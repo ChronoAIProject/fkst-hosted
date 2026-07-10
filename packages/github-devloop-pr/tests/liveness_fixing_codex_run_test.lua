@@ -28,6 +28,9 @@ local count_calls = h.count_calls
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local m_builders = require("devloop.markers.builders")
 local devloop_logging = require("devloop.logging")
+local ci_repair_attempts = require("core.ci_repair_attempts")
+local ci_repair_retry = require("core.ci_repair_retry")
+local config = require("devloop.config")
 
 local repo = "owner/repo"
 local proposal_id = "github-devloop/issue/owner/repo/42"
@@ -142,7 +145,9 @@ local function fixing_comments(event, version)
       event.review_dedup_key,
       event.reviewed_head_sha,
       nil,
-      "missing regression guard"
+      "missing regression guard",
+      nil,
+      event.ci_failure_key
     )),
   }
 end
@@ -211,6 +216,29 @@ local function timeout_facts(event, state, comments)
   }
 end
 
+local function ci_repair_hold_fixture(created_at)
+  local event = fixing({
+    repair_input = "ci-failure",
+    ci_failure_key = "head:def456/checks:digest-0000000101",
+  })
+  local comments = fixing_comments(event)
+  table.insert(comments, trusted_comment(
+    ci_repair_attempts.comment_request(repo, event, "no-fix", "No repaired revision was published.").body,
+    created_at
+  ))
+  local state = fixing_state(event, nil, "2026-06-03T01:00:00Z")
+  local row = restart_transition_row("fixing")
+  local facts = timeout_facts(event, state, comments)
+  local delay_seconds = core.version_fix_round(state.version)
+    * config.liveness_poll_cadence_seconds()
+  local due_seconds = math.max(
+    contract_time.iso_timestamp_epoch_seconds(state.marker_created_at),
+    contract_time.iso_timestamp_epoch_seconds(transition_version.updated_at(state.version))
+  )
+    + delay_seconds
+  return event, comments, state, row, facts, due_seconds, delay_seconds
+end
+
 local function capture_raises(fn)
   local raised = {}
   local original = devloop_logging.log_raise
@@ -238,6 +266,18 @@ local function with_codex_runs(running, fn)
   local original = fkst.codex_runs
   fkst.codex_runs = function()
     return { running = running or {}, recent = {} }
+  end
+  local ok, err = pcall(fn)
+  fkst.codex_runs = original
+  if not ok then
+    error(err)
+  end
+end
+
+local function with_codex_runs_unavailable(fn)
+  local original = fkst.codex_runs
+  fkst.codex_runs = function()
+    error("forced codex liveness lookup failure")
   end
   local ok, err = pcall(fn)
   fkst.codex_runs = original
@@ -291,7 +331,8 @@ local function mock_issue_claim()
   })
 end
 
-local function mock_pr_state(comments)
+local function mock_pr_state(comments, extra)
+  local selected = extra or {}
   entity_read_mocks.mock_pr_read_forms(t, {
     repo = repo,
     number = 7,
@@ -302,6 +343,9 @@ local function mock_pr_state(comments)
     updated_at = "2026-06-04T01:02:03Z",
     comments = comments,
     labels = {},
+    mergeable = selected.mergeable,
+    merge_state = selected.merge_state,
+    status_check_rollup_json = selected.status_check_rollup_json,
     register_all_views = true,
     times = 3,
   })
@@ -315,6 +359,9 @@ local function mock_pr_state(comments)
     updated_at = "2026-06-04T01:02:03Z",
     comments = comments,
     labels = {},
+    mergeable = selected.mergeable,
+    merge_state = selected.merge_state,
+    status_check_rollup_json = selected.status_check_rollup_json,
   }, entity_read_mocks.pr_origin_selector)
 end
 
@@ -336,21 +383,30 @@ local function reject_comment(event)
   ).body
 end
 
-local function mock_fix_dispatch_context(event, branch, rejection)
+local function mock_fix_dispatch_context(event, branch, rejection, times)
   mock_bot_env()
   mock_write_env("1")
   mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
     core.state_marker(event.proposal_id, "fixing", event.version),
     rejection,
   }, branch, event.version)
-  mock_pr_fix({ m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") }, branch, event.reviewed_head_sha)
+  mock_pr_fix(
+    { m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") },
+    branch,
+    event.reviewed_head_sha,
+    nil,
+    nil,
+    nil,
+    times
+  )
 end
 
-local function run_liveness_scan(name, run_opts)
+local function run_liveness_scan(name, run_opts, now_seconds)
   return h.run_department("departments/liveness_scan/main.lua", {
     queue = "devloop_liveness_tick",
     payload = { schema = "github-devloop.tick.v1" },
     ts = "2026-06-04T01:32:03Z",
+    now_seconds = now_seconds,
   }, run_opts or opts(name or "fixing-codex-run-liveness"))
 end
 
@@ -385,6 +441,120 @@ local function run_timeout_reconcile(payload, comments, name)
 end
 
 return {
+  test_fixing_backoff_hold_excludes_old_state_age_until_due_then_retries = function()
+    local event = fixing({
+      repair_input = "ci-failure",
+      ci_failure_key = "head:def456/checks:digest-0000000101",
+    })
+    local comments = fixing_comments(event)
+    local row = restart_transition_row("fixing")
+    local state = fixing_state(event, nil, "2026-06-03T01:00:00Z")
+    with_codex_runs({}, function()
+      local old_facts = timeout_facts(event, state, comments)
+      local old_eval = m_rae.actionable_epoch_resolve(core, row, state, old_facts, old_facts.now_seconds)
+      table.insert(comments, trusted_comment(conv_attempts.timeout_attempt_v2_marker(
+        proposal_id,
+        row.from_state,
+        row.liveness_class_id,
+        old_eval.generation_key,
+        2,
+        entity_lib.pr_source_ref(repo, event.pr_number)
+      )))
+    end)
+    table.insert(comments, trusted_comment(
+      ci_repair_attempts.comment_request(repo, event, "no-fix", "No repaired revision was published.").body,
+      "2026-06-03T02:58:00Z"
+    ))
+    local unavailable_facts = timeout_facts(event, state, comments)
+    unavailable_facts.now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:02:59Z")
+    with_codex_runs_unavailable(function()
+      local eval = m_rae.actionable_epoch_resolve(core, row, state, unavailable_facts, unavailable_facts.now_seconds)
+      t.eq(eval.status, "deferred")
+      t.eq(eval.hold.status, "held")
+      local decision = core.liveness_timeout_decision_with_facts(row, state, unavailable_facts, unavailable_facts.now_seconds)
+      t.eq(decision.action, "wait")
+      t.eq(core.liveness_timeout_attempt(row, state, unavailable_facts), 0)
+    end)
+    local rollup = '[{"__typename":"CheckRun","completedAt":"2026-06-03T02:57:00Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/test","name":"test","startedAt":"2026-06-03T02:56:00Z","status":"COMPLETED","workflowName":"test","headSha":"def456"}]'
+    local function setup_scan()
+      mock_repo_and_empty_issue_list()
+      mock_pr_list()
+      mock_issue_claim()
+      mock_pr_state(comments, {
+        mergeable = "MERGEABLE",
+        merge_state = "UNSTABLE",
+        status_check_rollup_json = rollup,
+      })
+      h.mock_required_check_runs_for("def456", "failure", repo)
+    end
+
+    setup_scan()
+    local before = run_liveness_scan(
+      "liveness-scan-fixing-backoff-before-due",
+      opts("liveness-scan-fixing-backoff-before-due"),
+      contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:02:59Z")
+    )
+    t.eq(before.exit_code, 0)
+    t.eq(h.find_raise(before.raises, "devloop_timeout_reconcile"), nil)
+    t.eq(h.find_raise(before.raises, "github-proxy.github_pr_comment_request", function(payload)
+      return tostring(payload.body or ""):find("fkst:github-devloop:timeout-attempt", 1, true) ~= nil
+    end), nil)
+
+    local due_facts = timeout_facts(event, state, comments)
+    due_facts.now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:03:00Z")
+    with_codex_runs({}, function()
+      local decision = core.liveness_timeout_decision_with_facts(row, state, due_facts, due_facts.now_seconds)
+      t.eq(decision.action, "wait")
+      t.eq(core.liveness_timeout_attempt(row, state, due_facts), 0)
+    end)
+
+    setup_scan()
+    local due = run_liveness_scan(
+      "liveness-scan-fixing-backoff-at-due",
+      opts("liveness-scan-fixing-backoff-at-due"),
+      contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:03:00Z")
+    )
+    t.eq(due.exit_code, 0)
+    t.eq(h.find_raise(due.raises, "devloop_timeout_reconcile"), nil)
+    t.eq(h.find_raise(due.raises, "github-proxy.github_pr_comment_request", function(payload)
+      return tostring(payload.body or ""):find("fkst:github-devloop:timeout-attempt", 1, true) ~= nil
+    end), nil)
+    local observe = h.find_raise(due.raises, "devloop_observe_pr")
+    t.is_true(observe ~= nil)
+    t.eq(h.find_raise(due.raises, "devloop_fixing"), nil)
+  end,
+
+  test_fixing_durable_completion_dominates_stale_live_run_for_same_generation = function()
+    local _, _, state, row, facts, _, delay_seconds = ci_repair_hold_fixture("2026-06-03T01:00:00Z")
+    local due_seconds = math.max(
+      contract_time.iso_timestamp_epoch_seconds(state.marker_created_at),
+      contract_time.iso_timestamp_epoch_seconds(transition_version.updated_at(state.version))
+    ) + delay_seconds
+    facts.now_seconds = due_seconds
+    local durable_hold = ci_repair_retry.resolve_liveness_hold(row, state, facts, due_seconds)
+    t.eq(durable_hold.status, "released")
+    local expected_dedup_key
+    with_codex_runs({}, function()
+      expected_dedup_key = core.restart_row_liveness_signal(row, state, facts, due_seconds).expected_dedup_key
+    end)
+    with_codex_runs({
+      {
+        run_id = "stale-completed-fixing-run",
+        role = "fix",
+        proposal_id = state.proposal_id,
+        dedup_key = expected_dedup_key,
+        status = "running",
+        lease_expires_at_ms = (due_seconds + math.floor(row.watchdog.budget_ms / 1000)) * 1000,
+      },
+    }, function()
+      local eval = m_rae.actionable_epoch_resolve(core, row, state, facts, due_seconds)
+      t.eq(eval.status, "actionable")
+      t.eq(eval.hold.status, "released")
+      t.eq(eval.hold.attempt.version, state.version)
+      t.eq(eval.epoch_ms, due_seconds * 1000)
+    end)
+  end,
+
   test_fixing_live_codex_run_defers_without_redrive_or_timeout_attempt = function()
     local event = fixing()
     local row = restart_transition_row("fixing")
@@ -489,7 +659,7 @@ return {
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("feedface", branch)
     mock_write_env("1")
-    mock_fix_dispatch_context(event, branch, rejection)
+    mock_fix_dispatch_context(event, branch, rejection, 0)
     mock_git_push(branch)
     mock_pr_fix({ m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") }, branch, "feedface")
 
@@ -553,7 +723,7 @@ return {
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("feedface", branch)
     mock_write_env("1")
-    mock_fix_dispatch_context(event, branch, rejection)
+    mock_fix_dispatch_context(event, branch, rejection, 0)
     mock_git_push(branch)
     mock_pr_fix({ m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") }, branch, "feedface")
 

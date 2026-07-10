@@ -87,10 +87,6 @@ return {
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("feedface", branch)
     mock_write_env("1")
-    mock_pr_native_fix({
-      core.state_marker(event.proposal_id, "fixing", event.version),
-      reject_comment,
-    }, branch, "def456")
     mock_git_push(branch)
     mock_pr_native_fix({}, branch, "feedface")
 
@@ -173,8 +169,7 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    mock_pr_native_fix(comments, branch, "def456")
-
+    mock_pr_native_fix(comments, branch, "def456", nil, nil, nil, 1)
     local result = run_fix(event, opts("fix-stale-before-codex", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)

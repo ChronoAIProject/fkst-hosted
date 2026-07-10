@@ -67,8 +67,11 @@ local function list_open_pr(repo, integration, upstream)
 end
 
 local function fetch_rollup_pr(repo, pr_number)
-  local viewed = git_mechanics.run_required(github("github-devloop-integration.rollup_scan").gh_pr_view_merge(repo, pr_number, 30), "rollup PR view")
-  local pr = parsers_pr.parse_pr_view_merge(viewed.stdout)
+  local viewed, command_result = github("github-devloop-integration.rollup_scan").gh_pr_view_merge(repo, pr_number, 30)
+  if viewed == nil then
+    git_mechanics.run_required(command_result or { exit_code = 1, stderr = "missing result" }, "rollup PR view")
+  end
+  local pr = parsers_pr.parse_pr_view_merge(viewed)
   pr.number = tonumber(pr_number)
   return pr
 end

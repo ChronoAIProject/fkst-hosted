@@ -3,8 +3,8 @@ local entity_lib = require("devloop.entity")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local requests_review = require("devloop.requests.review")
-local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
+local parsers_pr = require("devloop.parsers.pr")
 local core = require("core")
 local git_adapter = require("forge.git")
 local saga = require("workflow.saga")
@@ -15,13 +15,20 @@ local conflict_telemetry = require("devloop.conflict_telemetry")
 local context_bundle = require("devloop.context_bundle")
 local config = require("devloop.config")
 local m_mq = require("devloop.merge_queue")
-local ci_repair_attempts = require("departments.fix.ci_repair_attempts")
-
+local ci_repair_attempts = require("core.ci_repair_attempts")
+local ci_repair_retry = require("core.ci_repair_retry")
+local ci_verdict = require("core.ci_verdict")
+local fix_write_gate = require("departments.fix.write_gate")
+local with_current_classification = ci_verdict.with_current_classification
+local OWN_CI_RED = ci_verdict.OWN_CI_RED
+local review_meta_caps = {
+  build_comment = assert(rawget(core, "build_fix_review_meta_comment_request")),
+  build_label = assert(rawget(core, "build_fix_review_meta_label_request")),
+}
 local dispatch_liveness = {
   restart_transition_table = function(...) return core.restart_transition_table(...) end,
   restart_row_receiver_liveness = function(...) return core.restart_row_receiver_liveness(...) end,
 }
-
 local payloads_builders = require("devloop.payloads.builders")
 local v_fixing = require("devloop.validators.fixing")
 local m_facts = require("devloop.markers.facts")
@@ -30,10 +37,26 @@ local devloop_state = require("devloop.state")
 local devloop_commands = require("devloop.commands")
 local spec = {
   consumes = { "devloop_fixing" },
-  produces = { "github-proxy.github_issue_label_request", "github-proxy.github_pr_comment_request", "devloop_review_meta" },
+  produces = {
+    "github-proxy.github_issue_label_request",
+    "github-proxy.github_pr_comment_request",
+    "devloop_review_meta",
+    "devloop_fix_reconcile",
+    "github-devloop-decompose.devloop_decompose",
+  },
   stall_window = "10m",
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
+local function raise_review_meta(...) return requests_review.raise_fix_review_meta(review_meta_caps, ...) end
+local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_sha, reason, summary)
+  local text = tostring(summary or ""):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+  if #text > 600 then text = text:sub(1, 600) end
+  return requests_review.raise_fix_reviewing(core, {
+    dept = "fix", repo = repo, issue_number = issue_number, fix = fix,
+    old_head_sha = old_head_sha, new_head_sha = new_head_sha, reason = reason,
+    fix_summary = text, clear_fix_summary = true,
+  })
+end
 
 local function same_review_result_dedup(left, right)
   local left_canonical = devloop_base.canonical_pr_review_consensus_dedup_key(left)
@@ -46,7 +69,6 @@ local git = git_adapter.production_handle
 local function fix_done(_event)
   return false
 end
-
 local function branch_worktree(repo, issue_number, version, branch)
   local runtime_result = exec_sync({ cmd = devloop_commands.read_runtime_root_cmd(), timeout = 30 })
   if runtime_result.exit_code ~= 0 then
@@ -73,7 +95,7 @@ local function branch_worktree(repo, issue_number, version, branch)
         error("github-devloop: git-worktree-prune-failed: git worktree prune failed: " .. tostring(prune_result.stderr))
       end
     else
-      local remove_result = core.git.worktree_remove(existing, 60)
+      local remove_result = git("github-devloop").worktree_remove(existing, 60)
       if remove_result.exit_code ~= 0 then
         error("github-devloop: git-worktree-remove-failed: git worktree remove failed: " .. tostring(remove_result.stderr))
       end
@@ -137,7 +159,7 @@ local function merge_integration_for_fix(worktree, pr_number, integration_branch
   }
   local merge_result = devloop_commands.git_worktree_merge_no_edit(worktree, base_head, 120)
   if merge_result.exit_code ~= 0 then
-    local unmerged_result = core.git.unmerged_paths(worktree, 30)
+    local unmerged_result = git("github-devloop").unmerged_paths(worktree, 30)
     if unmerged_result.exit_code ~= 0 then
       error("github-devloop: git-unmerged-path-check-failed: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
     end
@@ -179,7 +201,7 @@ local function merge_sha_for_fix(worktree, sha, context, log_values)
   if merge_result.exit_code == 0 then
     return context
   end
-  local unmerged_result = core.git.unmerged_paths(worktree, 30)
+  local unmerged_result = git("github-devloop").unmerged_paths(worktree, 30)
   if unmerged_result.exit_code ~= 0 then
     error("github-devloop: git-unmerged-path-check-failed: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
   end
@@ -254,7 +276,7 @@ local function merge_speculative_predecessors_for_fix(worktree, repo, integratio
 end
 
 local function assert_no_unmerged_paths(worktree)
-  local unmerged_result = core.git.unmerged_paths(worktree, 30)
+  local unmerged_result = git("github-devloop").unmerged_paths(worktree, 30)
   if unmerged_result.exit_code ~= 0 then
     error("github-devloop: git-unmerged-path-check-failed: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
   end
@@ -264,7 +286,7 @@ local function assert_no_unmerged_paths(worktree)
 end
 
 local function assert_no_conflict_markers(worktree)
-  local markers_result = core.git.conflict_markers(worktree, 30)
+  local markers_result = git("github-devloop").conflict_markers(worktree, 30)
   if markers_result.exit_code == 1 then
     return
   end
@@ -272,103 +294,6 @@ local function assert_no_conflict_markers(worktree)
     error("github-devloop: unresolved-conflict-markers: fix left conflict markers unresolved")
   end
   error("github-devloop: git-conflict-marker-check-failed: git conflict marker check failed: " .. tostring(markers_result.stderr))
-end
-
-local function bounded_fix_summary(value)
-  local text = tostring(value or ""):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
-  if #text > 600 then
-    text = text:sub(1, 600)
-  end
-  return text
-end
-
-local function raise_review_meta(repo, issue_number, fix, reason, detail)
-  local comment_request = core.build_fix_review_meta_comment_request(repo, issue_number, fix, reason, detail)
-  local label_request = core.build_fix_review_meta_label_request(repo, issue_number, fix, reason)
-  local add_labels, remove_labels = devloop_state.state_label_changes("review-meta")
-  devloop_logging.log_apply("fix", fix.proposal_id, "review-meta", fix.version, { add = add_labels, remove = remove_labels }, {
-    "github-proxy.github_pr_comment_request",
-    "github-proxy.github_issue_label_request",
-    "devloop_review_meta",
-  })
-  devloop_logging.log_raise("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
-  if issue_number ~= nil then
-    devloop_logging.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
-  end
-  devloop_logging.log_raise("fix", fix.proposal_id, "devloop_review_meta", {
-    schema = "github-devloop.review-meta.v1",
-    proposal_id = fix.proposal_id,
-    review_proposal_id = fix.review_proposal_id,
-    review_dedup_key = fix.review_dedup_key,
-    version = fix.version,
-    pr_number = fix.pr_number,
-    n = 0,
-    dedup_key = fix.dedup_key,
-    source_ref = fix.source_ref,
-  })
-end
-
-local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_sha, reason, summary)
-  requests_review.raise_fix_reviewing(core, {
-    dept = "fix",
-    repo = repo,
-    issue_number = issue_number,
-    fix = fix,
-    old_head_sha = old_head_sha,
-    new_head_sha = new_head_sha,
-    reason = reason,
-    fix_summary = bounded_fix_summary(summary),
-    clear_fix_summary = true,
-  })
-end
-
-local function raise_stale_speculation_refix(repo, issue_number, fix, current_state, current_predecessor_set, reason)
-  local next_version = devloop_state.next_fix_version(fix.version)
-  local merge_ready = {
-    proposal_id = fix.proposal_id,
-    pr_number = fix.pr_number,
-    version = devloop_state._strip_latest_fix_version_suffix(fix.version),
-    review_proposal_id = fix.review_proposal_id,
-    review_dedup_key = fix.review_dedup_key,
-    reviewed_head_sha = fix.reviewed_head_sha,
-    dedup_key = fix.dedup_key,
-  }
-  local comment_request = requests_review.build_merge_gate_fix_comment_request(core,
-    repo,
-    issue_number,
-    merge_ready,
-    next_version,
-    fix.gate_failure_excerpt or fix.blocking_gap or reason,
-    fix.gate_baseline_sha,
-    fix.source_ref,
-    current_predecessor_set,
-    {
-      blocking_gap = fix.blocking_gap,
-      gate_failure_excerpt = fix.gate_failure_excerpt,
-      preserve_nil_gate_failure_excerpt = true,
-      repair_input = fix.repair_input,
-      ci_failure_key = fix.ci_failure_key,
-    }
-  )
-  local label_request = issue_number ~= nil and requests_labels.build_state_label_request(repo,
-    issue_number,
-    "fixing",
-    fix.dedup_key .. "/label/refix/" .. tostring(devloop_state.version_fix_round(next_version)),
-    entity_lib.issue_source_ref(repo, issue_number)
-  ) or nil
-  local add_labels, remove_labels = devloop_state.state_label_changes("fixing")
-  devloop_logging.log_cas_decision("fix", fix.proposal_id, current_state, "fixing", "fixing", "applied", reason)
-  local raised = {
-    "github-proxy.github_pr_comment_request",
-  }
-  if label_request ~= nil then
-    table.insert(raised, "github-proxy.github_issue_label_request")
-  end
-  devloop_logging.log_apply("fix", fix.proposal_id, "fixing", next_version, { add = add_labels, remove = remove_labels }, raised)
-  devloop_logging.log_raise("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
-  if label_request ~= nil then
-    devloop_logging.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
-  end
 end
 
 local function assert_fix_write_gate(fix, repo, issue_number)
@@ -407,6 +332,23 @@ local function branch_head_if_ahead(base_head_sha, branch)
     return nil
   end
   return branch_head_sha
+end
+
+local function validate_fix_write_gate_snapshot(repo, fix, branch, pr, reason_prefix, fail_closed)
+  local state = require("devloop.entity").current_entity_state(pr.comments, fix.proposal_id)
+  if state.state ~= "fixing" or tostring(state.version or "") ~= tostring(fix.version) then
+    devloop_logging.log_cas_decision(
+      "fix",
+      fix.proposal_id,
+      state,
+      "fixing",
+      "reviewing|review-meta",
+      "skip-stale(write-gate)",
+      tostring(reason_prefix) .. " issue state changed"
+    )
+    return nil
+  end
+  return fix_write_gate.validate(repo, fix, branch, pr, state, reason_prefix, fail_closed)
 end
 
 local function run_fix_attempt(plan)
@@ -452,6 +394,7 @@ local function run_fix_attempt(plan)
   if merge_context.conflicted then
     conflict_telemetry.log_conflict_files("fix", plan.fix.proposal_id, plan.fix.pr_number, merge_context.unmerged_paths)
   end
+  local dispatch = function()
   local codex_started_at = now()
   devloop_logging.log_codex_start("fix", plan.fix.proposal_id, "fix")
   local content_fetch = context_bundle.context_fetch_from_bundle(core, {
@@ -576,27 +519,43 @@ local function run_fix_attempt(plan)
     finished_at = now(),
   }
 end
-
-local function validate_fix_write_gate_snapshot(repo, fix, branch, pr, reason_prefix, fail_closed)
-  local rechecked_state = require("devloop.entity").current_entity_state(pr.comments, fix.proposal_id)
-  if rechecked_state.state ~= "fixing" or tostring(rechecked_state.version or "") ~= tostring(fix.version) then
-    devloop_logging.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing|review-meta", "skip-stale(write-gate)", tostring(reason_prefix) .. " issue state changed")
+  if plan.fix.repair_input ~= "ci-failure" then
+    return dispatch()
+  end
+  local outcome, mismatch, observed_pr = with_current_classification(
+    plan.repo,
+    plan.fix.pr_number,
+    plan.fix.reviewed_head_sha,
+    function(classification)
+      local current_pr = classification.current_pr
+      local authorized = validate_fix_write_gate_snapshot(
+        plan.repo, plan.fix, plan.branch, current_pr, "pre-dispatch", false
+      )
+      if authorized == nil then
+        return nil
+      end
+      if classification.kind ~= OWN_CI_RED then
+        return {
+          kind = "reviewing-current",
+          current_pr = current_pr,
+          reason = "own-CI gate no longer requires repair: " .. tostring(classification.reason),
+        }
+      end
+      plan.current_pr = current_pr
+      return dispatch()
+    end,
+    {
+      dept = "fix",
+      proposal_id = plan.fix.proposal_id,
+      error_class = "gh-pr-fix-dispatch-view-failed",
+    }
+  )
+  if mismatch == "head-mismatch" then
+    validate_fix_write_gate_snapshot(plan.repo, plan.fix, plan.branch, observed_pr, "pre-dispatch", false)
     return nil
   end
-  if tostring(pr.state or ""):lower() ~= "open"
-    or tostring(pr.head_ref_name or "") ~= branch
-    or tostring(pr.head_sha or "") ~= tostring(fix.reviewed_head_sha)
-    or not require("forge.merge.shared").is_same_repo_pr_head(pr, repo) then
-    local outcome = fail_closed and "fail-closed(write-gate)" or "skip-stale(write-gate)"
-    devloop_logging.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing|review-meta", outcome, tostring(reason_prefix) .. " PR fact changed or head repository missing")
-    if fail_closed then
-      error("github-devloop: write-time-pr-fact-changed: write-time PR fact changed or head repository missing")
-    end
-    return nil
-  end
-  return pr, rechecked_state
+  return outcome
 end
-
 local function recheck_fix_write_gate(repo, fix, branch)
   local pr_recheck = devloop_commands.gh_pr_view_fix(repo, fix.pr_number, 30)
   if pr_recheck.exit_code ~= 0 then
@@ -623,9 +582,20 @@ local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
   if outcome == nil then
     return
   end
-  recheck_fix_write_gate(repo, fix, branch)
+  local rechecked_pr = recheck_fix_write_gate(repo, fix, branch)
+  if outcome.kind == "reviewing-current" then
+    raise_reviewing(
+      repo,
+      issue_number,
+      fix,
+      fix.reviewed_head_sha,
+      rechecked_pr.head_sha,
+      outcome.reason
+    )
+    return
+  end
   if outcome.kind == "refix" then
-    raise_stale_speculation_refix(
+    ci_repair_retry.raise_speculative(core,
       repo,
       issue_number,
       fix,
@@ -638,7 +608,6 @@ local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
   if outcome.kind == "review-meta" then
     if fix.repair_input == "ci-failure" then
       ci_repair_attempts.raise_attempt_record(repo, fix, outcome.reason or "no-repair", outcome.detail)
-      ci_repair_attempts.raise_blocked(repo, issue_number, fix, "own-ci-red-unrepaired", outcome.reason or outcome.detail)
       return
     end
     raise_review_meta(repo, issue_number, fix, outcome.reason, outcome.detail)
@@ -824,7 +793,7 @@ local function act_fix(event)
     end
 
     if fix.repair_input == "ci-failure" and ci_repair_attempts.fact(current_pr.comments, fix) ~= nil then
-      ci_repair_attempts.raise_blocked(repo, issue_number, fix, "attempt-already-completed", "A bounded repair attempt already completed for this head and CI failure key.")
+      devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "fixing", "skip-idempotent(ci-repair-attempt-visible)", "completed CI repair round fact is visible; replay admission owns continuation")
       return
     end
 
@@ -855,7 +824,7 @@ local function act_fix(event)
     if fix.predecessor_set ~= nil then
       speculative_predecessors, speculative_current_set = current_predecessors_for_fix(repo, branches.integration, fix, current_pr)
       if speculative_predecessors ~= nil and tostring(speculative_current_set) ~= tostring(fix.predecessor_set) then
-        raise_stale_speculation_refix(
+        ci_repair_retry.raise_speculative(core,
           repo,
           issue_number,
           fix,

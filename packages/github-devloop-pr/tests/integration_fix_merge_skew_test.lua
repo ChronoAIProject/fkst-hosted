@@ -64,7 +64,6 @@ return {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
-    mock_pr_fix({ origin_marker }, branch, "def456")
     mock_git_push(branch)
     mock_pr_fix({ origin_marker }, branch, "feedface")
 
@@ -132,7 +131,6 @@ return {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
-    mock_pr_fix({ origin_marker }, branch, "def456")
     mock_git_push(branch)
     mock_pr_fix({ origin_marker }, branch, "feedface")
 

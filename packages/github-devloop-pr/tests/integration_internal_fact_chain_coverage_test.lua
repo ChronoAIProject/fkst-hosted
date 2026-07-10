@@ -509,6 +509,7 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge_rollup(merge_comments(event), '[{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/test","name":"test","startedAt":"2026-06-03T02:03:04Z","status":"COMPLETED","workflowName":"ci"}]')
+    mock_pr_merge_rollup(merge_comments(event), '[{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/test","name":"test","startedAt":"2026-06-03T02:03:04Z","status":"COMPLETED","workflowName":"ci"}]')
     h.mock_required_check_runs_for(event.reviewed_head_sha, "failure")
 
     local red = run_merge(event, opts("internal-chain-merge-red-direct", { FKST_GITHUB_WRITE = "1" }))

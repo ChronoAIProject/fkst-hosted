@@ -18,8 +18,13 @@ local transition_version = require("contract.transition_version")
 local comment_strings = require("devloop.strings")
 local m_builders = require("devloop.markers.builders")
 local devloop_logging = require("devloop.logging")
+local ci_repair_retry = require("core.ci_repair_retry")
+local fix_rounds = require("core.fix_rounds")
+local ci_verdict = require("core.ci_verdict")
+local with_current_classification = ci_verdict.with_current_classification
 
 function S.install(M)
+local function raise_fix_reviewing(opts) return requests_review.raise_fix_reviewing(M, opts) end
 local function linked_pr_state(pr)
   return tostring(pr and pr.state or ""):upper()
 end
@@ -306,33 +311,48 @@ local function replay_fixing(dept, issue, state, row, facts, tools)
     if intended_head_sha ~= nil and tostring(current_pr.head_sha or "") ~= intended_head_sha then
       return tools.log_skip(dept, proposal_id, state, "fixing", "fixing", "skip-stale(head-advanced)", "PR head advanced since rejected review")
     end
-    local new_version = devloop_state.next_fix_version(state.version)
-    local fix = {
+    return requests_review.raise_fixing_replay_reviewing(raise_fix_reviewing, dept, issue, state, proposal_id, link, current_pr, feedback, "push already visible; self-healing missing reviewing marker")
+  end
+  if feedback.ci_failure_key ~= nil then
+    local decision = ci_repair_retry.evaluate(M, state, {
+      dept = dept,
+      repo = issue.repo,
       proposal_id = proposal_id,
       pr_number = link.pr_number,
-      version = state.version,
       review_proposal_id = feedback.review_proposal_id,
       review_dedup_key = feedback.review_dedup_key,
       reviewed_head_sha = feedback.reviewed_head_sha,
       source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number),
-    }
-    local effects = {
-      {
-        queue = "github-proxy.github_pr_comment_request",
-        payload = requests_review.build_fix_reviewing_comment_request(M, issue.repo, issue.number, fix, feedback.reviewed_head_sha, current_pr.head_sha, new_version),
+      comments = comments_for_pr_facts(facts, current_pr),
+      now_seconds = facts.now_seconds,
+      row = row,
+      reason = "own-ci-red-repair-budget-exhausted",
+      apply = {
+        dept = dept,
+        issue = issue,
+        link = link,
+        feedback = feedback,
+        tools = tools,
       },
-    }
-    add_issue_label_effect(issue, proposal_id, "reviewing", new_version, issue_source_ref(issue), effects, {
-      "fixing",
-      "label",
-      "reviewing",
-      tostring(proposal_id),
-      tostring(new_version),
-      tostring(link.pr_number),
-      tostring(current_pr.head_sha),
     })
-    devloop_logging.log_cas_decision(dept, proposal_id, state, "fixing", "reviewing", "applied(replay)", "push already visible; self-healing missing reviewing marker")
-    return tools.raise_effects(dept, proposal_id, "reviewing", new_version, { add = { "fkst-dev:reviewing" }, remove = { "fkst-dev:fixing" } }, effects)
+    if decision.kind == "defer" then
+      return tools.log_defer(dept, proposal_id, state, "fixing", "fixing", "skip-pending(ci-repair-backoff)", "completed CI repair round is waiting for its version-derived retry epoch")
+    end
+    if decision.kind == "terminate" then
+      return true
+    end
+    if decision.kind == "reviewing" then
+      if not pr_open_state(decision.current_pr) then
+        return tools.log_skip(dept, proposal_id, state, "fixing", "reviewing", "skip-stale(pr-closed)", "fresh CI retry admission observed a non-open PR")
+      end
+      return requests_review.raise_fixing_replay_reviewing(raise_fix_reviewing, dept, issue, state, proposal_id, link, decision.current_pr, feedback, decision.reason)
+    end
+    if decision.kind == "applied" then
+      return decision.result
+    end
+    if decision.kind ~= "redrive" then
+      error("github-devloop: ci-repair-retry-decision-invalid: unsupported CI repair retry decision")
+    end
   end
   local payload = payloads_builders.build_replayed_fixing_payload({
     proposal_id = proposal_id,
@@ -582,29 +602,35 @@ local function replay_merging_state(dept, issue, state, row, facts, tools)
     })
   end
   if parsers_misc.is_ci_red_reason(ci_reason) then
-    local classification = M.classify_pr_ci_gate(current_pr, { repo = issue.repo, dept = dept, proposal_id = proposal_id })
-    if classification.kind ~= "OWN_CI_RED" then
-      devloop_logging.log_cas_decision(dept, proposal_id, state, "merging", "blocked", "applied(replay)", classification.reason)
-      return tools.raise_effects(dept, proposal_id, "blocked", state.version, { add = { "fkst-dev:blocked" }, remove = { "fkst-dev:merging" } }, {})
-    end
-    local fix_version = devloop_state.fix_version_from_review_version(state.version)
     local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
-    local request = requests_review.build_merge_gate_fix_comment_request(M, issue.repo, issue.number, merge_ready, fix_version, classification.reason, current_pr.base_ref_oid, source_ref, nil, {
-      ci_failure_key = classification.ci_failure_key,
-    })
-    local effects = {
-      { queue = "github-proxy.github_pr_comment_request", payload = request },
-    }
-    add_issue_label_effect(issue, proposal_id, "fixing", fix_version, issue_source_ref(issue), effects, {
-      "merging",
-      "label",
-      "fixing",
-      tostring(proposal_id),
-      tostring(fix_version),
-      tostring(link.pr_number),
-    })
-    devloop_logging.log_cas_decision(dept, proposal_id, state, "merging", "fixing", "applied(replay)", ci_reason)
-    return tools.raise_effects(dept, proposal_id, "fixing", fix_version, { add = { "fkst-dev:fixing" }, remove = { "fkst-dev:merging" } }, effects)
+    local applied, mismatch, observed_pr = with_current_classification(issue.repo, link.pr_number, authorized_head,
+      function(classification)
+        local admission = fix_rounds.admit_own_ci_continuation(state, classification, {
+          dept = dept, from_state = "merging", proposal_id = proposal_id,
+          review_proposal_id = merge_ready.review_proposal_id,
+          review_dedup_key = merge_ready.review_dedup_key,
+          pr_number = link.pr_number, source_ref = source_ref, reason = ci_reason,
+          head_branch = link.branch, base_branch = link.base_branch,
+        })
+        if admission.kind == "pr-merged" then return mark_issue_merged_from_linked_pr(dept, issue, state, proposal_id, link, admission.current_pr, tools) end
+        if admission.kind == "pr-closed" then return mark_child_closed_unmerged(dept, issue, state, proposal_id, link, tools, "applied(orphaned-pr-closed)", "linked PR closed during CI re-observation") end
+        if admission.kind == "identity-mismatch" then return raise_reviewing_for_current_head(dept, issue, state, proposal_id, link, admission.current_pr, authorized_head, "applied(replay)", "current PR head changed during CI re-observation", tools) end
+        if admission.kind == "not-own-ci" then
+          devloop_logging.log_cas_decision(dept, proposal_id, state, "merging", "blocked", "applied(replay)", admission.reason)
+          return tools.raise_effects(dept, proposal_id, "blocked", state.version, { add = { "fkst-dev:blocked" }, remove = { "fkst-dev:merging" } }, {})
+        end
+        if admission.kind ~= "admit" then return true end
+        local current = admission.current_pr
+        local request = requests_review.build_merge_gate_fix_comment_request(M, issue.repo, issue.number, merge_ready, admission.version, admission.reason, current.base_ref_oid, source_ref, nil, { ci_failure_key = admission.ci_failure_key })
+        local effects = { { queue = "github-proxy.github_pr_comment_request", payload = request } }
+        add_issue_label_effect(issue, proposal_id, "fixing", admission.version, issue_source_ref(issue), effects,
+          { "merging", "label", "fixing", tostring(proposal_id), tostring(admission.version), tostring(link.pr_number) })
+        devloop_logging.log_cas_decision(dept, proposal_id, state, "merging", "fixing", "applied(replay)", ci_reason)
+        return tools.raise_effects(dept, proposal_id, "fixing", admission.version, { add = { "fkst-dev:fixing" }, remove = { "fkst-dev:merging" } }, effects)
+      end,
+      { dept = dept, proposal_id = proposal_id, error_class = "merging-replay-ci-reobserve-failed" })
+    if mismatch == "head-mismatch" then return raise_reviewing_for_current_head(dept, issue, state, proposal_id, link, observed_pr, authorized_head, "applied(replay)", "current PR head changed during CI re-observation", tools) end
+    return applied
   end
   devloop_logging.log_cas_decision(dept, proposal_id, state, "merging", "blocked", "applied(replay)", tostring(ci_reason or "merge-gate-blocked"))
   return tools.raise_effects(dept, proposal_id, "blocked", state.version, { add = { "fkst-dev:blocked" }, remove = { "fkst-dev:merging" } }, {})

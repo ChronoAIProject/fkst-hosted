@@ -55,7 +55,6 @@ local function mock_fix_writeback(event, branch, origin_marker)
       event.source_ref
     ).body,
   }, branch, event.version)
-  mock_pr_fix({ origin_marker }, branch, "def456")
   mock_git_push(branch)
   mock_pr_fix({ origin_marker }, branch, "feedface")
 end

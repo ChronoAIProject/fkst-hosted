@@ -514,6 +514,7 @@ return {
     })
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge_rollup({ origin_marker }, '[{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/test","name":"test","startedAt":"2026-06-03T02:03:04Z","status":"COMPLETED","workflowName":"ci"}]')
+    mock_pr_merge_rollup({ origin_marker }, '[{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/test","name":"test","startedAt":"2026-06-03T02:03:04Z","status":"COMPLETED","workflowName":"ci"}]')
     mock_failing_required_check_runs()
 
     local result = run_merge(event, opts("merge-custom-test-command", { FKST_GITHUB_WRITE = "1" }))
@@ -549,6 +550,7 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "ACTION_REQUIRED")
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "ACTION_REQUIRED")
     mock_failing_required_check_runs()
 
     local action_required = run_merge(event, opts("merge-action-required-rollup", { FKST_GITHUB_WRITE = "1" }))
@@ -561,6 +563,7 @@ return {
     mock_write_env("1")
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
     mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
     mock_failing_required_check_runs()
 
@@ -582,6 +585,8 @@ return {
     mock_write_env("1")
     mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
     mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
+    mock_failing_required_check_runs()
     mock_failing_required_check_runs()
 
     local result = run_merge(event, opts("merge-rollup-red-at-write-time", { FKST_GITHUB_WRITE = "1" }))

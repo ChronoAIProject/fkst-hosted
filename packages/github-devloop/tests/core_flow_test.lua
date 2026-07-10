@@ -774,7 +774,13 @@ return {
     t.is_true(new_predecessors.dedup_key:find("/nobase/pr5-github-devloop/issue/owner/repo/41-ready-aaa111/noci/def456", 1, true) ~= nil)
     t.eq(new_ci_failure.repair_input, "ci-failure")
     t.eq(new_ci_failure.ci_failure_key, "head:def456/checks:digest-0000000101")
-    t.is_true(new_ci_failure.dedup_key:find("/nobase/nopred/head-def456/checks-digest-0000000101/def456", 1, true) ~= nil)
+    -- ci_failure_key is diagnostic only and must stay out of dedup identity: a drifting
+    -- CI digest would otherwise mint a fresh dedup every round and reset the repair budget.
+    local drifted_ci_failure = payloads_builders.build_replayed_fixing_payload(origin, 7, copy_table(feedback, {
+      ci_failure_key = "head:def456/checks:digest-0000000202",
+    }), source_ref())
+    t.eq(new_ci_failure.dedup_key, drifted_ci_failure.dedup_key)
+    t.is_true(new_ci_failure.dedup_key:find("checks-digest", 1, true) == nil)
     t.eq(v_fixing.is_supported_fixing(defective), true)
     t.eq(v_fixing.is_supported_fixing(corrected), true)
     t.eq(v_fixing.is_supported_fixing(new_predecessors), true)

@@ -64,8 +64,9 @@ function C.fixing_work_unit_key(fix)
     end
     return base_ids.dedup_key({
       "ci-failure",
-      tostring(fix.reviewed_head_sha or "nohead"),
-      tostring(fix.ci_failure_key),
+      tostring(fix.proposal_id),
+      tostring(fix.pr_number),
+      tostring(fix.version),
     })
   end
   return base_ids.dedup_key({
@@ -161,6 +162,7 @@ function C.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
   if review_fact.fix_version ~= nil then
     version = review_fact.fix_version
   end
+  local repair_input = C.fixing_repair_input(review_fact)
   local payload = {
     schema = "github-devloop.fixing.v1",
     proposal_id = origin.proposal_id,
@@ -169,18 +171,28 @@ function C.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
     review_proposal_id = review_fact.review_proposal_id,
     review_dedup_key = review_fact.review_dedup_key,
     reviewed_head_sha = review_fact.reviewed_head_sha,
-    repair_input = C.fixing_repair_input(review_fact),
+    repair_input = repair_input,
     ci_failure_key = review_fact.ci_failure_key,
-    dedup_key = base_ids.dedup_key({
+    source_ref = base_ids.normalize_source_ref(source_ref),
+  }
+  if repair_input == "ci-failure" then
+    payload.dedup_key = base_ids.dedup_key({
+      "fixing",
+      "ci-failure",
+      tostring(origin.proposal_id),
+      tostring(pr_number),
+      tostring(version),
+    })
+  else
+    payload.dedup_key = base_ids.dedup_key({
       "fixing",
       tostring(origin.proposal_id),
       tostring(version),
       tostring(pr_number),
       tostring(review_fact.review_dedup_key),
       tostring(review_fact.ci_failure_key or "noci"),
-    }),
-    source_ref = base_ids.normalize_source_ref(source_ref),
-  }
+    })
+  end
   local framing = shared.bounded_framing(review_fact.framing or origin.framing)
   if framing ~= nil then
     payload.framing = framing
@@ -233,18 +245,20 @@ function C.build_replayed_fixing_payload(origin, pr_number, feedback, source_ref
     ci_failure_key = feedback.ci_failure_key,
     gate_failure_excerpt = feedback.review_reason,
   }, source_ref)
-  payload.dedup_key = base_ids.dedup_key({
-    "fixing",
-    "replay",
-    tostring(origin.proposal_id),
-    tostring(payload.version),
-    tostring(pr_number),
-    tostring(feedback.review_dedup_key),
-    replay_fact_sha(feedback.gate_baseline_sha, "nobase"),
-    tostring(feedback.predecessor_set or "nopred"),
-    tostring(feedback.ci_failure_key or "noci"),
-    replay_fact_sha(feedback.reviewed_head_sha, "nohead"),
-  })
+  if payload.repair_input ~= "ci-failure" then
+    payload.dedup_key = base_ids.dedup_key({
+      "fixing",
+      "replay",
+      tostring(origin.proposal_id),
+      tostring(payload.version),
+      tostring(pr_number),
+      tostring(feedback.review_dedup_key),
+      replay_fact_sha(feedback.gate_baseline_sha, "nobase"),
+      tostring(feedback.predecessor_set or "nopred"),
+      tostring(feedback.ci_failure_key or "noci"),
+      replay_fact_sha(feedback.reviewed_head_sha, "nohead"),
+    })
+  end
   return payload
 end
 

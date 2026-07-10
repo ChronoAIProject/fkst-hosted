@@ -84,7 +84,9 @@ M.invalidate_entity_after_write = github_proxy_entity_view.invalidate_entity_aft
 local git_mechanics = require("devloop.git_mechanics")
 local function dept_exec_argv(...) return exec_argv(...) end
 M.git = require("forge.git").new(dept_exec_argv)
-require("forge.merge").install(M, { github_handle = require("devloop.github_factory").production_handle })
+require("forge.merge").install(M, {
+  github_handle = require("devloop.github_factory").production_handle,
+})
 require("core.review_carry_over").install(M)
 require("devloop.logging").install(M)
 require("devloop.state").install(M)
@@ -113,6 +115,7 @@ local restart_liveness_resolved = require("devloop.liveness").with_restart_polic
     version = "restart-liveness-provenance",
     marker_created_at = "2026-06-03T00:00:00Z",
   },
+  durable_hold_resolver = require("core.ci_repair_retry").resolve_liveness_hold,
 })
 restart_liveness_resolved.workflow_ports = workflow_ports.from_devloop(M)
 require("workflow.restart_liveness_contract").install(M, restart_liveness_resolved)

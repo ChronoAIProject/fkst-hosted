@@ -91,10 +91,12 @@ return {
     t.eq(signature.input_fact_family, "revision-goal")
     t.eq(match.dedup_key, "state.work_unit_key")
     t.eq(lineage["revision-goal.work_unit_key"], true)
-    t.eq(lineage["ci-failure.ci_failure_key"], true)
-    t.is_true(row.dedup_shape:find("<ci_failure_key-or-noci>", 1, true) ~= nil)
+    t.eq(lineage["ci-failure.ci_failure_key"], nil)
+    t.is_true(row.dedup_shape:find("ci-failure:<proposal_id>/<pr>/<version>", 1, true) ~= nil)
+    t.is_true(row.dedup_shape:find("<ci_failure_key-or-noci>", 1, true) == nil)
     t.eq(row.payload_fields.work_unit_key, "dedup:fixing-work-unit")
     t.eq(row.payload_fields.ci_failure_key, "marker:merge-gate.ci_failure_key")
+    t.is_true(table.concat(row.output_obligation.kinds, ","):find("ci-repair-attempt:v1", 1, true) ~= nil)
   end,
 
   test_fixing_code_producer_rejects_version_keyed_ci_repair_liveness = function()

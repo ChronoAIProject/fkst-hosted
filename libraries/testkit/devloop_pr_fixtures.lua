@@ -449,7 +449,7 @@ function M.new(deps)
     return comments
   end
 
-  local function mock_pr_fix(comments, head, head_sha, state, head_repo, cross_repo, times)
+  local function mock_pr_fix(comments, head, head_sha, state, head_repo, cross_repo, times, status_check_rollup_json)
     local cached = base.take_pr_phase_comments()
     local with_origin = {
       m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", 42, head or "devloop-owner-repo-42-01HY", base.reviewing().version, "dev"),
@@ -473,6 +473,11 @@ function M.new(deps)
       state = state or "OPEN",
       head_repo = head_repo or "owner/repo",
       cross_repo = cross_repo,
+      status_check_rollup_json = status_check_rollup_json or "[]",
+      -- Scoped CI effects re-read the same canonical facts independently.
+      -- Later phases pass an exact count when they intentionally need a
+      -- different observation.
+      times = times or 3,
     })
     entity_read_mocks.mock_pr_view_selector(t, {
       comments = with_origin,
@@ -481,7 +486,7 @@ function M.new(deps)
       state = state or "OPEN",
       head_repo = head_repo or "owner/repo",
       cross_repo = cross_repo,
-    }, "headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository", times or 1)
+    }, entity_read_mocks.pr_fix_selector, times or 2)
     entity_read_mocks.mock_pr_view_selector(t, {
       comments = with_origin,
       head = head or "devloop-owner-repo-42-01HY",
@@ -489,7 +494,7 @@ function M.new(deps)
       state = state or "OPEN",
       head_repo = head_repo or "owner/repo",
       cross_repo = cross_repo,
-    }, "headRefName,headRefOid,baseRefName,state,updatedAt,comments,headRepository,headRepositoryOwner,isCrossRepository", times or 1)
+    }, entity_read_mocks.pr_fix_precheck_selector, times or 1)
   end
 
   local function mock_pr_native_fix(comments, head, head_sha, state, head_repo, cross_repo, times)
@@ -516,6 +521,8 @@ function M.new(deps)
       state = state or "OPEN",
       head_repo = head_repo or "owner/repo",
       cross_repo = cross_repo,
+      status_check_rollup_json = "[]",
+      times = times or 3,
     })
     entity_read_mocks.mock_pr_view_selector(t, {
       comments = input_comments,
@@ -524,7 +531,7 @@ function M.new(deps)
       state = state or "OPEN",
       head_repo = head_repo or "owner/repo",
       cross_repo = cross_repo,
-    }, "headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository", times or 1)
+    }, entity_read_mocks.pr_fix_selector, times or 2)
     entity_read_mocks.mock_pr_view_selector(t, {
       comments = input_comments,
       head = head or "pr-native-branch",
@@ -532,7 +539,7 @@ function M.new(deps)
       state = state or "OPEN",
       head_repo = head_repo or "owner/repo",
       cross_repo = cross_repo,
-    }, "headRefName,headRefOid,baseRefName,state,updatedAt,comments,headRepository,headRepositoryOwner,isCrossRepository", times or 1)
+    }, entity_read_mocks.pr_fix_precheck_selector, times or 1)
   end
 
   local function mock_pr_origin_sequence(entries)

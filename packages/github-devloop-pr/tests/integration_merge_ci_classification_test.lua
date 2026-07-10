@@ -44,6 +44,7 @@ local function run_rollup_red_merge(name, check_conclusion, id, status)
   mock_write_env("1")
   mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
   mock_pr_merge_rollup({ origin_marker(event) }, rollup_json, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "UNSTABLE")
+  mock_pr_merge_rollup({ origin_marker(event) }, rollup_json, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "UNSTABLE")
   mock_required_check_run(check_conclusion, id, status)
   return event, run_merge(event, opts(name, { FKST_GITHUB_WRITE = "1" }))
 end
@@ -76,8 +77,10 @@ return {
     t.is_true(comment.payload.body:find('ci_failure_key="' .. fixing.ci_failure_key .. '"', 1, true) ~= nil)
     t.eq(fixing.gate_failure_excerpt, "own-ci-red")
     t.eq(fixing.repair_input, "ci-failure")
-    t.is_true(fixing.dedup_key:find("/head-def456/checks-digest-", 1, true) ~= nil)
-    t.is_true(fixing.work_unit_key:find("ci-failure/def456/head-def456/checks-digest-", 1, true) ~= nil)
+    t.is_true(fixing.dedup_key:find(fixing.ci_failure_key, 1, true) == nil)
+    t.is_true(fixing.work_unit_key:find(fixing.ci_failure_key, 1, true) == nil)
+    t.is_true(fixing.dedup_key:find(fixing.reviewed_head_sha, 1, true) == nil)
+    t.is_true(fixing.work_unit_key:find(fixing.reviewed_head_sha, 1, true) == nil)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
     t.eq(count_calls("gh pr merge"), 0)
   end,
@@ -95,8 +98,9 @@ return {
     t.eq(same_fix.dedup_key, first_fix.dedup_key)
     t.eq(same_fix.work_unit_key, first_fix.work_unit_key)
     t.is_true(stable_ci_failure_key(changed_fix.ci_failure_key))
-    t.is_true(changed_fix.dedup_key ~= first_fix.dedup_key)
-    t.is_true(changed_fix.work_unit_key ~= first_fix.work_unit_key)
+    t.is_true(changed_fix.ci_failure_key ~= first_fix.ci_failure_key)
+    t.eq(changed_fix.dedup_key, first_fix.dedup_key)
+    t.eq(changed_fix.work_unit_key, first_fix.work_unit_key)
   end,
 
   test_pending_required_check_does_not_route_to_fixing = function()

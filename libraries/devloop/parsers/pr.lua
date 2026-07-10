@@ -77,8 +77,15 @@ local function repository_name_with_owner(head_repository, head_repository_owner
   return nil
 end
 
-function C.parse_pr_view_origin(stdout)
-  local decoded = json.decode(stdout or "{}")
+local function decode_pr_view(value)
+  if type(value) == "table" then
+    return value
+  end
+  return json.decode(value or "{}")
+end
+
+function C.parse_pr_view_origin(value)
+  local decoded = decode_pr_view(value)
   local head_repo = repository_name_with_owner(
     decoded.headRepository or decoded.head_repository,
     decoded.headRepositoryOwner or decoded.head_repository_owner
@@ -125,15 +132,16 @@ local function status_rollup_entries(value)
   return value
 end
 
-function C.parse_pr_view_merge(stdout)
-  local decoded = json.decode(stdout or "{}")
-  local result = C.parse_pr_view_origin(stdout)
+function C.parse_pr_view_merge(value)
+  local decoded = decode_pr_view(value)
+  local result = C.parse_pr_view_origin(decoded)
   result.is_draft = decoded.isDraft
   if result.is_draft == nil then
     result.is_draft = decoded.is_draft
   end
   result.mergeable = decoded.mergeable
   result.merge_state_status = decoded.mergeStateStatus or decoded.merge_state_status
+  result.status_check_rollup_present = decoded.statusCheckRollup ~= nil or decoded.status_check_rollup ~= nil
   result.status_check_rollup = status_rollup_entries(decoded.statusCheckRollup or decoded.status_check_rollup)
   result.merged_at = decoded.mergedAt or decoded.merged_at
   result.labels = shared.label_names(decoded.labels)

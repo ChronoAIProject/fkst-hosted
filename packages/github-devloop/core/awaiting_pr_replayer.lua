@@ -25,7 +25,7 @@ local child_terminal_states = {
 }
 local canonical_pr_is_merged, origin_matches_delegation, canonical_merged_child_state, merged_child_landed_on_upstream
 local function log_skip(dept, proposal_id, state, from_state, to_state, outcome, reason)
-  return replayer.replay_log_skip(M, dept, proposal_id, state, from_state, to_state, outcome, reason)
+  return replayer.replay_log_decline(M, "stuck", dept, proposal_id, state, from_state, to_state, outcome, reason)
 end
 
 local function raise_effects(dept, proposal_id, apply_state, version, label_changes, effects)

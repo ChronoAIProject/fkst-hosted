@@ -117,6 +117,7 @@ return {
 
   test_fix_reconcile_drop_blocks_reviewing_issue = function()
     local event = fix_reconcile()
+    t.eq(event.head_sha, "def456")
     t.eq(transition_version.safe_version_segment(event.issue_version) ~= event.issue_version, true)
     mock_bot_env()
     mock_issue_review({ "fkst-dev:reviewing" }, {
@@ -135,6 +136,7 @@ return {
     t.eq(label.add_labels[1], "fkst-dev:blocked")
     t.eq(label.remove_labels[1], "fkst-dev:thinking")
     t.eq(count_calls("codex exec"), 0)
+    t.eq(count_calls("statusCheckRollup"), 0)
   end,
 
   test_fix_reconcile_visible_marker_is_idempotent = function()

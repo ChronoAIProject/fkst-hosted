@@ -250,7 +250,47 @@ local function resolve_live_defer_heartbeat(M, row, state, facts, now_seconds)
   return eval
 end
 
+local function is_codex_run_source(source)
+  return source == "codex_run:v1" or source == "codex_run_with_durable_hold:v1"
+end
+
+local function durable_hold_eval(M, row, state, facts, now_seconds)
+  if type(M.restart_durable_liveness_hold) ~= "function" then
+    return invalid("durable liveness hold resolver is unavailable")
+  end
+  local hold = M.restart_durable_liveness_hold(row, state, facts, now_seconds)
+  if type(hold) ~= "table" then
+    return invalid("durable liveness hold resolver returned an invalid result")
+  end
+  if hold.status == "held" then
+    local eval = deferred("durable liveness hold is not yet due")
+    eval.hold = hold
+    eval.signal = {
+      family = hold.fact_family,
+      resolver = row.defer and row.defer.hold_resolver,
+      due_ms = hold.due_ms,
+    }
+    return eval
+  end
+  if hold.status == "released" and tonumber(hold.due_ms) ~= nil and hold.fact_id ~= nil then
+    local eval = actionable(M, row, state, tonumber(hold.due_ms), tostring(hold.fact_id) .. ":due", "durable liveness hold reached its due time")
+    eval.hold = hold
+    return eval
+  end
+  if hold.status == "absent" then
+    return resolve_state_entry(M, row, state)
+  end
+  return invalid("durable liveness hold result is invalid: " .. tostring(hold.reason or hold.status))
+end
+
 local function resolve_codex_run(M, row, state, facts, now_seconds)
+  local durable_eval = nil
+  if row.actionable_epoch.source == "codex_run_with_durable_hold:v1" then
+    durable_eval = durable_hold_eval(M, row, state, facts, now_seconds)
+    if durable_eval.status == "contract_invalid" or durable_eval.hold ~= nil then
+      return durable_eval
+    end
+  end
   if type(M.restart_row_liveness_signal) ~= "function" then
     return invalid("codex run liveness signal resolver is unavailable")
   end
@@ -281,6 +321,10 @@ local function resolve_codex_run(M, row, state, facts, now_seconds)
     local eval = deferred("codex run liveness is indeterminate")
     eval.signal = signal
     return eval
+  end
+  if durable_eval ~= nil then
+    durable_eval.signal = durable_eval.signal or signal
+    return durable_eval
   end
   local entry_ms = state_entry_ms(state)
   if entry_ms == nil then
@@ -336,7 +380,7 @@ function C.actionable_epoch_resolve(M, row, state, facts, now_seconds)
   if row.actionable_epoch.source == "live_defer_heartbeat:v1" then
     return resolve_live_defer_heartbeat(M, row, state, facts, now_seconds)
   end
-  if row.actionable_epoch.source == "codex_run:v1" then
+  if is_codex_run_source(row.actionable_epoch.source) then
     return resolve_codex_run(M, row, state, facts, now_seconds)
   end
   if row.actionable_epoch.source == "child_workflow_wait:v1" then
@@ -349,6 +393,13 @@ function C.actionable_epoch_timeout_due(M, row, state, facts, now_seconds)
   local eval = C.actionable_epoch_resolve(M, row, state, facts, now_seconds)
   if type(facts) == "table" then
     facts.actionable_epoch_eval = eval
+  end
+  -- A durable-hold contract violation must escalate to the bounded terminal instead of
+  -- stalling the row. Every other epoch source keeps "not actionable => not due", so a
+  -- gate such as dependency_wait stays reachable by the ordinary liveness sweep.
+  if eval.status == "contract_invalid"
+    and row.actionable_epoch.source == "codex_run_with_durable_hold:v1" then
+    return true, nil
   end
   if row.actionable_epoch.source == "live_defer_heartbeat:v1" then
     if eval.status ~= "actionable" then
@@ -366,7 +417,7 @@ function C.actionable_epoch_timeout_due(M, row, state, facts, now_seconds)
     end
     return true, eval.heartbeat_age_minutes or age
   end
-  if row.actionable_epoch.source == "codex_run:v1" then
+  if is_codex_run_source(row.actionable_epoch.source) then
     if eval.status ~= "actionable" then
       return false, nil
     end
@@ -437,13 +488,17 @@ function C.actionable_epoch_codex_run_decision(M, row, state, facts, due, age)
   local eval = facts and facts.actionable_epoch_eval
   if not (row
     and row.actionable_epoch
-    and row.actionable_epoch.source == "codex_run:v1"
+    and is_codex_run_source(row.actionable_epoch.source)
     and type(eval) == "table"
     and eval.status == "actionable") then
     return nil
   end
   if due then
     return nil
+  end
+  if row.actionable_epoch.source == "codex_run_with_durable_hold:v1"
+    and type(eval.hold) == "table" then
+    return { action = "wait", age_minutes = age }
   end
   local attempt = M.liveness_timeout_attempt(row, state, facts)
   return {
@@ -513,7 +568,7 @@ function C.restart_row_has_registered_actionable_epoch(M, row)
     return false
   end
   local source = row.actionable_epoch.source
-  return (source == "live_defer_epoch:v1" or source == "live_defer_heartbeat:v1" or source == "codex_run:v1" or source == "child_workflow_wait:v1")
+  return (source == "live_defer_epoch:v1" or source == "live_defer_heartbeat:v1" or is_codex_run_source(source) or source == "child_workflow_wait:v1")
     and M.restart_liveness_epoch_sources()[source] ~= nil
 end
 

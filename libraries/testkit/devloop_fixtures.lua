@@ -467,7 +467,7 @@ function M.new(deps)
     }, run_opts)
   end
 
-  local function run_observe_pr(payload, run_opts)
+  local function run_observe_pr(payload, run_opts, now_seconds)
     mock_branch_config_env()
     mocks.mock_pr_origin_from_cached({
       proposal_id = "github-devloop/issue/owner/repo/42",
@@ -476,6 +476,7 @@ function M.new(deps)
     return run_department("departments/observe_pr/main.lua", {
       queue = "github-proxy.github_entity_changed",
       payload = payload,
+      now_seconds = now_seconds,
     }, run_opts)
   end
 

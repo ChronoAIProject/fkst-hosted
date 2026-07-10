@@ -494,11 +494,12 @@ return {
       "skip-pending(no-attempt-marker)",
       "skip-pending(codex-run-live)",
       "skip-stale(head-advanced)",
+      "skip-idempotent(live-exec-ref)",
     }
     for _, outcome in ipairs(declined) do
       local previous = replayer.replay_from_table
       replayer.replay_from_table = function()
-        replayer.replay_log_skip(core, "test", nil, { state = "ready" }, "ready", "ready", outcome, "declined")
+        replayer.replay_log_decline(core, "stuck", "test", nil, { state = "ready" }, "ready", "ready", outcome, "declined")
         return false
       end
       local ok, classified = pcall(function()
@@ -511,10 +512,10 @@ return {
     end
   end,
 
-  test_replay_timeout_classification_defers_live_exec_ref = function()
+  test_replay_timeout_classification_uses_typed_defer_not_outcome_text = function()
     local previous = replayer.replay_from_table
     replayer.replay_from_table = function()
-      replayer.replay_log_skip(core, "test", nil, { state = "thinking" }, "thinking", "consensus.proposal", "skip-idempotent(live-exec-ref)", "deferred")
+        replayer.replay_log_decline(core, "deferred", "test", nil, { state = "thinking" }, "thinking", "consensus.proposal", "arbitrary-observability-text", "deferred")
       return false
     end
     local ok, classified = pcall(function()
@@ -523,7 +524,7 @@ return {
     replayer.replay_from_table = previous
     if not ok then error(classified) end
     t.eq(classified.kind, "deferred")
-    t.eq(classified.outcome, "skip-idempotent(live-exec-ref)")
+      t.eq(classified.outcome, "arbitrary-observability-text")
   end,
 
   test_live_thinking_codex_run_defers_timeout_count = function()
