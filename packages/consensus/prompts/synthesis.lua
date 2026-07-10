@@ -1,10 +1,7 @@
 return {
   template = [[You are the Phase S synthesis judge for an adversarial consensus debate.
 
-Execution boundary:
-- You are running in an empty runtime scratch directory, not a repository checkout.
-- Do not clone, checkout, fetch with git, create branches, or modify any repository.
-- Read required source content only from the context manifest below.
+{{execution_boundary}}
 
 Read the proposal plus the complete Phase B and Phase R transcripts. Verify only citations or claims resolvable inside the in-invocation proposal, context manifest, and transcripts. Unverified movers have weight zero.
 {{decision_calibration}}

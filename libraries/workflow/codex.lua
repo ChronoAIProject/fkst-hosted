@@ -16,6 +16,13 @@ function M.judgment_codex_opts(prompt, worktree)
   }
 end
 
+function M.unrestricted_codex_opts(prompt, worktree)
+  return {
+    prompt = prompt,
+    worktree = worktree,
+  }
+end
+
 local function identity_parts(identity_or_role, proposal_id, dedup_key)
   if type(identity_or_role) == "table" then
     return identity_or_role.role, identity_or_role.proposal_id, identity_or_role.dedup_key

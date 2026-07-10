@@ -2,10 +2,7 @@ return {
   template = [[Judge this proposal from one whole-picture philosopher seat.
 {{bias}}
 
-Execution boundary:
-- You are running in an empty runtime scratch directory, not a repository checkout.
-- Do not clone, checkout, fetch with git, create branches, or modify any repository.
-- Read required source content only from the context manifest below.
+{{execution_boundary}}
 
 Response contract:
 {{mode_contract}}

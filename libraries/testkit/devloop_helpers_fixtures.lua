@@ -226,11 +226,19 @@ function M.new(deps)
     "run_decompose",
   }) do
     local base_run = helpers[name]
+    local add_missing_review_worktree = name == "run_review_pr" or name == "run_review_loop"
     helpers[name] = function(...)
       local payload = ...
       local repo, issue_number = issue_identity_from_payload(payload)
       mock_context_bundle(payload)
       mock_default_issue_claim(repo, issue_number)
+      if add_missing_review_worktree then
+        helpers.t.mock_command("/worktrees/devloop-", {
+          stdout = "",
+          stderr = "",
+          exit_code = 1,
+        })
+      end
       return base_run(...)
     end
   end
