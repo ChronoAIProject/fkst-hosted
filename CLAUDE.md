@@ -190,11 +190,11 @@ Incident of record (2026-06-17): `mkdir -p X && chmod 0555 X` on a worktree pare
 
 活性 bug 的三种伪装（实证根因 #550：merge tick 用裸名比较失配命名空间队列 → scan 永不跑 → 需重试的 PR 永卡 merge-ready → churn 到 `blocked`，三级错误网每级都擦肩）：
 - **benign-return 伪装成成功**：错误路径干净 `return`、投递干净 ACK，引擎视角「处理成功了」→ 无 dead_letter → L2 无米下锅。错误网以失败为键,一次「成功地做错了事」零事实可抓。
-- **consumed-but-unrouted 塌缩进合法 skip**：多队列消费者本就合法 `skip-foreign` 不属于自己的 payload；一个**声明消费**的队列的事件却内部路由不了时被当成 foreign 静默跳过——你无法对 skip-foreign 报警,否则误报每一次合法跳过。
+- **consumed-but-unrouted 塌缩进合法 skip**：多队列消费者只有在正向证据证明 **schema/domain/wrong-queue mismatch** 时才可 `skip-foreign`；requester/origin/correlation/continuation 不匹配不是 foreign，而是 request-reply tell、不得据此跳过。一个**声明消费**的队列的事件却内部路由不了时被当成 foreign 静默跳过——你无法对前一种合法 skip 一刀切报警，否则会误报真正的 schema/domain/wrong-queue mismatch。
 - **false-terminal（假终态）**：churn 到一个**合法终态**（如 `blocked`），liveness sweep 见终态即判 done → 绿,分不清「该 blocked」与「因上游静默死掉而错误 blocked」。
 
 对策（把活性 bug 转成安全 bug 让错误网能抓 + 正向断言 + harness 保真）：
-- **consumed-but-unrouted 一律 fail-closed**：dispatch on `event.queue` 必须**枚举** consumed 队列,区分「不消费的队列 / foreign payload」（合法跳过）与「声明消费却内部路由不了」（**`error()` fail-closed → dead_letter → L2 抓**）。这是边界资源公理（枚举 + fail-closed）与「错误分类要窄」在事件分发的落地。
+- **consumed-but-unrouted 一律 fail-closed**：dispatch on `event.queue` 必须**枚举** consumed 队列,区分「有正向证据的 schema/domain/wrong-queue mismatch」（合法跳过）与「声明消费却内部路由不了」（**`error()` fail-closed → dead_letter → L2 抓**）。requester/origin/correlation/continuation mismatch 永远不进入合法 skip 类。这是边界资源公理（枚举 + fail-closed）与「错误分类要窄」在事件分发的落地。
 - **非终止态必有正向进度断言**：每个非终态在预算内必须产出进度（活性契约）；**终态携带 WHY**,使假终态（如「从未尝试过 merge 的 blocked」）可被识别,而非被当作已满足。
 - **harness 保真到生产交付语义**：测试必须交付**生产形态**的事件（如命名空间队列名 `pkg.queue`,而非裸名）,否则裸名测试匹配 buggy 比较给假绿——「让问题都在测试解决」要求 harness 不保真即视为缺口。优先用 conformance 不变式机械覆盖整类（每个 consumed 队列用命名空间名派发必须不落 unsupported/skip-foreign fallthrough）,而非逐 dept 手写测试。
 
@@ -231,7 +231,7 @@ saga-mandatory umbrella = #375；budget-exhaustion liveness class = #558 / #568 
 非正常路径（异常/错误）的纪律:**异常必须被暴露** —— fail-loud、向上传播、落结构化日志（`error_class`/`fingerprint`/`source_ref`/`attempt`/`terminal`）—— **直到遇到一个实证地懂其根因、且懂正确处置的 handler 把它处理掉**。不得在不理解根因的情况下静默 `skip` / `return` / `catch` 把异常吞掉。被吞的异常既不报错（safety 盲）又常表现为静默缺席（liveness 盲），是自驱系统反复栽跟头的根。
 
 判据 —— 一个 `skip` / `catch` / benign-return 是否合法:
-- **合法**:代码**实证地知道**这是情形 X、且 X 的正确处置就是跳过（如「这个 event 的 payload 实证属于另一个 package、与我无关 → skip-foreign」）。这是一个**理解了根因的 handler 在正确处置**。
+- **合法**:代码**实证地知道**这是 schema/domain/wrong-queue mismatch、且正确处置就是跳过（如 schema 明确属于另一个 domain，或 `event.queue` 明确不是本 dispatch 分支）。这是一个**理解了根因的 handler 在正确处置**；requester/origin/correlation/continuation 不匹配不属于此例外。
 - **非法（latent bug）**:用 `skip`/`retry`/benign-return 当「我不认识这个 → 当作可跳过/可重试」的兜底。这是在**吞掉一个你不理解的异常**、把它伪装成合法处置。本系统的实证病例都是这一形态:#550 把内部路由不了的 tick 当 `skip-foreign(payload): unsupported event payload` 静默 return;#558 把 version-desync 当 `retry-pending` 无界重试（既不暴露又不解决);#556 observability `current==nil` 不问「为何 nil（并发/配额）」就走 create。
 
 规则:
@@ -239,6 +239,8 @@ saga-mandatory umbrella = #375；budget-exhaustion liveness class = #558 / #568 
 - **handler 必须理解根因才算「处理」**。不理解根因的 catch-and-retry 或 skip-and-continue 不是处理,是**掩盖** —— 它把异常吞进一个既不暴露、又不解决的黑洞。无界重试尤其要加界:重试 N 次仍不成立就不是「最终一致暂态」,而是结构性失配,必须暴露/reconcile 到带 WHY 的终态。
 - **处理一次,由懂的代码处理**。异常不应被多个不懂的中间层各 `catch` 一下又放过;它应一路暴露到唯一懂其根因与处置的 handler。本系统的 handler 链就是三级模型:L1 确定性 fail-closed → DLQ → **L2 triage codex 才是「懂如何处置未知失败」的 handler（facts→issue,而非当场猜测吞掉）**。
 - **错误分类要窄、可 grep、带根因事实**,让上游 handler 能据事实判断自己是否**真的懂**如何处置,而非盲吞。
+
+**fanout-only narrowing**：存量 `consensus_result` 等按 `proposal_id` / origin 判断「是不是给我的回复」再 `skip-foreign` 的过滤，是 shrink-only **MIGRATION DEBT**，不是合法 skip exemplar；只有 schema/domain/wrong-queue mismatch可继续作为合法 benign-return。
 
 prior art:Erlang/OTP「let it crash」(不防御式 catch,交给懂恢复策略的 supervisor)、Go 显式 error（handle 或 propagate,`_ = err` 是 smell）、「不要 catch 你处理不了的异常」。与三级错误模型一致(L1 暴露、L2 是懂根因的 handler),与「活性 ⟂ 安全」互补(被吞的异常两面皆盲)。#551 的 conformance 不变式(每个 consumed 队列必须路由或 fail-closed、不得静默 skip-foreign fallthrough)是这条纪律的机械执行;审查存量 `skip-foreign`/`skip-stale`/benign-return 是否「实证合法」还是「吞未知」是持续工作。
 
@@ -279,6 +281,8 @@ dogfood 中发现**运行的系统在流血**（storm / 资源耗尽 / churn / �
 
 **这正是本仓所有 ratchet/conformance 的同一形状**，本节给它们命名共同本质：G-ADAPTER（gh/git 只能经 `forge.github`/`forge.git` argv，裸 gh/git=0）、G-DEDUP（一份 canonical body，禁字节级 clone）、强制 saga（唯一形状 `workflow.saga.department`）、god-state（一状态一职责）、活性契约（每个非终止态必声明 budget+watchdog）、ports（唯一 egress 路径）——全是「唯一确定一种写法 + 机械禁止旁路」。
 
+**Harness 的核心 = 限制最小原语（restrict the minimal primitive；这是本质，不是梯度顶端的一档）。** harness 不是「检测坏写法」，是**只暴露最小的、正确的原语，使坏写法根本表达不出来**——你没法用一个不存在的原语。所以下面 ④ capability（限制原语）**就是本质本身**；③runtime-guard / ②schema / ①scan 都是**「原语一时限制不到」时逼近它的近似/回退**，越靠 ④ 越 bypass-proof、越 scale-free。**且 harness 是规定、不是菜单（prescriptive, not a menu）**：它**钉死唯一最好的写法、禁止其他**（接「唯一确定一种写法」），绝不说「有好几种方案任选」——把 harness 呈现成选项菜单，本身就是没收敛到本质。**诚实边界**：当原语无法在语言层被廉价限制（如动态语言里任意代码总能「叠」出旁路），诚实承认「语言层完全不可表示」需要受限 DSL、往往不值；此时 harness = **最强的诚实机制**（把有证据的已知旁路纳入 shrink-only inventory，并在迁移完成后 ratchet 到 zero-surface），不虚构现有声明结构证明不了的 detector——**残余是被收敛的违规，不是合法替代**（仍是「一种写法」，只是暂时只能 DETECT）。
+
 **机械实现「唯一写法」的强度梯度：PREVENT > DETECT，scan 是兜底不是终局。** 建 harness 先问「能不能让旁路**根本拿不到原语 / 发不出 effect**」，而不是先写 grep。按旁路性质选档，强→弱：
 
 - **④ capability restriction（最强：旁路原语不在业务代码 reach 内）**——可绕过的 primitive 只注入给 canonical path，业务层够不着 → 旁路**写不出**。判据：旁路 = 调用某**共享原语**。已实现例：`forge.ports` 持有 `gh/git` argv 构造权，业务 dept 拿不到裸 gh/git。目标形态：`M.spec.produces` 成为 `raise()` 的**能力授予**（dept 只能 raise 自己声明的队列）。
@@ -289,6 +293,29 @@ dogfood 中发现**运行的系统在流血**（storm / 资源耗尽 / churn / �
 **铁律：能表达成 ②③④ 的契约不得长期停在 ① scan。** scan 的职责是**暴露迁移债 + 防回归**，不是权限边界——把它当主防线，就是「编程语言太灵活、谁都能写另一种写法」的根源。判一个旁路该爬到哪档：调用共享原语→④收紧原语（如 forward-direct-raise 应经 produces 能力化，而非永久停在 scan）；数据结构属性→②schema；需授权的 effect→③runtime guard；任意源码 emergent→①scan 兜底。注意粒度：「一队列一 producer」只施于 **lifecycle/authority 队列**，telemetry/fanout/shared 队列可合法多 producer；同一队列若有 forward（写确认后触发）vs redrive（读到已可见 marker 后重投）两种权限语义，队列级能力分不出二者，需 queue 拆分 / typed egress 或保留 schema+scan backstop 区分。引擎层能力化（`raise⊆produces` fail-closed + 不可伪造的 raised 传输）属 substrate，不在包侧硬造。
 
 **纪律**：建 harness 时，问题不止「prior art 是什么」，更是「**这件事的唯一规范写法是什么、我如何让其他每一种写法在机械上不可表示（CI 红）**」。同一目的存在多种并存写法本身就是 smell——**先收敛成一种，再锁死旁路**。新增能力时同步给出「唯一写法 + 旁路禁止的不变式」，否则旁路迟早重新长出来、悄悄收回隐形税（实证：竞态旁路一年都没人发现，因为它「能用」）。
+
+## 消息只许 fanout；request-reply 是函数调用，不是消息（fanout-only message doctrine·HARD GATE）
+
+**部门/包之间只有两种通信原语，没有第三种**（这是「限制最小原语」在通信面的落地，prescriptive、非菜单）：
+1. **fanout-shaped 单向消息**：`raise(queue)` 只发布一次单向事实或 intent，**subscription 决定 acceptance，绝无 requester-correlated reply**；它既包括领域事件，也包括 one-way published-seam intent/command。后一种 command 是合法入口，不因名为 command 就变成 request-reply。
+2. **直接 library 调用**：同步函数、返回值。
+
+**这里的 fanout-only 是 acceptance semantics，不是 `M.spec.fanout` 字段。** 它要求所有 queue 的业务受理都与 requester provenance 无关，适用于每一条 queue；`M.spec.fanout` 只是 queue-cardinality contract，不声明 broadcast topic，也不决定本 doctrine 是否适用。
+
+**request-reply（A 问 → 算 → 回给 A 的 1:1 对话，如共识）绝不做成消息——它就是一次 lib 调用。** 禁的是 requester-correlated **reply**，不是 one-way seam intent/command。把对话做成「单向 publish 出去 + 每个消费者按 id 判断『是不是我的回复』」是反模式（EIP：Pub-Sub vs Request-Reply；orchestration vs choreography）；那个 origin 过滤就是病根，也正是 `skip-foreign` / consumed-but-unrouted 危害的来源。
+
+- **doctrine/review lens（requester-provenance noninterference / 受众无关性；当前不是 general mechanical detector）**：固定 queue、领域事实 D、消费者状态 S，**只改变/删除 requester·origin·correlation·continuation 来源 R，消费者的业务效果必须不变**——`BusinessEffect(c,q,D,R1,S) == BusinessEffect(c,q,D,R2,S)`，其中业务效果含「是否 skip/drop/early-return、写哪个领域状态、恢复/完成哪个 continuation、触发哪个 effect、产生哪些后续业务消息」（纯诊断 log/trace 不算）。即订阅本身即确立 applicability，**请求方归属不得影响业务受理**。
+  - **反事实 review 测试**：把「谁发起的请求 / 哪个 pending request 在等 / request·correlation·proposal token / reply address / caller reference」从事件里删掉——剩下的还是一条**完整领域事实**、消费者仍知「发生了什么」→ 可能是真 fanout-shaped message；若变成「不知是不是我的 / 不知恢复哪个等待 / 不知结果给哪个 caller / 无法与先前 outbound request 配对」→ 它是 request-reply。当前缺少支持把这个反事实普遍自动执行的 typed evidence，故不得称其为 general CI check。
+  - **三类 id 精确分**（`proposal_id` 字段名本身不非法，看它扮演哪个角色）：`event_id`（幂等去重、重复投递识别）合法，选调用方/pending continuation 非法；`entity / domain ref`（回源领域实体、应用领域事实、领域分区）合法，冒充 reply correlation 非法；在 provenance-independent admission **之后**，same-entity lineage/CAS 合法；`requester / origin / correlation / continuation ref` **不得出现在 public event 的业务 contract 中**——比对本地 outstanding request 再 skip/resume 非法。当前 `consensus_result` 等 `skip-foreign(proposal_id)` origin filters正命中最后一类，必须作为 shrink-only MIGRATION DEBT 收敛，不是 exemplar。（所以别把判据写成「必须处理每一条事件」——那会误伤 schema rejection、event-id 去重、tombstone no-op、entity 回源、合法 post-admission CAS、多 queue wrong-queue dispatch、tenant 分片；该禁的只是**用请求方归属或等待关系做 filtering**。）
+- **canonical 形态（唯一）**：要一个算出来的值 → `local result = consensus.reach(proposal)`。callee 是 source-agnostic workspace **library**，同步返回 `reached | converge`，**不认 caller / reply-queue / callback**；caller 自己持 saga marker / CAS / retry / re-derive（长 codex 推理的 durability 归入**调用者**状态，lib 调用幂等可重导——更干净，非免费）。
+- **library composition 与 event-graph composition 的边界（唯一）**：request-reply 逻辑只允许 declared direct `lib_deps` composition；真需要包面时，建薄包直接 call 该 library，多个薄包可引用同一 library。`[event_deps]` 始终是 composed-package 的 event-topology composition（Facade/Adapter），用于组合 fanout-shaped queues；它对 **request-reply reuse** 明确禁用。两者都是 composition，但职责与语义保持严格分离。
+- **为什么（teleology + testability，头号理由）**：**request-reply-as-message 对测试是噩梦**——要编排消息往返、mock reply、处理时序与投递；而 **lib 调用 trivially testable**（调函数、断返回值）。且它 inevitable：要值回来就调函数。
+- **层归属（不归引擎）**：引擎只知静态 `raise ⊆ produces ⊆ published_seam` 与 `M.spec.fanout` queue-cardinality contract，**看不到 Lua 的 provenance-independent acceptance semantics**（丢弃 pipeline 返回值、按 exit=0 ACK），真假 request-reply 对引擎图相同 → 强制归 **fkst-packages conformance**；**不新增引擎 `kind="broadcast"` 自报字段**。
+- **当前唯一可声称的 mechanical harness = known-dialogue inventory ratchet；状态为 `DESIGNED, NOT YET ENFORCED`。** 包拥有的 checker固定为 `scripts/check_repo_fanout_only.py`，shrink-only inventory固定为 `migration/request-reply-message.allowlist`；checker PR 落地并接入 repository checks之前，CI **尚未**执行 R11，不能写成「CI 已禁止」。本 lifecycle refactor期间，checker只 inventory 已知 request-reply surfaces并禁止 allowlist 增长；allowlist机制结构上只许 shrink，但 R9 要求现有 consensus entries在本 refactor中原样保留，所以此阶段实际只有 no-growth、没有 deletion，R11 **不删除任何 queue**。
+- **zero-surface 只在 terminal deletion 之后激活。** `consensus` package→library迁移必须作为独立 R9 behavior-change PR，携带 intent manifest，把已知 dialogue inventory ratchet 到 zero；该 PR 之后 zero才成为不可回退的 gate。`product-outcome parity` 固定指 caller-observable outcome equality：迁移前后返回相同 reply value，并产生相同 saga transitions/markers；delivery form 从 queue→call 是被明确授权的变化，不拿 delivery-form equality冒充 product parity。
+- **不得虚构 general audience-independence checker。** 现有 `output_obligation` / lineage声明不含 requester identity、response-to relation或 admission 前后 identity use，无法推出 request-reply。未来 general checker必须先新增 typed evidence：每条 cross-boundary message声明是否携带 requester provenance，且 producer/consumer contract声明 consumer acceptance与该 provenance无关；这些证据当前不存在，故只列 future work，不能由 same-lineage return声称已机械证明。任意未 inventory 的 Lua origin-filter继续由上述 doctrine/review lens识别，并作为待纳入 ratchet 的违规，不是合法替代。
+
+⟦AI:FKST⟧
 
 ## 有问题不可怕：要有「发现问题的机制」+ 把每个发现「做成 harness」（bug 不是失败，缺这两者才是·discover→harness-ify）
 
