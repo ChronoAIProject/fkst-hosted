@@ -98,6 +98,24 @@ Directory permissions are fragile: a read-only parent prevents `git worktree add
 
 Incident of record (2026-06-17): `mkdir -p X && chmod 0555 X` on a worktree parent broke `sync_scan`'s `git worktree add`, stalled forward sync across a week's dev advance, left running code stale, and allowed recurrence of an already-fixed false-terminal class. ⟦AI:FKST⟧
 
+## 代码一眼可推断，零隐含状态——因为推断者是 AI
+
+**这是一个有边界的设计规则：显式权威 + 局部可追踪控制流。** 业务行为优先写成普通函数、显式数据和直接调用；分支选择把 discriminator 写成数据，并用封闭、完整可见的 tagged dispatch table。这里的「一眼可推断」是指从调用点、相邻声明和 port contract 能沿显式调用追到「读了哪个权威、选了哪个分支、产生什么 effect」，不是要求没有抽象、状态、多态或 dispatch。操作者、worker、reviewer 主要靠读代码推断行为；隐藏在内存里的业务权威和隐式 dispatch 会使 AI 推断**不可靠、易错**，因此应把它们收窄到局部、显式、可追踪的形状。
+
+**证据只支持这个强度，不支持绝对化。** 已落地到集成分支 `integration-elonsg` 的 successor-kind 更正（#2121，尚未 rollup 到 dev）把原标为 `autonomous` 的 31 条 successor 中 12 条移到真实类别：7 条 `guard`（落地 kind 为 `guard_boundary`）、2 条 `timeout`、3 条 `entry`，约 39%，属于显著误分。这个测量支持把 `kind` 从产生路径中取出、明写为数据；它不支持「AI 必然推错」或「软件复杂性只有一个根」的叙事。隐式 dispatch 制造 opaque 控制流、durable mutable object 藏业务权威——都是「显式权威 + 可追控制流」的姊妹违规（不是 spec 定义的 hidden state 本身，见下段），不是软件复杂性的唯一根因。
+
+**术语不另起炉灶。** `docs/superpowers/specs/2026-06-27-hidden-state-eradication-design.md` 对 hidden state 的精确定义仍是权威：一个 lifecycle transition 的推进条件是 durable、可回源重导的事实，却只在 transient event path 被查询，且没有 level-triggered poll re-derive。本节不把所有抽象、多态或 request-local mutation 重新定义成 hidden state；它只给这些既有纪律指出共同目标：**explicit authority + locally traceable control flow**。
+
+**状态可以有 instance scope，但业务权威不得藏在 durable mutable object 里。** GitHub marker 是按 issue / proposal / saga instance 记录的事实，以 version 和 lineage（如 `state_instance_id`、saga / generation / entity lineage）键控；跨 pipeline 的真相从 GitHub、git 或明确 host fact 回源。正确形状是按 entity / version / lineage 显式外部键控、可重导的持久事实。把状态外置消除的是隐藏在内存中的业务权威，**不消除 instance scope**。
+
+**通信面的唯一判据仍是「消息只许 fanout」节的 requester-provenance noninterference，不是 broadcast cardinality，也不引入 class / instance 代理。** correlation 标识的是一次 invocation / request，不是 OOP instance：与该次调用相关的结果用直接函数调用返回，调用栈本身就是 correlation；不依赖 requester / continuation provenance 的事实或 intent 才是 fanout-shaped message。entity reference 以及在 provenance-independent admission 之后的 same-entity lineage / CAS 仍然合法。
+
+**下节 SOLID 在本仓是用 function / module / port contract 表达的分解与耦合指导。** LSP 对应显式 function / data / port contract 的可替换性。显式 dispatch table 本身仍是 runtime polymorphism；它的价值不是「没有多态」，而是 discriminator 封闭、完整且局部可见。这里禁止的是 **implicit subtype / receiver-type / metatable-driven dispatch、nominal method inheritance、durable mutable business objects**；允许 request-local mutable state，也允许普通函数 API 后受控封装的 metatable（如 weak table、error tagging、`libraries/devloop/di/select_caps.lua` 的 capability sealing），只要它不泄漏为业务 dispatch 或持久权威。封闭的 tagged dispatch table 是推荐形态。
+
+**这不是新增第 N 条，而是对既有较窄纪律的共同命名。** 「显式优先」「make illegal states unrepresentable」「限制最小原语」「单一真相源」「no silent swallow」「fanout-only requester-provenance noninterference」「marker-as-fact 回源」共同服务于同一个目标：让权威显式、让控制流局部可追踪。
+
+⟦AI:FKST⟧
+
 ## 面向对象基本原则
 
 - **单一职责原则**：一个类应该只有一个发生变化的原因。
