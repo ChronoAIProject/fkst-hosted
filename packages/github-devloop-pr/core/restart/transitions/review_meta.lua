@@ -61,6 +61,7 @@ return function(M, h)
         {
           state = "fixing",
           output_variant = "fix",
+          kind = "autonomous",
           postcondition_family = "review-meta-decision",
           decision_type = "review-meta-decision",
           bump = true,
@@ -68,6 +69,7 @@ return function(M, h)
         {
           state = "blocked",
           output_variant = "block",
+          kind = "autonomous",
           postcondition_family = "review-meta-decision",
           decision_type = "review-meta-decision",
           monotonic = true,

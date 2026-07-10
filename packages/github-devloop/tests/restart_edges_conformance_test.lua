@@ -1,4 +1,5 @@
 local h = require("tests.devloop_core_helpers")
+local entry_inventory = require("core.restart.entry_inventory")
 local restart_edges = require("devloop.restart_edges")
 
 local core = h.core
@@ -15,8 +16,24 @@ local structural_fields = {
 }
 
 local deferred_kinds = {
-  "timeout",
   "canonicalization",
+}
+
+local expected_successor_kinds = {
+  ["awaiting-pr/child_pr_merged"] = "guard_boundary",
+  ["awaiting-pr/child_pr_closed_unmerged_replaced"] = "guard_boundary",
+  ["awaiting-pr/child_pr_not_merged"] = "guard_boundary",
+  ["dependency_wait/blockers_still_open"] = "guard_boundary",
+  ["dependency_wait/blockers_released"] = "guard_boundary",
+  ["dependency_wait/dependency_resolver_stale"] = "guard_boundary",
+  ["impl-failed/retry-implementation"] = "entry",
+  ["implementing/revision_published"] = "autonomous",
+  ["implementing/revision_failed"] = "autonomous",
+  ["ready/implementation_kicked_off"] = "entry",
+  ["ready/blocker_reappeared"] = "guard_boundary",
+  ["ready/actionable_kickoff_timeout"] = "timeout",
+  ["thinking/consensus-reached"] = "autonomous",
+  ["thinking/consensus-stalled"] = "autonomous",
 }
 
 local function key_set(keys)
@@ -74,23 +91,27 @@ local function expected_edges(owner, rows)
   local empty_rows = {}
   for _, row in ipairs(rows) do
     local successors = row.responsibility_signature.successors
-    if #successors == 0 then
-      table.insert(empty_rows, row.from_state)
-    end
+    local row_has_edge = false
     for _, successor in ipairs(successors) do
-      table.insert(expected, {
-        id = owner .. "/" .. row.from_state .. "/autonomous/" .. successor.output_variant,
-        owner = owner,
-        row_id = row.from_state,
-        kind = "autonomous",
-        source = { state = row.from_state, boundary = nil },
-        target = successor.state,
-        provenance = {
+      if successor.kind == "autonomous" then
+        row_has_edge = true
+        table.insert(expected, {
+          id = owner .. "/" .. row.from_state .. "/autonomous/" .. successor.output_variant,
           owner = owner,
-          row = row.from_state,
-          field = "responsibility_signature.successors",
-        },
-      })
+          row_id = row.from_state,
+          kind = "autonomous",
+          source = { state = row.from_state, boundary = nil },
+          target = successor.state,
+          provenance = {
+            owner = owner,
+            row = row.from_state,
+            field = "responsibility_signature.successors",
+          },
+        })
+      end
+    end
+    if not row_has_edge then
+      table.insert(empty_rows, row.from_state)
     end
   end
   return expected, empty_rows
@@ -100,18 +121,96 @@ local function expected_guard_boundary_edges(owner, rows)
   local expected = {}
   local rows_without_boundaries = {}
   for _, row in ipairs(rows) do
-    if row.guard_boundaries == nil then
-      table.insert(rows_without_boundaries, row.from_state)
-    else
+    local row_has_edge = false
+    local signature = row.responsibility_signature
+    for _, successor in ipairs(type(signature) == "table" and signature.successors or {}) do
+      if successor.kind == "guard_boundary" then
+        row_has_edge = true
+        table.insert(expected, {
+          id = owner .. "/" .. row.from_state .. "/guard_boundary/" .. successor.output_variant,
+          owner = owner,
+          row_id = row.from_state,
+          kind = "guard_boundary",
+          source = { state = row.from_state, boundary = nil },
+          target = successor.state,
+          provenance = {
+            owner = owner,
+            row = row.from_state,
+            field = "responsibility_signature.successors",
+          },
+        })
+      end
+    end
+    if row.guard_boundaries ~= nil then
       for _, guard_boundary in ipairs(row.guard_boundaries) do
         for _, successor in ipairs(guard_boundary.successors) do
+          if successor.kind ~= "timeout" then
+            row_has_edge = true
+            table.insert(expected, {
+              id = owner .. "/" .. row.from_state .. "/guard_boundary/" .. guard_boundary.name .. "/" .. successor.output_variant,
+              owner = owner,
+              row_id = row.from_state,
+              kind = "guard_boundary",
+              source = { state = row.from_state, boundary = guard_boundary.name },
+              target = successor.state,
+              provenance = {
+                owner = owner,
+                row = row.from_state,
+                field = "guard_boundaries",
+              },
+            })
+          end
+        end
+      end
+    end
+    if not row_has_edge then
+      table.insert(rows_without_boundaries, row.from_state)
+    end
+  end
+  return expected, rows_without_boundaries
+end
+
+local timeout_policy_by_source = {
+  ["state_entry:v1"] = "timeout.state_entry_legacy_v1",
+  ["codex_run:v1"] = "timeout.codex_run_legacy_v1",
+  ["live_defer_heartbeat:v1"] = "timeout.heartbeat_legacy_v1",
+  ["live_defer_epoch:v1"] = "timeout.durable_clear_legacy_v1",
+  ["child_workflow_wait:v1"] = "timeout.child_workflow_legacy_v1",
+}
+
+local function expected_timeout_edges(owner, rows)
+  local expected = {}
+  for _, row in ipairs(rows) do
+    local policy_id = timeout_policy_by_source[row.actionable_epoch and row.actionable_epoch.source]
+    for _, successor in ipairs(row.responsibility_signature.successors) do
+      if successor.kind == "timeout" then
+        table.insert(expected, {
+          id = owner .. "/" .. row.from_state .. "/timeout/" .. successor.output_variant,
+          owner = owner,
+          row_id = row.from_state,
+          kind = "timeout",
+          source = { state = row.from_state, boundary = nil },
+          target = successor.state,
+          timeout_evidence_policy_id = policy_id,
+          provenance = {
+            owner = owner,
+            row = row.from_state,
+            field = "responsibility_signature.successors",
+          },
+        })
+      end
+    end
+    for _, guard_boundary in ipairs(row.guard_boundaries or {}) do
+      for _, successor in ipairs(guard_boundary.successors) do
+        if successor.kind == "timeout" then
           table.insert(expected, {
-            id = owner .. "/" .. row.from_state .. "/guard_boundary/" .. guard_boundary.name .. "/" .. successor.output_variant,
+            id = owner .. "/" .. row.from_state .. "/timeout/" .. guard_boundary.name .. "/" .. successor.output_variant,
             owner = owner,
             row_id = row.from_state,
-            kind = "guard_boundary",
+            kind = "timeout",
             source = { state = row.from_state, boundary = guard_boundary.name },
             target = successor.state,
+            timeout_evidence_policy_id = policy_id,
             provenance = {
               owner = owner,
               row = row.from_state,
@@ -122,7 +221,7 @@ local function expected_guard_boundary_edges(owner, rows)
       end
     end
   end
-  return expected, rows_without_boundaries
+  return expected
 end
 
 local function assert_edges(actual, expected, empty_rows)
@@ -174,7 +273,11 @@ local function assert_guard_boundary_edges(actual, expected, rows_without_bounda
   for index, expected_edge in ipairs(expected) do
     local edge = actual[index]
     assert_exact_keys(edge, edge_keys)
-    assert_exact_keys(edge.source, { state = true, boundary = true })
+    if expected_edge.source.boundary == nil then
+      assert_exact_keys(edge.source, { state = true })
+    else
+      assert_exact_keys(edge.source, { state = true, boundary = true })
+    end
     assert_exact_keys(edge.provenance, { owner = true, row = true, field = true })
     t.eq(edge.id, expected_edge.id)
     t.eq(edge.owner, expected_edge.owner)
@@ -199,6 +302,112 @@ local function assert_guard_boundary_edges(actual, expected, rows_without_bounda
   for _, row_id in ipairs(rows_without_boundaries) do
     t.eq(counts_by_row[row_id] or 0, 0)
   end
+end
+
+local function assert_timeout_edges(actual, expected)
+  t.eq(#actual, #expected)
+  local edge_keys = key_set(structural_fields)
+  edge_keys.timeout_evidence_policy_id = true
+  local seen_ids = {}
+  for index, expected_edge in ipairs(expected) do
+    local edge = actual[index]
+    assert_exact_keys(edge, edge_keys)
+    if expected_edge.source.boundary == nil then
+      assert_exact_keys(edge.source, { state = true })
+    else
+      assert_exact_keys(edge.source, { state = true, boundary = true })
+    end
+    assert_exact_keys(edge.provenance, { owner = true, row = true, field = true })
+    t.eq(edge.id, expected_edge.id)
+    t.eq(edge.owner, expected_edge.owner)
+    t.eq(edge.row_id, expected_edge.row_id)
+    t.eq(edge.kind, "timeout")
+    t.eq(edge.source.state, expected_edge.source.state)
+    t.eq(edge.source.boundary, expected_edge.source.boundary)
+    t.eq(edge.target, expected_edge.target)
+    t.eq(edge.timeout_evidence_policy_id, expected_edge.timeout_evidence_policy_id)
+    t.eq(edge.provenance.owner, expected_edge.provenance.owner)
+    t.eq(edge.provenance.row, expected_edge.provenance.row)
+    t.eq(edge.provenance.field, expected_edge.provenance.field)
+    t.eq(seen_ids[edge.id], nil)
+    seen_ids[edge.id] = true
+  end
+end
+
+local function assert_successor_kind_partition(rows)
+  local seen = {}
+  for _, row in ipairs(rows) do
+    for _, successor in ipairs(row.responsibility_signature.successors) do
+      local key = row.from_state .. "/" .. tostring(successor.output_variant)
+      t.eq(successor.kind, expected_successor_kinds[key])
+      t.eq(seen[key], nil)
+      seen[key] = true
+    end
+  end
+  local expected_count = 0
+  for key in pairs(expected_successor_kinds) do
+    expected_count = expected_count + 1
+    t.eq(seen[key], true)
+  end
+  local actual_count = 0
+  for _ in pairs(seen) do
+    actual_count = actual_count + 1
+  end
+  t.eq(actual_count, expected_count)
+end
+
+local function tuple_key(owner, source_state, target, output_variant)
+  local state_key = source_state == nil and "\0" or "\1" .. source_state
+  return table.concat({ owner, state_key, target, output_variant }, "\2")
+end
+
+local function output_variant_from_id(id)
+  local output_variant = tostring(id):match("/([^/]+)$")
+  t.is_true(output_variant ~= nil)
+  return output_variant
+end
+
+local function sorted_set_bytes(values)
+  local keys = {}
+  for key in pairs(values) do
+    table.insert(keys, key)
+  end
+  table.sort(keys)
+  return table.concat(keys, "\n")
+end
+
+local function legacy_union_bytes(owner, rows, inventory)
+  local tuples = {}
+  for _, row in ipairs(rows) do
+    for _, successor in ipairs(row.responsibility_signature.successors) do
+      tuples[tuple_key(owner, row.from_state, successor.state, successor.output_variant)] = true
+    end
+    for _, guard_boundary in ipairs(row.guard_boundaries or {}) do
+      for _, successor in ipairs(guard_boundary.successors) do
+        tuples[tuple_key(owner, row.from_state, successor.state, successor.output_variant)] = true
+      end
+    end
+  end
+  for _, entry in ipairs(inventory) do
+    tuples[tuple_key(owner, nil, entry.target, output_variant_from_id(entry.id))] = true
+  end
+  return sorted_set_bytes(tuples)
+end
+
+local function extracted_union_bytes(owner, rows, inventory)
+  local tuples = {}
+  local extracted = {
+    restart_edges.extract_autonomous_edges(owner, rows),
+    restart_edges.extract_guard_boundary_edges(owner, rows),
+    restart_edges.extract_timeout_edges(owner, rows),
+    restart_edges.extract_entry_edges(owner, inventory, rows),
+  }
+  for _, edges in ipairs(extracted) do
+    for _, edge in ipairs(edges) do
+      tuples[tuple_key(edge.owner, edge.source.state, edge.target, output_variant_from_id(edge.id))] = true
+    end
+  end
+  return sorted_set_bytes(tuples)
 end
 
 local function row(from_state, successors)
@@ -229,6 +438,13 @@ local function assert_guard_extract_fails(owner, rows)
   t.eq(ok, false)
 end
 
+local function assert_timeout_extract_fails(owner, rows)
+  local ok = pcall(function()
+    restart_edges.extract_timeout_edges(owner, rows)
+  end)
+  t.eq(ok, false)
+end
+
 local function row_by_state(rows, state)
   for _, candidate in ipairs(rows) do
     if candidate.from_state == state then
@@ -245,6 +461,7 @@ return {
       extract_entry_edges = true,
       extract_guard_boundary_edges = true,
       extract_operator_reentry_edges = true,
+      extract_timeout_edges = true,
       schema = true,
     })
     local schema = restart_edges.schema()
@@ -262,11 +479,13 @@ return {
       entry = true,
       guard_boundary = true,
       operator_reentry = true,
+      timeout = true,
     })
     t.eq(schema.extracted_kinds.autonomous, true)
     t.eq(schema.extracted_kinds.entry, true)
     t.eq(schema.extracted_kinds.guard_boundary, true)
     t.eq(schema.extracted_kinds.operator_reentry, true)
+    t.eq(schema.extracted_kinds.timeout, true)
     t.eq(#schema.deferred_kinds, #deferred_kinds)
     for index, kind in ipairs(deferred_kinds) do
       t.eq(schema.deferred_kinds[index], kind)
@@ -277,8 +496,10 @@ return {
     local owner = core.restart_package_name
     local rows = core.restart_transition_table()
     local snapshot = copy_value(rows)
+    assert_successor_kind_partition(rows)
     local expected, empty_rows = expected_edges(owner, rows)
     local actual = restart_edges.extract_autonomous_edges(owner, rows)
+    t.eq(#actual, 4)
     assert_edges(actual, expected, empty_rows)
     assert_same_value(rows, snapshot)
 
@@ -290,29 +511,56 @@ return {
       t.is_true(edge.provenance ~= repeated[index].provenance)
     end
 
-    -- Timeout and canonicalization edges remain deferred.
+    -- Canonicalization edges remain deferred.
     -- This conformance does not claim OLD/live-transition parity: thinking->dependency_wait
     -- and pr-open->blocked exist in production but not in these rows, so they are out of scope.
   end,
 
-  test_restart_guard_boundary_edges_match_issue_rows_and_remain_empty = function()
+  test_restart_guard_boundary_edges_match_issue_rows_in_authored_order = function()
     local owner = core.restart_package_name
     local rows = core.restart_transition_table()
     local snapshot = copy_value(rows)
     local expected, rows_without_boundaries = expected_guard_boundary_edges(owner, rows)
     local actual = restart_edges.extract_guard_boundary_edges(owner, rows)
-    t.eq(#expected, 0)
-    t.eq(#rows_without_boundaries, #rows)
+    t.eq(#expected, 7)
     assert_guard_boundary_edges(actual, expected, rows_without_boundaries)
     assert_same_value(rows, snapshot)
 
     local autonomous_only = row("autonomous-only", {
-      { state = "autonomous-target", output_variant = "autonomous-output" },
+      { state = "autonomous-target", output_variant = "autonomous-output", kind = "autonomous" },
     })
     t.eq(#restart_edges.extract_guard_boundary_edges(owner, { autonomous_only }), 0)
   end,
 
-  test_restart_edges_do_not_read_to_states_or_infer_a_different_kind = function()
+  test_restart_timeout_edges_match_issue_rows_and_closed_evidence_policy = function()
+    local owner = core.restart_package_name
+    local rows = core.restart_transition_table()
+    local snapshot = copy_value(rows)
+    local expected = expected_timeout_edges(owner, rows)
+    local actual = restart_edges.extract_timeout_edges(owner, rows)
+
+    t.eq(#expected, 1)
+    assert_timeout_edges(actual, expected)
+    t.eq(actual[1].id, owner .. "/ready/timeout/actionable_kickoff_timeout")
+    t.eq(actual[1].timeout_evidence_policy_id, "timeout.state_entry_legacy_v1")
+    assert_same_value(rows, snapshot)
+
+    local repeated = restart_edges.extract_timeout_edges(owner, rows)
+    assert_timeout_edges(repeated, expected)
+    t.is_true(actual[1] ~= repeated[1])
+    t.is_true(actual[1].source ~= repeated[1].source)
+    t.is_true(actual[1].provenance ~= repeated[1].provenance)
+  end,
+
+  test_restart_edge_kind_partition_preserves_the_legacy_issue_union_byte_for_byte = function()
+    local owner = core.restart_package_name
+    local rows = core.restart_transition_table()
+    local before = legacy_union_bytes(owner, rows, entry_inventory)
+    local after = extracted_union_bytes(owner, rows, entry_inventory)
+    t.eq(after, before)
+  end,
+
+  test_restart_edges_do_not_read_to_states_or_override_explicit_kinds = function()
     local synthetic = setmetatable({
       from_state = "authored-order",
       responsibility_signature = {
@@ -330,11 +578,21 @@ return {
       end,
     })
     local edges = restart_edges.extract_autonomous_edges("issue-owner", { synthetic })
-    t.eq(#edges, 2)
-    t.eq(edges[1].id, "issue-owner/authored-order/autonomous/z-first")
-    t.eq(edges[1].kind, "autonomous")
-    t.eq(edges[2].id, "issue-owner/authored-order/autonomous/a-second")
-    t.eq(edges[2].kind, "autonomous")
+    t.eq(#edges, 0)
+    local timeout_edges = restart_edges.extract_timeout_edges("issue-owner", {
+      setmetatable({
+        from_state = synthetic.from_state,
+        actionable_epoch = { source = "state_entry:v1" },
+        responsibility_signature = {
+          successors = { synthetic.responsibility_signature.successors[1] },
+        },
+      }, getmetatable(synthetic)),
+    })
+    t.eq(#timeout_edges, 1)
+    t.eq(timeout_edges[1].id, "issue-owner/authored-order/timeout/z-first")
+    local guard_edges = restart_edges.extract_guard_boundary_edges("issue-owner", { synthetic })
+    t.eq(#guard_edges, 1)
+    t.eq(guard_edges[1].id, "issue-owner/authored-order/guard_boundary/a-second")
   end,
 
   test_restart_guard_boundary_edges_do_not_read_to_states_sort_or_leak_autonomous = function()
@@ -342,7 +600,7 @@ return {
       from_state = "authored-order",
       responsibility_signature = {
         successors = {
-          { state = "autonomous-target", output_variant = "autonomous-only" },
+          { state = "autonomous-target", output_variant = "autonomous-only", kind = "autonomous" },
         },
       },
       guard_boundaries = {
@@ -401,20 +659,36 @@ return {
   end,
 
   test_restart_edges_fail_closed_on_invalid_authored_inputs = function()
-    local valid = row("from", { { state = "to", output_variant = "done" } })
+    local valid = row("from", { { state = "to", output_variant = "done", kind = "autonomous" } })
     assert_extract_fails("", { valid })
-    assert_extract_fails("owner", { row(nil, { { state = "to", output_variant = "done" } }) })
-    assert_extract_fails("owner", { row("", { { state = "to", output_variant = "done" } }) })
+    assert_extract_fails("owner", { row(nil, { { state = "to", output_variant = "done", kind = "autonomous" } }) })
+    assert_extract_fails("owner", { row("", { { state = "to", output_variant = "done", kind = "autonomous" } }) })
     assert_extract_fails("owner", { { from_state = "from", responsibility_signature = {} } })
-    assert_extract_fails("owner", { row("from", { { output_variant = "done" } }) })
-    assert_extract_fails("owner", { row("from", { { state = "", output_variant = "done" } }) })
-    assert_extract_fails("owner", { row("from", { { state = "to" } }) })
-    assert_extract_fails("owner", { row("from", { { state = "to", output_variant = "" } }) })
+    assert_extract_fails("owner", { row("from", { { output_variant = "done", kind = "autonomous" } }) })
+    assert_extract_fails("owner", { row("from", { { state = "", output_variant = "done", kind = "autonomous" } }) })
+    assert_extract_fails("owner", { row("from", { { state = "to", kind = "autonomous" } }) })
+    assert_extract_fails("owner", { row("from", { { state = "to", output_variant = "", kind = "autonomous" } }) })
+    assert_extract_fails("owner", { row("from", { { state = "to", output_variant = "done" } }) })
+    assert_extract_fails("owner", { row("from", { { state = "to", output_variant = "done", kind = "other" } }) })
     assert_extract_fails("owner", {
       row("from", {
-        { state = "one", output_variant = "same" },
-        { state = "two", output_variant = "same" },
+        { state = "one", output_variant = "same", kind = "autonomous" },
+        { state = "two", output_variant = "same", kind = "autonomous" },
       }),
+    })
+
+    assert_timeout_extract_fails("", { valid })
+    assert_timeout_extract_fails("owner", {
+      row("from", { { state = "to", output_variant = "done", kind = "timeout" } }),
+    })
+    assert_timeout_extract_fails("owner", {
+      {
+        from_state = "from",
+        actionable_epoch = { source = "unknown:v1" },
+        responsibility_signature = {
+          successors = { { state = "to", output_variant = "done", kind = "timeout" } },
+        },
+      },
     })
 
     local valid_guard = guard_row("from", {

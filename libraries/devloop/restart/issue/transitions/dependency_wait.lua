@@ -58,6 +58,7 @@ return function(M, h)
         {
           state = "dependency_wait",
           output_variant = "blockers_still_open",
+          kind = "guard_boundary",
           postcondition_family = "dependency-release-or-blocker-tracking",
           decision_type = "dependency_gate",
           monotonic = true,
@@ -65,6 +66,7 @@ return function(M, h)
         {
           state = "ready",
           output_variant = "blockers_released",
+          kind = "guard_boundary",
           postcondition_family = "dependency-release-or-blocker-tracking",
           decision_type = "dependency_gate",
           bump = true,
@@ -72,6 +74,7 @@ return function(M, h)
         {
           state = "blocked",
           output_variant = "dependency_resolver_stale",
+          kind = "guard_boundary",
           failure = true,
           terminal = true,
           decision_type = "dependency_gate",

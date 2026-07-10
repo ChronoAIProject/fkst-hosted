@@ -40,12 +40,14 @@ return function(M, h)
         {
           state = "implementing",
           output_variant = "implementation_kicked_off",
+          kind = "entry",
           postcondition_family = "implementation_kickoff",
           monotonic = true,
         },
         {
           state = "dependency_wait",
           output_variant = "blocker_reappeared",
+          kind = "guard_boundary",
           regression = "blocker_reappeared",
           failure = true,
           bump = true,
@@ -53,6 +55,7 @@ return function(M, h)
         {
           state = "blocked",
           output_variant = "actionable_kickoff_timeout",
+          kind = "timeout",
           terminal = true,
           monotonic = true,
         },

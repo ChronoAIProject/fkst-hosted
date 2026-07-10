@@ -4,12 +4,72 @@ local function is_nonempty_string(value)
   return type(value) == "string" and value ~= ""
 end
 
-function M.extract_entry_edges(owner, inventory)
+local successor_kinds = {
+  autonomous = true,
+  entry = true,
+  guard_boundary = true,
+  timeout = true,
+}
+
+local timeout_policy_by_actionable_source = {
+  ["state_entry:v1"] = "timeout.state_entry_legacy_v1",
+  ["codex_run:v1"] = "timeout.codex_run_legacy_v1",
+  ["live_defer_heartbeat:v1"] = "timeout.heartbeat_legacy_v1",
+  ["live_defer_epoch:v1"] = "timeout.durable_clear_legacy_v1",
+  ["child_workflow_wait:v1"] = "timeout.child_workflow_legacy_v1",
+}
+
+local function row_id(row)
+  local value = type(row) == "table" and row.from_state or nil
+  if not is_nonempty_string(value) then
+    error("devloop.restart_edges: row.from_state must be a non-empty string")
+  end
+  return value
+end
+
+local function responsibility_successors(row, required)
+  local signature = type(row) == "table" and row.responsibility_signature or nil
+  if signature == nil and not required then
+    return {}
+  end
+  local successors = type(signature) == "table" and signature.successors or nil
+  if type(successors) ~= "table" then
+    error("devloop.restart_edges: responsibility_signature.successors must be a table")
+  end
+  return successors
+end
+
+local function validate_responsibility_successor(successor)
+  if type(successor) ~= "table" or not is_nonempty_string(successor.state) then
+    error("devloop.restart_edges: successor.state must be a non-empty string")
+  end
+  if not is_nonempty_string(successor.output_variant) then
+    error("devloop.restart_edges: successor.output_variant must be a non-empty string")
+  end
+  if successor_kinds[successor.kind] ~= true then
+    error("devloop.restart_edges: successor.kind must be autonomous, guard_boundary, timeout, or entry")
+  end
+end
+
+local function timeout_policy_id(row)
+  local actionable_epoch = type(row) == "table" and row.actionable_epoch or nil
+  local source = type(actionable_epoch) == "table" and actionable_epoch.source or nil
+  local policy_id = timeout_policy_by_actionable_source[source]
+  if policy_id == nil then
+    error("devloop.restart_edges: timeout edge actionable_epoch.source must select a closed timeout evidence policy")
+  end
+  return policy_id
+end
+
+function M.extract_entry_edges(owner, inventory, rows)
   if not is_nonempty_string(owner) then
     error("devloop.restart_edges: owner must be a non-empty string")
   end
   if type(inventory) ~= "table" then
     error("devloop.restart_edges: entry inventory must be a table")
+  end
+  if type(rows) ~= "table" then
+    error("devloop.restart_edges: rows must be a table")
   end
 
   local edges = {}
@@ -79,6 +139,33 @@ function M.extract_entry_edges(owner, inventory)
         field = provenance.field,
       },
     })
+  end
+
+  for _, row in ipairs(rows) do
+    local current_row_id = row_id(row)
+    for _, successor in ipairs(responsibility_successors(row, true)) do
+      validate_responsibility_successor(successor)
+      if successor.kind == "entry" then
+        local id = owner .. "/" .. current_row_id .. "/entry/" .. successor.output_variant
+        if seen_ids[id] then
+          error("devloop.restart_edges: duplicate edge id " .. id)
+        end
+        seen_ids[id] = true
+        table.insert(edges, {
+          id = id,
+          owner = owner,
+          row_id = current_row_id,
+          kind = "entry",
+          source = { state = current_row_id, boundary = nil },
+          target = successor.state,
+          provenance = {
+            owner = owner,
+            row = current_row_id,
+            field = "responsibility_signature.successors",
+          },
+        })
+      end
+    end
   end
   return edges
 end
@@ -185,47 +272,38 @@ function M.extract_autonomous_edges(owner, rows)
   if not is_nonempty_string(owner) then
     error("devloop.restart_edges: owner must be a non-empty string")
   end
+  if type(rows) ~= "table" then
+    error("devloop.restart_edges: rows must be a table")
+  end
 
   local edges = {}
   local seen_ids = {}
   for _, row in ipairs(rows) do
-    local row_id = row.from_state
-    if not is_nonempty_string(row_id) then
-      error("devloop.restart_edges: row.from_state must be a non-empty string")
-    end
-
-    local signature = row.responsibility_signature
-    local successors = type(signature) == "table" and signature.successors or nil
-    if type(successors) ~= "table" then
-      error("devloop.restart_edges: responsibility_signature.successors must be a table")
-    end
+    local current_row_id = row_id(row)
+    local successors = responsibility_successors(row, true)
 
     for _, successor in ipairs(successors) do
-      if type(successor) ~= "table" or not is_nonempty_string(successor.state) then
-        error("devloop.restart_edges: successor.state must be a non-empty string")
-      end
-      if not is_nonempty_string(successor.output_variant) then
-        error("devloop.restart_edges: successor.output_variant must be a non-empty string")
-      end
-
-      local id = owner .. "/" .. row_id .. "/autonomous/" .. successor.output_variant
-      if seen_ids[id] then
-        error("devloop.restart_edges: duplicate edge id " .. id)
-      end
-      seen_ids[id] = true
-      table.insert(edges, {
-        id = id,
-        owner = owner,
-        row_id = row_id,
-        kind = "autonomous",
-        source = { state = row_id, boundary = nil },
-        target = successor.state,
-        provenance = {
+      validate_responsibility_successor(successor)
+      if successor.kind == "autonomous" then
+        local id = owner .. "/" .. current_row_id .. "/autonomous/" .. successor.output_variant
+        if seen_ids[id] then
+          error("devloop.restart_edges: duplicate edge id " .. id)
+        end
+        seen_ids[id] = true
+        table.insert(edges, {
+          id = id,
           owner = owner,
-          row = row_id,
-          field = "responsibility_signature.successors",
-        },
-      })
+          row_id = current_row_id,
+          kind = "autonomous",
+          source = { state = current_row_id, boundary = nil },
+          target = successor.state,
+          provenance = {
+            owner = owner,
+            row = current_row_id,
+            field = "responsibility_signature.successors",
+          },
+        })
+      end
     end
   end
   return edges
@@ -235,13 +313,36 @@ function M.extract_guard_boundary_edges(owner, rows)
   if not is_nonempty_string(owner) then
     error("devloop.restart_edges: owner must be a non-empty string")
   end
+  if type(rows) ~= "table" then
+    error("devloop.restart_edges: rows must be a table")
+  end
 
   local edges = {}
   local seen_ids = {}
   for _, row in ipairs(rows) do
-    local row_id = row.from_state
-    if not is_nonempty_string(row_id) then
-      error("devloop.restart_edges: row.from_state must be a non-empty string")
+    local current_row_id = row_id(row)
+    for _, successor in ipairs(responsibility_successors(row, false)) do
+      validate_responsibility_successor(successor)
+      if successor.kind == "guard_boundary" then
+        local id = owner .. "/" .. current_row_id .. "/guard_boundary/" .. successor.output_variant
+        if seen_ids[id] then
+          error("devloop.restart_edges: duplicate edge id " .. id)
+        end
+        seen_ids[id] = true
+        table.insert(edges, {
+          id = id,
+          owner = owner,
+          row_id = current_row_id,
+          kind = "guard_boundary",
+          source = { state = current_row_id, boundary = nil },
+          target = successor.state,
+          provenance = {
+            owner = owner,
+            row = current_row_id,
+            field = "responsibility_signature.successors",
+          },
+        })
+      end
     end
 
     local guard_boundaries = row.guard_boundaries
@@ -267,25 +368,109 @@ function M.extract_guard_boundary_edges(owner, rows)
           if not is_nonempty_string(successor.output_variant) then
             error("devloop.restart_edges: successor.output_variant must be a non-empty string")
           end
-
-          local id = owner .. "/" .. row_id .. "/guard_boundary/" .. guard_boundary.name .. "/" .. successor.output_variant
-          if seen_ids[id] then
-            error("devloop.restart_edges: duplicate edge id " .. id)
+          if successor.kind ~= nil and successor.kind ~= "guard_boundary" and successor.kind ~= "timeout" then
+            error("devloop.restart_edges: guard boundary successor.kind must be guard_boundary, timeout, or nil")
           end
-          seen_ids[id] = true
-          table.insert(edges, {
-            id = id,
-            owner = owner,
-            row_id = row_id,
-            kind = "guard_boundary",
-            source = { state = row_id, boundary = guard_boundary.name },
-            target = successor.state,
-            provenance = {
+
+          if successor.kind ~= "timeout" then
+            local id = owner .. "/" .. current_row_id .. "/guard_boundary/" .. guard_boundary.name .. "/" .. successor.output_variant
+            if seen_ids[id] then
+              error("devloop.restart_edges: duplicate edge id " .. id)
+            end
+            seen_ids[id] = true
+            table.insert(edges, {
+              id = id,
               owner = owner,
-              row = row_id,
-              field = "guard_boundaries",
-            },
-          })
+              row_id = current_row_id,
+              kind = "guard_boundary",
+              source = { state = current_row_id, boundary = guard_boundary.name },
+              target = successor.state,
+              provenance = {
+                owner = owner,
+                row = current_row_id,
+                field = "guard_boundaries",
+              },
+            })
+          end
+        end
+      end
+    end
+  end
+  return edges
+end
+
+function M.extract_timeout_edges(owner, rows)
+  if not is_nonempty_string(owner) then
+    error("devloop.restart_edges: owner must be a non-empty string")
+  end
+  if type(rows) ~= "table" then
+    error("devloop.restart_edges: rows must be a table")
+  end
+
+  local edges = {}
+  local seen_ids = {}
+  for _, row in ipairs(rows) do
+    local current_row_id = row_id(row)
+    local function insert_timeout_edge(successor, boundary, provenance_field)
+      local policy_id = timeout_policy_id(row)
+      local id_segments = { owner, current_row_id, "timeout" }
+      if boundary ~= nil then
+        table.insert(id_segments, boundary)
+      end
+      table.insert(id_segments, successor.output_variant)
+      local id = table.concat(id_segments, "/")
+      if seen_ids[id] then
+        error("devloop.restart_edges: duplicate edge id " .. id)
+      end
+      seen_ids[id] = true
+      table.insert(edges, {
+        id = id,
+        owner = owner,
+        row_id = current_row_id,
+        kind = "timeout",
+        source = { state = current_row_id, boundary = boundary },
+        target = successor.state,
+        timeout_evidence_policy_id = policy_id,
+        provenance = {
+          owner = owner,
+          row = current_row_id,
+          field = provenance_field,
+        },
+      })
+    end
+
+    for _, successor in ipairs(responsibility_successors(row, false)) do
+      validate_responsibility_successor(successor)
+      if successor.kind == "timeout" then
+        insert_timeout_edge(successor, nil, "responsibility_signature.successors")
+      end
+    end
+
+    local guard_boundaries = row.guard_boundaries
+    if guard_boundaries ~= nil then
+      if type(guard_boundaries) ~= "table" then
+        error("devloop.restart_edges: guard_boundaries must be a table")
+      end
+      for _, guard_boundary in ipairs(guard_boundaries) do
+        if type(guard_boundary) ~= "table" or not is_nonempty_string(guard_boundary.name) then
+          error("devloop.restart_edges: guard_boundary.name must be a non-empty string")
+        end
+        if type(guard_boundary.successors) ~= "table" then
+          error("devloop.restart_edges: guard_boundary.successors must be a table")
+        end
+        for _, successor in ipairs(guard_boundary.successors) do
+          if type(successor) ~= "table" or not is_nonempty_string(successor.state) then
+            error("devloop.restart_edges: successor.state must be a non-empty string")
+          end
+          if not is_nonempty_string(successor.output_variant) then
+            error("devloop.restart_edges: successor.output_variant must be a non-empty string")
+          end
+          if successor.kind ~= nil and successor.kind ~= "guard_boundary" and successor.kind ~= "timeout" then
+            error("devloop.restart_edges: guard boundary successor.kind must be guard_boundary, timeout, or nil")
+          end
+          if successor.kind == "timeout" then
+            insert_timeout_edge(successor, guard_boundary.name, "guard_boundaries")
+          end
         end
       end
     end
@@ -296,14 +481,15 @@ end
 function M.schema()
   return {
     structural_fields = { "id", "owner", "row_id", "kind", "source", "target", "provenance" },
-    -- Inventory-driven kinds are authored by each lifecycle owner.
+    -- Typed edge kinds are authored by each lifecycle owner.
     extracted_kinds = {
       autonomous = true,
       entry = true,
       guard_boundary = true,
       operator_reentry = true,
+      timeout = true,
     },
-    deferred_kinds = { "timeout", "canonicalization" },
+    deferred_kinds = { "canonicalization" },
   }
 end
 

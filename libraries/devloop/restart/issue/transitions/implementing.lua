@@ -61,12 +61,14 @@ return function(M, h)
         {
           state = "awaiting-pr",
           output_variant = "revision_published",
+          kind = "autonomous",
           postcondition_family = "revision_published",
           monotonic = true,
         },
         {
           state = "impl-failed",
           output_variant = "revision_failed",
+          kind = "autonomous",
           failure = true,
           monotonic = true,
         },

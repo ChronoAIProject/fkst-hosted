@@ -49,12 +49,14 @@ return function(M, h)
         {
           state = "merging",
           output_variant = "handoff_to_merge_gate",
+          kind = "entry",
           postcondition_family = "merge_gate_handoff",
           monotonic = true,
         },
         {
           state = "blocked",
           output_variant = "fix_budget_exhausted",
+          kind = "autonomous",
           terminal = true,
           monotonic = true,
         },
@@ -91,6 +93,7 @@ return function(M, h)
           {
             state = "blocked",
             output_variant = "watchdog_reconcile_terminal",
+            kind = "timeout",
             failure = true,
             terminal = true,
             monotonic = true,

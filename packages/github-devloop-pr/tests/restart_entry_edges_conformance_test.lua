@@ -24,6 +24,37 @@ local structural_fields = {
   "provenance",
 }
 
+local expected_entries = {
+  ["github-devloop-pr/reviewing/entry/first_seen_pr"] = {
+    row_id = "reviewing",
+    source_state = nil,
+    source_boundary = "github-proxy.github_entity_changed",
+    target = "reviewing",
+    field = "entry_inventory.first_seen_pr",
+  },
+  ["github-devloop-pr/reviewing/entry/review_receiver"] = {
+    row_id = "reviewing",
+    source_state = nil,
+    source_boundary = "github-devloop-pr.devloop_reviewing",
+    target = "reviewing",
+    field = "entry_inventory.review_receiver",
+  },
+  ["github-devloop-pr/pr-open/entry/pr_open_handoff"] = {
+    row_id = "pr-open",
+    source_state = nil,
+    source_boundary = "github-proxy.github_comment_written",
+    target = "pr-open",
+    field = "entry_inventory.pr_open_handoff",
+  },
+  ["github-devloop-pr/merge-ready/entry/handoff_to_merge_gate"] = {
+    row_id = "merge-ready",
+    source_state = "merge-ready",
+    source_boundary = nil,
+    target = "merging",
+    field = "responsibility_signature.successors",
+  },
+}
+
 local function key_set(keys)
   local out = {}
   for _, key in ipairs(keys) do
@@ -325,24 +356,47 @@ local function assert_symmetric_edge_sets(observed, authored)
   end
 end
 
+local function ingress_edges(edges)
+  local out = {}
+  for _, edge in ipairs(edges) do
+    if edge.source.state == nil then
+      table.insert(out, edge)
+    end
+  end
+  return out
+end
+
 local function assert_entry_shape(edges)
   local seen_ids = {}
   local edge_keys = key_set(structural_fields)
-  local targets = { reviewing = true, ["pr-open"] = true }
   for _, edge in ipairs(edges) do
+    local expected = expected_entries[edge.id]
+    t.is_true(expected ~= nil)
     assert_exact_keys(edge, edge_keys)
-    assert_exact_keys(edge.source, { boundary = true })
+    if expected.source_state == nil then
+      assert_exact_keys(edge.source, { boundary = true })
+    else
+      assert_exact_keys(edge.source, { state = true })
+    end
     assert_exact_keys(edge.provenance, { owner = true, row = true, field = true })
     t.eq(edge.owner, owner)
-    t.eq(edge.row_id, edge.target)
+    t.eq(edge.row_id, expected.row_id)
     t.eq(edge.kind, "entry")
-    t.eq(edge.source.state, nil)
-    t.eq(targets[edge.target], true)
+    t.eq(edge.source.state, expected.source_state)
+    t.eq(edge.source.boundary, expected.source_boundary)
+    t.eq(edge.target, expected.target)
     t.eq(edge.provenance.owner, owner)
-    t.eq(edge.provenance.row, edge.target)
+    t.eq(edge.provenance.row, expected.row_id)
+    t.eq(edge.provenance.field, expected.field)
     t.eq(seen_ids[edge.id], nil)
     seen_ids[edge.id] = true
   end
+  local expected_count = 0
+  for id in pairs(expected_entries) do
+    expected_count = expected_count + 1
+    t.eq(seen_ids[id], true)
+  end
+  t.eq(#edges, expected_count)
 end
 
 local function valid_entry()
@@ -361,9 +415,9 @@ local function valid_entry()
   }
 end
 
-local function assert_extract_fails(selected_owner, inventory)
+local function assert_extract_fails(selected_owner, inventory, rows)
   local ok = pcall(function()
-    restart_edges.extract_entry_edges(selected_owner, inventory)
+    restart_edges.extract_entry_edges(selected_owner, inventory, rows)
   end)
   t.eq(ok, false)
 end
@@ -377,16 +431,20 @@ return {
       pr_open_handoff_entry(),
     }
     local snapshot = copy_value(entry_inventory)
-    local authored = restart_edges.extract_entry_edges(owner, entry_inventory)
+    local rows = core.restart_transition_table()
+    local rows_snapshot = copy_value(rows)
+    local authored = restart_edges.extract_entry_edges(owner, entry_inventory, rows)
 
     assert_entry_shape(authored)
-    assert_symmetric_edge_sets(observed, authored)
+    assert_symmetric_edge_sets(observed, ingress_edges(authored))
     assert_same_value(entry_inventory, snapshot)
+    assert_same_value(rows, rows_snapshot)
     t.eq(authored[1].id, "github-devloop-pr/reviewing/entry/first_seen_pr")
     t.eq(authored[2].id, "github-devloop-pr/reviewing/entry/review_receiver")
     t.eq(authored[3].id, "github-devloop-pr/pr-open/entry/pr_open_handoff")
+    t.eq(authored[4].id, "github-devloop-pr/merge-ready/entry/handoff_to_merge_gate")
 
-    local repeated = restart_edges.extract_entry_edges(owner, entry_inventory)
+    local repeated = restart_edges.extract_entry_edges(owner, entry_inventory, rows)
     assert_entry_shape(repeated)
     for index, edge in ipairs(authored) do
       t.is_true(edge ~= repeated[index])
@@ -396,54 +454,55 @@ return {
   end,
 
   test_entry_edge_extractor_fails_closed_on_invalid_inventory = function()
-    assert_extract_fails("", { valid_entry() })
-    assert_extract_fails("owner", nil)
-    assert_extract_fails("owner", { "not-an-edge" })
+    assert_extract_fails("", { valid_entry() }, {})
+    assert_extract_fails("owner", nil, {})
+    assert_extract_fails("owner", { valid_entry() }, nil)
+    assert_extract_fails("owner", { "not-an-edge" }, {})
 
     local edge = valid_entry()
     edge.id = ""
-    assert_extract_fails("owner", { edge })
+    assert_extract_fails("owner", { edge }, {})
 
     edge = valid_entry()
     edge.owner = "other-owner"
-    assert_extract_fails("owner", { edge })
+    assert_extract_fails("owner", { edge }, {})
 
     edge = valid_entry()
     edge.row_id = ""
-    assert_extract_fails("owner", { edge })
+    assert_extract_fails("owner", { edge }, {})
 
     edge = valid_entry()
     edge.kind = "autonomous"
-    assert_extract_fails("owner", { edge })
+    assert_extract_fails("owner", { edge }, {})
 
     edge = valid_entry()
     edge.source.state = "unmanaged"
-    assert_extract_fails("owner", { edge })
+    assert_extract_fails("owner", { edge }, {})
 
     edge = valid_entry()
     edge.source.boundary = ""
-    assert_extract_fails("owner", { edge })
+    assert_extract_fails("owner", { edge }, {})
 
     edge = valid_entry()
     edge.target = ""
-    assert_extract_fails("owner", { edge })
+    assert_extract_fails("owner", { edge }, {})
 
     edge = valid_entry()
     edge.provenance.owner = ""
-    assert_extract_fails("owner", { edge })
+    assert_extract_fails("owner", { edge }, {})
 
     edge = valid_entry()
     edge.provenance.owner = "other-owner"
-    assert_extract_fails("owner", { edge })
+    assert_extract_fails("owner", { edge }, {})
 
     edge = valid_entry()
     edge.provenance.row = ""
-    assert_extract_fails("owner", { edge })
+    assert_extract_fails("owner", { edge }, {})
 
     edge = valid_entry()
     edge.provenance.field = ""
-    assert_extract_fails("owner", { edge })
+    assert_extract_fails("owner", { edge }, {})
 
-    assert_extract_fails("owner", { valid_entry(), valid_entry() })
+    assert_extract_fails("owner", { valid_entry(), valid_entry() }, {})
   end,
 }

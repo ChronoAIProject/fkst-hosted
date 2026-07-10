@@ -62,12 +62,14 @@ return function(M, h)
         {
           state = "ready",
           output_variant = "consensus-reached",
+          kind = "autonomous",
           postcondition_family = "issue-consensus",
           monotonic = true,
         },
         {
           state = "blocked",
           output_variant = "consensus-stalled",
+          kind = "autonomous",
           failure = true,
           terminal = true,
           monotonic = true,

@@ -76,6 +76,7 @@ return function(M, h)
         {
           state = "merge-ready",
           output_variant = "approved",
+          kind = "autonomous",
           postcondition_family = "review_decision_recorded",
           decision_type = "ReviewDecision",
           monotonic = true,
@@ -83,6 +84,7 @@ return function(M, h)
         {
           state = "fixing",
           output_variant = "changes_requested",
+          kind = "autonomous",
           postcondition_family = "review_decision_recorded",
           decision_type = "ReviewDecision",
           bump = true,
@@ -90,6 +92,7 @@ return function(M, h)
         {
           state = "review-meta",
           output_variant = "needs_review_meta",
+          kind = "autonomous",
           postcondition_family = "review_decision_recorded",
           decision_type = "ReviewDecision",
           monotonic = true,
@@ -97,6 +100,7 @@ return function(M, h)
         {
           state = "blocked",
           output_variant = "watchdog_reconcile_terminal",
+          kind = "timeout",
           terminal = true,
           monotonic = true,
         },

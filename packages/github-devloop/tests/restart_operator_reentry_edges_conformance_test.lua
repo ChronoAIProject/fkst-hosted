@@ -3,6 +3,7 @@ local convergence_shared = require("devloop.convergence.shared")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local conv_rounds = require("devloop.convergence.rounds")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local entry_inventory = require("core.restart.entry_inventory")
 local h = require("tests.devloop_helpers")
 local m_builders = require("devloop.markers.builders")
 local operator_commands = require("devloop.operator_commands")
@@ -155,13 +156,22 @@ local function row_by_state(state)
   return nil
 end
 
-local function assert_existing_autonomous_edge(source, target)
-  for _, edge in ipairs(restart_edges.extract_autonomous_edges(owner, core.restart_transition_table())) do
-    if edge.source.state == source and edge.target == target then
+local function assert_existing_typed_edge(kind, source, target)
+  local rows = core.restart_transition_table()
+  local edges
+  if kind == "entry" then
+    edges = restart_edges.extract_entry_edges(owner, entry_inventory, rows)
+  elseif kind == "guard_boundary" then
+    edges = restart_edges.extract_guard_boundary_edges(owner, rows)
+  else
+    edges = restart_edges.extract_autonomous_edges(owner, rows)
+  end
+  for _, edge in ipairs(edges) do
+    if edge.kind == kind and edge.source.state == source and edge.target == target then
       return
     end
   end
-  error("restart operator reentry conformance: expected existing autonomous edge "
+  error("restart operator reentry conformance: expected existing " .. kind .. " edge "
     .. source .. " -> " .. target)
 end
 
@@ -432,7 +442,7 @@ local function observe_ready_reready_row_replay()
   t.eq(ready.payload.ready_hand_off.marker_version, ready_version)
   t.eq(tostring(response.payload.body):find("fkst:github-devloop:state:v1", 1, true), nil)
   applied_cause_evidence(comments, "reready", response.payload.body)
-  assert_existing_autonomous_edge("ready", "implementing")
+  assert_existing_typed_edge("entry", "ready", "implementing")
   return { kind = "row-replay", command = "reready", source_state = "ready" }
 end
 
@@ -456,7 +466,7 @@ local function observe_dependency_wait_reready_row_replay()
   applied_cause_evidence(comments, "reready", response.payload.body)
   local emitted = core.current_state({ trusted_comment(ready_comment.payload.body) }, proposal_id)
   t.eq(emitted.state, "ready")
-  assert_existing_autonomous_edge("dependency_wait", "ready")
+  assert_existing_typed_edge("guard_boundary", "dependency_wait", "ready")
   return { kind = "row-replay", command = "reready", source_state = "dependency_wait" }
 end
 
@@ -488,7 +498,7 @@ local function observe_blocked_reready_row_replay()
   t.is_true(ready ~= nil, "negative blocked reready: devloop_ready was not replayed")
   t.eq(ready.payload.ready_hand_off.marker_version, ready_version)
   applied_cause_evidence(comments, "reready", response.payload.body)
-  assert_existing_autonomous_edge("ready", "implementing")
+  assert_existing_typed_edge("entry", "ready", "implementing")
   return { kind = "row-replay", command = "reready", source_state = "blocked" }
 end
 

@@ -51,6 +51,7 @@ return function(M, h)
         {
           state = "merged",
           output_variant = "merge-completed",
+          kind = "autonomous",
           postcondition_family = "merge_execution_result",
           decision_type = "MergeExecutionResult",
           monotonic = true,
@@ -58,6 +59,7 @@ return function(M, h)
         {
           state = "reviewing",
           output_variant = "head-advanced",
+          kind = "autonomous",
           postcondition_family = "merge_execution_result",
           decision_type = "MergeExecutionResult",
           bump = true,
@@ -65,6 +67,7 @@ return function(M, h)
         {
           state = "fixing",
           output_variant = "merge-needs-fix",
+          kind = "autonomous",
           postcondition_family = "merge_execution_result",
           decision_type = "MergeExecutionResult",
           failure = true,
@@ -73,6 +76,7 @@ return function(M, h)
         {
           state = "blocked",
           output_variant = "fix_budget_exhausted",
+          kind = "autonomous",
           terminal = true,
           monotonic = true,
         },

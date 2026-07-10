@@ -69,6 +69,7 @@ return function(M, h)
         {
           state = "merged",
           output_variant = "child_pr_merged",
+          kind = "guard_boundary",
           postcondition_family = "parent_resume_from_child_state_terminal",
           decision_type = "child_state_terminal_gate",
           monotonic = true,
@@ -76,6 +77,7 @@ return function(M, h)
         {
           state = "ready",
           output_variant = "child_pr_closed_unmerged_replaced",
+          kind = "guard_boundary",
           postcondition_family = "parent_resume_from_child_state_terminal",
           decision_type = "child_state_terminal_gate",
           failure = true,
@@ -85,6 +87,7 @@ return function(M, h)
         {
           state = "blocked",
           output_variant = "child_pr_not_merged",
+          kind = "guard_boundary",
           postcondition_family = "parent_resume_from_child_state_terminal",
           decision_type = "child_state_terminal_gate",
           terminal = true,

@@ -41,6 +41,7 @@ return function(M, h)
         {
           state = "implementing",
           output_variant = "retry-implementation",
+          kind = "entry",
           postcondition_family = "implementation-retry",
           bump = true,
         },

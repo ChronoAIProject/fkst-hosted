@@ -48,6 +48,7 @@ return function(M, h)
         {
           state = "reviewing",
           output_variant = "review_requested",
+          kind = "autonomous",
           postcondition_family = "pr_viability_routed",
           decision_type = "PrViability",
           monotonic = true,
@@ -55,6 +56,7 @@ return function(M, h)
         {
           state = "fixing",
           output_variant = "not_mergeable_repair",
+          kind = "autonomous",
           postcondition_family = "pr_viability_routed",
           decision_type = "PrViability",
           bump = true,

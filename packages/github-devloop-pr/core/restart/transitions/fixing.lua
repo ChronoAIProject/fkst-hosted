@@ -62,18 +62,21 @@ return function(M, h)
         {
           state = "reviewing",
           output_variant = "revision_published",
+          kind = "autonomous",
           postcondition_family = "revision_published",
           bump = true,
         },
         {
           state = "review-meta",
           output_variant = "revision_failed",
+          kind = "autonomous",
           failure = true,
           monotonic = true,
         },
         {
           state = "blocked",
           output_variant = "fix_budget_exhausted",
+          kind = "autonomous",
           terminal = true,
           monotonic = true,
         },
