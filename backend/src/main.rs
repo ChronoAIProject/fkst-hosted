@@ -345,9 +345,13 @@ async fn build_osb_backend(
     }
 
     // One shared HTTP client (reqwest is built rustls-only, per Cargo.toml), reused by
-    // the lifecycle client and every per-session execd client.
+    // the lifecycle client and every per-session execd client. Only the CONNECT
+    // timeout lives here — per-request budgets are per-verb (client-owned): a
+    // client-wide request timeout would sever the long-lived SSE command stream
+    // and the synchronous 330s-budget create.
     let http = reqwest::Client::builder()
         .user_agent("fkst-hosted-api")
+        .connect_timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(|e| AppError::Config(format!("failed to build opensandbox http client: {e}")))?;
 

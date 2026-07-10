@@ -13,6 +13,8 @@
 //! or a command's output/stream body — only method / path / status (via
 //! `map_response`) and, at most, the numeric log cursor.
 
+use std::time::Duration;
+
 use secrecy::{ExposeSecret, SecretString};
 
 use super::dto::{
@@ -24,6 +26,46 @@ use super::lifecycle;
 /// Header carrying the per-session execd access token (derived by
 /// [`super::token::derive_execd_token`]).
 const EXECD_TOKEN_HEADER: &str = "X-EXECD-ACCESS-TOKEN";
+
+/// Budget for `/files/upload`: credential files are small; the proxy hop adds
+/// little. Without a budget a wedged connection blocks the calling reconciler verb
+/// indefinitely (reqwest's default is NO request timeout).
+const UPLOAD_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Budget for the quick JSON/plain verbs (`/files/info`, `/command/status/{id}`,
+/// `/command/{id}/logs`) and for a `background: true` command launch (execd answers
+/// with just the `init` frame and closes the stream).
+const QUERY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Slack added on top of a FOREGROUND command's own execd-side `timeout` to bound
+/// the `/command` request: [`ExecdClient::run_command`] reads the BUFFERED SSE body,
+/// which lasts the command's lifetime, so the request budget must cover the command
+/// plus transport/startup overhead.
+const COMMAND_SLACK: Duration = Duration::from_secs(30);
+
+/// Per-verb request budgets, injectable so tests can shrink them to milliseconds
+/// (wiremock stall tests must not sleep 30s). Production always uses `default()`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ExecdTimeouts {
+    /// Budget for `/files/upload` (see [`UPLOAD_TIMEOUT`]).
+    pub(super) upload: Duration,
+    /// Budget for the quick verbs + background command launches
+    /// (see [`QUERY_TIMEOUT`]).
+    pub(super) query: Duration,
+    /// Foreground `/command` slack on top of the command's own timeout
+    /// (see [`COMMAND_SLACK`]).
+    pub(super) command_slack: Duration,
+}
+
+impl Default for ExecdTimeouts {
+    fn default() -> Self {
+        Self {
+            upload: UPLOAD_TIMEOUT,
+            query: QUERY_TIMEOUT,
+            command_slack: COMMAND_SLACK,
+        }
+    }
+}
 
 /// The fixed in-sandbox port execd listens on; the lifecycle service proxies it at
 /// `/proxy/{port}`.
@@ -44,13 +86,15 @@ pub struct ExecdClient {
     sandbox_id: String,
     execd_token: SecretString,
     http: reqwest::Client,
+    timeouts: ExecdTimeouts,
 }
 
 impl ExecdClient {
     /// Build a client over the SAME lifecycle base URL the sibling
     /// [`lifecycle::OsbLifecycleClient`] uses (this client owns the
     /// `/v1/sandboxes/{id}/proxy/{port}` prefix); a trailing slash is trimmed so
-    /// path joins never double up.
+    /// path joins never double up. Request budgets are the production
+    /// [`ExecdTimeouts::default`].
     pub fn new(
         lifecycle_base: reqwest::Url,
         api_key: SecretString,
@@ -64,20 +108,38 @@ impl ExecdClient {
             sandbox_id,
             execd_token,
             http,
+            timeouts: ExecdTimeouts::default(),
         }
     }
 
-    /// Start a request through the proxy with BOTH auth headers set. The ONLY place
-    /// either secret is exposed; every verb builds its request here so none can omit
-    /// a header. `execd_path` is the daemon-relative path (e.g. `/files/upload`) —
-    /// the core execd paths carry NO `/v1` prefix.
-    fn request(&self, method: reqwest::Method, execd_path: &str) -> reqwest::RequestBuilder {
+    /// Test-only budget override (milliseconds-scale stall tests).
+    #[cfg(test)]
+    pub(super) fn with_timeouts(mut self, timeouts: ExecdTimeouts) -> Self {
+        self.timeouts = timeouts;
+        self
+    }
+
+    /// Start a request through the proxy with BOTH auth headers AND the verb's
+    /// request budget set. The ONLY place either secret is exposed; every verb
+    /// builds its request here so none can omit a header or ride without a
+    /// deliberate budget choice (`None` = unbounded, reserved for a foreground
+    /// command with no execd-side timeout). `execd_path` is the daemon-relative
+    /// path (e.g. `/files/upload`) — the core execd paths carry NO `/v1` prefix.
+    fn request(
+        &self,
+        method: reqwest::Method,
+        execd_path: &str,
+        timeout: Option<Duration>,
+    ) -> reqwest::RequestBuilder {
         let url = format!(
             "{}/v1/sandboxes/{}/proxy/{}{}",
             self.base_url, self.sandbox_id, EXECD_PROXY_PORT, execd_path
         );
-        self.http
-            .request(method, url)
+        let mut builder = self.http.request(method, url);
+        if let Some(timeout) = timeout {
+            builder = builder.timeout(timeout);
+        }
+        builder
             .header(lifecycle::API_KEY_HEADER, self.api_key.expose_secret())
             .header(EXECD_TOKEN_HEADER, self.execd_token.expose_secret())
     }
@@ -123,7 +185,7 @@ impl ExecdClient {
         let path = "/files/upload";
         let method = reqwest::Method::POST;
         let response = self
-            .request(method.clone(), path)
+            .request(method.clone(), path, Some(self.timeouts.upload))
             .multipart(form)
             .send()
             .await?;
@@ -140,7 +202,7 @@ impl ExecdClient {
         let execd_path = "/files/info";
         let method = reqwest::Method::GET;
         let response = self
-            .request(method.clone(), execd_path)
+            .request(method.clone(), execd_path, Some(self.timeouts.query))
             .query(&[("path", path)])
             .send()
             .await?;
@@ -171,10 +233,27 @@ impl ExecdClient {
             timeout: timeout_ms,
             background,
         };
+        // The request budget follows the launch mode, because the body below is
+        // read BUFFERED (the response lasts until the SSE stream closes):
+        // - background: execd answers with just the `init` frame and closes — the
+        //   quick-query budget applies.
+        // - foreground with an execd-side timeout: the stream lasts the command's
+        //   lifetime, so the budget is that timeout + slack (never severs a
+        //   legitimately long command).
+        // - foreground WITHOUT an execd-side timeout: deliberately unbounded — a
+        //   fixed budget here would sever a legitimately long command (no such
+        //   call site today; validation always passes a timeout).
+        let request_timeout = match (background, timeout_ms) {
+            (true, _) => Some(self.timeouts.query),
+            (false, Some(ms)) => {
+                Some(Duration::from_millis(ms).saturating_add(self.timeouts.command_slack))
+            }
+            (false, None) => None,
+        };
         let path = "/command";
         let method = reqwest::Method::POST;
         let response = self
-            .request(method.clone(), path)
+            .request(method.clone(), path, request_timeout)
             .json(&body)
             .send()
             .await?;
@@ -209,7 +288,10 @@ impl ExecdClient {
     pub async fn command_status(&self, id: &str) -> Result<CommandStatus, OsbError> {
         let path = format!("/command/status/{id}");
         let method = reqwest::Method::GET;
-        let response = self.request(method.clone(), &path).send().await?;
+        let response = self
+            .request(method.clone(), &path, Some(self.timeouts.query))
+            .send()
+            .await?;
         let response = lifecycle::map_response(&method, &path, response).await?;
         Ok(response.json::<CommandStatus>().await?)
     }
@@ -223,7 +305,7 @@ impl ExecdClient {
         let path = format!("/command/{id}/logs");
         let method = reqwest::Method::GET;
         let response = self
-            .request(method.clone(), &path)
+            .request(method.clone(), &path, Some(self.timeouts.query))
             .query(&[("cursor", cursor.to_string())])
             .send()
             .await?;
