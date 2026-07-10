@@ -82,12 +82,17 @@ async fn main() -> ExitCode {
         "config loaded"
     );
 
-    // 2b. Pod-per-session dispatch (milestone #9): when enabled, prove the
-    //     Kubernetes API is reachable at startup so a misconfigured cluster
+    // 2b. Pod-per-session dispatch (milestone #9): when enabled IN K8S MODE, prove
+    //     the Kubernetes API is reachable at startup so a misconfigured cluster
     //     surfaces in the logs immediately. Non-fatal — a transient API blip
     //     should not crash the control plane; the Job-spawn path surfaces hard
-    //     errors per session. The control plane is Kubernetes-free when off.
-    if config.pod.dispatch {
+    //     errors per session. In OPENSANDBOX mode this apiserver probe would be
+    //     misleading (session dispatch never touches the k8s pod surface — the
+    //     control plane holds ZERO pod RBAC by design), so it is skipped: OSB
+    //     reachability is probed by `build_osb_backend` below. The env-store
+    //     KubeClient built in `spawn_reconciler` is a separate, mode-independent
+    //     concern and is untouched by this gate.
+    if config.pod.dispatch && config.pod.mode == PodMode::K8sCustomized {
         match fkst_control_plane::k8s::KubeClient::from_inferred(&config.pod.namespace).await {
             Ok(kube) => match kube.check_reachable().await {
                 Ok(version) => tracing::info!(
@@ -106,6 +111,10 @@ async fn main() -> ExitCode {
                 "pod dispatch enabled but the kubernetes client could not be built"
             ),
         }
+    } else if config.pod.dispatch {
+        tracing::info!(
+            "pod dispatch enabled (opensandbox mode; lifecycle reachability probed by the OSB backend)"
+        );
     } else {
         tracing::info!("pod dispatch disabled (FKST_POD_DISPATCH not set)");
     }
