@@ -626,17 +626,16 @@ function C.judgment_worktree_path(runtime_root, role, identity)
   return root:gsub("/+$", "") .. "/judgment-worktrees/github-devloop-" .. slug .. "-" .. suffix
 end
 
-function C.judgment_worktree_with_exec(exec_sync_fn, role, identity)
-  local runtime = exec_sync_fn({ cmd = C.read_runtime_root_cmd(), timeout = 30 })
-  if runtime.exit_code ~= 0 then
-    error("github-devloop: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime.stderr))
-  end
-  local worktree = C.judgment_worktree_path(runtime.stdout, role, identity)
-  local mkdir = exec_sync_fn({ cmd = C.mkdir_p_cmd(worktree), timeout = 30 })
-  if mkdir.exit_code ~= 0 then
-    error("github-devloop: judgment scratch directory setup failed: " .. tostring(mkdir.stderr))
-  end
-  return worktree
+function C.judgment_worktree_with_exec(_exec_sync_fn, _role, _identity)
+  -- Judgment codex is spawned read-only (judgment_codex_opts sets sandbox="read-only"). The
+  -- engine now honors --sandbox (substrate#267), and codex under a read-only sandbox refuses
+  -- to start in a non-git directory: "Not inside a trusted directory and --skip-git-repo-check
+  -- was not specified." A mkdir scratch dir is not a git repo, so run the judgment codex in the
+  -- existing read-only project checkout (".") -- already a git repo the engine runs in, the same
+  -- shape the archaudit judge uses. The codex reads its context from absolute <runtime>/context/...
+  -- paths passed in the prompt, not from this cwd, so the cwd only has to be a git repo the
+  -- sandboxed codex accepts. This is the single place that decides where judgment codex runs.
+  return "."
 end
 
 

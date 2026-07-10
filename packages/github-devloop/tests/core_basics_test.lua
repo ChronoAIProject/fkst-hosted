@@ -103,31 +103,16 @@ return {
     t.eq(paths[2], "b.lua")
     t.eq(paths[3], "c.lua")
   end,
-  test_core_shared_judgment_worktree_reads_runtime_root_and_mkdirs = function()
-    local worktree = core.judgment_worktree_path("/tmp/fkst-runtime\n", "review-meta", "dedup/key")
-    t.eq(core.mkdir_p_cmd(worktree), "mkdir -p '" .. worktree .. "'")
-    t.is_nil(core.mkdir_p_cmd(worktree):find("chmod", 1, true))
-    t.mock_command(core.read_runtime_root_cmd(), {
-      stdout = "/tmp/fkst-runtime\n",
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command(core.mkdir_p_cmd(worktree), {
-      stdout = "",
-      stderr = "",
-      exit_code = 0,
-    })
-
+  test_core_shared_judgment_worktree_is_the_readonly_project_checkout = function()
+    -- Judgment codex runs read-only in the existing project checkout (".", already a git repo
+    -- the sandboxed codex accepts) instead of a mkdir non-git scratch dir that codex under
+    -- --sandbox read-only rejects ("Not inside a trusted directory ..."). No runtime read, no mkdir.
     local actual = devloop_base.judgment_worktree_with_exec(exec_sync, "review-meta", "dedup/key")
 
-    t.eq(actual, worktree)
-    local saw_mkdir = false
+    t.eq(actual, ".")
     for _, call in ipairs(t.command_calls()) do
-      if call.rendered == core.mkdir_p_cmd(worktree) then
-        saw_mkdir = true
-      end
+      t.is_nil(tostring(call.rendered or ""):find("mkdir", 1, true))
     end
-    t.eq(saw_mkdir, true)
   end,
   test_opt_in_detection = function()
     t.eq(devloop_base.is_opted_in({ "fkst-dev:enabled" }), true)

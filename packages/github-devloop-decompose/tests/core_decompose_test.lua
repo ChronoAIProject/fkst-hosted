@@ -51,7 +51,7 @@ return {
     t.is_nil(prompt:find("gh issue", 1, true))
     t.is_nil(prompt:find("gh pr", 1, true))
     t.is_nil(prompt:find("gh api", 1, true))
-    t.is_true(prompt:find("You are running in an empty runtime scratch directory", 1, true) ~= nil)
+    t.is_true(prompt:find("read-only checkout", 1, true) ~= nil)
     t.is_true(prompt:find("Read GitHub context only from the local files named below", 1, true) ~= nil)
     t.is_nil(prompt:find("{{", 1, true))
   end,

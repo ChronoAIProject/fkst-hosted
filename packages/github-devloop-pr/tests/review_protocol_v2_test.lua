@@ -106,7 +106,7 @@ return {
     end
 
     t.is_true(fix_reflection_prompt:find("Line two: the marker named ⟦FKST:REASON⟧ followed by one concise paragraph.", 1, true) ~= nil)
-    t.is_true(fix_reflection_prompt:find("You are running in an empty runtime scratch directory", 1, true) ~= nil)
+    t.is_true(fix_reflection_prompt:find("read-only checkout", 1, true) ~= nil)
     t.is_true(fix_reflection_prompt:find("Read GitHub context only from the local files named below", 1, true) ~= nil)
     t.is_nil(fix_reflection_prompt:find("Chinese", 1, true))
     t.is_nil(fix_reflection_prompt:find("{{", 1, true))

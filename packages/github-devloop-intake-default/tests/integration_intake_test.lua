@@ -277,10 +277,9 @@ end
 local function assert_intake_judgment_call()
   local calls = codex_calls()
   t.eq(#calls, 1)
-  t.is_true(calls[1].rendered:find(" -C ", 1, true) ~= nil)
-  t.is_true(calls[1].rendered:find("/judgment-worktrees/github-devloop-intake-", 1, true) ~= nil)
-  t.is_nil(calls[1].rendered:find("/worktrees/", 1, true))
-  t.is_true(calls[1].stdin:find("empty runtime scratch directory", 1, true) ~= nil)
+  -- Judgment codex runs read-only in the existing project checkout ("."), not a mkdir scratch dir.
+  t.is_nil(calls[1].rendered:find("/judgment-worktrees/", 1, true))
+  t.is_true(calls[1].stdin:find("read-only checkout", 1, true) ~= nil)
   t.is_true(calls[1].stdin:find("Do not clone, checkout, fetch with git", 1, true) ~= nil)
   t.is_true(calls[1].stdin:find("issue.json", 1, true) ~= nil)
 end
