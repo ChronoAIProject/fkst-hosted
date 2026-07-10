@@ -27,6 +27,23 @@ use super::lifecycle;
 /// [`super::token::derive_execd_token`]).
 const EXECD_TOKEN_HEADER: &str = "X-EXECD-ACCESS-TOKEN";
 
+/// The deliberately-wrong token [`ExecdClient::probe_auth_rejection`] sends. A fixed
+/// non-secret literal: it can never equal a real token (real tokens are 64 lowercase
+/// hex chars of an HMAC).
+const PROBE_WRONG_TOKEN: &str = "fkst-auth-probe-invalid";
+
+/// Outcome of the exec-plane auth probe ([`ExecdClient::probe_auth_rejection`]) —
+/// a security GATE result, deliberately not folded into [`OsbError`] so an
+/// "accepted the wrong token" cannot be mistaken for an ordinary API failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthProbeOutcome {
+    /// The daemon rejected the wrong token (401/403) — token auth is enforced.
+    Rejected,
+    /// The daemon ACCEPTED the wrong token (a 2xx) — the exec plane is
+    /// unauthenticated; carrying the offending status for the log line.
+    Accepted { status: u16 },
+}
+
 /// Budget for `/files/upload`: credential files are small; the proxy hop adds
 /// little. Without a budget a wedged connection blocks the calling reconciler verb
 /// indefinitely (reqwest's default is NO request timeout).
@@ -120,16 +137,34 @@ impl ExecdClient {
     }
 
     /// Start a request through the proxy with BOTH auth headers AND the verb's
-    /// request budget set. The ONLY place either secret is exposed; every verb
-    /// builds its request here so none can omit a header or ride without a
-    /// deliberate budget choice (`None` = unbounded, reserved for a foreground
-    /// command with no execd-side timeout). `execd_path` is the daemon-relative
-    /// path (e.g. `/files/upload`) — the core execd paths carry NO `/v1` prefix.
+    /// request budget set. Every verb builds its request here so none can omit a
+    /// header or ride without a deliberate budget choice (`None` = unbounded,
+    /// reserved for a foreground command with no execd-side timeout). `execd_path`
+    /// is the daemon-relative path (e.g. `/files/upload`) — the core execd paths
+    /// carry NO `/v1` prefix.
     fn request(
         &self,
         method: reqwest::Method,
         execd_path: &str,
         timeout: Option<Duration>,
+    ) -> reqwest::RequestBuilder {
+        self.request_with_token(
+            method,
+            execd_path,
+            timeout,
+            self.execd_token.expose_secret(),
+        )
+    }
+
+    /// The actual request construction — the ONLY place either secret is exposed.
+    /// Private to the two callers: [`Self::request`] (the real token) and
+    /// [`Self::probe_auth_rejection`] (a deliberately WRONG token).
+    fn request_with_token(
+        &self,
+        method: reqwest::Method,
+        execd_path: &str,
+        timeout: Option<Duration>,
+        execd_token: &str,
     ) -> reqwest::RequestBuilder {
         let url = format!(
             "{}/v1/sandboxes/{}/proxy/{}{}",
@@ -141,7 +176,53 @@ impl ExecdClient {
         }
         builder
             .header(lifecycle::API_KEY_HEADER, self.api_key.expose_secret())
-            .header(EXECD_TOKEN_HEADER, self.execd_token.expose_secret())
+            .header(EXECD_TOKEN_HEADER, execd_token)
+    }
+
+    /// Security probe: sends `GET /files/info?path=/` through the proxy with a
+    /// DELIBERATELY WRONG token and reports whether the daemon REJECTED it.
+    ///
+    /// WHY: the deployed lifecycle server exempts the proxy route from API-key
+    /// auth, so the per-session execd token is the ONLY auth on the exec plane —
+    /// a sandbox whose execd accepts a bad token (a template/config regression
+    /// dropping the `EXECD_ACCESS_TOKEN` env) is an UNAUTHENTICATED exec surface
+    /// on a credential-bearing pod. execd's contract: empty or mismatched header
+    /// → 401 (403 tolerated as an equivalent rejection).
+    ///
+    /// `Ok(Rejected)` = enforcement proven; `Ok(Accepted{status})` = the security
+    /// failure (a 2xx for the wrong token); any other status is an ordinary
+    /// [`OsbError::Api`] infrastructure failure (NOT a security verdict), and
+    /// transport errors propagate as [`OsbError::Transport`].
+    pub async fn probe_auth_rejection(&self) -> Result<AuthProbeOutcome, OsbError> {
+        let execd_path = "/files/info";
+        let method = reqwest::Method::GET;
+        let response = self
+            .request_with_token(
+                method.clone(),
+                execd_path,
+                Some(self.timeouts.query),
+                PROBE_WRONG_TOKEN,
+            )
+            .query(&[("path", "/")])
+            .send()
+            .await?;
+        let status = response.status();
+        tracing::debug!(method = %method, path = %execd_path, status = status.as_u16(), "opensandbox execd auth probe");
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            return Ok(AuthProbeOutcome::Rejected);
+        }
+        if status.is_success() {
+            return Ok(AuthProbeOutcome::Accepted {
+                status: status.as_u16(),
+            });
+        }
+        // Neither a rejection nor an acceptance (404 holder gone, 5xx proxy blip):
+        // an ordinary infrastructure failure the caller retries/propagates.
+        let message = response.text().await.unwrap_or_default();
+        Err(OsbError::Api {
+            status: status.as_u16(),
+            message,
+        })
     }
 
     /// `POST /files/upload` — write `contents` to `path` inside the sandbox with the

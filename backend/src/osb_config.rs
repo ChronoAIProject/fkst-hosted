@@ -294,6 +294,60 @@ pub(crate) fn from_vars(
     }))
 }
 
+/// True when `url`'s host cannot be reached from a production sandbox: the
+/// sandbox-lockdown NetworkPolicy allows egress ONLY to kube-dns + the public
+/// internet, blocking RFC1918, loopback, link-local (incl. the GCP metadata IP
+/// `169.254.169.254`), and — by virtue of blocking the cluster CIDRs — every
+/// Kubernetes cluster-internal DNS name (`*.svc`, `*.svc.cluster.local`,
+/// `*.cluster.local`). Static classification only: no DNS resolution, no probing.
+fn is_sandbox_unreachable_host(url: &reqwest::Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return true; // a hostless URL cannot work either
+    };
+    // reqwest/url brackets IPv6 hosts (`[::1]`); strip for the address parse.
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = bare.parse::<std::net::Ipv4Addr>() {
+        return ip.is_private() || ip.is_loopback() || ip.is_link_local();
+    }
+    if let Ok(ip) = bare.parse::<std::net::Ipv6Addr>() {
+        return ip.is_loopback() || ip.is_unique_local() || ip.is_unicast_link_local();
+    }
+    let domain = host.trim_end_matches('.').to_ascii_lowercase();
+    domain == "localhost"
+        || domain == "cluster.local"
+        || domain.ends_with(".svc")
+        || domain.ends_with(".svc.cluster.local")
+        || domain.ends_with(".cluster.local")
+}
+
+/// Fail-closed egress-safety check for endpoints HANDED TO SESSIONS in opensandbox
+/// mode (session env / creds files — the LLM base URL, the chrono-storage URLs). A
+/// cluster-internal or private value passes config parsing but black-holes inside a
+/// sandbox mid-run; failing at startup names the misconfiguration instead.
+/// Deliberately NOT applied to `FKST_OSB_BASE_URL` itself — that is the
+/// backend→server URL, dialed from the control plane and intentionally
+/// cluster-internal.
+pub(crate) fn ensure_sandbox_endpoints_reachable(
+    endpoints: &[(&str, &str)],
+) -> Result<(), AppError> {
+    for (var, value) in endpoints {
+        let parsed = reqwest::Url::parse(value).map_err(|e| {
+            AppError::Config(format!(
+                "{var} must be a valid URL in opensandbox mode (got {value:?}: {e})"
+            ))
+        })?;
+        if is_sandbox_unreachable_host(&parsed) {
+            return Err(AppError::Config(format!(
+                "{var} points at a cluster-internal/private host ({value}) that a sandbox \
+                 cannot reach: sandbox egress is locked to the PUBLIC internet (RFC1918, \
+                 loopback, link-local/metadata, and *.svc / *.cluster.local are blocked). \
+                 Use the endpoint's public URL in opensandbox mode."
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// The `FKST_POD_*` knobs the operator EXPLICITLY set (non-blank raw value) that
 /// OpenSandbox mode ignores because the sandbox template owns them. Presence in the
 /// raw vars is the only reliable set-vs-defaulted signal (several of these knobs are
@@ -557,6 +611,45 @@ mod tests {
         assert!(!config
             .ignored_pod_knobs
             .contains(&"FKST_POD_DNS_NAMESERVERS"));
+    }
+
+    #[test]
+    fn sandbox_endpoint_classifier_table() {
+        // Unreachable from a sandbox: RFC1918 / loopback / link-local (incl. the
+        // GCP metadata IP) / cluster-internal DNS / localhost.
+        for value in [
+            "http://10.1.2.3/v1",
+            "http://172.16.0.1:8080/v1",
+            "http://192.168.1.1/v1",
+            "http://127.0.0.1:9000/v1",
+            "http://169.254.169.254/computeMetadata",
+            "http://[::1]:9000/v1",
+            "http://[fd00::1]/v1",
+            "http://localhost:8080/v1",
+            "http://foo.chronoai-fkst.svc/v1",
+            "http://foo.ns.svc.cluster.local/v1",
+            "http://anything.cluster.local/v1",
+        ] {
+            let err = ensure_sandbox_endpoints_reachable(&[("FKST_LLM_BASE_URL", value)])
+                .expect_err(&format!("{value} must be classified unreachable"));
+            assert!(err.to_string().contains("FKST_LLM_BASE_URL"), "{value}");
+        }
+        // Reachable: real public endpoints.
+        for value in [
+            "https://api.github.com",
+            "https://nyx-api.chrono-ai.fun/oauth/token",
+            "https://storage.example/proxy",
+            "https://llm.aelf.dev/v1",
+            "http://8.8.8.8/x",
+        ] {
+            ensure_sandbox_endpoints_reachable(&[("FKST_LLM_BASE_URL", value)])
+                .unwrap_or_else(|e| panic!("{value} must be classified reachable: {e}"));
+        }
+        // Unparseable is an error too (it cannot work anyway), naming the var.
+        let err = ensure_sandbox_endpoints_reachable(&[("FKST_STORAGE_BASE_URL", "not a url")])
+            .expect_err("garbage must fail");
+        assert!(err.to_string().contains("FKST_STORAGE_BASE_URL"));
+        assert!(err.to_string().contains("valid URL"));
     }
 
     #[test]
