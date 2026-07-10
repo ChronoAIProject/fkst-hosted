@@ -236,15 +236,6 @@ function M.workflow_select_eligible_blueprints(current, catalog)
   return M.prefilter_eligible_blueprints(current or {}, catalog)
 end
 
-local function execution_boundary_clause(source_phrase)
-  return table.concat({
-    "Execution boundary:",
-    "- You are running in a read-only checkout of the repository.",
-    "- Do not clone, checkout, fetch with git, create branches, or modify any repository.",
-    "- " .. tostring(source_phrase or ""),
-  }, "\n")
-end
-
 local function workflow_digest(eligible)
   if #eligible > M.MAX_WORKFLOW_SELECT_BLUEPRINTS then
     return nil
@@ -272,7 +263,7 @@ function M.build_workflow_select_prompt(ctx, eligible)
     title = devloop_base.quote_untrusted_prompt_text(current.title),
     body = devloop_base.quote_untrusted_prompt_text(current.body),
     comments = devloop_base.quote_untrusted_prompt_text(comments),
-    execution_boundary = execution_boundary_clause("Judge only from the issue data and offered workflow catalog entries provided in this prompt."),
+    execution_boundary = core.execution_boundary_clause("Judge only from the issue data and offered workflow catalog entries provided in this prompt."),
   })
 end
 
