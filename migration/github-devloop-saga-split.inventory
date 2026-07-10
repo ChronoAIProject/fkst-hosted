@@ -119,6 +119,7 @@
 {"path":"packages/github-devloop-pr/core/restart/marker_fields/review_meta.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/restart/marker_fields/review_result.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/restart/marker_fields/state.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/operator_reentry_inventory.lua","owner":"pr","reason":"authored operator reentry edges belong to the PR saga authority."}
 {"path":"packages/github-devloop-pr/core/restart/required_replay_payload_fields/fixing.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/restart/required_replay_payload_fields/index.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/restart/transitions/blocked.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
@@ -199,6 +200,7 @@
 {"path":"packages/github-devloop/core/restart/marker_fields/review_meta.lua","owner":"issue","reason":"marker fields belong to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/restart/marker_fields/review_result.lua","owner":"issue","reason":"marker fields belong to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/restart/marker_fields/state.lua","owner":"shared","reason":"marker fields are shared by the issue/PR seam."}
+{"path":"packages/github-devloop/core/restart/operator_reentry_inventory.lua","owner":"issue","reason":"authored operator reentry edges belong to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/restart/required_replay_payload_fields/fixing.lua","owner":"issue","reason":"required replay payload fields belong to the parent issue saga."}
 {"path":"packages/github-devloop/core/restart/required_replay_payload_fields/index.lua","owner":"issue","reason":"required replay payload fields belong to the parent issue saga."}
 {"path":"packages/github-devloop/core/span_conformance.lua","owner":"cross-cutting","reason":"package-owned conformance for github-devloop span source-shape ratchet."}

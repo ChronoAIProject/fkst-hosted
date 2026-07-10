@@ -15,7 +15,6 @@ local structural_fields = {
 }
 
 local deferred_kinds = {
-  "operator_reentry",
   "timeout",
   "canonicalization",
 }
@@ -245,6 +244,7 @@ return {
       extract_autonomous_edges = true,
       extract_entry_edges = true,
       extract_guard_boundary_edges = true,
+      extract_operator_reentry_edges = true,
       schema = true,
     })
     local schema = restart_edges.schema()
@@ -257,10 +257,16 @@ return {
     for index, field in ipairs(structural_fields) do
       t.eq(schema.structural_fields[index], field)
     end
-    assert_exact_keys(schema.extracted_kinds, { autonomous = true, entry = true, guard_boundary = true })
+    assert_exact_keys(schema.extracted_kinds, {
+      autonomous = true,
+      entry = true,
+      guard_boundary = true,
+      operator_reentry = true,
+    })
     t.eq(schema.extracted_kinds.autonomous, true)
     t.eq(schema.extracted_kinds.entry, true)
     t.eq(schema.extracted_kinds.guard_boundary, true)
+    t.eq(schema.extracted_kinds.operator_reentry, true)
     t.eq(#schema.deferred_kinds, #deferred_kinds)
     for index, kind in ipairs(deferred_kinds) do
       t.eq(schema.deferred_kinds[index], kind)
@@ -284,7 +290,7 @@ return {
       t.is_true(edge.provenance ~= repeated[index].provenance)
     end
 
-    -- Entry, operator-reentry, timeout, and canonicalization edges remain deferred.
+    -- Timeout and canonicalization edges remain deferred.
     -- This conformance does not claim OLD/live-transition parity: thinking->dependency_wait
     -- and pr-open->blocked exist in production but not in these rows, so they are out of scope.
   end,

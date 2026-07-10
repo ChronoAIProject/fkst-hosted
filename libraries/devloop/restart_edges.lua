@@ -83,6 +83,104 @@ function M.extract_entry_edges(owner, inventory)
   return edges
 end
 
+function M.extract_operator_reentry_edges(owner, inventory)
+  if not is_nonempty_string(owner) then
+    error("devloop.restart_edges: owner must be a non-empty string")
+  end
+  if type(inventory) ~= "table" then
+    error("devloop.restart_edges: operator reentry inventory must be a table")
+  end
+
+  local edges = {}
+  local seen_ids = {}
+  for _, authored in ipairs(inventory) do
+    if type(authored) ~= "table" then
+      error("devloop.restart_edges: operator reentry edge must be a table")
+    end
+    if not is_nonempty_string(authored.id) then
+      error("devloop.restart_edges: operator reentry edge id must be a non-empty string")
+    end
+    if authored.owner ~= owner then
+      error("devloop.restart_edges: operator reentry edge owner must match extractor owner")
+    end
+    if not is_nonempty_string(authored.row_id) then
+      error("devloop.restart_edges: operator reentry edge row_id must be a non-empty string")
+    end
+    if authored.kind ~= "operator_reentry" then
+      error("devloop.restart_edges: operator reentry edge kind must be operator_reentry")
+    end
+
+    local source = authored.source
+    if type(source) ~= "table" then
+      error("devloop.restart_edges: operator reentry edge source must be a table")
+    end
+    if not is_nonempty_string(source.state) then
+      error("devloop.restart_edges: operator reentry edge source.state must be a non-empty string")
+    end
+    if source.boundary ~= nil and not is_nonempty_string(source.boundary) then
+      error("devloop.restart_edges: operator reentry edge source.boundary must be nil or a non-empty string")
+    end
+    if not is_nonempty_string(authored.target) then
+      error("devloop.restart_edges: operator reentry edge target must be a non-empty string")
+    end
+
+    local cause_evidence = authored.cause_evidence
+    if type(cause_evidence) ~= "table" then
+      error("devloop.restart_edges: operator reentry edge cause_evidence must be a table")
+    end
+    if not is_nonempty_string(cause_evidence.command) then
+      error("devloop.restart_edges: operator reentry edge cause_evidence.command must be a non-empty string")
+    end
+    if cause_evidence.requires_applied_certificate ~= true then
+      error("devloop.restart_edges: operator reentry edge cause_evidence.requires_applied_certificate must be true")
+    end
+    if cause_evidence.resolver ~= "operator_commands" then
+      error("devloop.restart_edges: operator reentry edge cause_evidence.resolver must be operator_commands")
+    end
+
+    local provenance = authored.provenance
+    if type(provenance) ~= "table" then
+      error("devloop.restart_edges: operator reentry edge provenance must be a table")
+    end
+    if provenance.owner ~= owner then
+      error("devloop.restart_edges: operator reentry edge provenance.owner must match extractor owner")
+    end
+    if not is_nonempty_string(provenance.row) then
+      error("devloop.restart_edges: operator reentry edge provenance.row must be a non-empty string")
+    end
+    if not is_nonempty_string(provenance.field) then
+      error("devloop.restart_edges: operator reentry edge provenance.field must be a non-empty string")
+    end
+    if seen_ids[authored.id] then
+      error("devloop.restart_edges: duplicate edge id " .. authored.id)
+    end
+    seen_ids[authored.id] = true
+
+    table.insert(edges, {
+      id = authored.id,
+      owner = authored.owner,
+      row_id = authored.row_id,
+      kind = authored.kind,
+      source = {
+        state = source.state,
+        boundary = source.boundary,
+      },
+      target = authored.target,
+      cause_evidence = {
+        command = cause_evidence.command,
+        requires_applied_certificate = cause_evidence.requires_applied_certificate,
+        resolver = cause_evidence.resolver,
+      },
+      provenance = {
+        owner = provenance.owner,
+        row = provenance.row,
+        field = provenance.field,
+      },
+    })
+  end
+  return edges
+end
+
 function M.extract_autonomous_edges(owner, rows)
   if not is_nonempty_string(owner) then
     error("devloop.restart_edges: owner must be a non-empty string")
@@ -198,9 +296,14 @@ end
 function M.schema()
   return {
     structural_fields = { "id", "owner", "row_id", "kind", "source", "target", "provenance" },
-    -- Entry extraction is inventory-driven; the PR-owner inventory is a later increment.
-    extracted_kinds = { autonomous = true, entry = true, guard_boundary = true },
-    deferred_kinds = { "operator_reentry", "timeout", "canonicalization" },
+    -- Inventory-driven kinds are authored by each lifecycle owner.
+    extracted_kinds = {
+      autonomous = true,
+      entry = true,
+      guard_boundary = true,
+      operator_reentry = true,
+    },
+    deferred_kinds = { "timeout", "canonicalization" },
   }
 end
 
