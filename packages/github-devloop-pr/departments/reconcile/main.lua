@@ -30,8 +30,14 @@ local spec = {
   stall_window = "2m",
 }
 
-local fix_reconcile_from_states = { "reviewing", "fixing" }
-local fix_reconcile_from_label = "reviewing|fixing"
+local fix_reconcile_from_states = { "reviewing", "fixing", "merge-ready", "merging" }
+local fix_reconcile_from_state_set = {
+  reviewing = true,
+  fixing = true,
+  ["merge-ready"] = true,
+  merging = true,
+}
+local fix_reconcile_from_label = table.concat(fix_reconcile_from_states, "|")
 
 local function emit_blocked_reconcile(kind, proposal_id, state, version, action, reason, comment_request, label_request, comment_queue)
   local add_labels, remove_labels = devloop_state.state_label_changes("blocked")
@@ -272,7 +278,7 @@ local function pipeline_fix(event)
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, fix_reconcile_from_label, "blocked", devloop_state.cas_outcome(state, transition, version), "fix reconcile source marker not yet visible")
       error("github-devloop: fix-reconcile-marker-missing: source state marker not yet visible for fix reconcile; retrying")
     end
-    if (state.state ~= "reviewing" and state.state ~= "fixing")
+    if fix_reconcile_from_state_set[state.state] ~= true
       or transition_version.safe_version_segment(tostring(state.version or "")) ~= transition_version.safe_version_segment(tostring(reconcile.issue_version)) then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, fix_reconcile_from_label, "blocked", "skip-stale(version-mismatch)", "fix reconcile event does not match canonical source marker")
       return

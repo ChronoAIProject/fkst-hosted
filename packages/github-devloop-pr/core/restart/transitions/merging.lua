@@ -72,10 +72,7 @@ return function(M, h)
         },
         {
           state = "blocked",
-          output_variant = "merge-blocked",
-          postcondition_family = "merge_execution_result",
-          decision_type = "MergeExecutionResult",
-          failure = true,
+          output_variant = "fix_budget_exhausted",
           terminal = true,
           monotonic = true,
         },

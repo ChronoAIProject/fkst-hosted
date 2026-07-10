@@ -78,6 +78,26 @@ return {
     end
   end,
 
+  test_merge_origin_fix_budget_escape_is_terminal_not_failure = function()
+    local rows = rows_by_state(core.restart_transition_table())
+    for _, expected in ipairs({
+      { state = "merge-ready", edge = 2 },
+      { state = "merging", edge = 4 },
+    }) do
+      local row = rows[expected.state]
+      local edge = row.responsibility_signature.successors[expected.edge]
+      t.eq(row.to_states[expected.edge], "blocked")
+      t.eq(row.output_obligation.exits[expected.edge], "blocked")
+      t.eq(edge.state, "blocked")
+      t.eq(edge.output_variant, "fix_budget_exhausted")
+      t.eq(edge.failure, nil)
+      t.eq(edge.terminal, true)
+      t.eq(edge.monotonic, true)
+      t.eq(core.state_successors(expected.state)[expected.edge], "blocked")
+    end
+    t.eq(#core.strict_restart_responsibility_contract_errors(core.restart_transition_table()), 0)
+  end,
+
   test_fixing_code_producer_keys_liveness_to_revision_goal_work_unit = function()
     local row = rows_by_state(core.restart_transition_table()).fixing
     local signature = row.responsibility_signature

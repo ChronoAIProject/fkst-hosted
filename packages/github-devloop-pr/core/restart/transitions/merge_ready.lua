@@ -54,7 +54,7 @@ return function(M, h)
         },
         {
           state = "blocked",
-          output_variant = "watchdog_reconcile_terminal",
+          output_variant = "fix_budget_exhausted",
           terminal = true,
           monotonic = true,
         },
