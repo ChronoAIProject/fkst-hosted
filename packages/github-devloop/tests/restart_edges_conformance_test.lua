@@ -18,7 +18,6 @@ local deferred_kinds = {
   "entry",
   "operator_reentry",
   "timeout",
-  "guard_boundary",
   "canonicalization",
 }
 
@@ -99,6 +98,35 @@ local function expected_edges(owner, rows)
   return expected, empty_rows
 end
 
+local function expected_guard_boundary_edges(owner, rows)
+  local expected = {}
+  local rows_without_boundaries = {}
+  for _, row in ipairs(rows) do
+    if row.guard_boundaries == nil then
+      table.insert(rows_without_boundaries, row.from_state)
+    else
+      for _, guard_boundary in ipairs(row.guard_boundaries) do
+        for _, successor in ipairs(guard_boundary.successors) do
+          table.insert(expected, {
+            id = owner .. "/" .. row.from_state .. "/guard_boundary/" .. guard_boundary.name .. "/" .. successor.output_variant,
+            owner = owner,
+            row_id = row.from_state,
+            kind = "guard_boundary",
+            source = { state = row.from_state, boundary = guard_boundary.name },
+            target = successor.state,
+            provenance = {
+              owner = owner,
+              row = row.from_state,
+              field = "guard_boundaries",
+            },
+          })
+        end
+      end
+    end
+  end
+  return expected, rows_without_boundaries
+end
+
 local function assert_edges(actual, expected, empty_rows)
   t.eq(#actual, #expected)
   local edge_keys = key_set(structural_fields)
@@ -137,6 +165,44 @@ local function assert_edges(actual, expected, empty_rows)
   end
 end
 
+local function assert_guard_boundary_edges(actual, expected, rows_without_boundaries)
+  t.eq(#actual, #expected)
+  local edge_keys = key_set(structural_fields)
+  local seen_ids = {}
+  local seen_edges = {}
+  local seen_sources = {}
+  local seen_provenance = {}
+  local counts_by_row = {}
+  for index, expected_edge in ipairs(expected) do
+    local edge = actual[index]
+    assert_exact_keys(edge, edge_keys)
+    assert_exact_keys(edge.source, { state = true, boundary = true })
+    assert_exact_keys(edge.provenance, { owner = true, row = true, field = true })
+    t.eq(edge.id, expected_edge.id)
+    t.eq(edge.owner, expected_edge.owner)
+    t.eq(edge.row_id, expected_edge.row_id)
+    t.eq(edge.kind, expected_edge.kind)
+    t.eq(edge.source.state, expected_edge.source.state)
+    t.eq(edge.source.boundary, expected_edge.source.boundary)
+    t.eq(edge.target, expected_edge.target)
+    t.eq(edge.provenance.owner, expected_edge.provenance.owner)
+    t.eq(edge.provenance.row, expected_edge.provenance.row)
+    t.eq(edge.provenance.field, expected_edge.provenance.field)
+    t.eq(seen_ids[edge.id], nil)
+    t.eq(seen_edges[edge], nil)
+    t.eq(seen_sources[edge.source], nil)
+    t.eq(seen_provenance[edge.provenance], nil)
+    seen_ids[edge.id] = true
+    seen_edges[edge] = true
+    seen_sources[edge.source] = true
+    seen_provenance[edge.provenance] = true
+    counts_by_row[edge.row_id] = (counts_by_row[edge.row_id] or 0) + 1
+  end
+  for _, row_id in ipairs(rows_without_boundaries) do
+    t.eq(counts_by_row[row_id] or 0, 0)
+  end
+end
+
 local function row(from_state, successors)
   return {
     from_state = from_state,
@@ -144,9 +210,23 @@ local function row(from_state, successors)
   }
 end
 
+local function guard_row(from_state, guard_boundaries)
+  return {
+    from_state = from_state,
+    guard_boundaries = guard_boundaries,
+  }
+end
+
 local function assert_extract_fails(owner, rows)
   local ok = pcall(function()
     restart_edges.extract_autonomous_edges(owner, rows)
+  end)
+  t.eq(ok, false)
+end
+
+local function assert_guard_extract_fails(owner, rows)
+  local ok = pcall(function()
+    restart_edges.extract_guard_boundary_edges(owner, rows)
   end)
   t.eq(ok, false)
 end
@@ -161,9 +241,10 @@ local function row_by_state(rows, state)
 end
 
 return {
-  test_restart_edges_schema_is_explicitly_autonomous_only = function()
+  test_restart_edges_schema_is_explicit_about_extracted_and_deferred_kinds = function()
     assert_exact_keys(restart_edges, {
       extract_autonomous_edges = true,
+      extract_guard_boundary_edges = true,
       schema = true,
     })
     local schema = restart_edges.schema()
@@ -176,8 +257,9 @@ return {
     for index, field in ipairs(structural_fields) do
       t.eq(schema.structural_fields[index], field)
     end
-    assert_exact_keys(schema.extracted_kinds, { autonomous = true })
+    assert_exact_keys(schema.extracted_kinds, { autonomous = true, guard_boundary = true })
     t.eq(schema.extracted_kinds.autonomous, true)
+    t.eq(schema.extracted_kinds.guard_boundary, true)
     t.eq(#schema.deferred_kinds, #deferred_kinds)
     for index, kind in ipairs(deferred_kinds) do
       t.eq(schema.deferred_kinds[index], kind)
@@ -201,8 +283,26 @@ return {
       t.is_true(edge.provenance ~= repeated[index].provenance)
     end
 
+    -- Entry, operator-reentry, timeout, and canonicalization edges remain deferred.
     -- This conformance does not claim OLD/live-transition parity: thinking->dependency_wait
     -- and pr-open->blocked exist in production but not in these rows, so they are out of scope.
+  end,
+
+  test_restart_guard_boundary_edges_match_issue_rows_and_remain_empty = function()
+    local owner = core.restart_package_name
+    local rows = core.restart_transition_table()
+    local snapshot = copy_value(rows)
+    local expected, rows_without_boundaries = expected_guard_boundary_edges(owner, rows)
+    local actual = restart_edges.extract_guard_boundary_edges(owner, rows)
+    t.eq(#expected, 0)
+    t.eq(#rows_without_boundaries, #rows)
+    assert_guard_boundary_edges(actual, expected, rows_without_boundaries)
+    assert_same_value(rows, snapshot)
+
+    local autonomous_only = row("autonomous-only", {
+      { state = "autonomous-target", output_variant = "autonomous-output" },
+    })
+    t.eq(#restart_edges.extract_guard_boundary_edges(owner, { autonomous_only }), 0)
   end,
 
   test_restart_edges_do_not_read_to_states_or_infer_a_different_kind = function()
@@ -228,6 +328,57 @@ return {
     t.eq(edges[1].kind, "autonomous")
     t.eq(edges[2].id, "issue-owner/authored-order/autonomous/a-second")
     t.eq(edges[2].kind, "autonomous")
+  end,
+
+  test_restart_guard_boundary_edges_do_not_read_to_states_sort_or_leak_autonomous = function()
+    local synthetic = setmetatable({
+      from_state = "authored-order",
+      responsibility_signature = {
+        successors = {
+          { state = "autonomous-target", output_variant = "autonomous-only" },
+        },
+      },
+      guard_boundaries = {
+        {
+          name = "z-boundary",
+          successors = {
+            { state = "z-target", output_variant = "z-first" },
+            { state = "a-target", output_variant = "a-second" },
+          },
+        },
+        {
+          name = "a-boundary",
+          successors = {
+            { state = "m-target", output_variant = "m-third" },
+          },
+        },
+      },
+    }, {
+      __index = function(_, key)
+        if key == "to_states" then
+          error("to_states must not be read")
+        end
+        return nil
+      end,
+    })
+    local expected, rows_without_boundaries = expected_guard_boundary_edges("issue-owner", { synthetic })
+    local edges = restart_edges.extract_guard_boundary_edges("issue-owner", { synthetic })
+    assert_guard_boundary_edges(edges, expected, rows_without_boundaries)
+    t.eq(#edges, 3)
+    t.eq(edges[1].id, "issue-owner/authored-order/guard_boundary/z-boundary/z-first")
+    t.eq(edges[1].source.boundary, "z-boundary")
+    t.eq(edges[2].id, "issue-owner/authored-order/guard_boundary/z-boundary/a-second")
+    t.eq(edges[2].source.boundary, "z-boundary")
+    t.eq(edges[3].id, "issue-owner/authored-order/guard_boundary/a-boundary/m-third")
+    t.eq(edges[3].source.boundary, "a-boundary")
+
+    local repeated = restart_edges.extract_guard_boundary_edges("issue-owner", { synthetic })
+    assert_guard_boundary_edges(repeated, expected, rows_without_boundaries)
+    for index, edge in ipairs(edges) do
+      t.is_true(edge ~= repeated[index])
+      t.is_true(edge.source ~= repeated[index].source)
+      t.is_true(edge.provenance ~= repeated[index].provenance)
+    end
   end,
 
   test_restart_edges_exclude_blocked_operator_reentry = function()
@@ -256,6 +407,42 @@ return {
       row("from", {
         { state = "one", output_variant = "same" },
         { state = "two", output_variant = "same" },
+      }),
+    })
+
+    local valid_guard = guard_row("from", {
+      {
+        name = "boundary",
+        successors = { { state = "to", output_variant = "done" } },
+      },
+    })
+    assert_guard_extract_fails("", { valid_guard })
+    assert_guard_extract_fails("owner", { guard_row(nil, {}) })
+    assert_guard_extract_fails("owner", { guard_row("", {}) })
+    assert_guard_extract_fails("owner", { guard_row("from", { { successors = {} } }) })
+    assert_guard_extract_fails("owner", { guard_row("from", { { name = "", successors = {} } }) })
+    assert_guard_extract_fails("owner", { guard_row("from", { { name = "boundary" } }) })
+    assert_guard_extract_fails("owner", {
+      guard_row("from", { { name = "boundary", successors = { { output_variant = "done" } } } }),
+    })
+    assert_guard_extract_fails("owner", {
+      guard_row("from", { { name = "boundary", successors = { { state = "", output_variant = "done" } } } }),
+    })
+    assert_guard_extract_fails("owner", {
+      guard_row("from", { { name = "boundary", successors = { { state = "to" } } } }),
+    })
+    assert_guard_extract_fails("owner", {
+      guard_row("from", { { name = "boundary", successors = { { state = "to", output_variant = "" } } } }),
+    })
+    assert_guard_extract_fails("owner", {
+      guard_row("from", {
+        {
+          name = "boundary",
+          successors = {
+            { state = "one", output_variant = "same" },
+            { state = "two", output_variant = "same" },
+          },
+        },
       }),
     })
   end,
