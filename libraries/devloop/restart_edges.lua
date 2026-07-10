@@ -268,6 +268,100 @@ function M.extract_operator_reentry_edges(owner, inventory)
   return edges
 end
 
+function M.extract_canonicalization_edges(owner, inventory)
+  if not is_nonempty_string(owner) then
+    error("devloop.restart_edges: owner must be a non-empty string")
+  end
+  if type(inventory) ~= "table" then
+    error("devloop.restart_edges: canonicalization inventory must be a table")
+  end
+
+  local edges = {}
+  local seen_ids = {}
+  for _, authored in ipairs(inventory) do
+    if type(authored) ~= "table" then
+      error("devloop.restart_edges: canonicalization edge must be a table")
+    end
+    if not is_nonempty_string(authored.id) then
+      error("devloop.restart_edges: canonicalization edge id must be a non-empty string")
+    end
+    if authored.owner ~= owner then
+      error("devloop.restart_edges: canonicalization edge owner must match extractor owner")
+    end
+    if not is_nonempty_string(authored.row_id) then
+      error("devloop.restart_edges: canonicalization edge row_id must be a non-empty string")
+    end
+    if authored.kind ~= "canonicalization" then
+      error("devloop.restart_edges: canonicalization edge kind must be canonicalization")
+    end
+
+    local source = authored.source
+    if type(source) ~= "table" then
+      error("devloop.restart_edges: canonicalization edge source must be a table")
+    end
+    if not is_nonempty_string(source.state) then
+      error("devloop.restart_edges: canonicalization edge source.state must be a non-empty string")
+    end
+    if source.boundary ~= nil then
+      error("devloop.restart_edges: canonicalization edge source.boundary must be nil")
+    end
+    if not is_nonempty_string(authored.target) then
+      error("devloop.restart_edges: canonicalization edge target must be a non-empty string")
+    end
+
+    local cause_evidence = authored.cause_evidence
+    if type(cause_evidence) ~= "table" then
+      error("devloop.restart_edges: canonicalization edge cause_evidence must be a table")
+    end
+    if not is_nonempty_string(cause_evidence.marker) then
+      error("devloop.restart_edges: canonicalization edge cause_evidence.marker must be a non-empty string")
+    end
+    if not is_nonempty_string(cause_evidence.resolver) then
+      error("devloop.restart_edges: canonicalization edge cause_evidence.resolver must be a non-empty string")
+    end
+
+    local provenance = authored.provenance
+    if type(provenance) ~= "table" then
+      error("devloop.restart_edges: canonicalization edge provenance must be a table")
+    end
+    if provenance.owner ~= owner then
+      error("devloop.restart_edges: canonicalization edge provenance.owner must match extractor owner")
+    end
+    if not is_nonempty_string(provenance.row) then
+      error("devloop.restart_edges: canonicalization edge provenance.row must be a non-empty string")
+    end
+    if not is_nonempty_string(provenance.field) then
+      error("devloop.restart_edges: canonicalization edge provenance.field must be a non-empty string")
+    end
+    if seen_ids[authored.id] then
+      error("devloop.restart_edges: duplicate edge id " .. authored.id)
+    end
+    seen_ids[authored.id] = true
+
+    table.insert(edges, {
+      id = authored.id,
+      owner = authored.owner,
+      row_id = authored.row_id,
+      kind = authored.kind,
+      source = {
+        state = source.state,
+        boundary = nil,
+      },
+      target = authored.target,
+      cause_evidence = {
+        marker = cause_evidence.marker,
+        resolver = cause_evidence.resolver,
+      },
+      provenance = {
+        owner = provenance.owner,
+        row = provenance.row,
+        field = provenance.field,
+      },
+    })
+  end
+  return edges
+end
+
 function M.extract_autonomous_edges(owner, rows)
   if not is_nonempty_string(owner) then
     error("devloop.restart_edges: owner must be a non-empty string")
@@ -484,12 +578,13 @@ function M.schema()
     -- Typed edge kinds are authored by each lifecycle owner.
     extracted_kinds = {
       autonomous = true,
+      canonicalization = true,
       entry = true,
       guard_boundary = true,
       operator_reentry = true,
       timeout = true,
     },
-    deferred_kinds = { "canonicalization" },
+    deferred_kinds = {},
   }
 end
 

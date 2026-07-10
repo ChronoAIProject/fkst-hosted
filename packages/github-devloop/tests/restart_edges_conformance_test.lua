@@ -15,9 +15,7 @@ local structural_fields = {
   "provenance",
 }
 
-local deferred_kinds = {
-  "canonicalization",
-}
+local deferred_kinds = {}
 
 local expected_successor_kinds = {
   ["awaiting-pr/child_pr_merged"] = "guard_boundary",
@@ -458,6 +456,7 @@ return {
   test_restart_edges_schema_is_explicit_about_extracted_and_deferred_kinds = function()
     assert_exact_keys(restart_edges, {
       extract_autonomous_edges = true,
+      extract_canonicalization_edges = true,
       extract_entry_edges = true,
       extract_guard_boundary_edges = true,
       extract_operator_reentry_edges = true,
@@ -476,12 +475,14 @@ return {
     end
     assert_exact_keys(schema.extracted_kinds, {
       autonomous = true,
+      canonicalization = true,
       entry = true,
       guard_boundary = true,
       operator_reentry = true,
       timeout = true,
     })
     t.eq(schema.extracted_kinds.autonomous, true)
+    t.eq(schema.extracted_kinds.canonicalization, true)
     t.eq(schema.extracted_kinds.entry, true)
     t.eq(schema.extracted_kinds.guard_boundary, true)
     t.eq(schema.extracted_kinds.operator_reentry, true)
@@ -511,9 +512,8 @@ return {
       t.is_true(edge.provenance ~= repeated[index].provenance)
     end
 
-    -- Canonicalization edges remain deferred.
-    -- This conformance does not claim OLD/live-transition parity: thinking->dependency_wait
-    -- and pr-open->blocked exist in production but not in these rows, so they are out of scope.
+    -- Inventory-authored canonicalization edges have their own production-observation conformance.
+    -- This successor conformance remains scoped to responsibility_signature.successors.
   end,
 
   test_restart_guard_boundary_edges_match_issue_rows_in_authored_order = function()
