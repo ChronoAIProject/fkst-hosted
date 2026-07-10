@@ -51,6 +51,9 @@ impl OsbBackend {
     ) -> Result<EnsureOutcome, BackendError> {
         // (a) List-guard: a deterministically-correlated sandbox already exists → the
         // session is already live (idempotent no-op), mirroring the K8s 409 create.
+        // This guard is ALSO the orphan absorber for a create whose CLIENT-side
+        // request budget elapsed while the server still materialized the sandbox:
+        // the orphan correlates by metadata and turns the next ensure into a no-op.
         let existing = self
             .lifecycle
             .list_sandboxes(&managed_session_filter(&spec.session_id))

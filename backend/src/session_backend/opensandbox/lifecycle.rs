@@ -9,6 +9,7 @@
 //! execd endpoints — those are deferred to later issues.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
@@ -18,6 +19,40 @@ use super::dto::{CreateSandboxRequest, OsbError, SandboxView};
 /// The header carrying the API key (`apiKeyAuth` in the spec). `pub(super)` so the
 /// sibling execd client stamps the SAME key header through its own choke-point.
 pub(super) const API_KEY_HEADER: &str = "OPEN-SANDBOX-API-KEY";
+
+/// `POST /sandboxes` is SYNCHRONOUS on the server: it holds the request open until
+/// the sandbox is Running or its `sandbox_create_timeout_seconds` elapses — 300s in
+/// the production deployment (scale-from-zero gVisor spot pool; cold start 1–3
+/// min). Client budget = that ceiling + 30s slack, so a slow-but-healthy create is
+/// never aborted client-side. A create that DOES time out here may still
+/// materialize server-side; the spawn path's pre-create list-guard absorbs the
+/// orphan on the next reconcile tick.
+const CREATE_TIMEOUT: Duration = Duration::from_secs(330);
+
+/// Every other lifecycle verb (get / list / patch-metadata / delete / diagnostics
+/// logs) answers promptly; tens of seconds is generous. Without a budget, a wedged
+/// connection (server pod rescheduling, half-open TCP) blocks the calling
+/// reconciler verb indefinitely — reqwest's default is NO request timeout.
+const VERB_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Per-verb request budgets, injectable so tests can shrink them to milliseconds
+/// (wiremock stall tests must not sleep 30s). Production always uses `default()`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct LifecycleTimeouts {
+    /// Budget for `POST /sandboxes` (see [`CREATE_TIMEOUT`]).
+    pub(super) create: Duration,
+    /// Budget for every other verb (see [`VERB_TIMEOUT`]).
+    pub(super) verb: Duration,
+}
+
+impl Default for LifecycleTimeouts {
+    fn default() -> Self {
+        Self {
+            create: CREATE_TIMEOUT,
+            verb: VERB_TIMEOUT,
+        }
+    }
+}
 
 /// Page size requested when walking the paginated list endpoint.
 const LIST_PAGE_SIZE: u32 = 100;
@@ -38,27 +73,43 @@ pub struct OsbLifecycleClient {
     base_url: String,
     api_key: SecretString,
     http: reqwest::Client,
+    timeouts: LifecycleTimeouts,
 }
 
 impl OsbLifecycleClient {
     /// Build a client over an injected HTTP client. `base_url` is the API root (the
     /// client owns the `/v1` path prefix); a trailing slash is trimmed so path joins
-    /// never double up.
+    /// never double up. Request budgets are the production
+    /// [`LifecycleTimeouts::default`].
     pub fn new(base_url: reqwest::Url, api_key: SecretString, http: reqwest::Client) -> Self {
         Self {
             base_url: base_url.as_str().trim_end_matches('/').to_string(),
             api_key,
             http,
+            timeouts: LifecycleTimeouts::default(),
         }
     }
 
-    /// Start a request with the API-key header set. The ONLY place the key is
-    /// exposed; every verb builds its request through here so none can omit the
-    /// header.
-    fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
+    /// Test-only budget override (milliseconds-scale stall tests).
+    #[cfg(test)]
+    pub(super) fn with_timeouts(mut self, timeouts: LifecycleTimeouts) -> Self {
+        self.timeouts = timeouts;
+        self
+    }
+
+    /// Start a request with the API-key header AND the verb's request budget set.
+    /// The ONLY place the key is exposed; every verb builds its request through here
+    /// so none can omit the header or ride without a timeout.
+    fn request(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        timeout: Duration,
+    ) -> reqwest::RequestBuilder {
         let url = format!("{}{path}", self.base_url);
         self.http
             .request(method, url)
+            .timeout(timeout)
             .header(API_KEY_HEADER, self.api_key.expose_secret())
     }
 
@@ -69,7 +120,11 @@ impl OsbLifecycleClient {
     ) -> Result<SandboxView, OsbError> {
         let path = "/v1/sandboxes";
         let method = reqwest::Method::POST;
-        let response = self.request(method.clone(), path).json(req).send().await?;
+        let response = self
+            .request(method.clone(), path, self.timeouts.create)
+            .json(req)
+            .send()
+            .await?;
         let response = map_response(&method, path, response).await?;
         Ok(response.json::<SandboxView>().await?)
     }
@@ -78,7 +133,10 @@ impl OsbLifecycleClient {
     pub async fn get_sandbox(&self, id: &str) -> Result<SandboxView, OsbError> {
         let path = format!("/v1/sandboxes/{id}");
         let method = reqwest::Method::GET;
-        let response = self.request(method.clone(), &path).send().await?;
+        let response = self
+            .request(method.clone(), &path, self.timeouts.verb)
+            .send()
+            .await?;
         let response = map_response(&method, &path, response).await?;
         Ok(response.json::<SandboxView>().await?)
     }
@@ -117,7 +175,7 @@ impl OsbLifecycleClient {
             }
 
             let response = self
-                .request(method.clone(), path)
+                .request(method.clone(), path, self.timeouts.verb)
                 .query(&query)
                 .send()
                 .await?;
@@ -154,7 +212,7 @@ impl OsbLifecycleClient {
         let path = format!("/v1/sandboxes/{id}/metadata");
         let method = reqwest::Method::PATCH;
         let response = self
-            .request(method.clone(), &path)
+            .request(method.clone(), &path, self.timeouts.verb)
             .json(metadata)
             .send()
             .await?;
@@ -188,7 +246,7 @@ impl OsbLifecycleClient {
         let path = format!("/v1/sandboxes/{id}/diagnostics/logs");
         let method = reqwest::Method::GET;
         let response = self
-            .request(method.clone(), &path)
+            .request(method.clone(), &path, self.timeouts.verb)
             .query(&[("tail", tail.to_string()), ("since", since.to_string())])
             .send()
             .await?;
@@ -212,7 +270,10 @@ impl OsbLifecycleClient {
     pub async fn delete_sandbox(&self, id: &str) -> Result<(), OsbError> {
         let path = format!("/v1/sandboxes/{id}");
         let method = reqwest::Method::DELETE;
-        let response = self.request(method.clone(), &path).send().await?;
+        let response = self
+            .request(method.clone(), &path, self.timeouts.verb)
+            .send()
+            .await?;
         map_response(&method, &path, response).await?;
         Ok(())
     }

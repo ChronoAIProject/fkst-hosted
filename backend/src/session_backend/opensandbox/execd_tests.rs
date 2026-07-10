@@ -306,3 +306,113 @@ fn client_debug_never_leaks_either_secret() {
         "execd token leaked in Debug output: {debug}"
     );
 }
+
+/// Milliseconds-scale budgets for the stall tests below.
+fn tiny_timeouts() -> ExecdTimeouts {
+    ExecdTimeouts {
+        upload: std::time::Duration::from_millis(200),
+        query: std::time::Duration::from_millis(200),
+        command_slack: std::time::Duration::from_millis(100),
+    }
+}
+
+/// A stalled `/files/upload` elapses the UPLOAD budget and surfaces as a timeout
+/// `OsbError::Transport` instead of hanging the reconciler's creds push.
+#[tokio::test]
+async fn stalled_upload_times_out_as_transport() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(proxy("/files/upload")))
+        .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(5)))
+        .mount(&server)
+        .await;
+
+    let err = client(&server.uri())
+        .with_timeouts(tiny_timeouts())
+        .upload_file("/var/run/fkst/creds/github-token", b"tok", 0o400)
+        .await
+        .expect_err("stalled upload must time out");
+    assert!(
+        matches!(&err, OsbError::Transport(e) if e.is_timeout()),
+        "expected a timeout Transport error, got: {err:?}"
+    );
+}
+
+/// A BACKGROUND command launch rides the quick-query budget (execd answers with
+/// just the init frame and closes): a stalled response times out.
+#[tokio::test]
+async fn stalled_background_command_launch_times_out() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(proxy("/command")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("data: {\"type\":\"init\",\"text\":\"cmd-1\"}\n\n")
+                .set_delay(std::time::Duration::from_secs(5)),
+        )
+        .mount(&server)
+        .await;
+
+    let err = client(&server.uri())
+        .with_timeouts(tiny_timeouts())
+        .run_command("echo hi", None, true)
+        .await
+        .expect_err("stalled background launch must time out");
+    assert!(
+        matches!(&err, OsbError::Transport(e) if e.is_timeout()),
+        "expected a timeout Transport error, got: {err:?}"
+    );
+}
+
+/// A FOREGROUND command's request budget is its own execd-side timeout + slack —
+/// the buffered SSE body lasts the command's lifetime, so the budget must cover
+/// it. A response stalled past (timeout_ms + slack) times out...
+#[tokio::test]
+async fn stalled_foreground_command_times_out_at_its_own_timeout_plus_slack() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(proxy("/command")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("data: {\"type\":\"init\",\"text\":\"cmd-1\"}\n\n")
+                .set_delay(std::time::Duration::from_secs(5)),
+        )
+        .mount(&server)
+        .await;
+
+    // budget = 100ms (execd timeout) + 100ms (slack) = 200ms << the 5s stall.
+    let err = client(&server.uri())
+        .with_timeouts(tiny_timeouts())
+        .run_command("sleep 99", Some(100), false)
+        .await
+        .expect_err("a stall past timeout+slack must time out");
+    assert!(
+        matches!(&err, OsbError::Transport(e) if e.is_timeout()),
+        "expected a timeout Transport error, got: {err:?}"
+    );
+}
+
+/// ...while a foreground command whose stream lasts LONGER than the quick-query
+/// budget but WITHIN its own timeout+slack budget is NOT severed — proving the
+/// foreground budget derives from the command's timeout, not the query budget.
+#[tokio::test]
+async fn slow_foreground_command_within_its_own_budget_is_not_severed() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(proxy("/command")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("data: {\"type\":\"init\",\"text\":\"cmd-42\"}\n\n")
+                .set_delay(std::time::Duration::from_millis(500)),
+        )
+        .mount(&server)
+        .await;
+
+    // query budget = 200ms < 500ms stall < 2000ms (execd timeout) + 100ms slack.
+    let cmd = client(&server.uri())
+        .with_timeouts(tiny_timeouts())
+        .run_command("make build", Some(2_000), false)
+        .await
+        .expect("a foreground command within its own budget must not be severed");
+    assert_eq!(cmd.id, "cmd-42");
+}

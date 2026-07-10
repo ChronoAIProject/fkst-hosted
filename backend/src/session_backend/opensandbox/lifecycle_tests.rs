@@ -267,3 +267,92 @@ fn client_debug_never_leaks_the_api_key() {
         "api key leaked in Debug output: {debug}"
     );
 }
+
+/// A stalled (slow) verb response elapses the VERB budget and surfaces as a
+/// timeout `OsbError::Transport` instead of hanging the caller. Budgets are
+/// test-injected at milliseconds scale; the mock's delay far exceeds them.
+#[tokio::test]
+async fn stalled_verb_times_out_as_transport() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/sandboxes/sbx-slow"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"id": "sbx-slow"}))
+                .set_delay(std::time::Duration::from_secs(5)),
+        )
+        .mount(&server)
+        .await;
+
+    let client = client(&server.uri()).with_timeouts(LifecycleTimeouts {
+        create: std::time::Duration::from_millis(200),
+        verb: std::time::Duration::from_millis(200),
+    });
+    let err = client
+        .get_sandbox("sbx-slow")
+        .await
+        .expect_err("stalled verb must time out");
+    assert!(
+        matches!(&err, OsbError::Transport(e) if e.is_timeout()),
+        "expected a timeout Transport error, got: {err:?}"
+    );
+}
+
+/// `create_sandbox` rides the CREATE budget, not the verb budget: with a tiny verb
+/// budget and a generous create budget, a create slower than the verb budget still
+/// succeeds — proving the synchronous 300s-class server create is never cut off by
+/// the quick-verb budget.
+#[tokio::test]
+async fn slow_create_uses_the_create_budget_not_the_verb_budget() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/sandboxes"))
+        .respond_with(
+            ResponseTemplate::new(202)
+                .set_body_json(serde_json::json!({
+                    "id": "sbx-cold-start",
+                    "status": {"state": "Running"}
+                }))
+                .set_delay(std::time::Duration::from_millis(500)),
+        )
+        .mount(&server)
+        .await;
+
+    let client = client(&server.uri()).with_timeouts(LifecycleTimeouts {
+        create: std::time::Duration::from_secs(5),
+        verb: std::time::Duration::from_millis(100),
+    });
+    let view = client
+        .create_sandbox(&create_req())
+        .await
+        .expect("a create slower than the verb budget but within the create budget succeeds");
+    assert_eq!(view.id, "sbx-cold-start");
+}
+
+/// And the create budget IS enforced: a create slower than it times out.
+#[tokio::test]
+async fn stalled_create_times_out_at_the_create_budget() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/sandboxes"))
+        .respond_with(
+            ResponseTemplate::new(202)
+                .set_body_json(serde_json::json!({"id": "sbx-wedged"}))
+                .set_delay(std::time::Duration::from_secs(5)),
+        )
+        .mount(&server)
+        .await;
+
+    let client = client(&server.uri()).with_timeouts(LifecycleTimeouts {
+        create: std::time::Duration::from_millis(200),
+        verb: std::time::Duration::from_millis(200),
+    });
+    let err = client
+        .create_sandbox(&create_req())
+        .await
+        .expect_err("a wedged create must time out at the create budget");
+    assert!(
+        matches!(&err, OsbError::Transport(e) if e.is_timeout()),
+        "expected a timeout Transport error, got: {err:?}"
+    );
+}
