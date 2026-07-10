@@ -28,8 +28,9 @@ data:
   # secret.example.yaml) and is REQUIRED when FKST_POD_DISPATCH=true.
   FKST_LLM_MODEL: "gpt-5.5" # non-blank (fail-closed)
   FKST_LLM_BASE_URL: "https://llm.aelf.dev/v1"  # PUBLIC: the isolated session pod reaches the LLM over the internet, never in-cluster (#338 R3)
-  # wire_api MUST be "chat": chrono-llm serves only /chat/completions (502 on
-  # /responses). Non-blank (fail-closed).
+  # codex wire_api. "responses" is correct for llm.aelf.dev (verified) and is
+  # the code default — codex 0.139+ dropped wire_api="chat" (errors at config
+  # load); set "chat" ONLY for a chat-only backend. Non-blank (fail-closed).
   FKST_LLM_WIRE_API: "responses"
 
   # --- Session trigger ---
@@ -61,7 +62,10 @@ data:
   # are IGNORED (the sandbox template owns them) and warned about at startup if set.
   # FKST_OSB_API_KEY_FILE: "/var/secrets/opensandbox-fkst-api-key"
   # FKST_OSB_EXECD_TOKEN_SEED_FILE: "/var/secrets/fkst-osb-execd-token-seed"
-  # FKST_OSB_BASE_URL: "https://sandbox.chrono-ai.fun/api" # must be a valid URL
+  # In-cluster ClusterIP of the fkst tenant's OpenSandbox server (see
+  # opensandbox-fkst-tenant/). Do NOT use the public proxy-fronted URL: creates
+  # block up to 300s server-side (spot cold start); the public proxy 504s at ~60s.
+  # FKST_OSB_BASE_URL: "http://opensandbox-server-fkst.opensandbox-system.svc.cluster.local"
   # FKST_OSB_SESSION_CPU: "500m"      # sandbox resourceLimits.cpu (non-blank)
   # FKST_OSB_SESSION_MEMORY: "512Mi"  # sandbox resourceLimits.memory (non-blank)
   # FKST_OSB_ENTRYPOINT: "/usr/local/bin/fkst-control-plane" # absolute path
