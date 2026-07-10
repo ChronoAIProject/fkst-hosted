@@ -167,43 +167,79 @@ key names are ever returned.
 
 These are cluster-side facts the **infra team** must satisfy on their OpenSandbox
 deployment BEFORE `FKST_POD_MODE=opensandbox` is enabled; fkst cannot control them
-from this repo. Each was source-verified against the upstream OpenSandbox server.
-Tick a box only after running its verification. Substitute the deployed values for
-`$FKST_OSB_BASE_URL`, `$FKST_OSB_API_KEY`, `<fkst-tenant-ns>`, and `<probe-id>`.
+from this repo. Items marked **VERIFIED** were settled on 2026-07-10 against the
+production deployment (server **v0.2.1**, controller **v0.2.0**, execd
+**v1.0.20**; sources at tag `server/v0.2.1` of `alibaba/OpenSandbox`) — re-verify
+them only on a server upgrade. Tick the remaining boxes after running their
+verification. Substitute the deployed values for `$FKST_OSB_BASE_URL`,
+`$FKST_OSB_API_KEY`, `<fkst-tenant-ns>`, and `<probe-id>`.
 
-- [ ] **1. Multi-tenancy ON — dedicated fkst tenant namespace + dedicated API key. HARD GATE.**
-  - Server config carries a `[tenants]` block with a dedicated fkst tenant (its own namespace + its own `api_key`), and `OPENSANDBOX_INSECURE_SERVER` is NOT set (it bypasses auth entirely).
-  - A request WITHOUT the key is rejected: `curl -s -o /dev/null -w '%{http_code}' $FKST_OSB_BASE_URL/sandboxes` → **401**.
-  - Sandboxes land in the fkst tenant ns, not a shared one: after the probe sandbox (gate 3) exists, `kubectl get pods -n <fkst-tenant-ns> -l fkst-managed=true` lists it.
-  > ⚠️ **2026-07-09 live finding:** the current `opensandbox` release in `opensandbox-system` is SINGLE-tenant — sandboxes land in the shared `ornn-cluster` ns, with no `server.api_key` and no `[tenants]` block (and single-tenant mode leaves the sandbox-proxy path unauthenticated). Enabling fkst against it as-is is a **security regression**.
+- [ ] **1. Dedicated fkst server instance + dedicated API key + dedicated sandbox namespace. HARD GATE.**
+  **VERIFIED fact:** server v0.2.1 has NO multi-tenancy — one `api_key` string, one
+  `[kubernetes].namespace`, one BatchSandbox template per instance (there is no
+  `[tenants]` block in this release), and the create API carries no namespace
+  field. Per-caller separation therefore means a SECOND server instance; the full
+  specification (instance config, key distribution via GCP SM + CSI, namespace,
+  guardrails) is the **[`opensandbox-fkst-tenant/`](opensandbox-fkst-tenant/README.md)** runbook.
+  Gate checks once deployed:
+  - `OPENSANDBOX_INSECURE_SERVER` is NOT set on the instance (it bypasses auth entirely).
+  - A request WITHOUT the key is rejected: `curl -s -o /dev/null -w '%{http_code}' $FKST_OSB_BASE_URL/v1/sandboxes` → **401**.
+  - Sandboxes land in the fkst tenant ns: after the probe sandbox (gate 3) exists, `kubectl -n <fkst-tenant-ns> get pod <probe-id>-0` shows it.
+  - The fkst API key is NOT the chrono-sandbox key (separate GCP SM secrets).
 
 - [ ] **2. Pod template `restartPolicy: Always` + `terminationGracePeriodSeconds: 60`. HARD GATE.**
-  In the fkst-tenant BatchSandbox pod template. With `restartPolicy: Never`, the upstream controller (which counts only container *waiting* reasons as failures) reads `state=Pending` forever for an exited engine → completion/crash detection goes blind. Verify by inspecting the tenant's BatchSandbox template — both fields present with these values.
+  In the fkst-tenant BatchSandbox pod template (the tenant runbook's
+  `batchsandbox-template.yaml` carries both). With `restartPolicy: Never`, the
+  upstream controller (which counts only container *waiting* reasons as failures)
+  reads `state=Pending` forever for an exited engine → completion/crash detection
+  goes blind — and the credential-heal path (re-push after an in-place container
+  restart) can never trigger. NOTE the production chrono tenant's template is
+  `Never`/30s — correct for chrono, **wrong for fkst**; this is exactly why gate 1
+  requires a dedicated instance. Verify by inspecting the fkst tenant's template.
 
-- [ ] **3. `timeout: null` accepted.** Create a probe sandbox with a null timeout → **202**, and confirm it does not auto-expire (BatchSandbox in-tree accepts null; other providers may reject).
+- [x] **3. `timeout: null` accepted — VERIFIED on v0.2.1.** `ensure_timeout_within_limit`
+  returns early on null (the `max_sandbox_timeout_seconds` cap binds only requests
+  that SET a timeout — fkst's env-validation holders), and the batchsandbox
+  provider pops `expireTime` for a null expiry, so session sandboxes never
+  auto-expire (explicit delete + the fleet reaper own their lifecycle). Probe on a
+  deployed instance:
   ```sh
-  curl -s -o /dev/null -w '%{http_code}' -X POST $FKST_OSB_BASE_URL/sandboxes \
-    -H "Authorization: Bearer $FKST_OSB_API_KEY" -H 'Content-Type: application/json' \
-    -d '{"image":"<FKST_POD_IMAGE>","timeout":null}'   # expect 202; note the returned <probe-id>
+  curl -s -X POST $FKST_OSB_BASE_URL/v1/sandboxes \
+    -H "OPEN-SANDBOX-API-KEY: $FKST_OSB_API_KEY" -H 'Content-Type: application/json' \
+    -d '{"image":{"uri":"<FKST_POD_IMAGE>"},"entrypoint":["tail","-f","/dev/null"],
+         "resourceLimits":{"cpu":"250m","memory":"256Mi"},"timeout":null}'
+  # expect 202; note the returned "id" as <probe-id>
   ```
 
-- [ ] **4. Deprecated plain-text diagnostics-logs endpoint present.** GET it on the probe sandbox → **200, plain text** (the client depends on it; verified across server v0.1.14–v0.2.1).
+- [x] **4. Deprecated plain-text `diagnostics/logs` endpoint present — VERIFIED on v0.2.1**
+  (`api/devops.py`; the plain-text form answers when the `scope` param is OMITTED —
+  `scope=` selects the stable JSON diagnostics API, which answers **501** in this
+  release). Probe:
   ```sh
-  curl -s -H "Authorization: Bearer $FKST_OSB_API_KEY" \
-    $FKST_OSB_BASE_URL/sandboxes/<probe-id>/diagnostics-logs   # expect 200, plain text
+  curl -s -H "OPEN-SANDBOX-API-KEY: $FKST_OSB_API_KEY" \
+    "$FKST_OSB_BASE_URL/v1/sandboxes/<probe-id>/diagnostics/logs?tail=5"
+  # expect 200, plain text (Deprecation: true header)
   ```
 
-- [ ] **5. Server version recorded:** `__________` (fill in). The client was written against **v0.2.x** — re-verify gates 3 & 4 on every server upgrade.
+- [x] **5. Server version recorded: v0.2.1** (controller v0.2.0, execd v1.0.20;
+  2026-07-10). The client is written against the `server/v0.2.1` spec tags —
+  re-verify gates 3, 4, and the security note below on every server upgrade.
 
 - [ ] **6. CNI / egress.**
-  - Control-plane → lifecycle server reachable (from a control-plane pod): `curl -s -o /dev/null -w '%{http_code}' $FKST_OSB_BASE_URL/health` → 200.
+  - Control-plane → lifecycle server reachable (from a control-plane pod): `curl -s -o /dev/null -w '%{http_code}' $FKST_OSB_BASE_URL/health` → 200 (the health route is auth-exempt and NOT under `/v1`).
   - Sandbox egress reaches the three required hosts — from the probe sandbox via execd, `curl -sI https://github.com`, `curl -sI <FKST_LLM_BASE_URL host>`, and `curl -sI <chrono-storage host>` each succeed.
-  > **REGRESSION:** OpenSandbox defaults to ALLOW-ALL sandbox egress — looser than the deny-by-default, external-DNS-only NetworkPolicy k8s-customized sessions get (see `networkpolicy.yaml`). The infra team must EITHER configure the egress-policy feature for the fkst tenant OR sign off on the regression:
-  > **Allow-all egress sign-off:** `_______________` (name) / `__________` (date).
+  - **VERIFIED baseline:** the production chrono tenant carries a `sandbox-lockdown`
+    NetworkPolicy (ingress only from `opensandbox-system` + same-namespace; egress
+    only kube-dns + public internet, RFC1918 + GCP metadata blocked). The fkst
+    tenant runbook clones it (`networkpolicy-sandbox-lockdown.yaml`) — apply it in
+    the fkst sandbox namespace; ONLY sign off on allow-all if it is deliberately
+    omitted: `_______________` (name) / `__________` (date).
+    Consequence either way: every endpoint handed to sessions (LLM, storage) must
+    be PUBLIC — in-cluster/RFC1918 URLs black-hole inside a sandbox.
 
 - [ ] **7. Image pullable from the tenant namespace** (or registry auth configured — the tenant's `imagePullSecrets`, or the create-request `image.auth`). Verify a sandbox on `FKST_POD_IMAGE` starts without `ImagePullBackOff`.
 
-- [ ] **8. Quotas sized for the fleet.** The tenant's sandbox-count + CPU/mem `ResourceQuota` covers the expected concurrent session fleet (each sandbox requests `FKST_OSB_SESSION_CPU` / `FKST_OSB_SESSION_MEMORY`). Verify headroom ≥ peak concurrent sessions.
+- [ ] **8. Quotas sized for the fleet.** The tenant's sandbox-count + CPU/mem `ResourceQuota` covers the expected concurrent session fleet (each sandbox requests `FKST_OSB_SESSION_CPU` / `FKST_OSB_SESSION_MEMORY`; the runbook ships a sample). Verify headroom ≥ peak concurrent sessions.
 
 ## E2E smoke runbook (opensandbox mode)
 
@@ -233,6 +269,13 @@ enablement. In opensandbox mode the credential path differs from k8s-customized:
 - The per-session GitHub / App tokens now transit the OpenSandbox **server + proxy as multipart request bodies** (in k8s-customized mode they never leave the cluster's 0400 Secret mounts).
 - The **execd token rides the sandbox env**.
 - The proxy is an additional exposure surface for those credentials.
+- **VERIFIED (v0.2.1):** the proxy-to-sandbox route (`/(v1/)sandboxes/{id}/proxy/{port}/…`)
+  is **API-KEY-EXEMPT** in the server's auth middleware — the per-session
+  `X-EXECD-ACCESS-TOKEN` (enforced by execd: empty/mismatched → 401) is the ONLY
+  auth on the exec plane. Mitigations the review must confirm: the execd token is
+  always set on the create env (never blank), and ingress to the fkst server
+  Service is bounded to the backend's namespace (the tenant runbook's
+  `networkpolicy-server-ingress.yaml`).
 
 Review that path end-to-end, then record the outcome here:
 

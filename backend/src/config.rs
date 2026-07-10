@@ -235,7 +235,9 @@ pub struct PodConfig {
     /// Env: `FKST_LLM_MODEL`.
     pub llm_model: String,
     /// codex `wire_api` injected into the session pod as `FKST_LLM_WIRE_API`.
-    /// Env: `FKST_LLM_WIRE_API`. Default `chat`.
+    /// Env: `FKST_LLM_WIRE_API`. Default `responses` (codex 0.139+ dropped
+    /// `chat`; see [`defaults::llm_wire_api`]) — operators pin a chat-only
+    /// backend explicitly.
     pub llm_wire_api: String,
     /// External DNS resolvers for the isolated session/validation pod's
     /// `dnsConfig.nameservers`. Env: `FKST_POD_DNS_NAMESERVERS`, comma-separated.
