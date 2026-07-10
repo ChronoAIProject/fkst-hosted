@@ -137,6 +137,37 @@ return {
     t.eq(count_calls("codex exec"), 0)
   end,
 
+  test_fix_reconcile_drop_blocks_fixing_issue = function()
+    local event = fix_reconcile()
+    mock_bot_env()
+    mock_issue_review({ "fkst-dev:fixing" }, {
+      core.state_marker(event.proposal_id, "fixing", event.issue_version),
+    })
+
+    local result = run_fix_reconcile(event, opts("fix-reconcile-drop-fixing"))
+    t.eq(result.exit_code, 0)
+    local comment = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload
+    t.is_true(comment.body:find(core.state_marker(event.proposal_id, "blocked", event.issue_version), 1, true) ~= nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:blocked")
+  end,
+
+  test_fix_reconcile_skips_when_reviewed_head_changed = function()
+    local event = fix_reconcile()
+    mock_bot_env()
+    h.mock_default_issue_claim("owner/repo", 42)
+    mock_pr_origin({
+      origin_marker(reviewing().version),
+      core.state_marker(event.proposal_id, "reviewing", event.issue_version),
+    }, "devloop-owner-repo-42-01HY", "feedface")
+
+    local result = h.run_department("departments/reconcile/main.lua", {
+      queue = "devloop_fix_reconcile",
+      payload = event,
+    }, opts("fix-reconcile-head-advanced"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+  end,
+
   test_fix_reconcile_visible_marker_is_idempotent = function()
     local event = fix_reconcile()
     mock_bot_env()

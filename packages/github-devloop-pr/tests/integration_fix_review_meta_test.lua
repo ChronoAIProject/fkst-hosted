@@ -507,7 +507,7 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    mock_pr_fix({ m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") }, branch, "def456")
+    mock_pr_fix({ m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev"), core.state_marker(event.proposal_id, "fixing", event.version), reject_comment }, branch, "def456")
 
     local result = run_fix(event, opts("fix-no-changes-review-meta", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
@@ -517,7 +517,7 @@ return {
     t.is_true(comment_body:find("github-devloop fix escalated to review-meta: no-fix", 1, true) ~= nil)
     t.is_true(comment_body:find("fkst:github-devloop:review-meta:v1", 1, true) ~= nil)
     t.is_true(comment_body:find('dedup="' .. event.review_dedup_key .. '"', 1, true) ~= nil)
-    t.eq(find_raise(result.raises, "devloop_review_meta").payload.schema, "github-devloop.review-meta.v1")
+    t.eq(find_raise(result.raises, "devloop_review_meta").payload.version, core.next_fix_version(event.version))
   end,
 
   test_fix_clean_worktree_with_existing_ahead_commit_reuses_it = function()

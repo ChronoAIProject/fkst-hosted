@@ -23,6 +23,7 @@ local dispatch_liveness = {
 }
 
 local payloads_builders = require("devloop.payloads.builders")
+local conv_reconcile = require("devloop.convergence.reconcile")
 local v_fixing = require("devloop.validators.fixing")
 local m_facts = require("devloop.markers.facts")
 local devloop_logging = require("devloop.logging")
@@ -30,7 +31,13 @@ local devloop_state = require("devloop.state")
 local devloop_commands = require("devloop.commands")
 local spec = {
   consumes = { "devloop_fixing" },
-  produces = { "github-proxy.github_issue_label_request", "github-proxy.github_pr_comment_request", "devloop_review_meta" },
+  produces = {
+    "github-proxy.github_issue_label_request",
+    "github-proxy.github_pr_comment_request",
+    "devloop_review_meta",
+    "devloop_fix_reconcile",
+    "github-devloop-decompose.devloop_decompose",
+  },
   stall_window = "10m",
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
@@ -322,6 +329,21 @@ local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_s
   })
 end
 
+local function fix_at_next_attempt_version(fix)
+  local review_meta = payloads_builders.build_devloop_review_meta_payload({
+    proposal_id = fix.review_proposal_id,
+    dedup_key = fix.review_dedup_key,
+    source_ref = fix.source_ref,
+  }, fix.proposal_id, devloop_state.next_fix_version(fix.version), fix.pr_number, 0, fix.source_ref)
+  local advanced = {}
+  for key, value in pairs(fix) do
+    advanced[key] = value
+  end
+  advanced.version = review_meta.version
+  advanced.dedup_key = review_meta.dedup_key
+  return advanced
+end
+
 local function raise_stale_speculation_refix(repo, issue_number, fix, current_state, current_predecessor_set, reason)
   local next_version = devloop_state.next_fix_version(fix.version)
   local merge_ready = {
@@ -521,6 +543,7 @@ local function run_fix_attempt(plan)
     })
     return {
       kind = "review-meta",
+      completed_without_new_head = true,
       reason = "no-fix",
       detail = result.stdout or result.stderr,
       outcome = "escalated: no-fix",
@@ -558,6 +581,7 @@ local function run_fix_attempt(plan)
   if new_head_sha == plan.fix.reviewed_head_sha then
     return {
       kind = "review-meta",
+      completed_without_new_head = true,
       reason = "no-new-head",
       detail = result.stdout or result.stderr,
       outcome = "escalated: no-new-head",
@@ -623,7 +647,10 @@ local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
   if outcome == nil then
     return
   end
-  recheck_fix_write_gate(repo, fix, branch)
+  local _, current_state = recheck_fix_write_gate(repo, fix, branch)
+  if current_state == nil then
+    return
+  end
   if outcome.kind == "refix" then
     raise_stale_speculation_refix(
       repo,
@@ -639,6 +666,26 @@ local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
     if fix.repair_input == "ci-failure" then
       ci_repair_attempts.raise_attempt_record(repo, fix, outcome.reason or "no-repair", outcome.detail)
       ci_repair_attempts.raise_blocked(repo, issue_number, fix, "own-ci-red-unrepaired", outcome.reason or outcome.detail)
+      return
+    end
+    if outcome.completed_without_new_head == true then
+      local fix_round = devloop_state.version_fix_round(current_state.version)
+      if fix_round >= config.max_fix_rounds() then
+        local fix_reconcile = conv_reconcile.build_devloop_fix_reconcile_payload({
+          proposal_id = fix.proposal_id,
+          review_proposal_id = fix.review_proposal_id,
+          review_dedup_key = fix.review_dedup_key,
+          reviewed_head_sha = fix.reviewed_head_sha,
+          pr_number = fix.pr_number,
+          source_ref = fix.source_ref,
+        }, current_state.version)
+        local decompose = payloads_builders.build_devloop_decompose_payload(fix_reconcile)
+        devloop_logging.log_cas_decision("fix", fix.proposal_id, current_state, "fixing", "blocked", "applied(fix-loop-max-rounds)", "completed fix attempt produced no new head: " .. tostring(outcome.reason))
+        devloop_logging.log_raise("fix", fix.proposal_id, "devloop_fix_reconcile", fix_reconcile)
+        devloop_logging.log_raise("fix", fix.proposal_id, "github-devloop-decompose.devloop_decompose", decompose)
+        return
+      end
+      raise_review_meta(repo, issue_number, fix_at_next_attempt_version(fix), outcome.reason, outcome.detail)
       return
     end
     raise_review_meta(repo, issue_number, fix, outcome.reason, outcome.detail)

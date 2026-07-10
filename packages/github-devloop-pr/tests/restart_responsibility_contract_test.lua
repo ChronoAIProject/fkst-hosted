@@ -95,6 +95,15 @@ return {
     t.is_true(row.dedup_shape:find("<ci_failure_key-or-noci>", 1, true) ~= nil)
     t.eq(row.payload_fields.work_unit_key, "dedup:fixing-work-unit")
     t.eq(row.payload_fields.ci_failure_key, "marker:merge-gate.ci_failure_key")
+    t.eq(row.to_states[3], "blocked")
+    t.eq(row.output_obligation.exits[4], "blocked")
+    t.eq(signature.successors[3].state, "blocked")
+    t.eq(signature.successors[3].output_variant, "fix_budget_exhausted")
+    t.eq(signature.successors[3].terminal, true)
+    t.eq(core.state_successors("fixing")[3], "blocked")
+    -- the fixing->blocked budget-exhaustion escape is terminal (not a second failure family);
+    -- the row must have zero strict restart-responsibility contract errors.
+    t.eq(#core.strict_restart_responsibility_contract_errors(core.restart_transition_table()), 0)
   end,
 
   test_fixing_code_producer_rejects_version_keyed_ci_repair_liveness = function()
