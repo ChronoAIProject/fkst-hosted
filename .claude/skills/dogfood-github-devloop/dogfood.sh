@@ -106,6 +106,10 @@ derive_devloop_pkgs_from_workspace() { # $1 name
 
 pidof_df() { pgrep -f -- "supervise --project-root ${HOST} " 2>/dev/null; }
 latest_log() { ls -t "$LOGDIR/${1}-sv-"*.log 2>/dev/null | head -1; }
+engine_panic_count() { # $1 supervise log; count engine panics, excluding child stderr= blobs
+  sed -E 's/[[:space:]]stderr=.*$//' "$1" 2>/dev/null \
+    | grep -aciE "thread '[^']*' panicked|panicked at|redb.*lock error" || true
+}
 pid_alive_non_zombie() {
   local pid="$1" stat
   kill -0 "$pid" 2>/dev/null || return 1
@@ -406,7 +410,7 @@ launch_one() { # $1 name, $2 restart flag (0|1)
   wait_supervise_ready "$pid" "$log"
   local ready_status=$?
   if [ "$ready_status" -eq 0 ]; then
-    echo "[$name] started pid $pid  panic=$(grep -ac panicked "$log" 2>/dev/null)  log=$log"
+    echo "[$name] started pid $pid  panic=$(engine_panic_count "$log")  log=$log"
   else
     if [ "$ready_status" -eq 1 ]; then
       echo "[$name] FAILED to start; supervise pid $pid exited before readiness; tail:"
@@ -454,7 +458,7 @@ status_one() {
   if [ -z "$p" ]; then echo "[$1] STOPPED   (target $REPO)"; return 0; fi
   local et panic last hv pv
   et=$(ps -o etime= -p $p 2>/dev/null | tr -d ' ')
-  panic=$(grep -ciE "thread '[^']*' panicked|panicked at|redb.*lock error" "$log" 2>/dev/null)
+  panic=$(engine_panic_count "$log")
   last=$(tail -1 "$log" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-44)
   hv=$(git -C "$HOST" rev-parse HEAD 2>/dev/null | cut -c1-8)
   pv=$(git -C "$PKGSRC" rev-parse HEAD 2>/dev/null | cut -c1-8)
@@ -491,7 +495,7 @@ doctor_one() {
   cfg "$1" || return 1
   local p log panic st procpkg proceng verdict; p=$(pidof_df); log=$(latest_log "$1")
   derive_devloop_pkgs_from_workspace "$1" >/dev/null || { printf '  %-9s CONFIG-ERROR (target %s)\n' "$1" "$REPO"; return 0; }
-  panic=$(grep -ac panicked "$log" 2>/dev/null); panic=${panic:-0}
+  panic=$(engine_panic_count "$log"); panic=${panic:-0}
   if [ -z "$p" ]; then printf '  %-9s STOPPED (target %s)\n' "$1" "$REPO"; return 0; fi
   st=$(_proc_stale "$1")   # also fetches origin/dev for $PKGSRC + $SUBSTRATE_SRC
   procpkg=$(grep -aoE "${DEVLOOP_PKGS%% *}@[a-f0-9]+" "$log" 2>/dev/null | tail -1 | cut -d@ -f2)
