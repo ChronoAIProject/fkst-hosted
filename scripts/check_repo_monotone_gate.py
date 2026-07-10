@@ -140,7 +140,10 @@ class Violation:
         else:
             path = moved_paths.get(path, path)
         if path == "packages/github-devloop-pr/departments/merge/main.lua":
-            path = "packages/github-devloop-pr/core/merge_executor.lua"
+            if self.canonical_surface() == "process_merge_queue_tick":
+                path = "packages/github-devloop-pr/core/merge_queue_tick.lua"
+            else:
+                path = "packages/github-devloop-pr/core/merge_executor.lua"
         if path == "libraries/devloop/replayer.lua" and self.surface in (
             "fetch_child_state_fact",
             "require_marker_fact",
