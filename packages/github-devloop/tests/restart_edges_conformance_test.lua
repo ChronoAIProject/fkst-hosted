@@ -15,7 +15,6 @@ local structural_fields = {
 }
 
 local deferred_kinds = {
-  "entry",
   "operator_reentry",
   "timeout",
   "canonicalization",
@@ -244,6 +243,7 @@ return {
   test_restart_edges_schema_is_explicit_about_extracted_and_deferred_kinds = function()
     assert_exact_keys(restart_edges, {
       extract_autonomous_edges = true,
+      extract_entry_edges = true,
       extract_guard_boundary_edges = true,
       schema = true,
     })
@@ -257,8 +257,9 @@ return {
     for index, field in ipairs(structural_fields) do
       t.eq(schema.structural_fields[index], field)
     end
-    assert_exact_keys(schema.extracted_kinds, { autonomous = true, guard_boundary = true })
+    assert_exact_keys(schema.extracted_kinds, { autonomous = true, entry = true, guard_boundary = true })
     t.eq(schema.extracted_kinds.autonomous, true)
+    t.eq(schema.extracted_kinds.entry, true)
     t.eq(schema.extracted_kinds.guard_boundary, true)
     t.eq(#schema.deferred_kinds, #deferred_kinds)
     for index, kind in ipairs(deferred_kinds) do

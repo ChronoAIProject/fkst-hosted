@@ -165,6 +165,7 @@
 {"path":"packages/github-devloop/core/ratchet_slice_ledger.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/ready_split.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/reconcile_requests.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
+{"path":"packages/github-devloop/core/restart/entry_inventory.lua","owner":"issue","reason":"authored entry edges belong to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/restart/liveness_signal_producers/child_state.lua","owner":"shared","reason":"liveness signal producer is shared by issue wait boundaries."}
 {"path":"packages/github-devloop/core/restart/liveness_signal_producers/converge_round.lua","owner":"issue","reason":"liveness signal producer belongs to the parent issue saga."}
 {"path":"packages/github-devloop/core/restart/liveness_signal_producers/dependency_wait.lua","owner":"issue","reason":"liveness signal producer belongs to the parent issue saga."}
