@@ -38,6 +38,7 @@
 {"path":"libraries/devloop/queue.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/queue_starvation.lua","owner":"shared","reason":"queue starvation observation stays issue/integration-side until R2 while redrive targets the PR queue."}
 {"path":"libraries/devloop/replay_fields.lua","owner":"shared","reason":"replay payload field resolver is shared by issue and PR replay paths."}
+{"path":"libraries/devloop/replay_required_facts.lua","owner":"shared","reason":"required-fact gathering extracted from replayer.lua; shared by issue and PR replay paths."}
 {"path":"libraries/devloop/replay_thinking_convergence.lua","owner":"issue","reason":"issue-side thinking replay derives durable converge-round true-stall into blocked without PR package authority."}
 {"path":"libraries/devloop/replayer.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/requests.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
