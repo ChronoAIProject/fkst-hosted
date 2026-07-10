@@ -52,9 +52,15 @@ data:
   # --- OpenSandbox backend (only when FKST_POD_MODE=opensandbox) ---
   # These non-secret knobs are validated only in opensandbox mode; the two secrets
   # (FKST_OSB_API_KEY, FKST_OSB_EXECD_TOKEN_SEED) are in secret.example.yaml — NEVER
-  # here. FKST_POD_IMAGE + FKST_POD_NAMESPACE still apply in opensandbox mode; the
+  # here. Production delivers them as CSI-mounted files instead: set the non-secret
+  # FKST_OSB_API_KEY_FILE / FKST_OSB_EXECD_TOKEN_SEED_FILE vars (safe HERE — they
+  # are paths, not secrets) to the mount paths; a *_FILE var wins over its inline
+  # twin, contents are trimmed, unreadable/empty files fail closed.
+  # FKST_POD_IMAGE + FKST_POD_NAMESPACE still apply in opensandbox mode; the
   # other FKST_POD_* knobs (service account / DNS / runtime class / termination grace)
   # are IGNORED (the sandbox template owns them) and warned about at startup if set.
+  # FKST_OSB_API_KEY_FILE: "/var/secrets/opensandbox-fkst-api-key"
+  # FKST_OSB_EXECD_TOKEN_SEED_FILE: "/var/secrets/fkst-osb-execd-token-seed"
   # FKST_OSB_BASE_URL: "https://sandbox.chrono-ai.fun/api" # must be a valid URL
   # FKST_OSB_SESSION_CPU: "500m"      # sandbox resourceLimits.cpu (non-blank)
   # FKST_OSB_SESSION_MEMORY: "512Mi"  # sandbox resourceLimits.memory (non-blank)
