@@ -416,3 +416,77 @@ async fn slow_foreground_command_within_its_own_budget_is_not_severed() {
         .expect("a foreground command within its own budget must not be severed");
     assert_eq!(cmd.id, "cmd-42");
 }
+
+/// The auth probe sends the WRONG token (never the real one) plus the API key,
+/// and a 401 proves enforcement → `Rejected`.
+#[tokio::test]
+async fn auth_probe_sends_wrong_token_and_maps_401_to_rejected() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(proxy("/files/info")))
+        .and(query_param("path", "/"))
+        .and(header(API_KEY_HEADER, API_KEY))
+        .and(header(EXECD_TOKEN_HEADER, "fkst-auth-probe-invalid"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+
+    let outcome = client(&server.uri())
+        .probe_auth_rejection()
+        .await
+        .expect("401 is the enforced answer");
+    assert_eq!(outcome, AuthProbeOutcome::Rejected);
+}
+
+/// 403 is an equivalent rejection.
+#[tokio::test]
+async fn auth_probe_maps_403_to_rejected() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(proxy("/files/info")))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&server)
+        .await;
+
+    let outcome = client(&server.uri())
+        .probe_auth_rejection()
+        .await
+        .expect("403 is an equivalent rejection");
+    assert_eq!(outcome, AuthProbeOutcome::Rejected);
+}
+
+/// A 2xx for the WRONG token is the security failure: `Accepted{status}` — never
+/// an `OsbError` (it must not be mistaken for an ordinary API failure).
+#[tokio::test]
+async fn auth_probe_maps_2xx_to_accepted_security_failure() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(proxy("/files/info")))
+        .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+        .mount(&server)
+        .await;
+
+    let outcome = client(&server.uri())
+        .probe_auth_rejection()
+        .await
+        .expect("a 2xx is a (well-formed) security-failure outcome");
+    assert_eq!(outcome, AuthProbeOutcome::Accepted { status: 200 });
+}
+
+/// Any other status (holder gone, proxy blip) is an ordinary infrastructure
+/// failure — an `OsbError::Api`, NOT a security verdict.
+#[tokio::test]
+async fn auth_probe_maps_other_statuses_to_api_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(proxy("/files/info")))
+        .respond_with(ResponseTemplate::new(502).set_body_string("bad gateway"))
+        .mount(&server)
+        .await;
+
+    let err = client(&server.uri())
+        .probe_auth_rejection()
+        .await
+        .expect_err("a 502 is an infrastructure failure");
+    assert!(matches!(err, OsbError::Api { status: 502, .. }), "{err:?}");
+}

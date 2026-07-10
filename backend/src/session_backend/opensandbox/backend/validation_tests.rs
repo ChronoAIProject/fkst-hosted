@@ -40,6 +40,13 @@ async fn mount_holder_flow(server: &MockServer, logs_body: &str) {
         )))
         .mount(server)
         .await;
+    // The exec-plane security gate: the probe's WRONG token is rejected (401) —
+    // the enforced answer that lets the run proceed.
+    Mock::given(method("GET"))
+        .and(path("/v1/sandboxes/holder-1/proxy/44772/files/info"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(server)
+        .await;
     Mock::given(method("POST"))
         .and(path("/v1/sandboxes/holder-1/proxy/44772/files/upload"))
         .respond_with(ResponseTemplate::new(200))
@@ -134,6 +141,56 @@ async fn run_validation_treats_unparseable_output_as_failed_and_tears_down() {
     assert!(
         holder_deleted(&server).await,
         "the holder is deleted on the failure path too"
+    );
+}
+
+#[tokio::test]
+async fn run_validation_fails_and_tears_down_when_execd_accepts_a_wrong_token() {
+    // The security gate: a holder whose execd ACCEPTS the wrong-token probe (2xx)
+    // is an unauthenticated exec surface — the run refuses to proceed with a
+    // conservative Failed verdict naming the property, and the drop-guard still
+    // deletes the holder. Nothing secret-adjacent (spec upload / command) runs.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/sandboxes"))
+        .respond_with(ResponseTemplate::new(202).set_body_json(sandbox_json(
+            HOLDER_ID,
+            "Running",
+            "2026-07-09T00:00:00Z",
+            json!({}),
+        )))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/sandboxes/holder-1/proxy/44772/files/info"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path("/v1/sandboxes/holder-1"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+
+    let backend = backend(&server.uri(), osb_config());
+    let outcome = backend
+        .run_validation_impl(&req())
+        .await
+        .expect("a security refusal is a verdict, not an infra error");
+    match outcome {
+        ValidationOutcome::Failed { stderr_tail, .. } => {
+            assert!(
+                stderr_tail.contains("execd accepted an invalid access token"),
+                "{stderr_tail}"
+            );
+        }
+        other => panic!("expected the security Failed verdict, got {other:?}"),
+    }
+
+    // The drop-guard cleanup fires on this early-exit path too.
+    assert!(
+        holder_deleted(&server).await,
+        "the holder is deleted after the security refusal"
     );
 }
 

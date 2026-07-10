@@ -24,7 +24,7 @@ use secrecy::ExposeSecret;
 use crate::install::{ValidateSpec, VALIDATE_ENV_SUBCOMMAND, VALIDATE_SPEC_PATH};
 use crate::session_backend::opensandbox::derive_execd_token;
 use crate::session_backend::opensandbox::dto::{CreateSandboxRequest, OsbError};
-use crate::session_backend::opensandbox::{ExecdClient, OsbLifecycleClient};
+use crate::session_backend::opensandbox::{AuthProbeOutcome, ExecdClient, OsbLifecycleClient};
 use crate::session_backend::verdict::{
     last_non_empty_line, parse_verdict_line, verdict_timed_out, verdict_unparseable,
 };
@@ -97,9 +97,29 @@ impl OsbBackend {
             sandbox_id: holder_id.clone(),
         };
 
-        // 3. Upload the validate spec, then run the SAME command the Kubernetes
-        //    validation pod runs (`<entrypoint binary> validate-env`) through execd.
+        // 3. SECURITY GATE (before anything secret-adjacent goes near the holder):
+        //    prove the deployed execd actually REJECTS a wrong access token. The
+        //    lifecycle server's proxy route is API-key-exempt, so the per-session
+        //    execd token is the ONLY auth on the exec plane — a holder that accepts
+        //    a bad token means the tenant's sandboxes are an unauthenticated exec
+        //    surface, and validation refuses to proceed (conservative Failed
+        //    verdict, never persisted as trusted). Probe infrastructure errors
+        //    (`Err`) propagate as ordinary backend failures, NOT verdicts.
         let execd = (self.execd_factory)(&holder_id, &run_id);
+        match execd.probe_auth_rejection().await? {
+            AuthProbeOutcome::Rejected => {}
+            AuthProbeOutcome::Accepted { status } => {
+                tracing::error!(
+                    sandbox_id = %holder_id,
+                    status,
+                    "opensandbox run_validation: execd ACCEPTED an invalid access token — exec plane is unauthenticated; refusing to validate"
+                );
+                return Ok(verdict_execd_unauthenticated());
+            }
+        }
+
+        // 4. Upload the validate spec, then run the SAME command the Kubernetes
+        //    validation pod runs (`<entrypoint binary> validate-env`) through execd.
         let spec = ValidateSpec {
             install: req.install.clone(),
             variables: req.variables.clone(),
@@ -117,7 +137,7 @@ impl OsbBackend {
             .saturating_mul(1000);
         let cmd = execd.run_command(&command, Some(timeout_ms), false).await?;
 
-        // 4. Poll the command to completion, bounded by a hard wall-clock timeout so a
+        // 5. Poll the command to completion, bounded by a hard wall-clock timeout so a
         //    holder whose command never finishes still aborts → conservative timed-out
         //    `Failed`.
         let overall = Duration::from_secs(
@@ -135,7 +155,7 @@ impl OsbBackend {
             return Ok(verdict_timed_out());
         }
 
-        // 5. Read the command output and parse the LAST line as the verdict. A totally
+        // 6. Read the command output and parse the LAST line as the verdict. A totally
         //    unreadable log is an infra error (`?`); readable-but-unparseable is the
         //    conservative `Failed` — byte-identical to the Kubernetes `capture_outcome`.
         let (logs, _cursor) = execd.command_logs(&cmd.id, 0).await?;
@@ -190,6 +210,21 @@ impl OsbBackend {
             }
         }
         Ok(deleted)
+    }
+}
+
+/// The conservative `Failed` verdict for a holder whose execd ACCEPTED an invalid
+/// access token (the exec-plane security gate). OSB-specific (the Kubernetes backend
+/// has no proxy/execd surface), so it lives here rather than in the shared
+/// [`crate::session_backend::verdict`] builders; the shape mirrors them exactly —
+/// an untrusted result that must never persist the environment.
+fn verdict_execd_unauthenticated() -> ValidationOutcome {
+    ValidationOutcome::Failed {
+        failed_command_index: 0,
+        failed_command: String::new(),
+        exit_code: -1,
+        timed_out: false,
+        stderr_tail: "execd accepted an invalid access token — exec plane is unauthenticated; refusing to validate".to_string(),
     }
 }
 

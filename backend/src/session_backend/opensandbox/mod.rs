@@ -44,6 +44,6 @@ pub mod token;
 
 pub use backend::OsbBackend;
 pub use dto::*;
-pub use execd::ExecdClient;
+pub use execd::{AuthProbeOutcome, ExecdClient};
 pub use lifecycle::OsbLifecycleClient;
 pub use token::derive_execd_token;

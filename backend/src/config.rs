@@ -528,6 +528,22 @@ impl Config {
         // and fails closed on a partial config (naming the missing vars).
         let storage = ChronoStorageConfig::from_vars(&vars)?;
 
+        // Egress-safety gate (opensandbox mode only): every endpoint HANDED TO
+        // SESSIONS must be publicly reachable — the sandbox-lockdown NetworkPolicy
+        // blocks RFC1918 / cluster-internal egress, so a private value here would
+        // black-hole mid-session. Runs AFTER storage resolves so the storage URLs
+        // (which ride the per-session creds files) are vetted too. Deliberately
+        // NOT vetted: FKST_OSB_BASE_URL (backend→server, intentionally in-cluster).
+        if opensandbox.is_some() {
+            let mut sandbox_endpoints: Vec<(&str, &str)> =
+                vec![("FKST_LLM_BASE_URL", pod.llm_base_url.as_str())];
+            if let Some(storage) = &storage {
+                sandbox_endpoints.push(("FKST_STORAGE_BASE_URL", storage.base_url.as_str()));
+                sandbox_endpoints.push(("FKST_NYXID_TOKEN_URL", storage.nyxid_token_url.as_str()));
+            }
+            crate::osb_config::ensure_sandbox_endpoints_reachable(&sandbox_endpoints)?;
+        }
+
         // On-demand session-log download config (FKST_LOG_ADMINS,
         // FKST_PUBLIC_BASE_URL, FKST_GITHUB_OAUTH_*). Shares the same `vars`
         // snapshot; fails closed only on a half-configured OAuth id/secret pair.
@@ -781,6 +797,59 @@ mod tests {
         assert!(err
             .to_string()
             .contains("FKST_OSB_BASE_URL must be a valid URL when FKST_POD_MODE=opensandbox"));
+    }
+
+    #[test]
+    fn opensandbox_mode_rejects_cluster_internal_session_endpoints() {
+        // The sandbox-lockdown egress policy blocks RFC1918 / cluster DNS, so an
+        // in-cluster LLM URL handed to sessions must fail closed at startup —
+        // naming the var — instead of black-holing mid-session.
+        let mut v = opensandbox_dispatch_vars();
+        v.push((
+            "FKST_LLM_BASE_URL".to_string(),
+            "http://llm.internal.svc.cluster.local/v1".to_string(),
+        ));
+        let err = Config::from_vars(v)
+            .expect_err("cluster-internal LLM URL must fail closed in opensandbox mode");
+        assert!(matches!(err, AppError::Config(_)));
+        let msg = err.to_string();
+        assert!(msg.contains("FKST_LLM_BASE_URL"), "{msg}");
+        assert!(msg.contains("sandbox"), "{msg}");
+    }
+
+    #[test]
+    fn opensandbox_mode_vets_storage_urls_when_configured() {
+        // The chrono-storage URLs ride the per-session creds files, so they are
+        // sandbox-facing too: a private storage base URL fails closed by name.
+        let mut v = opensandbox_dispatch_vars();
+        v.extend(vars(&[
+            ("FKST_STORAGE_BASE_URL", "http://minio.storage.svc"),
+            ("FKST_STORAGE_BUCKET", "fkst-session-logs"),
+            ("FKST_NYXID_TOKEN_URL", "https://nyx.example/oauth/token"),
+            ("FKST_NYXID_CLIENT_ID", "cid"),
+            ("FKST_NYXID_CLIENT_SECRET", "sec"),
+        ]));
+        let err = Config::from_vars(v)
+            .expect_err("cluster-internal storage URL must fail closed in opensandbox mode");
+        assert!(err.to_string().contains("FKST_STORAGE_BASE_URL"));
+    }
+
+    #[test]
+    fn k8s_customized_mode_does_not_vet_session_endpoints() {
+        // The SAME cluster-internal LLM URL loads fine under the default
+        // k8s-customized mode — the egress gate applies ONLY in opensandbox mode
+        // (k8s sessions get the repo's own NetworkPolicy with different rules).
+        let v = vars(&[
+            ("FKST_POD_DISPATCH", "true"),
+            ("FKST_POD_IMAGE", "registry/fkst-control-plane:1.0"),
+            ("FKST_LLM_API_KEY", "sk-test"),
+            ("FKST_GITHUB_BOT_LOGIN", "fkst-bot"),
+            (
+                "FKST_LLM_BASE_URL",
+                "http://llm.internal.svc.cluster.local/v1",
+            ),
+        ]);
+        Config::from_vars(v).expect("k8s-customized mode does not vet sandbox endpoints");
     }
 
     #[test]
