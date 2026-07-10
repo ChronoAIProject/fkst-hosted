@@ -114,6 +114,7 @@ public = [
   "devloop.restart.pr_review_replay_facts",
   "devloop.restart_actionable_epoch",
   "devloop.restart_edges",
+  "devloop.restart_sinks",
   "devloop.restart_responsibility_contract",
   "devloop.rounds",
   "devloop.saga_conformance",

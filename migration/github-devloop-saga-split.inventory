@@ -57,6 +57,7 @@
 {"path":"libraries/devloop/restart/issue_lifecycle.lua","owner":"shared","reason":"shared issue restart lifecycle provider used by github-devloop and ops diagnostics."}
 {"path":"libraries/devloop/restart_actionable_epoch.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/restart_edges.lua","owner":"shared","reason":"pure autonomous restart-edge extractor shared by issue and PR lifecycle conformance."}
+{"path":"libraries/devloop/restart_sinks.lua","owner":"shared","reason":"pure lifecycle-sink inventory validator and coverage arbiter shared by issue and PR owners."}
 {"path":"libraries/devloop/restart_responsibility_contract.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/rounds.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/saga_conformance.lua","owner":"shared","reason":"shared semantic conformance hook used by saga packages to expose restart-transition proof obligations."}
@@ -125,6 +126,7 @@
 {"path":"packages/github-devloop-pr/core/restart/marker_fields/review_result.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/restart/marker_fields/state.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/restart/operator_reentry_inventory.lua","owner":"pr","reason":"authored operator reentry edges belong to the PR saga authority."}
+{"path":"packages/github-devloop-pr/core/restart/sink_inventory.lua","owner":"pr","reason":"authored lifecycle-sink classifications belong to the PR saga authority."}
 {"path":"packages/github-devloop-pr/core/restart/required_replay_payload_fields/fixing.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/restart/required_replay_payload_fields/index.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/restart/transitions/blocked.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
@@ -207,6 +209,7 @@
 {"path":"packages/github-devloop/core/restart/marker_fields/review_result.lua","owner":"issue","reason":"marker fields belong to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/restart/marker_fields/state.lua","owner":"shared","reason":"marker fields are shared by the issue/PR seam."}
 {"path":"packages/github-devloop/core/restart/operator_reentry_inventory.lua","owner":"issue","reason":"authored operator reentry edges belong to the parent issue saga authority."}
+{"path":"packages/github-devloop/core/restart/sink_inventory.lua","owner":"issue","reason":"authored lifecycle-sink classifications belong to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/restart/required_replay_payload_fields/fixing.lua","owner":"issue","reason":"required replay payload fields belong to the parent issue saga."}
 {"path":"packages/github-devloop/core/restart/required_replay_payload_fields/index.lua","owner":"issue","reason":"required replay payload fields belong to the parent issue saga."}
 {"path":"packages/github-devloop/core/span_conformance.lua","owner":"cross-cutting","reason":"package-owned conformance for github-devloop span source-shape ratchet."}
