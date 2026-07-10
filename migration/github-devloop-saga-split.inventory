@@ -101,6 +101,7 @@
 {"path":"packages/github-devloop-pr/core/merge_runtime_files.lua","owner":"pr","reason":"github-devloop-pr owns PR merge runtime file paths after extraction."}
 {"path":"packages/github-devloop-pr/core/pr_label_requests.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/pr_review_replayer.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/entry_inventory.lua","owner":"pr","reason":"authored entry edges belong to the PR saga authority."}
 {"path":"packages/github-devloop-pr/core/restart/liveness_signal_producers/index.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/restart/liveness_signal_producers/merge_gate_wait.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/restart/liveness_signal_producers/review_converge_round.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
