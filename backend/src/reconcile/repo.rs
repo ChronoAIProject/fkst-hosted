@@ -82,6 +82,21 @@ pub async fn reconcile_repo(
         {
             latched_config_rejected.insert(issue.number);
         }
+        // Deployment-wide access policy: a trigger issue authored by a user who
+        // is not allowlisted is IGNORED before parsing — no registration (so no
+        // spawn, on ANY path: webhook nudge or full resync), and no invalid-config
+        // marker either (an unauthorized author gets zero service interaction).
+        // Removing an author from the list de-desires their sessions: the live pod
+        // becomes an orphan the planner tears down on the next reconcile.
+        if !ctx.config.access.allows(issue.user_id, &issue.user_login) {
+            tracing::info!(
+                repo = %format!("{}/{}", repo.owner, repo.name),
+                issue = issue.number,
+                author_id = issue.user_id,
+                "access policy: trigger issue author not allowlisted; ignoring"
+            );
+            continue;
+        }
         match parse_registration(installation_id, repo, issue) {
             Ok(reg) => regs.push(reg),
             Err(marker) => invalid.push(marker),

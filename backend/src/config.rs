@@ -288,6 +288,11 @@ pub struct Config {
     /// `id` (never a client-supplied value) keys the user's `fkst-user-<id>`
     /// objects. Env: `FKST_GITHUB_API_BASE_URL`. Default `https://api.github.com`.
     pub github_api_base_url: String,
+    /// Deployment-wide GitHub-identity access policy (`FKST_ACCESS_ALLOWED_USERS`,
+    /// comma-separated numeric ids and/or logins). Unset = open; set = only the
+    /// listed identities pass the token-authenticated routes and only their
+    /// trigger issues spawn sessions. See [`crate::access_policy`].
+    pub access: crate::access_policy::AccessPolicy,
     /// Max bytes for a single inline vault value (#138). Env:
     /// `FKST_HOSTED_VAULT_VALUE_BYTE_CAP`. Default 65536, zero rejected.
     pub vault_value_byte_cap: usize,
@@ -334,6 +339,7 @@ impl Default for Config {
             log_level: defaults::log_level(),
             request_timeout_secs: defaults::request_timeout_secs(),
             github_api_base_url: defaults::github_api_base_url(),
+            access: crate::access_policy::AccessPolicy::default(),
             vault_value_byte_cap: defaults::vault_value_byte_cap(),
             vault_entries_per_scope_cap: defaults::vault_entries_per_scope_cap(),
             llm_api_key: SecretString::from(String::new()),
@@ -551,6 +557,10 @@ impl Config {
         // snapshot; fails closed only on a half-configured OAuth id/secret pair.
         let log = LogConfig::from_vars(&vars)?;
 
+        // Deployment-wide access policy (FKST_ACCESS_ALLOWED_USERS). Never fails:
+        // unset = open, set = enforced (set-but-empty = enforced deny-all).
+        let access = crate::access_policy::AccessPolicy::from_vars(&vars);
+
         Ok(Config {
             port: http.port,
             bind_addr: http.bind_addr,
@@ -560,6 +570,7 @@ impl Config {
             vault_entries_per_scope_cap: http.vault_entries_per_scope_cap,
             llm_api_key: SecretString::from(llm_api_key.unwrap_or_default()),
             github_api_base_url: webhook.github_api_base_url.trim().to_string(),
+            access,
             pod,
             opensandbox,
             env,
@@ -834,6 +845,21 @@ mod tests {
         let err = Config::from_vars(v)
             .expect_err("cluster-internal storage URL must fail closed in opensandbox mode");
         assert!(err.to_string().contains("FKST_STORAGE_BASE_URL"));
+    }
+
+    #[test]
+    fn access_allowlist_parses_and_defaults_open() {
+        // Unset → open (backward compatible).
+        let config = Config::from_vars(vars(&[])).expect("empty config loads");
+        assert!(!config.access.enforced());
+        assert!(config.access.allows(1, "anyone"));
+        // Set → enforced with the parsed entries.
+        let config = Config::from_vars(vars(&[("FKST_ACCESS_ALLOWED_USERS", "583231, @alice")]))
+            .expect("config with allowlist loads");
+        assert!(config.access.enforced());
+        assert!(config.access.allows(583231, "x"));
+        assert!(config.access.allows(2, "Alice"));
+        assert!(!config.access.allows(2, "mallory"));
     }
 
     #[test]

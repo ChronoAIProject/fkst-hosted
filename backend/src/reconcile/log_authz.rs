@@ -49,17 +49,9 @@ pub fn is_authorized(
         .any(|entry| entry_matches(entry, &requester_id_str, requester_login))
 }
 
-/// Whether one allow-list `entry` names the caller. An entry matches when — after
-/// trimming and ignoring a single leading `@` — it equals the caller's numeric id
-/// (as a decimal string) OR the caller's login (ASCII case-insensitive). An empty
-/// normalized entry never matches (so blank/junk tokens can never grant access).
-fn entry_matches(entry: &str, requester_id_str: &str, requester_login: &str) -> bool {
-    let normalized = entry.trim().trim_start_matches('@');
-    if normalized.is_empty() {
-        return false;
-    }
-    normalized == requester_id_str || normalized.eq_ignore_ascii_case(requester_login)
-}
+// The entry matcher is shared with the deployment-wide access policy so the two
+// allowlist syntaxes can never drift — see `crate::access_policy::entry_matches`.
+use crate::access_policy::entry_matches;
 
 #[cfg(test)]
 #[path = "log_authz_tests.rs"]

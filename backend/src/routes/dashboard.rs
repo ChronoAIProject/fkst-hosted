@@ -672,6 +672,7 @@ fn bearer_token(headers: &HeaderMap) -> Result<SecretString, AppError> {
     responses(
         (status = 200, description = "The cached dashboard (nulls until the first pull)", body = DashboardResponse),
         (status = 401, description = "Missing or invalid GitHub token", body = ErrorEnvelope),
+        (status = 403, description = "Verified GitHub identity not allowlisted (FKST_ACCESS_ALLOWED_USERS)", body = ErrorEnvelope),
         (status = 503, description = "Dashboard storage is not configured / unavailable", body = ErrorEnvelope),
     )
 )]
@@ -710,6 +711,7 @@ async fn get_dashboard(
     responses(
         (status = 202, description = "Pull started; poll the returned job id", body = PullJob),
         (status = 401, description = "Missing or invalid GitHub token", body = ErrorEnvelope),
+        (status = 403, description = "Verified GitHub identity not allowlisted (FKST_ACCESS_ALLOWED_USERS)", body = ErrorEnvelope),
         (status = 503, description = "Dashboard storage is not configured", body = ErrorEnvelope),
     )
 )]
@@ -752,7 +754,7 @@ async fn start_pull(
     responses(
         (status = 200, description = "The pull job's current progress/state", body = PullJob),
         (status = 401, description = "Missing or invalid GitHub token", body = ErrorEnvelope),
-        (status = 403, description = "The job belongs to a different user", body = ErrorEnvelope),
+        (status = 403, description = "The job belongs to a different user, or the verified GitHub identity is not allowlisted (FKST_ACCESS_ALLOWED_USERS)", body = ErrorEnvelope),
         (status = 404, description = "Unknown job id", body = ErrorEnvelope),
     )
 )]

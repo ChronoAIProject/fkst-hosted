@@ -37,6 +37,13 @@ data:
   # Only a GitHub issues.opened carrying this label auto-triggers a session.
   FKST_WEBHOOK_TRIGGER_LABEL: "fkst"
 
+  # --- Deployment-wide access allowlist (OPTIONAL) ---
+  # Comma-separated GitHub numeric ids and/or logins. Unset = open. Set = only
+  # these identities pass the token-authenticated APIs, and only their trigger
+  # issues spawn sessions (unlisted users get 403 / are ignored; removal tears
+  # their sessions down on the next reconcile). Ids preferred (rename-stable).
+  # FKST_ACCESS_ALLOWED_USERS: "583231,@your-github-login"
+
   # --- Pod-per-session dispatch (one K8s Job per substrate session) ---
   # FKST_POD_IMAGE is the SAME image this control plane runs; the session Job
   # re-execs it in `run-session` mode. Keep it in lockstep with the Deployment's
