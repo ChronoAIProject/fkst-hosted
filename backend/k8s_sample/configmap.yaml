@@ -41,7 +41,26 @@ data:
   # re-execs it in `run-session` mode. Keep it in lockstep with the Deployment's
   # image (kustomization.yaml `images:`).
   FKST_POD_DISPATCH: "true"
+  # Session-execution backend. Default value is "k8s-customized" (one K8s Job per
+  # session). "opensandbox" (one OpenSandbox sandbox per session) is available; when
+  # selected it REQUIRES the FKST_OSB_* block below (+ the two FKST_OSB_* Secrets in
+  # secret.example.yaml). Missing/invalid FKST_OSB_* vars fail closed at startup.
+  # Leave unset for the default.
+  # FKST_POD_MODE: "k8s-customized"
   FKST_POD_IMAGE: "fkst-control-plane:dev"
+
+  # --- OpenSandbox backend (only when FKST_POD_MODE=opensandbox) ---
+  # These non-secret knobs are validated only in opensandbox mode; the two secrets
+  # (FKST_OSB_API_KEY, FKST_OSB_EXECD_TOKEN_SEED) are in secret.example.yaml — NEVER
+  # here. FKST_POD_IMAGE + FKST_POD_NAMESPACE still apply in opensandbox mode; the
+  # other FKST_POD_* knobs (service account / DNS / runtime class / termination grace)
+  # are IGNORED (the sandbox template owns them) and warned about at startup if set.
+  # FKST_OSB_BASE_URL: "https://sandbox.chrono-ai.fun/api" # must be a valid URL
+  # FKST_OSB_SESSION_CPU: "500m"      # sandbox resourceLimits.cpu (non-blank)
+  # FKST_OSB_SESSION_MEMORY: "512Mi"  # sandbox resourceLimits.memory (non-blank)
+  # FKST_OSB_ENTRYPOINT: "/usr/local/bin/fkst-control-plane" # absolute path
+  # FKST_OSB_USE_SERVER_PROXY: "true" # only "true" is supported ("false" fails closed)
+  # FKST_OSB_INSPECT_HEALTH: "false"  # reserved toggle; no behaviour reads it yet
   FKST_POD_SERVICE_ACCOUNT: "fkst-session-runner"
   FKST_POD_RUN_TTL_SECS: "600" # ttlSecondsAfterFinished; > 0
   FKST_POD_ACTIVE_DEADLINE_SECS: "7200" # activeDeadlineSeconds; > 0

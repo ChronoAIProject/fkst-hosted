@@ -32,13 +32,10 @@ use utoipa_axum::routes;
 use crate::config::Config;
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
-use crate::k8s::env_store::{
-    content_hash, count_environments, delete_environment, env_object_name, get_environment,
-    list_environments, put_environment, EnvRecord, EnvSummary,
-};
-use crate::k8s::env_validator::{validate_environment, ValidationOutcome};
-use crate::k8s::KubeClient;
+use crate::k8s::env_store::{content_hash, env_object_name, EnvRecord, EnvStore, EnvSummary};
+use crate::k8s::env_validator::validate_environment;
 use crate::reserved_env::{is_reserved_env_key, LLM_ENV_KEY};
+use crate::session_backend::ValidationOutcome;
 use crate::state::AppState;
 
 /// The maximum length of an environment `name` (before the id/prefix budget).
@@ -244,11 +241,11 @@ fn summary_from_record(summary: EnvSummary) -> EnvironmentSummary {
     }
 }
 
-/// Build a Kubernetes client bound to the control-plane namespace the environment
-/// objects live in. An unreachable cluster surfaces as `503`, never a leaked
-/// client detail.
-async fn env_store_client(state: &AppState) -> Result<KubeClient, AppError> {
-    KubeClient::from_inferred(&state.config.pod.namespace)
+/// Build the named-environment store bound to the control-plane namespace the
+/// environment objects live in. An unreachable cluster surfaces as `503`, never a
+/// leaked client detail.
+async fn env_store(state: &AppState) -> Result<EnvStore, AppError> {
+    EnvStore::from_inferred(&state.config.pod.namespace)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "env store: kubernetes client unavailable");
@@ -288,19 +285,19 @@ async fn put_user_environment(
     validate_entries(&spec.variables, config)?;
     validate_entries(&spec.secrets, config)?;
 
-    let kube = env_store_client(&state).await?;
+    let store = env_store(&state).await?;
 
     // The sorted secret key NAMES feed the content hash + the view (never values).
     let secret_key_names: Vec<String> = spec.secrets.keys().cloned().collect();
     let new_hash = content_hash(&spec.install, &spec.variables, &secret_key_names);
 
     // Existing env drives replace-detection, the per-user cap, and idempotency.
-    let existing = get_environment(&kube, user.id, &name).await?;
+    let existing = store.get_environment(user.id, &name).await?;
 
     // 2. Per-user cap: only a NEW name may push the owner over the ceiling; a
     //    replace of an existing env is always allowed (it does not grow the set).
     if existing.is_none() {
-        let count = count_environments(&kube, user.id).await?;
+        let count = store.count_environments(user.id).await?;
         if count >= config.env.max_per_user {
             return Err(AppError::Unprocessable(format!(
                 "environment cap reached: at most {} named environments per user",
@@ -322,12 +319,16 @@ async fn put_user_environment(
         }
     }
 
-    // 4. Validate in the isolated pod. Err (429 capacity / infra) propagates; a
-    //    Failed verdict persists NOTHING and renders the detailed 422; only a
-    //    Passed verdict continues to persistence.
+    // 4. Validate in the isolated pod (via the session backend). Err (429 capacity /
+    //    infra) propagates; a Failed verdict persists NOTHING and renders the detailed
+    //    422; only a Passed verdict continues to persistence. The backend is built once
+    //    at startup — `None` (no cluster) is a 503 for the validate path.
+    let backend = state.session_backend.as_deref().ok_or_else(|| {
+        AppError::Unavailable("environment validation backend unavailable".to_string())
+    })?;
     let command_count = spec.install.len();
     match validate_environment(
-        &kube,
+        backend,
         config,
         user.id,
         &user.login,
@@ -370,19 +371,19 @@ async fn put_user_environment(
     //    fresh RFC3339 stamp; the validation image records provenance.
     let validated_at = Utc::now().to_rfc3339();
     let image = config.pod.image.clone().unwrap_or_default();
-    put_environment(
-        &kube,
-        user.id,
-        &user.login,
-        &name,
-        &spec.install,
-        &spec.variables,
-        &spec.secrets,
-        &validated_at,
-        &new_hash,
-        &image,
-    )
-    .await?;
+    store
+        .put_environment(
+            user.id,
+            &user.login,
+            &name,
+            &spec.install,
+            &spec.variables,
+            &spec.secrets,
+            &validated_at,
+            &new_hash,
+            &image,
+        )
+        .await?;
 
     let replaced = existing.is_some();
     let status = if replaced {
@@ -418,8 +419,8 @@ async fn list_user_environments(
     State(state): State<AppState>,
     user: GithubUser,
 ) -> Result<Json<EnvironmentList>, AppError> {
-    let kube = env_store_client(&state).await?;
-    let summaries = list_environments(&kube, user.id).await?;
+    let store = env_store(&state).await?;
+    let summaries = store.list_environments(user.id).await?;
     let environments = summaries.into_iter().map(summary_from_record).collect();
     Ok(Json(EnvironmentList { environments }))
 }
@@ -443,8 +444,8 @@ async fn get_user_environment(
     Path(name): Path<String>,
     user: GithubUser,
 ) -> Result<Json<EnvironmentView>, AppError> {
-    let kube = env_store_client(&state).await?;
-    match get_environment(&kube, user.id, &name).await? {
+    let store = env_store(&state).await?;
+    match store.get_environment(user.id, &name).await? {
         Some(record) => Ok(Json(view_from_record(record))),
         None => Err(AppError::NotFound(format!("no environment named {name:?}"))),
     }
@@ -469,8 +470,8 @@ async fn delete_user_environment(
     Path(name): Path<String>,
     user: GithubUser,
 ) -> Result<StatusCode, AppError> {
-    let kube = env_store_client(&state).await?;
-    let existed = delete_environment(&kube, user.id, &name).await?;
+    let store = env_store(&state).await?;
+    let existed = store.delete_environment(user.id, &name).await?;
     tracing::info!(github_user_id = user.id, env = %name, existed, "env delete");
     Ok(StatusCode::NO_CONTENT)
 }

@@ -1,6 +1,8 @@
-//! Unit tests for the pod → [`LivePod`] projection + the repo filter. The live
-//! LIST/plan/execute wiring needs a cluster and is live-verified; here we cover the
-//! pure mapping from a sample `Pod` (the load-bearing translation the driver does).
+//! Unit tests for the lifecycle verbs' PURE argument-assembly + pod → [`LivePod`]
+//! projection (relocated from `reconcile/repo_tests.rs` and the pod effect assembly
+//! in `reconcile/execute_tests.rs`, unchanged). The live LIST/patch/delete/create
+//! wiring needs a cluster and is live-verified; here we cover the load-bearing pure
+//! mappings the backend does off a sample `Pod`.
 
 use std::collections::BTreeMap;
 
@@ -135,4 +137,22 @@ fn repo_filter_matches_on_owner_and_name_annotations() {
             name: "other".to_string()
         }
     ));
+}
+
+#[test]
+fn kill_delete_params_carries_the_grace_period() {
+    let params = kill_delete_params(60);
+    assert_eq!(params.grace_period_seconds, Some(60));
+    // A zero grace is legitimate (immediate SIGKILL) and must be honoured.
+    assert_eq!(kill_delete_params(0).grace_period_seconds, Some(0));
+}
+
+#[test]
+fn last_pending_patch_sets_the_annotation_key_to_now() {
+    let now = DateTime::parse_from_rfc3339("2026-07-01T12:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let patch = last_pending_patch(now);
+    let value = &patch["metadata"]["annotations"][ANNOTATION_LAST_PENDING_AT];
+    assert_eq!(value.as_str().unwrap(), now.to_rfc3339());
 }

@@ -6,11 +6,15 @@
 //! protocol, and no journaling. A goal trigger records a `Pending` session that
 //! pod-per-session execution will later run (milestone #9).
 
+use std::collections::BTreeMap;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
-use fkst_control_plane::config::Config;
+use fkst_control_plane::config::{Config, PodMode};
+use fkst_control_plane::error::AppError;
 use fkst_control_plane::github_app::HttpGithubListing;
+use fkst_control_plane::osb_config::OpensandboxConfig;
 use fkst_control_plane::reconcile::{
     reconcile_channel, run_full_resync_loop, run_reconcile_loop, run_sweep_loop, ReconcileCtx,
     ReconcileHandle,
@@ -45,7 +49,9 @@ async fn main() -> ExitCode {
     //     verdict as the final stdout line, and exits SUCCESS/FAILURE — it never
     //     binds a socket or builds the server router, so the default arg-less
     //     invocation stays the API server unchanged.
-    if std::env::args().nth(1).as_deref() == Some("validate-env") {
+    if std::env::args().nth(1).as_deref()
+        == Some(fkst_control_plane::install::VALIDATE_ENV_SUBCOMMAND)
+    {
         return fkst_control_plane::install::run_validate_env().await;
     }
 
@@ -150,7 +156,6 @@ async fn main() -> ExitCode {
     // into `AppState`. The env-validation GC sweep (below) needs its own copy of
     // the namespace + the validation deadline; the reconciler gate reads dispatch.
     let pod_dispatch = config.pod.dispatch;
-    let sweep_namespace = config.pod.namespace.clone();
     let sweep_deadline = config.env.validate_deadline_secs;
 
     // The shared `session_id -> log-access context` registry the reconciler writes
@@ -176,17 +181,44 @@ async fn main() -> ExitCode {
     // enqueue here yet (that is the PR6 flip); with zero trigger issues this is a
     // harmless idle set of loops. Runs BEFORE build_router so the handle rides on
     // AppState.
+    // The single session backend the env-validation REST path + the reconciler loops
+    // drive (issue #413). Built ONCE, UN-gated on pod dispatch so the `PUT` validate
+    // path stays available even when the dynamic-session loops are off; `None` (no
+    // cluster) is non-fatal — the validate path then reports 503 and the loops do not
+    // spawn.
+    let session_backend = match build_session_backend(&config).await {
+        Ok(backend) => backend,
+        Err(error) => {
+            tracing::error!(error = %error, "failed to build session backend");
+            return ExitCode::FAILURE;
+        }
+    };
+
     let reconciler = if pod_dispatch {
-        spawn_reconciler(&config, github_app.clone(), log_registry.clone()).await
+        match session_backend.clone() {
+            Some(backend) => {
+                spawn_reconciler(&config, github_app.clone(), log_registry.clone(), backend).await
+            }
+            None => {
+                tracing::warn!(
+                    "pod dispatch on but session backend unavailable; reconciler not started"
+                );
+                None
+            }
+        }
     } else {
         None
     };
+
+    // Clone the backend for the GC sweep (spawned after the router build consumes it).
+    let sweep_backend = session_backend.clone();
 
     let app = match build_router(AppState {
         config,
         github_app,
         github_app_webhook_secret,
         reconciler,
+        session_backend,
         storage,
         log_registry,
     }) {
@@ -203,24 +235,18 @@ async fn main() -> ExitCode {
     // can orphan one; this periodic sweep reaps any older than the deadline. Only
     // when dispatch is on and a cluster is reachable (mirrors the watcher above).
     if pod_dispatch {
-        match fkst_control_plane::k8s::KubeClient::from_inferred(&sweep_namespace).await {
-            Ok(kube) => {
+        match sweep_backend {
+            Some(backend) => {
                 // Sweep at least once per deadline window, never faster than 30s.
                 let interval = std::time::Duration::from_secs(
                     u64::try_from(sweep_deadline).unwrap_or(300).max(30),
                 );
                 tokio::spawn(async move {
-                    fkst_control_plane::k8s::env_validator::run_sweep_loop(
-                        kube,
-                        sweep_deadline,
-                        interval,
-                    )
-                    .await;
+                    fkst_control_plane::k8s::env_validator::run_sweep_loop(backend, interval).await;
                 });
                 tracing::info!("env-validation gc sweep spawned");
             }
-            Err(error) => tracing::warn!(
-                error = %error,
+            None => tracing::warn!(
                 "pod dispatch on but kubernetes client unavailable; env-validation gc sweep not started"
             ),
         }
@@ -248,14 +274,152 @@ async fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Build the Model B reconcile context and spawn its four loops, returning the
-/// enqueue handle for `AppState` (or `None` if any prerequisite is missing). Every
-/// failure is a WARN, never fatal: a misconfigured/unreachable reconciler must not
-/// stop the API server (Model A stays fully functional).
+/// Build the single session backend for the configured [`PodMode`], UN-gated on pod
+/// dispatch so the env-validation REST path can drive it even when the dynamic-session
+/// loops are off. For `K8sCustomized`, `Ok(None)` (the client could not be built) is
+/// non-fatal: the validate path then reports 503 and the reconciler/sweep do not spawn.
+/// For `Opensandbox`, `Ok(None)` when the `FKST_OSB_*` block is absent (dispatch-off
+/// staging) — the same degraded path; otherwise the OpenSandbox backend is built.
+async fn build_session_backend(
+    config: &Config,
+) -> Result<Option<Arc<dyn fkst_control_plane::session_backend::SessionBackend>>, AppError> {
+    match config.pod.mode {
+        PodMode::K8sCustomized => {
+            match fkst_control_plane::k8s::KubeClient::from_inferred(&config.pod.namespace).await {
+                Ok(kube) => {
+                    let backend = fkst_control_plane::session_backend::k8s::K8sBackend::new(
+                        kube,
+                        config.pod.clone(),
+                        config.reconcile.pod_termination_grace_secs,
+                        config.env.validate_deadline_secs,
+                        config.env.validate_poll_interval_secs,
+                    );
+                    Ok(Some(Arc::new(backend)))
+                }
+                Err(error) => {
+                    tracing::warn!(error = %error, "session backend unavailable (kubernetes client could not be built); pod-driven features degraded");
+                    Ok(None)
+                }
+            }
+        }
+        PodMode::Opensandbox => match &config.opensandbox {
+            Some(osb) => Ok(Some(build_osb_backend(config, osb).await?)),
+            // Dispatch-off staging (mode set, FKST_OSB_* not yet configured): mirror
+            // the K8s "cluster unreachable -> Ok(None)" degraded path so the process
+            // still boots (the validate path reports 503, the loops do not spawn).
+            None => {
+                tracing::warn!(
+                    "FKST_POD_MODE=opensandbox but FKST_OSB_* not configured; session backend unavailable"
+                );
+                Ok(None)
+            }
+        },
+    }
+}
+
+/// Construct the OpenSandbox [`fkst_control_plane::session_backend::opensandbox::OsbBackend`]
+/// from the resolved config-layer [`OpensandboxConfig`]: one shared rustls HTTP client
+/// drives the lifecycle client and every per-session execd client (the factory derives
+/// the session-scoped execd token from the seed). The startup reachability probe is
+/// WARN-not-fatal, mirroring the K8s apiserver probe.
+async fn build_osb_backend(
+    config: &Config,
+    osb: &OpensandboxConfig,
+) -> Result<Arc<dyn fkst_control_plane::session_backend::SessionBackend>, AppError> {
+    use fkst_control_plane::session_backend::opensandbox::backend::{
+        ExecdFactory, OsbConfig, DEFAULT_EXECD_TOKEN_ENV_KEY,
+    };
+    use fkst_control_plane::session_backend::opensandbox::{
+        derive_execd_token, ExecdClient, ImageSpec, OsbBackend, OsbLifecycleClient, ResourceLimits,
+    };
+    use fkst_control_plane::session_backend::SessionBackend;
+
+    // Warn once per FKST_POD_* knob the operator set that opensandbox mode ignores (the
+    // sandbox template owns them). Computed in osb_config::from_vars (config.rs does not
+    // log); FKST_POD_NAMESPACE / FKST_POD_IMAGE are never in this set (both still apply).
+    for knob in &osb.ignored_pod_knobs {
+        tracing::warn!(
+            var = knob,
+            "{knob} is ignored in opensandbox mode (the sandbox template owns it)"
+        );
+    }
+
+    // One shared HTTP client (reqwest is built rustls-only, per Cargo.toml), reused by
+    // the lifecycle client and every per-session execd client.
+    let http = reqwest::Client::builder()
+        .user_agent("fkst-hosted-api")
+        .build()
+        .map_err(|e| AppError::Config(format!("failed to build opensandbox http client: {e}")))?;
+
+    let lifecycle =
+        OsbLifecycleClient::new(osb.base_url.clone(), osb.api_key.clone(), http.clone());
+
+    // The execd factory: one closure captures the shared inputs and mints a per-sandbox
+    // execd client, deriving the session-scoped execd token (HMAC of the seed) per call.
+    let base = osb.base_url.clone();
+    let key = osb.api_key.clone();
+    let seed = osb.execd_token_seed.clone();
+    let factory_http = http.clone();
+    let factory: ExecdFactory = Arc::new(move |sandbox_id: &str, session_id: &str| {
+        ExecdClient::new(
+            base.clone(),
+            key.clone(),
+            sandbox_id.to_string(),
+            derive_execd_token(&seed, session_id),
+            factory_http.clone(),
+        )
+    });
+
+    // The static launch config every sandbox is spawned with. The image is the SAME
+    // control-plane image (required in both modes); the entrypoint runs the in-sandbox
+    // binary in `run-substrate` mode (parity with the k8s Job re-exec).
+    let image_uri = config.pod.image.clone().ok_or_else(|| {
+        AppError::Config("FKST_POD_IMAGE must be set when FKST_POD_DISPATCH=true".to_string())
+    })?;
+    let osb_backend_config = OsbConfig {
+        image: ImageSpec {
+            uri: image_uri,
+            auth: None,
+        },
+        entrypoint: vec![osb.entrypoint.clone(), "run-substrate".to_string()],
+        resource_limits: ResourceLimits(BTreeMap::from([
+            ("cpu".to_string(), osb.session_cpu.clone()),
+            ("memory".to_string(), osb.session_memory.clone()),
+        ])),
+        execd_seed: osb.execd_token_seed.clone(),
+        execd_token_env_key: DEFAULT_EXECD_TOKEN_ENV_KEY.to_string(),
+        // The respawn-shield window: one reconcile cadence, so a just-stopped session
+        // stays reported `Terminating` across the next reconcile tick (the window in
+        // which the planner would otherwise re-observe it `Absent` and re-spawn).
+        reconcile_window: Duration::from_secs(config.reconcile.reconcile_interval_secs),
+        validate_deadline_secs: config.env.validate_deadline_secs,
+        validate_poll_interval_secs: config.env.validate_poll_interval_secs,
+    };
+
+    let backend = OsbBackend::new(lifecycle, factory, config.pod.clone(), osb_backend_config);
+
+    // Startup reachability probe: WARN-not-fatal (a transient blip must not crash the
+    // control plane; per-session spawns surface hard errors), mirroring the K8s probe.
+    if let Err(error) = backend.check_reachable().await {
+        tracing::warn!(
+            error = %error,
+            "opensandbox lifecycle server not reachable at startup; continuing"
+        );
+    }
+
+    Ok(Arc::new(backend))
+}
+
+/// Build the Model B reconcile context and spawn its loops, returning the enqueue
+/// handle for `AppState` (or `None` if any prerequisite is missing). The concrete
+/// session backend is passed in (built once, un-gated). Every failure is a WARN,
+/// never fatal: a misconfigured/unreachable reconciler must not stop the API server
+/// (Model A stays fully functional).
 async fn spawn_reconciler(
     config: &Config,
     github_app: Option<fkst_control_plane::github_app::GithubAppTokens>,
     log_registry: fkst_control_plane::log_access::LogAccessRegistry,
+    backend: Arc<dyn fkst_control_plane::session_backend::SessionBackend>,
 ) -> Option<ReconcileHandle> {
     let Some(github) = github_app else {
         tracing::warn!("pod dispatch on but github app not configured; reconciler not started");
@@ -290,7 +454,10 @@ async fn spawn_reconciler(
     };
 
     let ctx = ReconcileCtx {
-        kube,
+        backend,
+        // The env-store seam the spawn pre-flight reads; the reconciler shares one
+        // namespace-bound client with it (the backend owns its own).
+        env_store: fkst_control_plane::k8s::env_store::EnvStore::from_kube(kube),
         github,
         listing,
         http,
@@ -313,24 +480,29 @@ async fn spawn_reconciler(
     let resync_ctx = ctx.clone();
     let resync_handle = handle.clone();
     tokio::spawn(async move { run_full_resync_loop(resync_ctx, resync_handle).await });
-    // The in-place per-session token rotation loop.
-    let rot_kube = ctx.kube.clone();
+    // The in-place per-session token rotation loop (drives the fleet through the backend).
+    let rot_backend = ctx.backend.clone();
     let rot_github = ctx.github.clone();
     let rot_cfg = ctx.config.reconcile.clone();
     let rot_handle = handle.clone();
     tokio::spawn(async move {
-        fkst_control_plane::k8s::run_token_rotation_loop(rot_kube, rot_github, rot_cfg, rot_handle)
-            .await
+        fkst_control_plane::k8s::run_token_rotation_loop(
+            rot_backend,
+            rot_github,
+            rot_cfg,
+            rot_handle,
+        )
+        .await
     });
     // The package-agnostic session-health scrape loop (pod status + framework log
     // severity → flag/clear the degraded label on the trigger issue).
-    let health_kube = ctx.kube.clone();
+    let health_backend = ctx.backend.clone();
     let health_github = ctx.github.clone();
     let health_cfg = ctx.config.reconcile.clone();
     let health_handle = handle.clone();
     tokio::spawn(async move {
         fkst_control_plane::k8s::run_health_scrape_loop(
-            health_kube,
+            health_backend,
             health_github,
             health_cfg,
             health_handle,

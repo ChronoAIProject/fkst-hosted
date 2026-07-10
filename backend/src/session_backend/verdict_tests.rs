@@ -1,13 +1,11 @@
-//! Tests for [`super`] (the env-validation orchestrator's pure helpers). Split
-//! into a sibling file to keep `env_validator.rs` under the 500-line limit;
-//! included via `#[cfg(test)] #[path = "env_validator_tests.rs"] mod tests;`.
-//!
-//! The live orchestration (`validate_environment`, `sweep_orphans`) needs a
-//! cluster and is exercised by integration paths; here we pin the pure,
-//! cluster-free pieces: verdict parsing + last-line selection. The pod/ConfigMap
-//! builders + name generation are tested in `env_validator_pod.rs`.
+//! Tests for the shared env-validation verdict parsing (relocated verbatim from
+//! `k8s/validation_tests.rs`). These pin the pure, cluster-free pieces every backend
+//! shares: verdict parsing, last-line selection, and the two conservative-`Failed`
+//! builders that guarantee a timed-out / unparseable run yields a byte-identical
+//! verdict in either backend.
 
-use super::*;
+use super::{last_non_empty_line, parse_verdict_line, verdict_timed_out, verdict_unparseable};
+use crate::session_backend::ValidationOutcome;
 
 #[test]
 fn parse_verdict_line_reads_the_ok_frame() {
@@ -92,4 +90,30 @@ fn last_non_empty_line_skips_trailing_blank_lines() {
 fn last_non_empty_line_is_none_for_all_blank_input() {
     assert!(last_non_empty_line("").is_none());
     assert!(last_non_empty_line("\n\n   \n\t\n").is_none());
+}
+
+#[test]
+fn conservative_builders_are_the_shared_failed_verdicts() {
+    // A deadline elapse → timed_out Failed with the shared detail sentence.
+    assert_eq!(
+        verdict_timed_out(),
+        ValidationOutcome::Failed {
+            failed_command_index: 0,
+            failed_command: String::new(),
+            exit_code: -1,
+            timed_out: true,
+            stderr_tail: "validation pod did not complete before the deadline".to_string(),
+        }
+    );
+    // A readable-but-unparseable run → non-timed-out Failed with the shared sentence.
+    assert_eq!(
+        verdict_unparseable(),
+        ValidationOutcome::Failed {
+            failed_command_index: 0,
+            failed_command: String::new(),
+            exit_code: -1,
+            timed_out: false,
+            stderr_tail: "validation pod exceeded its limits".to_string(),
+        }
+    );
 }

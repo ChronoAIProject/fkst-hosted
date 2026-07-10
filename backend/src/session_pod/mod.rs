@@ -16,6 +16,7 @@
 //! `engine`/`sessions` modules were deleted).
 
 mod codex;
+mod creds_gate;
 mod creds_helper;
 mod driver;
 pub mod log_stream;

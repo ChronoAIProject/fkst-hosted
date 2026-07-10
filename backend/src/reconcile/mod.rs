@@ -34,6 +34,12 @@ pub mod retire;
 pub mod templates;
 pub mod work_ack;
 
+// Shared executor/loop test fixtures (the recording GitHub transport, the ctx
+// builder, and a re-export of the shared session-backend fake). Reconcile-wide so
+// both the executor tests and the loop tests can build a `ReconcileCtx`.
+#[cfg(test)]
+pub(crate) mod execute_test_support;
+
 use tokio::sync::mpsc;
 
 use crate::models::RepoRef;

@@ -16,6 +16,7 @@ use serde::Deserialize;
 use crate::env_config::EnvConfig;
 use crate::error::AppError;
 use crate::log_config::LogConfig;
+use crate::osb_config::OpensandboxConfig;
 use crate::reconcile_config::ReconcileConfig;
 use crate::storage::ChronoStorageConfig;
 
@@ -150,6 +151,10 @@ struct WebhookVars {
 struct PodVars {
     #[serde(default)]
     dispatch: bool,
+    /// Raw `FKST_POD_MODE` value; parsed into [`PodMode`] in `from_vars` so a
+    /// bad value yields our own precise error (envy would swallow the text).
+    #[serde(default)]
+    mode: Option<String>,
     #[serde(default = "defaults::pod_namespace")]
     namespace: String,
     #[serde(default)]
@@ -185,14 +190,36 @@ struct LlmVars {
     api_key: Option<String>,
 }
 
+/// Which session-execution backend the control plane drives. Selected by
+/// `FKST_POD_MODE`. `K8sCustomized` is the default (one Kubernetes Job per
+/// session); `Opensandbox` drives one OpenSandbox sandbox per session (issue #420)
+/// and requires the `FKST_OSB_*` block. Deliberately NOT
+/// `serde::Deserialize`/`FromStr`: it is parsed by hand in `from_vars` so a bad
+/// value surfaces our own precise error text rather than an envy message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PodMode {
+    /// The k8s-customized backend (one Kubernetes Job per session). Default.
+    K8sCustomized,
+    /// The OpenSandbox backend (one sandbox per session). Requires the
+    /// `FKST_OSB_*` config block when pod dispatch is on.
+    Opensandbox,
+}
+
 /// Pod-per-session dispatch configuration (milestone #9). When `dispatch` is
 /// false (the default) the control plane never touches Kubernetes.
 #[derive(Clone, Debug)]
 pub struct PodConfig {
     /// Master switch. Env: `FKST_POD_DISPATCH`. Default false.
     pub dispatch: bool,
+    /// The session-execution backend. Env: `FKST_POD_MODE`. Default
+    /// `k8s-customized`; `opensandbox` drives one OpenSandbox sandbox per session
+    /// (requires the `FKST_OSB_*` block when dispatch is on).
+    pub mode: PodMode,
     /// Namespace for per-session Jobs + Secrets. Env: `FKST_POD_NAMESPACE`.
-    /// Default `fkst-sessions`.
+    /// Default `fkst-sessions`. REQUIRED non-blank when dispatch is on in BOTH
+    /// modes: even in opensandbox mode the env-store `KubeClient`
+    /// (`KubeClient::from_inferred`) binds to this namespace to read per-session
+    /// environment/secret objects, so it is never an opensandbox-ignored knob.
     pub namespace: String,
     /// The image session pods run (the control-plane image, `run-substrate`
     /// mode). Env: `FKST_POD_IMAGE`. Required when `dispatch=true`.
@@ -228,6 +255,7 @@ impl Default for PodConfig {
     fn default() -> Self {
         Self {
             dispatch: false,
+            mode: PodMode::K8sCustomized,
             namespace: defaults::pod_namespace(),
             image: None,
             service_account: defaults::pod_service_account(),
@@ -272,6 +300,11 @@ pub struct Config {
     /// Pod-per-session dispatch settings (milestone #9). `dispatch=false` by
     /// default: the control plane is Kubernetes-free until an operator opts in.
     pub pod: PodConfig,
+    /// OpenSandbox session-backend config (`FKST_OSB_*`, issue #420). `Some` only
+    /// when pod dispatch is on AND `FKST_POD_MODE=opensandbox`; `None` for the
+    /// default k8s-customized backend (or dispatch off). A required var missing
+    /// under opensandbox fails closed at startup (see [`crate::osb_config::from_vars`]).
+    pub opensandbox: Option<OpensandboxConfig>,
     /// Named-environment / install-validation knobs (`FKST_ENV_*`, issue #338
     /// §6.1). Config surface only — no behaviour reads these yet.
     pub env: EnvConfig,
@@ -303,6 +336,7 @@ impl Default for Config {
             vault_entries_per_scope_cap: defaults::vault_entries_per_scope_cap(),
             llm_api_key: SecretString::from(String::new()),
             pod: PodConfig::default(),
+            opensandbox: None,
             env: EnvConfig::default(),
             reconcile: ReconcileConfig::default(),
             storage: None,
@@ -399,7 +433,24 @@ impl Config {
             .image
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
+        // Session-execution backend. Parsed UNCONDITIONALLY (even with dispatch
+        // off) so a bad value fails closed at startup regardless of dispatch.
+        // Blank/unset means the default k8s-customized backend, matching the
+        // repo's blank-as-absent convention.
+        let pod_mode = match pod.mode.as_deref().map(str::trim) {
+            None | Some("") | Some("k8s-customized") => PodMode::K8sCustomized,
+            Some("opensandbox") => PodMode::Opensandbox,
+            Some(other) => {
+                return Err(AppError::Config(format!(
+                    "FKST_POD_MODE must be one of \"k8s-customized\" | \"opensandbox\" (got \"{other}\")"
+                )))
+            }
+        };
         if pod.dispatch {
+            // FKST_POD_IMAGE + FKST_POD_NAMESPACE are required in BOTH backend modes:
+            // the image is the session pod / sandbox image, and the namespace binds
+            // the env-store KubeClient (mode-independent). The OpenSandbox-specific
+            // FKST_OSB_* vars are validated separately below via osb_config::from_vars.
             if pod_image.is_none() {
                 return Err(AppError::Config(
                     "FKST_POD_IMAGE must be set when FKST_POD_DISPATCH=true".to_string(),
@@ -445,6 +496,7 @@ impl Config {
         }
         let pod = PodConfig {
             dispatch: pod.dispatch,
+            mode: pod_mode,
             namespace: pod.namespace,
             image: pod_image,
             service_account: pod.service_account,
@@ -459,6 +511,13 @@ impl Config {
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty()),
         };
+
+        // OpenSandbox session-backend config (FKST_OSB_*). Validated ONLY when pod
+        // dispatch is on AND the selected backend is opensandbox; otherwise skipped
+        // (`None`), so a k8s-customized deploy never sets an FKST_OSB_* var. Shares
+        // the same `vars` snapshot; fails closed naming any missing/invalid var.
+        let opensandbox =
+            crate::osb_config::from_vars(&vars, pod.dispatch && pod.mode == PodMode::Opensandbox)?;
 
         // Named-environment / install-validation knobs (FKST_ENV_*). Shares the
         // same `vars` snapshot; fails closed on its own zero bounds internally.
@@ -484,6 +543,7 @@ impl Config {
             llm_api_key: SecretString::from(llm_api_key.unwrap_or_default()),
             github_api_base_url: webhook.github_api_base_url.trim().to_string(),
             pod,
+            opensandbox,
             env,
             reconcile,
             storage,
@@ -649,6 +709,88 @@ mod tests {
         let config = Config::from_vars(vars(&[("FKST_POD_RUNTIME_CLASS", "   ")]))
             .expect("blank runtime class");
         assert_eq!(config.pod.runtime_class, None);
+    }
+
+    // ---- pod mode (FKST_POD_MODE) tests ---------------------------------------
+
+    #[test]
+    fn pod_mode_defaults_to_k8s_customized() {
+        // Unset means the k8s-customized backend — the only one shipped today.
+        let config = Config::from_vars(vars(&[])).expect("defaults");
+        assert_eq!(config.pod.mode, PodMode::K8sCustomized);
+    }
+
+    #[test]
+    fn pod_mode_k8s_customized_is_accepted() {
+        let config = Config::from_vars(vars(&[("FKST_POD_MODE", "k8s-customized")]))
+            .expect("explicit k8s-customized");
+        assert_eq!(config.pod.mode, PodMode::K8sCustomized);
+    }
+
+    #[test]
+    fn pod_mode_unknown_value_is_a_config_error_naming_the_var() {
+        let err = Config::from_vars(vars(&[("FKST_POD_MODE", "bogus")]))
+            .expect_err("unknown mode must fail closed");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(err.to_string().contains(
+            "FKST_POD_MODE must be one of \"k8s-customized\" | \"opensandbox\" (got \"bogus\")"
+        ));
+    }
+
+    /// A dispatch-on opensandbox environment: the shared dispatch requirements
+    /// (image / namespace / LLM key / bot login) plus the full `FKST_OSB_*` block.
+    fn opensandbox_dispatch_vars() -> Vec<(String, String)> {
+        vars(&[
+            ("FKST_POD_DISPATCH", "true"),
+            ("FKST_POD_MODE", "opensandbox"),
+            ("FKST_POD_IMAGE", "registry/fkst-control-plane:1.0"),
+            ("FKST_LLM_API_KEY", "sk-test"),
+            ("FKST_GITHUB_BOT_LOGIN", "fkst-bot"),
+            ("FKST_OSB_BASE_URL", "https://sandbox.example/api"),
+            ("FKST_OSB_API_KEY", "osb-key"),
+            ("FKST_OSB_EXECD_TOKEN_SEED", "execd-seed"),
+            ("FKST_OSB_SESSION_CPU", "500m"),
+            ("FKST_OSB_SESSION_MEMORY", "512Mi"),
+            ("FKST_OSB_ENTRYPOINT", "/usr/local/bin/fkst-control-plane"),
+        ])
+    }
+
+    #[test]
+    fn opensandbox_dispatch_on_fully_configured_loads() {
+        // The OpenSandbox backend is available: a dispatch-on opensandbox config with
+        // a complete FKST_OSB_* block loads and surfaces the resolved OSB config.
+        let config =
+            Config::from_vars(opensandbox_dispatch_vars()).expect("full opensandbox config loads");
+        assert_eq!(config.pod.mode, PodMode::Opensandbox);
+        let osb = config.opensandbox.expect("opensandbox config present");
+        assert_eq!(osb.base_url.as_str(), "https://sandbox.example/api");
+        assert_eq!(osb.session_memory, "512Mi");
+    }
+
+    #[test]
+    fn opensandbox_dispatch_on_missing_osb_var_fails() {
+        // Drop one required FKST_OSB_* var: the load fails closed with that var's
+        // exact message (the OSB block is validated once opensandbox is selected).
+        let missing_base: Vec<(String, String)> = opensandbox_dispatch_vars()
+            .into_iter()
+            .filter(|(k, _)| k != "FKST_OSB_BASE_URL")
+            .collect();
+        let err = Config::from_vars(missing_base)
+            .expect_err("missing FKST_OSB_BASE_URL must fail closed");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(err
+            .to_string()
+            .contains("FKST_OSB_BASE_URL must be a valid URL when FKST_POD_MODE=opensandbox"));
+    }
+
+    #[test]
+    fn pod_mode_opensandbox_with_dispatch_off_is_allowed() {
+        // With dispatch off the FKST_OSB_* block is not validated, so an operator can
+        // stage the mode ahead of turning dispatch on; `opensandbox` stays `None`.
+        let config = Config::from_vars(vars(&[("FKST_POD_MODE", "opensandbox")]))
+            .expect("opensandbox parses when dispatch is off");
+        assert_eq!(config.pod.mode, PodMode::Opensandbox);
+        assert!(config.opensandbox.is_none());
     }
 
     #[test]

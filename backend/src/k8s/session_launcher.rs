@@ -32,7 +32,7 @@ use crate::models::RepoRef;
 use crate::session_pod::log_stream::{
     ENV_CONFIG_HASH, ENV_POD_NAME, ENV_POD_UID, ENV_SESSION_ID, ENV_TRIGGER_ISSUE,
 };
-use crate::session_spec::creds::{credential_secret_data, StorageWriterCreds, DEFAULT_CREDS_DIR};
+use crate::session_spec::creds::{CREDS_COMPLETE_SENTINEL, DEFAULT_CREDS_DIR};
 
 /// Errors launching a substrate-session Pod (relocated from the deleted Model-A
 /// Job launcher, trimmed to the variants the Pod path actually raises).
@@ -195,48 +195,63 @@ fn downward_env_var(name: &str, field_path: &str) -> EnvVar {
     }
 }
 
-/// The log-streaming env, injected on EVERY session (streaming is unconditional).
-/// Carries the session id (the collector's bundle key `logs/<id>/latest.tar.gz`),
-/// the trigger issue + config-hash (for the `meta.json`), and the downward-API pod
-/// UID/name (for the instance id). It adds NO storage credential — the write-only
-/// SA creds ride the per-session Secret (see [`build_session_secret`]), never env.
-fn log_streaming_env(spec: &SessionPodSpec) -> Vec<EnvVar> {
+/// The plain (non-downward-API) env var name/value pairs injected into a session
+/// runtime, factored out so BOTH session backends share ONE env source and can
+/// never drift. This is the §5.2 non-secret env (the ~16 core vars) plus the three
+/// PLAIN log-streaming vars ([`ENV_SESSION_ID`] / [`ENV_TRIGGER_ISSUE`] /
+/// [`ENV_CONFIG_HASH`], the collector's bundle key + `meta.json` inputs) — but NOT
+/// the two downward-API vars ([`ENV_POD_UID`] / [`ENV_POD_NAME`]): those use a pod
+/// fieldRef, so the Kubernetes backend appends them in [`session_env`] while an
+/// OpenSandbox backend (which has no downward API) supplies them as plain values.
+/// It adds NO storage credential — the write-only SA creds ride the per-session
+/// Secret (see [`build_session_secret`]), never env. Order is stable so the rendered
+/// runtime env is deterministic (aids tests + drift detection).
+pub(crate) fn session_env_pairs(
+    spec: &SessionPodSpec,
+    config: &PodConfig,
+) -> Vec<(&'static str, String)> {
     vec![
-        env_var(ENV_SESSION_ID, spec.session_id.clone()),
-        env_var(ENV_TRIGGER_ISSUE, spec.trigger_issue_number.to_string()),
-        env_var(ENV_CONFIG_HASH, spec.config_hash.clone()),
-        downward_env_var(ENV_POD_UID, "metadata.uid"),
-        downward_env_var(ENV_POD_NAME, "metadata.name"),
-    ]
-}
-
-/// The §5.2 non-secret env injected into the session Pod. Order is stable so the
-/// rendered Pod is deterministic (aids tests + drift detection).
-fn session_env(spec: &SessionPodSpec, config: &PodConfig) -> Vec<EnvVar> {
-    let mut env = vec![
-        env_var(
+        (
             GITHUB_REPO_ENV,
             format!("{}/{}", spec.repo.owner, spec.repo.name),
         ),
-        env_var(GITHUB_BOT_LOGIN_ENV, spec.bot_login.clone()),
-        env_var(GITHUB_WRITE_ENV, GITHUB_WRITE_VALUE),
-        env_var(GITHUB_CLAIM_MODE_ENV, GITHUB_CLAIM_MODE_VALUE),
-        env_var(GITHUB_PROXY_POLL_LABEL_PREFIX_ENV, spec.work_label.clone()),
-        env_var(LLM_MODEL_ENV, config.llm_model.clone()),
-        env_var(LLM_BASE_URL_ENV, config.llm_base_url.clone()),
-        env_var(LLM_WIRE_API_ENV, config.llm_wire_api.clone()),
-        env_var(DURABLE_ROOT_ENV, DURABLE_ROOT_DIR),
-        env_var(RUNTIME_ROOT_ENV, RUNTIME_ROOT_DIR),
-        env_var(SESSION_CREDS_DIR_ENV, CREDS_MOUNT_DIR),
-        env_var(CODEX_HOME_ENV, CODEX_HOME_DIR),
-        env_var(GIT_AUTHOR_NAME_ENV, spec.bot_login.clone()),
-        env_var(GIT_COMMITTER_NAME_ENV, spec.bot_login.clone()),
-        env_var(SESSION_PACKAGE_ROOTS_ENV, spec.package_roots.join(" ")),
-        env_var(SESSION_WORK_LABEL_ENV, spec.work_label.clone()),
-    ];
-    // Log streaming is unconditional: every session carries the (non-secret) log
-    // env + downward-API refs. The write-only storage creds ride the Secret.
-    env.extend(log_streaming_env(spec));
+        (GITHUB_BOT_LOGIN_ENV, spec.bot_login.clone()),
+        (GITHUB_WRITE_ENV, GITHUB_WRITE_VALUE.to_string()),
+        (GITHUB_CLAIM_MODE_ENV, GITHUB_CLAIM_MODE_VALUE.to_string()),
+        (GITHUB_PROXY_POLL_LABEL_PREFIX_ENV, spec.work_label.clone()),
+        (LLM_MODEL_ENV, config.llm_model.clone()),
+        (LLM_BASE_URL_ENV, config.llm_base_url.clone()),
+        (LLM_WIRE_API_ENV, config.llm_wire_api.clone()),
+        (DURABLE_ROOT_ENV, DURABLE_ROOT_DIR.to_string()),
+        (RUNTIME_ROOT_ENV, RUNTIME_ROOT_DIR.to_string()),
+        (SESSION_CREDS_DIR_ENV, CREDS_MOUNT_DIR.to_string()),
+        (CODEX_HOME_ENV, CODEX_HOME_DIR.to_string()),
+        (GIT_AUTHOR_NAME_ENV, spec.bot_login.clone()),
+        (GIT_COMMITTER_NAME_ENV, spec.bot_login.clone()),
+        (SESSION_PACKAGE_ROOTS_ENV, spec.package_roots.join(" ")),
+        (SESSION_WORK_LABEL_ENV, spec.work_label.clone()),
+        // The three PLAIN log-streaming vars; the two downward-API vars are appended
+        // per-backend (pod fieldRef here, plain value in the OpenSandbox backend).
+        (ENV_SESSION_ID, spec.session_id.clone()),
+        (ENV_TRIGGER_ISSUE, spec.trigger_issue_number.to_string()),
+        (ENV_CONFIG_HASH, spec.config_hash.clone()),
+    ]
+}
+
+/// The §5.2 non-secret env injected into the session Pod: the shared
+/// [`session_env_pairs`] rendered as [`EnvVar`]s, then the two downward-API vars
+/// ([`ENV_POD_UID`] / [`ENV_POD_NAME`]) the kubelet fills from the pod's own
+/// fieldRefs (never a literal value — safe inside the #338 hard-isolation box). The
+/// rendered order is IDENTICAL to the pre-refactor env.
+fn session_env(spec: &SessionPodSpec, config: &PodConfig) -> Vec<EnvVar> {
+    let mut env: Vec<EnvVar> = session_env_pairs(spec, config)
+        .into_iter()
+        .map(|(name, value)| env_var(name, value))
+        .collect();
+    // Log streaming is unconditional: every session carries the log env; the pod
+    // UID/name ride the downward API (a fieldRef), never a literal value.
+    env.push(downward_env_var(ENV_POD_UID, "metadata.uid"));
+    env.push(downward_env_var(ENV_POD_NAME, "metadata.name"));
     env
 }
 
@@ -351,30 +366,30 @@ pub fn build_session_pod(spec: &SessionPodSpec, config: &PodConfig) -> Result<Po
     })
 }
 
-/// Build the per-session creds Secret (pure; no API calls). Carries the rotating
-/// `github-token` (the `{token, expires_at}` JSON), the static `llm-api-key`, one
-/// `userenv.<KEY>` per injected per-user env entry, and — when `storage` is
-/// provided (the control plane configured a write-only chrono-storage SA) — the
-/// five `storage-*` files the in-pod log uploader reads. All via the shared
-/// [`credential_secret_data`] helper so the layout never diverges from the
-/// Model-A Job Secret. Owner-referenced to the Pod (when `owner` is provided) so
-/// K8s cascade-deletes it on Pod GC.
+/// Build the per-session creds Secret (pure; no API calls) from an ALREADY-ASSEMBLED
+/// `creds` map — the caller (the reconciler's executor) owns the credential layout
+/// now, assembling it through the shared
+/// [`credential_secret_data`](crate::session_spec::creds::credential_secret_data)
+/// helper so the layout never diverges from the Model-A Job Secret. Each value is a
+/// [`SecretString`] and is exposed only here to write it into `string_data`. The
+/// non-secret credentials-complete sentinel ([`CREDS_COMPLETE_SENTINEL`]) is added so
+/// it rides the atomic Secret mount and the in-pod driver's engine-start gate passes
+/// instantly. Owner-referenced to the Pod (when `owner` is provided) so K8s
+/// cascade-deletes it on Pod GC.
 pub fn build_session_secret(
     spec: &SessionPodSpec,
-    github_token_json: &str,
-    llm_api_key: &SecretString,
-    user_env: &BTreeMap<String, String>,
-    storage: Option<StorageWriterCreds<'_>>,
+    creds: BTreeMap<String, SecretString>,
     owner: Option<OwnerReference>,
 ) -> Secret {
-    let data = credential_secret_data(
-        github_token_json,
-        llm_api_key.expose_secret(),
-        user_env
-            .iter()
-            .map(|(key, value)| (key.as_str(), value.as_str())),
-        storage,
-    );
+    let mut string_data: BTreeMap<String, String> = creds
+        .into_iter()
+        .map(|(key, value)| (key, value.expose_secret().to_string()))
+        .collect();
+    // The credential writer's completeness signal: present at the atomic Secret mount
+    // so the in-pod driver's engine-start gate passes instantly. Non-secret (a bare
+    // marker), so it rides string_data directly. Deliberately NOT part of the shared
+    // credential_secret_data map — it is a per-backend writer signal, not a credential.
+    string_data.insert(CREDS_COMPLETE_SENTINEL.to_string(), "1".to_string());
 
     Secret {
         metadata: ObjectMeta {
@@ -383,7 +398,7 @@ pub fn build_session_secret(
             owner_references: owner.map(|o| vec![o]),
             ..Default::default()
         },
-        string_data: Some(data),
+        string_data: Some(string_data),
         type_: Some("Opaque".to_string()),
         ..Default::default()
     }
@@ -415,15 +430,17 @@ pub enum SessionPodOutcome {
 
 /// Create the session's Pod, then its owner-referenced Secret (idempotent). The
 /// Pod is created FIRST so the Secret can carry its UID as an ownerReference (the
-/// pod waits for the Secret to mount). A `409 AlreadyExists` on the Pod (same
-/// deterministic name) means the session is already live → [`AlreadyLive`],
-/// mirroring the Model-A launcher's idempotent create.
+/// pod waits for the Secret to mount) — the Secret is BUILT here, after the create,
+/// from the already-assembled `creds` so it can be owner-ref'd to the live Pod. A
+/// `409 AlreadyExists` on the Pod (same deterministic name) means the session is
+/// already live → [`AlreadyLive`], mirroring the Model-A launcher's idempotent create.
 ///
 /// [`AlreadyLive`]: SessionPodOutcome::AlreadyLive
 pub async fn create_session_pod(
     client: &kube::Client,
+    spec: &SessionPodSpec,
     pod: Pod,
-    mut secret: Secret,
+    creds: BTreeMap<String, SecretString>,
 ) -> Result<SessionPodOutcome, LaunchError> {
     // Namespace rides on the Pod (build_session_pod set it to config.namespace);
     // the Secret inherits it just before creation.
@@ -448,12 +465,10 @@ pub async fn create_session_pod(
         Err(err) => return Err(LaunchError::Kube(err)),
     };
 
-    // Pin the Secret to the Pod's namespace and owner-ref it to the created Pod
-    // so cascade-GC removes it when the Pod is deleted.
+    // Build the Secret owner-ref'd to the created Pod so cascade-GC removes it when
+    // the Pod is deleted, and pin it to the Pod's namespace.
+    let mut secret = build_session_secret(spec, creds, pod_owner_reference(&created));
     secret.metadata.namespace = Some(namespace.clone());
-    if let Some(owner) = pod_owner_reference(&created) {
-        secret.metadata.owner_references = Some(vec![owner]);
-    }
     match secrets.create(&PostParams::default(), &secret).await {
         Ok(_) => {}
         Err(kube::Error::Api(err)) if err.code == 409 => {

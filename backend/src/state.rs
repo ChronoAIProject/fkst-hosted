@@ -6,6 +6,7 @@ use crate::config::Config;
 use crate::github_app::GithubAppTokens;
 use crate::log_access::LogAccessRegistry;
 use crate::reconcile::ReconcileHandle;
+use crate::session_backend::SessionBackend;
 use crate::storage::ChronoStorageClient;
 
 /// Clonable state shared across the router. The control plane is API-only and
@@ -31,6 +32,12 @@ pub struct AppState {
     /// enqueue repos through it at the PR6 flip; today nothing reads it (Model A
     /// is unchanged), so it defaults to `None`.
     pub reconciler: Option<ReconcileHandle>,
+    /// The session runtime the env-validation REST path drives (issue #413): built
+    /// ONCE at startup, UN-gated on pod dispatch so the `PUT` validate path stays
+    /// available. `None` when the Kubernetes client could not be built — the validate
+    /// path then reports 503. Held as `Arc<dyn SessionBackend>` so no concrete
+    /// Kubernetes type touches the REST layer.
+    pub session_backend: Option<Arc<dyn SessionBackend>>,
     /// chrono-storage object client for minting presigned GET URLs on the log
     /// download endpoint (READ-scoped SA). `None` when log storage is unconfigured
     /// (`FKST_STORAGE_*` unset) — the endpoint then reports the feature disabled.

@@ -27,6 +27,7 @@ fn app(webhook_secret: bool) -> axum::Router {
         github_app: None,
         github_app_webhook_secret,
         reconciler: None,
+        session_backend: None,
         storage: None,
         log_registry: Default::default(),
     })

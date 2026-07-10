@@ -1,8 +1,18 @@
-# RBAC for pod-per-session execution. The control-plane reconciler creates +
-# reconciles + GCs one long-lived Pod (+ its 0400 per-session Secret) per
-# substrate session, in its OWN namespace (FKST_POD_NAMESPACE = downward-API
-# metadata.namespace). All objects are namespace-agnostic so kustomize sets the
-# namespace for everything.
+# RBAC for K8S-CUSTOMIZED-mode pod-per-session execution (the default,
+# FKST_POD_MODE=k8s-customized). The control-plane reconciler creates + reconciles
+# + GCs one long-lived Pod (+ its 0400 per-session Secret) per substrate session,
+# in its OWN namespace (FKST_POD_NAMESPACE = downward-API metadata.namespace). All
+# objects are namespace-agnostic so kustomize sets the namespace for everything.
+#
+# TWO RBAC POSTURES — apply EXACTLY ONE, matching FKST_POD_MODE (see README
+# "Choosing an RBAC posture"):
+#   * rbac.yaml (THIS FILE) -> k8s-customized mode: the FULL pod-launcher surface
+#                              below (pods + pods/log + pods/status + the env_store
+#                              secrets/configmaps), because the control plane runs
+#                              the session pods itself.
+#   * rbac-opensandbox.yaml -> opensandbox mode: the env_store secrets/configmaps
+#                              slice ONLY, with ZERO pod RBAC — the OpenSandbox
+#                              server (infra-owned) owns the session runtime.
 ---
 # The control plane runs as this ServiceAccount (Deployment serviceAccountName).
 apiVersion: v1

@@ -29,6 +29,13 @@ use tokio::process::Command;
 /// its mount dir + filename against this single source of truth.
 pub const VALIDATE_SPEC_PATH: &str = "/var/run/fkst/validate/validate-spec.json";
 
+/// The in-pod subcommand that runs env-validation ([`run_validate_env`]). ONE source
+/// of truth so every site that names it stays in lock-step: `main.rs` dispatches on
+/// it, the Kubernetes validation pod passes it as the container arg, and the
+/// OpenSandbox validation holder execs the image with it — the launcher and the
+/// dispatch can never drift on the literal.
+pub const VALIDATE_ENV_SUBCOMMAND: &str = "validate-env";
+
 /// In-pod cap on how many trailing stderr bytes a failed command surfaces in the
 /// verdict frame. Mirrors `FKST_ENV_INSTALL_STDERR_TAIL_BYTES`'s default so the
 /// pod bounds the frame the same way the control-plane config documents.
