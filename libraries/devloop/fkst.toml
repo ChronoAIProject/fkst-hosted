@@ -113,6 +113,7 @@ public = [
   "devloop.restart.issue_lifecycle",
   "devloop.restart.pr_review_replay_facts",
   "devloop.restart_actionable_epoch",
+  "devloop.restart_cas_catalog",
   "devloop.restart_edges",
   "devloop.restart_sinks",
   "devloop.restart_responsibility_contract",
