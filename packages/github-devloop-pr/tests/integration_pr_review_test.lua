@@ -100,6 +100,20 @@ local function assert_pr_label_guard(payload, expected_state, expected_version)
   t.eq(payload.expected_state, expected_state)
   t.eq(payload.expected_version, expected_version)
 end
+local function mock_existing_review_worktree(impl_version)
+  local worktree = devloop_base.implement_worktree_path(
+    "/tmp/fkst-packages-test/github-devloop/runtime",
+    "owner/repo",
+    42,
+    impl_version
+  )
+  t.mock_command(core.path_is_directory_cmd(worktree), {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  return worktree
+end
 local function mock_decompose_child_issue_list(proposal_id, version, pr_number, indexes)
   local repo = base_ids.parse_proposal_id(proposal_id)
   local rendered = {}
@@ -501,6 +515,7 @@ return {
   end,
   test_review_pr_builds_pr_review_consensus_proposal = function()
     local event = reviewing()
+    local worktree = mock_existing_review_worktree(event.version)
     mock_issue_review({ "fkst-dev:reviewing" }, {
       core.state_marker(event.proposal_id, "reviewing", event.version),
     }, {
@@ -524,6 +539,7 @@ return {
     t.is_nil(proposal.body:find("+return true", 1, true))
     t.is_true(proposal.body:find("Reviewed PR head: def456", 1, true) ~= nil)
     t.is_true(proposal.content_fetch:find("runtime-cache:", 1, true) == 1)
+    t.eq(proposal.worktree, worktree)
     t.eq(v_validate_proposal.validate_proposal(proposal), true)
     t.eq(count_calls("gh pr diff"), 2)
   end,
@@ -599,6 +615,7 @@ return {
     local proposal = result.raises[1].payload
     t.is_true(proposal.content_fetch:find("runtime-cache:", 1, true) == 1)
     t.is_nil(proposal.content_fetch:find("gh pr", 1, true))
+    t.is_nil(proposal.worktree)
     t.eq(count_calls("gh pr diff"), 2)
   end,
 

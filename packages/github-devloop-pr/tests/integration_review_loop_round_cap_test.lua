@@ -28,6 +28,21 @@ local function issue_proposal_id()
   return "github-devloop/issue/owner/repo/42"
 end
 
+local function mock_existing_review_worktree(impl_version)
+  local worktree = devloop_base.implement_worktree_path(
+    "/tmp/fkst-packages-test/github-devloop/runtime",
+    "owner/repo",
+    42,
+    impl_version
+  )
+  t.mock_command(core.path_is_directory_cmd(worktree), {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  return worktree
+end
+
 local function prepare_review_context(event, comments, head_sha)
   local impl_version = reviewing().version
   local origin_marker = m_builders.pr_origin_marker(issue_proposal_id(), "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
@@ -56,6 +71,7 @@ return {
       findings_record = findings("review evidence remains unresolved"),
     })
     local _, _, review_version = prepare_review_context(event)
+    local worktree = mock_existing_review_worktree(reviewing().version)
 
     local result = run_review_loop(event, opts("review-loop-first-resolvable-findings"))
     t.eq(result.exit_code, 0)
@@ -67,6 +83,7 @@ return {
     t.eq(proposal.payload.convergence_question, event.narrowed_question)
     t.eq(proposal.payload.findings_record, event.findings_record)
     t.eq(proposal.payload.prior_round_digests, nil)
+    t.eq(proposal.payload.worktree, worktree)
 
     local comment = find_raise(result.raises, "github-proxy.github_pr_comment_request")
     t.is_true(comment ~= nil)

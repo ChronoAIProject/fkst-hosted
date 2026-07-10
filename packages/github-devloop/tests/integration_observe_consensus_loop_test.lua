@@ -102,6 +102,7 @@ return {
     t.is_nil(result.raises[1].payload.content_fetch:find("gh issue", 1, true))
     t.eq(result.raises[1].payload.dedup_key, "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z")
     t.eq(result.raises[1].payload.source_ref.ref, "owner/repo#issue/42")
+    t.eq(result.raises[1].payload.worktree, ".")
 
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
     t.eq(label_raise.payload.schema, "github-proxy.label.v1")
@@ -562,6 +563,7 @@ return {
     t.eq(result.raises[1].payload.dedup_key, "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/1")
     t.eq(result.raises[1].payload.convergence_question, event.narrowed_question)
     t.eq(result.raises[1].payload.source_ref.ref, "owner/repo#issue/42")
+    t.eq(result.raises[1].payload.worktree, ".")
 
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
     t.is_true(comment.body:find("fkst:github-devloop:converge-round:v1", 1, true) ~= nil)

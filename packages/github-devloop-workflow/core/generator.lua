@@ -101,7 +101,7 @@ local function spawn_generated(deps, prompt, ctx)
     return deps.spawn_codex(prompt, ctx)
   end
   if type(deps.spawn_codex_sync) == "function" then
-    return deps.spawn_codex_sync(workflow_codex.judgment_codex_opts(prompt, ctx and ctx.worktree))
+    return deps.spawn_codex_sync(workflow_codex.unrestricted_codex_opts(prompt, ctx and ctx.worktree))
   end
   return nil, "missing-generator-runner"
 end

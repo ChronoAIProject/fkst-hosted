@@ -20,6 +20,7 @@ local max_gaps = 4
 local max_narrowed_question_len = 2000
 local max_digest_len = 600
 local findings_record_len = 1500
+local max_worktree_len = 4096
 local max_scratch_slug_len = 120
 local stale_generation_context_error_class = "stale_generation_context"
 local verdict_label = "⟦FKST:VERDICT⟧"
@@ -116,6 +117,12 @@ local function has_source_ref(value)
   return type(value) == "table"
     and is_bounded_string(value.kind, max_key_len)
     and is_bounded_string(value.ref, max_key_len)
+end
+
+local function is_worktree(value)
+  return is_bounded_string(value, max_worktree_len)
+    and value:find("%c") == nil
+    and (value == "." or value:sub(1, 1) == "/")
 end
 
 local function has_content_fetch(proposal)
@@ -291,6 +298,9 @@ function M.is_eligible(proposal)
     return false
   end
   if proposal.content_fetch ~= nil and not is_bounded_string(proposal.content_fetch, max_content_fetch_len) then
+    return false
+  end
+  if proposal.worktree ~= nil and not is_worktree(proposal.worktree) then
     return false
   end
   if normalize_round(proposal.round) == nil then

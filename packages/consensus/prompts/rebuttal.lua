@@ -1,10 +1,7 @@
 return {
   template = [[You are writing Phase R rebuttal for one consensus philosopher seat.
 
-Execution boundary:
-- You are running in an empty runtime scratch directory, not a repository checkout.
-- Do not clone, checkout, fetch with git, create branches, or modify any repository.
-- Read required source content only from the context manifest below.
+{{execution_boundary}}
 
 Read your own locked Phase B output and both peer Phase B outputs. Attack the root claim before the leaves. Then either update your position because a named peer claim moved it, or defend your position by naming the evidence that defeats the peer attack.
 

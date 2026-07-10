@@ -92,6 +92,24 @@ local tests = {
     t.is_true(seen_prompt:find("owner/repo#issue/42", 1, true) ~= nil)
   end,
 
+  test_generated_sync_runner_uses_unrestricted_codex_options = function()
+    local seen_opts = nil
+    local spec, reason = generator.run_slot_generator({
+      spawn_codex_sync = function(spawn_opts)
+        seen_opts = spawn_opts
+        return { exit_code = 0, stdout = '{"title":"Next","body":"From source_ref."}' }
+      end,
+    }, {
+      worktree = "/tmp/generator-worktree",
+    }, generated_slot, predecessor)
+
+    t.is_nil(reason)
+    t.eq(spec.title, "Next")
+    t.eq(seen_opts.worktree, "/tmp/generator-worktree")
+    t.is_true(type(seen_opts.prompt) == "string")
+    t.is_nil(seen_opts.sandbox)
+  end,
+
   test_generated_invalid_output_returns_reason_code = function()
     local spec, reason = generator.run_slot_generator({
       spawn_codex = function()

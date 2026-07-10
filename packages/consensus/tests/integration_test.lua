@@ -121,6 +121,12 @@ local function assert_judgment_dir_created_without_permission_control(count)
   t.eq(seen, count)
 end
 
+local function assert_no_judgment_dir_created()
+  for _, call in ipairs(t.command_calls()) do
+    t.is_nil(call.rendered:find("mkdir -p", 1, true))
+  end
+end
+
 local function mock_judgment_runtime()
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
     stdout = "/tmp/fkst-packages-test/consensus/runtime",
@@ -538,8 +544,53 @@ return {
     local repair = judgment_call("synthesis-repair")
     assert_judgment_worktree(repair, "synthesis-repair")
     t.is_true(repair.stdin:find("Repair attempt:", 1, true) ~= nil)
-    t.eq(judgment_call("angle-teleology") ~= nil, true)
-    t.eq(judgment_call("rebuttal-teleology") ~= nil, true)
+    assert_judgment_worktree(judgment_call("angle-teleology"), "angle-teleology")
+    assert_judgment_worktree(judgment_call("rebuttal-teleology"), "rebuttal-teleology")
+    assert_judgment_worktree(judgment_call("synthesis"), "synthesis")
+    t.is_true(repair.stdin:find("You are running in an empty runtime scratch directory", 1, true) ~= nil)
+    assert_judgment_dir_created_without_permission_control(8)
+  end,
+
+  test_proposal_worktree_runs_every_seat_without_scratch_mkdir = function()
+    local worktree = "/tmp"
+    mock_judgment_runtime()
+    for _, stdout in ipairs({
+      verdict_label .. " approve\n" .. reply_label .. " Teleology angle accepts a small adapter.\n",
+      verdict_label .. " abstain\n" .. reply_label .. " Parsimony wants the retry boundary explicit.\n",
+      verdict_label .. " approve\n" .. reply_label .. " Fidelity accepts removing duplicate wiring.\n",
+      stance_label .. " defend\n" .. verdict_label .. " approve\n" .. reply_label .. " Teleology still approves.\n",
+      stance_label .. " defend\n" .. verdict_label .. " abstain\n" .. reply_label .. " Parsimony still abstains.\n",
+      stance_label .. " defend\n" .. verdict_label .. " approve\n" .. reply_label .. " Fidelity still approves.\n",
+      synthesis_stdout("malformed synthesis output"),
+      synthesis_stdout("converge: retry ownership remains unresolved + inspect the retry owner record"),
+    }) do
+      t.mock_command("codex exec", {
+        stdout = stdout,
+        stderr = "",
+        exit_code = 0,
+      })
+    end
+
+    local result = run_decide(proposal({
+      dedup_key = "proposal-42-v1/checkout",
+      worktree = worktree,
+    }), opts("checkout-synthesis-repair"))
+
+    t.eq(result.exit_code, 0)
+    local calls = codex_calls()
+    t.eq(#calls, 8)
+    for _, call in ipairs(calls) do
+      t.is_true(call.rendered:find(" -C ", 1, true) ~= nil)
+      t.is_true(call.rendered:find(worktree, 1, true) ~= nil)
+      t.is_nil(call.rendered:find("/judgment-worktrees/", 1, true))
+      t.is_true(call.stdin:find("read-only checkout of the judged repository", 1, true) ~= nil)
+      t.is_nil(call.stdin:find("empty runtime scratch directory", 1, true))
+    end
+    assert_call_contains(calls, "Judge this proposal from one whole-picture philosopher seat.")
+    assert_call_contains(calls, "Phase R rebuttal")
+    assert_call_contains(calls, "This is the first synthesis attempt.")
+    assert_call_contains(calls, "Repair attempt:")
+    assert_no_judgment_dir_created()
   end,
 
   test_synthesis_second_parse_failure_converges_without_default_question = function()

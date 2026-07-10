@@ -50,6 +50,25 @@ local function render_content_fetch_block(proposal, deps, neutralize)
   }, "\n")
 end
 
+local function render_execution_boundary(proposal)
+  if proposal.worktree ~= nil then
+    return table.concat({
+      "Execution boundary:",
+      "- You are running in a read-only checkout of the judged repository.",
+      "- The context bundle below remains the pinned snapshot of record.",
+      "- You may read any file in this checkout as additional evidence.",
+      "- When a claim about repository source is load-bearing, cite path:line.",
+      "- Do not clone, fetch, checkout, create branches, or modify anything.",
+    }, "\n")
+  end
+  return table.concat({
+    "Execution boundary:",
+    "- You are running in an empty runtime scratch directory, not a repository checkout.",
+    "- Do not clone, checkout, fetch with git, create branches, or modify any repository.",
+    "- Read required source content only from the context manifest below.",
+  }, "\n")
+end
+
 local function render_findings_record_block(proposal, neutralize)
   if proposal.findings_record == nil or proposal.findings_record == "" then
     return ""
@@ -173,6 +192,7 @@ function M.install(core, deps)
       angle = safe_angle,
       title = neutralize(proposal.title),
       body = neutralize(proposal.body),
+      execution_boundary = render_execution_boundary(proposal),
       content_fetch_block = render_content_fetch_block(proposal, deps, neutralize),
       body_label = deps.has_content_fetch(proposal) and "Brief (not complete; read full context below):" or "Body:",
       context_block = context_block,
@@ -210,6 +230,7 @@ function M.install(core, deps)
       angle = neutralize(own_result.angle),
       title = neutralize(proposal.title),
       body = neutralize(proposal.body),
+      execution_boundary = render_execution_boundary(proposal),
       content_fetch_block = render_content_fetch_block(proposal, deps, neutralize),
       body_label = deps.has_content_fetch(proposal) and "Brief (not complete; read full context below):" or "Body:",
       context_block = context_block,
@@ -253,6 +274,7 @@ function M.install(core, deps)
         return {
           title = neutralize(proposal.title),
           body = neutralize(proposal.body),
+          execution_boundary = render_execution_boundary(proposal),
           content_fetch_block = render_content_fetch_block(proposal, deps, neutralize),
           body_label = deps.has_content_fetch(proposal) and "Brief (not complete; read full context below):" or "Body:",
           context_block = context_block,

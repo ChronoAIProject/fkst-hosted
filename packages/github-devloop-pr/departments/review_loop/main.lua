@@ -83,6 +83,22 @@ local function reviewing_segment_transition_status(state, review_version)
   return "pending"  -- no marker yet, or a state earlier than reviewing -> reviewing marker not yet visible
 end
 
+local function existing_implementation_worktree(repo, issue_number, impl_version)
+  if issue_number == nil or impl_version == nil then
+    return nil
+  end
+  local runtime = exec_sync({ cmd = devloop_commands.read_runtime_root_cmd(), timeout = 30 })
+  if type(runtime) ~= "table" or runtime.exit_code ~= 0 or tostring(runtime.stdout or "") == "" then
+    return nil
+  end
+  local worktree = devloop_base.implement_worktree_path(runtime.stdout, repo, issue_number, impl_version)
+  local directory = exec_sync({ cmd = devloop_commands.path_is_directory_cmd(worktree), timeout = 30 })
+  if type(directory) == "table" and directory.exit_code == 0 then
+    return worktree
+  end
+  return nil
+end
+
 return saga.department(spec, { done = function() return false end, act = function(event)
   local unresolved = event.payload or {}
   if not v_pr_review_unresolved.is_supported_pr_review_unresolved(unresolved) then
@@ -245,6 +261,10 @@ return saga.department(spec, { done = function() return false end, act = functio
       angle_digests = unresolved.angle_digests,
       findings_record = facts_with_current[#facts_with_current] and facts_with_current[#facts_with_current].findings_record,
     }, event.ts, current_pr.comments, content_fetch, high_risk, next_dedup)
+    local worktree = existing_implementation_worktree(repo, origin.issue_number, origin.impl_version)
+    if worktree ~= nil then
+      proposal.worktree = worktree
+    end
     if not v_validate_proposal.validate_proposal(proposal) then
       log.warn("github-devloop dept=review_loop proposal_id=" .. tostring(origin.proposal_id) .. " tag=SKIP reason=cannot-build-valid-review-loop-proposal")
       return
