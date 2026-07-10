@@ -81,6 +81,14 @@ async fn main() -> ExitCode {
         log_level = %config.log_level,
         "config loaded"
     );
+    if config.access.enforced() {
+        tracing::info!(
+            allowed_users = config.access.entry_count(),
+            "access policy ENFORCED (FKST_ACCESS_ALLOWED_USERS)"
+        );
+    } else {
+        tracing::info!("access policy open (FKST_ACCESS_ALLOWED_USERS not set)");
+    }
 
     // 2b. Pod-per-session dispatch (milestone #9): when enabled IN K8S MODE, prove
     //     the Kubernetes API is reachable at startup so a misconfigured cluster

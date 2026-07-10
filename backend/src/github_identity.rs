@@ -133,7 +133,22 @@ impl FromRequestParts<AppState> for GithubUser {
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
         let token = bearer_token(parts)?;
-        verify_token(&state.config.github_api_base_url, token).await
+        let user = verify_token(&state.config.github_api_base_url, token).await?;
+        // Deployment-wide access policy (FKST_ACCESS_ALLOWED_USERS): a VERIFIED
+        // identity that is not allowlisted is 403 (authenticated but not allowed)
+        // — enforced HERE so every token-authenticated route, present and future,
+        // is covered by one gate.
+        if !state.config.access.allows(user.id, &user.login) {
+            tracing::info!(
+                user_id = user.id,
+                "access policy: verified GitHub identity is not allowlisted"
+            );
+            return Err(AppError::Forbidden(
+                "this deployment restricts access; your GitHub account is not on the allowlist"
+                    .to_string(),
+            ));
+        }
+        Ok(user)
     }
 }
 
@@ -144,6 +159,16 @@ mod tests {
     use axum::http::Request;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// state_with_base + an enforced FKST_ACCESS_ALLOWED_USERS list.
+    fn state_with_allowlist(base_url: &str, allowlist: &str) -> AppState {
+        let mut state = state_with_base(base_url);
+        state.config.access = crate::access_policy::AccessPolicy::from_vars(&[(
+            "FKST_ACCESS_ALLOWED_USERS".to_string(),
+            allowlist.to_string(),
+        )]);
+        state
+    }
 
     fn state_with_base(base_url: &str) -> AppState {
         let config = Config {
@@ -292,5 +317,56 @@ mod tests {
             .await
             .expect_err("empty token must 401");
         assert!(matches!(err, AppError::Unauthorized(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn extractor_rejects_verified_but_unlisted_identity_with_403() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/user"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "login": "mallory",
+                "id": 999
+            })))
+            .mount(&server)
+            .await;
+
+        let state = state_with_allowlist(&server.uri(), "583231, alice");
+        let mut parts = parts_with_auth(Some("Bearer gho_valid"));
+        let err = GithubUser::from_request_parts(&mut parts, &state)
+            .await
+            .expect_err("verified but unlisted identity must be rejected");
+        assert!(
+            matches!(err, AppError::Forbidden(_)),
+            "must be 403 Forbidden (authenticated but not allowed), got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn extractor_passes_allowlisted_identity_by_id_and_login() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/user"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "login": "OctoCat",
+                "id": 583231
+            })))
+            .mount(&server)
+            .await;
+
+        // Listed by numeric id.
+        let state = state_with_allowlist(&server.uri(), "583231");
+        let mut parts = parts_with_auth(Some("Bearer gho_valid"));
+        let user = GithubUser::from_request_parts(&mut parts, &state)
+            .await
+            .expect("id-listed identity passes");
+        assert_eq!(user.id, 583231);
+
+        // Listed by login, case-insensitively.
+        let state = state_with_allowlist(&server.uri(), "@octocat");
+        let mut parts = parts_with_auth(Some("Bearer gho_valid"));
+        GithubUser::from_request_parts(&mut parts, &state)
+            .await
+            .expect("login-listed identity passes");
     }
 }

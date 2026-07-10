@@ -4,6 +4,7 @@
 //! routes) so both the binary entrypoint and the integration tests can build
 //! the application without a real TCP bind.
 
+pub mod access_policy;
 pub mod config;
 // Named-environment / install-validation config knobs (`FKST_ENV_*`, issue
 // #338 §6.1). Config surface only — no behaviour is wired to these yet.

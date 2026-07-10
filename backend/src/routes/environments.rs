@@ -266,6 +266,7 @@ async fn env_store(state: &AppState) -> Result<EnvStore, AppError> {
         (status = 200, description = "Environment replaced (or unchanged) and validated", body = EnvironmentView),
         (status = 201, description = "Environment created and validated", body = EnvironmentView),
         (status = 401, description = "Missing/invalid GitHub token", body = ErrorEnvelope),
+        (status = 403, description = "Verified GitHub identity not allowlisted (FKST_ACCESS_ALLOWED_USERS)", body = ErrorEnvelope),
         (status = 422, description = "Install validation failed (detailed report)", body = InstallValidationError),
         (status = 429, description = "Validation capacity busy, or the same env is already validating", body = ErrorEnvelope),
         (status = 503, description = "Environment store backend unavailable", body = ErrorEnvelope),
@@ -412,6 +413,7 @@ async fn put_user_environment(
     responses(
         (status = 200, description = "The caller's named environments (summaries)", body = EnvironmentList),
         (status = 401, description = "Missing/invalid GitHub token", body = ErrorEnvelope),
+        (status = 403, description = "Verified GitHub identity not allowlisted (FKST_ACCESS_ALLOWED_USERS)", body = ErrorEnvelope),
         (status = 503, description = "Environment store backend unavailable", body = ErrorEnvelope),
     )
 )]
@@ -435,6 +437,7 @@ async fn list_user_environments(
     responses(
         (status = 200, description = "The named environment (secret values omitted)", body = EnvironmentView),
         (status = 401, description = "Missing/invalid GitHub token", body = ErrorEnvelope),
+        (status = 403, description = "Verified GitHub identity not allowlisted (FKST_ACCESS_ALLOWED_USERS)", body = ErrorEnvelope),
         (status = 404, description = "No environment by that name", body = ErrorEnvelope),
         (status = 503, description = "Environment store backend unavailable", body = ErrorEnvelope),
     )
@@ -462,6 +465,7 @@ async fn get_user_environment(
     responses(
         (status = 204, description = "Deleted (idempotent — 204 even if absent)"),
         (status = 401, description = "Missing/invalid GitHub token", body = ErrorEnvelope),
+        (status = 403, description = "Verified GitHub identity not allowlisted (FKST_ACCESS_ALLOWED_USERS)", body = ErrorEnvelope),
         (status = 503, description = "Environment store backend unavailable", body = ErrorEnvelope),
     )
 )]
