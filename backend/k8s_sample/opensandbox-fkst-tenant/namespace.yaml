@@ -1,0 +1,19 @@
+# The DEDICATED fkst sandbox namespace: every sandbox the fkst OpenSandbox server
+# instance creates lands here (its config.toml pins `[kubernetes].namespace`).
+# Separate from BOTH `chronoai-chrono-sandbox` (the chrono tenant) and
+# `chronoai-fkst` (the fkst-hosted backend) — see README.md. If infra opts to
+# reuse the empty pre-existing `chronoai-opensandbox` namespace instead, rename
+# here and in every sibling manifest.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chronoai-fkst-sandbox
+  labels:
+    app.kubernetes.io/name: chronoai-fkst-sandbox
+    app.kubernetes.io/part-of: fkst-hosted
+    # Same Pod Security Standards backstop as the control-plane namespace
+    # (backend/k8s_sample/namespace.yaml): `baseline` blocks privileged /
+    # hostPath / host namespaces even if a template regression requested them.
+    # NOT `restricted` — session pods run as root (install commands), boxed by
+    # gVisor + no-token + zero-RBAC + the lockdown NetworkPolicy.
+    pod-security.kubernetes.io/enforce: baseline

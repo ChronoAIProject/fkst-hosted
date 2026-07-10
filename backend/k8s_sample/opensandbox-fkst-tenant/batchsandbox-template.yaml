@@ -1,0 +1,44 @@
+# BatchSandbox template for the fkst server instance (mounted at
+# /etc/opensandbox/batchsandbox-template.yaml). Mirrors the chrono tenant's
+# structure with the TWO fkst-specific deltas called out below — everything else
+# must stay aligned with the chrono template so the shared controller and the
+# lockdown NetworkPolicy keep working identically.
+metadata:
+  labels:
+    opensandbox.io/workload: sandbox
+spec:
+  replicas: 1
+  template:
+    metadata:
+      # POD label — networkpolicy-sandbox-lockdown.yaml selects on this. Must be
+      # here (pod template), not only on the CR metadata above.
+      labels:
+        opensandbox.io/workload: sandbox
+    spec:
+      # FKST DELTA 1: Always (chrono: Never). fkst sessions are long-lived and
+      # the credential-heal path re-pushes creds after an IN-PLACE container
+      # restart — impossible under Never. This is a hard gate for fkst-hosted.
+      restartPolicy: Always
+      # FKST DELTA 2: 60s (chrono: 30s) — the fkst session engine needs the
+      # longer drain to flush logs + hand off work on SIGTERM.
+      terminationGracePeriodSeconds: 60
+      # Unbound identity: no IAM, no RBAC, no API token (see
+      # serviceaccount-sandbox-runner.yaml).
+      serviceAccountName: sandbox-runner
+      automountServiceAccountToken: false
+      # gVisor placement is injected by the server ([secure_runtime]) via
+      # runtimeClassName, which carries the sandbox.gke.io/runtime nodeSelector
+      # + toleration. These explicit copies are a SECOND guarantee so a sandbox
+      # can only ever schedule on the gVisor pool, even if the runtime-class
+      # injection were ever misconfigured. (Pool choice — spot vs on-demand —
+      # is decided on the pool's own taints; see README.md.)
+      nodeSelector:
+        sandbox.gke.io/runtime: gvisor
+      tolerations:
+        - key: sandbox.gke.io/runtime
+          operator: Equal
+          value: gvisor
+          effect: NoSchedule
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
