@@ -12,7 +12,7 @@ local m_builders = require("devloop.markers.builders")
 local reached = h.reached
 local unresolved = h.unresolved
 local ai_sentinel = string.char(226, 159, 166) .. "AI:FKST" .. string.char(226, 159, 167)
-local verdict_summary_label = "Three-angle verdicts: "
+local verdict_summary_label = "Verdicts: "
 
 local function marker_attrs(marker)
   local attrs = {}
