@@ -1,10 +1,7 @@
 local devloop_base = require("devloop.base")
 local requests_review = require("devloop.requests.review")
-local convergence_shared = require("devloop.convergence.shared")
 local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
-local conv_rounds = require("devloop.convergence.rounds")
-local conv_reconcile = require("devloop.convergence.reconcile")
 local t = h.t
 local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
@@ -24,12 +21,10 @@ local review_unresolved = h.review_unresolved
 local fixing = h.fixing
 local pr_link_marker_for_fix = h.pr_link_marker_for_fix
 local review_meta_event = h.review_meta_event
-local review_reconcile = h.review_reconcile
 local merge_ready = h.merge_ready
 local run_observe = h.run_observe
 local run_result = h.run_result
 local run_loop = h.run_loop
-local run_review_reconcile = h.run_review_reconcile
 local run_implement = h.run_implement
 local run_observe_pr = h.run_observe_pr
 local run_review_pr = h.run_review_pr
@@ -126,7 +121,6 @@ return {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
-    mock_pr_fix({ origin_marker }, branch, "def456")
     mock_git_push(branch)
     mock_pr_fix({ origin_marker }, branch, "feedface")
 
@@ -183,6 +177,7 @@ return {
     mock_issue_fix_for_event(event, { "fkst-dev:enabled" }, {
       reject_comment,
     }, branch, event.version)
+    mock_pr_fix({ m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") }, branch, "def456", nil, nil, nil, 1)
     local pending = run_fix(event, opts("fix-marker-lag", { FKST_GITHUB_WRITE = "1" }))
     t.eq(pending.exit_code, 0)
     t.eq(#pending.raises, 0)
@@ -206,7 +201,6 @@ return {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
-    mock_pr_fix({ origin_marker }, branch, "def456")
     mock_git_push(branch)
     mock_pr_fix({ origin_marker }, branch, "feedface")
 
@@ -237,6 +231,7 @@ return {
       core.state_marker(event.proposal_id, "reviewing", review_version),
       reject_comment,
     }, branch, review_version)
+    mock_pr_fix({ m_builders.pr_origin_marker(event.proposal_id, "42", branch, review_version, "dev") }, branch, "def456", nil, nil, nil, 1)
 
     local pending = run_fix(event, opts("fix-new-round-marker-lag", { FKST_GITHUB_WRITE = "1" }))
     t.eq(pending.exit_code, 0)
@@ -261,6 +256,7 @@ return {
       core.state_marker(event.proposal_id, "reviewing", reviewing_version),
       reject_comment,
     }, branch, event.version)
+    mock_pr_fix({ m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") }, branch, "def456", nil, nil, nil, 1)
 
     local result = run_fix(event, opts("fix-idempotent-reviewing"))
     t.eq(result.exit_code, 0)
@@ -313,7 +309,7 @@ return {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
-    mock_pr_fix({ origin_marker }, branch, "def456")
+    mock_pr_fix({ origin_marker }, branch, "def456", nil, nil, nil, 1)
     local without_write = run_fix(event, opts("fix-write-later-first"))
     t.eq(without_write.exit_code, 0)
     t.eq(count_calls("codex exec"), 0)
@@ -335,7 +331,6 @@ return {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
-    mock_pr_fix({ origin_marker }, branch, "def456")
     mock_git_push(branch)
     mock_pr_fix({ origin_marker }, branch, "feedface")
 
@@ -395,7 +390,6 @@ return {
       core.state_marker(second_event.proposal_id, "fixing", second_event.version),
       reject_comment,
     }, first_branch, first_event.version)
-    mock_pr_fix({ origin_marker }, first_branch, "feedface")
     mock_git_push(first_branch)
     mock_pr_fix({ origin_marker }, first_branch, "baddad")
 
@@ -465,7 +459,7 @@ return {
       reject_comment,
     }, branch, event.version)
     mock_write_env("1")
-    entity_read_mocks.mock_pr_view_raw_selector(t, {}, entity_read_mocks.pr_fix_selector, {
+    entity_read_mocks.mock_pr_view_raw_selector(t, {}, entity_read_mocks.pr_merge_selector, {
       stdout = string.format(
         '{"headRefName":"%s","headRefOid":"def456","baseRefName":"dev","state":"OPEN","comments":[%s],"isCrossRepository":false}\n',
         json_string(branch),
@@ -558,7 +552,6 @@ return {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
-    mock_pr_fix({ origin_marker }, branch, "def456")
     mock_git_push(branch)
     mock_pr_fix({ origin_marker }, branch, "feedface")
 
@@ -592,7 +585,6 @@ return {
     t.mock_command("rev-parse --verify refs/heads/", { stdout = "feedface\n", stderr = "", exit_code = 0 })
     mock_write_env("1")
     mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, comments, branch, event.version)
-    mock_pr_fix({ origin_marker }, branch, "def456")
     mock_git_push(branch)
     mock_pr_fix({ origin_marker }, branch, "feedface")
 
@@ -794,90 +786,6 @@ return {
     t.eq(count_calls("gh pr diff"), 0)
   end,
 
-  test_review_loop_true_stall_records_round_and_raises_review_reconcile = function()
-    local event = review_unresolved({
-      dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/3",
-      round = 3,
-      narrowed_question = "Same review framing",
-      angle_digests = {
-        { angle = "minimal", verdict = "abstain", digest = "same" },
-      },
-    })
-    local impl_version = reviewing().version
-    local _, _, review_version = devloop_base.parse_pr_review_proposal_id(event.proposal_id)
-    local origin_marker = m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
-    local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
-    mock_bot_env()
-    mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
-    mock_issue_review({ "fkst-dev:reviewing" }, {
-      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
-      conv_rounds.review_converge_round_marker(core, event.proposal_id, "github-devloop/issue/owner/repo/42", review_version, "def456", sr_digest, 1, "base", event.narrowed_question, event.angle_digests),
-      conv_rounds.review_converge_round_marker(core, event.proposal_id, "github-devloop/issue/owner/repo/42", review_version, "def456", sr_digest, 2, "loop1", event.narrowed_question, event.angle_digests),
-    })
-
-    local loop_result = run_review_loop(event, opts("review-loop-true-stall"))
-    t.eq(loop_result.exit_code, 0)
-    t.eq(#loop_result.raises, 2)
-    t.eq(loop_result.raises[1].queue, "github-proxy.github_pr_comment_request")
-    t.is_true(loop_result.raises[1].payload.body:find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
-    t.is_true(loop_result.raises[1].payload.body:find('round="3"', 1, true) ~= nil)
-    local reconcile_payload = find_raise(loop_result.raises, "devloop_review_reconcile").payload
-    t.eq(reconcile_payload.schema, "github-devloop.review-reconcile.v1")
-    t.eq(reconcile_payload.proposal_id, "github-devloop/issue/owner/repo/42")
-    t.eq(reconcile_payload.review_proposal_id, event.proposal_id)
-    t.eq(reconcile_payload.issue_version, review_version)
-    t.eq(reconcile_payload.head_sha, "def456")
-    t.eq(reconcile_payload.round, 3)
-    t.eq(reconcile_payload.dedup_key, "review-reconcile:" .. review_version .. "/review-loop/3")
-    t.eq(reconcile_payload.source_ref.ref, "owner/repo#pr/7")
-  end,
-
-  test_review_reconcile_drop_blocks_reviewing_issue = function()
-    local event = review_reconcile()
-    mock_bot_env()
-    mock_issue_review({ "fkst-dev:reviewing" }, {
-      core.state_marker(event.proposal_id, "reviewing", event.issue_version),
-    })
-
-    local result = run_review_reconcile(event, opts("review-reconcile-drop"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
-    local comment = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload
-    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
-    local version = conv_reconcile.review_reconcile_terminal_state_version(event.issue_version, event.round)
-    t.is_true(comment.body:find("github-devloop review reconcile action: drop", 1, true) ~= nil)
-    t.is_true(comment.body:find("no-actionable-framing-after-3-review-rounds", 1, true) ~= nil)
-    t.is_true(comment.body:find(core.state_marker(event.proposal_id, "blocked", version), 1, true) ~= nil)
-    t.is_true(comment.body:find(conv_reconcile.review_reconcile_marker(event.proposal_id, event.issue_version, event.round, "drop"), 1, true) ~= nil)
-    t.eq(label.add_labels[1], "fkst-dev:blocked")
-    t.eq(label.remove_labels[1], "fkst-dev:thinking")
-    t.eq(count_calls("codex exec"), 0)
-  end,
-
-  test_review_reconcile_visible_marker_is_idempotent = function()
-    local event = review_reconcile()
-    local state_version = event.issue_version .. "/review-loop/9"
-    mock_bot_env()
-    mock_issue_review({ "fkst-dev:blocked" }, {
-      core.build_review_reconcile_comment_request("owner/repo", "42", event, "drop", "already done", conv_reconcile.review_reconcile_terminal_state_version(state_version, event.round)).body,
-    })
-
-    local result = run_review_reconcile(event, opts("review-reconcile-idempotent"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
-    t.eq(count_calls("codex exec"), 0)
-  end,
-
-  test_review_reconcile_requires_visible_reviewing_marker = function()
-    local event = review_reconcile()
-    mock_bot_env()
-    mock_issue_review({ "fkst-dev:enabled" }, {})
-
-    local result = run_review_reconcile(event, opts("review-reconcile-pending-reviewing"))
-    t.eq(result.exit_code, 1)
-    t.eq(#result.raises, 0)
-  end,
-
   test_review_meta_parse_failure_blocks_fail_closed = function()
     local event = review_meta_event()
     mock_issue_review_meta({ "fkst-dev:review-meta" }, {
@@ -978,7 +886,6 @@ return {
     mock_issue_fix_for_event(fix_event, { "fkst-dev:fixing" }, {
       meta_comment,
     }, branch, event.version)
-    mock_pr_fix({ origin_marker }, branch, "def456")
     mock_git_push(branch)
     mock_pr_fix({ origin_marker }, branch, "feedface")
 

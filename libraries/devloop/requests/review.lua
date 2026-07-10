@@ -151,48 +151,6 @@ function C.pr_base_unmanaged_blocked_version(version)
   return tostring(version or "") .. "/blocked/pr-base-unmanaged"
 end
 
-function C.ci_failure_unrepaired_blocked_version(version, ci_failure_key)
-  return base_ids.dedup_key({
-    tostring(version or ""),
-    "blocked",
-    "own-ci-red-unrepaired",
-    tostring(ci_failure_key or "noci"),
-  })
-end
-
-function C.build_ci_failure_unrepaired_blocked_request(repo, fix, reason, detail)
-  local blocked_version = C.ci_failure_unrepaired_blocked_version(fix.version, fix.ci_failure_key)
-  local state_marker = devloop_state.state_marker(fix.proposal_id, "blocked", blocked_version)
-  local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "own-ci-red-unrepaired")
-  local safe_detail = devloop_base.neutralize_untrusted_comment_text(detail or "")
-  if safe_detail == "" then
-    safe_detail = "No repaired revision was published for the terminal own-CI failure."
-  end
-  return C.attach_blocked_handoff(entity_lib.build_entity_comment_request({
-    kind = "pr",
-    repo = repo,
-    number = fix.pr_number,
-  }, "github-devloop blocked PR because the own-CI failure was not repaired by its bounded fix attempt."
-    .. "\n\nReason: own-ci-red-unrepaired"
-    .. "\nProposal: " .. tostring(fix.proposal_id)
-    .. "\nPR: " .. tostring(fix.pr_number)
-    .. "\nReviewed head: " .. tostring(fix.reviewed_head_sha)
-    .. "\nCI failure key: " .. tostring(fix.ci_failure_key)
-    .. "\nAttempt result: " .. safe_reason
-    .. "\n\nDetail:\n" .. safe_detail
-    .. "\n\n" .. state_marker
-    .. "\n" .. ai_sentinel, base_ids.dedup_key({
-    "fix",
-    "blocked",
-    "own-ci-red-unrepaired",
-    tostring(fix.proposal_id),
-    tostring(fix.pr_number),
-    tostring(fix.reviewed_head_sha),
-    tostring(fix.ci_failure_key),
-    tostring(reason or "no-repair"),
-  }), fix.source_ref), fix.proposal_id, fix.pr_number, blocked_version, fix.source_ref)
-end
-
 function C.build_pr_base_unmanaged_comment_request(repo, pr_number, origin, integration_branch, source_ref)
   local blocked_version = C.pr_base_unmanaged_blocked_version(origin.impl_version)
   local state_marker = devloop_state.state_marker(origin.proposal_id, "blocked", blocked_version)
@@ -419,6 +377,32 @@ function C.build_fix_reviewing_comment_request(M, repo, issue_number, fix, old_h
   return C.attach_reviewing_handoff(request, fix.proposal_id, fix.pr_number, new_version or fix.version, fix.source_ref)
 end
 
+function C.raise_fix_review_meta(caps, repo, issue_number, fix, reason, detail)
+  local comment_request = caps.build_comment(repo, issue_number, fix, reason, detail)
+  local label_request = caps.build_label(repo, issue_number, fix, reason)
+  local add_labels, remove_labels = devloop_state.state_label_changes("review-meta")
+  devloop_logging.log_apply("fix", fix.proposal_id, "review-meta", fix.version, { add = add_labels, remove = remove_labels }, {
+    "github-proxy.github_pr_comment_request",
+    "github-proxy.github_issue_label_request",
+    "devloop_review_meta",
+  })
+  devloop_logging.log_raise("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  if issue_number ~= nil then
+    devloop_logging.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  end
+  devloop_logging.log_raise("fix", fix.proposal_id, "devloop_review_meta", {
+    schema = "github-devloop.review-meta.v1",
+    proposal_id = fix.proposal_id,
+    review_proposal_id = fix.review_proposal_id,
+    review_dedup_key = fix.review_dedup_key,
+    version = fix.version,
+    pr_number = fix.pr_number,
+    n = 0,
+    dedup_key = fix.dedup_key,
+    source_ref = fix.source_ref,
+  })
+end
+
 function C.raise_fix_reviewing(M, opts)
   opts = opts or {}
   local dept = tostring(opts.dept or "unknown")
@@ -434,10 +418,16 @@ function C.raise_fix_reviewing(M, opts)
     fix.fix_summary = opts.fix_summary
   end
 
-  devloop_logging.log_cas_decision(dept, fix.proposal_id, current_state, "fixing", "reviewing", "applied", reason)
+  devloop_logging.log_cas_decision(dept, fix.proposal_id, current_state, "fixing", "reviewing", opts.outcome or "applied", reason)
   local comment_request = C.build_fix_reviewing_comment_request(M, repo, issue_number, fix, old_head_sha, new_head_sha, new_version)
-  local label_request = labels.build_fix_reviewing_label_request(repo, issue_number, fix, new_head_sha, new_version)
-  local add_labels, remove_labels = M.state_label_changes("reviewing")
+  local label_request = opts.label_request or labels.build_fix_reviewing_label_request(repo, issue_number, fix, new_head_sha, new_version)
+  local add_labels, remove_labels
+  if opts.label_changes ~= nil then
+    add_labels = opts.label_changes.add or {}
+    remove_labels = opts.label_changes.remove or {}
+  else
+    add_labels, remove_labels = M.state_label_changes("reviewing")
+  end
   local raised = {
     "github-proxy.github_pr_comment_request",
   }
@@ -449,6 +439,41 @@ function C.raise_fix_reviewing(M, opts)
   if issue_number ~= nil then
     devloop_logging.log_raise(dept, fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
   end
+end
+
+function C.raise_fixing_replay_reviewing(raise_reviewing, dept, issue, state, proposal_id, link, current_pr, feedback, reason)
+  local new_version = devloop_state.next_fix_version(state.version)
+  local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
+  local fix = {
+    proposal_id = proposal_id,
+    pr_number = link.pr_number,
+    version = state.version,
+    review_proposal_id = feedback.review_proposal_id,
+    review_dedup_key = feedback.review_dedup_key,
+    reviewed_head_sha = feedback.reviewed_head_sha,
+    source_ref = source_ref,
+  }
+  local label_request = issue.number ~= nil and labels.build_state_label_request(
+    issue.repo, issue.number, "reviewing", base_ids.dedup_key({
+      "fixing", "label", "reviewing", tostring(proposal_id), tostring(new_version),
+      tostring(link.pr_number), tostring(current_pr.head_sha),
+    }), entity_lib.issue_source_ref(issue.repo, issue.number)
+  ) or nil
+  raise_reviewing({
+    dept = dept,
+    repo = issue.repo,
+    issue_number = issue.number,
+    fix = fix,
+    old_head_sha = feedback.reviewed_head_sha,
+    new_head_sha = current_pr.head_sha,
+    new_version = new_version,
+    reason = reason,
+    current_state = state,
+    outcome = "applied(replay)",
+    label_request = label_request,
+    label_changes = { add = { "fkst-dev:reviewing" }, remove = { "fkst-dev:fixing" } },
+  })
+  return true
 end
 
 function C.build_merge_head_reviewing_comment_request(M, repo, issue_number, merge_ready, old_head_sha, new_head_sha, new_version, source_ref)

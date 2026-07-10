@@ -5,6 +5,72 @@ local C = {}
 local transition_version = require("contract.transition_version")
 local devloop_logging = require("devloop.logging")
 local config = require("devloop.config")
+local v_validate_proposal = require("devloop.validators.validate_proposal")
+
+local function latest_converge_round(caps, comments, proposal_id, state_version, source_ref)
+  local base_version = transition_version.strip_suffixes(state_version)
+  return caps.latest_complete_converge_round(comments, proposal_id, base_version, source_ref)
+end
+
+function C.build_replay_proposal(caps, issue, proposal_id, state, current, event_ts)
+  local latest = latest_converge_round(caps, current.comments, proposal_id, state.version, issue.source_ref)
+  if latest ~= nil then
+    local base_version = conv_rounds.converge_proposal_base_dedup(latest.dedup)
+    local replay_n = latest.round + 1
+    local replay_dedup = transition_version.loop_at(base_version, replay_n)
+    local content_fetch = caps.context_fetch({
+      dept = "observe_issue",
+      repo = issue.repo,
+      issue_number = issue.number,
+      proposal_id = proposal_id,
+      version = replay_dedup,
+      tick = event_ts,
+    })
+    local proposal = caps.build_board_loop(issue.repo, issue.number, {
+      title = issue.title,
+      updated_at = issue.updated_at,
+    }, issue.source_ref, replay_n, {
+      narrowed_question = latest.narrowed_question,
+      angle_digests = latest.angle_digests,
+      findings_record = latest.findings_record,
+    }, event_ts, content_fetch, replay_dedup)
+    return v_validate_proposal.validate_proposal(proposal) and proposal or nil
+  end
+
+  local replay_issue = {}
+  for key, value in pairs(issue) do
+    replay_issue[key] = value
+  end
+  local replay_dedup = transition_version.strip_timeout_suffixes(state.version)
+  replay_issue.content_fetch = caps.context_fetch({
+    dept = "observe_issue",
+    repo = issue.repo,
+    issue_number = issue.number,
+    proposal_id = proposal_id,
+    version = replay_dedup,
+    tick = event_ts,
+  })
+  local proposal = caps.build_board(replay_issue, event_ts)
+  proposal.dedup_key = replay_dedup
+  local replay_round = transition_version.loop_round(replay_dedup)
+  if replay_round > 0 then
+    proposal.round = replay_round
+  end
+  return v_validate_proposal.validate_proposal(proposal) and proposal or nil
+end
+
+function C.has_converge_replay(caps, current, proposal_id, state, source_ref)
+  if state.state ~= "thinking" then
+    return false
+  end
+  local facts = conv_rounds.converge_round_facts_for_proposal(current.comments, proposal_id)
+  local round = conv_rounds.max_converge_round(facts)
+  return caps.latest_complete_converge_round(current.comments, proposal_id, nil, source_ref) ~= nil
+    or (#facts > 0 and round >= config.max_converge_rounds())
+    or conv_rounds.is_true_stall(facts, round)
+    or conv_rounds.resolvability_exhausted(facts)
+    or conv_rounds.has_essence_stall(facts)
+end
 
 local function visible_true_stall(M, issue, state, facts)
     local current = facts and facts.current or issue
@@ -54,6 +120,36 @@ function C.replay_thinking_true_stall_blocked(M, dept, issue, state, facts, log_
       { queue = "github-proxy.github_issue_comment_request", payload = comment_request },
       { queue = "github-proxy.github_issue_label_request", payload = label_request },
     })
+end
+
+function C.replay(caps, dept, issue, state, row, facts, log_skip, log_defer, raise_effects)
+  local proposal_id = facts.proposal_id
+  local terminal = caps.replay_true_stall(dept, issue, state, facts, log_skip, raise_effects)
+  if terminal ~= nil then
+    return terminal
+  end
+  devloop_logging.log_cas_decision(dept, proposal_id, state, "unmanaged", "thinking", "skip-idempotent(already at to_state)", "trusted thinking state marker is already visible")
+  local proposal = C.build_replay_proposal(caps, issue, proposal_id, state, facts.current, facts.event_ts)
+  if proposal == nil then
+    return log_skip(dept, proposal_id, state, row.from_state, row.driving_queue, "skip-foreign(payload)", "cannot rebuild thinking replay proposal")
+  end
+  if caps.dispatch_live_run("consensus", proposal_id, proposal.dedup_key, {
+    state = {
+      state = "thinking",
+      version = proposal.dedup_key,
+      proposal_id = proposal_id,
+      marker_created_at = state.marker_created_at,
+    },
+    current = facts.current,
+    proposal_id = proposal_id,
+    now_seconds = facts.now_seconds or now(),
+  }) then
+    return log_defer(dept, proposal_id, state, row.from_state, row.driving_queue, "skip-idempotent(live-exec-ref)", "matching consensus codex run is still live")
+  end
+  devloop_logging.log_cas_decision(dept, proposal_id, state, row.from_state, row.driving_queue, "applied(replay)", "replaying consensus proposal from trusted state facts")
+  return raise_effects(dept, proposal_id, "thinking", proposal.dedup_key, { add = {}, remove = {} }, {
+    { queue = "consensus.proposal", payload = proposal },
+  })
 end
 
 return C

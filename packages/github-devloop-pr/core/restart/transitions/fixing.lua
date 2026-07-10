@@ -22,19 +22,21 @@ return function(M, h)
       },
     },
     actionable_epoch = {
-      source = "codex_run:v1",
+      source = "codex_run_with_durable_hold:v1",
       generation_source = "same_as_actionable_epoch",
     },
     defer = {
-      kind = "codex_run",
+      kind = "codex_run_with_durable_hold",
+      hold_fact = "ci-repair-attempt:v1",
+      hold_resolver = "ci-repair-backoff",
       redrive_opens_generation = true,
     },
     terminal = false,
     to_states = { "reviewing", "review-meta", "blocked" },
     driving_queue = "devloop_fixing",
     observe_surfaces = { issue = true, pr = true, liveness_scan = true },
-    output_obligation = obligation({ "fix:v1", "state:v1 reviewing", "review-meta:v1", "fix-reconcile:v1", "state:v1 blocked" }, { "reviewing", "review-meta", "fixing", "blocked" }),
-    budget = budget(120, "A live fixing codex defers when fkst.codex_runs() positively reports a matching run with an unexpired run-derived deadline, or when codex run liveness is indeterminate; only positively not-running status falls back to the marker-budget timeout path."),
+    output_obligation = obligation({ "fix:v1", "state:v1 reviewing", "review-meta:v1", "ci-repair-attempt:v1", "fix-reconcile:v1", "state:v1 blocked" }, { "reviewing", "review-meta", "fixing", "blocked" }),
+    budget = budget(120, "A live or indeterminate fixing codex defers; after a completed own-CI repair attempt, the trusted attempt fact defers until its version-derived due time and opens a new due-time generation before the fixing watchdog can accrue timeout attempts."),
     liveness_contract = liveness({
       mode = "live-defer",
       real_execution = {
@@ -57,7 +59,7 @@ return function(M, h)
       input_fact_family = "revision-goal",
       output_postcondition_family = "revision_published",
       phase_rank = devloop_state.stage_rank("fixing"),
-      lineage_keys = { "state.version", "revision-goal.work_unit_key", "review-result.dedup", "review-result.head_sha", "ci-failure.ci_failure_key", "source_ref" },
+      lineage_keys = { "state.version", "revision-goal.work_unit_key", "review-result.dedup", "review-result.head_sha", "source_ref" },
       successors = {
         {
           state = "reviewing",
@@ -83,7 +85,7 @@ return function(M, h)
       },
     }),
     payload_builder = payloads_builders.build_devloop_fixing_payload,
-    dedup_shape = "forward:fixing/<proposal_id>/<version>/<pr>/<review_dedup>/<ci_failure_key-or-noci>; replay:fixing/replay/<proposal_id>/<version>/<pr>/<review_dedup>/<gate_baseline_sha-or-nobase>/<predecessor_set-or-nopred>/<ci_failure_key-or-noci>/<reviewed_head_sha>",
+    dedup_shape = "ci-failure:<proposal_id>/<pr>/<version> shared by forward and replay; review-feedback:forward fixing/<proposal_id>/<version>/<pr>/<review_dedup>/noci, replay fixing/replay/<proposal_id>/<version>/<pr>/<review_dedup>/<gate_baseline_sha-or-nobase>/<predecessor_set-or-nopred>/noci/<reviewed_head_sha>",
     required_facts = {
       fact("state", "marker-read"),
       fact("pr-link", "marker-read"),
@@ -118,7 +120,7 @@ return function(M, h)
       "fixing replay is complete only when trusted feedback marker fields are copied into devloop_fixing and the PR-local state label projection is requested",
       "build_reconcile_pr_state_label_request"
     ),
-    marker_facts = "state:v1 fixing plus review-result/review-meta/merge-gate feedback, or current PR head for deterministic renormalization",
+    marker_facts = "state:v1 fixing plus review-result/review-meta/merge-gate feedback, ci-repair-attempt:v1 for a completed own-CI repair round, or current PR head for deterministic renormalization",
     kickoff = "devloop_fixing or devloop_reviewing",
     replay = "Observe re-raises fix when a trusted feedback fact is parseable; otherwise it re-enters reviewing for the current head.",
     span_contract = span_contract({

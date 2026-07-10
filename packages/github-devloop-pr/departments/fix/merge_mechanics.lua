@@ -2,10 +2,12 @@ local devloop_base = require("devloop.base")
 local m_mq = require("devloop.merge_queue")
 local devloop_logging = require("devloop.logging")
 local devloop_commands = require("devloop.commands")
+local git_adapter = require("forge.git")
 
 local M = {}
 
 function M.make(core)
+  local git = git_adapter.production_handle
   local function branch_worktree(repo, issue_number, version, branch)
     local runtime_result = exec_sync({ cmd = devloop_commands.read_runtime_root_cmd(), timeout = 30 })
     if runtime_result.exit_code ~= 0 then
@@ -32,7 +34,7 @@ function M.make(core)
           error("github-devloop: git-worktree-prune-failed: git worktree prune failed: " .. tostring(prune_result.stderr))
         end
       else
-        local remove_result = core.git.worktree_remove(existing, 60)
+        local remove_result = git("github-devloop").worktree_remove(existing, 60)
         if remove_result.exit_code ~= 0 then
           error("github-devloop: git-worktree-remove-failed: git worktree remove failed: " .. tostring(remove_result.stderr))
         end
@@ -96,7 +98,7 @@ function M.make(core)
     }
     local merge_result = devloop_commands.git_worktree_merge_no_edit(worktree, base_head, 120)
     if merge_result.exit_code ~= 0 then
-      local unmerged_result = core.git.unmerged_paths(worktree, 30)
+      local unmerged_result = git("github-devloop").unmerged_paths(worktree, 30)
       if unmerged_result.exit_code ~= 0 then
         error("github-devloop: git-unmerged-path-check-failed: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
       end
@@ -138,7 +140,7 @@ function M.make(core)
     if merge_result.exit_code == 0 then
       return context
     end
-    local unmerged_result = core.git.unmerged_paths(worktree, 30)
+    local unmerged_result = git("github-devloop").unmerged_paths(worktree, 30)
     if unmerged_result.exit_code ~= 0 then
       error("github-devloop: git-unmerged-path-check-failed: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
     end
@@ -213,7 +215,7 @@ function M.make(core)
   end
 
   local function assert_no_unmerged_paths(worktree)
-    local unmerged_result = core.git.unmerged_paths(worktree, 30)
+    local unmerged_result = git("github-devloop").unmerged_paths(worktree, 30)
     if unmerged_result.exit_code ~= 0 then
       error("github-devloop: git-unmerged-path-check-failed: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
     end
@@ -223,7 +225,7 @@ function M.make(core)
   end
 
   local function assert_no_conflict_markers(worktree)
-    local markers_result = core.git.conflict_markers(worktree, 30)
+    local markers_result = git("github-devloop").conflict_markers(worktree, 30)
     if markers_result.exit_code == 1 then
       return
     end

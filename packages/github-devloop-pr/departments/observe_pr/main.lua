@@ -31,6 +31,7 @@ local spec = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
     "github-devloop-decompose.devloop_decompose",
+    "devloop_fix_reconcile",
     -- devloop_reviewing is emitted only after github_comment_written via comment_handoff.
     "devloop_fixing",
     "devloop_review_meta",
@@ -138,7 +139,7 @@ local function issue_claim_for_origin(origin)
   return m_claims.read_current_issue_ownership(origin.repo, origin.issue_number)
 end
 
-local function replay_pr_local_state(origin, pr_number, current_pr, state, source_ref)
+local function replay_pr_local_state(origin, pr_number, current_pr, state, source_ref, now_seconds)
   if state.state == "blocked" and decompose_lib.decomposed_fact(current_pr.comments, origin.proposal_id, state.version, pr_number) == nil then
     devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked", "decomposed", "skip-foreign(decomposed)", "decomposed marker is not visible")
     return false
@@ -164,6 +165,7 @@ local function replay_pr_local_state(origin, pr_number, current_pr, state, sourc
       base_branch = origin.base_branch,
     },
     source_ref = source_ref,
+    now_seconds = now_seconds,
     feedback = core.fixing_replay_feedback_fact(current_pr.comments, origin.proposal_id, state.version), fix_feedback = core.fixing_replay_feedback_fact(current_pr.comments, origin.proposal_id, state.version),
   })
 end
@@ -258,7 +260,7 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
   return true
 end
 
-local function maybe_liveness_timeout(origin, pr_number, current_pr, state, source_ref, issue_current)
+local function maybe_liveness_timeout(origin, pr_number, current_pr, state, source_ref, issue_current, now_seconds)
   local row = replay_fields.restart_transition_row(core.restart_transition_table(), state and state.state)
   if not core.restart_row_observable_on(row, "pr") then
     return false
@@ -287,6 +289,7 @@ local function maybe_liveness_timeout(origin, pr_number, current_pr, state, sour
     review_proposal_id = state and state.state == "reviewing" and forge_validators.is_git_sha(head_sha)
       and devloop_base.pr_review_proposal_id(origin.repo, pr_number, state.version, head_sha)
       or nil,
+    now_seconds = now_seconds,
   })
 end
 
@@ -490,6 +493,7 @@ end
 local function process_pr_event(event)
   local pr = pr_context(event)
   local raw = event.payload or {}
+  local current_now_seconds = tonumber(event.now_seconds) or now()
   if pr == nil then
     devloop_logging.log_entry("observe_pr", event, "unknown", devloop_logging.payload_field(raw, "dedup_key"))
     devloop_logging.log_cas_decision("observe_pr", "unknown", { state = nil, version = nil }, "pr-open", "reviewing", "skip-foreign(pr)", "unsupported event payload")
@@ -565,12 +569,12 @@ local function process_pr_event(event)
     if state.state ~= nil and state.state ~= "pr-open" then
       if pr.source == "poll"
         and raw.source == "liveness-scan"
-        and maybe_liveness_timeout(origin, pr.number, current_pr, state, source_ref, issue_current) then
+        and maybe_liveness_timeout(origin, pr.number, current_pr, state, source_ref, issue_current, current_now_seconds) then
         return
       end
       local replay_state = state
       devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, state, "reviewing", state.state, "skip-idempotent(already at to_state)", state.state .. " marker visible on PR")
-      local replayed = replay_pr_local_state(origin, pr.number, current_pr, replay_state, source_ref)
+      local replayed = replay_pr_local_state(origin, pr.number, current_pr, replay_state, source_ref, current_now_seconds)
       if replayed then
         maybe_label_hints(origin, pr.number, current_pr, replay_state, source_ref)
       elseif replay_state.state == "blocked" or replay_state.state == "merged" then
@@ -589,7 +593,7 @@ local function process_pr_event(event)
       return
     end
     if state.state == "pr-open" and tostring(current_pr.state or ""):lower() ~= "open" then
-      replay_pr_local_state(origin, pr.number, current_pr, state, source_ref)
+      replay_pr_local_state(origin, pr.number, current_pr, state, source_ref, current_now_seconds)
       return
     end
     if transition ~= "apply" and transition ~= "idempotent" then

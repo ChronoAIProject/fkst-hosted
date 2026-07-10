@@ -212,11 +212,12 @@ function C.merge_queue_head(M, repo, base_branch, current)
   for _, pr_item in ipairs(parsers_pr.parse_pr_list_merge_queue(list.stdout)) do
     local pr_number = tonumber(pr_item.number)
     if pr_number ~= nil and not seen[tostring(pr_number)] then
-      local view = support.github().gh_pr_view_merge(repo, pr_number, 30)
-      if view.exit_code ~= 0 then
-        error("github-devloop: merge queue PR view failed: " .. tostring(view.stderr))
+      local view, command_result = support.github().gh_pr_view_merge(repo, pr_number, 30)
+      if view == nil then
+        error("github-devloop: merge queue PR view failed: "
+          .. tostring(command_result and command_result.stderr or "missing result"))
       end
-      local pr = parsers_pr.parse_pr_view_merge(view.stdout)
+      local pr = parsers_pr.parse_pr_view_merge(view)
       local entry = merge_queue_entry_from_pr(M, repo, pr_number, pr, base_branch)
       if entry ~= nil then
         table.insert(entries, entry)
@@ -522,11 +523,12 @@ function C.wip_capacity_allows_start(M, repo, current_issue_number)
 end
 
 local function pr_merge_view_for_wip(M, repo, pr_number)
-  local view = support.github().gh_pr_view_merge(repo, pr_number, 30)
-  if view.exit_code ~= 0 then
-    error("github-devloop: WIP PR state view failed: " .. tostring(view.stderr))
+  local view, command_result = support.github().gh_pr_view_merge(repo, pr_number, 30)
+  if view == nil then
+    error("github-devloop: WIP PR state view failed: "
+      .. tostring(command_result and command_result.stderr or "missing result"))
   end
-  return parsers_pr.parse_pr_view_merge(view.stdout)
+  return parsers_pr.parse_pr_view_merge(view)
 end
 
 local merge_gate_wait_wip_states = {

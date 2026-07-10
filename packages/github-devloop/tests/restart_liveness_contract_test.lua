@@ -482,7 +482,7 @@ return {
       },
     }
     local errors = core.strict_restart_liveness_contract_errors({ row })
-    t.is_true(contains_error(errors, "implementing: blocking spawn_codex_sync receiver must use codex_run:v1 liveness"), joined_errors(errors))
+    t.is_true(contains_error(errors, "implementing: blocking spawn_codex_sync receiver must use codex-run liveness"), joined_errors(errors))
   end,
 
   test_codex_run_defer_rejects_missing_real_execution = function()

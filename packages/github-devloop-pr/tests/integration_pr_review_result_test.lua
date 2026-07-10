@@ -16,7 +16,7 @@ local find_raise = h.find_raise
 local find_causal_raise = h.find_causal_raise
 
 local ai_sentinel = string.char(226, 159, 166) .. "AI:FKST" .. string.char(226, 159, 167)
-local verdict_summary_label = "Three-angle verdicts: "
+local verdict_summary_label = "Verdicts: "
 
 local function mock_issue_claim(assignees, author_login)
   local rendered = {}

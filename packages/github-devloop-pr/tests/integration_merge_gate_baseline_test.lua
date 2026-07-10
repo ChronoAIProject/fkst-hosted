@@ -46,6 +46,7 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge_rollup({ origin_marker }, '[{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/test","name":"test","startedAt":"2026-06-03T02:03:04Z","status":"COMPLETED","workflowName":"ci","headSha":"def456"}]', nil, nil, nil, nil, nil, nil, nil, nil, nil, "ba5e9999")
+    mock_pr_merge_rollup({ origin_marker }, '[{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/test","name":"test","startedAt":"2026-06-03T02:03:04Z","status":"COMPLETED","workflowName":"ci","headSha":"def456"}]', nil, nil, nil, nil, nil, nil, nil, nil, nil, "ba5e9999")
     mock_failing_required_check_runs()
 
     local result = run_merge(event, opts("merge-ci-red", { FKST_GITHUB_WRITE = "1" }))
@@ -207,7 +208,6 @@ return {
       old_feedback,
       new_feedback,
     }, branch, event.version)
-    mock_pr_fix({ origin_marker }, branch, event.reviewed_head_sha)
     mock_git_push(branch)
     mock_pr_fix({ origin_marker }, branch, "feedface")
 
@@ -287,7 +287,6 @@ return {
       core.state_marker(corrected.proposal_id, "fixing", corrected.version),
       feedback,
     }, branch, corrected.version)
-    mock_pr_fix({ origin_marker }, branch, corrected.reviewed_head_sha)
     mock_git_push(branch)
     mock_pr_fix({ origin_marker }, branch, "feedface")
 
@@ -306,6 +305,7 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     -- Synthetic verify-branch coverage: live CheckRun rollup entries do not carry headSha.
+    mock_pr_merge_rollup({ origin_marker }, '[{"name":"test","state":"COMPLETED","conclusion":"FAILURE","headSha":"bca321"}]', nil, nil, nil, nil, nil, nil, nil, nil, nil, "base999")
     mock_pr_merge_rollup({ origin_marker }, '[{"name":"test","state":"COMPLETED","conclusion":"FAILURE","headSha":"bca321"}]', nil, nil, nil, nil, nil, nil, nil, nil, nil, "base999")
     t.mock_command(check_runs_cmd, {
       stdout = '{"total_count":1,"check_runs":[{"name":"test","status":"completed","conclusion":"success","head_sha":"def456"}]}\n',
@@ -329,6 +329,7 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     -- Synthetic verify-branch coverage: live CheckRun rollup entries do not carry headSha.
+    mock_pr_merge_rollup({ origin_marker }, '[{"name":"test","state":"COMPLETED","conclusion":"FAILURE","headSha":"bca321"}]')
     mock_pr_merge_rollup({ origin_marker }, '[{"name":"test","state":"COMPLETED","conclusion":"FAILURE","headSha":"bca321"}]')
     t.mock_command(check_runs_cmd, {
       stdout = '{"total_count":1,"check_runs":[{"name":"test","status":"completed","conclusion":"success","head_sha":"def456"}]}\n',

@@ -30,7 +30,12 @@ local check_run_head_sha = check_runs.check_run_head_sha
 local check_run_name = check_runs.check_run_name
 local check_run_state = check_runs.check_run_state
 local parse_commit_check_runs = check_runs.parse_commit_check_runs
-local required_check_run_names = check_runs.required_check_run_names
+local required_head_check_run_status_value = check_runs.required_head_check_run_status
+local required_head_ci_failure_key_value = check_runs.required_head_ci_failure_key
+local required_check_run_names = {}
+for _, name in ipairs(check_runs.required_check_run_names or {}) do
+  table.insert(required_check_run_names, name)
+end
 
 local function log_check_runs_fallback(M, opts, repo, head_sha, runs, reason)
   if type(M.log_line) ~= "function" then
@@ -58,11 +63,11 @@ local function fetch_commit_check_runs(repo, head_sha)
 end
 
 local function required_head_check_run_status(runs, head_sha)
-  return check_runs.required_head_check_run_status(runs, head_sha, required_check_run_names)
+  return required_head_check_run_status_value(runs, head_sha, required_check_run_names)
 end
 
 local function required_head_ci_failure_key(runs, head_sha)
-  return check_runs.required_head_ci_failure_key(runs, head_sha, required_check_run_names)
+  return required_head_ci_failure_key_value(runs, head_sha, required_check_run_names)
 end
 
 local function ci_classification(kind, reason, extra)

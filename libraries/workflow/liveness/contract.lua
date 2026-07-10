@@ -196,7 +196,9 @@ local function validate_liveness_contract(M, row, errors)
     return
   end
 
-  if row.actionable_epoch and row.actionable_epoch.source == "codex_run:v1" then
+  if row.actionable_epoch
+    and (row.actionable_epoch.source == "codex_run:v1"
+      or row.actionable_epoch.source == "codex_run_with_durable_hold:v1") then
     if contract.signal ~= nil then
       table.insert(errors, state .. ": live-defer codex_run must not declare marker signal")
     end

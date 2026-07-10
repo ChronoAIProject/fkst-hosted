@@ -522,7 +522,8 @@ function M.restart_row_liveness_signal(row, state, facts, now_seconds)
   end
   if row
     and row.actionable_epoch
-    and row.actionable_epoch.source == "codex_run:v1" then
+    and (row.actionable_epoch.source == "codex_run:v1"
+      or row.actionable_epoch.source == "codex_run_with_durable_hold:v1") then
     return codex_run_liveness_signal(M, row, state, facts, now_seconds)
   end
   local signal_contract = liveness_contract_signal(contract)
@@ -567,7 +568,8 @@ function M.restart_row_receiver_liveness(row, state, facts, now_seconds)
         family = row.defer and (row.defer.live_marker or row.defer.kind),
         resolver = row.actionable_epoch and row.actionable_epoch.source,
       }
-      if row.actionable_epoch.source == "codex_run:v1" then
+      if row.actionable_epoch.source == "codex_run:v1"
+        or row.actionable_epoch.source == "codex_run_with_durable_hold:v1" then
         signal.family = signal.family or "codex_run:v1"
         signal.resolver = signal.resolver or "fkst.codex_runs"
       end

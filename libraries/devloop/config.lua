@@ -4,6 +4,9 @@ local C = {}
 local forge_validators = require("devloop.forge_validators")
 local env = require("workflow.env")
 
+local seconds_per_minute = 60
+local liveness_poll_interval_minutes = 5
+
 local allowed_env = {
   FKST_GITHUB_BOT_LOGIN = true,
   FKST_GITHUB_AUTHORIZED_LOGINS = true,
@@ -144,6 +147,14 @@ end
 
 function C.max_fix_rounds()
   return 12
+end
+
+function C.liveness_poll_interval()
+  return tostring(liveness_poll_interval_minutes) .. "m"
+end
+
+function C.liveness_poll_cadence_seconds()
+  return liveness_poll_interval_minutes * seconds_per_minute
 end
 
 function C.max_converge_rounds()

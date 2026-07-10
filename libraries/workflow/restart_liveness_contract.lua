@@ -72,6 +72,18 @@ local epoch_sources = {
     forbids_observed_fact = true,
     forbids_clear_opens_generation = true,
   },
+  ["codex_run_with_durable_hold:v1"] = {
+    durable = true,
+    opens_generation = true,
+    excludes_deferred_time = true,
+    requires_real_execution = true,
+    requires_durable_hold = true,
+    real_execution_primitive = "fkst.codex_runs",
+    forbids_freshness_ms = true,
+    forbids_clear_fact = true,
+    forbids_observed_fact = true,
+    forbids_clear_opens_generation = true,
+  },
   ["child_workflow_wait:v1"] = {
     durable = true,
     opens_generation = true,
@@ -92,6 +104,7 @@ local known_liveness_contract_violations = resolved.known_liveness_contract_viol
 local provenance = resolved.runtime_provenance or {}
 local codex_run_policy = resolved.codex_run or {}
 local child_workflow_wait_policy = resolved.child_workflow_wait or {}
+local durable_hold_resolver = resolved.durable_hold_resolver
 local default_provenance_proposal_id = "workflow/restart-liveness/provenance/1"
 local default_provenance_version = "restart-liveness-provenance"
 local default_provenance_marker_created_at = "2026-06-03T00:00:00Z"
@@ -116,6 +129,9 @@ local function restart_liveness_epoch_sources()
   return copy_table(epoch_sources)
 end
 rawset(M, "restart_liveness_epoch_sources", restart_liveness_epoch_sources)
+if type(durable_hold_resolver) == "function" then
+  rawset(M, "restart_durable_liveness_hold", durable_hold_resolver)
+end
 
 local function known_liveness_contract_violations_fn()
   return copy_table(known_liveness_contract_violations)
@@ -289,7 +305,7 @@ local function validate_heartbeat_defer(row, errors)
   end
 end
 
-local function validate_codex_run_defer(row, errors)
+local function validate_codex_run_defer(row, errors, expected_epoch_source)
   local state = state_name(row)
   local defer = row and row.defer or nil
   local epoch = row and row.actionable_epoch or nil
@@ -297,8 +313,8 @@ local function validate_codex_run_defer(row, errors)
   if defer.freshness_ms ~= nil then
     table.insert(errors, state .. ": codex_run defer must not declare freshness_ms")
   end
-  if epoch == nil or epoch.source ~= "codex_run:v1" then
-    table.insert(errors, state .. ": codex_run defer must use codex_run:v1")
+  if epoch == nil or epoch.source ~= expected_epoch_source then
+    table.insert(errors, state .. ": " .. tostring(defer.kind) .. " defer must use " .. tostring(expected_epoch_source))
   end
   if defer.clear_fact ~= nil then
     table.insert(errors, state .. ": codex_run defer must not declare clear_fact")
@@ -374,6 +390,24 @@ local function validate_codex_run_defer(row, errors)
   end
   if real_execution.indeterminate_timeout ~= expected_indeterminate_timeout then
     table.insert(errors, state .. ": codex_run defer real_execution.indeterminate_timeout must be " .. tostring(expected_indeterminate_timeout))
+  end
+end
+
+local function validate_codex_run_with_durable_hold_defer(row, errors)
+  local state = state_name(row)
+  local defer = row and row.defer or nil
+  validate_codex_run_defer(row, errors, "codex_run_with_durable_hold:v1")
+  if not non_empty_string(defer.hold_fact) then
+    table.insert(errors, state .. ": codex_run_with_durable_hold defer must declare hold_fact")
+  end
+  if not non_empty_string(defer.hold_resolver) then
+    table.insert(errors, state .. ": codex_run_with_durable_hold defer must declare hold_resolver")
+  end
+  if defer.redrive_opens_generation ~= true then
+    table.insert(errors, state .. ": codex_run_with_durable_hold defer.redrive_opens_generation must be true")
+  end
+  if type(durable_hold_resolver) ~= "function" then
+    table.insert(errors, state .. ": codex_run_with_durable_hold resolver is not injected")
   end
 end
 
@@ -481,14 +515,18 @@ local function validate_defer(row, source, errors)
     return
   end
   if defer.kind == "codex_run" then
-    validate_codex_run_defer(row, errors)
+    validate_codex_run_defer(row, errors, "codex_run:v1")
+    return
+  end
+  if defer.kind == "codex_run_with_durable_hold" then
+    validate_codex_run_with_durable_hold_defer(row, errors)
     return
   end
   if defer.kind == "child_workflow_wait" then
     validate_child_workflow_wait_defer(row, errors)
     return
   end
-  table.insert(errors, state .. ": live-defer defer.kind must be release_gate, heartbeat, codex_run, or child_workflow_wait")
+  table.insert(errors, state .. ": live-defer defer.kind must be release_gate, heartbeat, codex_run, codex_run_with_durable_hold, or child_workflow_wait")
 end
 
 local function validate_row(row, errors)
@@ -510,8 +548,10 @@ local function validate_row(row, errors)
     end
   end
   if blocking_codex_receiver(row)
-    and not (mode == "live-defer" and epoch ~= nil and epoch.source == "codex_run:v1") then
-    table.insert(errors, state .. ": blocking spawn_codex_sync receiver must use codex_run:v1 liveness")
+    and not (mode == "live-defer"
+      and epoch ~= nil
+      and (epoch.source == "codex_run:v1" or epoch.source == "codex_run_with_durable_hold:v1")) then
+    table.insert(errors, state .. ": blocking spawn_codex_sync receiver must use codex-run liveness")
   end
   if epoch ~= nil and epoch.source == "state_entry:v1" then
     if mode == "live-defer" then
@@ -551,6 +591,8 @@ local function validate_runtime_provenance(row, errors)
   elseif row.actionable_epoch.source == "live_defer_heartbeat:v1" then
     now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-03T00:00:01Z")
   elseif row.actionable_epoch.source == "codex_run:v1" then
+    now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-03T00:00:01Z")
+  elseif row.actionable_epoch.source == "codex_run_with_durable_hold:v1" then
     now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-03T00:00:01Z")
   elseif row.actionable_epoch.source == "child_workflow_wait:v1" then
     now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-03T00:00:01Z")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Behavior tests for scripts/run.sh doctor."""
+"""Behavior tests for operator doctor health checks."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+DOGFOOD_SCRIPT = REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "dogfood.sh"
 
 
 def write_executable(path: Path, text: str) -> None:
@@ -223,6 +224,72 @@ class DoctorScriptTest(unittest.TestCase):
             self.assertNotIn("packages/github-devloop-ops/departments/doctor/main.lua", result.stdout)
         finally:
             h.close()
+
+
+class DogfoodDoctorTest(unittest.TestCase):
+    def test_panic_count_excludes_child_stderr_and_preserves_engine_panic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bin_dir = root / "bin"
+            log_dir = root / "logs"
+            bin_dir.mkdir()
+            log_dir.mkdir()
+            write_executable(
+                bin_dir / "pgrep",
+                textwrap.dedent(
+                    """\
+                    #!/usr/bin/env bash
+                    printf '%s\n' "$DOGFOOD_TEST_PID"
+                    """
+                ),
+            )
+            (log_dir / "packages-sv-test.log").write_text(
+                "\n".join(
+                    (
+                        "TIMESTAMP=2026-07-10T00:00:00Z LEVEL=INFO MSG=event runtime running",
+                        "TIMESTAMP=2026-07-10T00:00:01Z LEVEL=WARN dept=github-devloop-pr.fix stderr=diff: grep -ac panicked supervise.log",
+                        "TIMESTAMP=2026-07-10T00:00:02Z LEVEL=WARN dept=fixture stderr=thread 'worker' panicked at child.rs:7",
+                        "TIMESTAMP=2026-07-10T00:00:03Z LEVEL=WARN dept=fixture stderr=redb temporary lock error",
+                        "TIMESTAMP=2026-07-10T00:00:04Z LEVEL=ERROR MSG=thread 'main' panicked at engine.rs:42",
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": f"{bin_dir}:{env.get('PATH', '')}",
+                    "DOGFOOD_CONFIG": str(root / "missing-config.sh"),
+                    "DOGFOOD_ROOT": str(root / "dogfood"),
+                    "DOGFOOD_LOGDIR": str(log_dir),
+                    "DOGFOOD_REPOS": "packages",
+                    "DOGFOOD_TEST_PID": str(os.getpid()),
+                    "GH_ORG": "ExampleOrg",
+                    "SUBSTRATE_SRC": str(root / "substrate"),
+                    "BIN": "/bin/true",
+                }
+            )
+
+            result = subprocess.run(
+                ["/bin/bash", str(DOGFOOD_SCRIPT), "status", "packages"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("panic=1", result.stdout)
+
+    def test_all_panic_readouts_use_the_fact_predicate(self) -> None:
+        source = DOGFOOD_SCRIPT.read_text(encoding="utf-8")
+        # every panic readout (start echo, status, doctor) goes through the
+        # stderr-stripping fact predicate; none greps the raw log text.
+        self.assertEqual(source.count('$(engine_panic_count "$log")'), 3)
+        self.assertNotIn("panic=$(grep", source)
 
 
 if __name__ == "__main__":

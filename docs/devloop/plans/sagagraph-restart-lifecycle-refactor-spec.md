@@ -52,7 +52,7 @@ Row replay/kickoff authority也必须来自 canonical row 与同一个 owner-bou
 
 `versions_equivalent` 的完整 domain semantics仍标记为 **ASSUMED-UNVERIFIED**：虽然当前实现可见于 `libraries/devloop/state.lua:162-170`，但其对所有历史 version forms 的兼容语义必须由 Step 0.1 corpus确认，不能只凭 helper body提升为新规范。
 
-## §4. R1–R10 Constitutional Invariants
+## §4. R1–R11 Constitutional Invariants
 
 ### R1. SINGLE AUTHORED LIFECYCLE MODEL
 
@@ -119,6 +119,20 @@ Checker、comparator、normalizer与 mandatory corpus必须来自 protected merg
 - absence必须由明确 emission ledger与 declared producer监控。
 
 没有 capable provider的 obligation必须 fail conformance，并记录 `unmonitored`/`indeterminate`；不得把所有 obligations虚假路由到 R7。Issue rows与 R10 index必须位于 `packages/github-devloop/core/restart/`；ops只能消费 owner发布的 legacy-exact read-only observation facts，不得经 shared `libraries/devloop`读取 issue rows或 temporal index。
+
+### R11. FANOUT-ONLY MESSAGE SEMANTICS
+
+部门/包之间只有两种通信原语：**fanout-shaped 单向消息**（`raise` 发布领域事实或 one-way published-seam intent/command，subscription 决定 acceptance、无 requester-correlated reply）与**直接 library 调用**（同步、返回值）。没有第三种。单向 published-seam intent/command是合法 fanout-shaped entry，不是 request-reply；**request-reply（1:1 对话，如 consensus）的 requester-correlated reply绝不做成消息——它是一次 lib 调用。** 完整 doctrine以 `CLAUDE.md` 的「消息只许 fanout」节为权威准绳。
+
+这里的 fanout-only 是 **provenance-independent acceptance semantics**，适用于所有 queues；它不是 `M.spec.fanout` 字段。后者只是 queue-cardinality contract，不声明 broadcast topic，也不决定 R11 是否适用。
+
+- **doctrine/review lens：requester-provenance noninterference（受众无关性）**。固定 queue/领域事实/消费者状态，只改变/删除 requester·origin·correlation·continuation 来源 R，消费者的**业务效果必须不变**（skip/drop、写哪个领域状态、恢复哪个 continuation、触发哪个 effect、产生哪些后续消息；诊断 log/trace 不算）。反事实 review 测试：删掉「谁发起/哪个 pending 在等/reply address/correlation token」后仍是完整领域事实 → 可能真 fanout-shaped message，否则 request-reply。三类 id 分角色：`event_id`（去重）合法/选调用方非法；`entity ref`（回源实体）合法/冒充 reply correlation 非法；provenance-independent admission后的 same-entity lineage/CAS合法；`requester·correlation·continuation ref` 不得进 public event业务 contract。当前 `consensus_result` 等 `skip-foreign(proposal_id)` origin filters命中最后一类，是 shrink-only MIGRATION DEBT，不是合法 exemplar。该 invariant与反事实目前是 review lens，不是 general mechanical detector。
+- **canonical 唯一形态**：`consensus.reach(proposal) -> reached|converge`，source-agnostic workspace library，同步返回，不认 caller/reply-queue；caller 持 saga marker/CAS/retry/re-derive。Request-reply logic的唯一 reuse form是 declared direct `lib_deps` composition；需要包面时用薄包 call library。`[event_deps]` 保持 event-topology composition（Facade/Adapter），只组合 fanout-shaped queues，明确禁止用于 request-reply reuse；两种 composition的职责与语义严格分离。
+- **层归属**：引擎只知静态 `raise ⊆ produces ⊆ published_seam` 与 `M.spec.fanout` queue-cardinality contract，看不到 Lua provenance-independent acceptance semantics → 归 **fkst-packages conformance**；不新增引擎 `kind="broadcast"` 自报字段。
+- **refactor phase：inventory + no-growth，绝不 zero-surface。** 本 refactor必须 inventory现有 known request-reply message surfaces；`migration/request-reply-message.allowlist` 是 shrink-only no-growth baseline。Allowlist机制结构上只许 shrink，但 R9 要求现有 consensus surface（`consensus.proposal`、`consensus_reached`、`consensus_converge`、reply consumers及相关 `[event_deps]`）在本 refactor中原样保持 allowlisted，所以本阶段实际只有 no-growth、没有 deletion。禁止新增 request-reply surface，但不禁止这份现有 surface；R11在 refactor中不删除任何 queue、delivery或 package surface，R9 legacy-exact parity保持成立。
+- **post-terminal phase：单独 behavior change才激活 zero-surface。** Terminal deletion完成后，`consensus` package→library迁移与 zero-surface activation必须在**单独 R9 behavior-change PR**中携带 intent manifest落地，把 known-dialogue inventory ratchet到 zero；不得并入本 refactor。`product-outcome parity`定义为同一 caller输入与 external facts下，迁移前后 caller-observable outcome相等：相同 reply value、相同 saga transitions、相同 markers。Delivery form从 queue→call是 manifest明确授权的变化，不要求 delivery-form equality，也不得借此放宽其余 product outcome。
+- **mechanical harness status：`DESIGNED, NOT YET ENFORCED`。** 包拥有的 checker固定为 `scripts/check_repo_fanout_only.py`，shrink-only inventory固定为 `migration/request-reply-message.allowlist`。Checker PR落地、配套 controls通过并接入 §10 repository checks之前，CI尚未强制 R11。当前唯一可声称的 mechanical harness design是上述 known-dialogue inventory ratchet（refactor no-growth、post-terminal zero）；不得声称已有 general detector。
+- **general checker是 future work，不从 lifecycle rows臆造。** 当前 `output_obligation`只有 kinds/exits，不声明 requester identity、response-to relation或 admission前后 identity use；same lineage又可合法服务 post-admission CAS，所以不能推出 request-reply。通用 audience-independence checker必须先新增 typed evidence：每条 cross-boundary message声明是否携带 requester provenance，且 producer/consumer contract声明 consumer acceptance与该 provenance无关。这些 evidence当前不存在；`output_obligation completed by same-lineage return`不得作为 detector claim。
 
 ## §5. Row Admission + Family-Fanout Rule
 
@@ -212,6 +226,7 @@ canonical rows
 - producer-side grant requirement for published-seam intents；
 - production issue/PR row union；
 - behavior tightening混入 refactor；
+- refactor内删除 known request-reply queue/delivery、激活 R11 zero-surface或执行 consensus package→library迁移；
 - refactor内激活 R7 anomaly event、ops PR dependency、ingestion或 delivery；
 - terminal deletion时保留 grantless或 unclassified lifecycle-authoritative sink，或未显式分类 published intent / telemetry。
 
@@ -1493,6 +1508,7 @@ Branch code只选择 typed semantic variant。CAS policy与 entitlement由 edge�
 - edge/CAS/effect、handoff lookup、timeout source及 pending-union parity全部通过；
 - R7 shadow/schema通过且 head无 anomaly event/new ops PR dependency/ingestion/delivery；
 - R10 obligations row-authored，owner-local derived index无 orphan/drift且 monitored provider capable；
+- R11 known-dialogue inventory相对 protected baseline零增长；现有 consensus message surface仍在 shrink-only allowlist中，terminal deletion本身不删除其 queue/delivery、不激活 zero-surface；
 - mandatory corpus/controls通过；behavior-change manifest不得豁免 refactor diff。
 
 ### Rollback
@@ -1647,6 +1663,7 @@ codex/git/merge calls
 terminal WHY
 package-visible delivery expectations
 anomaly event/ops dependency/ingestion/delivery absence during refactor
+known request-reply message inventory no-growth during refactor
 ```
 
 Opaque grant本身是新内部结构；比较的是 grant授权的 existing lifecycle-authoritative effects是否 exact，不允许借 grant增加或删除行为。Published intent与 R7 telemetry以 grantless classification校验。R7 shadow result可在非 observable conformance channel比较，但 OLD/NEW production都必须保持零 anomaly event raise、零新增 ops PR dependency、零 ingestion与零 package-visible anomaly delivery。
@@ -1718,6 +1735,8 @@ generated CI attestations outside tracked tree
 7. hash stream。
 
 R7 anomaly transport activation是保留的 post-terminal behavior change。其独立 manifest必须逐项列出新 qualified queues、ops `github-devloop-pr` dependency、ephemeral `consumes`、ingestion与预期 package-visible delivery delta，并证明：Step 8已完成；`M.spec.ephemeral`覆盖两个 anomaly queues；无 `source_ref`/`dedup_key`/durable identity；transport为 `grantless-telemetry`且无 minting path。该 PR不得与 refactor或其他 behavior change合并。
+
+R11 zero-surface activation同样是保留的 post-terminal behavior change。其独立 manifest必须证明：Step 8已完成；protected-base与 pre-migration known-dialogue inventory一致；`consensus` package→library迁移删除列明的 request-reply queues/deliveries并把 `migration/request-reply-message.allowlist` ratchet到 zero；`product-outcome parity`逐 fixture成立，即迁移前后 reply value、saga transitions与 markers相同。Queue→call delivery form是该 manifest唯一授权的 communication-form delta；该 PR不得与 lifecycle refactor或其他 behavior change合并。
 
 ### 9.6 CI Attestation
 
@@ -1808,7 +1827,23 @@ migration/intent-bounded-replay.allowlist
 migration/intent-diffs/
 ```
 
-所有 checkers必须：
+R11 known-dialogue ratchet（**`DESIGNED, NOT YET ENFORCED`**）：
+
+```text
+scripts/check_repo_fanout_only.py
+migration/request-reply-message.allowlist
+```
+
+职责：
+
+- inventory已知 request-reply message surfaces，包括 request queue、reply queues、reply consumers与仅为该 dialogue存在的 `[event_deps]`；
+- refactor phase以 protected baseline校验 no-growth：allowlist机制结构上只许 shrink，但 R9要求现有 consensus entries原样保留，故本阶段不删除 queue/delivery；
+- post-terminal仅接受独立 R9 behavior-change manifest + product-outcome parity，随后把 inventory与 allowlist ratchet到 zero并禁止再引入；
+- checker controls必须命中 `origin-keyed benign skip` positive fixture，同时不得把 schema rejection、`event_id` dedup、entity rehydration或 legal same-entity post-admission CAS误报为 request-reply；
+- 不从 `output_obligation`、lineage或字段名推导 audience semantics，不宣称 general requester-provenance detector；
+- checker PR必须独立于本 doctrine PR落地，并在落地时配套 tests、接入 `scripts/check_repo_runner.py`，从 `scripts/check_repo.py`与 `scripts/run.sh check`可达。上述 wiring完成前，R11不属于现行 CI enforcement。
+
+每个已落地 checker，以及 R11 checker的独立 checker PR，必须：
 
 - wired into `scripts/check_repo_runner.py`；
 - reachable from `scripts/check_repo.py`；
@@ -2087,6 +2122,14 @@ Acceptance：
 - `absence_uses_emission_ledger`
 - `absence_without_ledger_fails`
 
+### R11 Fanout-Only Controls (`DESIGNED, NOT YET ENFORCED`)
+
+- positive fixture：`origin-keyed benign skip`必须进入 known-dialogue inventory并被 no-growth/zero-surface ratchet命中；
+- negative control：schema rejection不得命中；
+- negative control：`event_id` dedup不得命中；
+- negative control：entity rehydration不得命中；
+- negative control：legal same-entity post-admission CAS不得命中。
+
 Bounded loops：
 
 - `self-loop once`
@@ -2166,5 +2209,6 @@ Bounded loops：
 | `NC-66` | production decider union issue与 PR rows | `production-cross-owner-union` |
 | `NC-67` | behavior-change manifest豁免 refactor parity | `refactor-intent-exemption-forbidden` |
 | `NC-68` | operator/replay/legacy blanket exemption | `blanket-exemption-forbidden` |
+| `NC-69` | R11 checker漏报 `origin-keyed benign skip` positive fixture，或误报 schema rejection、`event_id` dedup、entity rehydration、legal same-entity post-admission CAS任一 negative control | `request-reply-message-control-drift` |
 
 ⟦AI:FKST⟧

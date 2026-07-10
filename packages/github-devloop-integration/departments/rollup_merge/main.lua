@@ -118,11 +118,12 @@ local function act(event)
       return
     end
 
-    local viewed = github("github-devloop-integration.rollup_merge").gh_pr_view_merge(payload.repo, payload.pr_number, 30)
-    if viewed.exit_code ~= 0 then
-      error("github-devloop: gh-pr-view-failed: gh rollup PR view failed: " .. tostring(viewed.stderr))
+    local viewed, command_result = github("github-devloop-integration.rollup_merge").gh_pr_view_merge(payload.repo, payload.pr_number, 30)
+    if viewed == nil then
+      error("github-devloop: gh-pr-view-failed: gh rollup PR view failed: "
+        .. tostring(command_result and command_result.stderr or "missing result"))
     end
-    local pr = parsers_pr.parse_pr_view_merge(viewed.stdout)
+    local pr = parsers_pr.parse_pr_view_merge(viewed)
     if tostring(pr.head_ref_name or "") ~= tostring(payload.integration_branch or "") then
       log_skip(payload, "head-branch-mismatch")
       return

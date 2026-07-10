@@ -3,10 +3,10 @@ local C = {}
 
 local strings = {
   en = {
-    convergence_suffix = " - no three-angle consensus; narrowing",
+    convergence_suffix = " - no consensus across angles; narrowing",
     narrowed_question_label = "Narrowed question: ",
     angle_stances_label = "Angle stances:",
-    verdict_summary_label = "Three-angle verdicts: ",
+    verdict_summary_label = "Verdicts: ",
     comment_evidence_empty = "(review rounds are recorded on the parent PR comments)",
     thinking_started = "github-devloop thinking: consensus started",
     decision_prefix = "github-devloop decision: ",

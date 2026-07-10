@@ -86,7 +86,7 @@ local function run_no_new_head(event, id, post_state, feedback_comment, origin_v
     })
   end
   h.mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, comments, branch, impl_version)
-  h.mock_pr_fix({ origin_marker }, branch, "def456")
+  h.mock_pr_fix({ origin_marker }, branch, "def456", nil, nil, nil, 1)
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
     stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
     stderr = "",

@@ -51,9 +51,11 @@ local function comment_cases()
   local ready = ready_payload()
   local reached_with_angles = reached({
     angle_results = {
-      { angle = "minimal", verdict = "approve" },
-      { angle = "structural", verdict = "abstain" },
-      { angle = "delete", verdict = "approve" },
+      { angle = "teleology", verdict = "approve" },
+      { angle = "parsimony", verdict = "approve" },
+      { angle = "fidelity", verdict = "approve" },
+      { angle = "natural-ownership", verdict = "approve" },
+      { angle = "proportional-containment", verdict = "approve" },
     },
   })
   local converge_marker = conv_rounds.converge_round_marker(issue_proposal_id,
@@ -92,7 +94,7 @@ end
 local audited_english_skeletons = {
   "github-devloop thinking: consensus started",
   "github-devloop decision: ",
-  "Three-angle verdicts: ",
+  "Verdicts: ",
   "github-devloop convergence round ",
   "Narrowed question: ",
   "Angle stances:",
@@ -139,6 +141,25 @@ return {
       end
     end
     t.is_true(human >= #audited_english_skeletons - 2)
+  end,
+
+  test_comment_prose_does_not_restate_angle_cardinality = function()
+    local en_cases = render_cases("en")
+    local en_result = body_of(en_cases[2])
+    local en_converge = body_of(en_cases[3])
+
+    t.is_true(en_result:find(
+      "Verdicts: teleology=approve parsimony=approve fidelity=approve natural-ownership=approve proportional-containment=approve",
+      1,
+      true
+    ) ~= nil)
+    t.is_true(en_converge:find(
+      "github-devloop convergence round 2 - no consensus across angles; narrowing",
+      1,
+      true
+    ) ~= nil)
+    t.eq(en_result:find("Three-angle", 1, true), nil)
+    t.eq(en_converge:find("three-angle", 1, true), nil)
   end,
 
   test_zh_comments_localize_human_skeletons_and_keep_machine_tokens = function()

@@ -49,7 +49,7 @@ local function should_reinject_pr_base_unmanaged_heal(origin, current, state)
   return tostring(origin.base_branch or "") == tostring(config.branch_config().integration)
 end
 
-local function should_reinject_pr(repo, pr, limits, deadline)
+local function should_reinject_pr(repo, pr, limits, deadline, now_seconds)
   if not forge_validators.is_positive_pr_number(pr.number) then
     return false
   end
@@ -110,7 +110,7 @@ local function should_reinject_pr(repo, pr, limits, deadline)
       and devloop_base.pr_review_proposal_id(origin.repo, pr.number, state.version, current.head_sha)
       or nil,
     fresh_current_state = state,
-    now_seconds = now(),
+    now_seconds = now_seconds,
   })
   if timeout_action == "handled" then
     return false
@@ -133,6 +133,7 @@ local function act_liveness_scan(event)
   end
 
   local limits = liveness_scan.liveness_scan_limits()
+  local current_now_seconds = tonumber(event and event.now_seconds) or now()
   local deadline = sweep_bounds.sweep_deadline(now(), limits)
   local timeout = sweep_bounds.sweep_call_timeout(limits, deadline)
   if timeout <= 0 then
@@ -157,7 +158,7 @@ local function act_liveness_scan(event)
     end
 
     attempted = attempted + 1
-    local should_reinject, defer_reason = should_reinject_pr(repo, activation.entity, limits, deadline)
+    local should_reinject, defer_reason = should_reinject_pr(repo, activation.entity, limits, deadline, current_now_seconds)
     if defer_reason == "deadline" then
       liveness_scan.liveness_scan_update_cursor(cursor_key, cursor, total, attempted)
       liveness_scan.liveness_scan_log_deferred("deadline", {
