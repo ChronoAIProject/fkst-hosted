@@ -1,0 +1,19 @@
+# Capacity isolation for the fkst sandbox fleet: fkst's long-lived sessions must
+# never starve the chrono tenant (and vice versa). SAMPLE numbers sized for a
+# small fleet — size for the real fleet before applying (each session sandbox
+# consumes its resourceLimits from FKST_OSB_SESSION_CPU / _MEMORY, plus one
+# short-lived env-validation holder per validation run).
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: fkst-sandbox-quota
+  namespace: chronoai-fkst-sandbox
+  labels:
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  hard:
+    pods: "20"
+    limits.cpu: "40"
+    limits.memory: 80Gi
+    requests.cpu: "40"
+    requests.memory: 80Gi

@@ -1,0 +1,33 @@
+# Restrict who can call the fkst OpenSandbox server instance AT ALL.
+#
+# WHY: the server's proxy-to-sandbox route (`/(v1/)sandboxes/{id}/proxy/{port}/…`)
+# is API-KEY-EXEMPT in the deployed v0.2.1 auth middleware — any pod that can
+# reach the Service can attempt execd calls against any sandbox behind it, gated
+# only by the per-session X-EXECD-ACCESS-TOKEN. Bounding the callers to the
+# fkst-hosted backend's namespace contains that exposure.
+#
+# Applies in opensandbox-system; the podSelector must match the labels the
+# opensandbox-server-fkst Deployment stamps on its pods (shown here in the
+# chart's app.kubernetes.io convention — adjust to the actual instance labels).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: opensandbox-server-fkst-ingress
+  namespace: opensandbox-system
+  labels:
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: opensandbox-server
+      app.kubernetes.io/instance: opensandbox-server-fkst
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: chronoai-fkst
+      ports:
+        - port: 80
+          protocol: TCP
