@@ -248,9 +248,15 @@ local function apply_overlay(definition, variant, evidence, resolved)
   if overlay.only_states ~= nil and not state_is_one_of(current.state, overlay.only_states) then
     return resolved
   end
-  local source_states = overlay.source_states or variant.source_states
-  if not state_is_one_of(current.state, source_states) then
-    return result("stale", "from-state-mismatch", "skip-stale(from-state-mismatch)")
+  -- enforce_source_states defaults to true; a policy whose production CAS has no
+  -- from-state guard (the cyclic base's stage-rank forward-progress rule already
+  -- owns state admission, e.g. review_result) opts out so the overlay only enforces
+  -- version equality and does not override the base's admission.
+  if overlay.enforce_source_states ~= false then
+    local source_states = overlay.source_states or variant.source_states
+    if not state_is_one_of(current.state, source_states) then
+      return result("stale", "from-state-mismatch", "skip-stale(from-state-mismatch)")
+    end
   end
   local compared_version = evidence.overlay_version
   if compared_version == nil then
@@ -422,6 +428,14 @@ end
 
 local APPLY_ONLY_RAW = { kind = "version", version_form = "raw", statuses = { apply = true } }
 local APPLY_ONLY_SAFE = { kind = "version", version_form = "safe", statuses = { apply = true } }
+-- review_result production (main.lua) has NO from-state guard: the cyclic base's
+-- stage-rank forward-progress rule owns state admission (it admits any reachable
+-- predecessor whose stage_rank < target, incl. pr-open in the observe_pr->reviewing
+-- race window), then a safe-version equality check follows. So this policy-private
+-- overlay opts out of the from-state downgrade and enforces only safe-version equality,
+-- keeping catalog.resolve legacy-exact with the department. APPLY_ONLY_SAFE (used by
+-- pr_fix_reconcile) is left unchanged.
+local REVIEW_RESULT_SAFE = { kind = "version", version_form = "safe", statuses = { apply = true }, enforce_source_states = false }
 
 local policy_order = {
   "cas.base_plain_legacy_v1",
@@ -539,7 +553,7 @@ local policies = {
       reviewing_to_fixing = variant({ "reviewing" }, "fixing"),
       reviewing_to_review_meta = variant({ "reviewing" }, "review-meta"),
     },
-    overlay = APPLY_ONLY_SAFE,
+    overlay = REVIEW_RESULT_SAFE,
   },
   ["cas.legacy_fix_v1"] = {
     evidence_type = "fix_cas_evidence_v1",
