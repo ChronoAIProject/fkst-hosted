@@ -129,6 +129,8 @@ Flat packages (`kind = "package"`):
 
 - `consensus`: source-agnostic multi-angle `codex` consensus over abstract `proposal` events,
   producing `consensus_reached` or bounded `consensus_converge` events.
+- `git-branch-detector`: polls configured remote branch heads on a schedule and emits deduplicated
+  `git_ref_changed` fanout facts.
 - `github-external-pr-intake`: detects third-party pull requests and creates one normal bridge
   issue for `github-devloop` to process.
 - `github-proxy`: bridges GitHub issue and PR facts into fkst events, and handles dry-run-by-default
