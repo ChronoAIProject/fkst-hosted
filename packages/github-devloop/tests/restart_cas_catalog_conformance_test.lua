@@ -201,6 +201,20 @@ local function profile_production_result(profile, current, incoming)
     }
     incoming_for_base = transition_version.safe_version_segment(incoming)
   end
+  -- admissible_states mirrors production's explicit admissible-state guard (e.g.
+  -- merge_executor.lua's {merge-ready,merging,merged} check) which fires BEFORE the
+  -- transition-outcome branches: any current outside the set is stale/from-state-mismatch
+  -- regardless of the base status (pending/stale/apply/idempotent), so it must be modelled
+  -- ahead of the base computation, not as a from-state overlay (which no-ops on a pending base).
+  if profile.admissible_states ~= nil then
+    local admissible = false
+    for _, state_name in ipairs(profile.admissible_states) do
+      if current.state == state_name then admissible = true end
+    end
+    if not admissible then
+      return result("stale", "from-state-mismatch", "skip-stale(from-state-mismatch)"), incoming_for_base
+    end
+  end
   local expected
   if profile.base == "plain" then
     expected = production_result(
@@ -564,6 +578,7 @@ return {
         base = "cyclic",
         sources = { "merge-ready", "merging" },
         target = "merging",
+        admissible_states = { "merge-ready", "merging", "merged" },
         overlay = "raw",
         overlay_statuses = { apply = true, idempotent = true },
       },

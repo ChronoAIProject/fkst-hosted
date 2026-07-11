@@ -418,6 +418,27 @@ local function resolve_implement(definition, evidence)
   return resolved
 end
 
+-- Production merge admission (merge_executor.lua) applies an explicit admissible-state
+-- guard (~line 350) that fires BEFORE the cyclic transition-outcome branches: any current
+-- outside {merge-ready, merging, merged} is skip-stale(from-state-mismatch) regardless of
+-- the probe result (pending/stale/idempotent/apply), overriding the base's stage-rank
+-- admission. That override cannot be expressed as a from-state overlay (overlays only reject
+-- apply/idempotent, after the status filter — they cannot downgrade a pending/stale base),
+-- so it lives in a policy-private resolver, the same shape as resolve_implement's pre-checks.
+-- An admissible current (incl. merged, which is admissible but not a cyclic source) then
+-- follows the standard cyclic base + raw version-equality overlay. The pre-CAS merged-marker
+-- idempotency (state=merged + trusted merged marker -> skip-idempotent) is downstream effect
+-- idempotency, out of the admission-only catalog and not modeled here.
+local function resolve_merge(definition, evidence)
+  if not valid_common_evidence(evidence) then
+    return illegal("invalid-evidence")
+  end
+  if not state_is_one_of(evidence.current and evidence.current.state, { "merge-ready", "merging", "merged" }) then
+    return result("stale", "from-state-mismatch", "skip-stale(from-state-mismatch)")
+  end
+  return resolve_profile(definition, evidence)
+end
+
 local function variant(source_states, target_state, target_version)
   return {
     source_states = source_states,
@@ -582,7 +603,11 @@ local policies = {
       merge_ready_to_merging = variant({ "merge-ready" }, "merging"),
       merge_ready_or_merging_to_merging = variant({ "merge-ready", "merging" }, "merging"),
     },
+    -- resolve_merge applies production's admissible-state guard (current ∈ {merge-ready,
+    -- merging, merged}) before delegating an admissible current to the standard cyclic
+    -- base + this raw version-equality overlay; see resolve_merge for the rationale.
     overlay = { kind = "version", version_form = "raw", statuses = { apply = true, idempotent = true } },
+    resolve_profile = resolve_merge,
   },
   ["cas.legacy_pr_fix_reconcile_v1"] = {
     evidence_type = "pr_fix_reconcile_cas_evidence_v1",
