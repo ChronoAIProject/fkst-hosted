@@ -470,7 +470,7 @@ function S.observe_promotion_health(window_start_ms, opts)
   if verdict.clean ~= true and verdict.reason == "observe-malformed" then
     verdict.reason = "observe-unavailable"
   end
-  return verdict
+  return verdict, nonnegative_integer(snapshot.generated_at_ms)
 end
 
 function S.runtime_observe_gate(verdict)

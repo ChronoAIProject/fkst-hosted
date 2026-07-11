@@ -503,6 +503,59 @@ return {
     t.is_true(tostring(sample.payload.body):find('status="clean"', 1, true) ~= nil)
   end,
 
+  test_rollup_scan_snapshot_boundary_blocks_dead_letter_before_sampling_clock = function()
+    mock_env("1", "auto")
+    mock_fetches()
+    mock_ahead(2)
+    mock_content_diff(true)
+    mock_pr_list({ number = 9 })
+    mock_integration_head("def456")
+    mock_rollup_pr_view()
+    local first_snapshot = observe_clean()
+    first_snapshot.generated_at_ms = now() * 1000 - 2000
+    t.mock_observe(first_snapshot)
+    local first = run_scan(opts("rollup-observe-snapshot-boundary-first", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(first.exit_code, 0)
+    local first_sample = h.find_raise(first.raises, "github-proxy.github_pr_comment_request")
+    t.is_true(first_sample ~= nil)
+    t.is_true(tostring(first_sample.payload.body):find(
+      'first_clean_observed_at_ms="' .. tostring(first_snapshot.generated_at_ms) .. '"',
+      1,
+      true
+    ) ~= nil)
+
+    mock_env("1", "auto")
+    mock_fetches()
+    mock_ahead(2)
+    mock_content_diff(true)
+    mock_pr_list({ number = 9 })
+    mock_integration_head("def456")
+    mock_rollup_pr_view({
+      comments = {
+        { body = first_sample.payload.body, author_login = core._test_bot_login },
+      },
+    })
+    local second_snapshot = observe_clean()
+    second_snapshot.queues = {
+      { queue = "devloop_ready", dlq = 1 },
+    }
+    second_snapshot.dead_letters = {
+      {
+        delivery_id = "dead-1",
+        queue = "devloop_ready",
+        dead_at_ms = first_snapshot.generated_at_ms + 1000,
+        permanent = true,
+      },
+    }
+    t.mock_observe(second_snapshot)
+    local second = run_scan(opts("rollup-observe-snapshot-boundary-second", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(second.exit_code, 0)
+    local second_sample = h.find_raise(second.raises, "github-proxy.github_pr_comment_request")
+    t.is_true(second_sample ~= nil)
+    t.is_true(tostring(second_sample.payload.body):find('status="dirty"', 1, true) ~= nil)
+    t.is_true(tostring(second_sample.payload.body):find('reason=dead-letter:devloop_ready', 1, true) ~= nil)
+  end,
+
   test_rollup_scan_observe_sample_request_is_stable_replace_in_place_across_polls = function()
     mock_env("1", "auto")
     mock_fetches()
