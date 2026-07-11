@@ -56,27 +56,13 @@ return {
     t.eq(result.state, "thinking")
   end,
 
-  test_core_doctor_lifecycle_rows_match_authoritative_restart_rows = function()
-    local provider = require("devloop.restart.issue_lifecycle")
-    local rows = provider.lifecycle_rows(core)
-    local seen = 0
-    for _, expected in ipairs(rows) do
-      seen = seen + 1
-      local actual = provider.lifecycle_transition_row(core, expected.from_state)
-      t.is_true(actual ~= nil)
-      t.eq(actual.from_state, expected.from_state)
-      t.eq(actual.terminal, expected.terminal)
-      t.eq(actual.driving_queue, expected.driving_queue)
-      t.eq(actual.budget and tonumber(actual.budget.minutes) or nil, expected.budget and tonumber(expected.budget.minutes) or nil)
-    end
-    t.eq(seen, #rows)
-  end,
-
-  test_core_doctor_uses_provider_not_local_lifecycle_rows = function()
+  test_core_doctor_uses_observation_facts_not_issue_lifecycle = function()
     local body = file.read("packages/github-devloop-ops/core.lua")
     t.is_nil(body:find("local lifecycle_rows", 1, true))
     t.is_nil(body:find("devloop.restart.issue_lifecycle", 1, true))
-    t.is_true(file.read("packages/github-devloop-ops/core/doctor.lua"):find('require("devloop.restart.issue_lifecycle")', 1, true) ~= nil)
+    local doctor = file.read("packages/github-devloop-ops/core/doctor.lua")
+    t.is_true(doctor:find('require("devloop.restart.issue_observation_facts")', 1, true) ~= nil)
+    t.is_nil(doctor:find('require("devloop.restart.issue_lifecycle")', 1, true))
   end,
 
   test_core_doctor_classifies_stuck_past_budget = function()

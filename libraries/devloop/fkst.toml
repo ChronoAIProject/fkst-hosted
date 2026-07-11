@@ -110,6 +110,8 @@ public = [
   "devloop.restart.issue.transitions.merged",
   "devloop.restart.issue.transitions.ready",
   "devloop.restart.issue.transitions.thinking",
+  "devloop.restart.issue_observation_conformance",
+  "devloop.restart.issue_observation_facts",
   "devloop.restart.issue_lifecycle",
   "devloop.restart.pr_review_replay_facts",
   "devloop.restart_actionable_epoch",

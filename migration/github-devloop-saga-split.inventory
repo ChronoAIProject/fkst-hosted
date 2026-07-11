@@ -54,7 +54,9 @@
 {"path":"libraries/devloop/restart/issue/transitions/merged.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
 {"path":"libraries/devloop/restart/issue/transitions/ready.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
 {"path":"libraries/devloop/restart/issue/transitions/thinking.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
-{"path":"libraries/devloop/restart/issue_lifecycle.lua","owner":"shared","reason":"shared issue restart lifecycle provider used by github-devloop and ops diagnostics."}
+{"path":"libraries/devloop/restart/issue_lifecycle.lua","owner":"issue","reason":"issue restart lifecycle provider used by github-devloop owner wiring until the transition rows move owner-local."}
+{"path":"libraries/devloop/restart/issue_observation_conformance.lua","owner":"issue","reason":"issue owner conformance proves the published observation facts exactly match the assembled owner rows."}
+{"path":"libraries/devloop/restart/issue_observation_facts.lua","owner":"shared","reason":"read-only issue observation ABI published by the issue owner for cross-package ops consumers."}
 {"path":"libraries/devloop/restart_actionable_epoch.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/restart_cas_catalog.lua","owner":"shared","reason":"closed legacy-exact CAS policies and source-verified bindings are shared by issue and PR lifecycle conformance."}
 {"path":"libraries/devloop/restart_edges.lua","owner":"shared","reason":"pure autonomous restart-edge extractor shared by issue and PR lifecycle conformance."}
