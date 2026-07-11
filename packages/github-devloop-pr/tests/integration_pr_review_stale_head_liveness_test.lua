@@ -187,12 +187,17 @@ return {
     t.is_true(decision_request.payload.body:find('state="merge-ready"', 1, true) ~= nil)
     t.is_true(decision_request.payload.body:find('proposal="' .. expected_review_id .. '"', 1, true) ~= nil)
 
-    local current = core.current_state({
-      reviewing_request.payload.body,
-      decision_request.payload.body,
-    }, issue_proposal_id)
-    t.eq(current.state, "merge-ready")
-    t.eq(current.version, fresh_version)
+    local decision_handoff = h.run_comment_handoff_from_request(
+      decision_request.payload,
+      "IC_stale_head_merge_ready_1",
+      "stale-head-merge-ready-comment-handoff"
+    )
+    t.eq(decision_handoff.exit_code, 0)
+    local merge_ready = h.find_raise(decision_handoff.raises, "devloop_merge_ready")
+    t.is_true(merge_ready ~= nil)
+    t.eq(merge_ready.payload.version, fresh_version)
+    t.eq(merge_ready.payload.review_proposal_id, expected_review_id)
+    t.eq(merge_ready.payload.reviewed_head_sha, h2)
     t.eq(h.find_causal_raise(applied, "devloop_fixing"), nil)
   end,
 }
