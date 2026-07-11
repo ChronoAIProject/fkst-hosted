@@ -1,4 +1,5 @@
 local payloads_builders = require("devloop.payloads.builders")
+local devloop_state = require("devloop.state")
 return function(M, h)
   local fact = h.fact
   local obligation = h.obligation
@@ -56,7 +57,7 @@ return function(M, h)
       liveness_class = "thinking.active",
       input_fact_family = "issue-proposal",
       output_postcondition_family = "issue-consensus",
-      phase_rank = M.stage_rank("thinking"),
+      phase_rank = devloop_state.stage_rank("thinking"),
       lineage_keys = { "state.version", "source_ref" },
       successors = {
         {

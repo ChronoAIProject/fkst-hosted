@@ -711,8 +711,7 @@ local function partition_sources(sources)
   local transition_sources = {}
   local department_sources = {}
   for path, source in pairs(sources or {}) do
-    if path:find("/core/restart/transitions/", 1, true) ~= nil
-      or path:find("/restart/issue/transitions/", 1, true) ~= nil then
+    if path:find("/core/restart/transitions/", 1, true) ~= nil then
       transition_sources[path] = source
     end
     if path:find("/departments/", 1, true) ~= nil then

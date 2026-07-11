@@ -1,4 +1,5 @@
 local payloads_builders = require("devloop.payloads.builders")
+local devloop_state = require("devloop.state")
 return function(M, h)
   local fact = h.fact
   local obligation = h.obligation
@@ -35,7 +36,7 @@ return function(M, h)
       liveness_class = "impl_failed.operator_reentry",
       input_fact_family = "retryable-implementation-failure",
       output_postcondition_family = "implementation-retry",
-      phase_rank = M.stage_rank("impl-failed"),
+      phase_rank = devloop_state.stage_rank("impl-failed"),
       lineage_keys = { "state.version", "impl-failure.dedup", "source_ref" },
       successors = {
         {

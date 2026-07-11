@@ -1,4 +1,5 @@
 local payloads_builders = require("devloop.payloads.builders")
+local devloop_state = require("devloop.state")
 return function(M, h)
   local fact = h.fact
   local obligation = h.obligation
@@ -51,7 +52,7 @@ return function(M, h)
       liveness_class = "dependency_held_blocker_bound",
       input_fact_family = "ready-base-preconditions-and-open-blockers",
       output_postcondition_family = "dependency-release-or-blocker-tracking",
-      phase_rank = M.stage_rank("dependency_wait"),
+      phase_rank = devloop_state.stage_rank("dependency_wait"),
       lineage_keys = { "state.version", "source_ref", "dependency_epoch", "blocker_fingerprint" },
       decision_type = "dependency_gate",
       successors = {

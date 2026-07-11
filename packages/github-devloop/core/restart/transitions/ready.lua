@@ -1,4 +1,5 @@
 local payloads_builders = require("devloop.payloads.builders")
+local devloop_state = require("devloop.state")
 return function(M, h)
   local fact = h.fact
   local obligation = h.obligation
@@ -34,7 +35,7 @@ return function(M, h)
       liveness_class = "actionable_kickoff",
       input_fact_family = "ready-base-preconditions-and-no-open-blockers",
       output_postcondition_family = "implementation_kickoff",
-      phase_rank = M.stage_rank("ready"),
+      phase_rank = devloop_state.stage_rank("ready"),
       lineage_keys = { "state.version", "source_ref", "actionable_epoch" },
       successors = {
         {

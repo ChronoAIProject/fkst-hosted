@@ -1,5 +1,6 @@
 local decompose_lib = require("devloop.decompose")
 
+local devloop_state = require("devloop.state")
 return function(M, h)
   local fact = h.fact
   local obligation = h.obligation
@@ -46,7 +47,7 @@ return function(M, h)
       liveness_class = "blocked.operator_reentry",
       input_fact_family = "blocked-recovery-hold",
       output_postcondition_family = "blocked-decompose-escape",
-      phase_rank = M.stage_rank("blocked"),
+      phase_rank = devloop_state.stage_rank("blocked"),
       lineage_keys = { "state.version", "pr-link.pr", "source_ref" },
       successors = {},
       watchdog_escape = {

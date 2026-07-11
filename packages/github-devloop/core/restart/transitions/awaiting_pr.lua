@@ -1,3 +1,4 @@
+local devloop_state = require("devloop.state")
 return function(M, h)
   local fact = h.fact
   local obligation = h.obligation
@@ -62,7 +63,7 @@ return function(M, h)
       liveness_class = "child_workflow_wait",
       input_fact_family = "pr-delegation-and-child-state",
       output_postcondition_family = "parent_resume_from_child_state_terminal",
-      phase_rank = M.stage_rank("awaiting-pr"),
+      phase_rank = devloop_state.stage_rank("awaiting-pr"),
       lineage_keys = { "state.version", "pr-delegation.pr_proposal", "pr-delegation.pr", "source_ref" },
       decision_type = "child_state_terminal_gate",
       successors = {

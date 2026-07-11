@@ -56,13 +56,11 @@ return {
     t.eq(result.state, "thinking")
   end,
 
-  test_core_doctor_uses_observation_facts_not_issue_lifecycle = function()
+  test_core_doctor_uses_observation_facts = function()
     local body = file.read("packages/github-devloop-ops/core.lua")
     t.is_nil(body:find("local lifecycle_rows", 1, true))
-    t.is_nil(body:find("devloop.restart.issue_lifecycle", 1, true))
     local doctor = file.read("packages/github-devloop-ops/core/doctor.lua")
     t.is_true(doctor:find('require("devloop.restart.issue_observation_facts")', 1, true) ~= nil)
-    t.is_nil(doctor:find('require("devloop.restart.issue_lifecycle")', 1, true))
   end,
 
   test_core_doctor_classifies_stuck_past_budget = function()
