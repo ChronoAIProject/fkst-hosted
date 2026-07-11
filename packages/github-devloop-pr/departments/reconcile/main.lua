@@ -214,7 +214,7 @@ local function pipeline_review(event)
     end
 
     local action = "drop"
-    local reason = "no-actionable-framing-after-" .. tostring(reconcile.round) .. "-review-rounds"
+    local reason = tostring(reconcile.terminal_cause) .. "-after-" .. tostring(reconcile.round) .. "-review-rounds"
     local comment_request = core.build_review_reconcile_comment_request(repo, issue_number, reconcile, action, reason, version)
     local label_request = issue_number ~= nil and core.build_review_reconcile_label_request(repo, issue_number, reconcile) or nil
     emit_blocked_reconcile("reviewing", reconcile.proposal_id, state, version, action, reason, comment_request, label_request, "github-proxy.github_pr_comment_request")

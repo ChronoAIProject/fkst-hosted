@@ -72,32 +72,6 @@ local function linked_open_pr(dept, issue, state, facts, tools, from_state, to_s
   return link, current_pr, nil
 end
 
-local function review_truth_table_unapproved(fact)
-  if tonumber(fact and fact.round) == nil or tonumber(fact.round) < 1 then
-    return false
-  end
-  if type(fact.angle_digests) ~= "table" or #fact.angle_digests == 0 then
-    return false
-  end
-  local has_comment = false
-  for _, item in ipairs(fact.angle_digests) do
-    local verdict = type(item) == "table" and item.verdict or nil
-    if verdict == "approve" or verdict == "reject" or verdict == "invalid" then
-      return false
-    end
-    if verdict == "comment" then
-      has_comment = true
-    elseif verdict == "abstain" then
-    else
-      return false
-    end
-  end
-  if not has_comment then
-    return true
-  end
-  return tostring(fact.dedup or ""):find("/loop/", 1, true) ~= nil
-end
-
 local function append_issue_label_effect(issue, proposal_id, to_state, version, source_ref, effects, key)
   if issue.number == nil then
     return
@@ -269,20 +243,12 @@ local function replay_review_converge(dept, issue, state, facts, tools, link, cu
   if latest == nil then
     return nil
   end
-  if conv_rounds.is_true_stall(records, round)
-    or conv_rounds.resolvability_exhausted(records)
-    or conv_rounds.has_essence_stall(records) then
-    local payload = conv_reconcile.build_devloop_review_reconcile_payload(latest, round, facts.proposal_id, state.version, current_pr.head_sha)
-    devloop_logging.log_cas_decision(dept, facts.proposal_id, state, "reviewing", "blocked", "applied(replay)", "trusted review-converge-round fact reached terminal reconcile")
+  local terminal_cause = conv_rounds.terminal_cause(records, round)
+  if terminal_cause ~= nil then
+    local payload = conv_reconcile.build_devloop_review_reconcile_payload(latest, round, facts.proposal_id, state.version, current_pr.head_sha, terminal_cause)
+    devloop_logging.log_cas_decision(dept, facts.proposal_id, state, "reviewing", "blocked", "applied(replay)", "trusted review-converge-round fact reached terminal cause=" .. terminal_cause)
     return tools.raise_effects(dept, facts.proposal_id, "blocked", conv_reconcile.review_reconcile_terminal_state_version(state.version, round), { add = { "fkst-dev:blocked" }, remove = { "fkst-dev:reviewing" } }, {
       { queue = "devloop_review_reconcile", payload = payload },
-    })
-  end
-  if review_truth_table_unapproved(latest) then
-    local payload = payloads_builders.build_devloop_review_meta_payload(latest, facts.proposal_id, state.version, link.pr_number, round, latest.source_ref)
-    devloop_logging.log_cas_decision(dept, facts.proposal_id, state, "reviewing", "review-meta", "applied(replay)", "trusted review-converge-round fact requires review-meta")
-    return tools.raise_effects(dept, facts.proposal_id, "review-meta", state.version, { add = { "fkst-dev:review-meta" }, remove = { "fkst-dev:reviewing" } }, {
-      { queue = M.pr_package_queue("devloop_review_meta"), payload = payload },
     })
   end
   return nil

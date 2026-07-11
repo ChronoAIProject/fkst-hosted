@@ -113,7 +113,6 @@ return function(M, h)
     advancing_facts = {
       advancing_fact("review-result", "merge-ready", { pr = true, liveness_scan = true }, "source_ref:pr"),
       advancing_fact("review-result", "fixing", { pr = true, liveness_scan = true }, "source_ref:pr"),
-      advancing_fact("review-converge-round", "review-meta", { pr = true, liveness_scan = true }, "source_ref:pr"),
       advancing_fact("review-converge-round", "blocked", { pr = true, liveness_scan = true }, "source_ref:pr"),
     },
     payload_fields = {

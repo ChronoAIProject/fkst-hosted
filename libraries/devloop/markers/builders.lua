@@ -357,12 +357,20 @@ function C.pr_base_unmanaged_marker(proposal_id, pr_number, pr_base, integration
     .. '" -->'
 end
 
-function C.result_marker(proposal_id, decision, dedup_key)
+function C.result_marker(proposal_id, decision, dedup_key, decision_reason)
   if decision ~= "approve" and decision ~= "reject" then
     error("github-devloop: invalid decision")
   end
+  if decision == "reject" and decision_reason ~= "premise-refuted" then
+    error("github-devloop: invalid reject decision reason")
+  end
+  if decision == "approve" and decision_reason ~= nil then
+    error("github-devloop: unexpected approve decision reason")
+  end
+  local reason_attr = decision_reason and ('" reason="' .. decision_reason) or ""
   return '<!-- fkst:github-devloop:result:v1 proposal="' .. tostring(proposal_id)
     .. '" decision="' .. decision
+    .. reason_attr
     .. '" dedup="' .. tostring(dedup_key)
     .. '" -->'
 end

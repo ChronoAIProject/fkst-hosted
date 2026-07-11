@@ -178,11 +178,13 @@ return {
     t.eq(comment_facts[1].verdicts, facts[1].verdicts)
     t.is_true(round_comment.dedup_key:find("converge-round", 1, true) ~= nil)
 
-    local reconcile = conv_reconcile.build_devloop_reconcile_payload(event, 3, base_version)
+    local reconcile = conv_reconcile.build_devloop_reconcile_payload(event, 3, base_version, "no-semantic-progress")
     t.eq(reconcile.schema, "github-devloop.reconcile.v1")
     t.eq(reconcile.dedup_key, "reconcile:" .. base_version .. "/loop/3")
+    t.eq(reconcile.terminal_cause, "no-semantic-progress")
     t.eq(conv_reconcile.is_supported_reconcile(reconcile), true)
-    local reconcile_marker = conv_reconcile.reconcile_marker(proposal_id, base_version, 3, "drop")
+    t.eq(conv_reconcile.is_supported_reconcile(copy_table(reconcile, { terminal_cause = "unknown" })), false)
+    local reconcile_marker = conv_reconcile.reconcile_marker(proposal_id, base_version, 3, "drop", "no-semantic-progress")
     t.eq(conv_reconcile.has_reconcile_marker(core, { reconcile_marker }, proposal_id, base_version, 3), true)
     t.eq(conv_reconcile.reconcile_state_version(base_version, 3), base_version .. "/loop/3")
     local live_thinking_version = "github-devloop/issue/owner/repo/42/2026-06-14T05-22-55Z/intake/1287859418"
@@ -204,9 +206,9 @@ return {
     t.is_true(has_value(label.remove_labels, "fkst-dev:reviewing"))
     t.is_true(has_value(label.remove_labels, "fkst-dev:fixing"))
     t.eq(has_value(label.remove_labels, "fkst-dev:blocked"), false)
-    t.eq(#label.remove_labels, 12)
+    t.eq(#label.remove_labels, 13)
 
-    local comment = core.build_reconcile_comment_request("owner/repo", "42", reconcile, "drop", "no-actionable-framing-after-3-rounds")
+    local comment = core.build_reconcile_comment_request("owner/repo", "42", reconcile, "drop", "no-semantic-progress-after-3-rounds")
     t.is_true(comment.body:find("github-devloop reconcile action: drop", 1, true) ~= nil)
     t.is_true(comment.body:find("fkst:github-devloop:reconcile:v1", 1, true) ~= nil)
     t.is_true(comment.body:find(core.state_marker(proposal_id, "blocked", base_version .. "/loop/3"), 1, true) ~= nil)
@@ -217,7 +219,7 @@ return {
     local issue_proposal_id = "github-devloop/issue/owner/repo/42"
     local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local event = review_unresolved()
-    local reconcile = conv_reconcile.build_devloop_review_reconcile_payload(event, 3, issue_proposal_id, issue_version, "def456")
+    local reconcile = conv_reconcile.build_devloop_review_reconcile_payload(event, 3, issue_proposal_id, issue_version, "def456", "no-semantic-progress")
 
     t.eq(reconcile.schema, "github-devloop.review-reconcile.v1")
     t.eq(reconcile.proposal_id, issue_proposal_id)
@@ -225,8 +227,10 @@ return {
     t.eq(reconcile.issue_version, issue_version)
     t.eq(reconcile.head_sha, "def456")
     t.eq(reconcile.round, 3)
+    t.eq(reconcile.terminal_cause, "no-semantic-progress")
     t.eq(reconcile.dedup_key, "review-reconcile:" .. issue_version .. "/review-loop/3")
     t.eq(conv_reconcile.is_supported_review_reconcile(reconcile), true)
+    t.eq(conv_reconcile.is_supported_review_reconcile(copy_table(reconcile, { terminal_cause = "unknown" })), false)
     local missing_round = copy_table(reconcile)
     missing_round.round = nil
     t.eq(conv_reconcile.is_supported_review_reconcile(copy_table(reconcile, { dedup_key = "review-reconcile:" .. issue_version .. "/review-loop/4" })), false)
@@ -240,7 +244,7 @@ return {
     t.eq(terminal_version, live_reviewing_version .. "/review-loop/10")
     t.eq(core.versioned_transition_status({ state = "reviewing", version = live_reviewing_version }, { "reviewing" }, "blocked", terminal_version), "apply")
 
-    local marker = conv_reconcile.review_reconcile_marker(issue_proposal_id, issue_version, 3, "drop")
+    local marker = conv_reconcile.review_reconcile_marker(issue_proposal_id, issue_version, 3, "drop", "no-semantic-progress")
     t.eq(conv_reconcile.has_review_reconcile_marker(core, { marker }, issue_proposal_id, issue_version, 3), true)
     t.is_true(marker:find('action="drop"', 1, true) ~= nil)
     t.is_true(marker:find('dedup="review-reconcile:' .. issue_version .. '/review-loop/3"', 1, true) ~= nil)
@@ -251,7 +255,7 @@ return {
     t.is_true(has_value(label.remove_labels, "fkst-dev:reviewing"))
     t.eq(has_value(label.remove_labels, "fkst-dev:blocked"), false)
 
-    local comment = core.build_review_reconcile_comment_request("owner/repo", "42", reconcile, "drop", "no-actionable-framing-after-3-review-rounds")
+    local comment = core.build_review_reconcile_comment_request("owner/repo", "42", reconcile, "drop", "no-semantic-progress-after-3-review-rounds")
     t.is_true(comment.body:find("github-devloop review reconcile action: drop", 1, true) ~= nil)
     t.is_true(comment.body:find("fkst:github-devloop:review-reconcile:v1", 1, true) ~= nil)
     t.is_true(comment.body:find(core.state_marker(issue_proposal_id, "blocked", issue_version .. "/review-loop/3"), 1, true) ~= nil)
@@ -563,7 +567,7 @@ return {
     t.eq(label.remove_labels[5], "fkst-dev:merge-ready")
     t.eq(label.remove_labels[6], "fkst-dev:fixing")
     t.eq(label.remove_labels[7], "fkst-dev:impl-failed")
-    t.eq(#label.remove_labels, 12)
+    t.eq(#label.remove_labels, 13)
     t.is_true(#label.dedup_key <= 512)
 
     local comment = requests_lifecycle.build_implementing_comment_request(core, "owner/repo", "42", ready, "/tmp/devloop-owner-repo-42", "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123")
@@ -584,7 +588,7 @@ return {
     t.eq(failed_label.remove_labels[5], "fkst-dev:reviewing")
     t.eq(failed_label.remove_labels[6], "fkst-dev:merge-ready")
     t.eq(failed_label.remove_labels[7], "fkst-dev:fixing")
-    t.eq(#failed_label.remove_labels, 12)
+    t.eq(#failed_label.remove_labels, 13)
 
     local failure_comment = requests_lifecycle.build_impl_failure_comment_request(core, "owner/repo", "42", ready, "no-changes", "No files changed.")
     t.is_true(failure_comment.body:find("github-devloop implementation failed: no-changes", 1, true) ~= nil)

@@ -98,6 +98,26 @@ class MonotoneGateRatchetTest(unittest.TestCase):
         self.assertIn("planted_integration_gate state-equality reviewing", joined)
         self.assertIn("unclassified transient lifecycle cursor read", joined)
 
+    def test_declined_state_equality_is_flagged(self) -> None:
+        source = textwrap.dedent(
+            """\
+            local function planted_gate(current)
+              return current.state == "declined"
+            end
+            """
+        )
+
+        violations = monotone.source_violations(
+            "packages/github-devloop/core/synthetic_gate.lua",
+            source,
+        )
+
+        labels = [violation.label() for violation in violations]
+        self.assertEqual(
+            labels,
+            ["packages/github-devloop/core/synthetic_gate.lua:2 planted_gate state-equality declined"],
+        )
+
     def test_reached_gate_without_cursor_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

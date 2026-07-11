@@ -66,9 +66,9 @@ return {
     local label = h.find_raise(result.raises, "github-proxy.github_issue_label_request").payload
     local version = conv_reconcile.review_reconcile_terminal_state_version(event.issue_version, event.round)
     t.is_true(comment.body:find("github-devloop review reconcile action: drop", 1, true) ~= nil)
-    t.is_true(comment.body:find("no-actionable-framing-after-3-review-rounds", 1, true) ~= nil)
+    t.is_true(comment.body:find("no-semantic-progress-after-3-review-rounds", 1, true) ~= nil)
     t.is_true(comment.body:find(core.state_marker(event.proposal_id, "blocked", version), 1, true) ~= nil)
-    t.is_true(comment.body:find(conv_reconcile.review_reconcile_marker(event.proposal_id, event.issue_version, event.round, "drop"), 1, true) ~= nil)
+    t.is_true(comment.body:find(conv_reconcile.review_reconcile_marker(event.proposal_id, event.issue_version, event.round, "drop", event.terminal_cause), 1, true) ~= nil)
     t.eq(label.add_labels[1], "fkst-dev:blocked")
     t.eq(label.remove_labels[1], "fkst-dev:thinking")
     t.eq(h.count_calls("codex exec"), 0)

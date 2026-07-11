@@ -9,6 +9,7 @@ local handoff_helpers = require("devloop.comment_handoff")
 local payloads_builders = require("devloop.payloads.builders")
 local payloads_predicates = require("devloop.payloads.predicates")
 local conv_reconcile = require("devloop.convergence.reconcile")
+local conv_rounds = require("devloop.convergence.rounds")
 local devloop_logging = require("devloop.logging")
 local spec = {
   consumes = { "github-proxy.github_comment_written" },
@@ -38,6 +39,7 @@ local function supported_handoff(payload)
   if handoff.kind == "github-devloop.reconcile"
     and devloop_base.is_safe_consensus_result_ref(handoff.proposal_id, handoff.base_version)
     and strings.is_bounded_string(handoff.base_version, devloop_base._max_dedup_len)
+    and conv_rounds.is_terminal_cause(handoff.terminal_cause)
     and valid_round(handoff.round) ~= nil
     and source_refs.has_bounded_source_ref(handoff.source_ref, devloop_base._max_key_len) then
     return handoff
@@ -79,7 +81,7 @@ local function act_handoff(event)
     local reconcile = conv_reconcile.build_devloop_reconcile_payload({
       proposal_id = handoff.proposal_id,
       source_ref = handoff.source_ref,
-    }, handoff.round, handoff.base_version)
+    }, handoff.round, handoff.base_version, handoff.terminal_cause)
     devloop_logging.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "thinking", version = handoff.base_version }, "comment-written", "devloop_reconcile", "applied(own-write-comment-id)", "converge round comment write was acknowledged")
     devloop_logging.log_raise("comment_handoff", handoff.proposal_id, "devloop_reconcile", reconcile)
     return
