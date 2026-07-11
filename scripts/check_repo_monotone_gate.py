@@ -52,6 +52,7 @@ PHASES = (
     "closed-unmerged",
     "fixing",
     "impl-failed",
+    "declined",
     "blocked",
 )
 PHASE_LITERAL = "|".join(re.escape(phase) for phase in PHASES)
