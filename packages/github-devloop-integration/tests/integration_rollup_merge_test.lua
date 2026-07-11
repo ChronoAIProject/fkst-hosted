@@ -24,7 +24,9 @@ end
 local function observe_clean()
   return {
     schema_version = 1,
-    generated_at_ms = 1781832600000,
+    generated_at_ms = now() * 1000,
+    truncated = { deliveries = false, dead_letters = false },
+    dead_letters = json.decode("[]"),
   }
 end
 
@@ -225,13 +227,47 @@ return {
     mock_pr("def456")
     mock_pr("def456", "dev", "COMPLETED", "SUCCESS", "MERGEABLE", "CLEAN", "OPEN", "", { mature_clean_sample("def456") })
     mock_runtime_gate({
+      schema_version = 1,
+      generated_at_ms = now() * 1000,
+      truncated = { deliveries = false, dead_letters = false },
       queues = {
         { queue = "devloop_ready", ready = 0, leased = 0, retry = 0, dlq = 1 },
+      },
+      dead_letters = {
+        { delivery_id = "dead-1", queue = "devloop_ready", dead_at_ms = now() * 1000 - 1000 },
       },
     }, "def456")
     local result = run_merge(event(), opts("rollup-merge-runtime-dirty", "1"))
     t.eq(result.exit_code, 0)
     t.eq(h.count_calls("gh pr merge"), 0)
+  end,
+
+  test_rollup_merge_stale_dead_letter_audit_still_merges = function()
+    mock_write_mode("1")
+    mock_pr("def456")
+    mock_pr("def456", "dev", "COMPLETED", "SUCCESS", "MERGEABLE", "CLEAN", "OPEN", "", { mature_clean_sample("def456") })
+    mock_runtime_gate({
+      schema_version = 1,
+      generated_at_ms = now() * 1000,
+      truncated = { deliveries = false, dead_letters = false },
+      queues = {
+        { queue = "devloop_ready", ready = 0, leased = 0, retry = 0, dlq = 1 },
+      },
+      dead_letters = {
+        {
+          delivery_id = "dead-1",
+          queue = "devloop_ready",
+          dead_at_ms = now() * 1000 - 32 * 60 * 1000,
+          permanent = true,
+          replayable = false,
+        },
+      },
+    }, "def456")
+    mock_merge_command()
+    mock_pr("def456", "dev", "COMPLETED", "SUCCESS", "MERGEABLE", "CLEAN", "MERGED", "2026-06-03T02:03:04Z")
+    local result = run_merge(event(), opts("rollup-merge-stale-dead-letter-audit", "1"))
+    t.eq(result.exit_code, 0)
+    t.eq(h.count_calls("gh pr merge"), 1)
   end,
 
   test_rollup_merge_missing_observe_holds_fail_closed = function()
@@ -343,6 +379,9 @@ return {
     mock_write_mode("1")
     mock_pr("def456")
     mock_runtime_gate({
+      schema_version = 1,
+      generated_at_ms = now() * 1000,
+      truncated = { deliveries = false, dead_letters = false },
       entities = {
         {
           entity = "github-devloop/issue/owner/repo/623",
@@ -355,6 +394,7 @@ return {
       queues = {
         { queue = "devloop_ready", ready = 0, leased = 0, retry = 1, dlq = 0 },
       },
+      dead_letters = json.decode("[]"),
     }, "def456")
     mock_pr("def456", "dev", "COMPLETED", "SUCCESS", "MERGEABLE", "CLEAN", "OPEN", "", { mature_clean_sample("def456") })
     mock_merge_command()

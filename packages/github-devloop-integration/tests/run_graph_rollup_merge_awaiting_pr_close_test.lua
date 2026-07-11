@@ -143,7 +143,9 @@ end
 local function mock_runtime_stability_gate()
   t.mock_observe({
     schema_version = 1,
-    generated_at_ms = 1781832600000,
+    generated_at_ms = now() * 1000,
+    truncated = { deliveries = false, dead_letters = false },
+    dead_letters = json.decode("[]"),
   })
   t.mock_command("git fetch origin " .. integration_branch, {
     stdout = "",
