@@ -2,9 +2,15 @@ local S = {}
 local check_runs = require("forge.github.check_runs")
 local forge_validators = require("forge.gitref")
 
+local additional_merge_gate_reason_classes = {
+  ["ci-wait"] = true,
+  ["gate-failed"] = true,
+  ["head-sha-mismatch"] = true,
+  ["predecessor-set-mismatch"] = true,
+}
+
 function S.install(M, shared, opts)
 local github = opts.github_handle
-local strings = shared.strings
 local is_open_pr = shared.is_open_pr
 local log_check_runs_fallback = shared.log_check_runs_fallback
 local fetch_commit_check_runs = shared.fetch_commit_check_runs
@@ -158,7 +164,10 @@ local function merge_gate_reason_class(reason)
   if is_not_mergeable_reason(text) then
     return text
   end
-  return strings.sanitize_key(text ~= "" and text or "gate-failed", false):gsub("/", "-")
+  if additional_merge_gate_reason_classes[text] then
+    return text
+  end
+  return "gate-failed"
 end
 
 local function merge_gate_reason_requires_pr_merge_product(reason)

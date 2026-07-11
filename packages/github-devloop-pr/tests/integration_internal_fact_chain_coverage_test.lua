@@ -696,6 +696,8 @@ return {
   test_observe_pr_live_305_merge_gate_marker_substream_replay_reaches_issue_fixing_state = function()
     local event = merge_ready()
     local fixture = live_305_merge_gate_fix_marker_substream(event)
+    local replay_feedback = core.fixing_replay_feedback_fact(fixture.pr_comments, event.proposal_id, fixture.fixing_version)
+    t.eq(replay_feedback.reason, "rollup-red")
     mock_bot_env()
     mock_pr_origin_for({
       repo = fixture.repo,
@@ -726,6 +728,10 @@ return {
     t.eq(fixing_raise.payload.gate_baseline_sha, fixture.gate_baseline_sha)
     t.is_true(fixing_raise.payload.gate_failure_excerpt:find("rollup-red", 1, true) ~= nil)
     t.eq(fixing_raise.payload.source_ref.ref, "ChronoAIProject/fkst-packages#pr/305")
+    local replay_comment = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
+    local _, headline_count = replay_comment:gsub("github%-devloop merge gate failed:", "")
+    t.eq(headline_count, 1)
+    t.is_true(replay_comment:find('reason="ci-wait"', 1, true) ~= nil)
     assert_declared_merge_gate_fixing_replay_field_set(fixing_raise.payload)
     local defective_replay = payloads_builders.build_replayed_fixing_payload({
       proposal_id = event.proposal_id,
