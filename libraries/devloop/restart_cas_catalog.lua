@@ -279,11 +279,13 @@ local function resolve_profile(definition, evidence)
     }
   end
   local target_version = evidence.target_version or variant.target_version
+  -- legacy_probe_target_state is a shared pre-decision cyclic-probe target, not an edge target.
+  local probe_target_state = variant.legacy_probe_target_state or variant.target_state
   local resolved = base_result(
     definition.base,
     current_for_base,
     variant.source_states,
-    variant.target_state,
+    probe_target_state,
     evidence.incoming_version,
     target_version
   )
@@ -550,7 +552,12 @@ local policies = {
     evidence_type = "review_meta_cas_evidence_v1",
     production = { function_name = "cyclic_transition_status", overlay = "raw review-meta version equality", source = "packages/github-devloop-pr/departments/review_meta/main.lua:201" },
     base = "cyclic",
-    variants = { review_meta_to_fixing = variant({ "review-meta" }, "fixing") },
+    variants = {
+      predecision_eligibility = {
+        source_states = { "review-meta" },
+        legacy_probe_target_state = "fixing",
+      },
+    },
     overlay = APPLY_ONLY_RAW,
   },
   ["cas.legacy_merge_v1"] = {
@@ -625,8 +632,8 @@ local bindings = {
   { id = "github-devloop-pr/reviewing/timeout/watchdog_reconcile_terminal", consumer = "reconcile", cas_policy_id = "cas.legacy_timeout_reconcile_v1", variant = "reviewing_to_blocked" },
   { id = "github-devloop-pr/merge-ready/timeout/merge_gate/watchdog_reconcile_terminal", consumer = "reconcile", cas_policy_id = "cas.legacy_timeout_reconcile_v1", variant = "merge_ready_to_blocked" },
   { id = "github-devloop-pr/fixing/autonomous/revision_published", consumer = "fix", cas_policy_id = "cas.legacy_fix_v1", variant = "fixing_to_reviewing" },
-  { id = "github-devloop-pr/review-meta/autonomous/fix", consumer = "review_meta", cas_policy_id = "cas.legacy_review_meta_v1", variant = "review_meta_to_fixing" },
-  { id = "github-devloop-pr/review-meta/autonomous/block", consumer = "review_meta", cas_policy_id = "cas.legacy_review_meta_v1", variant = "review_meta_to_fixing" },
+  { id = "github-devloop-pr/review-meta/autonomous/fix", consumer = "review_meta", cas_policy_id = "cas.legacy_review_meta_v1", variant = "predecision_eligibility" },
+  { id = "github-devloop-pr/review-meta/autonomous/block", consumer = "review_meta", cas_policy_id = "cas.legacy_review_meta_v1", variant = "predecision_eligibility" },
   { id = "github-devloop-pr/merge-ready/entry/handoff_to_merge_gate", consumer = "merge", cas_policy_id = "cas.legacy_merge_v1", variant = "merge_ready_or_merging_to_merging" },
   { id = "transition/github-devloop-pr/reconcile/review-reject-blocked", consumer = "reconcile", cas_policy_id = "cas.legacy_pr_fix_reconcile_v1", variant = "review_reject_to_blocked" },
   { id = "transition/github-devloop-pr/reconcile/bounded-fix-blocked", consumer = "reconcile", cas_policy_id = "cas.legacy_pr_fix_reconcile_v1", variant = "bounded_fix_to_blocked" },

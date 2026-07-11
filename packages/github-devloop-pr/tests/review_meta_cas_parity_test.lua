@@ -15,7 +15,7 @@ local core = h.core
 local review_meta_department = require("departments.review_meta.main")
 
 local POLICY_ID = "cas.legacy_review_meta_v1"
-local VARIANT = "review_meta_to_fixing"
+local VARIANT = "predecision_eligibility"
 local V_OLDER = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-02T01-02-03Z"
 local V_EQUAL = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
 local V_NEWER = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"

@@ -447,7 +447,7 @@ return {
 
     for _, profile in ipairs({
       { id = "cas.legacy_fix_v1", variant = "fixing_to_reviewing", source = "fixing", target = "reviewing", target_version = V_EQUAL .. "/fix/3" },
-      { id = "cas.legacy_review_meta_v1", variant = "review_meta_to_fixing", source = "review-meta", target = "fixing" },
+      { id = "cas.legacy_review_meta_v1", variant = "predecision_eligibility", source = "review-meta", target = "fixing" },
       { id = "cas.legacy_merge_v1", variant = "merge_ready_to_merging", source = "merge-ready", target = "merging" },
     }) do
       local current = { state = profile.source, version = V_EQUAL }
@@ -488,7 +488,7 @@ return {
         overlay_version = V_OTHER,
       },
       { id = "cas.legacy_fix_v1", variant = "fixing_to_reviewing", incoming_version = V_EQUAL, overlay_version = V_OTHER },
-      { id = "cas.legacy_review_meta_v1", variant = "review_meta_to_fixing", incoming_version = V_EQUAL, overlay_version = V_OTHER },
+      { id = "cas.legacy_review_meta_v1", variant = "predecision_eligibility", incoming_version = V_EQUAL, overlay_version = V_OTHER },
       { id = "cas.legacy_merge_v1", variant = "merge_ready_to_merging", incoming_version = V_EQUAL, overlay_version = V_OTHER },
       {
         id = "cas.legacy_pr_fix_reconcile_v1",
@@ -551,7 +551,7 @@ return {
       },
       {
         id = "cas.legacy_review_meta_v1",
-        variant = "review_meta_to_fixing",
+        variant = "predecision_eligibility",
         base = "cyclic",
         sources = { "review-meta" },
         target = "fixing",
