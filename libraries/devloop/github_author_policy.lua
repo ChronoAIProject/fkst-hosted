@@ -37,6 +37,10 @@ function M.from_env(exec)
   return M.from_logins(logins)
 end
 
+function M.is_authorized(policy, login)
+  return content_filter.is_authorized(login, content_filter.policy_whitelist(policy))
+end
+
 function M.for_exec(exec)
   return M.from_env(exec)
 end

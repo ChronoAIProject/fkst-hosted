@@ -7,6 +7,7 @@ local github_factory = require("devloop.github_factory")
 local error_facts = require("contract.error_facts")
 local contract_time = require("contract.time")
 local config = require("devloop.config")
+local github_author_policy = require("devloop.github_author_policy")
 local github_view = require("forge.github_view")
 local devloop_logging = require("devloop.logging")
 local forks_handle = nil
@@ -305,11 +306,17 @@ function C.claim_issue_for_management(M, dept, repo, issue_number, current, prop
   -- assignee-mode policy: it keeps an assignee-claim bot from intruding on a
   -- human's issue. In label-mode the loop is single-tenant and explicitly
   -- opts issues in via the fkst-dev:enabled label, so it claims directly
-  -- (matching the label-claim fork). Assignee-mode keeps the original behavior.
+  -- (matching the label-claim fork). Assignee-mode isolates only authors admitted
+  -- by the canonical GitHub content policy.
   if config.claim_mode() ~= "label" and author ~= owner then
     local managed = C.managed_bot_logins()
     if C.is_managed_bot_login(author, managed) then
       log_claim(dept, proposal_id, "skip-fork-peer-bot", "other-authored unassigned issue belongs to a managed bot login")
+      return false
+    end
+    local trusted_author_policy = github_author_policy.from_env()
+    if not github_author_policy.is_authorized(trusted_author_policy, author) then
+      log_claim(dept, proposal_id, "skip-non-whitelisted-author", "other-authored unassigned issue author is not authorized for GitHub content")
       return false
     end
     local dedup_key = forks().fork_issue_dedup_key(repo, issue_number)
