@@ -112,7 +112,7 @@ end
 local function calibrated_ideal_contract(verdict_mode)
   local lines = ideal_rubric_lines()
   if verdict_mode == "gate" then
-    table.insert(lines, "Gate calibration: the IDEAL section is context only, never a rejection ground. Good-enough-and-clean is approvable. Ugliness must be evidenced against the six smells, never inferred from \"not my ideal\". Every blocking claim must name an evidenced smell and cite the diff through the existing ⟦FKST:GAP⟧ line.")
+    table.insert(lines, "Gate calibration: the IDEAL section is context only, never a rejection ground. Good-enough-and-clean is approvable. Ugliness must be evidenced against the six smells, never inferred from \"not my ideal\". Every blocking claim must name an evidenced smell and cite the diff in ⟦FKST:REPLY⟧; the ⟦FKST:GAP⟧ line carries only the short named gap, not the citation.")
   else
     table.insert(lines, converge_calibration())
   end
@@ -146,7 +146,7 @@ local function angle_mode_contract(verdict_mode, angle)
     "Assess the diff under the high-risk security threat model, outside the BEAUTY-GATE philosopher seats.",
   }
   if verdict_mode == "gate" then
-    table.insert(lines, "Gate calibration: every blocking claim must name an evidenced high-risk security gap and cite the diff through the existing ⟦FKST:GAP⟧ line. Advisory observations are comment.")
+    table.insert(lines, "Gate calibration: every blocking claim must name an evidenced high-risk security gap and cite the diff in ⟦FKST:REPLY⟧; the ⟦FKST:GAP⟧ line carries only the short named gap. Advisory observations are comment.")
   end
   return table.concat(lines, "\n")
 end
@@ -201,7 +201,7 @@ function M.install(core, deps)
       mode_contract = angle_mode_contract(verdict_mode, angle),
       verdict_options = verdict_mode == "gate" and "approve, comment, reject, or abstain" or "approve or abstain",
       readiness_instruction = verdict_mode == "gate"
-        and "Use reject ONLY for a goal-blocking gap and you MUST name exactly one blocking gap on a third line: ⟦FKST:GAP⟧ <one-line named gap>. Advisory observations are comment. Abstain only when you genuinely cannot judge."
+        and "Use reject ONLY for a goal-blocking gap and you MUST name exactly one blocking gap on a third line: ⟦FKST:GAP⟧ <short named gap>. Keep the ⟦FKST:GAP⟧ line a short label of a few words (for example \"missing regression test\"); put every diff citation, quotation, and detailed justification in ⟦FKST:REPLY⟧, never in the gap line. Advisory observations are comment. Abstain only when you genuinely cannot judge."
         or converge_seat_readiness(angle, false),
       weakest_instruction = weakest_instruction(verdict_mode, angle),
     }, proposal)
@@ -240,7 +240,7 @@ function M.install(core, deps)
       peer_outputs = render_peer_outputs(neutralize, peer_results),
       verdict_options = verdict_mode == "gate" and "approve, comment, reject, or abstain" or "approve or abstain",
       readiness_instruction = verdict_mode == "gate"
-        and "Use reject ONLY for a goal-blocking gap and you MUST name exactly one blocking gap on a third line: ⟦FKST:GAP⟧ <one-line named gap>. Advisory observations are comment. Abstain only when you genuinely cannot judge."
+        and "Use reject ONLY for a goal-blocking gap and you MUST name exactly one blocking gap on a third line: ⟦FKST:GAP⟧ <short named gap>. Keep the ⟦FKST:GAP⟧ line a short label of a few words (for example \"missing regression test\"); put every diff citation, quotation, and detailed justification in ⟦FKST:REPLY⟧, never in the gap line. Advisory observations are comment. Abstain only when you genuinely cannot judge."
         or converge_seat_readiness(own_result.angle, true),
     }, proposal)
   end

@@ -340,6 +340,11 @@ return {
     t.is_true(gate_prompt:find("Good-enough-and-clean is approvable", 1, true) ~= nil)
     t.is_true(gate_prompt:find("never inferred from \"not my ideal\"", 1, true) ~= nil)
     t.is_true(gate_prompt:find("Every blocking claim must name an evidenced smell", 1, true) ~= nil)
+    -- The GAP line is a short named label; detail and diff citations go in REPLY.
+    -- This keeps ⟦FKST:GAP⟧ within its bound so a valid reject verdict never parses
+    -- as unparseable just because its evidence is long (the review-stall root cause).
+    t.is_true(gate_prompt:find("cite the diff in ⟦FKST:REPLY⟧; the ⟦FKST:GAP⟧ line carries only the short named gap", 1, true) ~= nil)
+    t.is_true(gate_prompt:find("put every diff citation, quotation, and detailed justification in ⟦FKST:REPLY⟧, never in the gap line", 1, true) ~= nil)
     t.is_true(gate_prompt:find("Context manifest:", 1, true) ~= nil)
     t.is_nil(gate_prompt:find("WEAKEST:", 1, true))
     t.is_nil(gate_prompt:find("If you cannot fetch the source", 1, true))
@@ -505,6 +510,9 @@ return {
   end,
 
   test_parse_angle_output_reject_requires_exactly_one_bounded_gap = function()
+    -- The ⟦FKST:GAP⟧ line is a short named label; an over-length gap fails closed
+    -- (surfacing a producer contract violation) rather than being silently repaired.
+    -- The gate prompt now keeps evidence in ⟦FKST:REPLY⟧ so real angles stay under bound.
     t.is_nil(core.parse_angle_output(answer("reject", "No gap line."), "gate"))
     t.is_nil(core.parse_angle_output(reject_answer("Gap too long.", string.rep("x", 241)), "gate"))
     t.is_nil(core.parse_angle_output(reject_answer("One.", "gap one") .. "\n" .. gap_label .. " gap two", "gate"))
