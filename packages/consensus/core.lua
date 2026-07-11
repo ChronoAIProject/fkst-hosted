@@ -1,4 +1,5 @@
 local M = {}
+local angle_answers = require("angle_answers")
 local codex = require("workflow.codex")
 local env = require("workflow.env")
 local error_facts = require("contract.error_facts")
@@ -13,7 +14,7 @@ local max_title_len = 240
 local max_body_len = 12000
 local max_context_len = 8000
 local max_content_fetch_len = 4000
-local max_reply_len = 2000
+local max_reply_len = angle_answers.max_reply_len
 local max_framing_len = 1000
 local max_gap_len = 240
 local max_gaps = 4
@@ -64,6 +65,7 @@ function M.wrap_pipeline_failure(dept, fn)
     M.log_error_fact("error", dept, "FAILURE", M.error_class_from_message(err), type(event) == "table" and event.queue or nil, err, {
       source_ref = event_source_ref(event),
       attempt = type(event) == "table" and event.attempt or nil,
+      terminal = false,
     })
     error(err, 0)
   end
@@ -213,13 +215,7 @@ local function scratch_segment(value)
   return safe
 end
 
-local function is_verdict(value)
-  return value == "approve"
-    or value == "comment"
-    or value == "reject"
-    or value == "abstain"
-    or value == "invalid"
-end
+local is_verdict = angle_answers.is_verdict
 
 local function is_verdict_path(value)
   return value == "post-rebuttal-unanimity"
@@ -506,18 +502,6 @@ local function review_gap_list(angle_results)
   return gaps
 end
 
-function M.all_angles_succeeded(angle_results)
-  if type(angle_results) ~= "table" or #angle_results == 0 then
-    return false
-  end
-  for _, result in ipairs(angle_results) do
-    if type(result) ~= "table" or result.exit_code ~= 0 then
-      return false
-    end
-  end
-  return true
-end
-
 function M.aggregate(angle_results, verdict_mode)
   if type(angle_results) ~= "table" or #angle_results == 0 then
     return nil
@@ -582,25 +566,15 @@ end
 function M.angle_digests(angle_results)
   local digests = {}
   for _, result in ipairs(angle_results or {}) do
-    local verdict = result.verdict
-    if not is_verdict(verdict) then
-      verdict = "invalid"
+    if angle_answers.is_valid(result) then
+      local reply = bounded(result.reply, max_digest_len)
+      table.insert(digests, {
+        angle = bounded(result.angle or "unknown", max_key_len),
+        verdict = result.verdict,
+        reply = reply,
+        digest = reply,
+      })
     end
-    local reply = bounded(result.reply or "", max_digest_len)
-    local raw = bounded(result.stdout or "", max_digest_len)
-    local digest = reply
-    if digest == "" then
-      digest = raw
-    end
-    if digest == "" then
-      digest = "No parseable angle reply."
-    end
-    table.insert(digests, {
-      angle = bounded(result.angle or "unknown", max_key_len),
-      verdict = verdict,
-      reply = reply,
-      digest = bounded(digest, max_digest_len),
-    })
   end
   return digests
 end
@@ -621,6 +595,7 @@ function M.build_reached_payload(proposal, decision, angle_results, framing, pro
   if not has_source_ref(proposal.source_ref) then
     error("consensus: source-ref-missing: missing source_ref")
   end
+  angle_answers.assert_all_valid(angle_results, "reached-outcome")
 
   local clean_results = {}
   local body_lines = {}
@@ -651,7 +626,7 @@ function M.build_reached_payload(proposal, decision, angle_results, framing, pro
   for _, result in ipairs(angle_results or {}) do
     table.insert(clean_results, {
       angle = result.angle,
-      verdict = is_verdict(result.verdict) and result.verdict or "invalid",
+      verdict = result.verdict,
     })
     local target = (clean_decision == "approve" and result.verdict == "comment") and advisory_lines or body_lines
     table.insert(target, tostring(result.angle) .. ":")
@@ -726,13 +701,16 @@ function M.build_converge_payload(proposal, narrowed_question, angle_results, fi
   if not has_source_ref(proposal.source_ref) then
     error("consensus: source-ref-missing: missing source_ref")
   end
+  angle_answers.assert_has_valid(angle_results, "converge-outcome")
+
+  local angle_digests = M.angle_digests(angle_results)
 
   local payload = {
     schema = "consensus.consensus_converge.v1",
     proposal_id = proposal.proposal_id,
     round = tonumber(proposal.round) or 0,
     narrowed_question = bounded(narrowed_question, max_narrowed_question_len),
-    angle_digests = M.angle_digests(angle_results),
+    angle_digests = angle_digests,
     dedup_key = "consensus:" .. tostring(proposal.dedup_key),
     source_ref = {
       kind = proposal.source_ref.kind,

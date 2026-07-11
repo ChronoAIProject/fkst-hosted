@@ -593,7 +593,7 @@ return {
     assert_no_judgment_dir_created()
   end,
 
-  test_synthesis_second_parse_failure_converges_without_default_question = function()
+  test_synthesis_second_parse_failure_fails_closed_without_converge = function()
     mock_judgment_runtime()
     mock_angle("teleology", "approve", "Teleology angle approves.")
     mock_angle("parsimony", "abstain", "Parsimony angle needs framing.")
@@ -605,11 +605,33 @@ return {
     mock_synthesis_repair("malformed")
 
     local result = run_decide(proposal(), opts("malformed-synthesis"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    t.eq(result.raises[1].queue, "consensus_converge")
-    t.is_true(result.raises[1].payload.narrowed_question:find("synthesis-parse-failed", 1, true) ~= nil)
-    t.is_nil(result.raises[1].payload.narrowed_question:find("Resolve the concrete disagreement", 1, true))
+    t.is_true(result.exit_code ~= 0)
+    t.eq(#result.raises, 0)
+    t.is_true(tostring(result.error):find("synthesis-unparseable", 1, true) ~= nil)
+    t.eq(#codex_calls(), 8)
+  end,
+
+  test_synthesis_repair_worker_failure_fails_closed_as_codex_failed = function()
+    mock_judgment_runtime()
+    mock_angle("teleology", "approve", "Teleology angle approves.")
+    mock_angle("parsimony", "abstain", "Parsimony angle needs framing.")
+    mock_angle("fidelity", "approve", "Fidelity angle approves.")
+    mock_rebuttal_defend("teleology", "approve", "Teleology still approves.")
+    mock_rebuttal_defend("parsimony", "abstain", "Parsimony still needs framing.")
+    mock_rebuttal_defend("fidelity", "approve", "Fidelity still approves.")
+    mock_synthesis("malformed")
+    mock_judgment_dir()
+    t.mock_command("consensus-synthesis-repair-proposal", {
+      stdout = "",
+      stderr = "worker usage limit",
+      exit_code = 7,
+    })
+
+    local result = run_decide(proposal(), opts("failed-synthesis-repair"))
+    t.is_true(result.exit_code ~= 0)
+    t.eq(#result.raises, 0)
+    t.is_true(tostring(result.error):find("codex-failed", 1, true) ~= nil)
+    t.is_true(tostring(result.error):find("worker usage limit", 1, true) ~= nil)
     t.eq(#codex_calls(), 8)
   end,
 
@@ -668,7 +690,7 @@ return {
     t.eq(#codex_calls(), 7)
   end,
 
-  test_synthesis_reached_with_failed_angle_falls_back_to_consensus_converge = function()
+  test_synthesis_reached_with_failed_angle_fails_closed_as_codex_failed = function()
     mock_judgment_runtime()
     mock_angle("teleology", "approve", "Teleology angle approves.")
     mock_judgment_dir()
@@ -687,21 +709,18 @@ return {
       dedup_key = "proposal-42-v1/split-synthesis-reached-degraded",
     }), run_opts)
 
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    t.eq(result.raises[1].queue, "consensus_converge")
+    t.is_true(result.exit_code ~= 0)
+    t.eq(#result.raises, 0)
+    t.is_true(tostring(result.error):find("codex-failed", 1, true) ~= nil)
     t.is_nil(cache_get(core.reached_cache_key("proposal-42-v1/split-synthesis-reached-degraded")))
     t.eq(#codex_calls(), 7)
   end,
 
-  test_synthesis_reached_with_failed_angle_falls_back_to_consensus_converge_in_gate_mode = function()
+  test_synthesis_reached_with_malformed_angle_fails_closed_as_unparseable = function()
     mock_judgment_runtime()
     mock_angle("teleology", "approve", "Teleology angle approves.")
     mock_judgment_dir()
-    t.mock_command("consensus-angle-parsimony", {
-      stderr = "forced failure",
-      exit_code = 7,
-    })
+    t.mock_command("consensus-angle-parsimony", { stdout = "malformed", exit_code = 0 })
     mock_angle("fidelity", "comment", "Fidelity angle notes a non-blocking concern.")
     mock_rebuttal_defend("teleology", "approve", "Teleology still approves.")
     mock_rebuttal_defend("parsimony", "abstain", "Parsimony cannot judge after the failed P1.")
@@ -714,9 +733,9 @@ return {
       dedup_key = "proposal-42-v1/gate-split-synthesis-reached-degraded",
     }), run_opts)
 
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    t.eq(result.raises[1].queue, "consensus_converge")
+    t.is_true(result.exit_code ~= 0)
+    t.eq(#result.raises, 0)
+    t.is_true(tostring(result.error):find("angle-output-unparseable", 1, true) ~= nil)
     t.is_nil(cache_get(core.reached_cache_key("proposal-42-v1/gate-split-synthesis-reached-degraded")))
     t.eq(#codex_calls(), 7)
   end,
@@ -738,7 +757,7 @@ return {
     t.eq(#codex_calls(), 7)
   end,
 
-  test_failed_codex_call_raises_consensus_converge = function()
+  test_partial_angle_worker_failure_preserves_substantive_converge = function()
     mock_judgment_runtime()
     mock_angle("teleology", "approve", "Teleology angle approves.")
     mock_judgment_dir()
@@ -750,12 +769,13 @@ return {
     mock_rebuttal_defend("teleology", "approve", "Teleology still approves.")
     mock_rebuttal_defend("parsimony", "abstain", "Parsimony cannot judge after the failed P1.")
     mock_rebuttal_defend("fidelity", "approve", "Fidelity still approves.")
-    mock_synthesis("converge: parsimony angle failed + inspect the failed parsimony evidence")
+    mock_synthesis("converge: surviving seats disagree on retry ownership + inspect the retry contract")
 
     local result = run_decide(proposal({ dedup_key = "proposal-42-v1/codex-fails" }), opts("codex-fails"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "consensus_converge")
+    t.eq(result.raises[1].payload.narrowed_question, "surviving seats disagree on retry ownership + inspect the retry contract")
     local has_parsimony = false
     for _, digest in ipairs(result.raises[1].payload.angle_digests) do
       if digest.angle == "parsimony" and digest.verdict == "abstain" then
@@ -766,7 +786,7 @@ return {
     t.eq(#codex_calls(), 7)
   end,
 
-  test_unparseable_output_raises_consensus_converge_with_synthesis_parse_failure = function()
+  test_zero_valid_angle_outputs_fail_closed_before_rebuttal = function()
     mock_judgment_runtime()
     mock_judgment_dir()
     t.mock_command("consensus-angle-teleology", { stdout = "no verdict here", exit_code = 0 })
@@ -774,19 +794,30 @@ return {
     t.mock_command("consensus-angle-parsimony", { stdout = "still nothing useful", exit_code = 0 })
     mock_judgment_dir()
     t.mock_command("consensus-angle-fidelity", { stdout = "garbage output", exit_code = 0 })
-    mock_rebuttal_defend("teleology", "abstain", "Teleology cannot judge malformed P1.")
-    mock_rebuttal_defend("parsimony", "abstain", "Parsimony cannot judge malformed P1.")
-    mock_rebuttal_defend("fidelity", "abstain", "Fidelity cannot judge malformed P1.")
-    mock_synthesis("malformed")
-    mock_synthesis_repair("still malformed")
-
     local result = run_decide(proposal({ dedup_key = "proposal-42-v1/unparseable" }), opts("unparseable"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    t.eq(result.raises[1].queue, "consensus_converge")
-    t.is_true(result.raises[1].payload.narrowed_question:find("synthesis-parse-failed", 1, true) ~= nil)
-    t.is_nil(result.raises[1].payload.narrowed_question:find("Resolve the concrete disagreement", 1, true))
-    t.eq(#codex_calls(), 8)
+    t.is_true(result.exit_code ~= 0)
+    t.eq(#result.raises, 0)
+    t.is_true(tostring(result.error):find("angle-output-unparseable", 1, true) ~= nil)
+    t.eq(#codex_calls(), 3)
+  end,
+
+  test_zero_successful_angle_workers_fail_closed_as_codex_failed = function()
+    mock_judgment_runtime()
+    for _, angle in ipairs({ "teleology", "parsimony", "fidelity" }) do
+      mock_judgment_dir()
+      t.mock_command("consensus-angle-" .. angle, {
+        stdout = "",
+        stderr = "worker usage limit",
+        exit_code = 7,
+      })
+    end
+
+    local result = run_decide(proposal({ dedup_key = "proposal-42-v1/workers-failed" }), opts("workers-failed"))
+    t.is_true(result.exit_code ~= 0)
+    t.eq(#result.raises, 0)
+    t.is_true(tostring(result.error):find("codex-failed", 1, true) ~= nil)
+    t.is_true(tostring(result.error):find("worker usage limit", 1, true) ~= nil)
+    t.eq(#codex_calls(), 3)
   end,
 
   test_missing_source_ref_fails_closed_without_codex = function()

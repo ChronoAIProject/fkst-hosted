@@ -1,4 +1,5 @@
 local core = require("core")
+local angle_answers = require("angle_answers")
 local convergence_identity = require("contract.convergence_identity")
 local rebuttal = require("departments.decide.rebuttal")
 local synthesis = require("departments.decide.synthesis")
@@ -119,9 +120,12 @@ local function decide(proposal)
       reply = parsed and parsed.reply or nil,
       blocking_gap = parsed and parsed.blocking_gap or nil,
       stdout = type(result) == "table" and result.stdout or nil,
+      stderr = type(result) == "table" and result.stderr or nil,
       exit_code = type(result) == "table" and result.exit_code or nil,
     })
   end
+
+  angle_answers.assert_has_valid(angle_results, "blind")
 
   local decision = aggregate(angle_results, verdict_mode)
   if decision ~= nil then
@@ -158,9 +162,13 @@ local function decide(proposal)
         return parse_angle_output(stdout, mode)
       end,
     })
+    angle_answers.assert_has_valid(rebuttal_results, "rebuttal")
     local rebuttal_reached = rebuttal.post_rebuttal_reached(proposal, angle_results, rebuttal_results, verdict_mode, {
       aggregate = function(items, mode)
         return aggregate(items, mode)
+      end,
+      assert_all_angle_answers_valid = function(results, phase)
+        return angle_answers.assert_all_valid(results, phase)
       end,
       build_reached_payload = function(target_proposal, decision, results, framing, provenance)
         return build_reached_payload(target_proposal, decision, results, framing, provenance)
@@ -192,8 +200,8 @@ local function decide(proposal)
     end,
   })
   return synthesis.to_decision_result(proposal, angle_results, rebuttal_results, parsed, {
-    all_angles_succeeded = function(results)
-      return core.all_angles_succeeded(results)
+    assert_all_angle_answers_valid = function(results, phase)
+      return angle_answers.assert_all_valid(results, phase)
     end,
     build_reached_payload = function(target_proposal, decision, results, framing, provenance)
       return build_reached_payload(target_proposal, decision, results, framing, provenance)

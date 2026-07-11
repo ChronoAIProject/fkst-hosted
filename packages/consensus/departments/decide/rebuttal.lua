@@ -111,6 +111,7 @@ function M.collect(angle_results, results, verdict_mode, caps)
       stance = parsed and parsed.stance or nil,
       peer_claim = parsed and parsed.peer_claim or nil,
       stdout = type(result) == "table" and result.stdout or nil,
+      stderr = type(result) == "table" and result.stderr or nil,
       exit_code = type(result) == "table" and result.exit_code or nil,
     })
   end
@@ -125,6 +126,8 @@ function M.post_rebuttal_reached(proposal, p1_results, p2_results, verdict_mode,
   if decision == nil then
     return nil
   end
+  caps.assert_all_angle_answers_valid(p1_results, "blind")
+  caps.assert_all_angle_answers_valid(p2_results, "rebuttal")
   return {
     queue = "consensus_reached",
     payload = caps.build_reached_payload(proposal, decision, p2_results, nil, {

@@ -330,6 +330,28 @@ local function stamp_verified_count(parsed, p1_results, p2_results)
   return parsed
 end
 
+local function fail_synthesis(first, repaired)
+  local first_exit_code = type(first) == "table" and first.exit_code or nil
+  local repair_exit_code = type(repaired) == "table" and repaired.exit_code or nil
+  if repair_exit_code ~= 0 then
+    local stderr = type(repaired) == "table" and trim(repaired.stderr) or ""
+    local detail = stderr ~= "" and (" stderr=" .. stderr) or ""
+    error(
+      "consensus: codex-failed: phase=synthesis-repair"
+        .. " first_exit_code=" .. tostring(first_exit_code)
+        .. " repair_exit_code=" .. tostring(repair_exit_code)
+        .. detail,
+      0
+    )
+  end
+  error(
+    "consensus: synthesis-unparseable: phase=synthesis-repair"
+      .. " first_exit_code=" .. tostring(first_exit_code)
+      .. " repair_exit_code=" .. tostring(repair_exit_code),
+    0
+  )
+end
+
 function M.parse_or_retry(ctx)
   local first = ctx.spawn_sync("synthesis", ctx.build_prompt(false))
   local parsed = nil
@@ -348,26 +370,13 @@ function M.parse_or_retry(ctx)
     return parsed
   end
 
-  return {
-    kind = "converge",
-    disagreement = "synthesis-parse-failed",
-    resolving_evidence = "Provide one valid synthesis outcome using reached:<decision> <framing> or converge:<named disagreement> + <concrete resolving evidence>.",
-    narrowed_question = "synthesis-parse-failed + Provide one valid synthesis outcome using reached:<decision> <framing> or converge:<named disagreement> + <concrete resolving evidence>.",
-    findings_record = "open:\nsynthesis-parse-failed",
-    verified_moves = 0,
-  }
+  fail_synthesis(first, repaired)
 end
 
 function M.to_decision_result(proposal, p1_results, p2_results, parsed, caps)
   if parsed.kind == "reached" then
-    if not caps.all_angles_succeeded(p1_results) or not caps.all_angles_succeeded(p2_results) then
-      return {
-        queue = "consensus_converge",
-        angle_results = p2_results,
-        narrowed_question = "synthesis-parse-failed + Re-run synthesis after every Phase R result succeeds.",
-        findings_record = "open:\nsynthesis-parse-failed",
-      }
-    end
+    caps.assert_all_angle_answers_valid(p1_results, "blind")
+    caps.assert_all_angle_answers_valid(p2_results, "rebuttal")
     return {
       queue = "consensus_reached",
       payload = caps.build_reached_payload(proposal, parsed.decision, p2_results, parsed.framing, {
@@ -399,7 +408,7 @@ function M.full_transcript_lines(neutralize, label, results)
   local lines = { label }
   for _, item in ipairs(results or {}) do
     table.insert(lines, "Angle: " .. neutralize(item and item.angle))
-    table.insert(lines, "Verdict: " .. tostring(item and item.verdict or "invalid"))
+    table.insert(lines, "Verdict: " .. tostring(item and item.verdict))
     table.insert(lines, "Exit code: " .. tostring(item and item.exit_code or "nil"))
     table.insert(lines, "Full output (" .. tostring(plain_line_count(item and item.stdout or "")) .. " lines):")
     table.insert(lines, neutralize(item and item.stdout or ""))
