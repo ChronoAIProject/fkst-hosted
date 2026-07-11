@@ -56,6 +56,7 @@ local merged_label = "fkst-dev:merged"
 local fixing_label = "fkst-dev:fixing"
 local review_meta_label = "fkst-dev:review-meta"
 local impl_failed_label = "fkst-dev:impl-failed"
+local declined_label = "fkst-dev:declined"
 local blocked_label = "fkst-dev:blocked"
 local blocked_on_dependency_label = "fkst-dev:blocked-on-dependency"
 
@@ -73,6 +74,7 @@ local label_colors = {
   [fixing_label] = "D93F0B",
   [review_meta_label] = "BFD4F2",
   [impl_failed_label] = "B60205",
+  [declined_label] = "6E7781",
   [blocked_label] = "1B1F23",
   [blocked_on_dependency_label] = "E99695",
 }
@@ -798,6 +800,7 @@ C._merged_label = merged_label
 C._fixing_label = fixing_label
 C._review_meta_label = review_meta_label
 C._impl_failed_label = impl_failed_label
+C._declined_label = declined_label
 C._blocked_label = blocked_label
 C._blocked_on_dependency_label = blocked_on_dependency_label
 C._label_colors = label_colors

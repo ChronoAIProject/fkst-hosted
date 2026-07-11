@@ -282,9 +282,9 @@ function M.install(core, deps)
           findings_record_block = findings_record_block,
           reached_options = verdict_mode == "gate"
             and "- reached:approve <bounded framing>\n- reached:reject <bounded framing>"
-            or "- reached:approve <bounded framing>",
+            or "- reached:approve <bounded framing>\n- premise-refuted:<bounded framing backed by verified contrary evidence>",
           decision_calibration = verdict_mode == "converge"
-            and "Converge synthesis calibration: emit reached:approve when the proposal is sound, actionable, bounded, and code-verifiable and no evidenced issue-admission blocker survived. Do not emit converge or essence-stall merely for a seat's ideal-shortfall, broader-class preference, or future-PR grounding concern. Emit converge only for an evidenced essence-level blocker that would make development likely wrong and for which concrete resolving evidence can be named; emit essence-stall only when such a blocker exists and no concrete resolving evidence is nameable."
+            and "Converge synthesis calibration: emit reached:approve when the proposal is sound, actionable, bounded, and code-verifiable and no evidenced issue-admission blocker survived. Emit premise-refuted only when verified contrary evidence disproves the proposal's source premise. Do not emit converge or essence-stall merely for a seat's ideal-shortfall, broader-class preference, or future-PR grounding concern. Emit converge only for an evidenced essence-level blocker that would make development likely wrong and for which concrete resolving evidence can be named; emit essence-stall only when such a blocker exists and no concrete resolving evidence is nameable."
             or "",
           repair_instruction = repair_instruction,
           verified_move_candidates = synthesis.verified_move_candidates(p2_results),

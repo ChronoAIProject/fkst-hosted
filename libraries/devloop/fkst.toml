@@ -102,6 +102,7 @@ public = [
   "devloop.restart.issue.pr_partition_contract",
   "devloop.restart.issue.transitions.awaiting_pr",
   "devloop.restart.issue.transitions.blocked",
+  "devloop.restart.issue.transitions.declined",
   "devloop.restart.issue.transitions.dependency_wait",
   "devloop.restart.issue.transitions.impl_failed",
   "devloop.restart.issue.transitions.implementing",

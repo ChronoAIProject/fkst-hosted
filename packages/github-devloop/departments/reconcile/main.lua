@@ -145,7 +145,7 @@ local function pipeline_thinking(event)
 
     -- re-design/re-cluster require a trusted directive fact; current deterministic reconcile drops.
     local action = "drop"
-    local reason = "no-actionable-framing-after-" .. tostring(reconcile.round) .. "-rounds"
+    local reason = tostring(reconcile.terminal_cause) .. "-after-" .. tostring(reconcile.round) .. "-rounds"
     local comment_request = core.build_reconcile_comment_request(repo, issue_number, reconcile, action, reason, version)
     local label_request = core.build_reconcile_label_request(repo, issue_number, reconcile)
     emit_blocked_reconcile(reconcile.proposal_id, state, version, action, reason, comment_request, label_request)

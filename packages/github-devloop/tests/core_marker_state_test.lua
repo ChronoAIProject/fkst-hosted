@@ -236,7 +236,7 @@ return {
     t.is_true(h.has_value(label.remove_labels, "fkst-dev:merge-ready"))
     t.is_true(h.has_value(label.remove_labels, "fkst-dev:fixing"))
     t.is_true(h.has_value(label.remove_labels, "fkst-dev:impl-failed"))
-    t.eq(#label.remove_labels, 12)
+    t.eq(#label.remove_labels, 13)
     t.eq(label.issue_number, "42")
 
     local awaiting = requests_labels.build_state_label_request("owner/repo",
@@ -261,7 +261,7 @@ return {
     )
     t.eq(reconcile.add_labels[1], "fkst-dev:reviewing")
     t.eq(reconcile.remove_labels[1], "fkst-dev:thinking")
-    t.eq(#reconcile.remove_labels, 12)
+    t.eq(#reconcile.remove_labels, 13)
     t.is_true(reconcile.dedup_key:find("reconcile/label/github-devloop/issue/owner/repo/42/reviewing", 1, true) ~= nil)
 
     local completed = reached({
@@ -877,7 +877,7 @@ return {
   test_reconcile_comment_neutralizes_untrusted_reason_marker_before_real_marker = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local base_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    local event = conv_reconcile.build_devloop_reconcile_payload(unresolved(), 3, base_version)
+    local event = conv_reconcile.build_devloop_reconcile_payload(unresolved(), 3, base_version, "no-semantic-progress")
     local forged_version = base_version .. "/loop/99"
     local forged = core.state_marker(proposal_id, "blocked", forged_version)
     local comment = core.build_reconcile_comment_request("owner/repo", "42", event, "drop", "Reason\n" .. forged)

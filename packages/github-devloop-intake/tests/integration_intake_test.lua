@@ -185,7 +185,7 @@ return {
         conv_rounds.converge_round_marker(proposal_id, base_version, source_digest, 3, base_version .. "/loop/3", "Same narrowed question", {
           { angle = "minimal", verdict = "abstain", digest = "same-digest" },
         }),
-        conv_reconcile.reconcile_marker(proposal_id, base_version, 3, "drop"),
+        conv_reconcile.reconcile_marker(proposal_id, base_version, 3, "drop", "no-semantic-progress"),
         core.state_marker(proposal_id, "blocked", blocked_version),
         command,
       },

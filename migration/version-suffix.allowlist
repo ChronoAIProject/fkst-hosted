@@ -6,9 +6,3 @@
 libraries/contract/source_ref.lua:41 # why=source_ref ordering key parser is below transition_version and cannot require it without a cycle
 libraries/contract/source_ref.lua:42 # why=source_ref ordering key parser is below transition_version and cannot require it without a cycle
 libraries/contract/source_ref.lua:43 # why=source_ref ordering key render is below transition_version and cannot require it without a cycle
-libraries/devloop/convergence/reconcile.lua:22 # why=reconcile dedup-key namespace is not a state transition version
-libraries/devloop/convergence/reconcile.lua:50 # why=reconcile dedup-key validation mirrors the non-version reconcile namespace
-libraries/devloop/convergence/reconcile.lua:65 # why=review-reconcile dedup-key namespace is not a state transition version
-libraries/devloop/convergence/reconcile.lua:191 # why=review-reconcile dedup-key validation mirrors the non-version reconcile namespace
-libraries/devloop/convergence/reconcile.lua:251 # why=reconcile marker stores a non-version dedup key
-libraries/devloop/convergence/reconcile.lua:267 # why=review-reconcile marker stores a non-version dedup key

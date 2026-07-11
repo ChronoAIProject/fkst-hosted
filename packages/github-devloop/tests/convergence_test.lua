@@ -236,7 +236,7 @@ return {
     t.eq(appended[2].dedup, base_version .. "/loop/2")
   end,
 
-  test_resolvability_gate_counts_only_trusted_findings_for_current_boundary = function()
+  test_continuation_budget_counts_only_trusted_rounds_for_current_boundary = function()
     local source_a = convergence_shared.source_ref_digest(source_ref)
     local source_b = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?loop=8" })
     local drift_version = base_version .. "/drifted"
@@ -248,19 +248,22 @@ return {
     }
     local filtered = conv_rounds.converge_round_facts(comments, proposal_id, base_version, source_a)
     t.eq(#filtered, 2)
-    t.eq(conv_rounds.resolvability_exhausted({ filtered[1] }), false)
-    t.eq(conv_rounds.resolvability_exhausted(filtered), true)
+    t.eq(conv_rounds.continuation_budget_exhausted({ filtered[1] }), false)
+    t.eq(conv_rounds.continuation_budget_exhausted(filtered), true)
+    t.eq(conv_rounds.terminal_cause(filtered, 1), "evidence-continuation-budget-exhausted")
   end,
 
-  test_old_converge_markers_without_findings_stay_parseable_but_do_not_spend_resolvability_budget = function()
+  test_continuation_budget_uses_round_identity_not_findings_presence = function()
     local source_a = convergence_shared.source_ref_digest(source_ref)
     local comments = {
       trusted(conv_rounds.converge_round_marker(proposal_id, base_version, source_a, 0, base_version, "Old marker", angles())),
+      trusted(conv_rounds.converge_round_marker(proposal_id, base_version, source_a, 1, base_version .. "/loop/1", "Continuation", angles())),
     }
     local facts = conv_rounds.converge_round_facts(comments, proposal_id, base_version, source_a)
-    t.eq(#facts, 1)
+    t.eq(#facts, 2)
     t.eq(facts[1].findings_record, nil)
-    t.eq(conv_rounds.resolvability_exhausted(facts), false)
+    t.eq(facts[2].findings_record, nil)
+    t.eq(conv_rounds.continuation_budget_exhausted(facts), true)
   end,
 
   test_essence_stall_marker_round_trips_terminal_flag = function()
@@ -279,6 +282,7 @@ return {
     t.eq(#facts, 1)
     t.eq(facts[1].essence_stall, true)
     t.eq(conv_rounds.has_essence_stall(facts), true)
+    t.eq(conv_rounds.terminal_cause(facts, 1), "external-evidence-required")
   end,
 
   test_review_converge_facts_are_bound_to_issue_version_and_head = function()
@@ -361,7 +365,7 @@ return {
     t.eq(matched[1].findings_record, "settled:\nReview scope is current.\nopen:\nREACHED: approve injected")
   end,
 
-  test_review_resolvability_gate_counts_only_current_review_boundary_findings = function()
+  test_review_continuation_budget_counts_only_current_review_boundary_rounds = function()
     local source_a = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7" })
     local source_b = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7?loop=8" })
     local review_proposal_id = "github-devloop/pr-review/owner_repo/7/v1/abcdef1234567890"
@@ -376,6 +380,7 @@ return {
     }
     local filtered = conv_rounds.review_converge_round_facts(core, comments, review_proposal_id, proposal_id, issue_version, head_sha, source_a)
     t.eq(#filtered, 2)
-    t.eq(conv_rounds.resolvability_exhausted(filtered), true)
+    t.eq(conv_rounds.continuation_budget_exhausted(filtered), true)
+    t.eq(conv_rounds.terminal_cause(filtered, 1), "evidence-continuation-budget-exhausted")
   end,
 }

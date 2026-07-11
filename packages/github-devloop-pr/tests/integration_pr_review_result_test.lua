@@ -71,7 +71,7 @@ return {
       current_head_sha = "def456",
     }, entity_lib.pr_source_ref("owner/repo", 7))
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:merge-ready")
-    t.eq(#label_raise.payload.remove_labels, 12)
+    t.eq(#label_raise.payload.remove_labels, 13)
     t.is_true(comment_raise.payload.body:find("github-devloop PR review decision: approve", 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find(verdict_summary_label .. "minimal=approve structural=approve delete=approve", 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find(ai_sentinel, 1, true) ~= nil)
@@ -111,7 +111,7 @@ return {
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
     local fixing_raise = find_causal_raise(result, "devloop_fixing")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:fixing")
-    t.eq(#label_raise.payload.remove_labels, 12)
+    t.eq(#label_raise.payload.remove_labels, 13)
     t.eq(comment_raise.payload.handoff.kind, "github-devloop.fixing")
     t.eq(find_raise(result.raises, "devloop_merge_ready"), nil)
     t.is_true(comment_raise.payload.body:find("decision=\"reject\"", 1, true) ~= nil)
