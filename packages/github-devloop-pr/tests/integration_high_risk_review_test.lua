@@ -173,7 +173,7 @@ return {
 
   test_high_risk_review_loop_proposal_inherits_high_risk_angle = function()
     local unresolved = review_unresolved({
-      round = 1,
+      round = 0,
       narrowed_question = "Does the workflow change have adequate review evidence?",
       angle_digests = {
         { angle = "minimal", verdict = "approve", digest = "minimal ok" },

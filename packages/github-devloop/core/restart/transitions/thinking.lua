@@ -29,11 +29,11 @@ return function(M, h)
       redrive_opens_generation = true,
     },
     terminal = false,
-    to_states = { "ready", "blocked" },
+    to_states = { "ready", "declined", "blocked" },
     driving_queue = "consensus.proposal",
     observe_surfaces = { issue = true, liveness_scan = true },
     timeout_surfaces = { issue = true, issue_liveness_scan = true, liveness_scan = true },
-    output_obligation = obligation({ "consensus.consensus_reached", "consensus.consensus_converge" }, { "ready", "blocked", "thinking" }),
+    output_obligation = obligation({ "consensus.consensus_reached", "consensus.consensus_converge" }, { "ready", "declined", "blocked", "thinking" }),
     budget = budget(150, "A live consensus receiver defers when fkst.codex_runs() positively reports a matching run with an unexpired run-derived deadline, or when codex run liveness is transiently indeterminate; a permanently indeterminate signal is bounded by this row budget."),
     liveness_contract = liveness({
       mode = "live-defer",
@@ -65,6 +65,14 @@ return function(M, h)
           output_variant = "consensus-reached",
           kind = "autonomous",
           postcondition_family = "issue-consensus",
+          monotonic = true,
+        },
+        {
+          state = "declined",
+          output_variant = "premise-refuted",
+          kind = "autonomous",
+          postcondition_family = "issue-consensus",
+          terminal = true,
           monotonic = true,
         },
         {

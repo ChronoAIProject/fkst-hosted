@@ -55,7 +55,6 @@ local function converge_record_map(comments, kind, matches)
           angle_digests = angle_digests,
           findings_record = findings_record,
           essence_stall = essence_stall,
-          resolvable_findings = findings_record ~= nil,
         }
       end
     end
@@ -83,7 +82,6 @@ function C.append_converge_round_fact(facts, round, narrowed_question, angle_dig
     dedup = dedup_key,
     findings_record = normalized_findings,
     essence_stall = essence_stall == true,
-    resolvable_findings = normalized_findings ~= nil,
   })
   return copied
 end
@@ -97,26 +95,31 @@ function C.has_essence_stall(facts)
   return false
 end
 
-local function has_resolvable_findings(fact)
-  return type(fact) == "table" and normalize_findings_record(fact.findings_record) ~= nil
+function C.continuation_budget_exhausted(facts)
+  return C.max_converge_round(facts) >= 1
 end
 
-local function resolvable_count(facts)
-  local count = 0
-  for _, fact in ipairs(facts or {}) do
-    if has_resolvable_findings(fact) then
-      count = count + 1
-    end
+local terminal_causes = {
+  ["external-evidence-required"] = true,
+  ["no-semantic-progress"] = true,
+  ["evidence-continuation-budget-exhausted"] = true,
+}
+
+function C.is_terminal_cause(value)
+  return terminal_causes[tostring(value)] == true
+end
+
+function C.terminal_cause(facts, current_round)
+  if C.has_essence_stall(facts) then
+    return "external-evidence-required"
   end
-  return count
-end
-
-function C.should_continue_resolvable_boundary(facts_with_current)
-  return resolvable_count(facts_with_current) <= 1
-end
-
-function C.resolvability_exhausted(facts_with_current)
-  return resolvable_count(facts_with_current) > 1
+  if C.is_true_stall(facts, current_round) then
+    return "no-semantic-progress"
+  end
+  if C.continuation_budget_exhausted(facts) then
+    return "evidence-continuation-budget-exhausted"
+  end
+  return nil
 end
 
 function C.converge_base_version(consensus_dedup)

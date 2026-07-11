@@ -592,6 +592,15 @@ function M.build_reached_payload(proposal, decision, angle_results, framing, pro
   if clean_decision ~= "approve" and clean_decision ~= "reject" then
     error("consensus: decision-invalid: invalid decision")
   end
+  local decision_reason = type(decision_meta) == "table" and decision_meta.decision_reason or nil
+  local mode = M.verdict_mode(proposal)
+  if clean_decision == "reject" and mode == "converge" then
+    if decision_reason ~= "premise-refuted" then
+      error("consensus: decision-reason-invalid: converge reject must be premise-refuted")
+    end
+  elseif decision_reason ~= nil then
+    error("consensus: decision-reason-invalid: unexpected decision reason")
+  end
   if not has_source_ref(proposal.source_ref) then
     error("consensus: source-ref-missing: missing source_ref")
   end
@@ -663,6 +672,9 @@ function M.build_reached_payload(proposal, decision, angle_results, framing, pro
   }
   if proposal.effect_version ~= nil then
     payload.effect_version = tostring(proposal.effect_version)
+  end
+  if decision_reason ~= nil then
+    payload.decision_reason = decision_reason
   end
   if clean_gaps ~= nil then
     payload.blocking_gaps = clean_gaps

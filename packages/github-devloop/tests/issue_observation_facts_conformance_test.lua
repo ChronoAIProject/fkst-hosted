@@ -7,6 +7,7 @@ local t = h.t
 local expected_states = {
   ["awaiting-pr"] = { from_state = "awaiting-pr", terminal = false, driving_queue = "devloop_observe_redrive", budget_minutes = 259200 },
   blocked = { from_state = "blocked", terminal = false, driving_queue = "github-devloop-decompose.devloop_decompose", budget_minutes = 1440 },
+  declined = { from_state = "declined", terminal = true, driving_queue = "none", budget_minutes = nil },
   dependency_wait = { from_state = "dependency_wait", terminal = false, driving_queue = "devloop_observe_redrive", budget_minutes = 525600 },
   ["impl-failed"] = { from_state = "impl-failed", terminal = false, driving_queue = "devloop_ready", budget_minutes = 1440 },
   implementing = { from_state = "implementing", terminal = false, driving_queue = "devloop_ready", budget_minutes = 120 },
@@ -79,14 +80,14 @@ return {
       t.eq(row.budget and row.budget.minutes or nil, expected.budget_minutes)
       t.eq(facts.budget_minutes(state_name), expected.budget_minutes)
     end
-    t.eq(expected_seen, 8)
+    t.eq(expected_seen, 9)
 
     local published_seen = 0
     for state_name, _ in pairs(facts.states) do
       published_seen = published_seen + 1
       t.is_true(expected_states[state_name] ~= nil, "unexpected published state " .. tostring(state_name))
     end
-    t.eq(published_seen, 8)
+    t.eq(published_seen, 9)
 
     for _, state_name in ipairs({ "reviewing", "fixing", "merge-ready", "merging", "unknown-state" }) do
       t.is_nil(facts.transition_row(state_name), state_name)

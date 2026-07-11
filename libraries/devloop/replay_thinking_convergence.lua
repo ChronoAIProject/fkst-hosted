@@ -4,7 +4,6 @@ local conv_reconcile = require("devloop.convergence.reconcile")
 local C = {}
 local transition_version = require("contract.transition_version")
 local devloop_logging = require("devloop.logging")
-local config = require("devloop.config")
 local v_validate_proposal = require("devloop.validators.validate_proposal")
 
 local function latest_converge_round(caps, comments, proposal_id, state_version, source_ref)
@@ -66,10 +65,7 @@ function C.has_converge_replay(caps, current, proposal_id, state, source_ref)
   local facts = conv_rounds.converge_round_facts_for_proposal(current.comments, proposal_id)
   local round = conv_rounds.max_converge_round(facts)
   return caps.latest_complete_converge_round(current.comments, proposal_id, nil, source_ref) ~= nil
-    or (#facts > 0 and round >= config.max_converge_rounds())
-    or conv_rounds.is_true_stall(facts, round)
-    or conv_rounds.resolvability_exhausted(facts)
-    or conv_rounds.has_essence_stall(facts)
+    or conv_rounds.terminal_cause(facts, round) ~= nil
 end
 
 local function visible_true_stall(M, issue, state, facts)
@@ -82,17 +78,14 @@ local function visible_true_stall(M, issue, state, facts)
     local base_version = transition_version.strip_suffixes(state.version)
     local converge_facts = conv_rounds.converge_round_facts_for_proposal(current.comments, proposal_id)
     local round = conv_rounds.max_converge_round(converge_facts)
-    if #converge_facts == 0
-      or (round < config.max_converge_rounds()
-      and not conv_rounds.is_true_stall(converge_facts, round)
-      and not conv_rounds.resolvability_exhausted(converge_facts)
-      and not conv_rounds.has_essence_stall(converge_facts)) then
+    local terminal_cause = conv_rounds.terminal_cause(converge_facts, round)
+    if #converge_facts == 0 or terminal_cause == nil then
       return nil
     end
     return conv_reconcile.build_devloop_reconcile_payload({
       proposal_id = proposal_id,
       source_ref = base_ids.normalize_source_ref(source_ref),
-    }, round, base_version)
+    }, round, base_version, terminal_cause)
 end
 
 function C.replay_thinking_true_stall_blocked(M, dept, issue, state, facts, log_skip, raise_effects)
@@ -111,7 +104,7 @@ function C.replay_thinking_true_stall_blocked(M, dept, issue, state, facts, log_
       return log_skip(dept, proposal_id, state, "thinking", "blocked", M.cas_outcome(state, transition, version), "current marker cannot be reconciled from thinking")
     end
     local action = "drop"
-    local reason = "no-actionable-framing-after-" .. tostring(reconcile.round) .. "-rounds"
+    local reason = tostring(reconcile.terminal_cause) .. "-after-" .. tostring(reconcile.round) .. "-rounds"
     local comment_request = M.build_reconcile_comment_request(issue.repo, issue.number, reconcile, action, reason, version)
     local label_request = M.build_reconcile_label_request(issue.repo, issue.number, reconcile)
     local add_labels, remove_labels = M.state_label_changes("blocked")

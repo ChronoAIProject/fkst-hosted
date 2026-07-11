@@ -142,7 +142,7 @@ local function mock_issue_reads()
   })
 end
 
-local function second_resolvable_unresolved()
+local function evidence_continuation_unresolved()
   return {
     schema = "consensus.consensus_converge.v1",
     proposal_id = "github-devloop/issue/owner/repo/42",
@@ -160,7 +160,7 @@ end
 local function initial_event()
   return {
     queue = "consensus.consensus_converge",
-    payload = second_resolvable_unresolved(),
+    payload = evidence_continuation_unresolved(),
     source_ref = {
       kind = "external",
       reference = "owner/repo#issue/42",
@@ -208,7 +208,7 @@ return {
       "github-proxy.github_issue_comment_request",
       function(raised)
         return graph.payload_contains(raised, "github-devloop reconcile action: drop")
-          and graph.payload_contains(raised, "no-actionable-framing-after-")
+          and graph.payload_contains(raised, "evidence-continuation-budget-exhausted-after-")
           and graph.payload_contains(raised, 'state="blocked"')
       end
     )

@@ -88,9 +88,7 @@ return {
         body = core.state_marker(original.proposal_id, "thinking", original.dedup_key),
         created_at = "2026-06-03T00:00:00Z",
       },
-      converge_round_comment(event, original.proposal_id, base_version, 0, nil, "abstain"),
-      converge_round_comment(event, original.proposal_id, base_version, 1, nil, "comment"),
-      converge_round_comment(event, original.proposal_id, base_version, 2, "Latest visible question", "abstain"),
+      converge_round_comment(event, original.proposal_id, base_version, 0, "Latest visible question", "abstain"),
     })
 
     local result = run_observe(event, opts("thinking-replay-latest-converge-round", {
@@ -99,8 +97,8 @@ return {
     t.eq(result.exit_code, 0)
     local proposal = find_raise(result.raises, "consensus.proposal")
     t.is_true(proposal ~= nil)
-    t.eq(proposal.payload.dedup_key, original.dedup_key .. "/loop/3")
-    t.eq(proposal.payload.round, 3)
+    t.eq(proposal.payload.dedup_key, original.dedup_key .. "/loop/1")
+    t.eq(proposal.payload.round, 1)
     t.eq(proposal.payload.convergence_question, "Latest visible question")
     t.eq(proposal.payload.findings_record, nil)
     t.eq(proposal.payload.prior_round_digests, nil)
@@ -109,9 +107,9 @@ return {
       schema = "consensus.consensus_converge.v1",
       proposal_id = proposal.payload.proposal_id,
       round = proposal.payload.round,
-      narrowed_question = "Round 3 still needs a handoff",
+      narrowed_question = "Evidence continuation still needs a handoff",
       angle_digests = {
-        { angle = "minimal", verdict = "approve", digest = "round-digest-3" },
+        { angle = "minimal", verdict = "approve", digest = "round-digest-1" },
       },
       dedup_key = "consensus:" .. proposal.payload.dedup_key,
       source_ref = proposal.payload.source_ref,
@@ -121,34 +119,28 @@ return {
         body = core.state_marker(original.proposal_id, "thinking", original.dedup_key),
         created_at = "2026-06-03T00:00:00Z",
       },
-      converge_round_comment(event, original.proposal_id, base_version, 0, nil, "abstain"),
-      converge_round_comment(event, original.proposal_id, base_version, 1, nil, "comment"),
-      converge_round_comment(event, original.proposal_id, base_version, 2, "Latest visible question", "abstain"),
+      converge_round_comment(event, original.proposal_id, base_version, 0, "Latest visible question", "abstain"),
     })
     local loop = run_loop(loop_event, opts("thinking-replay-loop-regenerates-lost-handoff"))
     t.eq(loop.exit_code, 0)
-    local next_proposal = find_raise(loop.raises, "consensus.proposal")
-    t.is_true(next_proposal ~= nil)
-    t.eq(next_proposal.payload.dedup_key, original.dedup_key .. "/loop/4")
-    t.eq(next_proposal.payload.round, 4)
+    t.eq(find_raise(loop.raises, "consensus.proposal"), nil)
     local marker = find_raise(loop.raises, "github-proxy.github_issue_comment_request")
     t.is_true(marker ~= nil)
-    t.is_true(marker.payload.body:find('round="3"', 1, true) ~= nil)
+    t.is_true(marker.payload.body:find('round="1"', 1, true) ~= nil)
+    t.eq(marker.payload.handoff.terminal_cause, "evidence-continuation-budget-exhausted")
   end,
 
   test_thinking_redrive_defers_when_latest_visible_converge_round_run_is_live = function()
     local event = issue()
     local original = payloads_builders.build_proposal(event)
     local base_version = "consensus:" .. original.dedup_key
-    local version = original.dedup_key .. "/loop/3"
+    local version = original.dedup_key .. "/loop/1"
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
       {
         body = core.state_marker(original.proposal_id, "thinking", original.dedup_key),
         created_at = "2026-06-03T00:00:00Z",
       },
       converge_round_comment(event, original.proposal_id, base_version, 0),
-      converge_round_comment(event, original.proposal_id, base_version, 1),
-      converge_round_comment(event, original.proposal_id, base_version, 2),
     })
 
     local run_opts = opts("thinking-latest-converge-live-consensus-redrive", {

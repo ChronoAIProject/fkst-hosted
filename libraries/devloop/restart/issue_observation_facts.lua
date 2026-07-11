@@ -1,7 +1,7 @@
 local F = {
   schema = "restart-owner-observation-facts.v1",
   owner = "github-devloop",
-  source_rows_fingerprint = "49cb7d13",
+  source_rows_fingerprint = "71f027dc",
   states = {
     ["awaiting-pr"] = {
       from_state = "awaiting-pr",
@@ -20,6 +20,12 @@ local F = {
       terminal = false,
       driving_queue = "devloop_observe_redrive",
       budget_minutes = 525600,
+    },
+    declined = {
+      from_state = "declined",
+      terminal = true,
+      driving_queue = "none",
+      budget_minutes = nil,
     },
     ["impl-failed"] = {
       from_state = "impl-failed",

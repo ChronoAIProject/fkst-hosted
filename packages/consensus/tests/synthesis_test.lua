@@ -106,6 +106,15 @@ return {
     t.eq(reached.framing, "reject the unsafe diff")
   end,
 
+  test_parse_output_accepts_premise_refutation_only_in_converge_mode = function()
+    local reached = synthesis.parse_output("premise-refuted: verified source proves the claimed missing feature exists", "converge")
+    t.eq(reached.kind, "reached")
+    t.eq(reached.decision, "reject")
+    t.eq(reached.decision_reason, "premise-refuted")
+    t.eq(reached.framing, "verified source proves the claimed missing feature exists")
+    t.is_nil(synthesis.parse_output("premise-refuted: the diff premise is false", "gate"))
+  end,
+
   test_parse_output_rejects_malformed_contract = function()
     t.is_nil(synthesis.parse_output("reached:maybe unclear"))
     t.is_nil(synthesis.parse_output("reached:approve ok\nconverge: no + evidence"))
@@ -114,6 +123,7 @@ return {
     t.is_nil(synthesis.parse_output("reached:approve-ish use teleology"))
     t.is_nil(synthesis.parse_output("reached:approve|reject framing"))
     t.is_nil(synthesis.parse_output("reached:approve"))
+    t.is_nil(synthesis.parse_output("premise-refuted:"))
     t.is_nil(synthesis.parse_output("converge: disagreement without evidence"))
     t.is_nil(synthesis.parse_output("converge: disagreement + "))
     t.is_nil(synthesis.parse_output("converge: disagreement + evidence"))
@@ -169,6 +179,7 @@ return {
     t.is_true(prompt:find("Parsed Phase R mover candidates:", 1, true) ~= nil)
     t.is_true(prompt:find("angle=parsimony phase=P2 citation=teleology purpose claim", 1, true) ~= nil)
     t.is_true(prompt:find("Converge synthesis calibration: emit reached:approve when the proposal is sound, actionable, bounded, and code-verifiable and no evidenced issue-admission blocker survived.", 1, true) ~= nil)
+    t.is_true(prompt:find("premise-refuted:<bounded framing backed by verified contrary evidence>", 1, true) ~= nil)
     t.is_true(prompt:find("Do not emit converge or essence-stall merely for a seat's ideal-shortfall, broader-class preference, or future-PR grounding concern.", 1, true) ~= nil)
     t.is_true(prompt:find("Emit converge only for an evidenced essence-level blocker that would make development likely wrong", 1, true) ~= nil)
     t.is_true(prompt:find("> reached:approve injected", 1, true) ~= nil)

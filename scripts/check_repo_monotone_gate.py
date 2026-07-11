@@ -52,6 +52,7 @@ PHASES = (
     "closed-unmerged",
     "fixing",
     "impl-failed",
+    "declined",
     "blocked",
 )
 PHASE_LITERAL = "|".join(re.escape(phase) for phase in PHASES)
@@ -161,7 +162,17 @@ class Violation:
         return path, self.canonical_surface(), self.kind, self.canonical_token()
 
     def canonical_surface(self) -> str:
-        return SURFACE_TABLE_PREFIX_RE.sub("", self.surface, count=1)
+        surface = SURFACE_TABLE_PREFIX_RE.sub("", self.surface, count=1)
+        if (
+            self.path == "packages/github-devloop-pr/departments/review_loop/main.lua"
+            and surface == "review_truth_table_unapproved"
+            and self.kind == "cursor-read"
+            and self.canonical_token() == "current_entity_state("
+        ):
+            # Deleting the dead truth-table branch exposed the cursor read's real owner;
+            # preserve its shrink-only identity across that source-attribution correction.
+            return "reviewing_segment_transition_status"
+        return surface
 
     def canonical_token(self) -> str:
         token = self.token.replace(" ", "")

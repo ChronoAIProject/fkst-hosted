@@ -50,22 +50,6 @@ local function reviewing_transition_status(state, reviewing_version)
   return "stale"
 end
 
-local function existing_implementation_worktree(repo, issue_number, impl_version)
-  if issue_number == nil or impl_version == nil then
-    return nil
-  end
-  local runtime = exec_sync({ cmd = devloop_commands.read_runtime_root_cmd(), timeout = 30 })
-  if type(runtime) ~= "table" or runtime.exit_code ~= 0 or tostring(runtime.stdout or "") == "" then
-    return nil
-  end
-  local worktree = devloop_base.implement_worktree_path(runtime.stdout, repo, issue_number, impl_version)
-  local directory = exec_sync({ cmd = devloop_commands.path_is_directory_cmd(worktree), timeout = 30 })
-  if type(directory) == "table" and directory.exit_code == 0 then
-    return worktree
-  end
-  return nil
-end
-
 return saga.department(spec, { done = function() return false end, act = function(event)
   local reviewing = event.payload or {}
   if not v_reviewing.is_supported_reviewing(core, reviewing) then
@@ -182,7 +166,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     local proposal = payloads_builders.build_board_pr_review_proposal(core, repo, issue_number, reviewing.pr_number, reviewing.version, current_pr.head_sha, current_issue, pr_source_ref, event.ts, current_pr.comments, content_fetch, high_risk)
     -- Fall back to the read-only project checkout (".") if the ephemeral impl worktree is gone (restart);
     -- see review_loop -- the review codex reads the PR diff from context, so cwd just needs to be a git repo.
-    local worktree = existing_implementation_worktree(repo, issue_number, origin and origin.impl_version or reviewing.version)
+    local worktree = devloop_commands.existing_implementation_worktree(repo, issue_number, origin and origin.impl_version or reviewing.version)
     proposal.worktree = worktree or "."
     if not v_validate_proposal.validate_proposal(proposal) then
       log.warn("github-devloop dept=review_pr proposal_id=" .. tostring(reviewing.proposal_id) .. " tag=SKIP reason=cannot-build-valid-review-proposal")

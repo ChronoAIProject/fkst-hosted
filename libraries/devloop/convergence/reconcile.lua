@@ -8,6 +8,7 @@ local C = {}
 local replay_fields = require("devloop.replay_fields")
 local forge_validators = require("devloop.forge_validators")
 local transition_version = require("contract.transition_version")
+local conv_rounds = require("devloop.convergence.rounds")
 
 local source_refs = shared.source_refs
 local valid_round = shared.valid_round
@@ -15,13 +16,17 @@ local max_attr_len = shared.max_attr_len
 local safe_attr = shared.safe_attr
 local attr = shared.attr
 
-function C.build_devloop_reconcile_payload(unresolved, round, base_version)
+function C.build_devloop_reconcile_payload(unresolved, round, base_version, terminal_cause)
+  if not conv_rounds.is_terminal_cause(terminal_cause) then
+    error("github-devloop: invalid convergence terminal cause")
+  end
   return {
     schema = "github-devloop.reconcile.v1",
     proposal_id = unresolved.proposal_id,
-    dedup_key = "reconcile:" .. tostring(base_version) .. "/loop/" .. tostring(round),
+    dedup_key = "reconcile:" .. transition_version.loop_at(base_version, round),
     round = round,
     base_version = base_version,
+    terminal_cause = terminal_cause,
     source_ref = {
       kind = unresolved.source_ref.kind,
       ref = unresolved.source_ref.ref,
@@ -47,22 +52,27 @@ function C.is_supported_reconcile(payload)
     and strings.is_path_safe_key(payload.proposal_id, devloop_base._max_key_len)
     and strings.is_bounded_string(payload.dedup_key, devloop_base._max_dedup_len)
     and strings.is_bounded_string(payload.base_version, devloop_base._max_dedup_len)
-    and tostring(payload.dedup_key) == "reconcile:" .. tostring(payload.base_version) .. "/loop/" .. tostring(payload.round)
+    and conv_rounds.is_terminal_cause(payload.terminal_cause)
+    and tostring(payload.dedup_key) == "reconcile:" .. transition_version.loop_at(payload.base_version, payload.round)
     and inner_dedup ~= nil
     and strings.is_path_safe_key(inner_dedup, devloop_base._max_dedup_len)
     and source_refs.has_bounded_source_ref(payload.source_ref, devloop_base._max_key_len)
     and valid_round(payload.round) ~= nil
 end
 
-function C.build_devloop_review_reconcile_payload(unresolved, round, issue_proposal_id, issue_version, head_sha)
+function C.build_devloop_review_reconcile_payload(unresolved, round, issue_proposal_id, issue_version, head_sha, terminal_cause)
+  if not conv_rounds.is_terminal_cause(terminal_cause) then
+    error("github-devloop: invalid review convergence terminal cause")
+  end
   return {
     schema = "github-devloop.review-reconcile.v1",
     proposal_id = issue_proposal_id,
     review_proposal_id = unresolved.proposal_id,
     issue_version = issue_version,
     head_sha = head_sha,
+    terminal_cause = terminal_cause,
     round = round,
-    dedup_key = "review-reconcile:" .. tostring(issue_version) .. "/review-loop/" .. tostring(round),
+    dedup_key = "review-reconcile:" .. transition_version.review_loop_at(issue_version, round),
     source_ref = {
       kind = unresolved.source_ref.kind,
       ref = unresolved.source_ref.ref,
@@ -186,9 +196,10 @@ function C.is_supported_review_reconcile(payload)
     and strings.is_path_safe_key(payload.review_proposal_id, devloop_base._max_key_len)
     and strings.is_bounded_string(payload.issue_version, devloop_base._max_dedup_len)
     and forge_validators.is_git_sha(payload.head_sha)
+    and conv_rounds.is_terminal_cause(payload.terminal_cause)
     and valid_round(payload.round) ~= nil
     and strings.is_bounded_string(payload.dedup_key, devloop_base._max_dedup_len)
-    and tostring(payload.dedup_key) == "review-reconcile:" .. tostring(payload.issue_version) .. "/review-loop/" .. tostring(payload.round)
+    and tostring(payload.dedup_key) == "review-reconcile:" .. transition_version.review_loop_at(payload.issue_version, payload.round)
     and source_refs.has_bounded_source_ref(payload.source_ref, devloop_base._max_key_len)
 end
 
@@ -236,7 +247,7 @@ function C.reconcile_state_version(base_version, round)
   return transition_version.loop_at(base_version, round)
 end
 
-function C.reconcile_marker(proposal_id, base_version, round, action)
+function C.reconcile_marker(proposal_id, base_version, round, action, terminal_cause)
   local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid reconcile round")
@@ -244,15 +255,19 @@ function C.reconcile_marker(proposal_id, base_version, round, action)
   if action ~= "drop" and action ~= "re-design" and action ~= "re-cluster" then
     error("github-devloop: invalid reconcile action")
   end
+  if not conv_rounds.is_terminal_cause(terminal_cause) then
+    error("github-devloop: invalid convergence terminal cause")
+  end
   return '<!-- fkst:github-devloop:reconcile:v1 proposal="' .. safe_attr(proposal_id, devloop_base._max_key_len)
     .. '" version="' .. safe_attr(C.reconcile_state_version(base_version, n), devloop_base._max_dedup_len)
     .. '" round="' .. tostring(n)
     .. '" action="' .. safe_attr(action, max_attr_len)
-    .. '" dedup="' .. safe_attr("reconcile:" .. tostring(base_version) .. "/loop/" .. tostring(n), devloop_base._max_dedup_len)
+    .. '" terminal_cause="' .. safe_attr(terminal_cause, max_attr_len)
+    .. '" dedup="' .. safe_attr("reconcile:" .. transition_version.loop_at(base_version, n), devloop_base._max_dedup_len)
     .. '" -->'
 end
 
-function C.review_reconcile_marker(issue_proposal_id, issue_version, round, action)
+function C.review_reconcile_marker(issue_proposal_id, issue_version, round, action, terminal_cause)
   local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid review reconcile round")
@@ -260,11 +275,15 @@ function C.review_reconcile_marker(issue_proposal_id, issue_version, round, acti
   if action ~= "drop" and action ~= "re-design" and action ~= "re-cluster" then
     error("github-devloop: invalid review reconcile action")
   end
+  if not conv_rounds.is_terminal_cause(terminal_cause) then
+    error("github-devloop: invalid review convergence terminal cause")
+  end
   return '<!-- fkst:github-devloop:review-reconcile:v1 proposal="' .. safe_attr(issue_proposal_id, devloop_base._max_key_len)
     .. '" version="' .. safe_attr(C.review_reconcile_state_version(issue_version, n), devloop_base._max_dedup_len)
     .. '" round="' .. tostring(n)
     .. '" action="' .. safe_attr(action, max_attr_len)
-    .. '" dedup="' .. safe_attr("review-reconcile:" .. tostring(issue_version) .. "/review-loop/" .. tostring(n), devloop_base._max_dedup_len)
+    .. '" terminal_cause="' .. safe_attr(terminal_cause, max_attr_len)
+    .. '" dedup="' .. safe_attr("review-reconcile:" .. transition_version.review_loop_at(issue_version, n), devloop_base._max_dedup_len)
     .. '" -->'
 end
 

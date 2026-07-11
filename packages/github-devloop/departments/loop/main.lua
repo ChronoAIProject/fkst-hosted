@@ -5,7 +5,6 @@ local parsers_issue = require("devloop.parsers.issue")
 local convergence_shared = require("devloop.convergence.shared")
 local core, saga = require("core"), require("workflow.saga")
 local context_bundle = require("devloop.context_bundle")
-local config = require("devloop.config")
 
 
 
@@ -91,12 +90,8 @@ return saga.department(spec, { done = function() return false end, act = functio
     local has_lineage = #lineage > 0
     local latest_round = conv_rounds.max_converge_round(lineage)
     local latest_fact = latest_lineage_fact(lineage)
-    local terminal_lineage = has_lineage
-      and (latest_round >= config.max_converge_rounds()
-        or conv_rounds.is_true_stall(lineage, latest_round)
-        or conv_rounds.has_essence_stall(lineage)
-        or conv_rounds.resolvability_exhausted(lineage))
-    if terminal_lineage then
+    local lineage_terminal_cause = has_lineage and conv_rounds.terminal_cause(lineage, latest_round) or nil
+    if lineage_terminal_cause ~= nil then
       local terminal_base_version = latest_fact and latest_fact.version or base_version
       local terminal_unresolved = {
         proposal_id = unresolved.proposal_id,
@@ -110,6 +105,7 @@ return saga.department(spec, { done = function() return false end, act = functio
         proposal_id = unresolved.proposal_id,
         round = latest_round,
         base_version = terminal_base_version,
+        terminal_cause = lineage_terminal_cause,
         source_ref = base_ids.normalize_source_ref(unresolved.source_ref),
       })
       devloop_logging.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", devloop_state.cas_outcome(state, transition, unresolved.dedup_key), "convergence lineage terminal at round " .. tostring(latest_round))
@@ -143,25 +139,17 @@ return saga.department(spec, { done = function() return false end, act = functio
       unresolved.essence_stall == true
     )
     local lineage_with_current = conv_rounds.append_converge_round_fact(lineage, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key, unresolved.findings_record, unresolved.essence_stall == true)
-    local cap_exhausted = conv_rounds.max_converge_round(lineage_with_current) >= config.max_converge_rounds()
-    local resolvability_exhausted = conv_rounds.resolvability_exhausted(lineage_with_current)
-    local essence_stall = conv_rounds.has_essence_stall(lineage_with_current)
-    local true_stall = conv_rounds.is_true_stall(lineage_with_current, round)
-    if essence_stall or resolvability_exhausted or cap_exhausted or true_stall then
+    local terminal_cause = conv_rounds.terminal_cause(lineage_with_current, round)
+    if terminal_cause ~= nil then
       local comment_request = build_comment_request(unresolved, round, marker_body, {
         kind = "github-devloop.reconcile",
         proposal_id = unresolved.proposal_id,
         round = round,
         base_version = base_version,
+        terminal_cause = terminal_cause,
         source_ref = base_ids.normalize_source_ref(unresolved.source_ref),
       })
-      local reason = essence_stall
-        and ("essence stall at round " .. tostring(round))
-        or resolvability_exhausted
-          and ("resolvability budget reached at round " .. tostring(round))
-          or cap_exhausted
-            and ("convergence round cap reached at round " .. tostring(round))
-            or ("true convergence stall at round " .. tostring(round))
+      local reason = "convergence terminal cause=" .. terminal_cause .. " at round " .. tostring(round)
       devloop_logging.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", devloop_state.cas_outcome(state, transition, unresolved.dedup_key), reason)
       devloop_logging.log_apply("loop", unresolved.proposal_id, nil, nil, { add = {}, remove = {} }, {
         "github-proxy.github_issue_comment_request",

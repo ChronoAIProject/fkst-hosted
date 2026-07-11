@@ -139,7 +139,7 @@ return {
       convergence_shared.source_ref_digest(negative_entity.source_ref)
     )
     local negative_round = conv_rounds.max_converge_round(negative_facts)
-    t.eq(negative_round, 3)
+    t.eq(negative_round, 0)
     t.eq(conv_rounds.is_true_stall(negative_facts, negative_round), false)
   end,
 

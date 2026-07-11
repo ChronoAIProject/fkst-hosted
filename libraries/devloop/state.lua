@@ -8,13 +8,13 @@ local devloop_base = require("devloop.base")
 local transition_version = require("contract.transition_version")
 local m_builders = require("devloop.markers.builders")
 
-local label_by_state = { thinking = "fkst-dev:thinking", dependency_wait = "fkst-dev:ready", ready = "fkst-dev:ready", implementing = "fkst-dev:implementing", ["awaiting-pr"] = "fkst-dev:awaiting-pr", ["pr-open"] = "fkst-dev:pr-open", reviewing = "fkst-dev:reviewing", ["merge-ready"] = "fkst-dev:merge-ready", merging = "fkst-dev:merging", merged = "fkst-dev:merged", ["closed-unmerged"] = "fkst-dev:blocked", fixing = "fkst-dev:fixing", ["review-meta"] = "fkst-dev:review-meta", ["impl-failed"] = "fkst-dev:impl-failed", blocked = "fkst-dev:blocked" }
+local label_by_state = { thinking = "fkst-dev:thinking", dependency_wait = "fkst-dev:ready", ready = "fkst-dev:ready", implementing = "fkst-dev:implementing", ["awaiting-pr"] = "fkst-dev:awaiting-pr", ["pr-open"] = "fkst-dev:pr-open", reviewing = "fkst-dev:reviewing", ["merge-ready"] = "fkst-dev:merge-ready", merging = "fkst-dev:merging", merged = "fkst-dev:merged", ["closed-unmerged"] = "fkst-dev:blocked", fixing = "fkst-dev:fixing", ["review-meta"] = "fkst-dev:review-meta", ["impl-failed"] = "fkst-dev:impl-failed", declined = "fkst-dev:declined", blocked = "fkst-dev:blocked" }
 local state_labels = {}
 for _, label in pairs(label_by_state) do state_labels[label] = true end
-local state_graph = { unmanaged = { "thinking" }, thinking = { "dependency_wait", "ready", "blocked" }, dependency_wait = { "dependency_wait", "ready", "blocked" }, ready = { "dependency_wait", "implementing", "blocked" }, implementing = { "awaiting-pr", "impl-failed" }, ["awaiting-pr"] = { "merged", "ready", "blocked" }, ["pr-open"] = { "reviewing", "blocked" }, reviewing = { "merge-ready", "fixing", "review-meta" }, ["merge-ready"] = { "merging", "blocked" }, merging = { "merged", "reviewing", "fixing", "blocked" }, merged = {}, ["closed-unmerged"] = {}, fixing = { "reviewing", "review-meta", "blocked" }, ["review-meta"] = { "fixing", "blocked" }, ["impl-failed"] = { "implementing" }, blocked = {} }
-local issue_state_order = { "thinking", "dependency_wait", "ready", "implementing", "pr-open", "reviewing", "merge-ready", "fixing", "impl-failed", "blocked", "review-meta", "merging", "merged", "awaiting-pr" }
-local state_order = { "thinking", "dependency_wait", "ready", "implementing", "pr-open", "reviewing", "merge-ready", "fixing", "impl-failed", "blocked", "review-meta", "merging", "merged", "closed-unmerged", "awaiting-pr" }
-local state_stage_rank = { thinking = 100, dependency_wait = 500, ready = 500, implementing = 600, ["awaiting-pr"] = 625, ["pr-open"] = 650, reviewing = 675, ["merge-ready"] = 690, merging = 695, fixing = 700, ["review-meta"] = 710, ["impl-failed"] = 750, blocked = 800, ["closed-unmerged"] = 825, merged = 900 }
+local state_graph = { unmanaged = { "thinking" }, thinking = { "dependency_wait", "ready", "declined", "blocked" }, dependency_wait = { "dependency_wait", "ready", "blocked" }, ready = { "dependency_wait", "implementing", "blocked" }, implementing = { "awaiting-pr", "impl-failed" }, ["awaiting-pr"] = { "merged", "ready", "blocked" }, ["pr-open"] = { "reviewing", "blocked" }, reviewing = { "merge-ready", "fixing", "review-meta" }, ["merge-ready"] = { "merging", "blocked" }, merging = { "merged", "reviewing", "fixing", "blocked" }, merged = {}, ["closed-unmerged"] = {}, fixing = { "reviewing", "review-meta", "blocked" }, ["review-meta"] = { "fixing", "blocked" }, ["impl-failed"] = { "implementing" }, declined = {}, blocked = {} }
+local issue_state_order = { "thinking", "dependency_wait", "ready", "implementing", "pr-open", "reviewing", "merge-ready", "fixing", "impl-failed", "declined", "blocked", "review-meta", "merging", "merged", "awaiting-pr" }
+local state_order = { "thinking", "dependency_wait", "ready", "implementing", "pr-open", "reviewing", "merge-ready", "fixing", "impl-failed", "declined", "blocked", "review-meta", "merging", "merged", "closed-unmerged", "awaiting-pr" }
+local state_stage_rank = { thinking = 100, dependency_wait = 500, ready = 500, implementing = 600, ["awaiting-pr"] = 625, ["pr-open"] = 650, reviewing = 675, ["merge-ready"] = 690, merging = 695, fixing = 700, ["review-meta"] = 710, ["impl-failed"] = 750, declined = 800, blocked = 800, ["closed-unmerged"] = 825, merged = 900 }
 local function copy_array(values) local out = {}; for _, value in ipairs(values or {}) do table.insert(out, value) end; return out end
 
 local function marker_attrs(marker)
@@ -238,6 +238,7 @@ local milestone_domains = {
     implementing = true,
     ["awaiting-pr"] = true,
     ["impl-failed"] = true,
+    declined = true,
     blocked = true,
     merged = true,
   },
@@ -686,6 +687,7 @@ function C.has_terminal_label(labels)
     or C.has_label(labels, devloop_base._merged_label)
     or C.has_label(labels, devloop_base._fixing_label)
     or C.has_label(labels, devloop_base._impl_failed_label)
+    or C.has_label(labels, devloop_base._declined_label)
     or C.has_label(labels, devloop_base._blocked_label)
 end
 
@@ -748,6 +750,7 @@ function C.has_decision_terminal_label(labels)
     or C.has_label(labels, devloop_base._merged_label)
     or C.has_label(labels, devloop_base._fixing_label)
     or C.has_label(labels, devloop_base._impl_failed_label)
+    or C.has_label(labels, devloop_base._declined_label)
     or C.has_label(labels, devloop_base._blocked_label)
 end
 
@@ -762,16 +765,17 @@ function C.is_loop_terminal(labels)
     or C.has_label(labels, devloop_base._merged_label)
     or C.has_label(labels, devloop_base._fixing_label)
     or C.has_label(labels, devloop_base._impl_failed_label)
+    or C.has_label(labels, devloop_base._declined_label)
     or C.has_label(labels, devloop_base._blocked_label)
 end
 
-function C.has_result_marker(comments, proposal_id, decision, dedup_key)
+function C.has_result_marker(comments, proposal_id, decision, dedup_key, decision_reason)
   if type(comments) ~= "table" then
     return false
   end
   -- Match the FULL marker (proposal + decision + dedup) so a stale opposite/older-version marker
   -- does not suppress writing the current decision's result marker.
-  local needle = m_builders.result_marker(proposal_id, decision, dedup_key)
+  local needle = m_builders.result_marker(proposal_id, decision, dedup_key, decision_reason)
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
     if parsers_misc._comment_body(comment):find(needle, 1, true) ~= nil then
       return true

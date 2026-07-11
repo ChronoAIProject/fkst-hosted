@@ -21,12 +21,12 @@ pattern = "count_calls\\s*\\([^\\)\\n]*(?:[\"']gh (?:issue|pr) view\\b|core\\.gh
 message = "entity-read command count assertions are forbidden; assert observable outcomes instead"
 
 [[rules]]
-id = "convergence.requires-resolvability-gate"
+id = "convergence.requires-terminal-cause"
 severity = "error"
 kind = "text_require_regex"
 include = ["departments/loop/main.lua"]
-pattern = "conv_rounds\\.resolvability_exhausted\\s*\\(\\s*lineage_with_current\\s*\\)"
-message = "convergence continuation must use the resolvability gate over the proposal-wide marker lineage"
+pattern = "conv_rounds\\.terminal_cause\\s*\\(\\s*lineage_with_current\\s*,\\s*round\\s*\\)"
+message = "convergence continuation must use the typed terminal classifier over the proposal-wide marker lineage"
 
 [[rules]]
 id = "convergence.requires-stable-round-facts"

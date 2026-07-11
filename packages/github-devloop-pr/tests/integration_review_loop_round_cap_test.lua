@@ -62,7 +62,7 @@ local function prepare_review_context(event, comments, head_sha)
 end
 
 return {
-  test_review_loop_first_resolvable_findings_converge_raises_one_memory_proposal = function()
+  test_review_loop_first_converge_raises_one_evidence_continuation = function()
     local event = review_unresolved({
       dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review",
       round = 0,
@@ -73,7 +73,7 @@ return {
     local _, _, review_version = prepare_review_context(event)
     local worktree = mock_existing_review_worktree(reviewing().version)
 
-    local result = run_review_loop(event, opts("review-loop-first-resolvable-findings"))
+    local result = run_review_loop(event, opts("review-loop-first-evidence-continuation"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 2)
     local proposal = find_raise(result.raises, "consensus.proposal")
@@ -91,7 +91,7 @@ return {
     t.is_true(comment.payload.body:find('round="0"', 1, true) ~= nil)
   end,
 
-  test_review_loop_second_resolvable_findings_converge_reconciles_without_proposal = function()
+  test_review_loop_evidence_continuation_budget_reconciles_without_another_proposal = function()
     local event = review_unresolved({
       dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/1",
       round = 1,
@@ -115,7 +115,7 @@ return {
     )
     prepare_review_context(event, { first_marker })
 
-    local result = run_review_loop(event, opts("review-loop-second-resolvable-findings"))
+    local result = run_review_loop(event, opts("review-loop-evidence-continuation-budget"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 2)
     t.eq(find_raise(result.raises, "consensus.proposal"), nil)
@@ -130,6 +130,7 @@ return {
     t.eq(reconcile.payload.issue_version, review_version)
     t.eq(reconcile.payload.head_sha, "def456")
     t.eq(reconcile.payload.round, 1)
+    t.eq(reconcile.payload.terminal_cause, "evidence-continuation-budget-exhausted")
     t.eq(reconcile.payload.dedup_key, "review-reconcile:" .. review_version .. "/review-loop/1")
   end,
 
