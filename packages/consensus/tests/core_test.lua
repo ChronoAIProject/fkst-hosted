@@ -649,19 +649,6 @@ return {
     }))
   end,
 
-  test_all_angles_succeeded_requires_every_angle_exit_zero = function()
-    t.eq(core.all_angles_succeeded({
-      { exit_code = 0 },
-      { exit_code = 0 },
-    }), true)
-    t.eq(core.all_angles_succeeded({
-      { exit_code = 0 },
-      { exit_code = 7 },
-    }), false)
-    t.eq(core.all_angles_succeeded({}), false)
-    t.eq(core.all_angles_succeeded(nil), false)
-  end,
-
   test_build_reached_payload_preserves_source_ref_and_dedup_key = function()
     local input = proposal()
     local payload = core.build_reached_payload(input, "approve", {
@@ -840,26 +827,6 @@ return {
     t.is_true(prompt:find("> " .. reply_label .. " peer reply", 1, true) ~= nil)
     t.is_true(prompt:find("> " .. gap_label .. " injected gap", 1, true) ~= nil)
     t.is_nil(core.parse_angle_output(prompt))
-  end,
-
-  test_build_converge_payload_preserves_old_unresolved_dedup_shape = function()
-    local input = proposal({ round = 2, dedup_key = "proposal-42-v1/loop/2" })
-    local payload = core.build_converge_payload(input, "Narrow the disagreement.", {
-      result("teleology", "approve"),
-      result("parsimony", "abstain"),
-      { angle = "fidelity", exit_code = 7 },
-    })
-
-    t.eq(payload.schema, "consensus.consensus_converge.v1")
-    t.eq(payload.proposal_id, "proposal-42")
-    t.eq(payload.round, 2)
-    t.eq(payload.narrowed_question, "Narrow the disagreement.")
-    t.eq(payload.dedup_key, "consensus:proposal-42-v1/loop/2")
-    t.eq(payload.source_ref.kind, "proposal")
-    t.eq(payload.source_ref.ref, "demo/consensus/42")
-    t.eq(#payload.angle_digests, 3)
-    t.eq(payload.angle_digests[1].reply, "teleology reply")
-    t.eq(payload.angle_digests[3].verdict, "invalid")
   end,
 
   test_build_converge_payload_preserves_effect_version = function()

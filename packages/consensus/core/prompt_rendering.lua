@@ -79,7 +79,7 @@ end
 local function render_full_angle_output(neutralize, item)
   return table.concat({
     "Angle: " .. neutralize(item and item.angle),
-    "P1 verdict: " .. tostring(item and item.verdict or "invalid"),
+    "P1 verdict: " .. tostring(item and item.verdict),
     "P1 full output:",
     neutralize(item and item.stdout or ""),
   }, "\n")

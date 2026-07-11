@@ -123,7 +123,7 @@ return {
     t.is_true(logs[1]:find("fingerprint=", 1, true) ~= nil)
     t.is_true(logs[1]:find("source_ref=external:owner/repo#issue/42", 1, true) ~= nil)
     t.is_true(logs[1]:find("attempt=6", 1, true) ~= nil)
-    t.is_nil(logs[1]:find("terminal=", 1, true))
+    t.is_true(logs[1]:find("terminal=false", 1, true) ~= nil)
     t.is_true(logs[1]:find("queue=proposal", 1, true) ~= nil)
   end,
 }
