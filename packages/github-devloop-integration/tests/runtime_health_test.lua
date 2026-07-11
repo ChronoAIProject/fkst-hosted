@@ -20,6 +20,39 @@ local function assert_dirty(snapshot, reason)
   t.eq(result.reason, reason)
 end
 
+local generated_at_ms = 1781832600000
+
+local function promotion_snapshot(dead_letters, extra)
+  local snapshot = {
+    schema_version = 1,
+    generated_at_ms = generated_at_ms,
+    truncated = { deliveries = false, dead_letters = false },
+    dead_letters = dead_letters or {},
+  }
+  for key, value in pairs(extra or {}) do
+    snapshot[key] = value
+  end
+  return snapshot
+end
+
+local function promotion_verdict(snapshot, window_start_ms)
+  return runtime_health.promotion_verdict(snapshot, window_start_ms or (generated_at_ms - 1800000), {
+    stall_seconds = 1800,
+  })
+end
+
+local function assert_promotion_clean(snapshot, window_start_ms)
+  local result = promotion_verdict(snapshot, window_start_ms)
+  t.eq(result.clean, true)
+  t.eq(result.reason, "clean")
+end
+
+local function assert_promotion_dirty(snapshot, reason, window_start_ms)
+  local result = promotion_verdict(snapshot, window_start_ms)
+  t.eq(result.clean, false)
+  t.eq(result.reason, reason)
+end
+
 -- Golden-master fixtures for the rollup merge runtime gate. Keep these exact
 -- expected verdicts in sync with scripts/board.py:172-180 and the anomaly
 -- selection below that drives the board.py health first line.
@@ -109,6 +142,53 @@ return {
         { queue = "devloop_ready", ready = 0, leased = 0, retry = 0, dlq = 1 },
       },
     }, "queue-dlq:devloop_ready:count=1")
+  end,
+
+  test_promotion_health_ignores_stale_permanent_dead_letter_audit = function()
+    assert_promotion_clean(promotion_snapshot({
+      {
+        delivery_id = "dead-1",
+        queue = "devloop_ready",
+        dead_at_ms = generated_at_ms - 1800001,
+        permanent = true,
+        replayable = false,
+      },
+    }, {
+      queues = {
+        { queue = "devloop_ready", dlq = 1 },
+      },
+    }))
+  end,
+
+  test_promotion_health_blocks_dead_letter_at_window_boundary = function()
+    assert_promotion_dirty(promotion_snapshot({
+      {
+        delivery_id = "dead-1",
+        queue = "devloop_ready",
+        dead_at_ms = generated_at_ms - 1800000,
+        permanent = true,
+      },
+    }), "dead-letter:devloop_ready")
+  end,
+
+  test_promotion_health_missing_dead_letter_timestamp_fails_closed = function()
+    assert_promotion_dirty(promotion_snapshot({
+      { delivery_id = "dead-1", queue = "devloop_ready" },
+    }), "dead-letter-time-invalid:devloop_ready")
+  end,
+
+  test_promotion_health_truncated_dead_letter_detail_fails_closed = function()
+    assert_promotion_dirty(promotion_snapshot({}, {
+      truncated = { deliveries = false, dead_letters = true },
+    }), "dead-letter-detail-truncated")
+  end,
+
+  test_promotion_health_aggregate_only_queue_dlq_fails_closed = function()
+    assert_promotion_dirty(promotion_snapshot({}, {
+      queues = {
+        { queue = "devloop_ready", dlq = 1 },
+      },
+    }), "dead-letter-detail-inconsistent:queue=devloop_ready:count=1:detail=0")
   end,
 
   test_runtime_health_board_parity_terminal_fact_snapshot_is_dirty = function()
