@@ -615,7 +615,9 @@ return {
     local proposal = result.raises[1].payload
     t.is_true(proposal.content_fetch:find("runtime-cache:", 1, true) == 1)
     t.is_nil(proposal.content_fetch:find("gh pr", 1, true))
-    t.is_nil(proposal.worktree)
+    -- No existing impl worktree (e.g. wiped by a restart) → fall back to the read-only project checkout
+    -- ".", a git repo the sandboxed review codex accepts, instead of a non-git scratch dir it would refuse.
+    t.eq(proposal.worktree, ".")
     t.eq(count_calls("gh pr diff"), 2)
   end,
 
