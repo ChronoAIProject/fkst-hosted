@@ -206,7 +206,7 @@ return {
     t.is_true(has_value(label.remove_labels, "fkst-dev:reviewing"))
     t.is_true(has_value(label.remove_labels, "fkst-dev:fixing"))
     t.eq(has_value(label.remove_labels, "fkst-dev:blocked"), false)
-    t.eq(#label.remove_labels, 12)
+    t.eq(#label.remove_labels, 13)
 
     local comment = core.build_reconcile_comment_request("owner/repo", "42", reconcile, "drop", "no-semantic-progress-after-3-rounds")
     t.is_true(comment.body:find("github-devloop reconcile action: drop", 1, true) ~= nil)
@@ -567,7 +567,7 @@ return {
     t.eq(label.remove_labels[5], "fkst-dev:merge-ready")
     t.eq(label.remove_labels[6], "fkst-dev:fixing")
     t.eq(label.remove_labels[7], "fkst-dev:impl-failed")
-    t.eq(#label.remove_labels, 12)
+    t.eq(#label.remove_labels, 13)
     t.is_true(#label.dedup_key <= 512)
 
     local comment = requests_lifecycle.build_implementing_comment_request(core, "owner/repo", "42", ready, "/tmp/devloop-owner-repo-42", "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123")
@@ -588,7 +588,7 @@ return {
     t.eq(failed_label.remove_labels[5], "fkst-dev:reviewing")
     t.eq(failed_label.remove_labels[6], "fkst-dev:merge-ready")
     t.eq(failed_label.remove_labels[7], "fkst-dev:fixing")
-    t.eq(#failed_label.remove_labels, 12)
+    t.eq(#failed_label.remove_labels, 13)
 
     local failure_comment = requests_lifecycle.build_impl_failure_comment_request(core, "owner/repo", "42", ready, "no-changes", "No files changed.")
     t.is_true(failure_comment.body:find("github-devloop implementation failed: no-changes", 1, true) ~= nil)

@@ -265,7 +265,7 @@ return {
     local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:ready")
     t.eq(label_raise.payload.remove_labels[1], "fkst-dev:thinking")
-    t.eq(#label_raise.payload.remove_labels, 13)
+    t.eq(#label_raise.payload.remove_labels, 14)
     t.eq(label_raise.payload.issue_number, "42")
 
     t.eq(comment_raise.payload.issue_number, "42")
@@ -324,7 +324,7 @@ return {
     t.eq(#result.raises, 0)
   end,
 
-  test_consensus_result_premise_refutation_records_decline_and_blocks_implementation = function()
+  test_consensus_result_premise_refutation_records_distinct_declined_terminal = function()
     local event = reached({
       decision = "reject",
       decision_reason = "premise-refuted",
@@ -342,10 +342,10 @@ return {
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request")
     t.is_true(comment.payload.body:find("decline: premise-refuted", 1, true) ~= nil)
     local declined_state = core.current_state({ comment.payload.body }, event.proposal_id)
-    t.eq(declined_state.state, "blocked")
+    t.eq(declined_state.state, "declined")
     t.eq(declined_state.version, event.dedup_key)
     t.is_true(comment.payload.body:find(m_builders.result_marker(event.proposal_id, "reject", event.dedup_key, "premise-refuted"), 1, true) ~= nil)
-    t.eq(label.payload.add_labels[1], "fkst-dev:blocked")
+    t.eq(label.payload.add_labels[1], "fkst-dev:declined")
     t.eq(find_raise(result.raises, "devloop_ready"), nil)
   end,
 
@@ -357,7 +357,7 @@ return {
     t.eq(#stale_ready.raises, 2)
     local label_raise = find_raise(stale_ready.raises, "github-proxy.github_issue_label_request")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:ready")
-    t.eq(#label_raise.payload.remove_labels, 13)
+    t.eq(#label_raise.payload.remove_labels, 14)
     t.is_true(find_raise(stale_ready.raises, "github-proxy.github_issue_comment_request") ~= nil)
     t.eq(find_raise(stale_ready.raises, "devloop_ready"), nil)
 

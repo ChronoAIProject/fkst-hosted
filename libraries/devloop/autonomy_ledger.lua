@@ -47,6 +47,7 @@ local required_gate_names = {
 }
 
 local terminal_attempt_states = {
+  declined = true,
   blocked = true,
   ["impl-failed"] = true,
   merged = true,

@@ -46,6 +46,7 @@
 {"path":"libraries/devloop/restart/issue/pr_partition_contract.lua","owner":"shared","reason":"declares inert issue/PR partition contract data."}
 {"path":"libraries/devloop/restart/issue/transitions/awaiting_pr.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
 {"path":"libraries/devloop/restart/issue/transitions/blocked.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
+{"path":"libraries/devloop/restart/issue/transitions/declined.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
 {"path":"libraries/devloop/restart/issue/transitions/dependency_wait.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
 {"path":"libraries/devloop/restart/issue/transitions/impl_failed.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
 {"path":"libraries/devloop/restart/issue/transitions/implementing.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}

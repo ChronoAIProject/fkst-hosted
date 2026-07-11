@@ -211,7 +211,7 @@ return {
     local label_raise = find_label_with_added(result.raises, "fkst-dev:impl-failed")
     local comment_raise = find_comment_with(result.raises, "fkst:github-devloop:impl-failure:v1")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:impl-failed")
-    t.eq(#label_raise.payload.remove_labels, 12)
+    t.eq(#label_raise.payload.remove_labels, 13)
     t.is_true(comment_raise.payload.body:find("github-devloop implementation failed: codex-failed", 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find("forced implementation failure", 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find("fkst:github-devloop:impl-failure:v1", 1, true) ~= nil)

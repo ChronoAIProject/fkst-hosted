@@ -34,7 +34,7 @@ function C.build_result_comment_request(M, repo, issue_number, reached, state_na
   local marker = m_builders.result_marker(reached.proposal_id, reached.decision, reached.dedup_key, reached.decision_reason)
   local canonical_state = state_name or "ready"
   local effects = canonical_state == "ready" and "result-marker,ready-label,devloop-ready"
-    or canonical_state == "blocked" and "result-marker,blocked-label,premise-refuted"
+    or canonical_state == "declined" and "result-marker,declined-label,premise-refuted"
     or "result-marker,ready-label,dependency-hold"
   local state_marker = M.state_marker(reached.proposal_id, canonical_state, tostring(reached.effect_version or reached.dedup_key), effects)
   local body_text = devloop_base.neutralize_untrusted_comment_text(reached.body or "")
@@ -75,7 +75,7 @@ function C.result_effects_complete(current, reached)
   if type(current) ~= "table" or type(reached) ~= "table" then
     return false
   end
-  local state_name = reached.decision == "reject" and "blocked" or "ready"
+  local state_name = reached.decision == "reject" and "declined" or "ready"
   return devloop_state.has_result_marker(current.comments, reached.proposal_id, reached.decision, reached.dedup_key, reached.decision_reason)
     and devloop_state.state_label_hint_matches(current.labels, state_name)
 end

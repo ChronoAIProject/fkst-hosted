@@ -95,6 +95,7 @@ M.restart_lifecycle_states = {
   "implementing",
   "awaiting-pr",
   "impl-failed",
+  "declined",
   "blocked",
   "merged",
 }

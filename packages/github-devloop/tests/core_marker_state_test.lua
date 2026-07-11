@@ -236,7 +236,7 @@ return {
     t.is_true(h.has_value(label.remove_labels, "fkst-dev:merge-ready"))
     t.is_true(h.has_value(label.remove_labels, "fkst-dev:fixing"))
     t.is_true(h.has_value(label.remove_labels, "fkst-dev:impl-failed"))
-    t.eq(#label.remove_labels, 12)
+    t.eq(#label.remove_labels, 13)
     t.eq(label.issue_number, "42")
 
     local awaiting = requests_labels.build_state_label_request("owner/repo",
@@ -261,7 +261,7 @@ return {
     )
     t.eq(reconcile.add_labels[1], "fkst-dev:reviewing")
     t.eq(reconcile.remove_labels[1], "fkst-dev:thinking")
-    t.eq(#reconcile.remove_labels, 12)
+    t.eq(#reconcile.remove_labels, 13)
     t.is_true(reconcile.dedup_key:find("reconcile/label/github-devloop/issue/owner/repo/42/reviewing", 1, true) ~= nil)
 
     local completed = reached({

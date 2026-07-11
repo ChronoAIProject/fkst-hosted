@@ -39,10 +39,10 @@ end
 local function raise_result_effects(repo, issue_number, reached, current, state, gate, reason, version, to_state)
   version = version or result_version(reached)
   local declined = reached.decision == "reject"
-  to_state = to_state or (declined and "blocked" or gate and gate.ok and "ready" or "dependency_wait")
+  to_state = to_state or (declined and "declined" or gate and gate.ok and "ready" or "dependency_wait")
   local comment_request = requests_lifecycle.build_result_comment_request(core, repo, issue_number, reached, to_state)
   local label_request = declined
-    and requests_labels.build_state_label_request(repo, issue_number, "blocked", reached.proposal_id .. "/label/decline", reached.source_ref)
+    and requests_labels.build_state_label_request(repo, issue_number, "declined", reached.proposal_id .. "/label/decline", reached.source_ref)
     or requests_labels.build_result_label_request(repo, issue_number, reached)
   local dependency_comment_request = nil
   local dependency_label_request = nil
@@ -172,7 +172,7 @@ local function make_department(ports)
         version = version,
         comments = current.comments,
       })
-      local to_state = declined and "blocked" or gate.ok and "ready" or "dependency_wait"
+      local to_state = declined and "declined" or gate.ok and "ready" or "dependency_wait"
       local transition = devloop_state.versioned_transition_status(state, { "thinking" }, to_state, version)
       if transition == "idempotent" or transition == "stale" then
         if transition == "idempotent" and tostring(state.version or "") == tostring(version) then
