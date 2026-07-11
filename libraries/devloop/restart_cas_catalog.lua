@@ -298,20 +298,6 @@ local function resolve_profile(definition, evidence)
   return apply_overlay(definition, variant, evidence, resolved)
 end
 
-local function resolve_consensus(definition, evidence)
-  if type(evidence) ~= "table" or type(evidence.effects_complete) ~= "boolean" then
-    return illegal("invalid-evidence")
-  end
-  local resolved = resolve_profile(definition, evidence)
-  if resolved.status == "idempotent"
-    and type(evidence.current) == "table"
-    and tostring(evidence.current.version or "") == tostring(evidence.incoming_version or "")
-    and not evidence.effects_complete then
-    return result("apply", "effects-incomplete", "applied(result effects incomplete)")
-  end
-  return resolved
-end
-
 local function valid_handoff(evidence)
   return type(evidence.handoff) == "table" and evidence.handoff.status == "valid"
 end
@@ -504,14 +490,21 @@ local policies = {
   },
   ["cas.legacy_consensus_result_v1"] = {
     evidence_type = "consensus_result_cas_evidence_v1",
-    production = { function_name = "versioned_transition_status", overlay = "exact-version idempotent completeness repair", source = "packages/github-devloop/departments/consensus_result/main.lua:175" },
+    -- Admission-only: the versioned base fully models production's version-concurrency CAS
+    -- (consensus_result/main.lua:175 versioned_transition_status). Production's exact-version
+    -- idempotent effect-completeness REPAIR (idempotent probe + effects incomplete → re-raise
+    -- the result effects at the SAME version) is a POST-admission effect-idempotency
+    -- disposition, not a version-CAS admission, so it is NOT folded into the catalog status
+    -- (composed downstream, like merge's re-merge). catalog.resolve returns idempotent for the
+    -- idempotent probe regardless of effect completeness; the re-apply is a separate axis
+    -- verified by the non-circular consensus_result parity harness (post_admission_disposition).
+    production = { function_name = "versioned_transition_status", overlay = "admission-only versioned base (effect-completeness repair is a downstream disposition)", source = "packages/github-devloop/departments/consensus_result/main.lua:175" },
     base = "versioned",
     variants = {
       thinking_to_ready = variant({ "thinking" }, "ready"),
       thinking_to_dependency_wait = variant({ "thinking" }, "dependency_wait"),
     },
     overlay = { kind = "none", statuses = {} },
-    resolve_profile = resolve_consensus,
   },
   ["cas.legacy_issue_reconcile_v1"] = {
     evidence_type = "reconcile_cas_evidence_v1",

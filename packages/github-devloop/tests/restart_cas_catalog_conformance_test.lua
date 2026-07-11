@@ -275,9 +275,6 @@ local function assert_complete_profile_matrix(profile)
         overlay_version = profile.overlay_version or version_case.value,
         target_version = profile.target_version,
       }
-      if profile.id == "cas.legacy_consensus_result_v1" then
-        extras.effects_complete = true
-      end
       local actual = catalog.resolve(profile.id, evidence(
         current_case.value,
         profile.variant,
@@ -404,11 +401,16 @@ return {
       end
     end
 
+    -- effects_complete no longer affects the ADMISSION axis: an idempotent probe is
+    -- idempotent regardless of effect completeness. The effects-incomplete re-apply is a
+    -- POST-admission effect-repair disposition (verified by the non-circular
+    -- consensus_result_cas_parity_test), not a version-CAS apply, so the catalog returns
+    -- idempotent — not the folded apply/effects-incomplete of the pre-extraction resolver.
     local incomplete = catalog.resolve("cas.legacy_consensus_result_v1", evidence({
       state = "ready",
       version = V_EQUAL,
     }, "thinking_to_ready", V_EQUAL, { effects_complete = false }))
-    assert_result(incomplete, result("apply", "effects-incomplete", "applied(result effects incomplete)"))
+    assert_result(incomplete, result("idempotent", "already-at-target", "skip-idempotent(already at to_state)"))
 
     for _, profile in ipairs({
       { id = "cas.legacy_issue_reconcile_v1", variant = "thinking_to_blocked", source = { "thinking" }, target = "blocked" },
