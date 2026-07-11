@@ -111,9 +111,9 @@ return {
     t.eq(count_calls("--json body"), 0)
   end,
 
-  test_observe_non_whitelisted_other_author_after_grace_skips_without_fork_or_consensus = function()
+  test_observe_self_assigned_non_whitelisted_author_skips_without_fork_or_consensus = function()
     local created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now() - (3 * 60 * 60) - 1)
-    mock_issue_state({ "fkst-dev:enabled" }, "OPEN", {}, {}, "human", created_at)
+    mock_issue_state({ "fkst-dev:enabled" }, "OPEN", {}, { "fkst-test-bot" }, "human", created_at)
 
     local result = run_observe(issue(), opts("observe-non-whitelisted-other-author", {
       FKST_GITHUB_AUTHORIZED_LOGINS = "trusted-human",
