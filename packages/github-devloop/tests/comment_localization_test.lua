@@ -66,7 +66,7 @@ local function comment_cases()
     "Narrow question?",
     { { angle = "minimal", verdict = "abstain", digest = "digest" } }
   )
-  local reconcile = conv_reconcile.build_devloop_reconcile_payload(unresolved(), 3, reached_with_angles.dedup_key)
+  local reconcile = conv_reconcile.build_devloop_reconcile_payload(unresolved(), 3, reached_with_angles.dedup_key, "no-semantic-progress")
   local gate = { kind = "waiting", reason = "waiting-on-dependency" }
   local dependency_marker = core.dependency_wait_marker(issue_proposal_id, issue_version, { 7 }, gate.kind, gate.reason)
   local dependency_void_gate = {

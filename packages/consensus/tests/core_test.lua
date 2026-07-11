@@ -734,6 +734,24 @@ return {
     t.eq(payload.angle_results[1].verdict, "reject")
   end,
 
+  test_build_reached_payload_requires_typed_premise_refutation_for_converge_reject = function()
+    local payload = core.build_reached_payload(proposal(), {
+      decision = "reject",
+      decision_reason = "premise-refuted",
+    }, {
+      result("teleology", "abstain"),
+      result("parsimony", "approve"),
+      result("fidelity", "abstain"),
+    })
+
+    t.eq(payload.decision, "reject")
+    t.eq(payload.decision_reason, "premise-refuted")
+    local untyped_ok = pcall(core.build_reached_payload, proposal(), "reject", {
+      result("teleology", "abstain"),
+    })
+    t.eq(untyped_ok, false)
+  end,
+
   test_build_reached_payload_carries_blocking_gap_and_advisory_section = function()
     local reject_payload = core.build_reached_payload(proposal({ verdict_mode = "gate" }), {
       decision = "reject",

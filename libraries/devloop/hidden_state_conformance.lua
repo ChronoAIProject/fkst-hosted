@@ -343,16 +343,15 @@ local function fact_value(core, row, state, family, successor)
     }
   end
   if family == "review-meta" or family == "review-converge-round" then
-    local is_review_meta_replay = family == "review-converge-round" and successor == "review-meta"
     return {
       proposal_id = ISSUE_PROPOSAL,
       pr_number = PR_NUMBER,
       review_proposal_id = review_proposal(core, state),
-      review_dedup_key = is_review_meta_replay and transition_version.loop_at(review_dedup(core, state), 3) or review_dedup(core, state),
+      review_dedup_key = review_dedup(core, state),
       reviewed_head_sha = HEAD_SHA,
       version = state.version,
       n = 3,
-      action = (successor == "fixing" or is_review_meta_replay) and "fix" or "block",
+      action = successor == "fixing" and "fix" or "block",
       blocking_gap = "behavioral-fixture",
     }
   end
@@ -383,8 +382,8 @@ local function fact_value(core, row, state, family, successor)
     return {
       proposal_id = ISSUE_PROPOSAL,
       base_version = state.version,
-      round = 3,
-      dedup = transition_version.loop_at(state.version, 3),
+      round = stalled and 3 or 0,
+      dedup = transition_version.loop_at(state.version, stalled and 3 or 0),
       narrowed_question = stalled and "behavioral fixture narrowed question" or "behavioral fixture changing question",
       angle_digests = stalled
         and {
@@ -398,7 +397,6 @@ local function fact_value(core, row, state, family, successor)
           { angle = "safety", verdict = "abstain", digest = "changed" },
         },
       true_stall_fixture = stalled,
-      visible_round_sequence = not stalled,
     }
   end
   if family == "state" then
@@ -489,15 +487,6 @@ local function install_marker(core, entity, state, family, value, is_synthetic)
       for round = 1, value.round do
         table.insert(entity.comments, comment(core, conv_rounds.converge_round_marker(ISSUE_PROPOSAL, state.version, convergence_shared.source_ref_digest(SOURCE_REF), round, transition_version.loop_at(state.version, round), value.narrowed_question, value.angle_digests), "2026-06-03T01:03:1" .. tostring(round) .. "Z"))
       end
-    elseif value.visible_round_sequence == true then
-      for round = 1, value.round - 1 do
-        table.insert(entity.comments, comment(core, conv_rounds.converge_round_marker(ISSUE_PROPOSAL, state.version, convergence_shared.source_ref_digest(SOURCE_REF), round, transition_version.loop_at(state.version, round), "behavioral fixture narrowed question", {
-          { angle = "minimal", verdict = "abstain", digest = "a" },
-          { angle = "structural", verdict = "abstain", digest = "b" },
-          { angle = "safety", verdict = "abstain", digest = "c" },
-        }), "2026-06-03T01:03:1" .. tostring(round) .. "Z"))
-      end
-      table.insert(entity.comments, comment(core, conv_rounds.converge_round_marker(ISSUE_PROPOSAL, state.version, convergence_shared.source_ref_digest(SOURCE_REF), value.round, value.dedup, value.narrowed_question, value.angle_digests), "2026-06-03T01:03:10Z"))
     else
       table.insert(entity.comments, comment(core, conv_rounds.converge_round_marker(ISSUE_PROPOSAL, state.version, convergence_shared.source_ref_digest(SOURCE_REF), value.round, value.dedup, value.narrowed_question, value.angle_digests), "2026-06-03T01:03:10Z"))
     end

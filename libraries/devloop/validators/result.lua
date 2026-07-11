@@ -6,7 +6,9 @@ local C = {}
 function C.is_supported_result(payload)
   return type(payload) == "table"
     and payload.schema == "consensus.consensus_reached.v1"
-    and payload.decision == "approve"
+    and (payload.decision == "approve"
+      or payload.decision == "reject" and payload.decision_reason == "premise-refuted")
+    and (payload.decision ~= "approve" or payload.decision_reason == nil)
     and devloop_base.is_safe_consensus_result_ref(payload.proposal_id, payload.dedup_key)
     and (payload.effect_version == nil or devloop_base.is_safe_consensus_result_ref(payload.proposal_id, payload.effect_version))
     and strings.is_bounded_string(payload.body, devloop_base._max_body_len)

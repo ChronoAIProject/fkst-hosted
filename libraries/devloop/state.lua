@@ -765,13 +765,13 @@ function C.is_loop_terminal(labels)
     or C.has_label(labels, devloop_base._blocked_label)
 end
 
-function C.has_result_marker(comments, proposal_id, decision, dedup_key)
+function C.has_result_marker(comments, proposal_id, decision, dedup_key, decision_reason)
   if type(comments) ~= "table" then
     return false
   end
   -- Match the FULL marker (proposal + decision + dedup) so a stale opposite/older-version marker
   -- does not suppress writing the current decision's result marker.
-  local needle = m_builders.result_marker(proposal_id, decision, dedup_key)
+  local needle = m_builders.result_marker(proposal_id, decision, dedup_key, decision_reason)
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
     if parsers_misc._comment_body(comment):find(needle, 1, true) ~= nil then
       return true

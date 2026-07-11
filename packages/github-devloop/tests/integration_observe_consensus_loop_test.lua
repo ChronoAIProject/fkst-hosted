@@ -317,11 +317,36 @@ return {
     t.eq(current.version, event.dedup_key)
   end,
 
-  test_consensus_result_reject_is_unsupported = function()
+  test_consensus_result_untyped_reject_is_unsupported = function()
     mock_issue_result({ "fkst-dev:thinking" })
     local result = run_result(reached({ decision = "reject" }), opts("result-reject"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
+  end,
+
+  test_consensus_result_premise_refutation_records_decline_and_blocks_implementation = function()
+    local event = reached({
+      decision = "reject",
+      decision_reason = "premise-refuted",
+      framing = "Verified repository source proves the claimed missing feature exists.",
+      body = "The proposal premise is contradicted by source evidence.",
+    })
+    mock_issue_result({ "fkst-dev:thinking" }, {
+      core.state_marker(event.proposal_id, "thinking", default_marker_version),
+    })
+
+    local result = run_result(event, opts("result-premise-refuted"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request")
+    t.is_true(comment.payload.body:find("decline: premise-refuted", 1, true) ~= nil)
+    local declined_state = core.current_state({ comment.payload.body }, event.proposal_id)
+    t.eq(declined_state.state, "blocked")
+    t.eq(declined_state.version, event.dedup_key)
+    t.is_true(comment.payload.body:find(m_builders.result_marker(event.proposal_id, "reject", event.dedup_key, "premise-refuted"), 1, true) ~= nil)
+    t.eq(label.payload.add_labels[1], "fkst-dev:blocked")
+    t.eq(find_raise(result.raises, "devloop_ready"), nil)
   end,
 
   test_consensus_result_approve_self_heals_missing_ready_and_skips_completed_marker = function()
@@ -570,7 +595,7 @@ return {
     t.is_true(comment.body:find('round="0"', 1, true) ~= nil)
   end,
 
-  test_loop_true_stall_records_round_and_handoff_reconcile = function()
+  test_loop_visible_over_budget_lineage_handoffs_reconcile_before_new_result = function()
     local base_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local event = unresolved({
       dedup_key = base_version .. "/loop/3",
@@ -590,12 +615,12 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "github-proxy.github_issue_comment_request")
-    t.is_true(result.raises[1].payload.body:find('round="3"', 1, true) ~= nil)
     t.eq(find_raise(result.raises, "devloop_reconcile"), nil)
     t.eq(result.raises[1].payload.handoff.kind, "github-devloop.reconcile")
     t.eq(result.raises[1].payload.handoff.proposal_id, event.proposal_id)
-    t.eq(result.raises[1].payload.handoff.round, 3)
+    t.eq(result.raises[1].payload.handoff.round, 2)
     t.eq(result.raises[1].payload.handoff.base_version, base_version)
+    t.eq(result.raises[1].payload.handoff.terminal_cause, "evidence-continuation-budget-exhausted")
     t.eq(result.raises[1].payload.handoff.source_ref.ref, "owner/repo#issue/42")
   end,
 
@@ -629,7 +654,7 @@ return {
     t.eq(result.raises[1].payload.handoff.base_version, base_version)
   end,
 
-  test_loop_duplicate_converge_round_marker_skips = function()
+  test_loop_duplicate_terminal_round_redrives_reconcile_handoff = function()
     local event = unresolved({ round = 1 })
     local base_version = conv_rounds.converge_base_version(event.dedup_key)
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
@@ -639,10 +664,15 @@ return {
 
     local result = run_loop(event, opts("loop-duplicate-converge-round"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
+    t.eq(#result.raises, 1)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(comment ~= nil)
+    t.eq(comment.payload.handoff.kind, "github-devloop.reconcile")
+    t.eq(comment.payload.handoff.round, 1)
+    t.eq(comment.payload.handoff.terminal_cause, "evidence-continuation-budget-exhausted")
   end,
 
-  test_loop_stale_lower_round_unresolved_does_not_advance = function()
+  test_loop_stale_lower_round_redrives_visible_terminal_lineage = function()
     local base_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local event = unresolved({
       dedup_key = base_version .. "/loop/2",
@@ -659,7 +689,12 @@ return {
 
     local result = run_loop(event, opts("loop-stale-lower-round"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
+    t.eq(#result.raises, 1)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(comment ~= nil)
+    t.eq(comment.payload.handoff.kind, "github-devloop.reconcile")
+    t.eq(comment.payload.handoff.round, 4)
+    t.eq(comment.payload.handoff.terminal_cause, "evidence-continuation-budget-exhausted")
   end,
 
   test_loop_skips_foreign_proposal = function()
@@ -731,9 +766,9 @@ return {
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
     local version = conv_reconcile.reconcile_terminal_state_version(default_marker_version, event.round)
     t.is_true(comment.body:find("github-devloop reconcile action: drop", 1, true) ~= nil)
-    t.is_true(comment.body:find("no-actionable-framing-after-3-rounds", 1, true) ~= nil)
+    t.is_true(comment.body:find("no-semantic-progress-after-3-rounds", 1, true) ~= nil)
     t.is_true(comment.body:find(core.state_marker(event.proposal_id, "blocked", version), 1, true) ~= nil)
-    t.is_true(comment.body:find(conv_reconcile.reconcile_marker(event.proposal_id, event.base_version, event.round, "drop"), 1, true) ~= nil)
+    t.is_true(comment.body:find(conv_reconcile.reconcile_marker(event.proposal_id, event.base_version, event.round, "drop", event.terminal_cause), 1, true) ~= nil)
     t.eq(label.add_labels[1], "fkst-dev:blocked")
     t.eq(label.remove_labels[1], "fkst-dev:thinking")
     t.eq(count_calls("codex exec"), 0)

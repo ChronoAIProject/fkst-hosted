@@ -257,6 +257,22 @@ end
     return "[ -d " .. devloop_base._shell_single_quote(value) .. " ]"
   end
 
+  function C.existing_implementation_worktree(repo, issue_number, impl_version)
+    if issue_number == nil or impl_version == nil then
+      return nil
+    end
+    local runtime = exec_sync({ cmd = C.read_runtime_root_cmd(), timeout = 30 })
+    if type(runtime) ~= "table" or runtime.exit_code ~= 0 or tostring(runtime.stdout or "") == "" then
+      return nil
+    end
+    local worktree = devloop_base.implement_worktree_path(runtime.stdout, repo, issue_number, impl_version)
+    local directory = exec_sync({ cmd = C.path_is_directory_cmd(worktree), timeout = 30 })
+    if type(directory) == "table" and directory.exit_code == 0 then
+      return worktree
+    end
+    return nil
+  end
+
   function C.find_worktrees_for_branch(stdout, branch)
     if not forge_validators.is_git_ref_safe(branch) then
       error("github-devloop: invalid branch")

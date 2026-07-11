@@ -157,10 +157,6 @@ function C.liveness_poll_cadence_seconds()
   return liveness_poll_interval_minutes * seconds_per_minute
 end
 
-function C.max_converge_rounds()
-  return 8
-end
-
 function C.default_test_command()
   return "scripts/run.sh test"
 end

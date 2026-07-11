@@ -147,6 +147,22 @@ local function parse_reached(value, verdict_mode)
   }
 end
 
+local function parse_premise_refuted(value, verdict_mode)
+  if verdict_mode ~= "converge" then
+    return nil
+  end
+  local framing = bounded_text(value, max_field_len)
+  if framing == nil then
+    return nil
+  end
+  return {
+    kind = "reached",
+    decision = "reject",
+    decision_reason = "premise-refuted",
+    framing = framing,
+  }
+end
+
 local function parse_converge(value)
   local disagreement, evidence = trim(value):match("^([^+]+)%s+%+%s+(.+)$")
   disagreement = bounded_text(disagreement, max_field_len)
@@ -207,12 +223,16 @@ function M.parse_output(stdout, verdict_mode)
   local findings = {}
   for line in (text .. "\n"):gmatch("(.-)\n") do
     local reached = line_with_prefix(line, "reached:")
+    local premise_refuted = line_with_prefix(line, "premise-refuted:")
     local converge = line_with_prefix(line, "converge:")
     local essence_stall = line_with_prefix(line, "essence-stall:")
     local unresolvable = line_with_prefix(line, "unresolvable:")
     if reached ~= nil then
       outcome_count = outcome_count + 1
       parsed = parse_reached(reached, verdict_mode)
+    elseif premise_refuted ~= nil then
+      outcome_count = outcome_count + 1
+      parsed = parse_premise_refuted(premise_refuted, verdict_mode)
     elseif converge ~= nil then
       outcome_count = outcome_count + 1
       parsed = parse_converge(converge)
@@ -379,7 +399,10 @@ function M.to_decision_result(proposal, p1_results, p2_results, parsed, caps)
     caps.assert_all_angle_answers_valid(p2_results, "rebuttal")
     return {
       queue = "consensus_reached",
-      payload = caps.build_reached_payload(proposal, parsed.decision, p2_results, parsed.framing, {
+      payload = caps.build_reached_payload(proposal, {
+        decision = parsed.decision,
+        decision_reason = parsed.decision_reason,
+      }, p2_results, parsed.framing, {
         verdict_path = "synthesis",
         p1_verdicts = provenance.verdict_vector(p1_results),
         p2_verdicts = provenance.verdict_vector(p2_results),

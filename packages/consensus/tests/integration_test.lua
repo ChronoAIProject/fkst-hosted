@@ -690,6 +690,27 @@ return {
     t.eq(#codex_calls(), 7)
   end,
 
+  test_synthesis_premise_refutation_raises_typed_reached_result = function()
+    mock_judgment_runtime()
+    mock_angle("teleology", "abstain", "The source premise may already be false.")
+    mock_angle("parsimony", "approve", "The requested change is otherwise small.")
+    mock_angle("fidelity", "abstain", "Repository evidence contradicts the premise.")
+    mock_rebuttal_defend("teleology", "abstain", "The source still contradicts the premise.")
+    mock_rebuttal_defend("parsimony", "approve", "The shape remains small.")
+    mock_rebuttal_defend("fidelity", "abstain", "The cited implementation already exists.")
+    mock_synthesis("premise-refuted: verified repository source proves the claimed missing feature exists")
+
+    local result = run_decide(proposal({ dedup_key = "proposal-42-v1/premise-refuted" }), opts("synthesis-premise-refuted"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "consensus_reached")
+    t.eq(result.raises[1].payload.decision, "reject")
+    t.eq(result.raises[1].payload.decision_reason, "premise-refuted")
+    t.eq(result.raises[1].payload.framing, "verified repository source proves the claimed missing feature exists")
+    t.eq(result.raises[1].payload.verdict_path, "synthesis")
+    t.eq(#codex_calls(), 7)
+  end,
+
   test_synthesis_reached_with_failed_angle_fails_closed_as_codex_failed = function()
     mock_judgment_runtime()
     mock_angle("teleology", "approve", "Teleology angle approves.")

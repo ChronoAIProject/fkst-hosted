@@ -31,13 +31,18 @@ function C.build_observe_comment_request(M, issue, proposal)
   }, issue.source_ref)
 end
 function C.build_result_comment_request(M, repo, issue_number, reached, state_name)
-  local marker = m_builders.result_marker(reached.proposal_id, reached.decision, reached.dedup_key)
+  local marker = m_builders.result_marker(reached.proposal_id, reached.decision, reached.dedup_key, reached.decision_reason)
   local canonical_state = state_name or "ready"
-  local effects = canonical_state == "ready" and "result-marker,ready-label,devloop-ready" or "result-marker,ready-label,dependency-hold"
+  local effects = canonical_state == "ready" and "result-marker,ready-label,devloop-ready"
+    or canonical_state == "blocked" and "result-marker,blocked-label,premise-refuted"
+    or "result-marker,ready-label,dependency-hold"
   local state_marker = M.state_marker(reached.proposal_id, canonical_state, tostring(reached.effect_version or reached.dedup_key), effects)
   local body_text = devloop_base.neutralize_untrusted_comment_text(reached.body or "")
   local verdict_summary = shared.build_verdict_summary(M, reached.angle_results)
-  local body = comment_strings.comment_string(M, "decision_prefix") .. tostring(reached.decision)
+  local display_decision = reached.decision == "reject"
+    and "decline: " .. tostring(reached.decision_reason)
+    or tostring(reached.decision)
+  local body = comment_strings.comment_string(M, "decision_prefix") .. display_decision
   if verdict_summary ~= nil then
     body = body .. "\n" .. verdict_summary
   end
@@ -70,8 +75,9 @@ function C.result_effects_complete(current, reached)
   if type(current) ~= "table" or type(reached) ~= "table" then
     return false
   end
-  return devloop_state.has_result_marker(current.comments, reached.proposal_id, reached.decision, reached.dedup_key)
-    and devloop_state.state_label_hint_matches(current.labels, "ready")
+  local state_name = reached.decision == "reject" and "blocked" or "ready"
+  return devloop_state.has_result_marker(current.comments, reached.proposal_id, reached.decision, reached.dedup_key, reached.decision_reason)
+    and devloop_state.state_label_hint_matches(current.labels, state_name)
 end
 
 function C.build_converge_round_comment_request(M, repo, issue_number, unresolved, round, marker_body, handoff)
