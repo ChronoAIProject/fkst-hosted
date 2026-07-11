@@ -186,6 +186,8 @@ local function observe_clean()
   return {
     schema_version = 1,
     generated_at_ms = now() * 1000,
+    truncated = { deliveries = false, dead_letters = false },
+    dead_letters = json.decode("[]"),
   }
 end
 
@@ -471,6 +473,34 @@ return {
     t.eq(sample.payload.dedup_key, "rollup-observe-sample/owner/repo/9")
     t.eq(sample.payload.replace_marker, "<!-- fkst:github-devloop-integration:rollup-observe-sample:v1")
     t.is_true(h.find_raise(result.raises, "devloop_rollup_ready") ~= nil)
+  end,
+
+  test_rollup_scan_stale_dead_letter_audit_starts_clean_head_soak = function()
+    mock_env("1", "auto")
+    mock_fetches()
+    mock_ahead(2)
+    mock_content_diff(true)
+    mock_pr_list({ number = 9 })
+    mock_integration_head("def456")
+    mock_rollup_pr_view()
+    local snapshot = observe_clean()
+    snapshot.queues = {
+      { queue = "devloop_ready", dlq = 1 },
+    }
+    snapshot.dead_letters = {
+      {
+        delivery_id = "dead-1",
+        queue = "devloop_ready",
+        dead_at_ms = snapshot.generated_at_ms - 1,
+        permanent = true,
+      },
+    }
+    t.mock_observe(snapshot)
+    local result = run_scan(opts("rollup-observe-stale-dead-letter", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    local sample = h.find_raise(result.raises, "github-proxy.github_pr_comment_request")
+    t.is_true(sample ~= nil)
+    t.is_true(tostring(sample.payload.body):find('status="clean"', 1, true) ~= nil)
   end,
 
   test_rollup_scan_observe_sample_request_is_stable_replace_in_place_across_polls = function()

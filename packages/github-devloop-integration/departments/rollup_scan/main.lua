@@ -171,7 +171,9 @@ local function act(event)
       repo,
       pr.number,
       integration_head,
-      rollup_health.observe_runtime_health(),
+      rollup_health.observe_promotion_health(
+        rollup_health.promotion_window_start_ms(rollup_pr.comments, integration_head)
+      ),
       now(),
       rollup_pr.comments
     )
