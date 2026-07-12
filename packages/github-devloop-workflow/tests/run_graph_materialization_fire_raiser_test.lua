@@ -248,7 +248,7 @@ local function mock_materialization_cycle(origin_comments, revived_state, pr_sta
 end
 
 local function mock_env()
-  for _ = 1, 8 do
+  for _ = 1, 9 do
     t.mock_command(devloop_base.read_env_command("FKST_GITHUB_REPO"), {
       stdout = repo,
       stderr = "",
@@ -289,7 +289,7 @@ local function mock_child_materialization()
 end
 
 local function mock_native_merge_observation()
-  mock_write_mode("1", 3)
+  mock_write_mode("1", 4)
   t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_UPSTREAM_BRANCH"), {
     stdout = upstream_branch, stderr = "", exit_code = 0,
   })
