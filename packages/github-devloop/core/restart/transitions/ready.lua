@@ -28,6 +28,14 @@ return function(M, h)
       external_wait_bound_minutes = 0,
     }),
     on_timeout = timeout("devloop_ready"),
+    receiver_activations = {
+      {
+        kind = "entry",
+        boundary = nil,
+        target = "implementing",
+        output_variant = "implementation_kicked_off",
+      },
+    },
     responsibility_signature = responsibility_signature({
       receiver_kind = "issue",
       driving_queue = "devloop_ready",
@@ -38,13 +46,6 @@ return function(M, h)
       phase_rank = devloop_state.stage_rank("ready"),
       lineage_keys = { "state.version", "source_ref", "actionable_epoch" },
       successors = {
-        {
-          state = "implementing",
-          output_variant = "implementation_kicked_off",
-          kind = "entry",
-          postcondition_family = "implementation_kickoff",
-          monotonic = true,
-        },
         {
           state = "dependency_wait",
           output_variant = "blocker_reappeared",

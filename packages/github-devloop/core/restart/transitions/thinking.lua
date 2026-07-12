@@ -50,6 +50,14 @@ return function(M, h)
       },
     }),
     on_timeout = timeout("consensus.proposal"),
+    receiver_activations = {
+      {
+        kind = "entry",
+        boundary = "devloop_reconcile",
+        target = "blocked",
+        output_variant = "issue_reconcile_true_stall",
+      },
+    },
     responsibility_signature = responsibility_signature({
       receiver_kind = "consensus-worker",
       driving_queue = "consensus.proposal",

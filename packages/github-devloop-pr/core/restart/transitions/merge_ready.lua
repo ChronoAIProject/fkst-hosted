@@ -36,6 +36,14 @@ return function(M, h)
       },
     }),
     on_timeout = timeout("devloop_merge_ready"),
+    receiver_activations = {
+      {
+        kind = "entry",
+        boundary = nil,
+        target = "merging",
+        output_variant = "handoff_to_merge_gate",
+      },
+    },
     responsibility_signature = responsibility_signature({
       receiver_kind = "merge-ready-handoff",
       driving_queue = "devloop_merge_ready",
@@ -46,13 +54,6 @@ return function(M, h)
       phase_rank = devloop_state.stage_rank("merge-ready"),
       lineage_keys = { "merge-ready.version", "merge-ready.pr", "merge-ready.head_sha", "merge-ready.review_dedup", "source_ref" },
       successors = {
-        {
-          state = "merging",
-          output_variant = "handoff_to_merge_gate",
-          kind = "entry",
-          postcondition_family = "merge_gate_handoff",
-          monotonic = true,
-        },
         {
           state = "blocked",
           output_variant = "fix_budget_exhausted",

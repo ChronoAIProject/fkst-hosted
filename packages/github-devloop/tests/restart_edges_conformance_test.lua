@@ -24,10 +24,8 @@ local expected_successor_kinds = {
   ["dependency_wait/blockers_still_open"] = "guard_boundary",
   ["dependency_wait/blockers_released"] = "guard_boundary",
   ["dependency_wait/dependency_resolver_stale"] = "guard_boundary",
-  ["impl-failed/retry-implementation"] = "entry",
   ["implementing/revision_published"] = "autonomous",
   ["implementing/revision_failed"] = "autonomous",
-  ["ready/implementation_kicked_off"] = "entry",
   ["ready/blocker_reappeared"] = "guard_boundary",
   ["ready/actionable_kickoff_timeout"] = "timeout",
   ["thinking/consensus-reached"] = "autonomous",
@@ -387,6 +385,9 @@ local function legacy_union_bytes(owner, rows, inventory)
         tuples[tuple_key(owner, row.from_state, successor.state, successor.output_variant)] = true
       end
     end
+    for _, activation in ipairs(row.receiver_activations or {}) do
+      tuples[tuple_key(owner, row.from_state, activation.target, activation.output_variant)] = true
+    end
   end
   for _, entry in ipairs(inventory) do
     tuples[tuple_key(owner, nil, entry.target, output_variant_from_id(entry.id))] = true
@@ -560,6 +561,26 @@ return {
     local before = legacy_union_bytes(owner, rows, entry_inventory)
     local after = extracted_union_bytes(owner, rows, entry_inventory)
     t.eq(after, before)
+  end,
+
+  test_thinking_same_target_autonomous_and_receiver_activation_edges_coexist = function()
+    local owner = core.restart_package_name
+    local rows = core.restart_transition_table()
+    local autonomous_by_id = {}
+    for _, edge in ipairs(restart_edges.extract_autonomous_edges(owner, rows)) do
+      autonomous_by_id[edge.id] = edge
+    end
+    local entry_by_id = {}
+    for _, edge in ipairs(restart_edges.extract_entry_edges(owner, entry_inventory, rows)) do
+      entry_by_id[edge.id] = edge
+    end
+
+    local stalled = autonomous_by_id[owner .. "/thinking/autonomous/consensus-stalled"]
+    local reconcile = entry_by_id[owner .. "/thinking/entry/issue_reconcile_true_stall"]
+    t.is_true(stalled ~= nil)
+    t.is_true(reconcile ~= nil)
+    t.eq(stalled.target, "blocked")
+    t.eq(reconcile.target, "blocked")
   end,
 
   test_restart_edges_do_not_read_to_states_or_override_explicit_kinds = function()

@@ -51,7 +51,7 @@ local expected_entries = {
     source_state = "merge-ready",
     source_boundary = nil,
     target = "merging",
-    field = "responsibility_signature.successors",
+    field = "receiver_activations",
   },
 }
 

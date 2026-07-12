@@ -39,14 +39,21 @@ local expected_entries = {
     source_state = "impl-failed",
     source_boundary = nil,
     target = "implementing",
-    field = "responsibility_signature.successors",
+    field = "receiver_activations",
   },
   ["github-devloop/ready/entry/implementation_kicked_off"] = {
     row_id = "ready",
     source_state = "ready",
     source_boundary = nil,
     target = "implementing",
-    field = "responsibility_signature.successors",
+    field = "receiver_activations",
+  },
+  ["github-devloop/thinking/entry/issue_reconcile_true_stall"] = {
+    row_id = "thinking",
+    source_state = "thinking",
+    source_boundary = "devloop_reconcile",
+    target = "blocked",
+    field = "receiver_activations",
   },
 }
 
@@ -269,6 +276,8 @@ local function assert_entry_shape(edges)
     assert_exact_keys(edge, edge_keys)
     if expected.source_state == nil then
       assert_exact_keys(edge.source, { boundary = true })
+    elseif expected.source_boundary ~= nil then
+      assert_exact_keys(edge.source, { state = true, boundary = true })
     else
       assert_exact_keys(edge.source, { state = true })
     end
@@ -335,6 +344,7 @@ return {
     t.eq(authored[2].id, "github-devloop/thinking/entry/execute_request")
     t.eq(authored[3].id, "github-devloop/impl-failed/entry/retry-implementation")
     t.eq(authored[4].id, "github-devloop/ready/entry/implementation_kicked_off")
+    t.eq(authored[5].id, "github-devloop/thinking/entry/issue_reconcile_true_stall")
 
     local repeated = restart_edges.extract_entry_edges(owner, entry_inventory, rows)
     assert_entry_shape(repeated)
@@ -396,5 +406,22 @@ return {
     assert_extract_fails("owner", { edge }, {})
 
     assert_extract_fails("owner", { valid_entry(), valid_entry() }, {})
+
+    -- receiver_activations (rows arg) negatives: exercise the new validate_receiver_activation
+    -- branches + the activation-path duplicate-id guard, mirroring the inventory negatives so a
+    -- weakened validator or a dropped duplicate-id guard fails closed instead of silently passing.
+    local function activation_row(activations)
+      return { from_state = "thinking", receiver_activations = activations }
+    end
+    assert_extract_fails("owner", {}, { activation_row("not-a-table") })
+    assert_extract_fails("owner", {}, { activation_row({ "not-a-table-activation" }) })
+    assert_extract_fails("owner", {}, { activation_row({ { kind = "autonomous", target = "blocked", output_variant = "x" } }) })
+    assert_extract_fails("owner", {}, { activation_row({ { kind = "entry", output_variant = "x" } }) })
+    assert_extract_fails("owner", {}, { activation_row({ { kind = "entry", target = "blocked" } }) })
+    assert_extract_fails("owner", {}, { activation_row({ { kind = "entry", boundary = "", target = "blocked", output_variant = "x" } }) })
+    assert_extract_fails("owner", {}, { activation_row({
+      { kind = "entry", target = "blocked", output_variant = "dup" },
+      { kind = "entry", target = "ready", output_variant = "dup" },
+    }) })
   end,
 }

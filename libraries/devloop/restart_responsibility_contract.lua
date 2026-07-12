@@ -209,9 +209,20 @@ end
 local function validate_successor_coverage(row, signature, errors)
   local state = state_name(row)
   local by_state = edge_by_state(signature)
+  local activated_states = {}
+  for _, activation in ipairs(row.receiver_activations or {}) do
+    if non_empty_string(activation.target) then
+      activated_states[activation.target] = true
+      -- symmetric to the successor rule: a receiver_activation target must be a declared
+      -- to_state, so a target/to_states mismatch is unrepresentable in either direction.
+      if not has_value(row.to_states or {}, activation.target) then
+        table.insert(errors, state .. ": receiver_activation target is not in row.to_states: " .. tostring(activation.target))
+      end
+    end
+  end
   local declared_seen = {}
   for _, next_state in ipairs(row.to_states or {}) do
-    if by_state[next_state] == nil then
+    if by_state[next_state] == nil and activated_states[next_state] ~= true then
       table.insert(errors, state .. ": responsibility_signature.successors missing row successor " .. tostring(next_state))
     end
   end
@@ -412,9 +423,14 @@ end
 local function validate_phase_monotonicity(M, row, signature, edges, errors)
   local state = state_name(row)
   local current_rank = tonumber(signature.phase_rank)
+  local by_state = edge_by_state(signature)
   for _, edge in ipairs(edges or {}) do
     local next_rank = M.stage_rank and M.stage_rank(edge.state) or nil
-    if current_rank ~= nil and next_rank ~= nil and next_rank < current_rank and edge.bump ~= true then
+    if by_state[edge.state] ~= nil
+      and current_rank ~= nil
+      and next_rank ~= nil
+      and next_rank < current_rank
+      and edge.bump ~= true then
       table.insert(errors, state .. ": backward successor requires generation bump: " .. tostring(edge.state))
     end
   end

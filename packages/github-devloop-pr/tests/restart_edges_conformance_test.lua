@@ -21,7 +21,6 @@ local expected_successor_kinds = {
   ["fixing/revision_published"] = "autonomous",
   ["fixing/revision_failed"] = "autonomous",
   ["fixing/fix_budget_exhausted"] = "autonomous",
-  ["merge-ready/handoff_to_merge_gate"] = "entry",
   ["merge-ready/fix_budget_exhausted"] = "autonomous",
   ["merging/merge-completed"] = "autonomous",
   ["merging/head-advanced"] = "autonomous",
@@ -387,6 +386,9 @@ local function legacy_union_bytes(owner, rows, inventory)
       for _, successor in ipairs(guard_boundary.successors) do
         tuples[tuple_key(owner, row.from_state, successor.state, successor.output_variant)] = true
       end
+    end
+    for _, activation in ipairs(row.receiver_activations or {}) do
+      tuples[tuple_key(owner, row.from_state, activation.target, activation.output_variant)] = true
     end
   end
   for _, entry in ipairs(inventory) do

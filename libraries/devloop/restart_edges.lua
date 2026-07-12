@@ -6,7 +6,6 @@ end
 
 local successor_kinds = {
   autonomous = true,
-  entry = true,
   guard_boundary = true,
   timeout = true,
 }
@@ -47,7 +46,36 @@ local function validate_responsibility_successor(successor)
     error("devloop.restart_edges: successor.output_variant must be a non-empty string")
   end
   if successor_kinds[successor.kind] ~= true then
-    error("devloop.restart_edges: successor.kind must be autonomous, guard_boundary, timeout, or entry")
+    error("devloop.restart_edges: successor.kind must be autonomous, guard_boundary, or timeout")
+  end
+end
+
+local function receiver_activations(row)
+  local activations = type(row) == "table" and row.receiver_activations or nil
+  if activations == nil then
+    return {}
+  end
+  if type(activations) ~= "table" then
+    error("devloop.restart_edges: receiver_activations must be a table")
+  end
+  return activations
+end
+
+local function validate_receiver_activation(activation)
+  if type(activation) ~= "table" then
+    error("devloop.restart_edges: receiver activation must be a table")
+  end
+  if activation.kind ~= "entry" then
+    error("devloop.restart_edges: receiver activation kind must be entry")
+  end
+  if activation.boundary ~= nil and not is_nonempty_string(activation.boundary) then
+    error("devloop.restart_edges: receiver activation boundary must be nil or a non-empty string")
+  end
+  if not is_nonempty_string(activation.target) then
+    error("devloop.restart_edges: receiver activation target must be a non-empty string")
+  end
+  if not is_nonempty_string(activation.output_variant) then
+    error("devloop.restart_edges: receiver activation output_variant must be a non-empty string")
   end
 end
 
@@ -143,28 +171,26 @@ function M.extract_entry_edges(owner, inventory, rows)
 
   for _, row in ipairs(rows) do
     local current_row_id = row_id(row)
-    for _, successor in ipairs(responsibility_successors(row, true)) do
-      validate_responsibility_successor(successor)
-      if successor.kind == "entry" then
-        local id = owner .. "/" .. current_row_id .. "/entry/" .. successor.output_variant
-        if seen_ids[id] then
-          error("devloop.restart_edges: duplicate edge id " .. id)
-        end
-        seen_ids[id] = true
-        table.insert(edges, {
-          id = id,
-          owner = owner,
-          row_id = current_row_id,
-          kind = "entry",
-          source = { state = current_row_id, boundary = nil },
-          target = successor.state,
-          provenance = {
-            owner = owner,
-            row = current_row_id,
-            field = "responsibility_signature.successors",
-          },
-        })
+    for _, activation in ipairs(receiver_activations(row)) do
+      validate_receiver_activation(activation)
+      local id = owner .. "/" .. current_row_id .. "/entry/" .. activation.output_variant
+      if seen_ids[id] then
+        error("devloop.restart_edges: duplicate edge id " .. id)
       end
+      seen_ids[id] = true
+      table.insert(edges, {
+        id = id,
+        owner = owner,
+        row_id = current_row_id,
+        kind = "entry",
+        source = { state = current_row_id, boundary = activation.boundary },
+        target = activation.target,
+        provenance = {
+          owner = owner,
+          row = current_row_id,
+          field = "receiver_activations",
+        },
+      })
     end
   end
   return edges
