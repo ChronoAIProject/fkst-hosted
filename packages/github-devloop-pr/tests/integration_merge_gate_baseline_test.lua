@@ -210,14 +210,15 @@ return {
     t.eq(fact.gate_baseline_sha, event.gate_baseline_sha)
     t.eq(m_facts.merge_gate_fix_fact({ old_marker, new_marker }, event.proposal_id, event.version).gate_baseline_sha, event.gate_baseline_sha)
 
-    local missing, superseded = m_facts.merge_gate_fix_fact({ old_marker, new_marker }, event.proposal_id, event.version, {
+    local canonical, canonical_matches, superseded = m_facts.merge_gate_fix_fact({ old_marker, new_marker }, event.proposal_id, event.version, {
       review_proposal_id = event.review_proposal_id,
       review_dedup_key = event.review_dedup_key,
       reviewed_head_sha = event.reviewed_head_sha,
       gate_baseline_sha = "281c4f9e",
       match_gate_baseline_sha = true,
     })
-    t.eq(missing, nil)
+    t.eq(canonical.gate_baseline_sha, event.gate_baseline_sha)
+    t.eq(canonical_matches, false)
     t.eq(superseded, true)
   end,
 
