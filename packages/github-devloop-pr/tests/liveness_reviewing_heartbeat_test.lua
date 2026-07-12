@@ -281,6 +281,7 @@ return {
     t.is_true(comment ~= nil)
     local delivery_dedup_key = comment.payload.handoff.review_delivery_dedup_key
     t.eq(comment.payload.dedup_key, delivery_dedup_key)
+    t.is_true(#delivery_dedup_key <= devloop_base._max_key_len)
     local review_id = devloop_base.pr_review_proposal_id(repo, 7, review_version, "def456")
     t.eq(
       devloop_base.pr_review_proposal_id_from_redrive_delivery_dedup_key(delivery_dedup_key),

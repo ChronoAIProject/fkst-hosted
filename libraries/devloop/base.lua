@@ -294,21 +294,44 @@ function C.pr_review_consensus_dedup_key(review_proposal_id)
   return "consensus:" .. C.pr_review_proposal_dedup_key(review_proposal_id)
 end
 
+local function pr_review_redrive_generation_parts(review_repo, generation_key)
+  if not is_path_safe_key(generation_key, max_dedup_len) then
+    return nil
+  end
+  local generation_prefix, heartbeat_state, epoch_text = generation_key:match(
+    "^(restart%-liveness%-v2.-)/reviewing/reviewing%.active/live_defer_heartbeat%-v1/review%-converge%-round%-(%a+)/([%d%.]+)$")
+  local issue_proposal_id = generation_prefix
+    and generation_prefix:match("^restart%-liveness%-v2/(github%-devloop/issue/.+)$") or nil
+  local issue_repo = issue_proposal_id and base_ids.parse_proposal_id(issue_proposal_id) or nil
+  local heartbeat_code = ({ missing = "m", stale = "s" })[heartbeat_state]
+  local epoch_ms = tonumber(epoch_text)
+  if (generation_prefix ~= "restart-liveness-v2"
+      and (issue_repo == nil or C.safe_pr_review_repo_segment(issue_repo) ~= review_repo))
+    or heartbeat_code == nil
+    or epoch_ms == nil
+    or epoch_ms < 1
+    or epoch_ms ~= math.floor(epoch_ms) then
+    return nil
+  end
+  return heartbeat_code, string.format("%.0f", epoch_ms)
+end
+
 function C.pr_review_redrive_delivery_dedup_key(review_proposal_id, generation_key, attempt)
-  if C.parse_pr_review_proposal_id(review_proposal_id) == nil then
+  local review_repo = C.parse_pr_review_proposal_id(review_proposal_id)
+  if review_repo == nil then
     error("github-devloop: invalid PR review proposal id")
   end
-  if not is_path_safe_key(generation_key, max_dedup_len) then
-    error("github-devloop: invalid PR review redrive generation")
+  local heartbeat_code, epoch_ms = pr_review_redrive_generation_parts(review_repo, generation_key)
+  if heartbeat_code == nil then
+    error("github-devloop: invalid PR review redrive generation: " .. tostring(generation_key))
   end
   local round = tonumber(attempt)
   if round == nil or round < 1 or round ~= math.floor(round) then
     error("github-devloop: invalid PR review redrive attempt")
   end
-  local key = tostring(review_proposal_id)
-    .. "/r/" .. tostring(generation_key)
+  local key = tostring(review_proposal_id) .. "/r/" .. heartbeat_code .. "/" .. epoch_ms
     .. "/attempt/" .. tostring(round)
-  if not is_path_safe_key(key, max_dedup_len) then
+  if not is_path_safe_key(key, max_key_len) then
     error("github-devloop: PR review redrive delivery dedup exceeds the consensus key bound")
   end
   return key
@@ -323,12 +346,13 @@ local function parse_pr_review_proposal_dedup_key(dedup_key)
   if review_proposal ~= nil and C.parse_pr_review_proposal_id(review_proposal) ~= nil then
     return review_proposal, C.pr_review_proposal_dedup_key(review_proposal), "canonical"
   end
-  local generation_key, attempt
-  review_proposal, generation_key, attempt = without_loop:match(
-    "^(github%-devloop/pr%-review/[^/]+/%d+/[^/]+/[^/]+)/r/(.+)/attempt/(%d+)$"
+  local heartbeat_code, epoch_ms, attempt
+  review_proposal, heartbeat_code, epoch_ms, attempt = without_loop:match(
+    "^(github%-devloop/pr%-review/[^/]+/%d+/[^/]+/[^/]+)/r/([ms])/(%d+)/attempt/(%d+)$"
   )
   if review_proposal == nil
-    or not is_path_safe_key(generation_key, max_dedup_len)
+    or not is_path_safe_key(without_loop, max_key_len)
+    or epoch_ms:match("^[1-9]%d*$") == nil
     or tonumber(attempt) == nil
     or tonumber(attempt) < 1
     or C.parse_pr_review_proposal_id(review_proposal) == nil then

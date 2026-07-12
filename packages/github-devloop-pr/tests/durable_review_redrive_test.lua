@@ -181,10 +181,11 @@ return {
     local canonical_dedup = devloop_base.pr_review_proposal_dedup_key(review_id)
     local redrive_dedup = devloop_base.pr_review_redrive_delivery_dedup_key(
       review_id,
-      "restart-liveness-v2/reviewing/reviewing.active/state-entry/1",
+      "restart-liveness-v2/reviewing/reviewing.active/live_defer_heartbeat-v1/review-converge-round-missing/1783840000000.0",
       1
     )
     t.is_true(canonical_dedup ~= redrive_dedup)
+    t.is_true(#redrive_dedup <= devloop_base._max_key_len)
 
     local root = read_command("mktemp -d " .. shell_quote("/tmp/fkst-review-redrive.XXXXXX")):gsub("%s+$", "")
     local active_pid = nil

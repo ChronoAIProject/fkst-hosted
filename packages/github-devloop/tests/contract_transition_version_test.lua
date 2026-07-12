@@ -1,6 +1,5 @@
 local h = require("tests.devloop_core_helpers")
 local transition_version = require("contract.transition_version")
-local strings = require("contract.strings")
 local devloop_base = require("devloop.base")
 local core = h.core
 local t = h.t
@@ -296,28 +295,35 @@ return {
   end,
 
   test_pr_review_redrive_delivery_dedup_canonicalizes_to_logical_review = function()
-    local review = devloop_base.pr_review_proposal_id("owner/repo", 7, "ready/v1", "def456")
+    local review = devloop_base.pr_review_proposal_id(
+      "ChronoAIProject/fkst-packages",
+      2198,
+      "ready/github-devloop/issue/ChronoAIProject/fkst-packages/2196/intake/2750608298/review-loop/1/fix/1/fix/2/fix/3",
+      "381b34d281a1da6b6a7ef224f4c588309396b544"
+    )
     local base = devloop_base.pr_review_consensus_dedup_key(review)
+    local generation_prefix = "restart-liveness-v2/reviewing/reviewing.active/live_defer_heartbeat-v1/review-converge-round-"
     local redrive = devloop_base.pr_review_redrive_delivery_dedup_key(
       review,
-      "restart-liveness-v2/reviewing/reviewing.active/state-entry/1",
+      generation_prefix .. "missing/1798144657406.0",
       2
     )
 
-    t.is_true(#redrive <= devloop_base._max_dedup_len)
+    t.is_true(#redrive <= devloop_base._max_key_len)
     t.eq(devloop_base.pr_review_proposal_id_from_redrive_delivery_dedup_key(redrive), review)
     t.eq(devloop_base.pr_review_proposal_id_from_redrive_delivery_dedup_key(review .. "/review"), nil)
     t.eq(devloop_base.pr_review_proposal_id_from_redrive_delivery_dedup_key(redrive .. "/loop/1"), nil)
     t.eq(devloop_base.canonical_pr_review_consensus_dedup_key("consensus:" .. redrive), base)
     t.eq(devloop_base.canonical_pr_review_consensus_dedup_key("consensus:" .. redrive .. "/loop/1"), base)
-    t.is_true(redrive:find("restart-liveness-v2/reviewing/reviewing.active/state-entry/1", 1, true) ~= nil)
-
-    local colliding_generation = "restart-liveness-v2/reviewing/reviewing.active/state-entry/1788062342930"
-    local original_generation = "restart-liveness-v2/reviewing/reviewing.active/state-entry/1798144657406"
-    t.eq(strings.decimal_checksum(original_generation), strings.decimal_checksum(colliding_generation))
+    t.is_true(redrive:find("/r/m/1798144657406/attempt/2", 1, true) ~= nil)
+    t.is_nil(redrive:find("restart-liveness-v2", 1, true))
     t.is_true(
-      devloop_base.pr_review_redrive_delivery_dedup_key(review, original_generation, 2)
-        ~= devloop_base.pr_review_redrive_delivery_dedup_key(review, colliding_generation, 2)
+      devloop_base.pr_review_redrive_delivery_dedup_key(review, generation_prefix .. "missing/1798144657406.0", 2)
+        ~= devloop_base.pr_review_redrive_delivery_dedup_key(review, generation_prefix .. "stale/1798144657406.0", 2)
+    )
+    t.is_true(
+      devloop_base.pr_review_redrive_delivery_dedup_key(review, generation_prefix .. "missing/1798144657406.0", 2)
+        ~= devloop_base.pr_review_redrive_delivery_dedup_key(review, generation_prefix .. "missing/1788062342930.0", 2)
     )
   end,
 
