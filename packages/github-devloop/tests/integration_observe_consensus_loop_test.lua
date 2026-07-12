@@ -4,6 +4,7 @@ local forks = require("devloop.forks")
 local conv_rounds = require("devloop.convergence.rounds")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local m_builders = require("devloop.markers.builders")
+local devloop_base = require("devloop.base")
 local t = h.t
 local core = h.core
 local action_label = h.action_label
@@ -145,6 +146,37 @@ return {
     t.eq(find_raise(result.raises, "github-proxy.github_issue_create_request"), nil)
     t.eq(find_raise(result.raises, "consensus.proposal"), nil)
     t.eq(count_calls("codex exec"), 0)
+  end,
+
+  test_liveness_scan_non_whitelisted_thinking_issue_skips_redrive = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local marker_version = "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
+      {
+        body = core.state_marker(proposal_id, "thinking", marker_version),
+        created_at = "2026-06-03T01:02:03Z",
+      },
+    }, { "fkst-test-bot" }, "human")
+    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_REPO"), {
+      stdout = "owner/repo", stderr = "", exit_code = 0,
+    })
+    t.mock_command(core.gh_issue_list_observe_cmd("owner/repo"), {
+      stdout = '[{"number":42,"state":"open","updated_at":"2026-06-03T01:02:03Z"}]\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = h.run_department("departments/liveness_scan/main.lua", {
+      queue = "devloop_liveness_tick",
+      payload = { schema = "github-devloop.tick.v1" },
+      ts = "2026-06-03T01:32:03Z",
+    }, opts("liveness-scan-non-whitelisted-thinking-redrive", {
+      FKST_GITHUB_AUTHORIZED_LOGINS = "trusted-human",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(find_raise(result.raises, "consensus.proposal"), nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_comment_request"), nil)
   end,
 
   test_observe_authorized_other_author_after_grace_raises_fork_request_only = function()
