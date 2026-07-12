@@ -279,6 +279,9 @@ local function assert_edges(actual, expected, empty_rows)
     if expected_edge.cas_variant ~= nil then
       edge_keys.cas_variant = true
     end
+    if expected_edge.pending_order ~= nil then
+      edge_keys.pending_order = true
+    end
     assert_exact_keys(edge, edge_keys)
     assert_exact_keys(edge.source, { state = true })
     assert_exact_keys(edge.provenance, { owner = true, row = true, field = true })
@@ -291,6 +294,7 @@ local function assert_edges(actual, expected, empty_rows)
     t.eq(edge.target, expected_edge.target)
     t.eq(edge.cas_policy_id, expected_edge.cas_policy_id)
     t.eq(edge.cas_variant, expected_edge.cas_variant)
+    assert_same_value(edge.pending_order, expected_edge.pending_order)
     assert_valid_cas(edge)
     t.eq(edge.provenance.owner, expected_edge.provenance.owner)
     t.eq(edge.provenance.row, expected_edge.provenance.row)
@@ -561,6 +565,9 @@ return {
     assert_successor_kind_partition(rows)
     local expected, empty_rows = expected_edges(owner, rows)
     for _, edge in ipairs(expected) do
+      if edge.id == owner .. "/thinking/autonomous/consensus-reached" then
+        edge.pending_order = { participates = true, predecessor_state = "thinking" }
+      end
       if edge.id == owner .. "/thinking/autonomous/consensus-reached-dependency-held" then
         edge.cas_policy_id = "cas.legacy_consensus_result_v1"
         edge.cas_variant = "thinking_to_dependency_wait"

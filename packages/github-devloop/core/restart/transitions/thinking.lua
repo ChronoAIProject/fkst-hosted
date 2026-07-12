@@ -76,6 +76,7 @@ return function(M, h)
           cas_policy_id = "cas.legacy_consensus_result_v1",
           cas_variant = "thinking_to_ready",
           kind = "autonomous",
+          pending_order = { participates = true, predecessor_state = "thinking" },
           postcondition_family = "issue-consensus",
           monotonic = true,
         },

@@ -65,6 +65,23 @@ local function attach_cas_metadata(edge, declaration, context)
   end
 end
 
+local function attach_pending_order(edge, declaration, context)
+  local pending_order = declaration.pending_order
+  if pending_order == nil then
+    return
+  end
+  if type(pending_order) ~= "table" then
+    error("devloop.restart_edges: " .. context .. ".pending_order must be a table")
+  end
+  if type(pending_order.participates) ~= "boolean" then
+    error("devloop.restart_edges: " .. context .. ".pending_order.participates must be a boolean")
+  end
+  if pending_order.participates and not is_nonempty_string(pending_order.predecessor_state) then
+    error("devloop.restart_edges: " .. context .. ".pending_order.predecessor_state must be a non-empty string when participating")
+  end
+  edge.pending_order = pending_order
+end
+
 local function receiver_activations(row)
   local activations = type(row) == "table" and row.receiver_activations or nil
   if activations == nil then
@@ -446,6 +463,7 @@ function M.extract_autonomous_edges(owner, rows)
           },
         }
         attach_cas_metadata(edge, successor, "autonomous successor")
+        attach_pending_order(edge, successor, "autonomous successor")
         table.insert(edges, edge)
       end
     end
