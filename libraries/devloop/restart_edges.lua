@@ -54,8 +54,8 @@ local function validate_responsibility_successor(successor)
   if successor_kinds[successor.kind] ~= true then
     error("devloop.restart_edges: successor.kind must be autonomous, guard_boundary, or timeout")
   end
-  if successor.kind ~= "autonomous" then
-    reject_unsupported_cas_metadata(successor, successor.kind)
+  if successor.kind == "timeout" then
+    reject_unsupported_cas_metadata(successor, "timeout")
   end
 end
 
@@ -482,7 +482,7 @@ function M.extract_guard_boundary_edges(owner, rows)
           error("devloop.restart_edges: duplicate edge id " .. id)
         end
         seen_ids[id] = true
-        table.insert(edges, {
+        local edge = {
           id = id,
           owner = owner,
           row_id = current_row_id,
@@ -494,7 +494,9 @@ function M.extract_guard_boundary_edges(owner, rows)
             row = current_row_id,
             field = "responsibility_signature.successors",
           },
-        })
+        }
+        attach_cas_metadata(edge, successor, "guard_boundary edge")
+        table.insert(edges, edge)
       end
     end
 
@@ -524,8 +526,9 @@ function M.extract_guard_boundary_edges(owner, rows)
           if successor.kind ~= nil and successor.kind ~= "guard_boundary" and successor.kind ~= "timeout" then
             error("devloop.restart_edges: guard boundary successor.kind must be guard_boundary, timeout, or nil")
           end
-          local successor_kind = successor.kind == "timeout" and "timeout" or "guard_boundary"
-          reject_unsupported_cas_metadata(successor, successor_kind)
+          if successor.kind == "timeout" then
+            reject_unsupported_cas_metadata(successor, "timeout")
+          end
 
           if successor.kind ~= "timeout" then
             local id = owner .. "/" .. current_row_id .. "/guard_boundary/" .. guard_boundary.name .. "/" .. successor.output_variant
@@ -533,7 +536,7 @@ function M.extract_guard_boundary_edges(owner, rows)
               error("devloop.restart_edges: duplicate edge id " .. id)
             end
             seen_ids[id] = true
-            table.insert(edges, {
+            local edge = {
               id = id,
               owner = owner,
               row_id = current_row_id,
@@ -545,7 +548,9 @@ function M.extract_guard_boundary_edges(owner, rows)
                 row = current_row_id,
                 field = "guard_boundaries",
               },
-            })
+            }
+            attach_cas_metadata(edge, successor, "guard_boundary edge")
+            table.insert(edges, edge)
           end
         end
       end
@@ -623,8 +628,9 @@ function M.extract_timeout_edges(owner, rows)
           if successor.kind ~= nil and successor.kind ~= "guard_boundary" and successor.kind ~= "timeout" then
             error("devloop.restart_edges: guard boundary successor.kind must be guard_boundary, timeout, or nil")
           end
-          local successor_kind = successor.kind == "timeout" and "timeout" or "guard_boundary"
-          reject_unsupported_cas_metadata(successor, successor_kind)
+          if successor.kind == "timeout" then
+            reject_unsupported_cas_metadata(successor, "timeout")
+          end
           if successor.kind == "timeout" then
             insert_timeout_edge(successor, guard_boundary.name, "guard_boundaries")
           end

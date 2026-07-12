@@ -46,6 +46,15 @@ local expected_real_cas_by_id = {
   },
 }
 
+local expected_guard_boundary_cas_by_id = {
+  ["github-devloop/awaiting-pr/guard_boundary/child_pr_merged"] =
+    { cas_policy_id = "cas.legacy_awaiting_pr_v1", cas_variant = "awaiting_pr_to_merged" },
+  ["github-devloop/awaiting-pr/guard_boundary/child_pr_closed_unmerged_replaced"] =
+    { cas_policy_id = "cas.legacy_awaiting_pr_v1", cas_variant = "awaiting_pr_to_ready" },
+  ["github-devloop/awaiting-pr/guard_boundary/child_pr_not_merged"] =
+    { cas_policy_id = "cas.legacy_awaiting_pr_v1", cas_variant = "awaiting_pr_to_blocked" },
+}
+
 local function key_set(keys)
   local out = {}
   for _, key in ipairs(keys) do
@@ -158,6 +167,11 @@ local function expected_guard_boundary_edges(owner, rows)
             field = "responsibility_signature.successors",
           },
         })
+        local expected_cas = expected_guard_boundary_cas_by_id[expected[#expected].id]
+        if expected_cas ~= nil then
+          expected[#expected].cas_policy_id = expected_cas.cas_policy_id
+          expected[#expected].cas_variant = expected_cas.cas_variant
+        end
       end
     end
     if row.guard_boundaries ~= nil then
@@ -297,7 +311,6 @@ end
 
 local function assert_guard_boundary_edges(actual, expected, rows_without_boundaries)
   t.eq(#actual, #expected)
-  local edge_keys = key_set(structural_fields)
   local seen_ids = {}
   local seen_edges = {}
   local seen_sources = {}
@@ -305,6 +318,9 @@ local function assert_guard_boundary_edges(actual, expected, rows_without_bounda
   local counts_by_row = {}
   for index, expected_edge in ipairs(expected) do
     local edge = actual[index]
+    local edge_keys = key_set(structural_fields)
+    if expected_edge.cas_policy_id ~= nil then edge_keys.cas_policy_id = true end
+    if expected_edge.cas_variant ~= nil then edge_keys.cas_variant = true end
     assert_exact_keys(edge, edge_keys)
     if expected_edge.source.boundary == nil then
       assert_exact_keys(edge.source, { state = true })
@@ -319,6 +335,8 @@ local function assert_guard_boundary_edges(actual, expected, rows_without_bounda
     t.eq(edge.source.state, expected_edge.source.state)
     t.eq(edge.source.boundary, expected_edge.source.boundary)
     t.eq(edge.target, expected_edge.target)
+    t.eq(edge.cas_policy_id, expected_edge.cas_policy_id)
+    t.eq(edge.cas_variant, expected_edge.cas_variant)
     t.eq(edge.provenance.owner, expected_edge.provenance.owner)
     t.eq(edge.provenance.row, expected_edge.provenance.row)
     t.eq(edge.provenance.field, expected_edge.provenance.field)

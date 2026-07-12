@@ -91,6 +91,25 @@ local function canonicalization_entry()
   }
 end
 
+local function responsibility_row(successors)
+  return {
+    from_state = "from",
+    responsibility_signature = { successors = successors },
+  }
+end
+
+local function guard_boundaries_row(successors)
+  return {
+    from_state = "from",
+    guard_boundaries = {
+      {
+        name = "synthetic_guard",
+        successors = successors,
+      },
+    },
+  }
+end
+
 return {
   test_entry_cas_metadata_is_optional_and_copied_from_both_declaration_branches = function()
     local with_cas = inventory_entry()
@@ -204,44 +223,102 @@ return {
     end
   end,
 
-  test_cas_metadata_fails_closed_on_unsupported_edge_kinds = function()
-    local guard_row = {
-      from_state = "from",
-      responsibility_signature = {
-        successors = {
-          {
-            state = "to",
-            output_variant = "guarded",
-            kind = "guard_boundary",
-            cas_policy_id = "cas.unsupported_v1",
-          },
-        },
+  test_guard_boundary_cas_metadata_is_optional_and_copied_from_both_declaration_branches = function()
+    local responsibility = responsibility_row({
+      {
+        state = "with-cas",
+        output_variant = "responsibility-with-cas",
+        kind = "guard_boundary",
+        cas_policy_id = "cas.responsibility_v1",
+        cas_variant = "responsibility_variant",
       },
-    }
-    assert_error_contains(function()
-      restart_edges.extract_autonomous_edges("owner", { guard_row })
-    end, "cas_policy_id/cas_variant not supported on guard_boundary edges")
-    assert_error_contains(function()
-      restart_edges.extract_guard_boundary_edges("owner", { guard_row })
-    end, "cas_policy_id/cas_variant not supported on guard_boundary edges")
-
-    local timeout_row = {
-      from_state = "from",
-      actionable_epoch = { source = "state_entry:v1" },
-      responsibility_signature = {
-        successors = {
-          {
-            state = "to",
-            output_variant = "timed_out",
-            kind = "timeout",
-            cas_variant = "unsupported",
-          },
-        },
+      { state = "without-cas", output_variant = "responsibility-without-cas", kind = "guard_boundary" },
+    })
+    local guard_boundaries = guard_boundaries_row({
+      {
+        state = "with-cas",
+        output_variant = "array-with-cas",
+        kind = "guard_boundary",
+        cas_policy_id = "cas.array_v1",
+        cas_variant = "array_variant",
       },
-    }
-    assert_error_contains(function()
-      restart_edges.extract_timeout_edges("owner", { timeout_row })
-    end, "cas_policy_id/cas_variant not supported on timeout edges")
+      { state = "without-cas", output_variant = "array-without-cas" },
+    })
 
+    local edges = restart_edges.extract_guard_boundary_edges("owner", { responsibility, guard_boundaries })
+
+    t.eq(edges[1].cas_policy_id, "cas.responsibility_v1")
+    t.eq(edges[1].cas_variant, "responsibility_variant")
+    t.eq(has_key(edges[2], "cas_policy_id"), false)
+    t.eq(has_key(edges[2], "cas_variant"), false)
+    t.eq(edges[3].cas_policy_id, "cas.array_v1")
+    t.eq(edges[3].cas_variant, "array_variant")
+    t.eq(has_key(edges[4], "cas_policy_id"), false)
+    t.eq(has_key(edges[4], "cas_variant"), false)
+    t.eq(#restart_edges.extract_timeout_edges("owner", { responsibility, guard_boundaries }), 0)
+  end,
+
+  test_guard_boundary_cas_metadata_fails_closed_on_empty_or_non_string_values_in_both_branches = function()
+    local invalid_values = {
+      { field = "cas_policy_id", value = "" },
+      { field = "cas_policy_id", value = 1 },
+      { field = "cas_variant", value = "" },
+      { field = "cas_variant", value = false },
+    }
+    for _, invalid in ipairs(invalid_values) do
+      local responsibility_successor = {
+        state = "to",
+        output_variant = "responsibility-invalid",
+        kind = "guard_boundary",
+      }
+      responsibility_successor[invalid.field] = invalid.value
+      assert_error_contains(function()
+        restart_edges.extract_guard_boundary_edges("owner", {
+          responsibility_row({ responsibility_successor }),
+        })
+      end, "must be a non-empty string")
+
+      local array_successor = {
+        state = "to",
+        output_variant = "array-invalid",
+        kind = "guard_boundary",
+      }
+      array_successor[invalid.field] = invalid.value
+      assert_error_contains(function()
+        restart_edges.extract_guard_boundary_edges("owner", {
+          guard_boundaries_row({ array_successor }),
+        })
+      end, "must be a non-empty string")
+    end
+  end,
+
+  test_timeout_cas_metadata_remains_unsupported_in_both_declaration_branches = function()
+    local responsibility = responsibility_row({
+      {
+        state = "to",
+        output_variant = "responsibility-timeout",
+        kind = "timeout",
+        cas_variant = "unsupported",
+      },
+    })
+    local guard_boundaries = guard_boundaries_row({
+      {
+        state = "to",
+        output_variant = "array-timeout",
+        kind = "timeout",
+        cas_policy_id = "cas.unsupported_v1",
+      },
+    })
+    for _, extractor in ipairs({
+      restart_edges.extract_guard_boundary_edges,
+      restart_edges.extract_timeout_edges,
+    }) do
+      assert_error_contains(function()
+        extractor("owner", { responsibility })
+      end, "cas_policy_id/cas_variant not supported on timeout edges")
+      assert_error_contains(function()
+        extractor("owner", { guard_boundaries })
+      end, "cas_policy_id/cas_variant not supported on timeout edges")
+    end
   end,
 }
