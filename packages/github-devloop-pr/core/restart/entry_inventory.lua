@@ -25,6 +25,7 @@ return {
       boundary = "github-devloop-pr.devloop_reviewing",
     },
     target = "reviewing",
+    cas_policy_id = "cas.legacy_review_activation_handoff_v1",
     provenance = {
       owner = "github-devloop-pr",
       row = "reviewing",
@@ -41,6 +42,7 @@ return {
       boundary = "consensus.consensus_converge",
     },
     target = "reviewing",
+    cas_policy_id = "cas.legacy_review_loop_safe_v1",
     provenance = {
       owner = "github-devloop-pr",
       row = "reviewing",

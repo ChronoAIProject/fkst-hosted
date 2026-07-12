@@ -56,6 +56,8 @@ return function(M, h)
         boundary = "devloop_reconcile",
         target = "blocked",
         output_variant = "issue_reconcile_true_stall",
+        cas_policy_id = "cas.legacy_issue_reconcile_v1",
+        cas_variant = "thinking_to_blocked",
       },
     },
     responsibility_signature = responsibility_signature({

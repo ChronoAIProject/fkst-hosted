@@ -38,6 +38,12 @@ local function responsibility_successors(row, required)
   return successors
 end
 
+local function reject_unsupported_cas_metadata(declaration, kind)
+  if declaration.cas_policy_id ~= nil or declaration.cas_variant ~= nil then
+    error("devloop.restart_edges: cas_policy_id/cas_variant not supported on " .. kind .. " edges")
+  end
+end
+
 local function validate_responsibility_successor(successor)
   if type(successor) ~= "table" or not is_nonempty_string(successor.state) then
     error("devloop.restart_edges: successor.state must be a non-empty string")
@@ -48,20 +54,23 @@ local function validate_responsibility_successor(successor)
   if successor_kinds[successor.kind] ~= true then
     error("devloop.restart_edges: successor.kind must be autonomous, guard_boundary, or timeout")
   end
+  if successor.kind ~= "autonomous" then
+    reject_unsupported_cas_metadata(successor, successor.kind)
+  end
 end
 
-local function attach_autonomous_cas_metadata(edge, successor)
-  if successor.cas_policy_id ~= nil then
-    if not is_nonempty_string(successor.cas_policy_id) then
-      error("devloop.restart_edges: autonomous successor.cas_policy_id must be a non-empty string")
+local function attach_cas_metadata(edge, declaration, context)
+  if declaration.cas_policy_id ~= nil then
+    if not is_nonempty_string(declaration.cas_policy_id) then
+      error("devloop.restart_edges: " .. context .. ".cas_policy_id must be a non-empty string")
     end
-    edge.cas_policy_id = successor.cas_policy_id
+    edge.cas_policy_id = declaration.cas_policy_id
   end
-  if successor.cas_variant ~= nil then
-    if not is_nonempty_string(successor.cas_variant) then
-      error("devloop.restart_edges: autonomous successor.cas_variant must be a non-empty string")
+  if declaration.cas_variant ~= nil then
+    if not is_nonempty_string(declaration.cas_variant) then
+      error("devloop.restart_edges: " .. context .. ".cas_variant must be a non-empty string")
     end
-    edge.cas_variant = successor.cas_variant
+    edge.cas_variant = declaration.cas_variant
   end
 end
 
@@ -166,7 +175,7 @@ function M.extract_entry_edges(owner, inventory, rows)
     end
     seen_ids[authored.id] = true
 
-    table.insert(edges, {
+    local edge = {
       id = authored.id,
       owner = authored.owner,
       row_id = authored.row_id,
@@ -181,7 +190,9 @@ function M.extract_entry_edges(owner, inventory, rows)
         row = provenance.row,
         field = provenance.field,
       },
-    })
+    }
+    attach_cas_metadata(edge, authored, "entry edge")
+    table.insert(edges, edge)
   end
 
   for _, row in ipairs(rows) do
@@ -193,7 +204,7 @@ function M.extract_entry_edges(owner, inventory, rows)
         error("devloop.restart_edges: duplicate edge id " .. id)
       end
       seen_ids[id] = true
-      table.insert(edges, {
+      local edge = {
         id = id,
         owner = owner,
         row_id = current_row_id,
@@ -205,7 +216,9 @@ function M.extract_entry_edges(owner, inventory, rows)
           row = current_row_id,
           field = "receiver_activations",
         },
-      })
+      }
+      attach_cas_metadata(edge, activation, "entry receiver activation")
+      table.insert(edges, edge)
     end
   end
   return edges
@@ -237,6 +250,7 @@ function M.extract_operator_reentry_edges(owner, inventory)
     if authored.kind ~= "operator_reentry" then
       error("devloop.restart_edges: operator reentry edge kind must be operator_reentry")
     end
+    reject_unsupported_cas_metadata(authored, "operator_reentry")
 
     local source = authored.source
     if type(source) ~= "table" then
@@ -335,6 +349,7 @@ function M.extract_canonicalization_edges(owner, inventory)
     if authored.kind ~= "canonicalization" then
       error("devloop.restart_edges: canonicalization edge kind must be canonicalization")
     end
+    reject_unsupported_cas_metadata(authored, "canonicalization")
 
     local source = authored.source
     if type(source) ~= "table" then
@@ -438,7 +453,7 @@ function M.extract_autonomous_edges(owner, rows)
             field = "responsibility_signature.successors",
           },
         }
-        attach_autonomous_cas_metadata(edge, successor)
+        attach_cas_metadata(edge, successor, "autonomous successor")
         table.insert(edges, edge)
       end
     end
@@ -508,6 +523,8 @@ function M.extract_guard_boundary_edges(owner, rows)
           if successor.kind ~= nil and successor.kind ~= "guard_boundary" and successor.kind ~= "timeout" then
             error("devloop.restart_edges: guard boundary successor.kind must be guard_boundary, timeout, or nil")
           end
+          local successor_kind = successor.kind == "timeout" and "timeout" or "guard_boundary"
+          reject_unsupported_cas_metadata(successor, successor_kind)
 
           if successor.kind ~= "timeout" then
             local id = owner .. "/" .. current_row_id .. "/guard_boundary/" .. guard_boundary.name .. "/" .. successor.output_variant
@@ -605,6 +622,8 @@ function M.extract_timeout_edges(owner, rows)
           if successor.kind ~= nil and successor.kind ~= "guard_boundary" and successor.kind ~= "timeout" then
             error("devloop.restart_edges: guard boundary successor.kind must be guard_boundary, timeout, or nil")
           end
+          local successor_kind = successor.kind == "timeout" and "timeout" or "guard_boundary"
+          reject_unsupported_cas_metadata(successor, successor_kind)
           if successor.kind == "timeout" then
             insert_timeout_edge(successor, guard_boundary.name, "guard_boundaries")
           end

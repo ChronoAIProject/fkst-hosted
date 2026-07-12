@@ -3,6 +3,7 @@ local entry_inventory = require("core.restart.entry_inventory")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local execution_start = require("devloop.execution_start")
 local h = require("tests.devloop_helpers")
+local restart_cas_catalog = require("devloop.restart_cas_catalog")
 local restart_edges = require("devloop.restart_edges")
 
 local core = h.core
@@ -54,6 +55,9 @@ local expected_entries = {
     source_boundary = "devloop_reconcile",
     target = "blocked",
     field = "receiver_activations",
+    cas_policy_id = "cas.legacy_issue_reconcile_v1",
+    cas_variant = "thinking_to_blocked",
+    binding_id = "transition/github-devloop/reconcile/thinking-blocked",
   },
 }
 
@@ -267,12 +271,27 @@ local function ingress_edges(edges)
   return out
 end
 
+local function binding_by_id(binding_id)
+  for _, binding in ipairs(restart_cas_catalog.bindings()) do
+    if binding.id == binding_id then
+      return binding
+    end
+  end
+  return nil
+end
+
 local function assert_entry_shape(edges)
   local seen_ids = {}
-  local edge_keys = key_set(structural_fields)
   for _, edge in ipairs(edges) do
     local expected = expected_entries[edge.id]
     t.is_true(expected ~= nil)
+    local edge_keys = key_set(structural_fields)
+    if expected.cas_policy_id ~= nil then
+      edge_keys.cas_policy_id = true
+    end
+    if expected.cas_variant ~= nil then
+      edge_keys.cas_variant = true
+    end
     assert_exact_keys(edge, edge_keys)
     if expected.source_state == nil then
       assert_exact_keys(edge.source, { boundary = true })
@@ -291,6 +310,14 @@ local function assert_entry_shape(edges)
     t.eq(edge.provenance.owner, owner)
     t.eq(edge.provenance.row, expected.row_id)
     t.eq(edge.provenance.field, expected.field)
+    t.eq(edge.cas_policy_id, expected.cas_policy_id)
+    t.eq(edge.cas_variant, expected.cas_variant)
+    if expected.binding_id ~= nil then
+      local binding = binding_by_id(expected.binding_id)
+      t.is_true(binding ~= nil)
+      t.eq(edge.cas_policy_id, binding.cas_policy_id)
+      t.eq(edge.cas_variant, binding.variant)
+    end
     t.eq(seen_ids[edge.id], nil)
     seen_ids[edge.id] = true
   end

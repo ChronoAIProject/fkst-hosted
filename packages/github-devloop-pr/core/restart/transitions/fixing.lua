@@ -57,12 +57,16 @@ return function(M, h)
         boundary = "devloop_fix_reconcile",
         target = "blocked",
         output_variant = "review_reject_to_blocked",
+        cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
+        cas_variant = "review_reject_to_blocked",
       },
       {
         kind = "entry",
         boundary = "devloop_fix_reconcile",
         target = "blocked",
         output_variant = "bounded_fix_to_blocked",
+        cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
+        cas_variant = "bounded_fix_to_blocked",
       },
     },
     responsibility_signature = responsibility_signature({
