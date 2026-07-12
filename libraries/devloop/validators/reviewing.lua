@@ -13,7 +13,7 @@ function C.is_supported_reviewing(M, payload)
     and strings.is_bounded_string(payload.version, M._max_dedup_len)
     and (payload.review_delivery_dedup_key == nil
       or (payload.review_delivery_dedup_key == payload.dedup_key
-        and strings.is_path_safe_key(payload.review_delivery_dedup_key, M._max_key_len)
+        and strings.is_path_safe_key(payload.review_delivery_dedup_key, M._max_dedup_len)
         and devloop_base.pr_review_proposal_id_from_redrive_delivery_dedup_key(
           payload.review_delivery_dedup_key
         ) ~= nil))

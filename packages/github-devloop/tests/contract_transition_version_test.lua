@@ -1,5 +1,6 @@
 local h = require("tests.devloop_core_helpers")
 local transition_version = require("contract.transition_version")
+local strings = require("contract.strings")
 local devloop_base = require("devloop.base")
 local core = h.core
 local t = h.t
@@ -299,16 +300,25 @@ return {
     local base = devloop_base.pr_review_consensus_dedup_key(review)
     local redrive = devloop_base.pr_review_redrive_delivery_dedup_key(
       review,
-      "restart-liveness:v2/reviewing/reviewing.active/state-entry/1",
+      "restart-liveness-v2/reviewing/reviewing.active/state-entry/1",
       2
     )
 
-    t.is_true(#redrive <= devloop_base._max_key_len)
+    t.is_true(#redrive <= devloop_base._max_dedup_len)
     t.eq(devloop_base.pr_review_proposal_id_from_redrive_delivery_dedup_key(redrive), review)
     t.eq(devloop_base.pr_review_proposal_id_from_redrive_delivery_dedup_key(review .. "/review"), nil)
     t.eq(devloop_base.pr_review_proposal_id_from_redrive_delivery_dedup_key(redrive .. "/loop/1"), nil)
     t.eq(devloop_base.canonical_pr_review_consensus_dedup_key("consensus:" .. redrive), base)
     t.eq(devloop_base.canonical_pr_review_consensus_dedup_key("consensus:" .. redrive .. "/loop/1"), base)
+    t.is_true(redrive:find("restart-liveness-v2/reviewing/reviewing.active/state-entry/1", 1, true) ~= nil)
+
+    local colliding_generation = "restart-liveness-v2/reviewing/reviewing.active/state-entry/1788062342930"
+    local original_generation = "restart-liveness-v2/reviewing/reviewing.active/state-entry/1798144657406"
+    t.eq(strings.decimal_checksum(original_generation), strings.decimal_checksum(colliding_generation))
+    t.is_true(
+      devloop_base.pr_review_redrive_delivery_dedup_key(review, original_generation, 2)
+        ~= devloop_base.pr_review_redrive_delivery_dedup_key(review, colliding_generation, 2)
+    )
   end,
 
   test_devloop_state_builders_delegate_to_byte_exact_transition_constructors = function()

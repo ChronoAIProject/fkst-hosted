@@ -298,16 +298,17 @@ function C.pr_review_redrive_delivery_dedup_key(review_proposal_id, generation_k
   if C.parse_pr_review_proposal_id(review_proposal_id) == nil then
     error("github-devloop: invalid PR review proposal id")
   end
-  if not is_bounded_string(generation_key, max_dedup_len) then
+  if not is_path_safe_key(generation_key, max_dedup_len) then
     error("github-devloop: invalid PR review redrive generation")
   end
   local round = tonumber(attempt)
   if round == nil or round < 1 or round ~= math.floor(round) then
     error("github-devloop: invalid PR review redrive attempt")
   end
-  local generation_digest = string.format("%08x", tonumber(decimal_checksum(generation_key)))
-  local key = tostring(review_proposal_id) .. "/r/" .. generation_digest .. "-" .. tostring(round)
-  if not is_path_safe_key(key, max_key_len) then
+  local key = tostring(review_proposal_id)
+    .. "/r/" .. tostring(generation_key)
+    .. "/attempt/" .. tostring(round)
+  if not is_path_safe_key(key, max_dedup_len) then
     error("github-devloop: PR review redrive delivery dedup exceeds the consensus key bound")
   end
   return key
@@ -318,17 +319,16 @@ local function parse_pr_review_proposal_dedup_key(dedup_key)
     return nil
   end
   local without_loop = transition_version.strip_trailing_loop(dedup_key)
-  if not is_path_safe_key(without_loop, max_key_len) then
-    return nil
-  end
   local review_proposal = without_loop:match("^(.+)/review$")
   if review_proposal ~= nil and C.parse_pr_review_proposal_id(review_proposal) ~= nil then
     return review_proposal, C.pr_review_proposal_dedup_key(review_proposal), "canonical"
   end
-  local generation_digest, attempt
-  review_proposal, generation_digest, attempt = without_loop:match("^(.+)/r/([0-9a-f]+)%-(%d+)$")
+  local generation_key, attempt
+  review_proposal, generation_key, attempt = without_loop:match(
+    "^(github%-devloop/pr%-review/[^/]+/%d+/[^/]+/[^/]+)/r/(.+)/attempt/(%d+)$"
+  )
   if review_proposal == nil
-    or #generation_digest ~= 8
+    or not is_path_safe_key(generation_key, max_dedup_len)
     or tonumber(attempt) == nil
     or tonumber(attempt) < 1
     or C.parse_pr_review_proposal_id(review_proposal) == nil then

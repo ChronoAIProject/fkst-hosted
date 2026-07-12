@@ -547,7 +547,11 @@ return {
   test_review_pr_preserves_fresh_redrive_delivery_identity = function()
     local event = reviewing()
     local review_id = devloop_base.pr_review_proposal_id("owner/repo", 7, event.version, "def456")
-    local delivery_dedup_key = review_id .. "/r/12345678-2"
+    local delivery_dedup_key = devloop_base.pr_review_redrive_delivery_dedup_key(
+      review_id,
+      "restart-liveness-v2/github-devloop/issue/owner/repo/42/reviewing/reviewing.active/state-entry/timeout/1",
+      2
+    )
     event.dedup_key = delivery_dedup_key
     event.review_delivery_dedup_key = delivery_dedup_key
     mock_issue_review({ "fkst-dev:reviewing" }, {

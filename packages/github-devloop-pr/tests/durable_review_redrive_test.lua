@@ -181,7 +181,7 @@ return {
     local canonical_dedup = devloop_base.pr_review_proposal_dedup_key(review_id)
     local redrive_dedup = devloop_base.pr_review_redrive_delivery_dedup_key(
       review_id,
-      "restart-liveness:v2/reviewing/reviewing.active/state-entry/1",
+      "restart-liveness-v2/reviewing/reviewing.active/state-entry/1",
       1
     )
     t.is_true(canonical_dedup ~= redrive_dedup)

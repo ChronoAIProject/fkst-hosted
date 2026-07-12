@@ -47,6 +47,7 @@ function C.attach_reviewing_handoff(request, proposal_id, pr_number, version, so
       or tostring(review_pr_number or "") ~= tostring(source_pr_number or "") then
       error("github-devloop: invalid reviewing redrive delivery handoff")
     end
+    request.dedup_key = review_delivery_dedup_key
     request.handoff.review_delivery_dedup_key = review_delivery_dedup_key
   end
   return request
