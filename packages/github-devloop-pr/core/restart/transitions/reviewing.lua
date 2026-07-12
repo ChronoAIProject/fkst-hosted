@@ -117,6 +117,8 @@ return function(M, h)
           state = "blocked",
           output_variant = "watchdog_reconcile_terminal",
           kind = "timeout",
+          cas_policy_id = "cas.legacy_timeout_reconcile_v1",
+          cas_variant = "reviewing_to_blocked",
           terminal = true,
           monotonic = true,
         },

@@ -60,6 +60,8 @@ return function(M, h)
           state = "blocked",
           output_variant = "actionable_kickoff_timeout",
           kind = "timeout",
+          cas_policy_id = "cas.legacy_timeout_reconcile_v1",
+          cas_variant = "ready_to_blocked",
           terminal = true,
           monotonic = true,
         },

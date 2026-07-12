@@ -44,6 +44,7 @@ local expected_real_cas_by_id = {
     cas_policy_id = "cas.legacy_loop_plain_v1",
     cas_variant = "thinking_to_blocked",
   },
+  ["github-devloop/ready/timeout/actionable_kickoff_timeout"] = { cas_policy_id = "cas.legacy_timeout_reconcile_v1", cas_variant = "ready_to_blocked" },
 }
 
 local expected_guard_boundary_cas_by_id = {
@@ -217,14 +218,17 @@ local function expected_timeout_edges(owner, rows)
     local policy_id = timeout_policy_by_source[row.actionable_epoch and row.actionable_epoch.source]
     for _, successor in ipairs(row.responsibility_signature.successors) do
       if successor.kind == "timeout" then
+        local edge_id = owner .. "/" .. row.from_state .. "/timeout/" .. successor.output_variant; local expected_cas = expected_real_cas_by_id[edge_id]
         table.insert(expected, {
-          id = owner .. "/" .. row.from_state .. "/timeout/" .. successor.output_variant,
+          id = edge_id,
           owner = owner,
           row_id = row.from_state,
           kind = "timeout",
           source = { state = row.from_state, boundary = nil },
           target = successor.state,
           timeout_evidence_policy_id = policy_id,
+          cas_policy_id = expected_cas and expected_cas.cas_policy_id or nil, cas_variant = expected_cas and expected_cas.cas_variant or nil,
+          binding_id = expected_cas and edge_id or nil,
           provenance = {
             owner = owner,
             row = row.from_state,
@@ -319,8 +323,7 @@ local function assert_guard_boundary_edges(actual, expected, rows_without_bounda
   for index, expected_edge in ipairs(expected) do
     local edge = actual[index]
     local edge_keys = key_set(structural_fields)
-    if expected_edge.cas_policy_id ~= nil then edge_keys.cas_policy_id = true end
-    if expected_edge.cas_variant ~= nil then edge_keys.cas_variant = true end
+    if expected_edge.cas_policy_id ~= nil then edge_keys.cas_policy_id = true end; if expected_edge.cas_variant ~= nil then edge_keys.cas_variant = true end
     assert_exact_keys(edge, edge_keys)
     if expected_edge.source.boundary == nil then
       assert_exact_keys(edge.source, { state = true })
@@ -335,8 +338,7 @@ local function assert_guard_boundary_edges(actual, expected, rows_without_bounda
     t.eq(edge.source.state, expected_edge.source.state)
     t.eq(edge.source.boundary, expected_edge.source.boundary)
     t.eq(edge.target, expected_edge.target)
-    t.eq(edge.cas_policy_id, expected_edge.cas_policy_id)
-    t.eq(edge.cas_variant, expected_edge.cas_variant)
+    t.eq(edge.cas_policy_id, expected_edge.cas_policy_id); t.eq(edge.cas_variant, expected_edge.cas_variant)
     t.eq(edge.provenance.owner, expected_edge.provenance.owner)
     t.eq(edge.provenance.row, expected_edge.provenance.row)
     t.eq(edge.provenance.field, expected_edge.provenance.field)
@@ -357,11 +359,13 @@ end
 
 local function assert_timeout_edges(actual, expected)
   t.eq(#actual, #expected)
-  local edge_keys = key_set(structural_fields)
-  edge_keys.timeout_evidence_policy_id = true
   local seen_ids = {}
   for index, expected_edge in ipairs(expected) do
     local edge = actual[index]
+    local edge_keys = key_set(structural_fields)
+    edge_keys.timeout_evidence_policy_id = true
+    if expected_edge.cas_policy_id ~= nil then edge_keys.cas_policy_id = true end
+    if expected_edge.cas_variant ~= nil then edge_keys.cas_variant = true end
     assert_exact_keys(edge, edge_keys)
     if expected_edge.source.boundary == nil then
       assert_exact_keys(edge.source, { state = true })
@@ -377,6 +381,12 @@ local function assert_timeout_edges(actual, expected)
     t.eq(edge.source.boundary, expected_edge.source.boundary)
     t.eq(edge.target, expected_edge.target)
     t.eq(edge.timeout_evidence_policy_id, expected_edge.timeout_evidence_policy_id)
+    t.eq(edge.cas_policy_id, expected_edge.cas_policy_id)
+    t.eq(edge.cas_variant, expected_edge.cas_variant)
+    if expected_edge.binding_id ~= nil then
+      local binding = binding_by_id(expected_edge.binding_id); t.is_true(binding ~= nil)
+      t.eq(edge.cas_policy_id, binding.cas_policy_id); t.eq(edge.cas_variant, binding.variant)
+    end
     t.eq(edge.provenance.owner, expected_edge.provenance.owner)
     t.eq(edge.provenance.row, expected_edge.provenance.row)
     t.eq(edge.provenance.field, expected_edge.provenance.field)

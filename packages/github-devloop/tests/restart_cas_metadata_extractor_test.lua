@@ -292,33 +292,78 @@ return {
     end
   end,
 
-  test_timeout_cas_metadata_remains_unsupported_in_both_declaration_branches = function()
+  test_timeout_cas_metadata_is_optional_and_copied_from_both_declaration_branches = function()
     local responsibility = responsibility_row({
       {
-        state = "to",
-        output_variant = "responsibility-timeout",
+        state = "with-cas",
+        output_variant = "responsibility-with-cas",
         kind = "timeout",
-        cas_variant = "unsupported",
+        cas_policy_id = "cas.responsibility_timeout_v1",
+        cas_variant = "responsibility_variant",
       },
+      { state = "without-cas", output_variant = "responsibility-without-cas", kind = "timeout" },
     })
+    responsibility.actionable_epoch = { source = "state_entry:v1" }
     local guard_boundaries = guard_boundaries_row({
       {
-        state = "to",
-        output_variant = "array-timeout",
+        state = "with-cas",
+        output_variant = "array-with-cas",
         kind = "timeout",
-        cas_policy_id = "cas.unsupported_v1",
+        cas_policy_id = "cas.array_timeout_v1",
+        cas_variant = "array_variant",
       },
+      { state = "without-cas", output_variant = "array-without-cas", kind = "timeout" },
     })
-    for _, extractor in ipairs({
-      restart_edges.extract_guard_boundary_edges,
-      restart_edges.extract_timeout_edges,
-    }) do
+    guard_boundaries.actionable_epoch = { source = "live_defer_heartbeat:v1" }
+
+    local edges = restart_edges.extract_timeout_edges("owner", { responsibility, guard_boundaries })
+
+    t.eq(edges[1].timeout_evidence_policy_id, "timeout.state_entry_legacy_v1")
+    t.eq(edges[1].cas_policy_id, "cas.responsibility_timeout_v1")
+    t.eq(edges[1].cas_variant, "responsibility_variant")
+    t.eq(edges[2].timeout_evidence_policy_id, "timeout.state_entry_legacy_v1")
+    t.eq(has_key(edges[2], "cas_policy_id"), false)
+    t.eq(has_key(edges[2], "cas_variant"), false)
+    t.eq(edges[3].timeout_evidence_policy_id, "timeout.heartbeat_legacy_v1")
+    t.eq(edges[3].cas_policy_id, "cas.array_timeout_v1")
+    t.eq(edges[3].cas_variant, "array_variant")
+    t.eq(edges[4].timeout_evidence_policy_id, "timeout.heartbeat_legacy_v1")
+    t.eq(has_key(edges[4], "cas_policy_id"), false)
+    t.eq(has_key(edges[4], "cas_variant"), false)
+    t.eq(#restart_edges.extract_guard_boundary_edges("owner", { responsibility, guard_boundaries }), 0)
+  end,
+
+  test_timeout_cas_metadata_fails_closed_on_empty_or_non_string_values_in_both_branches = function()
+    local invalid_values = {
+      { field = "cas_policy_id", value = "" },
+      { field = "cas_policy_id", value = 1 },
+      { field = "cas_variant", value = "" },
+      { field = "cas_variant", value = false },
+    }
+    for _, invalid in ipairs(invalid_values) do
+      local responsibility_successor = {
+        state = "to",
+        output_variant = "responsibility-invalid",
+        kind = "timeout",
+      }
+      responsibility_successor[invalid.field] = invalid.value
+      local responsibility = responsibility_row({ responsibility_successor })
+      responsibility.actionable_epoch = { source = "state_entry:v1" }
       assert_error_contains(function()
-        extractor("owner", { responsibility })
-      end, "cas_policy_id/cas_variant not supported on timeout edges")
+        restart_edges.extract_timeout_edges("owner", { responsibility })
+      end, "must be a non-empty string")
+
+      local array_successor = {
+        state = "to",
+        output_variant = "array-invalid",
+        kind = "timeout",
+      }
+      array_successor[invalid.field] = invalid.value
+      local guard_boundaries = guard_boundaries_row({ array_successor })
+      guard_boundaries.actionable_epoch = { source = "state_entry:v1" }
       assert_error_contains(function()
-        extractor("owner", { guard_boundaries })
-      end, "cas_policy_id/cas_variant not supported on timeout edges")
+        restart_edges.extract_timeout_edges("owner", { guard_boundaries })
+      end, "must be a non-empty string")
     end
   end,
 }
