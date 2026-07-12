@@ -362,6 +362,25 @@ return {
     t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
   end,
 
+  test_blocked_issue_poll_closes_after_canonical_child_merge_lands = function()
+    local blocked_version = version .. "/blocked/child-pr-blocked"
+    mock_issue_close()
+    mock_branch_config()
+    mock_rollup_landing(0)
+    local result = run_observe(parent_comments({
+      state = "blocked",
+      version = blocked_version,
+      delegation_version = version,
+    }), child_comments("merged"), {
+      labels = { "fkst-dev:enabled", "fkst-dev:blocked" },
+      pr_state = "MERGED",
+      write = "real",
+    })
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
+  end,
+
   test_split_topology_child_merged_uses_merge_commit_landing_not_head_ancestry = function()
     mock_issue_close()
     mock_branch_config()
