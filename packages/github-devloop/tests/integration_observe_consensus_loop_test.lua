@@ -125,6 +125,28 @@ return {
     t.eq(count_calls("codex exec"), 0)
   end,
 
+  test_observe_self_assigned_non_whitelisted_thinking_issue_skips_replay = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local marker_version = "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
+      {
+        body = core.state_marker(proposal_id, "thinking", marker_version),
+        created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now()),
+      },
+    }, { "fkst-test-bot" }, "human")
+
+    local result = run_observe(issue({
+      labels = { "fkst-dev:enabled", "fkst-dev:thinking" },
+    }), opts("observe-non-whitelisted-thinking-replay", {
+      FKST_GITHUB_AUTHORIZED_LOGINS = "trusted-human",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_create_request"), nil)
+    t.eq(find_raise(result.raises, "consensus.proposal"), nil)
+    t.eq(count_calls("codex exec"), 0)
+  end,
+
   test_observe_authorized_other_author_after_grace_raises_fork_request_only = function()
     local run_opts = opts("observe-authorized-other-author-fork")
     mock_issue_state({ "fkst-dev:enabled" }, "OPEN", {}, {}, "trusted-human", os.date("!%Y-%m-%dT%H:%M:%SZ", now() - (3 * 60 * 60) - 1))
