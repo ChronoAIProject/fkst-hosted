@@ -61,6 +61,8 @@ return function(M, h)
         {
           state = "fixing",
           output_variant = "fix",
+          cas_policy_id = "cas.legacy_review_meta_v1",
+          cas_variant = "predecision_eligibility",
           kind = "autonomous",
           postcondition_family = "review-meta-decision",
           decision_type = "review-meta-decision",
@@ -69,6 +71,8 @@ return function(M, h)
         {
           state = "blocked",
           output_variant = "block",
+          cas_policy_id = "cas.legacy_review_meta_v1",
+          cas_variant = "predecision_eligibility",
           kind = "autonomous",
           postcondition_family = "review-meta-decision",
           decision_type = "review-meta-decision",

@@ -82,6 +82,8 @@ return function(M, h)
         {
           state = "reviewing",
           output_variant = "revision_published",
+          cas_policy_id = "cas.legacy_fix_v1",
+          cas_variant = "fixing_to_reviewing",
           kind = "autonomous",
           postcondition_family = "revision_published",
           bump = true,

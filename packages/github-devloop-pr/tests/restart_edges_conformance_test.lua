@@ -1,5 +1,6 @@
 local h = require("tests.devloop_core_helpers")
 local entry_inventory = require("core.restart.entry_inventory")
+local restart_cas_catalog = require("devloop.restart_cas_catalog")
 local restart_edges = require("devloop.restart_edges")
 
 local core = h.core
@@ -34,6 +35,33 @@ local expected_successor_kinds = {
   ["reviewing/changes_requested"] = "autonomous",
   ["reviewing/needs_review_meta"] = "autonomous",
   ["reviewing/watchdog_reconcile_terminal"] = "timeout",
+}
+
+local expected_real_cas_by_id = {
+  ["github-devloop-pr/reviewing/autonomous/approved"] = {
+    cas_policy_id = "cas.legacy_review_result_v1",
+    cas_variant = "reviewing_to_merge_ready",
+  },
+  ["github-devloop-pr/reviewing/autonomous/changes_requested"] = {
+    cas_policy_id = "cas.legacy_review_result_v1",
+    cas_variant = "reviewing_to_fixing",
+  },
+  ["github-devloop-pr/reviewing/autonomous/needs_review_meta"] = {
+    cas_policy_id = "cas.legacy_review_result_v1",
+    cas_variant = "reviewing_to_review_meta",
+  },
+  ["github-devloop-pr/fixing/autonomous/revision_published"] = {
+    cas_policy_id = "cas.legacy_fix_v1",
+    cas_variant = "fixing_to_reviewing",
+  },
+  ["github-devloop-pr/review-meta/autonomous/fix"] = {
+    cas_policy_id = "cas.legacy_review_meta_v1",
+    cas_variant = "predecision_eligibility",
+  },
+  ["github-devloop-pr/review-meta/autonomous/block"] = {
+    cas_policy_id = "cas.legacy_review_meta_v1",
+    cas_variant = "predecision_eligibility",
+  },
 }
 
 local function key_set(keys)
@@ -86,6 +114,15 @@ local function assert_same_value(actual, expected)
   t.eq(actual_count, expected_count)
 end
 
+local function binding_by_id(binding_id)
+  for _, binding in ipairs(restart_cas_catalog.bindings()) do
+    if binding.id == binding_id then
+      return binding
+    end
+  end
+  return nil
+end
+
 local function expected_edges(owner, rows)
   local expected = {}
   local empty_rows = {}
@@ -95,13 +132,18 @@ local function expected_edges(owner, rows)
     for _, successor in ipairs(successors) do
       if successor.kind == "autonomous" then
         row_has_edge = true
+        local edge_id = owner .. "/" .. row.from_state .. "/autonomous/" .. successor.output_variant
+        local expected_cas = expected_real_cas_by_id[edge_id]
         table.insert(expected, {
-          id = owner .. "/" .. row.from_state .. "/autonomous/" .. successor.output_variant,
+          id = edge_id,
           owner = owner,
           row_id = row.from_state,
           kind = "autonomous",
           source = { state = row.from_state, boundary = nil },
           target = successor.state,
+          cas_policy_id = expected_cas and expected_cas.cas_policy_id or nil,
+          cas_variant = expected_cas and expected_cas.cas_variant or nil,
+          binding_id = expected_cas and edge_id or nil,
           provenance = {
             owner = owner,
             row = row.from_state,
@@ -226,7 +268,6 @@ end
 
 local function assert_edges(actual, expected, empty_rows)
   t.eq(#actual, #expected)
-  local edge_keys = key_set(structural_fields)
   local seen_ids = {}
   local seen_edges = {}
   local seen_sources = {}
@@ -234,6 +275,13 @@ local function assert_edges(actual, expected, empty_rows)
   local counts_by_row = {}
   for index, expected_edge in ipairs(expected) do
     local edge = actual[index]
+    local edge_keys = key_set(structural_fields)
+    if expected_edge.cas_policy_id ~= nil then
+      edge_keys.cas_policy_id = true
+    end
+    if expected_edge.cas_variant ~= nil then
+      edge_keys.cas_variant = true
+    end
     assert_exact_keys(edge, edge_keys)
     assert_exact_keys(edge.source, { state = true })
     assert_exact_keys(edge.provenance, { owner = true, row = true, field = true })
@@ -244,6 +292,14 @@ local function assert_edges(actual, expected, empty_rows)
     t.eq(edge.source.state, expected_edge.source.state)
     t.eq(edge.source.boundary, nil)
     t.eq(edge.target, expected_edge.target)
+    t.eq(edge.cas_policy_id, expected_edge.cas_policy_id)
+    t.eq(edge.cas_variant, expected_edge.cas_variant)
+    if expected_edge.binding_id ~= nil then
+      local binding = binding_by_id(expected_edge.binding_id)
+      t.is_true(binding ~= nil)
+      t.eq(edge.cas_policy_id, binding.cas_policy_id)
+      t.eq(edge.cas_variant, binding.variant)
+    end
     t.eq(edge.provenance.owner, expected_edge.provenance.owner)
     t.eq(edge.provenance.row, expected_edge.provenance.row)
     t.eq(edge.provenance.field, expected_edge.provenance.field)

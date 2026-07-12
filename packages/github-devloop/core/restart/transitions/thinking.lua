@@ -73,6 +73,8 @@ return function(M, h)
         {
           state = "ready",
           output_variant = "consensus-reached",
+          cas_policy_id = "cas.legacy_consensus_result_v1",
+          cas_variant = "thinking_to_ready",
           kind = "autonomous",
           postcondition_family = "issue-consensus",
           monotonic = true,
@@ -101,6 +103,8 @@ return function(M, h)
         {
           state = "blocked",
           output_variant = "consensus-stalled",
+          cas_policy_id = "cas.legacy_loop_plain_v1",
+          cas_variant = "thinking_to_blocked",
           kind = "autonomous",
           failure = true,
           terminal = true,

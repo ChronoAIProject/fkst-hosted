@@ -33,6 +33,9 @@ local expected_entries = {
     source_boundary = "github-proxy.github_entity_changed",
     target = "reviewing",
     field = "entry_inventory.first_seen_pr",
+    cas_policy_id = "cas.legacy_observe_pr_v1",
+    cas_variant = "pr_open_to_reviewing",
+    binding_id = "github-devloop-pr/reviewing/entry/first_seen_pr",
   },
   ["github-devloop-pr/reviewing/entry/review_receiver"] = {
     row_id = "reviewing",
@@ -69,6 +72,9 @@ local expected_entries = {
     source_boundary = nil,
     target = "merging",
     field = "receiver_activations",
+    cas_policy_id = "cas.legacy_merge_v1",
+    cas_variant = "merge_ready_or_merging_to_merging",
+    binding_id = "github-devloop-pr/merge-ready/entry/handoff_to_merge_gate",
   },
   ["github-devloop-pr/reviewing/entry/review_reject_to_blocked"] = {
     row_id = "reviewing",

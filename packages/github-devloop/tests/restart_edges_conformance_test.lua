@@ -35,6 +35,17 @@ local expected_successor_kinds = {
   ["thinking/consensus-stalled"] = "autonomous",
 }
 
+local expected_real_cas_by_id = {
+  ["github-devloop/thinking/autonomous/consensus-reached"] = {
+    cas_policy_id = "cas.legacy_consensus_result_v1",
+    cas_variant = "thinking_to_ready",
+  },
+  ["github-devloop/thinking/autonomous/consensus-stalled"] = {
+    cas_policy_id = "cas.legacy_loop_plain_v1",
+    cas_variant = "thinking_to_blocked",
+  },
+}
+
 local function key_set(keys)
   local out = {}
   for _, key in ipairs(keys) do
@@ -83,6 +94,15 @@ local function assert_same_value(actual, expected)
     assert_same_value(actual[key], nested)
   end
   t.eq(actual_count, expected_count)
+end
+
+local function binding_by_id(binding_id)
+  for _, binding in ipairs(restart_cas_catalog.bindings()) do
+    if binding.id == binding_id then
+      return binding
+    end
+  end
+  return nil
 end
 
 local function expected_edges(owner, rows)
@@ -251,6 +271,12 @@ local function assert_edges(actual, expected, empty_rows)
     t.eq(edge.target, expected_edge.target)
     t.eq(edge.cas_policy_id, expected_edge.cas_policy_id)
     t.eq(edge.cas_variant, expected_edge.cas_variant)
+    if expected_edge.binding_id ~= nil then
+      local binding = binding_by_id(expected_edge.binding_id)
+      t.is_true(binding ~= nil)
+      t.eq(edge.cas_policy_id, binding.cas_policy_id)
+      t.eq(edge.cas_variant, binding.variant)
+    end
     t.eq(edge.provenance.owner, expected_edge.provenance.owner)
     t.eq(edge.provenance.row, expected_edge.provenance.row)
     t.eq(edge.provenance.field, expected_edge.provenance.field)
@@ -515,6 +541,14 @@ return {
       if edge.id == owner .. "/thinking/autonomous/consensus-reached-dependency-held" then
         edge.cas_policy_id = "cas.legacy_consensus_result_v1"
         edge.cas_variant = "thinking_to_dependency_wait"
+      end
+    end
+    for _, edge in ipairs(expected) do
+      local expected_cas = expected_real_cas_by_id[edge.id]
+      if expected_cas ~= nil then
+        edge.cas_policy_id = expected_cas.cas_policy_id
+        edge.cas_variant = expected_cas.cas_variant
+        edge.binding_id = edge.id
       end
     end
     local actual = restart_edges.extract_autonomous_edges(owner, rows)

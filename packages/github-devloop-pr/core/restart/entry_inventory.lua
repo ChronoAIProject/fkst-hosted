@@ -9,6 +9,8 @@ return {
       boundary = "github-proxy.github_entity_changed",
     },
     target = "reviewing",
+    cas_policy_id = "cas.legacy_observe_pr_v1",
+    cas_variant = "pr_open_to_reviewing",
     provenance = {
       owner = "github-devloop-pr",
       row = "reviewing",

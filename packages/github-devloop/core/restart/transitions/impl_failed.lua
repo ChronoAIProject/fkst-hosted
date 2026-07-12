@@ -35,6 +35,8 @@ return function(M, h)
         boundary = nil,
         target = "implementing",
         output_variant = "retry-implementation",
+        cas_policy_id = "cas.legacy_implement_activation_handoff_v1",
+        cas_variant = "impl_failed_to_implementing",
       },
     },
     responsibility_signature = responsibility_signature({

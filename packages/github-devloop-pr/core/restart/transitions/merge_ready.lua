@@ -42,6 +42,8 @@ return function(M, h)
         boundary = nil,
         target = "merging",
         output_variant = "handoff_to_merge_gate",
+        cas_policy_id = "cas.legacy_merge_v1",
+        cas_variant = "merge_ready_or_merging_to_merging",
       },
       {
         kind = "entry",

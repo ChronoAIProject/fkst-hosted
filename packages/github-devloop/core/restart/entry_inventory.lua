@@ -9,6 +9,8 @@ return {
       boundary = "github-proxy.github_entity_changed",
     },
     target = "thinking",
+    cas_policy_id = "cas.legacy_observe_issue_entry_v1",
+    cas_variant = "unmanaged_to_thinking",
     provenance = {
       owner = "github-devloop",
       row = "thinking",

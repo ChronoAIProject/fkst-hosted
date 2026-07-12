@@ -27,6 +27,9 @@ local expected_entries = {
     source_boundary = "github-proxy.github_entity_changed",
     target = "thinking",
     field = "entry_inventory.unmanaged_issue",
+    cas_policy_id = "cas.legacy_observe_issue_entry_v1",
+    cas_variant = "unmanaged_to_thinking",
+    binding_id = "github-devloop/thinking/entry/unmanaged_issue",
   },
   ["github-devloop/thinking/entry/execute_request"] = {
     row_id = "thinking",
@@ -41,6 +44,9 @@ local expected_entries = {
     source_boundary = nil,
     target = "implementing",
     field = "receiver_activations",
+    cas_policy_id = "cas.legacy_implement_activation_handoff_v1",
+    cas_variant = "impl_failed_to_implementing",
+    binding_id = "github-devloop/impl-failed/entry/retry-implementation",
   },
   ["github-devloop/ready/entry/implementation_kicked_off"] = {
     row_id = "ready",
@@ -48,6 +54,9 @@ local expected_entries = {
     source_boundary = nil,
     target = "implementing",
     field = "receiver_activations",
+    cas_policy_id = "cas.legacy_implement_activation_handoff_v1",
+    cas_variant = "ready_to_implementing",
+    binding_id = "github-devloop/ready/entry/implementation_kicked_off",
   },
   ["github-devloop/thinking/entry/issue_reconcile_true_stall"] = {
     row_id = "thinking",

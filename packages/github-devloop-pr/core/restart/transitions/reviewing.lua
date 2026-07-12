@@ -86,6 +86,8 @@ return function(M, h)
         {
           state = "merge-ready",
           output_variant = "approved",
+          cas_policy_id = "cas.legacy_review_result_v1",
+          cas_variant = "reviewing_to_merge_ready",
           kind = "autonomous",
           postcondition_family = "review_decision_recorded",
           decision_type = "ReviewDecision",
@@ -94,6 +96,8 @@ return function(M, h)
         {
           state = "fixing",
           output_variant = "changes_requested",
+          cas_policy_id = "cas.legacy_review_result_v1",
+          cas_variant = "reviewing_to_fixing",
           kind = "autonomous",
           postcondition_family = "review_decision_recorded",
           decision_type = "ReviewDecision",
@@ -102,6 +106,8 @@ return function(M, h)
         {
           state = "review-meta",
           output_variant = "needs_review_meta",
+          cas_policy_id = "cas.legacy_review_result_v1",
+          cas_variant = "reviewing_to_review_meta",
           kind = "autonomous",
           postcondition_family = "review_decision_recorded",
           decision_type = "ReviewDecision",
