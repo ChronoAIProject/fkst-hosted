@@ -538,15 +538,25 @@ local function act_fix(event)
     local merge_gate_fact = nil
     if reject_fact == nil and meta_fix_fact == nil then
       local merge_gate_candidate = m_facts.merge_gate_fix_fact(current_pr.comments, fix.proposal_id, fix.version)
-      merge_gate_fact = m_facts.merge_gate_fix_fact(current_pr.comments, fix.proposal_id, fix.version, {
+      local event_fact_visible
+      merge_gate_fact, event_fact_visible = m_facts.merge_gate_fix_fact(current_pr.comments, fix.proposal_id, fix.version, {
         review_proposal_id = fix.review_proposal_id,
         review_dedup_key = fix.review_dedup_key,
+        reviewed_head_sha = fix.reviewed_head_sha,
         gate_baseline_sha = fix.gate_baseline_sha,
         match_gate_baseline_sha = true,
+        predecessor_set = fix.predecessor_set,
+        match_predecessor_set = true,
         ci_failure_key = fix.ci_failure_key,
+        match_ci_failure_key = true,
       })
-      if merge_gate_fact == nil then
-        merge_gate_fact = merge_gate_candidate
+      if merge_gate_fact == nil and merge_gate_candidate ~= nil then
+        if event_fact_visible then
+          devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(superseded-merge-gate-fact)", "a newer canonical merge-gate fact supersedes this fix event")
+          return
+        end
+        devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "fail-closed(merge-gate-fact-mismatch)", "active fix event does not match any trusted merge-gate fact")
+        error("github-devloop: active-merge-gate-fact-mismatch: active fix event does not match any trusted merge-gate fact")
       end
     end
     if reject_fact == nil and meta_fix_fact == nil and merge_gate_fact == nil then
@@ -558,31 +568,17 @@ local function act_fix(event)
       if reject_fact.review_proposal_id ~= fix.review_proposal_id
         or not same_review_result_dedup(reject_fact.review_dedup_key, fix.review_dedup_key)
         or reject_fact.reviewed_head_sha ~= fix.reviewed_head_sha then
-        devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(review-fact-mismatch)", "fix event does not match canonical reject review marker")
-        return
+        devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "fail-closed(review-fact-mismatch)", "active fix event does not match canonical reject review marker")
+        error("github-devloop: active-review-fact-mismatch: active fix event does not match canonical reject review marker")
       end
       feedback_reason = reject_fact.review_reason
     elseif meta_fix_fact ~= nil then
       if meta_fix_fact.review_dedup_key ~= fix.review_dedup_key then
-        devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(review-meta-fact-mismatch)", "fix event does not match canonical review-meta fix marker")
-        return
+        devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "fail-closed(review-meta-fact-mismatch)", "active fix event does not match canonical review-meta fix marker")
+        error("github-devloop: active-review-meta-fact-mismatch: active fix event does not match canonical review-meta fix marker")
       end
       feedback_reason = meta_fix_fact.review_reason
     else
-      if merge_gate_fact.review_proposal_id ~= fix.review_proposal_id
-        or not same_review_result_dedup(merge_gate_fact.review_dedup_key, fix.review_dedup_key)
-        or merge_gate_fact.reviewed_head_sha ~= fix.reviewed_head_sha then
-        devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(merge-gate-fact-mismatch)", "fix event does not match canonical merge-gate marker")
-        return
-      end
-      if merge_gate_fact.gate_baseline_sha ~= fix.gate_baseline_sha then
-        devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(merge-gate-baseline-mismatch)", "fix event does not match canonical merge-gate baseline")
-        return
-      end
-      if merge_gate_fact.ci_failure_key ~= fix.ci_failure_key then
-        devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(ci-failure-key-mismatch)", "fix event does not match canonical CI failure key")
-        return
-      end
       feedback_reason = merge_gate_fact.review_reason
     end
 
@@ -646,11 +642,6 @@ local function act_fix(event)
         error("github-devloop: gh-issue-fix-view-failed: gh issue fix view failed: " .. tostring(issue_view.stderr))
       end
       current_issue = parsers_issue.parse_issue_view_fix(core, issue_view.stdout)
-    end
-
-    if merge_gate_fact ~= nil and tostring(merge_gate_fact.predecessor_set or "") ~= tostring(fix.predecessor_set or "") then
-      devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(predecessor-marker-mismatch)", "fix event does not match canonical merge-gate predecessor set")
-      return
     end
 
     local speculative_predecessors = nil

@@ -85,19 +85,21 @@ local function integration_head_soak_verdict(payload, pr)
 end
 
 local function runtime_stability_gate(payload, pr)
-  local observe_ok, observe_reason, observe_detail = rollup_health.runtime_observe_gate(rollup_health.observe_runtime_health())
-  if not observe_ok then
-    return false, observe_reason, observe_detail
-  end
-  local ok, soaked, reason = pcall(function()
-    local soak_ok, soak_reason = integration_head_soak_verdict(payload, pr)
-    return soak_ok, soak_reason
+  local ok, soaked, reason, window_start_ms = pcall(function()
+    local soak_ok, soak_reason, window_start_ms = integration_head_soak_verdict(payload, pr)
+    return soak_ok, soak_reason, window_start_ms
   end)
   if not ok then
     return false, "runtime-soak-unavailable", soaked
   end
   if soaked ~= true then
     return false, "runtime-soak-unready", reason
+  end
+  local observe_ok, observe_reason, observe_detail = rollup_health.runtime_observe_gate(
+    rollup_health.observe_promotion_health(window_start_ms)
+  )
+  if not observe_ok then
+    return false, observe_reason, observe_detail
   end
   return true, "runtime-stable"
 end

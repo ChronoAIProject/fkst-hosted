@@ -167,12 +167,15 @@ local function act(event)
       now(),
       core.rollup_red_window_minutes()
     )
+    local promotion_health, observed_at_ms = rollup_health.observe_promotion_health(
+      rollup_health.promotion_window_start_ms(rollup_pr.comments, integration_head)
+    )
     local sample = rollup_health.observe_sample_comment_request(
       repo,
       pr.number,
       integration_head,
-      rollup_health.observe_runtime_health(),
-      now(),
+      promotion_health,
+      observed_at_ms and observed_at_ms / 1000 or nil,
       rollup_pr.comments
     )
     devloop_logging.log_raise("rollup_scan", "rollup", "github-proxy.github_pr_comment_request", sample)

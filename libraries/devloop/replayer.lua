@@ -44,7 +44,7 @@ local function thinking_caps(installed)
 end
 
 local function fixing_replay_comment_request(M, issue, pr_number, fix_payload, feedback, source_ref)
-  local reason = fix_payload.gate_failure_excerpt or feedback.review_reason or feedback.reason or "fixing-replay"
+  local reason = feedback.reason or fix_payload.gate_failure_excerpt or feedback.review_reason or "fixing-replay"
   local request = requests_review.build_merge_gate_fix_comment_request(M,
     issue.repo,
     issue.number,

@@ -105,13 +105,13 @@ local function fix_comment_from_feedback(issue, pr_number, version, feedback, so
       reviewed_head_sha = feedback.reviewed_head_sha,
     },
     version,
-    feedback.blocking_gap or feedback.review_reason or feedback.reason or "review-result-reject",
+    feedback.reason or feedback.blocking_gap or feedback.review_reason or "review-result-reject",
     feedback.gate_baseline_sha,
     source_ref,
     feedback.predecessor_set,
     {
       blocking_gap = feedback.blocking_gap,
-      gate_failure_excerpt = feedback.gate_failure_excerpt or feedback.review_reason or feedback.reason,
+      gate_failure_excerpt = feedback.gate_failure_excerpt or feedback.reason or feedback.review_reason,
       ci_failure_key = feedback.ci_failure_key,
       preserve_nil_gate_failure_excerpt = feedback.gate_failure_excerpt == nil and feedback.review_reason == nil and feedback.reason == nil,
       current_head_sha = feedback.current_head_sha,
@@ -798,29 +798,34 @@ local function replay_reviewing(dept, issue, state, row, facts, tools)
   end
   devloop_logging.log_cas_decision(dept, proposal_id, state, "reviewing", "reviewing", "applied(replay)", "current PR head has no trusted review result")
   local effects = {}
-  if tostring(fields.version or "") ~= tostring(state.version or "") then
+  local delivery_dedup_key
+  if facts.redrive_delivery ~= nil then
+    delivery_dedup_key = devloop_base.pr_review_redrive_delivery_dedup_key(
+      review_proposal_id,
+      facts.redrive_delivery.generation_key,
+      facts.redrive_delivery.attempt
+    )
+  end
+  if tostring(fields.version or "") ~= tostring(state.version or "") or dept == "observe_pr" then
     table.insert(effects, {
       queue = "github-proxy.github_pr_comment_request",
       payload = requests_review.build_reviewing_comment_request(M, issue.repo, issue.number, {
         proposal_id = fields.proposal_id,
         impl_version = fields.version,
-      }, fields.pr_number, fields.source_ref),
-    })
-  elseif dept == "observe_pr" then
-    table.insert(effects, {
-      queue = "github-proxy.github_pr_comment_request",
-      payload = requests_review.build_reviewing_comment_request(M, issue.repo, issue.number, {
-        proposal_id = fields.proposal_id,
-        impl_version = fields.version,
-      }, fields.pr_number, fields.source_ref),
+      }, fields.pr_number, fields.source_ref, delivery_dedup_key),
     })
   else
+    local reviewing_payload = payloads_builders.build_devloop_reviewing_payload({
+      proposal_id = fields.proposal_id,
+      impl_version = fields.version,
+    }, fields.pr_number, fields.source_ref, fields.version)
+    if delivery_dedup_key ~= nil then
+      reviewing_payload.dedup_key = delivery_dedup_key
+      reviewing_payload.review_delivery_dedup_key = delivery_dedup_key
+    end
     table.insert(effects, {
       queue = "devloop_reviewing",
-      payload = payloads_builders.build_devloop_reviewing_payload({
-        proposal_id = fields.proposal_id,
-        impl_version = fields.version,
-      }, fields.pr_number, fields.source_ref, fields.version),
+      payload = reviewing_payload,
     })
   end
   return tools.raise_effects(dept, proposal_id, nil, nil, { add = {}, remove = {} }, effects)
