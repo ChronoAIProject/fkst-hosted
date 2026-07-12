@@ -243,7 +243,7 @@ function C.build_replayed_fixing_payload(origin, pr_number, feedback, source_ref
     gate_baseline_sha = feedback.gate_baseline_sha,
     predecessor_set = feedback.predecessor_set,
     ci_failure_key = feedback.ci_failure_key,
-    gate_failure_excerpt = feedback.review_reason,
+    gate_failure_excerpt = feedback.reason or feedback.review_reason,
   }, source_ref)
   if payload.repair_input ~= "ci-failure" then
     payload.dedup_key = base_ids.dedup_key({
