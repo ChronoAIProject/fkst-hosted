@@ -221,6 +221,127 @@ local function queue_dlq(snapshot)
   return nil
 end
 
+local function nonnegative_integer(value)
+  if type(value) ~= "number" or value < 0 or value ~= math.floor(value) then
+    return nil
+  end
+  return value
+end
+
+local function strict_list(value)
+  if type(value) ~= "table" then
+    return nil
+  end
+  local count = 0
+  local max_index = 0
+  for key, _ in pairs(value) do
+    if type(key) ~= "number" or key < 1 or key ~= math.floor(key) then
+      return nil
+    end
+    count = count + 1
+    max_index = math.max(max_index, key)
+  end
+  if count ~= max_index then
+    return nil
+  end
+  local result = {}
+  for index = 1, max_index do
+    result[index] = value[index]
+  end
+  return result
+end
+
+local function aggregate_count(value)
+  if type(value) == "number" then
+    return nonnegative_integer(value)
+  end
+  local entries = strict_list(value)
+  if entries ~= nil then
+    return #entries
+  end
+  return nil
+end
+
+local function dead_letter_aggregate_mismatch(snapshot, detail_counts, total)
+  for _, key in ipairs({ "dlq", "dead_letter" }) do
+    if snapshot[key] ~= nil then
+      local count = aggregate_count(snapshot[key])
+      if count == nil or count ~= total then
+        return "dead-letter-detail-inconsistent:source=" .. key
+          .. ":count=" .. tostring(count or "invalid")
+          .. ":detail=" .. tostring(total)
+      end
+    end
+  end
+  local queues = strict_list(snapshot.queues or snapshot.queue_state or snapshot.queue_states)
+  if queues == nil then
+    return nil
+  end
+  for _, queue in ipairs(queues) do
+    if type(queue) == "table" then
+      local queue_name = first_string(queue, { "queue", "name", "id" })
+      for _, key in ipairs({ "dlq", "dead", "dead_letters", "dead_letter" }) do
+        if queue[key] ~= nil then
+          local count = aggregate_count(queue[key])
+          local detail = detail_counts[queue_name] or 0
+          if count == nil or count ~= detail then
+            return "dead-letter-detail-inconsistent:queue=" .. queue_name
+              .. ":count=" .. tostring(count or "invalid")
+              .. ":detail=" .. tostring(detail)
+          end
+        end
+      end
+    end
+  end
+  return nil
+end
+
+local function promotion_dead_letter(snapshot, window_start_ms)
+  if snapshot.schema_version ~= 1 then
+    return "observe-schema-unsupported"
+  end
+  local generated_at_ms = nonnegative_integer(snapshot.generated_at_ms)
+  local starts_at_ms = nonnegative_integer(window_start_ms)
+  if generated_at_ms == nil then
+    return "observe-generated-at-invalid"
+  end
+  if starts_at_ms == nil or starts_at_ms > generated_at_ms then
+    return "observe-window-invalid"
+  end
+  if type(snapshot.truncated) ~= "table" or type(snapshot.truncated.dead_letters) ~= "boolean" then
+    return "dead-letter-detail-unavailable"
+  end
+  if snapshot.truncated.dead_letters then
+    return "dead-letter-detail-truncated"
+  end
+  local entries = strict_list(snapshot.dead_letters)
+  if entries == nil then
+    return "dead-letter-detail-unavailable"
+  end
+  local detail_counts = {}
+  for _, entry in ipairs(entries) do
+    if type(entry) ~= "table" then
+      return "dead-letter-entry-invalid"
+    end
+    local queue = first_string(entry, { "queue", "event_queue", "name" })
+    local dead_at_ms = nonnegative_integer(entry.dead_at_ms)
+    if queue == "-" or dead_at_ms == nil or dead_at_ms > generated_at_ms then
+      return "dead-letter-time-invalid:" .. queue
+    end
+    detail_counts[queue] = (detail_counts[queue] or 0) + 1
+  end
+  local mismatch = dead_letter_aggregate_mismatch(snapshot, detail_counts, #entries)
+  if mismatch ~= nil then
+    return mismatch
+  end
+  for _, entry in ipairs(entries) do
+    if entry.dead_at_ms >= starts_at_ms then
+      return "dead-letter:" .. first_string(entry, { "queue", "event_queue", "name" })
+    end
+  end
+  return nil
+end
+
 local function terminal_failure_fact(snapshot)
   local cron_counts = {}
   for _, fact in ipairs(failure_facts(snapshot)) do
@@ -276,8 +397,8 @@ local function observed_at_ms(value)
   return math.floor(number)
 end
 
--- Keep this contract in sync with scripts/board.py. The rollup merge gate must
--- not promote a head that this repository's operator board would report dirty.
+-- Keep this cumulative operator-health contract in sync with scripts/board.py.
+-- Candidate promotion uses the head-window verdict below.
 function S.verdict(snapshot, opts)
   if type(snapshot) ~= "table" then
     return { clean = false, reason = "observe-malformed" }
@@ -293,14 +414,40 @@ function S.verdict(snapshot, opts)
   return { clean = true, reason = "clean" }
 end
 
-function S.observe_runtime_health()
+function S.promotion_verdict(snapshot, window_start_ms, opts)
+  if type(snapshot) ~= "table" then
+    return { clean = false, reason = "observe-malformed" }
+  end
+  local options = opts or {}
+  local reason = promotion_dead_letter(snapshot, window_start_ms)
+    or terminal_failure_fact(snapshot)
+    or entity_anomaly(
+      snapshot,
+      math.floor((nonnegative_integer(snapshot.generated_at_ms) or 0) / 1000),
+      options.stall_seconds
+    )
+  if reason ~= nil then
+    return { clean = false, reason = reason }
+  end
+  return { clean = true, reason = "clean" }
+end
+
+local function observe_runtime_snapshot()
   if type(fkst) ~= "table" or type(fkst.observe) ~= "function" then
-    return { clean = false, reason = "observe-unavailable" }
+    return nil
   end
   local ok, snapshot = pcall(function()
     return fkst.observe({ include = { "queues", "errors", "events", "entities" } })
   end)
   if not ok then
+    return nil
+  end
+  return snapshot
+end
+
+function S.observe_runtime_health()
+  local snapshot = observe_runtime_snapshot()
+  if snapshot == nil then
     return { clean = false, reason = "observe-unavailable" }
   end
   local verdict = S.verdict(snapshot)
@@ -308,6 +455,22 @@ function S.observe_runtime_health()
     verdict.reason = "observe-unavailable"
   end
   return verdict
+end
+
+function S.observe_promotion_health(window_start_ms, opts)
+  local snapshot = observe_runtime_snapshot()
+  if snapshot == nil then
+    return { clean = false, reason = "observe-unavailable" }
+  end
+  local starts_at_ms = window_start_ms
+  if starts_at_ms == nil then
+    starts_at_ms = snapshot.generated_at_ms
+  end
+  local verdict = S.promotion_verdict(snapshot, starts_at_ms, opts)
+  if verdict.clean ~= true and verdict.reason == "observe-malformed" then
+    verdict.reason = "observe-unavailable"
+  end
+  return verdict, nonnegative_integer(snapshot.generated_at_ms)
 end
 
 function S.runtime_observe_gate(verdict)
@@ -388,6 +551,14 @@ local function latest_observe_sample(comments)
   return samples[#samples]
 end
 
+function S.promotion_window_start_ms(comments, head_sha)
+  local sample = latest_observe_sample(comments)
+  if sample == nil or tostring(sample.head_sha) ~= tostring(head_sha) then
+    return nil
+  end
+  return sample.first_clean_observed_at_ms
+end
+
 function S.observe_sample_comment_request(repo, pr_number, head_sha, verdict, observed_seconds, comments, source_ref)
   local status = type(verdict) == "table" and verdict.clean == true and "clean" or "dirty"
   local sampled_ms = math.floor((tonumber(observed_seconds) or now()) * 1000)
@@ -451,7 +622,7 @@ function S.observe_soak_verdict(comments, head_sha, required_seconds, now_second
       "runtime-soak-pending:age_seconds=" .. tostring(math.floor(age_ms / 1000))
         .. ":required_seconds=" .. tostring(math.floor(required_ms / 1000))
   end
-  return true, "runtime-soak-ok"
+  return true, "runtime-soak-ok", sample.first_clean_observed_at_ms
 end
 
 function S.observe_sample_marker_name()
