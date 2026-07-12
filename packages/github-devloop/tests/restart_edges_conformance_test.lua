@@ -31,6 +31,7 @@ local expected_successor_kinds = {
   ["ready/blocker_reappeared"] = "guard_boundary",
   ["ready/actionable_kickoff_timeout"] = "timeout",
   ["thinking/consensus-reached"] = "autonomous",
+  ["thinking/consensus-reached-dependency-held"] = "autonomous",
   ["thinking/premise-refuted"] = "autonomous",
   ["thinking/consensus-stalled"] = "autonomous",
 }
@@ -501,7 +502,7 @@ return {
     assert_successor_kind_partition(rows)
     local expected, empty_rows = expected_edges(owner, rows)
     local actual = restart_edges.extract_autonomous_edges(owner, rows)
-    t.eq(#actual, 5)
+    t.eq(#actual, 6)
     assert_edges(actual, expected, empty_rows)
     assert_same_value(rows, snapshot)
 

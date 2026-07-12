@@ -269,6 +269,26 @@ local function validate_output_family(row, signature, edges, errors)
   end
 end
 
+-- Count the DISTINCT success (postcondition) families among a state's normal successors.
+-- A worker's single-responsibility invariant is "exactly one success FAMILY" (per the SPEC
+-- fanout-by-family rule), NOT "exactly one raw edge": one family may have several variant
+-- edges to distinct target states (e.g. thinking's consensus outcome routes to ready OR
+-- dependency_wait, both the issue-consensus success family). validate_output_family already
+-- pins every normal edge to signature.output_postcondition_family, so this counts >=1 iff at
+-- least one success edge exists and 1 iff they all share the one family.
+local function success_family_count(normal, signature)
+  local families = {}
+  local count = 0
+  for _, edge in ipairs(normal or {}) do
+    local family = edge.postcondition_family or signature.output_postcondition_family
+    if family ~= nil and families[family] == nil then
+      families[family] = true
+      count = count + 1
+    end
+  end
+  return count
+end
+
 local function validate_kind_fanout(M, row, signature, edges, errors)
   local state = state_name(row)
   local normal = normal_edges(edges)
@@ -286,7 +306,7 @@ local function validate_kind_fanout(M, row, signature, edges, errors)
       end
     end
   elseif signature.state_kind == "worker" then
-    if #normal ~= 1 then
+    if success_family_count(normal, signature) ~= 1 then
       table.insert(errors, state .. ": worker state must declare exactly one success successor family")
     end
     if #failures > 1 then
