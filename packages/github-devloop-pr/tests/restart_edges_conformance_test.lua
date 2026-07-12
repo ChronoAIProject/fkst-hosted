@@ -587,8 +587,8 @@ return {
       entry_ids[edge.id] = true
       entry_counts[edge.row_id] = (entry_counts[edge.row_id] or 0) + 1
     end
-    t.eq(#entries, 11)
-    t.eq(entry_counts.reviewing, 3)
+    t.eq(#entries, 12)
+    t.eq(entry_counts.reviewing, 4)
     t.eq(entry_counts.fixing, 2)
     t.eq(entry_counts["merge-ready"], 3)
     t.eq(entry_counts.merging, 2)
@@ -597,6 +597,7 @@ return {
       t.eq(entry_ids[owner .. "/" .. state .. "/entry/review_reject_to_blocked"], true)
       t.eq(entry_ids[owner .. "/" .. state .. "/entry/bounded_fix_to_blocked"], true)
     end
+    t.eq(entry_ids[owner .. "/reviewing/entry/review_convergence_round"], true)
     t.eq(entry_ids[owner .. "/reviewing/entry/review_reject_to_blocked"], true)
 
     local before = legacy_union_bytes(owner, rows, entry_inventory)

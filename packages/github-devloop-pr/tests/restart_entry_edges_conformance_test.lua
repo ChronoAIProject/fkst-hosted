@@ -41,6 +41,14 @@ local expected_entries = {
     target = "reviewing",
     field = "entry_inventory.review_receiver",
   },
+  ["github-devloop-pr/reviewing/entry/review_convergence_round"] = {
+    row_id = "reviewing",
+    output_variant = "review_convergence_round",
+    source_state = nil,
+    source_boundary = "consensus.consensus_converge",
+    target = "reviewing",
+    field = "entry_inventory.review_convergence_round",
+  },
   ["github-devloop-pr/pr-open/entry/pr_open_handoff"] = {
     row_id = "pr-open",
     output_variant = "pr_open_handoff",
@@ -325,6 +333,46 @@ local function review_receiver_entry(reviewing_request)
   }
 end
 
+local function review_convergence_round_entry()
+  local department = require("departments.review_loop.main")
+  local queue_name = consumed_queue(department.spec, "consensus.consensus_converge")
+  local reviewing_state = h.reviewing()
+  local unresolved = h.review_unresolved({
+    round = 0,
+    narrowed_question = "Which reviewed-head evidence resolves the gap?",
+    angle_digests = {
+      { angle = "minimal", verdict = "comment", digest = "restart-entry-review-digest" },
+    },
+    findings_record = "open:\nreview finding remains unresolved",
+  })
+  local state_body = core.state_marker(proposal_id, "reviewing", reviewing_state.version)
+
+  h.mock_bot_env()
+  h.mock_pr_origin({
+    origin_marker(),
+    state_body,
+  }, branch, "def456")
+  h.mock_issue_review({ "fkst-dev:reviewing" }, { state_body }, {
+    title = "Implement decision recorder",
+    body = "Issue context",
+  })
+  local result = h.run_review_loop(unresolved, h.opts("restart-entry-review-convergence-round"))
+
+  assert_department_ok(result, "review-convergence-round")
+  t.is_true(h.find_raise(result.raises, "consensus.proposal") ~= nil)
+  local comment = h.find_raise(result.raises, "github-proxy.github_pr_comment_request")
+  t.is_true(comment ~= nil)
+  t.is_true(comment.payload.body:find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
+  t.eq(comment.payload.body:find("fkst:github-devloop:state:v1", 1, true), nil)
+
+  return {
+    owner = owner,
+    kind = "entry",
+    boundary = durable_queue_name(queue_name),
+    target = trusted_state_from_body(state_body, "reviewing"),
+  }
+end
+
 local function pr_open_comment_body()
   return "github-devloop PR child open"
     .. "\n\n" .. origin_marker()
@@ -491,6 +539,7 @@ return {
     local observed = {
       first_seen,
       review_receiver_entry(reviewing_request),
+      review_convergence_round_entry(),
       pr_open_handoff_entry(),
     }
     local snapshot = copy_value(entry_inventory)
@@ -504,15 +553,16 @@ return {
     assert_same_value(rows, rows_snapshot)
     t.eq(authored[1].id, "github-devloop-pr/reviewing/entry/first_seen_pr")
     t.eq(authored[2].id, "github-devloop-pr/reviewing/entry/review_receiver")
-    t.eq(authored[3].id, "github-devloop-pr/pr-open/entry/pr_open_handoff")
-    t.eq(authored[4].id, "github-devloop-pr/fixing/entry/review_reject_to_blocked")
-    t.eq(authored[5].id, "github-devloop-pr/fixing/entry/bounded_fix_to_blocked")
-    t.eq(authored[6].id, "github-devloop-pr/merge-ready/entry/handoff_to_merge_gate")
-    t.eq(authored[7].id, "github-devloop-pr/merge-ready/entry/review_reject_to_blocked")
-    t.eq(authored[8].id, "github-devloop-pr/merge-ready/entry/bounded_fix_to_blocked")
-    t.eq(authored[9].id, "github-devloop-pr/merging/entry/review_reject_to_blocked")
-    t.eq(authored[10].id, "github-devloop-pr/merging/entry/bounded_fix_to_blocked")
-    t.eq(authored[11].id, "github-devloop-pr/reviewing/entry/review_reject_to_blocked")
+    t.eq(authored[3].id, "github-devloop-pr/reviewing/entry/review_convergence_round")
+    t.eq(authored[4].id, "github-devloop-pr/pr-open/entry/pr_open_handoff")
+    t.eq(authored[5].id, "github-devloop-pr/fixing/entry/review_reject_to_blocked")
+    t.eq(authored[6].id, "github-devloop-pr/fixing/entry/bounded_fix_to_blocked")
+    t.eq(authored[7].id, "github-devloop-pr/merge-ready/entry/handoff_to_merge_gate")
+    t.eq(authored[8].id, "github-devloop-pr/merge-ready/entry/review_reject_to_blocked")
+    t.eq(authored[9].id, "github-devloop-pr/merge-ready/entry/bounded_fix_to_blocked")
+    t.eq(authored[10].id, "github-devloop-pr/merging/entry/review_reject_to_blocked")
+    t.eq(authored[11].id, "github-devloop-pr/merging/entry/bounded_fix_to_blocked")
+    t.eq(authored[12].id, "github-devloop-pr/reviewing/entry/review_reject_to_blocked")
 
     local repeated = restart_edges.extract_entry_edges(owner, entry_inventory, rows)
     assert_entry_shape(repeated)
