@@ -63,6 +63,18 @@ local function assert_exact_keys(value, expected)
   t.eq(count, expected_count)
 end
 
+local function assert_valid_cas(edge)
+  if edge.cas_policy_id == nil then
+    return
+  end
+  local definition = restart_cas_catalog.definition(edge.cas_policy_id)
+  t.is_true(definition ~= nil)
+  if edge.cas_variant ~= nil then
+    t.is_true(definition.variants ~= nil)
+    t.is_true(definition.variants[edge.cas_variant] ~= nil)
+  end
+end
+
 local function copy_value(value)
   if type(value) ~= "table" then
     return value
@@ -499,7 +511,7 @@ return {
     assert_observed_inventory_edge(3, observe_implementing_merged_child())
   end,
 
-  test_issue_implementing_handoff_canonicalization_matches_cas_catalog_binding = function()
+  test_issue_implementing_handoff_canonicalization_references_declared_cas_policy = function()
     local edge
     for _, candidate in ipairs(restart_edges.extract_canonicalization_edges(owner, canonicalization_inventory)) do
       if candidate.id == implementing_merged_delegated_pr_id then
@@ -507,17 +519,10 @@ return {
         break
       end
     end
-    local binding
-    for _, candidate in ipairs(restart_cas_catalog.bindings()) do
-      if candidate.id == implementing_merged_delegated_pr_id then
-        binding = candidate
-        break
-      end
-    end
     t.is_true(edge ~= nil)
-    t.is_true(binding ~= nil)
-    t.eq(edge.cas_policy_id, binding.cas_policy_id)
-    t.eq(edge.cas_variant, binding.variant)
+    t.eq(edge.cas_policy_id, "cas.legacy_awaiting_pr_v1")
+    t.eq(edge.cas_variant, "implementing_to_awaiting_pr")
+    assert_valid_cas(edge)
   end,
 
   test_issue_legacy_pr_open_canonicalization_matches_production_marker = function()

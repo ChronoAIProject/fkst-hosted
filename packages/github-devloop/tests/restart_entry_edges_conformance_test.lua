@@ -29,7 +29,6 @@ local expected_entries = {
     field = "entry_inventory.unmanaged_issue",
     cas_policy_id = "cas.legacy_observe_issue_entry_v1",
     cas_variant = "unmanaged_to_thinking",
-    binding_id = "github-devloop/thinking/entry/unmanaged_issue",
   },
   ["github-devloop/thinking/entry/execute_request"] = {
     row_id = "thinking",
@@ -46,7 +45,6 @@ local expected_entries = {
     field = "receiver_activations",
     cas_policy_id = "cas.legacy_implement_activation_handoff_v1",
     cas_variant = "impl_failed_to_implementing",
-    binding_id = "github-devloop/impl-failed/entry/retry-implementation",
   },
   ["github-devloop/ready/entry/implementation_kicked_off"] = {
     row_id = "ready",
@@ -56,7 +54,6 @@ local expected_entries = {
     field = "receiver_activations",
     cas_policy_id = "cas.legacy_implement_activation_handoff_v1",
     cas_variant = "ready_to_implementing",
-    binding_id = "github-devloop/ready/entry/implementation_kicked_off",
   },
   ["github-devloop/thinking/entry/issue_reconcile_true_stall"] = {
     row_id = "thinking",
@@ -66,7 +63,6 @@ local expected_entries = {
     field = "receiver_activations",
     cas_policy_id = "cas.legacy_issue_reconcile_v1",
     cas_variant = "thinking_to_blocked",
-    binding_id = "transition/github-devloop/reconcile/thinking-blocked",
   },
 }
 
@@ -280,13 +276,16 @@ local function ingress_edges(edges)
   return out
 end
 
-local function binding_by_id(binding_id)
-  for _, binding in ipairs(restart_cas_catalog.bindings()) do
-    if binding.id == binding_id then
-      return binding
-    end
+local function assert_valid_cas(edge)
+  if edge.cas_policy_id == nil then
+    return
   end
-  return nil
+  local definition = restart_cas_catalog.definition(edge.cas_policy_id)
+  t.is_true(definition ~= nil)
+  if edge.cas_variant ~= nil then
+    t.is_true(definition.variants ~= nil)
+    t.is_true(definition.variants[edge.cas_variant] ~= nil)
+  end
 end
 
 local function assert_entry_shape(edges)
@@ -321,12 +320,7 @@ local function assert_entry_shape(edges)
     t.eq(edge.provenance.field, expected.field)
     t.eq(edge.cas_policy_id, expected.cas_policy_id)
     t.eq(edge.cas_variant, expected.cas_variant)
-    if expected.binding_id ~= nil then
-      local binding = binding_by_id(expected.binding_id)
-      t.is_true(binding ~= nil)
-      t.eq(edge.cas_policy_id, binding.cas_policy_id)
-      t.eq(edge.cas_variant, binding.variant)
-    end
+    assert_valid_cas(edge)
     t.eq(seen_ids[edge.id], nil)
     seen_ids[edge.id] = true
   end

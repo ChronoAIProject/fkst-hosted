@@ -642,37 +642,6 @@ for id, definition in pairs(policies) do
   definition.id = id
 end
 
-local bindings = {
-  { id = "github-devloop/thinking/autonomous/consensus-reached", consumer = "consensus_result", cas_policy_id = "cas.legacy_consensus_result_v1", variant = "thinking_to_ready" },
-  { id = "transition/github-devloop/consensus_result/thinking-dependency_wait", consumer = "consensus_result", cas_policy_id = "cas.legacy_consensus_result_v1", variant = "thinking_to_dependency_wait" },
-  { id = "github-devloop/thinking/autonomous/consensus-stalled", consumer = "loop", cas_policy_id = "cas.legacy_loop_plain_v1", variant = "thinking_to_blocked" },
-  { id = "transition/github-devloop/reconcile/thinking-blocked", consumer = "reconcile", cas_policy_id = "cas.legacy_issue_reconcile_v1", variant = "thinking_to_blocked" },
-  { id = "github-devloop/ready/timeout/actionable_kickoff_timeout", consumer = "reconcile", cas_policy_id = "cas.legacy_timeout_reconcile_v1", variant = "ready_to_blocked" },
-  { id = "github-devloop/thinking/entry/unmanaged_issue", consumer = "observe_issue", cas_policy_id = "cas.legacy_observe_issue_entry_v1", variant = "unmanaged_to_thinking" },
-  { id = "github-devloop/awaiting-pr/canonicalization/implementing_merged_delegated_pr", consumer = "awaiting_pr_replayer", cas_policy_id = "cas.legacy_awaiting_pr_v1", variant = "implementing_to_awaiting_pr" },
-  { id = "github-devloop/awaiting-pr/guard_boundary/child_pr_merged", consumer = "awaiting_pr_replayer", cas_policy_id = "cas.legacy_awaiting_pr_v1", variant = "awaiting_pr_to_merged" },
-  { id = "github-devloop/awaiting-pr/guard_boundary/child_pr_closed_unmerged_replaced", consumer = "awaiting_pr_replayer", cas_policy_id = "cas.legacy_awaiting_pr_v1", variant = "awaiting_pr_to_ready" },
-  { id = "github-devloop/awaiting-pr/guard_boundary/child_pr_not_merged", consumer = "awaiting_pr_replayer", cas_policy_id = "cas.legacy_awaiting_pr_v1", variant = "awaiting_pr_to_blocked" },
-  { id = "github-devloop/ready/entry/implementation_kicked_off", consumer = "implement", cas_policy_id = "cas.legacy_implement_activation_handoff_v1", variant = "ready_to_implementing" },
-  { id = "github-devloop/impl-failed/entry/retry-implementation", consumer = "implement", cas_policy_id = "cas.legacy_implement_activation_handoff_v1", variant = "impl_failed_to_implementing" },
-  { id = "github-devloop/implementing/operator_reentry/reimplement_blocked_open_pr", consumer = "implement", cas_policy_id = "cas.legacy_implement_activation_handoff_v1", variant = "blocked_to_implementing" },
-  { id = "github-devloop/implementing/operator_reentry/reimplement_blocked_implementing_timeout_without_pr", consumer = "implement", cas_policy_id = "cas.legacy_implement_activation_handoff_v1", variant = "blocked_to_implementing" },
-  { id = "github-devloop-pr/reviewing/entry/first_seen_pr", consumer = "observe_pr", cas_policy_id = "cas.legacy_observe_pr_v1", variant = "pr_open_to_reviewing" },
-  { id = "github-devloop-pr/reviewing/autonomous/approved", consumer = "review_result", cas_policy_id = "cas.legacy_review_result_v1", variant = "reviewing_to_merge_ready" },
-  { id = "github-devloop-pr/reviewing/autonomous/changes_requested", consumer = "review_result", cas_policy_id = "cas.legacy_review_result_v1", variant = "reviewing_to_fixing" },
-  { id = "github-devloop-pr/reviewing/autonomous/needs_review_meta", consumer = "review_result", cas_policy_id = "cas.legacy_review_result_v1", variant = "reviewing_to_review_meta" },
-  { id = "github-devloop-pr/reviewing/timeout/watchdog_reconcile_terminal", consumer = "reconcile", cas_policy_id = "cas.legacy_timeout_reconcile_v1", variant = "reviewing_to_blocked" },
-  { id = "github-devloop-pr/merge-ready/timeout/merge_gate/watchdog_reconcile_terminal", consumer = "reconcile", cas_policy_id = "cas.legacy_timeout_reconcile_v1", variant = "merge_ready_to_blocked" },
-  { id = "github-devloop-pr/fixing/autonomous/revision_published", consumer = "fix", cas_policy_id = "cas.legacy_fix_v1", variant = "fixing_to_reviewing" },
-  { id = "github-devloop-pr/review-meta/autonomous/fix", consumer = "review_meta", cas_policy_id = "cas.legacy_review_meta_v1", variant = "predecision_eligibility" },
-  { id = "github-devloop-pr/review-meta/autonomous/block", consumer = "review_meta", cas_policy_id = "cas.legacy_review_meta_v1", variant = "predecision_eligibility" },
-  { id = "github-devloop-pr/merge-ready/entry/handoff_to_merge_gate", consumer = "merge", cas_policy_id = "cas.legacy_merge_v1", variant = "merge_ready_or_merging_to_merging" },
-  { id = "transition/github-devloop-pr/reconcile/review-reject-blocked", consumer = "reconcile", cas_policy_id = "cas.legacy_pr_fix_reconcile_v1", variant = "review_reject_to_blocked" },
-  { id = "transition/github-devloop-pr/reconcile/bounded-fix-blocked", consumer = "reconcile", cas_policy_id = "cas.legacy_pr_fix_reconcile_v1", variant = "bounded_fix_to_blocked" },
-  { id = "transition/github-devloop-pr/review_pr/reviewing-activation", consumer = "review_pr", cas_policy_id = "cas.legacy_review_activation_handoff_v1" },
-  { id = "transition/github-devloop-pr/review_loop/reviewing-convergence", consumer = "review_loop", cas_policy_id = "cas.legacy_review_loop_safe_v1" },
-}
-
 local function deep_copy(value)
   if type(value) ~= "table" then
     return value
@@ -701,14 +670,6 @@ function M.definition(policy_id)
   out.resolve = nil
   out.resolve_profile = nil
   return out
-end
-
-function M.bindings()
-  return deep_copy(bindings)
-end
-
-function M.deferred_bindings()
-  return {}
 end
 
 function M.resolve(policy_id, evidence)

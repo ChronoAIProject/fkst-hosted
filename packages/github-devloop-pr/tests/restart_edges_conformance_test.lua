@@ -122,13 +122,16 @@ local function assert_same_value(actual, expected)
   t.eq(actual_count, expected_count)
 end
 
-local function binding_by_id(binding_id)
-  for _, binding in ipairs(restart_cas_catalog.bindings()) do
-    if binding.id == binding_id then
-      return binding
-    end
+local function assert_valid_cas(edge)
+  if edge.cas_policy_id == nil then
+    return
   end
-  return nil
+  local definition = restart_cas_catalog.definition(edge.cas_policy_id)
+  t.is_true(definition ~= nil)
+  if edge.cas_variant ~= nil then
+    t.is_true(definition.variants ~= nil)
+    t.is_true(definition.variants[edge.cas_variant] ~= nil)
+  end
 end
 
 local function expected_edges(owner, rows)
@@ -151,7 +154,6 @@ local function expected_edges(owner, rows)
           target = successor.state,
           cas_policy_id = expected_cas and expected_cas.cas_policy_id or nil,
           cas_variant = expected_cas and expected_cas.cas_variant or nil,
-          binding_id = expected_cas and edge_id or nil,
           provenance = {
             owner = owner,
             row = row.from_state,
@@ -246,7 +248,6 @@ local function expected_timeout_edges(owner, rows)
           timeout_evidence_policy_id = policy_id,
           cas_policy_id = expected_cas and expected_cas.cas_policy_id or nil,
           cas_variant = expected_cas and expected_cas.cas_variant or nil,
-          binding_id = expected_cas and edge_id or nil,
           provenance = {
             owner = owner,
             row = row.from_state,
@@ -270,7 +271,6 @@ local function expected_timeout_edges(owner, rows)
             timeout_evidence_policy_id = policy_id,
             cas_policy_id = expected_cas and expected_cas.cas_policy_id or nil,
             cas_variant = expected_cas and expected_cas.cas_variant or nil,
-            binding_id = expected_cas and edge_id or nil,
             provenance = {
               owner = owner,
               row = row.from_state,
@@ -312,12 +312,7 @@ local function assert_edges(actual, expected, empty_rows)
     t.eq(edge.target, expected_edge.target)
     t.eq(edge.cas_policy_id, expected_edge.cas_policy_id)
     t.eq(edge.cas_variant, expected_edge.cas_variant)
-    if expected_edge.binding_id ~= nil then
-      local binding = binding_by_id(expected_edge.binding_id)
-      t.is_true(binding ~= nil)
-      t.eq(edge.cas_policy_id, binding.cas_policy_id)
-      t.eq(edge.cas_variant, binding.variant)
-    end
+    assert_valid_cas(edge)
     t.eq(edge.provenance.owner, expected_edge.provenance.owner)
     t.eq(edge.provenance.row, expected_edge.provenance.row)
     t.eq(edge.provenance.field, expected_edge.provenance.field)
@@ -404,12 +399,7 @@ local function assert_timeout_edges(actual, expected)
     t.eq(edge.timeout_evidence_policy_id, expected_edge.timeout_evidence_policy_id)
     t.eq(edge.cas_policy_id, expected_edge.cas_policy_id)
     t.eq(edge.cas_variant, expected_edge.cas_variant)
-    if expected_edge.binding_id ~= nil then
-      local binding = binding_by_id(expected_edge.binding_id)
-      t.is_true(binding ~= nil)
-      t.eq(edge.cas_policy_id, binding.cas_policy_id)
-      t.eq(edge.cas_variant, binding.variant)
-    end
+    assert_valid_cas(edge)
     t.eq(edge.provenance.owner, expected_edge.provenance.owner)
     t.eq(edge.provenance.row, expected_edge.provenance.row)
     t.eq(edge.provenance.field, expected_edge.provenance.field)

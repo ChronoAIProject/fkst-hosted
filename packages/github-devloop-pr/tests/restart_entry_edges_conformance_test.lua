@@ -35,7 +35,6 @@ local expected_entries = {
     field = "entry_inventory.first_seen_pr",
     cas_policy_id = "cas.legacy_observe_pr_v1",
     cas_variant = "pr_open_to_reviewing",
-    binding_id = "github-devloop-pr/reviewing/entry/first_seen_pr",
   },
   ["github-devloop-pr/reviewing/entry/review_receiver"] = {
     row_id = "reviewing",
@@ -45,7 +44,6 @@ local expected_entries = {
     target = "reviewing",
     field = "entry_inventory.review_receiver",
     cas_policy_id = "cas.legacy_review_activation_handoff_v1",
-    binding_id = "transition/github-devloop-pr/review_pr/reviewing-activation",
   },
   ["github-devloop-pr/reviewing/entry/review_convergence_round"] = {
     row_id = "reviewing",
@@ -55,7 +53,6 @@ local expected_entries = {
     target = "reviewing",
     field = "entry_inventory.review_convergence_round",
     cas_policy_id = "cas.legacy_review_loop_safe_v1",
-    binding_id = "transition/github-devloop-pr/review_loop/reviewing-convergence",
   },
   ["github-devloop-pr/pr-open/entry/pr_open_handoff"] = {
     row_id = "pr-open",
@@ -74,7 +71,6 @@ local expected_entries = {
     field = "receiver_activations",
     cas_policy_id = "cas.legacy_merge_v1",
     cas_variant = "merge_ready_or_merging_to_merging",
-    binding_id = "github-devloop-pr/merge-ready/entry/handoff_to_merge_gate",
   },
   ["github-devloop-pr/reviewing/entry/review_reject_to_blocked"] = {
     row_id = "reviewing",
@@ -85,7 +81,6 @@ local expected_entries = {
     field = "receiver_activations",
     cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
     cas_variant = "review_reject_to_blocked",
-    binding_id = "transition/github-devloop-pr/reconcile/review-reject-blocked",
   },
   ["github-devloop-pr/fixing/entry/review_reject_to_blocked"] = {
     row_id = "fixing",
@@ -96,7 +91,6 @@ local expected_entries = {
     field = "receiver_activations",
     cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
     cas_variant = "review_reject_to_blocked",
-    binding_id = "transition/github-devloop-pr/reconcile/review-reject-blocked",
   },
   ["github-devloop-pr/fixing/entry/bounded_fix_to_blocked"] = {
     row_id = "fixing",
@@ -107,7 +101,6 @@ local expected_entries = {
     field = "receiver_activations",
     cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
     cas_variant = "bounded_fix_to_blocked",
-    binding_id = "transition/github-devloop-pr/reconcile/bounded-fix-blocked",
   },
   ["github-devloop-pr/merge-ready/entry/review_reject_to_blocked"] = {
     row_id = "merge-ready",
@@ -118,7 +111,6 @@ local expected_entries = {
     field = "receiver_activations",
     cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
     cas_variant = "review_reject_to_blocked",
-    binding_id = "transition/github-devloop-pr/reconcile/review-reject-blocked",
   },
   ["github-devloop-pr/merge-ready/entry/bounded_fix_to_blocked"] = {
     row_id = "merge-ready",
@@ -129,7 +121,6 @@ local expected_entries = {
     field = "receiver_activations",
     cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
     cas_variant = "bounded_fix_to_blocked",
-    binding_id = "transition/github-devloop-pr/reconcile/bounded-fix-blocked",
   },
   ["github-devloop-pr/merging/entry/review_reject_to_blocked"] = {
     row_id = "merging",
@@ -140,7 +131,6 @@ local expected_entries = {
     field = "receiver_activations",
     cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
     cas_variant = "review_reject_to_blocked",
-    binding_id = "transition/github-devloop-pr/reconcile/review-reject-blocked",
   },
   ["github-devloop-pr/merging/entry/bounded_fix_to_blocked"] = {
     row_id = "merging",
@@ -151,7 +141,6 @@ local expected_entries = {
     field = "receiver_activations",
     cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
     cas_variant = "bounded_fix_to_blocked",
-    binding_id = "transition/github-devloop-pr/reconcile/bounded-fix-blocked",
   },
 }
 
@@ -506,13 +495,16 @@ local function ingress_edges(edges)
   return out
 end
 
-local function binding_by_id(binding_id)
-  for _, binding in ipairs(restart_cas_catalog.bindings()) do
-    if binding.id == binding_id then
-      return binding
-    end
+local function assert_valid_cas(edge)
+  if edge.cas_policy_id == nil then
+    return
   end
-  return nil
+  local definition = restart_cas_catalog.definition(edge.cas_policy_id)
+  t.is_true(definition ~= nil)
+  if edge.cas_variant ~= nil then
+    t.is_true(definition.variants ~= nil)
+    t.is_true(definition.variants[edge.cas_variant] ~= nil)
+  end
 end
 
 local function assert_entry_shape(edges)
@@ -548,16 +540,7 @@ local function assert_entry_shape(edges)
     t.eq(edge.provenance.field, expected.field)
     t.eq(edge.cas_policy_id, expected.cas_policy_id)
     t.eq(edge.cas_variant, expected.cas_variant)
-    if expected.binding_id ~= nil then
-      local binding = binding_by_id(expected.binding_id)
-      t.is_true(binding ~= nil)
-      t.eq(edge.cas_policy_id, binding.cas_policy_id)
-      if binding.variant ~= nil then
-        t.eq(edge.cas_variant, binding.variant)
-      else
-        t.eq(edge.cas_variant, nil)
-      end
-    end
+    assert_valid_cas(edge)
     t.eq(seen_ids[edge.id], nil)
     seen_ids[edge.id] = true
   end

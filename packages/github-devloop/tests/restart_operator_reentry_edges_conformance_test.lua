@@ -63,6 +63,18 @@ local function assert_exact_keys(value, expected)
   t.eq(count, expected_count)
 end
 
+local function assert_valid_cas(edge)
+  if edge.cas_policy_id == nil then
+    return
+  end
+  local definition = restart_cas_catalog.definition(edge.cas_policy_id)
+  t.is_true(definition ~= nil)
+  if edge.cas_variant ~= nil then
+    t.is_true(definition.variants ~= nil)
+    t.is_true(definition.variants[edge.cas_variant] ~= nil)
+  end
+end
+
 local function copy_value(value)
   if type(value) ~= "table" then
     return value
@@ -632,24 +644,19 @@ return {
     assert_observed_inventory_edge(3, observe_blocked_timeout_reimplement())
   end,
 
-  test_issue_blocked_operator_reentry_cas_metadata_matches_catalog_bindings = function()
+  test_issue_blocked_operator_reentry_cas_metadata_references_declared_policies = function()
     local authored = restart_edges.extract_operator_reentry_edges(owner, operator_reentry_inventory)
     local edges_by_id = {}
     for _, edge in ipairs(authored) do
       edges_by_id[edge.id] = edge
     end
-    local bindings_by_id = {}
-    for _, binding in ipairs(restart_cas_catalog.bindings()) do
-      bindings_by_id[binding.id] = binding
-    end
-
     for _, id in ipairs({ blocked_open_pr_id, blocked_timeout_without_pr_id }) do
       local edge = edges_by_id[id]
-      local binding = bindings_by_id[id]
+      local expected = cas_metadata_golden[id]
       t.is_true(edge ~= nil)
-      t.is_true(binding ~= nil)
-      t.eq(edge.cas_policy_id, binding.cas_policy_id)
-      t.eq(edge.cas_variant, binding.variant)
+      t.eq(edge.cas_policy_id, expected.cas_policy_id)
+      t.eq(edge.cas_variant, expected.cas_variant)
+      assert_valid_cas(edge)
     end
   end,
 

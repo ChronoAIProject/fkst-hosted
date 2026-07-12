@@ -1,8 +1,13 @@
 local transition_version = require("contract.transition_version")
+local canonicalization_inventory = require("core.restart.canonicalization_inventory")
+local entry_inventory = require("core.restart.entry_inventory")
+local operator_reentry_inventory = require("core.restart.operator_reentry_inventory")
 local catalog = require("devloop.restart_cas_catalog")
+local restart_edges = require("devloop.restart_edges")
 local devloop_state = require("devloop.state")
 local h = require("tests.devloop_helpers")
 
+local core = h.core
 local t = h.t
 
 local BASE = "ready/cas-parity"
@@ -174,21 +179,23 @@ local function assert_base_matrix(policy_id, production, sources, target, target
   end
 end
 
-local function binding_set()
-  local seen = {}
-  for _, binding in ipairs(catalog.bindings()) do
-    t.eq(type(binding.id), "string")
-    t.eq(type(binding.consumer), "string")
-    t.eq(type(binding.cas_policy_id), "string")
-    local definition = catalog.definition(binding.cas_policy_id)
-    t.is_true(definition ~= nil)
-    if binding.variant ~= nil and definition.variants ~= nil then
-      t.is_true(definition.variants[binding.variant] ~= nil)
-    end
-    t.eq(seen[binding.id], nil)
-    seen[binding.id] = true
+local function append_edges(target, edges)
+  for _, edge in ipairs(edges) do
+    target[#target + 1] = edge
   end
-  return seen
+end
+
+local function extracted_edges()
+  local owner = core.restart_package_name
+  local rows = core.restart_transition_table()
+  local edges = {}
+  append_edges(edges, restart_edges.extract_entry_edges(owner, entry_inventory, rows))
+  append_edges(edges, restart_edges.extract_operator_reentry_edges(owner, operator_reentry_inventory))
+  append_edges(edges, restart_edges.extract_canonicalization_edges(owner, canonicalization_inventory))
+  append_edges(edges, restart_edges.extract_autonomous_edges(owner, rows))
+  append_edges(edges, restart_edges.extract_guard_boundary_edges(owner, rows))
+  append_edges(edges, restart_edges.extract_timeout_edges(owner, rows))
+  return edges
 end
 
 local function profile_production_result(profile, current, incoming)
@@ -738,23 +745,24 @@ return {
     end
   end,
 
-  test_catalog_binds_core_extracted_edges_and_activation_transitions = function()
-    local seen = binding_set()
-    for _, id in ipairs({
-      "github-devloop/thinking/autonomous/consensus-reached",
-      "github-devloop/thinking/autonomous/consensus-stalled",
-      "github-devloop/ready/entry/implementation_kicked_off",
-      "github-devloop/impl-failed/entry/retry-implementation",
-      "github-devloop-pr/reviewing/autonomous/approved",
-      "github-devloop-pr/reviewing/autonomous/changes_requested",
-      "github-devloop-pr/fixing/autonomous/revision_published",
-      "github-devloop-pr/review-meta/autonomous/fix",
-      "github-devloop-pr/merge-ready/entry/handoff_to_merge_gate",
-      "transition/github-devloop-pr/review_pr/reviewing-activation",
-      "transition/github-devloop-pr/review_loop/reviewing-convergence",
-    }) do
-      t.eq(seen[id], true)
+  test_extracted_cas_edges_reference_declared_catalog_policies_and_variants = function()
+    local seen = {}
+    local count = 0
+    for _, edge in ipairs(extracted_edges()) do
+      if edge.cas_policy_id ~= nil then
+        local definition = catalog.definition(edge.cas_policy_id)
+        t.is_true(definition ~= nil)
+        if edge.cas_variant ~= nil then
+          t.is_true(definition.variants ~= nil)
+          t.is_true(definition.variants[edge.cas_variant] ~= nil)
+        end
+        t.eq(seen[edge.id], nil)
+        seen[edge.id] = true
+        count = count + 1
+      end
     end
-    t.eq(#catalog.deferred_bindings(), 0)
+    t.is_true(count > 0)
+    t.eq(catalog.bindings, nil)
+    t.eq(catalog.deferred_bindings, nil)
   end,
 }
