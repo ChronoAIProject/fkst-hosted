@@ -294,27 +294,85 @@ function C.pr_review_consensus_dedup_key(review_proposal_id)
   return "consensus:" .. C.pr_review_proposal_dedup_key(review_proposal_id)
 end
 
+function C.pr_review_redrive_delivery_dedup_key(review_proposal_id, generation_key, attempt)
+  if C.parse_pr_review_proposal_id(review_proposal_id) == nil then
+    error("github-devloop: invalid PR review proposal id")
+  end
+  if not is_bounded_string(generation_key, max_dedup_len) then
+    error("github-devloop: invalid PR review redrive generation")
+  end
+  local round = tonumber(attempt)
+  if round == nil or round < 1 or round ~= math.floor(round) then
+    error("github-devloop: invalid PR review redrive attempt")
+  end
+  local generation_digest = string.format("%08x", tonumber(decimal_checksum(generation_key)))
+  local key = tostring(review_proposal_id) .. "/r/" .. generation_digest .. "-" .. tostring(round)
+  if not is_path_safe_key(key, max_key_len) then
+    error("github-devloop: PR review redrive delivery dedup exceeds the consensus key bound")
+  end
+  return key
+end
+
+local function parse_pr_review_proposal_dedup_key(dedup_key)
+  if not is_path_safe_key(dedup_key, max_dedup_len) then
+    return nil
+  end
+  local without_loop = transition_version.strip_trailing_loop(dedup_key)
+  if not is_path_safe_key(without_loop, max_key_len) then
+    return nil
+  end
+  local review_proposal = without_loop:match("^(.+)/review$")
+  if review_proposal ~= nil and C.parse_pr_review_proposal_id(review_proposal) ~= nil then
+    return review_proposal, C.pr_review_proposal_dedup_key(review_proposal), "canonical"
+  end
+  local generation_digest, attempt
+  review_proposal, generation_digest, attempt = without_loop:match("^(.+)/r/([0-9a-f]+)%-(%d+)$")
+  if review_proposal == nil
+    or #generation_digest ~= 8
+    or tonumber(attempt) == nil
+    or tonumber(attempt) < 1
+    or C.parse_pr_review_proposal_id(review_proposal) == nil then
+    return nil
+  end
+  return review_proposal, C.pr_review_proposal_dedup_key(review_proposal), "redrive"
+end
+
+function C.pr_review_proposal_id_from_redrive_delivery_dedup_key(dedup_key)
+  if transition_version.strip_trailing_loop(dedup_key) ~= dedup_key then
+    return nil
+  end
+  local review_proposal, _, kind = parse_pr_review_proposal_dedup_key(dedup_key)
+  if kind ~= "redrive" then
+    return nil
+  end
+  return review_proposal
+end
+
+function C.canonical_pr_review_proposal_dedup_for_proposal(dedup_key, review_proposal_id)
+  local parsed_proposal, canonical = parse_pr_review_proposal_dedup_key(dedup_key)
+  if parsed_proposal == nil or parsed_proposal ~= review_proposal_id then
+    return nil
+  end
+  return canonical
+end
+
 local function parse_canonical_pr_review_consensus_dedup_key(dedup_key)
   local inner = tostring(dedup_key or ""):match("^consensus:(.+)$")
   if inner == nil then
     return nil
   end
-  local review_proposal = inner:match("^(.+)/review$")
-  if review_proposal == nil or C.parse_pr_review_proposal_id(review_proposal) == nil then
+  local review_proposal, canonical = parse_pr_review_proposal_dedup_key(inner)
+  if review_proposal == nil then
     return nil
   end
-  if inner ~= C.pr_review_proposal_dedup_key(review_proposal) then
-    return nil
-  end
-  return review_proposal, "consensus:" .. inner
+  return review_proposal, "consensus:" .. canonical
 end
 
 function C.canonical_pr_review_consensus_dedup_key(dedup_key)
   if not is_bounded_string(dedup_key, max_dedup_len) then
     return nil
   end
-  local canonical = transition_version.strip_trailing_loop(dedup_key)
-  local _, parsed = parse_canonical_pr_review_consensus_dedup_key(canonical)
+  local _, parsed = parse_canonical_pr_review_consensus_dedup_key(dedup_key)
   return parsed
 end
 

@@ -11,6 +11,8 @@ local opts = h.opts
 local replay_fields = require("devloop.replay_fields")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local m_builders = require("devloop.markers.builders")
+local mock_issue_review = h.mock_issue_review
+local mock_pr_origin_sequence = h.mock_pr_origin_sequence
 
 local repo = "owner/repo"
 local proposal_id = "github-devloop/issue/owner/repo/42"
@@ -243,6 +245,79 @@ local function find_pr_comment_with(result, needle)
 end
 
 return {
+  test_liveness_scan_reviewing_redrive_carries_fresh_delivery_identity = function()
+    local review_version = version .. "/review-loop/1"
+    local result = run_with_pr_comments("liveness-scan-reviewing-fresh-delivery-identity", {
+      m_builders.pr_origin_marker(proposal_id, "42", "devloop-owner-repo-42-01HY", review_version, "dev"),
+      state_comment("reviewing", review_version, "2026-06-03T00:00:00Z"),
+    })
+    t.eq(result.exit_code, 0)
+    local reviewing = find_raise(result, "devloop_reviewing")
+    t.is_true(reviewing ~= nil)
+    t.eq(reviewing.payload.review_delivery_dedup_key, reviewing.payload.dedup_key)
+    local review_id = devloop_base.pr_review_proposal_id(repo, 7, review_version, "def456")
+    t.eq(
+      devloop_base.canonical_pr_review_proposal_dedup_for_proposal(
+        reviewing.payload.review_delivery_dedup_key,
+        review_id
+      ),
+      devloop_base.pr_review_proposal_dedup_key(review_id)
+    )
+    t.is_true(reviewing.payload.review_delivery_dedup_key ~= devloop_base.pr_review_proposal_dedup_key(review_id))
+  end,
+
+  test_observe_pr_reviewing_redrive_preserves_fresh_identity_through_comment_handoff = function()
+    local review_version = version .. "/review-loop/1"
+    local observed = run_observe_with_pr_comments("observe-pr-reviewing-fresh-delivery-identity", {
+      m_builders.pr_origin_marker(proposal_id, "42", "devloop-owner-repo-42-01HY", review_version, "dev"),
+      state_comment("reviewing", review_version, "2026-06-03T00:00:00Z"),
+    })
+    if observed.exit_code ~= 0 then
+      error("observe_pr redrive failed: " .. tostring(observed.error or observed.stderr))
+    end
+    local comment = h.find_raise(observed.raises, "github-proxy.github_pr_comment_request", function(payload)
+      return payload.handoff ~= nil and payload.handoff.kind == "github-devloop.reviewing"
+    end)
+    t.is_true(comment ~= nil)
+    local delivery_dedup_key = comment.payload.handoff.review_delivery_dedup_key
+    local review_id = devloop_base.pr_review_proposal_id(repo, 7, review_version, "def456")
+    t.eq(
+      devloop_base.pr_review_proposal_id_from_redrive_delivery_dedup_key(delivery_dedup_key),
+      review_id
+    )
+
+    local handed_off = h.run_comment_handoff_from_request(
+      comment.payload,
+      "IC_reviewing_redrive_1",
+      "observe-pr-reviewing-redrive-handoff"
+    )
+    if handed_off.exit_code ~= 0 then
+      error("comment_handoff redrive failed: " .. tostring(handed_off.error or handed_off.stderr))
+    end
+    local reviewing_event = find_raise(handed_off, "devloop_reviewing")
+    t.is_true(reviewing_event ~= nil)
+    t.eq(reviewing_event.payload.dedup_key, delivery_dedup_key)
+    t.eq(reviewing_event.payload.review_delivery_dedup_key, delivery_dedup_key)
+
+    mock_issue_review({ "fkst-dev:reviewing" }, {
+      core.state_marker(proposal_id, "reviewing", review_version),
+    }, {
+      title = "Implement decision recorder",
+      body = "Issue context",
+    })
+    mock_pr_origin_sequence({
+      { head = "devloop-owner-repo-42-01HY", head_sha = "def456" },
+    })
+    local reviewed = h.run_review_pr(reviewing_event.payload, opts("review-pr-redrive-from-comment-handoff"))
+    if reviewed.exit_code ~= 0 then
+      error("review_pr redrive failed: " .. tostring(reviewed.error or reviewed.stderr))
+    end
+    local proposal = find_raise(reviewed, "consensus.proposal")
+    t.is_true(proposal ~= nil)
+    t.eq(proposal.payload.proposal_id, review_id)
+    t.eq(proposal.payload.dedup_key, delivery_dedup_key)
+  end,
+
   test_liveness_scan_reviewing_recent_pr_converge_round_does_not_timeout_count = function()
     local result = run_with_pr_comments("liveness-scan-reviewing-pr-heartbeat-live", {
       m_builders.pr_origin_marker(proposal_id, "42", "devloop-owner-repo-42-01HY", version, "dev"),

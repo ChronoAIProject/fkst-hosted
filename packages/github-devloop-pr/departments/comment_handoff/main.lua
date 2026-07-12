@@ -34,6 +34,34 @@ local function valid_base_pr_handoff(handoff)
     and source_refs.has_bounded_source_ref(handoff.source_ref, devloop_base._max_key_len)
 end
 
+local function valid_reviewing_handoff(handoff)
+  if not valid_base_pr_handoff(handoff) then
+    return false
+  end
+  if handoff.review_delivery_dedup_key == nil then
+    return true
+  end
+  local review_proposal_id = devloop_base.pr_review_proposal_id_from_redrive_delivery_dedup_key(
+    handoff.review_delivery_dedup_key
+  )
+  local _, review_pr_number, _, review_head_sha = devloop_base.parse_pr_review_proposal_id(
+    review_proposal_id
+  )
+  local source_repo, source_pr_number = devloop_base.parse_pr_source_ref(handoff.source_ref)
+  return review_proposal_id ~= nil
+    and source_repo ~= nil
+    and source_pr_number ~= nil
+    and review_head_sha ~= nil
+    and review_proposal_id == devloop_base.pr_review_proposal_id(
+      source_repo,
+      source_pr_number,
+      handoff.version,
+      review_head_sha
+    )
+    and tostring(review_pr_number or "") == tostring(handoff.pr_number or "")
+    and tostring(review_pr_number or "") == tostring(source_pr_number or "")
+end
+
 local function valid_review_handoff(handoff)
   return valid_base_pr_handoff(handoff)
     and devloop_base.is_safe_pr_review_result_ref(handoff.review_proposal_id, handoff.review_dedup_key)
@@ -188,6 +216,10 @@ local function emit_reviewing(payload, handoff)
     impl_version = handoff.version,
     reviewing_comment_id = payload.comment_id,
   }, handoff.pr_number, handoff.source_ref, handoff.version)
+  if handoff.review_delivery_dedup_key ~= nil then
+    reviewing.dedup_key = handoff.review_delivery_dedup_key
+    reviewing.review_delivery_dedup_key = handoff.review_delivery_dedup_key
+  end
   devloop_logging.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "reviewing", version = handoff.version }, "comment-written", "devloop_reviewing", "applied(own-write-comment-id)", "reviewing marker comment write was acknowledged")
   devloop_logging.log_raise("comment_handoff", handoff.proposal_id, "devloop_reviewing", reviewing)
   maybe_raise_pr_label(payload, handoff)
@@ -200,7 +232,7 @@ local handoff_strategies = {
     emit = emit_pr_open,
   },
   ["github-devloop.reviewing"] = {
-    validate = valid_base_pr_handoff,
+    validate = valid_reviewing_handoff,
     state = "reviewing",
     emit = emit_reviewing,
   },

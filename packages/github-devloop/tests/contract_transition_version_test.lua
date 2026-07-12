@@ -294,6 +294,23 @@ return {
     t.eq(devloop_base.canonical_pr_review_consensus_dedup_key(base .. "/loop/2/loop/3"), nil)
   end,
 
+  test_pr_review_redrive_delivery_dedup_canonicalizes_to_logical_review = function()
+    local review = devloop_base.pr_review_proposal_id("owner/repo", 7, "ready/v1", "def456")
+    local base = devloop_base.pr_review_consensus_dedup_key(review)
+    local redrive = devloop_base.pr_review_redrive_delivery_dedup_key(
+      review,
+      "restart-liveness:v2/reviewing/reviewing.active/state-entry/1",
+      2
+    )
+
+    t.is_true(#redrive <= devloop_base._max_key_len)
+    t.eq(devloop_base.pr_review_proposal_id_from_redrive_delivery_dedup_key(redrive), review)
+    t.eq(devloop_base.pr_review_proposal_id_from_redrive_delivery_dedup_key(review .. "/review"), nil)
+    t.eq(devloop_base.pr_review_proposal_id_from_redrive_delivery_dedup_key(redrive .. "/loop/1"), nil)
+    t.eq(devloop_base.canonical_pr_review_consensus_dedup_key("consensus:" .. redrive), base)
+    t.eq(devloop_base.canonical_pr_review_consensus_dedup_key("consensus:" .. redrive .. "/loop/1"), base)
+  end,
+
   test_devloop_state_builders_delegate_to_byte_exact_transition_constructors = function()
     local base = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
 
