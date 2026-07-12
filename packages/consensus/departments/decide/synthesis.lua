@@ -408,7 +408,6 @@ function M.to_decision_result(proposal, p1_results, p2_results, parsed, caps)
         p2_verdicts = provenance.verdict_vector(p2_results),
         verified_moves = parsed.verified_moves or 0,
       }),
-      cache = true,
     }
   end
 
