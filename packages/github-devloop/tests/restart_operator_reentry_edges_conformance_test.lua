@@ -9,6 +9,7 @@ local m_builders = require("devloop.markers.builders")
 local operator_commands = require("devloop.operator_commands")
 local operator_reentry_inventory = require("core.restart.operator_reentry_inventory")
 local payloads_builders = require("devloop.payloads.builders")
+local restart_cas_catalog = require("devloop.restart_cas_catalog")
 local restart_edges = require("devloop.restart_edges")
 
 local core = h.core
@@ -25,6 +26,20 @@ local structural_fields = {
   "target",
   "cause_evidence",
   "provenance",
+}
+local blocked_open_pr_id =
+  "github-devloop/implementing/operator_reentry/reimplement_blocked_open_pr"
+local blocked_timeout_without_pr_id =
+  "github-devloop/implementing/operator_reentry/reimplement_blocked_implementing_timeout_without_pr"
+local cas_metadata_golden = {
+  [blocked_open_pr_id] = {
+    cas_policy_id = "cas.legacy_implement_activation_handoff_v1",
+    cas_variant = "blocked_to_implementing",
+  },
+  [blocked_timeout_without_pr_id] = {
+    cas_policy_id = "cas.legacy_implement_activation_handoff_v1",
+    cas_variant = "blocked_to_implementing",
+  },
 }
 
 local function key_set(keys)
@@ -347,8 +362,13 @@ end
 
 local function assert_operator_reentry_shape(edges)
   local seen_ids = {}
-  local edge_keys = key_set(structural_fields)
   for _, edge in ipairs(edges) do
+    local edge_keys = key_set(structural_fields)
+    local expected_cas = cas_metadata_golden[edge.id]
+    if expected_cas ~= nil then
+      edge_keys.cas_policy_id = true
+      edge_keys.cas_variant = true
+    end
     assert_exact_keys(edge, edge_keys)
     if edge.source.boundary == nil then
       assert_exact_keys(edge.source, { state = true })
@@ -370,6 +390,8 @@ local function assert_operator_reentry_shape(edges)
     t.eq(edge.cause_evidence.resolver, "operator_commands")
     t.eq(edge.provenance.owner, owner)
     t.eq(edge.provenance.row, "implementing")
+    t.eq(edge.cas_policy_id, expected_cas and expected_cas.cas_policy_id or nil)
+    t.eq(edge.cas_variant, expected_cas and expected_cas.cas_variant or nil)
     t.eq(seen_ids[edge.id], nil)
     seen_ids[edge.id] = true
   end
@@ -608,6 +630,27 @@ return {
 
   test_issue_blocked_timeout_operator_reentry_matches_production_apply_decision = function()
     assert_observed_inventory_edge(3, observe_blocked_timeout_reimplement())
+  end,
+
+  test_issue_blocked_operator_reentry_cas_metadata_matches_catalog_bindings = function()
+    local authored = restart_edges.extract_operator_reentry_edges(owner, operator_reentry_inventory)
+    local edges_by_id = {}
+    for _, edge in ipairs(authored) do
+      edges_by_id[edge.id] = edge
+    end
+    local bindings_by_id = {}
+    for _, binding in ipairs(restart_cas_catalog.bindings()) do
+      bindings_by_id[binding.id] = binding
+    end
+
+    for _, id in ipairs({ blocked_open_pr_id, blocked_timeout_without_pr_id }) do
+      local edge = edges_by_id[id]
+      local binding = bindings_by_id[id]
+      t.is_true(edge ~= nil)
+      t.is_true(binding ~= nil)
+      t.eq(edge.cas_policy_id, binding.cas_policy_id)
+      t.eq(edge.cas_variant, binding.variant)
+    end
   end,
 
   test_issue_operator_reentry_inventory_is_ordered_immutable_and_deterministic = function()

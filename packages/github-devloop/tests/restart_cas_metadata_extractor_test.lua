@@ -172,6 +172,38 @@ return {
     end
   end,
 
+  test_operator_reentry_cas_metadata_is_optional_and_copied = function()
+    local with_cas = operator_reentry_entry()
+    with_cas.cas_policy_id = "cas.operator_reentry_v1"
+    with_cas.cas_variant = "retry"
+    local without_cas = operator_reentry_entry()
+    without_cas.id = "owner/blocked/operator_reentry/other"
+    without_cas.provenance.field = "operator_reentry.other"
+
+    local edges = restart_edges.extract_operator_reentry_edges("owner", { with_cas, without_cas })
+
+    t.eq(edges[1].cas_policy_id, "cas.operator_reentry_v1")
+    t.eq(edges[1].cas_variant, "retry")
+    t.eq(has_key(edges[2], "cas_policy_id"), false)
+    t.eq(has_key(edges[2], "cas_variant"), false)
+  end,
+
+  test_operator_reentry_cas_metadata_fails_closed_on_empty_or_non_string_values = function()
+    local invalid_values = {
+      { field = "cas_policy_id", value = "" },
+      { field = "cas_policy_id", value = 1 },
+      { field = "cas_variant", value = "" },
+      { field = "cas_variant", value = false },
+    }
+    for _, invalid in ipairs(invalid_values) do
+      local entry = operator_reentry_entry()
+      entry[invalid.field] = invalid.value
+      assert_error_contains(function()
+        restart_edges.extract_operator_reentry_edges("owner", { entry })
+      end, "must be a non-empty string")
+    end
+  end,
+
   test_cas_metadata_fails_closed_on_unsupported_edge_kinds = function()
     local guard_row = {
       from_state = "from",
@@ -186,6 +218,9 @@ return {
         },
       },
     }
+    assert_error_contains(function()
+      restart_edges.extract_autonomous_edges("owner", { guard_row })
+    end, "cas_policy_id/cas_variant not supported on guard_boundary edges")
     assert_error_contains(function()
       restart_edges.extract_guard_boundary_edges("owner", { guard_row })
     end, "cas_policy_id/cas_variant not supported on guard_boundary edges")
@@ -207,12 +242,6 @@ return {
     assert_error_contains(function()
       restart_edges.extract_timeout_edges("owner", { timeout_row })
     end, "cas_policy_id/cas_variant not supported on timeout edges")
-
-    local operator_entry = operator_reentry_entry()
-    operator_entry.cas_policy_id = "cas.unsupported_v1"
-    assert_error_contains(function()
-      restart_edges.extract_operator_reentry_edges("owner", { operator_entry })
-    end, "cas_policy_id/cas_variant not supported on operator_reentry edges")
 
   end,
 }

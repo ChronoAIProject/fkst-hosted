@@ -30,6 +30,8 @@ return {
       boundary = "open-pr",
     },
     target = "implementing",
+    cas_policy_id = "cas.legacy_implement_activation_handoff_v1",
+    cas_variant = "blocked_to_implementing",
     cause_evidence = {
       command = "reimplement",
       requires_applied_certificate = true,
@@ -51,6 +53,8 @@ return {
       boundary = "implementing-timeout-without-pr",
     },
     target = "implementing",
+    cas_policy_id = "cas.legacy_implement_activation_handoff_v1",
+    cas_variant = "blocked_to_implementing",
     cause_evidence = {
       command = "reimplement",
       requires_applied_certificate = true,
