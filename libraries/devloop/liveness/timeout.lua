@@ -223,6 +223,23 @@ local function emit_decompose_exhausted_marker(dept, entity, state, facts, propo
   return false
 end
 
+local function with_redrive_delivery_identity(facts, decision)
+  local replay_facts = {}
+  for key, value in pairs(facts or {}) do
+    replay_facts[key] = value
+  end
+  local eval = replay_facts.actionable_epoch_eval
+  local generation_key = type(eval) == "table" and eval.generation_key or decision.version
+  if generation_key == nil or generation_key == "" then
+    error("github-devloop: redrive-delivery-generation-missing: redrive has no delivery generation")
+  end
+  replay_facts.redrive_delivery = {
+    generation_key = generation_key,
+    attempt = decision.attempt,
+  }
+  return replay_facts
+end
+
 function M.maybe_timeout_redrive_from_table(dept, entity, state, table_row, facts)
   local row = table_row or replay_fields.restart_transition_row(M.restart_transition_table(), state and state.state)
   if row == nil or row.terminal == true then
@@ -271,7 +288,7 @@ function M.maybe_timeout_redrive_from_table(dept, entity, state, table_row, fact
     proposal_id = state.proposal_id,
     stage_rank = state.stage_rank,
     marker_created_at = state.marker_created_at,
-  }, row, facts)
+  }, row, with_redrive_delivery_identity(facts, decision))
   if replay.kind == "deferred" then
     return true
   end
