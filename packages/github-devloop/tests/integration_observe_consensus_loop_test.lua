@@ -4,6 +4,7 @@ local forks = require("devloop.forks")
 local conv_rounds = require("devloop.convergence.rounds")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local m_builders = require("devloop.markers.builders")
+local devloop_base = require("devloop.base")
 local t = h.t
 local core = h.core
 local action_label = h.action_label
@@ -111,26 +112,78 @@ return {
     t.eq(count_calls("--json body"), 0)
   end,
 
-  test_observe_other_authored_unmanaged_issue_inside_grace_does_not_fork = function()
-    mock_issue_state({ "fkst-dev:enabled" }, "OPEN", {}, {}, "human", os.date("!%Y-%m-%dT%H:%M:%SZ", now()))
-    t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 42), {
-      stdout = '{"title":"Issue title","createdAt":"' .. os.date("!%Y-%m-%dT%H:%M:%SZ", now()) .. '","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[],"assignees":[],"author":{"login":"human"}}\n',
-      stderr = "",
-      exit_code = 0,
-    })
+  test_observe_self_assigned_non_whitelisted_author_skips_without_fork_or_consensus = function()
+    local created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now() - (3 * 60 * 60) - 1)
+    mock_issue_state({ "fkst-dev:enabled" }, "OPEN", {}, { "fkst-test-bot" }, "human", created_at)
 
-    local result = run_observe(issue(), opts("observe-other-author-fresh"))
+    local result = run_observe(issue(), opts("observe-non-whitelisted-other-author", {
+      FKST_GITHUB_AUTHORIZED_LOGINS = "trusted-human",
+    }))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_create_request"), nil)
     t.eq(find_raise(result.raises, "consensus.proposal"), nil)
+    t.eq(count_calls("codex exec"), 0)
   end,
 
-  test_observe_other_authored_unmanaged_issue_after_grace_raises_fork_request_only = function()
-    local run_opts = opts("observe-other-author-fork")
-    mock_issue_state({ "fkst-dev:enabled" }, "OPEN", {}, {}, "human", os.date("!%Y-%m-%dT%H:%M:%SZ", now() - (3 * 60 * 60) - 1))
+  test_observe_self_assigned_non_whitelisted_thinking_issue_skips_replay = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local marker_version = "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
+      {
+        body = core.state_marker(proposal_id, "thinking", marker_version),
+        created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now()),
+      },
+    }, { "fkst-test-bot" }, "human")
+
+    local result = run_observe(issue({
+      labels = { "fkst-dev:enabled", "fkst-dev:thinking" },
+    }), opts("observe-non-whitelisted-thinking-replay", {
+      FKST_GITHUB_AUTHORIZED_LOGINS = "trusted-human",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_create_request"), nil)
+    t.eq(find_raise(result.raises, "consensus.proposal"), nil)
+    t.eq(count_calls("codex exec"), 0)
+  end,
+
+  test_liveness_scan_non_whitelisted_thinking_issue_skips_redrive = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local marker_version = "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
+      {
+        body = core.state_marker(proposal_id, "thinking", marker_version),
+        created_at = "2026-06-03T01:02:03Z",
+      },
+    }, { "fkst-test-bot" }, "human")
+    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_REPO"), {
+      stdout = "owner/repo", stderr = "", exit_code = 0,
+    })
+    t.mock_command(core.gh_issue_list_observe_cmd("owner/repo"), {
+      stdout = '[{"number":42,"state":"open","updated_at":"2026-06-03T01:02:03Z"}]\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = h.run_department("departments/liveness_scan/main.lua", {
+      queue = "devloop_liveness_tick",
+      payload = { schema = "github-devloop.tick.v1" },
+      ts = "2026-06-03T01:32:03Z",
+    }, opts("liveness-scan-non-whitelisted-thinking-redrive", {
+      FKST_GITHUB_AUTHORIZED_LOGINS = "trusted-human",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(find_raise(result.raises, "consensus.proposal"), nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_comment_request"), nil)
+  end,
+
+  test_observe_authorized_other_author_after_grace_raises_fork_request_only = function()
+    local run_opts = opts("observe-authorized-other-author-fork")
+    mock_issue_state({ "fkst-dev:enabled" }, "OPEN", {}, {}, "trusted-human", os.date("!%Y-%m-%dT%H:%M:%SZ", now() - (3 * 60 * 60) - 1))
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 42), {
-      stdout = '{"title":"Issue title","createdAt":"' .. os.date("!%Y-%m-%dT%H:%M:%SZ", now() - (3 * 60 * 60) - 1) .. '","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[],"assignees":[],"author":{"login":"human"}}\n',
+      stdout = '{"title":"Issue title","createdAt":"' .. os.date("!%Y-%m-%dT%H:%M:%SZ", now() - (3 * 60 * 60) - 1) .. '","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[],"assignees":[],"author":{"login":"trusted-human"}}\n',
       stderr = "",
       exit_code = 0,
     })
@@ -254,6 +307,26 @@ return {
     t.eq(replay_proposal.dedup_key, "github-devloop/issue/owner/repo/42/2026-06-03T01-02-05Z")
     t.eq(replay_proposal.source_ref.ref, "owner/repo#issue/42")
     t.eq(count_calls("--json body"), 0)
+  end,
+
+  test_consensus_result_non_whitelisted_author_skips_without_comment_or_label = function()
+    mock_issue_result({ "fkst-dev:thinking" }, nil, { author_login = "human" })
+    t.mock_command("gh api graphql", {
+      stdout = '{"data":{"repository":{"issue":{"blockedBy":{"nodes":[]}}}}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = h.run_department("departments/consensus_result/main.lua", {
+      queue = "consensus.consensus_reached",
+      payload = reached(),
+    }, opts("result-non-whitelisted-author", {
+      FKST_GITHUB_AUTHORIZED_LOGINS = "trusted-human",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_comment_request"), nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request"), nil)
   end,
 
   test_consensus_result_approve_raises_ready_label_and_comment = function()
@@ -593,6 +666,18 @@ return {
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
     t.is_true(comment.body:find("fkst:github-devloop:converge-round:v1", 1, true) ~= nil)
     t.is_true(comment.body:find('round="0"', 1, true) ~= nil)
+  end,
+
+  test_loop_non_whitelisted_author_converge_skips_without_comment_or_consensus = function()
+    mock_issue_loop({ "fkst-dev:thinking" }, nil, { author_login = "human" })
+
+    local result = run_loop(unresolved(), opts("loop-non-whitelisted-author", {
+      FKST_GITHUB_AUTHORIZED_LOGINS = "trusted-human",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(find_raise(result.raises, "consensus.proposal"), nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_comment_request"), nil)
   end,
 
   test_loop_visible_over_budget_lineage_handoffs_reconcile_before_new_result = function()

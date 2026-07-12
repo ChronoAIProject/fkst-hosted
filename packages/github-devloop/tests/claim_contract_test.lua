@@ -27,6 +27,18 @@ local function mock_bot(login, write_mode, write_reads)
   end
 end
 
+local function mock_authorized_login(login, bot_login, managed_bot_logins)
+  author_policy.mock_env(t, {
+    env = {
+      FKST_GITHUB_BOT_LOGIN = bot_login or "fkst-test-bot",
+      FKST_DEVLOOP_MANAGED_BOT_LOGINS = managed_bot_logins or "",
+      FKST_GITHUB_AUTHORIZED_LOGINS = login or "",
+    },
+  }, {
+    configure_trusted_bot_login = h.mock_author_policy_configure,
+  })
+end
+
 local function count_calls(needle)
   local count = 0
   for _, call in ipairs(t.command_calls()) do
@@ -330,6 +342,7 @@ return {
 
   test_other_author_unassigned_issue_inside_grace_skips_without_forking = function()
     mock_bot("fkst-test-bot", "1")
+    mock_authorized_login("human")
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 44), {
       stdout = issue_state_json({ author_login = "human", created_at = created_inside_grace() }),
       stderr = "",
@@ -397,6 +410,7 @@ return {
 
   test_other_author_unassigned_issue_after_grace_raises_self_assigned_fork = function()
     mock_bot("fkst-test-bot", "1")
+    mock_authorized_login("human")
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 43), {
       stdout = issue_state_json({ author_login = "human", created_at = created_after_grace() }),
       stderr = "",
@@ -424,8 +438,32 @@ return {
     t.eq(raised[1].payload.post_create_blocked_by.dedup_key, forks.fork_issue_dedup_key("owner/repo", 43) .. "/blocked-by")
   end,
 
+  test_non_whitelisted_other_author_skips_before_fork_side_effects = function()
+    mock_bot("fkst-test-bot", "1")
+    mock_authorized_login("")
+
+    local ok, captured_logs = capture_info_logs(function()
+      local result, raised = capture_raises(function()
+        return m_claims.claim_issue_for_management(core,
+          "claim_contract",
+          "owner/repo",
+          43,
+          self_current({ author_login = "human", created_at = created_after_grace() }),
+          "github-devloop/issue/owner/repo/43"
+        )
+      end)
+      t.eq(#raised, 0)
+      return result
+    end)
+
+    t.eq(ok, false)
+    t.eq(count_calls("gh issue edit"), 0)
+    t.is_true(table.concat(captured_logs, "\n"):find("outcome=skip-non-whitelisted-author", 1, true) ~= nil)
+  end,
+
   test_other_author_fork_revalidates_closed_issue_before_raise = function()
     mock_bot("fkst-test-bot", "1")
+    mock_authorized_login("human")
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 43), {
       stdout = issue_state_json({ state = "CLOSED", author_login = "human", created_at = created_after_grace() }),
       stderr = "",
@@ -467,6 +505,7 @@ return {
 
   test_existing_fork_parent_ledger_skips_duplicate_fork = function()
     mock_bot("fkst-test-bot", "1")
+    mock_authorized_login("human")
     local dedup_key = forks.fork_issue_dedup_key("owner/repo", 42)
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 42), {
       stdout = issue_state_json({
@@ -511,6 +550,7 @@ return {
       env = {
         FKST_GITHUB_BOT_LOGIN = "loning",
         FKST_DEVLOOP_MANAGED_BOT_LOGINS = "loning,ElonSG",
+        FKST_GITHUB_AUTHORIZED_LOGINS = "human",
       },
     }, {
       configure_trusted_bot_login = h.mock_author_policy_configure,
@@ -557,6 +597,7 @@ return {
 
   test_existing_fork_parent_intent_skips_duplicate_fork = function()
     mock_bot("fkst-test-bot", "1")
+    mock_authorized_login("human")
     local dedup_key = forks.fork_issue_dedup_key("owner/repo", 42)
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 42), {
       stdout = issue_state_json({
@@ -597,6 +638,7 @@ return {
 
   test_forged_fork_parent_intent_does_not_suppress_fork = function()
     mock_bot("fkst-test-bot", "1")
+    mock_authorized_login("human")
     local dedup_key = forks.fork_issue_dedup_key("owner/repo", 42)
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 42), {
       stdout = issue_state_json({

@@ -5,9 +5,14 @@ local core = h.core
 local opts = h.opts
 local find_raise = h.find_raise
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local author_policy = require("testkit.github_author_policy")
 
 local function mock_repo_env()
   h.mock_bot_env()
+  author_policy.mock_env(t, nil, {
+    configure_trusted_bot_login = h.mock_author_policy_configure,
+    times = 4,
+  })
   t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', { stdout = "dev", stderr = "", exit_code = 0 })
   t.mock_command('printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"', { stdout = "dev", stderr = "", exit_code = 0 })
   t.mock_command('printf %s "$FKST_DEVLOOP_ROLLUP_MERGE"', { stdout = "", stderr = "", exit_code = 0 })
@@ -52,14 +57,14 @@ local function mock_admission_view(fields)
     labels = {},
     comments = {},
     assignees = {},
-    author_login = "human",
+    author_login = f.author_login or "trusted-human",
   }, "title,body,createdAt,updatedAt,labels,comments,state,assignees,author")
 end
 
 local function mock_state_view(fields)
   local f = fields or {}
   t.mock_command(core.gh_issue_view_state_cmd("owner/repo", tostring(f.number or 42)), {
-    stdout = '{"title":"External request","createdAt":"' .. tostring(f.created_at or "2026-06-03T01:00:00Z") .. '","updatedAt":"' .. tostring(f.updated_at or "2026-06-03T01:02:03Z") .. '","state":"' .. tostring(f.state or "OPEN") .. '","labels":[],"comments":[],"assignees":[],"author":{"login":"human"}}\n',
+    stdout = '{"title":"External request","createdAt":"' .. tostring(f.created_at or "2026-06-03T01:00:00Z") .. '","updatedAt":"' .. tostring(f.updated_at or "2026-06-03T01:02:03Z") .. '","state":"' .. tostring(f.state or "OPEN") .. '","labels":[],"comments":[],"assignees":[],"author":{"login":"' .. tostring(f.author_login or "trusted-human") .. '"}}\n',
     stderr = "",
     exit_code = 0,
   })

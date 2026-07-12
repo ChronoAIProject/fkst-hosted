@@ -17,6 +17,7 @@ local entity_lib = require("devloop.entity")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
 local devloop_commands = require("devloop.commands")
+local github_author_policy = require("devloop.github_author_policy")
 local transition_version = require("contract.transition_version")
 local spec = {
   consumes = { "consensus.consensus_converge" },
@@ -71,6 +72,11 @@ return saga.department(spec, { done = function() return false end, act = functio
     local current = parsers_issue.parse_issue_view_loop(core, view.stdout)
     devloop_logging.log_forged_markers("loop", unresolved.proposal_id, current.comments)
     local state = devloop_state.current_state(current.comments, unresolved.proposal_id)
+    local trusted_author_policy = github_author_policy.from_env()
+    if not github_author_policy.is_authorized(trusted_author_policy, current.author_login) then
+      devloop_logging.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", "skip-non-whitelisted-author", "issue author is not authorized for GitHub content")
+      return
+    end
     local transition = devloop_state.transition_status(state, { "thinking" }, "blocked")
     if transition == "idempotent" or transition == "stale" then
       devloop_logging.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", devloop_state.cas_outcome(state, transition, unresolved.dedup_key), "unresolved event cannot advance current marker")
