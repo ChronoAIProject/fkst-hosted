@@ -2,6 +2,7 @@ local core = require("core")
 local angle_answers = require("angle_answers")
 local convergence_identity = require("contract.convergence_identity")
 local rebuttal = require("departments.decide.rebuttal")
+local result_memo = require("departments.decide.result_memo")
 local synthesis = require("departments.decide.synthesis")
 local workflow_codex = require("workflow.codex")
 local saga = require("workflow.saga")
@@ -10,7 +11,7 @@ local aggregate = core.aggregate
 local build_reached_payload = core.build_reached_payload
 local judgment_scratch_worktree = core.judgment_scratch_worktree
 local parse_angle_output = core.parse_angle_output
-local reached_cache_key = core.reached_cache_key
+local result_memo_key = core.result_memo_key
 
 local spec = {
   consumes = { "proposal" },
@@ -143,7 +144,6 @@ local function decide(proposal)
     return {
       queue = "consensus_reached",
       payload = build_reached_payload(proposal, decision, angle_results),
-      cache = true,
     }
   end
 
@@ -229,18 +229,17 @@ local function decision_done(event)
   if not core.is_eligible(proposal) then
     return true
   end
-
-  local cache_key = reached_cache_key(proposal.dedup_key)
-  local already_reached = false
-  with_lock(cache_key, function()
-    already_reached = cache_get(cache_key) ~= nil
-  end)
-  return already_reached
+  return false
 end
 
 local function act_decide(event)
   local proposal = event.payload or {}
-  local cache_key = reached_cache_key(proposal.dedup_key)
+  local cache_key = result_memo_key(proposal.dedup_key)
+  local memoized_payload = result_memo.load(cache_key, proposal.dedup_key)
+  if memoized_payload ~= nil then
+    raise("consensus_reached", memoized_payload)
+    return
+  end
 
   local ok, result = pcall(decide, proposal)
   if not ok then
@@ -257,22 +256,21 @@ local function act_decide(event)
   end
 
   with_lock(cache_key, function()
-    if cache_get(cache_key) then
-      return
+    memoized_payload = result_memo.load(cache_key, proposal.dedup_key)
+    if memoized_payload == nil and result.queue == "consensus_reached" then
+      result_memo.save(cache_key, result.payload)
+      memoized_payload = result.payload
     end
-    if result.queue == "consensus_reached" then
-      raise("consensus_reached", result.payload)
-      if result.cache then
-        cache_set(cache_key, proposal.dedup_key)
-      end
-      return
-    end
-    if result.queue == "consensus_converge" then
-      raise_converge(proposal, result.angle_results, result.narrowed_question, result.findings_record, result.essence_stall)
-      return
-    end
-    error("consensus: decision-result-invalid: unknown decision result")
   end)
+  if memoized_payload ~= nil then
+    raise("consensus_reached", memoized_payload)
+    return
+  end
+  if result.queue == "consensus_converge" then
+    raise_converge(proposal, result.angle_results, result.narrowed_question, result.findings_record, result.essence_stall)
+    return
+  end
+  error("consensus: decision-result-invalid: unknown decision result")
 end
 
 return saga.department(spec, {
