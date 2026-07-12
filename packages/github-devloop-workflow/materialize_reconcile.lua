@@ -232,13 +232,11 @@ local function process_origin(core, deps, repo, issue_number, event)
       log_decision(origin, "tick", "discover", "skip-closed", "issue is not open")
       return "skip"
     end
-    -- Terminal handling first: a workflow that already reached a terminal marker
-    -- needs no claim or blueprint. A "done" terminal (every slot merged) whose origin
-    -- is still OPEN is closed here, level-triggered, on any poll -- so origins that
-    -- reached done before this behavior existed (or whose terminal-time close was a
-    -- dry-run) still close, without needing the (already released) done claim.
+    -- Successful and configuration-error terminals are monotonic. A blocked terminal
+    -- is a derived child verdict, so each poll must recompute it from current child
+    -- facts: a child can recover and merge after the workflow recorded child-fatal.
     local terminal_fact = discovery.latest_terminal(core, current, origin)
-    if terminal_fact ~= nil then
+    if terminal_fact ~= nil and tostring(terminal_fact.state or "") ~= "blocked" then
       if tostring(terminal_fact.state or "") == "done" then
         lease.close_done_origin(core, deps, repo, issue_number, origin)
       end
