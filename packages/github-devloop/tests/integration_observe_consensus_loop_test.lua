@@ -616,6 +616,18 @@ return {
     t.is_true(comment.body:find('round="0"', 1, true) ~= nil)
   end,
 
+  test_loop_non_whitelisted_author_converge_skips_without_comment_or_consensus = function()
+    mock_issue_loop({ "fkst-dev:thinking" }, nil, { author_login = "human" })
+
+    local result = run_loop(unresolved(), opts("loop-non-whitelisted-author", {
+      FKST_GITHUB_AUTHORIZED_LOGINS = "trusted-human",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(find_raise(result.raises, "consensus.proposal"), nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_comment_request"), nil)
+  end,
+
   test_loop_visible_over_budget_lineage_handoffs_reconcile_before_new_result = function()
     local base_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local event = unresolved({
