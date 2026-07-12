@@ -406,6 +406,15 @@ function M.mkdir_p_cmd(path)
   return "mkdir -p " .. shell_single_quote(value)
 end
 
+function M.checkout_root_exists_cmd(path)
+  local value = tostring(path or "")
+  if value == "" or value:find("[\r\n]") ~= nil then
+    error("consensus: checkout-path-invalid: invalid checkout path")
+  end
+  local quoted = shell_single_quote(value)
+  return "test -d " .. quoted .. " && test -e " .. quoted .. "/.git"
+end
+
 -- Fail-closed parse. A genuine answer is an ADJACENT pair: exactly one clean verdict line
 -- immediately followed by exactly one reply line (the prompt asks for line one = verdict,
 -- line two = reply). The verdict sentinel must be followed by one whitelist word on its
