@@ -35,9 +35,13 @@ return {
     t.eq(signature.input_fact_family, "head-bound-merge-authorization")
     t.eq(signature.output_postcondition_family, "merge_gate_handoff")
     t.eq(signature.decision_type, nil)
-    t.eq(#row.receiver_activations, 1)
+    t.eq(#row.receiver_activations, 3)
     t.eq(row.receiver_activations[1].target, "merging")
     t.eq(row.receiver_activations[1].output_variant, "handoff_to_merge_gate")
+    t.eq(row.receiver_activations[2].target, "blocked")
+    t.eq(row.receiver_activations[2].output_variant, "review_reject_to_blocked")
+    t.eq(row.receiver_activations[3].target, "blocked")
+    t.eq(row.receiver_activations[3].output_variant, "bounded_fix_to_blocked")
     t.eq(#signature.successors, 1)
     t.eq(signature.successors[1].state, "blocked")
     t.eq(signature.successors[1].terminal, true)
@@ -94,6 +98,45 @@ return {
       t.eq(edge.terminal, true)
       t.eq(edge.monotonic, true)
       t.eq(core.state_successors(expected.state)[expected.exit], "blocked")
+    end
+    t.eq(#core.strict_restart_responsibility_contract_errors(core.restart_transition_table()), 0)
+  end,
+
+  test_fix_reconcile_entries_coexist_with_blocked_successors_and_merge_handoff = function()
+    local rows = rows_by_state(core.restart_transition_table())
+    local expected = {
+      reviewing = { "review_reject_to_blocked" },
+      fixing = { "review_reject_to_blocked", "bounded_fix_to_blocked" },
+      ["merge-ready"] = { "handoff_to_merge_gate", "review_reject_to_blocked", "bounded_fix_to_blocked" },
+      merging = { "review_reject_to_blocked", "bounded_fix_to_blocked" },
+    }
+
+    for state, variants in pairs(expected) do
+      local row = rows[state]
+      t.eq(#row.receiver_activations, #variants)
+      for index, variant in ipairs(variants) do
+        local activation = row.receiver_activations[index]
+        t.eq(activation.kind, "entry")
+        t.eq(activation.output_variant, variant)
+        if variant == "handoff_to_merge_gate" then
+          t.eq(activation.boundary, nil)
+          t.eq(activation.target, "merging")
+        else
+          t.eq(activation.boundary, "devloop_fix_reconcile")
+          t.eq(activation.target, "blocked")
+        end
+      end
+    end
+
+    local reviewing_successor = rows.reviewing.responsibility_signature.successors[4]
+    t.eq(reviewing_successor.output_variant, "watchdog_reconcile_terminal")
+    t.eq(reviewing_successor.kind, "timeout")
+    for _, state in ipairs({ "fixing", "merge-ready", "merging" }) do
+      local successors = rows[state].responsibility_signature.successors
+      local successor = successors[#successors]
+      t.eq(successor.output_variant, "fix_budget_exhausted")
+      t.eq(successor.state, "blocked")
+      t.eq(successor.terminal, true)
     end
     t.eq(#core.strict_restart_responsibility_contract_errors(core.restart_transition_table()), 0)
   end,

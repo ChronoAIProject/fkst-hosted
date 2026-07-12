@@ -27,6 +27,7 @@ local structural_fields = {
 local expected_entries = {
   ["github-devloop-pr/reviewing/entry/first_seen_pr"] = {
     row_id = "reviewing",
+    output_variant = "first_seen_pr",
     source_state = nil,
     source_boundary = "github-proxy.github_entity_changed",
     target = "reviewing",
@@ -34,6 +35,7 @@ local expected_entries = {
   },
   ["github-devloop-pr/reviewing/entry/review_receiver"] = {
     row_id = "reviewing",
+    output_variant = "review_receiver",
     source_state = nil,
     source_boundary = "github-devloop-pr.devloop_reviewing",
     target = "reviewing",
@@ -41,6 +43,7 @@ local expected_entries = {
   },
   ["github-devloop-pr/pr-open/entry/pr_open_handoff"] = {
     row_id = "pr-open",
+    output_variant = "pr_open_handoff",
     source_state = nil,
     source_boundary = "github-proxy.github_comment_written",
     target = "pr-open",
@@ -48,9 +51,66 @@ local expected_entries = {
   },
   ["github-devloop-pr/merge-ready/entry/handoff_to_merge_gate"] = {
     row_id = "merge-ready",
+    output_variant = "handoff_to_merge_gate",
     source_state = "merge-ready",
     source_boundary = nil,
     target = "merging",
+    field = "receiver_activations",
+  },
+  ["github-devloop-pr/reviewing/entry/review_reject_to_blocked"] = {
+    row_id = "reviewing",
+    output_variant = "review_reject_to_blocked",
+    source_state = "reviewing",
+    source_boundary = "devloop_fix_reconcile",
+    target = "blocked",
+    field = "receiver_activations",
+  },
+  ["github-devloop-pr/fixing/entry/review_reject_to_blocked"] = {
+    row_id = "fixing",
+    output_variant = "review_reject_to_blocked",
+    source_state = "fixing",
+    source_boundary = "devloop_fix_reconcile",
+    target = "blocked",
+    field = "receiver_activations",
+  },
+  ["github-devloop-pr/fixing/entry/bounded_fix_to_blocked"] = {
+    row_id = "fixing",
+    output_variant = "bounded_fix_to_blocked",
+    source_state = "fixing",
+    source_boundary = "devloop_fix_reconcile",
+    target = "blocked",
+    field = "receiver_activations",
+  },
+  ["github-devloop-pr/merge-ready/entry/review_reject_to_blocked"] = {
+    row_id = "merge-ready",
+    output_variant = "review_reject_to_blocked",
+    source_state = "merge-ready",
+    source_boundary = "devloop_fix_reconcile",
+    target = "blocked",
+    field = "receiver_activations",
+  },
+  ["github-devloop-pr/merge-ready/entry/bounded_fix_to_blocked"] = {
+    row_id = "merge-ready",
+    output_variant = "bounded_fix_to_blocked",
+    source_state = "merge-ready",
+    source_boundary = "devloop_fix_reconcile",
+    target = "blocked",
+    field = "receiver_activations",
+  },
+  ["github-devloop-pr/merging/entry/review_reject_to_blocked"] = {
+    row_id = "merging",
+    output_variant = "review_reject_to_blocked",
+    source_state = "merging",
+    source_boundary = "devloop_fix_reconcile",
+    target = "blocked",
+    field = "receiver_activations",
+  },
+  ["github-devloop-pr/merging/entry/bounded_fix_to_blocked"] = {
+    row_id = "merging",
+    output_variant = "bounded_fix_to_blocked",
+    source_state = "merging",
+    source_boundary = "devloop_fix_reconcile",
+    target = "blocked",
     field = "receiver_activations",
   },
 }
@@ -375,6 +435,8 @@ local function assert_entry_shape(edges)
     assert_exact_keys(edge, edge_keys)
     if expected.source_state == nil then
       assert_exact_keys(edge.source, { boundary = true })
+    elseif expected.source_boundary ~= nil then
+      assert_exact_keys(edge.source, { state = true, boundary = true })
     else
       assert_exact_keys(edge.source, { state = true })
     end
@@ -382,6 +444,7 @@ local function assert_entry_shape(edges)
     t.eq(edge.owner, owner)
     t.eq(edge.row_id, expected.row_id)
     t.eq(edge.kind, "entry")
+    t.eq(edge.id, owner .. "/" .. expected.row_id .. "/entry/" .. expected.output_variant)
     t.eq(edge.source.state, expected.source_state)
     t.eq(edge.source.boundary, expected.source_boundary)
     t.eq(edge.target, expected.target)
@@ -442,7 +505,14 @@ return {
     t.eq(authored[1].id, "github-devloop-pr/reviewing/entry/first_seen_pr")
     t.eq(authored[2].id, "github-devloop-pr/reviewing/entry/review_receiver")
     t.eq(authored[3].id, "github-devloop-pr/pr-open/entry/pr_open_handoff")
-    t.eq(authored[4].id, "github-devloop-pr/merge-ready/entry/handoff_to_merge_gate")
+    t.eq(authored[4].id, "github-devloop-pr/fixing/entry/review_reject_to_blocked")
+    t.eq(authored[5].id, "github-devloop-pr/fixing/entry/bounded_fix_to_blocked")
+    t.eq(authored[6].id, "github-devloop-pr/merge-ready/entry/handoff_to_merge_gate")
+    t.eq(authored[7].id, "github-devloop-pr/merge-ready/entry/review_reject_to_blocked")
+    t.eq(authored[8].id, "github-devloop-pr/merge-ready/entry/bounded_fix_to_blocked")
+    t.eq(authored[9].id, "github-devloop-pr/merging/entry/review_reject_to_blocked")
+    t.eq(authored[10].id, "github-devloop-pr/merging/entry/bounded_fix_to_blocked")
+    t.eq(authored[11].id, "github-devloop-pr/reviewing/entry/review_reject_to_blocked")
 
     local repeated = restart_edges.extract_entry_edges(owner, entry_inventory, rows)
     assert_entry_shape(repeated)

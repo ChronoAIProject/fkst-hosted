@@ -62,6 +62,14 @@ return function(M, h)
       },
     }),
     on_timeout = timeout("devloop_reviewing"),
+    receiver_activations = {
+      {
+        kind = "entry",
+        boundary = "devloop_fix_reconcile",
+        target = "blocked",
+        output_variant = "review_reject_to_blocked",
+      },
+    },
     responsibility_signature = responsibility_signature({
       receiver_kind = "reviewer",
       driving_queue = "devloop_reviewing",

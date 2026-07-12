@@ -36,6 +36,20 @@ return function(M, h)
       },
     }),
     on_timeout = timeout("devloop_merge_ready"),
+    receiver_activations = {
+      {
+        kind = "entry",
+        boundary = "devloop_fix_reconcile",
+        target = "blocked",
+        output_variant = "review_reject_to_blocked",
+      },
+      {
+        kind = "entry",
+        boundary = "devloop_fix_reconcile",
+        target = "blocked",
+        output_variant = "bounded_fix_to_blocked",
+      },
+    },
     responsibility_signature = responsibility_signature({
       receiver_kind = "merge-executor",
       driving_queue = "devloop_merge_ready",

@@ -43,6 +43,18 @@ return function(M, h)
         target = "merging",
         output_variant = "handoff_to_merge_gate",
       },
+      {
+        kind = "entry",
+        boundary = "devloop_fix_reconcile",
+        target = "blocked",
+        output_variant = "review_reject_to_blocked",
+      },
+      {
+        kind = "entry",
+        boundary = "devloop_fix_reconcile",
+        target = "blocked",
+        output_variant = "bounded_fix_to_blocked",
+      },
     },
     responsibility_signature = responsibility_signature({
       receiver_kind = "merge-ready-handoff",
