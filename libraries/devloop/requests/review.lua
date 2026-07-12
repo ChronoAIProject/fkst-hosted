@@ -16,7 +16,7 @@ local devloop_logging = require("devloop.logging")
 
 local ai_sentinel = shared.ai_sentinel
 
-function C.attach_reviewing_handoff(request, proposal_id, pr_number, version, source_ref)
+function C.attach_reviewing_handoff(request, proposal_id, pr_number, version, source_ref, review_delivery_dedup_key)
   request.handoff = {
     kind = "github-devloop.reviewing",
     proposal_id = proposal_id,
@@ -24,6 +24,32 @@ function C.attach_reviewing_handoff(request, proposal_id, pr_number, version, so
     version = version,
     source_ref = base_ids.normalize_source_ref(source_ref),
   }
+  if review_delivery_dedup_key ~= nil then
+    local review_proposal_id = devloop_base.pr_review_proposal_id_from_redrive_delivery_dedup_key(
+      review_delivery_dedup_key
+    )
+    local _, review_pr_number, _, review_head_sha = devloop_base.parse_pr_review_proposal_id(
+      review_proposal_id
+    )
+    local source_repo, source_pr_number = devloop_base.parse_pr_source_ref(request.handoff.source_ref)
+    local expected_review_proposal_id
+    if source_repo ~= nil and source_pr_number ~= nil and review_head_sha ~= nil then
+      expected_review_proposal_id = devloop_base.pr_review_proposal_id(
+        source_repo,
+        source_pr_number,
+        version,
+        review_head_sha
+      )
+    end
+    if review_proposal_id == nil
+      or review_proposal_id ~= expected_review_proposal_id
+      or tostring(review_pr_number or "") ~= tostring(pr_number or "")
+      or tostring(review_pr_number or "") ~= tostring(source_pr_number or "") then
+      error("github-devloop: invalid reviewing redrive delivery handoff")
+    end
+    request.dedup_key = review_delivery_dedup_key
+    request.handoff.review_delivery_dedup_key = review_delivery_dedup_key
+  end
   return request
 end
 
@@ -110,7 +136,7 @@ function C.build_issue_review_converge_round_comment_request(M, repo, issue_numb
   }, source_ref or unresolved.source_ref)
 end
 
-function C.build_reviewing_comment_request(M, repo, issue_number, origin, pr_number, source_ref)
+function C.build_reviewing_comment_request(M, repo, issue_number, origin, pr_number, source_ref, review_delivery_dedup_key)
   local state_marker = devloop_state.state_marker(origin.proposal_id, "reviewing", origin.impl_version)
   local request = entity_lib.build_entity_comment_request({
     kind = "pr",
@@ -124,7 +150,14 @@ function C.build_reviewing_comment_request(M, repo, issue_number, origin, pr_num
     tostring(origin.impl_version),
     tostring(pr_number),
   }), source_ref)
-  return C.attach_reviewing_handoff(request, origin.proposal_id, pr_number, origin.impl_version, source_ref)
+  return C.attach_reviewing_handoff(
+    request,
+    origin.proposal_id,
+    pr_number,
+    origin.impl_version,
+    source_ref,
+    review_delivery_dedup_key
+  )
 end
 
 function C.build_operator_rereview_comment_request(repo, pr_number, proposal_id, new_version, command, source_ref)

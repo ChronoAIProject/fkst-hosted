@@ -1,5 +1,6 @@
 local devloop_base = require("devloop.base")
 local requests_review = require("devloop.requests.review")
+local replay_fields = require("devloop.replay_fields")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
 local m_facts = require("devloop.markers.facts")
@@ -35,6 +36,70 @@ local function mock_failing_required_check_runs()
     stderr = "",
     exit_code = 0,
   })
+end
+
+local function replay_fixing_payload(event, comments)
+  local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
+  local state = {
+    state = "fixing",
+    version = event.version,
+    proposal_id = event.proposal_id,
+  }
+  local current_pr = {
+    number = event.pr_number,
+    comments = {},
+    head_ref_name = branch,
+    head_sha = event.reviewed_head_sha,
+    base_ref_name = "dev",
+    state = "OPEN",
+  }
+  local emitted = {}
+  local tools = {
+    find_linked_pr = function(snapshot, number)
+      for _, item in ipairs(snapshot and snapshot.prs or {}) do
+        if tostring(item.number or "") == tostring(number or "") then
+          return item.current
+        end
+      end
+      return nil
+    end,
+    log_skip = function(_, _, _, _, _, outcome, reason)
+      error("unexpected fixing replay decline: " .. tostring(outcome) .. ": " .. tostring(reason))
+    end,
+    raise_effects = function(_, _, _, _, _, effects)
+      for _, effect in ipairs(effects or {}) do
+        table.insert(emitted, effect)
+      end
+      return true
+    end,
+  }
+  local replayed = core.replayer_review_registry(tools).fixing(
+    "restart",
+    { repo = "owner/repo", number = 42, source_ref = h.source_ref() },
+    state,
+    replay_fields.restart_transition_row(core.restart_transition_table(), "fixing"),
+    {
+      proposal_id = event.proposal_id,
+      state = state,
+      source_ref = event.source_ref,
+      link = {
+        proposal_id = event.proposal_id,
+        pr_number = event.pr_number,
+        branch = branch,
+        impl_version = event.version,
+        base_branch = "dev",
+      },
+      snapshot = {
+        comments = comments,
+        state = state,
+        prs = { { number = event.pr_number, current = current_pr } },
+      },
+    }
+  )
+  t.eq(replayed, true)
+  local raised = find_raise(emitted, "devloop_fixing")
+  t.is_true(raised ~= nil)
+  return raised.payload
 end
 
 return {
@@ -143,14 +208,18 @@ return {
       match_gate_baseline_sha = true,
     })
     t.eq(fact.gate_baseline_sha, event.gate_baseline_sha)
+    t.eq(m_facts.merge_gate_fix_fact({ old_marker, new_marker }, event.proposal_id, event.version).gate_baseline_sha, event.gate_baseline_sha)
 
-    local missing = m_facts.merge_gate_fix_fact({ old_marker, new_marker }, event.proposal_id, event.version, {
+    local canonical, canonical_matches, superseded = m_facts.merge_gate_fix_fact({ old_marker, new_marker }, event.proposal_id, event.version, {
       review_proposal_id = event.review_proposal_id,
       review_dedup_key = event.review_dedup_key,
-      gate_baseline_sha = "feedface",
+      reviewed_head_sha = event.reviewed_head_sha,
+      gate_baseline_sha = "281c4f9e",
       match_gate_baseline_sha = true,
     })
-    t.eq(missing, nil)
+    t.eq(canonical.gate_baseline_sha, event.gate_baseline_sha)
+    t.eq(canonical_matches, false)
+    t.eq(superseded, true)
   end,
 
   test_fix_accepts_same_version_merge_gate_marker_matching_event_baseline = function()
@@ -218,6 +287,86 @@ return {
     t.eq(count_calls("git fetch 'origin' 'refs/pull/7/merge'"), 0)
   end,
 
+  test_active_fixing_merge_gate_lineage_mismatch_fails_closed = function()
+    local event = fixing({
+      gate_baseline_sha = "828df8d3",
+      gate_failure_excerpt = "mergeable-conflicting",
+    })
+    local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
+    local other_review = devloop_base.pr_review_proposal_id("owner/repo", event.pr_number, event.version, "feedface")
+    local other_dedup = devloop_base.pr_review_consensus_dedup_key(other_review)
+    local feedback = m_builders.merge_gate_marker(event.proposal_id,
+      event.pr_number,
+      event.version,
+      other_review,
+      other_dedup,
+      "feedface",
+      event.gate_baseline_sha,
+      "mergeable-conflicting"
+    )
+    local origin_marker = m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
+      core.state_marker(event.proposal_id, "fixing", event.version),
+      feedback,
+    }, branch, event.version)
+    mock_pr_fix({ origin_marker }, branch, event.reviewed_head_sha)
+
+    local result = run_fix(event, opts("fix-active-merge-gate-lineage-mismatch", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 1)
+    t.eq(find_causal_raise(result, "devloop_reviewing"), nil)
+  end,
+
+  test_older_matching_merge_gate_fact_is_superseded_by_newer_canonical_fact = function()
+    local seed_event = fixing({
+      gate_baseline_sha = "281c4f9e",
+      gate_failure_excerpt = "mergeable-conflicting",
+    })
+    local old_feedback = {
+      body = m_builders.merge_gate_marker(seed_event.proposal_id,
+        seed_event.pr_number,
+        seed_event.version,
+        seed_event.review_proposal_id,
+        seed_event.review_dedup_key,
+        seed_event.reviewed_head_sha,
+        seed_event.gate_baseline_sha,
+        "mergeable-conflicting"
+      ),
+      author_login = "fkst-test-bot",
+      created_at = "2026-06-03T01:00:00Z",
+    }
+    local event = replay_fixing_payload(seed_event, { old_feedback })
+    local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
+    local new_feedback = {
+      body = m_builders.merge_gate_marker(event.proposal_id,
+        event.pr_number,
+        event.version,
+        event.review_proposal_id,
+        event.review_dedup_key,
+        event.reviewed_head_sha,
+        "828df8d3",
+        "mergeable-conflicting"
+      ),
+      author_login = "fkst-test-bot",
+      created_at = "2026-06-03T01:01:00Z",
+    }
+    local origin_marker = m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
+      core.state_marker(event.proposal_id, "fixing", event.version),
+      old_feedback,
+      new_feedback,
+    }, branch, event.version)
+    mock_pr_fix({ origin_marker }, branch, event.reviewed_head_sha)
+
+    local result = run_fix(event, opts("fix-superseded-merge-gate-fact", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(find_causal_raise(result, "devloop_reviewing"), nil)
+  end,
+
   test_corrected_merge_gate_replay_dedup_reaches_fix_after_nil_baseline_predecessor = function()
     local event = fixing({
       gate_baseline_sha = "828df8d3",
@@ -232,17 +381,6 @@ return {
       reviewed_head_sha = event.reviewed_head_sha,
       blocking_gap = "mergeable-conflicting",
     }, event.source_ref)
-    local corrected = payloads_builders.build_replayed_fixing_payload({
-      proposal_id = event.proposal_id,
-      impl_version = event.version,
-    }, event.pr_number, {
-      review_proposal_id = event.review_proposal_id,
-      review_dedup_key = event.review_dedup_key,
-      reviewed_head_sha = event.reviewed_head_sha,
-      blocking_gap = "mergeable-conflicting",
-      gate_baseline_sha = event.gate_baseline_sha,
-      review_reason = "mergeable-conflicting",
-    }, event.source_ref)
     local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
     local feedback = "github-devloop merge gate failed: mergeable-conflicting"
       .. "\n" .. m_builders.merge_gate_marker(event.proposal_id,
@@ -254,6 +392,13 @@ return {
         event.gate_baseline_sha,
         "mergeable-conflicting"
       )
+    local corrected = replay_fixing_payload(event, {
+      {
+        body = feedback,
+        author_login = "fkst-test-bot",
+        created_at = "2026-06-03T01:00:00Z",
+      },
+    })
     local origin_marker = m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
 
     t.is_true(defective.dedup_key ~= corrected.dedup_key)

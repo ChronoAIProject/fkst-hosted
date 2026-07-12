@@ -286,19 +286,23 @@ local function merge_gate_fix_fact_matches_bindings(fact, opts)
     opts_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_key(opts.review_dedup_key)
   end
   local baseline_bound = opts.match_gate_baseline_sha == true or opts.gate_baseline_sha ~= nil
+  local predecessor_bound = opts.match_predecessor_set == true or opts.predecessor_set ~= nil
+  local ci_failure_bound = opts.match_ci_failure_key == true or opts.ci_failure_key ~= nil
   return (opts.review_proposal_id == nil or fact.review_proposal_id == tostring(opts.review_proposal_id))
     and (opts.review_dedup_key == nil or (fact_review_dedup ~= nil and fact_review_dedup == opts_review_dedup))
-    and (opts.ci_failure_key == nil or fact.ci_failure_key == tostring(opts.ci_failure_key))
+    and (opts.reviewed_head_sha == nil or fact.reviewed_head_sha == tostring(opts.reviewed_head_sha))
     and (not baseline_bound
       or (opts.gate_baseline_sha ~= nil and fact.gate_baseline_sha == tostring(opts.gate_baseline_sha))
       or (opts.gate_baseline_sha == nil and fact.gate_baseline_sha == nil))
+    and (not predecessor_bound or tostring(fact.predecessor_set or "") == tostring(opts.predecessor_set or ""))
+    and (not ci_failure_bound or tostring(fact.ci_failure_key or "") == tostring(opts.ci_failure_key or ""))
 end
 function C.merge_gate_fix_fact(comments, issue_proposal_id, issue_version, opts)
   if type(comments) ~= "table" then
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:merge%-gate:v1.-%-%->"
-  local first_fact = nil
+  local best, best_seconds, matched_binding = nil, nil, false
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
     for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local marker_issue = marker:match('proposal="([^"]+)"')
@@ -314,7 +318,7 @@ function C.merge_gate_fix_fact(comments, issue_proposal_id, issue_version, opts)
         and marker_version == tostring(issue_version)
         and strings.is_bounded_string(marker_review_proposal, devloop_base._max_key_len)
         and strings.is_bounded_string(marker_review_dedup, devloop_base._max_dedup_len)
-        and strings.is_bounded_string(marker_reason, devloop_base._max_key_len)
+        and strings.is_path_safe_key(marker_reason, devloop_base._max_key_len)
         and forge_validators.is_git_sha(marker_head_sha)
         and (marker_gate_baseline_sha == nil or forge_validators.is_git_sha(marker_gate_baseline_sha))
         and (marker_predecessor_set == nil or strings.is_path_safe_key(marker_predecessor_set, devloop_base._max_dedup_len))
@@ -328,20 +332,19 @@ function C.merge_gate_fix_fact(comments, issue_proposal_id, issue_version, opts)
           ci_failure_key = marker_ci_failure_key,
           reason = marker_reason,
           review_reason = parsers_misc._comment_body(comment),
+          comment_created_at = parsers_misc._comment_created_at(comment),
         }
-        if first_fact == nil then
-          first_fact = fact
-        end
         if merge_gate_fix_fact_matches_bindings(fact, opts) then
-          return fact
+          matched_binding = true
+        end
+        local candidate_seconds = contract_time.iso_timestamp_epoch_seconds(fact.comment_created_at) or 0
+        if best == nil or candidate_seconds >= best_seconds then
+          best, best_seconds = fact, candidate_seconds
         end
       end
     end
   end
-  if type(opts) == "table" then
-    return nil
-  end
-  return first_fact
+  return best, best ~= nil and merge_gate_fix_fact_matches_bindings(best, opts), matched_binding
 end
 
 function C.merge_ready_fact(comments, issue_proposal_id, issue_version, pr_number, head_sha)

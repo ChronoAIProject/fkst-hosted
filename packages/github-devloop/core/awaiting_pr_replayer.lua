@@ -229,6 +229,47 @@ function M.canonicalize_implementing_merged_delegated_pr(dept, issue, state, fac
   })
 end
 
+function M.close_canonically_merged_delegated_issue(dept, issue, state, facts)
+  local proposal_id = facts.proposal_id
+  local delegation = facts["pr-delegation"] or facts.pr_delegation
+  if delegation == nil then
+    return false
+  end
+  if tostring(delegation.proposal_id or "") ~= tostring(proposal_id or "")
+    or not version_is_same_lineage_or_descendant(state and state.version, delegation.version) then
+    log_skip(dept, proposal_id, state, tostring(state and state.state or "unknown"), "closed", "skip-stale(pr-delegation-version)", "canonical merged issue close requires the current delegation lineage")
+    return false
+  end
+  local pr_repo, pr_number = entity_lib.parse_pr_proposal_id(delegation.pr_proposal_id or delegation.pr_proposal)
+  if pr_repo ~= issue.repo or tostring(pr_number or "") ~= tostring(delegation.pr_number or "") then
+    log_skip(dept, proposal_id, state, tostring(state and state.state or "unknown"), "closed", "skip-stale(pr-delegation-child)", "canonical merged issue close requires a same-repository delegated PR")
+    return false
+  end
+  local current_pr = facts.current_pr
+  if type(current_pr) ~= "table" or current_pr.force_fresh ~= true then
+    current_pr = read_delegated_child_pr(dept, issue, delegation)
+  end
+  if canonical_merged_child_state(issue, state, delegation, current_pr) == nil then
+    return false
+  end
+  local landed, outcome, reason = merged_child_landed_on_upstream(dept, issue, state, delegation, current_pr)
+  if not landed then
+    log_skip(dept, proposal_id, state, tostring(state and state.state or "unknown"), "closed", outcome, reason)
+    return false
+  end
+  if config.write_mode() ~= "real" then
+    log_skip(dept, proposal_id, state, tostring(state and state.state or "unknown"), "closed", "skip-dry-run", "canonical merged delegated issue would close in real write mode")
+    return false
+  end
+  local close_result = devloop_commands.gh_issue_close(issue.repo, issue.number, 60)
+  if close_result.exit_code ~= 0 then
+    error("github-devloop: canonical-merged-issue-close-failed: " .. tostring(close_result.stderr))
+  end
+  devloop_entity_view.invalidate_entity_after_write(issue.repo, "issue", issue.number)
+  devloop_logging.log_cas_decision(dept, proposal_id, state, tostring(state and state.state or "unknown"), "closed", "applied(canonical-child-pr-merged)", "canonical delegated PR merge is landed on the configured upstream branch")
+  return true
+end
+
 function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
   local proposal_id = facts.proposal_id
   if state.state ~= "awaiting-pr" then
@@ -382,6 +423,7 @@ return {
   ["awaiting-pr"] = M.replay_awaiting_pr_state,
   implementing_to_awaiting_pr_transition_status = M.implementing_to_awaiting_pr_transition_status,
   canonicalize_implementing_merged_delegated_pr = M.canonicalize_implementing_merged_delegated_pr,
+  close_canonically_merged_delegated_issue = M.close_canonically_merged_delegated_issue,
 }
 end
 

@@ -596,9 +596,24 @@ local function process_issue_event(event)
     end
     if issue.source == "pr-entity-change" then
       if issue_state.state ~= "awaiting-pr" then
+        local current_delegation = m_facts.pr_delegation_fact(current.comments, proposal_id)
+        local claim_verified = false
+        if current_delegation ~= nil then
+          if not ensure_managed_issue_claim(issue, proposal_id, current, issue_state) then
+            return
+          end
+          claim_verified = true
+          if awaiting_pr_replay.close_canonically_merged_delegated_issue("observe_issue", issue, issue_state, {
+            proposal_id = proposal_id,
+            current_pr = issue.child_pr,
+            ["pr-delegation"] = current_delegation,
+          }) then
+            return
+          end
+        end
         local handoff_transition = awaiting_pr_replay.implementing_to_awaiting_pr_transition_status(issue_state)
         if handoff_transition == "apply" or handoff_transition == "idempotent" then
-          if not ensure_managed_issue_claim(issue, proposal_id, current, issue_state) then
+          if not claim_verified and not ensure_managed_issue_claim(issue, proposal_id, current, issue_state) then
             return
           end
           local delegation = m_facts.pr_delegation_fact(current.comments, proposal_id, issue_state.version)
@@ -693,6 +708,15 @@ local function process_issue_event(event)
     if state.state ~= nil then
       if not claim_checked and not ensure_managed_issue_claim(issue, proposal_id, current, state) then
         return
+      end
+      if state.state ~= "awaiting-pr" then
+        local delegation = m_facts.pr_delegation_fact(current.comments, proposal_id)
+        if awaiting_pr_replay.close_canonically_merged_delegated_issue("observe_issue", issue, state, {
+          proposal_id = proposal_id,
+          ["pr-delegation"] = delegation,
+        }) then
+          return
+        end
       end
       if maybe_apply_issue_rereview_command(issue, proposal_id, current, state, event.ts) then
         return
