@@ -35,11 +35,22 @@ local function prepare_judgment_worktree(path)
   return path
 end
 
-local function resolve_judgment_worktree(proposal, scratch_path)
-  if proposal.worktree ~= nil then
+local function checkout_root_exists(path)
+  local result = exec_sync({ cmd = core.checkout_root_exists_cmd(path), timeout = 30 })
+  return result.exit_code == 0
+end
+
+local function prepare_seat_worktree(proposal, scratch_path)
+  if proposal.worktree == nil then
+    return prepare_judgment_worktree(scratch_path)
+  end
+  if checkout_root_exists(proposal.worktree) then
     return proposal.worktree
   end
-  return prepare_judgment_worktree(scratch_path)
+  if checkout_root_exists(".") then
+    return "."
+  end
+  error("consensus: judgment-worktree-unavailable: proposal checkout and fallback checkout are unavailable")
 end
 
 local function codex_opts(proposal, prompt, worktree, role)
@@ -75,7 +86,7 @@ end
 
 local function spawn_angle(proposal, angle, runtime_root)
   local prompt = core.build_angle_prompt(proposal, angle)
-  local worktree = resolve_judgment_worktree(proposal,
+  local worktree = prepare_seat_worktree(proposal,
     judgment_scratch_worktree(runtime_root, "angle-" .. tostring(angle), proposal.dedup_key)
   )
   return dispatch_codex(proposal, prompt, worktree, "consensus", tostring(angle))
@@ -143,7 +154,7 @@ local function decide(proposal)
       angle_results = angle_results,
       runtime_root = runtime_root,
       prepare_judgment_worktree = function(path)
-        return resolve_judgment_worktree(proposal, path)
+        return prepare_seat_worktree(proposal, path)
       end,
       codex_opts = codex_opts,
       build_rebuttal_prompt = function(target_proposal, own_result, peer_results)
@@ -191,7 +202,7 @@ local function decide(proposal)
     end,
     spawn_sync = function(_kind, prompt)
       local repair = _kind == "synthesis-repair"
-      local worktree = resolve_judgment_worktree(proposal,
+      local worktree = prepare_seat_worktree(proposal,
         judgment_scratch_worktree(runtime_root, repair and "synthesis-repair" or "synthesis", proposal.dedup_key)
       )
       return dispatch_codex(proposal, prompt, worktree, "consensus", repair and "synthesis-repair" or "synthesis", {
