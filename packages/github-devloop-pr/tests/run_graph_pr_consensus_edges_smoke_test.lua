@@ -127,6 +127,17 @@ local function reached_payload()
   }
 end
 
+local function refused_reject_payload(dedup_key)
+  return {
+    schema = "consensus.consensus_reached.v1",
+    proposal_id = review_proposal_id,
+    decision = "reject",
+    body = "Review consensus rejects the diff without an actionable gap.",
+    dedup_key = dedup_key or review_dedup_key,
+    source_ref = pr_source_ref(),
+  }
+end
+
 local function review_converge_round_marker()
   return conv_rounds.review_converge_round_marker(core,
     review_proposal_id,
@@ -183,5 +194,35 @@ return {
       consumer = "github-devloop-pr.review_result",
     })
     t.eq(step.exit_code, 0)
+  end,
+
+  test_run_graph_owned_gapless_reject_fails_loud_on_initial_and_redrive_delivery = function()
+    local source_mismatch = refused_reject_payload()
+    source_mismatch.blocking_gap = "missing regression guard"
+    source_mismatch.source_ref = entity_lib.pr_source_ref(repo, 8)
+    local deliveries = {
+      refused_reject_payload(),
+      refused_reject_payload("consensus:" .. devloop_base.pr_review_redrive_delivery_dedup_key(
+        review_proposal_id,
+        "restart-liveness-v2/reviewing/reviewing.active/live_defer_heartbeat-v1/review-converge-round-missing/1783840000000.0",
+        1
+      )),
+      source_mismatch,
+    }
+
+    for index, payload in ipairs(deliveries) do
+      local trace = graph.run(
+        initial_event("consensus.consensus_reached", payload),
+        { max_steps = 4 }
+      )
+      local step = graph.require_delivery(trace, {
+        queue = "consensus.consensus_reached",
+        consumer = "github-devloop-pr.review_result",
+      })
+      t.is_true(step.exit_code ~= 0, "owned refused result delivery " .. tostring(index) .. " must fail loud")
+      t.is_true(tostring(step.error):find("review-result-invalid", 1, true) ~= nil)
+      t.is_nil(graph.find_raise(trace, "devloop_fix_reconcile"))
+      t.is_nil(graph.find_raise(trace, "github-devloop-decompose.devloop_decompose"))
+    end
   end,
 }
