@@ -544,6 +544,35 @@ return {
     t.eq(count_calls("gh pr diff"), 2)
   end,
 
+  test_review_pr_preserves_fresh_redrive_delivery_identity = function()
+    local event = reviewing()
+    local review_id = devloop_base.pr_review_proposal_id("owner/repo", 7, event.version, "def456")
+    local delivery_dedup_key = devloop_base.pr_review_redrive_delivery_dedup_key(
+      review_id,
+      "restart-liveness-v2/reviewing/reviewing.active/live_defer_heartbeat-v1/review-converge-round-missing/1783840000000.0",
+      2
+    )
+    t.is_true(#delivery_dedup_key <= devloop_base._max_key_len)
+    event.dedup_key = delivery_dedup_key
+    event.review_delivery_dedup_key = delivery_dedup_key
+    mock_issue_review({ "fkst-dev:reviewing" }, {
+      core.state_marker(event.proposal_id, "reviewing", event.version),
+    }, {
+      title = "Implement decision recorder",
+      body = "Issue context",
+    })
+    mock_pr_origin_sequence({
+      { head = "devloop-owner-repo-42-01HY", head_sha = "def456" },
+    })
+
+    local result = run_review_pr(event, opts("review-pr-redrive-delivery-identity"))
+    t.eq(result.exit_code, 0)
+    local proposal = find_raise(result.raises, "consensus.proposal").payload
+    t.eq(proposal.proposal_id, review_id)
+    t.eq(proposal.dedup_key, delivery_dedup_key)
+    t.eq(v_validate_proposal.validate_proposal(proposal), true)
+  end,
+
   test_review_pr_gate_reject_reached_routes_to_fixing = function()
     local event = reviewing()
     mock_issue_review({ "fkst-dev:reviewing" }, {

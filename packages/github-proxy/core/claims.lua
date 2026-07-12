@@ -1,4 +1,12 @@
+local content_filter = require("forge.github.content_filter")
+
 local S = {}
+
+local function same_login(left, right)
+  local canonical_left = content_filter.canon_login(left)
+  local canonical_right = content_filter.canon_login(right)
+  return canonical_left ~= nil and canonical_right ~= nil and canonical_left == canonical_right
+end
 
 function S.install(M)
 local function assignee_login(assignee)
@@ -49,7 +57,7 @@ end
 function M.issue_claim_held_by_self(repo, issue_number, login)
   local view = M.gh_exec(M.gh_issue_view_assignees_cmd(repo, issue_number), 30, "GitHub issue REST assignees")
   local logins = M.parse_issue_assignees(view.stdout)
-  return #logins == 1 and logins[1] == tostring(login or "")
+  return #logins == 1 and same_login(logins[1], login)
 end
 
 local function claim_source_ref_matches(payload, repo, issue_number)
@@ -101,7 +109,7 @@ function M.verify_issue_claim_in_issue(issue, payload, repo, issue_number, dept)
     return false
   end
   local logins = M.assignee_logins(issue and issue.assignees)
-  if #logins == 1 and logins[1] == tostring(claim.owner) then
+  if #logins == 1 and same_login(logins[1], claim.owner) then
     return true
   end
   verify_claim_log(dept, "assignee-claim-lost", repo, issue_number, claim.owner)

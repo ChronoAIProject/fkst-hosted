@@ -164,6 +164,14 @@ return saga.department(spec, { done = function() return false end, act = functio
     local content_fetch = context_fetch[1]
     local high_risk = context_fetch[2]
     local proposal = payloads_builders.build_board_pr_review_proposal(core, repo, issue_number, reviewing.pr_number, reviewing.version, current_pr.head_sha, current_issue, pr_source_ref, event.ts, current_pr.comments, content_fetch, high_risk)
+    if reviewing.review_delivery_dedup_key ~= nil then
+      if devloop_base.pr_review_proposal_id_from_redrive_delivery_dedup_key(
+        reviewing.review_delivery_dedup_key
+      ) ~= review_id then
+        error("github-devloop: pr-review-redrive-dedup-mismatch: review redrive delivery identity does not match the current PR review")
+      end
+      proposal.dedup_key = reviewing.review_delivery_dedup_key
+    end
     -- Fall back to the read-only project checkout (".") if the ephemeral impl worktree is gone (restart);
     -- see review_loop -- the review codex reads the PR diff from context, so cwd just needs to be a git repo.
     local worktree = devloop_commands.existing_implementation_worktree(repo, issue_number, origin and origin.impl_version or reviewing.version)
