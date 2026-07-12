@@ -703,9 +703,8 @@ local function act_fix(event)
     end
     local merge_gate_fact = nil
     if reject_fact == nil and meta_fix_fact == nil then
-      local merge_gate_candidate = m_facts.merge_gate_fix_fact(current_pr.comments, fix.proposal_id, fix.version)
-      local event_fact_visible
-      merge_gate_fact, event_fact_visible = m_facts.merge_gate_fix_fact(current_pr.comments, fix.proposal_id, fix.version, {
+      local canonical_matches, event_fact_visible
+      merge_gate_fact, canonical_matches, event_fact_visible = m_facts.merge_gate_fix_fact(current_pr.comments, fix.proposal_id, fix.version, {
         review_proposal_id = fix.review_proposal_id,
         review_dedup_key = fix.review_dedup_key,
         reviewed_head_sha = fix.reviewed_head_sha,
@@ -716,7 +715,7 @@ local function act_fix(event)
         ci_failure_key = fix.ci_failure_key,
         match_ci_failure_key = true,
       })
-      if merge_gate_fact == nil and merge_gate_candidate ~= nil then
+      if merge_gate_fact ~= nil and not canonical_matches then
         if event_fact_visible then
           devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(superseded-merge-gate-fact)", "a newer canonical merge-gate fact supersedes this fix event")
           return

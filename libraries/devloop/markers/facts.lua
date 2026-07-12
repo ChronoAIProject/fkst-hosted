@@ -318,7 +318,7 @@ function C.merge_gate_fix_fact(comments, issue_proposal_id, issue_version, opts)
         and marker_version == tostring(issue_version)
         and strings.is_bounded_string(marker_review_proposal, devloop_base._max_key_len)
         and strings.is_bounded_string(marker_review_dedup, devloop_base._max_dedup_len)
-        and strings.is_bounded_string(marker_reason, devloop_base._max_key_len)
+        and strings.is_path_safe_key(marker_reason, devloop_base._max_key_len)
         and forge_validators.is_git_sha(marker_head_sha)
         and (marker_gate_baseline_sha == nil or forge_validators.is_git_sha(marker_gate_baseline_sha))
         and (marker_predecessor_set == nil or strings.is_path_safe_key(marker_predecessor_set, devloop_base._max_dedup_len))
@@ -344,10 +344,7 @@ function C.merge_gate_fix_fact(comments, issue_proposal_id, issue_version, opts)
       end
     end
   end
-  if best ~= nil and merge_gate_fix_fact_matches_bindings(best, opts) then
-    return best, true
-  end
-  return nil, matched_binding
+  return best, best ~= nil and merge_gate_fix_fact_matches_bindings(best, opts), matched_binding
 end
 
 function C.merge_ready_fact(comments, issue_proposal_id, issue_version, pr_number, head_sha)
