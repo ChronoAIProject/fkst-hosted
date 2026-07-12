@@ -193,9 +193,9 @@ return {
       author_login = "fkst-test-bot",
       created_at = "2026-06-03T02:01:01Z",
     })
-    mock_env()
+    mock_env(20)
     h.mock_default_issue_claim()
-    h.mock_pr_origin_for({
+    entity_read_mocks.mock_pr_read_forms(t, {
       repo = repo,
       number = rereview_pr_number,
       comments = command_comments,
@@ -225,27 +225,10 @@ return {
     mock_pr_comment_write(rereview_pr_number)
     mock_reviewing_marker_visibility(expected_version)
     mock_pr_label_write()
-
-    local reentry_trace = graph.require_quiescent(graph.run(
-      entity_changed_event("2026-06-03T02:01:00Z", rereview_pr_number),
-      { max_steps = 10 }
-    ))
-    graph.assert_covers(reentry_trace, {
-      "github-proxy.github_entity_changed -> github-devloop-pr.observe_pr",
-      "github-proxy.github_pr_comment_request -> github-proxy.github_pr_comment",
-      "github-proxy.github_comment_written -> github-devloop-pr.comment_handoff",
-      "github-devloop-pr.devloop_reviewing -> github-devloop-pr.review_pr",
+    h.mock_context_bundle({
+      proposal_id = proposal_id,
+      pr_number = rereview_pr_number,
     })
-
-    local comment_request = graph.require_raise(reentry_trace, "github-proxy.github_pr_comment_request")
-    t.eq(comment_request.payload.handoff.kind, "github-devloop.reviewing")
-    t.eq(comment_request.payload.handoff.version, expected_version)
-    t.is_true(comment_request.payload.handoff.version ~= blocked_version)
-
-    local reviewing = graph.require_raise(reentry_trace, "github-devloop-pr.devloop_reviewing")
-    t.eq(reviewing.payload.version, expected_version)
-
-    h.mock_context_bundle(reviewing.payload)
     t.mock_command("gh pr diff " .. tostring(rereview_pr_number) .. " --repo " .. repo .. " --name-only", {
       stdout = "file.lua\n",
       stderr = "",
@@ -263,20 +246,28 @@ return {
       exit_code = 1,
     })
     mock_consensus_approval()
-    local review_trace = graph.require_quiescent(graph.run({
-      queue = "github-devloop-pr.devloop_reviewing",
-      payload = reviewing.payload,
-      source_ref = {
-        kind = "external",
-        reference = repo .. "#pr/" .. tostring(rereview_pr_number),
-      },
-    }, { max_steps = 12 }))
-    graph.assert_covers(review_trace, {
+
+    local reentry_trace = graph.require_quiescent(graph.run(
+      entity_changed_event("2026-06-03T02:01:00Z", rereview_pr_number),
+      { max_steps = 12 }
+    ))
+    graph.assert_covers(reentry_trace, {
+      "github-proxy.github_entity_changed -> github-devloop-pr.observe_pr",
+      "github-proxy.github_pr_comment_request -> github-proxy.github_pr_comment",
+      "github-proxy.github_comment_written -> github-devloop-pr.comment_handoff",
       "github-devloop-pr.devloop_reviewing -> github-devloop-pr.review_pr",
       "consensus.proposal -> consensus.decide",
     })
 
-    local proposal = graph.require_raise(review_trace, "consensus.proposal").payload
+    local comment_request = graph.require_raise(reentry_trace, "github-proxy.github_pr_comment_request")
+    t.eq(comment_request.payload.handoff.kind, "github-devloop.reviewing")
+    t.eq(comment_request.payload.handoff.version, expected_version)
+    t.is_true(comment_request.payload.handoff.version ~= blocked_version)
+
+    local reviewing = graph.require_raise(reentry_trace, "github-devloop-pr.devloop_reviewing")
+    t.eq(reviewing.payload.version, expected_version)
+
+    local proposal = graph.require_raise(reentry_trace, "consensus.proposal").payload
     t.eq(
       proposal.proposal_id,
       devloop_base.pr_review_proposal_id(repo, rereview_pr_number, expected_version, pushed_head_sha)
