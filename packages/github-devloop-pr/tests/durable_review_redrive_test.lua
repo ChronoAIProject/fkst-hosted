@@ -167,6 +167,11 @@ local function logs(root)
   return command_output("cat " .. shell_quote(root .. "/supervise.stdout") .. " " .. shell_quote(root .. "/supervise.stderr"))
 end
 
+local function decide_logs(root)
+  return command_output("find " .. shell_quote(root .. "/runtime-redrive/logs/framework-child")
+    .. " -type f -name " .. shell_quote("consensus.decide-*.log") .. " -exec cat {} +")
+end
+
 local function remove_fixture(root)
   local prefix = "/tmp/fkst-review-redrive."
   if root:sub(1, #prefix) ~= prefix then
@@ -213,10 +218,8 @@ return {
       write_file(root .. "/redrive.trigger", "redrive\n")
       active_pid = start_supervise(bin, root, package_root, root .. "/runtime-redrive", durable_root)
       wait_until("fresh review delivery to reach consensus.decide", function()
-        local output = logs(root)
-        if output:find("dept=consensus.decide", 1, true) ~= nil
-          and output:find("_2F_r_2F_", 1, true) ~= nil
-          and output:find("MSG=delivery acked", 1, true) ~= nil then
+        local output = decide_logs(root)
+        if output:find("review-redrive-consumed dedup_key=" .. redrive_dedup, 1, true) ~= nil then
           return output
         end
         return nil, output
