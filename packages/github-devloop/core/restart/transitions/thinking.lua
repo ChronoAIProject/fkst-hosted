@@ -82,6 +82,8 @@ return function(M, h)
           -- regression (contrast ready->dependency_wait's guard_boundary blocker_reappeared).
           state = "dependency_wait",
           output_variant = "consensus-reached-dependency-held",
+          cas_policy_id = "cas.legacy_consensus_result_v1",
+          cas_variant = "thinking_to_dependency_wait",
           kind = "autonomous",
           postcondition_family = "issue-consensus",
           monotonic = true,

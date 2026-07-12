@@ -1,5 +1,6 @@
 local h = require("tests.devloop_core_helpers")
 local entry_inventory = require("core.restart.entry_inventory")
+local restart_cas_catalog = require("devloop.restart_cas_catalog")
 local restart_edges = require("devloop.restart_edges")
 
 local core = h.core
@@ -224,7 +225,6 @@ end
 
 local function assert_edges(actual, expected, empty_rows)
   t.eq(#actual, #expected)
-  local edge_keys = key_set(structural_fields)
   local seen_ids = {}
   local seen_edges = {}
   local seen_sources = {}
@@ -232,6 +232,13 @@ local function assert_edges(actual, expected, empty_rows)
   local counts_by_row = {}
   for index, expected_edge in ipairs(expected) do
     local edge = actual[index]
+    local edge_keys = key_set(structural_fields)
+    if expected_edge.cas_policy_id ~= nil then
+      edge_keys.cas_policy_id = true
+    end
+    if expected_edge.cas_variant ~= nil then
+      edge_keys.cas_variant = true
+    end
     assert_exact_keys(edge, edge_keys)
     assert_exact_keys(edge.source, { state = true })
     assert_exact_keys(edge.provenance, { owner = true, row = true, field = true })
@@ -242,6 +249,8 @@ local function assert_edges(actual, expected, empty_rows)
     t.eq(edge.source.state, expected_edge.source.state)
     t.eq(edge.source.boundary, nil)
     t.eq(edge.target, expected_edge.target)
+    t.eq(edge.cas_policy_id, expected_edge.cas_policy_id)
+    t.eq(edge.cas_variant, expected_edge.cas_variant)
     t.eq(edge.provenance.owner, expected_edge.provenance.owner)
     t.eq(edge.provenance.row, expected_edge.provenance.row)
     t.eq(edge.provenance.field, expected_edge.provenance.field)
@@ -502,6 +511,12 @@ return {
     local snapshot = copy_value(rows)
     assert_successor_kind_partition(rows)
     local expected, empty_rows = expected_edges(owner, rows)
+    for _, edge in ipairs(expected) do
+      if edge.id == owner .. "/thinking/autonomous/consensus-reached-dependency-held" then
+        edge.cas_policy_id = "cas.legacy_consensus_result_v1"
+        edge.cas_variant = "thinking_to_dependency_wait"
+      end
+    end
     local actual = restart_edges.extract_autonomous_edges(owner, rows)
     t.eq(#actual, 6)
     assert_edges(actual, expected, empty_rows)
@@ -517,6 +532,75 @@ return {
 
     -- Inventory-authored canonicalization edges have their own production-observation conformance.
     -- This successor conformance remains scoped to responsibility_signature.successors.
+  end,
+
+  test_thinking_dependency_wait_edge_cas_metadata_shadows_binding_647 = function()
+    local owner = core.restart_package_name
+    local edge_id = owner .. "/thinking/autonomous/consensus-reached-dependency-held"
+    local edge
+    for _, candidate in ipairs(restart_edges.extract_autonomous_edges(owner, core.restart_transition_table())) do
+      if candidate.id == edge_id then
+        edge = candidate
+      end
+    end
+
+    local binding
+    for _, candidate in ipairs(restart_cas_catalog.bindings()) do
+      if candidate.id == "transition/github-devloop/consensus_result/thinking-dependency_wait" then
+        binding = candidate
+      end
+    end
+
+    t.is_true(edge ~= nil)
+    t.is_true(binding ~= nil)
+    t.eq(edge.cas_policy_id, "cas.legacy_consensus_result_v1")
+    t.eq(edge.cas_variant, "thinking_to_dependency_wait")
+    t.eq(edge.cas_policy_id, binding.cas_policy_id)
+    t.eq(edge.cas_variant, binding.variant)
+  end,
+
+  test_autonomous_cas_metadata_is_optional_copied_and_fail_closed = function()
+    local valid = row("from", {
+      {
+        state = "with-cas",
+        output_variant = "with-cas",
+        kind = "autonomous",
+        cas_policy_id = "cas.synthetic_v1",
+        cas_variant = "synthetic_variant",
+      },
+      { state = "without-cas", output_variant = "without-cas", kind = "autonomous" },
+    })
+    local edges = restart_edges.extract_autonomous_edges("owner", { valid })
+    t.eq(#edges, 2)
+    assert_exact_keys(edges[1], {
+      id = true,
+      owner = true,
+      row_id = true,
+      kind = true,
+      source = true,
+      target = true,
+      cas_policy_id = true,
+      cas_variant = true,
+      provenance = true,
+    })
+    t.eq(edges[1].cas_policy_id, "cas.synthetic_v1")
+    t.eq(edges[1].cas_variant, "synthetic_variant")
+    assert_exact_keys(edges[2], key_set(structural_fields))
+    t.eq(edges[2].cas_policy_id, nil)
+    t.eq(edges[2].cas_variant, nil)
+
+    assert_extract_fails("owner", {
+      row("from", { { state = "to", output_variant = "done", kind = "autonomous", cas_policy_id = "" } }),
+    })
+    assert_extract_fails("owner", {
+      row("from", { { state = "to", output_variant = "done", kind = "autonomous", cas_policy_id = 1 } }),
+    })
+    assert_extract_fails("owner", {
+      row("from", { { state = "to", output_variant = "done", kind = "autonomous", cas_variant = "" } }),
+    })
+    assert_extract_fails("owner", {
+      row("from", { { state = "to", output_variant = "done", kind = "autonomous", cas_variant = false } }),
+    })
   end,
 
   test_restart_guard_boundary_edges_match_issue_rows_in_authored_order = function()

@@ -50,6 +50,21 @@ local function validate_responsibility_successor(successor)
   end
 end
 
+local function attach_autonomous_cas_metadata(edge, successor)
+  if successor.cas_policy_id ~= nil then
+    if not is_nonempty_string(successor.cas_policy_id) then
+      error("devloop.restart_edges: autonomous successor.cas_policy_id must be a non-empty string")
+    end
+    edge.cas_policy_id = successor.cas_policy_id
+  end
+  if successor.cas_variant ~= nil then
+    if not is_nonempty_string(successor.cas_variant) then
+      error("devloop.restart_edges: autonomous successor.cas_variant must be a non-empty string")
+    end
+    edge.cas_variant = successor.cas_variant
+  end
+end
+
 local function receiver_activations(row)
   local activations = type(row) == "table" and row.receiver_activations or nil
   if activations == nil then
@@ -410,7 +425,7 @@ function M.extract_autonomous_edges(owner, rows)
           error("devloop.restart_edges: duplicate edge id " .. id)
         end
         seen_ids[id] = true
-        table.insert(edges, {
+        local edge = {
           id = id,
           owner = owner,
           row_id = current_row_id,
@@ -422,7 +437,9 @@ function M.extract_autonomous_edges(owner, rows)
             row = current_row_id,
             field = "responsibility_signature.successors",
           },
-        })
+        }
+        attach_autonomous_cas_metadata(edge, successor)
+        table.insert(edges, edge)
       end
     end
   end
