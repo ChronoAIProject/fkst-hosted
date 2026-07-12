@@ -349,7 +349,6 @@ function M.extract_canonicalization_edges(owner, inventory)
     if authored.kind ~= "canonicalization" then
       error("devloop.restart_edges: canonicalization edge kind must be canonicalization")
     end
-    reject_unsupported_cas_metadata(authored, "canonicalization")
 
     local source = authored.source
     if type(source) ~= "table" then
@@ -394,7 +393,7 @@ function M.extract_canonicalization_edges(owner, inventory)
     end
     seen_ids[authored.id] = true
 
-    table.insert(edges, {
+    local edge = {
       id = authored.id,
       owner = authored.owner,
       row_id = authored.row_id,
@@ -413,7 +412,9 @@ function M.extract_canonicalization_edges(owner, inventory)
         row = provenance.row,
         field = provenance.field,
       },
-    })
+    }
+    attach_cas_metadata(edge, authored, "canonicalization edge")
+    table.insert(edges, edge)
   end
   return edges
 end

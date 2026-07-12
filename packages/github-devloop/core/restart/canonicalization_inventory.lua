@@ -49,6 +49,8 @@ return {
       boundary = nil,
     },
     target = "awaiting-pr",
+    cas_policy_id = "cas.legacy_awaiting_pr_v1",
+    cas_variant = "implementing_to_awaiting_pr",
     cause_evidence = {
       marker = "pr-delegation:v1",
       resolver = "pr_delegation_fact",

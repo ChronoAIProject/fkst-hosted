@@ -140,6 +140,38 @@ return {
     end
   end,
 
+  test_canonicalization_cas_metadata_is_optional_and_copied = function()
+    local with_cas = canonicalization_entry()
+    with_cas.cas_policy_id = "cas.canonicalization_v1"
+    with_cas.cas_variant = "normalized"
+    local without_cas = canonicalization_entry()
+    without_cas.id = "owner/reviewing/canonicalization/other"
+    without_cas.provenance.field = "canonicalization_inventory.other"
+
+    local edges = restart_edges.extract_canonicalization_edges("owner", { with_cas, without_cas })
+
+    t.eq(edges[1].cas_policy_id, "cas.canonicalization_v1")
+    t.eq(edges[1].cas_variant, "normalized")
+    t.eq(has_key(edges[2], "cas_policy_id"), false)
+    t.eq(has_key(edges[2], "cas_variant"), false)
+  end,
+
+  test_canonicalization_cas_metadata_fails_closed_on_empty_or_non_string_values = function()
+    local invalid_values = {
+      { field = "cas_policy_id", value = "" },
+      { field = "cas_policy_id", value = 1 },
+      { field = "cas_variant", value = "" },
+      { field = "cas_variant", value = false },
+    }
+    for _, invalid in ipairs(invalid_values) do
+      local entry = canonicalization_entry()
+      entry[invalid.field] = invalid.value
+      assert_error_contains(function()
+        restart_edges.extract_canonicalization_edges("owner", { entry })
+      end, "must be a non-empty string")
+    end
+  end,
+
   test_cas_metadata_fails_closed_on_unsupported_edge_kinds = function()
     local guard_row = {
       from_state = "from",
@@ -182,10 +214,5 @@ return {
       restart_edges.extract_operator_reentry_edges("owner", { operator_entry })
     end, "cas_policy_id/cas_variant not supported on operator_reentry edges")
 
-    local canonical_entry = canonicalization_entry()
-    canonical_entry.cas_variant = "unsupported"
-    assert_error_contains(function()
-      restart_edges.extract_canonicalization_edges("owner", { canonical_entry })
-    end, "cas_policy_id/cas_variant not supported on canonicalization edges")
   end,
 }

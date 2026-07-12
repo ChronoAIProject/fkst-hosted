@@ -5,6 +5,7 @@ local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local h = require("tests.devloop_helpers")
 local m_builders = require("devloop.markers.builders")
 local m_facts = require("devloop.markers.facts")
+local restart_cas_catalog = require("devloop.restart_cas_catalog")
 local restart_edges = require("devloop.restart_edges")
 
 local core = h.core
@@ -31,6 +32,14 @@ local structural_fields = {
   "target",
   "cause_evidence",
   "provenance",
+}
+local implementing_merged_delegated_pr_id =
+  "github-devloop/awaiting-pr/canonicalization/implementing_merged_delegated_pr"
+local cas_metadata_golden = {
+  [implementing_merged_delegated_pr_id] = {
+    cas_policy_id = "cas.legacy_awaiting_pr_v1",
+    cas_variant = "implementing_to_awaiting_pr",
+  },
 }
 
 local function key_set(keys)
@@ -414,8 +423,13 @@ end
 
 local function assert_canonicalization_shape(edges)
   local seen_ids = {}
-  local edge_keys = key_set(structural_fields)
   for _, edge in ipairs(edges) do
+    local edge_keys = key_set(structural_fields)
+    local expected_cas = cas_metadata_golden[edge.id]
+    if expected_cas ~= nil then
+      edge_keys.cas_policy_id = true
+      edge_keys.cas_variant = true
+    end
     assert_exact_keys(edge, edge_keys)
     assert_exact_keys(edge.source, { state = true })
     assert_exact_keys(edge.cause_evidence, { marker = true, resolver = true })
@@ -426,6 +440,8 @@ local function assert_canonicalization_shape(edges)
     t.eq(edge.row_id, edge.target)
     t.eq(edge.provenance.owner, owner)
     t.eq(edge.provenance.row, edge.target)
+    t.eq(edge.cas_policy_id, expected_cas and expected_cas.cas_policy_id or nil)
+    t.eq(edge.cas_variant, expected_cas and expected_cas.cas_variant or nil)
     t.eq(seen_ids[edge.id], nil)
     seen_ids[edge.id] = true
   end
@@ -481,6 +497,27 @@ return {
 
   test_issue_implementing_handoff_canonicalization_matches_production_marker = function()
     assert_observed_inventory_edge(3, observe_implementing_merged_child())
+  end,
+
+  test_issue_implementing_handoff_canonicalization_matches_cas_catalog_binding = function()
+    local edge
+    for _, candidate in ipairs(restart_edges.extract_canonicalization_edges(owner, canonicalization_inventory)) do
+      if candidate.id == implementing_merged_delegated_pr_id then
+        edge = candidate
+        break
+      end
+    end
+    local binding
+    for _, candidate in ipairs(restart_cas_catalog.bindings()) do
+      if candidate.id == implementing_merged_delegated_pr_id then
+        binding = candidate
+        break
+      end
+    end
+    t.is_true(edge ~= nil)
+    t.is_true(binding ~= nil)
+    t.eq(edge.cas_policy_id, binding.cas_policy_id)
+    t.eq(edge.cas_variant, binding.variant)
   end,
 
   test_issue_legacy_pr_open_canonicalization_matches_production_marker = function()
