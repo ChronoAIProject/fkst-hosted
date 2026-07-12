@@ -76,7 +76,7 @@ local function mock_runtime_and_context()
   end
   for _ = 1, 4 do
     t.mock_command("gh api repos/owner/repo/issues/42", {
-      stdout = '{"labels":[{"name":"fkst-dev:ready"}],"assignees":[{"login":"fkst-test-bot"}]}\n',
+      stdout = '{"labels":[{"name":"fkst-dev:ready"}],"assignees":[{"login":"fkst-test-bot"}],"user":{"login":"fkst-test-bot"}}\n',
       stderr = "",
       exit_code = 0,
     })

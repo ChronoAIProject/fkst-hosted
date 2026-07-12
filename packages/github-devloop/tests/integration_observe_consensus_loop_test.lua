@@ -309,6 +309,26 @@ return {
     t.eq(count_calls("--json body"), 0)
   end,
 
+  test_consensus_result_non_whitelisted_author_skips_without_comment_or_label = function()
+    mock_issue_result({ "fkst-dev:thinking" }, nil, { author_login = "human" })
+    t.mock_command("gh api graphql", {
+      stdout = '{"data":{"repository":{"issue":{"blockedBy":{"nodes":[]}}}}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = h.run_department("departments/consensus_result/main.lua", {
+      queue = "consensus.consensus_reached",
+      payload = reached(),
+    }, opts("result-non-whitelisted-author", {
+      FKST_GITHUB_AUTHORIZED_LOGINS = "trusted-human",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_comment_request"), nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request"), nil)
+  end,
+
   test_consensus_result_approve_raises_ready_label_and_comment = function()
     mock_issue_result({ "fkst-dev:thinking" })
     local result = run_result(reached(), opts("result-approve"))
