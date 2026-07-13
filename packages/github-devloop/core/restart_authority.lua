@@ -36,6 +36,8 @@ local intent_fields = {
   source_boundary = true,
   target = true,
   evidence_refs = true,
+  incoming_version = true,
+  target_version = true,
 }
 
 local function illegal(reason_code, outcome_reason)
@@ -59,11 +61,21 @@ local function normalize_intent(intent)
   if type(intent.semantic_variant) ~= "string" or intent.semantic_variant == "" then
     return nil
   end
+  if intent.incoming_version ~= nil
+    and (type(intent.incoming_version) ~= "string" or intent.incoming_version == "") then
+    return nil
+  end
+  if intent.target_version ~= nil
+    and (type(intent.target_version) ~= "string" or intent.target_version == "") then
+    return nil
+  end
   return {
     semantic_variant = intent.semantic_variant,
     source_boundary = intent.source_boundary,
     target = intent.target,
     evidence_refs = intent.evidence_refs,
+    incoming_version = intent.incoming_version,
+    target_version = intent.target_version,
   }
 end
 
@@ -125,7 +137,9 @@ function M.decide_transition(sealed_snapshot, intent)
   if matches > 1 then
     return illegal("ambiguous-variant")
   end
-  if edge.cas_policy_id ~= "cas.legacy_loop_plain_v1" then
+  if edge.cas_policy_id ~= "cas.legacy_loop_plain_v1"
+    and not (edge.cas_policy_id == "cas.legacy_consensus_result_v1"
+      and edge.cas_variant == "thinking_to_ready") then
     return illegal("unsupported-shadow-edge")
   end
   if normalized.source_boundary ~= nil and normalized.source_boundary ~= edge.source.boundary then
@@ -145,6 +159,11 @@ function M.decide_transition(sealed_snapshot, intent)
     or variant.target_state ~= edge.target then
     return illegal("policy-variant-shape-mismatch")
   end
+  local cas_base = variant.base or definition.base
+  if (cas_base == "versioned" or cas_base == "cyclic")
+    and normalized.incoming_version == nil then
+    return illegal("incoming-version-required")
+  end
 
   local current = type(sealed_snapshot.current) == "table" and sealed_snapshot.current or {}
   local evidence = {
@@ -153,6 +172,8 @@ function M.decide_transition(sealed_snapshot, intent)
       version = current.version,
     },
     variant = edge.cas_variant,
+    incoming_version = normalized.incoming_version,
+    target_version = normalized.target_version,
   }
   local resolved = catalog.resolve(edge.cas_policy_id, evidence, projection)
   local disposition = ({

@@ -9,6 +9,7 @@ local restart_authority = require("core.restart_authority")
 local t = h.t
 local core = h.core
 local loop_department = require("departments.loop.main")
+local consensus_result_department = require("departments.consensus_result.main")
 
 local OWNER = "github-devloop"
 local SEMANTIC_VARIANT = "consensus-stalled"
@@ -17,6 +18,13 @@ local EDGE_ID = "github-devloop/thinking/autonomous/consensus-stalled"
 local APPLY_ENTITLEMENT_ID = EDGE_ID .. "/apply"
 local IDEMPOTENT_ENTITLEMENT_ID = EDGE_ID .. "/idempotent"
 local V_CURRENT = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+local CONSENSUS_REACHED_VARIANT = "consensus-reached"
+local CONSENSUS_RESULT_POLICY_ID = "cas.legacy_consensus_result_v1"
+local CONSENSUS_REACHED_EDGE_ID = "github-devloop/thinking/autonomous/consensus-reached"
+local V_OLDER = "consensus:github-devloop/issue/owner/repo/42/2026-06-02T01-02-03Z"
+local V_NEWER = "consensus:github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
+local V_ORDERING_EQUAL_CURRENT = V_CURRENT .. "/loop/01"
+local V_ORDERING_EQUAL_INCOMING = V_CURRENT .. "/loop/1"
 
 local state_labels = {
   thinking = "fkst-dev:thinking",
@@ -79,6 +87,41 @@ local fixtures = {
     expected_exit_code = 0,
     expected_status = "stale",
     expected_effect_ids = {},
+  },
+}
+
+local consensus_result_fixtures = {
+  {
+    name = "shadow-consensus-result-source-equal-apply",
+    current_state = "thinking",
+    current_version = V_CURRENT,
+    incoming_version = V_CURRENT,
+    expected_exit_code = 0,
+    expected_status = "apply",
+  },
+  {
+    name = "shadow-consensus-result-target-ordering-equal-idempotent",
+    current_state = "ready",
+    current_version = V_ORDERING_EQUAL_CURRENT,
+    incoming_version = V_ORDERING_EQUAL_INCOMING,
+    expected_exit_code = 0,
+    expected_status = "idempotent",
+  },
+  {
+    name = "shadow-consensus-result-source-marker-missing-pending",
+    current_state = nil,
+    current_version = nil,
+    incoming_version = V_NEWER,
+    expected_exit_code = 1,
+    expected_status = "pending",
+  },
+  {
+    name = "shadow-consensus-result-incoming-older-stale",
+    current_state = "thinking",
+    current_version = V_CURRENT,
+    incoming_version = V_OLDER,
+    expected_exit_code = 0,
+    expected_status = "stale",
   },
 }
 
@@ -182,6 +225,61 @@ local function observe_department(run)
   return result, probes, decisions, apply_plans
 end
 
+local function observe_consensus_result_department(run)
+  local probes = {}
+  local decisions = {}
+  local original_versioned = devloop_state.versioned_transition_status
+  local original_log_cas = devloop_logging.log_cas_decision
+
+  devloop_state.versioned_transition_status = function(current, from_states, to_state, incoming_version)
+    local outcome = original_versioned(current, from_states, to_state, incoming_version)
+    table.insert(probes, {
+      current = current,
+      from_states = from_states,
+      to_state = to_state,
+      incoming_version = incoming_version,
+      outcome = outcome,
+    })
+    return outcome
+  end
+  devloop_logging.log_cas_decision = function(
+    dept,
+    proposal_id,
+    current,
+    from_state,
+    to_state,
+    outcome,
+    reason
+  )
+    table.insert(decisions, {
+      dept = dept,
+      proposal_id = proposal_id,
+      current = current,
+      from_state = from_state,
+      to_state = to_state,
+      outcome = outcome,
+      reason = reason,
+    })
+    return original_log_cas(
+      dept,
+      proposal_id,
+      current,
+      from_state,
+      to_state,
+      outcome,
+      reason
+    )
+  end
+
+  local ok, result = pcall(run)
+  devloop_logging.log_cas_decision = original_log_cas
+  devloop_state.versioned_transition_status = original_versioned
+  if not ok then
+    error(result, 0)
+  end
+  return result, probes, decisions
+end
+
 local function run_real_department(payload)
   local raises = {}
   local original_raise = raise
@@ -228,6 +326,41 @@ local function observed_admission(probe)
     return { status = "stale", reason_code = "advanced-or-diverged" }
   end
   error("unexpected loop plain CAS probe outcome: " .. tostring(probe.outcome))
+end
+
+local function observed_consensus_result_admission(probe, decisions)
+  local observed = nil
+  if probe.outcome == "apply" then
+    observed = { status = "apply", reason_code = "apply" }
+  elseif probe.outcome == "idempotent" then
+    observed = { status = "idempotent", reason_code = "already-at-target" }
+  elseif probe.outcome == "pending" then
+    observed = { status = "pending", reason_code = "source-marker-not-visible" }
+  elseif probe.outcome == "stale" then
+    local incoming_older = false
+    for _, decision in ipairs(decisions) do
+      if tostring(decision.outcome or ""):find(
+        "incoming version < current marker version",
+        1,
+        true
+      ) ~= nil then
+        incoming_older = true
+      end
+    end
+    observed = {
+      status = "stale",
+      reason_code = incoming_older and "incoming-version-older" or "advanced-or-diverged",
+    }
+  else
+    error("unexpected consensus_result CAS probe outcome: " .. tostring(probe.outcome))
+  end
+
+  t.is_true(#decisions > 0, "consensus_result structured CAS decision captured")
+  observed.cas_outcome = decisions[1].outcome
+  for _, decision in ipairs(decisions) do
+    t.eq(decision.outcome, observed.cas_outcome, "consensus_result CAS log outcomes agree")
+  end
+  return observed
 end
 
 local function assert_bidirectional(actual, expected, field, context)
@@ -367,6 +500,72 @@ local function assert_case(fixture)
   return shadow
 end
 
+local function assert_consensus_result_case(fixture)
+  local event = h.reached({ effect_version = fixture.incoming_version })
+  local labels = { "fkst-dev:enabled" }
+  if fixture.current_state ~= nil then
+    table.insert(labels, state_labels[fixture.current_state])
+  end
+  local comments = {}
+  if fixture.current_state ~= nil then
+    table.insert(comments, core.state_marker(
+      event.proposal_id,
+      fixture.current_state,
+      fixture.current_version
+    ))
+  end
+  h.mock_issue_result(labels, comments)
+
+  t.eq(
+    type(consensus_result_department.make_department),
+    "function",
+    fixture.name .. ": real consensus_result department loaded"
+  )
+  local result, probes, decisions = observe_consensus_result_department(function()
+    local runner = fixture.expected_exit_code == 1
+      and h.run_result_expecting_failure
+      or h.run_result
+    return runner(event, h.opts("restart-authority-versioned-shadow-parity"))
+  end)
+
+  t.eq(result.exit_code, fixture.expected_exit_code, fixture.name .. ": department exit code")
+  t.eq(#probes, 1, fixture.name .. ": real department CAS probe count")
+  local probe = probes[1]
+  t.eq(probe.current.state, fixture.current_state, fixture.name .. ": observed current state")
+  t.eq(probe.current.version, fixture.current_version, fixture.name .. ": observed current version")
+  t.eq(probe.from_states[1], "thinking", fixture.name .. ": observed source state")
+  t.eq(#probe.from_states, 1, fixture.name .. ": observed source state count")
+  t.eq(probe.to_state, "ready", fixture.name .. ": observed target state")
+  t.eq(probe.incoming_version, event.effect_version, fixture.name .. ": observed incoming version")
+  for _, decision in ipairs(decisions) do
+    t.eq(decision.dept, "consensus_result", fixture.name .. ": legacy decision department")
+    t.eq(decision.from_state, "thinking", fixture.name .. ": legacy decision source")
+    t.eq(decision.to_state, "ready", fixture.name .. ": legacy decision target")
+  end
+
+  local legacy = observed_consensus_result_admission(probe, decisions)
+  local sealed = restart_authority.seal_snapshot({
+    owner = OWNER,
+    proposal_id = event.proposal_id,
+    current = {
+      state = fixture.current_state,
+      version = fixture.current_version,
+    },
+  })
+  local shadow = restart_authority.decide_transition(sealed, {
+    semantic_variant = CONSENSUS_REACHED_VARIANT,
+    incoming_version = event.effect_version,
+  })
+
+  assert_bidirectional(shadow, legacy, "status", fixture.name)
+  t.eq(shadow.status, fixture.expected_status, fixture.name .. ": expected shadow status")
+  assert_bidirectional(shadow, legacy, "reason_code", fixture.name)
+  assert_bidirectional(shadow, legacy, "cas_outcome", fixture.name)
+  t.eq(shadow.edge_id, CONSENSUS_REACHED_EDGE_ID, fixture.name .. ": selected edge id")
+  t.eq(shadow.cas_policy_id, CONSENSUS_RESULT_POLICY_ID, fixture.name .. ": selected CAS policy")
+  t.eq(shadow.grant, nil, fixture.name .. ": grant disabled")
+end
+
 local function assert_illegal(actual, reason_code, cas_outcome, context)
   t.eq(actual.status, "illegal", context .. ": status")
   t.eq(actual.reason_code, reason_code, context .. ": reason code")
@@ -394,6 +593,59 @@ return {
     t.eq(entitlement_ids.apply, APPLY_ENTITLEMENT_ID, "apply entitlement selected")
     t.eq(entitlement_ids.idempotent, IDEMPOTENT_ENTITLEMENT_ID, "idempotent entitlement selected")
     t.eq(entitlement_ids.apply == entitlement_ids.idempotent, false, "apply and idempotent entitlement ids are distinct")
+  end,
+
+  test_shadow_decider_matches_legacy_consensus_result_versioned_cas_triplets = function()
+    for _, fixture in ipairs(consensus_result_fixtures) do
+      assert_consensus_result_case(fixture)
+    end
+  end,
+
+  test_shadow_decider_requires_versioned_incoming_version = function()
+    local missing = restart_authority.decide_transition(sealed_snapshot(), {
+      semantic_variant = CONSENSUS_REACHED_VARIANT,
+    })
+    assert_illegal(
+      missing,
+      "incoming-version-required",
+      "illegal(incoming-version-required)",
+      "missing versioned incoming version"
+    )
+
+    local malformed_versions = {
+      {
+        context = "empty incoming version",
+        intent = { semantic_variant = CONSENSUS_REACHED_VARIANT, incoming_version = "" },
+      },
+      {
+        context = "non-string incoming version",
+        intent = { semantic_variant = CONSENSUS_REACHED_VARIANT, incoming_version = 42 },
+      },
+      {
+        context = "empty target version",
+        intent = {
+          semantic_variant = CONSENSUS_REACHED_VARIANT,
+          incoming_version = V_CURRENT,
+          target_version = "",
+        },
+      },
+      {
+        context = "non-string target version",
+        intent = {
+          semantic_variant = CONSENSUS_REACHED_VARIANT,
+          incoming_version = V_CURRENT,
+          target_version = 42,
+        },
+      },
+    }
+    for _, fixture in ipairs(malformed_versions) do
+      assert_illegal(
+        restart_authority.decide_transition(sealed_snapshot(), fixture.intent),
+        "malformed-intent",
+        "illegal(malformed-intent)",
+        fixture.context
+      )
+    end
   end,
 
   test_shadow_decider_rejects_unsealed_snapshot = function()
