@@ -236,6 +236,7 @@ fn registration(name: &str, work_label: &str) -> SessionRegistration {
             work_label: work_label.to_string(),
             environment: None,
             output_lang: None,
+            engine_config: std::collections::BTreeMap::new(),
         },
         session_id: "sess-1".to_string(),
         config_hash: "hash".to_string(),

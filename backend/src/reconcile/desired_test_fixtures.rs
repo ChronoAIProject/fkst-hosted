@@ -45,6 +45,7 @@ pub(super) fn reg(session_id: &str, trigger_issue: i64, config_hash: &str) -> Se
             work_label: "wl".to_string(),
             environment: None,
             output_lang: None,
+            engine_config: std::collections::BTreeMap::new(),
         },
         session_id: session_id.to_string(),
         config_hash: config_hash.to_string(),

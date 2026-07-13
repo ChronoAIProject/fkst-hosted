@@ -47,6 +47,7 @@ pub(crate) fn spec() -> SessionPodSpec {
         bot_login: "fkst-bot[bot]".to_string(),
         config_hash: config_hash(),
         output_lang: None,
+        engine_config: BTreeMap::new(),
     }
 }
 

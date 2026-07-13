@@ -44,6 +44,10 @@ pub struct SessionDef {
     /// it changes the pod env, so editing it after registration is a rejected
     /// config change like any other launch input.
     pub output_lang: Option<String>,
+    /// The validated `### Engine Config` map (allowlisted engine tunables the
+    /// launcher injects as session env). Part of BOTH hashes: it changes the
+    /// pod env, so editing it after registration is a rejected config change.
+    pub engine_config: std::collections::BTreeMap<String, String>,
 }
 
 /// One valid trigger issue resolved to everything the reconciler needs to spawn

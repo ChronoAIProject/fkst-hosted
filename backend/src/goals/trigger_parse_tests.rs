@@ -77,6 +77,7 @@ prod-env
             auto_merge: false,
             log_access: vec![],
             output_lang: None,
+            engine_config: std::collections::BTreeMap::new(),
         }
     );
 }
@@ -463,4 +464,65 @@ fn output_language_two_values_is_422() {
     let msg = err_message(&body_with_output_language("en\nzh"));
     assert!(msg.contains("Output Language"), "names the section: {msg}");
     assert!(msg.contains("at most one"), "flags the ambiguity: {msg}");
+}
+
+// ---- Engine Config (optional but STRICT; allowlisted; comment-tolerant) ----
+
+#[test]
+fn engine_config_absent_defaults_empty() {
+    let spec = parse_trigger_issue_body(&body_with_package(VALID_PKG)).expect("parses");
+    assert!(spec.engine_config.is_empty());
+}
+
+#[test]
+fn engine_config_section_parses_allowlisted_pairs() {
+    let body = format!(
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\nlabel\n\
+         ### Engine Config\n<!--\nOne KEY=value per line.\n-->\nFKST_CODEX_PERMIT_SLOTS=8\nFKST_RATE_POOL_GH=10,10\n"
+    );
+    let spec = parse_trigger_issue_body(&body).expect("parses");
+    assert_eq!(spec.engine_config.len(), 2);
+    assert_eq!(spec.engine_config["FKST_CODEX_PERMIT_SLOTS"], "8");
+    assert_eq!(spec.engine_config["FKST_RATE_POOL_GH"], "10,10");
+}
+
+#[test]
+fn engine_config_violations_are_422_from_the_whole_body_parse() {
+    let body = format!(
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\nlabel\n\
+         ### Engine Config\nFKST_RUNTIME_ROOT=/tmp/x\n"
+    );
+    let msg = err_message(&body);
+    assert!(msg.contains("Engine Config"), "names the section: {msg}");
+    assert!(msg.contains("FKST_RUNTIME_ROOT"), "names the key: {msg}");
+}
+
+#[test]
+fn the_bundled_templates_new_sections_parse_unset_verbatim() {
+    // The EXACT bundled text of the two NEW sections (explanatory comments and
+    // all) must parse to "not set" — never a 422 that punishes an author who
+    // kept the template's comments. The tail of the bundled asset (from
+    // `### Output Language` onward) is spliced verbatim onto valid required
+    // sections, so this test breaks if the asset's new-section text ever stops
+    // being comment-only or stops stripping cleanly.
+    let template = include_str!("../github_app/templates_assets/fkst-substrate-session.md");
+    let new_sections_start = template
+        .find("### Output Language")
+        .expect("the bundled template carries the Output Language section");
+    let body = format!(
+        "### Session Name
+sess
+### Packages
+{VALID_PKG}
+### Work Label
+label
+{}",
+        &template[new_sections_start..]
+    );
+    let spec = parse_trigger_issue_body(&body).expect("the bundled new-section text must parse");
+    assert_eq!(spec.output_lang, None, "comment-only section is unset");
+    assert!(
+        spec.engine_config.is_empty(),
+        "comment-only section is an empty map"
+    );
 }
