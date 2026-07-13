@@ -7,6 +7,7 @@ local graph = require("testkit.graph")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local conv_rounds = require("devloop.convergence.rounds")
 local m_builders = require("devloop.markers.builders")
+local context_bundle = require("devloop.context_bundle")
 
 local t = h.t
 local core = h.core
@@ -161,6 +162,42 @@ local function mock_consensus_approval()
   end
 end
 
+local function seed_readable_review_context(proposal_id)
+  local dir = os.tmpname() .. "-review-context"
+  local mkdir_ok = os.execute("mkdir -p " .. devloop_base._shell_single_quote(dir))
+  if not (mkdir_ok == true or mkdir_ok == 0) then
+    error("failed to create review context fixture")
+  end
+
+  local bundle = { dir = dir }
+  local files = {
+    notice = { "notice_path", "UNTRUSTED-NOTICE.txt", "BEGIN UNTRUSTED BUNDLE DATA\nEND UNTRUSTED BUNDLE DATA\n" },
+    issue = { "issue_path", "issue.json", "{}\n" },
+    board = { "board_path", "board.txt", "No related work.\n" },
+    pr = { "pr_path", "pr.json", "{}\n" },
+    diff = { "diff_path", "diff.patch", "+return true\n" },
+    risk = { "risk_path", "risk.txt", "PR risk tier: normal\n" },
+  }
+  for name, spec in pairs(files) do
+    local path = dir .. "/" .. spec[2]
+    local handle = assert(io.open(path, "w"))
+    handle:write(spec[3])
+    handle:close()
+    bundle[spec[1]] = path
+    bundle[name .. "_bytes"] = #spec[3]
+  end
+
+  local version = devloop_base.pr_review_proposal_dedup_key(proposal_id)
+  cache_set(context_bundle.context_bundle_key(proposal_id, version), dir)
+  cache_set(
+    context_bundle.context_bundle_manifest_key(proposal_id, version),
+    context_bundle.context_bundle_manifest(bundle)
+  )
+  return function()
+    os.execute("rm -rf " .. devloop_base._shell_single_quote(dir))
+  end
+end
+
 local function mock_reviewing_liveness_replay(version)
   local comments = {
     {
@@ -176,7 +213,7 @@ local function mock_reviewing_liveness_replay(version)
   }
 
   mock_env(32)
-  for _ = 1, 8 do
+  for _ = 1, 32 do
     t.mock_command(devloop_base.read_env_command("FKST_GITHUB_WRITE"), {
       stdout = "",
       stderr = "",
@@ -227,6 +264,13 @@ local function mock_reviewing_liveness_replay(version)
     assignees = { "fkst-test-bot" },
     author_login = "fkst-test-bot",
   })
+  for _ = 1, 5 do
+    t.mock_command("test -d '.' && test -e '.'/.git", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
   h.mock_context_bundle({
     proposal_id = issue_proposal_id,
     pr_number = pr_number,
@@ -347,11 +391,19 @@ return {
     })
     -- run_graph raisers use ts=0; a distinct poll generation prevents cross-test list-cache reuse.
     liveness_tick.ts = 1
-    local replay_trace = graph.require_quiescent(graph.run(liveness_tick, { max_steps = 12 }))
+    local cleanup_context = seed_readable_review_context(replay_proposal_id)
+    local replay_ok, replay_trace = pcall(function()
+      return graph.require_quiescent(graph.run(liveness_tick, { max_steps = 12 }))
+    end)
+    cleanup_context()
+    if not replay_ok then
+      error(replay_trace, 0)
+    end
     graph.assert_covers(replay_trace, {
       "github-devloop-pr.devloop_liveness_tick -> github-devloop-pr.liveness_scan",
       "github-devloop-pr.devloop_reviewing -> github-devloop-pr.review_pr",
       "consensus.proposal -> consensus.decide",
+      "consensus.consensus_reached -> github-devloop-pr.review_result",
     })
 
     local redrive = graph.require_raise(replay_trace, "github-devloop-pr.devloop_reviewing")
@@ -370,6 +422,16 @@ return {
       consumer = "consensus.decide",
     })
     t.eq(decide_step.exit_code, 0)
+    local reached = graph.require_raise(replay_trace, "consensus.consensus_reached")
+    t.eq(reached.payload.proposal_id, replay_proposal_id)
+    local review_step = graph.require_delivery(replay_trace, {
+      queue = "consensus.consensus_reached",
+      consumer = "github-devloop-pr.review_result",
+    })
+    t.eq(review_step.exit_code, 0)
+    graph.require_raise(replay_trace, "github-proxy.github_pr_comment_request", function(raised)
+      return tostring(raised.payload.body):find('state="merge-ready"', 1, true) ~= nil
+    end)
     t.is_nil(graph.find_raise(replay_trace, "devloop_timeout_reconcile"))
     t.is_nil(graph.find_raise(replay_trace, "github-devloop-decompose.devloop_decompose"))
   end,
