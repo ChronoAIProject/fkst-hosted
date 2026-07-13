@@ -50,6 +50,7 @@ fn config() -> PodConfig {
         llm_wire_api: "chat".to_string(),
         dns_nameservers: vec!["1.1.1.1".to_string(), "8.8.8.8".to_string()],
         runtime_class: None,
+        rate_pools: BTreeMap::new(),
     }
 }
 
@@ -184,6 +185,53 @@ fn session_env_pairs_supply_the_engine_hostfacts_exactly_once() {
         assert_eq!(hits.len(), 1, "{key} must appear exactly once");
         assert_eq!(hits[0].1, value, "{key} must be the platform constant");
     }
+}
+
+#[test]
+fn session_env_pairs_render_operator_rate_pools_with_a_pinned_ledger_root() {
+    let mut cfg = config();
+    cfg.rate_pools = BTreeMap::from([
+        (
+            "GH".to_string(),
+            crate::config::RatePool {
+                burst: 50,
+                refill_per_minute: 50,
+            },
+        ),
+        (
+            "GIT".to_string(),
+            crate::config::RatePool {
+                burst: 120,
+                refill_per_minute: 1,
+            },
+        ),
+    ]);
+    let pairs = session_env_pairs(&spec(), &cfg);
+    let get = |key: &str| {
+        pairs
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    };
+    assert_eq!(get("FKST_RATE_POOL_GH"), Some("50,50"));
+    assert_eq!(get("FKST_RATE_POOL_GIT"), Some("120,1"));
+    // The ledger root MUST ride along: the engine's default is `~/.fkst/rate-pools`
+    // and its `~`-expansion fails when HOME is unset in the session container.
+    assert_eq!(get("FKST_RATE_POOL_ROOT"), Some("/var/run/fkst/rate-pools"));
+    // No duplicate names: both backends render these pairs as-is.
+    let mut names: Vec<_> = pairs.iter().map(|(k, _)| k.clone()).collect();
+    names.sort();
+    names.dedup();
+    assert_eq!(names.len(), pairs.len(), "env names must be unique");
+}
+
+#[test]
+fn session_env_pairs_render_no_rate_pool_keys_when_unconfigured() {
+    let pairs = session_env_pairs(&spec(), &config());
+    assert!(
+        pairs.iter().all(|(k, _)| !k.starts_with("FKST_RATE_POOL_")),
+        "an unconfigured deploy must render the pre-knob env exactly"
+    );
 }
 
 #[test]

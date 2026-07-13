@@ -69,6 +69,16 @@ pub(crate) fn osb_config() -> OsbConfig {
 /// Build a backend whose lifecycle client AND execd factory both target `base`. The
 /// execd token is a fixed placeholder (the mock does not validate it).
 pub(crate) fn backend(base: &str, config: OsbConfig) -> OsbBackend {
+    backend_with_pod_config(base, config, PodConfig::default())
+}
+
+/// [`backend`] with an explicit [`PodConfig`], for tests exercising knobs the
+/// shared env source renders from it (e.g. operator rate pools).
+pub(crate) fn backend_with_pod_config(
+    base: &str,
+    config: OsbConfig,
+    pod_config: PodConfig,
+) -> OsbBackend {
     let url = reqwest::Url::parse(base).expect("base url");
     let http = reqwest::Client::new();
     let lifecycle = OsbLifecycleClient::new(
@@ -87,7 +97,7 @@ pub(crate) fn backend(base: &str, config: OsbConfig) -> OsbBackend {
             factory_http.clone(),
         )
     });
-    OsbBackend::new(lifecycle, factory, PodConfig::default(), config)
+    OsbBackend::new(lifecycle, factory, pod_config, config)
 }
 
 /// A one-page list envelope wrapping `items` (no further pages).

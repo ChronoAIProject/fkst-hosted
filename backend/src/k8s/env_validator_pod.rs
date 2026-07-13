@@ -255,6 +255,7 @@ mod tests {
             llm_wire_api: "chat".to_string(),
             dns_nameservers: vec!["1.1.1.1".to_string(), "8.8.8.8".to_string()],
             runtime_class: None,
+            rate_pools: std::collections::BTreeMap::new(),
         }
     }
 

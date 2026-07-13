@@ -10,6 +10,8 @@
 //! the dispatch/worker/journal knobs survive. Identity is the HMAC-verified
 //! GitHub webhook actor — there is no application-level auth to configure.
 
+use std::collections::BTreeMap;
+
 use secrecy::SecretString;
 use serde::Deserialize;
 
@@ -170,6 +172,11 @@ struct PodVars {
     /// `from_vars`.
     #[serde(default)]
     runtime_class: Option<String>,
+    /// Raw `FKST_POD_RATE_POOLS` value (operator-default engine rate pools);
+    /// parsed + validated in `from_vars` so a bad token yields our own precise
+    /// error. Space-separated `NAME=<burst>,<refill_per_minute>` tokens.
+    #[serde(default)]
+    rate_pools: Option<String>,
 }
 
 /// `FKST_LLM_*`-prefixed variables (static LLM-provider config). The session
@@ -203,6 +210,74 @@ pub enum PodMode {
     /// The OpenSandbox backend (one sandbox per session). Requires the
     /// `FKST_OSB_*` config block when pod dispatch is on.
     Opensandbox,
+}
+
+/// One operator-default engine rate pool (`FKST_POD_RATE_POOLS` token
+/// `NAME=<burst>,<refill_per_minute>`), injected into every session as
+/// `FKST_RATE_POOL_<NAME>` so the engine throttles matching external commands
+/// (`gh`, `git`, …) — including calls made inside the codex coding agent, via
+/// the engine's PATH shims. Protects the shared installation-scoped GitHub App
+/// API budget.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RatePool {
+    pub burst: u64,
+    pub refill_per_minute: u64,
+}
+
+/// Parse + validate the raw `FKST_POD_RATE_POOLS` value: space-separated
+/// `NAME=<burst>,<refill_per_minute>` tokens. Fail closed on any malformed
+/// token, naming it — a silently-dropped pool would leave sessions unthrottled,
+/// the exact failure this knob exists to prevent. `NAME` is restricted to the
+/// engine-safe uppercase subset and may not be `ROOT` (that would render as
+/// `FKST_RATE_POOL_ROOT`, the engine's ledger-directory env, not a pool).
+/// Values must be positive u64s — overflow must fail here, not pod-side.
+fn parse_rate_pools(raw: &str) -> Result<BTreeMap<String, RatePool>, AppError> {
+    fn err(token: &str, reason: &str) -> AppError {
+        AppError::Config(format!(
+            "FKST_POD_RATE_POOLS token {token:?} is invalid: {reason}; expected \
+             space-separated NAME=<burst>,<refill_per_minute> with NAME matching \
+             ^[A-Z0-9_]+$ (not ROOT) and both values positive integers"
+        ))
+    }
+    let mut pools = BTreeMap::new();
+    for token in raw.split_whitespace() {
+        let (name, value) = token
+            .split_once('=')
+            .ok_or_else(|| err(token, "missing `=`"))?;
+        if name.is_empty()
+            || !name
+                .bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+        {
+            return Err(err(token, "the pool NAME must match ^[A-Z0-9_]+$"));
+        }
+        if name == "ROOT" {
+            return Err(err(
+                token,
+                "ROOT is reserved (FKST_RATE_POOL_ROOT is the ledger dir, not a pool)",
+            ));
+        }
+        let (burst_raw, refill_raw) = value
+            .split_once(',')
+            .ok_or_else(|| err(token, "missing `,` between burst and refill"))?;
+        let parse_positive = |part: &str, which: &str| -> Result<u64, AppError> {
+            let n: u64 = part
+                .parse()
+                .map_err(|_| err(token, &format!("the {which} must be a u64")))?;
+            if n == 0 {
+                return Err(err(token, &format!("the {which} must be >= 1")));
+            }
+            Ok(n)
+        };
+        let pool = RatePool {
+            burst: parse_positive(burst_raw, "burst")?,
+            refill_per_minute: parse_positive(refill_raw, "refill_per_minute")?,
+        };
+        if pools.insert(name.to_string(), pool).is_some() {
+            return Err(err(token, "duplicate pool NAME"));
+        }
+    }
+    Ok(pools)
 }
 
 /// Pod-per-session dispatch configuration (milestone #9). When `dispatch` is
@@ -251,6 +326,11 @@ pub struct PodConfig {
     /// Containers) — the nodes must have the Kata runtime installed and nested
     /// virtualization enabled. Session and validation pods share this value.
     pub runtime_class: Option<String>,
+    /// Operator-default engine rate pools, keyed by pool NAME (rendered into
+    /// every session as `FKST_RATE_POOL_<NAME>`). Env: `FKST_POD_RATE_POOLS`,
+    /// space-separated `NAME=<burst>,<refill_per_minute>` tokens. Default empty
+    /// (no pools, no PATH shims — exactly the pre-knob behavior).
+    pub rate_pools: BTreeMap<String, RatePool>,
 }
 
 impl Default for PodConfig {
@@ -266,6 +346,7 @@ impl Default for PodConfig {
             llm_wire_api: defaults::llm_wire_api(),
             dns_nameservers: defaults::pod_dns_nameservers(),
             runtime_class: None,
+            rate_pools: BTreeMap::new(),
         }
     }
 }
@@ -518,6 +599,9 @@ impl Config {
                 .runtime_class
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty()),
+            // Parsed UNCONDITIONALLY (like the mode) so a malformed pool fails
+            // closed at startup even with dispatch off.
+            rate_pools: parse_rate_pools(pod.rate_pools.as_deref().unwrap_or(""))?,
         };
 
         // OpenSandbox session-backend config (FKST_OSB_*). Validated ONLY when pod
@@ -619,6 +703,64 @@ mod tests {
         let err = Config::from_vars(vars(&[("FKST_POD_DISPATCH", "true")]))
             .expect_err("dispatch with no image must fail closed");
         assert!(err.to_string().contains("FKST_POD_IMAGE"));
+    }
+
+    #[test]
+    fn rate_pools_parse_into_the_pod_config() {
+        let config = Config::from_vars(vars(&[("FKST_POD_RATE_POOLS", "GH=50,50 GIT_2=120,1")]))
+            .expect("valid pools parse");
+        assert_eq!(config.pod.rate_pools.len(), 2);
+        assert_eq!(
+            config.pod.rate_pools["GH"],
+            RatePool {
+                burst: 50,
+                refill_per_minute: 50
+            }
+        );
+        assert_eq!(
+            config.pod.rate_pools["GIT_2"],
+            RatePool {
+                burst: 120,
+                refill_per_minute: 1
+            }
+        );
+    }
+
+    #[test]
+    fn rate_pools_default_empty_when_unset_or_blank() {
+        assert!(Config::from_vars(vars(&[]))
+            .expect("unset ok")
+            .pod
+            .rate_pools
+            .is_empty());
+        assert!(Config::from_vars(vars(&[("FKST_POD_RATE_POOLS", "  ")]))
+            .expect("blank ok")
+            .pod
+            .rate_pools
+            .is_empty());
+    }
+
+    #[test]
+    fn rate_pools_fail_closed_on_every_malformed_token() {
+        // Each variant names the env var — even with dispatch OFF, so a bad
+        // operator value can never be silently dropped (an unthrottled session
+        // is exactly what this knob exists to prevent).
+        for bad in [
+            "GH50,50",                   // missing `=`
+            "gh=50,50",                  // lowercase NAME
+            "ROOT=1,1",                  // reserved NAME
+            "GH=0,5",                    // zero burst
+            "GH=5,0",                    // zero refill
+            "GH=5",                      // missing `,`
+            "GH=18446744073709551616,1", // u64 overflow
+            "GH=1,1 GH=2,2",             // duplicate NAME
+        ] {
+            let err = Config::from_vars(vars(&[("FKST_POD_RATE_POOLS", bad)])).expect_err(bad);
+            assert!(
+                err.to_string().contains("FKST_POD_RATE_POOLS"),
+                "{bad}: {err}"
+            );
+        }
     }
 
     #[test]

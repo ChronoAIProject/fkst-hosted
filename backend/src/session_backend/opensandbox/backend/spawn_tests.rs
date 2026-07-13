@@ -14,7 +14,8 @@ use crate::session_backend::opensandbox::derive_execd_token;
 use crate::session_backend::{BackendError, EnsureOutcome};
 
 use super::super::backend_test_support::{
-    backend, list_page, osb_config, sandbox_json, spec, API_KEY, EXECD_SEED, SESSION_ID,
+    backend, backend_with_pod_config, list_page, osb_config, sandbox_json, spec, API_KEY,
+    EXECD_SEED, SESSION_ID,
 };
 
 const UPLOAD_PATH: &str = "/v1/sandboxes/sbx-1/proxy/44772/files/upload";
@@ -122,6 +123,56 @@ async fn ensure_session_creates_with_null_timeout_stamped_metadata_and_execd_tok
         .await;
 
     let outcome = backend(&server.uri(), osb_config())
+        .ensure_session_impl(&spec(), one_cred())
+        .await
+        .expect("created");
+    assert_eq!(outcome, EnsureOutcome::Created);
+}
+
+#[tokio::test]
+async fn ensure_session_renders_operator_rate_pools_on_the_create_env() {
+    // The shared env source's rate-pool rendering must reach the sandbox create
+    // env too (pool definition + the pinned ledger root).
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/sandboxes"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(list_page(json!([]))))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/sandboxes"))
+        .and(body_partial_json(json!({
+            "env": {
+                "FKST_RATE_POOL_GH": "50,50",
+                "FKST_RATE_POOL_ROOT": "/var/run/fkst/rate-pools",
+            },
+        })))
+        .respond_with(ResponseTemplate::new(202).set_body_json(sandbox_json(
+            "sbx-1",
+            "Running",
+            "2026-07-09T00:00:00Z",
+            json!({}),
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(UPLOAD_PATH))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let pod_config = crate::config::PodConfig {
+        rate_pools: BTreeMap::from([(
+            "GH".to_string(),
+            crate::config::RatePool {
+                burst: 50,
+                refill_per_minute: 50,
+            },
+        )]),
+        ..crate::config::PodConfig::default()
+    };
+    let outcome = backend_with_pod_config(&server.uri(), osb_config(), pod_config)
         .ensure_session_impl(&spec(), one_cred())
         .await
         .expect("created");
