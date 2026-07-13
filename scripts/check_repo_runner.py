@@ -23,6 +23,7 @@ import check_repo_live_run_dispatch
 import check_repo_monotone_gate
 import check_repo_namespaced_queue
 import check_repo_producer_liveness
+import check_repo_restart_lifecycle
 import check_repo_saga_head
 import check_repo_saga_split
 import check_repo_version_suffix
@@ -149,6 +150,8 @@ def run_generic(c, config: check_repo_config.CheckRepoConfig, violations: list[s
     for message in check_repo_live_run_dispatch.repository_messages(root, allowlists, enforce_base):
         c.add(violations, "G-LIVE-RUN-DISPATCH", message)
     check_monotone_gate(c, root, violations, allowlists, enforce_base)
+    for message in check_repo_restart_lifecycle.repository_messages(root, enforce_base):
+        c.add(violations, "G-RESTART-LIFECYCLE", message)
     c.check_saga_handler_ratchet(root, violations, warnings, allowlists, enforce_base)
     sources = {c.rel(root, path): c.read_text(path) for package_root in c.package_roots(root) for path in sorted(package_root.glob("*/departments/*/main.lua")) if path.is_file()}
     for message in check_repo_saga_head.violations(sources, c.strip_lua_comments_and_strings):

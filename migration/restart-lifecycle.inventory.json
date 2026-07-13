@@ -1,0 +1,783 @@
+{
+  "artifact_sha256": "5a5c75594c03be685fb8a1c60d976c92b9acfeca946f135a140ca12c495e5b6c",
+  "consumer_entry_acceptors": [
+    {
+      "ordinal": "consumes:consensus.consensus_converge",
+      "path": "packages/github-devloop/departments/loop/main.lua",
+      "site_id": "entry:github-devloop:loop",
+      "symbol": "pipeline"
+    },
+    {
+      "ordinal": "consumes:consensus.consensus_reached",
+      "path": "packages/github-devloop/departments/consensus_result/main.lua",
+      "site_id": "entry:github-devloop:consensus-result",
+      "symbol": "pipeline"
+    },
+    {
+      "ordinal": "consumes:devloop_reconcile|devloop_timeout_reconcile",
+      "path": "packages/github-devloop/departments/reconcile/main.lua",
+      "site_id": "entry:github-devloop:reconcile",
+      "symbol": "pipeline"
+    },
+    {
+      "ordinal": "consumes:consensus.consensus_reached",
+      "path": "packages/github-devloop-pr/departments/review_result/main.lua",
+      "site_id": "entry:github-devloop-pr:review-result",
+      "symbol": "pipeline"
+    },
+    {
+      "ordinal": "consumes:devloop_fixing",
+      "path": "packages/github-devloop-pr/departments/fix/main.lua",
+      "site_id": "entry:github-devloop-pr:fix",
+      "symbol": "pipeline"
+    },
+    {
+      "ordinal": "consumes:devloop_fix_reconcile|devloop_review_reconcile|devloop_timeout_reconcile",
+      "path": "packages/github-devloop-pr/departments/reconcile/main.lua",
+      "site_id": "entry:github-devloop-pr:reconcile",
+      "symbol": "pipeline"
+    }
+  ],
+  "direct_constructor_sites": [
+    {
+      "ordinal": "build_consensus_proposal",
+      "path": "packages/github-devloop/departments/execute_start/main.lua",
+      "site_id": "ctor:github-devloop:execute-start-proposal",
+      "symbol": "pipeline"
+    },
+    {
+      "ordinal": "build_devloop_ready_payload",
+      "path": "packages/github-devloop/departments/observe_issue/main.lua",
+      "site_id": "ctor:github-devloop:observe-issue-ready",
+      "symbol": "process_issue_event"
+    },
+    {
+      "ordinal": "review proposal payload",
+      "path": "packages/github-devloop-pr/departments/review_pr/main.lua",
+      "site_id": "ctor:github-devloop-pr:review-pr-proposal",
+      "symbol": "pipeline"
+    },
+    {
+      "ordinal": "build_devloop_merge_ready_payload",
+      "path": "packages/github-devloop-pr/core/pr_review_replayer.lua",
+      "site_id": "ctor:github-devloop-pr:review-replayer-merge-ready",
+      "symbol": "review_converge_fact"
+    }
+  ],
+  "effect_sink_sites": [
+    {
+      "ordinal": "sink-inventory",
+      "path": "packages/github-devloop/core/restart/sink_inventory.lua",
+      "site_id": "sink-catalog:github-devloop",
+      "symbol": "records"
+    },
+    {
+      "ordinal": "sink-inventory",
+      "path": "packages/github-devloop-pr/core/restart/sink_inventory.lua",
+      "site_id": "sink-catalog:github-devloop-pr",
+      "symbol": "records"
+    }
+  ],
+  "grantless_sink_sites": [
+    {
+      "ordinal": "grantless-classified-sinks",
+      "path": "packages/github-devloop/core/restart/sink_inventory.lua",
+      "site_id": "grantless:github-devloop:sink-catalog",
+      "symbol": "records"
+    },
+    {
+      "ordinal": "grantless-classified-sinks",
+      "path": "packages/github-devloop-pr/core/restart/sink_inventory.lua",
+      "site_id": "grantless:github-devloop-pr:sink-catalog",
+      "symbol": "records"
+    }
+  ],
+  "old_behavior_observations": [],
+  "old_pending_projection": {
+    "status": "unobserved",
+    "why": "Step 0.0.1 increment 1 seeds the independent inventory and debt ratchet before symmetric OLD pending projection observation lands."
+  },
+  "ops_issue_row_reader_sites": [],
+  "owner_observation_fact_sites": [
+    {
+      "ordinal": "devloop_state.current_state",
+      "path": "packages/github-devloop/departments/observe_issue/main.lua",
+      "site_id": "fact:github-devloop:current-state",
+      "symbol": "process_issue_event"
+    },
+    {
+      "ordinal": "devloop.entity.current_entity_state",
+      "path": "packages/github-devloop-pr/departments/review_pr/main.lua",
+      "site_id": "fact:github-devloop-pr:current-entity-state",
+      "symbol": "pipeline"
+    },
+    {
+      "ordinal": "reviewing-segment-state-read",
+      "path": "packages/github-devloop-pr/departments/review_loop/main.lua",
+      "site_id": "fact:github-devloop-pr:review-loop-state",
+      "symbol": "reviewing_segment_transition_status"
+    }
+  ],
+  "production_writer_sites": [
+    {
+      "ordinal": "transition_status:thinking->blocked",
+      "path": "packages/github-devloop/departments/loop/main.lua",
+      "site_id": "writer:github-devloop:loop-thinking-blocked",
+      "symbol": "pipeline"
+    },
+    {
+      "ordinal": "versioned_transition_status:unmanaged->thinking",
+      "path": "packages/github-devloop/departments/observe_issue/main.lua",
+      "site_id": "writer:github-devloop:observe-issue-unmanaged-thinking",
+      "symbol": "process_issue_event"
+    },
+    {
+      "ordinal": "implementation_transition_status:*->implementing",
+      "path": "packages/github-devloop/departments/implement/transitions.lua",
+      "site_id": "writer:github-devloop:implement-enter",
+      "symbol": "M.implementation_transition_status"
+    },
+    {
+      "ordinal": "versioned_transition_status:implementing->awaiting-pr",
+      "path": "packages/github-devloop/core/awaiting_pr_replayer.lua",
+      "site_id": "writer:github-devloop:awaiting-pr-enter",
+      "symbol": "M.implementing_to_awaiting_pr_transition_status"
+    },
+    {
+      "ordinal": "versioned_transition_status:awaiting-pr->next",
+      "path": "packages/github-devloop/core/awaiting_pr_replayer.lua",
+      "site_id": "writer:github-devloop:awaiting-pr-exit",
+      "symbol": "M.replay_awaiting_pr_state"
+    },
+    {
+      "ordinal": "versioned_transition_status:thinking->blocked",
+      "path": "packages/github-devloop/departments/reconcile/main.lua",
+      "site_id": "writer:github-devloop:reconcile-thinking-blocked",
+      "symbol": "pipeline"
+    },
+    {
+      "ordinal": "versioned_transition_status:pr-open|unmanaged->reviewing",
+      "path": "packages/github-devloop-pr/departments/observe_pr/main.lua",
+      "site_id": "writer:github-devloop-pr:observe-pr-reviewing",
+      "symbol": "process_pr_event"
+    },
+    {
+      "ordinal": "cyclic_transition_status:reviewing->merge-ready|fixing|review-meta",
+      "path": "packages/github-devloop-pr/departments/review_result/main.lua",
+      "site_id": "writer:github-devloop-pr:review-result",
+      "symbol": "pipeline"
+    },
+    {
+      "ordinal": "cyclic_transition_status:review-meta->fixing",
+      "path": "packages/github-devloop-pr/departments/review_meta/main.lua",
+      "site_id": "writer:github-devloop-pr:review-meta-fixing",
+      "symbol": "pipeline"
+    },
+    {
+      "ordinal": "cyclic_transition_status:fixing->reviewing",
+      "path": "packages/github-devloop-pr/departments/fix/main.lua",
+      "site_id": "writer:github-devloop-pr:fix-reviewing",
+      "symbol": "pipeline"
+    },
+    {
+      "ordinal": "versioned_transition_status:reviewing->blocked",
+      "path": "packages/github-devloop-pr/departments/reconcile/main.lua",
+      "site_id": "writer:github-devloop-pr:reconcile-reviewing-blocked",
+      "symbol": "pipeline_review"
+    },
+    {
+      "ordinal": "versioned_transition_status:from_states->blocked",
+      "path": "packages/github-devloop-pr/departments/reconcile/main.lua",
+      "site_id": "writer:github-devloop-pr:reconcile-generic-blocked",
+      "symbol": "pipeline_fix"
+    },
+    {
+      "ordinal": "versioned_transition_status:reconcile.state->blocked",
+      "path": "packages/github-devloop-pr/departments/reconcile/main.lua",
+      "site_id": "writer:github-devloop-pr:reconcile-state-blocked",
+      "symbol": "pipeline_timeout"
+    }
+  ],
+  "published_intent_sites": [
+    {
+      "ordinal": "consensus.proposal",
+      "path": "packages/github-devloop/departments/execute_start/main.lua",
+      "site_id": "intent:github-devloop:execute-start",
+      "symbol": "pipeline"
+    },
+    {
+      "ordinal": "github-devloop-decompose.devloop_decompose",
+      "path": "packages/github-devloop/departments/observe_issue/main.lua",
+      "site_id": "intent:github-devloop:observe-issue-decompose",
+      "symbol": "process_issue_event"
+    },
+    {
+      "ordinal": "github-devloop-decompose.devloop_decompose",
+      "path": "packages/github-devloop-pr/departments/observe_pr/main.lua",
+      "site_id": "intent:github-devloop-pr:observe-pr-decompose",
+      "symbol": "process_pr_event"
+    },
+    {
+      "ordinal": "github-devloop-decompose.devloop_decompose",
+      "path": "packages/github-devloop-pr/departments/merge/main.lua",
+      "site_id": "intent:github-devloop-pr:merge-decompose",
+      "symbol": "merge_executor.process_merge_ready_event"
+    }
+  ],
+  "receiver_activation_acceptors": [
+    {
+      "ordinal": "consumes:github-devloop.devloop_execute_request",
+      "path": "packages/github-devloop/departments/execute_start/main.lua",
+      "site_id": "acceptor:github-devloop:execute-start",
+      "symbol": "pipeline"
+    },
+    {
+      "ordinal": "consumes:devloop_observe_issue",
+      "path": "packages/github-devloop/departments/observe_issue/main.lua",
+      "site_id": "acceptor:github-devloop:observe-issue",
+      "symbol": "pipeline"
+    },
+    {
+      "ordinal": "consumes:devloop_ready",
+      "path": "packages/github-devloop/departments/implement/main.lua",
+      "site_id": "acceptor:github-devloop:implement",
+      "symbol": "pipeline"
+    },
+    {
+      "ordinal": "consumes:devloop_observe_pr",
+      "path": "packages/github-devloop-pr/departments/observe_pr/main.lua",
+      "site_id": "acceptor:github-devloop-pr:observe-pr",
+      "symbol": "pipeline"
+    },
+    {
+      "ordinal": "consumes:devloop_reviewing",
+      "path": "packages/github-devloop-pr/departments/review_pr/main.lua",
+      "site_id": "acceptor:github-devloop-pr:review-pr",
+      "symbol": "pipeline"
+    },
+    {
+      "ordinal": "consumes:devloop_review_meta",
+      "path": "packages/github-devloop-pr/departments/review_meta/main.lua",
+      "site_id": "acceptor:github-devloop-pr:review-meta",
+      "symbol": "pipeline"
+    },
+    {
+      "ordinal": "consumes:devloop_merge_ready",
+      "path": "packages/github-devloop-pr/departments/merge/main.lua",
+      "site_id": "acceptor:github-devloop-pr:merge",
+      "symbol": "pipeline"
+    }
+  ],
+  "row_replay_sites": [
+    {
+      "ordinal": "replayer.replay_from_table",
+      "path": "packages/github-devloop/departments/observe_issue/main.lua",
+      "site_id": "row-replay:github-devloop:observe-issue",
+      "symbol": "replay_or_timeout"
+    },
+    {
+      "ordinal": "row-replay/thinking",
+      "path": "libraries/devloop/replayer.lua",
+      "site_id": "row-replay:github-devloop:replayer-thinking",
+      "symbol": "replay_thinking"
+    },
+    {
+      "ordinal": "row-replay/implementing",
+      "path": "libraries/devloop/replayer.lua",
+      "site_id": "row-replay:github-devloop:replayer-implementing",
+      "symbol": "replay_implementing"
+    },
+    {
+      "ordinal": "row-replay/impl-failed",
+      "path": "libraries/devloop/replayer.lua",
+      "site_id": "row-replay:github-devloop:replayer-impl-failed",
+      "symbol": "replay_impl_failed"
+    },
+    {
+      "ordinal": "row-replay/awaiting-pr",
+      "path": "packages/github-devloop/core/awaiting_pr_replayer.lua",
+      "site_id": "row-replay:github-devloop:awaiting-pr",
+      "symbol": "M.replay_awaiting_pr_state"
+    },
+    {
+      "ordinal": "row-replay/pr-local-state",
+      "path": "packages/github-devloop-pr/departments/observe_pr/main.lua",
+      "site_id": "row-replay:github-devloop-pr:observe-pr-local",
+      "symbol": "replay_pr_local_state"
+    },
+    {
+      "ordinal": "row-replay/pr-review",
+      "path": "packages/github-devloop-pr/core/pr_review_replayer.lua",
+      "site_id": "row-replay:github-devloop-pr:review-replayer",
+      "symbol": "review_converge_fact"
+    }
+  ],
+  "schema": "restart-lifecycle.inventory.v1",
+  "shared_issue_row_exports": [
+    {
+      "ordinal": "shared-row-export/state",
+      "path": "packages/github-devloop/core/restart/marker_fields/state.lua",
+      "site_id": "shared-row-export:github-devloop:state-marker-fields",
+      "symbol": "family = \"state\""
+    },
+    {
+      "ordinal": "shared-row-export/dependency-wait",
+      "path": "packages/github-devloop/core/restart/marker_fields/dependency_wait.lua",
+      "site_id": "shared-row-export:github-devloop:dependency-wait-marker-fields",
+      "symbol": "family = \"dependency-wait\""
+    }
+  ],
+  "source_tree": [
+    "packages/github-devloop/departments/loop/main.lua",
+    "packages/github-devloop/departments/observe_issue/main.lua",
+    "packages/github-devloop/departments/consensus_result/main.lua",
+    "packages/github-devloop/departments/execute_start/main.lua",
+    "packages/github-devloop/departments/implement/main.lua",
+    "packages/github-devloop/departments/implement/transitions.lua",
+    "packages/github-devloop/departments/reconcile/main.lua",
+    "packages/github-devloop/core/awaiting_pr_replayer.lua",
+    "packages/github-devloop/core/restart/sink_inventory.lua",
+    "packages/github-devloop-pr/departments/observe_pr/main.lua",
+    "packages/github-devloop-pr/departments/review_pr/main.lua",
+    "packages/github-devloop-pr/departments/review_result/main.lua",
+    "packages/github-devloop-pr/departments/review_loop/main.lua",
+    "packages/github-devloop-pr/departments/review_meta/main.lua",
+    "packages/github-devloop-pr/departments/fix/main.lua",
+    "packages/github-devloop-pr/departments/reconcile/main.lua",
+    "packages/github-devloop-pr/departments/merge/main.lua",
+    "packages/github-devloop-pr/core/pr_review_replayer.lua",
+    "packages/github-devloop-pr/core/restart/sink_inventory.lua",
+    "libraries/devloop/replayer.lua"
+  ],
+  "unobserved_sites": [
+    {
+      "category": "production_writer_sites",
+      "ordinal": "transition_status:thinking->blocked",
+      "path": "packages/github-devloop/departments/loop/main.lua",
+      "site_id": "writer:github-devloop:loop-thinking-blocked",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "production_writer_sites",
+      "ordinal": "versioned_transition_status:unmanaged->thinking",
+      "path": "packages/github-devloop/departments/observe_issue/main.lua",
+      "site_id": "writer:github-devloop:observe-issue-unmanaged-thinking",
+      "symbol": "process_issue_event",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "production_writer_sites",
+      "ordinal": "implementation_transition_status:*->implementing",
+      "path": "packages/github-devloop/departments/implement/transitions.lua",
+      "site_id": "writer:github-devloop:implement-enter",
+      "symbol": "M.implementation_transition_status",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "production_writer_sites",
+      "ordinal": "versioned_transition_status:implementing->awaiting-pr",
+      "path": "packages/github-devloop/core/awaiting_pr_replayer.lua",
+      "site_id": "writer:github-devloop:awaiting-pr-enter",
+      "symbol": "M.implementing_to_awaiting_pr_transition_status",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "production_writer_sites",
+      "ordinal": "versioned_transition_status:awaiting-pr->next",
+      "path": "packages/github-devloop/core/awaiting_pr_replayer.lua",
+      "site_id": "writer:github-devloop:awaiting-pr-exit",
+      "symbol": "M.replay_awaiting_pr_state",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "production_writer_sites",
+      "ordinal": "versioned_transition_status:thinking->blocked",
+      "path": "packages/github-devloop/departments/reconcile/main.lua",
+      "site_id": "writer:github-devloop:reconcile-thinking-blocked",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "production_writer_sites",
+      "ordinal": "versioned_transition_status:pr-open|unmanaged->reviewing",
+      "path": "packages/github-devloop-pr/departments/observe_pr/main.lua",
+      "site_id": "writer:github-devloop-pr:observe-pr-reviewing",
+      "symbol": "process_pr_event",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "production_writer_sites",
+      "ordinal": "cyclic_transition_status:reviewing->merge-ready|fixing|review-meta",
+      "path": "packages/github-devloop-pr/departments/review_result/main.lua",
+      "site_id": "writer:github-devloop-pr:review-result",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "production_writer_sites",
+      "ordinal": "cyclic_transition_status:review-meta->fixing",
+      "path": "packages/github-devloop-pr/departments/review_meta/main.lua",
+      "site_id": "writer:github-devloop-pr:review-meta-fixing",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "production_writer_sites",
+      "ordinal": "cyclic_transition_status:fixing->reviewing",
+      "path": "packages/github-devloop-pr/departments/fix/main.lua",
+      "site_id": "writer:github-devloop-pr:fix-reviewing",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "production_writer_sites",
+      "ordinal": "versioned_transition_status:reviewing->blocked",
+      "path": "packages/github-devloop-pr/departments/reconcile/main.lua",
+      "site_id": "writer:github-devloop-pr:reconcile-reviewing-blocked",
+      "symbol": "pipeline_review",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "production_writer_sites",
+      "ordinal": "versioned_transition_status:from_states->blocked",
+      "path": "packages/github-devloop-pr/departments/reconcile/main.lua",
+      "site_id": "writer:github-devloop-pr:reconcile-generic-blocked",
+      "symbol": "pipeline_fix",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "production_writer_sites",
+      "ordinal": "versioned_transition_status:reconcile.state->blocked",
+      "path": "packages/github-devloop-pr/departments/reconcile/main.lua",
+      "site_id": "writer:github-devloop-pr:reconcile-state-blocked",
+      "symbol": "pipeline_timeout",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "effect_sink_sites",
+      "ordinal": "sink-inventory",
+      "path": "packages/github-devloop/core/restart/sink_inventory.lua",
+      "site_id": "sink-catalog:github-devloop",
+      "symbol": "records",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "effect_sink_sites",
+      "ordinal": "sink-inventory",
+      "path": "packages/github-devloop-pr/core/restart/sink_inventory.lua",
+      "site_id": "sink-catalog:github-devloop-pr",
+      "symbol": "records",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "row_replay_sites",
+      "ordinal": "replayer.replay_from_table",
+      "path": "packages/github-devloop/departments/observe_issue/main.lua",
+      "site_id": "row-replay:github-devloop:observe-issue",
+      "symbol": "replay_or_timeout",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "row_replay_sites",
+      "ordinal": "row-replay/thinking",
+      "path": "libraries/devloop/replayer.lua",
+      "site_id": "row-replay:github-devloop:replayer-thinking",
+      "symbol": "replay_thinking",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "row_replay_sites",
+      "ordinal": "row-replay/implementing",
+      "path": "libraries/devloop/replayer.lua",
+      "site_id": "row-replay:github-devloop:replayer-implementing",
+      "symbol": "replay_implementing",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "row_replay_sites",
+      "ordinal": "row-replay/impl-failed",
+      "path": "libraries/devloop/replayer.lua",
+      "site_id": "row-replay:github-devloop:replayer-impl-failed",
+      "symbol": "replay_impl_failed",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "row_replay_sites",
+      "ordinal": "row-replay/awaiting-pr",
+      "path": "packages/github-devloop/core/awaiting_pr_replayer.lua",
+      "site_id": "row-replay:github-devloop:awaiting-pr",
+      "symbol": "M.replay_awaiting_pr_state",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "row_replay_sites",
+      "ordinal": "row-replay/pr-local-state",
+      "path": "packages/github-devloop-pr/departments/observe_pr/main.lua",
+      "site_id": "row-replay:github-devloop-pr:observe-pr-local",
+      "symbol": "replay_pr_local_state",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "row_replay_sites",
+      "ordinal": "row-replay/pr-review",
+      "path": "packages/github-devloop-pr/core/pr_review_replayer.lua",
+      "site_id": "row-replay:github-devloop-pr:review-replayer",
+      "symbol": "review_converge_fact",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "published_intent_sites",
+      "ordinal": "consensus.proposal",
+      "path": "packages/github-devloop/departments/execute_start/main.lua",
+      "site_id": "intent:github-devloop:execute-start",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "published_intent_sites",
+      "ordinal": "github-devloop-decompose.devloop_decompose",
+      "path": "packages/github-devloop/departments/observe_issue/main.lua",
+      "site_id": "intent:github-devloop:observe-issue-decompose",
+      "symbol": "process_issue_event",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "published_intent_sites",
+      "ordinal": "github-devloop-decompose.devloop_decompose",
+      "path": "packages/github-devloop-pr/departments/observe_pr/main.lua",
+      "site_id": "intent:github-devloop-pr:observe-pr-decompose",
+      "symbol": "process_pr_event",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "published_intent_sites",
+      "ordinal": "github-devloop-decompose.devloop_decompose",
+      "path": "packages/github-devloop-pr/departments/merge/main.lua",
+      "site_id": "intent:github-devloop-pr:merge-decompose",
+      "symbol": "merge_executor.process_merge_ready_event",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "receiver_activation_acceptors",
+      "ordinal": "consumes:github-devloop.devloop_execute_request",
+      "path": "packages/github-devloop/departments/execute_start/main.lua",
+      "site_id": "acceptor:github-devloop:execute-start",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "receiver_activation_acceptors",
+      "ordinal": "consumes:devloop_observe_issue",
+      "path": "packages/github-devloop/departments/observe_issue/main.lua",
+      "site_id": "acceptor:github-devloop:observe-issue",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "receiver_activation_acceptors",
+      "ordinal": "consumes:devloop_ready",
+      "path": "packages/github-devloop/departments/implement/main.lua",
+      "site_id": "acceptor:github-devloop:implement",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "receiver_activation_acceptors",
+      "ordinal": "consumes:devloop_observe_pr",
+      "path": "packages/github-devloop-pr/departments/observe_pr/main.lua",
+      "site_id": "acceptor:github-devloop-pr:observe-pr",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "receiver_activation_acceptors",
+      "ordinal": "consumes:devloop_reviewing",
+      "path": "packages/github-devloop-pr/departments/review_pr/main.lua",
+      "site_id": "acceptor:github-devloop-pr:review-pr",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "receiver_activation_acceptors",
+      "ordinal": "consumes:devloop_review_meta",
+      "path": "packages/github-devloop-pr/departments/review_meta/main.lua",
+      "site_id": "acceptor:github-devloop-pr:review-meta",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "receiver_activation_acceptors",
+      "ordinal": "consumes:devloop_merge_ready",
+      "path": "packages/github-devloop-pr/departments/merge/main.lua",
+      "site_id": "acceptor:github-devloop-pr:merge",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "consumer_entry_acceptors",
+      "ordinal": "consumes:consensus.consensus_converge",
+      "path": "packages/github-devloop/departments/loop/main.lua",
+      "site_id": "entry:github-devloop:loop",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "consumer_entry_acceptors",
+      "ordinal": "consumes:consensus.consensus_reached",
+      "path": "packages/github-devloop/departments/consensus_result/main.lua",
+      "site_id": "entry:github-devloop:consensus-result",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "consumer_entry_acceptors",
+      "ordinal": "consumes:devloop_reconcile|devloop_timeout_reconcile",
+      "path": "packages/github-devloop/departments/reconcile/main.lua",
+      "site_id": "entry:github-devloop:reconcile",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "consumer_entry_acceptors",
+      "ordinal": "consumes:consensus.consensus_reached",
+      "path": "packages/github-devloop-pr/departments/review_result/main.lua",
+      "site_id": "entry:github-devloop-pr:review-result",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "consumer_entry_acceptors",
+      "ordinal": "consumes:devloop_fixing",
+      "path": "packages/github-devloop-pr/departments/fix/main.lua",
+      "site_id": "entry:github-devloop-pr:fix",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "consumer_entry_acceptors",
+      "ordinal": "consumes:devloop_fix_reconcile|devloop_review_reconcile|devloop_timeout_reconcile",
+      "path": "packages/github-devloop-pr/departments/reconcile/main.lua",
+      "site_id": "entry:github-devloop-pr:reconcile",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "direct_constructor_sites",
+      "ordinal": "build_consensus_proposal",
+      "path": "packages/github-devloop/departments/execute_start/main.lua",
+      "site_id": "ctor:github-devloop:execute-start-proposal",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "direct_constructor_sites",
+      "ordinal": "build_devloop_ready_payload",
+      "path": "packages/github-devloop/departments/observe_issue/main.lua",
+      "site_id": "ctor:github-devloop:observe-issue-ready",
+      "symbol": "process_issue_event",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "direct_constructor_sites",
+      "ordinal": "review proposal payload",
+      "path": "packages/github-devloop-pr/departments/review_pr/main.lua",
+      "site_id": "ctor:github-devloop-pr:review-pr-proposal",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "direct_constructor_sites",
+      "ordinal": "build_devloop_merge_ready_payload",
+      "path": "packages/github-devloop-pr/core/pr_review_replayer.lua",
+      "site_id": "ctor:github-devloop-pr:review-replayer-merge-ready",
+      "symbol": "review_converge_fact",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "shared_issue_row_exports",
+      "ordinal": "shared-row-export/state",
+      "path": "packages/github-devloop/core/restart/marker_fields/state.lua",
+      "site_id": "shared-row-export:github-devloop:state-marker-fields",
+      "symbol": "family = \"state\"",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "shared_issue_row_exports",
+      "ordinal": "shared-row-export/dependency-wait",
+      "path": "packages/github-devloop/core/restart/marker_fields/dependency_wait.lua",
+      "site_id": "shared-row-export:github-devloop:dependency-wait-marker-fields",
+      "symbol": "family = \"dependency-wait\"",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "owner_observation_fact_sites",
+      "ordinal": "devloop_state.current_state",
+      "path": "packages/github-devloop/departments/observe_issue/main.lua",
+      "site_id": "fact:github-devloop:current-state",
+      "symbol": "process_issue_event",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "owner_observation_fact_sites",
+      "ordinal": "devloop.entity.current_entity_state",
+      "path": "packages/github-devloop-pr/departments/review_pr/main.lua",
+      "site_id": "fact:github-devloop-pr:current-entity-state",
+      "symbol": "pipeline",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "owner_observation_fact_sites",
+      "ordinal": "reviewing-segment-state-read",
+      "path": "packages/github-devloop-pr/departments/review_loop/main.lua",
+      "site_id": "fact:github-devloop-pr:review-loop-state",
+      "symbol": "reviewing_segment_transition_status",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "grantless_sink_sites",
+      "ordinal": "grantless-classified-sinks",
+      "path": "packages/github-devloop/core/restart/sink_inventory.lua",
+      "site_id": "grantless:github-devloop:sink-catalog",
+      "symbol": "records",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    },
+    {
+      "category": "grantless_sink_sites",
+      "ordinal": "grantless-classified-sinks",
+      "path": "packages/github-devloop-pr/core/restart/sink_inventory.lua",
+      "site_id": "grantless:github-devloop-pr:sink-catalog",
+      "symbol": "records",
+      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
+    }
+  ],
+  "version": 1,
+  "watched_files": [
+    "docs/devloop/plans/sagagraph-restart-lifecycle-refactor-spec.md",
+    "scripts/check_repo_restart_lifecycle.py",
+    "scripts/check_repo_runner.py",
+    "packages/github-devloop/departments/loop/main.lua",
+    "packages/github-devloop/departments/observe_issue/main.lua",
+    "packages/github-devloop/departments/consensus_result/main.lua",
+    "packages/github-devloop/departments/execute_start/main.lua",
+    "packages/github-devloop/departments/implement/main.lua",
+    "packages/github-devloop/departments/implement/transitions.lua",
+    "packages/github-devloop/departments/reconcile/main.lua",
+    "packages/github-devloop/core/awaiting_pr_replayer.lua",
+    "packages/github-devloop/core/restart/sink_inventory.lua",
+    "packages/github-devloop-pr/departments/observe_pr/main.lua",
+    "packages/github-devloop-pr/departments/review_pr/main.lua",
+    "packages/github-devloop-pr/departments/review_result/main.lua",
+    "packages/github-devloop-pr/departments/review_loop/main.lua",
+    "packages/github-devloop-pr/departments/review_meta/main.lua",
+    "packages/github-devloop-pr/departments/fix/main.lua",
+    "packages/github-devloop-pr/departments/reconcile/main.lua",
+    "packages/github-devloop-pr/departments/merge/main.lua",
+    "packages/github-devloop-pr/core/pr_review_replayer.lua",
+    "packages/github-devloop-pr/core/restart/sink_inventory.lua",
+    "libraries/devloop/replayer.lua",
+    "packages/github-devloop/core/restart/marker_fields/state.lua",
+    "packages/github-devloop/core/restart/marker_fields/dependency_wait.lua",
+    "migration/restart-lifecycle.allowlist"
+  ]
+}
