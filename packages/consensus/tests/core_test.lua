@@ -732,13 +732,17 @@ return {
   end,
 
   test_build_reached_payload_accepts_gate_reject = function()
-    local payload = core.build_reached_payload(proposal({ verdict_mode = "gate" }), "reject", {
+    local payload = core.build_reached_payload(proposal({ verdict_mode = "gate" }), {
+      decision = "reject",
+      blocking_gaps = { "missing regression test" },
+    }, {
       result("teleology", "reject"),
       result("parsimony", "reject"),
       result("fidelity", "reject"),
     })
 
     t.eq(payload.decision, "reject")
+    t.eq(payload.blocking_gap, "missing regression test")
     t.eq(payload.angle_results[1].verdict, "reject")
   end,
 

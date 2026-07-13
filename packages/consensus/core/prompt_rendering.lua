@@ -269,7 +269,7 @@ function M.install(core, deps)
         local repair_instruction = "This is the first synthesis attempt."
         if repair then
           local stdout = type(prior_result) == "table" and prior_result.stdout or ""
-          repair_instruction = "Repair attempt: the previous synthesis output failed the parser. Emit one valid outcome line and do not rerun Phase B or Phase R. Previous output:\n" .. neutralize(stdout)
+          repair_instruction = "Repair attempt: the previous synthesis output failed the parser. Emit one valid response contract and do not rerun Phase B or Phase R. Previous output:\n" .. neutralize(stdout)
         end
         return {
           title = neutralize(proposal.title),
@@ -281,7 +281,7 @@ function M.install(core, deps)
           convergence_block = convergence_block,
           findings_record_block = findings_record_block,
           reached_options = verdict_mode == "gate"
-            and "- reached:approve <bounded framing>\n- reached:reject <bounded framing>"
+            and "- reached:approve <bounded framing>\n- reached:reject <bounded framing>, immediately followed by exactly one line:\n  ⟦FKST:GAP⟧ <short named gap selected verbatim from a rejecting Phase R GAP>\n  The GAP must be a few-word greppable label no longer than 240 bytes. Keep citations, quotations, and detailed evidence in the reached framing, findings, and Phase B/R REPLY transcripts, never in the GAP line."
             or "- reached:approve <bounded framing>\n- premise-refuted:<bounded framing backed by verified contrary evidence>",
           decision_calibration = verdict_mode == "converge"
             and "Converge synthesis calibration: emit reached:approve when the proposal is sound, actionable, bounded, and code-verifiable and no evidenced issue-admission blocker survived. Emit premise-refuted only when verified contrary evidence disproves the proposal's source premise. Do not emit converge or essence-stall merely for a seat's ideal-shortfall, broader-class preference, or future-PR grounding concern. Emit converge only for an evidenced essence-level blocker that would make development likely wrong and for which concrete resolving evidence can be named; emit essence-stall only when such a blocker exists and no concrete resolving evidence is nameable."

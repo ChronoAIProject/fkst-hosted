@@ -139,4 +139,25 @@ return {
     t.eq(reached_ok, false)
     t.is_true(tostring(reached_err):find("codex-failed", 1, true) ~= nil)
   end,
+
+  test_reached_payload_requires_gate_reject_gap_but_allows_premise_refutation = function()
+    local gate_ok, gate_err = pcall(core.build_reached_payload, proposal({ verdict_mode = "gate" }), {
+      decision = "reject",
+    }, {
+      answer("teleology", "reject"),
+    })
+    t.eq(gate_ok, false)
+    t.is_true(tostring(gate_err):find("blocking-gap-invalid", 1, true) ~= nil)
+
+    local premise = core.build_reached_payload(proposal(), {
+      decision = "reject",
+      decision_reason = "premise-refuted",
+    }, {
+      answer("teleology", "abstain"),
+      answer("parsimony", "approve"),
+    })
+    t.eq(premise.decision, "reject")
+    t.eq(premise.decision_reason, "premise-refuted")
+    t.is_nil(premise.blocking_gap)
+  end,
 }
