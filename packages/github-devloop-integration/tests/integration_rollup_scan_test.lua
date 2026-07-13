@@ -176,7 +176,7 @@ local function mock_rollup_pr_view(fields)
       comments_json(fields.comments),
       h.json_string(state),
       h.json_string(conclusion),
-      h.json_string(fields.head_sha or "def456"),
+      h.json_string(fields.check_head_sha or fields.head_sha or "def456"),
       h.json_string(completed_at)
     ),
     stderr = "",
@@ -664,7 +664,11 @@ return {
     t.is_true(create ~= nil)
     t.eq(create.payload.schema, "github-proxy.issue-create.v1")
     t.eq(create.payload.repo, "owner/repo")
-    t.eq(create.payload.dedup_key, core.rollup_health_dedup_key("owner/repo", "test: COMPLETED/FAILURE"))
+    t.eq(create.payload.dedup_key, core.rollup_health_dedup_key(
+      "owner/repo",
+      "test: COMPLETED/FAILURE",
+      "def456"
+    ))
     t.eq(create.payload.parent_comment_target.issue_number, "9")
     t.is_true(create.payload.body:find("Rollup PR: #9", 1, true) ~= nil)
     t.is_true(create.payload.body:find("Failing check: `test: COMPLETED/FAILURE`", 1, true) ~= nil)
@@ -675,6 +679,67 @@ return {
     t.is_true(written:find('"failing_check":"test: COMPLETED/FAILURE"', 1, true) ~= nil)
     t.is_true(written:find('"red_started_at"', 1, true) ~= nil)
     t.is_true(h.find_raise(result.raises, "devloop_rollup_ready") ~= nil)
+  end,
+
+  test_rollup_scan_scopes_red_alert_dedup_to_rollup_head = function()
+    local completed_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 45 * 60)
+
+    local function observe(head_sha, name)
+      mock_env("1", "auto")
+      mock_fetches()
+      mock_ahead(2)
+      mock_content_diff(true)
+      mock_pr_list({ number = 9, head_sha = head_sha })
+      mock_integration_head(head_sha)
+      mock_rollup_pr_view({
+        status = "red",
+        head_sha = head_sha,
+        updated_at = completed_at,
+        completed_at = completed_at,
+      })
+      local result = run_scan(opts(name, {
+        FKST_GITHUB_WRITE = "1",
+        FKST_DEVLOOP_ROLLUP_RED_WINDOW_MINUTES = "30",
+      }))
+      t.eq(result.exit_code, 0)
+      local create = h.find_raise(result.raises, "github-proxy.github_issue_create_request")
+      t.is_true(create ~= nil)
+      return create.payload.dedup_key
+    end
+
+    local head_a = "aaaa1111"
+    local head_b = "bbbb2222"
+    local first = observe(head_a, "rollup-health-head-a")
+    local replay = observe(head_a, "rollup-health-head-a-replay")
+    local next_head = observe(head_b, "rollup-health-head-b")
+
+    t.eq(first, replay)
+    t.is_true(first ~= next_head)
+    t.eq(first, core.rollup_health_dedup_key("owner/repo", "test: COMPLETED/FAILURE", head_a))
+    t.eq(next_head, core.rollup_health_dedup_key("owner/repo", "test: COMPLETED/FAILURE", head_b))
+  end,
+
+  test_rollup_scan_rejects_red_check_evidence_from_another_head = function()
+    mock_env("1", "auto")
+    mock_fetches()
+    mock_ahead(2)
+    mock_content_diff(true)
+    mock_pr_list({ number = 9, head_sha = "aaaa1111" })
+    mock_integration_head("aaaa1111")
+    mock_rollup_pr_view({
+      status = "red",
+      head_sha = "aaaa1111",
+      check_head_sha = "bbbb2222",
+      updated_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 45 * 60),
+    })
+
+    local result = run_scan(opts("rollup-health-check-head-mismatch", {
+      FKST_GITHUB_WRITE = "1",
+      FKST_DEVLOOP_ROLLUP_RED_WINDOW_MINUTES = "30",
+    }))
+
+    t.is_true(result.exit_code ~= 0)
+    t.eq(h.find_raise(result.raises, "github-proxy.github_issue_create_request"), nil)
   end,
 
   test_rollup_scan_red_window_uses_failed_check_time_not_pr_update_time = function()

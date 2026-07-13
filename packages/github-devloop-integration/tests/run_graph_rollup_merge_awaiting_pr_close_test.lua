@@ -302,6 +302,11 @@ local function mock_observe_issue_inputs(child_state, landed, issue_lifecycle_st
 end
 
 local function mock_github_proxy_writes()
+  t.mock_command(devloop_base.read_env_command("FKST_GITHUB_WRITE"), {
+    stdout = "1",
+    stderr = "",
+    exit_code = 0,
+  })
   for _, command in ipairs({
     issue_comments_api_cmd(),
     quoted_issue_comments_api_cmd(),
