@@ -145,6 +145,7 @@
 {"path":"packages/github-devloop-pr/core/restart/transitions/pr_open.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/restart/transitions/review_meta.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/restart/transitions/reviewing.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart_authority.lua","owner":"pr","reason":"owner-local grant-disabled shadow decider for PR-side restart transitions (Step 0.0.3 PR twin); composes typed edges + owner pending projection + CAS catalog in shadow, grant=nil, constructs no lifecycle effect."}
 {"path":"packages/github-devloop-pr/core/review_carry_over.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/review_meta_requests.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/review_redrive.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}

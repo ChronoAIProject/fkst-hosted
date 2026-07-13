@@ -1,19 +1,7 @@
 -- This grant-disabled shadow slice proves CAS-admission-composition parity only.
--- The loop department's thinking-to-blocked probe is an admission sentinel; the
--- real blocked transition belongs to reconcile, so this does not prove effect parity.
---
--- Scope of the cas_outcome claim (honest bound): parity holds for admission status
--- and reason_code (two independent reachability implementations), and for cas_outcome
--- within the tested version regime (incoming dedup_key == current marker version). The
--- loop stale cas_outcome version-branch is NOT yet modeled here: production loop emits
--- "skip-stale(incoming version < current marker version)" when the dedup_key is
--- ordered-older (devloop_state.cas_outcome passes dedup_key as incoming_version),
--- whereas the catalog's plain loop model + this shadow's version-less evidence always
--- yield "skip-advanced-or-diverged". This divergence is rooted in the (unchanged)
--- catalog plain modeling of loop cas_outcome; the shadow composes it faithfully. It is
--- a documented gap to close before any grant-enablement (add a stale older-dedup_key
--- fixture + thread the incoming version, or make cas.legacy_loop_plain_v1 model the
--- stale version-branch).
+-- It models the review_result approved edge, including the production cyclic
+-- probe's safe current-version form and its post-probe safe-version overlay.
+-- No live effect is authorized or emitted by this module.
 
 local core = require("core")
 local owner = core.restart_package_name
@@ -28,6 +16,7 @@ local edges = owner_pending_projection.edges(owner, rows, inventories)
 local projection = owner_pending_projection.derive(owner, rows, inventories)
 local catalog = require("devloop.restart_cas_catalog")
 local restart_effect_entitlements = require("devloop.restart_effect_entitlements")
+local transition_version = require("contract.transition_version")
 
 local M = {}
 local issued = setmetatable({}, { __mode = "k" })
@@ -42,10 +31,11 @@ local intent_fields = {
 }
 
 local function illegal(reason_code, outcome_reason)
+  local detail = outcome_reason or reason_code
   return {
     status = "illegal",
     reason_code = reason_code,
-    cas_outcome = "illegal(" .. tostring(outcome_reason or reason_code) .. ")",
+    cas_outcome = "illegal(" .. tostring(detail) .. ")",
     grant = nil,
   }
 end
@@ -62,17 +52,11 @@ local function normalize_intent(intent)
   if type(intent.semantic_variant) ~= "string" or intent.semantic_variant == "" then
     return nil
   end
-  if intent.incoming_version ~= nil
-    and (type(intent.incoming_version) ~= "string" or intent.incoming_version == "") then
-    return nil
-  end
-  if intent.target_version ~= nil
-    and (type(intent.target_version) ~= "string" or intent.target_version == "") then
-    return nil
-  end
-  if intent.overlay_version ~= nil
-    and (type(intent.overlay_version) ~= "string" or intent.overlay_version == "") then
-    return nil
+  for _, field in ipairs({ "incoming_version", "target_version", "overlay_version" }) do
+    local value = intent[field]
+    if value ~= nil and (type(value) ~= "string" or value == "") then
+      return nil
+    end
   end
   return {
     semantic_variant = intent.semantic_variant,
@@ -85,41 +69,25 @@ local function normalize_intent(intent)
   }
 end
 
-local function select_edge(semantic_variant)
-  local selected = nil
-  local matches = 0
-  for _, edge in ipairs(edges) do
-    if edge.semantic_variant == semantic_variant then
-      selected = edge
-      matches = matches + 1
-    end
-  end
-  return selected, matches
-end
-
-local function exact_source_state(source_states, source_state)
-  if type(source_states) ~= "table" or #source_states ~= 1 or source_states[1] ~= source_state then
-    return false
-  end
-  for key in pairs(source_states) do
-    if key ~= 1 then
-      return false
-    end
-  end
-  return true
-end
-
 function M.seal_snapshot(fields)
   if type(fields) ~= "table" or fields.owner ~= owner then
     error("restart-authority: snapshot-owner-mismatch: owner must be " .. tostring(owner))
   end
   local current = type(fields.current) == "table" and fields.current or {}
+  -- Present current.version in SAFE form, byte-exact with what production's review_result
+  -- department feeds its cyclic probe (departments/review_result/main.lua:184:
+  -- transition_version.safe_version_segment(state.version or "")). This is correct for the
+  -- ONLY edge this module admits (fence: cas.legacy_review_result_v1/reviewing_to_merge_ready,
+  -- whose base_current_version_form="safe"); it is idempotent with the catalog's own safe
+  -- re-projection (safe(safe(x))==safe(x)). If the fence is ever widened to a raw-form edge,
+  -- derive the form from the catalog's base_current_version_form instead of this unconditional
+  -- projection.
   local sealed = {
     owner = fields.owner,
     proposal_id = fields.proposal_id,
     current = {
       state = current.state,
-      version = current.version,
+      version = transition_version.safe_version_segment(current.version or ""),
     },
   }
   issued[sealed] = true
@@ -136,16 +104,22 @@ function M.decide_transition(sealed_snapshot, intent)
     return illegal("malformed-intent")
   end
 
-  local edge, matches = select_edge(normalized.semantic_variant)
+  local edge = nil
+  local matches = 0
+  for _, candidate in ipairs(edges) do
+    if candidate.semantic_variant == normalized.semantic_variant then
+      edge = candidate
+      matches = matches + 1
+    end
+  end
   if matches == 0 then
     return illegal("unknown-variant")
   end
   if matches > 1 then
     return illegal("ambiguous-variant")
   end
-  if edge.cas_policy_id ~= "cas.legacy_loop_plain_v1"
-    and not (edge.cas_policy_id == "cas.legacy_consensus_result_v1"
-      and edge.cas_variant == "thinking_to_ready") then
+  if edge.cas_policy_id ~= "cas.legacy_review_result_v1"
+    or edge.cas_variant ~= "reviewing_to_merge_ready" then
     return illegal("unsupported-shadow-edge")
   end
   if normalized.source_boundary ~= nil and normalized.source_boundary ~= edge.source.boundary then
@@ -160,8 +134,19 @@ function M.decide_transition(sealed_snapshot, intent)
     and type(definition.variants) == "table"
     and definition.variants[edge.cas_variant]
     or nil
+  local source_states = variant and variant.source_states
+  local source_shape_exact = type(source_states) == "table"
+    and #source_states == 1
+    and source_states[1] == edge.source.state
+  if source_shape_exact then
+    for key in pairs(source_states) do
+      if key ~= 1 then
+        source_shape_exact = false
+      end
+    end
+  end
   if variant == nil
-    or not exact_source_state(variant.source_states, edge.source.state)
+    or not source_shape_exact
     or variant.target_state ~= edge.target then
     return illegal("policy-variant-shape-mismatch")
   end
