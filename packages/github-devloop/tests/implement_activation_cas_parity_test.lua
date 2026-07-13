@@ -5,6 +5,12 @@
 -- verification, effects, liveness dedup, and legacy logs remain separate axes.
 
 local catalog = require("devloop.restart_cas_catalog")
+local owner_pending_projection = require("devloop.restart_owner_pending_projection")
+local inventories = {
+  canonicalization = require("core.restart.canonicalization_inventory"),
+  entry = require("core.restart.entry_inventory"),
+  operator_reentry = require("core.restart.operator_reentry_inventory"),
+}
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
 local dispatch_live_run = require("devloop.dispatch_live_run")
@@ -15,6 +21,7 @@ local transitions = require("departments.implement.transitions")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local projection = owner_pending_projection.derive(core.restart_package_name, core.restart_transition_table(), inventories)
 local implement_department = require("departments.implement.main")
 
 local POLICY_ID = "cas.legacy_implement_activation_handoff_v1"
@@ -404,7 +411,7 @@ local function assert_case(fixture)
     local decision = decision_after_probe(decisions, probe, boundary_calls)
     t.is_true(decision ~= nil, fixture.name .. ": legacy CAS decision captured separately")
     local observed = observed_admission(probe, decision, handoff_checks, #boundary_calls == 1)
-    local actual = catalog.resolve(POLICY_ID, evidence)
+    local actual = catalog.resolve(POLICY_ID, evidence, projection)
     t.eq(actual.status, observed.status, fixture.name .. ": admission status parity")
     t.eq(actual.reason_code, observed.reason_code, fixture.name .. ": admission reason parity")
     if fixture.admission_status ~= nil then
@@ -443,7 +450,7 @@ local function assert_malformed_fail_closed()
     incoming_version = payload.dedup_key,
     phase = "initial",
     retry = false,
-  })
+  }, projection)
   t.eq(resolved.status, "illegal", "catalog rejects the same malformed version value")
   t.eq(resolved.reason_code, "invalid-evidence", "catalog malformed reason")
   t.eq(resolved.cas_outcome, "illegal(invalid-evidence)", "catalog malformed fail-closed outcome")

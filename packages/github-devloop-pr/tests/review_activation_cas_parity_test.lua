@@ -5,6 +5,12 @@
 -- only from structured CAS logs plus the first post-admission safe-head guard.
 
 local catalog = require("devloop.restart_cas_catalog")
+local owner_pending_projection = require("devloop.restart_owner_pending_projection")
+local inventories = {
+  canonicalization = require("core.restart.canonicalization_inventory"),
+  entry = require("core.restart.entry_inventory"),
+  operator_reentry = require("core.restart.operator_reentry_inventory"),
+}
 local entity_lib = require("devloop.entity")
 local devloop_logging = require("devloop.logging")
 local m_builders = require("devloop.markers.builders")
@@ -14,6 +20,7 @@ local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local projection = owner_pending_projection.derive(core.restart_package_name, core.restart_transition_table(), inventories)
 local review_pr_department = require("departments.review_pr.main")
 
 local POLICY_ID = "cas.legacy_review_activation_handoff_v1"
@@ -433,7 +440,7 @@ local function assert_case(fixture)
     or (fixture.invalid_handoff and "invalid" or nil)
   t.eq(evidence.handoff and evidence.handoff.status or nil, expected_handoff_status, fixture.name .. ": catalog handoff status")
   local observed = observed_admission(probe, decisions, boundary_reached)
-  local resolved = catalog.resolve(POLICY_ID, evidence)
+  local resolved = catalog.resolve(POLICY_ID, evidence, projection)
   t.eq(resolved.status, observed.status, fixture.name .. ": admission status parity")
   t.eq(resolved.reason_code, observed.reason_code, fixture.name .. ": admission reason parity")
   t.eq(observed.status, fixture.admission_status, fixture.name .. ": observed admission status")
@@ -471,7 +478,7 @@ local function assert_malformed_is_pre_cas_and_catalog_illegal()
   local resolved = catalog.resolve(POLICY_ID, {
     current = { state = "reviewing", version = V_EQUAL },
     reviewing_version = malformed.version,
-  })
+  }, projection)
   t.eq(resolved.status, "illegal", "review-activation-malformed: catalog status")
   t.eq(resolved.reason_code, "invalid-evidence", "review-activation-malformed: catalog reason")
   t.eq(resolved.cas_outcome, "illegal(invalid-evidence)", "review-activation-malformed: catalog fails closed")

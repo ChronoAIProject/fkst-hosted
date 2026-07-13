@@ -22,6 +22,17 @@ local frozen_projection = {
   blocked = {},
 }
 
+local function deep_copy(value)
+  if type(value) ~= "table" then
+    return value
+  end
+  local copy = {}
+  for key, nested in pairs(value) do
+    copy[key] = deep_copy(nested)
+  end
+  return copy
+end
+
 local owner_sources = {
   ["github-devloop"] = {
     unmanaged = true,
@@ -61,6 +72,10 @@ end
 
 function M.derive(owner, rows, inventories)
   return pending_projection.derive_pending_projection(M.edges(owner, rows, inventories))
+end
+
+function M.frozen_projection()
+  return deep_copy(frozen_projection)
 end
 
 local function expected_owner_projection(owner)

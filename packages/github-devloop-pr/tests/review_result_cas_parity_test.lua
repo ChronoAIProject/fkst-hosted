@@ -5,6 +5,12 @@
 -- a devloop.state transition helper.
 
 local catalog = require("devloop.restart_cas_catalog")
+local owner_pending_projection = require("devloop.restart_owner_pending_projection")
+local inventories = {
+  canonicalization = require("core.restart.canonicalization_inventory"),
+  entry = require("core.restart.entry_inventory"),
+  operator_reentry = require("core.restart.operator_reentry_inventory"),
+}
 local devloop_base = require("devloop.base")
 local config = require("devloop.config")
 local devloop_logging = require("devloop.logging")
@@ -15,6 +21,7 @@ local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local projection = owner_pending_projection.derive(core.restart_package_name, core.restart_transition_table(), inventories)
 local review_result_department = require("departments.review_result.main")
 
 local POLICY_ID = "cas.legacy_review_result_v1"
@@ -330,7 +337,7 @@ local function assert_catalog_matches_observed_decision(fixture)
   t.eq(evidence.to_state, probe.to_state, fixture.name .. ": catalog target state comes from probe")
   t.eq(evidence.incoming_version, probe.incoming_version, fixture.name .. ": catalog incoming version comes from probe")
   t.eq(evidence.target_version, probe.target_version, fixture.name .. ": catalog target version comes from probe")
-  local actual = catalog.resolve(POLICY_ID, evidence)
+  local actual = catalog.resolve(POLICY_ID, evidence, projection)
   t.eq(actual.status, observed.status, fixture.name .. ": admission status parity")
   t.eq(actual.reason_code, observed.reason_code, fixture.name .. ": admission reason parity")
   if fixture.probe_outcome ~= nil then

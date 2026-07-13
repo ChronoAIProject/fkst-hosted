@@ -4,12 +4,19 @@
 -- This test never computes the expected admission with a transition helper.
 
 local catalog = require("devloop.restart_cas_catalog")
+local owner_pending_projection = require("devloop.restart_owner_pending_projection")
+local inventories = {
+  canonicalization = require("core.restart.canonicalization_inventory"),
+  entry = require("core.restart.entry_inventory"),
+  operator_reentry = require("core.restart.operator_reentry_inventory"),
+}
 local devloop_logging = require("devloop.logging")
 local m_builders = require("devloop.markers.builders")
 local devloop_state = require("devloop.state")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local projection = owner_pending_projection.derive(core.restart_package_name, core.restart_transition_table(), inventories)
 
 local POLICY_ID = "cas.legacy_consensus_result_v1"
 local V_OLDER = "consensus:github-devloop/issue/owner/repo/42/2026-06-02T01-02-03Z"
@@ -257,7 +264,7 @@ local function assert_catalog_matches_observed_admission(fixture)
   t.eq(legacy_log_outcome(decisions), fixture.legacy_log_outcome, fixture.name .. ": legacy log outcome axis")
   t.eq(emitted_state(result), fixture.effect_state, fixture.name .. ": captured effect state")
 
-  local actual = catalog.resolve(POLICY_ID, evidence_from_source(source))
+  local actual = catalog.resolve(POLICY_ID, evidence_from_source(source), projection)
   t.eq(actual.status, observed.status, fixture.name .. ": admission status parity")
   t.eq(actual.reason_code, observed.reason_code, fixture.name .. ": admission reason parity")
 end
@@ -281,7 +288,7 @@ local function assert_rejected_before_cas()
 
   local evidence = evidence_from_source(source)
   t.eq(evidence.incoming_version, 42, "consensus-result-malformed: catalog sees the same rejected value")
-  local resolved = catalog.resolve(POLICY_ID, evidence)
+  local resolved = catalog.resolve(POLICY_ID, evidence, projection)
   t.eq(resolved.status, "illegal", "consensus-result-malformed: catalog status")
   t.eq(resolved.reason_code, "invalid-evidence", "consensus-result-malformed: catalog reason")
   t.eq(resolved.cas_outcome, "illegal(invalid-evidence)", "consensus-result-malformed: catalog fails closed")

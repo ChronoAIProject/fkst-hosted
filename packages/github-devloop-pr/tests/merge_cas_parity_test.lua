@@ -5,6 +5,12 @@
 -- never computes the expected result with a devloop.state transition helper.
 
 local catalog = require("devloop.restart_cas_catalog")
+local owner_pending_projection = require("devloop.restart_owner_pending_projection")
+local inventories = {
+  canonicalization = require("core.restart.canonicalization_inventory"),
+  entry = require("core.restart.entry_inventory"),
+  operator_reentry = require("core.restart.operator_reentry_inventory"),
+}
 local devloop_logging = require("devloop.logging")
 local m_builders = require("devloop.markers.builders")
 local m_facts = require("devloop.markers.facts")
@@ -12,6 +18,7 @@ local devloop_state = require("devloop.state")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local projection = owner_pending_projection.derive(core.restart_package_name, core.restart_transition_table(), inventories)
 local merge_department = require("departments.merge.main")
 
 local POLICY_ID = "cas.legacy_merge_v1"
@@ -205,7 +212,7 @@ local function assert_catalog_matches_observed_decision(fixture)
   t.eq(evidence.incoming_version, probe.incoming_version, fixture.name .. ": catalog incoming version comes from probe")
   t.eq(evidence.target_version, probe.target_version, fixture.name .. ": catalog target version comes from probe")
   t.eq(evidence.overlay_version, probe.incoming_version, fixture.name .. ": catalog overlay version comes from probe")
-  local actual = catalog.resolve(POLICY_ID, evidence)
+  local actual = catalog.resolve(POLICY_ID, evidence, projection)
   t.eq(actual.status, observed.status, fixture.name .. ": admission status parity")
   t.eq(actual.reason_code, observed.reason_code, fixture.name .. ": admission reason parity")
   if fixture.probe_outcome ~= nil then
@@ -244,7 +251,7 @@ local function assert_pre_cas_rejection(name, payload, expected_reason_code)
   }
   t.eq(evidence.incoming_version, payload.version, name .. ": catalog incoming version comes from rejected payload")
   t.eq(evidence.overlay_version, payload.version, name .. ": catalog overlay version comes from rejected payload")
-  local resolved = catalog.resolve(POLICY_ID, evidence)
+  local resolved = catalog.resolve(POLICY_ID, evidence, projection)
   t.eq(resolved.status, "illegal", name .. ": catalog status")
   t.eq(resolved.reason_code, expected_reason_code, name .. ": catalog reason")
   t.eq(resolved.cas_outcome, "illegal(" .. expected_reason_code .. ")", name .. ": catalog fails closed")

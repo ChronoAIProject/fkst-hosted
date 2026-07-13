@@ -4,6 +4,12 @@
 -- helper.
 
 local catalog = require("devloop.restart_cas_catalog")
+local owner_pending_projection = require("devloop.restart_owner_pending_projection")
+local inventories = {
+  canonicalization = require("core.restart.canonicalization_inventory"),
+  entry = require("core.restart.entry_inventory"),
+  operator_reentry = require("core.restart.operator_reentry_inventory"),
+}
 local devloop_logging = require("devloop.logging")
 local m_builders = require("devloop.markers.builders")
 local replay_fields = require("devloop.replay_fields")
@@ -12,6 +18,7 @@ local devloop_state = require("devloop.state")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local projection = owner_pending_projection.derive(core.restart_package_name, core.restart_transition_table(), inventories)
 local observe_pr_department = require("departments.observe_pr.main")
 
 local POLICY_ID = "cas.legacy_observe_pr_v1"
@@ -329,7 +336,7 @@ local function assert_observe_pr_admission_case(fixture)
   local observed = observed_admission(fixture, probe, decision, admitted_guard_reached)
   local actual = nil
   if probe ~= nil then
-    actual = catalog.resolve(POLICY_ID, evidence_from_probe(probe))
+    actual = catalog.resolve(POLICY_ID, evidence_from_probe(probe), projection)
     t.eq(actual.status, observed.status, fixture.name .. ": admission status parity")
     t.eq(actual.reason_code, observed.reason_code, fixture.name .. ": admission reason parity")
   end

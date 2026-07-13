@@ -4,6 +4,12 @@
 -- arguments; no transition helper computes the expected admission result.
 
 local catalog = require("devloop.restart_cas_catalog")
+local owner_pending_projection = require("devloop.restart_owner_pending_projection")
+local inventories = {
+  canonicalization = require("core.restart.canonicalization_inventory"),
+  entry = require("core.restart.entry_inventory"),
+  operator_reentry = require("core.restart.operator_reentry_inventory"),
+}
 local convergence_shared = require("devloop.convergence.shared")
 local conv_rounds = require("devloop.convergence.rounds")
 local devloop_base = require("devloop.base")
@@ -14,6 +20,7 @@ local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local projection = owner_pending_projection.derive(core.restart_package_name, core.restart_transition_table(), inventories)
 local review_loop_department = require("departments.review_loop.main")
 
 local POLICY_ID = "cas.legacy_review_loop_safe_v1"
@@ -252,7 +259,7 @@ local function assert_review_loop_admission_case(fixture)
   end
 
   local observed = observed_admission(probe, boundary_reached)
-  local resolved = catalog.resolve(POLICY_ID, evidence_from_probe(probe))
+  local resolved = catalog.resolve(POLICY_ID, evidence_from_probe(probe), projection)
   t.eq(resolved.status, observed.status, fixture.name .. ": admission status parity")
   t.eq(resolved.reason_code, observed.reason_code, fixture.name .. ": admission reason parity")
   t.eq(probe.outcome, fixture.probe_outcome, fixture.name .. ": literal probe outcome")
@@ -285,7 +292,7 @@ local function assert_malformed_is_pre_cas_and_catalog_illegal()
   local resolved = catalog.resolve(POLICY_ID, {
     current = { state = "reviewing", version = V_EQUAL },
     review_version = malformed.proposal_id,
-  })
+  }, projection)
   t.eq(resolved.status, "illegal", "review-loop-malformed: catalog status")
   t.eq(resolved.reason_code, "invalid-evidence", "review-loop-malformed: catalog reason")
   t.eq(resolved.cas_outcome, "illegal(invalid-evidence)", "review-loop-malformed: catalog fails closed")

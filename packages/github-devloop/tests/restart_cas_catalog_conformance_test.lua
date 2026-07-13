@@ -3,12 +3,14 @@ local canonicalization_inventory = require("core.restart.canonicalization_invent
 local entry_inventory = require("core.restart.entry_inventory")
 local operator_reentry_inventory = require("core.restart.operator_reentry_inventory")
 local catalog = require("devloop.restart_cas_catalog")
+local owner_pending_projection = require("devloop.restart_owner_pending_projection")
 local restart_edges = require("devloop.restart_edges")
 local devloop_state = require("devloop.state")
 local h = require("tests.devloop_helpers")
 
 local core = h.core
 local t = h.t
+local projection = owner_pending_projection.frozen_projection()
 
 local BASE = "ready/cas-parity"
 local V_OLDER = BASE .. "/loop/1"
@@ -173,7 +175,7 @@ local function assert_base_matrix(policy_id, production, sources, target, target
         target_state = target,
         incoming_version = incoming,
         target_version = target_version,
-      })
+      }, projection)
       assert_result(actual, expected, policy_id .. "/" .. tostring(current.state) .. "/" .. version_case.name)
     end
   end
@@ -287,7 +289,7 @@ local function assert_complete_profile_matrix(profile)
         profile.variant,
         incoming_for_base,
         extras
-      ))
+      ), projection)
       assert_result(actual, expected, table.concat({
         profile.id,
         current_case.name,
@@ -317,11 +319,11 @@ return {
     t.eq(catalog.assumptions.versions_equivalent, "ASSUMED-UNVERIFIED")
 
     assert_result(
-      catalog.resolve("cas.unknown", {}),
+      catalog.resolve("cas.unknown", {}, projection),
       result("illegal", "unknown-cas-policy", "illegal(unknown-cas-policy)")
     )
     assert_result(
-      catalog.resolve("cas.legacy_fix_v1", { current = "not-evidence" }),
+      catalog.resolve("cas.legacy_fix_v1", { current = "not-evidence" }, projection),
       result("illegal", "invalid-evidence", "illegal(invalid-evidence)")
     )
   end,
@@ -358,7 +360,7 @@ return {
       source_states = { "thinking" },
       target_state = "ready",
       incoming_version = V_NEWER,
-    })
+    }, projection)
     t.eq(newer_versioned.status, "apply")
 
     local raw_version = "/reviewing#head//fix/1/"
@@ -370,7 +372,7 @@ return {
         target_state = "reviewing",
         incoming_version = V_OLDER,
         target_version = equivalent_target,
-      }),
+      }, projection),
       production_cyclic(
         { state = "reviewing", version = raw_version },
         { "fixing" },
@@ -385,7 +387,7 @@ return {
   test_plain_and_versioned_complete_profiles_match_production = function()
     local loop_current = { state = "thinking", version = V_EQUAL }
     assert_result(
-      catalog.resolve("cas.legacy_loop_plain_v1", evidence(loop_current, "thinking_to_blocked")),
+      catalog.resolve("cas.legacy_loop_plain_v1", evidence(loop_current, "thinking_to_blocked"), projection),
       production_result(loop_current, devloop_state.transition_status(loop_current, { "thinking" }, "blocked"), nil)
     )
 
@@ -401,7 +403,7 @@ return {
         assert_result(
           catalog.resolve("cas.legacy_consensus_result_v1", evidence(current, variant, V_EQUAL, {
             effects_complete = true,
-          })),
+          }), projection),
           expected,
           "consensus/" .. variant .. "/" .. tostring(current.state)
         )
@@ -416,7 +418,7 @@ return {
     local incomplete = catalog.resolve("cas.legacy_consensus_result_v1", evidence({
       state = "ready",
       version = V_EQUAL,
-    }, "thinking_to_ready", V_EQUAL, { effects_complete = false }))
+    }, "thinking_to_ready", V_EQUAL, { effects_complete = false }), projection)
     assert_result(incomplete, result("idempotent", "already-at-target", "skip-idempotent(already at to_state)"))
 
     for _, profile in ipairs({
@@ -427,7 +429,7 @@ return {
     }) do
       local current = { state = profile.source[1], version = V_EQUAL }
       assert_result(
-        catalog.resolve(profile.id, evidence(current, profile.variant, V_EQUAL)),
+        catalog.resolve(profile.id, evidence(current, profile.variant, V_EQUAL), projection),
         production_versioned(current, profile.source, profile.target, V_EQUAL),
         profile.id .. "/" .. profile.variant
       )
@@ -444,7 +446,7 @@ return {
       { apply = true }
     )
     assert_result(
-      catalog.resolve("cas.legacy_observe_pr_v1", evidence(observe_source, "pr_open_to_reviewing", V_NEWER)),
+      catalog.resolve("cas.legacy_observe_pr_v1", evidence(observe_source, "pr_open_to_reviewing", V_NEWER), projection),
       observe_expected
     )
 
@@ -464,7 +466,7 @@ return {
     assert_result(
       catalog.resolve("cas.legacy_review_result_v1", evidence(review_source, "reviewing_to_fixing", safe_incoming, {
         overlay_version = V_EQUAL,
-      })),
+      }), projection),
       review_expected
     )
 
@@ -479,7 +481,7 @@ return {
       assert_result(
         catalog.resolve(profile.id, evidence(current, profile.variant, V_EQUAL, {
           target_version = profile.target_version,
-        })),
+        }), projection),
         expected
       )
     end
@@ -499,7 +501,7 @@ return {
         "review_reject_to_blocked",
         reconcile_terminal_version,
         { overlay_version = V_EQUAL }
-      )),
+      ), projection),
       reconcile_expected
     )
 
@@ -526,7 +528,7 @@ return {
       assert_result(
         catalog.resolve(mismatch.id, evidence(current, mismatch.variant, mismatch.incoming_version, {
           overlay_version = mismatch.overlay_version,
-        })),
+        }), projection),
         result("stale", "version-mismatch", "skip-stale(version-mismatch)"),
         mismatch.id .. "/overlay-mismatch"
       )
@@ -613,21 +615,21 @@ return {
       catalog.resolve("cas.legacy_review_loop_safe_v1", {
         current = { state = "reviewing", version = V_EQUAL },
         review_version = safe,
-      }),
+      }, projection),
       result("apply", "apply", "applied")
     )
     assert_result(
       catalog.resolve("cas.legacy_review_loop_safe_v1", {
         current = { state = "reviewing", version = V_NEWER },
         review_version = safe,
-      }),
+      }, projection),
       result("stale", "reviewing-version", "skip-stale(reviewing-version)")
     )
     assert_result(
       catalog.resolve("cas.legacy_review_loop_safe_v1", {
         current = { state = nil, version = nil },
         review_version = safe,
-      }),
+      }, projection),
       result("pending", "source-marker-not-visible", "retry-pending(from-state marker not yet visible)")
     )
 
@@ -637,12 +639,12 @@ return {
       handoff = { status = "invalid" },
     }
     assert_result(
-      catalog.resolve("cas.legacy_review_activation_handoff_v1", mismatch_evidence),
+      catalog.resolve("cas.legacy_review_activation_handoff_v1", mismatch_evidence, projection),
       result("stale", "version-mismatch", "skip-stale(version-mismatch)")
     )
     mismatch_evidence.handoff.status = "valid"
     assert_result(
-      catalog.resolve("cas.legacy_review_activation_handoff_v1", mismatch_evidence),
+      catalog.resolve("cas.legacy_review_activation_handoff_v1", mismatch_evidence, projection),
       result("apply", "verified-own-reviewing-hand-off", "apply(verified-own-reviewing-hand-off)")
     )
     assert_result(
@@ -650,14 +652,14 @@ return {
         current = { state = nil, version = nil },
         reviewing_version = V_EQUAL,
         handoff = { status = "invalid" },
-      }),
+      }, projection),
       result("pending", "reviewing-marker-not-visible", "retry-pending(reviewing marker not yet visible)")
     )
     assert_result(
       catalog.resolve("cas.legacy_review_activation_handoff_v1", {
         current = { state = nil, version = nil },
         reviewing_version = V_EQUAL,
-      }),
+      }, projection),
       result("pending", "reviewing-marker-not-visible", "retry-pending(reviewing marker not yet visible)")
     )
   end,
@@ -672,7 +674,7 @@ return {
         phase = "initial",
         handoff = { status = "valid" },
         retry = false,
-      }),
+      }, projection),
       result("apply", "verified-own-ready-hand-off", "apply(verified-own-ready-hand-off)"),
       "implement/initial-handoff"
     )
@@ -684,7 +686,7 @@ return {
         phase = "initial",
         handoff = { status = "valid" },
         retry = true,
-      }),
+      }, projection),
       result("pending", "source-marker-not-visible", "retry-pending(from-state marker not yet visible)"),
       "implement/retry-does-not-borrow-handoff"
     )
@@ -697,7 +699,7 @@ return {
         handoff = { status = "valid" },
         accepted_handoff = true,
         retry = false,
-      }),
+      }, projection),
       result("apply", "own-ready-hand-off", "apply(own-ready-hand-off)"),
       "implement/recheck-accepted-handoff"
     )
@@ -708,7 +710,7 @@ return {
         incoming_version = V_EQUAL,
         phase = "initial",
         retry = false,
-      }),
+      }, projection),
       result("pending", "source-marker-not-visible", "retry-pending(from-state marker not yet visible)"),
       "implement/absent-handoff"
     )
@@ -737,7 +739,7 @@ return {
             phase = "initial",
             handoff = { status = "invalid" },
             retry = false,
-          }),
+          }, projection),
           expected,
           "implement/matrix/" .. current_case.name .. "/" .. version_case.name
         )

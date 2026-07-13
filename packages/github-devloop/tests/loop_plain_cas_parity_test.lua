@@ -4,6 +4,12 @@
 -- CAS logs are separate axes, never inputs to the admission classification.
 
 local catalog = require("devloop.restart_cas_catalog")
+local owner_pending_projection = require("devloop.restart_owner_pending_projection")
+local inventories = {
+  canonicalization = require("core.restart.canonicalization_inventory"),
+  entry = require("core.restart.entry_inventory"),
+  operator_reentry = require("core.restart.operator_reentry_inventory"),
+}
 local convergence_shared = require("devloop.convergence.shared")
 local conv_rounds = require("devloop.convergence.rounds")
 local devloop_logging = require("devloop.logging")
@@ -11,6 +17,7 @@ local devloop_state = require("devloop.state")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local projection = owner_pending_projection.derive(core.restart_package_name, core.restart_transition_table(), inventories)
 local loop_department = require("departments.loop.main")
 
 local POLICY_ID = "cas.legacy_loop_plain_v1"
@@ -246,7 +253,7 @@ local function assert_case(fixture)
   t.eq(evidence.incoming_version, probe.incoming_version, fixture.name .. ": catalog incoming version comes from probe")
   t.eq(evidence.target_version, probe.target_version, fixture.name .. ": catalog target version comes from probe")
   local observed = observed_admission(probe, boundary_reached)
-  local actual = catalog.resolve(POLICY_ID, evidence)
+  local actual = catalog.resolve(POLICY_ID, evidence, projection)
   t.eq(actual.status, observed.status, fixture.name .. ": admission status parity")
   t.eq(actual.reason_code, observed.reason_code, fixture.name .. ": admission reason parity")
   t.eq(observed.status, fixture.admission_status, fixture.name .. ": observed admission status")

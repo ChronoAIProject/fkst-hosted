@@ -1,4 +1,5 @@
 local transition_version = require("contract.transition_version")
+local pending_projection = require("devloop.restart_pending_projection")
 local devloop_state = require("devloop.state")
 
 local M = {}
@@ -57,24 +58,6 @@ local function normalize_state(state_name)
   return state_name
 end
 
-local function can_reach(from_state, to_state, seen)
-  local from = normalize_state(from_state)
-  if from == to_state then
-    return true
-  end
-  local visited = seen or {}
-  if visited[from] then
-    return false
-  end
-  visited[from] = true
-  for _, next_state in ipairs(devloop_state.state_successors(from)) do
-    if can_reach(next_state, to_state, visited) then
-      return true
-    end
-  end
-  return false
-end
-
 local function state_is_one_of(state_name, states)
   local normalized = normalize_state(state_name)
   for _, expected in ipairs(states or {}) do
@@ -92,7 +75,10 @@ local function current_fields(current)
   return current, nil
 end
 
-local function plain_status(current, source_states, target_state)
+local function plain_status(current, source_states, target_state, projection)
+  if projection == nil then
+    error("restart_cas_catalog: pending projection required for reachability")
+  end
   local current_state = current_fields(current)
   if current_state == target_state then
     return "idempotent"
@@ -101,21 +87,21 @@ local function plain_status(current, source_states, target_state)
     return "apply"
   end
   for _, source_state in ipairs(source_states) do
-    if can_reach(current_state, normalize_state(source_state)) then
+    if pending_projection.can_reach(projection, current_state, normalize_state(source_state)) then
       return "pending"
     end
   end
   return "stale"
 end
 
-local function versioned_status(current, source_states, target_state, incoming_version)
+local function versioned_status(current, source_states, target_state, incoming_version, projection)
   if type(current) == "table"
     and current.version ~= nil
     and incoming_version ~= nil
     and transition_version.compare(incoming_version, current.version) < 0 then
     return "stale"
   end
-  return plain_status(current, source_states, target_state)
+  return plain_status(current, source_states, target_state, projection)
 end
 
 local function versions_equivalent(left, right)
@@ -129,10 +115,10 @@ local function versions_equivalent(left, right)
     == transition_version.safe_version_segment(right)
 end
 
-local function cyclic_status(current, source_states, target_state, incoming_version, target_version)
+local function cyclic_status(current, source_states, target_state, incoming_version, target_version, projection)
   local current_state, current_version = current_fields(current)
   if incoming_version == nil then
-    return plain_status(current, source_states, target_state)
+    return plain_status(current, source_states, target_state, projection)
   end
   if target_version ~= nil
     and current_state == target_state
@@ -181,28 +167,28 @@ local function status_result(current, status, incoming_version)
   return illegal("invalid-base-result")
 end
 
-local function base_result(base, current, source_states, target_state, incoming_version, target_version)
+local function base_result(base, current, source_states, target_state, incoming_version, target_version, projection)
   if base == "plain" then
-    return status_result(current, plain_status(current, source_states, target_state), nil)
+    return status_result(current, plain_status(current, source_states, target_state, projection), nil)
   end
   if base == "versioned" then
     return status_result(
       current,
-      versioned_status(current, source_states, target_state, incoming_version),
+      versioned_status(current, source_states, target_state, incoming_version, projection),
       incoming_version
     )
   end
   if base == "cyclic" then
     return status_result(
       current,
-      cyclic_status(current, source_states, target_state, incoming_version, target_version),
+      cyclic_status(current, source_states, target_state, incoming_version, target_version, projection),
       incoming_version
     )
   end
   return illegal("invalid-base-policy")
 end
 
-local function resolve_base(evidence, base)
+local function resolve_base(evidence, base, projection)
   if not valid_common_evidence(evidence)
     or not valid_state_list(evidence.source_states)
     or type(evidence.target_state) ~= "string"
@@ -215,7 +201,8 @@ local function resolve_base(evidence, base)
     evidence.source_states,
     evidence.target_state,
     evidence.incoming_version,
-    evidence.target_version
+    evidence.target_version,
+    projection
   )
 end
 
@@ -268,7 +255,7 @@ local function apply_overlay(definition, variant, evidence, resolved)
   return resolved
 end
 
-local function resolve_profile(definition, evidence)
+local function resolve_profile(definition, evidence, projection)
   if not valid_common_evidence(evidence) then
     return illegal("invalid-evidence")
   end
@@ -293,7 +280,8 @@ local function resolve_profile(definition, evidence)
     variant.source_states,
     probe_target_state,
     evidence.incoming_version,
-    target_version
+    target_version,
+    projection
   )
   return apply_overlay(definition, variant, evidence, resolved)
 end
@@ -365,7 +353,7 @@ local function resolve_review_activation(evidence)
   return result("apply", "apply", "applied")
 end
 
-local function resolve_implement(definition, evidence)
+local function resolve_implement(definition, evidence, projection)
   if not valid_common_evidence(evidence)
     or (evidence.phase ~= "initial" and evidence.phase ~= "recheck")
     or type(evidence.retry) ~= "boolean"
@@ -390,7 +378,8 @@ local function resolve_implement(definition, evidence)
     variant.source_states,
     variant.target_state,
     evidence.incoming_version,
-    evidence.target_version
+    evidence.target_version,
+    projection
   )
   if resolved.status ~= "pending" or evidence.retry then
     return resolved
@@ -415,14 +404,14 @@ end
 -- follows the standard cyclic base + raw version-equality overlay. The pre-CAS merged-marker
 -- idempotency (state=merged + trusted merged marker -> skip-idempotent) is downstream effect
 -- idempotency, out of the admission-only catalog and not modeled here.
-local function resolve_merge(definition, evidence)
+local function resolve_merge(definition, evidence, projection)
   if not valid_common_evidence(evidence) then
     return illegal("invalid-evidence")
   end
   if not state_is_one_of(evidence.current and evidence.current.state, { "merge-ready", "merging", "merged" }) then
     return result("stale", "from-state-mismatch", "skip-stale(from-state-mismatch)")
   end
-  return resolve_profile(definition, evidence)
+  return resolve_profile(definition, evidence, projection)
 end
 
 local function variant(source_states, target_state, target_version)
@@ -469,17 +458,17 @@ local policies = {
   ["cas.base_plain_legacy_v1"] = {
     evidence_type = "cas_base_evidence_v1",
     production = { function_name = "transition_status", source = "libraries/devloop/state.lua:505" },
-    resolve = function(evidence) return resolve_base(evidence, "plain") end,
+    resolve = function(evidence, projection) return resolve_base(evidence, "plain", projection) end,
   },
   ["cas.base_versioned_legacy_v1"] = {
     evidence_type = "cas_base_evidence_v1",
     production = { function_name = "versioned_transition_status", source = "libraries/devloop/state.lua:527" },
-    resolve = function(evidence) return resolve_base(evidence, "versioned") end,
+    resolve = function(evidence, projection) return resolve_base(evidence, "versioned", projection) end,
   },
   ["cas.base_cyclic_legacy_v1"] = {
     evidence_type = "cas_base_evidence_v1",
     production = { function_name = "cyclic_transition_status", source = "libraries/devloop/state.lua:538" },
-    resolve = function(evidence) return resolve_base(evidence, "cyclic") end,
+    resolve = function(evidence, projection) return resolve_base(evidence, "cyclic", projection) end,
   },
   ["cas.legacy_loop_plain_v1"] = {
     evidence_type = "loop_cas_evidence_v1",
@@ -672,16 +661,16 @@ function M.definition(policy_id)
   return out
 end
 
-function M.resolve(policy_id, evidence)
+function M.resolve(policy_id, evidence, projection)
   local definition = policies[policy_id]
   if definition == nil then
     return illegal("unknown-cas-policy")
   end
   if definition.resolve ~= nil then
-    return definition.resolve(evidence)
+    return definition.resolve(evidence, projection)
   end
   local resolver = definition.resolve_profile or resolve_profile
-  return resolver(definition, evidence)
+  return resolver(definition, evidence, projection)
 end
 
 return M
