@@ -278,13 +278,15 @@ local function assert_rejected_before_cas()
   source.event.effect_version = 42
   h.mock_issue_result(source.labels, source.comments)
   local result, probes, decisions, result_marker_checks = observe_department(function()
-    return h.run_result(source.event, h.opts("consensus-result-cas-parity-malformed"))
+    return h.run_result_expecting_failure(source.event, h.opts("consensus-result-cas-parity-malformed"))
   end)
 
-  t.eq(result.exit_code, 0, "consensus-result-malformed: department exit code")
+  -- Owned malformed results must fail loud; benign skip would recreate the #2111 swallow class.
+  t.eq(result.exit_code, 1, "consensus-result-malformed: department exit code")
+  t.is_true(tostring(result.failure.error):find("consensus-result-invalid", 1, true) ~= nil, "consensus-result-malformed: fail-loud error")
   t.eq(#probes, 0, "consensus-result-malformed: production rejects before CAS")
   t.eq(#result_marker_checks, 0, "consensus-result-malformed: admission boundary not reached")
-  t.eq(#decisions, 1, "consensus-result-malformed: rejection log captured")
+  t.eq(#decisions, 0, "consensus-result-malformed: failure precedes legacy rejection logging")
 
   local evidence = evidence_from_source(source)
   t.eq(evidence.incoming_version, 42, "consensus-result-malformed: catalog sees the same rejected value")

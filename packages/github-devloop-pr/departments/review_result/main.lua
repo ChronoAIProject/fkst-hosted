@@ -44,23 +44,39 @@ local function copy_reached_with_review_dedup(reached, review_dedup_key)
 end
 
 return saga.department(spec, { done = function() return false end, act = function(event)
-  local reached = event.payload or {}
-  if not v_review_result.is_supported_review_result(reached) then
+  local reached = type(event.payload) == "table" and event.payload or {}
+  if reached.schema ~= "consensus.consensus_reached.v1"
+    or type(reached.proposal_id) ~= "string"
+    or reached.proposal_id:match("^github%-devloop/pr%-review/") == nil then
     devloop_logging.log_entry("review_result", event, "unknown", devloop_logging.payload_field(reached, "dedup_key"))
     devloop_logging.log_cas_decision("review_result", "unknown", { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
 
-  devloop_logging.log_entry("review_result", event, reached.proposal_id, reached.dedup_key)
   local review_repo, proposal_pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(reached.proposal_id)
   if review_repo == nil then
-    devloop_logging.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop pr-review")
-    return
+    error("github-devloop: review-result-invalid: owned review proposal_id is malformed")
   end
+  if not v_review_result.is_supported_review_result(reached) then
+    error("github-devloop: review-result-invalid: owned review result violates the consumer contract")
+  end
+
+  devloop_logging.log_entry("review_result", event, reached.proposal_id, reached.dedup_key)
   local repo, pr_number = devloop_base.parse_pr_source_ref(reached.source_ref)
-  if repo == nil or tostring(pr_number) ~= tostring(proposal_pr_number) then
-    devloop_logging.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(source_ref)", "review source_ref does not match PR review proposal")
-    return
+  if devloop_base.safe_pr_review_repo_segment(repo) ~= review_repo
+    or tostring(pr_number) ~= tostring(proposal_pr_number) then
+    error("github-devloop: review-result-invalid: owned review source_ref does not match proposal_id")
+  end
+  local canonical_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
+    reached.dedup_key,
+    reached.proposal_id
+  )
+  if canonical_review_dedup == nil then
+    error("github-devloop: review-result-invalid: owned review dedup does not match proposal_id")
+  end
+  if reached.decision == "reject"
+    and not strings.is_bounded_string(reached.blocking_gap, devloop_base._max_blocking_gap_len) then
+    error("github-devloop: review-result-invalid: owned reject is missing a bounded blocking_gap")
   end
 
   devloop_base.assert_trusted_bot_configured()
@@ -100,24 +116,9 @@ return saga.department(spec, { done = function() return false end, act = functio
     devloop_logging.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(version)", "review proposal version is missing")
     return
   end
-  local canonical_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
-    reached.dedup_key,
-    reached.proposal_id
-  )
-  if canonical_review_dedup == nil then
-    devloop_logging.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(review-dedup)", "review result dedup does not match PR review proposal")
-    return
-  end
-  if reached.decision == "reject"
-    and not strings.is_bounded_string(reached.blocking_gap, devloop_base._max_blocking_gap_len) then
-    devloop_logging.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "fixing", "skip-foreign(blocking-gap)", "reject review result is missing a bounded blocking_gap")
-    return
-  end
-
   local lock_key = entity_lib.review_result_lock_key(origin.proposal_id)
   if lock_key == nil then
-    devloop_logging.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(proposal_id)", "no issue transition lock key")
-    return
+    error("github-devloop: review-result-invalid: owned review has no issue transition lock key")
   end
 
   with_lock(lock_key, function()

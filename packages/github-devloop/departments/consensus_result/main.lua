@@ -10,6 +10,7 @@ local entity_lib = require("devloop.entity")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
 local github_factory = require("devloop.github_factory")
+local github_author_policy = require("devloop.github_author_policy")
 
 local spec = {
   consumes = { "consensus.consensus_reached" },
@@ -133,25 +134,33 @@ local function make_department(ports)
   end
 
   local function act_result(event)
-    local reached = event.payload or {}
-    if not v_result.is_supported_result(reached) then
+    local reached = type(event.payload) == "table" and event.payload or {}
+    if reached.schema ~= "consensus.consensus_reached.v1"
+      or type(reached.proposal_id) ~= "string"
+      or reached.proposal_id:match("^github%-devloop/issue/") == nil then
       devloop_logging.log_entry("consensus_result", event, "unknown", devloop_logging.payload_field(reached, "dedup_key"))
       devloop_logging.log_cas_decision("consensus_result", "unknown", { state = nil, version = nil }, "thinking", "ready", "skip-foreign(proposal_id)", "unsupported event payload")
       return
     end
 
-    devloop_logging.log_entry("consensus_result", event, reached.proposal_id, reached.dedup_key)
-    local version = result_version(reached)
     local repo, issue_number = base_ids.parse_proposal_id(reached.proposal_id)
-    if repo == nil then
-      devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, { state = nil, version = nil }, "thinking", "ready", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
-      return
+    if repo == nil or not base_ids.issue_ref_round_trips(repo, issue_number) then
+      error("github-devloop: consensus-result-invalid: owned proposal_id is malformed")
+    end
+    if not v_result.is_supported_result(reached) then
+      error("github-devloop: consensus-result-invalid: owned consensus result violates the consumer contract")
+    end
+    local expected_source_ref = entity_lib.issue_source_ref(repo, issue_number)
+    if reached.source_ref.kind ~= expected_source_ref.kind
+      or reached.source_ref.ref ~= expected_source_ref.ref then
+      error("github-devloop: consensus-result-invalid: owned source_ref does not match proposal_id")
     end
 
+    devloop_logging.log_entry("consensus_result", event, reached.proposal_id, reached.dedup_key)
+    local version = result_version(reached)
     local lock_key = entity_lib.result_lock_key(reached.proposal_id)
     if lock_key == nil then
-      devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, { state = nil, version = nil }, "thinking", "ready", "skip-foreign(proposal_id)", "no transition lock key")
-      return
+      error("github-devloop: consensus-result-invalid: owned result has no transition lock key")
     end
 
     with_lock(lock_key, function()
@@ -166,6 +175,11 @@ local function make_department(ports)
       })
       devloop_logging.log_forged_markers("consensus_result", reached.proposal_id, current.comments)
       local state = devloop_state.current_state(current.comments, reached.proposal_id)
+      local trusted_author_policy = github_author_policy.from_env()
+      if not github_author_policy.is_authorized(trusted_author_policy, current.author_login) then
+        devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", "thinking", "skip-non-whitelisted-author", "issue author is not authorized for GitHub content")
+        return
+      end
       local declined = reached.decision == "reject"
       local gate = declined and { ok = true } or core.dependency_gate(repo, issue_number, {
         proposal_id = reached.proposal_id,

@@ -10,6 +10,7 @@ local entity_list_cache = require("devloop.entity_list_cache")
 local saga = require("workflow.saga")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
 local devloop_logging = require("devloop.logging")
+local github_author_policy = require("devloop.github_author_policy")
 
 local LIVENESS_SCAN_CURSOR_PREFIX = "github-devloop/liveness-scan/issue-cursor/"
 
@@ -50,6 +51,11 @@ local function should_reinject_issue(repo, issue, limits, deadline)
   end
 
   local current = parsers_issue.parse_issue_view_state(core, state_view.stdout)
+  local trusted_author_policy = github_author_policy.from_env()
+  if not github_author_policy.is_authorized(trusted_author_policy, current.author_login) then
+    devloop_logging.log_cas_decision("liveness_scan", proposal_id, { state = nil, version = nil }, "tick", "observe", "skip-non-whitelisted-author", "issue author is not authorized for GitHub content")
+    return false
+  end
   if tostring(current.state or ""):upper() ~= "OPEN" then
     devloop_logging.log_cas_decision("liveness_scan", proposal_id, { state = nil, version = nil }, "tick", "observe", "skip-closed", "issue is not open")
     return false

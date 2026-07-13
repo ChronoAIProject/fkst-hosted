@@ -144,6 +144,7 @@ local function replay_implementing(M, dept, issue, state, row, facts)
     dedup_key = M.ready_payload_inner_version(state.version),
     source_ref = issue.source_ref,
     impl_retry_attempt = M.implementation_retry_attempt(state.version),
+    redrive_delivery = facts.redrive_delivery,
   })
   devloop_logging.log_cas_decision(dept, proposal_id, state, "implementing", "implementing", "applied(codex-run-absent)", "no matching implement codex run is running")
   return raise_effects(M, dept, proposal_id, "implementing", state.version, { add = {}, remove = {} }, {

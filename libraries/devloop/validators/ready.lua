@@ -4,7 +4,24 @@ local strings = require("contract.strings")
 local source_refs = require("contract.source_ref")
 
 local payloads_predicates = require("devloop.payloads.predicates")
+local payloads_shared = require("devloop.payloads.shared")
 local C = {}
+
+local function is_supported_redrive_delivery(payload)
+  if payload.redrive_delivery == nil then
+    return payload.implementation_version == nil
+  end
+  if payload.implementation_version == nil then
+    return false
+  end
+  local ok, expected = pcall(
+    payloads_shared.ready_redrive_delivery_dedup_key,
+    payload.proposal_id,
+    payload.implementation_version,
+    payload.redrive_delivery
+  )
+  return ok and payload.dedup_key == expected
+end
 
 local function is_supported_blocked_reimplement(payload)
   local reentry = payload.operator_reentry
@@ -27,6 +44,11 @@ function C.is_supported_ready(M, payload)
   return type(payload) == "table"
     and payload.schema == "github-devloop.ready.v1"
     and devloop_base.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
+    and devloop_base.is_safe_proposal_ref(
+      payload.proposal_id,
+      payload.implementation_version or payload.dedup_key
+    )
+    and is_supported_redrive_delivery(payload)
     and (payload.framing == nil or strings.is_bounded_string(payload.framing, M._max_framing_len))
     and (payload.operator_reentry == nil or is_supported_blocked_reimplement(payload))
     and (payload.ready_hand_off == nil

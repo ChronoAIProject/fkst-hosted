@@ -694,6 +694,7 @@ return {
     t.eq(by_state.ready.effects.kinds[1], "devloop_ready")
     t.eq(by_state.dependency_wait.effects.completeness_derivation, "dependency_gate_rederive")
     t.eq(by_state["awaiting-pr"].effects.completeness_derivation, "replay_awaiting_pr_state")
+    t.eq(by_state.blocked.output_obligation.kinds[2], "output-obligation-escalation:v1")
     t.eq(by_state.blocked.effects.intent_count, 2)
     t.eq(by_state.blocked.effects.completeness_derivation, "decompose_children_complete")
     t.eq(#core.restart_effect_contract_errors(), 0)
