@@ -96,7 +96,13 @@ async fn ensure_session_creates_with_null_timeout_stamped_metadata_and_execd_tok
                 "fkst-config-hash": "a".repeat(32),
                 "fkst-config-hash-2": "a".repeat(32),
             },
-            "env": { "EXECD_ACCESS_TOKEN": expected_execd_token() },
+            "env": {
+                "EXECD_ACCESS_TOKEN": expected_execd_token(),
+                // The shared `session_env_pairs` source must reach the sandbox
+                // create env too — proven here via the engine HostFact pair.
+                "FKST_CANDIDATE_PREFIX": "fkst-cand",
+                "FKST_CANDIDATE_FROM_SEP": "--from--",
+            },
         })))
         .respond_with(ResponseTemplate::new(202).set_body_json(sandbox_json(
             "sbx-1",

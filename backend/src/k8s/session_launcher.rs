@@ -99,6 +99,17 @@ const SESSION_PACKAGE_ROOTS_ENV: &str = "FKST_SESSION_PACKAGE_ROOTS";
 /// The claim/poll work label (also carried in the env so the entrypoint can
 /// build the supervise command without re-reading the pod annotation).
 const SESSION_WORK_LABEL_ENV: &str = "FKST_SESSION_WORK_LABEL";
+/// The engine's required HostFact pair (its config registry declares them with
+/// NO default and fails closed), consumed by the `setup_worktree()` Lua SDK to
+/// compose candidate branch names as `{prefix}-{date}-{slug}-{ulid}{sep}{parent}`.
+/// Platform-owned constants, not knobs: process env beats a workspace repo's own
+/// `fkst.env` in the engine's resolver, so hosted candidate branch naming is
+/// uniform across sessions. Both values satisfy the engine's branch-fragment
+/// validation (no `..`/`//`, no leading/trailing `/`, no `~^:?*[\` or whitespace).
+const CANDIDATE_PREFIX_ENV: &str = "FKST_CANDIDATE_PREFIX";
+const CANDIDATE_PREFIX_VALUE: &str = "fkst-cand";
+const CANDIDATE_FROM_SEP_ENV: &str = "FKST_CANDIDATE_FROM_SEP";
+const CANDIDATE_FROM_SEP_VALUE: &str = "--from--";
 
 // --- labels + annotations ----------------------------------------------------
 // These keys are the single source of truth for the Model B session pod's
@@ -197,7 +208,9 @@ fn downward_env_var(name: &str, field_path: &str) -> EnvVar {
 
 /// The plain (non-downward-API) env var name/value pairs injected into a session
 /// runtime, factored out so BOTH session backends share ONE env source and can
-/// never drift. This is the §5.2 non-secret env (the ~16 core vars) plus the three
+/// never drift. This is the §5.2 non-secret env (the ~16 core vars), the engine's
+/// required HostFact pair ([`CANDIDATE_PREFIX_ENV`] / [`CANDIDATE_FROM_SEP_ENV`],
+/// which reach the supervise child through the driver's base-env layer), plus the three
 /// PLAIN log-streaming vars ([`ENV_SESSION_ID`] / [`ENV_TRIGGER_ISSUE`] /
 /// [`ENV_CONFIG_HASH`], the collector's bundle key + `meta.json` inputs) — but NOT
 /// the two downward-API vars ([`ENV_POD_UID`] / [`ENV_POD_NAME`]): those use a pod
@@ -230,6 +243,10 @@ pub(crate) fn session_env_pairs(
         (GIT_COMMITTER_NAME_ENV, spec.bot_login.clone()),
         (SESSION_PACKAGE_ROOTS_ENV, spec.package_roots.join(" ")),
         (SESSION_WORK_LABEL_ENV, spec.work_label.clone()),
+        // The engine's required HostFacts — without them any package calling
+        // `setup_worktree()` fails at runtime with a HostFact-missing error.
+        (CANDIDATE_PREFIX_ENV, CANDIDATE_PREFIX_VALUE.to_string()),
+        (CANDIDATE_FROM_SEP_ENV, CANDIDATE_FROM_SEP_VALUE.to_string()),
         // The three PLAIN log-streaming vars; the two downward-API vars are appended
         // per-backend (pod fieldRef here, plain value in the OpenSandbox backend).
         (ENV_SESSION_ID, spec.session_id.clone()),

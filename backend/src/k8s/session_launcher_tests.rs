@@ -165,6 +165,25 @@ fn build_session_pod_injects_the_section_5_2_env() {
         Some("web api")
     );
     assert_eq!(env_value(env, "FKST_SESSION_WORK_LABEL"), Some("fkst"));
+    // The engine's required HostFact pair (no engine default — a session without
+    // them fails any `setup_worktree()` call). Platform constants, not knobs.
+    assert_eq!(env_value(env, "FKST_CANDIDATE_PREFIX"), Some("fkst-cand"));
+    assert_eq!(env_value(env, "FKST_CANDIDATE_FROM_SEP"), Some("--from--"));
+}
+
+#[test]
+fn session_env_pairs_supply_the_engine_hostfacts_exactly_once() {
+    // Exactly once: a duplicate EnvVar name would resolve last-wins by kubelet
+    // accident; the shared pairs are the single source both backends render from.
+    let pairs = session_env_pairs(&spec(), &config());
+    for (key, value) in [
+        ("FKST_CANDIDATE_PREFIX", "fkst-cand"),
+        ("FKST_CANDIDATE_FROM_SEP", "--from--"),
+    ] {
+        let hits: Vec<_> = pairs.iter().filter(|(k, _)| *k == key).collect();
+        assert_eq!(hits.len(), 1, "{key} must appear exactly once");
+        assert_eq!(hits[0].1, value, "{key} must be the platform constant");
+    }
 }
 
 #[test]
