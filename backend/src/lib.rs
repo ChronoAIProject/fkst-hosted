@@ -9,6 +9,7 @@ pub mod config;
 // Named-environment / install-validation config knobs (`FKST_ENV_*`, issue
 // #338 §6.1). Config surface only — no behaviour is wired to these yet.
 pub mod env_config;
+pub mod environment_profile;
 pub mod error;
 pub mod github_app;
 // GitHub-token identity verification + the `GithubUser` axum extractor (PR4a):

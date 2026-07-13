@@ -187,7 +187,7 @@ impl GithubListing for FakeListing {
 pub(crate) fn test_ctx(backend: Arc<dyn SessionBackend>) -> ReconcileCtx {
     ReconcileCtx {
         backend,
-        env_store: EnvStore::fake(),
+        env_store: Arc::new(EnvStore::fake()),
         github: tokens(Arc::new(RecordingApi::default())),
         listing: Arc::new(FakeListing),
         http: reqwest::Client::new(),

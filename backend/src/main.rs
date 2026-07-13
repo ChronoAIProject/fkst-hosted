@@ -478,7 +478,9 @@ async fn spawn_reconciler(
         backend,
         // The env-store seam the spawn pre-flight reads; the reconciler shares one
         // namespace-bound client with it (the backend owns its own).
-        env_store: fkst_control_plane::k8s::env_store::EnvStore::from_kube(kube),
+        env_store: std::sync::Arc::new(fkst_control_plane::k8s::env_store::EnvStore::from_kube(
+            kube,
+        )),
         github,
         listing,
         http,
