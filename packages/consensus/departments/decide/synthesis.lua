@@ -8,6 +8,8 @@ local max_findings_entry_len = 700
 local max_narrowed_question_len = 2000
 local max_verified_moves = 64
 local max_mover_len = 240
+local max_blocking_gap_len = 240
+local gap_label = "⟦FKST:GAP⟧"
 
 local trim = strings.trim
 
@@ -130,7 +132,7 @@ local function combine_findings_records(records, verified_citations)
   return text
 end
 
-local function parse_reached(value, verdict_mode)
+local function parse_reached(value, verdict_mode, gap_count, gap, outcome_index, gap_index)
   local first, framing = trim(value):match("^(%S+)%s+(.+)$")
   local decision = first and first:lower() or nil
   if decision ~= "approve" and not (verdict_mode == "gate" and decision == "reject") then
@@ -140,11 +142,22 @@ local function parse_reached(value, verdict_mode)
   if framing == nil then
     return nil
   end
-  return {
+  local parsed = {
     kind = "reached",
     decision = decision,
     framing = framing,
   }
+  if decision == "reject" then
+    if gap_count ~= 1
+      or gap_index ~= outcome_index + 1
+      or not strings.is_bounded_string(gap, max_blocking_gap_len) then
+      return nil
+    end
+    parsed.blocking_gap = gap
+  elseif gap_count ~= 0 then
+    return nil
+  end
+  return parsed
 end
 
 local function parse_premise_refuted(value, verdict_mode)
@@ -218,18 +231,27 @@ function M.parse_output(stdout, verdict_mode)
 
   local parsed = nil
   local outcome_count = 0
+  local reached_value = nil
+  local reached_index = nil
+  local gap = nil
+  local gap_count = 0
+  local gap_index = nil
   local verified_moves = {}
   local seen_verified_move = {}
   local findings = {}
+  local line_index = 0
   for line in (text .. "\n"):gmatch("(.-)\n") do
+    line_index = line_index + 1
     local reached = line_with_prefix(line, "reached:")
     local premise_refuted = line_with_prefix(line, "premise-refuted:")
     local converge = line_with_prefix(line, "converge:")
     local essence_stall = line_with_prefix(line, "essence-stall:")
     local unresolvable = line_with_prefix(line, "unresolvable:")
+    local captured_gap = line:match("^%s*" .. gap_label .. "%s*(.*)$")
     if reached ~= nil then
       outcome_count = outcome_count + 1
-      parsed = parse_reached(reached, verdict_mode)
+      reached_value = reached
+      reached_index = line_index
     elseif premise_refuted ~= nil then
       outcome_count = outcome_count + 1
       parsed = parse_premise_refuted(premise_refuted, verdict_mode)
@@ -242,6 +264,10 @@ function M.parse_output(stdout, verdict_mode)
     elseif unresolvable ~= nil then
       outcome_count = outcome_count + 1
       parsed = parse_essence_stall(unresolvable)
+    elseif captured_gap ~= nil then
+      gap_count = gap_count + 1
+      gap = trim(captured_gap)
+      gap_index = line_index
     else
       local move = parse_verified_move(line)
       if move ~= nil then
@@ -272,6 +298,16 @@ function M.parse_output(stdout, verdict_mode)
   end
 
   if outcome_count ~= 1 or parsed == nil then
+    if outcome_count ~= 1 or reached_value == nil then
+      return nil
+    end
+  end
+  if reached_value ~= nil then
+    parsed = parse_reached(reached_value, verdict_mode, gap_count, gap, reached_index, gap_index)
+    if parsed == nil then
+      return nil
+    end
+  elseif gap_count ~= 0 then
     return nil
   end
   local findings_record = combine_findings_records(findings)
@@ -350,6 +386,34 @@ local function stamp_verified_count(parsed, p1_results, p2_results)
   return parsed
 end
 
+local function has_matching_reject_gap(parsed, verdict_mode, p2_results)
+  if parsed == nil
+    or parsed.kind ~= "reached"
+    or parsed.decision ~= "reject"
+    or verdict_mode ~= "gate" then
+    return parsed ~= nil
+  end
+  if not strings.is_bounded_string(parsed.blocking_gap, max_blocking_gap_len) then
+    return false
+  end
+  for _, result in ipairs(p2_results or {}) do
+    if result.verdict == "reject"
+      and strings.is_bounded_string(result.blocking_gap, max_blocking_gap_len)
+      and result.blocking_gap == parsed.blocking_gap then
+      return true
+    end
+  end
+  return false
+end
+
+local function parse_attempt(stdout, ctx)
+  local parsed = stamp_verified_count(M.parse_output(stdout, ctx.verdict_mode), ctx.p1_results, ctx.p2_results)
+  if not has_matching_reject_gap(parsed, ctx.verdict_mode, ctx.p2_results) then
+    return nil
+  end
+  return parsed
+end
+
 local function fail_synthesis(first, repaired)
   local first_exit_code = type(first) == "table" and first.exit_code or nil
   local repair_exit_code = type(repaired) == "table" and repaired.exit_code or nil
@@ -376,7 +440,7 @@ function M.parse_or_retry(ctx)
   local first = ctx.spawn_sync("synthesis", ctx.build_prompt(false))
   local parsed = nil
   if type(first) == "table" and first.exit_code == 0 then
-    parsed = stamp_verified_count(M.parse_output(first.stdout, ctx.verdict_mode), ctx.p1_results, ctx.p2_results)
+    parsed = parse_attempt(first.stdout, ctx)
   end
   if parsed ~= nil then
     return parsed
@@ -384,7 +448,7 @@ function M.parse_or_retry(ctx)
 
   local repaired = ctx.spawn_sync("synthesis-repair", ctx.build_prompt(true, first))
   if type(repaired) == "table" and repaired.exit_code == 0 then
-    parsed = stamp_verified_count(M.parse_output(repaired.stdout, ctx.verdict_mode), ctx.p1_results, ctx.p2_results)
+    parsed = parse_attempt(repaired.stdout, ctx)
   end
   if parsed ~= nil then
     return parsed
@@ -402,6 +466,7 @@ function M.to_decision_result(proposal, p1_results, p2_results, parsed, caps)
       payload = caps.build_reached_payload(proposal, {
         decision = parsed.decision,
         decision_reason = parsed.decision_reason,
+        blocking_gaps = parsed.blocking_gap ~= nil and { parsed.blocking_gap } or nil,
       }, p2_results, parsed.framing, {
         verdict_path = "synthesis",
         p1_verdicts = provenance.verdict_vector(p1_results),
