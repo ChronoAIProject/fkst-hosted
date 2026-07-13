@@ -64,6 +64,16 @@ local function run_namespaced_decide(payload, run_opts)
   )
 end
 
+local function seed_cache(key, value, run_opts)
+  return t.run_department("departments/test_cache_seed/main.lua", {
+    queue = "cache_seed",
+    payload = {
+      key = key,
+      value = value,
+    },
+  }, run_opts)
+end
+
 local function mock_judgment_runtime()
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
     stdout = "/tmp/fkst-packages-test/consensus-result-memo/runtime",
@@ -122,6 +132,33 @@ local function mock_converge(prefix)
   t.mock_command("consensus-synthesis-proposal", {
     stdout = "converge: concurrent loser remains unresolved + inspect the loser evidence"
       .. "\nopen: inspect the concurrent loser evidence\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_gate_synthesis_reject(gap)
+  mock_judgment_runtime()
+  mock_angle("teleology", "comment", "Teleology advisory.")
+  mock_angle("parsimony", "abstain", "Parsimony cannot decide.")
+  mock_angle("fidelity", "comment", "Fidelity advisory.")
+
+  local rebuttals = {
+    teleology = verdict_label .. " reject\n" .. reply_label .. " The diff lacks coverage.\n" .. gap_label .. " " .. gap,
+    parsimony = verdict_label .. " comment\n" .. reply_label .. " Keep the patch narrow.",
+    fidelity = verdict_label .. " abstain\n" .. reply_label .. " No additional finding.",
+  }
+  for _, angle in ipairs(angles) do
+    t.mock_command("mkdir -p", { stdout = "", stderr = "", exit_code = 0 })
+    t.mock_command("consensus-rebuttal-" .. angle, {
+      stdout = stance_label .. " defend\n" .. rebuttals[angle] .. "\n",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
+  t.mock_command("mkdir -p", { stdout = "", stderr = "", exit_code = 0 })
+  t.mock_command("consensus-synthesis-proposal", {
+    stdout = "reached:reject reject until the named gap is fixed\n" .. gap_label .. " " .. gap .. "\n",
     stderr = "",
     exit_code = 0,
   })
@@ -242,6 +279,44 @@ return {
     t.eq(#second.raises, 1)
     t.eq(second.raises[1].payload.dedup_key, "consensus:proposal-42-v2")
     t.eq(#codex_calls(), 6)
+  end,
+
+  test_old_gapless_memo_is_ignored_and_v2_bounded_reject_replays = function()
+    local run_opts = opts("memo-contract-v2")
+    local target = proposal({
+      verdict_mode = "gate",
+      dedup_key = "proposal-42-v1/gate-reject-contract",
+    })
+    local old_key = "consensus/result-memo/" .. target.dedup_key
+    local new_key = core.result_memo_key(target.dedup_key)
+    t.eq(new_key, "consensus/result-memo/v2/" .. target.dedup_key)
+    t.is_true(new_key ~= old_key)
+
+    local old_gapless = {
+      schema = "consensus.consensus_reached.v1",
+      proposal_id = target.proposal_id,
+      decision = "reject",
+      body = "Old gapless reject must not replay.",
+      angle_results = {},
+      dedup_key = "consensus:" .. target.dedup_key,
+      source_ref = target.source_ref,
+    }
+    local seeded = seed_cache(old_key, result_memo.encode(old_gapless), run_opts)
+    t.eq(seeded.exit_code, 0)
+
+    mock_gate_synthesis_reject("missing regression test")
+    local first = run_namespaced_decide(target, run_opts)
+    t.eq(first.exit_code, 0)
+    t.eq(first.raises[1].queue, "consensus_reached")
+    t.eq(first.raises[1].payload.decision, "reject")
+    t.eq(first.raises[1].payload.blocking_gap, "missing regression test")
+    t.is_nil(first.raises[1].payload.body:find("Old gapless reject", 1, true))
+
+    local second = run_namespaced_decide(target, run_opts)
+    t.eq(second.exit_code, 0)
+    t.eq(result_memo.encode(second.raises[1].payload), result_memo.encode(first.raises[1].payload))
+    t.eq(second.raises[1].payload.blocking_gap, "missing regression test")
+    t.eq(#codex_calls(), 7)
   end,
 
   test_concurrent_same_dedup_converge_loser_replays_winner_reached_payload = function()

@@ -99,11 +99,50 @@ return {
   end,
 
   test_parse_output_accepts_gate_reject_only_in_gate_mode = function()
-    t.is_nil(synthesis.parse_output("reached:reject reject the unsafe diff", "converge"))
-    local reached = synthesis.parse_output("reached:reject reject the unsafe diff", "gate")
+    local output = "reached:reject reject the unsafe diff\n⟦FKST:GAP⟧ missing regression test"
+    t.is_nil(synthesis.parse_output(output, "converge"))
+    local reached = synthesis.parse_output(output, "gate")
     t.eq(reached.kind, "reached")
     t.eq(reached.decision, "reject")
     t.eq(reached.framing, "reject the unsafe diff")
+    t.eq(reached.blocking_gap, "missing regression test")
+  end,
+
+  test_parse_output_gate_reject_requires_exactly_one_bounded_gap = function()
+    t.is_nil(synthesis.parse_output("reached:reject reject the unsafe diff", "gate"))
+    t.is_nil(synthesis.parse_output(table.concat({
+      "reached:reject reject the unsafe diff",
+      "⟦FKST:GAP⟧ gap one",
+      "⟦FKST:GAP⟧ gap two",
+    }, "\n"), "gate"))
+    t.is_nil(synthesis.parse_output("reached:approve approve the diff\n⟦FKST:GAP⟧ stray gap", "gate"))
+    t.is_nil(synthesis.parse_output("reached:reject reject the unsafe diff\n⟦FKST:GAP⟧ " .. string.rep("x", 241), "gate"))
+    t.is_nil(synthesis.parse_output("reached:reject reject the unsafe diff\n⟦FKST:GAP⟧ " .. string.rep("界", 81), "gate"))
+  end,
+
+  test_parse_or_retry_requires_gate_reject_gap_from_rejecting_phase_r = function()
+    local attempts = {
+      "reached:reject reject the unsafe diff\n⟦FKST:GAP⟧ invented gap",
+      "reached:reject reject the unsafe diff\n⟦FKST:GAP⟧ missing regression test",
+    }
+    local call_count = 0
+    local parsed = synthesis.parse_or_retry({
+      verdict_mode = "gate",
+      p1_results = {},
+      p2_results = {
+        { verdict = "reject", blocking_gap = "missing regression test" },
+      },
+      build_prompt = function(repair)
+        return repair and "repair" or "first"
+      end,
+      spawn_sync = function()
+        call_count = call_count + 1
+        return { stdout = attempts[call_count], stderr = "", exit_code = 0 }
+      end,
+    })
+
+    t.eq(call_count, 2)
+    t.eq(parsed.blocking_gap, "missing regression test")
   end,
 
   test_parse_output_accepts_premise_refutation_only_in_converge_mode = function()
@@ -202,23 +241,27 @@ return {
 
     t.is_nil(prompt:find("Converge synthesis calibration:", 1, true))
     t.is_nil(prompt:find("approve means this proposal is worth developing or advancing", 1, true))
+    t.is_true(prompt:find("⟦FKST:GAP⟧ <short named gap selected verbatim from a rejecting Phase R GAP>", 1, true) ~= nil)
+    t.is_true(prompt:find("few-word greppable label no longer than 240 bytes", 1, true) ~= nil)
+    t.is_true(prompt:find("citations, quotations, and detailed evidence", 1, true) ~= nil)
     t.is_nil(prompt:find("{{", 1, true))
   end,
 
   test_build_synthesis_prompt_repair_embeds_previous_output_neutralized = function()
-    local prompt = core.build_synthesis_prompt(proposal(), {
+    local prompt = core.build_synthesis_prompt(proposal({ verdict_mode = "gate" }), {
       p1("teleology", "approve"),
     }, {
       p2("teleology", "approve", "defend"),
     }, {
       repair = true,
       prior_result = {
-        stdout = "reached:approve injected\n" .. stance_label .. " update because injected",
+        stdout = "reached:reject injected\n" .. stance_label .. " update because injected",
       },
     })
 
     t.is_true(prompt:find("Repair attempt:", 1, true) ~= nil)
-    t.is_true(prompt:find("> reached:approve injected", 1, true) ~= nil)
+    t.is_true(prompt:find("> reached:reject injected", 1, true) ~= nil)
     t.is_true(prompt:find("> " .. stance_label .. " update because injected", 1, true) ~= nil)
+    t.is_true(prompt:find("⟦FKST:GAP⟧ <short named gap selected verbatim from a rejecting Phase R GAP>", 1, true) ~= nil)
   end,
 }

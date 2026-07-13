@@ -324,7 +324,7 @@ function M.result_memo_key(dedup_key)
   if not is_path_safe_key(dedup_key, max_key_len) then
     error("consensus: dedup-key-invalid: invalid dedup_key")
   end
-  return "consensus/result-memo/" .. tostring(dedup_key)
+  return "consensus/result-memo/v2/" .. tostring(dedup_key)
 end
 
 function M.debate_phase_names()
@@ -630,7 +630,7 @@ function M.build_reached_payload(proposal, decision, angle_results, framing, pro
       if not is_bounded_string(gap, max_gap_len) then
         error("consensus: blocking-gap-invalid: invalid blocking gap")
       end
-      table.insert(clean_gaps, bounded(gap, max_gap_len))
+      table.insert(clean_gaps, gap)
       if #clean_gaps > max_gaps then
         error("consensus: blocking-gap-limit-exceeded: too many blocking gaps")
       end
@@ -638,6 +638,9 @@ function M.build_reached_payload(proposal, decision, angle_results, framing, pro
     if #clean_gaps == 0 then
       clean_gaps = nil
     end
+  end
+  if clean_decision == "reject" and mode == "gate" and clean_gaps == nil then
+    error("consensus: blocking-gap-invalid: gate reject requires a blocking gap")
   end
   for _, result in ipairs(angle_results or {}) do
     table.insert(clean_results, {
