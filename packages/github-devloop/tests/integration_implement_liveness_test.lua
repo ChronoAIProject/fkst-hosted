@@ -19,6 +19,7 @@ local count_calls = h.count_calls
 local find_raise = h.find_raise
 local codex_status = require("tests.codex_status_helpers")
 local m_builders = require("devloop.markers.builders")
+local payloads_shared = require("devloop.payloads.shared")
 
 local function stale_attempt_started_at()
   return tostring(now() - 7201)
@@ -46,12 +47,20 @@ local function implementing_comments(event, extra)
 end
 
 local function liveness_redrive_ready(event)
-  return payloads_builders.build_devloop_ready_payload(core, {
+  local payload = payloads_builders.build_devloop_ready_payload(core, {
     proposal_id = event.proposal_id,
     dedup_key = core.ready_payload_inner_version(event.dedup_key),
     source_ref = event.source_ref,
     impl_retry_attempt = core.implementation_retry_attempt(event.dedup_key),
+    redrive_delivery = {
+      generation_key = "restart-liveness-v2/implementing/implementing.active/codex_run-v1/codex-run-not-running/1783840000000",
+      attempt = 1,
+    },
   })
+  t.eq(payload.dedup_key, payloads_shared.ready_redrive_delivery_dedup_key(
+    payload.proposal_id, payload.implementation_version, payload.redrive_delivery
+  ))
+  return payload
 end
 
 local function mock_missing_remote_branch(branch)
@@ -185,6 +194,8 @@ return {
   test_implementing_liveness_redrive_uses_current_marker_version = function()
     local current = ready()
     local event = liveness_redrive_ready(current)
+    t.is_true(event.dedup_key ~= current.dedup_key)
+    t.eq(event.implementation_version, current.dedup_key)
     local comments, branch = implementing_comments(current, {
       core.implement_attempt_marker(current.proposal_id, current.dedup_key, 2, stale_attempt_started_at()),
     })
@@ -213,6 +224,19 @@ return {
     t.eq(label.payload.add_labels[1], "fkst-dev:impl-failed")
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.is_true(comment.payload.body:find(core.state_marker(current.proposal_id, "impl-failed", current.dedup_key), 1, true) ~= nil)
+  end,
+
+  test_implementing_liveness_redrive_rejects_tampered_delivery_identity = function()
+    local event = liveness_redrive_ready(ready())
+    event.dedup_key = event.dedup_key .. "/tampered"
+
+    local result = run_implement(event, opts("implement-liveness-redrive-tampered-delivery"))
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh "), 0)
+    t.eq(count_calls("git "), 0)
+    t.eq(count_calls("codex exec"), 0)
   end,
 
   test_implementing_liveness_redrive_takes_over_orphaned_owner_marker = function()

@@ -550,7 +550,18 @@ local function process_ready_event(event)
     return
   end
 
-  devloop_logging.log_entry("implement", event, ready.proposal_id, ready.dedup_key)
+  local delivery_dedup_key = ready.dedup_key
+  if ready.implementation_version ~= nil then
+    local logical = {}
+    for key, value in pairs(ready) do
+      logical[key] = value
+    end
+    logical.dedup_key = ready.implementation_version
+    logical.implementation_version = nil
+    logical.redrive_delivery = nil
+    ready = logical
+  end
+  devloop_logging.log_entry("implement", event, ready.proposal_id, delivery_dedup_key)
   local repo, issue_number = base_ids.parse_proposal_id(ready.proposal_id)
   if repo == nil then
     devloop_logging.log_cas_decision("implement", ready.proposal_id, { state = nil, version = nil }, "ready", "implementing", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")

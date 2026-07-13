@@ -20,7 +20,7 @@ return function(M, h)
     to_states = {},
     driving_queue = decompose_queue,
     observe_surfaces = { issue = true, pr = true, liveness_scan = true },
-    output_obligation = obligation({ "decomposed:v1", "github-proxy.github_issue_create_request[*]", "operator reintake command" }, { "blocked", "thinking" }),
+    output_obligation = obligation({ "decomposed:v1", "output-obligation-escalation:v1", "github-proxy.github_issue_create_request[*]", "operator reintake command" }, { "blocked", "thinking" }),
     reentry_commands = { "rereview", "reintake" },
     operator_reentry = {
       kind = "external_command",
