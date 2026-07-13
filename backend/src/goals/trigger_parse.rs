@@ -156,7 +156,7 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
         .iter()
         .find(|(heading, _)| heading == HEADING_ENVIRONMENT)
     {
-        Some((_, content)) => parse_environment_name(content)?,
+        Some((_, content)) => parse_environment_name(&strip_html_comments(content))?,
         None => None,
     };
 
@@ -272,11 +272,11 @@ fn parse_session_name(sections: &[(String, String)]) -> Result<String, AppError>
     let block = sections
         .iter()
         .find(|(heading, _)| heading == HEADING_SESSION_NAME)
-        .map(|(_, content)| content.as_str())
+        .map(|(_, content)| strip_html_comments(content))
         .ok_or_else(|| {
             AppError::Unprocessable("the `### Session Name` section is required".to_string())
         })?;
-    match non_empty_lines(block).as_slice() {
+    match non_empty_lines(&block).as_slice() {
         [name] if is_valid_env_name(name) => Ok(name.clone()),
         [name] => Err(AppError::Unprocessable(format!(
             "the `### Session Name` section names an invalid session name {name:?}: must match {} \
@@ -297,11 +297,11 @@ fn parse_packages(sections: &[(String, String)]) -> Result<Vec<PackageRef>, AppE
     let block = sections
         .iter()
         .find(|(heading, _)| heading == HEADING_PACKAGES)
-        .map(|(_, content)| content.as_str())
+        .map(|(_, content)| strip_html_comments(content))
         .ok_or_else(|| {
             AppError::Unprocessable("the `### Packages` section is required".to_string())
         })?;
-    let lines = non_empty_lines(block);
+    let lines = non_empty_lines(&block);
     if lines.is_empty() {
         return Err(AppError::Unprocessable(
             "the `### Packages` section must list at least one package".to_string(),
@@ -398,11 +398,11 @@ fn parse_work_label(sections: &[(String, String)]) -> Result<String, AppError> {
     let block = sections
         .iter()
         .find(|(heading, _)| heading == HEADING_WORK_LABEL)
-        .map(|(_, content)| content.as_str())
+        .map(|(_, content)| strip_html_comments(content))
         .ok_or_else(|| {
             AppError::Unprocessable("the `### Work Label` section is required".to_string())
         })?;
-    let label = match non_empty_lines(block).as_slice() {
+    let label = match non_empty_lines(&block).as_slice() {
         [label] => label.clone(),
         _ => {
             return Err(AppError::Unprocessable(

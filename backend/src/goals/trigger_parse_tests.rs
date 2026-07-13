@@ -498,6 +498,48 @@ fn engine_config_violations_are_422_from_the_whole_body_parse() {
 }
 
 #[test]
+fn the_full_pristine_bundled_template_parses_with_its_sample_values() {
+    // The bug (#480): an author who fills the form values but KEEPS the
+    // template's explanatory comments must never 422 — previously the strict
+    // required sections counted their own template comment as a content line.
+    let body = include_str!("../github_app/templates_assets/fkst-substrate-session.md");
+    let spec = parse_trigger_issue_body(body).expect("the pristine template must parse");
+    assert_eq!(spec.name, "my-first-session");
+    assert_eq!(spec.work_label, "fkst-work");
+    assert_eq!(spec.packages.len(), 1);
+    assert_eq!(spec.packages[0].repo, "fkst-packages");
+    assert_eq!(spec.environment, None, "comment-only section is unset");
+    assert!(!spec.auto_merge, "the template ships `false`");
+    assert_eq!(spec.output_lang, None);
+    assert!(spec.engine_config.is_empty());
+}
+
+#[test]
+fn strict_sections_parse_comment_plus_value() {
+    // Comment + value in each previously-sharp strict section.
+    let body = "### Session Name
+<!-- one line -->
+sess
+### Packages
+<!--
+refs
+-->
+acme/tools@main:pkg/a
+### Work Label
+<!-- label -->
+label
+### Environment
+<!-- optional -->
+staging
+";
+    let spec = parse_trigger_issue_body(body).expect("comment + value parses");
+    assert_eq!(spec.name, "sess");
+    assert_eq!(spec.packages.len(), 1);
+    assert_eq!(spec.work_label, "label");
+    assert_eq!(spec.environment.as_deref(), Some("staging"));
+}
+
+#[test]
 fn the_bundled_templates_new_sections_parse_unset_verbatim() {
     // The EXACT bundled text of the two NEW sections (explanatory comments and
     // all) must parse to "not set" — never a 422 that punishes an author who
