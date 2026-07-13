@@ -8,6 +8,7 @@ local config = require("devloop.config")
 local devloop_logging = require("devloop.logging")
 local strings = require("contract.strings")
 local rollup_health = require("core" .. ".rollup_health")
+local devloop_base = require("devloop.base")
 
 local spec = {
   consumes = { "devloop_rollup_ready" },
@@ -113,6 +114,7 @@ local function act(event)
     error(unsupported_payload_error(payload, unsupported_reason))
   end
 
+  devloop_base.assert_trusted_bot_configured()
   devloop_logging.log_entry("rollup_merge", event, "rollup", payload.dedup_key)
   with_lock(core.rollup_lock_key(payload.repo, payload.upstream_branch, payload.integration_branch), function()
     if config.write_mode() ~= "real" then

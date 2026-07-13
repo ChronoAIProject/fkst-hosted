@@ -38,7 +38,9 @@ local function run_merge(payload, run_opts)
 end
 
 local function mock_write_mode(value)
-  t.mock_command('printf %s "$FKST_GITHUB_WRITE"', { stdout = value or "1", stderr = "", exit_code = 0 })
+  for _ = 1, 2 do
+    t.mock_command('printf %s "$FKST_GITHUB_WRITE"', { stdout = value or "1", stderr = "", exit_code = 0 })
+  end
 end
 
 local function mock_soak_minutes(value)
@@ -218,6 +220,28 @@ return {
   test_rollup_merge_clean_observe_and_soaked_head_merges = function()
     mock_successful_merge()
     local result = run_merge(event(), opts("rollup-merge-clean-soaked", "1"))
+    t.eq(result.exit_code, 0)
+    t.eq(h.count_calls("gh pr merge"), 1)
+  end,
+
+  test_rollup_merge_uses_env_bot_identity_for_mature_soak_sample = function()
+    local prod_bot = "prod-bot"
+    h.mock_author_policy_configure(core._test_bot_login)
+    t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', { stdout = prod_bot, stderr = "", exit_code = 0 })
+    mock_write_mode("1")
+    mock_pr("def456")
+    mock_runtime_gate(observe_clean(), "def456")
+    mock_pr("def456", "dev", "COMPLETED", "SUCCESS", "MERGEABLE", "CLEAN", "OPEN", "", {
+      observe_sample_comment("def456", "clean", 31 * 60, prod_bot),
+    })
+    mock_merge_command()
+    mock_pr("def456", "dev", "COMPLETED", "SUCCESS", "MERGEABLE", "CLEAN", "MERGED", "2026-06-03T02:03:04Z")
+    local run_opts = opts("rollup-merge-prod-bot-soak", "1")
+    run_opts.env.FKST_GITHUB_BOT_LOGIN = prod_bot
+    local result = t.run_department("departments/rollup_merge/main.lua", {
+      queue = "devloop_rollup_ready",
+      payload = event(),
+    }, run_opts)
     t.eq(result.exit_code, 0)
     t.eq(h.count_calls("gh pr merge"), 1)
   end,
