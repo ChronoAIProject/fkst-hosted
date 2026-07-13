@@ -200,6 +200,7 @@ function M.extract_entry_edges(owner, inventory, rows)
       },
     }
     attach_cas_metadata(edge, authored, "entry edge")
+    attach_pending_order(edge, authored, "entry edge")
     table.insert(edges, edge)
   end
 
@@ -226,6 +227,7 @@ function M.extract_entry_edges(owner, inventory, rows)
         },
       }
       attach_cas_metadata(edge, activation, "entry receiver activation")
+      attach_pending_order(edge, activation, "entry receiver activation")
       table.insert(edges, edge)
     end
   end
@@ -326,6 +328,7 @@ function M.extract_operator_reentry_edges(owner, inventory)
       },
     }
     attach_cas_metadata(edge, authored, "operator_reentry edge")
+    attach_pending_order(edge, authored, "operator_reentry edge")
     table.insert(edges, edge)
   end
   return edges
@@ -422,6 +425,7 @@ function M.extract_canonicalization_edges(owner, inventory)
       },
     }
     attach_cas_metadata(edge, authored, "canonicalization edge")
+    attach_pending_order(edge, authored, "canonicalization edge")
     table.insert(edges, edge)
   end
   return edges
@@ -505,6 +509,7 @@ function M.extract_guard_boundary_edges(owner, rows)
           },
         }
         attach_cas_metadata(edge, successor, "guard_boundary edge")
+        attach_pending_order(edge, successor, "guard_boundary edge")
         table.insert(edges, edge)
       end
     end
@@ -555,6 +560,7 @@ function M.extract_guard_boundary_edges(owner, rows)
               },
             }
             attach_cas_metadata(edge, successor, "guard_boundary edge")
+            attach_pending_order(edge, successor, "guard_boundary edge")
             table.insert(edges, edge)
           end
         end
@@ -603,6 +609,7 @@ function M.extract_timeout_edges(owner, rows)
         },
       }
       attach_cas_metadata(edge, successor, "timeout edge")
+      attach_pending_order(edge, successor, "timeout edge")
       table.insert(edges, edge)
     end
 
