@@ -435,6 +435,43 @@ impl GithubAppTokens {
             .await
     }
 
+    /// Create a new issue on `owner/repo` as the App: mint an installation token,
+    /// then `POST /issues` with the title/body/labels. Returns the new number.
+    /// Used by the install-time trigger-issue seeder.
+    pub async fn create_issue(
+        &self,
+        owner_repo: &str,
+        title: &str,
+        body: &str,
+        labels: &[String],
+    ) -> Result<u64, GithubAppError> {
+        let (owner, repo) = owner_repo
+            .split_once('/')
+            .ok_or(GithubAppError::InvalidRepoRef)?;
+        let token = self.token_for_repo(owner_repo, None).await?;
+        self.inner
+            .api
+            .create_issue(&token, owner, repo, title, body, labels)
+            .await
+    }
+
+    /// The numbers of OPEN issues on `owner/repo` carrying `label` (excludes PRs).
+    /// The seeder's idempotency probe.
+    pub async fn open_issues_with_label(
+        &self,
+        owner_repo: &str,
+        label: &str,
+    ) -> Result<Vec<u64>, GithubAppError> {
+        let (owner, repo) = owner_repo
+            .split_once('/')
+            .ok_or(GithubAppError::InvalidRepoRef)?;
+        let token = self.token_for_repo(owner_repo, None).await?;
+        self.inner
+            .api
+            .open_issues_with_label(&token, owner, repo, label)
+            .await
+    }
+
     /// Add labels to `owner/repo`'s issue `number` as the App (additive).
     pub async fn add_issue_labels(
         &self,

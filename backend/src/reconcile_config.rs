@@ -116,6 +116,9 @@ struct ReconcileVars {
     pod_session_max_lifetime_secs: u64,
     #[serde(default = "defaults::health_scrape_secs")]
     health_scrape_secs: u64,
+    /// Auto-create a seed trigger issue when the App is installed on a repo.
+    #[serde(default)]
+    seed_trigger_issue_on_install: bool,
 }
 
 /// Model B reconciler configuration (issue #359 §4). Config surface only — no
@@ -155,6 +158,12 @@ pub struct ReconcileConfig {
     /// reads each live pod's status + recent framework logs to flag/clear a
     /// degraded session on its trigger issue.
     pub health_scrape_secs: u64,
+    /// When true, auto-create a seed trigger issue (packages =
+    /// github-devloop-workflow, work label `fkst-evolve`, auto-merge on) the first
+    /// time the App is installed on a repo with no open trigger issue. Env:
+    /// `FKST_SEED_TRIGGER_ISSUE_ON_INSTALL`. Default false (opt-in — it writes to
+    /// the user's repo).
+    pub seed_trigger_issue_on_install: bool,
 }
 
 impl Default for ReconcileConfig {
@@ -162,6 +171,7 @@ impl Default for ReconcileConfig {
         Self {
             substrate_trigger_label: defaults::substrate_trigger_label(),
             github_bot_login: None,
+            seed_trigger_issue_on_install: false,
             reconcile_interval_secs: defaults::reconcile_interval_secs(),
             pod_full_resync_interval_secs: defaults::pod_full_resync_interval_secs(),
             session_idle_grace_secs: defaults::session_idle_grace_secs(),
@@ -244,6 +254,7 @@ impl ReconcileConfig {
             pod_token_refresh_secs: env.pod_token_refresh_secs,
             pod_session_max_lifetime_secs: env.pod_session_max_lifetime_secs,
             health_scrape_secs: env.health_scrape_secs,
+            seed_trigger_issue_on_install: env.seed_trigger_issue_on_install,
         })
     }
 }

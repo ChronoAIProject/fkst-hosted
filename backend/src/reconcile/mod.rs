@@ -31,6 +31,7 @@ pub mod reachability;
 pub mod registry;
 pub mod repo;
 pub mod retire;
+pub mod seed_issue;
 pub mod templates;
 pub mod work_ack;
 

@@ -37,6 +37,12 @@ data:
   # Only a GitHub issues.opened carrying this label auto-triggers a session.
   FKST_WEBHOOK_TRIGGER_LABEL: "fkst"
 
+  # Auto-seed a trigger issue when the App is installed on a repo (writes to the
+  # user's repo, so opt-in). "true" seeds session=evolve, the github-devloop-workflow
+  # package, work label fkst-evolve, auto-merge on, log access = repo owner;
+  # idempotent + best-effort. Default false.
+  # FKST_SEED_TRIGGER_ISSUE_ON_INSTALL: "false"
+
   # --- Deployment-wide access allowlist (OPTIONAL) ---
   # Comma-separated GitHub numeric ids and/or logins. Unset = open. Set = only
   # these identities pass the token-authenticated APIs, and only their trigger
