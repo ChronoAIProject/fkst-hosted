@@ -76,6 +76,7 @@ prod-env
             environment: Some("prod-env".to_string()),
             auto_merge: false,
             log_access: vec![],
+            output_lang: None,
         }
     );
 }
@@ -396,4 +397,70 @@ fn environment_with_two_lines_is_422_naming_the_section() {
         msg.contains("exactly one"),
         "must flag the ambiguity: {msg}"
     );
+}
+
+// ---- Output Language (optional but STRICT; comment-tolerant) ----
+
+/// Build a body with the three required sections held valid plus a
+/// `### Output Language` section carrying `val`.
+fn body_with_output_language(val: &str) -> String {
+    format!(
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\nlabel\n### Output Language\n{val}\n"
+    )
+}
+
+#[test]
+fn output_language_absent_defaults_none() {
+    let spec = parse_trigger_issue_body(&body_with_package(VALID_PKG)).expect("parses");
+    assert_eq!(spec.output_lang, None, "an absent section defaults to None");
+}
+
+#[test]
+fn output_language_accepts_conservative_locale_tags() {
+    for lang in ["en", "zh", "cmn", "zh-CN", "zh_TW", "pt-br20"] {
+        let spec =
+            parse_trigger_issue_body(&body_with_output_language(lang)).expect("valid locale");
+        assert_eq!(spec.output_lang.as_deref(), Some(lang), "{lang}");
+    }
+}
+
+#[test]
+fn output_language_blank_or_comment_only_is_none() {
+    // Blank section.
+    let spec = parse_trigger_issue_body(&body_with_output_language("   \n")).expect("parses");
+    assert_eq!(spec.output_lang, None);
+    // The PRISTINE template shape: a multi-line explanatory HTML comment and no
+    // value. Stripping the comment must leave nothing — not a 422.
+    let spec = parse_trigger_issue_body(&body_with_output_language(
+        "<!--\nOptional. One locale tag, e.g. zh.\n-->",
+    ))
+    .expect("pristine template section parses");
+    assert_eq!(spec.output_lang, None);
+}
+
+#[test]
+fn output_language_comment_plus_value_parses_the_value() {
+    let spec = parse_trigger_issue_body(&body_with_output_language(
+        "<!--\nOptional. One locale tag.\n-->\nzh",
+    ))
+    .expect("comment + value parses");
+    assert_eq!(spec.output_lang.as_deref(), Some("zh"));
+}
+
+#[test]
+fn output_language_invalid_locale_is_422_naming_the_section() {
+    for bad in ["ZH", "zh cn", "zh/../x", "a", "toolong-abcdefghij"] {
+        let msg = err_message(&body_with_output_language(bad));
+        assert!(
+            msg.contains("Output Language"),
+            "{bad}: must name the section: {msg}"
+        );
+    }
+}
+
+#[test]
+fn output_language_two_values_is_422() {
+    let msg = err_message(&body_with_output_language("en\nzh"));
+    assert!(msg.contains("Output Language"), "names the section: {msg}");
+    assert!(msg.contains("at most one"), "flags the ambiguity: {msg}");
 }

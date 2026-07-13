@@ -235,6 +235,7 @@ fn registration(name: &str, work_label: &str) -> SessionRegistration {
             packages: Vec::new(),
             work_label: work_label.to_string(),
             environment: None,
+            output_lang: None,
         },
         session_id: "sess-1".to_string(),
         config_hash: "hash".to_string(),

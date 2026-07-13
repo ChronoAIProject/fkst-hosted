@@ -52,22 +52,37 @@ fn hex_digest<T: Serialize>(value: &T, what: &str) -> String {
 }
 
 /// A stable content hash over a session's launch inputs: its ordered package
-/// references, its work label, and its optional environment. Mirrors
-/// [`crate::k8s::env_store_meta::content_hash`] (canonical JSON → SHA-256 hex) so a
-/// live pod's recorded hash can be compared for drift. Stable and, for a fixed
-/// package ORDER, deterministic (packages are author-ordered, so order is part of
-/// the identity).
-pub fn config_hash(packages: &[PackageRef], work_label: &str, environment: Option<&str>) -> String {
+/// references, its work label, its optional environment, and its optional output
+/// language. Mirrors [`crate::k8s::env_store_meta::content_hash`] (canonical JSON
+/// → SHA-256 hex) so a live pod's recorded hash can be compared for drift. Stable
+/// and, for a fixed package ORDER, deterministic (packages are author-ordered, so
+/// order is part of the identity).
+///
+/// DIGEST-STABILITY INVARIANT: fields added after the original trio serialize
+/// ONLY when set (`skip_serializing_if`), so a config that does not use them
+/// hashes byte-identically across deploys. Without the skip, every live
+/// session's recomputed hash would differ from the one latched at announce —
+/// tripping the immutability check fleet-wide (false `fkst-config-rejected` +
+/// spawn suppression). Guarded by `config_hash_is_digest_stable_for_old_configs`.
+pub fn config_hash(
+    packages: &[PackageRef],
+    work_label: &str,
+    environment: Option<&str>,
+    output_lang: Option<&str>,
+) -> String {
     #[derive(Serialize)]
     struct Canonical<'a> {
         packages: Vec<CanonPackage<'a>>,
         work_label: &'a str,
         environment: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output_lang: Option<&'a str>,
     }
     let canonical = Canonical {
         packages: canon_packages(packages),
         work_label,
         environment,
+        output_lang,
     };
     hex_digest(&canonical, "config-hash")
 }
@@ -96,6 +111,10 @@ pub fn full_config_hash(reg: &SessionRegistration) -> String {
         name: &'a str,
         auto_merge: bool,
         log_access: &'a [String],
+        // Serialized ONLY when set — see the digest-stability invariant on
+        // [`config_hash`]; an old config must hash identically after a deploy.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output_lang: Option<&'a str>,
     }
     let canonical = Canonical {
         packages: canon_packages(&reg.def.packages),
@@ -104,6 +123,7 @@ pub fn full_config_hash(reg: &SessionRegistration) -> String {
         name: &reg.def.name,
         auto_merge: reg.auto_merge,
         log_access: &reg.log_access,
+        output_lang: reg.def.output_lang.as_deref(),
     };
     hex_digest(&canonical, "full-config-hash")
 }
