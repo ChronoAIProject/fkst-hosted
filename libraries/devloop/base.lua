@@ -157,11 +157,10 @@ function C.strip_bot_login_suffix(login)
 end
 
 function C.configure_trusted_bot_login(login)
-  if login == nil or tostring(login) == "" then
-    trusted_bot_login_current = nil
-    return nil
-  end
   trusted_bot_login_current = C.strip_bot_login_suffix(login)
+  if trusted_bot_login_current == "" then
+    trusted_bot_login_current = nil
+  end
   return trusted_bot_login_current
 end
 
@@ -843,7 +842,17 @@ function C.gh_exec_opts(cmd_or_opts, timeout)
 end
 
 function C.trusted_bot_login()
-  return trusted_bot_login_current or test_bot_login
+  if trusted_bot_login_current ~= nil then
+    return trusted_bot_login_current
+  end
+  local login = C.configure_trusted_bot_login(C.read_env("FKST_GITHUB_BOT_LOGIN"))
+  if login ~= nil then
+    return login
+  end
+  if C.read_env("FKST_GITHUB_WRITE") == "1" then
+    error("github-devloop: FKST_GITHUB_BOT_LOGIN is required when FKST_GITHUB_WRITE=1 (trusted_bot_login)")
+  end
+  return test_bot_login
 end
 
 C._max_key_len = max_key_len

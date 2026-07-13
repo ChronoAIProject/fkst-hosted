@@ -10,6 +10,7 @@ local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T0
 local branch_sha = "bbbb2222"
 local integration_sha = "aaaa1111"
 local merge_sha = "cccc3333"
+local production_bot = "production-bot"
 local review_proposal = devloop_base.pr_review_proposal_id("owner/repo", 7, version, branch_sha)
 local review_dedup = "consensus:" .. review_proposal .. "/review"
 
@@ -71,12 +72,13 @@ local function mock_pr_list(is_draft)
   })
 end
 
-local function pr_comments(state)
+local function pr_comments(state, author_login)
+  local author = author_login or core._test_bot_login
   return {
-    m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", 42, branch, version, "integration/dev"),
-    core.state_marker("github-devloop/issue/owner/repo/42", state or "merge-ready", version),
-    m_builders.review_result_marker(review_proposal, "github-devloop/issue/owner/repo/42", "approve", review_dedup),
-    m_builders.merge_ready_marker("github-devloop/issue/owner/repo/42", 7, version, review_proposal, review_dedup, branch_sha),
+    { body = m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", 42, branch, version, "integration/dev"), author_login = author },
+    { body = core.state_marker("github-devloop/issue/owner/repo/42", state or "merge-ready", version), author_login = author },
+    { body = m_builders.review_result_marker(review_proposal, "github-devloop/issue/owner/repo/42", "approve", review_dedup), author_login = author },
+    { body = m_builders.merge_ready_marker("github-devloop/issue/owner/repo/42", 7, version, review_proposal, review_dedup, branch_sha), author_login = author },
   }
 end
 
@@ -101,12 +103,17 @@ local function mock_pr_view(state, comments, extra)
   })
 end
 
-local function mock_issue_view(labels, comments)
+local function mock_issue_view(labels, comments, owner_login)
   entity_read_mocks.mock_issue_view_selector(t, {
     labels = labels,
     comments = comments,
+    assignees = owner_login ~= nil and { owner_login } or nil,
+    author_login = owner_login,
   }, "labels,comments")
-  entity_read_mocks.mock_issue_view_selector(t, {}, "assignees,author")
+  entity_read_mocks.mock_issue_view_selector(t, {
+    assignees = owner_login ~= nil and { owner_login } or nil,
+    author_login = owner_login,
+  }, "assignees,author")
 end
 
 local function mock_issue_view_other_owned()
@@ -137,19 +144,19 @@ local function mock_worktree_merge(exit_code, unmerged_stdout)
 end
 
 return {
-  test_pr_freshness_approved_pr_merges_integration_and_pushes_with_lease = function()
+  test_pr_freshness_approved_pr_from_production_bot_merges_and_pushes = function()
     mock_env("1")
     mock_pr_list(false)
-    mock_pr_view("merge-ready")
-    mock_issue_view({})
+    mock_pr_view("merge-ready", pr_comments("merge-ready", production_bot))
+    mock_issue_view({}, nil, production_bot)
     mock_fetch_and_heads()
     t.mock_command("merge-base --is-ancestor", { stdout = "", stderr = "", exit_code = 1 })
     mock_worktree_merge(0)
     t.mock_command("commit -F", { stdout = "[detached " .. merge_sha .. "] Refresh branch\n", stderr = "", exit_code = 0 })
     t.mock_command('printf %s "$FKST_GITHUB_WRITE"', { stdout = "1", stderr = "", exit_code = 0 })
-    t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', { stdout = "fkst-test-bot", stderr = "", exit_code = 0 })
+    t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', { stdout = production_bot, stderr = "", exit_code = 0 })
     t.mock_command('printf %s "$FKST_GITHUB_WRITE"', { stdout = "1", stderr = "", exit_code = 0 })
-    t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', { stdout = "fkst-test-bot", stderr = "", exit_code = 0 })
+    t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', { stdout = production_bot, stderr = "", exit_code = 0 })
     t.mock_command('printf %s "$FKST_GITHUB_WRITE"', { stdout = "1", stderr = "", exit_code = 0 })
     t.mock_command("git fetch 'origin' '" .. branch .. "'", { stdout = "", stderr = "", exit_code = 0 })
     t.mock_command("refs/remotes/'origin'/'" .. branch .. "'^{commit}", { stdout = branch_sha .. "\n", stderr = "", exit_code = 0 })
@@ -158,7 +165,10 @@ return {
     t.mock_command("git fetch 'origin' '" .. branch .. "'", { stdout = "", stderr = "", exit_code = 0 })
     t.mock_command("refs/remotes/'origin'/'" .. branch .. "'^{commit}", { stdout = merge_sha .. "\n", stderr = "", exit_code = 0 })
 
-    local result = run_scan(opts("pr-freshness-real", { FKST_GITHUB_WRITE = "1" }))
+    local result = run_scan(opts("pr-freshness-real", {
+      FKST_GITHUB_WRITE = "1",
+      FKST_GITHUB_BOT_LOGIN = production_bot,
+    }))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(h.count_calls("merge --no-ff --no-commit"), 1)
