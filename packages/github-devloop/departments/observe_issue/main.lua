@@ -200,9 +200,6 @@ local function ensure_managed_issue_claim(issue, proposal_id, current, state)
     devloop_logging.log_cas_decision("observe_issue", proposal_id, state, state.state, state.state, "skip-claim-lost", "CLAIM lost before managed issue handling")
     return false
   end
-  if claim_state == "self" then
-    return true
-  end
   return m_claims.claim_issue_for_management(core, "observe_issue", issue.repo, issue.number, current, proposal_id)
 end
 

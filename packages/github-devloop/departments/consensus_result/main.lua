@@ -10,6 +10,7 @@ local entity_lib = require("devloop.entity")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
 local github_factory = require("devloop.github_factory")
+local github_author_policy = require("devloop.github_author_policy")
 
 local spec = {
   consumes = { "consensus.consensus_reached" },
@@ -174,6 +175,11 @@ local function make_department(ports)
       })
       devloop_logging.log_forged_markers("consensus_result", reached.proposal_id, current.comments)
       local state = devloop_state.current_state(current.comments, reached.proposal_id)
+      local trusted_author_policy = github_author_policy.from_env()
+      if not github_author_policy.is_authorized(trusted_author_policy, current.author_login) then
+        devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", "thinking", "skip-non-whitelisted-author", "issue author is not authorized for GitHub content")
+        return
+      end
       local declined = reached.decision == "reject"
       local gate = declined and { ok = true } or core.dependency_gate(repo, issue_number, {
         proposal_id = reached.proposal_id,

@@ -75,6 +75,26 @@ local function observed_escalation_issue(dedup_key, issue_number)
   }
 end
 
+local function observed_semantic_escalation_issue(dedup_key, issue_number, terminal_version)
+  return {
+    issue_number = tonumber(issue_number),
+    parent_issue = {
+      body = "Escalation issue body.\n\n"
+        .. core.output_obligation_escalation_marker({
+          proposal_id = proposal_id,
+          terminal_version = terminal_version or blocked_version,
+          dedup_key = dedup_key,
+          reason_class = "state-output-obligation-timeout",
+          source_repo = repo,
+          issue_number = issue_number,
+        })
+        .. "\n",
+      author_login = "fkst-test-bot",
+      comments = {},
+    },
+  }
+end
+
 local function find_raise(raises, queue)
   for _, raised in ipairs(raises or {}) do
     if raised.queue == queue then
@@ -183,6 +203,8 @@ return {
     t.is_true(request.body:find("`reason_class`: `state-output-obligation-timeout`", 1, true) ~= nil)
     t.is_true(request.body:find("`parent`: `owner/repo#42`", 1, true) ~= nil)
     t.is_true(request.body:find("`proposal_id`: `" .. proposal_id .. "`", 1, true) ~= nil)
+    t.is_true(request.body:find("fkst:github-devloop-ops:output-obligation-escalation:v1", 1, true) ~= nil)
+    t.is_true(request.body:find('terminal_version="' .. blocked_version .. '"', 1, true) ~= nil)
 
     local edge = core.output_obligation_failure_drain_edge({ created_marker(request.dedup_key, 2030) }, request.dedup_key)
     t.eq(edge.kind, "superseded-by-escalation-issue")
@@ -190,6 +212,35 @@ return {
 
     local second = core.blocked_obligation_patrol_once(entity({ created_marker(request.dedup_key, 2030) }))
     t.eq(#second, 0)
+  end,
+
+  test_blocked_obligation_patrol_marks_semantic_escalation_issue_body_edge = function()
+    local first = core.blocked_obligation_patrol_once(entity())
+    t.eq(#first, 1)
+    local dedup_key = first[1].payload.dedup_key
+
+    local edge = core.output_obligation_failure_drain_edge({}, dedup_key, {
+      observed_semantic_escalation_issue(dedup_key, 2226, blocked_version),
+    }, nil, blocked_version)
+    t.eq(edge.kind, "output-obligation-escalation-issue")
+    t.eq(edge.issue_id, "2226")
+    t.eq(edge.terminal_version, blocked_version)
+
+    local second = core.blocked_obligation_patrol_once(entity(), {
+      observed_semantic_escalation_issue(dedup_key, 2226, blocked_version),
+    })
+    t.eq(#second, 0)
+  end,
+
+  test_blocked_obligation_patrol_ignores_stale_semantic_escalation_issue_body_edge = function()
+    local first = core.blocked_obligation_patrol_once(entity())
+    t.eq(#first, 1)
+    local dedup_key = first[1].payload.dedup_key
+
+    local second = core.blocked_obligation_patrol_once(entity(), {
+      observed_semantic_escalation_issue(dedup_key, 2226, blocked_version .. "/stale"),
+    })
+    t.eq(#second, 1)
   end,
 
   test_blocked_obligation_patrol_marks_observed_escalation_issue_body_edge = function()

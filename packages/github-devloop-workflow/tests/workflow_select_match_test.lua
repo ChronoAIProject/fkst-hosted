@@ -187,12 +187,12 @@ local function mock_workflow_codex(stdout, exit_code)
   })
 end
 
-local function mock_default_context_bundle(current)
+local function mock_default_context_bundle(current, authorized_logins)
   local ok = { stdout = "", stderr = "", exit_code = 0 }
   author_policy.mock_env(t, {
     env = {
       FKST_DEVLOOP_MANAGED_BOT_LOGINS = "",
-      FKST_GITHUB_AUTHORIZED_LOGINS = "",
+      FKST_GITHUB_AUTHORIZED_LOGINS = authorized_logins or "",
     },
   }, {
     times = 4,
@@ -233,13 +233,13 @@ local function mock_default_context_bundle(current)
   t.mock_command("mkdir -p", ok)
 end
 
-local function mock_default_codex(stdout, current)
+local function mock_default_codex(stdout, current, authorized_logins)
   t.mock_command('printf %s "$FKST_OUTPUT_LANG"', {
     stdout = "",
     stderr = "",
     exit_code = 0,
   })
-  mock_default_context_bundle(current)
+  mock_default_context_bundle(current, authorized_logins)
   t.mock_command("codex exec", {
     stdout = stdout or "⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Clear bounded implementation task.",
     stderr = "",
@@ -454,7 +454,7 @@ local tests = {
         body = body,
         author_login = "human",
         labels = { "workflow" },
-      })
+      }, "human")
 
       local result = run_workflow_select(payload)
       local calls = codex_calls()

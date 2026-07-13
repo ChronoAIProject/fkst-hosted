@@ -11,13 +11,14 @@
 # the gh auth user convention, branches default to dev/integration). Set only what differs here.
 # Precedence: an explicit env var > this file > the built-in default.
 
-# Base dir for all dogfood worktrees / logs / runtime scratch.  default: $HOME/.fkst-dogfood
+# Machine layout convention: docs/user/machine-fkst-home-layout.md
+# Base dir for all dogfood worktrees / logs / runtime scratch. Target: $HOME/.fkst/dogfood
 # Keep it on a STABLE path. Do NOT use /private/tmp: macOS age-cleans it (files untouched >3d),
 # which rots the run checkouts and the durable store.
-# DOGFOOD_ROOT="$HOME/.fkst-dogfood"
+# DOGFOOD_ROOT="$HOME/.fkst/dogfood"
 
-# Substrate checkout the engine BIN builds from (BIN derives from it).  default: $HOME/fkst-substrate
-# SUBSTRATE_SRC="$HOME/fkst-substrate"
+# Substrate checkout the engine BIN builds from (BIN derives from it).
+# SUBSTRATE_SRC="$HOME/.fkst/src/fkst-substrate"
 
 # Trusted bot == THIS host's `gh auth` user. THE TWO MACHINES DIFFER HERE.
 #   machine A:  BOT=loning
@@ -61,6 +62,6 @@
 # STABLE durable roots — the redb persistent delivery store, REUSED across restarts so
 # in-flight events resume. NEVER point these at a fresh path on a normal restart (that wipes
 # the queue and strands mid-state issues). Pin the ACTUAL existing store path on this host:
-# DUR_PACKAGES="$HOME/.fkst-dogfood/durable/packages"
-# DUR_SUBSTRATE="$HOME/.fkst-dogfood/durable/substrate"
-# DUR_WEBSITE="$HOME/.fkst-dogfood/durable/website"
+# DUR_PACKAGES="$HOME/.fkst/dogfood/durable/packages"
+# DUR_SUBSTRATE="$HOME/.fkst/dogfood/durable/substrate"
+# DUR_WEBSITE="$HOME/.fkst/dogfood/durable/website"

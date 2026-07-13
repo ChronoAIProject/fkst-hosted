@@ -88,6 +88,18 @@ function C.build_devloop_ready_payload(M, source)
     dedup_key = ready_version,
     source_ref = base_ids.normalize_source_ref(source.source_ref),
   }
+  if source.redrive_delivery ~= nil then
+    payload.implementation_version = ready_version
+    payload.redrive_delivery = {
+      generation_key = source.redrive_delivery.generation_key,
+      attempt = source.redrive_delivery.attempt,
+    }
+    payload.dedup_key = shared.ready_redrive_delivery_dedup_key(
+      source.proposal_id,
+      ready_version,
+      payload.redrive_delivery
+    )
+  end
   if source.include_ready_hand_off == true and source.ready_comment_id ~= nil then
     payload.ready_hand_off = {
       kind = "own-state-marker",
