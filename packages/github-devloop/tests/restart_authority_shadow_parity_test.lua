@@ -21,6 +21,9 @@ local V_CURRENT = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02
 local CONSENSUS_REACHED_VARIANT = "consensus-reached"
 local CONSENSUS_RESULT_POLICY_ID = "cas.legacy_consensus_result_v1"
 local CONSENSUS_REACHED_EDGE_ID = "github-devloop/thinking/autonomous/consensus-reached"
+local CONSENSUS_REACHED_DEPENDENCY_HELD_VARIANT = "consensus-reached-dependency-held"
+local CONSENSUS_REACHED_DEPENDENCY_HELD_EDGE_ID =
+  "github-devloop/thinking/autonomous/consensus-reached-dependency-held"
 local V_OLDER = "consensus:github-devloop/issue/owner/repo/42/2026-06-02T01-02-03Z"
 local V_NEWER = "consensus:github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
 local V_ORDERING_EQUAL_CURRENT = V_CURRENT .. "/loop/01"
@@ -29,6 +32,7 @@ local V_ORDERING_EQUAL_INCOMING = V_CURRENT .. "/loop/1"
 local state_labels = {
   thinking = "fkst-dev:thinking",
   ready = "fkst-dev:ready",
+  dependency_wait = "fkst-dev:ready",
   blocked = "fkst-dev:blocked",
 }
 
@@ -122,6 +126,41 @@ local consensus_result_fixtures = {
   },
   {
     name = "shadow-consensus-result-incoming-older-stale",
+    current_state = "thinking",
+    current_version = V_CURRENT,
+    incoming_version = V_OLDER,
+    expected_exit_code = 0,
+    expected_status = "stale",
+  },
+}
+
+local dependency_wait_consensus_result_fixtures = {
+  {
+    name = "shadow-consensus-result-dependency-held-source-equal-apply",
+    current_state = "thinking",
+    current_version = V_CURRENT,
+    incoming_version = V_CURRENT,
+    expected_exit_code = 0,
+    expected_status = "apply",
+  },
+  {
+    name = "shadow-consensus-result-dependency-held-target-ordering-equal-idempotent",
+    current_state = "dependency_wait",
+    current_version = V_ORDERING_EQUAL_CURRENT,
+    incoming_version = V_ORDERING_EQUAL_INCOMING,
+    expected_exit_code = 0,
+    expected_status = "idempotent",
+  },
+  {
+    name = "shadow-consensus-result-dependency-held-source-marker-missing-pending",
+    current_state = nil,
+    current_version = nil,
+    incoming_version = V_NEWER,
+    expected_exit_code = 1,
+    expected_status = "pending",
+  },
+  {
+    name = "shadow-consensus-result-dependency-held-incoming-older-stale",
     current_state = "thinking",
     current_version = V_CURRENT,
     incoming_version = V_OLDER,
@@ -583,6 +622,79 @@ local function assert_consensus_result_case(fixture)
   t.eq(shadow.grant, nil, fixture.name .. ": grant disabled")
 end
 
+local function assert_dependency_wait_consensus_result_case(fixture)
+  local event = h.reached({ effect_version = fixture.incoming_version })
+  local labels = { "fkst-dev:enabled" }
+  if fixture.current_state ~= nil then
+    table.insert(labels, state_labels[fixture.current_state])
+  end
+  if fixture.current_state == "dependency_wait" then
+    table.insert(labels, "fkst-dev:blocked-on-dependency")
+  end
+  local comments = {}
+  if fixture.current_state ~= nil then
+    table.insert(comments, core.state_marker(
+      event.proposal_id,
+      fixture.current_state,
+      fixture.current_version
+    ))
+  end
+  h.mock_issue_result(labels, comments)
+
+  t.eq(
+    type(consensus_result_department.make_department),
+    "function",
+    fixture.name .. ": real consensus_result department loaded"
+  )
+  local result, probes, decisions = observe_consensus_result_department(function()
+    local runner = fixture.expected_exit_code == 1
+      and h.run_result_expecting_failure
+      or h.run_result
+    return runner(event, h.opts("restart-authority-dependency-held-versioned-shadow-parity"))
+  end)
+
+  t.eq(result.exit_code, fixture.expected_exit_code, fixture.name .. ": department exit code")
+  t.eq(#probes, 1, fixture.name .. ": real department CAS probe count")
+  local probe = probes[1]
+  t.eq(probe.current.state, fixture.current_state, fixture.name .. ": observed current state")
+  t.eq(probe.current.version, fixture.current_version, fixture.name .. ": observed current version")
+  t.eq(probe.from_states[1], "thinking", fixture.name .. ": observed source state")
+  t.eq(#probe.from_states, 1, fixture.name .. ": observed source state count")
+  t.eq(probe.to_state, "dependency_wait", fixture.name .. ": observed target state")
+  t.eq(probe.incoming_version, event.effect_version, fixture.name .. ": observed incoming version")
+  for _, decision in ipairs(decisions) do
+    t.eq(decision.dept, "consensus_result", fixture.name .. ": legacy decision department")
+    t.eq(decision.from_state, "thinking", fixture.name .. ": legacy decision source")
+    t.eq(decision.to_state, "dependency_wait", fixture.name .. ": legacy decision target")
+  end
+
+  local legacy = observed_consensus_result_admission(probe, { decisions[1] })
+  local sealed = restart_authority.seal_snapshot({
+    owner = OWNER,
+    proposal_id = event.proposal_id,
+    current = {
+      state = fixture.current_state,
+      version = fixture.current_version,
+    },
+  })
+  local shadow = restart_authority.decide_transition(sealed, {
+    semantic_variant = CONSENSUS_REACHED_DEPENDENCY_HELD_VARIANT,
+    incoming_version = event.effect_version,
+  })
+
+  assert_bidirectional(shadow, legacy, "status", fixture.name)
+  t.eq(shadow.status, fixture.expected_status, fixture.name .. ": expected shadow status")
+  assert_bidirectional(shadow, legacy, "reason_code", fixture.name)
+  assert_bidirectional(shadow, legacy, "cas_outcome", fixture.name)
+  t.eq(
+    shadow.edge_id,
+    CONSENSUS_REACHED_DEPENDENCY_HELD_EDGE_ID,
+    fixture.name .. ": selected edge id"
+  )
+  t.eq(shadow.cas_policy_id, CONSENSUS_RESULT_POLICY_ID, fixture.name .. ": selected CAS policy")
+  t.eq(shadow.grant, nil, fixture.name .. ": grant disabled")
+end
+
 local function assert_illegal(actual, reason_code, cas_outcome, context)
   t.eq(actual.status, "illegal", context .. ": status")
   t.eq(actual.reason_code, reason_code, context .. ": reason code")
@@ -615,6 +727,19 @@ return {
   test_shadow_decider_matches_legacy_consensus_result_versioned_cas_triplets = function()
     for _, fixture in ipairs(consensus_result_fixtures) do
       assert_consensus_result_case(fixture)
+    end
+  end,
+
+  test_shadow_decider_matches_legacy_dependency_held_consensus_result_versioned_cas_triplets = function()
+    for _ = 1, #dependency_wait_consensus_result_fixtures do
+      t.mock_command(core.gh_blocked_by_cmd("owner/repo", 42), {
+        stdout = "{",
+        stderr = "",
+        exit_code = 0,
+      })
+    end
+    for _, fixture in ipairs(dependency_wait_consensus_result_fixtures) do
+      assert_dependency_wait_consensus_result_case(fixture)
     end
   end,
 

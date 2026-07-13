@@ -144,7 +144,8 @@ function M.decide_transition(sealed_snapshot, intent)
   end
   if edge.cas_policy_id ~= "cas.legacy_loop_plain_v1"
     and not (edge.cas_policy_id == "cas.legacy_consensus_result_v1"
-      and edge.cas_variant == "thinking_to_ready") then
+      and (edge.cas_variant == "thinking_to_ready"
+        or edge.cas_variant == "thinking_to_dependency_wait")) then
     return illegal("unsupported-shadow-edge")
   end
   if normalized.source_boundary ~= nil and normalized.source_boundary ~= edge.source.boundary then
