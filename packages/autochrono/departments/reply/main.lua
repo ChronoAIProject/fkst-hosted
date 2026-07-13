@@ -9,24 +9,35 @@ local spec = {
   stall_window = "30s",
 }
 
-local function reply_done(event)
-  local payload = event.payload or {}
-  if payload.schema ~= "consensus.consensus_reached.v1" then
-    log.warn("autochrono: unsupported consensus schema")
-    return true
+local function classify(payload)
+  if type(payload) ~= "table"
+    or payload.schema ~= "consensus.consensus_reached.v1"
+    or type(payload.proposal_id) ~= "string"
+    or payload.proposal_id:match("^autochrono/issue/") == nil then
+    return "foreign"
   end
 
   local repo, issue_number = core.parse_proposal_id(payload.proposal_id)
-  if repo == nil then
-    return true
+  if repo == nil or not core.issue_ref_round_trips(repo, issue_number) then
+    error("autochrono: consensus-result-invalid: owned proposal_id is malformed")
   end
-  if payload.decision ~= "approve" then
-    return true
+  local expected_source_ref = tostring(repo) .. "#issue/" .. tostring(issue_number)
+  if (payload.decision ~= "approve" and payload.decision ~= "reject")
+    or not core.validate_reached(payload)
+    or payload.source_ref.kind ~= "external"
+    or payload.source_ref.ref ~= expected_source_ref then
+    error("autochrono: consensus-result-invalid: owned consensus result violates the consumer contract")
   end
-  -- Fail closed: a malformed consensus_reached must not yield an empty reply nor mark the
-  -- issue replied (which would skip a later well-formed event).
-  if not core.validate_reached(payload) then
-    log.warn("autochrono: malformed consensus_reached; skipping reply")
+  if payload.decision == "reject" then
+    return "ignored"
+  end
+  return "route", repo, issue_number
+end
+
+local function reply_done(event)
+  local payload = event.payload
+  local disposition, repo, issue_number = classify(payload)
+  if disposition ~= "route" then
     return true
   end
 
@@ -39,9 +50,9 @@ local function reply_done(event)
 end
 
 local function act_reply(event)
-  local payload = event.payload or {}
-  local repo, issue_number = core.parse_proposal_id(payload.proposal_id)
-  if repo == nil or payload.decision ~= "approve" or not core.validate_reached(payload) then
+  local payload = event.payload
+  local disposition, repo, issue_number = classify(payload)
+  if disposition ~= "route" then
     return
   end
 

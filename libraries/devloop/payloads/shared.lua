@@ -1,5 +1,6 @@
 local base_ids = require("devloop.base_ids")
 local devloop_base = require("devloop.base")
+local strings = require("contract.strings")
 local C = {}
 local github_view = require("forge.github_view")
 local github_handle = nil
@@ -45,6 +46,26 @@ function C.bounded_control_text(value, limit)
     text = base_ids.truncate_utf8(text, cap)
   end
   return text
+end
+
+function C.ready_redrive_delivery_dedup_key(proposal_id, implementation_version, redrive_delivery)
+  if not devloop_base.is_safe_proposal_ref(proposal_id, implementation_version) then
+    error("github-devloop: invalid implementation redrive version")
+  end
+  if type(redrive_delivery) ~= "table"
+    or not strings.is_path_safe_key(redrive_delivery.generation_key, devloop_base._max_dedup_len) then
+    error("github-devloop: invalid implementation redrive generation")
+  end
+  local attempt = tonumber(redrive_delivery.attempt)
+  if attempt == nil or attempt < 1 or attempt ~= math.floor(attempt) then
+    error("github-devloop: invalid implementation redrive attempt")
+  end
+  return base_ids.dedup_key({
+    implementation_version,
+    "delivery-redrive",
+    redrive_delivery.generation_key,
+    tostring(attempt),
+  })
 end
 
 return C

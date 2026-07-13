@@ -382,6 +382,31 @@ local tests = {
     t.is_true(raised[1].payload.body:find('reason_code="child-fatal-first"', 1, true) ~= nil)
   end,
 
+  test_stale_child_fatal_terminal_rederives_merged_children_and_completes = function()
+    local first_spec = generated_spec("first")
+    local second_spec = generated_spec("second")
+    local first_ref = { kind = "external", ref = repo .. "#issue/108" }
+    local blocked_terminal, terminal_err = marker.build_terminal_marker(origin, "blocked", "child-fatal-second")
+    t.is_nil(terminal_err)
+    local raised = run_with({
+      current = issue({
+        comment(blueprint_marker()),
+        created_comment("first", materialization.EMPTY_PREDECESSOR_REF_DIGEST, first_spec, 108),
+        created_comment("second", materialize_reconcile._private.predecessor_ref_digest({ source_ref = first_ref }), second_spec, 109),
+        comment(blocked_terminal),
+      }),
+      child_statuses = {
+        ["108"] = "result_ready",
+        ["109"] = "result_ready",
+      },
+    })
+
+    t.eq(#raised, 1)
+    t.eq(raised[1].queue, "github-proxy.github_issue_comment_request")
+    t.is_true(raised[1].payload.body:find('state="done"', 1, true) ~= nil)
+    t.is_true(raised[1].payload.body:find('reason_code="all-slots-result-ready"', 1, true) ~= nil)
+  end,
+
   test_non_first_no_changes_child_writes_blocked_terminal_with_why = function()
     local first_spec = generated_spec("first")
     local second_spec = generated_spec("second")

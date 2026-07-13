@@ -22,6 +22,7 @@ local rollup_head_sha = "fedcba9876543210fedcba9876543210fedcba98"
 local integration_branch = "integration-elonsg"
 local upstream_branch = "dev"
 local child_branch = "devloop-rollup-owner-rollup-repo-4242-01HY"
+local blocked_version = version .. "/blocked/child-pr-blocked"
 
 local function issue_comments_api_cmd()
   return "gh api --paginate --slurp repos/" .. repo .. "/issues/" .. tostring(issue_number) .. "/comments?per_page=100"
@@ -44,9 +45,11 @@ local function comment(body, created_at)
   }
 end
 
-local function parent_comments()
+local function parent_comments(state)
+  local current_state = state or "awaiting-pr"
+  local current_version = current_state == "blocked" and blocked_version or version
   return {
-    comment(core.state_marker(parent, "awaiting-pr", version), "2026-06-03T01:02:03Z"),
+    comment(core.state_marker(parent, current_state, current_version), "2026-06-03T01:02:03Z"),
     comment(m_builders.pr_delegation_marker(parent, child_pr, child_pr_number, version, "g1"), "2026-06-03T01:03:03Z"),
   }
 end
@@ -165,6 +168,17 @@ local function mock_runtime_stability_gate()
 end
 
 local function mock_rollup_merge_success()
+  -- rollup_merge validates the trusted bot before its normal write-mode read.
+  t.mock_command(devloop_base.read_env_command("FKST_GITHUB_BOT_LOGIN"), {
+    stdout = core._test_bot_login,
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command(devloop_base.read_env_command("FKST_GITHUB_WRITE"), {
+    stdout = "1",
+    stderr = "",
+    exit_code = 0,
+  })
   entity_mocks.mock_pr_view_selector(t, {
     repo = repo,
     number = rollup_pr_number,
@@ -261,8 +275,10 @@ local function mock_rollup_landing(exit_code)
   })
 end
 
-local function mock_observe_issue_inputs(child_state, landed)
+local function mock_observe_issue_inputs(child_state, landed, issue_lifecycle_state)
   local effective_child_state = child_state or "merged"
+  local current_issue_state = issue_lifecycle_state or "awaiting-pr"
+  local current_label = current_issue_state == "blocked" and "fkst-dev:blocked" or "fkst-dev:awaiting-pr"
   t.mock_command("gh api graphql", {
     stdout = '{"data":{"repository":{"issue":{"blockedBy":{"totalCount":0,"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}\n',
     stderr = "",
@@ -274,8 +290,8 @@ local function mock_observe_issue_inputs(child_state, landed)
     title = "Awaiting delegated PR",
     state = "OPEN",
     updated_at = "2026-06-03T01:02:03Z",
-    labels = { "fkst-dev:enabled", "fkst-dev:awaiting-pr" },
-    comments = parent_comments(),
+    labels = { "fkst-dev:enabled", current_label },
+    comments = parent_comments(current_issue_state),
     assignees = { core._test_bot_login },
     author_login = core._test_bot_login,
   }, "title,body,comments,labels,state,createdAt,updatedAt,assignees,author")
@@ -343,6 +359,31 @@ local function mock_everything(child_state, landed)
   mock_liveness_scan_inputs(child_state)
   mock_observe_issue_inputs(child_state, landed)
   mock_github_proxy_writes()
+end
+
+local function blocked_observe_event()
+  return {
+    queue = "github-devloop.devloop_observe_issue",
+    source_ref = {
+      kind = "external",
+      reference = repo .. "#issue/" .. tostring(issue_number),
+    },
+    payload = {
+      schema = "github-proxy.v1",
+      type = "issue",
+      repo = repo,
+      number = issue_number,
+      title = "Blocked child whose delegated PR later merged",
+      state = "OPEN",
+      updated_at = "2026-06-03T02:10:04Z",
+      labels = { "fkst-dev:enabled", "fkst-dev:blocked" },
+      dedup_key = repo .. "#issue#" .. tostring(issue_number) .. "@2026-06-03T02:10:04Z",
+      source_ref = {
+        kind = "external",
+        ref = repo .. "#issue/" .. tostring(issue_number),
+      },
+    },
+  }
 end
 
 return {
@@ -424,5 +465,17 @@ return {
     t.eq(h.count_calls("git merge-base --is-ancestor " .. child_merge_commit_sha .. " " .. rollup_head_sha), 1)
     t.eq(h.count_calls("git merge-base --is-ancestor " .. child_head_sha .. " " .. rollup_head_sha), 0)
     t.eq(h.count_calls("gh issue close " .. tostring(issue_number) .. " --repo " .. repo), 0)
+  end,
+
+  test_blocked_issue_observe_closes_after_delegated_merge_lands = function()
+    mock_common_env()
+    mock_observe_issue_inputs("merged", true, "blocked")
+
+    local trace = graph.require_quiescent(graph.run(blocked_observe_event(), { max_steps = 4 }))
+    graph.assert_covers(trace, {
+      "github-devloop.devloop_observe_issue -> github-devloop.observe_issue",
+    })
+    t.eq(h.count_calls("git merge-base --is-ancestor " .. child_merge_commit_sha .. " " .. rollup_head_sha), 1)
+    t.eq(h.count_calls("gh issue close " .. tostring(issue_number) .. " --repo " .. repo), 1)
   end,
 }
