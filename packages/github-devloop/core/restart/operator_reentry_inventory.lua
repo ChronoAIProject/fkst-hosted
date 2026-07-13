@@ -1,6 +1,6 @@
 return {
   {
-    id = "github-devloop/implementing/operator_reentry/reimplement_impl_failed",
+    semantic_variant = "reimplement_impl_failed",
     owner = "github-devloop",
     row_id = "implementing",
     kind = "operator_reentry",
@@ -22,7 +22,7 @@ return {
     },
   },
   {
-    id = "github-devloop/implementing/operator_reentry/reimplement_blocked_open_pr",
+    semantic_variant = "reimplement_blocked_open_pr",
     owner = "github-devloop",
     row_id = "implementing",
     kind = "operator_reentry",
@@ -46,7 +46,7 @@ return {
     },
   },
   {
-    id = "github-devloop/implementing/operator_reentry/reimplement_blocked_implementing_timeout_without_pr",
+    semantic_variant = "reimplement_blocked_implementing_timeout_without_pr",
     owner = "github-devloop",
     row_id = "implementing",
     kind = "operator_reentry",

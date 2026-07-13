@@ -17,6 +17,7 @@ local structural_fields = {
   "kind",
   "source",
   "target",
+  "semantic_variant",
   "provenance",
 }
 
@@ -27,6 +28,7 @@ local expected_entries = {
     source_boundary = "github-proxy.github_entity_changed",
     target = "thinking",
     field = "entry_inventory.unmanaged_issue",
+    semantic_variant = "unmanaged_issue",
     cas_policy_id = "cas.legacy_observe_issue_entry_v1",
     cas_variant = "unmanaged_to_thinking",
   },
@@ -36,6 +38,7 @@ local expected_entries = {
     source_boundary = "github-devloop.devloop_execute_request",
     target = "thinking",
     field = "entry_inventory.execute_request",
+    semantic_variant = "execute_request",
   },
   ["github-devloop/impl-failed/entry/retry-implementation"] = {
     row_id = "impl-failed",
@@ -311,7 +314,6 @@ local function assert_entry_shape(edges)
     if expected.cas_variant ~= nil then
       edge_keys.cas_variant = true
     end
-    if expected.semantic_variant ~= nil then edge_keys.semantic_variant = true end
     edge_keys.pending_order = true
     assert_exact_keys(edge, edge_keys)
     if expected.source_state == nil then
@@ -329,6 +331,10 @@ local function assert_entry_shape(edges)
     t.eq(edge.source.boundary, expected.source_boundary)
     t.eq(edge.target, expected.target)
     t.eq(edge.semantic_variant, expected.semantic_variant)
+    t.eq(type(edge.semantic_variant), "string")
+    t.is_true(edge.semantic_variant ~= "")
+    t.eq(edge.semantic_variant:find("/", 1, true), nil)
+    t.eq(edge.semantic_variant, edge.id:match("/([^/]+)$"))
     t.eq(edge.provenance.owner, owner)
     t.eq(edge.provenance.row, expected.row_id)
     t.eq(edge.provenance.field, expected.field)
@@ -349,7 +355,7 @@ end
 
 local function valid_entry()
   return {
-    id = "owner/thinking/entry/site",
+    semantic_variant = "site",
     owner = "owner",
     row_id = "thinking",
     kind = "entry",
@@ -407,7 +413,11 @@ return {
     assert_extract_fails("owner", { "not-an-edge" }, {})
 
     local edge = valid_entry()
-    edge.id = ""
+    edge.semantic_variant = ""
+    assert_extract_fails("owner", { edge }, {})
+
+    edge = valid_entry()
+    edge.semantic_variant = "qualified/site"
     assert_extract_fails("owner", { edge }, {})
 
     edge = valid_entry()

@@ -22,6 +22,7 @@ local structural_fields = {
   "kind",
   "source",
   "target",
+  "semantic_variant",
   "provenance",
 }
 
@@ -33,6 +34,7 @@ local expected_entries = {
     source_boundary = "github-proxy.github_entity_changed",
     target = "reviewing",
     field = "entry_inventory.first_seen_pr",
+    semantic_variant = "first_seen_pr",
     cas_policy_id = "cas.legacy_observe_pr_v1",
     cas_variant = "pr_open_to_reviewing",
   },
@@ -43,6 +45,7 @@ local expected_entries = {
     source_boundary = "github-devloop-pr.devloop_reviewing",
     target = "reviewing",
     field = "entry_inventory.review_receiver",
+    semantic_variant = "review_receiver",
     cas_policy_id = "cas.legacy_review_activation_handoff_v1",
   },
   ["github-devloop-pr/reviewing/entry/review_convergence_round"] = {
@@ -52,6 +55,7 @@ local expected_entries = {
     source_boundary = "consensus.consensus_converge",
     target = "reviewing",
     field = "entry_inventory.review_convergence_round",
+    semantic_variant = "review_convergence_round",
     cas_policy_id = "cas.legacy_review_loop_safe_v1",
   },
   ["github-devloop-pr/pr-open/entry/pr_open_handoff"] = {
@@ -61,6 +65,7 @@ local expected_entries = {
     source_boundary = "github-proxy.github_comment_written",
     target = "pr-open",
     field = "entry_inventory.pr_open_handoff",
+    semantic_variant = "pr_open_handoff",
   },
   ["github-devloop-pr/merge-ready/entry/handoff_to_merge_gate"] = {
     row_id = "merge-ready",
@@ -542,7 +547,6 @@ local function assert_entry_shape(edges)
     if expected.cas_variant ~= nil then
       edge_keys.cas_variant = true
     end
-    if expected.semantic_variant ~= nil then edge_keys.semantic_variant = true end
     edge_keys.pending_order = true
     assert_exact_keys(edge, edge_keys)
     if expected.source_state == nil then
@@ -561,6 +565,10 @@ local function assert_entry_shape(edges)
     t.eq(edge.source.boundary, expected.source_boundary)
     t.eq(edge.target, expected.target)
     t.eq(edge.semantic_variant, expected.semantic_variant)
+    t.eq(type(edge.semantic_variant), "string")
+    t.is_true(edge.semantic_variant ~= "")
+    t.eq(edge.semantic_variant:find("/", 1, true), nil)
+    t.eq(edge.semantic_variant, edge.id:match("/([^/]+)$"))
     t.eq(edge.provenance.owner, owner)
     t.eq(edge.provenance.row, expected.row_id)
     t.eq(edge.provenance.field, expected.field)
@@ -581,7 +589,7 @@ end
 
 local function valid_entry()
   return {
-    id = "owner/reviewing/entry/site",
+    semantic_variant = "site",
     owner = "owner",
     row_id = "reviewing",
     kind = "entry",
@@ -649,7 +657,11 @@ return {
     assert_extract_fails("owner", { "not-an-edge" }, {})
 
     local edge = valid_entry()
-    edge.id = ""
+    edge.semantic_variant = ""
+    assert_extract_fails("owner", { edge }, {})
+
+    edge = valid_entry()
+    edge.semantic_variant = "qualified/site"
     assert_extract_fails("owner", { edge }, {})
 
     edge = valid_entry()

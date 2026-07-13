@@ -30,6 +30,7 @@ local structural_fields = {
   "kind",
   "source",
   "target",
+  "semantic_variant",
   "cause_evidence",
   "provenance",
 }
@@ -457,6 +458,10 @@ local function assert_canonicalization_shape(edges)
     t.eq(edge.kind, "canonicalization")
     t.eq(edge.source.boundary, nil)
     t.eq(edge.row_id, edge.target)
+    t.eq(type(edge.semantic_variant), "string")
+    t.is_true(edge.semantic_variant ~= "")
+    t.eq(edge.semantic_variant:find("/", 1, true), nil)
+    t.eq(edge.semantic_variant, edge.id:match("/([^/]+)$"))
     t.eq(edge.provenance.owner, owner)
     t.eq(edge.provenance.row, edge.target)
     t.eq(edge.cas_policy_id, expected_cas and expected_cas.cas_policy_id or nil)
@@ -467,9 +472,9 @@ local function assert_canonicalization_shape(edges)
   end
 end
 
-local function valid_canonicalization(id, source_state, target, marker, resolver)
+local function valid_canonicalization(semantic_variant, source_state, target, marker, resolver)
   return {
-    id = id or "owner/ready/canonicalization/legacy_ready_rederived",
+    semantic_variant = semantic_variant or "legacy_ready_rederived",
     owner = "owner",
     row_id = target or "ready",
     kind = "canonicalization",
@@ -562,7 +567,7 @@ return {
     local inventory = {
       valid_canonicalization(),
       valid_canonicalization(
-        "owner/dependency_wait/canonicalization/legacy_ready_dependency_hold",
+        "legacy_ready_dependency_hold",
         "ready",
         "dependency_wait"
       ),
@@ -574,11 +579,13 @@ return {
     local edges = restart_edges.extract_canonicalization_edges("owner", inventory)
 
     t.eq(#edges, 2)
-    t.eq(edges[1].id, inventory[1].id)
-    t.eq(edges[2].id, inventory[2].id)
-    assert_same_value(edges, inventory)
+    t.eq(edges[1].id, "owner/ready/canonicalization/legacy_ready_rederived")
+    t.eq(edges[2].id, "owner/dependency_wait/canonicalization/legacy_ready_dependency_hold")
     assert_same_value(inventory, snapshot)
     for index, edge in ipairs(edges) do
+      local expected = copy_value(inventory[index])
+      expected.id = "owner/" .. expected.row_id .. "/canonicalization/" .. expected.semantic_variant
+      assert_same_value(edge, expected)
       t.is_true(edge ~= inventory[index])
       t.is_true(edge.source ~= inventory[index].source)
       t.is_true(edge.cause_evidence ~= inventory[index].cause_evidence)
@@ -592,7 +599,11 @@ return {
     assert_extract_fails("owner", { "not-an-edge" })
 
     local edge = valid_canonicalization()
-    edge.id = ""
+    edge.semantic_variant = ""
+    assert_extract_fails("owner", { edge })
+
+    edge = valid_canonicalization()
+    edge.semantic_variant = "qualified/legacy_ready_rederived"
     assert_extract_fails("owner", { edge })
 
     edge = valid_canonicalization()

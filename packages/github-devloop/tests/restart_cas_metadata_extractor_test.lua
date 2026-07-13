@@ -5,7 +5,7 @@ local t = h.t
 
 local function inventory_entry()
   return {
-    id = "owner/thinking/entry/ingress",
+    semantic_variant = "ingress",
     owner = "owner",
     row_id = "thinking",
     kind = "entry",
@@ -52,7 +52,7 @@ end
 
 local function operator_reentry_entry()
   return {
-    id = "owner/blocked/operator_reentry/retry",
+    semantic_variant = "retry",
     owner = "owner",
     row_id = "blocked",
     kind = "operator_reentry",
@@ -73,7 +73,7 @@ end
 
 local function canonicalization_entry()
   return {
-    id = "owner/reviewing/canonicalization/normalized",
+    semantic_variant = "normalized",
     owner = "owner",
     row_id = "reviewing",
     kind = "canonicalization",
@@ -116,7 +116,7 @@ return {
     with_cas.cas_policy_id = "cas.inventory_v1"
     with_cas.cas_variant = "inventory_variant"
     local without_cas = inventory_entry()
-    without_cas.id = "owner/thinking/entry/other"
+    without_cas.semantic_variant = "other"
     without_cas.provenance.field = "entry_inventory.other"
 
     local receiver_with_cas = activation("receiver_with_cas")
@@ -164,7 +164,7 @@ return {
     with_cas.cas_policy_id = "cas.canonicalization_v1"
     with_cas.cas_variant = "normalized"
     local without_cas = canonicalization_entry()
-    without_cas.id = "owner/reviewing/canonicalization/other"
+    without_cas.semantic_variant = "other"
     without_cas.provenance.field = "canonicalization_inventory.other"
 
     local edges = restart_edges.extract_canonicalization_edges("owner", { with_cas, without_cas })
@@ -196,7 +196,7 @@ return {
     with_cas.cas_policy_id = "cas.operator_reentry_v1"
     with_cas.cas_variant = "retry"
     local without_cas = operator_reentry_entry()
-    without_cas.id = "owner/blocked/operator_reentry/other"
+    without_cas.semantic_variant = "other"
     without_cas.provenance.field = "operator_reentry.other"
 
     local edges = restart_edges.extract_operator_reentry_edges("owner", { with_cas, without_cas })

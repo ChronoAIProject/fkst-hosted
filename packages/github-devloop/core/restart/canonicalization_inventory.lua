@@ -1,6 +1,6 @@
 return {
   {
-    id = "github-devloop/dependency_wait/canonicalization/legacy_ready_dependency_hold",
+    semantic_variant = "legacy_ready_dependency_hold",
     owner = "github-devloop",
     row_id = "dependency_wait",
     kind = "canonicalization",
@@ -21,7 +21,7 @@ return {
     },
   },
   {
-    id = "github-devloop/ready/canonicalization/legacy_ready_rederive",
+    semantic_variant = "legacy_ready_rederive",
     owner = "github-devloop",
     row_id = "ready",
     kind = "canonicalization",
@@ -42,7 +42,7 @@ return {
     },
   },
   {
-    id = "github-devloop/awaiting-pr/canonicalization/implementing_merged_delegated_pr",
+    semantic_variant = "implementing_merged_delegated_pr",
     owner = "github-devloop",
     row_id = "awaiting-pr",
     kind = "canonicalization",
@@ -65,7 +65,7 @@ return {
     },
   },
   {
-    id = "github-devloop/awaiting-pr/canonicalization/legacy_pr_open_delegation",
+    semantic_variant = "legacy_pr_open_delegation",
     owner = "github-devloop",
     row_id = "awaiting-pr",
     kind = "canonicalization",

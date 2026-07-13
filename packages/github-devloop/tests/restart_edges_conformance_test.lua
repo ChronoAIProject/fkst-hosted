@@ -78,7 +78,6 @@ local function assert_exact_keys(value, expected)
 end
 
 local function assert_semantic_variant(edge)
-  if edge.semantic_variant == nil then return end
   t.eq(type(edge.semantic_variant), "string")
   t.is_true(edge.semantic_variant ~= "")
   t.eq(edge.semantic_variant:find("/", 1, true), nil)
@@ -488,7 +487,7 @@ local function legacy_union_bytes(owner, rows, inventory)
     end
   end
   for _, entry in ipairs(inventory) do
-    tuples[tuple_key(owner, nil, entry.target, output_variant_from_id(entry.id))] = true
+    tuples[tuple_key(owner, nil, entry.target, entry.semantic_variant)] = true
   end
   return sorted_set_bytes(tuples)
 end

@@ -65,7 +65,7 @@ end
 
 local function inventory_entry(output_variant)
   return {
-    id = "owner/thinking/entry/" .. output_variant,
+    semantic_variant = output_variant,
     owner = "owner",
     row_id = "thinking",
     kind = "entry",
@@ -97,7 +97,7 @@ end
 
 local function operator_reentry_entry(output_variant)
   return {
-    id = "owner/blocked/operator_reentry/" .. output_variant,
+    semantic_variant = output_variant,
     owner = "owner",
     row_id = "blocked",
     kind = "operator_reentry",
@@ -118,7 +118,7 @@ end
 
 local function canonicalization_entry(output_variant)
   return {
-    id = "owner/reviewing/canonicalization/" .. output_variant,
+    semantic_variant = output_variant,
     owner = "owner",
     row_id = "reviewing",
     kind = "canonicalization",

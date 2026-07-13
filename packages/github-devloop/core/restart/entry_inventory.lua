@@ -1,6 +1,6 @@
 return {
   {
-    id = "github-devloop/thinking/entry/unmanaged_issue",
+    semantic_variant = "unmanaged_issue",
     owner = "github-devloop",
     row_id = "thinking",
     kind = "entry",
@@ -19,7 +19,7 @@ return {
     },
   },
   {
-    id = "github-devloop/thinking/entry/execute_request",
+    semantic_variant = "execute_request",
     owner = "github-devloop",
     row_id = "thinking",
     kind = "entry",

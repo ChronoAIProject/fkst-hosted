@@ -1,6 +1,6 @@
 return {
   {
-    id = "github-devloop-pr/reviewing/entry/first_seen_pr",
+    semantic_variant = "first_seen_pr",
     owner = "github-devloop-pr",
     row_id = "reviewing",
     kind = "entry",
@@ -19,7 +19,7 @@ return {
     },
   },
   {
-    id = "github-devloop-pr/reviewing/entry/review_receiver",
+    semantic_variant = "review_receiver",
     owner = "github-devloop-pr",
     row_id = "reviewing",
     kind = "entry",
@@ -37,7 +37,7 @@ return {
     },
   },
   {
-    id = "github-devloop-pr/reviewing/entry/review_convergence_round",
+    semantic_variant = "review_convergence_round",
     owner = "github-devloop-pr",
     row_id = "reviewing",
     kind = "entry",
@@ -55,7 +55,7 @@ return {
     },
   },
   {
-    id = "github-devloop-pr/pr-open/entry/pr_open_handoff",
+    semantic_variant = "pr_open_handoff",
     owner = "github-devloop-pr",
     row_id = "pr-open",
     kind = "entry",

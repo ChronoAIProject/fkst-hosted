@@ -1,6 +1,6 @@
 return {
   {
-    id = "github-devloop-pr/reviewing/canonicalization/fixing_head_renormalization",
+    semantic_variant = "fixing_head_renormalization",
     owner = "github-devloop-pr",
     row_id = "reviewing",
     kind = "canonicalization",
@@ -21,7 +21,7 @@ return {
     },
   },
   {
-    id = "github-devloop-pr/reviewing/canonicalization/pr_base_unmanaged_self_heal",
+    semantic_variant = "pr_base_unmanaged_self_heal",
     owner = "github-devloop-pr",
     row_id = "reviewing",
     kind = "canonicalization",

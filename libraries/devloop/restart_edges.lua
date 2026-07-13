@@ -4,6 +4,10 @@ local function is_nonempty_string(value)
   return type(value) == "string" and value ~= ""
 end
 
+local function build_inventory_edge_id(owner, row_id, kind, semantic_variant)
+  return owner .. "/" .. row_id .. "/" .. kind .. "/" .. semantic_variant
+end
+
 local successor_kinds = {
   autonomous = true,
   guard_boundary = true,
@@ -183,9 +187,6 @@ function M.extract_entry_edges(owner, inventory, rows)
     if type(authored) ~= "table" then
       error("devloop.restart_edges: entry edge must be a table")
     end
-    if not is_nonempty_string(authored.id) then
-      error("devloop.restart_edges: entry edge id must be a non-empty string")
-    end
     if authored.owner ~= owner then
       error("devloop.restart_edges: entry edge owner must match extractor owner")
     end
@@ -194,6 +195,12 @@ function M.extract_entry_edges(owner, inventory, rows)
     end
     if authored.kind ~= "entry" then
       error("devloop.restart_edges: entry edge kind must be entry")
+    end
+    if not is_nonempty_string(authored.semantic_variant) then
+      error("devloop.restart_edges: entry edge semantic_variant must be a non-empty string")
+    end
+    if authored.semantic_variant:find("/", 1, true) ~= nil then
+      error("devloop.restart_edges: entry edge semantic_variant must not contain /")
     end
 
     local source = authored.source
@@ -223,13 +230,19 @@ function M.extract_entry_edges(owner, inventory, rows)
     if not is_nonempty_string(provenance.field) then
       error("devloop.restart_edges: entry edge provenance.field must be a non-empty string")
     end
-    if seen_ids[authored.id] then
-      error("devloop.restart_edges: duplicate edge id " .. authored.id)
+    local id = build_inventory_edge_id(
+      authored.owner,
+      authored.row_id,
+      authored.kind,
+      authored.semantic_variant
+    )
+    if seen_ids[id] then
+      error("devloop.restart_edges: duplicate edge id " .. id)
     end
-    seen_ids[authored.id] = true
+    seen_ids[id] = true
 
     local edge = {
-      id = authored.id,
+      id = id,
       owner = authored.owner,
       row_id = authored.row_id,
       kind = authored.kind,
@@ -238,6 +251,7 @@ function M.extract_entry_edges(owner, inventory, rows)
         boundary = source.boundary,
       },
       target = authored.target,
+      semantic_variant = authored.semantic_variant,
       provenance = {
         owner = provenance.owner,
         row = provenance.row,
@@ -294,9 +308,6 @@ function M.extract_operator_reentry_edges(owner, inventory)
     if type(authored) ~= "table" then
       error("devloop.restart_edges: operator reentry edge must be a table")
     end
-    if not is_nonempty_string(authored.id) then
-      error("devloop.restart_edges: operator reentry edge id must be a non-empty string")
-    end
     if authored.owner ~= owner then
       error("devloop.restart_edges: operator reentry edge owner must match extractor owner")
     end
@@ -305,6 +316,12 @@ function M.extract_operator_reentry_edges(owner, inventory)
     end
     if authored.kind ~= "operator_reentry" then
       error("devloop.restart_edges: operator reentry edge kind must be operator_reentry")
+    end
+    if not is_nonempty_string(authored.semantic_variant) then
+      error("devloop.restart_edges: operator reentry edge semantic_variant must be a non-empty string")
+    end
+    if authored.semantic_variant:find("/", 1, true) ~= nil then
+      error("devloop.restart_edges: operator reentry edge semantic_variant must not contain /")
     end
     local source = authored.source
     if type(source) ~= "table" then
@@ -347,13 +364,19 @@ function M.extract_operator_reentry_edges(owner, inventory)
     if not is_nonempty_string(provenance.field) then
       error("devloop.restart_edges: operator reentry edge provenance.field must be a non-empty string")
     end
-    if seen_ids[authored.id] then
-      error("devloop.restart_edges: duplicate edge id " .. authored.id)
+    local id = build_inventory_edge_id(
+      authored.owner,
+      authored.row_id,
+      authored.kind,
+      authored.semantic_variant
+    )
+    if seen_ids[id] then
+      error("devloop.restart_edges: duplicate edge id " .. id)
     end
-    seen_ids[authored.id] = true
+    seen_ids[id] = true
 
     local edge = {
-      id = authored.id,
+      id = id,
       owner = authored.owner,
       row_id = authored.row_id,
       kind = authored.kind,
@@ -362,6 +385,7 @@ function M.extract_operator_reentry_edges(owner, inventory)
         boundary = source.boundary,
       },
       target = authored.target,
+      semantic_variant = authored.semantic_variant,
       cause_evidence = {
         command = cause_evidence.command,
         requires_applied_certificate = cause_evidence.requires_applied_certificate,
@@ -394,9 +418,6 @@ function M.extract_canonicalization_edges(owner, inventory)
     if type(authored) ~= "table" then
       error("devloop.restart_edges: canonicalization edge must be a table")
     end
-    if not is_nonempty_string(authored.id) then
-      error("devloop.restart_edges: canonicalization edge id must be a non-empty string")
-    end
     if authored.owner ~= owner then
       error("devloop.restart_edges: canonicalization edge owner must match extractor owner")
     end
@@ -405,6 +426,12 @@ function M.extract_canonicalization_edges(owner, inventory)
     end
     if authored.kind ~= "canonicalization" then
       error("devloop.restart_edges: canonicalization edge kind must be canonicalization")
+    end
+    if not is_nonempty_string(authored.semantic_variant) then
+      error("devloop.restart_edges: canonicalization edge semantic_variant must be a non-empty string")
+    end
+    if authored.semantic_variant:find("/", 1, true) ~= nil then
+      error("devloop.restart_edges: canonicalization edge semantic_variant must not contain /")
     end
 
     local source = authored.source
@@ -445,13 +472,19 @@ function M.extract_canonicalization_edges(owner, inventory)
     if not is_nonempty_string(provenance.field) then
       error("devloop.restart_edges: canonicalization edge provenance.field must be a non-empty string")
     end
-    if seen_ids[authored.id] then
-      error("devloop.restart_edges: duplicate edge id " .. authored.id)
+    local id = build_inventory_edge_id(
+      authored.owner,
+      authored.row_id,
+      authored.kind,
+      authored.semantic_variant
+    )
+    if seen_ids[id] then
+      error("devloop.restart_edges: duplicate edge id " .. id)
     end
-    seen_ids[authored.id] = true
+    seen_ids[id] = true
 
     local edge = {
-      id = authored.id,
+      id = id,
       owner = authored.owner,
       row_id = authored.row_id,
       kind = authored.kind,
@@ -460,6 +493,7 @@ function M.extract_canonicalization_edges(owner, inventory)
         boundary = nil,
       },
       target = authored.target,
+      semantic_variant = authored.semantic_variant,
       cause_evidence = {
         marker = cause_evidence.marker,
         resolver = cause_evidence.resolver,

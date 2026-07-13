@@ -1,6 +1,6 @@
 return {
   {
-    id = "github-devloop-pr/reviewing/operator_reentry/rereview_blocked",
+    semantic_variant = "rereview_blocked",
     owner = "github-devloop-pr",
     row_id = "reviewing",
     kind = "operator_reentry",
@@ -22,7 +22,7 @@ return {
     },
   },
   {
-    id = "github-devloop-pr/reviewing/operator_reentry/rereview_review_meta",
+    semantic_variant = "rereview_review_meta",
     owner = "github-devloop-pr",
     row_id = "reviewing",
     kind = "operator_reentry",
@@ -44,7 +44,7 @@ return {
     },
   },
   {
-    id = "github-devloop-pr/reviewing/operator_reentry/rereview_reviewing",
+    semantic_variant = "rereview_reviewing",
     owner = "github-devloop-pr",
     row_id = "reviewing",
     kind = "operator_reentry",

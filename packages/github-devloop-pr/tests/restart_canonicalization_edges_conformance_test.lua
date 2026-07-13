@@ -24,6 +24,7 @@ local structural_fields = {
   "kind",
   "source",
   "target",
+  "semantic_variant",
   "cause_evidence",
   "provenance",
 }
@@ -335,6 +336,10 @@ local function assert_canonicalization_shape(edges)
     t.eq(edge.kind, "canonicalization")
     t.eq(edge.source.boundary, nil)
     t.eq(edge.row_id, edge.target)
+    t.eq(type(edge.semantic_variant), "string")
+    t.is_true(edge.semantic_variant ~= "")
+    t.eq(edge.semantic_variant:find("/", 1, true), nil)
+    t.eq(edge.semantic_variant, edge.id:match("/([^/]+)$"))
     t.eq(edge.provenance.owner, owner)
     t.eq(edge.provenance.row, edge.target)
     assert_same_value(edge.pending_order, pending_order_goldens[edge.id])

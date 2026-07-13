@@ -25,6 +25,7 @@ local structural_fields = {
   "kind",
   "source",
   "target",
+  "semantic_variant",
   "cause_evidence",
   "provenance",
 }
@@ -271,6 +272,10 @@ local function assert_operator_reentry_shape(edges)
     t.eq(source_states[edge.source.state], true)
     t.eq(edge.source.boundary, nil)
     t.eq(edge.target, "reviewing")
+    t.eq(type(edge.semantic_variant), "string")
+    t.is_true(edge.semantic_variant ~= "")
+    t.eq(edge.semantic_variant:find("/", 1, true), nil)
+    t.eq(edge.semantic_variant, edge.id:match("/([^/]+)$"))
     t.eq(edge.cause_evidence.command, "rereview")
     t.eq(edge.cause_evidence.requires_applied_certificate, true)
     t.eq(edge.cause_evidence.resolver, "operator_commands")
@@ -284,7 +289,7 @@ end
 
 local function valid_operator_reentry()
   return {
-    id = "owner/reviewing/operator_reentry/rereview_blocked",
+    semantic_variant = "rereview_blocked",
     owner = "owner",
     row_id = "reviewing",
     kind = "operator_reentry",
@@ -382,7 +387,11 @@ return {
     assert_extract_fails("owner", { "not-an-edge" })
 
     local edge = valid_operator_reentry()
-    edge.id = ""
+    edge.semantic_variant = ""
+    assert_extract_fails("owner", { edge })
+
+    edge = valid_operator_reentry()
+    edge.semantic_variant = "qualified/rereview_blocked"
     assert_extract_fails("owner", { edge })
 
     edge = valid_operator_reentry()
