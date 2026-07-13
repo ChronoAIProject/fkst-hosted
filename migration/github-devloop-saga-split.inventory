@@ -217,6 +217,7 @@
 {"path":"packages/github-devloop/core/restart/sink_inventory.lua","owner":"issue","reason":"authored lifecycle-sink classifications belong to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/restart/required_replay_payload_fields/fixing.lua","owner":"issue","reason":"required replay payload fields belong to the parent issue saga."}
 {"path":"packages/github-devloop/core/restart/required_replay_payload_fields/index.lua","owner":"issue","reason":"required replay payload fields belong to the parent issue saga."}
+{"path":"packages/github-devloop/core/restart_authority.lua","owner":"issue","reason":"owner-local grant-disabled shadow decider for issue-side restart transitions (Step 0.0.3); composes typed edges + owner pending projection + CAS catalog in shadow, grant=nil, constructs no lifecycle effect."}
 {"path":"packages/github-devloop/core/span_conformance.lua","owner":"cross-cutting","reason":"package-owned conformance for github-devloop span source-shape ratchet."}
 {"path":"packages/github-devloop/departments/comment_handoff/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
 {"path":"packages/github-devloop/departments/consensus_result/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
