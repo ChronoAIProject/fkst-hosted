@@ -1,7 +1,8 @@
 -- Non-circularity contract: production truth comes from the real loop
 -- department's transition_status probe and first post-CAS round-marker guard.
--- Catalog evidence is copied from observed probe arguments. Effects and legacy
--- CAS logs are separate axes, never inputs to the admission classification.
+-- Catalog admission evidence is copied from observed probe arguments. The
+-- outcome version comes from the event dedup key, matching the production log.
+-- Effects and legacy CAS logs are separate axes.
 
 local catalog = require("devloop.restart_cas_catalog")
 local owner_pending_projection = require("devloop.restart_owner_pending_projection")
@@ -23,6 +24,7 @@ local loop_department = require("departments.loop.main")
 local POLICY_ID = "cas.legacy_loop_plain_v1"
 local VARIANT = "thinking_to_blocked"
 local V_CURRENT = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+local V_OLDER = "consensus:github-devloop/issue/owner/repo/42/2026-06-02T01-02-03Z"
 local V_DIFFERENT = "consensus:github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
 
 local state_labels = {
@@ -110,7 +112,7 @@ local function observe_department(run)
   return result, probes, decisions, boundary_calls
 end
 
-local function evidence_from_probe(probe)
+local function evidence_from_probe(probe, outcome_version)
   local definition = catalog.definition(POLICY_ID)
   local variant = definition and definition.variants[VARIANT]
   t.is_true(variant ~= nil, "loop plain probe must select a catalog variant")
@@ -123,12 +125,12 @@ local function evidence_from_probe(probe)
   return {
     current = probe.current,
     variant = VARIANT,
-    incoming_version = probe.incoming_version,
+    incoming_version = outcome_version,
     target_version = probe.target_version,
   }
 end
 
-local function observed_admission(probe, boundary_reached)
+local function observed_admission(probe, boundary_reached, decision)
   if boundary_reached then
     t.eq(probe.outcome, "apply", "loop admission boundary requires an applying CAS probe")
     return { status = "apply", reason_code = "apply" }
@@ -140,7 +142,15 @@ local function observed_admission(probe, boundary_reached)
     return { status = "idempotent", reason_code = "already-at-target" }
   end
   if probe.outcome == "stale" then
-    return { status = "stale", reason_code = "advanced-or-diverged" }
+    local incoming_older = tostring(decision and decision.outcome or ""):find(
+      "incoming version < current marker version",
+      1,
+      true
+    ) ~= nil
+    return {
+      status = "stale",
+      reason_code = incoming_older and "incoming-version-older" or "advanced-or-diverged",
+    }
   end
   error("loop plain CAS probe applied without reaching its admission boundary")
 end
@@ -248,16 +258,19 @@ local function assert_case(fixture)
     t.is_true(type(boundary_calls[1].comments) == "table", fixture.name .. ": boundary comments captured")
   end
 
-  local evidence = evidence_from_probe(probe)
+  local evidence = evidence_from_probe(probe, event.dedup_key)
   t.eq(evidence.current, probe.current, fixture.name .. ": catalog current comes from probe")
-  t.eq(evidence.incoming_version, probe.incoming_version, fixture.name .. ": catalog incoming version comes from probe")
+  t.eq(evidence.incoming_version, event.dedup_key, fixture.name .. ": catalog incoming version comes from event dedup key")
   t.eq(evidence.target_version, probe.target_version, fixture.name .. ": catalog target version comes from probe")
-  local observed = observed_admission(probe, boundary_reached)
+  local observed = observed_admission(probe, boundary_reached, decision)
   local actual = catalog.resolve(POLICY_ID, evidence, projection)
   t.eq(actual.status, observed.status, fixture.name .. ": admission status parity")
   t.eq(actual.reason_code, observed.reason_code, fixture.name .. ": admission reason parity")
   t.eq(observed.status, fixture.admission_status, fixture.name .. ": observed admission status")
   t.eq(actual.status, fixture.admission_status, fixture.name .. ": catalog admission status")
+  if fixture.catalog_cas_outcome ~= nil then
+    t.eq(actual.cas_outcome, fixture.catalog_cas_outcome, fixture.name .. ": catalog CAS outcome")
+  end
 
   t.eq(result.exit_code, fixture.expected_exit_code or 0, fixture.name .. ": department exit code")
   t.eq(#result.raises, fixture.effect_count or 0, fixture.name .. ": captured effect count")
@@ -323,6 +336,18 @@ return {
       current_version = V_CURRENT,
       admission_status = "stale",
       legacy_log_outcome = "skip-advanced-or-diverged",
+    })
+  end,
+
+  test_loop_plain_older_event_version_formats_stale_outcome = function()
+    assert_case({
+      name = "loop-older-event-version-stale",
+      current_state = "ready",
+      current_version = V_CURRENT,
+      raw_event_version = V_OLDER,
+      admission_status = "stale",
+      catalog_cas_outcome = "skip-stale(incoming version < current marker version)",
+      legacy_log_outcome = "skip-stale(incoming version < current marker version)",
     })
   end,
 

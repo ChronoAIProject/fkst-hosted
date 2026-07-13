@@ -76,16 +76,21 @@ local fixtures = {
     expected_effect_ids = {},
   },
   {
-    -- Stale coverage is within the dedup_key == current.version regime only: this
-    -- reaches cas_outcome "skip-advanced-or-diverged". The loop stale version-branch
-    -- ("skip-stale(incoming version < current marker version)", when dedup_key is
-    -- ordered-older) is a documented gap not yet modeled by the version-less shadow
-    -- evidence -- see restart_authority.lua's header; close before grant-enablement.
     name = "shadow-newer-stale",
     current_state = "ready",
     current_version = V_CURRENT,
     expected_exit_code = 0,
     expected_status = "stale",
+    expected_effect_ids = {},
+  },
+  {
+    name = "shadow-newer-stale-older-event-version",
+    current_state = "ready",
+    current_version = V_CURRENT,
+    raw_event_version = V_OLDER,
+    expected_exit_code = 0,
+    expected_status = "stale",
+    expected_cas_outcome = "skip-stale(incoming version < current marker version)",
     expected_effect_ids = {},
   },
 }
@@ -312,7 +317,7 @@ local function fixture_comments(event, fixture)
   }
 end
 
-local function observed_admission(probe)
+local function observed_admission(probe, decision)
   if probe.outcome == "apply" then
     return { status = "apply", reason_code = "apply" }
   end
@@ -323,7 +328,15 @@ local function observed_admission(probe)
     return { status = "pending", reason_code = "source-marker-not-visible" }
   end
   if probe.outcome == "stale" then
-    return { status = "stale", reason_code = "advanced-or-diverged" }
+    local incoming_older = tostring(decision and decision.outcome or ""):find(
+      "incoming version < current marker version",
+      1,
+      true
+    ) ~= nil
+    return {
+      status = "stale",
+      reason_code = incoming_older and "incoming-version-older" or "advanced-or-diverged",
+    }
   end
   error("unexpected loop plain CAS probe outcome: " .. tostring(probe.outcome))
 end
@@ -418,7 +431,7 @@ end
 
 local function assert_case(fixture)
   local event = h.unresolved({
-    dedup_key = V_CURRENT,
+    dedup_key = fixture.raw_event_version or V_CURRENT,
     round = 0,
     narrowed_question = "Which fact resolves the remaining gap?",
     angle_digests = {
@@ -466,7 +479,7 @@ local function assert_case(fixture)
     fixture.name .. ": lifecycle-authoritative projection"
   )
 
-  local legacy = observed_admission(probe)
+  local legacy = observed_admission(probe, decision)
   legacy.cas_outcome = decision.outcome
   local sealed = restart_authority.seal_snapshot({
     owner = OWNER,
@@ -478,12 +491,16 @@ local function assert_case(fixture)
   })
   local shadow = restart_authority.decide_transition(sealed, {
     semantic_variant = SEMANTIC_VARIANT,
+    incoming_version = event.dedup_key,
   })
 
   assert_bidirectional(shadow, legacy, "status", fixture.name)
   t.eq(shadow.status, fixture.expected_status, fixture.name .. ": expected shadow status")
   assert_bidirectional(shadow, legacy, "reason_code", fixture.name)
   assert_bidirectional(shadow, legacy, "cas_outcome", fixture.name)
+  if fixture.expected_cas_outcome ~= nil then
+    t.eq(shadow.cas_outcome, fixture.expected_cas_outcome, fixture.name .. ": expected shadow CAS outcome")
+  end
   t.eq(shadow.edge_id, EDGE_ID, fixture.name .. ": selected edge id")
   t.eq(shadow.cas_policy_id, POLICY_ID, fixture.name .. ": selected CAS policy")
   t.eq(shadow.evidence.status, "complete", fixture.name .. ": evidence status")

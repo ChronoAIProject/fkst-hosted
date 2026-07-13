@@ -2,18 +2,17 @@
 -- The loop department's thinking-to-blocked probe is an admission sentinel; the
 -- real blocked transition belongs to reconcile, so this does not prove effect parity.
 --
--- Scope of the cas_outcome claim (honest bound): parity holds for admission status
--- and reason_code (two independent reachability implementations), and for cas_outcome
--- within the tested version regime (incoming dedup_key == current marker version). The
--- loop stale cas_outcome version-branch is NOT yet modeled here: production loop emits
--- "skip-stale(incoming version < current marker version)" when the dedup_key is
--- ordered-older (devloop_state.cas_outcome passes dedup_key as incoming_version),
--- whereas the catalog's plain loop model + this shadow's version-less evidence always
--- yield "skip-advanced-or-diverged". This divergence is rooted in the (unchanged)
--- catalog plain modeling of loop cas_outcome; the shadow composes it faithfully. It is
--- a documented gap to close before any grant-enablement (add a stale older-dedup_key
--- fixture + thread the incoming version, or make cas.legacy_loop_plain_v1 model the
--- stale version-branch).
+-- cas_outcome parity is COMPLETE for this edge: admission status and reason_code
+-- (two independent reachability implementations) plus the full cas_outcome including
+-- the loop stale VERSION-BRANCH. Production loop emits "skip-stale(incoming version <
+-- current marker version)" when the driving event's dedup_key is ordered-older
+-- (devloop_state.cas_outcome passes dedup_key as incoming_version) and
+-- "skip-advanced-or-diverged" otherwise; this shadow now threads that dedup_key as
+-- intent.incoming_version, the catalog's plain base_result passes it to status_result
+-- (cas.legacy_loop_plain_v1 resolves via resolve_profile, so the version-branch fires
+-- while the abstract cas.base_plain_legacy_v1 stays versionless via resolve_base), and
+-- the parity harness exercises the ordered-older stale case bidirectionally against the
+-- real loop department. The earlier version-branch gap is closed.
 
 local core = require("core")
 local owner = core.restart_package_name

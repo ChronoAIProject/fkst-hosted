@@ -169,7 +169,7 @@ end
 
 local function base_result(base, current, source_states, target_state, incoming_version, target_version, projection)
   if base == "plain" then
-    return status_result(current, plain_status(current, source_states, target_state, projection), nil)
+    return status_result(current, plain_status(current, source_states, target_state, projection), incoming_version)
   end
   if base == "versioned" then
     return status_result(
@@ -195,12 +195,21 @@ local function resolve_base(evidence, base, projection)
     or evidence.target_state == "" then
     return illegal("invalid-evidence")
   end
+  local incoming_version = evidence.incoming_version
+  if base == "plain" then
+    -- The abstract cas.base_plain_legacy_v1 (the only resolve_base plain policy) models
+    -- production's versionless transition_status admission primitive, so its stale
+    -- cas_outcome must NOT version-branch. Concrete plain profiles that DO carry a
+    -- cas_outcome version (e.g. loop_plain's dedup_key) resolve via resolve_profile, which
+    -- passes incoming_version to base_result directly and is unaffected by this nil.
+    incoming_version = nil
+  end
   return base_result(
     base,
     evidence.current,
     evidence.source_states,
     evidence.target_state,
-    evidence.incoming_version,
+    incoming_version,
     evidence.target_version,
     projection
   )
