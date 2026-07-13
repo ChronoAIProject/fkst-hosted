@@ -2,6 +2,7 @@ local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
 local gh_argv = require("testkit.gh_argv_mock")
+local rollup_health = require("core.rollup_health")
 local zh_summary = string.char(228, 184, 173, 230, 150, 135, 230, 145, 152, 232, 166, 129)
 
 local function opts(name, extra)
@@ -24,6 +25,7 @@ local function mock_env(write_mode, rollup_merge, integration, release_notes_fal
   t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', { stdout = "dev", stderr = "", exit_code = 0 })
   t.mock_command('printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"', { stdout = integration or "integration/dev", stderr = "", exit_code = 0 })
   t.mock_command('printf %s "$FKST_GITHUB_REPO"', { stdout = "owner/repo", stderr = "", exit_code = 0 })
+  t.mock_command('printf %s "$FKST_GITHUB_WRITE"', { stdout = write_mode or "", stderr = "", exit_code = 0 })
   t.mock_command('printf %s "$FKST_GITHUB_WRITE"', { stdout = write_mode or "", stderr = "", exit_code = 0 })
   t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', { stdout = "dev", stderr = "", exit_code = 0 })
   t.mock_command('printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"', { stdout = integration or "integration/dev", stderr = "", exit_code = 0 })
@@ -473,6 +475,52 @@ return {
     t.eq(sample.payload.dedup_key, "rollup-observe-sample/owner/repo/9")
     t.eq(sample.payload.replace_marker, "<!-- fkst:github-devloop-integration:rollup-observe-sample:v1")
     t.is_true(h.find_raise(result.raises, "devloop_rollup_ready") ~= nil)
+  end,
+
+  test_rollup_scan_uses_env_bot_identity_to_preserve_clean_soak_start = function()
+    local prod_bot = "prod-bot"
+    local first_clean_ms = (now() - 31 * 60) * 1000
+    local previous_sampled_ms = (now() - 60) * 1000
+    h.mock_author_policy_configure(core._test_bot_login)
+    mock_env("1", "auto")
+    t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', { stdout = prod_bot, stderr = "", exit_code = 0 })
+    t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', { stdout = prod_bot, stderr = "", exit_code = 0 })
+    mock_fetches()
+    mock_ahead(2)
+    mock_content_diff(true)
+    mock_pr_list({ number = 9 })
+    mock_integration_head("def456")
+    mock_rollup_pr_view({
+      comments = {
+        {
+          body = rollup_health.observe_sample_marker("def456", "clean", first_clean_ms, previous_sampled_ms),
+          author_login = prod_bot,
+        },
+      },
+    })
+    local snapshot = observe_clean()
+    t.mock_observe(snapshot)
+    local run_opts = opts("rollup-observe-prod-bot", {
+      FKST_GITHUB_WRITE = "1",
+      FKST_GITHUB_BOT_LOGIN = prod_bot,
+    })
+    local result = t.run_department("departments/rollup_scan/main.lua", {
+      queue = "devloop_branch_tick",
+      payload = { schema = "github-devloop.branch-tick.v1" },
+    }, run_opts)
+    t.eq(result.exit_code, 0)
+    local sample = h.find_raise(result.raises, "github-proxy.github_pr_comment_request")
+    t.is_true(sample ~= nil)
+    t.is_true(tostring(sample.payload.body):find(
+      'first_clean_observed_at_ms="' .. tostring(first_clean_ms) .. '"',
+      1,
+      true
+    ) ~= nil)
+    t.is_true(tostring(sample.payload.body):find(
+      'sampled_at_ms="' .. tostring(snapshot.generated_at_ms) .. '"',
+      1,
+      true
+    ) ~= nil)
   end,
 
   test_rollup_scan_stale_dead_letter_audit_starts_clean_head_soak = function()
