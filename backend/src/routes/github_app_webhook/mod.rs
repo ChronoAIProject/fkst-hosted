@@ -295,6 +295,31 @@ impl CacheBust for AppState {
 /// the enumerated `repositories` when present, else account-wide by login (an
 /// `all` install / a bare `deleted` never enumerates concrete repos). Never
 /// mints a token.
+/// Best-effort install-time trigger-issue seeding (issue #467), behind the
+/// `FKST_SEED_TRIGGER_ISSUE_ON_INSTALL` flag. Spawned so the webhook answers
+/// immediately; every failure is logged inside the seeder and never surfaces here
+/// (the webhook always returns 2xx). Idempotency (skip a repo that already has an
+/// open trigger issue) lives in the seeder.
+fn maybe_seed_trigger_issues(state: &AppState, owner_login: &str, repos: &[RepoObject]) {
+    if !state.config.reconcile.seed_trigger_issue_on_install {
+        return;
+    }
+    let Some(github) = state.github_app.clone() else {
+        tracing::warn!("seed-on-install enabled but the github app is not configured; skipping");
+        return;
+    };
+    let owner_repos: Vec<String> = repos.iter().map(|r| canonical(&r.full_name)).collect();
+    if owner_repos.is_empty() {
+        return;
+    }
+    let label = state.config.reconcile.substrate_trigger_label.clone();
+    let owner = owner_login.to_string();
+    tokio::spawn(async move {
+        crate::reconcile::seed_issue::seed_trigger_issues(&github, &label, &owner, &owner_repos)
+            .await;
+    });
+}
+
 async fn handle_installation(state: &AppState, body: &[u8]) -> Result<Handled, String> {
     let event: InstallationEvent =
         serde_json::from_slice(body).map_err(|e| format!("installation parse: {e}"))?;
@@ -303,6 +328,13 @@ async fn handle_installation(state: &AppState, body: &[u8]) -> Result<Handled, S
     // spawns for any pending trigger). An account-wide event enumerates no repos,
     // so the periodic full-resync catches it. Additive to the cache-bust below.
     enqueue_installation_repos(state, event.installation.id, &event.repositories);
+    if event.action == "created" {
+        maybe_seed_trigger_issues(
+            state,
+            &event.installation.account.login,
+            &event.repositories,
+        );
+    }
     dispatch_installation(state, &event).await
 }
 
@@ -360,6 +392,13 @@ async fn handle_installation_repositories(
     // live session torn down. Additive to the cache-bust below.
     enqueue_installation_repos(state, event.installation.id, &event.repositories_added);
     enqueue_installation_repos(state, event.installation.id, &event.repositories_removed);
+    if event.action == "added" {
+        maybe_seed_trigger_issues(
+            state,
+            &event.installation.account.login,
+            &event.repositories_added,
+        );
+    }
     dispatch_installation_repositories(state, &event).await
 }
 

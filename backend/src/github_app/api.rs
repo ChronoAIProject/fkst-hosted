@@ -130,6 +130,35 @@ pub trait GithubApi: Send + Sync {
         unimplemented!("create_issue_comment is only implemented by the HTTP transport")
     }
 
+    /// Create a new issue (`POST /repos/{o}/{r}/issues`) with `title`, `body`, and
+    /// `labels`; returns its number. Default panics (only the HTTP transport
+    /// implements it).
+    async fn create_issue(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        title: &str,
+        body: &str,
+        labels: &[String],
+    ) -> Result<u64, GithubAppError> {
+        let _ = (token, owner, repo, title, body, labels);
+        unimplemented!("create_issue is only implemented by the HTTP transport")
+    }
+
+    /// The numbers of OPEN issues carrying `label` (the seed-issue idempotency
+    /// probe; excludes pull requests). Default panics.
+    async fn open_issues_with_label(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        label: &str,
+    ) -> Result<Vec<u64>, GithubAppError> {
+        let _ = (token, owner, repo, label);
+        unimplemented!("open_issues_with_label is only implemented by the HTTP transport")
+    }
+
     /// Add labels to an issue (additive; preserves existing). Default panics.
     async fn add_issue_labels(
         &self,
@@ -600,6 +629,80 @@ impl GithubApi for HttpGithubApi {
             )));
         }
         Ok(())
+    }
+
+    async fn create_issue(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        title: &str,
+        body: &str,
+        labels: &[String],
+    ) -> Result<u64, GithubAppError> {
+        let url = format!("{}/repos/{owner}/{repo}/issues", self.api_base);
+        let response = self
+            .client
+            .post(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .json(&serde_json::json!({ "title": title, "body": body, "labels": labels }))
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("create_issue: {e}")))?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "create_issue status {status}: {body}"
+            )));
+        }
+        let value: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("create_issue parse: {e}")))?;
+        value.get("number").and_then(|n| n.as_u64()).ok_or_else(|| {
+            GithubAppError::Http("create_issue: response missing number".to_string())
+        })
+    }
+
+    async fn open_issues_with_label(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        label: &str,
+    ) -> Result<Vec<u64>, GithubAppError> {
+        let url = format!("{}/repos/{owner}/{repo}/issues", self.api_base);
+        let response = self
+            .client
+            .get(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .query(&[("state", "open"), ("labels", label), ("per_page", "100")])
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("open_issues_with_label: {e}")))?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "open_issues_with_label status {status}: {body}"
+            )));
+        }
+        let items: Vec<serde_json::Value> = response
+            .json()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("open_issues_with_label parse: {e}")))?;
+        // The issues endpoint also returns PRs (they carry a `pull_request` object);
+        // exclude them so a PR never masquerades as an existing trigger issue.
+        Ok(items
+            .iter()
+            .filter(|it| it.get("pull_request").is_none())
+            .filter_map(|it| it.get("number").and_then(|n| n.as_u64()))
+            .collect())
     }
 
     async fn add_issue_labels(
