@@ -812,9 +812,13 @@ return {
     assert_illegal(actual, "unknown-variant", "illegal(unknown-variant)", "unknown variant")
   end,
 
-  test_shadow_decider_fences_other_thinking_to_blocked_edge = function()
+  test_shadow_decider_fences_unsupported_known_edge = function()
+    -- A known, correctly-shaped edge whose (policy, variant) is not yet in the
+    -- shadow whitelist must be fenced. issue_reconcile_true_stall is now a
+    -- supported edge; reimplement_impl_failed remains unsupported and stands in
+    -- for the "known but not-yet-whitelisted" case.
     local actual = restart_authority.decide_transition(sealed_snapshot(), {
-      semantic_variant = "issue_reconcile_true_stall",
+      semantic_variant = "reimplement_impl_failed",
     })
     assert_illegal(
       actual,
