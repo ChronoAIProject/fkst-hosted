@@ -12,11 +12,13 @@ local inventories = {
 }
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
+local restart_authority = require("core.restart_authority")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
 local projection = owner_pending_projection.derive(core.restart_package_name, core.restart_transition_table(), inventories)
 local reconcile_department = require("departments.reconcile.main")
+local conv_reconcile = require("devloop.convergence.reconcile")
 
 local POLICY_ID = "cas.legacy_issue_reconcile_v1"
 local VARIANT = "thinking_to_blocked"
@@ -32,6 +34,49 @@ local function reconcile_event(incoming_version, round)
   event.base_version = incoming_version
   event.dedup_key = "reconcile:" .. tostring(incoming_version) .. "/loop/" .. tostring(event.round)
   return event
+end
+
+-- The reconcile department derives its CAS incoming_version from the CURRENT
+-- marker version bumped to the reconcile round (reconcile_terminal_state_version),
+-- NOT from event.base_version. The shadow intent builder derives the same version
+-- independently from (current_version, round) via the same public helper the
+-- department uses, so both deciders see identical CAS inputs without the shadow
+-- reading the spied probe.
+local function shadow_intent_from_event(event, current_version)
+  return {
+    semantic_variant = "issue_reconcile_true_stall",
+    source_boundary = "devloop_reconcile",
+    target = "blocked",
+    incoming_version = conv_reconcile.reconcile_terminal_state_version(current_version, event.round),
+  }
+end
+
+local function seal_snapshot(current_state, current_version)
+  return restart_authority.seal_snapshot({
+    owner = core.restart_package_name,
+    current = {
+      state = current_state,
+      version = current_version,
+    },
+  })
+end
+
+local function shadow_disposition(decision)
+  if decision.status == "apply" then
+    return { status = "apply", reason_code = "apply" }
+  end
+  if decision.status == "idempotent" then
+    return { status = "idempotent", reason_code = "already-at-target" }
+  end
+  if decision.status == "stale" then
+    return { status = "stale", reason_code = decision.reason_code }
+  end
+  error("unexpected shadow status: " .. tostring(decision.status))
+end
+
+local function assert_bidirectional(name, observed, shadow)
+  t.eq(shadow.status, observed.status, name .. ": shadow status parity")
+  t.eq(shadow.reason_code, observed.reason_code, name .. ": shadow reason parity")
 end
 
 local function observe_department(run)
@@ -246,6 +291,36 @@ local function assert_catalog_matches_observed_decision(fixture)
   end
 end
 
+local function assert_shadow_matches_observed_decision(fixture)
+  local event = reconcile_event(fixture.incoming_version, fixture.round)
+  mock_current_issue(event, fixture)
+
+  local _, probes, decisions, boundary_calls = observe_department(function()
+    return run_real_department(event)
+  end)
+
+  t.eq(#probes, 1, fixture.name .. ": real department CAS probe count")
+  local probe = probes[1]
+  local boundary_reached = #boundary_calls > 0
+  local observed = observed_admission(probe, boundary_reached)
+  local shadow_intent = shadow_intent_from_event(event, fixture.current_version)
+  local shadow = restart_authority.decide_transition(
+    seal_snapshot(fixture.current_state, fixture.current_version),
+    shadow_intent
+  )
+  t.eq(shadow.status ~= "illegal", true, fixture.name .. ": shadow edge supported")
+  assert_bidirectional(fixture.name, observed, shadow_disposition(shadow))
+
+  if fixture.expected_status ~= nil then
+    t.eq(shadow.status, fixture.expected_status, fixture.name .. ": shadow status")
+  end
+  if fixture.expected_reason_code ~= nil then
+    t.eq(shadow.reason_code, fixture.expected_reason_code, fixture.name .. ": shadow reason")
+  end
+  t.eq(shadow_intent.incoming_version, probe.incoming_version, fixture.name .. ": independently round-derived version equals the real department's probe input, without reading the spied probe")
+  t.eq(#decisions, 1, fixture.name .. ": legacy log still captured once")
+end
+
 local function assert_rejected_before_cas(name, payload)
   h.mock_bot_env()
   local result, probes, _, boundary_calls = observe_department(function()
@@ -347,6 +422,26 @@ return {
       admission_status = "apply",
       effect_count = 2,
       post_admission_disposition = "effect-emitted(blocked)",
+    })
+  end,
+
+  -- The reconcile department bumps a monotonic round-scoped version and only
+  -- reaches the versioned CAS from a live thinking marker, so its sole CAS
+  -- outcome is apply. Idempotent (already at/after blocked) and stale
+  -- (state-advanced) are resolved by the department's pre-CAS stage_rank guards
+  -- and never invoke the probe, so there is no real idempotent/stale CAS
+  -- decision to compare the shadow against. incoming_version here only feeds the
+  -- reconcile event's base_version (used for reconcile-marker dedup); it does NOT
+  -- feed the CAS, whose version is derived from the current marker version bumped
+  -- to the reconcile round (reconcile_terminal_state_version).
+  test_issue_reconcile_shadow_applies_from_thinking = function()
+    assert_shadow_matches_observed_decision({
+      name = "issue-reconcile-shadow-apply-from-thinking",
+      current_state = "thinking",
+      current_version = V_EQUAL,
+      incoming_version = V_EQUAL,
+      expected_status = "apply",
+      expected_reason_code = "apply",
     })
   end,
 
