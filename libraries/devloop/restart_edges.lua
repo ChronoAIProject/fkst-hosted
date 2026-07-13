@@ -220,6 +220,7 @@ function M.extract_entry_edges(owner, inventory, rows)
         kind = "entry",
         source = { state = current_row_id, boundary = activation.boundary },
         target = activation.target,
+        semantic_variant = activation.output_variant,
         provenance = {
           owner = owner,
           row = current_row_id,
@@ -460,6 +461,7 @@ function M.extract_autonomous_edges(owner, rows)
           kind = "autonomous",
           source = { state = current_row_id, boundary = nil },
           target = successor.state,
+          semantic_variant = successor.output_variant,
           provenance = {
             owner = owner,
             row = current_row_id,
@@ -502,6 +504,7 @@ function M.extract_guard_boundary_edges(owner, rows)
           kind = "guard_boundary",
           source = { state = current_row_id, boundary = nil },
           target = successor.state,
+          semantic_variant = successor.output_variant,
           provenance = {
             owner = owner,
             row = current_row_id,
@@ -553,6 +556,7 @@ function M.extract_guard_boundary_edges(owner, rows)
               kind = "guard_boundary",
               source = { state = current_row_id, boundary = guard_boundary.name },
               target = successor.state,
+              semantic_variant = successor.output_variant,
               provenance = {
                 owner = owner,
                 row = current_row_id,
@@ -601,6 +605,7 @@ function M.extract_timeout_edges(owner, rows)
         kind = "timeout",
         source = { state = current_row_id, boundary = boundary },
         target = successor.state,
+        semantic_variant = successor.output_variant,
         timeout_evidence_policy_id = policy_id,
         provenance = {
           owner = owner,

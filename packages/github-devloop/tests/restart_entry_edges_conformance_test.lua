@@ -43,6 +43,7 @@ local expected_entries = {
     source_boundary = nil,
     target = "implementing",
     field = "receiver_activations",
+    semantic_variant = "retry-implementation",
     cas_policy_id = "cas.legacy_implement_activation_handoff_v1",
     cas_variant = "impl_failed_to_implementing",
   },
@@ -52,6 +53,7 @@ local expected_entries = {
     source_boundary = nil,
     target = "implementing",
     field = "receiver_activations",
+    semantic_variant = "implementation_kicked_off",
     cas_policy_id = "cas.legacy_implement_activation_handoff_v1",
     cas_variant = "ready_to_implementing",
   },
@@ -61,6 +63,7 @@ local expected_entries = {
     source_boundary = "devloop_reconcile",
     target = "blocked",
     field = "receiver_activations",
+    semantic_variant = "issue_reconcile_true_stall",
     cas_policy_id = "cas.legacy_issue_reconcile_v1",
     cas_variant = "thinking_to_blocked",
   },
@@ -308,6 +311,7 @@ local function assert_entry_shape(edges)
     if expected.cas_variant ~= nil then
       edge_keys.cas_variant = true
     end
+    if expected.semantic_variant ~= nil then edge_keys.semantic_variant = true end
     edge_keys.pending_order = true
     assert_exact_keys(edge, edge_keys)
     if expected.source_state == nil then
@@ -324,6 +328,7 @@ local function assert_entry_shape(edges)
     t.eq(edge.source.state, expected.source_state)
     t.eq(edge.source.boundary, expected.source_boundary)
     t.eq(edge.target, expected.target)
+    t.eq(edge.semantic_variant, expected.semantic_variant)
     t.eq(edge.provenance.owner, owner)
     t.eq(edge.provenance.row, expected.row_id)
     t.eq(edge.provenance.field, expected.field)

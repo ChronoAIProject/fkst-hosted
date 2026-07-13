@@ -69,6 +69,7 @@ local expected_entries = {
     source_boundary = nil,
     target = "merging",
     field = "receiver_activations",
+    semantic_variant = "handoff_to_merge_gate",
     cas_policy_id = "cas.legacy_merge_v1",
     cas_variant = "merge_ready_or_merging_to_merging",
   },
@@ -79,6 +80,7 @@ local expected_entries = {
     source_boundary = "devloop_fix_reconcile",
     target = "blocked",
     field = "receiver_activations",
+    semantic_variant = "review_reject_to_blocked",
     cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
     cas_variant = "review_reject_to_blocked",
   },
@@ -89,6 +91,7 @@ local expected_entries = {
     source_boundary = "devloop_fix_reconcile",
     target = "blocked",
     field = "receiver_activations",
+    semantic_variant = "review_reject_to_blocked",
     cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
     cas_variant = "review_reject_to_blocked",
   },
@@ -99,6 +102,7 @@ local expected_entries = {
     source_boundary = "devloop_fix_reconcile",
     target = "blocked",
     field = "receiver_activations",
+    semantic_variant = "bounded_fix_to_blocked",
     cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
     cas_variant = "bounded_fix_to_blocked",
   },
@@ -109,6 +113,7 @@ local expected_entries = {
     source_boundary = "devloop_fix_reconcile",
     target = "blocked",
     field = "receiver_activations",
+    semantic_variant = "review_reject_to_blocked",
     cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
     cas_variant = "review_reject_to_blocked",
   },
@@ -119,6 +124,7 @@ local expected_entries = {
     source_boundary = "devloop_fix_reconcile",
     target = "blocked",
     field = "receiver_activations",
+    semantic_variant = "bounded_fix_to_blocked",
     cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
     cas_variant = "bounded_fix_to_blocked",
   },
@@ -129,6 +135,7 @@ local expected_entries = {
     source_boundary = "devloop_fix_reconcile",
     target = "blocked",
     field = "receiver_activations",
+    semantic_variant = "review_reject_to_blocked",
     cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
     cas_variant = "review_reject_to_blocked",
   },
@@ -139,6 +146,7 @@ local expected_entries = {
     source_boundary = "devloop_fix_reconcile",
     target = "blocked",
     field = "receiver_activations",
+    semantic_variant = "bounded_fix_to_blocked",
     cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
     cas_variant = "bounded_fix_to_blocked",
   },
@@ -534,6 +542,7 @@ local function assert_entry_shape(edges)
     if expected.cas_variant ~= nil then
       edge_keys.cas_variant = true
     end
+    if expected.semantic_variant ~= nil then edge_keys.semantic_variant = true end
     edge_keys.pending_order = true
     assert_exact_keys(edge, edge_keys)
     if expected.source_state == nil then
@@ -551,6 +560,7 @@ local function assert_entry_shape(edges)
     t.eq(edge.source.state, expected.source_state)
     t.eq(edge.source.boundary, expected.source_boundary)
     t.eq(edge.target, expected.target)
+    t.eq(edge.semantic_variant, expected.semantic_variant)
     t.eq(edge.provenance.owner, owner)
     t.eq(edge.provenance.row, expected.row_id)
     t.eq(edge.provenance.field, expected.field)
