@@ -65,6 +65,51 @@ local function attach_cas_metadata(edge, declaration, context)
   end
 end
 
+local function validate_effect_ids(effect_ids, context)
+  if type(effect_ids) ~= "table" then
+    error("devloop.restart_edges: " .. context .. ".effect_ids must be an array of strings")
+  end
+  local count = 0
+  for key, effect_id in pairs(effect_ids) do
+    if type(key) ~= "number" or key < 1 or key % 1 ~= 0 or type(effect_id) ~= "string" then
+      error("devloop.restart_edges: " .. context .. ".effect_ids must be an array of strings")
+    end
+    count = count + 1
+  end
+  if count ~= #effect_ids then
+    error("devloop.restart_edges: " .. context .. ".effect_ids must be a dense array")
+  end
+end
+
+local function validate_effect_entitlement(entry, context)
+  if type(entry) ~= "table" then
+    error("devloop.restart_edges: " .. context .. " must be a table")
+  end
+  if not is_nonempty_string(entry.id) then
+    error("devloop.restart_edges: " .. context .. ".id must be a non-empty string")
+  end
+  validate_effect_ids(entry.effect_ids, context)
+end
+
+local function attach_effect_entitlements(edge, declaration, context)
+  local entitlements = declaration.transition_effect_entitlements
+  if entitlements == nil then
+    return
+  end
+  if type(entitlements) ~= "table" then
+    error("devloop.restart_edges: " .. context .. ".transition_effect_entitlements must be a table")
+  end
+  validate_effect_entitlement(
+    entitlements.apply,
+    context .. ".transition_effect_entitlements.apply"
+  )
+  validate_effect_entitlement(
+    entitlements.idempotent,
+    context .. ".transition_effect_entitlements.idempotent"
+  )
+  edge.transition_effect_entitlements = entitlements
+end
+
 local function attach_pending_order(edge, declaration, context)
   local pending_order = declaration.pending_order
   if pending_order == nil then
@@ -469,6 +514,7 @@ function M.extract_autonomous_edges(owner, rows)
           },
         }
         attach_cas_metadata(edge, successor, "autonomous successor")
+        attach_effect_entitlements(edge, successor, "autonomous successor")
         attach_pending_order(edge, successor, "autonomous successor")
         table.insert(edges, edge)
       end

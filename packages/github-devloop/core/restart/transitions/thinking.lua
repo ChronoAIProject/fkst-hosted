@@ -109,6 +109,17 @@ return function(M, h)
           output_variant = "consensus-stalled",
           cas_policy_id = "cas.legacy_loop_plain_v1",
           cas_variant = "thinking_to_blocked",
+          -- SPEC sections 69/71 and A4.3 row-replay classify both emission plans as grantless.
+          transition_effect_entitlements = {
+            apply = {
+              id = "github-devloop/thinking/autonomous/consensus-stalled/apply",
+              effect_ids = {},
+            },
+            idempotent = {
+              id = "github-devloop/thinking/autonomous/consensus-stalled/idempotent",
+              effect_ids = {},
+            },
+          },
           kind = "autonomous",
           pending_order = { participates = true, predecessor_state = "thinking" },
           failure = true,

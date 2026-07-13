@@ -14,6 +14,8 @@ local OWNER = "github-devloop"
 local SEMANTIC_VARIANT = "consensus-stalled"
 local POLICY_ID = "cas.legacy_loop_plain_v1"
 local EDGE_ID = "github-devloop/thinking/autonomous/consensus-stalled"
+local APPLY_ENTITLEMENT_ID = EDGE_ID .. "/apply"
+local IDEMPOTENT_ENTITLEMENT_ID = EDGE_ID .. "/idempotent"
 local V_CURRENT = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
 
 local state_labels = {
@@ -24,23 +26,46 @@ local state_labels = {
 
 local fixtures = {
   {
-    name = "shadow-source-apply",
+    name = "shadow-source-apply-next-round",
     current_state = "thinking",
     current_version = V_CURRENT,
     expected_exit_code = 0,
     needs_context = true,
+    expected_status = "apply",
+    expected_entitlement_id = APPLY_ENTITLEMENT_ID,
+    expected_effect_ids = {
+      "consensus.proposal",
+      "github-proxy.github_issue_comment_request",
+    },
+  },
+  {
+    name = "shadow-source-apply-terminal",
+    current_state = "thinking",
+    current_version = V_CURRENT,
+    expected_exit_code = 0,
+    essence_stall = true,
+    expected_status = "apply",
+    expected_entitlement_id = APPLY_ENTITLEMENT_ID,
+    expected_effect_ids = {
+      "github-proxy.github_issue_comment_request",
+    },
   },
   {
     name = "shadow-target-idempotent",
     current_state = "blocked",
     current_version = V_CURRENT,
     expected_exit_code = 0,
+    expected_status = "idempotent",
+    expected_entitlement_id = IDEMPOTENT_ENTITLEMENT_ID,
+    expected_effect_ids = {},
   },
   {
     name = "shadow-older-pending",
     current_state = nil,
     current_version = nil,
     expected_exit_code = 1,
+    expected_status = "pending",
+    expected_effect_ids = {},
   },
   {
     -- Stale coverage is within the dedup_key == current.version regime only: this
@@ -52,14 +77,18 @@ local fixtures = {
     current_state = "ready",
     current_version = V_CURRENT,
     expected_exit_code = 0,
+    expected_status = "stale",
+    expected_effect_ids = {},
   },
 }
 
 local function observe_department(run)
   local probes = {}
   local decisions = {}
+  local apply_plans = {}
   local original_transition = devloop_state.transition_status
   local original_log_cas = devloop_logging.log_cas_decision
+  local original_log_apply = devloop_logging.log_apply
 
   devloop_state.transition_status = function(
     current,
@@ -113,14 +142,44 @@ local function observe_department(run)
       reason
     )
   end
+  devloop_logging.log_apply = function(
+    dept,
+    proposal_id,
+    to_state,
+    version,
+    labels,
+    effect_ids
+  )
+    local copied_effect_ids = {}
+    for _, effect_id in ipairs(effect_ids or {}) do
+      table.insert(copied_effect_ids, effect_id)
+    end
+    table.insert(apply_plans, {
+      dept = dept,
+      proposal_id = proposal_id,
+      to_state = to_state,
+      version = version,
+      labels = labels,
+      effect_ids = copied_effect_ids,
+    })
+    return original_log_apply(
+      dept,
+      proposal_id,
+      to_state,
+      version,
+      labels,
+      effect_ids
+    )
+  end
 
   local ok, result = pcall(run)
+  devloop_logging.log_apply = original_log_apply
   devloop_logging.log_cas_decision = original_log_cas
   devloop_state.transition_status = original_transition
   if not ok then
     error(result, 0)
   end
-  return result, probes, decisions
+  return result, probes, decisions, apply_plans
 end
 
 local function run_real_department(payload)
@@ -176,6 +235,54 @@ local function assert_bidirectional(actual, expected, field, context)
   t.eq(expected[field], actual[field], context .. ": legacy-to-shadow " .. field)
 end
 
+local function assert_array(actual, expected, context)
+  t.eq(type(actual), "table", context .. ": array type")
+  t.eq(#actual, #expected, context .. ": array length")
+  for index, value in ipairs(expected) do
+    t.eq(actual[index], value, context .. ": array item " .. tostring(index))
+  end
+  for key in pairs(actual) do
+    t.eq(
+      type(key) == "number" and key >= 1 and key <= #expected and key % 1 == 0,
+      true,
+      context .. ": dense array key"
+    )
+  end
+end
+
+local function lifecycle_authoritative_projection(apply_plans, context)
+  local projection = {}
+  local grantless_effect_ids = {
+    ["consensus.proposal"] = true,
+    ["github-proxy.github_issue_comment_request"] = true,
+  }
+  for _, plan in ipairs(apply_plans) do
+    t.eq(plan.dept, "loop", context .. ": apply plan department")
+    t.eq(plan.to_state, nil, context .. ": no state:v1 marker write")
+    for _, label in ipairs((plan.labels and plan.labels.add) or {}) do
+      if devloop_state.is_state_label(label) then
+        table.insert(projection, "label:add:" .. label)
+      end
+    end
+    for _, label in ipairs((plan.labels and plan.labels.remove) or {}) do
+      if devloop_state.is_state_label(label) then
+        table.insert(projection, "label:remove:" .. label)
+      end
+    end
+    for _, effect_id in ipairs(plan.effect_ids) do
+      t.eq(
+        grantless_effect_ids[effect_id],
+        true,
+        context .. ": observed effect is published-seam or non-lifecycle grantless"
+      )
+      if grantless_effect_ids[effect_id] ~= true then
+        table.insert(projection, effect_id)
+      end
+    end
+  end
+  return projection
+end
+
 local function assert_case(fixture)
   local event = h.unresolved({
     dedup_key = V_CURRENT,
@@ -184,6 +291,7 @@ local function assert_case(fixture)
     angle_digests = {
       { angle = "minimal", verdict = "abstain", digest = "shadow-parity" },
     },
+    essence_stall = fixture.essence_stall,
   })
   local labels = { "fkst-dev:enabled" }
   if fixture.current_state ~= nil then
@@ -194,7 +302,7 @@ local function assert_case(fixture)
     h.mock_context_bundle(event)
   end
 
-  local result, probes, decisions = observe_department(function()
+  local result, probes, decisions, apply_plans = observe_department(function()
     return run_real_department(event)
   end)
 
@@ -211,6 +319,19 @@ local function assert_case(fixture)
   t.eq(probe.incoming_version, nil, fixture.name .. ": plain probe incoming version")
   t.eq(probe.target_version, nil, fixture.name .. ": plain probe target version")
   t.eq(decision.dept, "loop", fixture.name .. ": legacy decision department")
+  t.eq(#apply_plans, fixture.expected_status == "apply" and 1 or 0, fixture.name .. ": apply plan count")
+  if #apply_plans == 1 then
+    assert_array(
+      apply_plans[1].effect_ids,
+      fixture.expected_effect_ids,
+      fixture.name .. ": observed OLD effect ids"
+    )
+  end
+  assert_array(
+    lifecycle_authoritative_projection(apply_plans, fixture.name),
+    {},
+    fixture.name .. ": lifecycle-authoritative projection"
+  )
 
   local legacy = observed_admission(probe)
   legacy.cas_outcome = decision.outcome
@@ -227,6 +348,7 @@ local function assert_case(fixture)
   })
 
   assert_bidirectional(shadow, legacy, "status", fixture.name)
+  t.eq(shadow.status, fixture.expected_status, fixture.name .. ": expected shadow status")
   assert_bidirectional(shadow, legacy, "reason_code", fixture.name)
   assert_bidirectional(shadow, legacy, "cas_outcome", fixture.name)
   t.eq(shadow.edge_id, EDGE_ID, fixture.name .. ": selected edge id")
@@ -235,7 +357,14 @@ local function assert_case(fixture)
   t.eq(#shadow.evidence.refs, 0, fixture.name .. ": default evidence refs")
   t.eq(shadow.evidence.facts.source, "thinking", fixture.name .. ": evidence source")
   t.eq(shadow.evidence.facts.target, "blocked", fixture.name .. ": evidence target")
+  t.eq(shadow.effect_entitlement_id, fixture.expected_entitlement_id, fixture.name .. ": entitlement id")
+  if fixture.expected_entitlement_id ~= nil then
+    assert_array(shadow.granted_effect_ids, {}, fixture.name .. ": granted effect ids")
+  else
+    t.eq(shadow.granted_effect_ids, nil, fixture.name .. ": no granted effect ids")
+  end
   t.eq(shadow.grant, nil, fixture.name .. ": grant disabled")
+  return shadow
 end
 
 local function assert_illegal(actual, reason_code, cas_outcome, context)
@@ -255,9 +384,16 @@ end
 
 return {
   test_shadow_decider_matches_legacy_loop_plain_cas_triplets = function()
+    local entitlement_ids = {}
     for _, fixture in ipairs(fixtures) do
-      assert_case(fixture)
+      local shadow = assert_case(fixture)
+      if shadow.effect_entitlement_id ~= nil then
+        entitlement_ids[shadow.status] = shadow.effect_entitlement_id
+      end
     end
+    t.eq(entitlement_ids.apply, APPLY_ENTITLEMENT_ID, "apply entitlement selected")
+    t.eq(entitlement_ids.idempotent, IDEMPOTENT_ENTITLEMENT_ID, "idempotent entitlement selected")
+    t.eq(entitlement_ids.apply == entitlement_ids.idempotent, false, "apply and idempotent entitlement ids are distinct")
   end,
 
   test_shadow_decider_rejects_unsealed_snapshot = function()

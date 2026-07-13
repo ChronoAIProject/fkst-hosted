@@ -107,6 +107,7 @@ public = [
   "devloop.restart_actionable_epoch",
   "devloop.restart_cas_catalog",
   "devloop.restart_edges",
+  "devloop.restart_effect_entitlements",
   "devloop.restart_owner_pending_projection",
   "devloop.restart_pending_projection",
   "devloop.restart_sinks",

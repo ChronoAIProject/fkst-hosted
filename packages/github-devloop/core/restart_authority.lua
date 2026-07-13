@@ -27,6 +27,7 @@ local owner_pending_projection = require("devloop.restart_owner_pending_projecti
 local edges = owner_pending_projection.edges(owner, rows, inventories)
 local projection = owner_pending_projection.derive(owner, rows, inventories)
 local catalog = require("devloop.restart_cas_catalog")
+local restart_effect_entitlements = require("devloop.restart_effect_entitlements")
 
 local M = {}
 local issued = setmetatable({}, { __mode = "k" })
@@ -154,12 +155,25 @@ function M.decide_transition(sealed_snapshot, intent)
     variant = edge.cas_variant,
   }
   local resolved = catalog.resolve(edge.cas_policy_id, evidence, projection)
+  local disposition = ({
+    apply = "apply",
+    idempotent = "idempotent",
+  })[resolved.status]
+  local effect_entitlement_id = nil
+  local granted_effect_ids = nil
+  if disposition ~= nil and edge.transition_effect_entitlements ~= nil then
+    local entitlement = restart_effect_entitlements.resolve(edge, disposition)
+    effect_entitlement_id = entitlement.id
+    granted_effect_ids = entitlement.effect_ids
+  end
   return {
     status = resolved.status,
     reason_code = resolved.reason_code,
     cas_outcome = resolved.cas_outcome,
     edge_id = edge.id,
     cas_policy_id = edge.cas_policy_id,
+    effect_entitlement_id = effect_entitlement_id,
+    granted_effect_ids = granted_effect_ids,
     evidence = {
       status = "complete",
       refs = normalized.evidence_refs or {},

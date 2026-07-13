@@ -144,6 +144,7 @@ local function expected_edges(owner, rows)
           target = successor.state,
           semantic_variant = successor.output_variant,
           pending_order = copy_value(successor.pending_order),
+          transition_effect_entitlements = copy_value(successor.transition_effect_entitlements),
           provenance = {
             owner = owner,
             row = row.from_state,
@@ -300,6 +301,9 @@ local function assert_edges(actual, expected, empty_rows)
     end
     if expected_edge.pending_order ~= nil then
       edge_keys.pending_order = true
+    end
+    if expected_edge.transition_effect_entitlements ~= nil then
+      edge_keys.transition_effect_entitlements = true
     end
     assert_exact_keys(edge, edge_keys)
     assert_exact_keys(edge.source, { state = true })
