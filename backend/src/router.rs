@@ -67,8 +67,10 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
     // The named-environment REST API (issue #338) under `/api/v1`. It is open at
     // the app layer: identity is the per-request GitHub token verified by the
     // `GithubUser` extractor, not middleware. Session query/stop are NOT a REST
-    // surface — a session is controlled solely through its GitHub issue (the
-    // `/status` + `/stop` issue comments, authorized by sender == issue author).
+    // surface — a session is controlled solely through its GitHub issue
+    // LIFECYCLE: opening a trigger issue registers it, closing the issue retires
+    // it, and open work-label issues keep it from idling. Issue comments are
+    // inert (the `/status` + `/stop` commands were removed with Model A).
     //
     // The identity-gated log-download endpoint (`/api/v1/logs/*`) is merged into the
     // same `/api/v1` subtree. It is likewise open at the app layer (it authorizes
