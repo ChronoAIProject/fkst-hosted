@@ -64,3 +64,32 @@ always can. A leading `@` is fine. Frozen once the session registers. Delete thi
 whole section for author + admins only (the default).
 -->
 
+### Output Language
+
+<!--
+Optional. ONE locale tag (e.g. `en`, `zh`, `zh-CN`) — the language the session's
+packages write user-visible comments in. The value must EXACTLY match a
+`locales/<value>.lua` file shipped by the session's package (case- and
+separator-sensitive); a mismatch silently falls back to English. Delete this
+whole section for English (the default).
+-->
+
+### Engine Config
+
+<!--
+Optional. Advanced engine tunables, ONE `KEY=value` per line, drawn ONLY from
+this allowlist (anything else is rejected with an explanatory comment):
+  FKST_CODEX_PERMIT_SLOTS=<1..32>          concurrent codex subprocesses
+  FKST_QUEUE_CAPACITY=<1..1024>            per-queue capacity
+  FKST_MAX_IN_FLIGHT_PER_DEPT=<1..1024>    per-department concurrency
+  FKST_DURABLE_ADMISSION_BURST_PER_DEPT=<1..1024>
+  FKST_RETRY_DEFAULT_MAX_ATTEMPTS=<1..100>
+  FKST_RETRY_DEFAULT_BASE / FKST_RETRY_DEFAULT_CAP /
+  FKST_DEPARTMENT_DEFAULT_STALL_WINDOW /
+  FKST_SUBSCRIBER_ABSENT_DELIVERY_BUDGET=<n>s|m|h   (1 second ..= 7 days; the
+    effective retry CAP must stay >= the effective BASE — defaults 60s / 30m)
+  FKST_RATE_POOL_<NAME>=<burst>,<refill_per_minute> throttle a program by
+    basename (e.g. FKST_RATE_POOL_GH=10,10); platform defaults can only be
+    TIGHTENED, never widened.
+Delete this whole section for the engine defaults.
+-->

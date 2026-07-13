@@ -42,6 +42,7 @@ pub fn parse_registration(
         &spec.work_label,
         spec.environment.as_deref(),
         spec.output_lang.as_deref(),
+        &spec.engine_config,
     );
 
     Ok(SessionRegistration {
@@ -55,6 +56,7 @@ pub fn parse_registration(
             work_label: spec.work_label,
             environment: spec.environment,
             output_lang: spec.output_lang,
+            engine_config: spec.engine_config,
         },
         session_id,
         config_hash: hash,

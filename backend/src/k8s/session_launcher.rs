@@ -110,19 +110,6 @@ const CANDIDATE_PREFIX_ENV: &str = "FKST_CANDIDATE_PREFIX";
 const CANDIDATE_PREFIX_VALUE: &str = "fkst-cand";
 const CANDIDATE_FROM_SEP_ENV: &str = "FKST_CANDIDATE_FROM_SEP";
 const CANDIDATE_FROM_SEP_VALUE: &str = "--from--";
-/// The engine's session output locale (the `t()` i18n SDK resolves
-/// `locales/<value>.lua` by exact filename match, falling back to `en`).
-const OUTPUT_LANG_ENV: &str = "FKST_OUTPUT_LANG";
-/// Prefix rendering an operator [`RatePool`](crate::config::RatePool) as the
-/// engine's `FKST_RATE_POOL_<NAME>=<burst>,<refill_per_minute>` definition.
-const RATE_POOL_ENV_PREFIX: &str = "FKST_RATE_POOL_";
-/// The engine's rate-pool ledger dir env. Pinned to a writable pod path whenever
-/// any pool is defined: the engine's default is `~/.fkst/rate-pools` and its
-/// `~`-expansion FAILS when HOME is unset — which a session container does not
-/// guarantee — so injecting pools without pinning this would turn a working
-/// session into a startup failure.
-const RATE_POOL_ROOT_ENV: &str = "FKST_RATE_POOL_ROOT";
-const RATE_POOL_ROOT_DIR: &str = "/var/run/fkst/rate-pools";
 
 // --- labels + annotations ----------------------------------------------------
 // These keys are the single source of truth for the Model B session pod's
@@ -171,6 +158,10 @@ pub struct SessionPodSpec {
     /// Optional session output locale (`### Output Language` → `FKST_OUTPUT_LANG`).
     /// `None` renders no env key at all (the engine defaults to `en`).
     pub output_lang: Option<String>,
+    /// The validated `### Engine Config` map (allowlisted engine tunables).
+    /// Tighten-merged with the operator rate-pool defaults at render time —
+    /// see [`crate::k8s::engine_env::engine_tunables_env`].
+    pub engine_config: BTreeMap<String, String>,
 }
 
 /// The deterministic Pod/Secret name for a session (`fkst-sess-<session_id>`).
@@ -275,26 +266,15 @@ pub(crate) fn session_env_pairs(
         .drain(..)
         .map(|(name, value)| (name.to_string(), value))
         .collect();
-    // The optional output locale — absent means ABSENT (no key), so a session
-    // without the section renders byte-identical env to the pre-feature layout.
-    if let Some(lang) = &spec.output_lang {
-        env.push((OUTPUT_LANG_ENV.to_string(), lang.clone()));
-    }
-    // Operator-default engine rate pools (BTreeMap ⇒ deterministic order), plus
-    // the ledger-root pin they require. Emitted ONLY when pools exist so an
-    // unconfigured deploy renders byte-identical env to the pre-knob layout.
-    if !config.rate_pools.is_empty() {
-        for (name, pool) in &config.rate_pools {
-            env.push((
-                format!("{RATE_POOL_ENV_PREFIX}{name}"),
-                format!("{},{}", pool.burst, pool.refill_per_minute),
-            ));
-        }
-        env.push((
-            RATE_POOL_ROOT_ENV.to_string(),
-            RATE_POOL_ROOT_DIR.to_string(),
-        ));
-    }
+    // The engine-tunable tail: output locale + the tighten-merged engine config
+    // (operator rate-pool defaults vs the trigger's `### Engine Config`). All
+    // map-level merged, so duplicate EnvVar names are impossible; nothing set ⇒
+    // nothing rendered (byte-identical to the pre-feature layout).
+    env.extend(crate::k8s::engine_env::engine_tunables_env(
+        spec.output_lang.as_deref(),
+        &spec.engine_config,
+        &config.rate_pools,
+    ));
     env
 }
 

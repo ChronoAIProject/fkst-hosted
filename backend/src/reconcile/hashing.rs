@@ -14,6 +14,8 @@
 //! `PackageRef` need not be `Serialize`); the field set + order IS the canonical form
 //! (serde serialises in declaration order), so identical inputs always hash identically.
 
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -69,6 +71,7 @@ pub fn config_hash(
     work_label: &str,
     environment: Option<&str>,
     output_lang: Option<&str>,
+    engine_config: &BTreeMap<String, String>,
 ) -> String {
     #[derive(Serialize)]
     struct Canonical<'a> {
@@ -77,12 +80,15 @@ pub fn config_hash(
         environment: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         output_lang: Option<&'a str>,
+        #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+        engine_config: &'a BTreeMap<String, String>,
     }
     let canonical = Canonical {
         packages: canon_packages(packages),
         work_label,
         environment,
         output_lang,
+        engine_config,
     };
     hex_digest(&canonical, "config-hash")
 }
@@ -115,6 +121,8 @@ pub fn full_config_hash(reg: &SessionRegistration) -> String {
         // [`config_hash`]; an old config must hash identically after a deploy.
         #[serde(skip_serializing_if = "Option::is_none")]
         output_lang: Option<&'a str>,
+        #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+        engine_config: &'a BTreeMap<String, String>,
     }
     let canonical = Canonical {
         packages: canon_packages(&reg.def.packages),
@@ -124,6 +132,7 @@ pub fn full_config_hash(reg: &SessionRegistration) -> String {
         auto_merge: reg.auto_merge,
         log_access: &reg.log_access,
         output_lang: reg.def.output_lang.as_deref(),
+        engine_config: &reg.def.engine_config,
     };
     hex_digest(&canonical, "full-config-hash")
 }

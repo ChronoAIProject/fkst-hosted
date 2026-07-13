@@ -36,6 +36,7 @@ fn spec() -> SessionPodSpec {
         bot_login: "fkst-bot[bot]".to_string(),
         config_hash: "cfg-deadbeef".to_string(),
         output_lang: None,
+        engine_config: BTreeMap::new(),
     }
 }
 
@@ -243,6 +244,41 @@ fn session_env_pairs_render_the_output_language_only_when_set() {
             .map(|(_, v)| v.as_str()),
         Some("zh-CN")
     );
+}
+
+#[test]
+fn session_env_pairs_render_the_tighten_merged_engine_config() {
+    // Operator default GH=50,50; the user narrows GH and adds permit slots.
+    let mut cfg = config();
+    cfg.rate_pools = BTreeMap::from([(
+        "GH".to_string(),
+        crate::config::RatePool {
+            burst: 50,
+            refill_per_minute: 50,
+        },
+    )]);
+    let mut spec = spec();
+    spec.engine_config = BTreeMap::from([
+        ("FKST_CODEX_PERMIT_SLOTS".to_string(), "8".to_string()),
+        ("FKST_RATE_POOL_GH".to_string(), "999,10".to_string()),
+    ]);
+    let pairs = session_env_pairs(&spec, &cfg);
+    let get = |key: &str| {
+        pairs
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    };
+    assert_eq!(get("FKST_CODEX_PERMIT_SLOTS"), Some("8"));
+    // Tighten-only: the widened burst clamps to the operator's 50; the
+    // narrower refill (10) survives.
+    assert_eq!(get("FKST_RATE_POOL_GH"), Some("50,10"));
+    assert_eq!(get("FKST_RATE_POOL_ROOT"), Some("/var/run/fkst/rate-pools"));
+    // Still no duplicate names after the merge.
+    let mut names: Vec<_> = pairs.iter().map(|(k, _)| k.clone()).collect();
+    names.sort();
+    names.dedup();
+    assert_eq!(names.len(), pairs.len(), "env names must be unique");
 }
 
 #[test]

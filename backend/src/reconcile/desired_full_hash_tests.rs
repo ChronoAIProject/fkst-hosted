@@ -25,6 +25,7 @@ fn base_reg() -> SessionRegistration {
             work_label: "wl".to_string(),
             environment: Some("env".to_string()),
             output_lang: None,
+            engine_config: std::collections::BTreeMap::new(),
         },
         session_id: "sid".to_string(),
         config_hash: "ignored".to_string(),
@@ -147,6 +148,7 @@ fn full_config_hash_is_a_strict_superset_of_config_hash() {
         &base.def.work_label,
         base.def.environment.as_deref(),
         base.def.output_lang.as_deref(),
+        &base.def.engine_config,
     );
     let base_full = full_config_hash(&base);
 
@@ -157,6 +159,7 @@ fn full_config_hash_is_a_strict_superset_of_config_hash() {
         &toggled.def.work_label,
         toggled.def.environment.as_deref(),
         toggled.def.output_lang.as_deref(),
+        &toggled.def.engine_config,
     );
 
     assert_eq!(
@@ -195,5 +198,20 @@ fn full_config_hash_moves_with_the_output_language() {
         base,
         full_config_hash(&reg),
         "output_lang must move the hash"
+    );
+}
+
+#[test]
+fn full_config_hash_moves_with_the_engine_config() {
+    let base = full_config_hash(&base_reg());
+    let mut reg = base_reg();
+    reg.def.engine_config = std::collections::BTreeMap::from([(
+        "FKST_CODEX_PERMIT_SLOTS".to_string(),
+        "8".to_string(),
+    )]);
+    assert_ne!(
+        base,
+        full_config_hash(&reg),
+        "engine_config must move the hash"
     );
 }

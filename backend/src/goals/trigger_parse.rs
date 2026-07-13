@@ -37,6 +37,7 @@ const HEADING_ENVIRONMENT: &str = "### Environment";
 const HEADING_AUTO_MERGE: &str = "### Auto-merge";
 const HEADING_LOG_ACCESS: &str = "### Log Access Allowlist";
 const HEADING_OUTPUT_LANGUAGE: &str = "### Output Language";
+const HEADING_ENGINE_CONFIG: &str = "### Engine Config";
 
 /// GitHub caps a label name at 50 characters; the Work Label must fit so the
 /// launcher can apply it verbatim.
@@ -127,6 +128,11 @@ pub struct TriggerSpec {
     /// `en`). `None` when the section is absent or blank; strictly validated when
     /// present (one value, conservative locale charset) — a 422 names the section.
     pub output_lang: Option<String>,
+    /// The OPTIONAL `### Engine Config`: the validated, ALLOWLISTED engine
+    /// tunables (`KEY=value` lines — see [`crate::goals::engine_config`]) the
+    /// launcher injects as session env. Empty when the section is absent/blank.
+    /// Every key/value is bounded at parse time; part of BOTH config hashes.
+    pub engine_config: std::collections::BTreeMap<String, String>,
 }
 
 /// Parse the `fkst-substrate-trigger` issue body into a [`TriggerSpec`].
@@ -158,6 +164,16 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
     let log_access = parse_log_access(&sections);
     let output_lang = parse_output_language(&sections)?;
 
+    // `### Engine Config` — OPTIONAL but STRICT; the allowlist parser owns the
+    // rules (see `goals::engine_config`). Absent → empty map.
+    let engine_config = match sections
+        .iter()
+        .find(|(heading, _)| heading == HEADING_ENGINE_CONFIG)
+    {
+        Some((_, content)) => crate::goals::engine_config::parse_engine_config(content)?,
+        None => std::collections::BTreeMap::new(),
+    };
+
     Ok(TriggerSpec {
         name,
         packages,
@@ -166,6 +182,7 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
         auto_merge,
         log_access,
         output_lang,
+        engine_config,
     })
 }
 

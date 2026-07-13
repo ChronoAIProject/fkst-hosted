@@ -6,6 +6,7 @@
 //! unless `FKST_POD_DISPATCH=true` — the control plane is Kubernetes-free by default.
 
 pub mod client;
+pub(crate) mod engine_env;
 pub mod env_store;
 pub mod env_validator;
 // Pure builders for the env-validation Pod + its spec ConfigMap (issue #338), driven

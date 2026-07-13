@@ -6,6 +6,9 @@
 //! uses; `package_ref` is the fetched-package ref grammar. (There is no goal store
 //! or goal API — a GitHub issue IS the unit of work.)
 
+// The `### Engine Config` allowlist parser/validator (issue #472): the bounded
+// subset of the engine's config registry a trigger author may tune per session.
+pub mod engine_config;
 pub mod labels;
 // The Model B `owner/repo@ref:path` package-reference grammar (issue #359,
 // "packages are FETCHED"): the single source of truth for the ref shape shared by
