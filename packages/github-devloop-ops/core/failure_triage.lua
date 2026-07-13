@@ -206,6 +206,29 @@ local function output_obligation_dedup_key(repo, proposal_id, terminal_version, 
   })
 end
 
+local function marker_attr(value, limit)
+  local text = tostring(value or "")
+  if limit ~= nil and #text > limit then
+    text = base_ids.truncate_utf8(text, limit)
+  end
+  return text:gsub("\r", " ")
+    :gsub("\n", " ")
+    :gsub("&", "&amp;")
+    :gsub('"', "&quot;")
+    :gsub("<", "&lt;")
+    :gsub(">", "&gt;")
+end
+
+local function output_obligation_escalation_marker(fact)
+  return '<!-- fkst:github-devloop-ops:output-obligation-escalation:v1 proposal="'
+    .. marker_attr(fact.proposal_id, M._max_key_len)
+    .. '" terminal_version="' .. marker_attr(fact.terminal_version, M._max_dedup_len)
+    .. '" dedup="' .. marker_attr(fact.dedup_key, M._max_dedup_len)
+    .. '" reason_class="' .. marker_attr(fact.reason_class, M._max_key_len)
+    .. '" parent="' .. marker_attr(tostring(fact.source_repo or "") .. "#issue/" .. tostring(fact.issue_number or ""), M._max_key_len * 2 + 7)
+    .. '" -->'
+end
+
 local function issue_created_drain_edge(comments, dedup_key)
   if type(comments) ~= "table" then
     return nil
@@ -228,32 +251,59 @@ local function issue_created_drain_edge(comments, dedup_key)
   return nil
 end
 
-local function issue_body_drain_edge(issues, dedup_key)
-  if type(issues) ~= "table" then
-    return nil
-  end
-  local marker = "<!-- fkst:github-proxy:issue-create:" .. tostring(dedup_key) .. " -->"
-  for _, issue in ipairs(issues) do
-    local observed_issue = type(issue) == "table" and (issue.parent_issue or issue.issue or issue) or nil
-    if type(issue) == "table"
-      and type(observed_issue) == "table"
-      and parsers_misc._comment_author_login(observed_issue) == devloop_base.trusted_bot_login()
-      and tostring(observed_issue.body or ""):find(marker, 1, true) ~= nil
-      and tonumber(issue.issue_number or issue.number) ~= nil then
+local function issue_body_semantic_drain_edge(issue, issue_number, dedup_key, terminal_version)
+  local marker_pattern = "<!%-%- fkst:github%-devloop%-ops:output%-obligation%-escalation:v1.-%-%->"
+  for marker in tostring(issue and issue.body or ""):gmatch(marker_pattern) do
+    if attr(marker, "dedup") == tostring(dedup_key)
+      and (terminal_version == nil or attr(marker, "terminal_version") == tostring(terminal_version)) then
       return {
-        kind = "superseded-by-observed-escalation-issue",
-        issue_id = tostring(math.floor(tonumber(issue.issue_number or issue.number))),
+        kind = "output-obligation-escalation-issue",
+        issue_id = tostring(math.floor(tonumber(issue_number))),
         dedup_key = tostring(dedup_key),
+        terminal_version = tostring(attr(marker, "terminal_version") or ""),
       }
     end
   end
   return nil
 end
 
-local function output_obligation_drain_edge(comments, dedup_key, issues, recent_issues)
+local function issue_body_proxy_drain_edge(issue, issue_number, dedup_key)
+  local marker = "<!-- fkst:github-proxy:issue-create:" .. tostring(dedup_key) .. " -->"
+  if tostring(issue and issue.body or ""):find(marker, 1, true) ~= nil then
+    return {
+      kind = "superseded-by-observed-escalation-issue",
+      issue_id = tostring(math.floor(tonumber(issue_number))),
+      dedup_key = tostring(dedup_key),
+    }
+  end
+  return nil
+end
+
+local function issue_body_drain_edge(issues, dedup_key, terminal_version)
+  if type(issues) ~= "table" then
+    return nil
+  end
+  for _, issue in ipairs(issues) do
+    local observed_issue = type(issue) == "table" and (issue.parent_issue or issue.issue or issue) or nil
+    if type(issue) == "table"
+      and type(observed_issue) == "table"
+      and parsers_misc._comment_author_login(observed_issue) == devloop_base.trusted_bot_login()
+      and tonumber(issue.issue_number or issue.number) ~= nil then
+      local issue_number = tonumber(issue.issue_number or issue.number)
+      local edge = issue_body_semantic_drain_edge(observed_issue, issue_number, dedup_key, terminal_version)
+        or issue_body_proxy_drain_edge(observed_issue, issue_number, dedup_key)
+      if edge ~= nil then
+        return edge
+      end
+    end
+  end
+  return nil
+end
+
+local function output_obligation_drain_edge(comments, dedup_key, issues, recent_issues, terminal_version)
   return issue_created_drain_edge(comments, dedup_key)
-    or issue_body_drain_edge(issues, dedup_key)
-    or issue_body_drain_edge(recent_issues, dedup_key)
+    or issue_body_drain_edge(issues, dedup_key, terminal_version)
+    or issue_body_drain_edge(recent_issues, dedup_key, terminal_version)
 end
 
 local function normalized_output_obligation_fact(source)
@@ -299,7 +349,7 @@ local function normalized_output_obligation_fact(source)
     driving_queue = tostring(source.driving_queue or ""),
     why_text = tostring(source.why_text or source.why or ""),
     dedup_key = dedup_key,
-    drain_edge = output_obligation_drain_edge(source.comments, dedup_key),
+    drain_edge = output_obligation_drain_edge(source.comments, dedup_key, nil, nil, terminal_version),
   }, nil
 end
 
@@ -360,6 +410,8 @@ local function output_obligation_body(fact)
     "- `proposal_id`: `" .. display_text(fact.proposal_id, M._max_key_len) .. "`",
     "- `terminal_version`: `" .. display_text(fact.terminal_version, M._max_dedup_len) .. "`",
     "- `source_ref`: `" .. display_source_ref(fact.source_ref) .. "`",
+    "",
+    output_obligation_escalation_marker(fact),
     "",
     "Terminal WHY:",
     "- `from_state`: `" .. display_text(fact.from_state, M._max_key_len) .. "`",
@@ -465,8 +517,12 @@ function M.output_obligation_failure_dedup_key(repo, proposal_id, terminal_versi
   return output_obligation_dedup_key(repo, proposal_id, terminal_version, reason_class)
 end
 
-function M.output_obligation_failure_drain_edge(comments, dedup_key, issues, recent_issues)
-  return output_obligation_drain_edge(comments, dedup_key, issues, recent_issues)
+function M.output_obligation_escalation_marker(fact)
+  return output_obligation_escalation_marker(fact)
+end
+
+function M.output_obligation_failure_drain_edge(comments, dedup_key, issues, recent_issues, terminal_version)
+  return output_obligation_drain_edge(comments, dedup_key, issues, recent_issues, terminal_version)
 end
 
 function M.classify_output_obligation_failure(payload)
@@ -504,7 +560,7 @@ function M.blocked_output_obligation_failures(entity, observed_entities, recent_
       end
       local normalized = normalized_output_obligation_fact(fact)
       if normalized ~= nil then
-        normalized.drain_edge = output_obligation_drain_edge(comments, normalized.dedup_key, observed_entities, recent_merged_issues)
+        normalized.drain_edge = output_obligation_drain_edge(comments, normalized.dedup_key, observed_entities, recent_merged_issues, normalized.terminal_version)
         table.insert(failures, normalized)
       end
     end
