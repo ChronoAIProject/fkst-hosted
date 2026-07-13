@@ -117,6 +117,27 @@ pub(crate) fn non_empty_lines(block: &str) -> Vec<String> {
         .collect()
 }
 
+/// Strip non-nested `<!-- … -->` HTML comment spans (including multi-line ones)
+/// from a section body, so the issue templates' explanatory comments never count
+/// as content lines in a STRICT section parser. The lenient parsers (Auto-merge,
+/// Log Access) tolerate comment lines by token-matching; strict single-value
+/// parsers (Output Language, Engine Config) must strip them first or the pristine
+/// template would 422. An unterminated `<!--` strips to end of input —
+/// defensive: a dangling comment must not smuggle its tail into a strict parser.
+pub(crate) fn strip_html_comments(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(start) = rest.find("<!--") {
+        out.push_str(&rest[..start]);
+        match rest[start + 4..].find("-->") {
+            Some(end) => rest = &rest[start + 4 + end + 3..],
+            None => return out,
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,5 +277,27 @@ mod tests {
         };
         assert!(msg.contains("Environment"), "names the section: {msg}");
         assert!(msg.contains("exactly one"), "flags the ambiguity: {msg}");
+    }
+
+    #[test]
+    fn strip_html_comments_removes_single_and_multi_line_spans() {
+        assert_eq!(strip_html_comments("a <!-- x --> b"), "a  b");
+        // A multi-line template comment vanishes wholesale, keeping the value.
+        assert_eq!(
+            strip_html_comments("<!--\nOptional. One line.\nMore prose.\n-->\nzh\n"),
+            "\nzh\n"
+        );
+        // Multiple spans on one input.
+        assert_eq!(strip_html_comments("<!--a-->x<!--b-->y"), "xy");
+    }
+
+    #[test]
+    fn strip_html_comments_handles_the_edges() {
+        // No comment: byte-identical passthrough.
+        assert_eq!(strip_html_comments("plain\nlines\n"), "plain\nlines\n");
+        // Unterminated comment strips to end of input (never smuggles the tail).
+        assert_eq!(strip_html_comments("kept <!-- dangling\nvalue"), "kept ");
+        // Empty input.
+        assert_eq!(strip_html_comments(""), "");
     }
 }

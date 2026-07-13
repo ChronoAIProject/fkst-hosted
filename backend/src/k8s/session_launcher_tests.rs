@@ -35,6 +35,7 @@ fn spec() -> SessionPodSpec {
         work_label: "fkst".to_string(),
         bot_login: "fkst-bot[bot]".to_string(),
         config_hash: "cfg-deadbeef".to_string(),
+        output_lang: None,
     }
 }
 
@@ -223,6 +224,25 @@ fn session_env_pairs_render_operator_rate_pools_with_a_pinned_ledger_root() {
     names.sort();
     names.dedup();
     assert_eq!(names.len(), pairs.len(), "env names must be unique");
+}
+
+#[test]
+fn session_env_pairs_render_the_output_language_only_when_set() {
+    // None ⇒ NO key at all (the engine's own `en` default applies), so a
+    // session without the section renders the pre-feature env exactly.
+    let pairs = session_env_pairs(&spec(), &config());
+    assert!(pairs.iter().all(|(k, _)| k != "FKST_OUTPUT_LANG"));
+
+    let mut with_lang = spec();
+    with_lang.output_lang = Some("zh-CN".to_string());
+    let pairs = session_env_pairs(&with_lang, &config());
+    assert_eq!(
+        pairs
+            .iter()
+            .find(|(k, _)| k == "FKST_OUTPUT_LANG")
+            .map(|(_, v)| v.as_str()),
+        Some("zh-CN")
+    );
 }
 
 #[test]

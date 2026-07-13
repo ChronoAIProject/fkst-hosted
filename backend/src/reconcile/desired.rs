@@ -39,6 +39,11 @@ pub struct SessionDef {
     pub work_label: String,
     /// The optional named environment parsed from `### Environment`.
     pub environment: Option<String>,
+    /// The optional session output locale parsed from `### Output Language`
+    /// (rendered into the session as `FKST_OUTPUT_LANG`). Part of BOTH hashes:
+    /// it changes the pod env, so editing it after registration is a rejected
+    /// config change like any other launch input.
+    pub output_lang: Option<String>,
 }
 
 /// One valid trigger issue resolved to everything the reconciler needs to spawn

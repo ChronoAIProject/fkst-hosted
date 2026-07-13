@@ -5,7 +5,7 @@ description: >-
   stop autonomous fkst-substrate coding sessions ENTIRELY through GitHub issues (there is
   no other API surface for this). Use whenever you need to: (a) launch a session by opening
   an `fkst-substrate-trigger` issue with the exact `### Session Name` / `### Packages` /
-  `### Work Label` / optional `### Environment` / `### Auto-merge` / `### Log Access Allowlist` body;
+  `### Work Label` / optional `### Environment` / `### Auto-merge` / `### Log Access Allowlist` / `### Output Language` body;
   (b) queue tasks by opening issues that carry the session's Work Label; (c) interpret the
   session's status comments and labels (registered / picked-up / degraded / retired /
   invalid / config-rejected); (d) download a session's redacted logs from the identity-gated
@@ -62,6 +62,7 @@ invalid). Intro text before the first heading is ignored.
 | `### Environment` | optional | one pre-provisioned environment name to inject (or blank → none). **Never put secret values here** — this only *selects* a profile provisioned out-of-band |
 | `### Auto-merge` | optional | `true`/`yes`/`on`/`enabled`/`1` (case-insensitive) → the App bot's PRs are auto-merged into the default branch and the linked work issue auto-closed; anything else → off |
 | `### Log Access Allowlist` | optional | extra GitHub logins/numeric-ids (beyond the author + global admins) allowed to download this session's logs; whitespace/comma/newline separated; a leading `@` is stripped. **Frozen at registration** (see config immutability) |
+| `### Output Language` | optional | one locale tag (`^[a-z]{2,3}([-_][A-Za-z0-9]{2,8})?$`, e.g. `en`, `zh`, `zh-CN`) → the session's packages emit user-visible prose (issue/PR comments) in that locale via `FKST_OUTPUT_LANG`. The value must **exactly** match a `locales/<value>.lua` file shipped by the session's package (case- and separator-sensitive); a mismatch silently falls back to English. Absent/blank → English |
 
 ### Package reference grammar — `owner/repo@ref:path`
 Split greedily on the **first `@`** (`owner/repo` vs `ref:path`), then the **first `:`**
@@ -135,7 +136,7 @@ don't set them.
 ## 5. Config immutability
 
 Once a session has registered, its config (`### Packages` / `### Work Label` / `### Environment`
-/ `### Auto-merge` / `### Log Access Allowlist`) is **frozen**. Editing the trigger body does **not**
+/ `### Auto-merge` / `### Log Access Allowlist` / `### Output Language`) is **frozen**. Editing the trigger body does **not**
 re-launch — the control plane posts a one-time `fkst-config-rejected` comment. **To change
 config, close the trigger and open a new one.** (This is why `### Log Access Allowlist` can't be widened
 after the fact to grant retroactive log access.)

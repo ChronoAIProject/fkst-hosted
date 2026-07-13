@@ -110,6 +110,9 @@ const CANDIDATE_PREFIX_ENV: &str = "FKST_CANDIDATE_PREFIX";
 const CANDIDATE_PREFIX_VALUE: &str = "fkst-cand";
 const CANDIDATE_FROM_SEP_ENV: &str = "FKST_CANDIDATE_FROM_SEP";
 const CANDIDATE_FROM_SEP_VALUE: &str = "--from--";
+/// The engine's session output locale (the `t()` i18n SDK resolves
+/// `locales/<value>.lua` by exact filename match, falling back to `en`).
+const OUTPUT_LANG_ENV: &str = "FKST_OUTPUT_LANG";
 /// Prefix rendering an operator [`RatePool`](crate::config::RatePool) as the
 /// engine's `FKST_RATE_POOL_<NAME>=<burst>,<refill_per_minute>` definition.
 const RATE_POOL_ENV_PREFIX: &str = "FKST_RATE_POOL_";
@@ -165,6 +168,9 @@ pub struct SessionPodSpec {
     pub bot_login: String,
     /// Config-hash annotation used by the reconciler for drift detection.
     pub config_hash: String,
+    /// Optional session output locale (`### Output Language` → `FKST_OUTPUT_LANG`).
+    /// `None` renders no env key at all (the engine defaults to `en`).
+    pub output_lang: Option<String>,
 }
 
 /// The deterministic Pod/Secret name for a session (`fkst-sess-<session_id>`).
@@ -269,6 +275,11 @@ pub(crate) fn session_env_pairs(
         .drain(..)
         .map(|(name, value)| (name.to_string(), value))
         .collect();
+    // The optional output locale — absent means ABSENT (no key), so a session
+    // without the section renders byte-identical env to the pre-feature layout.
+    if let Some(lang) = &spec.output_lang {
+        env.push((OUTPUT_LANG_ENV.to_string(), lang.clone()));
+    }
     // Operator-default engine rate pools (BTreeMap ⇒ deterministic order), plus
     // the ledger-root pin they require. Emitted ONLY when pools exist so an
     // unconfigured deploy renders byte-identical env to the pre-knob layout.

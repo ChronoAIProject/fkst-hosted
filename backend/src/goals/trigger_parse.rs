@@ -26,7 +26,7 @@ use regex::Regex;
 use crate::error::AppError;
 use crate::goals::section_parse::{
     env_name_regex, is_valid_env_name, non_empty_lines, parse_environment_name, split_sections,
-    MAX_ENV_NAME_LEN,
+    strip_html_comments, MAX_ENV_NAME_LEN,
 };
 
 /// The canonical `fkst-substrate-trigger` section headings, in template order.
@@ -36,6 +36,7 @@ const HEADING_WORK_LABEL: &str = "### Work Label";
 const HEADING_ENVIRONMENT: &str = "### Environment";
 const HEADING_AUTO_MERGE: &str = "### Auto-merge";
 const HEADING_LOG_ACCESS: &str = "### Log Access Allowlist";
+const HEADING_OUTPUT_LANGUAGE: &str = "### Output Language";
 
 /// GitHub caps a label name at 50 characters; the Work Label must fit so the
 /// launcher can apply it verbatim.
@@ -60,6 +61,17 @@ fn owner_repo_segment_regex() -> &'static Regex {
 fn ref_path_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new("^[A-Za-z0-9_./-]+$").expect("static ref/path regex"))
+}
+
+/// Anchored pattern for the `### Output Language` value: a conservative locale
+/// tag (`en`, `zh`, `zh-CN`, `zh_TW`, `cmn`) — a strict subset of the engine's
+/// own `[A-Za-z0-9_-]+` locale charset, so the value is path-safe as the
+/// `locales/<value>.lua` filename component the engine resolves it to.
+fn output_lang_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new("^[a-z]{2,3}([-_][A-Za-z0-9]{2,8})?$").expect("static output-lang regex")
+    })
 }
 
 /// A fully-qualified GitHub package reference parsed from one `### Packages` line,
@@ -109,6 +121,12 @@ pub struct TriggerSpec {
     /// FROZEN by config-immutability (it is part of `full_config_hash`) so it cannot
     /// be edited AFTER the session registers to grant access retroactively.
     pub log_access: Vec<String>,
+    /// The OPTIONAL `### Output Language`: the locale the session's packages emit
+    /// user-visible prose in (`FKST_OUTPUT_LANG` → the engine's `t()` i18n SDK,
+    /// resolving `locales/<value>.lua` by EXACT filename match, falling back to
+    /// `en`). `None` when the section is absent or blank; strictly validated when
+    /// present (one value, conservative locale charset) — a 422 names the section.
+    pub output_lang: Option<String>,
 }
 
 /// Parse the `fkst-substrate-trigger` issue body into a [`TriggerSpec`].
@@ -138,6 +156,7 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
 
     let auto_merge = parse_auto_merge(&sections);
     let log_access = parse_log_access(&sections);
+    let output_lang = parse_output_language(&sections)?;
 
     Ok(TriggerSpec {
         name,
@@ -146,7 +165,37 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
         environment,
         auto_merge,
         log_access,
+        output_lang,
     })
+}
+
+/// `### Output Language` — OPTIONAL but STRICT (mirrors `### Environment`):
+/// absent, blank, or comment-only → `None`; exactly one non-empty line matching
+/// the conservative locale pattern → `Some`; anything else → a 422 naming the
+/// section and the rule. Template comments are stripped FIRST (the template
+/// ships an explanatory `<!-- … -->` inside the section body, and this parser —
+/// unlike the lenient Auto-merge scan — would otherwise count it as content).
+fn parse_output_language(sections: &[(String, String)]) -> Result<Option<String>, AppError> {
+    let block = match sections
+        .iter()
+        .find(|(heading, _)| heading == HEADING_OUTPUT_LANGUAGE)
+    {
+        Some((_, content)) => strip_html_comments(content),
+        None => return Ok(None),
+    };
+    match non_empty_lines(&block).as_slice() {
+        [] => Ok(None),
+        [lang] if output_lang_regex().is_match(lang) => Ok(Some(lang.clone())),
+        [lang] => Err(AppError::Unprocessable(format!(
+            "the `### Output Language` section names an invalid locale {lang:?}: must match {} \
+             (e.g. `en`, `zh`, `zh-CN`) and exactly match a `locales/<value>.lua` file shipped \
+             by the session's package",
+            output_lang_regex().as_str()
+        ))),
+        _ => Err(AppError::Unprocessable(
+            "the `### Output Language` section must contain at most one non-empty line".to_string(),
+        )),
+    }
 }
 
 /// `### Auto-merge` — OPTIONAL, lenient. `true` iff the section's FIRST non-empty

@@ -46,6 +46,7 @@ pub(crate) fn spec() -> SessionPodSpec {
         work_label: "fkst-work".to_string(),
         bot_login: "fkst-bot[bot]".to_string(),
         config_hash: config_hash(),
+        output_lang: None,
     }
 }
 

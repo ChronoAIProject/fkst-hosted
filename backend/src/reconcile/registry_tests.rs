@@ -70,7 +70,7 @@ fn valid_body_yields_a_registration() {
     // The session id + config hash must match the canonical derivations.
     let want_id = derive_session_id(INSTALLATION_ID, "acme", "site", 7);
     assert_eq!(reg.session_id, want_id);
-    let want_hash = config_hash(&reg.def.packages, &reg.def.work_label, None);
+    let want_hash = config_hash(&reg.def.packages, &reg.def.work_label, None, None);
     assert_eq!(reg.config_hash, want_hash);
 }
 
@@ -102,7 +102,12 @@ fn environment_section_is_captured() {
     // The environment participates in the config hash.
     assert_eq!(
         reg.config_hash,
-        config_hash(&reg.def.packages, &reg.def.work_label, Some("staging"))
+        config_hash(
+            &reg.def.packages,
+            &reg.def.work_label,
+            Some("staging"),
+            None
+        )
     );
 }
 

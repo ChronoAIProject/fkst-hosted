@@ -261,6 +261,7 @@ fn session_pod_spec_from(reg: &SessionRegistration, bot_login: Option<String>) -
         work_label: reg.def.work_label.clone(),
         bot_login: bot_login.unwrap_or_default(),
         config_hash: reg.config_hash.clone(),
+        output_lang: reg.def.output_lang.clone(),
     }
 }
 

@@ -234,6 +234,7 @@ pub(super) fn registration() -> SessionRegistration {
             ],
             work_label: "fkst-run".to_string(),
             environment: None,
+            output_lang: None,
         },
         session_id: "sess-abc".to_string(),
         config_hash: "hash123".to_string(),

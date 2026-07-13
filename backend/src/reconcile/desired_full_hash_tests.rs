@@ -24,6 +24,7 @@ fn base_reg() -> SessionRegistration {
             packages: vec![pkg("acme", "tools", "main", "pkg/a")],
             work_label: "wl".to_string(),
             environment: Some("env".to_string()),
+            output_lang: None,
         },
         session_id: "sid".to_string(),
         config_hash: "ignored".to_string(),
@@ -145,6 +146,7 @@ fn full_config_hash_is_a_strict_superset_of_config_hash() {
         &base.def.packages,
         &base.def.work_label,
         base.def.environment.as_deref(),
+        base.def.output_lang.as_deref(),
     );
     let base_full = full_config_hash(&base);
 
@@ -154,6 +156,7 @@ fn full_config_hash_is_a_strict_superset_of_config_hash() {
         &toggled.def.packages,
         &toggled.def.work_label,
         toggled.def.environment.as_deref(),
+        toggled.def.output_lang.as_deref(),
     );
 
     assert_eq!(
@@ -168,5 +171,29 @@ fn full_config_hash_is_a_strict_superset_of_config_hash() {
     assert_ne!(
         base_config, base_full,
         "the full hash covers a larger field set than config_hash"
+    );
+}
+
+#[test]
+fn full_config_hash_is_digest_stable_for_old_configs() {
+    // PINNED pre-`output_lang` digest (captured before the field existed): a
+    // registration that never set the new section must hash byte-identically
+    // across the deploy, or every announced session's latched marker would
+    // mismatch and the immutability check would fire fleet-wide.
+    assert_eq!(
+        full_config_hash(&base_reg()),
+        "0a97c6a26cf3dc2ae4326ea253f7ee33e8bf8e28bd3416b8e33443e7999fb091"
+    );
+}
+
+#[test]
+fn full_config_hash_moves_with_the_output_language() {
+    let base = full_config_hash(&base_reg());
+    let mut reg = base_reg();
+    reg.def.output_lang = Some("zh".to_string());
+    assert_ne!(
+        base,
+        full_config_hash(&reg),
+        "output_lang must move the hash"
     );
 }
