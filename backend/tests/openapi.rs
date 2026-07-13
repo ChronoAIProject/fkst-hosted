@@ -87,6 +87,8 @@ async fn paths_are_the_trimmed_v1_surface() {
         "/api/v1/users/me/environments/{name}",
         // The identity-gated log-download endpoint + its browser-OAuth callback.
         "/api/v1/logs/{session_id}",
+        // The identity-gated engine observe read-model (issue #473).
+        "/api/v1/sessions/{session_id}/observe",
         "/api/v1/logs/oauth/callback",
         // The frontend GitHub-OAuth login flow (login → callback → refresh).
         "/api/v1/auth/github/login",

@@ -244,7 +244,11 @@ fn browser_redirect(state: &AppState, session_id: &str) -> Response {
 /// the reconciler-maintained registry (a one-way `session_id` cannot yield it
 /// otherwise); an unknown session → 404 (never reveals more), an unauthorized caller
 /// → 403. The token is NEVER referenced here; only the resolved (public) identity is.
-fn authorize(state: &AppState, session_id: &str, user: &GithubUser) -> Result<(), AppError> {
+pub(crate) fn authorize(
+    state: &AppState,
+    session_id: &str,
+    user: &GithubUser,
+) -> Result<(), AppError> {
     let Some(context) = state.log_registry.get(session_id) else {
         // Deny-by-default: with no context we cannot authorize, so we do not serve.
         return Err(AppError::NotFound(

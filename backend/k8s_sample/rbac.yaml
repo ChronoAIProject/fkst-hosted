@@ -69,6 +69,13 @@ rules:
   - apiGroups: [""]
     resources: ["pods/log", "pods/status"]
     verbs: ["get"]
+  # Exec the engine's read-only observe read-model inside a session pod
+  # (GET /api/v1/sessions/{id}/observe → `fkst-framework observe --json`).
+  # Control-plane SA only; the session pod itself stays zero-RBAC and its
+  # automountServiceAccountToken:false does not block API-server-driven exec.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
