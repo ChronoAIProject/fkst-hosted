@@ -127,7 +127,6 @@ impl OsbBackend {
     fn create_env(&self, spec: &SessionPodSpec) -> BTreeMap<String, String> {
         let mut env: BTreeMap<String, String> = session_env_pairs(spec, &self.pod_config)
             .into_iter()
-            .map(|(name, value)| (name.to_string(), value))
             .collect();
         env.insert(ENV_POD_NAME.to_string(), spec.session_id.clone());
         env.insert(ENV_POD_UID.to_string(), spec.session_id.clone());

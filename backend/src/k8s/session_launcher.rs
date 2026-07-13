@@ -110,6 +110,16 @@ const CANDIDATE_PREFIX_ENV: &str = "FKST_CANDIDATE_PREFIX";
 const CANDIDATE_PREFIX_VALUE: &str = "fkst-cand";
 const CANDIDATE_FROM_SEP_ENV: &str = "FKST_CANDIDATE_FROM_SEP";
 const CANDIDATE_FROM_SEP_VALUE: &str = "--from--";
+/// Prefix rendering an operator [`RatePool`](crate::config::RatePool) as the
+/// engine's `FKST_RATE_POOL_<NAME>=<burst>,<refill_per_minute>` definition.
+const RATE_POOL_ENV_PREFIX: &str = "FKST_RATE_POOL_";
+/// The engine's rate-pool ledger dir env. Pinned to a writable pod path whenever
+/// any pool is defined: the engine's default is `~/.fkst/rate-pools` and its
+/// `~`-expansion FAILS when HOME is unset — which a session container does not
+/// guarantee — so injecting pools without pinning this would turn a working
+/// session into a startup failure.
+const RATE_POOL_ROOT_ENV: &str = "FKST_RATE_POOL_ROOT";
+const RATE_POOL_ROOT_DIR: &str = "/var/run/fkst/rate-pools";
 
 // --- labels + annotations ----------------------------------------------------
 // These keys are the single source of truth for the Model B session pod's
@@ -218,12 +228,14 @@ fn downward_env_var(name: &str, field_path: &str) -> EnvVar {
 /// OpenSandbox backend (which has no downward API) supplies them as plain values.
 /// It adds NO storage credential — the write-only SA creds ride the per-session
 /// Secret (see [`build_session_secret`]), never env. Order is stable so the rendered
-/// runtime env is deterministic (aids tests + drift detection).
+/// runtime env is deterministic (aids tests + drift detection). Keys are owned
+/// `String`s because the operator rate pools render dynamic
+/// `FKST_RATE_POOL_<NAME>` names.
 pub(crate) fn session_env_pairs(
     spec: &SessionPodSpec,
     config: &PodConfig,
-) -> Vec<(&'static str, String)> {
-    vec![
+) -> Vec<(String, String)> {
+    let mut pairs: Vec<(&'static str, String)> = vec![
         (
             GITHUB_REPO_ENV,
             format!("{}/{}", spec.repo.owner, spec.repo.name),
@@ -252,7 +264,27 @@ pub(crate) fn session_env_pairs(
         (ENV_SESSION_ID, spec.session_id.clone()),
         (ENV_TRIGGER_ISSUE, spec.trigger_issue_number.to_string()),
         (ENV_CONFIG_HASH, spec.config_hash.clone()),
-    ]
+    ];
+    let mut env: Vec<(String, String)> = pairs
+        .drain(..)
+        .map(|(name, value)| (name.to_string(), value))
+        .collect();
+    // Operator-default engine rate pools (BTreeMap ⇒ deterministic order), plus
+    // the ledger-root pin they require. Emitted ONLY when pools exist so an
+    // unconfigured deploy renders byte-identical env to the pre-knob layout.
+    if !config.rate_pools.is_empty() {
+        for (name, pool) in &config.rate_pools {
+            env.push((
+                format!("{RATE_POOL_ENV_PREFIX}{name}"),
+                format!("{},{}", pool.burst, pool.refill_per_minute),
+            ));
+        }
+        env.push((
+            RATE_POOL_ROOT_ENV.to_string(),
+            RATE_POOL_ROOT_DIR.to_string(),
+        ));
+    }
+    env
 }
 
 /// The §5.2 non-secret env injected into the session Pod: the shared
@@ -263,7 +295,7 @@ pub(crate) fn session_env_pairs(
 fn session_env(spec: &SessionPodSpec, config: &PodConfig) -> Vec<EnvVar> {
     let mut env: Vec<EnvVar> = session_env_pairs(spec, config)
         .into_iter()
-        .map(|(name, value)| env_var(name, value))
+        .map(|(name, value)| env_var(&name, value))
         .collect();
     // Log streaming is unconditional: every session carries the log env; the pod
     // UID/name ride the downward API (a fieldRef), never a literal value.

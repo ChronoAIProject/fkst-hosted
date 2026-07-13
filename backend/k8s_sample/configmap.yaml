@@ -62,6 +62,14 @@ data:
   # Leave unset for the default.
   # FKST_POD_MODE: "k8s-customized"
   FKST_POD_IMAGE: "fkst-control-plane:dev"
+  # Operator-default engine rate pools, injected into EVERY session as
+  # FKST_RATE_POOL_<NAME>=<burst>,<refill_per_minute>. The engine throttles
+  # matching external commands (`gh`, `git`, ... — including calls the codex
+  # coding agent makes, via its PATH shims), protecting the shared GitHub App
+  # installation API budget. Space-separated NAME=<burst>,<refill> tokens; NAME
+  # is uppercase [A-Z0-9_]+ (not ROOT) and matches the throttled program's
+  # basename case-insensitively. Unset = no pools (the pre-knob behavior).
+  # FKST_POD_RATE_POOLS: "GH=50,50 GIT=120,120"
 
   # --- OpenSandbox backend (only when FKST_POD_MODE=opensandbox) ---
   # These non-secret knobs are validated only in opensandbox mode; the two secrets
