@@ -62,6 +62,17 @@ return function(M, h)
       },
     }),
     on_timeout = timeout("devloop_reviewing"),
+    receiver_activations = {
+      {
+        kind = "entry",
+        boundary = "devloop_fix_reconcile",
+        target = "blocked",
+        output_variant = "review_reject_to_blocked",
+        cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
+        cas_variant = "review_reject_to_blocked",
+        pending_order = { participates = false },
+      },
+    },
     responsibility_signature = responsibility_signature({
       receiver_kind = "reviewer",
       driving_queue = "devloop_reviewing",
@@ -76,6 +87,10 @@ return function(M, h)
         {
           state = "merge-ready",
           output_variant = "approved",
+          cas_policy_id = "cas.legacy_review_result_v1",
+          cas_variant = "reviewing_to_merge_ready",
+          kind = "autonomous",
+          pending_order = { participates = true, predecessor_state = "reviewing" },
           postcondition_family = "review_decision_recorded",
           decision_type = "ReviewDecision",
           monotonic = true,
@@ -83,6 +98,10 @@ return function(M, h)
         {
           state = "fixing",
           output_variant = "changes_requested",
+          cas_policy_id = "cas.legacy_review_result_v1",
+          cas_variant = "reviewing_to_fixing",
+          kind = "autonomous",
+          pending_order = { participates = true, predecessor_state = "reviewing" },
           postcondition_family = "review_decision_recorded",
           decision_type = "ReviewDecision",
           bump = true,
@@ -90,6 +109,10 @@ return function(M, h)
         {
           state = "review-meta",
           output_variant = "needs_review_meta",
+          cas_policy_id = "cas.legacy_review_result_v1",
+          cas_variant = "reviewing_to_review_meta",
+          kind = "autonomous",
+          pending_order = { participates = true, predecessor_state = "reviewing" },
           postcondition_family = "review_decision_recorded",
           decision_type = "ReviewDecision",
           monotonic = true,
@@ -97,6 +120,10 @@ return function(M, h)
         {
           state = "blocked",
           output_variant = "watchdog_reconcile_terminal",
+          kind = "timeout",
+          cas_policy_id = "cas.legacy_timeout_reconcile_v1",
+          cas_variant = "reviewing_to_blocked",
+          pending_order = { participates = false },
           terminal = true,
           monotonic = true,
         },

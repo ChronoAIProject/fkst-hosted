@@ -1,4 +1,5 @@
 local payloads_builders = require("devloop.payloads.builders")
+local devloop_state = require("devloop.state")
 return function(M, h)
   local fact = h.fact
   local obligation = h.obligation
@@ -55,18 +56,22 @@ return function(M, h)
       liveness_class = "implementing.active",
       input_fact_family = "ready/devloop_ready",
       output_postcondition_family = "revision_published",
-      phase_rank = M.stage_rank("implementing"),
+      phase_rank = devloop_state.stage_rank("implementing"),
       lineage_keys = { "state.version", "implementing.dedup", "source_ref" },
       successors = {
         {
           state = "awaiting-pr",
           output_variant = "revision_published",
+          kind = "autonomous",
+          pending_order = { participates = true, predecessor_state = "implementing" },
           postcondition_family = "revision_published",
           monotonic = true,
         },
         {
           state = "impl-failed",
           output_variant = "revision_failed",
+          kind = "autonomous",
+          pending_order = { participates = true, predecessor_state = "implementing" },
           failure = true,
           monotonic = true,
         },

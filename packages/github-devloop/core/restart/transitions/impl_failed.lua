@@ -1,4 +1,5 @@
 local payloads_builders = require("devloop.payloads.builders")
+local devloop_state = require("devloop.state")
 return function(M, h)
   local fact = h.fact
   local obligation = h.obligation
@@ -28,6 +29,17 @@ return function(M, h)
       external_wait_bound_minutes = 1410,
     }),
     on_timeout = timeout("devloop_ready"),
+    receiver_activations = {
+      {
+        kind = "entry",
+        boundary = nil,
+        target = "implementing",
+        output_variant = "retry-implementation",
+        cas_policy_id = "cas.legacy_implement_activation_handoff_v1",
+        cas_variant = "impl_failed_to_implementing",
+        pending_order = { participates = true, predecessor_state = "impl-failed" },
+      },
+    },
     responsibility_signature = responsibility_signature({
       receiver_kind = "operator-reentry",
       driving_queue = "devloop_ready",
@@ -35,16 +47,9 @@ return function(M, h)
       liveness_class = "impl_failed.operator_reentry",
       input_fact_family = "retryable-implementation-failure",
       output_postcondition_family = "implementation-retry",
-      phase_rank = M.stage_rank("impl-failed"),
+      phase_rank = devloop_state.stage_rank("impl-failed"),
       lineage_keys = { "state.version", "impl-failure.dedup", "source_ref" },
-      successors = {
-        {
-          state = "implementing",
-          output_variant = "retry-implementation",
-          postcondition_family = "implementation-retry",
-          bump = true,
-        },
-      },
+      successors = {},
     }),
     payload_builder = payloads_builders.build_devloop_ready_payload,
     dedup_shape = "ready/<impl-failure inner dedup> with impl_retry_attempt=<impl-failure.attempt+1>",

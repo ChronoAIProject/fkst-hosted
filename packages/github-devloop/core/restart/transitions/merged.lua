@@ -1,3 +1,4 @@
+local devloop_state = require("devloop.state")
 return function(M, h)
   local fact = h.fact
   local obligation = h.obligation
@@ -16,7 +17,7 @@ return function(M, h)
       liveness_class = "terminal",
       input_fact_family = "merged-fact",
       output_postcondition_family = "terminal-merged",
-      phase_rank = M.stage_rank("merged"),
+      phase_rank = devloop_state.stage_rank("merged"),
       lineage_keys = { "state.version", "merged.head_sha" },
       successors = {},
     }),

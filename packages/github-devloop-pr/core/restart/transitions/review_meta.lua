@@ -61,6 +61,10 @@ return function(M, h)
         {
           state = "fixing",
           output_variant = "fix",
+          cas_policy_id = "cas.legacy_review_meta_v1",
+          cas_variant = "predecision_eligibility",
+          kind = "autonomous",
+          pending_order = { participates = true, predecessor_state = "review-meta" },
           postcondition_family = "review-meta-decision",
           decision_type = "review-meta-decision",
           bump = true,
@@ -68,6 +72,10 @@ return function(M, h)
         {
           state = "blocked",
           output_variant = "block",
+          cas_policy_id = "cas.legacy_review_meta_v1",
+          cas_variant = "predecision_eligibility",
+          kind = "autonomous",
+          pending_order = { participates = true, predecessor_state = "review-meta" },
           postcondition_family = "review-meta-decision",
           decision_type = "review-meta-decision",
           monotonic = true,
