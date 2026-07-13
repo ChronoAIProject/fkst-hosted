@@ -171,3 +171,14 @@ session-sensitive.
   a pre-provisioned profile; values are supplied out-of-band, never read from the issue.
 - **Give it a sweep.** Actions are reconciled on a poll; expect seconds, and re-check the
   issue's comments/labels rather than expecting instant effect.
+
+## Observe a session's engine state
+
+`GET /api/v1/sessions/{session_id}/observe?limit=N` (same identity + three-tier
+authorization as the log download: trigger author / `### Log Access Allowlist` /
+global admins; GitHub Bearer token) returns the engine's live observe snapshot as
+raw JSON — per-queue depth / pending / in-flight / retrying, oldest-pending age,
+subscriber status, DLQ tombstones, and codex-run records. It never contains
+payload bodies. `limit` is clamped to 1..=10000 (default 500). A `409` means the
+session's packages declare no reliable subscriptions (nothing to observe); a
+`404` means the session or its runtime is unknown.

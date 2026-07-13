@@ -56,14 +56,20 @@ const CREDS_VOLUME: &str = "creds";
 /// owner-only read. The isolated session pod runs as root, so root reads the
 /// owner-only files directly — no `fsGroup`/group-read relaxation is needed.
 const SECRET_FILE_MODE: i32 = 0o400;
-/// The container name inside the session pod.
-const RUNNER_CONTAINER: &str = "runner";
+/// The container name inside the session pod. `pub(crate)` so the engine-observe
+/// exec targets the same container the builder stamps.
+pub(crate) const RUNNER_CONTAINER: &str = "runner";
 /// The single container arg: the PR4 `run-substrate` entrypoint.
 const RUN_SUBSTRATE_ARG: &str = "run-substrate";
 
 /// The durable delivery-state root the run-substrate entrypoint initializes
 /// idempotently so a container restart resumes rather than wiping it.
-const DURABLE_ROOT_DIR: &str = "/var/run/fkst/durable";
+/// `pub(crate)`: the engine-observe exec MUST pass this exact string — the
+/// engine derives its live-observe socket path from an FNV hash of the
+/// durable-root string AS GIVEN (no canonicalization), so a second literal
+/// with e.g. a trailing slash would silently degrade every observe call into
+/// a redb-lock error.
+pub(crate) const DURABLE_ROOT_DIR: &str = "/var/run/fkst/durable";
 /// The per-restart scratch/runtime root.
 const RUNTIME_ROOT_DIR: &str = "/var/run/fkst/runtime";
 /// The codex config/home dir inside the pod.

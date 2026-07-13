@@ -10,3 +10,4 @@ pub mod health;
 // short-lived presigned URL. Self-authorizing in-handler (no documented security).
 pub mod logs;
 pub mod metrics;
+pub mod observe;
