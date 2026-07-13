@@ -412,7 +412,7 @@ end
 
   test_spawn_before_declared_start_predecessor_fails = function()
     local errors = span.errors_from_sources({
-      ["libraries/devloop/restart/issue/transitions/implementing.lua"] = transition_source([[
+      ["packages/github-devloop/core/restart/transitions/implementing.lua"] = transition_source([[
     span_contract = span_contract({
       department = "implement",
       durable_start_marker = "implement-attempt:v1",
@@ -434,7 +434,7 @@ raise_implementing_state(repo, issue_number, ready)
 
   test_declared_start_predecessor_can_bind_marker_through_shared_helper = function()
     local errors = span.errors_from_sources({
-      ["libraries/devloop/restart/issue/transitions/implementing.lua"] = transition_source([[
+      ["packages/github-devloop/core/restart/transitions/implementing.lua"] = transition_source([[
     span_contract = span_contract({
       department = "implement",
       durable_start_marker = "implement-attempt:v1",
@@ -463,7 +463,7 @@ end
 
   test_declared_start_predecessor_can_order_workflow_codex_dispatch = function()
     local errors = span.errors_from_sources({
-      ["libraries/devloop/restart/issue/transitions/implementing.lua"] = transition_source([[
+      ["packages/github-devloop/core/restart/transitions/implementing.lua"] = transition_source([[
     span_contract = span_contract({
       department = "implement",
       durable_start_marker = "implement-attempt:v1",
@@ -551,7 +551,7 @@ local outcome = run_fix_attempt(attempt_plan)
       t.is_true(listed[path] == true, path .. " missing from source paths:\n" .. table.concat(paths, "\n"))
     end
     assert_listed("libraries/devloop/requests/lifecycle.lua")
-    assert_listed("libraries/devloop/restart/issue/transitions/implementing.lua")
+    assert_listed("packages/github-devloop/core/restart/transitions/implementing.lua")
     assert_listed("packages/github-devloop/departments/implement/main.lua")
     assert_listed("packages/consensus/departments/decide/main.lua")
     assert_listed("packages/github-devloop-pr/core/restart/transitions/fixing.lua")

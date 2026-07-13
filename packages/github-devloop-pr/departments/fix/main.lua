@@ -3,8 +3,8 @@ local entity_lib = require("devloop.entity")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local requests_review = require("devloop.requests.review")
-local parsers_issue = require("devloop.parsers.issue")
 local parsers_pr = require("devloop.parsers.pr")
+local parsers_issue = require("devloop.parsers.issue")
 local core = require("core")
 local git_adapter = require("forge.git")
 local saga = require("workflow.saga")
@@ -14,7 +14,7 @@ local dispatch_live_run = require("devloop.dispatch_live_run")
 local conflict_telemetry = require("devloop.conflict_telemetry")
 local context_bundle = require("devloop.context_bundle")
 local config = require("devloop.config")
-local m_mq = require("devloop.merge_queue")
+local merge_mechanics = require("departments.fix.merge_mechanics").make(core)
 local ci_repair_attempts = require("core.ci_repair_attempts")
 local ci_repair_retry = require("core.ci_repair_retry")
 local ci_verdict = require("core.ci_verdict")
@@ -25,16 +25,27 @@ local review_meta_caps = {
   build_comment = assert(rawget(core, "build_fix_review_meta_comment_request")),
   build_label = assert(rawget(core, "build_fix_review_meta_label_request")),
 }
+
 local dispatch_liveness = {
   restart_transition_table = function(...) return core.restart_transition_table(...) end,
   restart_row_receiver_liveness = function(...) return core.restart_row_receiver_liveness(...) end,
 }
+
 local payloads_builders = require("devloop.payloads.builders")
+local conv_reconcile = require("devloop.convergence.reconcile")
 local v_fixing = require("devloop.validators.fixing")
 local m_facts = require("devloop.markers.facts")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
 local devloop_commands = require("devloop.commands")
+local branch_worktree = merge_mechanics.branch_worktree
+local merge_integration_for_fix = merge_mechanics.merge_integration_for_fix
+local current_predecessors_for_fix = merge_mechanics.current_predecessors_for_fix
+local merge_predecessor_entries_for_fix = merge_mechanics.merge_predecessor_entries_for_fix
+local merge_speculative_predecessors_for_fix = merge_mechanics.merge_speculative_predecessors_for_fix
+local assert_no_unmerged_paths = merge_mechanics.assert_no_unmerged_paths
+local assert_no_conflict_markers = merge_mechanics.assert_no_conflict_markers
+local bounded_fix_summary = merge_mechanics.bounded_fix_summary
 local spec = {
   consumes = { "devloop_fixing" },
   produces = {
@@ -47,16 +58,6 @@ local spec = {
   stall_window = "10m",
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
-local function raise_review_meta(...) return requests_review.raise_fix_review_meta(review_meta_caps, ...) end
-local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_sha, reason, summary)
-  local text = tostring(summary or ""):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
-  if #text > 600 then text = text:sub(1, 600) end
-  return requests_review.raise_fix_reviewing(core, {
-    dept = "fix", repo = repo, issue_number = issue_number, fix = fix,
-    old_head_sha = old_head_sha, new_head_sha = new_head_sha, reason = reason,
-    fix_summary = text, clear_fix_summary = true,
-  })
-end
 
 local function same_review_result_dedup(left, right)
   local left_canonical = devloop_base.canonical_pr_review_consensus_dedup_key(left)
@@ -69,231 +70,38 @@ local git = git_adapter.production_handle
 local function fix_done(_event)
   return false
 end
-local function branch_worktree(repo, issue_number, version, branch)
-  local runtime_result = exec_sync({ cmd = devloop_commands.read_runtime_root_cmd(), timeout = 30 })
-  if runtime_result.exit_code ~= 0 then
-    error("github-devloop: runtime-root-read-failed: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime_result.stderr))
-  end
-  local runtime_root = runtime_result.stdout
-  local worktree = devloop_base.implement_worktree_path(runtime_root, repo, issue_number, version)
-  local list_result = devloop_commands.git_worktree_list(30)
-  if list_result.exit_code ~= 0 then
-    error("github-devloop: git-worktree-list-failed: git worktree list failed: " .. tostring(list_result.stderr))
-  end
-  local existing = devloop_commands.find_worktree_for_branch(list_result.stdout, branch)
-  if existing ~= nil then
-    local dir_result = exec_sync({ cmd = devloop_commands.path_is_directory_cmd(existing), timeout = 30 })
-    if dir_result.exit_code ~= 0 and dir_result.exit_code ~= 1 then
-      error("github-devloop: worktree-path-check-failed: git worktree path check failed: " .. tostring(dir_result.stderr))
-    end
-    if dir_result.exit_code == 0 and devloop_base.path_under_runtime_root(runtime_root, existing) then
-      return existing
-    end
-    if dir_result.exit_code == 1 then
-      local prune_result = devloop_commands.git_worktree_prune(60)
-      if prune_result.exit_code ~= 0 then
-        error("github-devloop: git-worktree-prune-failed: git worktree prune failed: " .. tostring(prune_result.stderr))
-      end
-    else
-      local remove_result = git("github-devloop").worktree_remove(existing, 60)
-      if remove_result.exit_code ~= 0 then
-        error("github-devloop: git-worktree-remove-failed: git worktree remove failed: " .. tostring(remove_result.stderr))
-      end
-    end
-  end
 
-  local fetch_result = devloop_commands.git_fetch_branch("origin", branch, 60)
-  if fetch_result.exit_code ~= 0 then
-    error("github-devloop: git-pr-head-branch-fetch-failed: git PR head branch fetch failed: " .. tostring(fetch_result.stderr))
-  end
-  local add_result = devloop_commands.git_worktree_add_remote_branch(worktree, "origin", branch, existing ~= nil, 60)
-  if add_result.exit_code ~= 0 then
-    error("github-devloop: git-worktree-add-failed: git worktree add failed: " .. tostring(add_result.stderr))
-  end
-  return worktree
+local function raise_review_meta(...)
+  return requests_review.raise_fix_review_meta(review_meta_caps, ...)
 end
 
-local function fetch_expected_pr_merge_product(pr_number, expected_baseline_sha)
-  if expected_baseline_sha == nil then
-    return nil
-  end
-  local fetch_result = devloop_commands.git_fetch_pr_merge_ref("origin", pr_number, 60)
-  if fetch_result.exit_code ~= 0 then
-    error("github-devloop: git-pr-merge-ref-fetch-failed: git PR merge ref fetch failed: " .. tostring(fetch_result.stderr))
-  end
-  local head_result = devloop_commands.git_fetch_head_commit(30)
-  if head_result.exit_code ~= 0 then
-    error("github-devloop: git-pr-merge-ref-head-failed: git PR merge ref head failed: " .. tostring(head_result.stderr))
-  end
-  local merge_product_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
-  if merge_product_sha ~= expected_baseline_sha then
-    error("github-devloop: merge-ref-baseline-mismatch: PR merge ref head does not match merge-gate baseline")
-  end
-  return merge_product_sha
-end
-
-local function merge_integration_for_fix(worktree, pr_number, integration_branch, expected_baseline_sha, merge_gate_reason)
-  if core.merge_gate_reason_requires_pr_merge_product(merge_gate_reason) then
-    fetch_expected_pr_merge_product(pr_number, expected_baseline_sha)
-  end
-  local base_head = expected_baseline_sha
-  if base_head == nil then
-    local fetch_result = devloop_commands.git_fetch_branch("origin", integration_branch, 60)
-    if fetch_result.exit_code ~= 0 then
-      error("github-devloop: git-integration-branch-fetch-failed: git integration branch fetch failed: " .. tostring(fetch_result.stderr))
-    end
-    local base_result = devloop_commands.git_remote_branch_head("origin", integration_branch, 30)
-    if base_result.exit_code ~= 0 then
-      error("github-devloop: git-integration-branch-head-failed: git integration branch head failed: " .. tostring(base_result.stderr))
-    end
-    base_head = tostring(base_result.stdout or ""):gsub("%s+$", "")
-  end
-  if not require("devloop.pr_safety").is_safe_head_sha(base_head) then
-    error("github-devloop: integration-head-unsafe: unsafe integration head")
-  end
-  local result = {
-    target_branch = integration_branch,
-    target_sha = base_head,
-    conflicted = false,
-    unmerged_paths = "",
-  }
-  local merge_result = devloop_commands.git_worktree_merge_no_edit(worktree, base_head, 120)
-  if merge_result.exit_code ~= 0 then
-    local unmerged_result = git("github-devloop").unmerged_paths(worktree, 30)
-    if unmerged_result.exit_code ~= 0 then
-      error("github-devloop: git-unmerged-path-check-failed: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
-    end
-    if tostring(unmerged_result.stdout or "") == "" then
-      error("github-devloop: git-integration-merge-failed: git integration merge failed: " .. tostring(merge_result.stderr))
-    end
-    result.conflicted = true
-    result.unmerged_paths = tostring(unmerged_result.stdout or "")
-    devloop_logging.log_line("info", "fix", "merge-target", "MERGE_SKEW", {
-      "integration_branch=" .. tostring(integration_branch),
-      "integration_sha=" .. tostring(base_head),
-      "reason=integration merge requires codex conflict resolution",
-    })
-  end
-  return result
-end
-
-local function merge_result_context(target_branch, target_sha)
-  return {
-    target_branch = target_branch,
-    target_sha = target_sha,
-    conflicted = false,
-    unmerged_paths = "",
-  }
-end
-
-local function append_unmerged_paths(left, right)
-  if tostring(left or "") == "" then
-    return tostring(right or "")
-  end
-  if tostring(right or "") == "" then
-    return tostring(left or "")
-  end
-  return tostring(left) .. "\n" .. tostring(right)
-end
-
-local function merge_sha_for_fix(worktree, sha, context, log_values)
-  local merge_result = devloop_commands.git_worktree_merge_no_edit(worktree, sha, 120)
-  if merge_result.exit_code == 0 then
-    return context
-  end
-  local unmerged_result = git("github-devloop").unmerged_paths(worktree, 30)
-  if unmerged_result.exit_code ~= 0 then
-    error("github-devloop: git-unmerged-path-check-failed: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
-  end
-  if tostring(unmerged_result.stdout or "") == "" then
-    error("github-devloop: git-target-merge-failed: git target merge failed: " .. tostring(merge_result.stderr))
-  end
-  context.conflicted = true
-  context.unmerged_paths = append_unmerged_paths(context.unmerged_paths, unmerged_result.stdout)
-  devloop_logging.log_line("info", "fix", "merge-target", "MERGE_SKEW", log_values)
-  return context
-end
-
-local function fetch_verified_pr_head(pr_number, expected_head_sha)
-  local fetch_result = devloop_commands.git_fetch_pr_head_ref("origin", pr_number, 60)
-  if fetch_result.exit_code ~= 0 then
-    error("github-devloop: git-pr-head-ref-fetch-failed: git PR head ref fetch failed: " .. tostring(fetch_result.stderr))
-  end
-  local head_result = devloop_commands.git_fetch_head_commit(30)
-  if head_result.exit_code ~= 0 then
-    error("github-devloop: git-pr-head-ref-head-failed: git PR head ref head failed: " .. tostring(head_result.stderr))
-  end
-  local head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
-  if head_sha ~= tostring(expected_head_sha) then
-    error("github-devloop: pr-head-predecessor-mismatch: PR head ref does not match merge queue predecessor")
-  end
-  return head_sha
-end
-
-local function current_predecessors_for_fix(repo, integration_branch, fix, current_pr)
-  local predecessors, reason = m_mq.merge_queue_predecessors(core, repo, integration_branch, {
-    pr_number = fix.pr_number,
-    pr = current_pr,
+local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_sha, reason, summary)
+  requests_review.raise_fix_reviewing(core, {
+    dept = "fix",
+    repo = repo,
+    issue_number = issue_number,
+    fix = fix,
+    old_head_sha = old_head_sha,
+    new_head_sha = new_head_sha,
+    reason = reason,
+    fix_summary = bounded_fix_summary(summary),
+    clear_fix_summary = true,
   })
-  if predecessors == nil then
-    return nil, reason
-  end
-  return predecessors, m_mq.merge_queue_predecessor_set(predecessors)
 end
 
-local function merge_predecessor_entries_for_fix(worktree, integration_branch, predecessors, current_set)
-  if #predecessors == 0 then
-    return nil, "not-speculative"
+local function fix_at_next_attempt_version(fix)
+  local review_meta = payloads_builders.build_devloop_review_meta_payload({
+    proposal_id = fix.review_proposal_id,
+    dedup_key = fix.review_dedup_key,
+    source_ref = fix.source_ref,
+  }, fix.proposal_id, devloop_state.next_fix_version(fix.version), fix.pr_number, 0, fix.source_ref)
+  local advanced = {}
+  for key, value in pairs(fix) do
+    advanced[key] = value
   end
-  local context = merge_result_context("speculative:" .. integration_branch, current_set)
-  for _, predecessor in ipairs(predecessors) do
-    if not require("devloop.pr_safety").is_safe_head_sha(predecessor.head_sha) then
-      error("github-devloop: speculative-predecessor-head-unsafe: unsafe speculative predecessor head")
-    end
-    local predecessor_head = fetch_verified_pr_head(predecessor.pr_number, predecessor.head_sha)
-    context = merge_sha_for_fix(worktree, predecessor_head, context, {
-      "integration_branch=" .. tostring(integration_branch),
-      "predecessor_pr=" .. tostring(predecessor.pr_number),
-      "predecessor_head=" .. tostring(predecessor_head),
-      "reason=speculative predecessor merge requires codex conflict resolution",
-    })
-  end
-  return context, "ok"
-end
-
-local function merge_speculative_predecessors_for_fix(worktree, repo, integration_branch, fix, current_pr)
-  if fix.predecessor_set == nil then
-    return nil, "not-speculative"
-  end
-  local predecessors, current_set = current_predecessors_for_fix(repo, integration_branch, fix, current_pr)
-  if predecessors == nil then
-    return nil, current_set
-  end
-  if tostring(current_set) ~= tostring(fix.predecessor_set) then
-    return nil, "predecessor-set-mismatch", current_set
-  end
-  return merge_predecessor_entries_for_fix(worktree, integration_branch, predecessors, current_set)
-end
-
-local function assert_no_unmerged_paths(worktree)
-  local unmerged_result = git("github-devloop").unmerged_paths(worktree, 30)
-  if unmerged_result.exit_code ~= 0 then
-    error("github-devloop: git-unmerged-path-check-failed: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
-  end
-  if tostring(unmerged_result.stdout or "") ~= "" then
-    error("github-devloop: unresolved-merge-conflicts: fix left target merge conflicts unresolved")
-  end
-end
-
-local function assert_no_conflict_markers(worktree)
-  local markers_result = git("github-devloop").conflict_markers(worktree, 30)
-  if markers_result.exit_code == 1 then
-    return
-  end
-  if markers_result.exit_code == 0 then
-    error("github-devloop: unresolved-conflict-markers: fix left conflict markers unresolved")
-  end
-  error("github-devloop: git-conflict-marker-check-failed: git conflict marker check failed: " .. tostring(markers_result.stderr))
+  advanced.version = review_meta.version
+  advanced.dedup_key = review_meta.dedup_key
+  return advanced
 end
 
 local function assert_fix_write_gate(fix, repo, issue_number)
@@ -464,6 +272,7 @@ local function run_fix_attempt(plan)
     })
     return {
       kind = "review-meta",
+      completed_without_new_head = true,
       reason = "no-fix",
       detail = result.stdout or result.stderr,
       outcome = "escalated: no-fix",
@@ -501,6 +310,7 @@ local function run_fix_attempt(plan)
   if new_head_sha == plan.fix.reviewed_head_sha then
     return {
       kind = "review-meta",
+      completed_without_new_head = true,
       reason = "no-new-head",
       detail = result.stdout or result.stderr,
       outcome = "escalated: no-new-head",
@@ -518,7 +328,7 @@ local function run_fix_attempt(plan)
     started_at = codex_started_at,
     finished_at = now(),
   }
-end
+  end
   if plan.fix.repair_input ~= "ci-failure" then
     return dispatch()
   end
@@ -556,6 +366,7 @@ end
   end
   return outcome
 end
+
 local function recheck_fix_write_gate(repo, fix, branch)
   local pr_recheck = devloop_commands.gh_pr_view_fix(repo, fix.pr_number, 30)
   if pr_recheck.exit_code ~= 0 then
@@ -582,7 +393,10 @@ local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
   if outcome == nil then
     return
   end
-  local rechecked_pr = recheck_fix_write_gate(repo, fix, branch)
+  local rechecked_pr, current_state = recheck_fix_write_gate(repo, fix, branch)
+  if current_state == nil then
+    return
+  end
   if outcome.kind == "reviewing-current" then
     raise_reviewing(
       repo,
@@ -608,6 +422,26 @@ local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
   if outcome.kind == "review-meta" then
     if fix.repair_input == "ci-failure" then
       ci_repair_attempts.raise_attempt_record(repo, fix, outcome.reason or "no-repair", outcome.detail)
+      return
+    end
+    if outcome.completed_without_new_head == true then
+      local fix_round = devloop_state.version_fix_round(current_state.version)
+      if fix_round >= config.max_fix_rounds() then
+        local fix_reconcile = conv_reconcile.build_devloop_fix_reconcile_payload({
+          proposal_id = fix.proposal_id,
+          review_proposal_id = fix.review_proposal_id,
+          review_dedup_key = fix.review_dedup_key,
+          reviewed_head_sha = fix.reviewed_head_sha,
+          pr_number = fix.pr_number,
+          source_ref = fix.source_ref,
+        }, current_state.version)
+        local decompose = payloads_builders.build_devloop_decompose_payload(fix_reconcile)
+        devloop_logging.log_cas_decision("fix", fix.proposal_id, current_state, "fixing", "blocked", "applied(fix-loop-max-rounds)", "completed fix attempt produced no new head: " .. tostring(outcome.reason))
+        devloop_logging.log_raise("fix", fix.proposal_id, "devloop_fix_reconcile", fix_reconcile)
+        devloop_logging.log_raise("fix", fix.proposal_id, "github-devloop-decompose.devloop_decompose", decompose)
+        return
+      end
+      raise_review_meta(repo, issue_number, fix_at_next_attempt_version(fix), outcome.reason, outcome.detail)
       return
     end
     raise_review_meta(repo, issue_number, fix, outcome.reason, outcome.detail)

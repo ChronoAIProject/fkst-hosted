@@ -7,7 +7,7 @@ local m_facts = require("devloop.markers.facts")
 local devloop_commands = require("devloop.commands")
 local devloop_state = require("devloop.state")
 local S = {}
-local issue_lifecycle = require("devloop.restart.issue_lifecycle")
+local issue_observation_facts = require("devloop.restart.issue_observation_facts")
 local decompose_lib = require("devloop.decompose")
 local entity_list_cache = require("devloop.entity_list_cache")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
@@ -132,7 +132,7 @@ function M.saga_doctor_classify_entity(entity, opts)
   local options = opts or {}
   local now_seconds = tonumber(options.now_seconds) or now()
   local state = entity.current_state
-  local row = issue_lifecycle.lifecycle_transition_row(M, state and state.state)
+  local row = issue_observation_facts.transition_row(state and state.state)
 
   -- NOTE: a label-vs-marker mismatch check (MIS-LABELED) is intentionally NOT done
   -- here. An issue's fkst-dev label legitimately mirrors its linked PR's downstream

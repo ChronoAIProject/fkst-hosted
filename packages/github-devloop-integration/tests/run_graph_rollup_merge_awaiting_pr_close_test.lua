@@ -104,7 +104,12 @@ local function initial_event()
 end
 
 local function mock_common_env()
-  for _ = 1, 12 do
+  -- FIFO single-use env-read mocks (engine primitive): each department invocation in a
+  -- run-graph pass consumes one mock per env var, so provision generous headroom. Bumped
+  -- from 12 after rollup_merge began calling assert_trusted_bot_configured() (#2248), which
+  -- reads FKST_GITHUB_BOT_LOGIN/FKST_GITHUB_WRITE per invocation. Root fix (persistent
+  -- env-read mocks in the engine test primitive) tracked as a substrate follow-up.
+  for _ = 1, 40 do
     t.mock_command(devloop_base.read_env_command("FKST_GITHUB_WRITE"), {
       stdout = "1",
       stderr = "",
@@ -163,6 +168,17 @@ local function mock_runtime_stability_gate()
 end
 
 local function mock_rollup_merge_success()
+  -- rollup_merge validates the trusted bot before its normal write-mode read.
+  t.mock_command(devloop_base.read_env_command("FKST_GITHUB_BOT_LOGIN"), {
+    stdout = core._test_bot_login,
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command(devloop_base.read_env_command("FKST_GITHUB_WRITE"), {
+    stdout = "1",
+    stderr = "",
+    exit_code = 0,
+  })
   entity_mocks.mock_pr_view_selector(t, {
     repo = repo,
     number = rollup_pr_number,
