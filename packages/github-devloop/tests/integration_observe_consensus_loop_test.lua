@@ -390,10 +390,10 @@ return {
     t.eq(current.version, event.dedup_key)
   end,
 
-  test_consensus_result_untyped_reject_is_unsupported = function()
-    mock_issue_result({ "fkst-dev:thinking" })
-    local result = run_result(reached({ decision = "reject" }), opts("result-reject"))
-    t.eq(result.exit_code, 0)
+  test_consensus_result_untyped_owned_reject_fails_loud = function()
+    local result = run_result_expecting_failure(reached({ decision = "reject" }), opts("result-reject"))
+    t.eq(result.exit_code, 1)
+    t.is_true(tostring(result.failure.error):find("consensus-result-invalid", 1, true) ~= nil)
     t.eq(#result.raises, 0)
   end,
 
@@ -616,13 +616,28 @@ return {
     t.eq(#result.raises, 0)
   end,
 
-  test_consensus_result_rejects_malformed_proposal_id_before_gh_view = function()
-    local result = run_result(reached({
+  test_consensus_result_fails_loud_for_owned_malformed_proposal_id_before_gh_view = function()
+    local result = run_result_expecting_failure(reached({
       proposal_id = "github-devloop/issue/owner/repo/../../42",
       dedup_key = "github-devloop/issue/owner/repo/../../42/result",
     }), opts("result-malformed-proposal"))
-    t.eq(result.exit_code, 0)
+    t.eq(result.exit_code, 1)
+    t.is_true(tostring(result.failure.error):find("consensus-result-invalid", 1, true) ~= nil)
     t.eq(#result.raises, 0)
+  end,
+
+  test_consensus_result_fails_loud_for_owned_malformed_approve = function()
+    local result = run_result_expecting_failure(reached({ body = "" }), opts("result-malformed-approve"))
+    t.eq(result.exit_code, 1)
+    t.is_true(tostring(result.failure.error):find("consensus-result-invalid", 1, true) ~= nil)
+    t.eq(#result.raises, 0)
+
+    local mismatch = run_result_expecting_failure(reached({
+      source_ref = { kind = "external", ref = "owner/repo#issue/43" },
+    }), opts("result-source-ref-mismatch"))
+    t.eq(mismatch.exit_code, 1)
+    t.is_true(tostring(mismatch.failure.error):find("consensus-result-invalid", 1, true) ~= nil)
+    t.eq(#mismatch.raises, 0)
   end,
 
   test_consensus_result_re_raises_until_github_has_terminal_fact = function()

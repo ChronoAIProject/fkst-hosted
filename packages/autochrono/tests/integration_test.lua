@@ -252,16 +252,21 @@ return {
     t.eq(#codex_calls(), 0)
   end,
 
-  test_reply_skips_malformed_reached_without_marking_replied = function()
+  test_reply_fails_loud_for_owned_malformed_reached_without_marking_replied = function()
     local run_opts = opts("reply-malformed")
 
-    -- approve but empty body -> no reply raised
     local bad = run_reply(consensus_reached({ body = "" }), run_opts)
-    t.eq(bad.exit_code, 0)
+    t.eq(bad.exit_code, 1)
+    t.is_true(tostring(bad.error):find("consensus-result-invalid", 1, true) ~= nil)
     t.eq(#bad.raises, 0)
 
-    -- the malformed event must NOT have marked the issue replied: a later well-formed
-    -- approve for the same issue still produces a reply
+    local mismatch = run_reply(consensus_reached({
+      source_ref = { kind = "external", ref = "owner/repo#issue/43" },
+    }), run_opts)
+    t.eq(mismatch.exit_code, 1)
+    t.is_true(tostring(mismatch.error):find("consensus-result-invalid", 1, true) ~= nil)
+    t.eq(#mismatch.raises, 0)
+
     local good = run_reply(consensus_reached(), run_opts)
     t.eq(good.exit_code, 0)
     t.eq(#good.raises, 1)

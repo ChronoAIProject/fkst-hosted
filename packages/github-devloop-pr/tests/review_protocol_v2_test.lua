@@ -449,7 +449,8 @@ return {
     })
 
     local result = h.run_review_result(event, h.opts("review-v2-reject-missing-gap"))
-    t.eq(result.exit_code, 0)
+    t.eq(result.exit_code, 1)
+    t.is_true(tostring(result.error):find("review-result-invalid", 1, true) ~= nil)
     t.eq(#result.raises, 0)
   end,
 
