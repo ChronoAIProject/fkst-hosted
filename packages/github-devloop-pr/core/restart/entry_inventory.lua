@@ -9,6 +9,7 @@ return {
       boundary = "github-proxy.github_entity_changed",
     },
     target = "reviewing",
+    pending_order = { participates = false },
     cas_policy_id = "cas.legacy_observe_pr_v1",
     cas_variant = "pr_open_to_reviewing",
     provenance = {
@@ -27,6 +28,7 @@ return {
       boundary = "github-devloop-pr.devloop_reviewing",
     },
     target = "reviewing",
+    pending_order = { participates = false },
     cas_policy_id = "cas.legacy_review_activation_handoff_v1",
     provenance = {
       owner = "github-devloop-pr",
@@ -44,6 +46,7 @@ return {
       boundary = "consensus.consensus_converge",
     },
     target = "reviewing",
+    pending_order = { participates = false },
     cas_policy_id = "cas.legacy_review_loop_safe_v1",
     provenance = {
       owner = "github-devloop-pr",
@@ -61,6 +64,7 @@ return {
       boundary = "github-proxy.github_comment_written",
     },
     target = "pr-open",
+    pending_order = { participates = false },
     provenance = {
       owner = "github-devloop-pr",
       row = "pr-open",

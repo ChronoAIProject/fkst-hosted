@@ -66,6 +66,14 @@ local expected_entries = {
   },
 }
 
+local pending_order_goldens = {
+  ["github-devloop/thinking/entry/unmanaged_issue"] = { participates = true, predecessor_state = "unmanaged" },
+  ["github-devloop/thinking/entry/execute_request"] = { participates = false },
+  ["github-devloop/impl-failed/entry/retry-implementation"] = { participates = true, predecessor_state = "impl-failed" },
+  ["github-devloop/ready/entry/implementation_kicked_off"] = { participates = true, predecessor_state = "ready" },
+  ["github-devloop/thinking/entry/issue_reconcile_true_stall"] = { participates = false },
+}
+
 local function key_set(keys)
   local out = {}
   for _, key in ipairs(keys) do
@@ -300,6 +308,7 @@ local function assert_entry_shape(edges)
     if expected.cas_variant ~= nil then
       edge_keys.cas_variant = true
     end
+    edge_keys.pending_order = true
     assert_exact_keys(edge, edge_keys)
     if expected.source_state == nil then
       assert_exact_keys(edge.source, { boundary = true })
@@ -320,6 +329,7 @@ local function assert_entry_shape(edges)
     t.eq(edge.provenance.field, expected.field)
     t.eq(edge.cas_policy_id, expected.cas_policy_id)
     t.eq(edge.cas_variant, expected.cas_variant)
+    assert_same_value(edge.pending_order, pending_order_goldens[edge.id])
     assert_valid_cas(edge)
     t.eq(seen_ids[edge.id], nil)
     seen_ids[edge.id] = true

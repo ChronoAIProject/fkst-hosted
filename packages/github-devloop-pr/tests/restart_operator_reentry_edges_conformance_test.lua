@@ -28,6 +28,11 @@ local structural_fields = {
   "cause_evidence",
   "provenance",
 }
+local pending_order_goldens = {
+  ["github-devloop-pr/reviewing/operator_reentry/rereview_blocked"] = { participates = false },
+  ["github-devloop-pr/reviewing/operator_reentry/rereview_review_meta"] = { participates = false },
+  ["github-devloop-pr/reviewing/operator_reentry/rereview_reviewing"] = { participates = false },
+}
 
 local function key_set(keys)
   local out = {}
@@ -248,9 +253,10 @@ end
 
 local function assert_operator_reentry_shape(edges)
   local seen_ids = {}
-  local edge_keys = key_set(structural_fields)
   local source_states = { blocked = true, ["review-meta"] = true, reviewing = true }
   for _, edge in ipairs(edges) do
+    local edge_keys = key_set(structural_fields)
+    edge_keys.pending_order = true
     assert_exact_keys(edge, edge_keys)
     assert_exact_keys(edge.source, { state = true })
     assert_exact_keys(edge.cause_evidence, {
@@ -270,6 +276,7 @@ local function assert_operator_reentry_shape(edges)
     t.eq(edge.cause_evidence.resolver, "operator_commands")
     t.eq(edge.provenance.owner, owner)
     t.eq(edge.provenance.row, "reviewing")
+    assert_same_value(edge.pending_order, pending_order_goldens[edge.id])
     t.eq(seen_ids[edge.id], nil)
     seen_ids[edge.id] = true
   end

@@ -44,6 +44,7 @@ return function(M, h)
         output_variant = "handoff_to_merge_gate",
         cas_policy_id = "cas.legacy_merge_v1",
         cas_variant = "merge_ready_or_merging_to_merging",
+        pending_order = { participates = true, predecessor_state = "merge-ready" },
       },
       {
         kind = "entry",
@@ -52,6 +53,7 @@ return function(M, h)
         output_variant = "review_reject_to_blocked",
         cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
         cas_variant = "review_reject_to_blocked",
+        pending_order = { participates = false },
       },
       {
         kind = "entry",
@@ -60,6 +62,7 @@ return function(M, h)
         output_variant = "bounded_fix_to_blocked",
         cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
         cas_variant = "bounded_fix_to_blocked",
+        pending_order = { participates = false },
       },
     },
     responsibility_signature = responsibility_signature({
@@ -76,6 +79,7 @@ return function(M, h)
           state = "blocked",
           output_variant = "fix_budget_exhausted",
           kind = "autonomous",
+          pending_order = { participates = true, predecessor_state = "merge-ready" },
           terminal = true,
           monotonic = true,
         },
@@ -93,18 +97,21 @@ return function(M, h)
           {
             state = "reviewing",
             output_variant = "approval_stale",
+            pending_order = { participates = false },
             decision_type = "MergeEligibility",
             bump = true,
           },
           {
             state = "merging",
             output_variant = "eligible_now",
+            pending_order = { participates = true, predecessor_state = "merge-ready" },
             decision_type = "MergeEligibility",
             monotonic = true,
           },
           {
             state = "fixing",
             output_variant = "code_repair_needed",
+            pending_order = { participates = false },
             decision_type = "MergeEligibility",
             failure = true,
             bump = true,
@@ -115,6 +122,7 @@ return function(M, h)
             kind = "timeout",
             cas_policy_id = "cas.legacy_timeout_reconcile_v1",
             cas_variant = "merge_ready_to_blocked",
+            pending_order = { participates = false },
             failure = true,
             terminal = true,
             monotonic = true,

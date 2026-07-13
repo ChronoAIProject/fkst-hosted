@@ -29,6 +29,7 @@ local expected_successor_kinds = {
   ["merging/fix_budget_exhausted"] = "autonomous",
   ["pr-open/review_requested"] = "autonomous",
   ["pr-open/not_mergeable_repair"] = "autonomous",
+  ["pr-open/pr_base_unmanaged"] = "guard_boundary",
   ["review-meta/fix"] = "autonomous",
   ["review-meta/block"] = "autonomous",
   ["reviewing/approved"] = "autonomous",
@@ -152,6 +153,7 @@ local function expected_edges(owner, rows)
           kind = "autonomous",
           source = { state = row.from_state, boundary = nil },
           target = successor.state,
+          pending_order = copy_value(successor.pending_order),
           cas_policy_id = expected_cas and expected_cas.cas_policy_id or nil,
           cas_variant = expected_cas and expected_cas.cas_variant or nil,
           provenance = {
@@ -185,6 +187,7 @@ local function expected_guard_boundary_edges(owner, rows)
           kind = "guard_boundary",
           source = { state = row.from_state, boundary = nil },
           target = successor.state,
+          pending_order = copy_value(successor.pending_order),
           provenance = {
             owner = owner,
             row = row.from_state,
@@ -205,6 +208,7 @@ local function expected_guard_boundary_edges(owner, rows)
               kind = "guard_boundary",
               source = { state = row.from_state, boundary = guard_boundary.name },
               target = successor.state,
+              pending_order = copy_value(successor.pending_order),
               provenance = {
                 owner = owner,
                 row = row.from_state,
@@ -245,6 +249,7 @@ local function expected_timeout_edges(owner, rows)
           kind = "timeout",
           source = { state = row.from_state, boundary = nil },
           target = successor.state,
+          pending_order = copy_value(successor.pending_order),
           timeout_evidence_policy_id = policy_id,
           cas_policy_id = expected_cas and expected_cas.cas_policy_id or nil,
           cas_variant = expected_cas and expected_cas.cas_variant or nil,
@@ -268,6 +273,7 @@ local function expected_timeout_edges(owner, rows)
             kind = "timeout",
             source = { state = row.from_state, boundary = guard_boundary.name },
             target = successor.state,
+            pending_order = copy_value(successor.pending_order),
             timeout_evidence_policy_id = policy_id,
             cas_policy_id = expected_cas and expected_cas.cas_policy_id or nil,
             cas_variant = expected_cas and expected_cas.cas_variant or nil,
@@ -300,6 +306,7 @@ local function assert_edges(actual, expected, empty_rows)
     if expected_edge.cas_variant ~= nil then
       edge_keys.cas_variant = true
     end
+    if expected_edge.pending_order ~= nil then edge_keys.pending_order = true end
     assert_exact_keys(edge, edge_keys)
     assert_exact_keys(edge.source, { state = true })
     assert_exact_keys(edge.provenance, { owner = true, row = true, field = true })
@@ -312,6 +319,7 @@ local function assert_edges(actual, expected, empty_rows)
     t.eq(edge.target, expected_edge.target)
     t.eq(edge.cas_policy_id, expected_edge.cas_policy_id)
     t.eq(edge.cas_variant, expected_edge.cas_variant)
+    assert_same_value(edge.pending_order, expected_edge.pending_order)
     assert_valid_cas(edge)
     t.eq(edge.provenance.owner, expected_edge.provenance.owner)
     t.eq(edge.provenance.row, expected_edge.provenance.row)
@@ -333,7 +341,6 @@ end
 
 local function assert_guard_boundary_edges(actual, expected, rows_without_boundaries)
   t.eq(#actual, #expected)
-  local edge_keys = key_set(structural_fields)
   local seen_ids = {}
   local seen_edges = {}
   local seen_sources = {}
@@ -341,6 +348,8 @@ local function assert_guard_boundary_edges(actual, expected, rows_without_bounda
   local counts_by_row = {}
   for index, expected_edge in ipairs(expected) do
     local edge = actual[index]
+    local edge_keys = key_set(structural_fields)
+    if expected_edge.pending_order ~= nil then edge_keys.pending_order = true end
     assert_exact_keys(edge, edge_keys)
     if expected_edge.source.boundary == nil then
       assert_exact_keys(edge.source, { state = true })
@@ -355,6 +364,7 @@ local function assert_guard_boundary_edges(actual, expected, rows_without_bounda
     t.eq(edge.source.state, expected_edge.source.state)
     t.eq(edge.source.boundary, expected_edge.source.boundary)
     t.eq(edge.target, expected_edge.target)
+    assert_same_value(edge.pending_order, expected_edge.pending_order)
     t.eq(edge.provenance.owner, expected_edge.provenance.owner)
     t.eq(edge.provenance.row, expected_edge.provenance.row)
     t.eq(edge.provenance.field, expected_edge.provenance.field)
@@ -380,6 +390,7 @@ local function assert_timeout_edges(actual, expected)
     local edge = actual[index]
     local edge_keys = key_set(structural_fields)
     edge_keys.timeout_evidence_policy_id = true
+    if expected_edge.pending_order ~= nil then edge_keys.pending_order = true end
     if expected_edge.cas_policy_id ~= nil then edge_keys.cas_policy_id = true end
     if expected_edge.cas_variant ~= nil then edge_keys.cas_variant = true end
     assert_exact_keys(edge, edge_keys)
@@ -399,6 +410,7 @@ local function assert_timeout_edges(actual, expected)
     t.eq(edge.timeout_evidence_policy_id, expected_edge.timeout_evidence_policy_id)
     t.eq(edge.cas_policy_id, expected_edge.cas_policy_id)
     t.eq(edge.cas_variant, expected_edge.cas_variant)
+    assert_same_value(edge.pending_order, expected_edge.pending_order)
     assert_valid_cas(edge)
     t.eq(edge.provenance.owner, expected_edge.provenance.owner)
     t.eq(edge.provenance.row, expected_edge.provenance.row)
@@ -601,7 +613,7 @@ return {
     local snapshot = copy_value(rows)
     local expected, rows_without_boundaries = expected_guard_boundary_edges(owner, rows)
     local actual = restart_edges.extract_guard_boundary_edges(owner, rows)
-    t.eq(#expected, 3)
+    t.eq(#expected, 4)
     assert_guard_boundary_edges(actual, expected, rows_without_boundaries)
     assert_same_value(rows, snapshot)
 

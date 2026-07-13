@@ -36,6 +36,7 @@ return function(M, h)
         output_variant = "implementation_kicked_off",
         cas_policy_id = "cas.legacy_implement_activation_handoff_v1",
         cas_variant = "ready_to_implementing",
+        pending_order = { participates = true, predecessor_state = "ready" },
       },
     },
     responsibility_signature = responsibility_signature({
@@ -52,6 +53,7 @@ return function(M, h)
           state = "dependency_wait",
           output_variant = "blocker_reappeared",
           kind = "guard_boundary",
+          pending_order = { participates = true, predecessor_state = "ready" },
           regression = "blocker_reappeared",
           failure = true,
           bump = true,
@@ -62,6 +64,7 @@ return function(M, h)
           kind = "timeout",
           cas_policy_id = "cas.legacy_timeout_reconcile_v1",
           cas_variant = "ready_to_blocked",
+          pending_order = { participates = true, predecessor_state = "ready" },
           terminal = true,
           monotonic = true,
         },

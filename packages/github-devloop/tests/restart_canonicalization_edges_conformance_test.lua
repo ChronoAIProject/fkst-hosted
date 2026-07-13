@@ -41,6 +41,12 @@ local cas_metadata_golden = {
     cas_variant = "implementing_to_awaiting_pr",
   },
 }
+local pending_order_goldens = {
+  ["github-devloop/dependency_wait/canonicalization/legacy_ready_dependency_hold"] = { participates = true, predecessor_state = "ready" },
+  ["github-devloop/ready/canonicalization/legacy_ready_rederive"] = { participates = false },
+  [implementing_merged_delegated_pr_id] = { participates = true, predecessor_state = "implementing" },
+  ["github-devloop/awaiting-pr/canonicalization/legacy_pr_open_delegation"] = { participates = false },
+}
 
 local function key_set(keys)
   local out = {}
@@ -442,6 +448,7 @@ local function assert_canonicalization_shape(edges)
       edge_keys.cas_policy_id = true
       edge_keys.cas_variant = true
     end
+    edge_keys.pending_order = true
     assert_exact_keys(edge, edge_keys)
     assert_exact_keys(edge.source, { state = true })
     assert_exact_keys(edge.cause_evidence, { marker = true, resolver = true })
@@ -454,6 +461,7 @@ local function assert_canonicalization_shape(edges)
     t.eq(edge.provenance.row, edge.target)
     t.eq(edge.cas_policy_id, expected_cas and expected_cas.cas_policy_id or nil)
     t.eq(edge.cas_variant, expected_cas and expected_cas.cas_variant or nil)
+    assert_same_value(edge.pending_order, pending_order_goldens[edge.id])
     t.eq(seen_ids[edge.id], nil)
     seen_ids[edge.id] = true
   end

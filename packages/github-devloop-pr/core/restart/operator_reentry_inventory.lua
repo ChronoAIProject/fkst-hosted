@@ -9,6 +9,7 @@ return {
       boundary = nil,
     },
     target = "reviewing",
+    pending_order = { participates = false },
     cause_evidence = {
       command = "rereview",
       requires_applied_certificate = true,
@@ -30,6 +31,7 @@ return {
       boundary = nil,
     },
     target = "reviewing",
+    pending_order = { participates = false },
     cause_evidence = {
       command = "rereview",
       requires_applied_certificate = true,
@@ -51,6 +53,7 @@ return {
       boundary = nil,
     },
     target = "reviewing",
+    pending_order = { participates = false },
     cause_evidence = {
       command = "rereview",
       requires_applied_certificate = true,

@@ -27,6 +27,10 @@ local structural_fields = {
   "cause_evidence",
   "provenance",
 }
+local pending_order_goldens = {
+  ["github-devloop-pr/reviewing/canonicalization/fixing_head_renormalization"] = { participates = true, predecessor_state = "fixing" },
+  ["github-devloop-pr/reviewing/canonicalization/pr_base_unmanaged_self_heal"] = { participates = false },
+}
 
 local function key_set(keys)
   local out = {}
@@ -320,8 +324,9 @@ end
 
 local function assert_canonicalization_shape(edges)
   local seen_ids = {}
-  local edge_keys = key_set(structural_fields)
   for _, edge in ipairs(edges) do
+    local edge_keys = key_set(structural_fields)
+    edge_keys.pending_order = true
     assert_exact_keys(edge, edge_keys)
     assert_exact_keys(edge.source, { state = true })
     assert_exact_keys(edge.cause_evidence, { marker = true, resolver = true })
@@ -332,6 +337,7 @@ local function assert_canonicalization_shape(edges)
     t.eq(edge.row_id, edge.target)
     t.eq(edge.provenance.owner, owner)
     t.eq(edge.provenance.row, edge.target)
+    assert_same_value(edge.pending_order, pending_order_goldens[edge.id])
     t.eq(seen_ids[edge.id], nil)
     seen_ids[edge.id] = true
   end

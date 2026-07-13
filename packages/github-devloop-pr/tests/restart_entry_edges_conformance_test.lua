@@ -144,6 +144,21 @@ local expected_entries = {
   },
 }
 
+local pending_order_goldens = {
+  ["github-devloop-pr/reviewing/entry/first_seen_pr"] = { participates = false },
+  ["github-devloop-pr/reviewing/entry/review_receiver"] = { participates = false },
+  ["github-devloop-pr/reviewing/entry/review_convergence_round"] = { participates = false },
+  ["github-devloop-pr/pr-open/entry/pr_open_handoff"] = { participates = false },
+  ["github-devloop-pr/merge-ready/entry/handoff_to_merge_gate"] = { participates = true, predecessor_state = "merge-ready" },
+  ["github-devloop-pr/reviewing/entry/review_reject_to_blocked"] = { participates = false },
+  ["github-devloop-pr/fixing/entry/review_reject_to_blocked"] = { participates = false },
+  ["github-devloop-pr/fixing/entry/bounded_fix_to_blocked"] = { participates = false },
+  ["github-devloop-pr/merge-ready/entry/review_reject_to_blocked"] = { participates = false },
+  ["github-devloop-pr/merge-ready/entry/bounded_fix_to_blocked"] = { participates = false },
+  ["github-devloop-pr/merging/entry/review_reject_to_blocked"] = { participates = false },
+  ["github-devloop-pr/merging/entry/bounded_fix_to_blocked"] = { participates = false },
+}
+
 local function key_set(keys)
   local out = {}
   for _, key in ipairs(keys) do
@@ -519,6 +534,7 @@ local function assert_entry_shape(edges)
     if expected.cas_variant ~= nil then
       edge_keys.cas_variant = true
     end
+    edge_keys.pending_order = true
     assert_exact_keys(edge, edge_keys)
     if expected.source_state == nil then
       assert_exact_keys(edge.source, { boundary = true })
@@ -540,6 +556,7 @@ local function assert_entry_shape(edges)
     t.eq(edge.provenance.field, expected.field)
     t.eq(edge.cas_policy_id, expected.cas_policy_id)
     t.eq(edge.cas_variant, expected.cas_variant)
+    assert_same_value(edge.pending_order, pending_order_goldens[edge.id])
     assert_valid_cas(edge)
     t.eq(seen_ids[edge.id], nil)
     seen_ids[edge.id] = true

@@ -9,6 +9,7 @@ return {
       boundary = nil,
     },
     target = "implementing",
+    pending_order = { participates = true, predecessor_state = "impl-failed" },
     cause_evidence = {
       command = "reimplement",
       requires_applied_certificate = true,
@@ -30,6 +31,7 @@ return {
       boundary = "open-pr",
     },
     target = "implementing",
+    pending_order = { participates = false },
     cas_policy_id = "cas.legacy_implement_activation_handoff_v1",
     cas_variant = "blocked_to_implementing",
     cause_evidence = {
@@ -53,6 +55,7 @@ return {
       boundary = "implementing-timeout-without-pr",
     },
     target = "implementing",
+    pending_order = { participates = false },
     cas_policy_id = "cas.legacy_implement_activation_handoff_v1",
     cas_variant = "blocked_to_implementing",
     cause_evidence = {

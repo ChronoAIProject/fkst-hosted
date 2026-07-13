@@ -41,6 +41,11 @@ local cas_metadata_golden = {
     cas_variant = "blocked_to_implementing",
   },
 }
+local pending_order_goldens = {
+  ["github-devloop/implementing/operator_reentry/reimplement_impl_failed"] = { participates = true, predecessor_state = "impl-failed" },
+  [blocked_open_pr_id] = { participates = false },
+  [blocked_timeout_without_pr_id] = { participates = false },
+}
 
 local function key_set(keys)
   local out = {}
@@ -381,6 +386,7 @@ local function assert_operator_reentry_shape(edges)
       edge_keys.cas_policy_id = true
       edge_keys.cas_variant = true
     end
+    edge_keys.pending_order = true
     assert_exact_keys(edge, edge_keys)
     if edge.source.boundary == nil then
       assert_exact_keys(edge.source, { state = true })
@@ -404,6 +410,7 @@ local function assert_operator_reentry_shape(edges)
     t.eq(edge.provenance.row, "implementing")
     t.eq(edge.cas_policy_id, expected_cas and expected_cas.cas_policy_id or nil)
     t.eq(edge.cas_variant, expected_cas and expected_cas.cas_variant or nil)
+    assert_same_value(edge.pending_order, pending_order_goldens[edge.id])
     t.eq(seen_ids[edge.id], nil)
     seen_ids[edge.id] = true
   end

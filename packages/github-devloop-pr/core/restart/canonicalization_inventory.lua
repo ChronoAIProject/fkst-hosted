@@ -9,6 +9,7 @@ return {
       boundary = nil,
     },
     target = "reviewing",
+    pending_order = { participates = true, predecessor_state = "fixing" },
     cause_evidence = {
       marker = "fix:v1",
       resolver = "has_fix_marker",
@@ -29,6 +30,7 @@ return {
       boundary = nil,
     },
     target = "reviewing",
+    pending_order = { participates = false },
     cause_evidence = {
       marker = "state:v1",
       resolver = "current_entity_state",

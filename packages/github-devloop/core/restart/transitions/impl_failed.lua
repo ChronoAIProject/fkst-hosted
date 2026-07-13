@@ -37,6 +37,7 @@ return function(M, h)
         output_variant = "retry-implementation",
         cas_policy_id = "cas.legacy_implement_activation_handoff_v1",
         cas_variant = "impl_failed_to_implementing",
+        pending_order = { participates = true, predecessor_state = "impl-failed" },
       },
     },
     responsibility_signature = responsibility_signature({
