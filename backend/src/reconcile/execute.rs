@@ -18,9 +18,9 @@ use std::sync::Arc;
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::config::Config;
+use crate::environment_profile::EnvironmentProfileStore;
 use crate::github_app::listing::GithubListing;
 use crate::github_app::{session_permissions, GithubAppError, GithubAppTokens};
-use crate::k8s::env_store::EnvStore;
 use crate::k8s::{session_github_token_json, SessionPodSpec};
 use crate::models::RepoRef;
 use crate::reconcile::announce::announce_session_comment;
@@ -52,9 +52,10 @@ pub struct ReconcileCtx {
     /// mark-pending / stop / cleanup / observe). Backend-neutral: the executor never
     /// touches a concrete Kubernetes type, only this `Arc<dyn SessionBackend>`.
     pub backend: Arc<dyn SessionBackend>,
-    /// The named-environment store the spawn pre-flight reads (`resolve_environment`).
-    /// A cheap-to-clone `EnvStore` seam (no bare Kubernetes client on the ctx).
-    pub env_store: EnvStore,
+    /// The environment-profile store the spawn pre-flight reads
+    /// (`resolve_environment`). Held behind the backend-agnostic
+    /// [`EnvironmentProfileStore`] trait so the storage backend is swappable.
+    pub env_store: Arc<dyn EnvironmentProfileStore>,
     /// GitHub App token service: mints the session token + posts comments/labels.
     pub github: GithubAppTokens,
     /// Read-side GitHub transport the driver enumerates issues + counts work with.
@@ -180,7 +181,7 @@ async fn spawn_session(reg: SessionRegistration, ctx: &ReconcileCtx) {
     // 2. Environment: a named environment must exist + be `ready` for the author;
     //    otherwise post feedback and skip (fail closed, no doomed pod).
     let user_env = match resolve_environment(
-        &ctx.env_store,
+        ctx.env_store.as_ref(),
         reg.trigger_author_id,
         reg.def.environment.as_deref(),
     )
@@ -426,7 +427,7 @@ enum EnvResolution {
 /// named selection must EXIST and be `ready`; otherwise (missing, not ready, or a
 /// store-read error) the launch is blocked with a feedback comment — fail closed.
 async fn resolve_environment(
-    env_store: &EnvStore,
+    env_store: &dyn EnvironmentProfileStore,
     author_id: i64,
     environment: Option<&str>,
 ) -> EnvResolution {

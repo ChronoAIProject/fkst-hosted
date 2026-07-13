@@ -83,8 +83,8 @@ async fn paths_are_the_trimmed_v1_surface() {
     // Present: the v1 surface — the named-environment REST API (collection +
     // item) plus the top-level system routes.
     for expected in [
-        "/api/v1/users/me/environments",
-        "/api/v1/users/me/environments/{name}",
+        "/api/v1/users/me/environment-profiles",
+        "/api/v1/users/me/environment-profiles/{name}",
         // The identity-gated log-download endpoint + its browser-OAuth callback.
         "/api/v1/logs/{session_id}",
         "/api/v1/logs/oauth/callback",
@@ -140,10 +140,10 @@ async fn components_include_the_named_environment_schemas_and_not_the_removed_on
     for expected in [
         "ErrorEnvelope",
         // The named-environment DTOs (issue #338 §2.2).
-        "EnvironmentSpec",
-        "EnvironmentView",
-        "EnvironmentList",
-        "EnvironmentSummary",
+        "EnvironmentProfileSpec",
+        "EnvironmentProfileView",
+        "EnvironmentProfileList",
+        "EnvironmentProfileSummary",
         "InstallValidationError",
     ] {
         assert!(
@@ -183,10 +183,10 @@ async fn no_operation_requires_security_the_whole_surface_is_open() {
     // `GithubUser` extractor), NOT a documented security scheme — so they carry
     // no `security` and no `NyxIdIdentity`.
     for (route, verb) in [
-        ("/api/v1/users/me/environments", "get"),
-        ("/api/v1/users/me/environments/{name}", "put"),
-        ("/api/v1/users/me/environments/{name}", "get"),
-        ("/api/v1/users/me/environments/{name}", "delete"),
+        ("/api/v1/users/me/environment-profiles", "get"),
+        ("/api/v1/users/me/environment-profiles/{name}", "put"),
+        ("/api/v1/users/me/environment-profiles/{name}", "get"),
+        ("/api/v1/users/me/environment-profiles/{name}", "delete"),
     ] {
         assert!(
             paths[route][verb].get("security").is_none(),

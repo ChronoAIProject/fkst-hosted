@@ -27,6 +27,9 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use k8s_openapi::ByteString;
 use kube::api::{Api, DeleteParams, ListParams, PostParams};
 
+use async_trait::async_trait;
+
+use crate::environment_profile::EnvironmentProfileStore;
 use crate::error::AppError;
 use crate::k8s::{KubeClient, KubeError};
 
@@ -147,7 +150,8 @@ impl EnvStore {
     }
 }
 
-impl EnvStore {
+#[async_trait]
+impl EnvironmentProfileStore for EnvStore {
     /// Write one named environment as a Secret + ConfigMap pair.
     ///
     /// Validate-then-swap write order: the Secret is written FIRST and the ConfigMap
@@ -156,7 +160,7 @@ impl EnvStore {
     /// through to a `resourceVersion`-matched replace). The Secret is always written
     /// — even with no secrets — so the pair exists atomically.
     #[allow(clippy::too_many_arguments)]
-    pub async fn put_environment(
+    async fn put_environment(
         &self,
         id: i64,
         login: &str,
@@ -218,11 +222,7 @@ impl EnvStore {
     /// Read one named environment's public view (install + variables + status +
     /// secret key NAMES). `None` when the ConfigMap is absent. NEVER reads secret
     /// values.
-    pub async fn get_environment(
-        &self,
-        id: i64,
-        name: &str,
-    ) -> Result<Option<EnvRecord>, AppError> {
+    async fn get_environment(&self, id: i64, name: &str) -> Result<Option<EnvRecord>, AppError> {
         let kube = &self.0;
         let object = env_object_name(id, name);
         let cm = match configmap_api(kube)
@@ -255,7 +255,7 @@ impl EnvStore {
     /// List a user's named environments as compact summaries (counts only). Joins the
     /// ConfigMaps (install + variable counts) with the Secrets (secret counts) by
     /// object name. Sorted by env name for a stable response.
-    pub async fn list_environments(&self, id: i64) -> Result<Vec<EnvSummary>, AppError> {
+    async fn list_environments(&self, id: i64) -> Result<Vec<EnvSummary>, AppError> {
         let kube = &self.0;
         let selector = owner_selector(id);
         let lp = ListParams::default().labels(&selector);
@@ -294,7 +294,7 @@ impl EnvStore {
     }
 
     /// Count a user's named environments — for the per-user cap check.
-    pub async fn count_environments(&self, id: i64) -> Result<usize, AppError> {
+    async fn count_environments(&self, id: i64) -> Result<usize, AppError> {
         let kube = &self.0;
         let selector = owner_selector(id);
         let lp = ListParams::default().labels(&selector);
@@ -304,7 +304,7 @@ impl EnvStore {
 
     /// Delete both the ConfigMap and Secret for one named environment. Idempotent /
     /// `404`-tolerant. Returns whether ANYTHING existed (either object present).
-    pub async fn delete_environment(&self, id: i64, name: &str) -> Result<bool, AppError> {
+    async fn delete_environment(&self, id: i64, name: &str) -> Result<bool, AppError> {
         let kube = &self.0;
         let object = env_object_name(id, name);
         let cm_existed = delete_configmap(&configmap_api(kube), &object).await?;
@@ -320,7 +320,7 @@ impl EnvStore {
     /// solely for the in-cluster session-injection path and is NEVER wired to any
     /// user-facing route, so a secret value never crosses the API boundary through
     /// here. `None` when the ConfigMap is absent.
-    pub async fn load_environment_for_session(
+    async fn load_environment_for_session(
         &self,
         id: i64,
         name: &str,

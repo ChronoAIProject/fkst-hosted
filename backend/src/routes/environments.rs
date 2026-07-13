@@ -1,4 +1,4 @@
-//! `/api/v1/users/me/environments`: the named-environment REST API (issue #338
+//! `/api/v1/users/me/environment-profiles`: the named-environment REST API (issue #338
 //! §2.2), replacing the flat per-user env store.
 //!
 //! Each NAMED environment bundles ordered install commands, non-secret variables,
@@ -13,9 +13,10 @@
 //! numeric `id` — and ONLY the verified id, never a request path/body value —
 //! keys the `fkst-env-<id>-<name>` objects, so a caller can only ever touch their
 //! OWN environments. Secret VALUES are write-only: no response type carries one
-//! ([`EnvironmentView`] exposes secret KEY NAMES), locked by a serialization test.
+//! ([`EnvironmentProfileView`] exposes secret KEY NAMES), locked by a serialization test.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::sync::OnceLock;
 
 use axum::extract::{Path, State};
@@ -30,9 +31,10 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::config::Config;
+use crate::environment_profile::{default_store, EnvironmentProfileStore};
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
-use crate::k8s::env_store::{content_hash, env_object_name, EnvRecord, EnvStore, EnvSummary};
+use crate::k8s::env_store::{content_hash, env_object_name, EnvRecord, EnvSummary};
 use crate::k8s::env_validator::validate_environment;
 use crate::reserved_env::{is_reserved_env_key, LLM_ENV_KEY};
 use crate::session_backend::ValidationOutcome;
@@ -45,10 +47,10 @@ const MAX_OBJECT_NAME_LEN: usize = 63;
 /// The status stamped on a fully-written (validated) environment.
 const STATUS_READY: &str = "ready";
 
-/// `PUT /users/me/environments/{name}` body: the desired environment contents.
+/// `PUT /users/me/environment-profiles/{name}` body: the desired environment contents.
 /// Every field defaults to empty so a caller can omit any of them.
 #[derive(Debug, Default, Deserialize, ToSchema)]
-pub struct EnvironmentSpec {
+pub struct EnvironmentProfileSpec {
     /// Ordered install commands validated in the isolated pod before persisting.
     #[serde(default)]
     pub install: Vec<String>,
@@ -64,7 +66,7 @@ pub struct EnvironmentSpec {
 /// The full view of one named environment: its install commands, non-secret
 /// variables, and secret key NAMES. Secret values are deliberately absent.
 #[derive(Debug, Serialize, ToSchema)]
-pub struct EnvironmentView {
+pub struct EnvironmentProfileView {
     pub name: String,
     pub status: String,
     pub validated_at: String,
@@ -75,7 +77,7 @@ pub struct EnvironmentView {
 
 /// A compact list-view of one named environment: counts only, no contents.
 #[derive(Debug, Serialize, ToSchema)]
-pub struct EnvironmentSummary {
+pub struct EnvironmentProfileSummary {
     pub name: String,
     pub status: String,
     pub validated_at: String,
@@ -84,10 +86,10 @@ pub struct EnvironmentSummary {
     pub secret_count: u32,
 }
 
-/// `GET /users/me/environments` response: the caller's environments as summaries.
+/// `GET /users/me/environment-profiles` response: the caller's environments as summaries.
 #[derive(Debug, Serialize, ToSchema)]
-pub struct EnvironmentList {
-    pub environments: Vec<EnvironmentSummary>,
+pub struct EnvironmentProfileList {
+    pub environment_profiles: Vec<EnvironmentProfileSummary>,
 }
 
 /// The detailed `422` body returned by `PUT` (and ONLY `PUT`) when the install
@@ -218,8 +220,8 @@ fn validate_install(install: &[String], config: &Config) -> Result<(), AppError>
 }
 
 /// Project a stored [`EnvRecord`] into the public view (never a secret value).
-fn view_from_record(record: EnvRecord) -> EnvironmentView {
-    EnvironmentView {
+fn view_from_record(record: EnvRecord) -> EnvironmentProfileView {
+    EnvironmentProfileView {
         name: record.name,
         status: record.status,
         validated_at: record.validated_at,
@@ -230,8 +232,8 @@ fn view_from_record(record: EnvRecord) -> EnvironmentView {
 }
 
 /// Project a stored [`EnvSummary`] into the public summary (counts only).
-fn summary_from_record(summary: EnvSummary) -> EnvironmentSummary {
-    EnvironmentSummary {
+fn summary_from_record(summary: EnvSummary) -> EnvironmentProfileSummary {
+    EnvironmentProfileSummary {
         name: summary.name,
         status: summary.status,
         validated_at: summary.validated_at,
@@ -244,8 +246,8 @@ fn summary_from_record(summary: EnvSummary) -> EnvironmentSummary {
 /// Build the named-environment store bound to the control-plane namespace the
 /// environment objects live in. An unreachable cluster surfaces as `503`, never a
 /// leaked client detail.
-async fn env_store(state: &AppState) -> Result<EnvStore, AppError> {
-    EnvStore::from_inferred(&state.config.pod.namespace)
+async fn env_store(state: &AppState) -> Result<Arc<dyn EnvironmentProfileStore>, AppError> {
+    default_store(&state.config.pod.namespace)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "env store: kubernetes client unavailable");
@@ -253,18 +255,18 @@ async fn env_store(state: &AppState) -> Result<EnvStore, AppError> {
         })
 }
 
-/// `PUT /api/v1/users/me/environments/{name}` — validate the install commands in
+/// `PUT /api/v1/users/me/environment-profiles/{name}` — validate the install commands in
 /// an isolated pod and persist the environment ONLY on success.
 #[utoipa::path(
     put,
-    path = "/users/me/environments/{name}",
+    path = "/users/me/environment-profiles/{name}",
     tag = "users",
-    operation_id = "put_user_environment",
+    operation_id = "put_user_environment_profile",
     params(("name" = String, Path, description = "Environment name (^[a-z0-9]([a-z0-9-]*[a-z0-9])?$, 1..=40 chars)")),
-    request_body = EnvironmentSpec,
+    request_body = EnvironmentProfileSpec,
     responses(
-        (status = 200, description = "Environment replaced (or unchanged) and validated", body = EnvironmentView),
-        (status = 201, description = "Environment created and validated", body = EnvironmentView),
+        (status = 200, description = "Environment replaced (or unchanged) and validated", body = EnvironmentProfileView),
+        (status = 201, description = "Environment created and validated", body = EnvironmentProfileView),
         (status = 401, description = "Missing/invalid GitHub token", body = ErrorEnvelope),
         (status = 403, description = "Verified GitHub identity not allowlisted (FKST_ACCESS_ALLOWED_USERS)", body = ErrorEnvelope),
         (status = 422, description = "Install validation failed (detailed report)", body = InstallValidationError),
@@ -276,7 +278,7 @@ async fn put_user_environment(
     State(state): State<AppState>,
     Path(name): Path<String>,
     user: GithubUser,
-    Json(spec): Json<EnvironmentSpec>,
+    Json(spec): Json<EnvironmentProfileSpec>,
 ) -> Result<Response, AppError> {
     let config = &state.config;
 
@@ -393,7 +395,7 @@ async fn put_user_environment(
         StatusCode::CREATED
     };
     tracing::info!(github_user_id = user.id, env = %name, replaced, "env put: validated and persisted");
-    let view = EnvironmentView {
+    let view = EnvironmentProfileView {
         name,
         status: STATUS_READY.to_string(),
         validated_at,
@@ -404,14 +406,14 @@ async fn put_user_environment(
     Ok((status, Json(view)).into_response())
 }
 
-/// `GET /api/v1/users/me/environments` — the caller's environments as summaries.
+/// `GET /api/v1/users/me/environment-profiles` — the caller's environments as summaries.
 #[utoipa::path(
     get,
-    path = "/users/me/environments",
+    path = "/users/me/environment-profiles",
     tag = "users",
-    operation_id = "list_user_environments",
+    operation_id = "list_user_environment_profiles",
     responses(
-        (status = 200, description = "The caller's named environments (summaries)", body = EnvironmentList),
+        (status = 200, description = "The caller's named environments (summaries)", body = EnvironmentProfileList),
         (status = 401, description = "Missing/invalid GitHub token", body = ErrorEnvelope),
         (status = 403, description = "Verified GitHub identity not allowlisted (FKST_ACCESS_ALLOWED_USERS)", body = ErrorEnvelope),
         (status = 503, description = "Environment store backend unavailable", body = ErrorEnvelope),
@@ -420,22 +422,24 @@ async fn put_user_environment(
 async fn list_user_environments(
     State(state): State<AppState>,
     user: GithubUser,
-) -> Result<Json<EnvironmentList>, AppError> {
+) -> Result<Json<EnvironmentProfileList>, AppError> {
     let store = env_store(&state).await?;
     let summaries = store.list_environments(user.id).await?;
-    let environments = summaries.into_iter().map(summary_from_record).collect();
-    Ok(Json(EnvironmentList { environments }))
+    let environment_profiles = summaries.into_iter().map(summary_from_record).collect();
+    Ok(Json(EnvironmentProfileList {
+        environment_profiles,
+    }))
 }
 
-/// `GET /api/v1/users/me/environments/{name}` — one environment (no secret values).
+/// `GET /api/v1/users/me/environment-profiles/{name}` — one environment (no secret values).
 #[utoipa::path(
     get,
-    path = "/users/me/environments/{name}",
+    path = "/users/me/environment-profiles/{name}",
     tag = "users",
-    operation_id = "get_user_environment",
+    operation_id = "get_user_environment_profile",
     params(("name" = String, Path, description = "The environment name")),
     responses(
-        (status = 200, description = "The named environment (secret values omitted)", body = EnvironmentView),
+        (status = 200, description = "The named environment (secret values omitted)", body = EnvironmentProfileView),
         (status = 401, description = "Missing/invalid GitHub token", body = ErrorEnvelope),
         (status = 403, description = "Verified GitHub identity not allowlisted (FKST_ACCESS_ALLOWED_USERS)", body = ErrorEnvelope),
         (status = 404, description = "No environment by that name", body = ErrorEnvelope),
@@ -446,7 +450,7 @@ async fn get_user_environment(
     State(state): State<AppState>,
     Path(name): Path<String>,
     user: GithubUser,
-) -> Result<Json<EnvironmentView>, AppError> {
+) -> Result<Json<EnvironmentProfileView>, AppError> {
     let store = env_store(&state).await?;
     match store.get_environment(user.id, &name).await? {
         Some(record) => Ok(Json(view_from_record(record))),
@@ -454,13 +458,13 @@ async fn get_user_environment(
     }
 }
 
-/// `DELETE /api/v1/users/me/environments/{name}` — remove an environment. Idempotent:
+/// `DELETE /api/v1/users/me/environment-profiles/{name}` — remove an environment. Idempotent:
 /// `204` whether or not it existed.
 #[utoipa::path(
     delete,
-    path = "/users/me/environments/{name}",
+    path = "/users/me/environment-profiles/{name}",
     tag = "users",
-    operation_id = "delete_user_environment",
+    operation_id = "delete_user_environment_profile",
     params(("name" = String, Path, description = "The environment name")),
     responses(
         (status = 204, description = "Deleted (idempotent — 204 even if absent)"),

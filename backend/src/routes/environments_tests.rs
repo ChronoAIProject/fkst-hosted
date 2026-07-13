@@ -174,7 +174,7 @@ fn validate_install_rejects_an_oversize_command() {
 
 #[test]
 fn environment_spec_deserializes_all_fields() {
-    let spec: EnvironmentSpec = serde_json::from_value(serde_json::json!({
+    let spec: EnvironmentProfileSpec = serde_json::from_value(serde_json::json!({
         "install": ["npm ci"],
         "variables": { "NODE_ENV": "production" },
         "secrets": { "TOKEN": "s3cr3t" }
@@ -187,7 +187,7 @@ fn environment_spec_deserializes_all_fields() {
 
 #[test]
 fn environment_spec_fields_are_optional() {
-    let empty: EnvironmentSpec =
+    let empty: EnvironmentProfileSpec =
         serde_json::from_value(serde_json::json!({})).expect("deserializes");
     assert!(empty.install.is_empty() && empty.variables.is_empty() && empty.secrets.is_empty());
 }
@@ -217,7 +217,7 @@ fn environment_view_never_carries_secret_values() {
     // could ever hold a secret value. Assert the serialized shape to lock it in.
     let mut variables = BTreeMap::new();
     variables.insert("FOO".to_string(), "bar".to_string());
-    let view = EnvironmentView {
+    let view = EnvironmentProfileView {
         name: "prod".to_string(),
         status: "ready".to_string(),
         validated_at: "2026-01-01T00:00:00+00:00".to_string(),
