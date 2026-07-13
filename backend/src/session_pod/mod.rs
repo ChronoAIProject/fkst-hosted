@@ -21,6 +21,6 @@ mod creds_helper;
 mod driver;
 pub mod log_stream;
 mod plan;
-mod supervise;
+pub(crate) mod supervise;
 
 pub use driver::run_substrate_from_env;

@@ -22,7 +22,7 @@ use super::plan::exit_status_to_code;
 
 /// The bundled substrate binary the session execs (image-baked, §Dockerfile). Also
 /// the `--framework-bin` arg the driver builds, so it is the shared source of truth.
-pub(super) const FRAMEWORK_BIN: &str = "/usr/local/bin/fkst-framework";
+pub(crate) const FRAMEWORK_BIN: &str = "/usr/local/bin/fkst-framework";
 
 /// Spawn `fkst-framework supervise` with the built argv + env in its OWN process
 /// group and supervise it, forwarding SIGTERM/SIGINT to the child's group so the

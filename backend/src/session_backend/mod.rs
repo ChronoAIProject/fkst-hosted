@@ -49,6 +49,30 @@ pub enum BackendError {
     Other(#[from] anyhow::Error),
 }
 
+/// A failure of the [`SessionBackend::engine_observe`] verb, kept apart from
+/// [`BackendError`] because its cases map to DISTINCT client responses (404 /
+/// 409 / 503) rather than the executor's swallow-or-log split.
+#[derive(Debug, thiserror::Error)]
+pub enum ObserveError {
+    /// No runtime exists for the session (pod/sandbox absent) → 404.
+    #[error("session runtime not found")]
+    SessionNotFound,
+    /// The session's packages declare no reliable subscriptions, so the engine
+    /// has neither an observe socket nor a `delivery.redb` to open → 409.
+    #[error("session has no durable delivery store to observe")]
+    NoDurableStore,
+    /// Any other exec/transport failure. The message is safe for logs but NOT
+    /// guaranteed safe for clients — route handlers map it to a generic 503.
+    #[error("engine observe failed: {0}")]
+    Failed(String),
+}
+
+/// The stderr marker the engine emits when a session has no durable store
+/// (verified against fkst-substrate `observe.rs` / `delivery_store.rs`): the
+/// offline fallback fails with "open existing durable delivery database …".
+/// Both backends classify a non-zero observe exit through this marker.
+pub(crate) const ENGINE_OBSERVE_NO_STORE_MARKER: &str = "open existing durable delivery database";
+
 /// A live session runtime projected into a kube-free handle: the identity + repo the
 /// fleet-wide loops (token rotation, health scrape, sweep) address a session by. The
 /// concrete backend derives it from a runtime's stamped metadata.
@@ -170,6 +194,14 @@ pub trait SessionBackend: Send + Sync {
     /// output could not be read at all (a transport error) — so the caller can
     /// withhold a health CLEAR it cannot justify. Best-effort: never propagates.
     async fn recent_output(&self, session_id: &str) -> Option<String>;
+
+    /// Run the engine's observe read-model (`fkst-framework observe
+    /// --durable-root … --json --limit N`) INSIDE the session's runtime and
+    /// return its raw JSON stdout. Read-only; the engine never emits payload
+    /// bodies (only schema/digest/byte counts), so the output is safe to serve
+    /// to an authorized viewer. `limit` is pre-clamped by the caller to the
+    /// engine's accepted 1..=10000.
+    async fn engine_observe(&self, session_id: &str, limit: u32) -> Result<String, ObserveError>;
 
     /// Validate a named environment's install commands in a throwaway isolated
     /// runtime, returning the parsed verdict (the admission/concurrency guards stay

@@ -149,6 +149,16 @@ impl SessionBackend for FakeSessionBackend {
         self.recent.get(session_id).cloned().unwrap_or(None)
     }
 
+    async fn engine_observe(
+        &self,
+        _session_id: &str,
+        _limit: u32,
+    ) -> Result<String, crate::session_backend::ObserveError> {
+        // The fake serves a minimal valid snapshot; per-case behavior is not
+        // needed by any current test (route mapping is unit-tested directly).
+        Ok("{}".to_string())
+    }
+
     async fn run_validation(
         &self,
         _req: &ValidationRequest,

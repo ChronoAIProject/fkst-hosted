@@ -40,14 +40,15 @@ use crate::k8s::SessionPodSpec;
 use crate::models::RepoRef;
 use crate::reconcile::desired::{KillReason, LivePod};
 use crate::session_backend::{
-    BackendError, DeliveryOutcome, EnsureOutcome, RuntimeStatus, SessionBackend, SessionHandle,
-    ValidationOutcome, ValidationRequest,
+    BackendError, DeliveryOutcome, EnsureOutcome, ObserveError, RuntimeStatus, SessionBackend,
+    SessionHandle, ValidationOutcome, ValidationRequest,
 };
 
 use super::dto::{ImageSpec, OsbError, ResourceLimits, SandboxView};
 use super::{ExecdClient, OsbLifecycleClient};
 
 pub mod correlate;
+mod engine_observe;
 mod fleet;
 mod health;
 mod logs;
@@ -282,6 +283,10 @@ impl SessionBackend for OsbBackend {
 
     async fn recent_output(&self, session_id: &str) -> Option<String> {
         self.recent_output_impl(session_id).await
+    }
+
+    async fn engine_observe(&self, session_id: &str, limit: u32) -> Result<String, ObserveError> {
+        self.engine_observe_impl(session_id, limit).await
     }
 
     async fn run_validation(

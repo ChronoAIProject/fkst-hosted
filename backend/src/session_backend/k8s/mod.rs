@@ -27,16 +27,21 @@ use crate::k8s::{KubeClient, SessionPodSpec};
 use crate::models::RepoRef;
 use crate::reconcile::desired::LivePod;
 
+use crate::session_backend::ObserveError;
+
 use super::{
     BackendError, DeliveryOutcome, EnsureOutcome, KillReason, RuntimeStatus, SessionBackend,
     SessionHandle, ValidationOutcome, ValidationRequest,
 };
 
 mod credential;
+mod engine_observe;
 mod fleet;
 mod lifecycle;
 mod status;
 mod validation;
+
+pub(crate) use engine_observe::classify_failure as classify_observe_failure;
 
 /// The direct-Kubernetes session backend: drives one long-lived Pod (+ its
 /// owner-referenced creds Secret) per substrate session, plus the throwaway
@@ -159,6 +164,10 @@ impl SessionBackend for K8sBackend {
 
     async fn recent_output(&self, session_id: &str) -> Option<String> {
         self.recent_output_impl(session_id).await
+    }
+
+    async fn engine_observe(&self, session_id: &str, limit: u32) -> Result<String, ObserveError> {
+        self.engine_observe_impl(session_id, limit).await
     }
 
     async fn run_validation(
