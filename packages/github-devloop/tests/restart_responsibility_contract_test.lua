@@ -145,6 +145,52 @@ return {
     t.eq(#m_rrc.strict_restart_responsibility_contract_errors(core, { clean_row() }), 0)
   end,
 
+  -- Direct regression for the worker single-responsibility fanout rule: it counts DISTINCT
+  -- success (postcondition) FAMILIES, not raw normal edges, so multiple variants of one
+  -- success family are admitted (thinking's consensus outcome routes to ready OR
+  -- dependency_wait, both issue-consensus) while two different families, or zero success
+  -- edges, remain god-state violations.
+  test_worker_success_fanout_counts_families_not_raw_edges = function()
+    local function worker_with(successors)
+      local row = clean_row()
+      row.responsibility_signature.successors = successors
+      row.to_states = {}
+      for _, edge in ipairs(successors) do
+        if edge.state ~= nil then
+          table.insert(row.to_states, edge.state)
+        end
+      end
+      return row
+    end
+    local function has_fanout_error(row)
+      for _, err in ipairs(m_rrc.strict_restart_responsibility_contract_errors(core, { row })) do
+        if tostring(err):find("exactly one success successor family", 1, true) ~= nil then
+          return true
+        end
+      end
+      return false
+    end
+    -- two variants of the SAME success family -> admitted
+    t.eq(has_fanout_error(worker_with({
+      { state = "done-a", output_variant = "a", postcondition_family = "synthetic-output", monotonic = true },
+      { state = "done-b", output_variant = "b", postcondition_family = "synthetic-output", monotonic = true },
+    })), false)
+    -- a nil-family variant inherits the signature family -> still one family, admitted
+    t.eq(has_fanout_error(worker_with({
+      { state = "done-a", output_variant = "a", monotonic = true },
+      { state = "done-b", output_variant = "b", postcondition_family = "synthetic-output", monotonic = true },
+    })), false)
+    -- two DIFFERENT success families -> god-state, rejected
+    t.eq(has_fanout_error(worker_with({
+      { state = "done-a", output_variant = "a", postcondition_family = "synthetic-output", monotonic = true },
+      { state = "done-b", output_variant = "b", postcondition_family = "unrelated-family", monotonic = true },
+    })), true)
+    -- zero success (normal) edges -> rejected
+    t.eq(has_fanout_error(worker_with({
+      { state = "dead", output_variant = "boom", failure = true, terminal = true, monotonic = true },
+    })), true)
+  end,
+
   test_blocked_is_clean_budget_bounded_recovery_signature = function()
     local row = rows_by_state(core.restart_transition_table()).blocked
     local signature = row.responsibility_signature

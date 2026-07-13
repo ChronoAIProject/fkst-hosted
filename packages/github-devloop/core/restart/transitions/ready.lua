@@ -1,4 +1,5 @@
 local payloads_builders = require("devloop.payloads.builders")
+local devloop_state = require("devloop.state")
 return function(M, h)
   local fact = h.fact
   local obligation = h.obligation
@@ -27,6 +28,17 @@ return function(M, h)
       external_wait_bound_minutes = 0,
     }),
     on_timeout = timeout("devloop_ready"),
+    receiver_activations = {
+      {
+        kind = "entry",
+        boundary = nil,
+        target = "implementing",
+        output_variant = "implementation_kicked_off",
+        cas_policy_id = "cas.legacy_implement_activation_handoff_v1",
+        cas_variant = "ready_to_implementing",
+        pending_order = { participates = true, predecessor_state = "ready" },
+      },
+    },
     responsibility_signature = responsibility_signature({
       receiver_kind = "issue",
       driving_queue = "devloop_ready",
@@ -34,18 +46,14 @@ return function(M, h)
       liveness_class = "actionable_kickoff",
       input_fact_family = "ready-base-preconditions-and-no-open-blockers",
       output_postcondition_family = "implementation_kickoff",
-      phase_rank = M.stage_rank("ready"),
+      phase_rank = devloop_state.stage_rank("ready"),
       lineage_keys = { "state.version", "source_ref", "actionable_epoch" },
       successors = {
         {
-          state = "implementing",
-          output_variant = "implementation_kicked_off",
-          postcondition_family = "implementation_kickoff",
-          monotonic = true,
-        },
-        {
           state = "dependency_wait",
           output_variant = "blocker_reappeared",
+          kind = "guard_boundary",
+          pending_order = { participates = true, predecessor_state = "ready" },
           regression = "blocker_reappeared",
           failure = true,
           bump = true,
@@ -53,6 +61,10 @@ return function(M, h)
         {
           state = "blocked",
           output_variant = "actionable_kickoff_timeout",
+          kind = "timeout",
+          cas_policy_id = "cas.legacy_timeout_reconcile_v1",
+          cas_variant = "ready_to_blocked",
+          pending_order = { participates = true, predecessor_state = "ready" },
           terminal = true,
           monotonic = true,
         },

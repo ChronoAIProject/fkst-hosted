@@ -141,7 +141,16 @@ class Violation:
         else:
             path = moved_paths.get(path, path)
         if path == "packages/github-devloop-pr/departments/merge/main.lua":
-            path = "packages/github-devloop-pr/core/merge_executor.lua"
+            if self.canonical_surface() == "process_merge_queue_tick":
+                path = "packages/github-devloop-pr/core/merge_queue_tick.lua"
+            else:
+                path = "packages/github-devloop-pr/core/merge_executor.lua"
+        if path == "libraries/devloop/replayer.lua" and self.surface in (
+            "fetch_child_state_fact",
+            "require_marker_fact",
+        ):
+            # Step 0.0 split: required-fact gathering moved to replay_required_facts.lua.
+            path = "libraries/devloop/replay_required_facts.lua"
         if path == "packages/github-devloop-intake-default/departments/intake_judge/main.lua":
             path = "packages/github-devloop-intake/departments/intake_judge/main.lua"
         # 2b-2a stdlib move: the default-intake engine (intake_judge:read_current_for_candidate)

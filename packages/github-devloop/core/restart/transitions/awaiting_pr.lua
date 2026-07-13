@@ -1,3 +1,4 @@
+local devloop_state = require("devloop.state")
 return function(M, h)
   local fact = h.fact
   local obligation = h.obligation
@@ -62,13 +63,17 @@ return function(M, h)
       liveness_class = "child_workflow_wait",
       input_fact_family = "pr-delegation-and-child-state",
       output_postcondition_family = "parent_resume_from_child_state_terminal",
-      phase_rank = M.stage_rank("awaiting-pr"),
+      phase_rank = devloop_state.stage_rank("awaiting-pr"),
       lineage_keys = { "state.version", "pr-delegation.pr_proposal", "pr-delegation.pr", "source_ref" },
       decision_type = "child_state_terminal_gate",
       successors = {
         {
           state = "merged",
           output_variant = "child_pr_merged",
+          kind = "guard_boundary",
+          pending_order = { participates = true, predecessor_state = "awaiting-pr" },
+          cas_policy_id = "cas.legacy_awaiting_pr_v1",
+          cas_variant = "awaiting_pr_to_merged",
           postcondition_family = "parent_resume_from_child_state_terminal",
           decision_type = "child_state_terminal_gate",
           monotonic = true,
@@ -76,6 +81,10 @@ return function(M, h)
         {
           state = "ready",
           output_variant = "child_pr_closed_unmerged_replaced",
+          kind = "guard_boundary",
+          pending_order = { participates = true, predecessor_state = "awaiting-pr" },
+          cas_policy_id = "cas.legacy_awaiting_pr_v1",
+          cas_variant = "awaiting_pr_to_ready",
           postcondition_family = "parent_resume_from_child_state_terminal",
           decision_type = "child_state_terminal_gate",
           failure = true,
@@ -85,6 +94,10 @@ return function(M, h)
         {
           state = "blocked",
           output_variant = "child_pr_not_merged",
+          kind = "guard_boundary",
+          pending_order = { participates = true, predecessor_state = "awaiting-pr" },
+          cas_policy_id = "cas.legacy_awaiting_pr_v1",
+          cas_variant = "awaiting_pr_to_blocked",
           postcondition_family = "parent_resume_from_child_state_terminal",
           decision_type = "child_state_terminal_gate",
           terminal = true,

@@ -36,6 +36,26 @@ return function(M, h)
       },
     }),
     on_timeout = timeout("devloop_merge_ready"),
+    receiver_activations = {
+      {
+        kind = "entry",
+        boundary = "devloop_fix_reconcile",
+        target = "blocked",
+        output_variant = "review_reject_to_blocked",
+        cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
+        cas_variant = "review_reject_to_blocked",
+        pending_order = { participates = false },
+      },
+      {
+        kind = "entry",
+        boundary = "devloop_fix_reconcile",
+        target = "blocked",
+        output_variant = "bounded_fix_to_blocked",
+        cas_policy_id = "cas.legacy_pr_fix_reconcile_v1",
+        cas_variant = "bounded_fix_to_blocked",
+        pending_order = { participates = false },
+      },
+    },
     responsibility_signature = responsibility_signature({
       receiver_kind = "merge-executor",
       driving_queue = "devloop_merge_ready",
@@ -51,6 +71,8 @@ return function(M, h)
         {
           state = "merged",
           output_variant = "merge-completed",
+          kind = "autonomous",
+          pending_order = { participates = true, predecessor_state = "merging" },
           postcondition_family = "merge_execution_result",
           decision_type = "MergeExecutionResult",
           monotonic = true,
@@ -58,6 +80,8 @@ return function(M, h)
         {
           state = "reviewing",
           output_variant = "head-advanced",
+          kind = "autonomous",
+          pending_order = { participates = true, predecessor_state = "merging" },
           postcondition_family = "merge_execution_result",
           decision_type = "MergeExecutionResult",
           bump = true,
@@ -65,6 +89,8 @@ return function(M, h)
         {
           state = "fixing",
           output_variant = "merge-needs-fix",
+          kind = "autonomous",
+          pending_order = { participates = true, predecessor_state = "merging" },
           postcondition_family = "merge_execution_result",
           decision_type = "MergeExecutionResult",
           failure = true,
@@ -72,10 +98,9 @@ return function(M, h)
         },
         {
           state = "blocked",
-          output_variant = "merge-blocked",
-          postcondition_family = "merge_execution_result",
-          decision_type = "MergeExecutionResult",
-          failure = true,
+          output_variant = "fix_budget_exhausted",
+          kind = "autonomous",
+          pending_order = { participates = true, predecessor_state = "merging" },
           terminal = true,
           monotonic = true,
         },

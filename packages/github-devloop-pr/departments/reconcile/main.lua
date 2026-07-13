@@ -43,6 +43,15 @@ local spec = {
   stall_window = "2m",
 }
 
+local fix_reconcile_from_states = { "reviewing", "fixing", "merge-ready", "merging" }
+local fix_reconcile_from_state_set = {
+  reviewing = true,
+  fixing = true,
+  ["merge-ready"] = true,
+  merging = true,
+}
+local fix_reconcile_from_label = table.concat(fix_reconcile_from_states, "|")
+
 local function emit_blocked_reconcile(kind, proposal_id, state, version, action, reason, comment_request, label_request, comment_queue)
   local add_labels, remove_labels = devloop_state.state_label_changes("blocked")
   local queue = comment_queue or "github-proxy.github_issue_comment_request"
@@ -228,14 +237,14 @@ local function pipeline_fix(event)
   local merge_gate_terminal = fix_rounds.is_supported_merge_gate(reconcile)
   if not review_reject and not own_ci_terminal and not merge_gate_terminal then
     devloop_logging.log_entry("reconcile", event, "unknown", devloop_logging.payload_field(reconcile, "dedup_key"))
-    devloop_logging.log_cas_decision("reconcile", "unknown", { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "unsupported event payload")
+    devloop_logging.log_cas_decision("reconcile", "unknown", { state = nil, version = nil }, fix_reconcile_from_label, "blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
 
   devloop_logging.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
   local entity = entity_lib.parse_entity_proposal_id(reconcile.proposal_id)
   if entity == nil then
-    devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
+    devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, fix_reconcile_from_label, "blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return
   end
   local repo = entity.repo
@@ -250,7 +259,7 @@ local function pipeline_fix(event)
 
   local lock_key = entity_lib.transition_lock_key(reconcile.proposal_id)
   if lock_key == nil then
-    devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "no transition lock key")
+    devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, fix_reconcile_from_label, "blocked", "skip-foreign(proposal_id)", "no transition lock key")
     return
   end
 
@@ -264,17 +273,23 @@ local function pipeline_fix(event)
       devloop_logging.log_forged_markers("reconcile", reconcile.proposal_id, current.comments)
       local state = require("devloop.entity").current_entity_state(current.comments, reconcile.proposal_id)
       local version = conv_reconcile.fix_reconcile_state_version(reconcile.issue_version)
+      local from_states = review_reject and fix_reconcile_from_states or bounded_fix_from_states
+      local from_state_set = review_reject and fix_reconcile_from_state_set or bounded_fix_from_state
+      local from_text = review_reject and fix_reconcile_from_label or "fixing|merge-ready|merging"
       if conv_reconcile.has_fix_reconcile_marker(core, current.comments, reconcile.proposal_id, reconcile.issue_version) then
-        devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-idempotent(fix reconcile marker already visible)", "fix reconcile result marker for incoming version is already visible")
+        devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, from_text, "blocked", "skip-idempotent(fix reconcile marker already visible)", "fix reconcile result marker for incoming version is already visible")
         return
       end
       if state.state ~= nil and devloop_state.stage_rank(state.state) >= devloop_state.stage_rank("blocked") then
-        devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-idempotent(already terminal)", "current marker is already terminal at or beyond blocked")
+        devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, from_text, "blocked", "skip-idempotent(already terminal)", "current marker is already terminal at or beyond blocked")
         return
       end
 
-    local from_states = review_reject and { "reviewing" } or bounded_fix_from_states
-    local from_text = review_reject and "reviewing" or "fixing|merge-ready|merging"
+    if review_reject and tostring(current.head_sha or "") ~= tostring(reconcile.head_sha or "") then
+      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, from_text, "blocked", "skip-stale(head-advanced)", "PR head changed after the over-budget fix decision")
+      return
+    end
+
     local transition = devloop_state.versioned_transition_status(state, from_states, "blocked", version)
     if state.state == nil or transition == "pending" then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, from_text, "blocked", devloop_state.cas_outcome(state, transition, version), "fix reconcile source state marker not yet visible")
@@ -282,11 +297,7 @@ local function pipeline_fix(event)
     end
     local version_matches = transition_version.safe_version_segment(tostring(state.version or ""))
       == transition_version.safe_version_segment(tostring(reconcile.issue_version))
-    if review_reject and (state.state ~= "reviewing" or not version_matches) then
-      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, from_text, "blocked", "skip-stale(version-mismatch)", "fix reconcile event does not match a canonical source marker")
-      return
-    end
-    if not review_reject and (bounded_fix_from_state[state.state] ~= true or not version_matches) then
+    if from_state_set[state.state] ~= true or not version_matches then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, from_text, "blocked", "skip-stale(version-mismatch)", "fix reconcile event does not match a canonical source marker")
       return
     end
@@ -316,7 +327,7 @@ local function pipeline_fix(event)
       or "fix-loop-max-rounds-after-" .. tostring(reconcile.round) .. "-rounds"
     local comment_request = build_fix_reconcile_comment_request(repo, issue_number, reconcile, action, reason)
     local label_request = issue_number ~= nil and build_fix_reconcile_label_request(repo, issue_number, reconcile) or nil
-    emit_blocked_reconcile("reviewing", reconcile.proposal_id, state, version, action, reason, comment_request, label_request, "github-proxy.github_pr_comment_request")
+    emit_blocked_reconcile(state.state, reconcile.proposal_id, state, version, action, reason, comment_request, label_request, "github-proxy.github_pr_comment_request")
     end
 
     if own_ci_terminal then

@@ -1,4 +1,5 @@
 local payloads_builders = require("devloop.payloads.builders")
+local devloop_state = require("devloop.state")
 return function(M, h)
   local fact = h.fact
   local obligation = h.obligation
@@ -28,11 +29,11 @@ return function(M, h)
       redrive_opens_generation = true,
     },
     terminal = false,
-    to_states = { "ready", "declined", "blocked" },
+    to_states = { "ready", "dependency_wait", "declined", "blocked" },
     driving_queue = "consensus.proposal",
     observe_surfaces = { issue = true, liveness_scan = true },
     timeout_surfaces = { issue = true, issue_liveness_scan = true, liveness_scan = true },
-    output_obligation = obligation({ "consensus.consensus_reached", "consensus.consensus_converge" }, { "ready", "declined", "blocked", "thinking" }),
+    output_obligation = obligation({ "consensus.consensus_reached", "consensus.consensus_converge" }, { "ready", "dependency_wait", "declined", "blocked", "thinking" }),
     budget = budget(150, "A live consensus receiver defers when fkst.codex_runs() positively reports a matching run with an unexpired run-derived deadline, or when codex run liveness is transiently indeterminate; a permanently indeterminate signal is bounded by this row budget."),
     liveness_contract = liveness({
       mode = "live-defer",
@@ -49,6 +50,17 @@ return function(M, h)
       },
     }),
     on_timeout = timeout("consensus.proposal"),
+    receiver_activations = {
+      {
+        kind = "entry",
+        boundary = "devloop_reconcile",
+        target = "blocked",
+        output_variant = "issue_reconcile_true_stall",
+        cas_policy_id = "cas.legacy_issue_reconcile_v1",
+        cas_variant = "thinking_to_blocked",
+        pending_order = { participates = false },
+      },
+    },
     responsibility_signature = responsibility_signature({
       receiver_kind = "consensus-worker",
       driving_queue = "consensus.proposal",
@@ -56,18 +68,38 @@ return function(M, h)
       liveness_class = "thinking.active",
       input_fact_family = "issue-proposal",
       output_postcondition_family = "issue-consensus",
-      phase_rank = M.stage_rank("thinking"),
+      phase_rank = devloop_state.stage_rank("thinking"),
       lineage_keys = { "state.version", "source_ref" },
       successors = {
         {
           state = "ready",
           output_variant = "consensus-reached",
+          cas_policy_id = "cas.legacy_consensus_result_v1",
+          cas_variant = "thinking_to_ready",
+          kind = "autonomous",
+          pending_order = { participates = true, predecessor_state = "thinking" },
+          postcondition_family = "issue-consensus",
+          monotonic = true,
+        },
+        {
+          -- Consensus reached but the dependency gate is unresolvable (unmet blockers):
+          -- consensus_result routes to dependency_wait instead of ready. Same success
+          -- family as ready (issue-consensus applied), a distinct gate-held variant; not a
+          -- regression (contrast ready->dependency_wait's guard_boundary blocker_reappeared).
+          state = "dependency_wait",
+          output_variant = "consensus-reached-dependency-held",
+          cas_policy_id = "cas.legacy_consensus_result_v1",
+          cas_variant = "thinking_to_dependency_wait",
+          kind = "autonomous",
+          pending_order = { participates = true, predecessor_state = "thinking" },
           postcondition_family = "issue-consensus",
           monotonic = true,
         },
         {
           state = "declined",
           output_variant = "premise-refuted",
+          kind = "autonomous",
+          pending_order = { participates = false },
           postcondition_family = "issue-consensus",
           terminal = true,
           monotonic = true,
@@ -75,6 +107,21 @@ return function(M, h)
         {
           state = "blocked",
           output_variant = "consensus-stalled",
+          cas_policy_id = "cas.legacy_loop_plain_v1",
+          cas_variant = "thinking_to_blocked",
+          -- SPEC sections 69/71 and A4.3 row-replay classify both emission plans as grantless.
+          transition_effect_entitlements = {
+            apply = {
+              id = "github-devloop/thinking/autonomous/consensus-stalled/apply",
+              effect_ids = {},
+            },
+            idempotent = {
+              id = "github-devloop/thinking/autonomous/consensus-stalled/idempotent",
+              effect_ids = {},
+            },
+          },
+          kind = "autonomous",
+          pending_order = { participates = true, predecessor_state = "thinking" },
           failure = true,
           terminal = true,
           monotonic = true,
