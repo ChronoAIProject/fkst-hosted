@@ -20,6 +20,23 @@ local autonomy_ledger = require("devloop.autonomy_ledger")
 local m_builders = require("devloop.markers.builders")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
 local devloop_logging = require("devloop.logging")
+
+function S.fetch_then_scan_rollup_receipts(candidates, fetch_receipt, receipt_contains_child)
+  local receipt_heads = {}
+  for _, candidate in ipairs(candidates) do
+    local receipt_head = fetch_receipt(candidate)
+    if receipt_head ~= nil then
+      table.insert(receipt_heads, receipt_head)
+    end
+  end
+  for _, receipt_head in ipairs(receipt_heads) do
+    if receipt_contains_child(receipt_head) then
+      return true
+    end
+  end
+  return false
+end
+
 function S.install(M)
 local child_terminal_states = {
   merged = true,
@@ -439,7 +456,7 @@ merged_child_landed_on_upstream = function(dept, issue, state, delegation, curre
   end
   local candidates = parsers_pr.parse_pr_list_promotions(listed.stdout)
   local landed = git_mechanics.with_repo_ref_store_lock(issue.repo, function()
-    for _, candidate in ipairs(candidates) do
+    return S.fetch_then_scan_rollup_receipts(candidates, function(candidate)
       local branch_match = tostring(candidate.head_ref_name or "") == tostring(branches.integration or "")
         and tostring(candidate.base_ref_name or "") == tostring(branches.upstream or "")
       local canonically_merged = contract_time.iso_timestamp_epoch_seconds(candidate.merged_at) ~= nil
@@ -462,13 +479,13 @@ merged_child_landed_on_upstream = function(dept, issue, state, delegation, curre
           if fetched_head ~= tostring(candidate.head_sha) then
             error("github-devloop: awaiting-pr-rollup-receipt-head-mismatch: fetched rollup PR head differs from GitHub metadata")
           end
-          if git_mechanics.is_ancestor(M.git, merge_commit_sha, fetched_head, "awaiting-pr rollup receipt ancestry") then
-            return true
-          end
+          return fetched_head
         end
       end
-    end
-    return false
+      return nil
+    end, function(receipt_head)
+      return git_mechanics.is_ancestor(M.git, merge_commit_sha, receipt_head, "awaiting-pr rollup receipt ancestry")
+    end)
   end)
   if not landed then
     return false, "skip-pending(rollup-receipt-missing)", "no merged rollup PR into upstream preserves the child PR merge commit"

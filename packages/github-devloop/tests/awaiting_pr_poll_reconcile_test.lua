@@ -11,6 +11,8 @@ local m_builders = require("devloop.markers.builders")
 local devloop_logging = require("devloop.logging")
 local replayer = require("devloop.replayer")
 local github_commands = require("forge.github").new(function() end)
+local git_mechanics = require("devloop.git_mechanics")
+local awaiting_pr_replayer = require("core.awaiting_pr_replayer")
 
 local repo = "owner/repo"
 local issue_number = 42
@@ -416,6 +418,47 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
+  end,
+
+  test_rollup_receipt_scan_fetches_containing_receipt_before_probing_absent_orphan_object = function()
+    local newer_head = "3333333333333333333333333333333333333333"
+    local orphan_object_available = false
+    local ancestry_calls = {}
+    local fake_git = {
+      is_ancestor = function(_, descendant_sha)
+        table.insert(ancestry_calls, descendant_sha)
+        if not orphan_object_available then
+          return {
+            stdout = "",
+            stderr = "fatal: Not a valid commit name " .. merge_commit_sha,
+            exit_code = 128,
+          }
+        end
+        return { stdout = "", stderr = "", exit_code = descendant_sha == rollup_head_sha and 0 or 1 }
+      end,
+    }
+
+    t.raises(function()
+      git_mechanics.is_ancestor(fake_git, merge_commit_sha, newer_head, "test orphan object precondition")
+    end)
+    ancestry_calls = {}
+
+    local landed = awaiting_pr_replayer.fetch_then_scan_rollup_receipts({
+      { number = 10, head_sha = newer_head },
+      { number = rollup_pr_number, head_sha = rollup_head_sha },
+    }, function(candidate)
+      if candidate.number == rollup_pr_number then
+        orphan_object_available = true
+      end
+      return candidate.head_sha
+    end, function(receipt_head)
+      return git_mechanics.is_ancestor(fake_git, merge_commit_sha, receipt_head, "test rollup receipt ancestry")
+    end)
+
+    t.is_true(landed)
+    t.eq(#ancestry_calls, 2)
+    t.eq(ancestry_calls[1], newer_head)
+    t.eq(ancestry_calls[2], rollup_head_sha)
   end,
 
   test_split_topology_rewritten_history_uses_immutable_rollup_pr_receipt = function()
