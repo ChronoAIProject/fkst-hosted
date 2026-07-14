@@ -140,10 +140,10 @@ local function observed_admission(probe, decision, marker_check_reached)
   end
 
   local legacy_reason = tostring(decision and decision.reason or "")
-  if not marker_check_reached and legacy_reason:find("no longer review%-meta") ~= nil then
+  if legacy_reason:find("no longer review%-meta") ~= nil then
     return { status = "stale", reason_code = "from-state-mismatch" }
   end
-  if not marker_check_reached and legacy_reason:find("version") ~= nil then
+  if legacy_reason:find("event version does not match canonical issue marker", 1, true) ~= nil then
     return { status = "stale", reason_code = "version-mismatch" }
   end
   if marker_check_reached then
@@ -153,6 +153,13 @@ local function observed_admission(probe, decision, marker_check_reached)
 end
 
 local function post_admission_disposition(result, decision, marker_check_reached)
+  local outcome = tostring(decision and decision.outcome or "")
+  local reason = tostring(decision and decision.reason or "")
+  if outcome:find("skip%-stale", 1) ~= nil
+    or reason:find("no longer review%-meta") ~= nil
+    or reason:find("event version does not match canonical issue marker", 1, true) ~= nil then
+    return "not-admitted"
+  end
   if not marker_check_reached then
     return "not-admitted"
   end
@@ -160,7 +167,6 @@ local function post_admission_disposition(result, decision, marker_check_reached
   if state ~= nil then
     return "effect-emitted(" .. state .. ")"
   end
-  local outcome = tostring(decision and decision.outcome or "")
   if outcome:find("review%-meta marker already visible") ~= nil then
     return "effect-idempotent"
   end
@@ -233,7 +239,7 @@ local function assert_catalog_matches_observed_decision(fixture)
   t.is_true(type(decision.reason) == "string", fixture.name .. ": legacy log reason captured")
 
   local marker_check_reached = #marker_checks > 0
-  t.eq(#marker_checks, fixture.marker_check_reached and 1 or 0, fixture.name .. ": marker admission boundary reach")
+  t.eq(#marker_checks, fixture.marker_check_reached == false and 0 or 1, fixture.name .. ": marker admission boundary reach")
   if marker_check_reached then
     t.eq(marker_checks[1].proposal_id, event.proposal_id, fixture.name .. ": marker boundary proposal")
     t.eq(marker_checks[1].dedup_key, event.dedup_key, fixture.name .. ": marker boundary dedup")
@@ -288,6 +294,37 @@ local function assert_rejected_before_cas(name, payload, expected_reason_code)
   t.eq(resolved.status, "illegal", name .. ": catalog status")
   t.eq(resolved.reason_code, expected_reason_code, name .. ": catalog reason")
   t.eq(resolved.cas_outcome, "illegal(" .. expected_reason_code .. ")", name .. ": catalog fails closed")
+end
+
+local function assert_local_source_marker_pending(name, current_state, current_version, incoming_version, catalog_pending)
+  local event = h.review_meta_event({ version = incoming_version or V_EQUAL })
+  local comments = {}
+  if current_state ~= nil then
+    table.insert(comments, core.state_marker(event.proposal_id, current_state, current_version or V_EQUAL))
+  end
+  h.mock_issue_review_meta({}, comments)
+  h.mock_default_issue_claim()
+  h.mock_pr_origin(nil, "devloop-owner-repo-42-01HY", "def456", "OPEN", "dev")
+
+  local result, probes, decisions, marker_checks = observe_department(function()
+    return run_real_department(event)
+  end)
+
+  t.eq(result.exit_code, 1, name .. ": absent source marker must retry")
+  t.eq(#probes, 0, name .. ": local source-marker guard must run before cyclic CAS")
+  t.eq(#marker_checks, 1, name .. ": exact decision marker must be checked first")
+  t.eq(#decisions, 1, name .. ": retry decision count")
+  t.eq(decisions[1].outcome, "retry-pending(from-state marker not yet visible)", name .. ": retry outcome")
+  t.is_true(tostring(result.error or ""):find("review%-meta state marker not yet visible; retrying") ~= nil, name .. ": retry error")
+  if catalog_pending then
+    local resolved = catalog.resolve(POLICY_ID, {
+      current = current_state ~= nil and current_fact(current_state, current_version or V_EQUAL) or nil,
+      variant = VARIANT,
+      incoming_version = incoming_version or V_EQUAL,
+      overlay_version = incoming_version or V_EQUAL,
+    }, projection)
+    t.eq(resolved.status, "pending", name .. ": catalog pending parity")
+  end
 end
 
 return {
@@ -355,23 +392,11 @@ return {
   end,
 
   test_review_meta_source_newer_is_pending = function()
-    assert_catalog_matches_observed_decision({
-      name = "review-meta-source-newer",
-      current_state = "review-meta",
-      current_version = V_EQUAL,
-      incoming_version = V_NEWER,
-      expected_exit_code = 1,
-    })
+    assert_local_source_marker_pending("review-meta-source-newer", "review-meta", V_EQUAL, V_NEWER, true)
   end,
 
   test_review_meta_missing_current_marker_is_pending = function()
-    assert_catalog_matches_observed_decision({
-      name = "review-meta-current-missing",
-      current_state = nil,
-      current_version = nil,
-      incoming_version = V_EQUAL,
-      expected_exit_code = 1,
-    })
+    assert_local_source_marker_pending("review-meta-current-missing", nil, nil, V_EQUAL, true)
   end,
 
   test_review_meta_target_state_is_idempotent = function()
@@ -380,7 +405,14 @@ return {
       current_state = "fixing",
       current_version = V_EQUAL,
       incoming_version = V_EQUAL,
+      result_marker_visible = true,
+      marker_check_reached = true,
+      post_admission_disposition = "effect-idempotent",
     })
+  end,
+
+  test_review_meta_same_version_fixing_without_source_or_decision_marker_is_pending = function()
+    assert_local_source_marker_pending("review-meta-fixing-predecessor-pending", "fixing")
   end,
 
   test_review_meta_unrelated_state_is_stale = function()
@@ -402,13 +434,7 @@ return {
   end,
 
   test_review_meta_predecessor_with_equal_event_matches_production_admission = function()
-    assert_catalog_matches_observed_decision({
-      name = "review-meta-predecessor-equal",
-      current_state = "reviewing",
-      current_version = V_EQUAL,
-      incoming_version = V_EQUAL,
-      legacy_log_outcome = "applied",
-    })
+    assert_local_source_marker_pending("review-meta-predecessor-equal", "reviewing")
   end,
 
   test_review_meta_malformed_evidence_and_payload_fail_closed_before_cas = function()

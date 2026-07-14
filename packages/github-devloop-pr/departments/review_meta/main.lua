@@ -198,10 +198,22 @@ return saga.department(spec, { done = function() return false end, act = functio
     devloop_logging.log_forged_markers("review_meta", review_meta.proposal_id, current_pr.comments)
 
     local state = require("devloop.entity").current_entity_state(current_pr.comments, review_meta.proposal_id)
+    local result_marker_visible = m_facts.has_review_meta_marker(current_pr.comments, review_meta.proposal_id, review_meta.dedup_key)
+    local source_marker_visible = devloop_state.has_state_marker(current_pr.comments, review_meta.proposal_id, "review-meta", review_meta.version)
+    if not result_marker_visible
+      and not source_marker_visible
+      and devloop_state.compare_state_marker_order(state, "review-meta", review_meta.version) < 0 then
+      devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "retry-pending(from-state marker not yet visible)", "review-meta state marker not yet visible")
+      error("github-devloop: review-meta-marker-missing: review-meta state marker not yet visible; retrying")
+    end
     local transition = devloop_state.cyclic_transition_status(state, { "review-meta" }, "fixing", review_meta.version)
     if transition == "pending" then
       devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "retry-pending(from-state marker not yet visible)", "review-meta state marker not yet visible")
       error("github-devloop: review-meta-marker-missing: review-meta state marker not yet visible; retrying")
+    end
+    if result_marker_visible then
+      devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "skip-idempotent(review-meta marker already visible)", "review-meta result marker for incoming version is already visible")
+      return
     end
     if state.state ~= "review-meta" or transition == "stale" then
       devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", devloop_state.cas_outcome(state, transition, review_meta.version), "current marker is no longer review-meta")
@@ -211,11 +223,6 @@ return saga.department(spec, { done = function() return false end, act = functio
       devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "skip-stale(version-mismatch)", "review-meta event version does not match canonical issue marker")
       return
     end
-    if m_facts.has_review_meta_marker(current_pr.comments, review_meta.proposal_id, review_meta.dedup_key) then
-      devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "skip-idempotent(review-meta marker already visible)", "review-meta result marker for incoming version is already visible")
-      return
-    end
-
     local plan = load_review_meta_context(repo, issue_number, review_meta, event, current_pr, current_issue, state)
     if dispatch_live_run.dispatch_live_run_dedup(dispatch_liveness, "review-meta", review_meta.proposal_id, review_meta.version, {
       state = state,

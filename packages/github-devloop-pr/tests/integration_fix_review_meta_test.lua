@@ -472,7 +472,6 @@ return {
     t.eq(#result.raises, 0)
     t.eq(count_calls("codex exec"), 0)
   end,
-
   test_fix_no_changes_moves_forward_to_reviewing_for_review_meta_path = function()
     local event = fixing()
     local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
@@ -505,15 +504,16 @@ return {
 
     local result = run_fix(event, opts("fix-no-changes-review-meta", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:review-meta")
-    local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
+    local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
+    local comment_body = comment_raise.payload.body
     t.is_true(comment_body:find("github-devloop fix escalated to review-meta: no-fix", 1, true) ~= nil)
     t.is_true(comment_body:find("fkst:github-devloop:review-meta:v1", 1, true) ~= nil)
     t.is_true(comment_body:find('dedup="' .. event.review_dedup_key .. '"', 1, true) ~= nil)
-    t.eq(find_raise(result.raises, "devloop_review_meta").payload.version, core.next_fix_version(event.version))
+    t.eq(find_raise(result.raises, "devloop_review_meta"), nil)
+    t.eq(comment_raise.payload.handoff.version, core.next_fix_version(event.version))
   end,
-
   test_fix_clean_worktree_with_existing_ahead_commit_reuses_it = function()
     local event = fixing()
     local branch = devloop_base.implement_branch("owner/repo", "42", event.version)

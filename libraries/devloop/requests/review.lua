@@ -101,6 +101,26 @@ function C.attach_fixing_handoff(request, proposal_id, pr_number, version, revie
   return request
 end
 
+function C.attach_review_meta_handoff(request, review_meta)
+  request.handoff = {
+    kind = "github-devloop.review_meta",
+    proposal_id = review_meta.proposal_id,
+    review_proposal_id = review_meta.review_proposal_id,
+    review_dedup_key = review_meta.review_dedup_key,
+    version = review_meta.version,
+    pr_number = review_meta.pr_number,
+    n = review_meta.n,
+    dedup_key = review_meta.dedup_key,
+    source_ref = base_ids.normalize_source_ref(review_meta.source_ref),
+  }
+  for _, field in ipairs({ "mode", "fix_round", "blocking_gap" }) do
+    if review_meta[field] ~= nil then
+      request.handoff[field] = review_meta[field]
+    end
+  end
+  return request
+end
+
 function C.build_review_converge_round_comment_request(M, repo, issue_number, unresolved, issue_proposal_id, round, marker_body, source_ref)
   return entity_lib.build_entity_comment_request({
     kind = "pr",
@@ -287,6 +307,14 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
       blocking_gap = reached.blocking_gap,
       current_head_sha = reached.current_head_sha,
     }, source_ref)
+  elseif reached.reflection_checkpoint then
+    local reflection = payloads_builders.build_devloop_fix_reflection_payload({
+      proposal_id = reached.proposal_id,
+      dedup_key = review_dedup_key,
+      source_ref = source_ref,
+    }, issue_proposal_id, issue_version, pr_number, fix_round, source_ref)
+    reflection.blocking_gap = blocking_gap
+    C.attach_review_meta_handoff(request, reflection)
   end
   return request
 end
@@ -412,19 +440,7 @@ end
 
 function C.raise_fix_review_meta(caps, repo, issue_number, fix, reason, detail)
   local comment_request = caps.build_comment(repo, issue_number, fix, reason, detail)
-  local label_request = caps.build_label(repo, issue_number, fix, reason)
-  local add_labels, remove_labels = devloop_state.state_label_changes("review-meta")
-  devloop_logging.log_apply("fix", fix.proposal_id, "review-meta", fix.version, { add = add_labels, remove = remove_labels }, {
-    "github-proxy.github_pr_comment_request",
-    "github-proxy.github_issue_label_request",
-    "devloop_review_meta",
-  })
-  devloop_logging.log_raise("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
-  if issue_number ~= nil then
-    devloop_logging.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
-  end
-  devloop_logging.log_raise("fix", fix.proposal_id, "devloop_review_meta", {
-    schema = "github-devloop.review-meta.v1",
+  C.attach_review_meta_handoff(comment_request, {
     proposal_id = fix.proposal_id,
     review_proposal_id = fix.review_proposal_id,
     review_dedup_key = fix.review_dedup_key,
@@ -434,6 +450,16 @@ function C.raise_fix_review_meta(caps, repo, issue_number, fix, reason, detail)
     dedup_key = fix.dedup_key,
     source_ref = fix.source_ref,
   })
+  local label_request = caps.build_label(repo, issue_number, fix, reason)
+  local add_labels, remove_labels = devloop_state.state_label_changes("review-meta")
+  devloop_logging.log_apply("fix", fix.proposal_id, "review-meta", fix.version, { add = add_labels, remove = remove_labels }, {
+    "github-proxy.github_pr_comment_request",
+    "github-proxy.github_issue_label_request",
+  })
+  devloop_logging.log_raise("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  if issue_number ~= nil then
+    devloop_logging.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  end
 end
 
 function C.raise_fix_reviewing(M, opts)

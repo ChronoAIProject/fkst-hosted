@@ -16,6 +16,7 @@ local replay_fields = require("devloop.replay_fields")
 local replayer = require("devloop.replayer")
 local devloop_state = require("devloop.state")
 local h = require("tests.devloop_helpers")
+local restart_authority = require("core.restart_authority")
 local t = h.t
 local core = h.core
 local projection = owner_pending_projection.derive(core.restart_package_name, core.restart_transition_table(), inventories)
@@ -23,6 +24,8 @@ local observe_pr_department = require("departments.observe_pr.main")
 
 local POLICY_ID = "cas.legacy_observe_pr_v1"
 local VARIANT = "pr_open_to_reviewing"
+local SEMANTIC_VARIANT = "first_seen_pr"
+local SOURCE_BOUNDARY = "github-proxy.github_entity_changed"
 local PROPOSAL_ID = "github-devloop/issue/owner/repo/42"
 local BRANCH = "devloop-owner-repo-42-01HY"
 local BASE_BRANCH = "dev"
@@ -137,6 +140,26 @@ local function evidence_from_probe(probe)
   }
 end
 
+local function observe_shadow(run)
+  local evidence = nil
+  local original_resolve = catalog.resolve
+  catalog.resolve = function(policy_id, candidate, candidate_projection)
+    evidence = candidate
+    return original_resolve(policy_id, candidate, candidate_projection)
+  end
+  local ok, result = pcall(run)
+  catalog.resolve = original_resolve
+  if not ok then
+    error(result, 0)
+  end
+  return result, evidence
+end
+
+local function assert_bidirectional(actual, expected, field, context)
+  t.eq(actual[field], expected[field], context .. ": shadow-to-production " .. field)
+  t.eq(expected[field], actual[field], context .. ": production-to-shadow " .. field)
+end
+
 local function pr_event(pr_number, overrides)
   local number = pr_number or 7
   local event = {
@@ -240,6 +263,19 @@ local function observed_admission(fixture, probe, decision, admitted_guard_reach
   error(fixture.name .. ": observe_pr admission apply did not reach a classified guard")
 end
 
+local function observed_cas_outcome(observed)
+  if observed.status == "apply" then
+    return "applied"
+  end
+  if observed.reason_code == "incoming-version-older" then
+    return "skip-stale(incoming version < current marker version)"
+  end
+  if observed.reason_code == "version-mismatch" then
+    return "skip-stale(version-mismatch)"
+  end
+  error("observe_pr admission has no CAS outcome for " .. tostring(observed.reason_code))
+end
+
 local function post_admission_disposition(result, boundary_reached, pre_builder_admission_reached)
   local state = emitted_state(result)
   local admitted_guard_reached = boundary_reached or pre_builder_admission_reached
@@ -339,6 +375,42 @@ local function assert_observe_pr_admission_case(fixture)
     actual = catalog.resolve(POLICY_ID, evidence_from_probe(probe), projection)
     t.eq(actual.status, observed.status, fixture.name .. ": admission status parity")
     t.eq(actual.reason_code, observed.reason_code, fixture.name .. ": admission reason parity")
+    if observed.status == "apply" or observed.status == "stale" then
+      local sealed = restart_authority.seal_snapshot({
+        owner = core.restart_package_name,
+        proposal_id = PROPOSAL_ID,
+        current = {
+          state = fixture.current_state,
+          version = fixture.current_version,
+        },
+      })
+      local intent = {
+        semantic_variant = SEMANTIC_VARIANT,
+        source_boundary = SOURCE_BOUNDARY,
+        target = "reviewing",
+        incoming_version = fixture.incoming_version,
+        overlay_version = fixture.incoming_version,
+      }
+      t.eq(intent.source_boundary, SOURCE_BOUNDARY, fixture.name .. ": ingress boundary is explicit")
+      local shadow, shadow_evidence = observe_shadow(function()
+        return restart_authority.decide_transition(sealed, intent)
+      end)
+      local legacy = {
+        status = observed.status,
+        reason_code = observed.reason_code,
+        cas_outcome = observed_cas_outcome(observed),
+      }
+      assert_bidirectional(shadow, legacy, "status", fixture.name)
+      assert_bidirectional(shadow, legacy, "reason_code", fixture.name)
+      assert_bidirectional(shadow, legacy, "cas_outcome", fixture.name)
+      t.eq(shadow.cas_policy_id, POLICY_ID, fixture.name .. ": selected CAS policy")
+      t.eq(shadow.grant, nil, fixture.name .. ": grant disabled")
+      t.eq(shadow_evidence.current.state, fixture.current_state, fixture.name .. ": independently sealed current state")
+      t.eq(shadow_evidence.current.version, fixture.current_version or "", fixture.name .. ": independently sealed raw current version")
+      t.eq(shadow_evidence.variant, VARIANT, fixture.name .. ": catalog variant")
+      t.eq(shadow_evidence.incoming_version, fixture.incoming_version, fixture.name .. ": independently derived incoming version")
+      t.eq(shadow_evidence.overlay_version, fixture.incoming_version, fixture.name .. ": independently derived overlay version")
+    end
   end
   if fixture.probe_outcome ~= nil then
     t.eq(probe and probe.outcome, fixture.probe_outcome, fixture.name .. ": literal probe outcome")
@@ -391,6 +463,28 @@ local function assert_malformed_event_is_pre_cas()
   t.eq(#decisions, 1, "observe-pr-malformed: rejection decision count")
   t.eq(decisions[1].outcome, "skip-foreign(pr)", "observe-pr-malformed: rejection outcome")
   t.eq(decisions[1].reason, "unsupported event payload", "observe-pr-malformed: rejection reason")
+end
+
+local function ingress_shadow(current_state, source_boundary)
+  local sealed = restart_authority.seal_snapshot({
+    owner = core.restart_package_name,
+    proposal_id = PROPOSAL_ID,
+    current = { state = current_state, version = V_EQUAL },
+  })
+  return restart_authority.decide_transition(sealed, {
+    semantic_variant = SEMANTIC_VARIANT,
+    source_boundary = source_boundary,
+    target = "reviewing",
+    incoming_version = V_EQUAL,
+    overlay_version = V_EQUAL,
+  })
+end
+
+local function assert_illegal(actual, reason_code, context)
+  t.eq(actual.status, "illegal", context .. ": status")
+  t.eq(actual.reason_code, reason_code, context .. ": reason code")
+  t.eq(actual.cas_outcome, "illegal(" .. reason_code .. ")", context .. ": CAS outcome")
+  t.eq(actual.grant, nil, context .. ": grant disabled")
 end
 
 return {
@@ -574,5 +668,26 @@ return {
 
   test_observe_pr_malformed_event_is_rejected_before_cas = function()
     assert_malformed_event_is_pre_cas()
+  end,
+
+  test_observe_pr_ingress_shadow_requires_exact_source_boundary = function()
+    assert_illegal(
+      ingress_shadow("pr-open", nil),
+      "source-boundary-mismatch",
+      "observe-pr-ingress-missing-boundary"
+    )
+    assert_illegal(
+      ingress_shadow("pr-open", "github-devloop-pr.devloop_observe_pr"),
+      "source-boundary-mismatch",
+      "observe-pr-ingress-wrong-boundary"
+    )
+  end,
+
+  test_observe_pr_ingress_shadow_rejects_unroutable_current_state = function()
+    assert_illegal(
+      ingress_shadow("blocked", SOURCE_BOUNDARY),
+      "source-state-not-admitted",
+      "observe-pr-ingress-unroutable-source"
+    )
   end,
 }

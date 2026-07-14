@@ -30,6 +30,7 @@ return {
       "github-devloop.closed_unmerged",
       "github-devloop.merge_ready",
       "github-devloop.fixing",
+      "github-devloop.review_meta",
     }) do
       local entry = strategy_entry(body, kind)
       t.is_true(entry ~= nil)

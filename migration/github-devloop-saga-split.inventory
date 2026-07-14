@@ -63,6 +63,7 @@
 {"path":"libraries/devloop/restart_effect_entitlements.lua","owner":"shared","reason":"pure fail-closed transition-effect-entitlement selector shared by issue and PR lifecycle owners; owner-authored per-edge apply/idempotent entitlements are supplied as values."}
 {"path":"libraries/devloop/restart_owner_pending_projection.lua","owner":"shared","reason":"pure full-edge-set collector shared by issue and PR pending projection conformance; owner-private rows and inventories are supplied as values."}
 {"path":"libraries/devloop/restart_pending_projection.lua","owner":"shared","reason":"pure pending-order relation shared by lifecycle edge owners and CAS conformance."}
+{"path":"libraries/devloop/restart_source_admission.lua","owner":"shared","reason":"pure closed source-shape and ingress route-admission checks shared by issue and PR shadow deciders."}
 {"path":"libraries/devloop/restart_sinks.lua","owner":"shared","reason":"pure lifecycle-sink inventory validator and coverage arbiter shared by issue and PR owners."}
 {"path":"libraries/devloop/restart_responsibility_contract.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/rounds.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
