@@ -5,6 +5,7 @@ writer:github-devloop:awaiting-pr-enter
 writer:github-devloop:awaiting-pr-exit
 writer:github-devloop:reconcile-thinking-blocked
 writer:github-devloop-pr:observe-pr-reviewing
+writer:github-devloop-pr:fix-reviewing
 writer:github-devloop-pr:reconcile-reviewing-blocked
 writer:github-devloop-pr:reconcile-generic-blocked
 writer:github-devloop-pr:reconcile-state-blocked
