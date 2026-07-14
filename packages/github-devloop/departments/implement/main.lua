@@ -639,7 +639,7 @@ local function process_ready_event(event)
 
     local branches = config.branch_config()
     local implementation_version = core.implementation_attempt_version(ready.dedup_key, ready.impl_retry_attempt)
-    local branch_version = core.implementation_base_version(ready.dedup_key)
+    local branch_version = core.implementation_branch_version(ready.dedup_key, ready.impl_retry_attempt)
     local marker_ready = ready_for_implementation_version(ready, implementation_version)
     local branch = devloop_base.implement_branch(repo, issue_number, branch_version)
 

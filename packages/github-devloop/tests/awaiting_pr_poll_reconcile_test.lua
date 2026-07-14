@@ -1,4 +1,5 @@
 local entity_lib = require("devloop.entity")
+local devloop_base = require("devloop.base")
 local h = require("tests.devloop_helpers")
 local entity_mocks = require("tests.entity_read_mock_helpers")
 local contract_time = require("contract.time")
@@ -28,6 +29,9 @@ local upstream_branch = "dev"
 local upstream_head_sha = "fedcba9876543210fedcba9876543210fedcba98"
 local rollup_pr_number = 9
 local rollup_head_sha = "2222222222222222222222222222222222222222"
+local original_branch = devloop_base.implement_branch(repo, issue_number, core.implementation_base_version(version))
+local replacement_version = version .. "/reimplement/1"
+local replacement_branch = devloop_base.implement_branch(repo, issue_number, replacement_version)
 
 local function restart_transition_row(state_name)
   return replay_fields.restart_transition_row(core.restart_transition_table(), state_name)
@@ -102,7 +106,8 @@ local function child_comments(state, child_version, opts)
   local options = opts or {}
   local effective_version = child_version or version
   local base_branch = options.base_branch or integration_branch
-  local body = m_builders.pr_origin_marker(parent, issue_number, "devloop-owner-repo-42-01HY", effective_version, base_branch)
+  local branch = options.branch or original_branch
+  local body = m_builders.pr_origin_marker(parent, issue_number, branch, effective_version, base_branch)
     .. "\n" .. core.state_marker(parent, state, effective_version)
   if state == "merged" then
     body = body .. "\n" .. m_builders.merged_marker(core, parent, pr_number, effective_version, head_sha)
@@ -114,13 +119,13 @@ end
 
 local function child_origin_only_comments()
   return {
-    comment(m_builders.pr_origin_marker(parent, issue_number, "devloop-owner-repo-42-01HY", version, integration_branch), core._test_bot_login, "2026-06-03T01:04:03Z"),
+    comment(m_builders.pr_origin_marker(parent, issue_number, original_branch, version, integration_branch), core._test_bot_login, "2026-06-03T01:04:03Z"),
   }
 end
 
 local function child_merged_comments_with_kept_promotion()
   return {
-    comment(m_builders.pr_origin_marker(parent, issue_number, "devloop-owner-repo-42-01HY", version, integration_branch)
+    comment(m_builders.pr_origin_marker(parent, issue_number, original_branch, version, integration_branch)
       .. "\n" .. core.state_marker(parent, "merged", version)
       .. "\n" .. m_builders.merged_marker(core, parent, pr_number, version, head_sha), core._test_bot_login, "2026-06-03T01:04:03Z"),
   }
@@ -227,7 +232,7 @@ local function mock_reads(issue_comments, pr_comments, opts)
     repo = repo,
     number = options.pr_number or pr_number,
     comments = pr_comments,
-    head = "devloop-owner-repo-42-01HY",
+    head = options.branch or original_branch,
     head_sha = head_sha,
     merge_commit_sha = options.merge_commit_sha or merge_commit_sha,
     state = options.pr_state or "OPEN",
@@ -555,13 +560,23 @@ return {
     t.is_true(resume ~= nil)
     t.is_true(resume.payload.body:find('state="ready"', 1, true) ~= nil)
     t.is_true(resume.payload.body:find("/reimplement/1", 1, true) ~= nil)
+    t.eq(resume.payload.handoff.kind, "github-devloop.ready")
+    t.eq(resume.payload.handoff.proposal_id, parent)
+    t.eq(resume.payload.handoff.version, replacement_version)
+    t.eq(resume.payload.handoff.marker_version, replacement_version)
   end,
 
-  test_child_closed_unmerged_blocks_at_reimplementation_budget = function()
-    local exhausted = version .. "/reimplement/12"
+  test_replacement_child_closed_unmerged_blocks_without_second_replacement = function()
     local result = run_observe(
-      parent_comments({ version = exhausted, delegation_version = exhausted }),
-      child_comments("closed-unmerged", exhausted)
+      parent_comments({
+        version = replacement_version,
+        delegation_version = replacement_version,
+        delegation_generation = "g2",
+      }),
+      child_comments("closed-unmerged", replacement_version, {
+        branch = replacement_branch,
+      }),
+      { branch = replacement_branch }
     )
 
     t.eq(result.exit_code, 0)

@@ -682,7 +682,11 @@ local function process_issue_event(event)
         return false
       end
       local pr_proposal_id = entity_lib.pr_proposal_id(issue.repo, link.pr_number)
-      local delegation = "g" .. tostring(core.implementation_retry_attempt(issue_state.version) or 1)
+      local retry_attempt = core.implementation_retry_attempt(issue_state.version)
+      local delegation = "g" .. tostring(core.implementation_delegation_generation(
+        issue_state.version,
+        retry_attempt
+      ))
       local comment_body = "github-devloop canonicalized legacy issue PR state to delegated PR child"
         .. "\n\n" .. devloop_state.state_marker(proposal_id, "awaiting-pr", issue_state.version)
         .. "\n" .. m_builders.pr_delegation_marker(proposal_id, pr_proposal_id, link.pr_number, issue_state.version, delegation)

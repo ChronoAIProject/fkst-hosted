@@ -330,6 +330,11 @@ function C.current_state(comments, proposal_id)
   return derive_current_marker(comments, proposal_id)
 end
 
+function C.is_current_state(comments, proposal_id, state, version)
+  local current = derive_current_marker(comments, proposal_id)
+  return current.state == state and current.version == version
+end
+
 local function current_marker_state(comments, proposal_id)
   local current = derive_current_marker(comments, proposal_id)
   if current == nil or current.state == nil then

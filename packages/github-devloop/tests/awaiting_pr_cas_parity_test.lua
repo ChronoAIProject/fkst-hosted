@@ -12,6 +12,7 @@ local inventories = {
   operator_reentry = require("core.restart.operator_reentry_inventory"),
 }
 local devloop_logging = require("devloop.logging")
+local devloop_base = require("devloop.base")
 local devloop_state = require("devloop.state")
 local entity_lib = require("devloop.entity")
 local entity_mocks = require("tests.entity_read_mock_helpers")
@@ -36,7 +37,8 @@ local PR_PROPOSAL_ID = "github-devloop/pr/owner/repo/7"
 local V_OLDER = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-02T01-02-03Z"
 local V_EQUAL = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
 local DELEGATION = "g1"
-local BRANCH = "dev"
+local BRANCH = devloop_base.implement_branch(REPO, ISSUE_NUMBER, V_EQUAL)
+local BASE_BRANCH = "integration/dev"
 local HEAD_SHA = "0123456789abcdef0123456789abcdef01234567"
 local MERGE_COMMIT_SHA = "1111111111111111111111111111111111111111"
 
@@ -196,9 +198,9 @@ local function child_comments(fixture)
   local body = m_builders.pr_origin_marker(
     PROPOSAL_ID,
     ISSUE_NUMBER,
-    "devloop-owner-repo-42-01HY",
+    BRANCH,
     version,
-    BRANCH
+    BASE_BRANCH
   )
   if fixture.child_state ~= nil then
     body = body .. "\n" .. core.state_marker(PROPOSAL_ID, fixture.child_state, version)
@@ -210,20 +212,20 @@ local function child_comments(fixture)
 end
 
 local function mock_env()
-  h.mock_bot_env()
-  h.mock_write_env("")
-  t.mock_command("gh api graphql", {
-    stdout = '{"data":{"repository":{"issue":{"blockedBy":{"nodes":[]}}}}}\n',
-    stderr = "",
-    exit_code = 0,
-  })
   t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', {
-    stdout = BRANCH,
+    stdout = BASE_BRANCH,
     stderr = "",
     exit_code = 0,
   })
   t.mock_command('printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"', {
-    stdout = BRANCH,
+    stdout = BASE_BRANCH,
+    stderr = "",
+    exit_code = 0,
+  })
+  h.mock_bot_env()
+  h.mock_write_env("")
+  t.mock_command("gh api graphql", {
+    stdout = '{"data":{"repository":{"issue":{"blockedBy":{"nodes":[]}}}}}\n',
     stderr = "",
     exit_code = 0,
   })
@@ -242,11 +244,11 @@ local function mock_reads(fixture, issue_comments, pr_comments)
     repo = REPO,
     number = PR_NUMBER,
     comments = pr_comments,
-    head = "devloop-owner-repo-42-01HY",
+    head = BRANCH,
     head_sha = HEAD_SHA,
     merge_commit_sha = MERGE_COMMIT_SHA,
     state = fixture.pr_state or "OPEN",
-    base_branch = BRANCH,
+    base_branch = BASE_BRANCH,
     labels = {},
   }, entity_mocks.pr_origin_selector, fixture.pr_view_times)
 end

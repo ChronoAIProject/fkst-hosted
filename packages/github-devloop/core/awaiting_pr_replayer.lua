@@ -1,5 +1,6 @@
 local git_mechanics = require("devloop.git_mechanics")
 local entity_lib = require("devloop.entity")
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
 local parsers_pr = require("devloop.parsers.pr")
@@ -53,10 +54,25 @@ local function raise_effects(dept, proposal_id, apply_state, version, label_chan
 end
 
 local function next_reimplementation_version(version)
-  return transition_version.next_reimplement(version)
+  return transition_version.reimplement_at(M.implementation_base_version(version), 1)
 end
 
-local function parent_state_for_child_terminal(state, child_state)
+local function closed_unmerged_generation(issue, state, current_pr)
+  local root_version = M.implementation_base_version(state.version)
+  local original_branch = devloop_base.implement_branch(issue.repo, issue.number, root_version)
+  local replacement_version = transition_version.reimplement_at(root_version, 1)
+  local replacement_branch = devloop_base.implement_branch(issue.repo, issue.number, replacement_version)
+  local current_branch = tostring(current_pr and current_pr.head_ref_name or "")
+  if current_branch == original_branch then
+    return "original"
+  end
+  if current_branch == replacement_branch then
+    return "replacement"
+  end
+  return nil
+end
+
+local function parent_state_for_child_terminal(state, child_state, generation)
   if child_state.state == "merged" then
     return {
       to_state = "merged",
@@ -65,7 +81,7 @@ local function parent_state_for_child_terminal(state, child_state)
     }
   end
   if child_state.state == "closed-unmerged" then
-    if devloop_state.version_reimplement_round(state.version) >= config.max_fix_rounds() then
+    if generation == "replacement" then
       return {
         to_state = "blocked",
         version = tostring(state.version or "") .. "/blocked/replacement-budget-exhausted",
@@ -155,7 +171,7 @@ end
 local function build_resume_comment_request(issue, state, next_state, child_state, delegation, current_pr)
   local source_ref = issue.source_ref or entity_lib.issue_source_ref(issue.repo, issue.number)
   local state_marker = devloop_state.state_marker(delegation.proposal_id, next_state.to_state, next_state.version)
-  return entity_lib.build_entity_comment_request({
+  local request = entity_lib.build_entity_comment_request({
     kind = "issue",
     repo = issue.repo,
     number = issue.number,
@@ -175,6 +191,16 @@ local function build_resume_comment_request(issue, state, next_state, child_stat
     tostring(next_state.to_state),
     tostring(next_state.version),
   }), source_ref)
+  if next_state.to_state == "ready" then
+    request.handoff = {
+      kind = "github-devloop.ready",
+      proposal_id = delegation.proposal_id,
+      version = next_state.version,
+      marker_version = next_state.version,
+      source_ref = source_ref,
+    }
+  end
+  return request
 end
 
 local function build_awaiting_pr_canonicalization_comment_request(issue, state, delegation)
@@ -336,7 +362,25 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
   if not child_lineage_matches_delegation(state, delegation, child_state) then
     return log_skip(dept, proposal_id, state, "awaiting-pr", "awaiting-pr", "skip-stale(child-state-lineage)", "child terminal state does not match parent delegation lineage")
   end
-  local next_state = parent_state_for_child_terminal(state, child_state)
+  local generation = nil
+  local child_closed_unmerged = devloop_state.reached(
+    current_pr.comments,
+    delegation.proposal_id,
+    "closed-unmerged",
+    { domain = "github-devloop-pr", lineage_base = state.version }
+  ) and not devloop_state.reached(
+    current_pr.comments,
+    delegation.proposal_id,
+    "merged",
+    { domain = "github-devloop-pr", lineage_base = state.version }
+  )
+  if child_closed_unmerged then
+    generation = closed_unmerged_generation(issue, state, current_pr)
+    if generation == nil then
+      return log_skip(dept, proposal_id, state, "awaiting-pr", "awaiting-pr", "skip-stale(child-branch-lineage)", "closed child PR is not on a deterministic original or replacement implementation branch")
+    end
+  end
+  local next_state = parent_state_for_child_terminal(state, child_state, generation)
   if next_state.to_state == "merged" then
     if canonical_merged_state == nil then
       return log_skip(dept, proposal_id, state, "awaiting-pr", "awaiting-pr", "skip-pending(canonical-child-pr-merged-missing)", "delegated child PR has a merged marker but is not canonically merged by GitHub")

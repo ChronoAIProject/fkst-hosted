@@ -64,7 +64,9 @@ local function maybe_adopt_open_implementation_pr(repo, issue_number, reconcile,
     source_ref = reconcile.source_ref,
     comments = current and current.comments or {},
   }
-  local child = core.adopt_existing_pr_child(issue, impl_version, core.implementation_retry_attempt(impl_version) or 1)
+  local retry_attempt = core.implementation_retry_attempt(impl_version)
+  local generation = core.implementation_delegation_generation(impl_version, retry_attempt)
+  local child = core.adopt_existing_pr_child(issue, impl_version, generation)
   if child == nil then
     return false
   end
