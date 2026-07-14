@@ -28,12 +28,12 @@ pub const LLM_API_KEY_FILE: &str = "llm-api-key";
 /// Kubernetes Secret data key (`[-._a-zA-Z0-9]+`).
 pub const USER_ENV_PREFIX: &str = "userenv.";
 
-/// The write-only chrono-storage SA client id the in-pod log uploader mints its
-/// OAuth2 token with. Non-secret (an OAuth client identifier), mounted alongside
-/// the secret below. Present only when the control plane configured a write-only
-/// SA; absent otherwise (the uploader then produces no bundle — fail-closed).
+/// The chrono-storage SA client id the in-pod log uploader mints its OAuth2
+/// token with. Non-secret (an OAuth client identifier), mounted alongside the
+/// secret below. Present only when the control plane configured chrono-storage;
+/// absent otherwise (the uploader then produces no bundle — fail-closed).
 pub const STORAGE_CLIENT_ID_FILE: &str = "storage-client-id";
-/// The write-only chrono-storage SA client secret (SECRET). Mounted 0400.
+/// The chrono-storage SA client secret (SECRET). Mounted 0400.
 pub const STORAGE_CLIENT_SECRET_FILE: &str = "storage-client-secret";
 /// The NyxID OAuth2 token endpoint the in-pod uploader mints against.
 pub const STORAGE_TOKEN_URL_FILE: &str = "storage-token-url";
@@ -53,15 +53,16 @@ pub const DEFAULT_CREDS_DIR: &str = "/var/run/fkst/creds";
 /// the writer finishes. The value is non-secret (a bare marker), never a credential.
 pub const CREDS_COMPLETE_SENTINEL: &str = ".creds-complete";
 
-/// The write-only chrono-storage SA creds injected into a session Secret so the
-/// in-pod log uploader can PUT its bundle. All borrowed `&str` (the caller exposes
-/// its own secret before calling), keeping this module free of a `secrecy`
-/// dependency. Present only when the control plane configured a write-only SA.
+/// The chrono-storage SA creds injected into a session Secret so the in-pod log
+/// uploader can PUT its bundle (the same single NyxID SA the control plane
+/// authenticates with). All borrowed `&str` (the caller exposes its own secret
+/// before calling), keeping this module free of a `secrecy` dependency. Present
+/// only when the control plane configured chrono-storage.
 #[derive(Debug, Clone, Copy)]
 pub struct StorageWriterCreds<'a> {
-    /// The write-only SA client id (non-secret).
+    /// The storage SA client id (non-secret).
     pub client_id: &'a str,
-    /// The write-only SA client secret (SECRET; the caller exposed it).
+    /// The storage SA client secret (SECRET; the caller exposed it).
     pub client_secret: &'a str,
     /// The NyxID OAuth2 token endpoint the in-pod uploader mints against.
     pub token_url: &'a str,
@@ -73,9 +74,9 @@ pub struct StorageWriterCreds<'a> {
 
 /// Assemble the credential data keys carried by a per-session Kubernetes Secret:
 /// the rotating [`GITHUB_TOKEN_FILE`], the static [`LLM_API_KEY_FILE`], one
-/// [`USER_ENV_PREFIX`]`<KEY>` entry per injected per-user env var, and — when a
-/// write-only chrono-storage SA is configured — the five `storage-*` files the
-/// in-pod log uploader reads.
+/// [`USER_ENV_PREFIX`]`<KEY>` entry per injected per-user env var, and — when
+/// chrono-storage is configured — the five `storage-*` files the in-pod log
+/// uploader reads.
 ///
 /// The session-Pod Secret builder builds on top of this map — the Model-B
 /// session Secret carries only these creds — so the credential layout lives in
@@ -153,12 +154,12 @@ impl CredsLayout {
         self.base.join(CREDS_COMPLETE_SENTINEL)
     }
 
-    /// Path to the write-only chrono-storage SA client id (non-secret).
+    /// Path to the chrono-storage SA client id (non-secret).
     pub fn storage_client_id(&self) -> PathBuf {
         self.base.join(STORAGE_CLIENT_ID_FILE)
     }
 
-    /// Path to the write-only chrono-storage SA client secret (SECRET).
+    /// Path to the chrono-storage SA client secret (SECRET).
     pub fn storage_client_secret(&self) -> PathBuf {
         self.base.join(STORAGE_CLIENT_SECRET_FILE)
     }
@@ -308,12 +309,12 @@ mod tests {
         assert_eq!(data.len(), 2);
         assert!(data.contains_key("github-token"));
         assert!(data.contains_key("llm-api-key"));
-        // No write-only SA configured → no storage-* keys.
+        // No chrono-storage configured → no storage-* keys.
         assert!(!data.contains_key("storage-client-secret"));
     }
 
     #[test]
-    fn credential_secret_data_carries_the_write_only_sa_when_present() {
+    fn credential_secret_data_carries_the_storage_sa_when_present() {
         let storage = StorageWriterCreds {
             client_id: "writer-client",
             client_secret: "writer-secret",

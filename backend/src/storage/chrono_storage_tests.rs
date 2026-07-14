@@ -38,8 +38,6 @@ async fn client_and_server() -> (ChronoStorageClient, MockServer) {
         nyxid_token_url: format!("{}{TOKEN_PATH}", server.uri()),
         nyxid_client_id: "sa-client".to_string(),
         nyxid_client_secret: SecretString::from(SA_SECRET.to_string()),
-        writer_client_id: None,
-        writer_client_secret: None,
     };
     let client = ChronoStorageClient::new(reqwest::Client::new(), config);
     (client, server)
@@ -324,8 +322,6 @@ async fn bucket_ok_is_false_when_token_mint_fails() {
         nyxid_token_url: format!("{}/no-such-token", server.uri()),
         nyxid_client_id: "sa-client".to_string(),
         nyxid_client_secret: SecretString::from(SA_SECRET.to_string()),
-        writer_client_id: None,
-        writer_client_secret: None,
     };
     let client = ChronoStorageClient::new(reqwest::Client::new(), config);
     assert!(!client.bucket_ok().await);

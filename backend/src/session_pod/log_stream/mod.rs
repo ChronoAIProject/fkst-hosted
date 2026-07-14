@@ -8,11 +8,11 @@
 //! Wave 1 is the pure, exhaustively tested redactor LIBRARY ([`redact`]). Wave 2 is
 //! the effectful IN-POD collector that captures the full session log tree, redacts
 //! every record, folds the tree into a single `tar.gz`, and uploads it to
-//! chrono-storage at `logs/<session_id>/latest.tar.gz` as a WRITE-ONLY service
-//! account. The collector is spawned from the `run-substrate` driver on EVERY
+//! chrono-storage at `logs/<session_id>/latest.tar.gz` as the mounted storage
+//! SA. The collector is spawned from the `run-substrate` driver on EVERY
 //! session (streaming is unconditional); it is best-effort and MUST NOT crash or
 //! block the engine — the session keeps running even if streaming fails entirely,
-//! and a session whose control plane configured no write-only SA simply produces no
+//! and a session whose control plane configured no chrono-storage simply produces no
 //! bundle (the uploader is not spawned).
 //!
 //! The pieces are decomposed so each concern is unit-testable in isolation:
