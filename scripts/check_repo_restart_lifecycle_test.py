@@ -250,6 +250,20 @@ class RestartLifecycleRatchetTest(unittest.TestCase):
         messages = self.messages_for(mutate=mutate, recompute_sha=False)
         self.assertTrue(any('artifact_sha256 mismatch' in m for m in messages), messages)
 
+    def test_normalize_artifact_sha256_rewrites_tampered_hash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def mutate(inventory):
+                inventory['artifact_sha256'] = 'tampered'
+
+            self.write_fixture(root, mutate=mutate, recompute_sha=False)
+            expected = ratchet.normalize_artifact_sha256(root)
+            inventory = json.loads((root / ratchet.INVENTORY).read_text(encoding='utf-8'))
+
+            self.assertEqual(inventory['artifact_sha256'], expected)
+            self.assertEqual(ratchet.repository_messages(root, enforce_base=False), [])
+
     def test_allowlist_growth_fails(self):
         messages = self.messages_for(allowlist_lines=['writer:1', 'writer:2'])
         self.assertTrue(any('unknown site id writer:2' in m for m in messages), messages)
