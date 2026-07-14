@@ -14,9 +14,14 @@ const NodeAbortSignal = nativeAC.signal.constructor;
 globalThis.AbortController = NodeAbortController as typeof AbortController;
 globalThis.AbortSignal = NodeAbortSignal as typeof AbortSignal;
 
-// jsdom in this environment doesn't expose window.localStorage; provide a
-// minimal in-memory shim so the LanguageProvider's persistence is testable.
-if (typeof window !== 'undefined' && !window.localStorage) {
+// jsdom's window.localStorage is unreliable across Node versions: absent in
+// some environments, present-but-broken (methods missing) in others. Install
+// the in-memory shim whenever a WORKING Storage is not there, so the suite
+// passes identically everywhere.
+if (
+  typeof window !== 'undefined' &&
+  (!window.localStorage || typeof window.localStorage.clear !== 'function')
+) {
   const store = new Map<string, string>();
   Object.defineProperty(window, 'localStorage', {
     configurable: true,

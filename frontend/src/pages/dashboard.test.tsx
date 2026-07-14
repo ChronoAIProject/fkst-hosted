@@ -22,13 +22,15 @@ describe('Dashboard', () => {
     expect(screen.getByText('Sign in to view your dashboard')).toBeInTheDocument();
   });
 
-  it('shows a not-configured note when signed in but the backend URL is unset', () => {
-    // In tests VITE_FKST_API_BASE is unset, so the API is "not configured".
+  it('treats the same-origin default as configured (no docs-only note)', () => {
+    // VITE_FKST_API_BASE unset = SAME-ORIGIN (the deployable topology), so a
+    // signed-in user gets the real dashboard surface, never the docs-only note
+    // (that state now requires the explicit VITE_FKST_DOCS_ONLY=true build).
     window.localStorage.setItem('fkst-gh-access', 'ghu_x');
     renderDashboard();
     expect(
-      screen.getByText('The dashboard backend is not configured for this deployment yet.')
-    ).toBeInTheDocument();
+      screen.queryByText('The dashboard backend is not configured for this deployment yet.')
+    ).not.toBeInTheDocument();
   });
 });
 
