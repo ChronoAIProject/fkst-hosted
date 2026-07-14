@@ -31,9 +31,9 @@ local validators = require("devloop.commands.validators")
     end)
   end
 
-  function C.gh_pr_view_origin(repo, pr_number, timeout)
+  function C.gh_pr_view_origin(repo, pr_number, timeout, github)
     return support.gh_result(function()
-      return support.github().pr_cli_view(
+      return (github or support.github()).pr_cli_view(
         repo,
         pr_number,
         "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,mergedAt,comments,labels,author,mergeable,mergeStateStatus",
@@ -58,9 +58,9 @@ local validators = require("devloop.commands.validators")
     end)
   end
 
-  function C.gh_pr_view_freshness(repo, pr_number, timeout)
+  function C.gh_pr_view_freshness(repo, pr_number, timeout, github)
     return support.gh_result(function()
-      return support.github().pr_cli_view(repo, pr_number, "headRefName,headRefOid,baseRefName,state,updatedAt,isDraft,comments,labels,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", timeout)
+      return (github or support.github()).pr_cli_view(repo, pr_number, "headRefName,headRefOid,baseRefName,state,updatedAt,isDraft,comments,labels,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", timeout)
     end)
   end
 
@@ -136,9 +136,9 @@ local validators = require("devloop.commands.validators")
     end)
   end
 
-  function C.gh_pr_close(repo, pr_number, timeout)
+  function C.gh_pr_close(repo, pr_number, timeout, github)
     return support.gh_result(function()
-      return support.github().pr_close(repo, pr_number, timeout)
+      return (github or support.github()).pr_close(repo, pr_number, timeout)
     end)
   end
 

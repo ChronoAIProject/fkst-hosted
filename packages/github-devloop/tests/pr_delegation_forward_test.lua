@@ -12,6 +12,7 @@ local repo = "owner/repo"
 local issue_number = 42
 local issue_proposal = "github-devloop/issue/owner/repo/42"
 local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+local replacement_version = impl_version .. "/reimplement/1"
 local branch = devloop_base.implement_branch(repo, issue_number, core.implementation_base_version(impl_version))
 local base_branch = "dev"
 local head_sha = "abc123def456"
@@ -106,6 +107,19 @@ local function first_line(body)
 end
 
 return {
+  test_retry_attempt_and_replacement_generation_are_independent = function()
+    t.eq(core.implementation_branch_version(impl_version, 2), impl_version)
+    t.eq(core.implementation_attempt_version(impl_version, 2), impl_version .. "/reimplement/2")
+    t.eq(core.implementation_delegation_generation(impl_version, 2), 1)
+
+    t.eq(core.implementation_branch_version(impl_version .. "/reimplement/2", 2), impl_version)
+    t.eq(core.implementation_delegation_generation(impl_version .. "/reimplement/2", 2), 1)
+
+    t.eq(core.implementation_branch_version(replacement_version, 2), replacement_version)
+    t.eq(core.implementation_attempt_version(replacement_version, 2), replacement_version)
+    t.eq(core.implementation_delegation_generation(replacement_version, 2), 2)
+  end,
+
   test_ensure_pr_child_creates_then_adopts_by_branch_and_writes_split_facts = function()
     mock_branch_list(nil, 7)
     t.mock_command("gh pr create", { stdout = "https://github.example/owner/repo/pull/7\n", stderr = "", exit_code = 0 })
