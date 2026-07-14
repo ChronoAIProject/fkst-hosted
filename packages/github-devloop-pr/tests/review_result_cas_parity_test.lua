@@ -19,11 +19,13 @@ local requests_review = require("devloop.requests.review")
 local devloop_state = require("devloop.state")
 local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
+local restart_authority = require("core.restart_authority")
 local t = h.t
 local core = h.core
 local projection = owner_pending_projection.derive(core.restart_package_name, core.restart_transition_table(), inventories)
 local review_result_department = require("departments.review_result.main")
 
+local OWNER = core.restart_package_name
 local POLICY_ID = "cas.legacy_review_result_v1"
 local V_OLDER = "2026-06-02T01-02-03Z"
 local V_EQUAL = "2026-06-03T01-02-03Z"
@@ -143,6 +145,21 @@ local function evidence_from_probe(probe)
     target_version = probe.target_version,
     overlay_version = probe.incoming_version,
   }
+end
+
+local function observe_shadow(run)
+  local evidence = nil
+  local original_resolve = catalog.resolve
+  catalog.resolve = function(policy_id, candidate, candidate_projection)
+    evidence = candidate
+    return original_resolve(policy_id, candidate, candidate_projection)
+  end
+  local ok, result = pcall(run)
+  catalog.resolve = original_resolve
+  if not ok then
+    error(result, 0)
+  end
+  return result, evidence
 end
 
 local function review_event(fixture)
@@ -355,7 +372,62 @@ local function assert_catalog_matches_observed_decision(fixture)
   if fixture.legacy_log_outcome ~= nil then
     t.eq(decision.outcome, fixture.legacy_log_outcome, fixture.name .. ": legacy log outcome")
   end
-  return "cas"
+  return {
+    result = result,
+    probe = probe,
+    decision = decision,
+    observed = observed,
+    actual = actual,
+  }
+end
+
+local function assert_bidirectional(actual, expected, field, context)
+  t.eq(actual[field], expected[field], context .. ": shadow-to-production " .. field)
+  t.eq(expected[field], actual[field], context .. ": production-to-shadow " .. field)
+end
+
+local function assert_fixing_shadow_case(fixture)
+  local production = assert_catalog_matches_observed_decision(fixture)
+  local sealed_snapshot = restart_authority.seal_snapshot({
+    owner = OWNER,
+    current = {
+      state = fixture.current_state,
+      version = fixture.current_version,
+    },
+  })
+  local intent = {
+    semantic_variant = "changes_requested",
+    target = "fixing",
+    incoming_version = fixture.incoming_version,
+    overlay_version = fixture.incoming_version,
+  }
+  t.eq(intent.source_boundary, nil, fixture.name .. ": nil boundary is omitted from shadow intent")
+
+  local shadow, evidence = observe_shadow(function()
+    return restart_authority.decide_transition(sealed_snapshot, intent)
+  end)
+  local observed = {
+    status = production.observed.status,
+    reason_code = production.observed.reason_code,
+    cas_outcome = production.decision.outcome,
+  }
+
+  assert_bidirectional(shadow, observed, "status", fixture.name)
+  assert_bidirectional(shadow, observed, "reason_code", fixture.name)
+  assert_bidirectional(shadow, observed, "cas_outcome", fixture.name)
+  t.eq(shadow.edge_id, "github-devloop-pr/reviewing/autonomous/changes_requested", fixture.name .. ": selected edge")
+  t.eq(shadow.cas_policy_id, POLICY_ID, fixture.name .. ": selected CAS policy")
+  t.eq(shadow.grant, nil, fixture.name .. ": grant disabled")
+  t.eq(evidence.current.state, fixture.current_state, fixture.name .. ": evidence current state")
+  t.eq(
+    evidence.current.version,
+    transition_version.safe_version_segment(fixture.current_version or ""),
+    fixture.name .. ": evidence safe current version"
+  )
+  t.eq(evidence.variant, "reviewing_to_fixing", fixture.name .. ": evidence variant")
+  t.eq(evidence.incoming_version, fixture.incoming_version, fixture.name .. ": evidence incoming version")
+  t.eq(evidence.target_version, nil, fixture.name .. ": evidence target version")
+  t.eq(evidence.overlay_version, fixture.incoming_version, fixture.name .. ": evidence overlay version")
 end
 
 local function assert_rejected_before_cas(name, payload)
@@ -370,6 +442,57 @@ local function assert_rejected_before_cas(name, payload)
 end
 
 return {
+  test_shadow_review_result_changes_requested_matches_reachable_cas_outcomes = function()
+    local fixtures = {
+      {
+        name = "shadow-review-result-fixing-apply",
+        current_state = "reviewing",
+        current_version = V_EQUAL,
+        incoming_version = V_EQUAL,
+        target_state = "fixing",
+        comment_builder_reached = true,
+        effect_state = "fixing",
+        post_admission_disposition = "effect-emitted(fixing)",
+        expected_queues = {
+          "github-proxy.github_pr_comment_request",
+          "github-proxy.github_issue_label_request",
+        },
+        legacy_log_outcome = "applied",
+      },
+      {
+        name = "shadow-review-result-fixing-idempotent",
+        current_state = "fixing",
+        current_version = V_EQUAL,
+        incoming_version = V_EQUAL,
+        target_state = "fixing",
+        legacy_log_outcome = "skip-idempotent(already at to_state)",
+      },
+      {
+        name = "shadow-review-result-fixing-pending",
+        current_state = nil,
+        current_version = nil,
+        incoming_version = V_EQUAL,
+        target_state = "fixing",
+        expected_exit_code = 1,
+        legacy_log_outcome = "retry-pending(from-state marker not yet visible)",
+      },
+      {
+        name = "shadow-review-result-fixing-safe-overlay-stale",
+        current_state = "reviewing",
+        current_version = V_ORDERING_EQUAL_CURRENT,
+        incoming_version = V_ORDERING_EQUAL_INCOMING,
+        target_state = "fixing",
+        probe_outcome = "apply",
+        admission_status = "stale",
+        admission_reason_code = "version-mismatch",
+        legacy_log_outcome = "skip-stale(version-mismatch)",
+      },
+    }
+    for _, fixture in ipairs(fixtures) do
+      assert_fixing_shadow_case(fixture)
+    end
+  end,
+
   test_review_result_source_older_is_stale = function()
     assert_catalog_matches_observed_decision({
       name = "review-result-source-older",

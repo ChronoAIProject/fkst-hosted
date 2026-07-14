@@ -125,6 +125,19 @@ local function pr_list_head_argv(repo, branch, base_branch)
   return { "gh", "api", "--paginate", "--slurp", query }
 end
 
+local function pr_list_promotions_argv(repo, head_branch, base_branch)
+  local owner = repo_owner(repo)
+  local head_filter = owner ~= nil and (owner .. ":" .. tostring(head_branch)) or tostring(head_branch)
+  return {
+    "gh",
+    "api",
+    "--paginate",
+    "--slurp",
+    "repos/" .. tostring(repo) .. "/pulls?state=closed&head=" .. shell.url_encode(head_filter)
+      .. "&base=" .. shell.url_encode(base_branch) .. "&per_page=100",
+  }
+end
+
 local function pr_view_argv(repo, pr_number)
   return { "gh", "api", "repos/" .. tostring(repo) .. "/pulls/" .. tostring(pr_number) }
 end
@@ -429,6 +442,19 @@ function M.install(handle)
 
   function handle.pr_list_head(repo, branch, base_branch, timeout)
     return handle._exec(pr_list_head_argv(repo, branch, base_branch), timeout, "gh pr list --head", stdout_policy.content_json("pr_list"))
+  end
+
+  function handle.pr_list_promotions(repo, head_branch, base_branch, timeout)
+    return handle._exec(
+      pr_list_promotions_argv(repo, head_branch, base_branch),
+      timeout,
+      "gh PR promotion list",
+      stdout_policy.content_json("pr_list")
+    )
+  end
+
+  function handle.pr_list_promotions_cmd(repo, head_branch, base_branch)
+    return render_gh_argv(pr_list_promotions_argv(repo, head_branch, base_branch), { 5 })
   end
 
   function handle.pr_list_merge_queue(repo, base, timeout)

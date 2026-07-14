@@ -41,6 +41,10 @@ return {
       "gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&base=release%2F2026&per_page=100'"
     )
     t.eq(
+      github_adapter.new(function() end).pr_list_promotions_cmd("owner/repo", "integration/dev", "dev"),
+      "gh api --paginate --slurp 'repos/owner/repo/pulls?state=closed&head=owner%3Aintegration%2Fdev&base=dev&per_page=100'"
+    )
+    t.eq(
       core.gh_issue_view_merge_cmd("owner/repo", 42),
       "gh issue view '42' --repo 'owner/repo' --json title,labels,comments,state,assignees,author"
     )

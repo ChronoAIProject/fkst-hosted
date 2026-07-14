@@ -62,6 +62,9 @@ local function repository_name_with_owner(head_repository, head_repository_owner
   if head_repository.name_with_owner ~= nil and head_repository.name_with_owner ~= "" then
     return tostring(head_repository.name_with_owner)
   end
+  if head_repository.full_name ~= nil and head_repository.full_name ~= "" then
+    return tostring(head_repository.full_name)
+  end
   local name = head_repository.name
   local owner = nil
   if type(head_repository.owner) == "table" and head_repository.owner.login ~= nil then
@@ -75,6 +78,31 @@ local function repository_name_with_owner(head_repository, head_repository_owner
     return tostring(owner) .. "/" .. tostring(name)
   end
   return nil
+end
+
+function C.parse_pr_list_promotions(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local prs = {}
+  if type(decoded) ~= "table" then
+    return prs
+  end
+  shared.each_paginated_item(decoded, function(pr)
+    local number = type(pr) == "table" and tonumber(pr.number) or nil
+    if number ~= nil then
+      local head = type(pr.head) == "table" and pr.head or {}
+      local base = type(pr.base) == "table" and pr.base or {}
+      table.insert(prs, {
+        number = number,
+        state = pr.state,
+        merged_at = pr.mergedAt or pr.merged_at,
+        head_ref_name = pr.headRefName or pr.head_ref_name or head.ref,
+        head_sha = pr.headRefOid or pr.head_ref_oid or head.sha,
+        head_repository = repository_name_with_owner(head.repo or pr.headRepository, pr.headRepositoryOwner),
+        base_ref_name = pr.baseRefName or pr.base_ref_name or base.ref,
+      })
+    end
+  end)
+  return prs
 end
 
 local function decode_pr_view(value)

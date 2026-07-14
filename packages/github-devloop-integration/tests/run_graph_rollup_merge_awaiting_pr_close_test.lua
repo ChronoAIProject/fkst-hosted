@@ -5,6 +5,7 @@ local h = require("tests.devloop_helpers")
 local graph = require("testkit.graph")
 local entity_mocks = require("tests.entity_read_mock_helpers")
 local m_builders = require("devloop.markers.builders")
+local github_commands = require("forge.github").new(function() end)
 
 local t = h.t
 local core = h.core
@@ -258,12 +259,20 @@ local function mock_liveness_scan_inputs(child_state)
 end
 
 local function mock_rollup_landing(exit_code)
-  t.mock_command(core.git_fetch_branch_cmd("origin", upstream_branch), {
+  t.mock_command(github_commands.pr_list_promotions_cmd(repo, integration_branch, upstream_branch), {
+    stdout = '[[{"number":' .. tostring(rollup_pr_number)
+      .. ',"state":"closed","merged_at":"2026-06-03T02:03:04Z"'
+      .. ',"head":{"ref":"' .. integration_branch .. '","sha":"' .. rollup_head_sha
+      .. '","repo":{"full_name":"' .. repo .. '"}},"base":{"ref":"' .. upstream_branch .. '"}}]]\n',
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command(core.git_fetch_pr_head_ref_cmd("origin", rollup_pr_number), {
     stdout = "",
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command(core.git_remote_branch_head_cmd("origin", upstream_branch), {
+  t.mock_command(core.git_fetch_head_commit_cmd(), {
     stdout = rollup_head_sha .. "\n",
     stderr = "",
     exit_code = 0,
@@ -443,7 +452,7 @@ return {
     t.eq(h.count_calls("gh issue close " .. tostring(issue_number) .. " --repo " .. repo), 0)
   end,
 
-  test_rollup_merge_wake_does_not_close_parent_before_child_merge_commit_lands = function()
+  test_rollup_merge_wake_does_not_close_parent_when_rollup_omits_child_merge = function()
     mock_everything("merged", false)
 
     local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 10 }))
@@ -464,6 +473,7 @@ return {
     t.eq(merged_label, nil)
     t.eq(h.count_calls("git merge-base --is-ancestor " .. child_merge_commit_sha .. " " .. rollup_head_sha), 1)
     t.eq(h.count_calls("git merge-base --is-ancestor " .. child_head_sha .. " " .. rollup_head_sha), 0)
+    t.eq(h.count_calls(core.git_fetch_pr_head_ref_cmd("origin", rollup_pr_number)), 1)
     t.eq(h.count_calls("gh issue close " .. tostring(issue_number) .. " --repo " .. repo), 0)
   end,
 
