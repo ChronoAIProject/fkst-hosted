@@ -109,6 +109,35 @@ class RestartLifecycleRatchetTest(unittest.TestCase):
     def test_valid_fixture_passes(self):
         self.assertEqual(self.messages_for(), [])
 
+    def test_null_target_version_passes(self):
+        def mutate(inventory):
+            inventory['old_behavior_observations'][0]['old_inputs']['target_version'] = None
+        self.assertEqual(self.messages_for(mutate=mutate), [])
+
+    def test_missing_target_version_key_fails(self):
+        def mutate(inventory):
+            del inventory['old_behavior_observations'][0]['old_inputs']['target_version']
+        messages = self.messages_for(mutate=mutate)
+        self.assertTrue(any('old_inputs: missing key target_version' in message for message in messages), messages)
+
+    def test_empty_target_version_fails(self):
+        def mutate(inventory):
+            inventory['old_behavior_observations'][0]['old_inputs']['target_version'] = ''
+        messages = self.messages_for(mutate=mutate)
+        self.assertTrue(any(
+            '.old_inputs.target_version: must be a non-empty string or null' in message
+            for message in messages
+        ), messages)
+
+    def test_wrong_type_target_version_fails(self):
+        def mutate(inventory):
+            inventory['old_behavior_observations'][0]['old_inputs']['target_version'] = 123
+        messages = self.messages_for(mutate=mutate)
+        self.assertTrue(any(
+            '.old_inputs.target_version: must be a non-empty string or null' in message
+            for message in messages
+        ), messages)
+
     def test_missing_spec_required_fields_fail(self):
         cases = (
             (('evidence_refs',), 'missing key evidence_refs'),

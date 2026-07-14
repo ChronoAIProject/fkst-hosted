@@ -1199,7 +1199,7 @@ Observation schema：
     current_fact = { ... },
     caller_from_states = { ... },
     incoming_version = "...",
-    target_version = "...",
+    target_version = "..." | nil,
     handoff_reference = { ... } | nil,
   },
 
@@ -1225,6 +1225,8 @@ Observation schema：
   evidence_refs = { ... },
 }
 ```
+
+A null `target_version` records a resolver invocation that passes no target-version argument, such as a four-argument cyclic or versioned call.
 
 独立性：
 
