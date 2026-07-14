@@ -50,9 +50,9 @@ return {
     local result = run_result(current, opts("result-outbox-result-marker-no-label"))
 
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
+    t.eq(#result.raises, 0)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_comment_request"), nil)
-    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:ready")
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request"), nil)
     t.eq(find_raise(result.raises, "devloop_ready"), nil)
   end,
 
@@ -75,5 +75,44 @@ return {
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:ready")
     t.eq(find_raise(result.raises, "devloop_ready"), nil)
     t.is_true(comment_raise.payload.body:find(core.state_marker(current.proposal_id, "ready", consensus_version, "result-marker,ready-label,devloop-ready"), 1, true) ~= nil)
+  end,
+
+  test_consensus_result_first_decision_wins_same_lineage_and_new_generation_applies = function()
+    local approve = reached()
+    mock_issue_result({ "fkst-dev:thinking" }, {
+      core.state_marker(approve.proposal_id, "thinking", approve.dedup_key),
+    })
+    local applied = run_result(approve, opts("result-first-approve"))
+    t.eq(applied.exit_code, 0)
+    local approved_fact = find_raise(applied.raises, "github-proxy.github_issue_comment_request").payload.body
+
+    local reject = reached({
+      decision = "reject",
+      decision_reason = "premise-refuted",
+      body = "Divergent recompute rejects the premise.",
+    })
+    mock_issue_result({ "fkst-dev:ready" }, { approved_fact })
+    local absorbed = run_result(reject, opts("result-divergent-reject"))
+    t.eq(absorbed.exit_code, 0)
+    t.eq(#absorbed.raises, 1)
+    local audit = find_raise(absorbed.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(audit.payload.body:find("fkst:github-devloop:result-divergence:v1", 1, true) ~= nil)
+    t.eq(find_raise(absorbed.raises, "github-proxy.github_issue_label_request"), nil)
+    t.eq(core.current_state({ approved_fact }, approve.proposal_id).state, "ready")
+
+    local fresh_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
+    local fresh_reject = reached({
+      decision = "reject",
+      decision_reason = "premise-refuted",
+      body = "A new generation rejects the premise.",
+      dedup_key = fresh_version,
+    })
+    mock_issue_result({ "fkst-dev:thinking" }, {
+      approved_fact,
+      core.state_marker(fresh_reject.proposal_id, "thinking", fresh_version),
+    })
+    local fresh = run_result(fresh_reject, opts("result-new-generation-reject"))
+    t.eq(fresh.exit_code, 0)
+    t.eq(find_raise(fresh.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:declined")
   end,
 }

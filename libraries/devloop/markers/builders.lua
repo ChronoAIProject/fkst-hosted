@@ -357,7 +357,7 @@ function C.pr_base_unmanaged_marker(proposal_id, pr_number, pr_base, integration
     .. '" -->'
 end
 
-function C.result_marker(proposal_id, decision, dedup_key, decision_reason)
+function C.result_marker(proposal_id, decision, dedup_key, decision_reason, logical_identity)
   if decision ~= "approve" and decision ~= "reject" then
     error("github-devloop: invalid decision")
   end
@@ -372,6 +372,15 @@ function C.result_marker(proposal_id, decision, dedup_key, decision_reason)
     .. '" decision="' .. decision
     .. reason_attr
     .. '" dedup="' .. tostring(dedup_key)
+    .. (logical_identity and '" lineage="' .. tostring(logical_identity) or "")
+    .. '" -->'
+end
+
+function C.result_divergence_marker(kind, logical_identity, first_decision, incoming_decision)
+  return '<!-- fkst:github-devloop:result-divergence:v1 kind="' .. tostring(kind)
+    .. '" lineage="' .. tostring(logical_identity)
+    .. '" first="' .. tostring(first_decision)
+    .. '" incoming="' .. tostring(incoming_decision)
     .. '" -->'
 end
 return C
