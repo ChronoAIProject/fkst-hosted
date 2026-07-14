@@ -79,11 +79,15 @@ function M.sync_conflict_self_hash_normalizer_paths(unmerged_stdout)
   return selected
 end
 
-function M.sync_conflict_self_hash_normalizer_argv(worktree, path)
+function M.sync_conflict_self_hash_normalizer_argv(source_root, worktree, path)
   local script = self_hash_normalizers[path]
+  local trusted_root = tostring(source_root or ""):gsub("/+$", "")
   local root = tostring(worktree or ""):gsub("/+$", "")
   if script == nil then
     error("github-devloop: sync-conflict-normalizer-unknown: no self-hash normalizer for path")
+  end
+  if trusted_root == "" or trusted_root:find("[\r\n]") ~= nil then
+    error("github-devloop: sync-conflict-normalizer-source-root-invalid: invalid source root")
   end
   if root == "" or root:find("[\r\n]") ~= nil then
     error("github-devloop: sync-conflict-normalizer-worktree-invalid: invalid worktree")
@@ -91,7 +95,7 @@ function M.sync_conflict_self_hash_normalizer_argv(worktree, path)
   return {
     "python3",
     "-B",
-    root .. "/" .. script,
+    trusted_root .. "/" .. script,
     "--root",
     root,
     "--fix-artifact-sha256",

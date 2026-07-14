@@ -71,6 +71,33 @@ local function require_clean_resolution(git, worktree)
   return true, ""
 end
 
+local function source_root()
+  local function checked_root(root)
+    local value = tostring(root or ""):gsub("%s+$", ""):gsub("/+$", "")
+    if value == "" or value:find("[\r\n]") ~= nil then
+      error("github-devloop: sync-conflict-source-root-unavailable: trusted source checkout could not be resolved")
+    end
+    return value
+  end
+
+  if type(debug) == "table" and type(debug.getinfo) == "function" then
+    local info = debug.getinfo(1, "S")
+    local source = info and info.source or ""
+    if source:sub(1, 1) == "@" then
+      local path = source:sub(2)
+      local package_suffix = "/packages/github-devloop-integration/departments/sync_conflict/main.lua"
+      if path:sub(-#package_suffix) == package_suffix then
+        return path:sub(1, #path - #package_suffix)
+      end
+      local local_suffix = "/.fkst/local-packages/github-devloop-integration/departments/sync_conflict/main.lua"
+      if path:sub(-#local_suffix) == local_suffix then
+        return path:sub(1, #path - #local_suffix)
+      end
+    end
+  end
+  return checked_root(exec_sync({ cmd = "pwd", timeout = 30 }).stdout)
+end
+
 local function normalize_self_hash_manifests(git, worktree, original_unmerged_stdout)
   local paths = core.sync_conflict_self_hash_normalizer_paths(original_unmerged_stdout)
   if #paths == 0 then
@@ -83,9 +110,10 @@ local function normalize_self_hash_manifests(git, worktree, original_unmerged_st
   if tostring(current_unmerged.stdout or "") ~= "" then
     return
   end
+  local trusted_source_root = source_root()
   for _, path in ipairs(paths) do
     local result = exec_argv({
-      argv = core.sync_conflict_self_hash_normalizer_argv(worktree, path),
+      argv = core.sync_conflict_self_hash_normalizer_argv(trusted_source_root, worktree, path),
       timeout = 120,
     })
     if type(result) ~= "table" or result.exit_code ~= 0 then

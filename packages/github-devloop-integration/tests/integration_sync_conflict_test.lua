@@ -85,6 +85,16 @@ local function codex_calls()
   return calls
 end
 
+local function self_hash_normalizer_call()
+  for _, call in ipairs(t.command_calls()) do
+    if call.program == "python3"
+      and tostring((call.args or {})[2] or ""):find("check_repo_restart_lifecycle.py", 1, true) ~= nil then
+      return call
+    end
+  end
+  return nil
+end
+
 local function assert_sync_conflict_worktree_call()
   local calls = codex_calls()
   t.eq(#calls, 1)
@@ -137,6 +147,7 @@ return {
     mock_conflicting_worktree("100644 abc 1\tmigration/restart-lifecycle.inventory.json\n")
     t.mock_command("codex exec", { stdout = "resolved", stderr = "", exit_code = 0 })
     t.mock_command("ls-files -u", { stdout = "", stderr = "", exit_code = 0 })
+    t.mock_command("pwd", { stdout = "/trusted/fkst-packages\n", stderr = "", exit_code = 0 })
     t.mock_command("python3 -B", { stdout = "OK: restart lifecycle inventory is schema-valid, shrink-only, independent, and self-hash-matched\n", stderr = "", exit_code = 0 })
     t.mock_command("ls-files -u", { stdout = "", stderr = "", exit_code = 0 })
     t.mock_command("diff --check", { stdout = "", stderr = "", exit_code = 0 })
@@ -152,6 +163,11 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(h.count_calls("codex exec"), 1)
     t.eq(h.count_calls("python3 -B"), 1)
+    local normalizer = self_hash_normalizer_call()
+    t.is_true(normalizer ~= nil)
+    t.eq(normalizer.args[3], "--root")
+    t.is_true(normalizer.args[4]:find("/worktrees/sync-owner-repo-dev-integration-dev-", 1, true) ~= nil)
+    t.is_nil(normalizer.args[2]:find(normalizer.args[4], 1, true))
     t.eq(h.count_calls("commit -F"), 1)
     t.eq(h.count_calls("push origin HEAD:refs/heads/"), 1)
   end,

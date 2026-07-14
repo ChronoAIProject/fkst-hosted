@@ -84,13 +84,14 @@ return {
 
   test_sync_conflict_self_hash_normalizer_argv_uses_checker_owner = function()
     local argv = core.sync_conflict_self_hash_normalizer_argv(
+      "/trusted/fkst-packages",
       "/tmp/fkst-worktree/",
       "migration/restart-lifecycle.inventory.json"
     )
 
     t.eq(argv[1], "python3")
     t.eq(argv[2], "-B")
-    t.eq(argv[3], "/tmp/fkst-worktree/scripts/check_repo_restart_lifecycle.py")
+    t.eq(argv[3], "/trusted/fkst-packages/scripts/check_repo_restart_lifecycle.py")
     t.eq(argv[4], "--root")
     t.eq(argv[5], "/tmp/fkst-worktree")
     t.eq(argv[6], "--fix-artifact-sha256")
