@@ -1,5 +1,5 @@
 -- This grant-disabled shadow slice proves CAS-admission-composition parity only.
--- It models the review_result approved edge, including the production cyclic
+-- It models the review_result approved and changes-requested edges, including the production cyclic
 -- probe's safe current-version form and its post-probe safe-version overlay.
 -- No live effect is authorized or emitted by this module.
 
@@ -77,7 +77,7 @@ function M.seal_snapshot(fields)
   -- Present current.version in SAFE form, byte-exact with what production's review_result
   -- department feeds its cyclic probe (departments/review_result/main.lua:184:
   -- transition_version.safe_version_segment(state.version or "")). This is correct for the
-  -- ONLY edge this module admits (fence: cas.legacy_review_result_v1/reviewing_to_merge_ready,
+  -- ONLY policy profile this module admits (fence: cas.legacy_review_result_v1 variants
   -- whose base_current_version_form="safe"); it is idempotent with the catalog's own safe
   -- re-projection (safe(safe(x))==safe(x)). If the fence is ever widened to a raw-form edge,
   -- derive the form from the catalog's base_current_version_form instead of this unconditional
@@ -119,7 +119,8 @@ function M.decide_transition(sealed_snapshot, intent)
     return illegal("ambiguous-variant")
   end
   if edge.cas_policy_id ~= "cas.legacy_review_result_v1"
-    or edge.cas_variant ~= "reviewing_to_merge_ready" then
+    or (edge.cas_variant ~= "reviewing_to_merge_ready"
+      and edge.cas_variant ~= "reviewing_to_fixing") then
     return illegal("unsupported-shadow-edge")
   end
   if normalized.source_boundary ~= nil and normalized.source_boundary ~= edge.source.boundary then
