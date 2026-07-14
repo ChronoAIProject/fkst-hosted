@@ -723,7 +723,7 @@ function M.build_converge_payload(proposal, narrowed_question, angle_results, fi
   if not has_source_ref(proposal.source_ref) then
     error("consensus: source-ref-missing: missing source_ref")
   end
-  angle_answers.assert_has_valid(angle_results, "converge-outcome")
+  angle_answers.assert_all_valid(angle_results, "converge-outcome")
 
   local angle_digests = M.angle_digests(angle_results)
 

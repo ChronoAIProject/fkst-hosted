@@ -41,7 +41,7 @@ end
 
 local function run_merge_queue_tick(run_opts)
   return t.run_department("departments/merge_queue/main.lua", {
-    queue = "devloop_merge_queue_tick",
+    queue = "github-devloop-pr.devloop_merge_queue_tick",
     payload = {
       schema = "github-devloop.merge-queue-tick.v1",
     },
@@ -167,10 +167,6 @@ local function mock_queue_pr(event, created_at, state, state_version, mergeable,
     merge_state = merge_state or "CLEAN",
     status_check_rollup_json = '[{"name":"test","status":' .. json_literal(rollup_state or "COMPLETED") .. ',"conclusion":' .. json_literal(rollup_conclusion or "SUCCESS") .. '}]',
   })
-end
-
-local function mock_queue_pr_red(event, created_at, state, state_version)
-  mock_queue_pr(event, created_at, state, state_version, "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
 end
 
 local function mock_merge_pr_view(event, state, mergeable, merge_state, rollup_state, rollup_conclusion, base_sha)
@@ -514,7 +510,7 @@ return {
     t.is_true(scanned_queue)
   end,
 
-  test_merge_queue_poll_yields_red_fixing_head_to_next_green = function()
+  test_merge_queue_poll_routes_blocked_red_head_to_fixing_and_releases_next_green = function()
     local current = merge_ready()
     local older = event_for_pr(9, 44, "2026-06-03T00-00-00Z", "aabb11")
     local origin_marker = m_builders.pr_origin_marker(current.proposal_id, "42", "devloop-owner-repo-42-01HY", current.version, "dev")
@@ -524,10 +520,11 @@ return {
     mock_repo_env()
     mock_branch_config_env(2)
     mock_queue_list({ 9, 7 })
-    mock_queue_pr_red(older, "2026-06-03T01:00:00Z")
+    mock_queue_pr(older, "2026-06-03T01:00:00Z", nil, nil, "MERGEABLE", "BLOCKED", "COMPLETED", "FAILURE")
     mock_queue_pr(current, "2026-06-03T02:00:00Z")
-    mock_merge_pr_view(older, "OPEN", "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
-    mock_merge_pr_view(older, "OPEN", "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
+    mock_merge_pr_view(older, "OPEN", "MERGEABLE", "BLOCKED", "COMPLETED", "FAILURE")
+    mock_merge_pr_view(older, "OPEN", "MERGEABLE", "BLOCKED", "COMPLETED", "FAILURE")
+    h.mock_required_check_runs_for(older.reviewed_head_sha, "failure")
     h.mock_required_check_runs_for(older.reviewed_head_sha, "failure")
     mock_diff_name_only(9, { "packages/older.lua" })
     mock_claimed_issue_for_event(older, 1)

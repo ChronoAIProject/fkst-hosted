@@ -55,6 +55,13 @@ local function run_decide(event_payload, run_opts)
   }, run_opts)
 end
 
+local function run_namespaced_decide(event_payload, run_opts)
+  return t.run_department("departments/decide/main.lua", {
+    queue = "consensus.proposal",
+    payload = event_payload,
+  }, run_opts)
+end
+
 local function seed_cache(key, value, run_opts)
   return t.run_department("departments/test_cache_seed/main.lua", {
     queue = "cache_seed",
@@ -669,55 +676,27 @@ return {
     t.eq(#codex_calls(), 7)
   end,
 
-  test_synthesis_reached_with_failed_angle_fails_closed_as_codex_failed = function()
-    mock_judgment_runtime()
-    mock_angle("teleology", "approve", "Teleology angle approves.")
-    mock_judgment_dir()
-    t.mock_command("consensus-angle-parsimony", {
-      stderr = "forced failure",
-      exit_code = 7,
-    })
-    mock_angle("fidelity", "abstain", "Fidelity angle abstains.")
-    mock_rebuttal_defend("teleology", "approve", "Teleology still approves.")
-    mock_rebuttal_defend("parsimony", "abstain", "Parsimony cannot judge after the failed P1.")
-    mock_rebuttal_defend("fidelity", "abstain", "Fidelity still abstains.")
-    mock_synthesis("reached:approve approve the narrowed framing")
-
-    local run_opts = opts("split-synthesis-reached-degraded")
-    local result = run_decide(proposal({
-      dedup_key = "proposal-42-v1/split-synthesis-reached-degraded",
-    }), run_opts)
-
-    t.is_true(result.exit_code ~= 0)
-    t.eq(#result.raises, 0)
-    t.is_true(tostring(result.error):find("codex-failed", 1, true) ~= nil)
-    t.eq(#codex_calls(), 7)
-  end,
-
-  test_synthesis_reached_with_malformed_angle_fails_closed_as_unparseable = function()
+  test_partial_malformed_angle_fails_closed_before_synthesis_as_unparseable = function()
     mock_judgment_runtime()
     mock_angle("teleology", "approve", "Teleology angle approves.")
     mock_judgment_dir()
     t.mock_command("consensus-angle-parsimony", { stdout = "malformed", exit_code = 0 })
     mock_angle("fidelity", "comment", "Fidelity angle notes a non-blocking concern.")
-    mock_rebuttal_defend("teleology", "approve", "Teleology still approves.")
-    mock_rebuttal_defend("parsimony", "abstain", "Parsimony cannot judge after the failed P1.")
-    mock_rebuttal_defend("fidelity", "comment", "Fidelity still has a non-blocking concern.")
-    mock_synthesis("reached:approve approve the narrowed framing")
 
-    local run_opts = opts("gate-split-synthesis-reached-degraded")
+    local run_opts = opts("gate-partial-malformed-angle")
     local result = run_decide(proposal({
       verdict_mode = "gate",
-      dedup_key = "proposal-42-v1/gate-split-synthesis-reached-degraded",
+      dedup_key = "proposal-42-v1/gate-partial-malformed-angle",
     }), run_opts)
 
     t.is_true(result.exit_code ~= 0)
     t.eq(#result.raises, 0)
     t.is_true(tostring(result.error):find("angle-output-unparseable", 1, true) ~= nil)
-    t.eq(#codex_calls(), 7)
+    t.is_true(tostring(result.error):find("phase=blind", 1, true) ~= nil)
+    t.eq(#codex_calls(), 3)
   end,
 
-  test_abstain_raises_consensus_converge = function()
+  test_all_valid_disagreement_raises_consensus_converge = function()
     mock_judgment_runtime()
     mock_angle("teleology", "approve", "Teleology angle approves.")
     mock_angle("parsimony", "abstain", "Parsimony angle abstains.")
@@ -731,36 +710,64 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "consensus_converge")
+    t.eq(result.raises[1].payload.narrowed_question, "parsimony blocker remains unresolved + inspect the named blocker")
     t.eq(#codex_calls(), 7)
   end,
 
-  test_partial_angle_worker_failure_preserves_substantive_converge = function()
+  test_persistent_partial_angle_worker_failure_retries_same_round_without_converge = function()
+    local target = proposal({
+      round = 2,
+      dedup_key = "proposal-42-v1/loop/2",
+    })
+    local run_opts = opts("persistent-partial-angle-failure")
+    for _ = 1, 2 do
+      mock_judgment_runtime()
+      mock_angle("teleology", "approve", "Teleology angle approves.")
+      mock_judgment_dir()
+      t.mock_command("consensus-angle-parsimony", {
+        stderr = "forced failure",
+        exit_code = 7,
+      })
+      mock_angle("fidelity", "approve", "Fidelity angle approves.")
+      mock_rebuttal_defend("teleology", "approve", "Teleology still approves.")
+      mock_rebuttal_defend("parsimony", "abstain", "Parsimony cannot judge after the failed P1.")
+      mock_rebuttal_defend("fidelity", "approve", "Fidelity still approves.")
+      mock_synthesis("converge: surviving seats disagree on retry ownership + inspect the retry contract")
+
+      local result = run_namespaced_decide(target, run_opts)
+      t.is_true(result.exit_code ~= 0)
+      t.eq(#result.raises, 0)
+      t.is_true(tostring(result.error):find("codex-failed", 1, true) ~= nil)
+      t.is_true(tostring(result.error):find("phase=blind", 1, true) ~= nil)
+    end
+    t.eq(target.round, 2)
+    t.eq(target.dedup_key, "proposal-42-v1/loop/2")
+    t.eq(#codex_calls(), 6)
+  end,
+
+  test_partial_rebuttal_worker_failure_fails_closed_before_synthesis = function()
     mock_judgment_runtime()
     mock_angle("teleology", "approve", "Teleology angle approves.")
+    mock_angle("parsimony", "abstain", "Parsimony angle abstains.")
+    mock_angle("fidelity", "approve", "Fidelity angle approves.")
+    mock_rebuttal_defend("teleology", "approve", "Teleology still approves.")
     mock_judgment_dir()
-    t.mock_command("consensus-angle-parsimony", {
+    t.mock_command("consensus-rebuttal-parsimony", {
       stderr = "forced failure",
       exit_code = 7,
     })
-    mock_angle("fidelity", "approve", "Fidelity angle approves.")
-    mock_rebuttal_defend("teleology", "approve", "Teleology still approves.")
-    mock_rebuttal_defend("parsimony", "abstain", "Parsimony cannot judge after the failed P1.")
     mock_rebuttal_defend("fidelity", "approve", "Fidelity still approves.")
     mock_synthesis("converge: surviving seats disagree on retry ownership + inspect the retry contract")
 
-    local result = run_decide(proposal({ dedup_key = "proposal-42-v1/codex-fails" }), opts("codex-fails"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    t.eq(result.raises[1].queue, "consensus_converge")
-    t.eq(result.raises[1].payload.narrowed_question, "surviving seats disagree on retry ownership + inspect the retry contract")
-    local has_parsimony = false
-    for _, digest in ipairs(result.raises[1].payload.angle_digests) do
-      if digest.angle == "parsimony" and digest.verdict == "abstain" then
-        has_parsimony = true
-      end
-    end
-    t.eq(has_parsimony, true)
-    t.eq(#codex_calls(), 7)
+    local result = run_namespaced_decide(
+      proposal({ dedup_key = "proposal-42-v1/rebuttal-worker-fails" }),
+      opts("partial-rebuttal-worker-failure")
+    )
+    t.is_true(result.exit_code ~= 0)
+    t.eq(#result.raises, 0)
+    t.is_true(tostring(result.error):find("codex-failed", 1, true) ~= nil)
+    t.is_true(tostring(result.error):find("phase=rebuttal", 1, true) ~= nil)
+    t.eq(#codex_calls(), 6)
   end,
 
   test_zero_valid_angle_outputs_fail_closed_before_rebuttal = function()
