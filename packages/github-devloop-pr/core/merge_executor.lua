@@ -519,6 +519,21 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
   end
   local mergeable, mergeable_reason = check_runs.pr_mergeable(current_pr)
   if not mergeable then
+    local _, gate_reason = core.evaluate_ci_merge_gate(current_pr, {
+      repo = repo,
+      dept = "merge",
+      proposal_id = merge_ready.proposal_id,
+    })
+    if parsers_misc.is_ci_red_reason(gate_reason) then
+      log_gate(merge_ready, "fixing", gate_reason)
+      local _, mismatch, observed_pr = raise_fresh_own_ci_fixing(repo, issue_number, merge_ready, state,
+        current_pr.head_sha, queue_position, "gh-pr-merge-ci-classification-failed")
+      if mismatch == "head-mismatch" then
+        log_gate(merge_ready, "reviewing", "head-sha-mismatch")
+        raise_reviewing_for_current_head(repo, issue_number, merge_ready, state, observed_pr, "head-sha-mismatch")
+      end
+      return
+    end
     if not check_runs.is_not_mergeable_reason(mergeable_reason) then
       log_gate(merge_ready, "dry-run", mergeable_reason)
       error("github-devloop: merge-gate-wait: merge wait on " .. tostring(mergeable_reason) .. "; retrying")
