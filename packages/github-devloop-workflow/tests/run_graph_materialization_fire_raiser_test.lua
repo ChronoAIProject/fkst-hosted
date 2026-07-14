@@ -5,6 +5,7 @@ local graph = require("testkit.graph")
 local gh_argv = require("testkit.gh_argv_mock")
 local base_ids = require("devloop.base_ids")
 local m_builders = require("devloop.markers.builders")
+local github_commands = require("forge.github").new(function() end)
 gh_argv.install(t, core)
 
 local repo = "owner/repo"
@@ -19,7 +20,8 @@ local revived_pr = 2139
 local child_version = "ready/consensus-workflow-child/2026-07-10T20-18-00Z"
 local head_sha = "0123456789abcdef0123456789abcdef01234567"
 local merge_commit_sha = "1111111111111111111111111111111111111111"
-local upstream_head_sha = "fedcba9876543210fedcba9876543210fedcba98"
+local rollup_head_sha = "2222222222222222222222222222222222222222"
+local rollup_pr = 2140
 local integration_branch = "integration-elonsg"
 local upstream_branch = "dev"
 local revived_branch = "devloop-owner-repo-2137-01HY"
@@ -310,13 +312,20 @@ local function mock_native_merge_observation()
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command(core.git_fetch_branch_cmd("origin", upstream_branch), {
+  t.mock_command(github_commands.pr_list_promotions_cmd(repo, integration_branch, upstream_branch), {
+    stdout = '[[{"number":' .. tostring(rollup_pr)
+      .. ',"state":"closed","merged_at":"2026-07-12T00:24:02Z"'
+      .. ',"head":{"ref":"' .. integration_branch .. '","sha":"' .. rollup_head_sha
+      .. '","repo":{"full_name":"' .. repo .. '"}},"base":{"ref":"' .. upstream_branch .. '"}}]]\n',
+    stderr = "", exit_code = 0,
+  })
+  t.mock_command(core.git_fetch_pr_head_ref_cmd("origin", rollup_pr), {
     stdout = "", stderr = "", exit_code = 0,
   })
-  t.mock_command(core.git_remote_branch_head_cmd("origin", upstream_branch), {
-    stdout = upstream_head_sha .. "\n", stderr = "", exit_code = 0,
+  t.mock_command(core.git_fetch_head_commit_cmd(), {
+    stdout = rollup_head_sha .. "\n", stderr = "", exit_code = 0,
   })
-  t.mock_command("git merge-base --is-ancestor " .. merge_commit_sha .. " " .. upstream_head_sha, {
+  t.mock_command("git merge-base --is-ancestor " .. merge_commit_sha .. " " .. rollup_head_sha, {
     stdout = "", stderr = "", exit_code = 0,
   })
   t.mock_command(core.gh_issue_close_cmd(repo, revived_child_issue), {

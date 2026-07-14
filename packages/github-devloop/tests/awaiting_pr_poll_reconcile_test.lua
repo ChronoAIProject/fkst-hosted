@@ -10,6 +10,9 @@ local autonomy_ledger = require("devloop.autonomy_ledger")
 local m_builders = require("devloop.markers.builders")
 local devloop_logging = require("devloop.logging")
 local replayer = require("devloop.replayer")
+local github_commands = require("forge.github").new(function() end)
+local git_mechanics = require("devloop.git_mechanics")
+local awaiting_pr_replayer = require("core.awaiting_pr_replayer")
 
 local repo = "owner/repo"
 local issue_number = 42
@@ -23,6 +26,8 @@ local merge_commit_sha = "1111111111111111111111111111111111111111"
 local integration_branch = "integration/dev"
 local upstream_branch = "dev"
 local upstream_head_sha = "fedcba9876543210fedcba9876543210fedcba98"
+local rollup_pr_number = 9
+local rollup_head_sha = "2222222222222222222222222222222222222222"
 
 local function restart_transition_row(state_name)
   return replay_fields.restart_transition_row(core.restart_transition_table(), state_name)
@@ -157,6 +162,32 @@ local function mock_branch_config(split)
 end
 
 local function mock_rollup_landing(exit_code)
+  t.mock_command(github_commands.pr_list_promotions_cmd(repo, integration_branch, upstream_branch), {
+    stdout = '[[{"number":' .. tostring(rollup_pr_number)
+      .. ',"state":"closed","merged_at":"2026-06-03T03:03:04Z"'
+      .. ',"head":{"ref":"' .. integration_branch .. '","sha":"' .. rollup_head_sha
+      .. '","repo":{"full_name":"' .. repo .. '"}},"base":{"ref":"' .. upstream_branch .. '"}}]]\n',
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command(core.git_fetch_pr_head_ref_cmd("origin", rollup_pr_number), {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command(core.git_fetch_head_commit_cmd(), {
+    stdout = rollup_head_sha .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git merge-base --is-ancestor " .. merge_commit_sha .. " " .. rollup_head_sha, {
+    stdout = "",
+    stderr = "",
+    exit_code = exit_code,
+  })
+end
+
+local function mock_orphaned_from_current_upstream()
   t.mock_command(core.git_fetch_branch_cmd("origin", upstream_branch), {
     stdout = "",
     stderr = "",
@@ -170,7 +201,15 @@ local function mock_rollup_landing(exit_code)
   t.mock_command("git merge-base --is-ancestor " .. merge_commit_sha .. " " .. upstream_head_sha, {
     stdout = "",
     stderr = "",
-    exit_code = exit_code,
+    exit_code = 1,
+  })
+end
+
+local function mock_no_rollup_receipt()
+  t.mock_command(github_commands.pr_list_promotions_cmd(repo, integration_branch, upstream_branch), {
+    stdout = "[[]]\n",
+    stderr = "",
+    exit_code = 0,
   })
 end
 
@@ -381,9 +420,51 @@ return {
     t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
   end,
 
-  test_split_topology_child_merged_uses_merge_commit_landing_not_head_ancestry = function()
+  test_rollup_receipt_scan_fetches_containing_receipt_before_probing_absent_orphan_object = function()
+    local newer_head = "3333333333333333333333333333333333333333"
+    local orphan_object_available = false
+    local ancestry_calls = {}
+    local fake_git = {
+      is_ancestor = function(_, descendant_sha)
+        table.insert(ancestry_calls, descendant_sha)
+        if not orphan_object_available then
+          return {
+            stdout = "",
+            stderr = "fatal: Not a valid commit name " .. merge_commit_sha,
+            exit_code = 128,
+          }
+        end
+        return { stdout = "", stderr = "", exit_code = descendant_sha == rollup_head_sha and 0 or 1 }
+      end,
+    }
+
+    t.raises(function()
+      git_mechanics.is_ancestor(fake_git, merge_commit_sha, newer_head, "test orphan object precondition")
+    end)
+    ancestry_calls = {}
+
+    local landed = awaiting_pr_replayer.fetch_then_scan_rollup_receipts({
+      { number = 10, head_sha = newer_head },
+      { number = rollup_pr_number, head_sha = rollup_head_sha },
+    }, function(candidate)
+      if candidate.number == rollup_pr_number then
+        orphan_object_available = true
+      end
+      return candidate.head_sha
+    end, function(receipt_head)
+      return git_mechanics.is_ancestor(fake_git, merge_commit_sha, receipt_head, "test rollup receipt ancestry")
+    end)
+
+    t.is_true(landed)
+    t.eq(#ancestry_calls, 2)
+    t.eq(ancestry_calls[1], newer_head)
+    t.eq(ancestry_calls[2], rollup_head_sha)
+  end,
+
+  test_split_topology_rewritten_history_uses_immutable_rollup_pr_receipt = function()
     mock_issue_close()
     mock_branch_config()
+    mock_orphaned_from_current_upstream()
     mock_rollup_landing(0)
     local result = run_observe(parent_comments(), child_comments("merged"), {
       pr_state = "MERGED",
@@ -394,9 +475,11 @@ return {
     local resume = resume_comment(result)
     assert_resume_has_autonomy_result(resume)
     t.eq(count_raises(result.raises, "github-proxy.github_issue_label_request"), 1)
-    t.eq(count_calls("git fetch 'origin' '" .. upstream_branch .. "'"), 1)
-    t.eq(count_calls("git merge-base --is-ancestor " .. merge_commit_sha .. " " .. upstream_head_sha), 1)
-    t.eq(count_calls("git merge-base --is-ancestor " .. head_sha .. " " .. upstream_head_sha), 0)
+    t.eq(count_calls(github_commands.pr_list_promotions_cmd(repo, integration_branch, upstream_branch)), 1)
+    t.eq(count_calls(core.git_fetch_pr_head_ref_cmd("origin", rollup_pr_number)), 1)
+    t.eq(count_calls("git merge-base --is-ancestor " .. merge_commit_sha .. " " .. rollup_head_sha), 1)
+    t.eq(count_calls("git fetch 'origin' '" .. upstream_branch .. "'"), 0)
+    t.eq(count_calls("git merge-base --is-ancestor " .. merge_commit_sha .. " " .. upstream_head_sha), 0)
     t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
   end,
 
@@ -413,10 +496,10 @@ return {
     t.eq(count_calls("gh issue close 42 --repo owner/repo"), 0)
   end,
 
-  test_split_topology_canonical_merged_child_waits_until_merge_commit_lands_on_upstream = function()
+  test_split_topology_canonical_merged_child_waits_while_integration_has_no_rollup_receipt = function()
     mock_issue_close()
     mock_branch_config()
-    mock_rollup_landing(1)
+    mock_no_rollup_receipt()
     local result = run_observe(parent_comments(), child_comments("merged"), {
       pr_state = "MERGED",
       write = "real",
@@ -425,7 +508,9 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_raises(result.raises, "github-proxy.github_issue_comment_request"), 0)
     t.eq(count_raises(result.raises, "github-proxy.github_issue_label_request"), 0)
-    t.eq(count_calls("git merge-base --is-ancestor " .. merge_commit_sha .. " " .. upstream_head_sha), 1)
+    t.eq(count_calls(github_commands.pr_list_promotions_cmd(repo, integration_branch, upstream_branch)), 1)
+    t.eq(count_calls(core.git_fetch_pr_head_ref_cmd("origin", rollup_pr_number)), 0)
+    t.eq(count_calls("git merge-base --is-ancestor"), 0)
     t.eq(count_calls("gh issue close 42 --repo owner/repo"), 0)
   end,
 
