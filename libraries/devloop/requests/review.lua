@@ -281,8 +281,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
     "review-result",
     "comment",
     tostring(issue_proposal_id),
-    tostring(reached.decision),
-    tostring(review_dedup_key),
+    tostring(reached.proposal_id),
   }), source_ref)
   if reached.decision == "approve" then
     local _, _, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(reached.proposal_id)
@@ -317,6 +316,16 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
     C.attach_review_meta_handoff(request, reflection)
   end
   return request
+end
+
+function C.build_review_result_divergence_comment_request(repo, issue_proposal_id, reached, first_decision, source_ref)
+  local _, pr_number = devloop_base.parse_pr_source_ref(source_ref)
+  return entity_lib.build_entity_comment_request({ kind = "pr", repo = repo, number = pr_number },
+    "Suppressed divergent PR review result for an already admitted lineage.\n\n"
+      .. m_builders.result_divergence_marker("pr-review", reached.proposal_id, first_decision, reached.decision)
+      .. "\n" .. ai_sentinel,
+    base_ids.dedup_key({ "review-result-divergence", tostring(issue_proposal_id), tostring(reached.proposal_id), tostring(first_decision), tostring(reached.decision) }),
+    source_ref)
 end
 
 function C.build_high_risk_review_evidence_comment_request(repo, issue_proposal_id, issue_version, reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, source_ref)

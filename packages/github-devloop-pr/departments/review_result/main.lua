@@ -6,6 +6,7 @@ local requests_labels = require("devloop.requests.labels")
 local requests_review = require("devloop.requests.review")
 local parsers_pr = require("devloop.parsers.pr")
 local m_facts = require("devloop.markers.facts")
+local result_facts = require("devloop.markers.result_facts")
 local convergence_shared, github_risk = require("devloop.convergence.shared"), require("devloop.github_risk")
 local core, saga = require("core"), require("workflow.saga")
 local transition_version = require("contract.transition_version")
@@ -80,6 +81,8 @@ return saga.department(spec, { done = function() return false end, act = functio
 
   devloop_base.assert_trusted_bot_configured()
   local branches = config.branch_config()
+  local lock_key = entity_lib.pr_transition_lock_key(repo, pr_number)
+  with_lock(lock_key, function()
   local pr_view = devloop_commands.gh_pr_view_origin(repo, pr_number, 30)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh-pr-review-result-view-failed: gh pr origin view failed for review result: " .. tostring(pr_view.stderr))
@@ -115,18 +118,29 @@ return saga.department(spec, { done = function() return false end, act = functio
     devloop_logging.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(version)", "review proposal version is missing")
     return
   end
-  local lock_key = entity_lib.review_result_lock_key(origin.proposal_id)
-  if lock_key == nil then
-    error("github-devloop: review-result-invalid: owned review has no issue transition lock key")
-  end
-
-  with_lock(lock_key, function()
     local pr_source_ref = entity_lib.pr_source_ref(origin.repo, pr_number)
     if not m_claims.verify_pr_review_issue_claim("review_result", origin.repo, origin.issue_number, nil, origin.proposal_id) then
       return
     end
     devloop_logging.log_forged_markers("review_result", origin.proposal_id, current_pr.comments)
     local state = require("devloop.entity").current_entity_state(current_pr.comments, origin.proposal_id)
+    local first_result = result_facts.first_review_result_fact(current_pr.comments, reached.proposal_id, origin.proposal_id)
+    if first_result ~= nil then
+      if first_result.decision == reached.decision then
+        devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", "merge-ready|fixing", "skip-idempotent(first-result)", "logical review result was already admitted")
+        return
+      end
+      local audit_request = requests_review.build_review_result_divergence_comment_request(
+        origin.repo,
+        origin.proposal_id,
+        reached,
+        first_result.decision,
+        pr_source_ref
+      )
+      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", "merge-ready|fixing", "suppress-divergent-result", "first admitted logical review result wins")
+      devloop_logging.log_raise("review_result", origin.proposal_id, "github-proxy.github_pr_comment_request", audit_request)
+      return
+    end
     local effective_decision = reached.decision
     local comment_reached = copy_reached_with_review_dedup(reached, canonical_review_dedup)
     local gate_owned_reject = reached.decision == "reject" and payloads_predicates.is_gate_owned_review_gap(reached.blocking_gap)

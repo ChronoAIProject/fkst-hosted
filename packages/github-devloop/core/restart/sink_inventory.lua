@@ -44,8 +44,8 @@ queue("test_context_bundle_probe", "context_bundle_probe", "grantless-non-lifecy
 queue("test_context_bundle_probe", "context_bundle_probe_result", "grantless-non-lifecycle", "test-probe/context-bundle-result")
 
 add("adapter:structured-log", "all", "devloop_logging.log_line", "adapter", "grantless-telemetry", "structured-log:v1/dept+proposal+tag")
-add("comment:issue:consensus-result", "consensus_result", "raise_result_effects.result_comment", "comment", "lifecycle-authoritative", "state:v1+result:v1;dedup=proposal/comment/decision")
-add("label:issue:consensus-result", "consensus_result", "raise_result_effects.result_label", "label", "lifecycle-authoritative", "state-label:ready;dedup=proposal/label/decision")
+add("comment:issue:consensus-result", "consensus_result", "raise_result_effects.result_comment", "comment", "lifecycle-authoritative", "state:v1+result:v1;dedup=proposal/comment/logical-result")
+add("label:issue:consensus-result", "consensus_result", "raise_result_effects.result_label", "label", "lifecycle-authoritative", "state-label:ready|declined;dedup=proposal/label/logical-result")
 add("comment:issue:dependency-hold", "consensus_result", "raise_result_effects.dependency_hold_comment", "comment", "lifecycle-authoritative", "dependency-wait|dependency-cycle|dependency-unresolvable:v1;dedup=dependency/comment")
 add("label:issue:dependency-hold", "consensus_result", "raise_result_effects.dependency_hold_label", "label", "lifecycle-authoritative", "label:fkst-dev:blocked-on-dependency;dedup=dependency/label/hold")
 add("comment:issue:dependency-release", "consensus_result", "raise_result_effects.dependency_release_comment", "comment", "lifecycle-authoritative", "dependency-release:v1;dedup=dependency/comment/release")

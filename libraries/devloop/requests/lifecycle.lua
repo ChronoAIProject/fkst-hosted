@@ -9,6 +9,7 @@ local comment_strings = require("devloop.strings")
 local shared = require("devloop.requests.shared")
 local m_shared = require("devloop.markers.shared")
 local m_builders = require("devloop.markers.builders")
+local result_facts = require("devloop.markers.result_facts")
 local m_mq = require("devloop.merge_queue")
 
 local strings = shared.strings
@@ -31,7 +32,12 @@ function C.build_observe_comment_request(M, issue, proposal)
   }, issue.source_ref)
 end
 function C.build_result_comment_request(M, repo, issue_number, reached, state_name)
-  local marker = m_builders.result_marker(reached.proposal_id, reached.decision, reached.dedup_key, reached.decision_reason)
+  local logical_identity = tostring(reached.effect_version or reached.dedup_key)
+  local marker_lineage = reached.effect_version ~= nil
+    and tostring(reached.effect_version) ~= tostring(reached.dedup_key)
+    and logical_identity
+    or nil
+  local marker = m_builders.result_marker(reached.proposal_id, reached.decision, reached.dedup_key, reached.decision_reason, marker_lineage)
   local canonical_state = state_name or "ready"
   local effects = canonical_state == "ready" and "result-marker,ready-label,devloop-ready"
     or canonical_state == "declined" and "result-marker,declined-label,premise-refuted"
@@ -56,8 +62,7 @@ function C.build_result_comment_request(M, repo, issue_number, reached, state_na
     repo = repo,
     issue_number = issue_number,
     body = body,
-    dedup_key = tostring(reached.proposal_id) .. "/comment/" .. tostring(reached.decision)
-      .. "/" .. (tostring(reached.dedup_key):gsub(":", "-")),
+    dedup_key = base_ids.dedup_key({ tostring(reached.proposal_id), "comment", logical_identity }),
     source_ref = base_ids.normalize_source_ref(reached.source_ref),
   }, reached.source_ref)
   if canonical_state == "ready" then
@@ -71,12 +76,29 @@ function C.build_result_comment_request(M, repo, issue_number, reached, state_na
   end
   return request
 end
+function C.build_result_divergence_comment_request(repo, issue_number, reached, first_decision)
+  local logical_identity = tostring(reached.effect_version or reached.dedup_key)
+  return m_claims.attach_issue_claim({
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "Suppressed divergent consensus result for an already admitted lineage.\n\n"
+      .. m_builders.result_divergence_marker("issue", logical_identity, first_decision, reached.decision)
+      .. "\n" .. ai_sentinel,
+    dedup_key = base_ids.dedup_key({ "result-divergence", tostring(reached.proposal_id), logical_identity, tostring(first_decision), tostring(reached.decision) }),
+    source_ref = base_ids.normalize_source_ref(reached.source_ref),
+  }, reached.source_ref)
+end
 function C.result_effects_complete(current, reached)
   if type(current) ~= "table" or type(reached) ~= "table" then
     return false
   end
   local state_name = reached.decision == "reject" and "declined" or "ready"
-  return devloop_state.has_result_marker(current.comments, reached.proposal_id, reached.decision, reached.dedup_key, reached.decision_reason)
+  return result_facts.first_result_fact(
+    current.comments,
+    reached.proposal_id,
+    tostring(reached.effect_version or reached.dedup_key)
+  ) ~= nil
     and devloop_state.state_label_hint_matches(current.labels, state_name)
 end
 

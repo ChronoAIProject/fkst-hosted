@@ -227,6 +227,13 @@ local function assert_catalog_matches_observed_admission(fixture)
     return run_real_department(source, fixture.expected_exit_code or 0)
   end)
 
+  if fixture.first_result_gate then
+    t.eq(#probes, 0, fixture.name .. ": first-result gate precedes CAS")
+    t.eq(#result.raises, 0, fixture.name .. ": admitted result is a no-op")
+    t.eq(legacy_log_outcome(decisions), "skip-idempotent(first-result)", fixture.name .. ": first-result outcome")
+    return
+  end
+
   t.eq(#probes, 1, fixture.name .. ": real department CAS probe count")
   local probe = probes[1]
   t.eq(probe.current.state, fixture.current_state, fixture.name .. ": probe current state")
@@ -386,12 +393,13 @@ return {
       current_version = V_EQUAL,
       incoming_version = V_EQUAL,
       result_marker_visible = true,
+      first_result_gate = true,
       probe_outcome = "idempotent",
       admission_status = "idempotent",
       admission_reason_code = "already-at-target",
-      boundary_call_count = 1,
-      post_admission_disposition = "effect-idempotent",
-      legacy_log_outcome = "skip-idempotent(result effects complete)",
+      boundary_call_count = 0,
+      post_admission_disposition = "not-admitted",
+      legacy_log_outcome = "skip-idempotent(first-result)",
       effect_state = nil,
     })
   end,
@@ -425,7 +433,7 @@ return {
       probe_outcome = "idempotent",
       admission_status = "idempotent",
       admission_reason_code = "already-at-target",
-      boundary_call_count = 3,
+      boundary_call_count = 2,
       post_admission_disposition = "effect-repair(ready)",
       legacy_log_outcome = "applied(result effects incomplete)",
       effect_state = "ready",
@@ -443,13 +451,14 @@ return {
       current_version = V_EQUAL,
       incoming_version = V_EQUAL,
       result_marker_visible = true,
+      first_result_gate = true,
       labels = { "fkst-dev:enabled" },
       probe_outcome = "idempotent",
       admission_status = "idempotent",
       admission_reason_code = "already-at-target",
-      boundary_call_count = 3,
-      post_admission_disposition = "effect-repair(label)",
-      legacy_log_outcome = "applied(result effects incomplete)",
+      boundary_call_count = 0,
+      post_admission_disposition = "not-admitted",
+      legacy_log_outcome = "skip-idempotent(first-result)",
       effect_state = nil,
     })
   end,

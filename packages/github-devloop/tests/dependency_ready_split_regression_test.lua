@@ -494,12 +494,8 @@ return {
 
     local result = h.run_result(current, h.opts("ready-split-regression-result"))
     t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
     t.eq(find_raise(result.raises, "devloop_ready"), nil)
-    t.is_true(marker_body(result.raises, "fkst:github-devloop:dependency-wait:v1") ~= nil)
-    local label = find_raise(result.raises, "github-proxy.github_issue_label_request", function(payload)
-      return h.has_value(payload.add_labels, "fkst-dev:blocked-on-dependency")
-    end)
-    t.is_true(label ~= nil)
   end,
 
   test_consensus_result_dependency_wait_comment_has_no_ready_handoff = function()
