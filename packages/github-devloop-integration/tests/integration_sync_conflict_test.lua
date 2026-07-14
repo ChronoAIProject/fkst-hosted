@@ -55,13 +55,13 @@ local function mock_fetch_and_heads(upstream_sha, integration_sha)
   t.mock_command("refs/remotes/'origin'/'integration/dev'^{commit}", { stdout = (integration_sha or "bbbb2222") .. "\n", stderr = "", exit_code = 0 })
 end
 
-local function mock_conflicting_worktree()
+local function mock_conflicting_worktree(unmerged_stdout)
   t.mock_command("merge-base --is-ancestor", { stdout = "", stderr = "", exit_code = 1 })
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-rt", stderr = "", exit_code = 0 })
   t.mock_command("mkdir -p", { stdout = "", stderr = "", exit_code = 0 })
   t.mock_command("git worktree add --detach", { stdout = "", stderr = "", exit_code = 0 })
   t.mock_command("merge --no-ff --no-commit", { stdout = "", stderr = "conflict", exit_code = 1 })
-  t.mock_command("ls-files -u", { stdout = "100644 abc 1\tcore.lua\n", stderr = "", exit_code = 0 })
+  t.mock_command("ls-files -u", { stdout = unmerged_stdout or "100644 abc 1\tcore.lua\n", stderr = "", exit_code = 0 })
 end
 
 local function mock_successful_codex_resolution()
@@ -128,6 +128,30 @@ return {
     t.eq(h.count_calls("codex exec"), 1)
     assert_sync_conflict_worktree_call()
     t.eq(h.count_calls("ls-files -u"), 3)
+    t.eq(h.count_calls("commit -F"), 1)
+    t.eq(h.count_calls("push origin HEAD:refs/heads/"), 1)
+  end,
+
+  test_sync_conflict_normalizes_self_hashed_manifest_after_codex = function()
+    mock_fetch_and_heads()
+    mock_conflicting_worktree("100644 abc 1\tmigration/restart-lifecycle.inventory.json\n")
+    t.mock_command("codex exec", { stdout = "resolved", stderr = "", exit_code = 0 })
+    t.mock_command("ls-files -u", { stdout = "", stderr = "", exit_code = 0 })
+    t.mock_command("python3 -B", { stdout = "OK: restart lifecycle inventory is schema-valid, shrink-only, independent, and self-hash-matched\n", stderr = "", exit_code = 0 })
+    t.mock_command("ls-files -u", { stdout = "", stderr = "", exit_code = 0 })
+    t.mock_command("diff --check", { stdout = "", stderr = "", exit_code = 0 })
+    t.mock_command("diff --cached --check", { stdout = "", stderr = "", exit_code = 0 })
+    t.mock_command("git -C", { stdout = "", stderr = "", exit_code = 0 })
+    t.mock_command("ls-files -u", { stdout = "", stderr = "", exit_code = 0 })
+    t.mock_command("diff --cached --check", { stdout = "", stderr = "", exit_code = 0 })
+    t.mock_command("commit -F", { stdout = "[detached cccc3333] Sync dev into integration/dev\n", stderr = "", exit_code = 0 })
+    mock_real_push()
+    mock_cleanup()
+
+    local result = run_conflict(event(), opts("sync-conflict-self-hash", "1"))
+    t.eq(result.exit_code, 0)
+    t.eq(h.count_calls("codex exec"), 1)
+    t.eq(h.count_calls("python3 -B"), 1)
     t.eq(h.count_calls("commit -F"), 1)
     t.eq(h.count_calls("push origin HEAD:refs/heads/"), 1)
   end,

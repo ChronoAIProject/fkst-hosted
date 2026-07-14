@@ -71,6 +71,36 @@ local function require_clean_resolution(git, worktree)
   return true, ""
 end
 
+local function normalize_self_hash_manifests(git, worktree, original_unmerged_stdout)
+  local paths = core.sync_conflict_self_hash_normalizer_paths(original_unmerged_stdout)
+  if #paths == 0 then
+    return
+  end
+  local current_unmerged = git_mechanics.run_required(
+    git.unmerged_paths(worktree, 30),
+    "unmerged path check before self-hash normalization"
+  )
+  if tostring(current_unmerged.stdout or "") ~= "" then
+    return
+  end
+  for _, path in ipairs(paths) do
+    local result = exec_argv({
+      argv = core.sync_conflict_self_hash_normalizer_argv(worktree, path),
+      timeout = 120,
+    })
+    if type(result) ~= "table" or result.exit_code ~= 0 then
+      error("github-devloop: self-hash-normalizer-failed: "
+        .. tostring(path)
+        .. ": "
+        .. error_facts.one_line(type(result) == "table" and result.stderr or "missing command result"))
+    end
+    devloop_logging.log_line("info", "sync_conflict", "branch-sync", "NORMALIZE", {
+      "path=" .. tostring(path),
+      "reason=self-hashed generated manifest",
+    })
+  end
+end
+
 local function raise_sync_conflict_escalation(conflict, fingerprint, attempt, reason, unmerged_stdout)
   local request = core.build_sync_conflict_escalation_request(
     conflict,
@@ -412,6 +442,7 @@ local function act(event, ports)
         })
         error("github-devloop: sync-conflict-codex-failed: sync conflict codex failed: " .. tostring(stderr))
       end
+      normalize_self_hash_manifests(git, worktree, tostring(unmerged.stdout or ""))
       local resolved, remaining_unmerged = require_clean_resolution(git, worktree)
       if not resolved then
         local fingerprint = core.sync_conflict_fingerprint(active_conflict, remaining_unmerged)

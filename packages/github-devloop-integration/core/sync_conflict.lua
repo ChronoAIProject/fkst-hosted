@@ -7,6 +7,9 @@ local conflict_telemetry = require("devloop.conflict_telemetry")
 
 function S.install(M)
 local max_sync_conflict_attempts = 3
+local self_hash_normalizers = {
+  ["migration/restart-lifecycle.inventory.json"] = "scripts/check_repo_restart_lifecycle.py",
+}
 
 local function safe_branch_segment(branch)
   return strings.sanitize_key(tostring(branch or ""), false):gsub("/", "-")
@@ -60,6 +63,39 @@ end
 
 function M.sync_conflict_fingerprint(conflict, unmerged_stdout)
   return conflict_fingerprint(conflict, unmerged_stdout)
+end
+
+function M.sync_conflict_self_hash_normalizer_paths(unmerged_stdout)
+  local paths = conflict_telemetry.conflict_file_paths_from_unmerged(unmerged_stdout)
+  local selected = {}
+  local seen = {}
+  for _, path in ipairs(paths) do
+    if self_hash_normalizers[path] ~= nil and seen[path] ~= true then
+      table.insert(selected, path)
+      seen[path] = true
+    end
+  end
+  table.sort(selected)
+  return selected
+end
+
+function M.sync_conflict_self_hash_normalizer_argv(worktree, path)
+  local script = self_hash_normalizers[path]
+  local root = tostring(worktree or ""):gsub("/+$", "")
+  if script == nil then
+    error("github-devloop: sync-conflict-normalizer-unknown: no self-hash normalizer for path")
+  end
+  if root == "" or root:find("[\r\n]") ~= nil then
+    error("github-devloop: sync-conflict-normalizer-worktree-invalid: invalid worktree")
+  end
+  return {
+    "python3",
+    "-B",
+    root .. "/" .. script,
+    "--root",
+    root,
+    "--fix-artifact-sha256",
+  }
 end
 
 function M.sync_conflict_attempt_count(conflict, fingerprint)

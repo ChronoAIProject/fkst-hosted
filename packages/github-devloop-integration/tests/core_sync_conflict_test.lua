@@ -70,6 +70,32 @@ return {
     t.eq(core.sync_conflict_attempt_count(item, fingerprint), 2)
   end,
 
+  test_sync_conflict_self_hash_normalizer_registry_selects_known_manifest_once = function()
+    local paths = core.sync_conflict_self_hash_normalizer_paths(table.concat({
+      "100644 abc 1\tmigration/restart-lifecycle.inventory.json",
+      "100644 def 2\tmigration/restart-lifecycle.inventory.json",
+      "100644 ghi 1\tpackages/github-devloop/core.lua",
+      "",
+    }, "\n"))
+
+    t.eq(#paths, 1)
+    t.eq(paths[1], "migration/restart-lifecycle.inventory.json")
+  end,
+
+  test_sync_conflict_self_hash_normalizer_argv_uses_checker_owner = function()
+    local argv = core.sync_conflict_self_hash_normalizer_argv(
+      "/tmp/fkst-worktree/",
+      "migration/restart-lifecycle.inventory.json"
+    )
+
+    t.eq(argv[1], "python3")
+    t.eq(argv[2], "-B")
+    t.eq(argv[3], "/tmp/fkst-worktree/scripts/check_repo_restart_lifecycle.py")
+    t.eq(argv[4], "--root")
+    t.eq(argv[5], "/tmp/fkst-worktree")
+    t.eq(argv[6], "--fix-artifact-sha256")
+  end,
+
   test_sync_conflict_escalation_request_carries_terminal_why = function()
     local item = conflict()
     local fingerprint = core.sync_conflict_fingerprint(item, "100644 abc 1\tcore.lua\n")
