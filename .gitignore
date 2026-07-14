@@ -20,6 +20,10 @@ backend/*/k8s_sample/secret.yaml
 backend/*/k8s_sample/secret.*.local.yaml
 !backend/*/k8s_sample/secret.example.yaml
 
+# Local PRODUCTION manifests (hold real cluster values/secrets) — never commit.
+backend/k8s_prod/
+frontend/k8s_prod/
+
 # OS noise
 .DS_Store
 
