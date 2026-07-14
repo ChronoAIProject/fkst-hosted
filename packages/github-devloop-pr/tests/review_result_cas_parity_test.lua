@@ -548,7 +548,6 @@ return {
       expected_queues = {
         "github-proxy.github_pr_comment_request",
         "github-proxy.github_issue_label_request",
-        "devloop_review_meta",
       },
     })
   end,

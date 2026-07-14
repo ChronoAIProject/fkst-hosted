@@ -27,7 +27,6 @@ local spec = {
     "github-proxy.github_pr_comment_request",
     "devloop_fix_reconcile",
     "github-devloop-decompose.devloop_decompose",
-    "devloop_review_meta",
   },
   fanout = { "consensus.consensus_reached" },
   stall_window = "30s",
@@ -270,16 +269,6 @@ return saga.department(spec, { done = function() return false end, act = functio
     if label_request ~= nil then
       table.insert(raised, "github-proxy.github_issue_label_request")
     end
-    local reflection_payload = nil
-    if reflection_checkpoint then
-      reflection_payload = payloads_builders.build_devloop_fix_reflection_payload({
-        proposal_id = reached.proposal_id,
-        dedup_key = canonical_review_dedup,
-        source_ref = pr_source_ref,
-      }, origin.proposal_id, issue_version, pr_number, devloop_state.version_fix_round(issue_version), pr_source_ref)
-      reflection_payload.blocking_gap = comment_reached.blocking_gap
-      table.insert(raised, "devloop_review_meta")
-    end
     devloop_logging.log_apply("review_result", origin.proposal_id, to_state, issue_version, { add = add_labels, remove = remove_labels }, raised)
     devloop_logging.log_raise("review_result", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
     if evidence_request ~= nil then
@@ -287,9 +276,6 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
     if origin.issue_number ~= nil then
       devloop_logging.log_raise("review_result", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
-    end
-    if reflection_payload ~= nil then
-      devloop_logging.log_raise("review_result", origin.proposal_id, "devloop_review_meta", reflection_payload)
     end
   end)
 end, wrap = devloop_logging.wrap_pipeline_failure, name = "review_result" })

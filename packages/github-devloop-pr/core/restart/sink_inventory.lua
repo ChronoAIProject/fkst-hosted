@@ -28,7 +28,7 @@ queue("comment_handoff", "devloop_observe_pr", "grantless-telemetry", "observe-p
 queue("comment_handoff", "devloop_merge_ready", "lifecycle-authoritative", "state:v1/merge-ready+review+head")
 queue("comment_handoff", "devloop_fixing", "lifecycle-authoritative", "state:v1/fixing+head+version")
 queue("comment_handoff", "devloop_reviewing", "lifecycle-authoritative", "state:v1/reviewing+head+version")
-queue("fix", "devloop_review_meta", "lifecycle-authoritative", "state:v1/review-meta+review+head")
+queue("comment_handoff", "devloop_review_meta", "lifecycle-authoritative", "state:v1/review-meta+review+head")
 queue("fix", "devloop_fix_reconcile", "lifecycle-authoritative", "fix-reconcile:v1/proposal+round")
 queue("fix", "github-devloop-decompose.devloop_decompose", "grantless-published-intent", "decompose.v1/proposal+attempt")
 queue("liveness_scan", "devloop_observe_pr", "grantless-telemetry", "observe-pr:v1/source-ref+dedup")
@@ -56,7 +56,6 @@ queue("review_loop", "devloop_review_reconcile", "lifecycle-authoritative", "rev
 queue("review_pr", "consensus.proposal", "lifecycle-authoritative", "consensus-proposal:v1/review-proposal+dedup")
 queue("review_result", "devloop_fix_reconcile", "lifecycle-authoritative", "fix-reconcile:v1/proposal+round")
 queue("review_result", "github-devloop-decompose.devloop_decompose", "grantless-published-intent", "decompose.v1/proposal+attempt")
-queue("review_result", "devloop_review_meta", "lifecycle-authoritative", "state:v1/review-meta+review+head")
 
 add("adapter:structured-log", "all", "devloop_logging.log_line", "adapter", "grantless-telemetry", "structured-log:v1/dept+proposal+tag")
 add("label:issue:comment-handoff-state", "comment_handoff", "emit_label_handoff.label", "label", "lifecycle-authoritative", "state-label:pr-state;dedup=comment-handoff/label")

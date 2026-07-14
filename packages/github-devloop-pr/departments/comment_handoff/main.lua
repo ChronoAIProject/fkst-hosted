@@ -12,6 +12,7 @@ local ci_failure_keys = require("devloop.ci_failure_keys")
 
 local payloads_builders = require("devloop.payloads.builders")
 local payloads_predicates = require("devloop.payloads.predicates")
+local v_review_meta = require("devloop.validators.review_meta")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
 local spec = {
@@ -21,6 +22,7 @@ local spec = {
     "devloop_merge_ready",
     "devloop_fixing",
     "devloop_reviewing",
+    "devloop_review_meta",
     "github-proxy.github_issue_label_request",
   },
   fanout = { "github-proxy.github_comment_written" },
@@ -83,6 +85,33 @@ local function valid_fixing_handoff(handoff)
     and (handoff.predecessor_set == nil or strings.is_path_safe_key(handoff.predecessor_set, devloop_base._max_dedup_len))
     and (handoff.ci_failure_key == nil or ci_failure_keys.is_valid(handoff.ci_failure_key, devloop_base._max_dedup_len))
     and (handoff.dedup_key == nil or strings.is_path_safe_key(handoff.dedup_key, devloop_base._max_dedup_len))
+end
+
+local function review_meta_payload(handoff, comment_id)
+  local payload = {
+    schema = "github-devloop.review-meta.v1",
+    proposal_id = handoff.proposal_id,
+    review_proposal_id = handoff.review_proposal_id,
+    review_dedup_key = handoff.review_dedup_key,
+    version = handoff.version,
+    pr_number = handoff.pr_number,
+    n = handoff.n,
+    dedup_key = handoff.dedup_key,
+    source_ref = base_ids.normalize_source_ref(handoff.source_ref),
+  }
+  for _, field in ipairs({ "mode", "fix_round", "blocking_gap" }) do
+    if handoff[field] ~= nil then
+      payload[field] = handoff[field]
+    end
+  end
+  if comment_id ~= nil then
+    payload.review_meta_comment_id = comment_id
+  end
+  return payload
+end
+
+local function valid_review_meta_handoff(handoff)
+  return v_review_meta.is_supported_review_meta(review_meta_payload(handoff))
 end
 
 local function issue_claim_ok(payload, handoff)
@@ -225,6 +254,12 @@ local function emit_reviewing(payload, handoff)
   maybe_raise_pr_label(payload, handoff)
 end
 
+local function emit_review_meta(payload, handoff)
+  local review_meta = review_meta_payload(handoff, payload.comment_id)
+  devloop_logging.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "review-meta", version = handoff.version }, "comment-written", "devloop_review_meta", "applied(own-write-comment-id)", "review-meta marker comment write was acknowledged")
+  devloop_logging.log_raise("comment_handoff", handoff.proposal_id, "devloop_review_meta", review_meta)
+end
+
 local handoff_strategies = {
   ["github-devloop.pr_open"] = {
     validate = valid_base_pr_handoff,
@@ -255,6 +290,11 @@ local handoff_strategies = {
     validate = valid_fixing_handoff,
     state = "fixing",
     emit = emit_fixing,
+  },
+  ["github-devloop.review_meta"] = {
+    validate = valid_review_meta_handoff,
+    state = "review-meta",
+    emit = emit_review_meta,
   },
 }
 

@@ -246,7 +246,10 @@ return {
     local below_cap = fixing_event(fix_version(config.max_fix_rounds() - 1))
     local first = run_no_new_head(below_cap, "no-new-head-below-cap")
     t.eq(first.exit_code, 0)
-    local advanced = find_raise(first, "devloop_review_meta").payload
+    local first_request = h.find_raise(first.raises, "github-proxy.github_pr_comment_request").payload
+    local first_handoff = h.run_comment_handoff_from_request(
+      first_request, "IC_no_new_head_below_cap_1", "no-new-head-below-cap-handoff")
+    local advanced = find_raise(first_handoff, "devloop_review_meta").payload
     t.eq(advanced.version, core.next_fix_version(below_cap.version))
     t.eq(core.version_fix_round(advanced.version), config.max_fix_rounds())
 
