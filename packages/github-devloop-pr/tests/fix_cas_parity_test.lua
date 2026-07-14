@@ -17,6 +17,7 @@ local payloads_builders = require("devloop.payloads.builders")
 local devloop_state = require("devloop.state")
 local dispatch_live_run = require("devloop.dispatch_live_run")
 local h = require("tests.devloop_helpers")
+local restart_authority = require("core.restart_authority")
 local t = h.t
 local core = h.core
 local projection = owner_pending_projection.derive(core.restart_package_name, core.restart_transition_table(), inventories)
@@ -24,6 +25,7 @@ local fix_department = require("departments.fix.main")
 
 local POLICY_ID = "cas.legacy_fix_v1"
 local VARIANT = "fixing_to_reviewing"
+local OWNER = core.restart_package_name
 local V_OLDER = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-02T01-02-03Z"
 local V_EQUAL = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
 local V_NEWER = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
@@ -115,18 +117,33 @@ local function evidence_from_fixture(fixture)
   }
 end
 
+local function observe_shadow(run)
+  local evidence = nil
+  local original_resolve = catalog.resolve
+  catalog.resolve = function(policy_id, candidate, candidate_projection)
+    evidence = candidate
+    return original_resolve(policy_id, candidate, candidate_projection)
+  end
+  local ok, result = pcall(run)
+  catalog.resolve = original_resolve
+  if not ok then
+    error(result, 0)
+  end
+  return result, evidence
+end
+
 local function observed_admission(probe, decision, boundary_reached)
   if probe.outcome == "pending" then
-    return { status = "pending", reason_code = "source-marker-not-visible" }
+    return { status = "pending", reason_code = "source-marker-not-visible", cas_outcome = decision.outcome }
   end
   if probe.outcome == "idempotent" then
-    return { status = "idempotent", reason_code = "already-at-target" }
+    return { status = "idempotent", reason_code = "already-at-target", cas_outcome = decision.outcome }
   end
   if probe.outcome == "stale" then
     if tostring(probe.incoming_version or "") ~= tostring(probe.current.version or "") then
-      return { status = "stale", reason_code = "incoming-version-older" }
+      return { status = "stale", reason_code = "incoming-version-older", cas_outcome = decision.outcome }
     end
-    return { status = "stale", reason_code = "advanced-or-diverged" }
+    return { status = "stale", reason_code = "advanced-or-diverged", cas_outcome = decision.outcome }
   end
   if probe.outcome ~= "apply" then
     error("fix admission probe returned an unknown outcome: " .. tostring(probe.outcome))
@@ -135,13 +152,13 @@ local function observed_admission(probe, decision, boundary_reached)
   local legacy_outcome = tostring(decision and decision.outcome or "")
   local legacy_reason = tostring(decision and decision.reason or "")
   if not boundary_reached and legacy_reason:find("not currently fixing", 1, true) ~= nil then
-    return { status = "stale", reason_code = "from-state-mismatch" }
+    return { status = "stale", reason_code = "from-state-mismatch", cas_outcome = legacy_outcome }
   end
   if not boundary_reached and legacy_outcome:find("version-mismatch", 1, true) ~= nil then
-    return { status = "stale", reason_code = "version-mismatch" }
+    return { status = "stale", reason_code = "version-mismatch", cas_outcome = legacy_outcome }
   end
   if boundary_reached then
-    return { status = "apply", reason_code = "apply" }
+    return { status = "apply", reason_code = "apply", cas_outcome = "applied" }
   end
   error("fix admission apply did not reach a classified guard")
 end
@@ -247,6 +264,55 @@ local function assert_catalog_matches_observed_decision(fixture)
   if fixture.legacy_log_outcome ~= nil then
     t.eq(decision.outcome, fixture.legacy_log_outcome, fixture.name .. ": legacy log outcome")
   end
+  return {
+    probe = probe,
+    decision = decision,
+    observed = observed,
+  }
+end
+
+local function assert_bidirectional(actual, expected, field, context)
+  t.eq(actual[field], expected[field], context .. ": shadow-to-production " .. field)
+  t.eq(expected[field], actual[field], context .. ": production-to-shadow " .. field)
+end
+
+local function assert_fix_shadow_case(fixture)
+  local production = assert_catalog_matches_observed_decision(fixture)
+  local sealed_snapshot = restart_authority.seal_snapshot({
+    owner = OWNER,
+    current = {
+      state = fixture.current_state,
+      version = fixture.current_version,
+    },
+  })
+  local incoming_version = fixture.incoming_version
+  local overlay_version = fixture.incoming_version
+  local target_version = core.next_fix_version(fixture.incoming_version)
+  local intent = {
+    semantic_variant = "revision_published",
+    target = "reviewing",
+    incoming_version = incoming_version,
+    target_version = target_version,
+    overlay_version = overlay_version,
+  }
+  t.eq(intent.source_boundary, nil, fixture.name .. ": nil boundary is omitted from shadow intent")
+
+  local shadow, evidence = observe_shadow(function()
+    return restart_authority.decide_transition(sealed_snapshot, intent)
+  end)
+
+  assert_bidirectional(shadow, production.observed, "status", fixture.name)
+  assert_bidirectional(shadow, production.observed, "reason_code", fixture.name)
+  assert_bidirectional(shadow, production.observed, "cas_outcome", fixture.name)
+  t.eq(shadow.edge_id, "github-devloop-pr/fixing/autonomous/revision_published", fixture.name .. ": selected edge")
+  t.eq(shadow.cas_policy_id, POLICY_ID, fixture.name .. ": selected CAS policy")
+  t.eq(shadow.grant, nil, fixture.name .. ": grant disabled")
+  t.eq(evidence.current.state, fixture.current_state, fixture.name .. ": evidence current state")
+  t.eq(evidence.current.version, fixture.current_version or "", fixture.name .. ": evidence raw current version")
+  t.eq(evidence.variant, VARIANT, fixture.name .. ": evidence variant")
+  t.eq(evidence.incoming_version, incoming_version, fixture.name .. ": independently derived incoming version")
+  t.eq(evidence.target_version, target_version, fixture.name .. ": independently derived target version")
+  t.eq(evidence.overlay_version, overlay_version, fixture.name .. ": independently derived overlay version")
 end
 
 local function assert_rejected_before_cas(name, payload, expected_reason_code)
@@ -271,6 +337,51 @@ local function assert_rejected_before_cas(name, payload, expected_reason_code)
 end
 
 return {
+  test_shadow_fixing_to_reviewing_apply = function()
+    assert_fix_shadow_case({
+      name = "shadow-fix-apply",
+      current_state = "fixing",
+      current_version = V_EQUAL,
+      incoming_version = V_EQUAL,
+      boundary_reached = true,
+      expected_exit_code = 1,
+      post_admission_disposition = "feedback-pending",
+      legacy_log_outcome = "retry-pending(fix feedback marker not visible)",
+    })
+  end,
+
+  test_shadow_fixing_to_reviewing_idempotent = function()
+    assert_fix_shadow_case({
+      name = "shadow-fix-idempotent",
+      current_state = "reviewing",
+      current_version = V_EQUAL,
+      incoming_version = V_EQUAL,
+    })
+  end,
+
+  test_shadow_fixing_to_reviewing_pending = function()
+    assert_fix_shadow_case({
+      name = "shadow-fix-pending",
+      current_state = nil,
+      current_version = nil,
+      incoming_version = V_EQUAL,
+      expected_exit_code = 1,
+    })
+  end,
+
+  test_shadow_fixing_to_reviewing_raw_overlay_stale = function()
+    assert_fix_shadow_case({
+      name = "shadow-fix-raw-overlay-stale",
+      current_state = "fixing",
+      current_version = V_ORDERING_EQUAL_CURRENT,
+      incoming_version = V_ORDERING_EQUAL_INCOMING,
+      probe_outcome = "apply",
+      admission_status = "stale",
+      admission_reason_code = "version-mismatch",
+      legacy_log_outcome = "skip-stale(version-mismatch)",
+    })
+  end,
+
   test_fix_source_equal_is_admitted_before_feedback_guard = function()
     assert_catalog_matches_observed_decision({
       name = "fix-source-equal",
