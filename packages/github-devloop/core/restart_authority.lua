@@ -27,6 +27,7 @@ local edges = owner_pending_projection.edges(owner, rows, inventories)
 local projection = owner_pending_projection.derive(owner, rows, inventories)
 local catalog = require("devloop.restart_cas_catalog")
 local restart_effect_entitlements = require("devloop.restart_effect_entitlements")
+local restart_source_admission = require("devloop.restart_source_admission")
 
 local M = {}
 local issued = setmetatable({}, { __mode = "k" })
@@ -96,18 +97,6 @@ local function select_edge(semantic_variant)
   return selected, matches
 end
 
-local function exact_source_state(source_states, source_state)
-  if type(source_states) ~= "table" or #source_states ~= 1 or source_states[1] ~= source_state then
-    return false
-  end
-  for key in pairs(source_states) do
-    if key ~= 1 then
-      return false
-    end
-  end
-  return true
-end
-
 function M.seal_snapshot(fields)
   if type(fields) ~= "table" or fields.owner ~= owner then
     error("restart-authority: snapshot-owner-mismatch: owner must be " .. tostring(owner))
@@ -155,11 +144,26 @@ function M.decide_transition(sealed_snapshot, intent)
       and edge.cas_variant == "thinking_to_blocked") then
     return illegal("unsupported-shadow-edge")
   end
-  if normalized.source_boundary ~= nil and normalized.source_boundary ~= edge.source.boundary then
-    return illegal("source-boundary-mismatch")
+  local concrete_source_mode = edge.source.state ~= nil
+  local ingress_mode = edge.kind == "entry" and edge.source.state == nil
+  if not concrete_source_mode and not ingress_mode then
+    return illegal("policy-variant-shape-mismatch")
   end
-  if normalized.target ~= nil and normalized.target ~= edge.target then
-    return illegal("target-mismatch")
+  if ingress_mode then
+    if type(edge.source.boundary) ~= "string" or edge.source.boundary == ""
+      or normalized.source_boundary ~= edge.source.boundary then
+      return illegal("source-boundary-mismatch")
+    end
+    if normalized.target ~= edge.target then
+      return illegal("target-mismatch")
+    end
+  else
+    if normalized.source_boundary ~= nil and normalized.source_boundary ~= edge.source.boundary then
+      return illegal("source-boundary-mismatch")
+    end
+    if normalized.target ~= nil and normalized.target ~= edge.target then
+      return illegal("target-mismatch")
+    end
   end
 
   local definition = catalog.definition(edge.cas_policy_id)
@@ -167,10 +171,23 @@ function M.decide_transition(sealed_snapshot, intent)
     and type(definition.variants) == "table"
     and definition.variants[edge.cas_variant]
     or nil
-  if variant == nil
-    or not exact_source_state(variant.source_states, edge.source.state)
-    or variant.target_state ~= edge.target then
+  if variant == nil or variant.target_state ~= edge.target then
     return illegal("policy-variant-shape-mismatch")
+  end
+  local current = type(sealed_snapshot.current) == "table" and sealed_snapshot.current or {}
+  if concrete_source_mode
+    and not restart_source_admission.exact_source_state(variant.source_states, edge.source.state) then
+    return illegal("policy-variant-shape-mismatch")
+  end
+  if ingress_mode then
+    local admitted_sources = restart_source_admission.dense_unique_state_set(variant.source_states)
+    if admitted_sources == nil then
+      return illegal("policy-variant-shape-mismatch")
+    end
+    local current_state = current.state == nil and "unmanaged" or current.state
+    if admitted_sources[current_state] ~= true then
+      return illegal("source-state-not-admitted")
+    end
   end
   local cas_base = variant.base or definition.base
   if (cas_base == "versioned" or cas_base == "cyclic")
@@ -178,7 +195,6 @@ function M.decide_transition(sealed_snapshot, intent)
     return illegal("incoming-version-required")
   end
 
-  local current = type(sealed_snapshot.current) == "table" and sealed_snapshot.current or {}
   local evidence = {
     current = {
       state = current.state,
@@ -213,7 +229,7 @@ function M.decide_transition(sealed_snapshot, intent)
       status = "complete",
       refs = normalized.evidence_refs or {},
       facts = {
-        source = edge.source.state,
+        source = ingress_mode and current.state or edge.source.state,
         target = edge.target,
       },
     },
