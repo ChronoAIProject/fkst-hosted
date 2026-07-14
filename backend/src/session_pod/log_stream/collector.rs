@@ -12,7 +12,7 @@
 //! Fail-safe by construction: the whole thing is best-effort. A redaction, file,
 //! bundle, or upload error is logged (redacted) and swallowed — it can NEVER crash
 //! the session or block `supervise`; the engine keeps running even if streaming
-//! fails outright, and a session whose control plane configured no write-only SA
+//! fails outright, and a session whose control plane configured no chrono-storage
 //! simply produces no bundle (the uploader is not spawned).
 
 use std::collections::HashMap;
@@ -213,12 +213,12 @@ impl Uploader {
     }
 }
 
-/// Build the uploader from the mounted write-only SA creds, or `None` when the SA is
+/// Build the uploader from the mounted storage SA creds, or `None` when they are
 /// not configured / a runtime cannot be built — the fail-closed path: the collector
 /// still captures + redacts to disk, it just uploads nothing.
 fn build_uploader(creds: &CredsLayout, config: &CollectorConfig) -> Option<Uploader> {
     let Some(sink) = ChronoStorageSink::from_creds(creds) else {
-        tracing::warn!("log-stream: write-only storage SA not mounted; capturing without upload");
+        tracing::warn!("log-stream: storage SA creds not mounted; capturing without upload");
         return None;
     };
     let runtime = build_upload_runtime()?;

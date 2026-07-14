@@ -91,7 +91,7 @@ pub(crate) fn scrub_transport(e: &reqwest::Error) -> String {
 /// Two callers reach for this once the config has been loaded + fail-closed-
 /// validated at startup, so the client is built from the SAME parsed values (no
 /// second env pass, unlike [`try_from_env`]):
-/// - the in-pod log uploader, which resolves the WRITE-ONLY SA config from its
+/// - the in-pod log uploader, which resolves the storage SA config from its
 ///   mounted creds;
 /// - the control plane's log-download path, which reuses `Config::storage`.
 ///

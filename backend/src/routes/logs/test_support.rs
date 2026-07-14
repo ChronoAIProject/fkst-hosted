@@ -175,10 +175,6 @@ pub(crate) async fn storage_server(present: bool) -> (Arc<ChronoStorageClient>, 
         nyxid_token_url: format!("{}/oauth/token", server.uri()),
         nyxid_client_id: "sa-client".to_string(),
         nyxid_client_secret: SecretString::from("sa-secret".to_string()),
-        // The log-download path exercises the READ SA only; the write-only
-        // uploader creds are irrelevant here.
-        writer_client_id: None,
-        writer_client_secret: None,
     };
     (
         Arc::new(ChronoStorageClient::new(reqwest::Client::new(), config)),

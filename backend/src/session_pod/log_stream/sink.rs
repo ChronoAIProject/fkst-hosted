@@ -5,8 +5,8 @@
 //! goes is one narrow trait, [`LogSink`], so the destination (chrono-storage today,
 //! anything tomorrow) is a plug-and-play implementation the collector never names
 //! directly. The production impl is [`ChronoStorageSink`], which PUTs the bundle
-//! through the reopened [`ChronoStorageClient`] as the mounted WRITE-ONLY service
-//! account — it uploads, never reads/lists/deletes.
+//! through the reopened [`ChronoStorageClient`] as the mounted storage SA — the
+//! sink itself only ever uploads.
 //!
 //! Secret hygiene: an upload failure is reduced to [`SinkError`], whose `Display`
 //! carries only the leak-free [`StorageError`] rendering (a numeric HTTP status or
@@ -44,7 +44,7 @@ pub trait LogSink: Send + Sync {
 }
 
 /// The production [`LogSink`]: uploads each bundle to chrono-storage as the mounted
-/// WRITE-ONLY SA via [`ChronoStorageClient::upload`].
+/// storage SA via [`ChronoStorageClient::upload`].
 pub struct ChronoStorageSink {
     client: ChronoStorageClient,
 }
@@ -55,13 +55,13 @@ impl ChronoStorageSink {
         Self { client }
     }
 
-    /// Build the sink from the write-only SA creds mounted under `creds`
+    /// Build the sink from the storage SA creds mounted under `creds`
     /// (`storage-client-id` / `storage-client-secret` / `storage-token-url` +
     /// non-secret `storage-base-url` / `storage-bucket`), mirroring how the
     /// collector reads `github-token`.
     ///
     /// Returns `None` when ANY of the five files is absent/blank — the fail-closed
-    /// path: without the write-only SA the collector simply produces no bundle
+    /// path: without injected storage creds the collector simply produces no bundle
     /// (the uploader is not spawned) rather than crashing the session.
     pub fn from_creds(creds: &CredsLayout) -> Option<Self> {
         let base_url = read_trimmed(&creds.storage_base_url())?;
@@ -73,13 +73,10 @@ impl ChronoStorageSink {
             base_url,
             bucket,
             nyxid_token_url: token_url,
-            // In-pod the WRITE-ONLY SA IS the SA the client authenticates as, so its
+            // In-pod the injected SA IS the SA the client authenticates as, so its
             // id/secret become the client-credentials the token provider mints with.
             nyxid_client_id: client_id,
             nyxid_client_secret: secrecy::SecretString::from(client_secret),
-            // The in-pod client never re-injects a second SA into a session Secret.
-            writer_client_id: None,
-            writer_client_secret: None,
         };
         Some(Self::new(crate::storage::client_from_config(config)))
     }

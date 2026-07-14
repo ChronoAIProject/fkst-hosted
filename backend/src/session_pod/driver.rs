@@ -220,7 +220,7 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     // 6b. Log streaming: spawn the in-pod collector BEFORE supervise so it captures
     //     the whole run. Streaming is unconditional — the collector redacts every
     //     record and uploads a `tar.gz` bundle to chrono-storage as the mounted
-    //     write-only SA (or, absent that SA, captures without uploading). It reads
+    //     storage SA (or, absent storage creds, captures without uploading). It reads
     //     only the mounted creds it already has and adds no new credential. The
     //     collector runs on its own thread; a failure inside it can never crash or
     //     block supervise.

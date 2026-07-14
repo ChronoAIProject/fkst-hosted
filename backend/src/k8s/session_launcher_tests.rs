@@ -535,7 +535,7 @@ fn build_session_secret_without_user_env_carries_only_the_base_creds() {
 }
 
 #[test]
-fn build_session_secret_carries_the_write_only_sa_when_configured() {
+fn build_session_secret_carries_the_storage_sa_when_configured() {
     let storage = StorageWriterCreds {
         client_id: "writer-client",
         client_secret: "writer-secret",
@@ -546,7 +546,7 @@ fn build_session_secret_carries_the_write_only_sa_when_configured() {
     let creds = creds_map("ghs_json", "sk-test", std::iter::empty(), Some(storage));
     let secret = build_session_secret(&spec(), creds, None);
     let data = secret.string_data.as_ref().expect("string data");
-    // Base creds + the five write-only storage-* files, nothing else.
+    // Base creds + the five storage-* files, nothing else.
     assert_eq!(data["storage-client-id"], "writer-client");
     assert_eq!(data["storage-client-secret"], "writer-secret");
     assert_eq!(data["storage-token-url"], "https://nyx.example/oauth/token");

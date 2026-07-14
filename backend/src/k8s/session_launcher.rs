@@ -237,7 +237,7 @@ fn downward_env_var(name: &str, field_path: &str) -> EnvVar {
 /// the two downward-API vars ([`ENV_POD_UID`] / [`ENV_POD_NAME`]): those use a pod
 /// fieldRef, so the Kubernetes backend appends them in [`session_env`] while an
 /// OpenSandbox backend (which has no downward API) supplies them as plain values.
-/// It adds NO storage credential — the write-only SA creds ride the per-session
+/// It adds NO storage credential — the storage SA creds ride the per-session
 /// Secret (see [`build_session_secret`]), never env. Order is stable so the rendered
 /// runtime env is deterministic (aids tests + drift detection). Keys are owned
 /// `String`s because the operator rate pools render dynamic

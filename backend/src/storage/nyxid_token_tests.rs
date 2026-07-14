@@ -21,8 +21,6 @@ fn provider(server: &MockServer, secret: &str) -> NyxidSaTokenProvider {
         nyxid_token_url: format!("{}{TOKEN_PATH}", server.uri()),
         nyxid_client_id: "sa-client".to_string(),
         nyxid_client_secret: SecretString::from(secret.to_string()),
-        writer_client_id: None,
-        writer_client_secret: None,
     };
     NyxidSaTokenProvider::new(reqwest::Client::new(), &config)
 }
@@ -155,8 +153,6 @@ async fn transport_error_when_endpoint_unreachable() {
         nyxid_token_url: "http://127.0.0.1:1/oauth/token".to_string(),
         nyxid_client_id: "sa-client".to_string(),
         nyxid_client_secret: SecretString::from("sa-secret".to_string()),
-        writer_client_id: None,
-        writer_client_secret: None,
     };
     let provider = NyxidSaTokenProvider::new(reqwest::Client::new(), &config);
     let err = provider

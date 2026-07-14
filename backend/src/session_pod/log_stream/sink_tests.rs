@@ -1,5 +1,5 @@
 //! Tests for the log-bundle sink: the fake records puts, `from_creds` fails closed
-//! without the write-only SA files, and the chrono-storage sink maps an upload
+//! without the storage SA cred files, and the chrono-storage sink maps an upload
 //! failure to a leak-free error. Split into a sibling file so `sink.rs` stays under
 //! the module-size cap.
 
@@ -45,7 +45,7 @@ async fn fake_sink_can_be_programmed_to_fail() {
     assert_eq!(fake.calls().len(), 1);
 }
 
-/// Write the five write-only SA cred files into a fresh creds dir.
+/// Write the five storage SA cred files into a fresh creds dir.
 fn write_storage_creds(dir: &std::path::Path) {
     std::fs::write(
         dir.join("storage-base-url"),
@@ -63,7 +63,7 @@ fn write_storage_creds(dir: &std::path::Path) {
 }
 
 #[test]
-fn from_creds_is_none_when_the_write_only_sa_is_not_mounted() {
+fn from_creds_is_none_when_the_storage_sa_is_not_mounted() {
     let dir = tempfile::tempdir().expect("dir");
     // Only some of the files present → fail closed (None), no uploader.
     std::fs::write(
@@ -107,8 +107,6 @@ async fn sink_over_status(status: u16) -> (ChronoStorageSink, MockServer) {
         nyxid_token_url: format!("{}/oauth/token", server.uri()),
         nyxid_client_id: "writer-client".to_string(),
         nyxid_client_secret: SecretString::from(SA_SECRET.to_string()),
-        writer_client_id: None,
-        writer_client_secret: None,
     };
     (
         ChronoStorageSink::new(ChronoStorageClient::new(reqwest::Client::new(), config)),
@@ -125,7 +123,7 @@ async fn put_maps_a_non_2xx_upload_to_a_sink_error_without_leaking_secrets() {
         .expect_err("403 must error");
     assert!(matches!(err, SinkError::Upload(_)));
     let rendered = format!("{err} {err:?}");
-    // The write-only SA secret + the minted token never ride the error.
+    // The storage SA secret + the minted token never ride the error.
     assert!(!rendered.contains(SA_SECRET), "leaked secret: {rendered}");
     assert!(!rendered.contains(SA_TOKEN), "leaked token: {rendered}");
     // What DOES survive is the leak-free status code.
@@ -156,8 +154,6 @@ async fn put_succeeds_on_a_2xx_upload() {
         nyxid_token_url: format!("{}/oauth/token", server.uri()),
         nyxid_client_id: "writer-client".to_string(),
         nyxid_client_secret: SecretString::from(SA_SECRET.to_string()),
-        writer_client_id: None,
-        writer_client_secret: None,
     };
     let sink = ChronoStorageSink::new(ChronoStorageClient::new(reqwest::Client::new(), config));
     sink.put("logs/s1/latest.tar.gz", Bytes::from_static(b"gz"))

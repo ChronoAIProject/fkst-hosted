@@ -152,3 +152,40 @@ fn github_token_json_carries_the_token_and_rfc3339_expiry() {
         "expiry round-trips as an RFC3339 instant"
     );
 }
+
+// ---- Session storage credential assembly (issue #489) -------------------------
+
+/// With chrono-storage configured, the SINGLE NyxID SA is always injected into
+/// the session Secret's `storage-*` keys — id and secret sourced from
+/// `nyxid_client_id`/`nyxid_client_secret`, unconditionally (no writer pair, no
+/// half-enabled state). With no storage config the keys are absent entirely.
+#[test]
+fn storage_creds_carry_the_single_nyxid_sa_into_the_session_secret() {
+    let mut config = Config::default();
+    assert!(
+        storage_writer_creds(&config).is_none(),
+        "no storage config → no storage creds"
+    );
+
+    config.storage = Some(crate::storage::ChronoStorageConfig {
+        base_url: "https://storage.example/proxy".into(),
+        bucket: "fkst-logs".into(),
+        nyxid_token_url: "https://nyx.example/oauth/token".into(),
+        nyxid_client_id: "sa-client".into(),
+        nyxid_client_secret: SecretString::from("sa-secret"),
+    });
+    let creds = storage_writer_creds(&config)
+        .expect("storage configured → uploader creds are unconditional");
+    assert_eq!(creds.client_id, "sa-client");
+    assert_eq!(creds.client_secret, "sa-secret");
+    assert_eq!(creds.token_url, "https://nyx.example/oauth/token");
+    assert_eq!(creds.base_url, "https://storage.example/proxy");
+    assert_eq!(creds.bucket, "fkst-logs");
+
+    let data = credential_secret_data("ghs", "sk-llm", std::iter::empty(), Some(creds));
+    assert_eq!(data["storage-client-id"], "sa-client");
+    assert_eq!(data["storage-client-secret"], "sa-secret");
+    assert_eq!(data["storage-token-url"], "https://nyx.example/oauth/token");
+    assert_eq!(data["storage-base-url"], "https://storage.example/proxy");
+    assert_eq!(data["storage-bucket"], "fkst-logs");
+}

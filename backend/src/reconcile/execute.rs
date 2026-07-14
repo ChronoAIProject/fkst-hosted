@@ -214,8 +214,8 @@ async fn spawn_session(reg: SessionRegistration, ctx: &ReconcileCtx) {
 
     // 5. Assemble the per-session credential map (the executor now owns the credential
     //    layout, threading it through the backend as `SecretString`s). Always inject
-    //    the write-only SA creds when the control plane configured one (log streaming
-    //    is unconditional; the per-session flag was retired). Absent a configured SA
+    //    the storage SA creds when chrono-storage is configured (log streaming is
+    //    unconditional; the per-session flag was retired). Absent a storage config
     //    the Secret carries no storage-* keys and the in-pod uploader fails closed —
     //    no bundle, never a crash.
     let storage = storage_writer_creds(&ctx.config);
@@ -290,17 +290,16 @@ fn session_contributors(reg: &SessionRegistration) -> Vec<String> {
     contributors
 }
 
-/// Resolve the WRITE-ONLY chrono-storage SA creds to inject into a session Secret,
-/// or `None` when the control plane has no storage config OR no write-only SA
-/// configured (the in-pod uploader then fails closed — no bundle). Borrows the
-/// config, exposing the client secret only to copy it into the Secret builder.
+/// Resolve the chrono-storage SA creds to inject into a session Secret, or `None`
+/// when the control plane has no storage config (the in-pod uploader then fails
+/// closed — no bundle). The single configured NyxID SA serves both the control
+/// plane's own storage calls and the in-pod uploader. Borrows the config, exposing
+/// the client secret only to copy it into the Secret builder.
 fn storage_writer_creds(config: &Config) -> Option<StorageWriterCreds<'_>> {
     let storage = config.storage.as_ref()?;
-    let client_id = storage.writer_client_id.as_deref()?;
-    let client_secret = storage.writer_client_secret.as_ref()?;
     Some(StorageWriterCreds {
-        client_id,
-        client_secret: client_secret.expose_secret(),
+        client_id: &storage.nyxid_client_id,
+        client_secret: storage.nyxid_client_secret.expose_secret(),
         token_url: &storage.nyxid_token_url,
         base_url: &storage.base_url,
         bucket: &storage.bucket,
