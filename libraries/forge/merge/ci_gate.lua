@@ -142,6 +142,15 @@ end
 local function evaluate_ci_merge_gate(pr, opts)
   local mergeable, mergeable_reason = pr_mergeable(pr)
   if not mergeable then
+    if mergeable_reason == "merge-state-blocked" then
+      local rollup_green, rollup_reason = pr_rollup_green(pr)
+      if not rollup_green and rollup_reason == "rollup-red" then
+        local classification = classify_pr_ci_gate(pr, opts)
+        if classification.actionable then
+          return false, classification.reason, classification
+        end
+      end
+    end
     return false, mergeable_reason
   end
   local green, green_reason = evaluate_ci_status_gate(pr, opts)

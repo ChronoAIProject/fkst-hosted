@@ -130,6 +130,38 @@ return {
     t.eq(reason, "rollup-pending")
   end,
 
+  test_blocked_with_red_required_head_check_routes_to_own_ci_red = function()
+    mock_check_runs('{"total_count":1,"check_runs":[{"name":"test","status":"completed","conclusion":"failure","head_sha":"def456"}]}\n')
+    local ok, reason, classification = core.evaluate_ci_merge_gate(pr({
+      merge_state_status = "BLOCKED",
+      status_check_rollup = {
+        { name = "test", state = "COMPLETED", conclusion = "FAILURE" },
+      },
+    }), {
+      repo = "owner/repo",
+      proposal_id = "github-devloop/issue/owner/repo/42",
+    })
+    t.eq(ok, false)
+    t.eq(reason, "own-ci-red")
+    t.eq(classification.kind, "OWN_CI_RED")
+    t.eq(classification.actionable, true)
+  end,
+
+  test_blocked_with_pending_required_and_failed_optional_check_remains_blocked = function()
+    mock_check_runs('{"total_count":2,"check_runs":[{"name":"test","status":"in_progress","conclusion":null,"head_sha":"def456"},{"name":"lint","status":"completed","conclusion":"failure","head_sha":"def456"}]}\n')
+    local ok, reason = core.evaluate_ci_merge_gate(pr({
+      merge_state_status = "BLOCKED",
+      status_check_rollup = {
+        { name = "lint", state = "COMPLETED", conclusion = "FAILURE" },
+      },
+    }), {
+      repo = "owner/repo",
+      proposal_id = "github-devloop/issue/owner/repo/42",
+    })
+    t.eq(ok, false)
+    t.eq(reason, "merge-state-blocked")
+  end,
+
   test_unstable_without_rollup_remains_merge_state_wait = function()
     local ok, reason = core.evaluate_ci_merge_gate(pr({
       merge_state_status = "UNSTABLE",

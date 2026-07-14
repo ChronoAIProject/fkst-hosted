@@ -36,16 +36,18 @@ local function mock_check_runs_json(json)
   })
 end
 
-local function run_rollup_red_merge(name, check_conclusion, id, status)
+local function run_rollup_red_merge(name, check_conclusion, id, status, merge_state)
   local event = merge_ready()
   local rollup_json = '[{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/shared","name":"shared-integration","startedAt":"2026-06-03T02:03:04Z","status":"COMPLETED","workflowName":"integration"}]'
   mock_bot_env()
   mock_write_env("1")
   mock_write_env("1")
   mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
-  mock_pr_merge_rollup({ origin_marker(event) }, rollup_json, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "UNSTABLE")
-  mock_pr_merge_rollup({ origin_marker(event) }, rollup_json, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "UNSTABLE")
-  mock_required_check_run(check_conclusion, id, status)
+  mock_pr_merge_rollup({ origin_marker(event) }, rollup_json, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", merge_state or "UNSTABLE")
+  mock_pr_merge_rollup({ origin_marker(event) }, rollup_json, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", merge_state or "UNSTABLE")
+  for _ = 1, merge_state == "BLOCKED" and 2 or 1 do
+    mock_required_check_run(check_conclusion, id, status)
+  end
   return event, run_merge(event, opts(name, { FKST_GITHUB_WRITE = "1" }))
 end
 
@@ -82,6 +84,24 @@ return {
     t.is_true(fixing.dedup_key:find(fixing.reviewed_head_sha, 1, true) == nil)
     t.is_true(fixing.work_unit_key:find(fixing.reviewed_head_sha, 1, true) == nil)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
+    t.eq(count_calls("gh pr merge"), 0)
+  end,
+
+  test_blocked_red_required_check_raises_fixing = function()
+    local _, result = run_rollup_red_merge("merge-blocked-own-red-fixing", "failure", 101, nil, "BLOCKED")
+    t.eq(result.exit_code, 0)
+    local fixing = find_causal_raise(result, "devloop_fixing").payload
+    t.eq(fixing.gate_failure_excerpt, "own-ci-red")
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
+    t.eq(count_calls("gh pr merge"), 0)
+  end,
+
+  test_blocked_pending_required_check_remains_merge_gate_wait = function()
+    local _, result = run_rollup_red_merge("merge-blocked-required-pending", nil, 101, "in_progress", "BLOCKED")
+    t.eq(result.exit_code, 1)
+    t.eq(find_raise(result.raises, "devloop_fixing"), nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request"), nil)
+    t.eq(count_calls(check_runs_cmd), 1)
     t.eq(count_calls("gh pr merge"), 0)
   end,
 
