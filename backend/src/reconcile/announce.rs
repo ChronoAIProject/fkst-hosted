@@ -83,6 +83,11 @@ pub fn announce_session_comment(
         ));
     }
 
+    body.push_str(
+        "🔒 **Config frozen.** This session's configuration is now immutable — editing \
+         this issue's body is rejected (`fkst-config-rejected`); to change anything, \
+         close this issue and open a new trigger.\n\n",
+    );
     body.push_str("Close this issue to retire the session.");
     // The hidden immutability marker is appended LAST so it trails the visible body.
     body.push_str(&config_hash_marker(full_config_hash));

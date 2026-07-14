@@ -24,7 +24,7 @@ use super::{issue_templates_permissions, GithubAppError, GithubAppTokens};
 /// change to the bundled files below; the bundled `config.yml` marker MUST equal
 /// this (enforced by a unit test). Repos whose installed version is below this
 /// get a merged PR to catch up.
-pub const FKST_ISSUE_TEMPLATES_VERSION: u32 = 4;
+pub const FKST_ISSUE_TEMPLATES_VERSION: u32 = 5;
 
 /// Repo-relative directory the templates live under.
 const TEMPLATE_DIR: &str = ".github/ISSUE_TEMPLATE";

@@ -240,7 +240,7 @@ export const en: SiteContent = {
     },
     logs: {
       intro:
-        'Every session auto-streams its redacted logs to storage. The 📥 Logs URL in the registration comment is `/api/v1/logs/{session_id}`. Access is identity-gated and deny-by-default — authorized only if you are the trigger author, on the `### Log Access Allowlist`, or a global admin. There are two ways in:',
+        'Every session auto-streams its redacted logs to storage. The 📥 Logs URL in the registration comment is `/api/v1/logs/{session_id}`. Access is identity-gated and deny-by-default — authorized only if you are the trigger author, on the `### FKST Contributors` list, or a global admin. There are two ways in:',
       browserTitle: 'Browser',
       browser:
         'Open the URL. It redirects through GitHub login, then the redacted `.tar.gz` downloads. No storage URL is ever exposed — the control plane streams the bytes.',
