@@ -187,7 +187,12 @@ issue_recency_class() { # $1 issue-number, $2 labels, $3 state, $4 age-hours, $5
     reviewing|fixing|review-meta|merge-ready|merging)
       if echo "$openpr" | grep -qx "$num"; then echo "$st →see PR (active)"; else echo "⚠ STRANDED $st (no open PR)"; fi
       ;;
-    *) return 1 ;;
+    awaiting-pr)
+      # parent waits on delegated child PR terminal + rollup cascade; hours are normal, days are not
+      if [ "$age" -ge "$stale" ]; then echo "⚠ STUCK awaiting-pr ${age}h (child cascade overdue)"; else echo "✓ waiting child-cascade ${age}h"; fi
+      ;;
+    # unknown state: render it visibly instead of silently dropping the row (expose, don't swallow)
+    *) echo "⚠ UNRENDERED-STATE $st ${age}h" ;;
   esac
 }
 
@@ -669,7 +674,7 @@ board_one() { # $1 name, $2 stale_hours
         if [ "$a" -ge "$stale" ]; then cls="⚠ STRANDED stateless ${a}h"; else cls="✓ waiting intake ${a}h"; fi
       fi
     else
-      cls="$(issue_recency_class "$num" "$label" "$st" "$a" "$stale" "$openpr")" || continue
+      cls="$(issue_recency_class "$num" "$label" "$st" "$a" "$stale" "$openpr")"
     fi
     printf "  #%-4s [%-12s] %s\n" "$num" "$st" "$cls"
   done
