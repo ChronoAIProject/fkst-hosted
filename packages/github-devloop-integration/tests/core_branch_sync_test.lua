@@ -1,4 +1,7 @@
+local base_ids = require("devloop.base_ids")
+local forge_validators = require("devloop.forge_validators")
 local git_mechanics = require("devloop.git_mechanics")
+local strings = require("contract.strings")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
@@ -102,7 +105,11 @@ return {
 
     t.eq(
       core.branch_sync_lock_key("owner/repo", "dev", "integration/dev"),
-      "github-devloop/branch-sync/owner/repo/dev/integration/dev"
+      "github-devloop/branch-sync/owner/repo/dev-2006806159/integration-dev-3436629376"
+    )
+    t.eq(
+      core.rollup_lock_key("owner/repo", "dev", "integration/dev"),
+      "github-devloop/rollup/owner/repo/dev-2006806159/integration-dev-3436629376"
     )
     t.eq(
       git_mechanics.repo_ref_store_lock_key("owner/repo"),
@@ -133,6 +140,45 @@ return {
       }),
       true
     )
+  end,
+
+  test_branch_lock_keys_bound_long_devloop_branches = function()
+    local repo = "ChronoAIProject/fkst-packages"
+    local upstream = "integration"
+    local integration = "devloop/issue/ChronoAIProject/fkst-packages/2250/ready-github-devloop-issue-ChronoAIProject-fkst-packages-2250-intake-0524061129-0072253362"
+    local different_integration = integration:sub(1, -2) .. "3"
+
+    local branch_sync_key = core.branch_sync_lock_key(repo, upstream, integration)
+    local rollup_key = core.rollup_lock_key(repo, upstream, integration)
+    t.is_true(strings.is_path_safe_key(branch_sync_key, 200))
+    t.is_true(strings.is_path_safe_key(rollup_key, 200))
+    t.eq(branch_sync_key, core.branch_sync_lock_key(repo, upstream, integration))
+    t.eq(rollup_key, core.rollup_lock_key(repo, upstream, integration))
+    t.is_true(branch_sync_key ~= core.branch_sync_lock_key(repo, upstream, different_integration))
+    t.is_true(rollup_key ~= core.rollup_lock_key(repo, upstream, different_integration))
+    t.is_true(core.branch_sync_lock_key(repo, "a/b", "c") ~= core.branch_sync_lock_key(repo, "a", "b/c"))
+  end,
+
+  test_branch_lock_keys_fit_maximum_accepted_inputs = function()
+    local repo = "owner/" .. string.rep("r", 94)
+    local upstream = string.rep("u", 160)
+    local integration = string.rep("i", 160)
+
+    t.eq(#repo, 100)
+    t.eq(base_ids.safe_repo(repo), repo)
+    t.eq(#upstream, 160)
+    t.eq(#integration, 160)
+    t.is_true(forge_validators.is_git_ref_safe(upstream))
+    t.is_true(forge_validators.is_git_ref_safe(integration))
+
+    local branch_sync_key = core.branch_sync_lock_key(repo, upstream, integration)
+    local rollup_key = core.rollup_lock_key(repo, upstream, integration)
+    t.is_true(strings.is_path_safe_key(branch_sync_key, 200))
+    t.is_true(strings.is_path_safe_key(rollup_key, 200))
+    t.is_true(#branch_sync_key <= 200)
+    t.is_true(#rollup_key <= 200)
+    t.eq(#branch_sync_key, 199)
+    t.eq(#rollup_key, 200)
   end,
 
   test_branch_sync_rejects_unsafe_shapes = function()

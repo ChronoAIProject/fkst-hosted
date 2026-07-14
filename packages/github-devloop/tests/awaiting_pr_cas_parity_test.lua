@@ -5,6 +5,7 @@
 
 local catalog = require("devloop.restart_cas_catalog")
 local owner_pending_projection = require("devloop.restart_owner_pending_projection")
+local restart_authority = require("core.restart_authority")
 local inventories = {
   canonicalization = require("core.restart.canonicalization_inventory"),
   entry = require("core.restart.entry_inventory"),
@@ -20,6 +21,8 @@ local t = h.t
 local core = h.core
 local projection = owner_pending_projection.derive(core.restart_package_name, core.restart_transition_table(), inventories)
 local observe_issue_department = require("departments.observe_issue.main")
+local OWNER = core.restart_package_name
+local SHADOW_VARIANT = "implementing_merged_delegated_pr"
 
 local POLICY_ID = "cas.legacy_awaiting_pr_v1"
 local REPO = "owner/repo"
@@ -149,6 +152,11 @@ local function evidence_from_probe(probe)
     incoming_version = probe.incoming_version,
     target_version = probe.target_version,
   }
+end
+
+local function assert_bidirectional(shadow, observed, field, context)
+  t.eq(shadow[field], observed[field], context .. ": shadow " .. field .. " matches observed")
+  t.eq(observed[field], shadow[field], context .. ": observed " .. field .. " matches shadow")
 end
 
 local function comment(body, created_at)
@@ -390,7 +398,70 @@ local function assert_case(fixture)
   )
 end
 
+local function assert_shadow_case(fixture)
+  mock_env()
+  local issue_comments = parent_comments(fixture)
+  local pr_comments = child_comments(fixture)
+  mock_reads(fixture, issue_comments, pr_comments)
+
+  local result, probes, _, boundary_calls = observe_department(function()
+    return run_real_department(fixture)
+  end)
+
+  t.eq(#probes, 1, fixture.name .. ": real department CAS probe count")
+  t.eq(#boundary_calls, 1, fixture.name .. ": admission boundary reach")
+  local probe = probes[1]
+  t.eq(probe.current.state, fixture.current_state, fixture.name .. ": probe current state")
+  t.eq(probe.current.version, fixture.current_version, fixture.name .. ": probe current version")
+  t.eq(probe.variant, "implementing_to_awaiting_pr", fixture.name .. ": probe variant")
+  t.eq(probe.incoming_version, fixture.current_version, fixture.name .. ": real probe incoming version")
+
+  local observed = observed_admission(probe, true)
+  local shadow_intent = {
+    semantic_variant = SHADOW_VARIANT,
+    target = "awaiting-pr",
+    incoming_version = fixture.current_version,
+  }
+  t.eq(shadow_intent.incoming_version, probe.incoming_version, fixture.name .. ": non-circular incoming version anchor")
+
+  local sealed = restart_authority.seal_snapshot({
+    owner = OWNER,
+    current = {
+      state = fixture.current_state,
+      version = fixture.current_version,
+    },
+  })
+  local shadow = restart_authority.decide_transition(sealed, shadow_intent)
+
+  assert_bidirectional(shadow, observed, "status", fixture.name)
+  assert_bidirectional(shadow, observed, "reason_code", fixture.name)
+  t.eq(shadow.edge_id ~= nil, true, fixture.name .. ": selected edge")
+  t.eq(shadow.cas_policy_id, POLICY_ID, fixture.name .. ": selected CAS policy")
+  t.eq(shadow.evidence.status, "complete", fixture.name .. ": evidence status")
+  t.eq(shadow.evidence.facts.source, "implementing", fixture.name .. ": evidence source")
+  t.eq(shadow.evidence.facts.target, "awaiting-pr", fixture.name .. ": evidence target")
+  t.eq(shadow.grant, nil, fixture.name .. ": grant disabled")
+  t.eq(result.exit_code, fixture.expected_exit_code or 0, fixture.name .. ": department exit code")
+end
+
 return {
+  -- implementing_to_awaiting_pr is apply-only parity: observe_issue/main.lua:601
+  -- gates this canonicalization behind state ~= "awaiting-pr", so an issue already
+  -- in awaiting-pr never reaches this edge's idempotent branch via the real
+  -- department. Idempotent shadow coverage stays with policies whose department
+  -- genuinely probes an already-at-target case.
+  test_shadow_implementing_to_awaiting_pr_apply_parity = function()
+    assert_shadow_case({
+      name = "shadow-implementing-to-awaiting-pr-apply",
+      current_state = "implementing",
+      current_version = V_EQUAL,
+      raw_incoming_version = V_OLDER,
+      child_state = "merged",
+      pr_state = "MERGED",
+      expected_exit_code = 0,
+    })
+  end,
+
   test_implementing_canonicalization_uses_spied_current_version_not_raw_fixture_version = function()
     assert_case({
       name = "implementing-canonicalization-derived-version",

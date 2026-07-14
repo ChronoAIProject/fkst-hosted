@@ -10,7 +10,8 @@ local core = h.core
 
 local repo = "owner/repo"
 local pr_number = 7
-local comment_id = "123456"
+local fixing_comment_id = "123456"
+local reviewing_comment_id = "123457"
 
 local function polluted_merge_gate_comments(event)
   local clean_body = "github-devloop merge gate failed: mergeable-conflicting\n"
@@ -96,16 +97,9 @@ local function mock_runtime_and_context()
       exit_code = 0,
     })
   end
-  for _ = 1, 16 do
+  for _ = 1, 48 do
     t.mock_command(devloop_base.read_env_command("FKST_GITHUB_WRITE"), {
       stdout = "1",
-      stderr = "",
-      exit_code = 0,
-    })
-  end
-  for _ = 1, 32 do
-    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_WRITE"), {
-      stdout = "",
       stderr = "",
       exit_code = 0,
     })
@@ -158,17 +152,28 @@ local function mock_comment_handoff(event, comments)
       })
     end
   end
-  t.mock_command("gh api --method POST repos/owner/repo/issues/7/comments --field 'body=", {
-    stdout = '{"id":' .. comment_id .. ',"body":"created","user":{"login":"fkst-test-bot"}}\n',
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command("gh api --method GET 'repos/owner/repo/issues/comments/" .. comment_id .. "'", {
-    stdout = '{"body":"' .. h.json_string(core.state_marker(event.proposal_id, "fixing", event.version))
-      .. '","user":{"login":"fkst-test-bot"}}\n',
-    stderr = "",
-    exit_code = 0,
-  })
+  local comment_path = "/tmp/fkst-github-proxy-comment-owner_repo-pr-7.md"
+  for _, written in ipairs({
+    {
+      id = fixing_comment_id,
+      body = core.state_marker(event.proposal_id, "fixing", event.version),
+    },
+    {
+      id = reviewing_comment_id,
+      body = core.state_marker(event.proposal_id, "reviewing", core.next_fix_version(event.version)),
+    },
+  }) do
+    t.mock_command("gh api --method POST repos/owner/repo/issues/7/comments --field 'body=@" .. comment_path .. "'", {
+      stdout = '{"id":' .. written.id .. ',"body":"created","user":{"login":"fkst-test-bot"}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh api --method GET 'repos/owner/repo/issues/comments/" .. written.id .. "'", {
+      stdout = '{"body":"' .. h.json_string(written.body) .. '","user":{"login":"fkst-test-bot"}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+  end
 end
 
 local function mock_label_write()

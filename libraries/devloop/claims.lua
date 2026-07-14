@@ -285,12 +285,14 @@ function C.fork_grace_elapsed(repo, issue_number, current, now_seconds, grace_se
   return true, "fork-grace-elapsed", age_seconds
 end
 
-function C.claim_issue_for_management(M, dept, repo, issue_number, current, proposal_id)
+function C.claim_admission_inputs(current)
   local owner = C.claim_owner()
   local status = C.issue_claim_state(current and current.assignees, owner, current and current.labels)
   if status == "other" then
-    log_claim(dept, proposal_id, "skip-claimed-by-other", "issue assignee claim is held by another login")
-    return false
+    return {
+      owner = owner,
+      status = status,
+    }
   end
 
   local claim_mode = config.claim_mode()
@@ -299,34 +301,98 @@ function C.claim_issue_for_management(M, dept, repo, issue_number, current, prop
     author = devloop_base.strip_bot_login_suffix(author)
   end
   local managed = nil
-  if claim_mode ~= "label" then
-    if author == nil or author == "" then
-      log_claim(dept, proposal_id, "skip-fork-author-unknown", "issue author is missing or unknown")
-      return false
+  local trusted_author_policy = nil
+  if claim_mode ~= "label" and author ~= nil and author ~= "" and author ~= owner then
+    managed = C.managed_bot_logins()
+    if not C.is_managed_bot_login(author, managed) then
+      trusted_author_policy = github_author_policy.from_env()
     end
-    if author ~= owner then
-      managed = C.managed_bot_logins()
-      if C.is_managed_bot_login(author, managed) then
-        if status == "self" then
-          return true
+  end
+  return {
+    owner = owner,
+    status = status,
+    claim_mode = claim_mode,
+    managed = managed,
+    trusted_author_policy = trusted_author_policy,
+  }
+end
+
+function C.claim_admission_precheck(current, inputs)
+  local author = C.issue_author_login(current)
+  if author ~= nil and author ~= "" then
+    author = devloop_base.strip_bot_login_suffix(author)
+  end
+  local detail = {
+    owner = inputs.owner,
+    status = inputs.status,
+    claim_mode = inputs.claim_mode,
+    author = author,
+    managed = inputs.managed,
+  }
+  if inputs.status == "other" then
+    return "other", {
+      action = "skip-claimed-by-other",
+      reason = "issue assignee claim is held by another login",
+    }
+  end
+
+  if inputs.claim_mode ~= "label" then
+    if author == nil or author == "" then
+      return "denied", {
+        action = "skip-fork-author-unknown",
+        reason = "issue author is missing or unknown",
+      }
+    end
+    if author ~= inputs.owner then
+      if C.is_managed_bot_login(author, inputs.managed) then
+        if inputs.status == "self" then
+          return "held", detail
         end
-        log_claim(dept, proposal_id, "skip-fork-peer-bot", "other-authored unassigned issue belongs to a managed bot login")
-        return false
+        return "denied", {
+          action = "skip-fork-peer-bot",
+          reason = "other-authored unassigned issue belongs to a managed bot login",
+        }
       end
-      local trusted_author_policy = github_author_policy.from_env()
-      if not github_author_policy.is_authorized(trusted_author_policy, author) then
-        log_claim(dept, proposal_id, "skip-non-whitelisted-author", "other-authored issue author is not authorized for GitHub content")
-        return false
+      if not github_author_policy.is_authorized(inputs.trusted_author_policy, author) then
+        return "denied", {
+          action = "skip-non-whitelisted-author",
+          reason = "other-authored issue author is not authorized for GitHub content",
+        }
       end
     end
   end
-  if status == "self" then
-    return true
+  if inputs.status == "self" then
+    return "held", detail
   end
   if author == nil or author == "" then
-    log_claim(dept, proposal_id, "skip-fork-author-unknown", "issue author is missing or unknown")
+    return "denied", {
+      action = "skip-fork-author-unknown",
+      reason = "issue author is missing or unknown",
+    }
+  end
+  return "needs-claim", detail
+end
+
+function C.log_claim_admission_skip(dept, proposal_id, detail)
+  log_claim(dept, proposal_id, detail.action, detail.reason)
+end
+
+function C.claim_issue_for_management(M, dept, repo, issue_number, current, proposal_id)
+  local admission, detail = C.claim_admission_precheck(current, C.claim_admission_inputs(current))
+  if admission == "held" then
+    return true
+  end
+  if admission == "other" or admission == "denied" then
+    C.log_claim_admission_skip(dept, proposal_id, detail)
     return false
   end
+  if admission ~= "needs-claim" then
+    error("github-devloop: invalid claim admission decision")
+  end
+  local owner = detail.owner
+  local claim_mode = detail.claim_mode
+  local author = detail.author
+  local managed = detail.managed
   -- Fork-and-block isolation (grace + fork of other-authored issues) is an
   -- assignee-mode policy: it keeps an assignee-claim bot from intruding on a
   -- human's issue. In label-mode the loop is single-tenant and explicitly

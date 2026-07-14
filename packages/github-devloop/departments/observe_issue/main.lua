@@ -195,21 +195,31 @@ local function replay_or_timeout(issue, proposal_id, current, link, snapshot, st
 end
 
 local function ensure_managed_issue_claim(issue, proposal_id, current, state)
-  local claim_state = m_claims.issue_claim_state(current.assignees, m_claims.claim_owner(), current.labels)
-  if claim_state == "other" then
+  local admission, detail = m_claims.claim_admission_precheck(current, m_claims.claim_admission_inputs(current))
+  if admission == "held" then
+    return true
+  end
+  if admission == "other" then
     devloop_logging.log_cas_decision("observe_issue", proposal_id, state, state.state, state.state, "skip-claim-lost", "CLAIM lost before managed issue handling")
+    return false
+  end
+  if admission == "denied" then
+    m_claims.log_claim_admission_skip("observe_issue", proposal_id, detail)
     return false
   end
   return m_claims.claim_issue_for_management(core, "observe_issue", issue.repo, issue.number, current, proposal_id)
 end
 
-local function maybe_canonicalize_implementing_merged_delegated_pr(issue, proposal_id, current, issue_state, current_pr)
+local function maybe_canonicalize_implementing_merged_delegated_pr(issue, proposal_id, current, issue_state, current_pr, current_pr_delegation)
   if issue_state == nil or issue_state.state ~= "implementing" then
     return false
   end
   local delegation = m_facts.pr_delegation_fact(current.comments, proposal_id, issue_state.version)
   if delegation == nil then
     return false
+  end
+  if not awaiting_pr_replay.delegation_identity_matches(current_pr_delegation, delegation) then
+    current_pr = nil
   end
   return awaiting_pr_replay.canonicalize_implementing_merged_delegated_pr("observe_issue", issue, issue_state, {
     proposal_id = proposal_id,
@@ -706,15 +716,19 @@ local function process_issue_event(event)
       return true
     end
     if state.state ~= nil then
+      local close_current_pr = nil
+      local close_delegation = nil
       if not claim_checked and not ensure_managed_issue_claim(issue, proposal_id, current, state) then
         return
       end
       if state.state ~= "awaiting-pr" then
-        local delegation = m_facts.pr_delegation_fact(current.comments, proposal_id)
-        if awaiting_pr_replay.close_canonically_merged_delegated_issue("observe_issue", issue, state, {
+        close_delegation = m_facts.pr_delegation_fact(current.comments, proposal_id)
+        local closed
+        closed, close_current_pr = awaiting_pr_replay.close_canonically_merged_delegated_issue("observe_issue", issue, state, {
           proposal_id = proposal_id,
-          ["pr-delegation"] = delegation,
-        }) then
+          ["pr-delegation"] = close_delegation,
+        })
+        if closed then
           return
         end
       end
@@ -727,7 +741,7 @@ local function process_issue_event(event)
       if maybe_apply_issue_reimplement_command(issue, proposal_id, current, state, snapshot) then
         return
       end
-      if maybe_canonicalize_implementing_merged_delegated_pr(issue, proposal_id, current, state, nil) then
+      if maybe_canonicalize_implementing_merged_delegated_pr(issue, proposal_id, current, state, close_current_pr, close_delegation) then
         return
       end
       if maybe_canonicalize_legacy_pr_open_issue() then

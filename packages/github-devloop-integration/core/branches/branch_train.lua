@@ -11,30 +11,33 @@ function BranchTrain.install(M, shared)
   local require_sync_result = shared.require_sync_result
   local runtime_root_path = shared.runtime_root_path
 
-  function M.branch_sync_lock_key(repo, upstream, integration)
-    local key = "github-devloop/branch-sync/"
-      .. base_ids.safe_repo(require_safe_repo(repo))
-      .. "/"
-      .. require_safe_branch("upstream branch", upstream)
-      .. "/"
-      .. require_safe_branch("integration branch", integration)
+  local function bounded_lock_key(prefix, repo, upstream, integration)
+    local safe_repo = base_ids.safe_repo(require_safe_repo(repo))
+    local branches = {
+      require_safe_branch("upstream branch", upstream),
+      require_safe_branch("integration branch", integration),
+    }
+    local component_limit = math.floor((M._max_key_len - #prefix - #safe_repo - 3) / 2)
+    for index, branch in ipairs(branches) do
+      local checksum = decimal_checksum(branch)
+      local readable_limit = component_limit - #checksum - 1
+      local readable = strings.sanitize_key(branch, false):gsub("/", "-"):sub(1, readable_limit)
+      branches[index] = readable .. "-" .. checksum
+    end
+
+    local key = table.concat({ prefix, safe_repo, branches[1], branches[2] }, "/")
     if not strings.is_path_safe_key(key, M._max_key_len) then
-      error("github-devloop: lock-key-invalid: invalid branch sync lock key")
+      error("github-devloop: lock-key-invalid: invalid branch lock key")
     end
     return key
   end
 
+  function M.branch_sync_lock_key(repo, upstream, integration)
+    return bounded_lock_key("github-devloop/branch-sync", repo, upstream, integration)
+  end
+
   function M.rollup_lock_key(repo, upstream, integration)
-    local key = "github-devloop/rollup/"
-      .. base_ids.safe_repo(require_safe_repo(repo))
-      .. "/"
-      .. require_safe_branch("upstream branch", upstream)
-      .. "/"
-      .. require_safe_branch("integration branch", integration)
-    if not strings.is_path_safe_key(key, M._max_key_len) then
-      error("github-devloop: lock-key-invalid: invalid rollup lock key")
-    end
-    return key
+    return bounded_lock_key("github-devloop/rollup", repo, upstream, integration)
   end
 
   function M.rollup_source_ref(repo, pr_number)

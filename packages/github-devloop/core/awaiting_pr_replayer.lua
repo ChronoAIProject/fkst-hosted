@@ -87,6 +87,20 @@ local function version_is_same_lineage_or_descendant(version, lineage)
   return base ~= "" and (candidate == base or candidate:sub(1, #base + 1) == base .. "/")
 end
 
+function M.delegation_identity_matches(left, right)
+  if type(left) ~= "table" or type(right) ~= "table"
+    or tostring(left.pr_number or "") ~= tostring(right.pr_number or "") then
+    return false
+  end
+  local left_version = tostring(left.version or "")
+  local right_version = tostring(right.version or "")
+  if left_version == "" or right_version == "" then
+    return false
+  end
+  return version_is_same_lineage_or_descendant(left_version, right_version)
+    or version_is_same_lineage_or_descendant(right_version, left_version)
+end
+
 local function child_lineage_matches_delegation(state, delegation, child_state)
   return tostring(delegation.version or "") == tostring(state.version or "")
     and version_is_same_lineage_or_descendant(child_state.version, delegation.version)
@@ -233,33 +247,33 @@ function M.close_canonically_merged_delegated_issue(dept, issue, state, facts)
   local proposal_id = facts.proposal_id
   local delegation = facts["pr-delegation"] or facts.pr_delegation
   if delegation == nil then
-    return false
+    return false, nil
   end
   if tostring(delegation.proposal_id or "") ~= tostring(proposal_id or "")
     or not version_is_same_lineage_or_descendant(state and state.version, delegation.version) then
     log_skip(dept, proposal_id, state, tostring(state and state.state or "unknown"), "closed", "skip-stale(pr-delegation-version)", "canonical merged issue close requires the current delegation lineage")
-    return false
+    return false, nil
   end
   local pr_repo, pr_number = entity_lib.parse_pr_proposal_id(delegation.pr_proposal_id or delegation.pr_proposal)
   if pr_repo ~= issue.repo or tostring(pr_number or "") ~= tostring(delegation.pr_number or "") then
     log_skip(dept, proposal_id, state, tostring(state and state.state or "unknown"), "closed", "skip-stale(pr-delegation-child)", "canonical merged issue close requires a same-repository delegated PR")
-    return false
+    return false, nil
   end
   local current_pr = facts.current_pr
   if type(current_pr) ~= "table" or current_pr.force_fresh ~= true then
     current_pr = read_delegated_child_pr(dept, issue, delegation)
   end
   if canonical_merged_child_state(issue, state, delegation, current_pr) == nil then
-    return false
+    return false, current_pr
   end
   local landed, outcome, reason = merged_child_landed_on_upstream(dept, issue, state, delegation, current_pr)
   if not landed then
     log_skip(dept, proposal_id, state, tostring(state and state.state or "unknown"), "closed", outcome, reason)
-    return false
+    return false, current_pr
   end
   if config.write_mode() ~= "real" then
     log_skip(dept, proposal_id, state, tostring(state and state.state or "unknown"), "closed", "skip-dry-run", "canonical merged delegated issue would close in real write mode")
-    return false
+    return false, current_pr
   end
   local close_result = devloop_commands.gh_issue_close(issue.repo, issue.number, 60)
   if close_result.exit_code ~= 0 then
@@ -267,7 +281,7 @@ function M.close_canonically_merged_delegated_issue(dept, issue, state, facts)
   end
   devloop_entity_view.invalidate_entity_after_write(issue.repo, "issue", issue.number)
   devloop_logging.log_cas_decision(dept, proposal_id, state, tostring(state and state.state or "unknown"), "closed", "applied(canonical-child-pr-merged)", "canonical delegated PR merge is landed on the configured upstream branch")
-  return true
+  return true, current_pr
 end
 
 function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
@@ -424,6 +438,7 @@ return {
   implementing_to_awaiting_pr_transition_status = M.implementing_to_awaiting_pr_transition_status,
   canonicalize_implementing_merged_delegated_pr = M.canonicalize_implementing_merged_delegated_pr,
   close_canonically_merged_delegated_issue = M.close_canonically_merged_delegated_issue,
+  delegation_identity_matches = M.delegation_identity_matches,
 }
 end
 
