@@ -437,6 +437,95 @@ local function reviewing_marker()
   return '<!-- fkst:generic-workflow:state:v1 proposal="generic-workflow/issue/owner/x/42" state="reviewing" version="v1" stage_rank="675" -->'
 end
 
+local function poll_pr_json(number, updated_at, state)
+  return string.format(
+    '{"number":%d,"title":"PR %d","html_url":"https://github.example/owner/x/pull/%d","updated_at":"%s","state":"%s","user":{"login":"fkst-test-bot"},"labels":[{"name":"review"}]}',
+    number,
+    number,
+    number,
+    updated_at,
+    state or "open"
+  )
+end
+
+local function poll_pr_list_many_json(count, target_number, target_updated_at)
+  local parts = {}
+  for index = 1, count do
+    table.insert(parts, poll_pr_json(100 + index, string.format("2026-06-03T03:%02d:00Z", index % 60), "OPEN"))
+  end
+  table.insert(parts, poll_pr_json(target_number, target_updated_at, "OPEN"))
+  return "[[" .. table.concat(parts, ",") .. "]]\n"
+end
+
+local function poll_issue_json(number, updated_at)
+  return string.format(
+    '{"number":%d,"title":"Issue %d","html_url":"https://github.example/owner/x/issues/%d","updated_at":"%s","state":"open","author":{"login":"fkst-test-bot"},"labels":[{"name":"adapter-enabled"}],"assignees":[{"login":"fkst-test-bot"}]}',
+    number, number, number, updated_at
+  )
+end
+
+local function poll_issue_list_from(items)
+  return "[[" .. table.concat(items, ",") .. "]]\n"
+end
+
+local function poll_pr_list_from(items)
+  return "[[" .. table.concat(items, ",") .. "]]\n"
+end
+
+local function changed_numbers(raises)
+  local result = {}
+  for _, raised in ipairs(raises or {}) do
+    if raised.queue == "github_entity_changed" then
+      table.insert(result, raised.payload.number)
+    end
+  end
+  return table.concat(result, ",")
+end
+
+local function raises_for_queue(raises, queue)
+  local result = {}
+  for _, raised in ipairs(raises or {}) do
+    if raised.queue == queue then
+      table.insert(result, raised)
+    end
+  end
+  return result
+end
+
+local function observed_issue_raises(raises)
+  return raises_for_queue(raises, "github_issue_observed")
+end
+
+local function changed_raises(raises)
+  return raises_for_queue(raises, "github_entity_changed")
+end
+
+local function find_entity_raise(raises, entity_type, number)
+  for _, raised in ipairs(raises or {}) do
+    if raised.queue == "github_entity_changed"
+      and raised.payload.type == entity_type
+      and tonumber(raised.payload.number) == tonumber(number)
+    then
+      return raised
+    end
+  end
+  return nil
+end
+
+local function assert_observed_issue(raised, number, updated_at)
+  t.eq(raised.queue, "github_issue_observed")
+  t.eq(raised.payload.schema, "github-proxy.issue-observed.v1")
+  t.eq(raised.payload.type, "issue")
+  t.eq(raised.payload.repo, "owner/x")
+  t.eq(raised.payload.number, number)
+  t.eq(raised.payload.updated_at, updated_at)
+  t.is_nil(raised.payload.title)
+  t.is_nil(raised.payload.body)
+  t.is_nil(raised.payload.labels)
+  t.eq(raised.payload.source_ref.kind, "external")
+  t.eq(raised.payload.source_ref.ref, "owner/x#issue/" .. tostring(number))
+end
+
 
 return {
   t = t,
@@ -471,4 +560,14 @@ return {
   capture_label_department_logs = capture_label_department_logs,
   long_dedup = long_dedup,
   reviewing_marker = reviewing_marker,
+  poll_pr_json = poll_pr_json,
+  poll_pr_list_many_json = poll_pr_list_many_json,
+  poll_issue_json = poll_issue_json,
+  poll_issue_list_from = poll_issue_list_from,
+  poll_pr_list_from = poll_pr_list_from,
+  changed_numbers = changed_numbers,
+  observed_issue_raises = observed_issue_raises,
+  changed_raises = changed_raises,
+  find_entity_raise = find_entity_raise,
+  assert_observed_issue = assert_observed_issue,
 }
