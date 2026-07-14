@@ -50,6 +50,7 @@ pub fn parse_registration(
         repo: repo.clone(),
         trigger_issue: issue.number,
         trigger_author_id: issue.user_id,
+        trigger_author_login: issue.user_login.clone(),
         def: SessionDef {
             name: spec.name,
             packages: spec.packages,

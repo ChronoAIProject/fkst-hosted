@@ -5,7 +5,7 @@ description: >-
   stop autonomous fkst-substrate coding sessions ENTIRELY through GitHub issues (there is
   no other API surface for this). Use whenever you need to: (a) launch a session by opening
   an `fkst-substrate-trigger` issue with the exact `### Session Name` / `### Packages` /
-  `### Work Label` / optional `### Environment` / `### Auto-merge` / `### Log Access Allowlist` / `### Output Language` / `### Engine Config` body;
+  `### Work Label` / optional `### Environment` / `### Auto-merge` / `### FKST Contributors` (alias: `### Log Access Allowlist`) / `### Output Language` / `### Engine Config` body;
   (b) queue tasks by opening issues that carry the session's Work Label; (c) interpret the
   session's status comments and labels (registered / picked-up / degraded / retired /
   invalid / config-rejected); (d) download a session's redacted logs from the identity-gated
@@ -61,7 +61,7 @@ invalid). Intro text before the first heading is ignored.
 | `### Work Label` | **yes** | exactly one non-empty line; a valid GitHub label, **≤ 50 chars, no comma** (the substrate reads it from a comma-separated env var) |
 | `### Environment` | optional | one pre-provisioned environment name to inject (or blank → none). **Never put secret values here** — this only *selects* a profile provisioned out-of-band |
 | `### Auto-merge` | optional | `true`/`yes`/`on`/`enabled`/`1` (case-insensitive) → the App bot's PRs are auto-merged into the default branch and the linked work issue auto-closed; anything else → off |
-| `### Log Access Allowlist` | optional | extra GitHub logins/numeric-ids (beyond the author + global admins) allowed to download this session's logs; whitespace/comma/newline separated; a leading `@` is stripped. **Frozen at registration** (see config immutability) |
+| `### FKST Contributors` | optional | the session's TRUSTED USERS (author always included): (1) the substrate only acts on issues/comments from these logins — injected as `FKST_GITHUB_AUTHORIZED_LOGINS` into the session for the packages' github author policy; (2) they may also download the session's redacted logs. Whitespace/comma/newline separated; leading `@` stripped; numeric ids work for log download only (the author policy matches logins). Legacy heading `### Log Access Allowlist` is still accepted as an alias. **Frozen at registration** |
 | `### Output Language` | optional | one locale tag (`^[a-z]{2,3}([-_][A-Za-z0-9]{2,8})?$`, e.g. `en`, `zh`, `zh-CN`) → the session's packages emit user-visible prose (issue/PR comments) in that locale via `FKST_OUTPUT_LANG`. The value must **exactly** match a `locales/<value>.lua` file shipped by the session's package (case- and separator-sensitive); a mismatch silently falls back to English. Absent/blank → English |
 | `### Engine Config` | optional | advanced engine tunables, one `KEY=value` per line from a strict allowlist: `FKST_CODEX_PERMIT_SLOTS` (1..32), `FKST_QUEUE_CAPACITY` / `FKST_MAX_IN_FLIGHT_PER_DEPT` / `FKST_DURABLE_ADMISSION_BURST_PER_DEPT` (1..1024), `FKST_RETRY_DEFAULT_MAX_ATTEMPTS` (1..100), the four duration keys (`<n>s\|m\|h`, 1s..7d normalized; effective retry `CAP >= BASE`, defaults 60s/30m), and `FKST_RATE_POOL_<NAME>=<burst>,<refill/min>` (platform pool defaults can only be TIGHTENED, never widened). Any other key → `fkst-substrate-invalid` with the rule in the comment
 
@@ -137,16 +137,16 @@ don't set them.
 ## 5. Config immutability
 
 Once a session has registered, its config (`### Packages` / `### Work Label` / `### Environment`
-/ `### Auto-merge` / `### Log Access Allowlist` / `### Output Language` / `### Engine Config`) is **frozen**. Editing the trigger body does **not**
+/ `### Auto-merge` / `### FKST Contributors` / `### Output Language` / `### Engine Config`) is **frozen**. Editing the trigger body does **not**
 re-launch — the control plane posts a one-time `fkst-config-rejected` comment. **To change
-config, close the trigger and open a new one.** (This is why `### Log Access Allowlist` can't be widened
+config, close the trigger and open a new one.** (This is why `### FKST Contributors` can't be widened
 after the fact to grant retroactive log access.)
 
 ## 6. Download a session's logs
 
 Every session **auto-streams its redacted logs** to storage; the 📥 Logs URL in the
 registration comment is `…/api/v1/logs/{session_id}`. Access is **identity-gated, deny by
-default**, authorized if the requester is the **trigger author**, on the **`### Log Access Allowlist`
+default**, authorized if the requester is the **trigger author**, on the **`### FKST Contributors`
 allow-list**, or a **global admin**. Two ways in:
 - **Browser** — just open the URL; it redirects through GitHub login, then the redacted
   `.tar.gz` downloads. (No S3 URL is ever exposed; the control plane streams the bytes.)

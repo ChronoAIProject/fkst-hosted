@@ -53,7 +53,7 @@ export const TRIGGER_FIELDS: { key: FieldKey; name: string; required: boolean }[
   { key: 'workLabel', name: '### Work Label', required: true },
   { key: 'environment', name: '### Environment', required: false },
   { key: 'autoMerge', name: '### Auto-merge', required: false },
-  { key: 'logAllowlist', name: '### Log Access Allowlist', required: false },
+  { key: 'logAllowlist', name: '### FKST Contributors', required: false },
 ];
 
 export type GrammarKey = 'ownerRepo' | 'ref' | 'path';

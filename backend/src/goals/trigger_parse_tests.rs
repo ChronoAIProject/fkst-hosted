@@ -568,3 +568,37 @@ label
         "comment-only section is an empty map"
     );
 }
+
+#[test]
+fn fkst_contributors_heading_parses_and_legacy_heading_stays_an_alias() {
+    // New heading.
+    let body = format!(
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\nlabel\n### FKST Contributors\n@alice, bob\n"
+    );
+    let spec = parse_trigger_issue_body(&body).expect("parses");
+    assert_eq!(
+        spec.log_access,
+        vec!["alice".to_string(), "bob".to_string()]
+    );
+    // Legacy heading parses BYTE-IDENTICALLY (load-bearing: live issue bodies
+    // re-parse every tick — a changed result would flip their full hash).
+    let spec = parse_trigger_issue_body(&body_with_log_access("@alice, bob")).expect("parses");
+    assert_eq!(
+        spec.log_access,
+        vec!["alice".to_string(), "bob".to_string()]
+    );
+}
+
+#[test]
+fn fkst_contributors_and_legacy_sections_merge_deduped() {
+    let body = format!(
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\nlabel\n\
+         ### FKST Contributors\nalice\nBob\n### Log Access Allowlist\nbob, carol\n"
+    );
+    let spec = parse_trigger_issue_body(&body).expect("both headings parse");
+    // Current heading first; `bob` deduped case-insensitively (first spelling wins).
+    assert_eq!(
+        spec.log_access,
+        vec!["alice".to_string(), "Bob".to_string(), "carol".to_string()]
+    );
+}

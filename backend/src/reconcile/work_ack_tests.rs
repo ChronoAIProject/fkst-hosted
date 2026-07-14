@@ -230,6 +230,7 @@ fn registration(name: &str, work_label: &str) -> SessionRegistration {
         repo: repo(),
         trigger_issue: 1,
         trigger_author_id: 7,
+        trigger_author_login: "author-login".to_string(),
         def: SessionDef {
             name: name.to_string(),
             packages: Vec::new(),

@@ -90,6 +90,10 @@ const GITHUB_CLAIM_MODE_ENV: &str = "FKST_GITHUB_CLAIM_MODE";
 /// work by LABEL, never by assignment. Must be `label`.
 const GITHUB_CLAIM_MODE_VALUE: &str = "label";
 const GITHUB_PROXY_POLL_LABEL_PREFIX_ENV: &str = "FKST_GITHUB_PROXY_POLL_LABEL_PREFIX";
+/// Comma-separated GitHub logins the packages' github author policy trusts
+/// (issues/comments from anyone else are ignored by the session). The bot's own
+/// login is implicitly authorized package-side via `FKST_GITHUB_BOT_LOGIN`.
+const GITHUB_AUTHORIZED_LOGINS_ENV: &str = "FKST_GITHUB_AUTHORIZED_LOGINS";
 const LLM_MODEL_ENV: &str = "FKST_LLM_MODEL";
 const LLM_BASE_URL_ENV: &str = "FKST_LLM_BASE_URL";
 const LLM_WIRE_API_ENV: &str = "FKST_LLM_WIRE_API";
@@ -168,6 +172,10 @@ pub struct SessionPodSpec {
     /// Tighten-merged with the operator rate-pool defaults at render time —
     /// see [`crate::k8s::engine_env::engine_tunables_env`].
     pub engine_config: BTreeMap<String, String>,
+    /// The session's trusted users (trigger author first, then the
+    /// `### FKST Contributors` list, case-insensitively deduped) — rendered as
+    /// `FKST_GITHUB_AUTHORIZED_LOGINS` for the packages' github author policy.
+    pub contributors: Vec<String>,
 }
 
 /// The deterministic Pod/Secret name for a session (`fkst-sess-<session_id>`).
@@ -272,6 +280,14 @@ pub(crate) fn session_env_pairs(
         .drain(..)
         .map(|(name, value)| (name.to_string(), value))
         .collect();
+    // Trusted users — ABSENT (not empty) when there are none, so the packages'
+    // author-policy default is untouched rather than fed an empty list.
+    if !spec.contributors.is_empty() {
+        env.push((
+            GITHUB_AUTHORIZED_LOGINS_ENV.to_string(),
+            spec.contributors.join(","),
+        ));
+    }
     // The engine-tunable tail: output locale + the tighten-merged engine config
     // (operator rate-pool defaults vs the trigger's `### Engine Config`). All
     // map-level merged, so duplicate EnvVar names are impossible; nothing set ⇒

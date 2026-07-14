@@ -63,6 +63,12 @@ pub struct SessionRegistration {
     pub trigger_issue: i64,
     /// The numeric GitHub id of the issue author (the control-path authz subject).
     pub trigger_author_id: i64,
+    /// The issue author's GitHub LOGIN. Identity metadata like
+    /// [`trigger_author_id`](Self::trigger_author_id) — EXCLUDED from both config
+    /// hashes. Injected (author-first) into `FKST_GITHUB_AUTHORIZED_LOGINS` so the
+    /// packages' github author policy always trusts the person who opened the
+    /// trigger.
+    pub trigger_author_login: String,
     /// The launch inputs.
     pub def: SessionDef,
     /// The deterministic session id (see [`crate::session_spec::derive_session_id`]).

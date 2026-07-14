@@ -236,7 +236,7 @@ export const zh: SiteContent = {
     },
     logs: {
       intro:
-        '每个会话都会自动把脱敏日志流式写入存储。注册评论中的 📥 日志 URL 为 `/api/v1/logs/{session_id}`。访问按身份鉴权、默认拒绝 —— 仅当你是触发者、在 `### Log Access Allowlist` 中，或为全局管理员时才获授权。有两种方式：',
+        '每个会话都会自动把脱敏日志流式写入存储。注册评论中的 📥 日志 URL 为 `/api/v1/logs/{session_id}`。访问按身份鉴权、默认拒绝 —— 仅当你是触发者、在 `### FKST Contributors` 列表中，或为全局管理员时才获授权。有两种方式：',
       browserTitle: '浏览器',
       browser:
         '直接打开该 URL。它会经 GitHub 登录跳转，随后下载脱敏后的 `.tar.gz`。绝不会暴露任何存储 URL —— 控制平面会流式传输字节。',

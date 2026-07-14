@@ -263,7 +263,31 @@ fn session_pod_spec_from(reg: &SessionRegistration, bot_login: Option<String>) -
         config_hash: reg.config_hash.clone(),
         output_lang: reg.def.output_lang.clone(),
         engine_config: reg.def.engine_config.clone(),
+        contributors: session_contributors(reg),
     }
+}
+
+/// The session's trusted-users list for `FKST_GITHUB_AUTHORIZED_LOGINS`: the
+/// trigger author's login FIRST (always trusted, skipped only if GitHub gave us
+/// a blank login), then the `### FKST Contributors` tokens, deduped
+/// case-insensitively (GitHub logins are case-insensitive). Numeric-id tokens
+/// ride along harmlessly — the packages' author policy matches logins, so an id
+/// token never matches anything (same never-matching leniency as log authz).
+fn session_contributors(reg: &SessionRegistration) -> Vec<String> {
+    let mut contributors: Vec<String> = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    let author = reg.trigger_author_login.trim();
+    for token in std::iter::once(author).chain(reg.log_access.iter().map(String::as_str)) {
+        if token.is_empty() {
+            continue;
+        }
+        let folded = token.to_ascii_lowercase();
+        if !seen.contains(&folded) {
+            seen.push(folded);
+            contributors.push(token.to_string());
+        }
+    }
+    contributors
 }
 
 /// Resolve the WRITE-ONLY chrono-storage SA creds to inject into a session Secret,

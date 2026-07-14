@@ -10,6 +10,11 @@ Opening this issue starts an fkst session. fkst parses the sections below by
 their EXACT `### ` headings. Do NOT rename the headings. Do NOT put secrets,
 tokens, or credentials anywhere in this issue — they are supplied only through
 your environment and are never read from issue text.
+
+⚠️ ONE-SHOT CONFIG: the moment the session registers (the 🟢 comment appears),
+EVERYTHING in this issue body is FROZEN. Edits after that are rejected with an
+`fkst-config-rejected` label and change nothing. To change any setting, close
+this issue and open a new trigger.
 -->
 
 ### Session Name
@@ -53,15 +58,19 @@ deleting this section, leaves auto-merge OFF (the default).
 -->
 false
 
-### Log Access Allowlist
+### FKST Contributors
 
 <!--
-Optional ALLOW-LIST (not a switch). Log streaming is ALWAYS on for every session;
-this section only WIDENS who may DOWNLOAD this session's redacted logs. List extra
-GitHub logins or numeric user ids — one per line, or comma/space separated — that may
-download the logs IN ADDITION to you (the issue author) and the global admins, who
-always can. A leading `@` is fine. Frozen once the session registers. Delete this
-whole section for author + admins only (the default).
+Optional TRUSTED-USERS list, doing two things at once. List extra GitHub logins
+— one per line, or comma/space separated; a leading `@` is fine — that you trust
+on this session IN ADDITION to you (the issue author), who is always included:
+1. The session ONLY acts on issues/comments written by its contributors (you,
+   these users, and the bot). Anyone else's input is ignored by the substrate.
+2. These users may also DOWNLOAD the session's redacted logs (log streaming is
+   always on; global admins can always download).
+Numeric user ids are also accepted, but only for log download — the substrate
+matches contributors by LOGIN. Delete this whole section to trust only yourself.
+(The old heading `### Log Access Allowlist` is still accepted as an alias.)
 -->
 
 ### Output Language

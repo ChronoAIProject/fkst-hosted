@@ -29,7 +29,7 @@ const SEED_WORK_LABEL: &str = "fkst-evolve";
 const SEED_TITLE: &str = "[session] evolve (auto-seeded)";
 
 /// Render the seed trigger-issue body. `log_access_owner` is the repo owner login,
-/// placed in the `### Log Access Allowlist` (auto-merge is on). The leading marker
+/// placed in the `### FKST Contributors` (auto-merge is on). The leading marker
 /// comment is intro text the parser ignores (it starts at the first `### ` heading)
 /// and marks the issue as auto-seeded for humans.
 fn build_seed_body(log_access_owner: &str) -> String {
@@ -39,7 +39,7 @@ fn build_seed_body(log_access_owner: &str) -> String {
          ### Packages\n{SEED_PACKAGE_REF}\n\n\
          ### Work Label\n{SEED_WORK_LABEL}\n\n\
          ### Auto-merge\ntrue\n\n\
-         ### Log Access Allowlist\n{log_access_owner}\n"
+         ### FKST Contributors\n{log_access_owner}\n"
     )
 }
 

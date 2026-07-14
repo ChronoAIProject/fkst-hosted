@@ -216,6 +216,7 @@ pub(super) fn registration() -> SessionRegistration {
         },
         trigger_issue: 7,
         trigger_author_id: 583231,
+        trigger_author_login: "author-login".to_string(),
         def: SessionDef {
             name: "site".to_string(),
             packages: vec![

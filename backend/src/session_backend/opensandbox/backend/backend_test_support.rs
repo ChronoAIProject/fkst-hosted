@@ -48,6 +48,7 @@ pub(crate) fn spec() -> SessionPodSpec {
         config_hash: config_hash(),
         output_lang: None,
         engine_config: BTreeMap::new(),
+        contributors: vec!["author-login".to_string()],
     }
 }
 
