@@ -70,13 +70,6 @@ local function raise_failure(value, phase)
   error("consensus: angle-results-unavailable: " .. detail, 0)
 end
 
-function M.assert_has_valid(results, phase)
-  local value = counts(results)
-  if value.valid == 0 then
-    raise_failure(value, phase)
-  end
-end
-
 function M.assert_all_valid(results, phase)
   local value = counts(results)
   if value.total == 0 or value.valid ~= value.total then

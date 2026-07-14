@@ -891,7 +891,7 @@ return {
       { angle = "a", verdict = "approve", reply = string.rep("a", 2000), exit_code = 0 },
       { angle = "b", verdict = "abstain", reply = string.rep("b", 2000), exit_code = 0 },
       { angle = "c", verdict = "abstain", reply = string.rep("c", 2000), exit_code = 0 },
-      { angle = "d", stdout = string.rep("d", 2000), exit_code = 1 },
+      { angle = "d", verdict = "abstain", reply = string.rep("d", 2000), exit_code = 0 },
     })
 
     t.eq(#payload.narrowed_question, 2000)
