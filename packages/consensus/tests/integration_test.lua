@@ -714,30 +714,35 @@ return {
     t.eq(#codex_calls(), 7)
   end,
 
-  test_partial_angle_worker_failure_leaves_the_round_retryable_without_converge = function()
-    mock_judgment_runtime()
-    mock_angle("teleology", "approve", "Teleology angle approves.")
-    mock_judgment_dir()
-    t.mock_command("consensus-angle-parsimony", {
-      stderr = "forced failure",
-      exit_code = 7,
-    })
-    mock_angle("fidelity", "approve", "Fidelity angle approves.")
-    mock_rebuttal_defend("teleology", "approve", "Teleology still approves.")
-    mock_rebuttal_defend("parsimony", "abstain", "Parsimony cannot judge after the failed P1.")
-    mock_rebuttal_defend("fidelity", "approve", "Fidelity still approves.")
-    mock_synthesis("converge: surviving seats disagree on retry ownership + inspect the retry contract")
-
+  test_persistent_partial_angle_worker_failure_retries_same_round_without_converge = function()
     local target = proposal({
       round = 2,
       dedup_key = "proposal-42-v1/loop/2",
     })
-    local result = run_namespaced_decide(target, opts("partial-angle-failure"))
-    t.is_true(result.exit_code ~= 0)
-    t.eq(#result.raises, 0)
-    t.is_true(tostring(result.error):find("codex-failed", 1, true) ~= nil)
-    t.is_true(tostring(result.error):find("phase=blind", 1, true) ~= nil)
-    t.eq(#codex_calls(), 3)
+    local run_opts = opts("persistent-partial-angle-failure")
+    for _ = 1, 2 do
+      mock_judgment_runtime()
+      mock_angle("teleology", "approve", "Teleology angle approves.")
+      mock_judgment_dir()
+      t.mock_command("consensus-angle-parsimony", {
+        stderr = "forced failure",
+        exit_code = 7,
+      })
+      mock_angle("fidelity", "approve", "Fidelity angle approves.")
+      mock_rebuttal_defend("teleology", "approve", "Teleology still approves.")
+      mock_rebuttal_defend("parsimony", "abstain", "Parsimony cannot judge after the failed P1.")
+      mock_rebuttal_defend("fidelity", "approve", "Fidelity still approves.")
+      mock_synthesis("converge: surviving seats disagree on retry ownership + inspect the retry contract")
+
+      local result = run_namespaced_decide(target, run_opts)
+      t.is_true(result.exit_code ~= 0)
+      t.eq(#result.raises, 0)
+      t.is_true(tostring(result.error):find("codex-failed", 1, true) ~= nil)
+      t.is_true(tostring(result.error):find("phase=blind", 1, true) ~= nil)
+    end
+    t.eq(target.round, 2)
+    t.eq(target.dedup_key, "proposal-42-v1/loop/2")
+    t.eq(#codex_calls(), 6)
   end,
 
   test_partial_rebuttal_worker_failure_fails_closed_before_synthesis = function()
