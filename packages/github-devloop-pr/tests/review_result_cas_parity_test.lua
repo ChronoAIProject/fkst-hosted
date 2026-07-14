@@ -419,11 +419,7 @@ local function assert_fixing_shadow_case(fixture)
   t.eq(shadow.cas_policy_id, POLICY_ID, fixture.name .. ": selected CAS policy")
   t.eq(shadow.grant, nil, fixture.name .. ": grant disabled")
   t.eq(evidence.current.state, fixture.current_state, fixture.name .. ": evidence current state")
-  t.eq(
-    evidence.current.version,
-    transition_version.safe_version_segment(fixture.current_version or ""),
-    fixture.name .. ": evidence safe current version"
-  )
+  t.eq(evidence.current.version, fixture.current_version or "", fixture.name .. ": evidence raw current version")
   t.eq(evidence.variant, "reviewing_to_fixing", fixture.name .. ": evidence variant")
   t.eq(evidence.incoming_version, fixture.incoming_version, fixture.name .. ": evidence incoming version")
   t.eq(evidence.target_version, nil, fixture.name .. ": evidence target version")

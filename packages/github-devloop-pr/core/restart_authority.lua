@@ -1,6 +1,6 @@
 -- This grant-disabled shadow slice proves CAS-admission-composition parity only.
--- It models the review_result approved and changes-requested edges, including the production cyclic
--- probe's safe current-version form and its post-probe safe-version overlay.
+-- It models selected review_result and fix edges while preserving the raw snapshot
+-- fact for each policy profile to project independently.
 -- No live effect is authorized or emitted by this module.
 
 local core = require("core")
@@ -16,7 +16,6 @@ local edges = owner_pending_projection.edges(owner, rows, inventories)
 local projection = owner_pending_projection.derive(owner, rows, inventories)
 local catalog = require("devloop.restart_cas_catalog")
 local restart_effect_entitlements = require("devloop.restart_effect_entitlements")
-local transition_version = require("contract.transition_version")
 
 local M = {}
 local issued = setmetatable({}, { __mode = "k" })
@@ -74,20 +73,12 @@ function M.seal_snapshot(fields)
     error("restart-authority: snapshot-owner-mismatch: owner must be " .. tostring(owner))
   end
   local current = type(fields.current) == "table" and fields.current or {}
-  -- Present current.version in SAFE form, byte-exact with what production's review_result
-  -- department feeds its cyclic probe (departments/review_result/main.lua:184:
-  -- transition_version.safe_version_segment(state.version or "")). This is correct for the
-  -- ONLY policy profile this module admits (fence: cas.legacy_review_result_v1 variants
-  -- whose base_current_version_form="safe"); it is idempotent with the catalog's own safe
-  -- re-projection (safe(safe(x))==safe(x)). If the fence is ever widened to a raw-form edge,
-  -- derive the form from the catalog's base_current_version_form instead of this unconditional
-  -- projection.
   local sealed = {
     owner = fields.owner,
     proposal_id = fields.proposal_id,
     current = {
       state = current.state,
-      version = transition_version.safe_version_segment(current.version or ""),
+      version = current.version or "",
     },
   }
   issued[sealed] = true
@@ -118,9 +109,12 @@ function M.decide_transition(sealed_snapshot, intent)
   if matches > 1 then
     return illegal("ambiguous-variant")
   end
-  if edge.cas_policy_id ~= "cas.legacy_review_result_v1"
-    or (edge.cas_variant ~= "reviewing_to_merge_ready"
-      and edge.cas_variant ~= "reviewing_to_fixing") then
+  local supported_review_result = edge.cas_policy_id == "cas.legacy_review_result_v1"
+    and (edge.cas_variant == "reviewing_to_merge_ready"
+      or edge.cas_variant == "reviewing_to_fixing")
+  local supported_fix = edge.cas_policy_id == "cas.legacy_fix_v1"
+    and edge.cas_variant == "fixing_to_reviewing"
+  if not supported_review_result and not supported_fix then
     return illegal("unsupported-shadow-edge")
   end
   if normalized.source_boundary ~= nil and normalized.source_boundary ~= edge.source.boundary then
