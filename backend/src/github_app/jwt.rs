@@ -92,9 +92,9 @@ mod tests {
         let pub_pem = public_key_pem(&public);
         let dec_key = DecodingKey::from_rsa_pem(pub_pem.as_bytes()).expect("dec key");
         let mut validation = Validation::new(Algorithm::RS256);
-        // Do not validate audience/expired for this structural test.
+        // Do not validate expiry for this structural test (signature IS verified
+        // against the test public key).
         validation.validate_exp = false;
-        validation.insecure_disable_signature_validation();
 
         let data = decode::<AppClaims>(token_str, &dec_key, &validation).expect("decode");
         let claims = data.claims;
@@ -129,17 +129,20 @@ mod tests {
 
     #[test]
     fn minted_token_is_brief_and_within_10_minute_cap() {
-        let (private, _) = generate_keypair();
+        let (private, public) = generate_keypair();
         let enc = encoding_key_from_private(&private);
         let now = epoch_secs();
         let token = mint_app_jwt(1, &enc).expect("mint");
         let token_str = token.expose_secret();
 
+        // jsonwebtoken 10 enforces key/algorithm family matching even with
+        // signature validation disabled (the type-confusion fix), so decode
+        // with the real public key — a strictly stronger check anyway.
+        let pub_pem = public_key_pem(&public);
+        let dec_key = DecodingKey::from_rsa_pem(pub_pem.as_bytes()).expect("dec key");
         let mut validation = Validation::new(Algorithm::RS256);
         validation.validate_exp = false;
-        validation.insecure_disable_signature_validation();
-        let data = decode::<AppClaims>(token_str, &DecodingKey::from_secret(b"-"), &validation)
-            .expect("decode");
+        let data = decode::<AppClaims>(token_str, &dec_key, &validation).expect("decode");
 
         // exp must be < now + 600 (10 min GitHub cap)
         assert!(
