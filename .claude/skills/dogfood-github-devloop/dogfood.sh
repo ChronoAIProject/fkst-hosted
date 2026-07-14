@@ -662,10 +662,13 @@ board_one() { # $1 name, $2 stale_hours
     printf "  PR#%-4s →%-12s %-12s %s\n" "$num" "$base" "$flow" "$title"
   done
   echo "── issues (by fkst-dev state) ──"
-  gh api "repos/$REPO/issues?state=open&per_page=100" --jq '.[]|select(.pull_request==null)|([.labels[].name]|map(select(startswith("fkst-dev:")and .!="fkst-dev:enabled"))) as $labels|"\(.number)\t\(.updated_at)\t\(if ($labels|length)==0 then "__fkst_stateless__" else ($labels|join(",")) end)\t\(.title[0:38])"' 2>/dev/null | \
+  gh api "repos/$REPO/issues?state=open&per_page=100" --jq '.[]|select(.pull_request==null)|([.labels[].name]|map(select(startswith("fkst-dev:")and .!="fkst-dev:enabled"))) as $labels|(([.labels[].name]|index("fkst-dashboard"))!=null) as $dash|"\(.number)\t\(.updated_at)\t\(if ($labels|length)>0 then ($labels|join(",")) elif $dash then "__fkst_dashboard__" else "__fkst_stateless__" end)\t\(.title[0:38])"' 2>/dev/null | \
   while IFS=$'\t' read -r num upd label title; do
     local a st cls workflow_fact; a=$(( (now - $(epoch_utc "$upd")) / 3600 )); st="$(issue_primary_state "$label")"
-    if [ -z "$label" ] || [ "$label" = "__fkst_stateless__" ]; then
+    if [ "$label" = "__fkst_dashboard__" ]; then
+      # fkst-dashboard is an intentionally long-lived tracked surface (intake decision=track), not pipeline work — never STRANDED
+      st="dashboard"; cls="✓ dashboard (tracked)"
+    elif [ -z "$label" ] || [ "$label" = "__fkst_stateless__" ]; then
       if workflow_fact=$(workflow_board_fact "$num"); then
         st="${workflow_fact%%$'\t'*}"
         cls="${workflow_fact#*$'\t'}"
