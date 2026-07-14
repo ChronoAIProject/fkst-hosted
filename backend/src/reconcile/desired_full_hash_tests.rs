@@ -19,6 +19,7 @@ fn base_reg() -> SessionRegistration {
         },
         trigger_issue: 5,
         trigger_author_id: 9,
+        trigger_author_login: "author-login".to_string(),
         def: SessionDef {
             name: "sess".to_string(),
             packages: vec![pkg("acme", "tools", "main", "pkg/a")],

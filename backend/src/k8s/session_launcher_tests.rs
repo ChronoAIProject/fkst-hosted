@@ -37,6 +37,7 @@ fn spec() -> SessionPodSpec {
         config_hash: "cfg-deadbeef".to_string(),
         output_lang: None,
         engine_config: BTreeMap::new(),
+        contributors: vec!["author-login".to_string()],
     }
 }
 
@@ -225,6 +226,41 @@ fn session_env_pairs_render_operator_rate_pools_with_a_pinned_ledger_root() {
     names.sort();
     names.dedup();
     assert_eq!(names.len(), pairs.len(), "env names must be unique");
+}
+
+#[test]
+fn session_env_pairs_render_the_contributors_only_when_present() {
+    // The fixture spec carries the author login → the env pair renders.
+    let pairs = session_env_pairs(&spec(), &config());
+    assert_eq!(
+        pairs
+            .iter()
+            .find(|(k, _)| k == "FKST_GITHUB_AUTHORIZED_LOGINS")
+            .map(|(_, v)| v.as_str()),
+        Some("author-login")
+    );
+    // Multiple contributors render comma-joined, author first.
+    let mut with_more = spec();
+    with_more.contributors = vec![
+        "author-login".to_string(),
+        "alice".to_string(),
+        "bob".to_string(),
+    ];
+    let pairs = session_env_pairs(&with_more, &config());
+    assert_eq!(
+        pairs
+            .iter()
+            .find(|(k, _)| k == "FKST_GITHUB_AUTHORIZED_LOGINS")
+            .map(|(_, v)| v.as_str()),
+        Some("author-login,alice,bob")
+    );
+    // Empty ⇒ ABSENT (not an empty value), preserving the packages' default.
+    let mut none = spec();
+    none.contributors = Vec::new();
+    let pairs = session_env_pairs(&none, &config());
+    assert!(pairs
+        .iter()
+        .all(|(k, _)| k != "FKST_GITHUB_AUTHORIZED_LOGINS"));
 }
 
 #[test]

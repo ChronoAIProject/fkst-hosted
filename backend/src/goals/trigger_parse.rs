@@ -36,6 +36,12 @@ const HEADING_WORK_LABEL: &str = "### Work Label";
 const HEADING_ENVIRONMENT: &str = "### Environment";
 const HEADING_AUTO_MERGE: &str = "### Auto-merge";
 const HEADING_LOG_ACCESS: &str = "### Log Access Allowlist";
+/// The CURRENT name of the trusted-users section (issue #487). The legacy
+/// [`HEADING_LOG_ACCESS`] heading stays accepted as an alias forever: the
+/// reconciler re-parses live issue bodies every tick, so dropping it would
+/// change existing sessions' parsed list → flip their `full_config_hash` →
+/// false `fkst-config-rejected` across the fleet.
+const HEADING_FKST_CONTRIBUTORS: &str = "### FKST Contributors";
 const HEADING_OUTPUT_LANGUAGE: &str = "### Output Language";
 const HEADING_ENGINE_CONFIG: &str = "### Engine Config";
 
@@ -238,30 +244,38 @@ fn parse_auto_merge(sections: &[(String, String)]) -> bool {
     })
 }
 
-/// `### Log Access Allowlist` — OPTIONAL, lenient. Parse the section into the list of GitHub
-/// logins or numeric ids (BEYOND the issue author + the global admins) allowed to
-/// download this session's redacted logs. Tokens are separated by ANY whitespace,
-/// comma, or newline, so an author can list them one-per-line or comma-separated. A
-/// leading `@` on a login is stripped (`@alice` ≡ `alice`); empty tokens are
-/// dropped. Absent/blank → empty. Never errors: this is an allow-list, not a
-/// validated field. The tokens are NOT resolved to real accounts here — the
-/// authorization check ([`crate::reconcile::log_authz::is_authorized`]) matches a
-/// requester against each entry by numeric id AND by case-insensitive login, so an
-/// entry that names no real account simply never matches.
+/// `### FKST Contributors` (legacy alias: `### Log Access Allowlist`) — OPTIONAL,
+/// lenient. The session's trusted-users list, serving BOTH purposes: (a) extra
+/// GitHub logins/ids (beyond the issue author + the global admins) allowed to
+/// download the session's redacted logs, and (b) the logins injected into the
+/// session as `FKST_GITHUB_AUTHORIZED_LOGINS`, which the packages' github author
+/// policy uses to decide whose issues/comments the session acts on. Tokens are
+/// separated by ANY whitespace, comma, or newline; a leading `@` is stripped;
+/// empty tokens dropped. Both headings may appear — tokens merge (current heading
+/// first), deduped case-insensitively. Absent/blank → empty. Never errors. Tokens
+/// are NOT resolved to real accounts: log authz matches by numeric id AND
+/// case-insensitive login, and the author policy matches logins, so a token that
+/// names no real account simply never matches anything.
 fn parse_log_access(sections: &[(String, String)]) -> Vec<String> {
-    let block = match sections
-        .iter()
-        .find(|(heading, _)| heading == HEADING_LOG_ACCESS)
-    {
-        Some((_, content)) => content.as_str(),
-        None => return Vec::new(),
-    };
-    block
-        .split(|c: char| c.is_whitespace() || c == ',')
-        .map(|token| token.trim().trim_start_matches('@'))
-        .filter(|token| !token.is_empty())
-        .map(str::to_string)
-        .collect()
+    let mut tokens: Vec<String> = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    for heading in [HEADING_FKST_CONTRIBUTORS, HEADING_LOG_ACCESS] {
+        let Some((_, content)) = sections.iter().find(|(h, _)| h == heading) else {
+            continue;
+        };
+        for token in content
+            .split(|c: char| c.is_whitespace() || c == ',')
+            .map(|token| token.trim().trim_start_matches('@'))
+            .filter(|token| !token.is_empty())
+        {
+            let folded = token.to_ascii_lowercase();
+            if !seen.contains(&folded) {
+                seen.push(folded);
+                tokens.push(token.to_string());
+            }
+        }
+    }
+    tokens
 }
 
 /// `### Session Name` — required; EXACTLY ONE non-empty line that satisfies the
