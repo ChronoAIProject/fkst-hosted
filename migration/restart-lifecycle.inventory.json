@@ -1,5 +1,5 @@
 {
-  "artifact_sha256": "66877531f7a1129db8705dc2cf65762cf7e91bf2f616f983ba954140b9f509ce",
+  "artifact_sha256": "eab8e6f8d61aad81b0f87396d4a3fdae2fa64748e50540b613f9c44b95acd2b9",
   "consumer_entry_acceptors": [
     {
       "ordinal": "consumes:consensus.consensus_converge",
@@ -805,6 +805,689 @@
         "source_state": "reviewing",
         "target": "review-meta"
       }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.cyclic_transition_status:apply"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#pr/7"
+        }
+      ],
+      "observation_id": "writer:github-devloop-pr:review-meta/fixing/apply/apply/blocked",
+      "old_inputs": {
+        "caller_from_states": [
+          "review-meta"
+        ],
+        "current_fact": {
+          "stage_rank": 710,
+          "state": "review-meta",
+          "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+        },
+        "handoff_reference": {
+          "review_meta_comment_id": "IC_review_meta_observation_1"
+        },
+        "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "applied",
+        "emitted_effects": [
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "comment:pr:review-meta-result",
+            "ordinal": 1,
+            "sink_kind": "comment"
+          },
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "label:issue:review-meta-result",
+            "ordinal": 2,
+            "sink_kind": "label"
+          }
+        ],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [
+          {
+            "effect_id": "comment:pr:review-meta-result",
+            "payload": {
+              "body": "github-devloop review-meta action: block\n\nReason:\nThe review cannot be repaired safely.\n\n<!-- fkst:github-devloop:state:v1 proposal=\"github-devloop/issue/owner/repo/42\" state=\"blocked\" version=\"ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-meta-action/1\" stage_rank=\"800\" marker_order_key=\"2026-06-03T01-02-03Z/000000000000/000000000000/000000000000/000000000000/000000000001/000000000000/000000000000/000000000800\" -->\n<!-- fkst:github-devloop:review-meta:v1 proposal=\"github-devloop/issue/owner/repo/42\" dedup=\"review-meta/github-devloop/issue/owner/repo/42/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/7/3/consensus-github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review/loop/2\" action=\"block\" version=\"ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-meta-action/1\" -->",
+              "dedup_key": "review-meta/comment/review-meta/github-devloop/issue/owner/repo/42/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/7/3/consensus-github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review/loop/2/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-meta-action/1",
+              "pr_number": 7,
+              "repo": "owner/repo",
+              "schema": "github-proxy.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#pr/7"
+              }
+            },
+            "queue": "github-proxy.github_pr_comment_request"
+          },
+          {
+            "effect_id": "label:issue:review-meta-result",
+            "payload": {
+              "add_labels": [
+                "fkst-dev:blocked"
+              ],
+              "dedup_key": "review-meta/label/block/review-meta/github-devloop/issue/owner/repo/42/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/7/3/consensus-github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review/loop/2/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-meta-action/1",
+              "issue_number": "42",
+              "label_colors": {
+                "fkst-dev:blocked": "1B1F23"
+              },
+              "remove_labels": [
+                "fkst-dev:thinking",
+                "fkst-dev:ready",
+                "fkst-dev:implementing",
+                "fkst-dev:pr-open",
+                "fkst-dev:reviewing",
+                "fkst-dev:merge-ready",
+                "fkst-dev:fixing",
+                "fkst-dev:impl-failed",
+                "fkst-dev:declined",
+                "fkst-dev:review-meta",
+                "fkst-dev:merging",
+                "fkst-dev:merged",
+                "fkst-dev:awaiting-pr"
+              ],
+              "repo": "owner/repo",
+              "schema": "github-proxy.label.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#pr/7"
+              },
+              "target_kind": "issue",
+              "target_number": "42"
+            },
+            "queue": "github-proxy.github_issue_label_request"
+          }
+        ],
+        "reason_code": "apply",
+        "status": "apply",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop-pr",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "cyclic_transition_status:review-meta->fixing",
+        "path": "packages/github-devloop-pr/departments/review_meta/main.lua",
+        "symbol": "pipeline"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-devloop.review-meta.v1",
+        "generation_epoch": {
+          "current_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "target_version": null
+        },
+        "kind": "cyclic_transition_status",
+        "lineage": {
+          "dedup_key": "review-meta/github-devloop/issue/owner/repo/42/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/7/3/consensus-github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review/loop/2",
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "review_dedup_key": "consensus:github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review/loop/2",
+          "review_proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#pr/7"
+          }
+        },
+        "source_boundary": null,
+        "source_state": "review-meta",
+        "target": "fixing"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.cyclic_transition_status:apply"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#pr/7"
+        }
+      ],
+      "observation_id": "writer:github-devloop-pr:review-meta/fixing/apply/apply/fixing",
+      "old_inputs": {
+        "caller_from_states": [
+          "review-meta"
+        ],
+        "current_fact": {
+          "stage_rank": 710,
+          "state": "review-meta",
+          "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+        },
+        "handoff_reference": {
+          "review_meta_comment_id": "IC_review_meta_observation_1"
+        },
+        "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "applied",
+        "emitted_effects": [
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "comment:pr:review-meta-result",
+            "ordinal": 1,
+            "sink_kind": "comment"
+          },
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "label:issue:review-meta-result",
+            "ordinal": 2,
+            "sink_kind": "label"
+          }
+        ],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [
+          {
+            "effect_id": "comment:pr:review-meta-result",
+            "payload": {
+              "body": "github-devloop review-meta action: fix\n\nReason:\nRun another fix pass.\n\n<!-- fkst:github-devloop:state:v1 proposal=\"github-devloop/issue/owner/repo/42\" state=\"fixing\" version=\"ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-meta-action/1\" stage_rank=\"700\" marker_order_key=\"2026-06-03T01-02-03Z/000000000000/000000000000/000000000000/000000000000/000000000001/000000000000/000000000000/000000000700\" -->\n<!-- fkst:github-devloop:review-meta:v1 proposal=\"github-devloop/issue/owner/repo/42\" dedup=\"review-meta/github-devloop/issue/owner/repo/42/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/7/3/consensus-github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review/loop/2\" action=\"fix\" version=\"ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-meta-action/1\" gap=\"missing OLD review-meta observation evidence\" -->",
+              "dedup_key": "review-meta/comment/review-meta/github-devloop/issue/owner/repo/42/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/7/3/consensus-github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review/loop/2/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-meta-action/1",
+              "handoff": {
+                "blocking_gap": "missing OLD review-meta observation evidence",
+                "kind": "github-devloop.fixing",
+                "pr_number": 7,
+                "proposal_id": "github-devloop/issue/owner/repo/42",
+                "repair_input": "review-feedback",
+                "review_dedup_key": "review-meta/github-devloop/issue/owner/repo/42/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/7/3/consensus-github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review/loop/2",
+                "review_proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456",
+                "reviewed_head_sha": "def456",
+                "source_ref": {
+                  "kind": "external",
+                  "ref": "owner/repo#pr/7"
+                },
+                "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-meta-action/1"
+              },
+              "pr_number": 7,
+              "repo": "owner/repo",
+              "schema": "github-proxy.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#pr/7"
+              }
+            },
+            "queue": "github-proxy.github_pr_comment_request"
+          },
+          {
+            "effect_id": "label:issue:review-meta-result",
+            "payload": {
+              "add_labels": [
+                "fkst-dev:fixing"
+              ],
+              "dedup_key": "review-meta/label/fix/review-meta/github-devloop/issue/owner/repo/42/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/7/3/consensus-github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review/loop/2/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-meta-action/1",
+              "issue_number": "42",
+              "label_colors": {
+                "fkst-dev:fixing": "D93F0B"
+              },
+              "remove_labels": [
+                "fkst-dev:thinking",
+                "fkst-dev:ready",
+                "fkst-dev:implementing",
+                "fkst-dev:pr-open",
+                "fkst-dev:reviewing",
+                "fkst-dev:merge-ready",
+                "fkst-dev:impl-failed",
+                "fkst-dev:declined",
+                "fkst-dev:blocked",
+                "fkst-dev:review-meta",
+                "fkst-dev:merging",
+                "fkst-dev:merged",
+                "fkst-dev:awaiting-pr"
+              ],
+              "repo": "owner/repo",
+              "schema": "github-proxy.label.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#pr/7"
+              },
+              "target_kind": "issue",
+              "target_number": "42"
+            },
+            "queue": "github-proxy.github_issue_label_request"
+          }
+        ],
+        "reason_code": "apply",
+        "status": "apply",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop-pr",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "cyclic_transition_status:review-meta->fixing",
+        "path": "packages/github-devloop-pr/departments/review_meta/main.lua",
+        "symbol": "pipeline"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-devloop.review-meta.v1",
+        "generation_epoch": {
+          "current_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "target_version": null
+        },
+        "kind": "cyclic_transition_status",
+        "lineage": {
+          "dedup_key": "review-meta/github-devloop/issue/owner/repo/42/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/7/3/consensus-github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review/loop/2",
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "review_dedup_key": "consensus:github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review/loop/2",
+          "review_proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#pr/7"
+          }
+        },
+        "source_boundary": null,
+        "source_state": "review-meta",
+        "target": "fixing"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.cyclic_transition_status:apply"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#pr/7"
+        }
+      ],
+      "observation_id": "writer:github-devloop-pr:review-meta/fixing/apply/codex-deferred/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "review-meta"
+        ],
+        "current_fact": {
+          "stage_rank": 710,
+          "state": "review-meta",
+          "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+        },
+        "handoff_reference": {
+          "review_meta_comment_id": "IC_review_meta_observation_1"
+        },
+        "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "applied",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "codex-deferred",
+        "status": "apply",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop-pr",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "cyclic_transition_status:review-meta->fixing",
+        "path": "packages/github-devloop-pr/departments/review_meta/main.lua",
+        "symbol": "pipeline"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-devloop.review-meta.v1",
+        "generation_epoch": {
+          "current_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "target_version": null
+        },
+        "kind": "cyclic_transition_status",
+        "lineage": {
+          "dedup_key": "review-meta/github-devloop/issue/owner/repo/42/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/7/3/consensus-github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review/loop/2",
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "review_dedup_key": "consensus:github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review/loop/2",
+          "review_proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#pr/7"
+          }
+        },
+        "source_boundary": null,
+        "source_state": "review-meta",
+        "target": "fixing"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.cyclic_transition_status:apply"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#pr/7"
+        }
+      ],
+      "observation_id": "writer:github-devloop-pr:review-meta/fixing/apply/liveness-deferred/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "review-meta"
+        ],
+        "current_fact": {
+          "stage_rank": 710,
+          "state": "review-meta",
+          "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+        },
+        "handoff_reference": {
+          "review_meta_comment_id": "IC_review_meta_observation_1"
+        },
+        "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "skip-idempotent(live-exec-ref)",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "liveness-deferred",
+        "status": "apply",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop-pr",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "cyclic_transition_status:review-meta->fixing",
+        "path": "packages/github-devloop-pr/departments/review_meta/main.lua",
+        "symbol": "pipeline"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-devloop.review-meta.v1",
+        "generation_epoch": {
+          "current_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "target_version": null
+        },
+        "kind": "cyclic_transition_status",
+        "lineage": {
+          "dedup_key": "review-meta/github-devloop/issue/owner/repo/42/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/7/3/consensus-github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review/loop/2",
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "review_dedup_key": "consensus:github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review/loop/2",
+          "review_proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#pr/7"
+          }
+        },
+        "source_boundary": null,
+        "source_state": "review-meta",
+        "target": "fixing"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.cyclic_transition_status:idempotent"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#pr/7"
+        }
+      ],
+      "observation_id": "writer:github-devloop-pr:review-meta/fixing/idempotent/review-meta-marker-visible/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "review-meta"
+        ],
+        "current_fact": {
+          "stage_rank": 700,
+          "state": "fixing",
+          "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+        },
+        "handoff_reference": {
+          "review_meta_comment_id": "IC_review_meta_observation_1"
+        },
+        "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "skip-idempotent(review-meta marker already visible)",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "review-meta-marker-visible",
+        "status": "idempotent",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop-pr",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "cyclic_transition_status:review-meta->fixing",
+        "path": "packages/github-devloop-pr/departments/review_meta/main.lua",
+        "symbol": "pipeline"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-devloop.review-meta.v1",
+        "generation_epoch": {
+          "current_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "target_version": null
+        },
+        "kind": "cyclic_transition_status",
+        "lineage": {
+          "dedup_key": "review-meta/github-devloop/issue/owner/repo/42/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/7/3/consensus-github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review/loop/2",
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "review_dedup_key": "consensus:github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review/loop/2",
+          "review_proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#pr/7"
+          }
+        },
+        "source_boundary": null,
+        "source_state": "review-meta",
+        "target": "fixing"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.cyclic_transition_status:stale"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#pr/7"
+        }
+      ],
+      "observation_id": "writer:github-devloop-pr:review-meta/fixing/stale/advanced-or-diverged/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "review-meta"
+        ],
+        "current_fact": {
+          "stage_rank": 800,
+          "state": "blocked",
+          "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+        },
+        "handoff_reference": {
+          "review_meta_comment_id": "IC_review_meta_observation_1"
+        },
+        "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "skip-advanced-or-diverged",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "advanced-or-diverged",
+        "status": "stale",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop-pr",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "cyclic_transition_status:review-meta->fixing",
+        "path": "packages/github-devloop-pr/departments/review_meta/main.lua",
+        "symbol": "pipeline"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-devloop.review-meta.v1",
+        "generation_epoch": {
+          "current_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "target_version": null
+        },
+        "kind": "cyclic_transition_status",
+        "lineage": {
+          "dedup_key": "review-meta/github-devloop/issue/owner/repo/42/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/7/3/consensus-github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review/loop/2",
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "review_dedup_key": "consensus:github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review/loop/2",
+          "review_proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#pr/7"
+          }
+        },
+        "source_boundary": null,
+        "source_state": "review-meta",
+        "target": "fixing"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.cyclic_transition_status:stale"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#pr/7"
+        }
+      ],
+      "observation_id": "writer:github-devloop-pr:review-meta/fixing/stale/incoming-version-older/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "review-meta"
+        ],
+        "current_fact": {
+          "stage_rank": 710,
+          "state": "review-meta",
+          "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+        },
+        "handoff_reference": {
+          "review_meta_comment_id": "IC_review_meta_observation_1"
+        },
+        "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-02T01-02-03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "skip-stale(incoming version < current marker version)",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "incoming-version-older",
+        "status": "stale",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop-pr",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "cyclic_transition_status:review-meta->fixing",
+        "path": "packages/github-devloop-pr/departments/review_meta/main.lua",
+        "symbol": "pipeline"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-devloop.review-meta.v1",
+        "generation_epoch": {
+          "current_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-02T01-02-03Z",
+          "target_version": null
+        },
+        "kind": "cyclic_transition_status",
+        "lineage": {
+          "dedup_key": "review-meta/github-devloop/issue/owner/repo/42/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-02T01-02-03Z/7/3/consensus-github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-3438267448/def456/review/loop/2",
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "review_dedup_key": "consensus:github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-3438267448/def456/review/loop/2",
+          "review_proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-3438267448/def456",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#pr/7"
+          }
+        },
+        "source_boundary": null,
+        "source_state": "review-meta",
+        "target": "fixing"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.cyclic_transition_status:apply"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#pr/7"
+        }
+      ],
+      "observation_id": "writer:github-devloop-pr:review-meta/fixing/stale/version-mismatch/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "review-meta"
+        ],
+        "current_fact": {
+          "stage_rank": 710,
+          "state": "review-meta",
+          "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/01"
+        },
+        "handoff_reference": {
+          "review_meta_comment_id": "IC_review_meta_observation_1"
+        },
+        "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/1",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "skip-stale(version-mismatch)",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "version-mismatch",
+        "status": "stale",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop-pr",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "cyclic_transition_status:review-meta->fixing",
+        "path": "packages/github-devloop-pr/departments/review_meta/main.lua",
+        "symbol": "pipeline"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-devloop.review-meta.v1",
+        "generation_epoch": {
+          "current_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/01",
+          "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/1",
+          "target_version": null
+        },
+        "kind": "cyclic_transition_status",
+        "lineage": {
+          "dedup_key": "review-meta/github-devloop/issue/owner/repo/42/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/1/7/3/consensus-github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2599093192/def456/review/loop/2",
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "review_dedup_key": "consensus:github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2599093192/def456/review/loop/2",
+          "review_proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2599093192/def456",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#pr/7"
+          }
+        },
+        "source_boundary": null,
+        "source_state": "review-meta",
+        "target": "fixing"
+      }
     }
   ],
   "old_pending_projection": {
@@ -1118,14 +1801,6 @@
       "path": "packages/github-devloop-pr/departments/observe_pr/main.lua",
       "site_id": "writer:github-devloop-pr:observe-pr-reviewing",
       "symbol": "process_pr_event",
-      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
-    },
-    {
-      "category": "production_writer_sites",
-      "ordinal": "cyclic_transition_status:review-meta->fixing",
-      "path": "packages/github-devloop-pr/departments/review_meta/main.lua",
-      "site_id": "writer:github-devloop-pr:review-meta-fixing",
-      "symbol": "pipeline",
       "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
     },
     {
