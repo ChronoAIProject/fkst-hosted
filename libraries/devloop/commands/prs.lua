@@ -81,6 +81,17 @@ local validators = require("devloop.commands.validators")
     end)
   end
 
+  function C.gh_pr_list_promotions(repo, head, base, timeout)
+    return support.gh_result(function()
+      return support.github().pr_list_promotions(
+        repo,
+        validators.require_safe_branch("promotion PR head branch", head),
+        validators.require_safe_branch("promotion PR base branch", base),
+        timeout
+      )
+    end)
+  end
+
   function C.gh_pr_create(repo, head, base, title, body_file, timeout)
     return support.gh_result(function()
       return support.github().pr_create(

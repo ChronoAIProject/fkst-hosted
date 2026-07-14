@@ -7,11 +7,14 @@ local config = require("devloop.config")
 local m_facts = require("devloop.markers.facts")
 local devloop_state = require("devloop.state")
 local devloop_commands = require("devloop.commands")
+local git_commands = require("devloop.commands.git_ops")
+local pr_commands = require("devloop.commands.prs")
 -- `awaiting-pr` is the issue-side `dependency_wait` twin: poll-reconcile the delegated PR's terminal fact and never drive `github-devloop-pr` internal lifecycle queues; the PR package owns those queues.
 local S, replay_fields = {}, require("devloop.replay_fields")
 local replayer = require("devloop.replayer")
 local forge_validators = require("devloop.forge_validators")
 local contract_time = require("contract.time")
+local contract_strings = require("contract.strings")
 local transition_version = require("contract.transition_version")
 local autonomy_ledger = require("devloop.autonomy_ledger")
 local m_builders = require("devloop.markers.builders")
@@ -425,10 +428,50 @@ merged_child_landed_on_upstream = function(dept, issue, state, delegation, curre
   if not forge_validators.is_git_sha(merge_commit_sha) then
     return false, "skip-pending(merge-commit-missing)", "canonical merged child PR has no GitHub mergeCommit.oid"
   end
-  git_mechanics.fetch_branch(M.git, branches.upstream, "awaiting-pr upstream fetch")
-  local upstream_head = git_mechanics.remote_head(M.git, branches.upstream, "awaiting-pr upstream head", "unsafe awaiting-pr upstream head")
-  if not git_mechanics.is_ancestor(M.git, merge_commit_sha, upstream_head, "awaiting-pr rollup merge-commit reachability") then
-    return false, "skip-pending(rollup-not-landed)", "child PR merge commit is not reachable from upstream branch"
+  local listed = pr_commands.gh_pr_list_promotions(
+    issue.repo,
+    branches.integration,
+    branches.upstream,
+    60
+  )
+  if listed.exit_code ~= 0 then
+    error("github-devloop: awaiting-pr-rollup-receipt-list-failed: " .. tostring(listed.stderr))
+  end
+  local candidates = parsers_pr.parse_pr_list_promotions(listed.stdout)
+  local landed = git_mechanics.with_repo_ref_store_lock(issue.repo, function()
+    for _, candidate in ipairs(candidates) do
+      local branch_match = tostring(candidate.head_ref_name or "") == tostring(branches.integration or "")
+        and tostring(candidate.base_ref_name or "") == tostring(branches.upstream or "")
+      local canonically_merged = contract_time.iso_timestamp_epoch_seconds(candidate.merged_at) ~= nil
+      if branch_match and canonically_merged then
+        if tostring(candidate.head_repository or "") == ""
+          or not forge_validators.is_git_sha(candidate.head_sha)
+          or tonumber(candidate.number) == nil then
+          error("github-devloop: awaiting-pr-rollup-receipt-invalid: merged rollup PR metadata is incomplete")
+        end
+        if tostring(candidate.head_repository) == tostring(issue.repo) then
+          git_mechanics.run_required(
+            git_commands.git_fetch_pr_head_ref("origin", candidate.number, 60),
+            "awaiting-pr rollup receipt fetch"
+          )
+          local fetched = git_mechanics.run_required(
+            git_commands.git_fetch_head_commit(30),
+            "awaiting-pr rollup receipt head"
+          )
+          local fetched_head = contract_strings.trim(fetched.stdout)
+          if fetched_head ~= tostring(candidate.head_sha) then
+            error("github-devloop: awaiting-pr-rollup-receipt-head-mismatch: fetched rollup PR head differs from GitHub metadata")
+          end
+          if git_mechanics.is_ancestor(M.git, merge_commit_sha, fetched_head, "awaiting-pr rollup receipt ancestry") then
+            return true
+          end
+        end
+      end
+    end
+    return false
+  end)
+  if not landed then
+    return false, "skip-pending(rollup-receipt-missing)", "no merged rollup PR into upstream preserves the child PR merge commit"
   end
   return true
 end
