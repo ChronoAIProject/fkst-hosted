@@ -238,6 +238,14 @@ return {
     t.is_true(h.has_value(label.remove_labels, "fkst-dev:impl-failed"))
     t.eq(#label.remove_labels, 13)
     t.eq(label.issue_number, "42")
+    t.eq(label.dedup_key, "github-devloop/issue/owner/repo/42/label/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z")
+
+    local declined = requests_labels.build_result_state_label_request("owner/repo", "42", reached({
+      decision = "reject",
+      decision_reason = "premise-refuted",
+    }), "declined")
+    t.eq(declined.add_labels[1], "fkst-dev:declined")
+    t.eq(declined.dedup_key, label.dedup_key)
 
     local awaiting = requests_labels.build_state_label_request("owner/repo",
       "42",
@@ -285,7 +293,7 @@ return {
     local comment_version = tostring(completed.dedup_key):gsub(":", "-")
     t.eq(
       comment.dedup_key,
-      tostring(completed.proposal_id) .. "/comment/" .. tostring(completed.decision) .. "/" .. comment_version
+      tostring(completed.proposal_id) .. "/comment/" .. comment_version
     )
   end,
   test_comment_dedup_key_includes_consensus_version = function()
@@ -299,8 +307,8 @@ return {
     local first_comment = requests_lifecycle.build_result_comment_request(core, "owner/repo", "42", first)
     local second_comment = requests_lifecycle.build_result_comment_request(core, "owner/repo", "42", second)
 
-    t.eq(first_comment.dedup_key, "github-devloop/issue/owner/repo/42/comment/approve/consensus-github-devloop/issue/owner/repo/42/v1")
-    t.eq(second_comment.dedup_key, "github-devloop/issue/owner/repo/42/comment/approve/consensus-github-devloop/issue/owner/repo/42/v2")
+    t.eq(first_comment.dedup_key, "github-devloop/issue/owner/repo/42/comment/consensus-github-devloop/issue/owner/repo/42/v1")
+    t.eq(second_comment.dedup_key, "github-devloop/issue/owner/repo/42/comment/consensus-github-devloop/issue/owner/repo/42/v2")
     t.eq(first_comment.dedup_key ~= second_comment.dedup_key, true)
   end,
   test_current_state_uses_highest_version_not_append_order = function()

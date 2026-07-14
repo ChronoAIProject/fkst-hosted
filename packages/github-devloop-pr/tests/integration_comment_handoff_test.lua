@@ -196,8 +196,8 @@ return {
       target = "pr",
       pr_number = 7,
       comment_id = "IC_fixing_1",
-      request_dedup_key = "review-result/comment/" .. proposal_id .. "/reject/" .. review_dedup_key,
-      dedup_key = "review-result/comment/" .. proposal_id .. "/reject/written/IC_fixing_1",
+      request_dedup_key = "review-result/comment/" .. proposal_id .. "/" .. review_dedup_key,
+      dedup_key = "review-result/comment/" .. proposal_id .. "/written/IC_fixing_1",
       source_ref = source_ref,
       handoff = {
         kind = "github-devloop.fixing",
@@ -266,8 +266,8 @@ return {
       target = "pr",
       pr_number = 7,
       comment_id = "IC_merge_ready_1",
-      request_dedup_key = "review-result/comment/github-devloop/issue/owner/repo/42/approve/" .. review_dedup_key,
-      dedup_key = "review-result/comment/github-devloop/issue/owner/repo/42/approve/written/IC_merge_ready_1",
+      request_dedup_key = "review-result/comment/github-devloop/issue/owner/repo/42/" .. review_dedup_key,
+      dedup_key = "review-result/comment/github-devloop/issue/owner/repo/42/written/IC_merge_ready_1",
       source_ref = source_ref,
       handoff = {
         kind = "github-devloop.merge_ready",

@@ -11,6 +11,7 @@ local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
 local github_factory = require("devloop.github_factory")
 local github_author_policy = require("devloop.github_author_policy")
+local result_facts = require("devloop.markers.result_facts")
 
 local spec = {
   consumes = { "consensus.consensus_reached" },
@@ -43,7 +44,7 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
   to_state = to_state or (declined and "declined" or gate and gate.ok and "ready" or "dependency_wait")
   local comment_request = requests_lifecycle.build_result_comment_request(core, repo, issue_number, reached, to_state)
   local label_request = declined
-    and requests_labels.build_state_label_request(repo, issue_number, "declined", reached.proposal_id .. "/label/decline", reached.source_ref)
+    and requests_labels.build_result_state_label_request(repo, issue_number, reached, "declined")
     or requests_labels.build_result_label_request(repo, issue_number, reached)
   local dependency_comment_request = nil
   local dependency_label_request = nil
@@ -178,6 +179,26 @@ local function make_department(ports)
       local trusted_author_policy = github_author_policy.from_env()
       if not github_author_policy.is_authorized(trusted_author_policy, current.author_login) then
         devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", "thinking", "skip-non-whitelisted-author", "issue author is not authorized for GitHub content")
+        return
+      end
+      local first_result = result_facts.first_result_fact(
+        current.comments,
+        reached.proposal_id,
+        version
+      )
+      if first_result ~= nil then
+        if first_result.decision == reached.decision then
+          devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", "ready|declined", "skip-idempotent(first-result)", "logical consensus result was already admitted")
+          return
+        end
+        local audit_request = requests_lifecycle.build_result_divergence_comment_request(
+          repo,
+          issue_number,
+          reached,
+          first_result.decision
+        )
+        devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", "ready|declined", "suppress-divergent-result", "first admitted logical consensus result wins")
+        devloop_logging.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_comment_request", audit_request)
         return
       end
       local declined = reached.decision == "reject"
