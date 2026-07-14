@@ -23,7 +23,9 @@ local projection = owner_pending_projection.derive(core.restart_package_name, co
 local observe_issue_department = require("departments.observe_issue.main")
 local OWNER = core.restart_package_name
 local IMPLEMENTING_SHADOW_VARIANT = "implementing_merged_delegated_pr"
+local AWAITING_PR_MERGED_SHADOW_VARIANT = "child_pr_merged"
 local AWAITING_PR_READY_SHADOW_VARIANT = "child_pr_closed_unmerged_replaced"
+local AWAITING_PR_BLOCKED_SHADOW_VARIANT = "child_pr_not_merged"
 
 local POLICY_ID = "cas.legacy_awaiting_pr_v1"
 local REPO = "owner/repo"
@@ -486,6 +488,35 @@ return {
       semantic_variant = AWAITING_PR_READY_SHADOW_VARIANT,
       target = "ready",
       legacy_log_outcome = "applied(child-pr-closed-unmerged)",
+      expected_exit_code = 0,
+    })
+  end,
+
+  test_shadow_awaiting_pr_to_merged_apply_parity = function()
+    assert_shadow_case({
+      name = "shadow-awaiting-pr-to-merged-apply",
+      current_state = "awaiting-pr",
+      current_version = V_EQUAL,
+      child_state = "merged",
+      pr_state = "MERGED",
+      cas_variant = "awaiting_pr_to_merged",
+      semantic_variant = AWAITING_PR_MERGED_SHADOW_VARIANT,
+      target = "merged",
+      legacy_log_outcome = "applied(child-pr-merged)",
+      expected_exit_code = 0,
+    })
+  end,
+
+  test_shadow_awaiting_pr_to_blocked_apply_parity = function()
+    assert_shadow_case({
+      name = "shadow-awaiting-pr-to-blocked-apply",
+      current_state = "awaiting-pr",
+      current_version = V_EQUAL,
+      child_state = "blocked",
+      cas_variant = "awaiting_pr_to_blocked",
+      semantic_variant = AWAITING_PR_BLOCKED_SHADOW_VARIANT,
+      target = "blocked",
+      legacy_log_outcome = "applied(child-pr-blocked)",
       expected_exit_code = 0,
     })
   end,
