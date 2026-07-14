@@ -50,8 +50,9 @@ return {
     t.is_true(tostring(err):find("codex-failed", 1, true) ~= nil)
   end,
 
-  test_build_converge_payload_omits_workers_without_a_valid_verdict = function()
-    local payload = core.build_converge_payload(
+  test_build_converge_payload_rejects_an_incomplete_panel = function()
+    local ok, err = pcall(
+      core.build_converge_payload,
       proposal({ round = 2, dedup_key = "proposal-42-v1/loop/2" }),
       "Narrow the disagreement.",
       {
@@ -61,16 +62,8 @@ return {
       }
     )
 
-    t.eq(payload.schema, "consensus.consensus_converge.v1")
-    t.eq(payload.proposal_id, "proposal-42")
-    t.eq(payload.round, 2)
-    t.eq(payload.narrowed_question, "Narrow the disagreement.")
-    t.eq(payload.dedup_key, "consensus:proposal-42-v1/loop/2")
-    t.eq(payload.source_ref.kind, "proposal")
-    t.eq(payload.source_ref.ref, "demo/consensus/42")
-    t.eq(#payload.angle_digests, 2)
-    t.eq(payload.angle_digests[1].reply, "teleology reply")
-    t.eq(payload.angle_digests[2].verdict, "abstain")
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("codex-failed", 1, true) ~= nil)
   end,
 
   test_outcome_builders_reject_zero_valid_angle_answers = function()

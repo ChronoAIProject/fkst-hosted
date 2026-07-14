@@ -137,7 +137,7 @@ local function decide(proposal)
     })
   end
 
-  angle_answers.assert_has_valid(angle_results, "blind")
+  angle_answers.assert_all_valid(angle_results, "blind")
 
   local decision = aggregate(angle_results, verdict_mode)
   if decision ~= nil then
@@ -173,7 +173,7 @@ local function decide(proposal)
         return parse_angle_output(stdout, mode)
       end,
     })
-    angle_answers.assert_has_valid(rebuttal_results, "rebuttal")
+    angle_answers.assert_all_valid(rebuttal_results, "rebuttal")
     local rebuttal_reached = rebuttal.post_rebuttal_reached(proposal, angle_results, rebuttal_results, verdict_mode, {
       aggregate = function(items, mode)
         return aggregate(items, mode)
