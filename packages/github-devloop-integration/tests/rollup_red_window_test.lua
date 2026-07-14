@@ -34,4 +34,16 @@ return {
       core.rollup_red_window_minutes(exec_returning("5000"))
     end)
   end,
+
+  test_rollup_health_dedup_key_is_head_scoped_and_requires_a_valid_head = function()
+    local key = core.rollup_health_dedup_key("owner/repo", "test: COMPLETED/FAILURE", "aaaa1111")
+    t.eq(key, core.rollup_health_dedup_key("owner/repo", "test: COMPLETED/FAILURE", "aaaa1111"))
+    t.is_true(key ~= core.rollup_health_dedup_key("owner/repo", "test: COMPLETED/FAILURE", "bbbb2222"))
+    t.raises(function()
+      core.rollup_health_dedup_key("owner/repo", "test: COMPLETED/FAILURE", nil)
+    end)
+    t.raises(function()
+      core.rollup_health_dedup_key("owner/repo", "test: COMPLETED/FAILURE", "not-a-sha")
+    end)
+  end,
 }

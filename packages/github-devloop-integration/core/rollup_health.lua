@@ -732,6 +732,13 @@ local function failure_identity(failing_check)
   return identity
 end
 
+local function require_rollup_head_sha(value)
+  if not forge_validators.is_git_sha(value) then
+    error("github-devloop: rollup-health-head-sha-invalid: rollup head SHA is missing or invalid")
+  end
+  return tostring(value):lower()
+end
+
 function M.rollup_red_window_minutes(exec)
   local raw = devloop_base.read_env("FKST_DEVLOOP_ROLLUP_RED_WINDOW_MINUTES", exec)
   if raw == nil or strings.trim(raw) == "" then
@@ -744,11 +751,12 @@ function M.rollup_red_window_minutes(exec)
   return value
 end
 
-function M.rollup_health_dedup_key(repo, failing_check)
+function M.rollup_health_dedup_key(repo, failing_check, head_sha)
   return base_ids.dedup_key({
     detector,
     tostring(repo or ""),
     failure_identity(failing_check),
+    require_rollup_head_sha(head_sha),
   })
 end
 
@@ -793,7 +801,7 @@ function M.build_rollup_health_issue_create_request(repo, evidence, snapshot)
     labels = evidence.rollup_autofix
       and json.decode('["fkst-dev:enabled","fkst-class:expedite"]')
       or json.decode("[]"),
-    dedup_key = M.rollup_health_dedup_key(repo, evidence.failing_check),
+    dedup_key = M.rollup_health_dedup_key(repo, evidence.failing_check, evidence.head_sha),
     parent_comment_target = {
       repo = repo,
       issue_number = tostring(evidence.pr_number),
@@ -816,6 +824,13 @@ function M.observe_rollup_health(repo, upstream, integration, pr, now_seconds, t
   if reason ~= "rollup-red" then
     log.info("github-devloop dept=rollup_scan tag=ROLLUP_HEALTH action=no-op reason=" .. tostring(reason))
     return { action = "no-op", reason = reason }
+  end
+
+  local head_sha = require_rollup_head_sha(pr and pr.head_sha)
+  local failing_head_sha = parsers_misc.rollup_failure_gate_sha(pr)
+  if failing_head_sha == nil or tostring(failing_head_sha):lower() ~= head_sha then
+    error("github-devloop: rollup-health-check-head-mismatch: failing check head does not match rollup head"
+      .. " rollup_head=" .. head_sha .. " check_head=" .. tostring(failing_head_sha or "missing"))
   end
 
   local red_started_at = rollup_red_started_at(pr)
@@ -842,7 +857,7 @@ function M.observe_rollup_health(repo, upstream, integration, pr, now_seconds, t
     pr_number = pr and pr.number,
     upstream_branch = upstream,
     integration_branch = integration,
-    head_sha = pr and pr.head_sha,
+    head_sha = head_sha,
     updated_at = pr and pr.updated_at,
     red_started_at = red_started_at,
     age_minutes = age,
