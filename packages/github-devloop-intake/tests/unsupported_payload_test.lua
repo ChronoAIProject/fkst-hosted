@@ -60,6 +60,15 @@ local function payload_for_queue(queue)
       dedup_key = "owner/repo#issue#42@2026-06-03T01:02:03Z",
       source_ref = entity_lib.issue_source_ref("owner/repo", 42),
     },
+    ["github-proxy.github_issue_observed"] = {
+      schema = "github-proxy.issue-observed.v1",
+      type = "issue",
+      repo = "owner/repo",
+      number = 42,
+      updated_at = "2026-06-03T01:02:03Z",
+      dedup_key = "github-issue-observed/owner/repo/42/2026-06-03T01:02:03Z/probe",
+      source_ref = entity_lib.issue_source_ref("owner/repo", 42),
+    },
   }
   local payload = payloads[queue]
   if payload == nil then

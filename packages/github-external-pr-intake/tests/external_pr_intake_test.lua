@@ -420,7 +420,7 @@ return {
     t.is_true(proxy_raiser:find('produces = "github_poll_tick"', 1, true) ~= nil)
     t.is_true(proxy_raiser:find("external_pr_scan", 1, true) == nil)
     t.is_true(proxy_poll:find('consumes = { "github_poll_tick" }', 1, true) ~= nil)
-    t.is_true(proxy_poll:find('produces = { "github_entity_changed" }', 1, true) ~= nil)
+    t.is_true(proxy_poll:find('produces = { "github_entity_changed", "github_issue_observed" }', 1, true) ~= nil)
     t.is_true(proxy_poll:find('{ type = "pr"', 1, true) ~= nil)
     t.is_true(proxy_poll:find('raise("github_entity_changed"', 1, true) ~= nil)
     t.is_true(proxy_poll:find("core.is_external_candidate", 1, true) == nil)

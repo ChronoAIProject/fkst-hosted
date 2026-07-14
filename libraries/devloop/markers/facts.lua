@@ -95,6 +95,23 @@ function C.has_intake_decision_marker(comments, issue_proposal_id)
   return C.intake_decision_fact(comments, issue_proposal_id) ~= nil
 end
 
+function C.has_state_marker(comments, issue_proposal_id)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
+      if marker_attr(marker, "proposal") == tostring(issue_proposal_id)
+        and marker_attr(marker, "state") ~= nil
+        and marker_attr(marker, "version") ~= nil then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 function C.review_reject_fact(comments, issue_proposal_id, issue_version)
   if type(comments) ~= "table" then
     return nil

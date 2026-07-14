@@ -1,8 +1,22 @@
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local payloads_builders = require("devloop.payloads.builders")
+local replay_authorization = require("core.replay_authorization")
 local S = {}
 local operator_commands = require("devloop.operator_commands")
+
+function S.build_intake_replay_candidate(repo, issue, terminal)
+  local proposal_id = base_ids.proposal_id(repo, tostring(issue.number))
+  local effect_id = devloop_base.intake_decision_dedup_key(proposal_id, {
+    title = issue.title,
+    body = issue.body,
+  }, nil, nil)
+  local successor_key = replay_authorization.successor_key(proposal_id, terminal)
+  return payloads_builders.build_devloop_intake_candidate_payload(repo, tostring(issue.number), issue.updated_at, {
+    effect_id = effect_id,
+    dedup_key = successor_key,
+  })
+end
 
 function S.install(M)
 function M.should_skip_known_intake_issue(labels)
@@ -44,6 +58,7 @@ function M.build_intake_admission_candidate(repo, issue, command, delivery_versi
     reintake_effect_updated_at = command and updated_at or nil,
   })
 end
+
 end
 
 return S

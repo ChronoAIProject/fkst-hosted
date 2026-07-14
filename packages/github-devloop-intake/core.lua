@@ -70,6 +70,7 @@ M.fetch_pr_view_origin = github_proxy_entity_view.fetch_pr_view_origin
 M.invalidate_entity_after_write = github_proxy_entity_view.invalidate_entity_after_write
 require("devloop.logging").install(M)
 require("devloop.state").install(M)
+require("core.replay_authorization").install(M)
 require("core.admission").install(M)
 local entity = require("devloop.entity")
 M.linked_pr_surface_snapshot = function(...) return entity.linked_pr_surface_snapshot(M, ...) end

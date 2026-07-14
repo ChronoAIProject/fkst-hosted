@@ -30,6 +30,16 @@ local capture_comment_department_logs = h.capture_comment_department_logs
 local capture_label_department_logs = h.capture_label_department_logs
 local long_dedup = h.long_dedup
 local reviewing_marker = h.reviewing_marker
+local pr_json = h.poll_pr_json
+local pr_list_many_json = h.poll_pr_list_many_json
+local issue_json = h.poll_issue_json
+local issue_list_from = h.poll_issue_list_from
+local pr_list_from = h.poll_pr_list_from
+local numbers = h.changed_numbers
+local observed_issue_raises = h.observed_issue_raises
+local changed_raises = h.changed_raises
+local find_entity_raise = h.find_entity_raise
+local assert_observed_issue = h.assert_observed_issue
 local issue_comment_create = "gh api --method POST repos/owner/x/issues/42/comments"
 
 local function mock_poll_env(replay_budget)
@@ -38,58 +48,6 @@ local function mock_poll_env(replay_budget)
   if replay_budget ~= nil then
     mock_proxy_replay_budget_env(replay_budget)
   end
-end
-
-local function pr_json(number, updated_at, state)
-  return string.format(
-    '{"number":%d,"title":"PR %d","html_url":"https://github.example/owner/x/pull/%d","updated_at":"%s","state":"%s","user":{"login":"fkst-test-bot"},"labels":[{"name":"review"}]}',
-    number,
-    number,
-    number,
-    updated_at,
-    state or "open"
-  )
-end
-
-local function pr_list_many_json(count, target_number, target_updated_at)
-  local parts = {}
-  for index = 1, count do
-    table.insert(parts, pr_json(100 + index, string.format("2026-06-03T03:%02d:00Z", index % 60), "OPEN"))
-  end
-  table.insert(parts, pr_json(target_number, target_updated_at, "OPEN"))
-  return "[[" .. table.concat(parts, ",") .. "]]\n"
-end
-
-local function issue_json(number, updated_at)
-  return string.format(
-    '{"number":%d,"title":"Issue %d","html_url":"https://github.example/owner/x/issues/%d","updated_at":"%s","state":"open","author":{"login":"fkst-test-bot"},"labels":[{"name":"adapter-enabled"}],"assignees":[{"login":"fkst-test-bot"}]}',
-    number, number, number, updated_at
-  )
-end
-
-local function issue_list_from(items)
-  return "[[" .. table.concat(items, ",") .. "]]\n"
-end
-
-local function pr_list_from(items)
-  return "[[" .. table.concat(items, ",") .. "]]\n"
-end
-
-local function numbers(raises)
-  local result = {}
-  for _, raised in ipairs(raises or {}) do
-    table.insert(result, raised.payload.number)
-  end
-  return table.concat(result, ",")
-end
-
-local function find_entity_raise(raises, entity_type, number)
-  for _, raised in ipairs(raises or {}) do
-    if raised.payload.type == entity_type and tonumber(raised.payload.number) == tonumber(number) then
-      return raised
-    end
-  end
-  return nil
 end
 
 local function has_arg_pair(rendered, flag, value)
@@ -136,7 +94,8 @@ return {
     mock_poll()
     local second = t.run_department("departments/github_poll/main.lua", event, run_opts)
     t.eq(second.exit_code, 0)
-    t.eq(#second.raises, 0)
+    t.eq(#second.raises, 1)
+    assert_observed_issue(second.raises[1], 42, "2026-06-03T01:02:03Z")
     t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues?state=open&per_page=100"), 2)
     t.eq(count_calls("gh api --paginate --slurp repos/owner/x/pulls?state=open&per_page=100"), 2)
   end,
@@ -232,8 +191,10 @@ return {
     mock_pr_list("[]\n")
     local second = t.run_department("departments/github_poll/main.lua", event, run_opts)
     t.eq(second.exit_code, 0)
-    t.eq(#second.raises, 1)
-    t.eq(second.raises[1].payload.number, 44)
+    t.eq(#second.raises, 3)
+    t.eq(#changed_raises(second.raises), 1)
+    t.eq(changed_raises(second.raises)[1].payload.number, 44)
+    t.eq(#observed_issue_raises(second.raises), 2)
   end,
 
   test_inbound_poll_replay_budget_is_shared_across_issue_and_pr_lanes = function()
@@ -266,11 +227,14 @@ return {
     mock_pr_list(prs)
     local second = t.run_department("departments/github_poll/main.lua", event, run_opts)
     t.eq(second.exit_code, 0)
-    t.eq(#second.raises, 2)
-    t.eq(second.raises[1].payload.type, "issue")
-    t.eq(second.raises[1].payload.number, 44)
-    t.eq(second.raises[2].payload.type, "pr")
-    t.eq(second.raises[2].payload.number, 8)
+    t.eq(#second.raises, 3)
+    local changed = changed_raises(second.raises)
+    t.eq(#changed, 2)
+    t.eq(changed[1].payload.type, "issue")
+    t.eq(changed[1].payload.number, 44)
+    t.eq(changed[2].payload.type, "pr")
+    t.eq(changed[2].payload.number, 8)
+    t.eq(#observed_issue_raises(second.raises), 1)
   end,
 
   test_inbound_poll_replay_budget_tie_breaks_shared_lanes_deterministically = function()
@@ -304,11 +268,14 @@ return {
     mock_pr_list(prs)
     local second = t.run_department("departments/github_poll/main.lua", event, run_opts)
     t.eq(second.exit_code, 0)
-    t.eq(#second.raises, 2)
-    t.eq(second.raises[1].payload.type, "pr")
-    t.eq(second.raises[1].payload.number, 43)
-    t.eq(second.raises[2].payload.type, "issue")
-    t.eq(second.raises[2].payload.number, 44)
+    t.eq(#second.raises, 3)
+    local changed = changed_raises(second.raises)
+    t.eq(#changed, 2)
+    t.eq(changed[1].payload.type, "pr")
+    t.eq(changed[1].payload.number, 43)
+    t.eq(changed[2].payload.type, "issue")
+    t.eq(changed[2].payload.number, 44)
+    t.eq(#observed_issue_raises(second.raises), 1)
   end,
 
   test_inbound_poll_defaults_cold_replay_budget_to_ten = function()
@@ -406,9 +373,12 @@ return {
       ts = "poll-2",
     }, run_opts)
     t.eq(second.exit_code, 0)
-    t.eq(#second.raises, 1)
-    t.eq(second.raises[1].payload.number, 50)
-    t.eq(second.raises[1].payload.dedup_key, "owner/x#issue#50@2026-06-03T01:04:00Z/poll/poll-2")
+    t.eq(#second.raises, 2)
+    local second_changed = changed_raises(second.raises)
+    t.eq(#second_changed, 1)
+    t.eq(second_changed[1].payload.number, 50)
+    t.eq(second_changed[1].payload.dedup_key, "owner/x#issue#50@2026-06-03T01:04:00Z/poll/poll-2")
+    t.eq(#observed_issue_raises(second.raises), 1)
 
     mock_poll_env("1")
     mock_issue_list(issue_list_from({
@@ -422,9 +392,12 @@ return {
       ts = "poll-3",
     }, run_opts)
     t.eq(labelled.exit_code, 0)
-    t.eq(#labelled.raises, 1)
-    t.eq(labelled.raises[1].payload.number, 50)
-    t.eq(labelled.raises[1].payload.dedup_key, "owner/x#issue#50@2026-06-03T01:04:00Z")
+    t.eq(#labelled.raises, 2)
+    local labelled_changed = changed_raises(labelled.raises)
+    t.eq(#labelled_changed, 1)
+    t.eq(labelled_changed[1].payload.number, 50)
+    t.eq(labelled_changed[1].payload.dedup_key, "owner/x#issue#50@2026-06-03T01:04:00Z")
+    t.eq(#observed_issue_raises(labelled.raises), 1)
 
     mock_poll_env("1")
     mock_issue_list(issue_list_from({
@@ -438,7 +411,9 @@ return {
       ts = "poll-4",
     }, run_opts)
     t.eq(cached_labelled.exit_code, 0)
-    t.eq(#cached_labelled.raises, 0)
+    t.eq(#cached_labelled.raises, 2)
+    t.eq(#changed_raises(cached_labelled.raises), 0)
+    t.eq(#observed_issue_raises(cached_labelled.raises), 2)
   end,
 
   test_inbound_poll_rejects_invalid_replay_budget = function()
