@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -128,6 +129,22 @@ def artifact_sha256_for_document(document: dict[str, Any]) -> str:
 def load_inventory(root: Path) -> dict[str, Any]:
     path = root / INVENTORY
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def write_inventory(root: Path, inventory: dict[str, Any]) -> None:
+    path = root / INVENTORY
+    path.write_text(
+        json.dumps(inventory, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def normalize_artifact_sha256(root: Path) -> str:
+    inventory = load_inventory(root)
+    expected_sha = artifact_sha256_for_document(inventory)
+    inventory["artifact_sha256"] = expected_sha
+    write_inventory(root, inventory)
+    return expected_sha
 
 
 def validate_top_level(inventory: dict[str, Any]) -> list[str]:
@@ -448,8 +465,18 @@ def repository_messages(root: Path, enforce_base: bool = True) -> list[str]:
     return messages
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
+    parser.add_argument("--fix-artifact-sha256", action="store_true")
+    return parser.parse_args()
+
+
 def main() -> int:
-    root = Path(__file__).resolve().parent.parent
+    args = parse_args()
+    root = args.root.resolve()
+    if args.fix_artifact_sha256:
+        normalize_artifact_sha256(root)
     messages = repository_messages(root)
     if messages:
         for message in messages:
