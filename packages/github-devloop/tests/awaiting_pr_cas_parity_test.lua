@@ -22,7 +22,8 @@ local core = h.core
 local projection = owner_pending_projection.derive(core.restart_package_name, core.restart_transition_table(), inventories)
 local observe_issue_department = require("departments.observe_issue.main")
 local OWNER = core.restart_package_name
-local SHADOW_VARIANT = "implementing_merged_delegated_pr"
+local IMPLEMENTING_SHADOW_VARIANT = "implementing_merged_delegated_pr"
+local AWAITING_PR_READY_SHADOW_VARIANT = "child_pr_closed_unmerged_replaced"
 
 local POLICY_ID = "cas.legacy_awaiting_pr_v1"
 local REPO = "owner/repo"
@@ -404,7 +405,7 @@ local function assert_shadow_case(fixture)
   local pr_comments = child_comments(fixture)
   mock_reads(fixture, issue_comments, pr_comments)
 
-  local result, probes, _, boundary_calls = observe_department(function()
+  local result, probes, decisions, boundary_calls = observe_department(function()
     return run_real_department(fixture)
   end)
 
@@ -413,33 +414,37 @@ local function assert_shadow_case(fixture)
   local probe = probes[1]
   t.eq(probe.current.state, fixture.current_state, fixture.name .. ": probe current state")
   t.eq(probe.current.version, fixture.current_version, fixture.name .. ": probe current version")
-  t.eq(probe.variant, "implementing_to_awaiting_pr", fixture.name .. ": probe variant")
+  t.eq(probe.variant, fixture.cas_variant, fixture.name .. ": probe variant")
   t.eq(probe.incoming_version, fixture.current_version, fixture.name .. ": real probe incoming version")
 
   local observed = observed_admission(probe, true)
-  local shadow_intent = {
-    semantic_variant = SHADOW_VARIANT,
-    target = "awaiting-pr",
-    incoming_version = fixture.current_version,
-  }
-  t.eq(shadow_intent.incoming_version, probe.incoming_version, fixture.name .. ": non-circular incoming version anchor")
-
-  local sealed = restart_authority.seal_snapshot({
+  local sealed_snapshot = restart_authority.seal_snapshot({
     owner = OWNER,
     current = {
       state = fixture.current_state,
       version = fixture.current_version,
     },
   })
-  local shadow = restart_authority.decide_transition(sealed, shadow_intent)
+  local shadow_intent = {
+    semantic_variant = fixture.semantic_variant,
+    target = fixture.target,
+    incoming_version = sealed_snapshot.current.version,
+  }
+  t.eq(shadow_intent.incoming_version, probe.incoming_version, fixture.name .. ": non-circular incoming version anchor")
+  t.eq(shadow_intent.source_boundary, nil, fixture.name .. ": nil boundary is omitted from shadow intent")
+
+  local shadow = restart_authority.decide_transition(sealed_snapshot, shadow_intent)
 
   assert_bidirectional(shadow, observed, "status", fixture.name)
   assert_bidirectional(shadow, observed, "reason_code", fixture.name)
+  local decision = decision_for_probe(decisions, probe)
+  t.is_true(decision ~= nil, fixture.name .. ": real department CAS decision captured")
+  t.eq(decision.outcome, fixture.legacy_log_outcome, fixture.name .. ": real department CAS outcome")
   t.eq(shadow.edge_id ~= nil, true, fixture.name .. ": selected edge")
   t.eq(shadow.cas_policy_id, POLICY_ID, fixture.name .. ": selected CAS policy")
   t.eq(shadow.evidence.status, "complete", fixture.name .. ": evidence status")
-  t.eq(shadow.evidence.facts.source, "implementing", fixture.name .. ": evidence source")
-  t.eq(shadow.evidence.facts.target, "awaiting-pr", fixture.name .. ": evidence target")
+  t.eq(shadow.evidence.facts.source, fixture.current_state, fixture.name .. ": evidence source")
+  t.eq(shadow.evidence.facts.target, fixture.target, fixture.name .. ": evidence target")
   t.eq(shadow.grant, nil, fixture.name .. ": grant disabled")
   t.eq(result.exit_code, fixture.expected_exit_code or 0, fixture.name .. ": department exit code")
 end
@@ -458,6 +463,29 @@ return {
       raw_incoming_version = V_OLDER,
       child_state = "merged",
       pr_state = "MERGED",
+      cas_variant = "implementing_to_awaiting_pr",
+      semantic_variant = IMPLEMENTING_SHADOW_VARIANT,
+      target = "awaiting-pr",
+      legacy_log_outcome = "applied(merged-delegated-pr-canonicalized)",
+      expected_exit_code = 0,
+    })
+  end,
+
+  -- awaiting_pr_to_ready is apply-only parity. The child-outcome observer routes
+  -- into replay only after the parent has been re-read as awaiting-pr, and replay
+  -- then feeds that same marker version into versioned_transition_status. An
+  -- already ready parent is rejected before this CAS probe, and stale/pending
+  -- versions cannot be constructed by this route.
+  test_shadow_awaiting_pr_to_ready_apply_parity = function()
+    assert_shadow_case({
+      name = "shadow-awaiting-pr-to-ready-apply",
+      current_state = "awaiting-pr",
+      current_version = V_EQUAL,
+      child_state = "closed-unmerged",
+      cas_variant = "awaiting_pr_to_ready",
+      semantic_variant = AWAITING_PR_READY_SHADOW_VARIANT,
+      target = "ready",
+      legacy_log_outcome = "applied(child-pr-closed-unmerged)",
       expected_exit_code = 0,
     })
   end,
