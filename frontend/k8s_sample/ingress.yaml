@@ -1,0 +1,63 @@
+# SAMPLE ingress fronting BOTH fkst deployables on ONE origin, which is the
+# default topology the frontend image is built for (empty VITE_FKST_API_BASE =
+# same-origin): the SPA's login/dashboard XHRs hit the same host, so no CORS
+# configuration is needed anywhere.
+#
+# The backend paths are exactly its public surface (see backend/k8s_sample):
+# /api/v1/* (all APIs incl. the GitHub OAuth callback), /health, /metrics,
+# /openapi.json, and the App webhook. Everything else falls through to the SPA.
+# Adapt host/TLS per cluster (local dev used a mkcert cert — Chrome refuses
+# http downloads from the logs endpoint).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fkst-hosted
+  labels:
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  rules:
+    - host: fkst.local # adapt
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: fkst-control-plane
+                port:
+                  name: http
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: fkst-control-plane
+                port:
+                  name: http
+          - path: /metrics
+            pathType: Exact
+            backend:
+              service:
+                name: fkst-control-plane
+                port:
+                  name: http
+          - path: /openapi.json
+            pathType: Exact
+            backend:
+              service:
+                name: fkst-control-plane
+                port:
+                  name: http
+          - path: /github/app/webhook
+            pathType: Prefix
+            backend:
+              service:
+                name: fkst-control-plane
+                port:
+                  name: http
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: fkst-frontend
+                port:
+                  name: http
