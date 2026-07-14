@@ -9,15 +9,18 @@ local saga = require("workflow.saga")
 local m_facts = require("devloop.markers.facts")
 local devloop_logging = require("devloop.logging")
 local devloop_commands = require("devloop.commands")
+local entity_lib = require("devloop.entity")
+local admission_core = require("core.admission")
+local replay_authorization = require("core.replay_authorization")
 
 local spec = {
-  consumes = { "github-proxy.github_entity_changed" },
+  consumes = { "github-proxy.github_entity_changed", "github-proxy.github_issue_observed" },
   produces = {
     "devloop_intake_candidate",
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_create_request",
   },
-  fanout = { "github-proxy.github_entity_changed", "devloop_intake_candidate" },
+  fanout = { "github-proxy.github_entity_changed", "github-proxy.github_issue_observed", "devloop_intake_candidate" },
   stall_window = "30s",
 }
 
@@ -68,6 +71,43 @@ local function done(_event)
   return false
 end
 
+local function current_issue_from_source_ref(source_ref, updated_at)
+  local repo, issue_number = devloop_base.parse_issue_source_ref(source_ref)
+  if repo == nil or issue_number == nil then
+    return nil, nil, nil, "invalid issue source_ref"
+  end
+  local view = devloop_commands.gh_issue_view(repo, issue_number, "title,body,createdAt,updatedAt,labels,comments,state,assignees,author", 30)
+  if view.exit_code ~= 0 then
+    error("github-devloop-intake: gh-issue-admission-view-failed: gh issue admission view failed: " .. tostring(view.stderr))
+  end
+  local current = parsers_issue.parse_issue_view_intake_judge(core, view.stdout)
+  current.updated_at = current.updated_at or updated_at
+  current.number = issue_number
+  return repo, issue_number, current, nil
+end
+
+local function has_trusted_progress(current, proposal_id)
+  if core.should_skip_known_intake_issue(current.labels) then
+    return true, "active devloop label is visible"
+  end
+  if m_facts.has_intake_decision_marker(current.comments, proposal_id) then
+    return true, "trusted intake decision marker is already visible"
+  end
+  if m_facts.has_state_marker(current.comments, proposal_id) then
+    return true, "trusted state marker is already visible"
+  end
+  return false, nil
+end
+
+local function issue_from_current(issue_number, current)
+  return {
+    number = issue_number,
+    title = current.title,
+    body = current.body,
+    updated_at = current.updated_at,
+  }
+end
+
 local function admit_issue_event(event, entity)
   entity = entity or event.payload or {}
   devloop_logging.log_entry("admission", event, "github-devloop/intake", devloop_logging.payload_field(entity, "dedup_key"))
@@ -79,21 +119,10 @@ local function admit_issue_event(event, entity)
   local proposal_id = base_ids.proposal_id(repo, issue_number)
   devloop_base.assert_trusted_bot_configured()
 
-  local view = devloop_commands.gh_issue_view(repo, issue_number, "title,body,createdAt,updatedAt,labels,comments,state,assignees,author", 30)
-  if view.exit_code ~= 0 then
-    error("github-devloop-intake: gh-issue-admission-view-failed: gh issue admission view failed: " .. tostring(view.stderr))
-  end
-  local current = parsers_issue.parse_issue_view_intake_judge(core, view.stdout)
-  current.updated_at = current.updated_at or entity.updated_at
-  current.number = issue_number
+  local _, _, current = current_issue_from_source_ref(entity.source_ref, entity.updated_at)
 
   devloop_logging.log_forged_markers("admission", proposal_id, current.comments)
-  local issue = {
-    number = issue_number,
-    title = current.title,
-    body = current.body,
-    updated_at = current.updated_at,
-  }
+  local issue = issue_from_current(issue_number, current)
 
   if handle_pending_reintake(repo, issue, current, proposal_id, entity.source_ref) then
     return
@@ -121,6 +150,51 @@ local function admit_issue_event(event, entity)
   devloop_logging.log_raise("admission", proposal_id, "devloop_intake_candidate", payload)
 end
 
+local function act_issue_observed(event)
+  local entity = event.payload or {}
+  devloop_logging.log_entry("admission", event, "github-devloop/intake-observed", devloop_logging.payload_field(entity, "dedup_key"))
+  if entity.type ~= "issue" then
+    return
+  end
+  local repo, issue_number = devloop_base.parse_issue_source_ref(entity.source_ref)
+  if repo == nil or issue_number == nil then
+    devloop_logging.log_cas_decision("admission", "unknown", { state = nil, version = nil }, "observed", "candidate", "skip-foreign(source_ref)", "invalid issue source_ref")
+    return
+  end
+  local proposal_id = base_ids.proposal_id(repo, issue_number)
+  devloop_base.assert_trusted_bot_configured()
+
+  local lock_key = entity_lib.observe_lock_key(repo, issue_number)
+  with_lock(lock_key, function()
+    local terminal, precondition_reason, observe_snapshot = replay_authorization.terminal_precondition(entity.source_ref)
+    if terminal == nil then
+      devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "observed", "replay-candidate", "skip-" .. tostring(precondition_reason or "not-authorized"), "intake replay terminal precondition failed")
+      return
+    end
+
+    local _, _, current = current_issue_from_source_ref(entity.source_ref, entity.updated_at)
+    devloop_logging.log_forged_markers("admission", proposal_id, current.comments)
+    local progress_visible = has_trusted_progress(current, proposal_id)
+    local authorization, reason = replay_authorization.authorize(current, proposal_id, entity.source_ref, {
+      has_trusted_progress = progress_visible,
+      observe_snapshot = observe_snapshot,
+      terminal = terminal,
+    })
+    if authorization == nil then
+      devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "observed", "replay-candidate", "skip-" .. tostring(reason or "not-authorized"), "intake replay precondition failed")
+      return
+    end
+
+    once(authorization.once_key, function()
+      local payload = admission_core.build_intake_replay_candidate(repo, issue_from_current(issue_number, current), authorization.terminal)
+      devloop_logging.log_apply("admission", proposal_id, nil, nil, { add = {}, remove = {} }, {
+        "devloop_intake_candidate",
+      })
+      devloop_logging.log_raise("admission", proposal_id, "devloop_intake_candidate", payload)
+    end)
+  end)
+end
+
 local function act_entity_changed(event)
   local entity = event.payload or {}
   if entity.type ~= "issue" then
@@ -134,6 +208,7 @@ end
 
 local handlers = {
   ["github-proxy.github_entity_changed"] = act_entity_changed,
+  ["github-proxy.github_issue_observed"] = act_issue_observed,
 }
 
 local function act(event)
