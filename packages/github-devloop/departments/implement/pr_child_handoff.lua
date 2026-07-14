@@ -85,7 +85,11 @@ function H.raise_awaiting_pr_from_fact(dept, repo, issue_number, ready, current,
   if current_pr ~= nil then
     issue.pr_comments = current_pr.comments
   end
-  local child = core.ensure_pr_child(issue, ready.dedup_key, core.implementation_retry_attempt(ready.dedup_key) or 1)
+  local generation = core.implementation_delegation_generation(
+    ready.dedup_key,
+    ready.impl_retry_attempt
+  )
+  local child = core.ensure_pr_child(issue, ready.dedup_key, generation)
   if child == nil then
     devloop_logging.log_cas_decision(dept, ready.proposal_id, {
       state = "implementing",

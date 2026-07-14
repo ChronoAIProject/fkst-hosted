@@ -56,7 +56,12 @@ local function delegation_key(proposal_id, impl_version, generation)
 end
 
 local function branch_for(repo, issue_number, impl_version)
-  return devloop_base.implement_branch(repo, issue_number, M.implementation_base_version(impl_version))
+  local retry_attempt = M.implementation_retry_attempt(impl_version)
+  return devloop_base.implement_branch(
+    repo,
+    issue_number,
+    M.implementation_branch_version(impl_version, retry_attempt)
+  )
 end
 
 local function parse_open_prs_for_branch(stdout, branch, base_branch)

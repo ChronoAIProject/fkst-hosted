@@ -172,8 +172,9 @@ local function base_entity(core, row, source_ref)
   }, state
 end
 
-local function child_pr(core, state, child_state)
-  local body = m_builders.pr_origin_marker(ISSUE_PROPOSAL, ISSUE_NUMBER, BRANCH, state.version, BASE_BRANCH)
+local function child_pr(core, state, child_state, branch)
+  local child_branch = branch or BRANCH
+  local body = m_builders.pr_origin_marker(ISSUE_PROPOSAL, ISSUE_NUMBER, child_branch, state.version, BASE_BRANCH)
   if child_state ~= nil then
     body = body .. "\n" .. devloop_state.state_marker(PR_PROPOSAL, child_state, state.version)
   end
@@ -184,7 +185,7 @@ local function child_pr(core, state, child_state)
     repo = REPO,
     number = PR_NUMBER,
     state = child_state == "merged" and "MERGED" or "OPEN",
-    head_ref_name = BRANCH,
+    head_ref_name = child_branch,
     base_ref_name = BASE_BRANCH,
     head_sha = HEAD_SHA,
     mergeable = "MERGEABLE",
@@ -501,10 +502,11 @@ end
 local function add_context_facts(core, row, entity, state, facts, source_ref, include_fact, declared)
   if row.from_state == "awaiting-pr" then
     local child_state = include_fact and awaiting_pr_child_state_for_successor(declared.successor) or nil
+    local child_branch = devloop_base.implement_branch(REPO, ISSUE_NUMBER, core.implementation_base_version(state.version))
     if declared.fact_family == "canonical-child-pr-merged" then
       child_state = nil
     end
-    facts.current_pr = child_pr(core, state, child_state)
+    facts.current_pr = child_pr(core, state, child_state, child_branch)
     if declared.fact_family == "canonical-child-pr-merged" and include_fact == true then
       facts.current_pr.state = "MERGED"
       facts.current_pr.merged_at = "2026-06-03T01:04:03Z"

@@ -97,6 +97,29 @@ function M.implementation_base_version(version)
   return transition_version.strip_trailing_reimplement(version)
 end
 
+function M.implementation_branch_version(version, attempt)
+  local replacement_round = transition_version.trailing_reimplement_round(version)
+  local retry_attempt = attempt == nil and nil or valid_attempt(attempt)
+  if attempt ~= nil and retry_attempt == nil then
+    error("github-devloop: invalid-attempt: invalid implementation branch attempt")
+  end
+  if replacement_round == 1 then
+    return tostring(version or "")
+  end
+  if replacement_round ~= 0 and retry_attempt ~= nil and replacement_round ~= retry_attempt then
+    error("github-devloop: invalid-version-lineage: implementation retry suffix does not match structured attempt")
+  end
+  return M.implementation_base_version(version)
+end
+
+function M.implementation_delegation_generation(version, attempt)
+  local branch_version = M.implementation_branch_version(version, attempt)
+  if transition_version.trailing_reimplement_round(branch_version) == 1 then
+    return 2
+  end
+  return 1
+end
+
 function M.implementation_retry_attempt(version)
   return valid_attempt(transition_version.trailing_reimplement_round(version))
 end
@@ -121,13 +144,18 @@ function M.ready_payload_inner_version(version)
 end
 
 function M.implementation_attempt_version(version, attempt)
+  local n = attempt == nil and nil or valid_attempt(attempt)
+  if attempt ~= nil and n == nil then
+    error("github-devloop: invalid-attempt: invalid implementation attempt version")
+  end
+  if transition_version.trailing_reimplement_round(
+    M.implementation_branch_version(version, n)
+  ) == 1 then
+    return tostring(version or "")
+  end
   local base = M.implementation_base_version(version)
-  local n = tonumber(attempt)
   if n == nil or n <= 1 then
     return base
-  end
-  if n ~= math.floor(n) or n > max_impl_retry_attempts then
-    error("github-devloop: invalid-attempt: invalid implementation attempt version")
   end
   return transition_version.reimplement_at(base, n)
 end
