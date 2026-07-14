@@ -207,9 +207,11 @@ def validate_observation(record: dict[str, Any], index: int) -> list[str]:
             messages.append(f"{label}.old_inputs.current_fact: must be an object")
         if not isinstance(old_inputs.get("caller_from_states"), (dict, list)):
             messages.append(f"{label}.old_inputs.caller_from_states: must be an array or object")
-        for key in ("incoming_version", "target_version"):
-            if not isinstance(old_inputs.get(key), str) or not old_inputs.get(key):
-                messages.append(f"{label}.old_inputs.{key}: must be a non-empty string")
+        if not isinstance(old_inputs.get("incoming_version"), str) or not old_inputs.get("incoming_version"):
+            messages.append(f"{label}.old_inputs.incoming_version: must be a non-empty string")
+        target_version = old_inputs.get("target_version")
+        if target_version is not None and (not isinstance(target_version, str) or not target_version):
+            messages.append(f"{label}.old_inputs.target_version: must be a non-empty string or null")
         handoff_reference = old_inputs.get("handoff_reference")
         if handoff_reference is not None and not isinstance(handoff_reference, dict):
             messages.append(f"{label}.old_inputs.handoff_reference: must be an object or null")
