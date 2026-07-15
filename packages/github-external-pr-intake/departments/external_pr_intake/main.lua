@@ -19,6 +19,7 @@ local github_author_policy_env = {
   extra_login_envs = {
     "FKST_DEVLOOP_MANAGED_BOT_LOGINS",
     "FKST_GITHUB_AUTHORIZED_LOGINS",
+    "FKST_EXTERNAL_PR_TRUSTED_CONTRIBUTOR_LOGINS",
   },
 }
 
@@ -34,6 +35,22 @@ local function read_pr(github, repo, pr_number)
   end
   decoded.number = decoded.number or pr_number
   return core.normalize_pr(decoded, repo)
+end
+
+local function admit_external_candidate(github, pr, managed, now_seconds)
+  if not core.is_external_candidate(pr, managed, now_seconds) then
+    return false, "not-external"
+  end
+  if not github.is_authorized_author(pr.author_login) then
+    return false, "non-authorized-author"
+  end
+  return true, nil
+end
+
+local function log_action(dedup_key, action)
+  core.log_line("info", "external_pr_intake", dedup_key, "ACTION", {
+    "action=" .. tostring(action),
+  })
 end
 
 local function search_open_bridge_issues(github, repo, pr_number, managed)
@@ -221,11 +238,9 @@ local function maybe_acknowledge_existing_bridge(github, repo, pr, bridge, manag
 end
 
 local function maybe_acknowledge_bridge_from_scan(github, repo, pr, managed)
-  if not core.is_external_candidate(pr, managed, now()) then
-    return nil
-  end
   local fresh_pr = read_pr(github, repo, pr.number)
-  if not core.is_external_candidate(fresh_pr, managed, now()) then
+  local admitted = admit_external_candidate(github, fresh_pr, managed, now())
+  if not admitted then
     return nil
   end
   for _, candidate in ipairs(search_all_bridge_issues(github, repo, fresh_pr.number, managed)) do
@@ -250,8 +265,9 @@ local function handle_candidate(github, payload)
   with_lock(core.bridge_lock_key(repo, pr_number), function()
     local managed = core.managed_bot_logins()
     local pr = read_pr(github, repo, pr_number)
-    if not core.is_external_candidate(pr, managed, now()) then
-      action = "skip-not-external"
+    local admitted, reason = admit_external_candidate(github, pr, managed, now())
+    if not admitted then
+      action = "skip-" .. tostring(reason)
       return
     end
 
@@ -275,8 +291,9 @@ local function handle_candidate(github, payload)
       return
     end
 
-    if not core.is_external_candidate(pr, managed, now()) then
-      action = "skip-not-external-after-claim"
+    admitted, reason = admit_external_candidate(github, pr, managed, now())
+    if not admitted then
+      action = "skip-" .. tostring(reason) .. "-after-claim"
       return
     end
     bridge = existing_bridge(github, repo, pr, managed)
@@ -305,9 +322,7 @@ local function handle_candidate(github, payload)
     write_comment(github, repo, pr_number, pr, canonical_issue_number)
     action = "created-bridge"
   end)
-  core.log_line("info", "external_pr_intake", core.dedup_key(repo, pr_number), "ACTION", {
-    "action=" .. tostring(action),
-  })
+  log_action(core.dedup_key(repo, pr_number), action)
 end
 
 local function handle_scan(github, event)
@@ -316,22 +331,25 @@ local function handle_scan(github, event)
   local result = github.pr_list(repo, 30)
   for _, raw in ipairs(core.parse_pr_list(result and result.stdout or "[]")) do
     local pr = core.normalize_pr(raw, repo)
-    if core.is_external_candidate(pr, managed, now()) then
+    local admitted, reason = admit_external_candidate(github, pr, managed, now())
+    local dedup_key = nil
+    if admitted or reason == "non-authorized-author" then
+      dedup_key = core.dedup_key(repo, pr.number)
+    end
+    if admitted then
       local handled_action = nil
       with_lock(core.bridge_lock_key(repo, pr.number), function()
         handled_action = maybe_acknowledge_bridge_from_scan(github, repo, pr, managed)
       end)
       if handled_action ~= nil then
-        core.log_line("info", "external_pr_intake", core.dedup_key(repo, pr.number), "ACTION", {
-          "action=" .. tostring(handled_action),
-        })
+        log_action(dedup_key, handled_action)
       else
         local payload = {
           schema = "github-external-pr-intake.v1",
           repo = repo,
           number = pr.number,
           updated_at = pr.updated_at,
-          dedup_key = core.dedup_key(repo, pr.number),
+          dedup_key = dedup_key,
           source_ref = core.source_ref(repo, pr.number),
         }
         core.log_line("info", "external_pr_intake", payload.dedup_key, "RAISE", {
@@ -339,6 +357,8 @@ local function handle_scan(github, event)
         })
         raise("external_pr_candidate", payload)
       end
+    elseif reason == "non-authorized-author" then
+      log_action(dedup_key, "skip-non-authorized-author")
     end
   end
 end
