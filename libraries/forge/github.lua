@@ -1,5 +1,6 @@
 local exec_wrap = require("forge.github.exec")
 local result = require("forge.github.result")
+local content_filter = require("forge.github.content_filter")
 
 local M = {}
 
@@ -10,6 +11,9 @@ function M.new(exec, opts)
   local options = opts or {}
   local handle = {}
   handle._trusted_author_policy = options.trusted_author_policy
+  function handle.is_authorized_author(login)
+    return content_filter.is_authorized(login, content_filter.policy_whitelist(handle._trusted_author_policy))
+  end
   function handle._exec(argv, timeout, context, stdout_policy)
     return exec_wrap.run(exec, argv, timeout, context, stdout_policy, handle._trusted_author_policy)
   end

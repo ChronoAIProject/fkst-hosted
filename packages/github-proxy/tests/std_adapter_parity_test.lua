@@ -90,4 +90,19 @@ return {
       "forge.git methods"
     )
   end,
+
+  test_github_author_authorization_real_and_fake_use_bound_policy = function()
+    local noop_exec = function(_opts)
+      return { stdout = "{}", stderr = "", exit_code = 0 }
+    end
+    local real = github.new(noop_exec, { trusted_author_policy = policy })
+    local fake = github_fake.new(github_fake.model({ author_policy = policy }))
+
+    assert(real.is_authorized_author("Human"))
+    assert(fake.is_authorized_author("Human"))
+    assert(not real.is_authorized_author("untrusted-human"))
+    assert(not fake.is_authorized_author("untrusted-human"))
+    assert(not real.is_authorized_author(nil))
+    assert(not fake.is_authorized_author(nil))
+  end,
 }
