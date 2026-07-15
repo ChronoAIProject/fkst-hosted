@@ -45,6 +45,7 @@ local merge_predecessor_entries_for_fix = merge_mechanics.merge_predecessor_entr
 local merge_speculative_predecessors_for_fix = merge_mechanics.merge_speculative_predecessors_for_fix
 local assert_no_unmerged_paths = merge_mechanics.assert_no_unmerged_paths
 local assert_candidate_diff_clean = merge_mechanics.assert_candidate_diff_clean
+local assert_staged_diff_clean = merge_mechanics.assert_staged_diff_clean
 local bounded_fix_summary = merge_mechanics.bounded_fix_summary
 local spec = {
   consumes = { "devloop_fixing" },
@@ -284,6 +285,7 @@ local function run_fix_attempt(plan)
   if add_result.exit_code ~= 0 then
     error("github-devloop: git-add-failed: git add failed: " .. tostring(add_result.stderr))
   end
+  assert_staged_diff_clean(worktree)
   local commit_result = devloop_commands.git_commit(worktree, payloads_builders.fix_commit_subject(
       plan.issue_number,
       require("devloop.github_proxy_entity_view").commit_issue_subject_snapshot(plan.repo, plan.issue_number)
