@@ -19,6 +19,11 @@ local function mock_env_reads()
     exit_code = 0,
   })
   for _ = 1, 2 do
+    t.mock_command('printf %s "$FKST_EXTERNAL_PR_TRUSTED_CONTRIBUTOR_LOGINS"', {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
     author_policy.mock_env(t, {
       env = {
         FKST_DEVLOOP_MANAGED_BOT_LOGINS = "",

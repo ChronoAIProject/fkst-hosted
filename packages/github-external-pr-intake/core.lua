@@ -1,5 +1,6 @@
 local env = require("workflow.env")
 local error_facts = require("contract.error_facts")
+local content_filter = require("forge.github.content_filter")
 local logging = require("workflow.logging")
 local strings = require("contract.strings")
 local forge_strings = require("forge.strings")
@@ -14,6 +15,7 @@ local allowed_env = {
   FKST_DEVLOOP_MANAGED_BOT_LOGINS = true,
   FKST_GITHUB_AUTHORIZED_LOGINS = true,
   FKST_EXTERNAL_PR_BRIDGE_MIN_AGE_SECONDS = true,
+  FKST_EXTERNAL_PR_TRUSTED_CONTRIBUTOR_LOGINS = true,
 }
 
 local function read_env_command(name)
@@ -496,7 +498,18 @@ function M.bridge_issue_body(repo, pr)
 end
 
 function M.bridge_issue_title(pr)
-  return "Integrate external PR #" .. tostring(M.safe_number(pr.number, "issue title pr")) .. ": " .. tostring(pr.title or "")
+  local author = content_filter.canon_login(type(pr) == "table" and pr.author_login or nil)
+  if author == nil then
+    error("github-external-pr-intake: bridge-title-author-required: bridge issue author is required")
+  end
+  local title = "Integrate external PR #"
+    .. tostring(M.safe_number(pr.number, "issue title pr"))
+    .. " from @"
+    .. author
+  if title:find(content_filter.MARKER_PREFIX, 1, true) ~= nil then
+    error("github-external-pr-intake: bridge-title-marker-forbidden: bridge issue identity contains a content marker")
+  end
+  return title
 end
 
 function M.issue_url(repo, issue_number, issue)

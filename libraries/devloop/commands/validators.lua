@@ -22,6 +22,12 @@ function S.require_safe_branch(name, value)
 end
 
 function S.require_safe_ref(name, value)
+  local ref = tostring(value or "")
+  local branch = ref:match("^refs/heads/(.+)$")
+  if branch ~= nil then
+    S.require_safe_branch(name, branch)
+    return ref
+  end
   return forge_validators.require_safe_branch(name, value, "github-devloop")
 end
 

@@ -528,11 +528,11 @@ function M.new(deps)
     })
   end
 
-  local function mock_no_conflict_markers()
-    t.mock_command("grep -n -I -E", {
-      stdout = "",
-      stderr = "",
-      exit_code = 1,
+  local function mock_candidate_diff_check(merge)
+    t.mock_command("diff --check", {
+      stdout = merge and merge.candidate_diff_stdout or "",
+      stderr = merge and merge.candidate_diff_stderr or "",
+      exit_code = merge and merge.candidate_diff_exit_code or 0,
     })
   end
 
@@ -580,15 +580,7 @@ function M.new(deps)
     else
       mock_no_unmerged_paths()
     end
-    if merge ~= nil and merge.post_codex_conflict_markers_stdout ~= nil then
-      t.mock_command("grep -n -I -E", {
-        stdout = merge.post_codex_conflict_markers_stdout,
-        stderr = merge.post_codex_conflict_markers_stderr or "",
-        exit_code = merge.post_codex_conflict_markers_exit_code or 0,
-      })
-    else
-      mock_no_conflict_markers()
-    end
+    mock_candidate_diff_check(merge)
     return worktree
   end
 
@@ -637,7 +629,7 @@ function M.new(deps)
       exit_code = 0,
     })
     mock_no_unmerged_paths()
-    mock_no_conflict_markers()
+    mock_candidate_diff_check()
     return worktree
   end
 
@@ -686,7 +678,7 @@ function M.new(deps)
       exit_code = 0,
     })
     mock_no_unmerged_paths()
-    mock_no_conflict_markers()
+    mock_candidate_diff_check()
     return worktree
   end
 
