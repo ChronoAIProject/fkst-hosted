@@ -199,6 +199,9 @@ struct RawLogin {
 struct RawInstallation {
     id: i64,
     account: RawLogin,
+    /// `"all"` or `"selected"` — whether the installation covers every repo.
+    #[serde(default)]
+    repository_selection: String,
 }
 #[derive(Deserialize)]
 struct InstallationsPage {
@@ -230,6 +233,7 @@ struct RawRepoPerms {
 /// One element of the bare-array `GET /user/repos` response.
 #[derive(Deserialize)]
 struct RawUserRepo {
+    id: i64,
     name: String,
     owner: RawRepoOwner,
     #[serde(default)]
@@ -241,6 +245,7 @@ struct RawUserRepo {
 /// A repo the user can access, as the repo-listing endpoint consumes it.
 #[derive(Debug)]
 pub(crate) struct UserRepo {
+    pub id: i64,
     pub owner: String,
     pub name: String,
     pub private: bool,
@@ -287,8 +292,9 @@ where
 #[derive(Debug)]
 pub(crate) struct InstallationRef {
     pub id: i64,
-    #[allow(dead_code)]
     pub account: String,
+    /// `"all"` or `"selected"` (empty when GitHub omits it).
+    pub repository_selection: String,
 }
 
 impl DashboardGithub {
@@ -372,6 +378,7 @@ impl DashboardGithub {
                 .get_page(&url, user_token, query.as_deref(), "user_repos")
                 .await?;
             out.extend(page.into_iter().map(|r| UserRepo {
+                id: r.id,
                 owner: r.owner.login,
                 name: r.name,
                 private: r.private,
@@ -452,6 +459,7 @@ impl DashboardGithub {
                 AppError::Unavailable("github create-repo response was malformed".to_string())
             })?;
             return Ok(UserRepo {
+                id: raw.id,
                 owner: raw.owner.login,
                 name: raw.name,
                 private: raw.private,
@@ -485,6 +493,92 @@ impl DashboardGithub {
         })
     }
 
+    /// `GET /repos/{owner}/{repo}` (user token) — the repo's immutable id (the
+    /// removal endpoint keys off ids, not names).
+    pub(crate) async fn repo_id(
+        &self,
+        user_token: &SecretString,
+        owner: &str,
+        name: &str,
+    ) -> Result<i64, AppError> {
+        #[derive(Deserialize)]
+        struct RawId {
+            id: i64,
+        }
+        let url = format!("{}/repos/{owner}/{name}", self.api_base);
+        let (raw, _): (RawId, _) = self.get_page(&url, user_token, None, "repo_id").await?;
+        Ok(raw.id)
+    }
+
+    /// `DELETE /user/installations/{iid}/repositories/{rid}` (user token) —
+    /// remove ONE repo from a selected-mode installation (issue #509).
+    pub(crate) async fn remove_installation_repo(
+        &self,
+        user_token: &SecretString,
+        installation_id: i64,
+        repository_id: i64,
+    ) -> Result<(), AppError> {
+        let url = format!(
+            "{}/user/installations/{installation_id}/repositories/{repository_id}",
+            self.api_base
+        );
+        self.delete_no_content(&url, user_token, "remove_installation_repo")
+            .await
+    }
+
+    /// `DELETE /app/installations/{id}` (APP JWT — the app uninstalls itself
+    /// from the account; issue #509). The only non-user-token call here.
+    pub(crate) async fn delete_installation(
+        &self,
+        app_jwt: &SecretString,
+        installation_id: i64,
+    ) -> Result<(), AppError> {
+        let url = format!("{}/app/installations/{installation_id}", self.api_base);
+        self.delete_no_content(&url, app_jwt, "delete_installation")
+            .await
+    }
+
+    /// Shared DELETE-expecting-204 helper (Bearer `auth`, GitHub error `message`
+    /// carried into the error).
+    async fn delete_no_content(
+        &self,
+        url: &str,
+        auth: &SecretString,
+        op: &str,
+    ) -> Result<(), AppError> {
+        let response = self
+            .client
+            .delete(url)
+            .bearer_auth(auth.expose_secret())
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+            .send()
+            .await
+            .map_err(|e| {
+                tracing::warn!(op, error = %e, "github delete transport error");
+                AppError::Unavailable(format!("github {op} request failed"))
+            })?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        let message = response
+            .json::<serde_json::Value>()
+            .await
+            .ok()
+            .and_then(|v| {
+                v.get("message")
+                    .and_then(|m| m.as_str())
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| format!("github returned status {status}"));
+        Err(match status.as_u16() {
+            401 => AppError::Unauthorized(format!("github rejected the token: {message}")),
+            403 => AppError::Forbidden(format!("GitHub refused {op}: {message}")),
+            404 => AppError::NotFound(format!("github {op}: {message}")),
+            _ => AppError::Unavailable(format!("github {op} returned status {status}")),
+        })
+    }
+
     /// `GET /user/installations` (user token) — the app installations this user can access.
     pub(crate) async fn user_installations(
         &self,
@@ -500,6 +594,7 @@ impl DashboardGithub {
             out.extend(page.installations.into_iter().map(|raw| InstallationRef {
                 id: raw.id,
                 account: raw.account.login,
+                repository_selection: raw.repository_selection,
             }));
             match next {
                 Some(n) => {

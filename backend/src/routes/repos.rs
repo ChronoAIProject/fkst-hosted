@@ -16,7 +16,7 @@
 
 use std::collections::HashSet;
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::Json;
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,8 @@ use crate::state::AppState;
 /// One repo the signed-in user can access, with its App-installation status.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RepoStatus {
+    /// The repo's immutable GitHub id (removal keys off it).
+    pub id: i64,
     /// Repo owner login (user or organization).
     pub owner: String,
     /// Repo name.
@@ -67,8 +69,21 @@ pub struct ReposResponse {
     /// Organizations the user belongs to (creation targets + empty groups),
     /// sorted.
     pub orgs: Vec<String>,
+    /// This App's installations the user can see, one per connected account.
+    pub installations: Vec<InstallationInfo>,
     /// Every repo the user can access, sorted by `owner/name`.
     pub repos: Vec<RepoStatus>,
+}
+
+/// One App installation the signed-in user can see (account-level connection).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InstallationInfo {
+    /// The connected account (user or organization login).
+    pub account: String,
+    /// The installation id (drives the Manage deep-link + uninstall).
+    pub installation_id: i64,
+    /// `"all"` or `"selected"` — whether the installation covers every repo.
+    pub repository_selection: String,
 }
 
 /// Request body for creating a repository as the signed-in user.
@@ -108,17 +123,28 @@ async fn list_repos(
     let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
 
     let accessible = gh.user_all_repos(&token).await?;
+    let insts = gh.user_installations(&token).await?;
     let mut installed: HashSet<String> = HashSet::new();
-    for inst in gh.user_installations(&token).await? {
+    for inst in &insts {
         for repo in gh.user_installation_repos(&token, inst.id).await? {
             installed.insert(format!("{}/{}", repo.owner, repo.name));
         }
     }
+    let mut installations: Vec<InstallationInfo> = insts
+        .into_iter()
+        .map(|i| InstallationInfo {
+            account: i.account,
+            installation_id: i.id,
+            repository_selection: i.repository_selection,
+        })
+        .collect();
+    installations.sort_by(|a, b| a.account.cmp(&b.account));
 
     let mut repos: Vec<RepoStatus> = accessible
         .into_iter()
         .map(|r| RepoStatus {
             installed: installed.contains(&format!("{}/{}", r.owner, r.name)),
+            id: r.id,
             owner: r.owner,
             name: r.name,
             private: r.private,
@@ -138,6 +164,7 @@ async fn list_repos(
             .and_then(|g| g.app_slug().map(str::to_string)),
         viewer: Viewer { login: user.login },
         orgs,
+        installations,
         repos,
     }))
 }
@@ -201,6 +228,7 @@ async fn create_repo(
     Ok((
         axum::http::StatusCode::CREATED,
         Json(RepoStatus {
+            id: created.id,
             owner: created.owner,
             name: created.name,
             private: created.private,
@@ -211,11 +239,104 @@ async fn create_repo(
     ))
 }
 
+/// Resolve the caller-visible installation on `owner`, or 404.
+async fn find_installation(
+    gh: &DashboardGithub,
+    token: &secrecy::SecretString,
+    owner: &str,
+) -> Result<crate::routes::dashboard::InstallationRef, AppError> {
+    gh.user_installations(token)
+        .await?
+        .into_iter()
+        .find(|i| i.account.eq_ignore_ascii_case(owner))
+        .ok_or_else(|| AppError::NotFound(format!("no installation on {owner}")))
+}
+
+/// `DELETE /api/v1/installations/{owner}` — uninstall the App from an account
+/// the caller can see (the App deletes its own installation via its JWT).
+#[utoipa::path(
+    delete,
+    path = "/installations/{owner}",
+    tag = "repos",
+    operation_id = "uninstall_account",
+    params(("owner" = String, Path, description = "Account (user or org) login")),
+    responses(
+        (status = 204, description = "Installation removed"),
+        (status = 401, description = "Missing or invalid GitHub token", body = ErrorEnvelope),
+        (status = 403, description = "Not allowlisted", body = ErrorEnvelope),
+        (status = 404, description = "No installation on that account", body = ErrorEnvelope),
+        (status = 503, description = "GitHub API unreachable", body = ErrorEnvelope),
+    )
+)]
+async fn uninstall_account(
+    State(state): State<AppState>,
+    _user: GithubUser,
+    headers: HeaderMap,
+    Path(owner): Path<String>,
+) -> Result<axum::http::StatusCode, AppError> {
+    let token = bearer_token(&headers)?;
+    let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
+    let inst = find_installation(&gh, &token, &owner).await?;
+    let app = state
+        .github_app
+        .as_ref()
+        .ok_or_else(|| AppError::Unavailable("github app is not configured".to_string()))?;
+    let jwt = app
+        .app_jwt()
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("app jwt mint: {e}")))?;
+    gh.delete_installation(&jwt, inst.id).await?;
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
+/// `DELETE /api/v1/installations/{owner}/repositories/{repo}` — remove one repo
+/// from a SELECTED-mode installation (user token; 409 for all-repositories).
+#[utoipa::path(
+    delete,
+    path = "/installations/{owner}/repositories/{repo}",
+    tag = "repos",
+    operation_id = "uninstall_repo",
+    params(
+        ("owner" = String, Path, description = "Account (user or org) login"),
+        ("repo" = String, Path, description = "Repository name"),
+    ),
+    responses(
+        (status = 204, description = "Repository removed from the installation"),
+        (status = 401, description = "Missing or invalid GitHub token", body = ErrorEnvelope),
+        (status = 403, description = "Not allowlisted", body = ErrorEnvelope),
+        (status = 404, description = "No installation / unknown repository", body = ErrorEnvelope),
+        (status = 409, description = "Installation covers all repositories (manage on GitHub)", body = ErrorEnvelope),
+        (status = 503, description = "GitHub API unreachable", body = ErrorEnvelope),
+    )
+)]
+async fn uninstall_repo(
+    State(state): State<AppState>,
+    _user: GithubUser,
+    headers: HeaderMap,
+    Path((owner, repo)): Path<(String, String)>,
+) -> Result<axum::http::StatusCode, AppError> {
+    let token = bearer_token(&headers)?;
+    let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
+    let inst = find_installation(&gh, &token, &owner).await?;
+    if inst.repository_selection == "all" {
+        return Err(AppError::Conflict(
+            "the installation covers all repositories; change the repo selection on GitHub (Manage)"
+                .to_string(),
+        ));
+    }
+    let repo_id = gh.repo_id(&token, &owner, &repo).await?;
+    gh.remove_installation_repo(&token, inst.id, repo_id)
+        .await?;
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
 /// The repos router (nested under `/api/v1`). GitHub-token authenticated via
 /// the `GithubUser` extractor (like the dashboard), so no documented security
 /// scheme.
 pub fn router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(list_repos, create_repo))
+    OpenApiRouter::new()
+        .routes(routes!(list_repos, create_repo))
+        .routes(routes!(uninstall_account))
+        .routes(routes!(uninstall_repo))
 }
 
 #[cfg(test)]
