@@ -27,6 +27,7 @@ class GithubContentIngressGuardTest(unittest.TestCase):
 
     def base_files(self) -> dict[str, str]:
         return {
+            "migration/prompt-external-fetch.allowlist": "",
             "libraries/forge/github/exec.lua": """
 local content_filter = require("forge.github.content_filter")
 local stdout_policy = require("forge.github.stdout_policy")
@@ -160,6 +161,51 @@ end
                 violations = self.run_guard(files)
                 self.assertEqual(len(violations), 1)
                 self.assertIn(f"{helper} must declare stdout_policy.content_json(\"{shape}\")", violations[0])
+
+    def test_rejects_external_github_fetch_commands_in_prompt_templates(self) -> None:
+        commands = (
+            "gh issue view 42 --repo owner/repo",
+            "gh pr view 42 --repo owner/repo",
+            "gh pr diff 42 --repo owner/repo",
+            "gh api repos/owner/repo/issues/42",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                files = self.base_files()
+                files["packages/example/prompts/judge.lua"] = f'return {{ template = [[Run `{command}`.]] }}\n'
+                violations = self.run_guard(files)
+                self.assertEqual(len(violations), 1)
+                self.assertIn("raw external-content fetch", violations[0])
+                self.assertIn("packages/example/prompts/judge.lua", violations[0])
+
+    def test_rejects_external_git_fetch_commands_in_prompt_templates(self) -> None:
+        commands = (
+            "git clone https://github.com/owner/repo",
+            "git fetch origin",
+            "git pull",
+            "git ls-remote origin",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                files = self.base_files()
+                files["packages/example/prompts/judge.lua"] = f'return {{ template = [[Run `{command}`.]] }}\n'
+                violations = self.run_guard(files)
+                self.assertEqual(len(violations), 1)
+                self.assertIn("raw external-content fetch", violations[0])
+
+    def test_allows_local_git_checks_in_prompt_templates(self) -> None:
+        files = self.base_files()
+        files["packages/example/prompts/judge.lua"] = (
+            'return { template = [[Run `git ls-files -u` and inspect `git diff`.]] }\n'
+        )
+        self.assertEqual(self.run_guard(files), [])
+
+    def test_prompt_external_fetch_allowlist_must_remain_empty(self) -> None:
+        files = self.base_files()
+        files["migration/prompt-external-fetch.allowlist"] = "packages/example/prompts/judge.lua\n"
+        violations = self.run_guard(files)
+        self.assertEqual(len(violations), 1)
+        self.assertIn("must remain empty", violations[0])
 
 
 if __name__ == "__main__":

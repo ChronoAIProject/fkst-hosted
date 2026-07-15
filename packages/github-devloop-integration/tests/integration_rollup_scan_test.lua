@@ -194,6 +194,11 @@ local function observe_clean()
 end
 
 local function mock_release_notes(body)
+  t.mock_command("git log", {
+    stdout = "abc123\tRollup change\n",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("codex exec", {
     stdout = body or ("Release highlights\n\nZh: fa bu zhai yao.\n" .. core._release_notes_ai_sentinel),
     stderr = "",
@@ -258,16 +263,19 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(h.count_calls("gh pr create"), 1)
     t.eq(h.count_calls("codex exec"), 1)
-    local saw_prompt_range = false
+    local saw_prompt_history = false
+    local saw_prompt_filtered_context = false
     local saw_prompt_issue_fetch = false
     for _, call in ipairs(t.command_calls()) do
       if call.rendered:find("codex exec", 1, true) ~= nil then
-        saw_prompt_range = call.stdin:find("git log --format=%H%x09%s refs/remotes/origin/dev..def456", 1, true) ~= nil
+        saw_prompt_history = call.stdin:find("abc123\tRollup change", 1, true) ~= nil
+        saw_prompt_filtered_context = call.stdin:find("Filtered referenced GitHub context", 1, true) ~= nil
         saw_prompt_issue_fetch = call.stdin:find("gh issue view <referenced-number> --repo owner/repo --json title,body,comments,labels,state", 1, true) ~= nil
       end
     end
-    t.is_true(saw_prompt_range)
-    t.is_true(saw_prompt_issue_fetch)
+    t.is_true(saw_prompt_history)
+    t.is_true(saw_prompt_filtered_context)
+    t.is_true(not saw_prompt_issue_fetch)
     t.is_true(h.has_call("--head integration/dev"))
     t.is_true(h.has_call("--base dev"))
     local create_call = find_call("gh pr create")
@@ -285,6 +293,7 @@ return {
     mock_content_diff(true)
     mock_pr_list(nil)
     mock_integration_head("def456")
+    t.mock_command("git log", { stdout = "abc123\tRollup change\n", stderr = "", exit_code = 0 })
     t.mock_command("codex exec", { stdout = "", stderr = "model unavailable", exit_code = 1 })
     local result = run_scan(opts("rollup-codex-fail", { FKST_GITHUB_WRITE = "1" }))
     t.is_true(result.exit_code ~= 0)
@@ -298,6 +307,7 @@ return {
     mock_content_diff(true)
     mock_pr_list(nil)
     mock_integration_head("def456")
+    t.mock_command("git log", { stdout = "abc123\tRollup change\n", stderr = "", exit_code = 0 })
     t.mock_command("codex exec", { stdout = "\n" .. core._release_notes_ai_sentinel .. "\n", stderr = "", exit_code = 0 })
     local result = run_scan(opts("rollup-codex-empty", { FKST_GITHUB_WRITE = "1" }))
     t.is_true(result.exit_code ~= 0)
@@ -311,6 +321,7 @@ return {
     mock_content_diff(true)
     mock_pr_list(nil)
     mock_integration_head("def456")
+    t.mock_command("git log", { stdout = "abc123\tRollup change\n", stderr = "", exit_code = 0 })
     t.mock_command("codex exec", { stdout = "", stderr = "model unavailable", exit_code = 1 })
     t.mock_command("gh pr create", { stdout = "https://github.example/owner/repo/pull/9\n", stderr = "", exit_code = 0 })
     mock_pr_list({ number = 9 })

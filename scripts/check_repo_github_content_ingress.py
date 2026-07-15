@@ -14,6 +14,12 @@ from typing import Callable
 
 
 RULE = "G-GITHUB-CONTENT-INGRESS"
+PROMPT_EXTERNAL_FETCH_ALLOWLIST = "migration/prompt-external-fetch.allowlist"
+PROMPT_EXTERNAL_FETCH_RE = re.compile(
+    r"\bgh\s+(?:api\b|issue\s+view\b|pr\s+(?:view|diff)\b)"
+    r"|\bgit\s+(?:clone|fetch|pull|ls-remote)\b",
+    re.IGNORECASE,
+)
 WRAPPER_NEEDLES = {
     "libraries/forge/github/exec.lua": ("content_filter.apply_gh_content_filter",),
 }
@@ -164,6 +170,18 @@ def policyless_require_github_constructions(source: str, stripped: str) -> list[
     return found
 
 
+def prompt_external_fetch_sites(root: Path, read_text: Callable[[Path], str], rel: Callable[[Path, Path], str]) -> list[tuple[str, int, str]]:
+    packages = root / "packages"
+    sites: list[tuple[str, int, str]] = []
+    if not packages.exists():
+        return sites
+    for path in sorted(packages.glob("*/prompts/*.lua")):
+        text = read_text(path)
+        for match in PROMPT_EXTERNAL_FETCH_RE.finditer(text):
+            sites.append((rel(root, path), text.count("\n", 0, match.start()) + 1, match.group(0)))
+    return sites
+
+
 def messages(
     root: Path,
     read_text: Callable[[Path], str],
@@ -172,6 +190,28 @@ def messages(
     strip_lua_comments_and_strings: Callable[[str], str],
 ) -> list[str]:
     violations: list[str] = []
+    allowlist_path = root / PROMPT_EXTERNAL_FETCH_ALLOWLIST
+    if not allowlist_path.is_file():
+        violations.append(
+            f"{PROMPT_EXTERNAL_FETCH_ALLOWLIST} is missing; prompt external-fetch inventory must remain at zero"
+        )
+    else:
+        entries = [
+            line.strip()
+            for line in read_text(allowlist_path).splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        if entries:
+            violations.append(
+                f"{PROMPT_EXTERNAL_FETCH_ALLOWLIST} must remain empty; raw prompt fetch bypasses are forbidden"
+            )
+
+    for relpath, line, command in prompt_external_fetch_sites(root, read_text, rel):
+        violations.append(
+            f"{relpath}:{line} prompt contains raw external-content fetch {command!r}; "
+            "prefetch through filtered forge.github and pass supplied context"
+        )
+
     for relpath, needles in WRAPPER_NEEDLES.items():
         path = root / relpath
         text = read_text(path) if path.is_file() else ""
