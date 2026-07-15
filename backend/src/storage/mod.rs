@@ -6,7 +6,7 @@
 //! wiremock-tested machinery for that: [`config::ChronoStorageConfig`] (the
 //! optional, fail-closed env config), [`nyxid_token::NyxidSaTokenProvider`] (the
 //! cached/refreshed token minter), and [`chrono_storage::ChronoStorageClient`]
-//! (upload / download / delete / copy / bucket-readiness).
+//! (upload / download / delete / bucket-readiness).
 //!
 //! The feature is OPTIONAL: [`try_from_env`] returns `None` when it is not
 //! configured, so a control plane with no storage config runs exactly as before.

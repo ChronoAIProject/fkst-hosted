@@ -1,11 +1,11 @@
 //! wiremock tests for the chrono-storage client: each method builds the right
 //! method/path/query and sends the bearer header; the two-step download resolves
-//! a presigned URL then fetches the bytes with no auth; non-2xx maps to a
+//! the authenticated /objects/download read returns raw bytes; non-2xx maps to a
 //! status error; and neither the token nor the client secret leaks into an error.
 
 use axum::body::Bytes;
 use secrecy::SecretString;
-use wiremock::matchers::{body_json, header, header_exists, method, path, query_param};
+use wiremock::matchers::{header, header_exists, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
@@ -94,26 +94,15 @@ async fn upload_maps_non_2xx_to_status_error() {
 }
 
 #[tokio::test]
-async fn download_resolves_presigned_url_then_fetches_bytes() {
+async fn download_fetches_bytes_via_objects_download() {
     let (client, server) = client_and_server().await;
-    let signed = format!("{}/signed/blob?sig=abc123", server.uri());
 
-    // Step 1: presigned-url resolution (authenticated).
+    // The real chrono-bucket API (issue #497): a single authenticated GET of
+    // /objects/download returns the raw object bytes — no presigned indirection.
     Mock::given(method("GET"))
-        .and(path(format!("/api/buckets/{BUCKET}/presigned-url")))
+        .and(path(format!("/api/buckets/{BUCKET}/objects/download")))
         .and(query_param("key", "sessions/42/run.log"))
         .and(header("authorization", bearer().as_str()))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "data": { "presignedUrl": signed, "expiresAt": "2999-01-01T00:00:00Z" }
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    // Step 2: the direct fetch of the signed URL carries NO auth header.
-    Mock::given(method("GET"))
-        .and(path("/signed/blob"))
-        .and(query_param("sig", "abc123"))
         .respond_with(ResponseTemplate::new(200).set_body_bytes(b"BLOB-DATA".to_vec()))
         .expect(1)
         .mount(&server)
@@ -127,53 +116,10 @@ async fn download_resolves_presigned_url_then_fetches_bytes() {
 }
 
 #[tokio::test]
-async fn presigned_get_url_requests_expiry_and_returns_the_signed_url() {
-    let (client, server) = client_and_server().await;
-    let signed = "https://cdn.example/signed/blob?sig=xyz".to_string();
-    Mock::given(method("GET"))
-        .and(path(format!("/api/buckets/{BUCKET}/presigned-url")))
-        .and(query_param("key", "logs/sess-1/latest.tar.gz"))
-        // The requested 900s TTL rides the `expiresIn` query param.
-        .and(query_param("expiresIn", "900"))
-        .and(header("authorization", bearer().as_str()))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "data": { "presignedUrl": signed, "expiresAt": "2999-01-01T00:00:00Z" }
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let url = client
-        .presigned_get_url("logs/sess-1/latest.tar.gz", 900)
-        .await
-        .expect("presign succeeds");
-    assert_eq!(url, "https://cdn.example/signed/blob?sig=xyz");
-}
-
-#[tokio::test]
-async fn presigned_get_url_maps_missing_object_to_status_404() {
+async fn download_maps_missing_object_to_status_404() {
     let (client, server) = client_and_server().await;
     Mock::given(method("GET"))
-        .and(path(format!("/api/buckets/{BUCKET}/presigned-url")))
-        .respond_with(ResponseTemplate::new(404))
-        .mount(&server)
-        .await;
-
-    let err = client
-        .presigned_get_url("logs/missing/latest.tar.gz", 900)
-        .await
-        .expect_err("404 must error");
-    assert!(
-        matches!(err, StorageError::Status { status: 404 }),
-        "got {err:?}"
-    );
-}
-
-#[tokio::test]
-async fn download_maps_presigned_404_to_status_error() {
-    let (client, server) = client_and_server().await;
-    Mock::given(method("GET"))
-        .and(path(format!("/api/buckets/{BUCKET}/presigned-url")))
+        .and(path(format!("/api/buckets/{BUCKET}/objects/download")))
         .respond_with(ResponseTemplate::new(404))
         .mount(&server)
         .await;
@@ -189,26 +135,15 @@ async fn download_maps_presigned_404_to_status_error() {
 }
 
 #[tokio::test]
-async fn download_maps_signed_url_5xx_to_status_error() {
+async fn download_maps_5xx_to_status_error() {
     let (client, server) = client_and_server().await;
-    let signed = format!("{}/signed/blob", server.uri());
     Mock::given(method("GET"))
-        .and(path(format!("/api/buckets/{BUCKET}/presigned-url")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "data": { "presignedUrl": signed, "expiresAt": "2999-01-01T00:00:00Z" }
-        })))
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/signed/blob"))
+        .and(path(format!("/api/buckets/{BUCKET}/objects/download")))
         .respond_with(ResponseTemplate::new(502))
         .mount(&server)
         .await;
 
-    let err = client
-        .download("k")
-        .await
-        .expect_err("signed 502 must error");
+    let err = client.download("k").await.expect_err("502 must error");
     assert!(
         matches!(err, StorageError::Status { status: 502 }),
         "got {err:?}"
@@ -245,43 +180,6 @@ async fn delete_maps_non_2xx_to_status_error() {
     let err = client.delete("k").await.expect_err("404 must error");
     assert!(
         matches!(err, StorageError::Status { status: 404 }),
-        "got {err:?}"
-    );
-}
-
-#[tokio::test]
-async fn copy_posts_source_and_dest_keys_as_json() {
-    let (client, server) = client_and_server().await;
-    Mock::given(method("POST"))
-        .and(path(format!("/api/buckets/{BUCKET}/objects/copy")))
-        .and(header("authorization", bearer().as_str()))
-        .and(body_json(serde_json::json!({
-            "sourceKey": "a/old.log",
-            "destKey": "b/new.log",
-        })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "data": {} })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    client
-        .copy("a/old.log", "b/new.log")
-        .await
-        .expect("copy succeeds");
-}
-
-#[tokio::test]
-async fn copy_maps_non_2xx_to_status_error() {
-    let (client, server) = client_and_server().await;
-    Mock::given(method("POST"))
-        .and(path(format!("/api/buckets/{BUCKET}/objects/copy")))
-        .respond_with(ResponseTemplate::new(500))
-        .mount(&server)
-        .await;
-
-    let err = client.copy("a", "b").await.expect_err("500 must error");
-    assert!(
-        matches!(err, StorageError::Status { status: 500 }),
         "got {err:?}"
     );
 }
