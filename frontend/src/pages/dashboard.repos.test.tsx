@@ -6,6 +6,7 @@ import { AuthProvider } from '@/lib/auth/github-auth';
 
 // The wire shape of GET /api/v1/repos (mirrors the component's DTO).
 interface RepoSpec {
+  id: number;
   owner: string;
   name: string;
   private: boolean;
@@ -13,10 +14,16 @@ interface RepoSpec {
   admin: boolean;
   installed: boolean;
 }
+interface InstallationSpec {
+  account: string;
+  installation_id: number;
+  repository_selection: 'all' | 'selected';
+}
 interface ReposBody {
   app_slug: string | null;
   viewer: { login: string };
   orgs: string[];
+  installations: InstallationSpec[];
   repos: RepoSpec[];
 }
 
@@ -73,6 +80,33 @@ function stubCreateApi(opts: {
   return fetchMock;
 }
 
+/** Stub for the danger flows: GET /api/v1/repos serves `initial` until a
+ *  successful DELETE (any path), then `after`; DELETE answers with the given
+ *  status/body (204 on success or an error envelope). */
+function stubDeleteApi(opts: {
+  initial: ReposBody;
+  after: ReposBody;
+  del: { status: number; body?: unknown };
+}) {
+  let deleted = false;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith('/api/v1/dashboard')) {
+      return jsonResponse({ last_pulled_at_ms: null, dashboard: null });
+    }
+    if (init?.method === 'DELETE') {
+      if (opts.del.status < 300) deleted = true;
+      return jsonResponse(opts.del.body ?? null, opts.del.status);
+    }
+    if (url.endsWith('/api/v1/repos') && init?.method !== 'POST') {
+      return jsonResponse(deleted ? opts.after : opts.initial);
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
 const repoGetCalls = (fetchMock: ReturnType<typeof stubApi>) =>
   fetchMock.mock.calls.filter(
     ([input, init]) => String(input).endsWith('/api/v1/repos') && init?.method !== 'POST'
@@ -83,6 +117,9 @@ const repoPostCall = (fetchMock: ReturnType<typeof stubApi>) =>
     ([input, init]) => String(input).endsWith('/api/v1/repos') && init?.method === 'POST'
   );
 
+const deleteCall = (fetchMock: ReturnType<typeof stubApi>) =>
+  fetchMock.mock.calls.find(([, init]) => init?.method === 'DELETE');
+
 function renderDashboard() {
   return render(
     <AuthProvider>
@@ -91,7 +128,9 @@ function renderDashboard() {
   );
 }
 
+let nextRepoId = 1;
 const repo = (over: Partial<RepoSpec> & Pick<RepoSpec, 'owner' | 'name'>): RepoSpec => ({
+  id: nextRepoId++,
   private: false,
   org: false,
   admin: true,
@@ -115,9 +154,10 @@ describe('Dashboard — Repositories section', () => {
       app_slug: 'chronoai-fkst',
       viewer: { login: 'shining' },
       orgs: ['acme'],
+      installations: [],
       repos: [
-        { owner: 'acme', name: 'widgets', private: true, org: true, admin: true, installed: true },
-        { owner: 'shining', name: 'lab', private: false, org: false, admin: true, installed: false },
+        repo({ owner: 'acme', name: 'widgets', private: true, org: true, installed: true }),
+        repo({ owner: 'shining', name: 'lab' }),
       ],
     });
     renderDashboard();
@@ -137,9 +177,10 @@ describe('Dashboard — Repositories section', () => {
       app_slug: 'chronoai-fkst',
       viewer: { login: 'shining' },
       orgs: ['acme'],
+      installations: [],
       repos: [
-        { owner: 'acme', name: 'widgets', private: true, org: true, admin: true, installed: true },
-        { owner: 'acme', name: 'gears', private: true, org: true, admin: false, installed: false },
+        repo({ owner: 'acme', name: 'widgets', private: true, org: true, installed: true }),
+        repo({ owner: 'acme', name: 'gears', private: true, org: true, admin: false }),
       ],
     });
     renderDashboard();
@@ -165,6 +206,7 @@ describe('Dashboard — Repositories section', () => {
       app_slug: 'chronoai-fkst',
       viewer: { login: 'shining' },
       orgs: [],
+      installations: [],
       repos: [],
     });
     renderDashboard();
@@ -190,9 +232,8 @@ describe('Dashboard — Repositories section', () => {
       app_slug: null,
       viewer: { login: 'acme' },
       orgs: [],
-      repos: [
-        { owner: 'acme', name: 'gears', private: false, org: false, admin: true, installed: false },
-      ],
+      installations: [],
+      repos: [repo({ owner: 'acme', name: 'gears' })],
     });
     renderDashboard();
 
@@ -210,6 +251,7 @@ describe('Dashboard — Repositories section', () => {
       app_slug: 'chronoai-fkst',
       viewer: { login: 'shining' },
       orgs: ['zeta', 'acme'], // deliberately out of order + zeta has no repos
+      installations: [],
       repos: [
         repo({ owner: 'acme', name: 'widgets', org: true, installed: true }),
         repo({ owner: 'acme', name: 'gears', org: true }),
@@ -236,6 +278,7 @@ describe('Dashboard — Repositories section', () => {
       app_slug: 'chronoai-fkst',
       viewer: { login: 'shining' },
       orgs: ['acme'],
+      installations: [],
       repos: [
         repo({ owner: 'shining', name: 'lab' }),
         repo({ owner: 'acme', name: 'widgets', org: true }),
@@ -264,6 +307,7 @@ describe('Dashboard — Repositories section', () => {
       app_slug: 'chronoai-fkst',
       viewer: { login: 'shining' },
       orgs: ['acme'],
+      installations: [],
       repos: [repo({ owner: 'shining', name: 'lab', installed: true })],
     };
     const created = repo({ owner: 'shining', name: 'rocket', private: true });
@@ -309,6 +353,7 @@ describe('Dashboard — Repositories section', () => {
       app_slug: 'chronoai-fkst',
       viewer: { login: 'shining' },
       orgs: ['acme'],
+      installations: [],
       repos: [repo({ owner: 'acme', name: 'widgets', org: true })],
     };
     const message = 'The GitHub App is missing the Administration permission on acme.';
@@ -347,6 +392,7 @@ describe('Dashboard — Repositories section', () => {
       app_slug: 'chronoai-fkst',
       viewer: { login: 'shining' },
       orgs: [],
+      installations: [],
       repos: [repo({ owner: 'shining', name: 'lab' })],
     });
     renderDashboard();
@@ -363,5 +409,165 @@ describe('Dashboard — Repositories section', () => {
     await user.clear(name);
     await user.type(name, 'Good-name.1_x');
     expect(submit).toBeEnabled();
+  });
+
+  it('shows a Connect CTA (with hint) on a group whose account has no installation', async () => {
+    stubApi({
+      app_slug: 'chronoai-fkst',
+      viewer: { login: 'shining' },
+      orgs: [],
+      installations: [],
+      repos: [repo({ owner: 'shining', name: 'lab' })],
+    });
+    renderDashboard();
+
+    const connect = await screen.findByRole('link', { name: 'Connect' });
+    expect(connect).toHaveAttribute(
+      'href',
+      'https://github.com/apps/chronoai-fkst/installations/new'
+    );
+    expect(connect).toHaveAttribute('target', '_blank');
+    expect(connect).toHaveAttribute('rel', 'noreferrer');
+    expect(
+      screen.getByText('Connect to enable repository creation and fkst sessions.')
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Manage' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Uninstall' })).not.toBeInTheDocument();
+  });
+
+  it('shows Manage (exact per-account settings URL) and Uninstall on connected groups', async () => {
+    stubApi({
+      app_slug: 'chronoai-fkst',
+      viewer: { login: 'shining' },
+      orgs: ['acme'],
+      installations: [
+        { account: 'shining', installation_id: 11, repository_selection: 'all' },
+        { account: 'acme', installation_id: 22, repository_selection: 'selected' },
+      ],
+      repos: [
+        repo({ owner: 'shining', name: 'lab', installed: true }),
+        repo({ owner: 'acme', name: 'widgets', org: true, installed: true }),
+      ],
+    });
+    renderDashboard();
+
+    const manages = await screen.findAllByRole('link', { name: 'Manage' });
+    // Personal group renders first, then orgs — each with its own settings page.
+    expect(manages.map((a) => a.getAttribute('href'))).toEqual([
+      'https://github.com/settings/installations/11',
+      'https://github.com/organizations/acme/settings/installations/22',
+    ]);
+    for (const a of manages) {
+      expect(a).toHaveAttribute('target', '_blank');
+      expect(a).toHaveAttribute('rel', 'noreferrer');
+    }
+    expect(screen.getAllByRole('button', { name: 'Uninstall' })).toHaveLength(2);
+    expect(screen.queryByRole('link', { name: 'Connect' })).not.toBeInTheDocument();
+  });
+
+  it('uninstalls an account after confirmation and re-fetches the list', async () => {
+    const user = userEvent.setup();
+    const initial: ReposBody = {
+      app_slug: 'chronoai-fkst',
+      viewer: { login: 'shining' },
+      orgs: [],
+      installations: [{ account: 'shining', installation_id: 11, repository_selection: 'all' }],
+      repos: [repo({ owner: 'shining', name: 'lab', installed: true })],
+    };
+    const fetchMock = stubDeleteApi({
+      initial,
+      after: {
+        ...initial,
+        installations: [],
+        repos: [repo({ owner: 'shining', name: 'lab' })],
+      },
+      del: { status: 204 },
+    });
+    renderDashboard();
+
+    await user.click(await screen.findByRole('button', { name: 'Uninstall' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Uninstall from shining?')).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Uninstall' }));
+
+    await waitFor(() => expect(deleteCall(fetchMock)).toBeDefined());
+    expect(String(deleteCall(fetchMock)![0])).toMatch(/\/api\/v1\/installations\/shining$/);
+    // Dialog closes and the list re-fetches; the group is now not-connected.
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(repoGetCalls(fetchMock)).toBe(2));
+    expect(await screen.findByRole('link', { name: 'Connect' })).toBeInTheDocument();
+  });
+
+  it('keeps the uninstall dialog open and shows the envelope message on failure', async () => {
+    const user = userEvent.setup();
+    const initial: ReposBody = {
+      app_slug: 'chronoai-fkst',
+      viewer: { login: 'shining' },
+      orgs: [],
+      installations: [{ account: 'shining', installation_id: 11, repository_selection: 'all' }],
+      repos: [repo({ owner: 'shining', name: 'lab', installed: true })],
+    };
+    const message = 'No installation found for this account.';
+    const fetchMock = stubDeleteApi({
+      initial,
+      after: initial,
+      del: { status: 404, body: { error: 'not_found', message } },
+    });
+    renderDashboard();
+
+    await user.click(await screen.findByRole('button', { name: 'Uninstall' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Uninstall' }));
+
+    expect(await within(dialog).findByText(message)).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(repoGetCalls(fetchMock)).toBe(1); // no re-fetch on failure
+  });
+
+  it('removes a repo from a selected-mode installation after confirmation', async () => {
+    const user = userEvent.setup();
+    const initial: ReposBody = {
+      app_slug: 'chronoai-fkst',
+      viewer: { login: 'shining' },
+      orgs: ['acme'],
+      installations: [{ account: 'acme', installation_id: 22, repository_selection: 'selected' }],
+      repos: [repo({ owner: 'acme', name: 'widgets', org: true, installed: true })],
+    };
+    const fetchMock = stubDeleteApi({
+      initial,
+      after: { ...initial, repos: [repo({ owner: 'acme', name: 'widgets', org: true })] },
+      del: { status: 204 },
+    });
+    renderDashboard();
+
+    await user.click(await screen.findByRole('button', { name: 'Remove' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Remove acme/widgets?')).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() => expect(deleteCall(fetchMock)).toBeDefined());
+    expect(String(deleteCall(fetchMock)![0])).toMatch(
+      /\/api\/v1\/installations\/acme\/repositories\/widgets$/
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(repoGetCalls(fetchMock)).toBe(2));
+  });
+
+  it('shows no Remove on all-mode installed rows, only the managed-on-GitHub hint', async () => {
+    stubApi({
+      app_slug: 'chronoai-fkst',
+      viewer: { login: 'shining' },
+      orgs: [],
+      installations: [{ account: 'shining', installation_id: 11, repository_selection: 'all' }],
+      repos: [repo({ owner: 'shining', name: 'lab', installed: true })],
+    });
+    renderDashboard();
+
+    const installedMark = await screen.findByText('✓ Installed');
+    expect(installedMark).toHaveAttribute(
+      'title',
+      'This installation covers all repositories — repository selection is managed on GitHub via Manage.'
+    );
+    expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
   });
 });

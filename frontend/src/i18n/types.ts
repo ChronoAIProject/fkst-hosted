@@ -126,6 +126,38 @@ export interface SiteContent {
       createFailed: string;
       /** Callout under a freshly created repo pointing at the Install step. */
       createdNextStep: string;
+      /** Group-header CTA for an account without an App installation. */
+      connect: string;
+      /** Short hint next to the Connect CTA (why connecting matters). */
+      connectHint: string;
+      /** Group-header link to the installation's GitHub settings page. */
+      manage: string;
+      /** Group-header danger action for a connected account. */
+      uninstall: string;
+      /** Uninstall confirm dialog title; `{owner}` placeholder. */
+      uninstallConfirmTitle: string;
+      /** Uninstall confirm dialog body; `{owner}` placeholder. */
+      uninstallConfirmBody: string;
+      /** Uninstall confirm dialog: explicit confirm button. */
+      uninstallConfirm: string;
+      /** Uninstall confirm button while the DELETE is in flight. */
+      uninstallPending: string;
+      /** Generic uninstall failure (no server message available). */
+      uninstallFailed: string;
+      /** Per-repo action removing it from a selected-mode installation. */
+      remove: string;
+      /** Remove confirm dialog title; `{repo}` placeholder. */
+      removeConfirmTitle: string;
+      /** Remove confirm dialog body; `{repo}` placeholder. */
+      removeConfirmBody: string;
+      /** Remove confirm dialog: explicit confirm button. */
+      removeConfirm: string;
+      /** Remove confirm button while the DELETE is in flight. */
+      removePending: string;
+      /** Generic remove failure (no server message available). */
+      removeFailed: string;
+      /** Title hint on Installed rows of an all-repositories installation. */
+      allModeHint: string;
     };
   };
   intro: {
