@@ -48,14 +48,41 @@ pub struct RepoStatus {
     pub installed: bool,
 }
 
-/// The repo listing plus what the frontend needs to build the install link.
+/// The signed-in viewer, for the frontend's grouping + create-repo owner picker.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct Viewer {
+    /// The signed-in user's GitHub login.
+    pub login: String,
+}
+
+/// The repo listing plus what the frontend needs to build the install link,
+/// group by account, and offer create-repo targets.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ReposResponse {
     /// The App's slug (install page: `https://github.com/apps/{app_slug}/installations/new`);
     /// null when the deployment has no App slug configured.
     pub app_slug: Option<String>,
+    /// The signed-in user (the "personal" grouping/creation target).
+    pub viewer: Viewer,
+    /// Organizations the user belongs to (creation targets + empty groups),
+    /// sorted.
+    pub orgs: Vec<String>,
     /// Every repo the user can access, sorted by `owner/name`.
     pub repos: Vec<RepoStatus>,
+}
+
+/// Request body for creating a repository as the signed-in user.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CreateRepoRequest {
+    /// Organization to create under; null (or the viewer's own login) creates
+    /// under the personal account.
+    pub owner: Option<String>,
+    /// Repository name (`[A-Za-z0-9._-]+`, at most 100 chars).
+    pub name: String,
+    /// Create as a private repository.
+    pub private: bool,
+    /// Optional repository description.
+    pub description: Option<String>,
 }
 
 /// `GET /api/v1/repos` — every repo the signed-in user can access, each flagged
@@ -74,7 +101,7 @@ pub struct ReposResponse {
 )]
 async fn list_repos(
     State(state): State<AppState>,
-    _user: GithubUser,
+    user: GithubUser,
     headers: HeaderMap,
 ) -> Result<Json<ReposResponse>, AppError> {
     let token = bearer_token(&headers)?;
@@ -101,20 +128,94 @@ async fn list_repos(
         .collect();
     repos.sort_by(|a, b| (&a.owner, &a.name).cmp(&(&b.owner, &b.name)));
 
+    let mut orgs = gh.user_orgs(&token).await?;
+    orgs.sort();
+
     Ok(Json(ReposResponse {
         app_slug: state
             .github_app
             .as_ref()
             .and_then(|g| g.app_slug().map(str::to_string)),
+        viewer: Viewer { login: user.login },
+        orgs,
         repos,
     }))
+}
+
+/// `POST /api/v1/repos` — create a repository AS the signed-in user (their
+/// token; personal account or an organization they belong to). The created
+/// repo starts without the App installed — the guided install flow follows.
+#[utoipa::path(
+    post,
+    path = "/repos",
+    tag = "repos",
+    operation_id = "create_repo",
+    request_body = CreateRepoRequest,
+    responses(
+        (status = 201, description = "The created repository", body = RepoStatus),
+        (status = 400, description = "Invalid name / GitHub rejected the repository", body = ErrorEnvelope),
+        (status = 401, description = "Missing or invalid GitHub token", body = ErrorEnvelope),
+        (status = 403, description = "Not allowlisted, or GitHub refused creation (App may lack the Administration permission)", body = ErrorEnvelope),
+        (status = 503, description = "GitHub API unreachable", body = ErrorEnvelope),
+    )
+)]
+async fn create_repo(
+    State(state): State<AppState>,
+    user: GithubUser,
+    headers: HeaderMap,
+    Json(req): Json<CreateRepoRequest>,
+) -> Result<(axum::http::StatusCode, Json<RepoStatus>), AppError> {
+    let name = req.name.trim();
+    let valid = !name.is_empty()
+        && name.len() <= 100
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    if !valid {
+        return Err(AppError::Validation(
+            "repository name must be 1-100 chars of [A-Za-z0-9._-]".to_string(),
+        ));
+    }
+    // The viewer's own login as owner means the personal account.
+    let org = req
+        .owner
+        .as_deref()
+        .map(str::trim)
+        .filter(|o| !o.is_empty() && !o.eq_ignore_ascii_case(&user.login));
+
+    let token = bearer_token(&headers)?;
+    let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
+    let created = gh
+        .create_repo(
+            &token,
+            org,
+            name,
+            req.private,
+            req.description
+                .as_deref()
+                .map(str::trim)
+                .filter(|d| !d.is_empty()),
+        )
+        .await?;
+
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(RepoStatus {
+            owner: created.owner,
+            name: created.name,
+            private: created.private,
+            org: created.org,
+            admin: created.admin,
+            installed: false,
+        }),
+    ))
 }
 
 /// The repos router (nested under `/api/v1`). GitHub-token authenticated via
 /// the `GithubUser` extractor (like the dashboard), so no documented security
 /// scheme.
 pub fn router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(list_repos))
+    OpenApiRouter::new().routes(routes!(list_repos, create_repo))
 }
 
 #[cfg(test)]
