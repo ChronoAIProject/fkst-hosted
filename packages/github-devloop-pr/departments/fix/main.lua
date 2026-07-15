@@ -279,6 +279,18 @@ local function assert_staged_diff_check(worktree)
     .. single_line_evidence(diff_result.stderr))
 end
 
+local function assert_revision_range_diff_check(worktree, base_head_sha, head_sha)
+  local diff_result = core.git.diff_check_range(worktree, base_head_sha, head_sha, 30)
+  if diff_result.exit_code == 0 then
+    return
+  end
+  error("github-devloop: range-diff-check-failed: git diff --check failed for reusable fix head"
+    .. " base=" .. tostring(base_head_sha)
+    .. " head=" .. tostring(head_sha)
+    .. " stdout=" .. single_line_evidence(diff_result.stdout)
+    .. " stderr=" .. single_line_evidence(diff_result.stderr))
+end
+
 local function bounded_fix_summary(value)
   local text = tostring(value or ""):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
   if #text > 600 then
@@ -493,6 +505,7 @@ local function run_fix_attempt(plan)
   if tostring(status.stdout or "") == "" then
     local existing_head_sha = branch_head_if_ahead(plan.fix.reviewed_head_sha, plan.branch)
     if existing_head_sha ~= nil then
+      assert_revision_range_diff_check(worktree, plan.fix.reviewed_head_sha, existing_head_sha)
       devloop_logging.log_codex_result("fix", plan.fix.proposal_id, "fix", result, "result=reusing-existing-head", nil)
       return {
         kind = "reviewing",

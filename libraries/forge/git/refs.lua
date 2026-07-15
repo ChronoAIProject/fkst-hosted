@@ -210,6 +210,14 @@ local function diff_check_argv(worktree, cached)
   return worktree_argv(worktree, "diff", "--check")
 end
 
+local function diff_check_range_argv(worktree, base_sha, head_sha)
+  local range = tostring(base_sha) .. ".." .. tostring(head_sha)
+  if worktree == nil then
+    return { "git", "diff", "--check", range }
+  end
+  return worktree_argv(worktree, "diff", "--check", range)
+end
+
 local function commit_message_file_argv(worktree, message_file)
   return worktree_argv(worktree, "commit", "-F", message_file)
 end
@@ -482,6 +490,14 @@ function M.install(handle)
 
   function handle.diff_check(worktree, cached, timeout)
     return exec_result(handle, diff_check_argv(worktree, cached), timeout, "git diff --check")
+  end
+
+  function handle.diff_check_range(worktree, base_sha, head_sha, timeout)
+    return exec_result(handle, diff_check_range_argv(
+      worktree,
+      gitref.require_safe_sha("diff check base sha", base_sha, "github-devloop"),
+      gitref.require_safe_sha("diff check head sha", head_sha, "github-devloop")
+    ), timeout, "git diff --check range")
   end
 
   function handle.commit_message_file(worktree, message_file, timeout)
