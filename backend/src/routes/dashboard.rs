@@ -388,6 +388,103 @@ impl DashboardGithub {
         }
     }
 
+    /// `GET /user/orgs` (user token) — the organizations the user belongs to,
+    /// paginated. Powers the create-repo owner picker (issue #503).
+    pub(crate) async fn user_orgs(
+        &self,
+        user_token: &SecretString,
+    ) -> Result<Vec<String>, AppError> {
+        let mut url = format!("{}/user/orgs", self.api_base);
+        let mut query: Option<Vec<(&str, &str)>> = Some(vec![("per_page", "100")]);
+        let mut out = Vec::new();
+        loop {
+            let (page, next): (Vec<RawLogin>, _) = self
+                .get_page(&url, user_token, query.as_deref(), "user_orgs")
+                .await?;
+            out.extend(page.into_iter().map(|o| o.login));
+            match next {
+                Some(next_url) => {
+                    url = next_url;
+                    query = None;
+                }
+                None => return Ok(out),
+            }
+        }
+    }
+
+    /// `POST /user/repos` (personal) or `POST /orgs/{org}/repos` (organization)
+    /// with the USER token — the repo is created AS the signed-in user (issue
+    /// #503). GitHub gates repo creation for App user-to-server tokens behind
+    /// the App's `administration` repository permission; a 403 maps to a
+    /// message naming that requirement so the operator knows what to grant.
+    pub(crate) async fn create_repo(
+        &self,
+        user_token: &SecretString,
+        org: Option<&str>,
+        name: &str,
+        private: bool,
+        description: Option<&str>,
+    ) -> Result<UserRepo, AppError> {
+        let url = match org {
+            Some(org) => format!("{}/orgs/{org}/repos", self.api_base),
+            None => format!("{}/user/repos", self.api_base),
+        };
+        let mut body = serde_json::json!({ "name": name, "private": private });
+        if let Some(desc) = description {
+            body["description"] = serde_json::Value::String(desc.to_string());
+        }
+        let response = self
+            .client
+            .post(&url)
+            .bearer_auth(user_token.expose_secret())
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| {
+                tracing::warn!(error = %e, "github create-repo transport error");
+                AppError::Unavailable("github create-repo request failed".to_string())
+            })?;
+        let status = response.status();
+        if status.is_success() {
+            let raw: RawUserRepo = response.json().await.map_err(|e| {
+                tracing::warn!(error = %e, "github create-repo response did not parse");
+                AppError::Unavailable("github create-repo response was malformed".to_string())
+            })?;
+            return Ok(UserRepo {
+                owner: raw.owner.login,
+                name: raw.name,
+                private: raw.private,
+                org: raw.owner.kind == "Organization",
+                // The creator administers a fresh repo; default open if GitHub
+                // omits the permissions block on the create response.
+                admin: raw.permissions.map(|p| p.admin).unwrap_or(true),
+            });
+        }
+        // Carry GitHub's own `message` (it names the real cause: permission
+        // missing, name taken, org policy) without leaking anything else.
+        let message = response
+            .json::<serde_json::Value>()
+            .await
+            .ok()
+            .and_then(|v| {
+                v.get("message")
+                    .and_then(|m| m.as_str())
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| format!("github returned status {status}"));
+        Err(match status.as_u16() {
+            401 => AppError::Unauthorized(format!("github rejected the token: {message}")),
+            403 | 404 => AppError::Forbidden(format!(
+                "GitHub refused repo creation: {message} — if this persists, the \
+                 GitHub App likely lacks the 'Administration' repository \
+                 permission required for user-token repo creation"
+            )),
+            422 => AppError::Validation(format!("GitHub rejected the repository: {message}")),
+            _ => AppError::Unavailable(format!("github create-repo returned status {status}")),
+        })
+    }
+
     /// `GET /user/installations` (user token) — the app installations this user can access.
     pub(crate) async fn user_installations(
         &self,
