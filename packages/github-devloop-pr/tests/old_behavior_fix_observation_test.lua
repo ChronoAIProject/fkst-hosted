@@ -10,7 +10,7 @@ local transition_version = require("contract.transition_version")
 local ci_repair_attempts = require("core.ci_repair_attempts")
 local h = require("tests.devloop_helpers")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
-local observation_support = require("tests.old_behavior_observation_support_helpers")
+local observation_support = require("testkit.old_behavior_observation_support")
 local fix_department = require("departments.fix.main")
 
 local t = h.t
@@ -249,6 +249,9 @@ end
 
 local function observe_real_department(run, codex_runs_for_read)
   return observation_support.observe_department({
+    config = config,
+    devloop_logging = devloop_logging,
+    devloop_state = devloop_state,
     dept = "fix",
     from_state = "fixing",
     run = run,

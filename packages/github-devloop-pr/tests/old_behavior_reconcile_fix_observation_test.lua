@@ -1,10 +1,12 @@
+local config = require("devloop.config")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local devloop_logging = require("devloop.logging")
+local devloop_state = require("devloop.state")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local ci_verdict = require("core.ci_verdict")
 local fix_rounds = require("core.fix_rounds")
 local h = require("tests.devloop_helpers")
-local observation_support = require("tests.old_behavior_observation_support_helpers")
+local observation_support = require("testkit.old_behavior_observation_support")
 local testing = require("testkit.testing")
 local transition_version = require("contract.transition_version")
 local reconcile_department = require("departments.reconcile.main")
@@ -162,6 +164,9 @@ end
 local function observe_real_department(event, comments, observed_from, head_sha, surface)
   prepare_fixture(comments, head_sha, surface)
   return observation_support.observe_department({
+    config = config,
+    devloop_logging = devloop_logging,
+    devloop_state = devloop_state,
     dept = "reconcile",
     from_state = observed_from,
     transition_kind = "versioned_transition_status",

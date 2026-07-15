@@ -1,8 +1,10 @@
+local config = require("devloop.config")
+local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local h = require("tests.devloop_helpers")
 local m_builders = require("devloop.markers.builders")
-local observation_support = require("tests.old_behavior_observation_support_helpers")
+local observation_support = require("testkit.old_behavior_observation_support")
 local testing = require("testkit.testing")
 local transition_version = require("contract.transition_version")
 local observe_pr_department = require("departments.observe_pr.main")
@@ -93,6 +95,9 @@ end
 
 local function observe_real_department(run)
   return observation_support.observe_department({
+    config = config,
+    devloop_logging = devloop_logging,
+    devloop_state = devloop_state,
     dept = "observe_pr",
     from_state = "pr-open",
     transition_kind = "versioned_transition_status",
