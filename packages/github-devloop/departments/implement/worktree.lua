@@ -110,4 +110,34 @@ function M.prepare_worktree(repo, issue_number, ready, branch, base_head)
   return worktree
 end
 
+function M.prepare_worktree_from_base(repo, issue_number, ready, branch, base_head)
+  local runtime_result = exec_sync({ cmd = devloop_commands.read_runtime_root_cmd(), timeout = 30 })
+  if runtime_result.exit_code ~= 0 then
+    error("github-devloop: runtime-root-read-failed: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime_result.stderr))
+  end
+  local runtime_root = runtime_result.stdout
+  local worktree = devloop_base.implement_worktree_path(runtime_root, repo, issue_number, ready.dedup_key)
+  local list_result = devloop_commands.git_worktree_list(30)
+  if list_result.exit_code ~= 0 then
+    error("github-devloop: worktree-list-failed: git worktree list failed: " .. tostring(list_result.stderr))
+  end
+  for _, stale_worktree in ipairs(devloop_commands.find_worktrees_for_branch(list_result.stdout, branch)) do
+    devloop_logging.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {
+      "branch=" .. tostring(branch),
+      "worktree=" .. tostring(stale_worktree),
+      "reason=removing existing deterministic worktree before external PR provisioning",
+    })
+    M.remove_stale_worktree(stale_worktree)
+  end
+  local clean_result = devloop_commands.git_worktree_force_clean(worktree, 60)
+  if clean_result.exit_code ~= 0 then
+    error("github-devloop: worktree-cleanup-failed: git worktree cleanup failed: " .. tostring(clean_result.stderr))
+  end
+  local worktree_result = devloop_commands.git_worktree_add_reset_branch(worktree, branch, base_head, 60)
+  if worktree_result.exit_code ~= 0 then
+    error("github-devloop: git-worktree-add-failed: git worktree reset add failed: " .. tostring(worktree_result.stderr))
+  end
+  return worktree
+end
+
 return M
