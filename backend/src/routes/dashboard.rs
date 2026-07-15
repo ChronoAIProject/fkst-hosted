@@ -216,6 +216,39 @@ struct ReposPage {
     repositories: Vec<RawRepo>,
 }
 #[derive(Deserialize)]
+struct RawRepoOwner {
+    login: String,
+    /// `"User"` or `"Organization"`.
+    #[serde(rename = "type", default)]
+    kind: String,
+}
+#[derive(Deserialize)]
+struct RawRepoPerms {
+    #[serde(default)]
+    admin: bool,
+}
+/// One element of the bare-array `GET /user/repos` response.
+#[derive(Deserialize)]
+struct RawUserRepo {
+    name: String,
+    owner: RawRepoOwner,
+    #[serde(default)]
+    private: bool,
+    /// Present for authenticated requests; defaults closed when absent.
+    permissions: Option<RawRepoPerms>,
+}
+
+/// A repo the user can access, as the repo-listing endpoint consumes it.
+#[derive(Debug)]
+pub(crate) struct UserRepo {
+    pub owner: String,
+    pub name: String,
+    pub private: bool,
+    pub org: bool,
+    pub admin: bool,
+}
+
+#[derive(Deserialize)]
 struct RawLabel {
     name: String,
 }
@@ -317,6 +350,42 @@ impl DashboardGithub {
             .await
             .map_err(|e| AppError::Upstream(format!("github {resource} body: {e}")))?;
         Ok((page, next))
+    }
+
+    /// `GET /user/repos` (user token) — EVERY repo the user can access (private,
+    /// public, and organization repos), paginated. Powers the repo-listing
+    /// endpoint (issue #499); `affiliation` covers owned, collaborator, and
+    /// org-member repos, `visibility=all` includes private ones.
+    pub(crate) async fn user_all_repos(
+        &self,
+        user_token: &SecretString,
+    ) -> Result<Vec<UserRepo>, AppError> {
+        let mut url = format!("{}/user/repos", self.api_base);
+        let mut query: Option<Vec<(&str, &str)>> = Some(vec![
+            ("per_page", "100"),
+            ("affiliation", "owner,collaborator,organization_member"),
+            ("visibility", "all"),
+        ]);
+        let mut out = Vec::new();
+        loop {
+            let (page, next): (Vec<RawUserRepo>, _) = self
+                .get_page(&url, user_token, query.as_deref(), "user_repos")
+                .await?;
+            out.extend(page.into_iter().map(|r| UserRepo {
+                owner: r.owner.login,
+                name: r.name,
+                private: r.private,
+                org: r.owner.kind == "Organization",
+                admin: r.permissions.map(|p| p.admin).unwrap_or(false),
+            }));
+            match next {
+                Some(next_url) => {
+                    url = next_url;
+                    query = None;
+                }
+                None => return Ok(out),
+            }
+        }
     }
 
     /// `GET /user/installations` (user token) — the app installations this user can access.
@@ -646,7 +715,7 @@ async fn run_pull(state: AppState, token: SecretString, user_id: i64, job_id: St
 }
 
 /// Pull the non-empty bearer token out of the `Authorization` header, or 401.
-fn bearer_token(headers: &HeaderMap) -> Result<SecretString, AppError> {
+pub(crate) fn bearer_token(headers: &HeaderMap) -> Result<SecretString, AppError> {
     let value = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
