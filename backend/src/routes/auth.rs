@@ -55,6 +55,14 @@ pub struct LoginCallbackQuery {
     /// GitHub's error slug when the user denied authorization (e.g. `access_denied`).
     #[serde(default)]
     error: Option<String>,
+    /// Present on GitHub's POST-INSTALL redirect (`install` / `update` /
+    /// `request`) — the App has "Request user authorization during
+    /// installation" on, so installs land on this callback too.
+    #[serde(default)]
+    setup_action: Option<String>,
+    /// The installation id GitHub appends on the post-install redirect.
+    #[serde(default)]
+    installation_id: Option<String>,
 }
 
 /// The refresh request body: the (rotating) refresh token the SPA holds.
@@ -156,6 +164,21 @@ async fn github_login_callback(
             frontend.trim_end_matches('#')
         ));
     }
+    // GitHub's POST-INSTALL redirect: "Request user authorization during
+    // installation" routes App installs to this callback with
+    // `code`+`installation_id`+`setup_action` but NO `state`. That is not a
+    // login — bounce to the dashboard, where the fresh installation is already
+    // visible. The unused one-time code is deliberately dropped: with no state
+    // there is no CSRF binding under which it would be safe to exchange.
+    if let Some(target) = post_install_redirect(
+        query.state.as_deref(),
+        query.setup_action.as_deref(),
+        query.installation_id.as_deref(),
+        frontend,
+    ) {
+        return redirect_302(&target);
+    }
+
     let (Some(code), Some(state_param)) = (
         query.code.filter(|c| !c.is_empty()),
         query.state.filter(|s| !s.is_empty()),
@@ -362,6 +385,24 @@ fn http_client() -> &'static reqwest::Client {
     })
 }
 
+/// The dashboard URL a STATELESS GitHub post-install redirect bounces to, or
+/// `None` for a normal login callback (a `state` is present, or no install
+/// markers are). Stateless + `setup_action`/`installation_id` = GitHub sent the
+/// browser here after an App install, not after our login redirect.
+fn post_install_redirect(
+    state: Option<&str>,
+    setup_action: Option<&str>,
+    installation_id: Option<&str>,
+    frontend: &str,
+) -> Option<String> {
+    let stateless = state.map(str::is_empty).unwrap_or(true);
+    if stateless && (setup_action.is_some() || installation_id.is_some()) {
+        Some(format!("{}/dashboard", frontend.trim_end_matches('/')))
+    } else {
+        None
+    }
+}
+
 /// The frontend-login router (nested under `/api/v1`). Open at the app layer: the
 /// login/callback establish identity and the refresh is guarded by the refresh token
 /// itself, so there is no documented security scheme.
@@ -450,5 +491,44 @@ mod tests {
         assert_eq!(resp.refresh_token.as_deref(), Some("ghr_y"));
         assert_eq!(resp.expires_in, Some(28800));
         assert_eq!(resp.token_type, "bearer");
+    }
+}
+
+#[cfg(test)]
+mod post_install_tests {
+    use super::post_install_redirect;
+
+    #[test]
+    fn stateless_install_redirects_to_the_dashboard() {
+        assert_eq!(
+            post_install_redirect(
+                None,
+                Some("install"),
+                Some("146704012"),
+                "https://fkst.example/"
+            ),
+            Some("https://fkst.example/dashboard".to_string())
+        );
+        // installation_id alone is enough (setup_action can be absent).
+        assert_eq!(
+            post_install_redirect(Some(""), None, Some("1"), "https://fkst.example"),
+            Some("https://fkst.example/dashboard".to_string())
+        );
+    }
+
+    #[test]
+    fn a_real_login_callback_is_untouched() {
+        // State present -> normal login path even if GitHub echoes extras.
+        assert_eq!(
+            post_install_redirect(
+                Some("signed-state"),
+                Some("install"),
+                Some("1"),
+                "https://f"
+            ),
+            None
+        );
+        // No install markers + no state -> not an install; the 400 path owns it.
+        assert_eq!(post_install_redirect(None, None, None, "https://f"), None);
     }
 }
