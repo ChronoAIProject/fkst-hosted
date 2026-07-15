@@ -231,12 +231,62 @@ local function logs_contain(logs, needle)
   return false
 end
 
+local function mock_command_times(command, stdout, times)
+  for _ = 1, times or 1 do
+    t.mock_command(command, {
+      stdout = stdout,
+      stderr = "",
+      exit_code = 0,
+    })
+  end
+end
+
 return {
   test_trusted_contributor_env_is_allowed_for_action_scoped_policy_wiring = function()
     t.eq(
       core.read_env_command("FKST_EXTERNAL_PR_TRUSTED_CONTRIBUTOR_LOGINS"),
       'printf %s "$FKST_EXTERNAL_PR_TRUSTED_CONTRIBUTOR_LOGINS"'
     )
+  end,
+
+  test_configured_trusted_contributor_is_admitted_through_production_policy_wiring = function()
+    mock_command_times('printf %s "$FKST_GITHUB_REPO"', "owner/repo")
+    mock_command_times('printf %s "$FKST_GITHUB_WRITE"', "")
+    mock_command_times('printf %s "$FKST_GITHUB_BOT_LOGIN"', "fkst-test-bot", 2)
+    mock_command_times('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', "fkst-test-bot", 2)
+    mock_command_times('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', "")
+    mock_command_times('printf %s "$FKST_EXTERNAL_PR_TRUSTED_CONTRIBUTOR_LOGINS"', "trusted-contributor")
+    mock_command_times('printf %s "$FKST_EXTERNAL_PR_BRIDGE_MIN_AGE_SECONDS"', "", 2)
+    t.mock_command("gh api --paginate --slurp", {
+      stdout = '[{"number":7,"title":"Contributor patch","state":"open","created_at":"2026-06-03T01:02:03Z","updated_at":"2026-06-19T01:02:03Z","user":{"login":"trusted-contributor"},"head":{"ref":"feature/contrib"},"base":{"ref":"dev"}}]\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh pr view", {
+      stdout = pr_json({
+        authors = { "trusted-contributor" },
+        claimed = false,
+        read_count = 0,
+        title = "Contributor patch",
+      }),
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh issue list", {
+      stdout = "[]\n",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = t.run_department("departments/external_pr_intake/main.lua", {
+      queue = "github-external-pr-intake.external_pr_scan",
+      payload = { schema = "github-external-pr-intake.v1" },
+    })
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "external_pr_candidate")
+    t.eq(result.raises[1].payload.number, 7)
   end,
 
   test_non_authorized_durable_candidate_is_rejected_before_bridge_writes = function()
