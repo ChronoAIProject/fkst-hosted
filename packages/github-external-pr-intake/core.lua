@@ -1,6 +1,7 @@
 local env = require("workflow.env")
 local error_facts = require("contract.error_facts")
 local content_filter = require("forge.github.content_filter")
+local external_pr_bridge = require("contract.external_pr_bridge")
 local logging = require("workflow.logging")
 local strings = require("contract.strings")
 local forge_strings = require("forge.strings")
@@ -167,37 +168,15 @@ function M.safe_number(value, context)
 end
 
 function M.source_ref(repo, pr_number)
-  return {
-    kind = "external",
-    ref = tostring(repo) .. "#pr/" .. tostring(M.safe_number(pr_number, "pr")),
-  }
+  return external_pr_bridge.source_ref(repo, pr_number)
 end
 
 function M.parse_source_ref(source_ref)
-  if type(source_ref) ~= "table" or source_ref.kind ~= "external" then
-    error("github-external-pr-intake: source-ref-required: external PR source_ref is required")
-  end
-  local repo, number = tostring(source_ref.ref or ""):match("^([^#]+)#pr/(%d+)$")
-  if repo == nil then
-    error("github-external-pr-intake: invalid-source-ref: external PR source_ref is required")
-  end
-  return repo, M.safe_number(number, "source_ref pr")
+  return external_pr_bridge.parse_source_ref(source_ref)
 end
 
 function M.bridge_marker(repo, pr_number, issue_number)
-  local marker = '<!-- fkst:github-external-pr-intake:external-pr-bridge:v1 repo="'
-    .. tostring(repo)
-    .. '" pr="'
-    .. tostring(M.safe_number(pr_number, "marker pr"))
-    .. '" source_ref="external:'
-    .. tostring(repo)
-    .. "#pr/"
-    .. tostring(pr_number)
-    .. '"'
-  if issue_number ~= nil then
-    marker = marker .. ' issue="' .. tostring(M.safe_number(issue_number, "marker issue")) .. '"'
-  end
-  return marker .. " -->"
+  return external_pr_bridge.marker(repo, pr_number, issue_number)
 end
 
 function M.handled_marker(repo, pr_number, issue_number)
@@ -211,11 +190,7 @@ function M.handled_marker(repo, pr_number, issue_number)
 end
 
 function M.bridge_search_query(repo, pr_number)
-  return 'fkst:github-external-pr-intake:external-pr-bridge:v1 repo="'
-    .. tostring(repo)
-    .. '" pr="'
-    .. tostring(M.safe_number(pr_number, "search pr"))
-    .. '"'
+  return external_pr_bridge.search_query(repo, pr_number)
 end
 
 function M.bridge_lock_key(repo, pr_number)
@@ -406,13 +381,8 @@ function M.is_external_candidate(pr, managed, now_seconds)
 end
 
 function M.bridge_marker_issue_number(body)
-  for marker in tostring(body or ""):gmatch("<!%-%- fkst:github%-external%-pr%-intake:external%-pr%-bridge:v1.-%-%->") do
-    local issue = tonumber(marker:match('issue="(%d+)"'))
-    if issue ~= nil then
-      return issue
-    end
-  end
-  return nil
+  local marker = external_pr_bridge.find_marker(body)
+  return marker and marker.issue_number or nil
 end
 
 local function marker_attr(marker, name)
@@ -483,11 +453,9 @@ function M.bridge_issue_body(repo, pr)
   return table.concat({
     M.bridge_marker(repo, number),
     "",
-    "- Source: external PR #" .. tostring(number) .. " (refs/pull/" .. tostring(number) .. "/head), author @"
+    "- Source: external PR #" .. tostring(number) .. ", author @"
       .. tostring(pr.author_login or "unknown") .. ". source_ref: " .. source,
-    "- Task: implement/complete the change BASED ON the existing code in PR #" .. tostring(number)
-      .. " - fetch `refs/pull/" .. tostring(number)
-      .. "/head`, build ON the contributor's work, do NOT rewrite from scratch. Re-derive the full diff from source_ref.",
+    "- Task: implement/complete the change based on the contributor change already provisioned in your worktree. Complete or fix it there; do not rewrite from scratch.",
     "- MUST comply with project conventions (CLAUDE.md): file <= 1000 lines; source-internal text English; all gh/git via forge.github/forge.git adapters; saga-shaped departments; `scripts/run.sh test` green; ports/adapters; no compat/legacy shim; outward text English.",
     "- If PR #" .. tostring(number) .. "'s base is not a managed branch (current base: `"
       .. tostring(pr.base_ref_name or "") .. "`), implement against `dev`.",
