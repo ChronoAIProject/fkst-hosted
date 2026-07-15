@@ -321,6 +321,61 @@ return {
     t.eq(count_calls("git push origin"), 1)
   end,
 
+  test_fix_pushes_validated_candidate_when_branch_moves_after_check = function()
+    local event = fixing({ gate_baseline_sha = "abc123", gate_failure_excerpt = "own-ci-red" })
+    local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
+    local reject_comment = "github-devloop merge gate failed: own-ci-red"
+      .. "\n" .. core.state_marker(event.proposal_id, "fixing", event.version)
+      .. "\n" .. m_builders.merge_gate_marker(event.proposal_id,
+        event.pr_number,
+        event.version,
+        event.review_proposal_id,
+        event.review_dedup_key,
+        event.reviewed_head_sha,
+        event.gate_baseline_sha,
+        "own-ci-red"
+      )
+    local origin_marker = m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
+      core.state_marker(event.proposal_id, "fixing", event.version),
+      reject_comment,
+    }, branch, event.version)
+    mock_pr_fix({ origin_marker }, branch, "def456")
+    t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+      stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
+      stderr = "",
+      exit_code = 0,
+    })
+    mock_existing_fix_worktree(branch, "def456")
+    mock_implement_codex(0, "prepared validated candidate")
+    mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_git_commit("feedface", branch)
+    mock_write_env("1")
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
+      core.state_marker(event.proposal_id, "fixing", event.version),
+      reject_comment,
+    }, branch, event.version)
+    t.mock_command("git push origin " .. branch, {
+      stdout = "pushed moved branch head badc0de\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("git push origin feedface:refs/heads/" .. branch, {
+      stdout = "pushed validated candidate feedface\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    mock_pr_fix({ origin_marker }, branch, "feedface")
+
+    local result = run_fix(event, opts("fix-pushes-validated-candidate", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("diff --check 'def456..feedface'"), 1)
+    t.eq(count_calls("git push origin feedface:refs/heads/" .. branch), 1)
+    t.eq(count_calls("git push origin " .. branch), 0)
+  end,
+
   test_fix_errors_when_unmerged_index_remains_after_worker = function()
     local event = fixing({ gate_baseline_sha = "abc123", gate_failure_excerpt = "own-ci-red" })
     local branch = devloop_base.implement_branch("owner/repo", "42", event.version)

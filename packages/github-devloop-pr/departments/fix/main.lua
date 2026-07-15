@@ -451,7 +451,13 @@ local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
     error("github-devloop: fix-outcome-unknown: unknown fix outcome")
   end
 
-  local push = devloop_commands.git_push_branch(branch, 120)
+  local push = devloop_commands.git_push_ref_update(
+    "origin",
+    outcome.new_head_sha,
+    "refs/heads/" .. branch,
+    false,
+    120
+  )
   if push.exit_code ~= 0 then
     error("github-devloop: git-push-failed: git push failed: " .. tostring(push.stderr))
   end
