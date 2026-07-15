@@ -44,7 +44,7 @@ local current_predecessors_for_fix = merge_mechanics.current_predecessors_for_fi
 local merge_predecessor_entries_for_fix = merge_mechanics.merge_predecessor_entries_for_fix
 local merge_speculative_predecessors_for_fix = merge_mechanics.merge_speculative_predecessors_for_fix
 local assert_no_unmerged_paths = merge_mechanics.assert_no_unmerged_paths
-local assert_no_conflict_markers = merge_mechanics.assert_no_conflict_markers
+local assert_candidate_diff_clean = merge_mechanics.assert_candidate_diff_clean
 local bounded_fix_summary = merge_mechanics.bounded_fix_summary
 local spec = {
   consumes = { "devloop_fixing" },
@@ -243,7 +243,6 @@ local function run_fix_attempt(plan)
   end
   devloop_logging.log_codex_result("fix", plan.fix.proposal_id, "fix", result, "result=completed", nil)
   assert_no_unmerged_paths(worktree)
-  assert_no_conflict_markers(worktree)
 
   local status = devloop_commands.git_status(worktree, 30)
   if status.exit_code ~= 0 then
@@ -252,6 +251,7 @@ local function run_fix_attempt(plan)
   if tostring(status.stdout or "") == "" then
     local existing_head_sha = branch_head_if_ahead(plan.fix.reviewed_head_sha, plan.branch)
     if existing_head_sha ~= nil then
+      assert_candidate_diff_clean(worktree, plan.fix.reviewed_head_sha, existing_head_sha)
       devloop_logging.log_codex_result("fix", plan.fix.proposal_id, "fix", result, "result=reusing-existing-head", nil)
       return {
         kind = "reviewing",
@@ -317,6 +317,7 @@ local function run_fix_attempt(plan)
       finished_at = now(),
     }
   end
+  assert_candidate_diff_clean(worktree, plan.fix.reviewed_head_sha, new_head_sha)
   return {
     kind = "reviewing",
     old_head_sha = plan.fix.reviewed_head_sha,

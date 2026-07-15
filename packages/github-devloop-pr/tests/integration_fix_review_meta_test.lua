@@ -563,9 +563,9 @@ return {
     t.eq(find_causal_raise(result, "devloop_reviewing").payload.version, core.next_fix_version(event.version))
     t.eq(count_calls("add -A"), 0)
     t.eq(count_calls("commit -m"), 0)
+    t.eq(count_calls("diff --check 'def456..feedface'"), 1)
     t.eq(count_calls("git push origin"), 1)
   end,
-
   test_fix_reviewing_clears_stale_fix_summary_when_codex_summary_is_empty = function()
     local event = fixing({ fix_summary = "stale summary from a prior round" })
     local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
