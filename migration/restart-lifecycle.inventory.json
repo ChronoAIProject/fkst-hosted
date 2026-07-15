@@ -1,5 +1,5 @@
 {
-  "artifact_sha256": "2d4eeaef026bee397959aea7aa71f4d585d77c8fff0b1875db7f1c39d92d2942",
+  "artifact_sha256": "80a6144838a62e26d00f23ff0720c8c2b435959cacc8695a8546641fb803c6bc",
   "consumer_entry_acceptors": [
     {
       "ordinal": "consumes:consensus.consensus_converge",
@@ -11899,6 +11899,1682 @@
         "source_state": "thinking",
         "target": "blocked"
       }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.versioned_transition_status:stale"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/declined-state-advanced/thinking/stale/advanced-or-diverged/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": 800,
+          "state": "declined",
+          "version": "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "skip-advanced-or-diverged",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "advanced-or-diverged",
+        "status": "stale",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "issue_number": 42,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": null,
+        "source_state": "declined",
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-decision",
+          "ref": "devloop.logging.log_cas_decision:skip-held"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/intake-held/thinking/guard-return/hold-label-present/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": null,
+          "state": null,
+          "version": null
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "skip-held",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "hold-label-present",
+        "status": "guard-return",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": null,
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "issue_number": 42,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": null,
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-decision",
+          "ref": "devloop.logging.log_cas_decision:skip-advanced-or-diverged"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/issue-closed/thinking/guard-return/issue-not-open/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": null,
+          "state": null,
+          "version": null
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "skip-advanced-or-diverged",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "issue-not-open",
+        "status": "guard-return",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": null,
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "issue_number": 42,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": null,
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-decision",
+          "ref": "devloop.logging.log_cas_decision:skip-not-opted-in"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/not-opted-in/thinking/guard-return/enabled-label-absent/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": null,
+          "state": null,
+          "version": null
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "skip-not-opted-in",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "enabled-label-absent",
+        "status": "guard-return",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": null,
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "issue_number": 42,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": null,
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.versioned_transition_status:idempotent"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/thinking-live-idempotent-reemit/thinking/idempotent/already-thinking-reemit/thinking",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": 100,
+          "state": "thinking",
+          "version": "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "skip-idempotent(already at to_state)",
+        "emitted_effects": [
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "queue:consensus.proposal",
+            "ordinal": 1,
+            "sink_kind": "queue"
+          },
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "comment:issue:thinking-state",
+            "ordinal": 2,
+            "sink_kind": "comment"
+          },
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "label:issue:thinking-state",
+            "ordinal": 3,
+            "sink_kind": "label"
+          }
+        ],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [
+          {
+            "effect_id": "queue:consensus.proposal",
+            "payload": {
+              "body": "Judge the current GitHub issue from the full source content.\nIssue: owner/repo#42\nRecurrence: read recent closed issues in context; if this is the third same-class instance, reframe to a class solution or give an explicit waiver.",
+              "content_fetch": "runtime-cache:github-devloop/context-bundle-manifest-v2/github-devloop/issue/owner/repo/42/owner-repo-issue-42-2026-06-03T01-02-03Z",
+              "dedup_key": "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+              "proposal_id": "github-devloop/issue/owner/repo/42",
+              "schema": "consensus.proposal.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#issue/42"
+              },
+              "title": "Implement decision recorder",
+              "verdict_mode": "converge",
+              "worktree": "."
+            },
+            "queue": "consensus.proposal"
+          },
+          {
+            "effect_id": "comment:issue:thinking-state",
+            "payload": {
+              "body": "github-devloop thinking: consensus started\n\n<!-- fkst:github-devloop:state:v1 proposal=\"github-devloop/issue/owner/repo/42\" state=\"thinking\" version=\"github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z\" stage_rank=\"100\" marker_order_key=\"2026-06-03T01-02-03Z/000000000000/000000000000/000000000000/000000000000/000000000000/000000000000/000000000000/000000000100\" -->",
+              "claim": {
+                "owner": "fkst-test-bot",
+                "source_ref": {
+                  "kind": "external",
+                  "ref": "owner/repo#issue/42"
+                }
+              },
+              "dedup_key": "github-devloop/issue/owner/repo/42/comment/thinking/github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+              "issue_number": 42,
+              "repo": "owner/repo",
+              "schema": "github-proxy.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#issue/42"
+              }
+            },
+            "queue": "github-proxy.github_issue_comment_request"
+          },
+          {
+            "effect_id": "label:issue:thinking-state",
+            "payload": {
+              "add_labels": [
+                "fkst-dev:thinking"
+              ],
+              "claim": {
+                "owner": "fkst-test-bot",
+                "source_ref": {
+                  "kind": "external",
+                  "ref": "owner/repo#issue/42"
+                }
+              },
+              "dedup_key": "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/label/thinking",
+              "issue_number": 42,
+              "label_colors": {
+                "fkst-dev:thinking": "8250DF"
+              },
+              "remove_labels": [
+                "fkst-dev:ready",
+                "fkst-dev:implementing",
+                "fkst-dev:pr-open",
+                "fkst-dev:reviewing",
+                "fkst-dev:merge-ready",
+                "fkst-dev:fixing",
+                "fkst-dev:impl-failed",
+                "fkst-dev:declined",
+                "fkst-dev:blocked",
+                "fkst-dev:review-meta",
+                "fkst-dev:merging",
+                "fkst-dev:merged",
+                "fkst-dev:awaiting-pr"
+              ],
+              "repo": "owner/repo",
+              "schema": "github-proxy.label.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#issue/42"
+              },
+              "target_kind": "issue",
+              "target_number": 42
+            },
+            "queue": "github-proxy.github_issue_label_request"
+          }
+        ],
+        "reason_code": "already-thinking-reemit",
+        "status": "idempotent",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "issue_number": 42,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": null,
+        "source_state": "thinking",
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.versioned_transition_status:stale"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/thinking-older-event/thinking/stale/incoming-version-older/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": 100,
+          "state": "thinking",
+          "version": "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42@2026-06-02T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "skip-stale(incoming version < current marker version)",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "incoming-version-older",
+        "status": "stale",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-02T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42@2026-06-02T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-02T01:02:03Z",
+          "issue_number": 42,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": null,
+        "source_state": "thinking",
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.versioned_transition_status:apply"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42004"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/unmanaged-assignee-claim-error/thinking/error/assignee-claim-error-propagated/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": 0,
+          "state": null,
+          "version": null
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42004@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "error(gh-command-failed)",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "assignee-claim-error-propagated",
+        "status": "error",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": null,
+          "incoming_version": "owner/repo#issue#42004@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42004@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42004@2026-06-03T01:02:03Z",
+          "issue_number": 42004,
+          "proposal_id": "github-devloop/issue/owner/repo/42004",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42004"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": null,
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.versioned_transition_status:apply"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42003"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/unmanaged-assignee-claim-lost/thinking/guard-return/assignee-claim-lost-after-verification/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": 0,
+          "state": null,
+          "version": null
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42003@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "claim-lost",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "assignee-claim-lost-after-verification",
+        "status": "guard-return",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": null,
+          "incoming_version": "owner/repo#issue#42003@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42003@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42003@2026-06-03T01:02:03Z",
+          "issue_number": 42003,
+          "proposal_id": "github-devloop/issue/owner/repo/42003",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42003"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": null,
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.versioned_transition_status:apply"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42002"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/unmanaged-assignee-claim-permission-denied/thinking/guard-return/assignee-claim-permission-denied/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": 0,
+          "state": null,
+          "version": null
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42002@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "skip-claim-permission-denied",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "assignee-claim-permission-denied",
+        "status": "guard-return",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": null,
+          "incoming_version": "owner/repo#issue#42002@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42002@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42002@2026-06-03T01:02:03Z",
+          "issue_number": 42002,
+          "proposal_id": "github-devloop/issue/owner/repo/42002",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42002"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": null,
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.versioned_transition_status:apply"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/unmanaged-author-unknown-at-admission/thinking/guard-return/claim-author-unknown-at-admission/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": 0,
+          "state": null,
+          "version": null
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "skip-fork-author-unknown",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "claim-author-unknown-at-admission",
+        "status": "guard-return",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": null,
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "issue_number": 42,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": null,
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.versioned_transition_status:apply"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/unmanaged-existing-fork/thinking/guard-return/fork-present-before-rederive/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": 0,
+          "state": null,
+          "version": null
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "fork-present",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "fork-present-before-rederive",
+        "status": "guard-return",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": null,
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "issue_number": 42,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": null,
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.versioned_transition_status:apply"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/unmanaged-foreign-assignee/thinking/guard-return/claim-held-by-other/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": 0,
+          "state": null,
+          "version": null
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "skip-claimed-by-other",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "claim-held-by-other",
+        "status": "guard-return",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": null,
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "issue_number": 42,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": null,
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.versioned_transition_status:apply"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/unmanaged-fork-appears-after-rederive/thinking/guard-return/fork-present-after-rederive/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": 0,
+          "state": null,
+          "version": null
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "fork-present",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "fork-present-after-rederive",
+        "status": "guard-return",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": null,
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "issue_number": 42,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": null,
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.versioned_transition_status:apply"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/unmanaged-fork-author-missing-after-rederive/thinking/guard-return/fork-author-missing-after-rederive/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": 0,
+          "state": null,
+          "version": null
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "skip-fork-author-unknown",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "fork-author-missing-after-rederive",
+        "status": "guard-return",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": null,
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "issue_number": 42,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": null,
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.versioned_transition_status:apply"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/unmanaged-fork-grace/thinking/guard-return/fork-grace-pending/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": 0,
+          "state": null,
+          "version": null
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "skip-fork-grace",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "fork-grace-pending",
+        "status": "guard-return",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": null,
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "issue_number": 42,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": null,
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.versioned_transition_status:apply"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/unmanaged-fork-original-closed-after-rederive/thinking/guard-return/fork-original-closed-after-rederive/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": 0,
+          "state": null,
+          "version": null
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "skip-fork-original-closed",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "fork-original-closed-after-rederive",
+        "status": "guard-return",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": null,
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "issue_number": 42,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": null,
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.versioned_transition_status:apply"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/unmanaged-fork-raised/thinking/guard-return/fork-raised-before-management/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": 0,
+          "state": null,
+          "version": null
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "fork-raised",
+        "emitted_effects": [
+          {
+            "authority_class": "grantless-non-lifecycle",
+            "effect_id": "adapter:github.issue-create-fork",
+            "ordinal": 1,
+            "sink_kind": "adapter"
+          }
+        ],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [
+          {
+            "effect_id": "adapter:github.issue-create-fork",
+            "payload": {
+              "assignees": [
+                "fkst-test-bot"
+              ],
+              "body": "Self-owned fork for isolated implementation.\n\nOriginal: owner/repo#42\nOriginal author: human\nSource ref: external:owner/repo#issue/42\n\n<!-- fkst:github-devloop:fork-origin:v1 repo=\"owner/repo\" issue=\"42\" author=\"human\" source_ref_kind=\"external\" source_ref=\"owner/repo#issue/42\" -->",
+              "dedup_key": "github-devloop/fork/owner/repo/issue/42/v1",
+              "external_effect_saga": "fork-and-block",
+              "external_effect_step": "create-fork",
+              "parent_comment_target": {
+                "issue_number": 42,
+                "repo": "owner/repo"
+              },
+              "post_create_blocked_by": {
+                "blocked_issue_number": 42,
+                "dedup_key": "github-devloop/fork/owner/repo/issue/42/v1/blocked-by",
+                "external_effect_saga": "fork-and-block",
+                "external_effect_step": "block-original"
+              },
+              "repo": "owner/repo",
+              "schema": "github-proxy.issue-create.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#issue/42"
+              },
+              "title": "Fork of #42: [fkst:blocked-github-content:v1 field=\"title\" existed=\"true\" author_login=\"human\" why=\"non-whitelisted-author\"]"
+            },
+            "queue": "github-proxy.github_issue_create_request"
+          }
+        ],
+        "reason_code": "fork-raised-before-management",
+        "status": "guard-return",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": null,
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "issue_number": 42,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": null,
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.versioned_transition_status:apply"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/unmanaged-ingress-apply/thinking/apply/apply/thinking",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": 0,
+          "state": null,
+          "version": null
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "applied",
+        "emitted_effects": [
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "queue:consensus.proposal",
+            "ordinal": 1,
+            "sink_kind": "queue"
+          },
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "comment:issue:thinking-state",
+            "ordinal": 2,
+            "sink_kind": "comment"
+          },
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "label:issue:thinking-state",
+            "ordinal": 3,
+            "sink_kind": "label"
+          }
+        ],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [
+          {
+            "effect_id": "queue:consensus.proposal",
+            "payload": {
+              "body": "Judge the current GitHub issue from the full source content.\nIssue: owner/repo#42\nRecurrence: read recent closed issues in context; if this is the third same-class instance, reframe to a class solution or give an explicit waiver.",
+              "content_fetch": "runtime-cache:github-devloop/context-bundle-manifest-v2/github-devloop/issue/owner/repo/42/owner-repo-issue-42-2026-06-03T01-02-03Z",
+              "dedup_key": "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+              "proposal_id": "github-devloop/issue/owner/repo/42",
+              "schema": "consensus.proposal.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#issue/42"
+              },
+              "title": "Implement decision recorder",
+              "verdict_mode": "converge",
+              "worktree": "."
+            },
+            "queue": "consensus.proposal"
+          },
+          {
+            "effect_id": "comment:issue:thinking-state",
+            "payload": {
+              "body": "github-devloop thinking: consensus started\n\n<!-- fkst:github-devloop:state:v1 proposal=\"github-devloop/issue/owner/repo/42\" state=\"thinking\" version=\"github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z\" stage_rank=\"100\" marker_order_key=\"2026-06-03T01-02-03Z/000000000000/000000000000/000000000000/000000000000/000000000000/000000000000/000000000000/000000000100\" -->",
+              "claim": {
+                "owner": "fkst-test-bot",
+                "source_ref": {
+                  "kind": "external",
+                  "ref": "owner/repo#issue/42"
+                }
+              },
+              "dedup_key": "github-devloop/issue/owner/repo/42/comment/thinking/github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+              "issue_number": 42,
+              "repo": "owner/repo",
+              "schema": "github-proxy.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#issue/42"
+              }
+            },
+            "queue": "github-proxy.github_issue_comment_request"
+          },
+          {
+            "effect_id": "label:issue:thinking-state",
+            "payload": {
+              "add_labels": [
+                "fkst-dev:thinking"
+              ],
+              "claim": {
+                "owner": "fkst-test-bot",
+                "source_ref": {
+                  "kind": "external",
+                  "ref": "owner/repo#issue/42"
+                }
+              },
+              "dedup_key": "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/label/thinking",
+              "issue_number": 42,
+              "label_colors": {
+                "fkst-dev:thinking": "8250DF"
+              },
+              "remove_labels": [
+                "fkst-dev:ready",
+                "fkst-dev:implementing",
+                "fkst-dev:pr-open",
+                "fkst-dev:reviewing",
+                "fkst-dev:merge-ready",
+                "fkst-dev:fixing",
+                "fkst-dev:impl-failed",
+                "fkst-dev:declined",
+                "fkst-dev:blocked",
+                "fkst-dev:review-meta",
+                "fkst-dev:merging",
+                "fkst-dev:merged",
+                "fkst-dev:awaiting-pr"
+              ],
+              "repo": "owner/repo",
+              "schema": "github-proxy.label.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#issue/42"
+              },
+              "target_kind": "issue",
+              "target_number": 42
+            },
+            "queue": "github-proxy.github_issue_label_request"
+          }
+        ],
+        "reason_code": "apply",
+        "status": "apply",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": null,
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "issue_number": 42,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": null,
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.versioned_transition_status:apply"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42001"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/unmanaged-label-claim-lost/thinking/guard-return/label-claim-lost-after-verification/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": 0,
+          "state": null,
+          "version": null
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42001@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "claim-lost",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "label-claim-lost-after-verification",
+        "status": "guard-return",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": null,
+          "incoming_version": "owner/repo#issue#42001@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42001@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42001@2026-06-03T01:02:03Z",
+          "issue_number": 42001,
+          "proposal_id": "github-devloop/issue/owner/repo/42001",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42001"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": null,
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.versioned_transition_status:apply"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/unmanaged-peer-bot-author/thinking/guard-return/claim-peer-bot-author/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": 0,
+          "state": null,
+          "version": null
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "skip-fork-peer-bot",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "claim-peer-bot-author",
+        "status": "guard-return",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": null,
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "issue_number": 42,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": null,
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-probe",
+          "ref": "devloop.state.versioned_transition_status:apply"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/unmanaged-unauthorized-author/thinking/guard-return/claim-author-not-authorized/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": 0,
+          "state": null,
+          "version": null
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "skip-non-whitelisted-author",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "claim-author-not-authorized",
+        "status": "guard-return",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": null,
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "issue_number": 42,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": null,
+        "target": "thinking"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-cas-decision",
+          "ref": "devloop.logging.log_cas_decision:skip-foreign(proposal_id)"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        }
+      ],
+      "observation_id": "writer:github-devloop:observe-issue-unmanaged-thinking/unsupported-payload/thinking/guard-return/unsupported-event-payload/none",
+      "old_inputs": {
+        "caller_from_states": [
+          "unmanaged"
+        ],
+        "current_fact": {
+          "stage_rank": null,
+          "state": null,
+          "version": null
+        },
+        "handoff_reference": null,
+        "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+        "target_version": null
+      },
+      "old_outcome": {
+        "cas_outcome": "skip-foreign(proposal_id)",
+        "emitted_effects": [],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [],
+        "reason_code": "unsupported-event-payload",
+        "status": "guard-return",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "versioned_transition_status:unmanaged->thinking",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": null,
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "target_version": null
+        },
+        "kind": "versioned_transition_status",
+        "lineage": {
+          "dedup_key": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "incoming_version": "owner/repo#issue#42@2026-06-03T01:02:03Z",
+          "issue_number": 42,
+          "proposal_id": "unknown",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": null,
+        "target": "thinking"
+      }
     }
   ],
   "old_pending_projection": {
@@ -12158,14 +13834,6 @@
     "libraries/devloop/replayer.lua"
   ],
   "unobserved_sites": [
-    {
-      "category": "production_writer_sites",
-      "ordinal": "versioned_transition_status:unmanaged->thinking",
-      "path": "packages/github-devloop/departments/observe_issue/main.lua",
-      "site_id": "writer:github-devloop:observe-issue-unmanaged-thinking",
-      "symbol": "process_issue_event",
-      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
-    },
     {
       "category": "production_writer_sites",
       "ordinal": "implementation_transition_status:*->implementing",
