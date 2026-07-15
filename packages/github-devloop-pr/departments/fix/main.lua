@@ -260,15 +260,23 @@ local function assert_no_unmerged_paths(worktree)
   end
 end
 
-local function assert_no_conflict_markers(worktree)
-  local markers_result = core.git.conflict_markers(worktree, 30)
-  if markers_result.exit_code == 1 then
+local function single_line_evidence(value)
+  local text = tostring(value or "")
+  if text == "" then
+    return "<empty>"
+  end
+  return text:gsub("\r", "\\r"):gsub("\n", "\\n")
+end
+
+local function assert_staged_diff_check(worktree)
+  local diff_result = core.git.diff_check(worktree, true, 30)
+  if diff_result.exit_code == 0 then
     return
   end
-  if markers_result.exit_code == 0 then
-    error("github-devloop: unresolved-conflict-markers: fix left conflict markers unresolved")
-  end
-  error("github-devloop: git-conflict-marker-check-failed: git conflict marker check failed: " .. tostring(markers_result.stderr))
+  error("github-devloop: staged-diff-check-failed: git diff --cached --check failed stdout="
+    .. single_line_evidence(diff_result.stdout)
+    .. " stderr="
+    .. single_line_evidence(diff_result.stderr))
 end
 
 local function bounded_fix_summary(value)
@@ -477,7 +485,6 @@ local function run_fix_attempt(plan)
   end
   devloop_logging.log_codex_result("fix", plan.fix.proposal_id, "fix", result, "result=completed", nil)
   assert_no_unmerged_paths(worktree)
-  assert_no_conflict_markers(worktree)
 
   local status = devloop_commands.git_status(worktree, 30)
   if status.exit_code ~= 0 then
@@ -517,6 +524,7 @@ local function run_fix_attempt(plan)
   if add_result.exit_code ~= 0 then
     error("github-devloop: git-add-failed: git add failed: " .. tostring(add_result.stderr))
   end
+  assert_staged_diff_check(worktree)
   local commit_result = devloop_commands.git_commit(worktree, payloads_builders.fix_commit_subject(
       plan.issue_number,
       require("devloop.github_proxy_entity_view").commit_issue_subject_snapshot(plan.repo, plan.issue_number)

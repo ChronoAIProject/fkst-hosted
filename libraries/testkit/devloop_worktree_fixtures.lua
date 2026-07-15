@@ -446,12 +446,21 @@ function M.new(deps)
     })
   end
 
-  local function mock_git_commit(new_head, branch)
+  local function mock_cached_diff_check(result)
+    t.mock_command("diff --cached --check", {
+      stdout = result and result.stdout or "",
+      stderr = result and result.stderr or "",
+      exit_code = result and result.exit_code or 0,
+    })
+  end
+
+  local function mock_git_commit(new_head, branch, cached_diff_result)
     t.mock_command("git -C", {
       stdout = "",
       stderr = "",
       exit_code = 0,
     })
+    mock_cached_diff_check(cached_diff_result)
     t.mock_command("commit -m", {
       stdout = "[" .. tostring(branch or "devloop-owner-repo-42-01HY") .. " 1234567] Implement github-devloop ready state\n",
       stderr = "",
@@ -528,14 +537,6 @@ function M.new(deps)
     })
   end
 
-  local function mock_no_conflict_markers()
-    t.mock_command("grep -n -I -E", {
-      stdout = "",
-      stderr = "",
-      exit_code = 1,
-    })
-  end
-
   local function mock_existing_fix_worktree(branch, head, path, merge)
     local worktree = path or "/tmp/fkst-packages-test/github-devloop/runtime/worktrees/fix-worktree"
     t.mock_command("git worktree list --porcelain", {
@@ -579,15 +580,6 @@ function M.new(deps)
       })
     else
       mock_no_unmerged_paths()
-    end
-    if merge ~= nil and merge.post_codex_conflict_markers_stdout ~= nil then
-      t.mock_command("grep -n -I -E", {
-        stdout = merge.post_codex_conflict_markers_stdout,
-        stderr = merge.post_codex_conflict_markers_stderr or "",
-        exit_code = merge.post_codex_conflict_markers_exit_code or 0,
-      })
-    else
-      mock_no_conflict_markers()
     end
     return worktree
   end
@@ -637,7 +629,6 @@ function M.new(deps)
       exit_code = 0,
     })
     mock_no_unmerged_paths()
-    mock_no_conflict_markers()
     return worktree
   end
 
@@ -686,7 +677,6 @@ function M.new(deps)
       exit_code = 0,
     })
     mock_no_unmerged_paths()
-    mock_no_conflict_markers()
     return worktree
   end
 

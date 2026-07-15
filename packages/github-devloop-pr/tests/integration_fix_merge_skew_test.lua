@@ -167,9 +167,11 @@ return {
     t.eq(count_calls("refs/remotes/'origin'/'dev'^{commit}"), 0)
     t.eq(count_calls("merge --no-edit 'abc123'"), 1)
     t.eq(count_calls("ls-files -u"), 2)
+    t.eq(count_calls("diff --cached --check"), 1)
+    t.eq(count_calls("grep -n -I -E"), 0)
   end,
 
-  test_fix_errors_on_leftover_conflict_markers = function()
+  test_fix_errors_on_staged_diff_check_conflict_markers = function()
     local event = fixing({ gate_baseline_sha = "abc123", gate_failure_excerpt = "own-ci-red" })
     local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
     local reject_comment = "github-devloop merge gate failed: own-ci-red"
@@ -203,16 +205,30 @@ return {
       stderr = "CONFLICT (content): Merge conflict in packages/github-devloop/core.lua\n",
       unmerged_stdout = "100644 abc123 1\tpackages/github-devloop/core.lua\n",
       post_codex_unmerged_stdout = "",
-      post_codex_conflict_markers_stdout = "packages/github-devloop/core.lua:1:" .. string.rep("<", 7) .. " HEAD\n",
-      post_codex_conflict_markers_exit_code = 0,
     })
     mock_write_env("1")
     mock_implement_codex(0, "resolved owned CI failure")
+    mock_git_status(" M packages/github-devloop/core.lua\n")
+    t.mock_command("git -C", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("diff --cached --check", {
+      stdout = "packages/github-devloop/core.lua:1: leftover conflict marker\n",
+      stderr = "git diff check details\n",
+      exit_code = 2,
+    })
 
-    local result = run_fix(event, opts("fix-leftover-conflict-markers", { FKST_GITHUB_WRITE = "1" }))
+    local result = run_fix(event, opts("fix-staged-diff-check-conflict-markers", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 1)
-    t.eq(count_calls("grep -n -I -E"), 1)
-    t.eq(count_calls("status --porcelain"), 0)
+    t.is_true(tostring(result.error or ""):find("staged-diff-check-failed", 1, true) ~= nil)
+    t.is_true(tostring(result.error or ""):find("stdout=packages/github-devloop/core.lua:1: leftover conflict marker\\n", 1, true) ~= nil)
+    t.is_true(tostring(result.error or ""):find("stderr=git diff check details\\n", 1, true) ~= nil)
+    t.eq(count_calls("grep -n -I -E"), 0)
+    t.eq(count_calls("diff --cached --check"), 1)
+    t.eq(count_calls("status --porcelain"), 1)
+    t.eq(count_calls("add -A"), 1)
     t.eq(count_calls("commit -m"), 0)
     t.eq(count_calls("git push origin"), 0)
   end,

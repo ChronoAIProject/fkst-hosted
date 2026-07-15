@@ -210,14 +210,6 @@ local function diff_check_argv(worktree, cached)
   return worktree_argv(worktree, "diff", "--check")
 end
 
-local function conflict_markers_argv(worktree)
-  local pattern = "^(" .. string.rep("<", 7) .. "|" .. string.rep("=", 7) .. "|" .. string.rep(">", 7) .. ")"
-  if worktree == nil then
-    return { "git", "grep", "-n", "-I", "-E", pattern, "--", "." }
-  end
-  return worktree_argv(worktree, "grep", "-n", "-I", "-E", pattern, "--", ".")
-end
-
 local function commit_message_file_argv(worktree, message_file)
   return worktree_argv(worktree, "commit", "-F", message_file)
 end
@@ -490,10 +482,6 @@ function M.install(handle)
 
   function handle.diff_check(worktree, cached, timeout)
     return exec_result(handle, diff_check_argv(worktree, cached), timeout, "git diff --check")
-  end
-
-  function handle.conflict_markers(worktree, timeout)
-    return exec_result(handle, conflict_markers_argv(worktree), timeout, "git grep conflict markers")
   end
 
   function handle.commit_message_file(worktree, message_file, timeout)
