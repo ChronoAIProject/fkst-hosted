@@ -521,12 +521,21 @@ function M.new(deps)
     })
   end
 
-  local function mock_git_commit(new_head, branch)
+  local function mock_cached_diff_check(result)
+    t.mock_command("diff --cached --check", {
+      stdout = result and result.stdout or "",
+      stderr = result and result.stderr or "",
+      exit_code = result and result.exit_code or 0,
+    })
+  end
+
+  local function mock_git_commit(new_head, branch, cached_diff_result)
     t.mock_command("git -C", {
       stdout = "",
       stderr = "",
       exit_code = 0,
     })
+    mock_cached_diff_check(cached_diff_result)
     t.mock_command("commit -m", {
       stdout = "[" .. tostring(branch or "devloop-owner-repo-42-01HY") .. " 1234567] Implement github-devloop ready state\n",
       stderr = "",
