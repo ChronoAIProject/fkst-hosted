@@ -100,7 +100,7 @@ local function authorize_fork_issue_create(payload)
   if github.is_authorized_author(author_login) then
     return true
   end
-  local outcome = author_login == nil or author_login == ""
+  local outcome = (author_login == nil or author_login == "")
     and "skip-fork-author-unknown"
     or "skip-non-whitelisted-author"
   shared.log_line("info", "github_issue_create", "SKIP", {
