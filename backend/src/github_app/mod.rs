@@ -798,6 +798,11 @@ impl GithubAppTokens {
         Ok(token.token)
     }
 
+    /// The configured App slug (`FKST_GITHUB_APP_SLUG`), when set.
+    pub fn app_slug(&self) -> Option<&str> {
+        self.inner.app_slug.as_deref()
+    }
+
     /// The install URL for this app (if slug is configured).
     pub fn install_url(&self) -> Option<String> {
         self.inner

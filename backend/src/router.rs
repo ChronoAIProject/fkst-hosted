@@ -81,6 +81,7 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
         .merge(routes::logs::router())
         .merge(routes::auth::router())
         .merge(routes::dashboard::router())
+        .merge(routes::repos::router())
         // The identity-gated engine observe read-model (issue #473); authorizes
         // in-handler with the SAME three-tier check as the log download.
         .merge(routes::observe::router());
