@@ -55,6 +55,22 @@ export const en: SiteContent = {
     workIssues: 'Work issues',
     open: 'open',
     closed: 'closed',
+    repos: {
+      title: 'Repositories',
+      refresh: 'Refresh',
+      loading: 'Loading repositories…',
+      loadFailed: 'Could not load your repositories. Please try again.',
+      empty: 'No repositories found on your account.',
+      private: 'private',
+      public: 'public',
+      org: 'org',
+      installed: 'Installed',
+      install: 'Install',
+      nonAdminHint:
+        'You are not an admin of this repository — GitHub may send an approval request to its owner.',
+      appNotConfigured:
+        'The GitHub App is not configured for this deployment yet, so install links are unavailable.',
+    },
   },
   intro: {
     metaTitle: 'FKST — Autonomous coding sessions, hosted',

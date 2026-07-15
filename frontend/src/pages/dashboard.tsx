@@ -48,8 +48,21 @@ interface PullJob {
   total: number;
   error?: string | null;
 }
+interface UserRepo {
+  owner: string;
+  name: string;
+  private: boolean;
+  org: boolean;
+  admin: boolean;
+  installed: boolean;
+}
+interface UserReposResponse {
+  app_slug: string | null;
+  repos: UserRepo[];
+}
 
 type DashboardContent = ReturnType<typeof useContent>['dashboard'];
+type ReposContent = DashboardContent['repos'];
 
 /** Format an epoch-ms as Singapore time (the dashboard's canonical timezone). */
 export function formatSgt(ms: number, lang: 'en' | 'zh'): string {
@@ -190,11 +203,45 @@ function SessionCard({ s, d }: { s: SessionGroup; d: DashboardContent }) {
   );
 }
 
+function RepoRow({ repo, appSlug, rc }: { repo: UserRepo; appSlug: string | null; rc: ReposContent }) {
+  return (
+    <div className="flex items-center gap-2 py-2 text-[12.5px] min-w-0">
+      <a
+        href={`https://github.com/${repo.owner}/${repo.name}`}
+        target="_blank"
+        rel="noreferrer"
+        className="font-mono text-[12px] text-fg hover:text-amber transition-colors truncate min-w-0"
+      >
+        {`${repo.owner}/${repo.name}`}
+      </a>
+      <Chip tone="neutral">{repo.private ? rc.private : rc.public}</Chip>
+      {repo.org && <Chip tone="amber">{rc.org}</Chip>}
+      <span className="flex-1" aria-hidden="true" />
+      {repo.installed ? (
+        <span className="font-mono text-[11px] text-green flex-none">{`✓ ${rc.installed}`}</span>
+      ) : (
+        appSlug != null && (
+          <a
+            href={`https://github.com/apps/${appSlug}/installations/new`}
+            target="_blank"
+            rel="noreferrer"
+            title={repo.admin ? undefined : rc.nonAdminHint}
+            className="font-ui font-semibold text-[11.5px] bg-amber text-amber-ink rounded-control px-3 py-1 transition-colors hover:brightness-[1.06] flex-none"
+          >
+            {rc.install}
+          </a>
+        )
+      )}
+    </div>
+  );
+}
+
 // ---- Page -------------------------------------------------------------------
 
 export function Dashboard() {
   const c = useContent();
   const d = c.dashboard;
+  const rc = d.repos;
   const { lang } = useLang();
   const { configured, isAuthenticated, error, signIn, apiFetch } = useAuth();
 
@@ -202,6 +249,9 @@ export function Dashboard() {
   const [pulling, setPulling] = useState(false);
   const [progress, setProgress] = useState<PullJob | null>(null);
   const [pullError, setPullError] = useState<string | null>(null);
+  const [reposData, setReposData] = useState<UserReposResponse | null>(null);
+  const [reposError, setReposError] = useState(false);
+  const [reposTick, setReposTick] = useState(0);
   const cancelled = useRef(false);
 
   useEffect(() => {
@@ -226,6 +276,27 @@ export function Dashboard() {
       active = false;
     };
   }, [isAuthenticated, configured, apiFetch]);
+
+  // Load the user's repositories + App installation status on mount; the
+  // section's Refresh button re-runs it by bumping `reposTick`.
+  useEffect(() => {
+    if (!isAuthenticated || !configured) return;
+    let active = true;
+    setReposError(false);
+    apiFetch('/api/v1/repos')
+      .then((r) =>
+        r.ok ? (r.json() as Promise<UserReposResponse>) : Promise.reject(new Error(String(r.status)))
+      )
+      .then((j) => {
+        if (active) setReposData(j);
+      })
+      .catch(() => {
+        if (active) setReposError(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isAuthenticated, configured, apiFetch, reposTick]);
 
   useEffect(
     () => () => {
@@ -411,6 +482,46 @@ export function Dashboard() {
           )}
         </>
       )}
+
+      <section className="border border-line rounded-panel bg-raise p-8 max-[600px]:p-5 flex flex-col gap-4">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <h2 className="font-display font-semibold text-[18px] text-fg">{rc.title}</h2>
+          <button
+            type="button"
+            onClick={() => setReposTick((t) => t + 1)}
+            className="font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim hover:text-fg transition-colors cursor-pointer"
+          >
+            {rc.refresh}
+          </button>
+        </div>
+        {reposError ? (
+          <div className="border border-line border-l-2 border-l-red rounded-card bg-[color-mix(in_oklab,var(--raise)_55%,transparent)] px-4 py-3 text-[13px] text-dim">
+            {rc.loadFailed}
+          </div>
+        ) : reposData == null ? (
+          <p className="font-mono text-[12px] text-ghost">{rc.loading}</p>
+        ) : (
+          <>
+            {reposData.app_slug == null && (
+              <p className="font-mono text-[12px] text-ghost">{rc.appNotConfigured}</p>
+            )}
+            {reposData.repos.length === 0 ? (
+              <p className="font-mono text-[12.5px] text-ghost">{rc.empty}</p>
+            ) : (
+              <div className="flex flex-col divide-y divide-[color-mix(in_oklab,var(--line)_55%,transparent)]">
+                {reposData.repos.map((repo) => (
+                  <RepoRow
+                    key={`${repo.owner}/${repo.name}`}
+                    repo={repo}
+                    appSlug={reposData.app_slug}
+                    rc={rc}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </section>
     </div>
   );
 }

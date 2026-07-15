@@ -84,6 +84,20 @@ export interface SiteContent {
     workIssues: string;
     open: string;
     closed: string;
+    repos: {
+      title: string;
+      refresh: string;
+      loading: string;
+      loadFailed: string;
+      empty: string;
+      private: string;
+      public: string;
+      org: string;
+      installed: string;
+      install: string;
+      nonAdminHint: string;
+      appNotConfigured: string;
+    };
   };
   intro: {
     metaTitle: string;
