@@ -88,6 +88,18 @@ local function mock_child_issue_rest_view(issue_number, child_id)
   })
 end
 
+local function mock_source_issue_author(author_login)
+  local author = "null"
+  if author_login ~= nil then
+    author = '{"login":"' .. h.json_string(author_login) .. '"}'
+  end
+  t.mock_command("gh api repos/owner/x/issues/42", {
+    stdout = '{"number":42,"title":"Source issue","body":"Source body","state":"open","user":' .. author .. "}\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function mock_issue_add_sub_issue(parent_number, child_id, exit_code, stderr)
   t.mock_command(
     "gh api --method POST repos/owner/x/issues/" .. tostring(parent_number or 42) .. "/sub_issues -F sub_issue_id=" .. tostring(child_id or 987654321),
@@ -619,5 +631,125 @@ return {
     t.eq(count_calls("gh issue list"), 1)
     t.eq(count_calls("gh issue create"), 0)
     t.eq(count_calls("/sub_issues"), 0)
+  end,
+
+  test_fork_issue_create_request_reauthorizes_source_author_before_writes = function()
+    local payload = event({
+      external_effect_saga = "fork-and-block",
+      external_effect_step = "create-fork",
+      parent_comment_target = {
+        repo = "owner/x",
+        issue_number = 42,
+      },
+      post_create_blocked_by = {
+        blocked_issue_number = 42,
+        dedup_key = "github-devloop/fork/owner/x/issue/42/v1/blocked-by",
+        external_effect_saga = "fork-and-block",
+        external_effect_step = "block-original",
+      },
+      source_ref = {
+        kind = "external",
+        ref = "owner/x#issue/42",
+      },
+    }).payload
+    mock_write_env("1")
+    mock_bot_env()
+    mock_source_issue_author("untrusted-human")
+    local intent_comment = {
+      body = core.issue_create_intent_marker(payload.dedup_key),
+      author_login = "fkst-test-bot",
+    }
+    h.mock_comment_view({ intent_comment })
+    h.mock_comment_view({ intent_comment })
+    mock_issue_create_search("[]\n")
+    mock_issue_create()
+    mock_parent_issue_comment_write()
+
+    local result = t.run_department("departments/github_issue_create/main.lua", {
+      queue = "github_issue_create_request",
+      payload = payload,
+    }, opts("fork-issue-create-unauthorized-author", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh api repos/owner/x/issues/42"), 1)
+    t.eq(count_calls("gh issue list"), 0)
+    t.eq(count_calls("gh issue create"), 0)
+    t.eq(count_calls("gh issue comment 42 --repo owner/x"), 0)
+  end,
+
+  test_fork_issue_create_request_rejects_missing_source_author = function()
+    local payload = event({
+      dedup_key = "github-devloop/fork/owner/x/issue/42/missing-author",
+      external_effect_saga = "fork-and-block",
+      external_effect_step = "create-fork",
+      parent_comment_target = {
+        repo = "owner/x",
+        issue_number = 42,
+      },
+      source_ref = {
+        kind = "external",
+        ref = "owner/x#issue/42",
+      },
+    }).payload
+    mock_write_env("1")
+    mock_bot_env()
+    mock_source_issue_author(nil)
+    h.mock_comment_view({})
+
+    local result = t.run_department("departments/github_issue_create/main.lua", {
+      queue = "github_issue_create_request",
+      payload = payload,
+    }, opts("fork-issue-create-missing-author", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh api repos/owner/x/issues/42"), 1)
+    t.eq(count_calls("gh issue list"), 0)
+    t.eq(count_calls("gh issue create"), 0)
+    t.eq(count_calls("gh issue comment 42 --repo owner/x"), 0)
+  end,
+
+  test_fork_issue_create_request_allows_authorized_source_author = function()
+    local payload = event({
+      dedup_key = "github-devloop/fork/owner/x/issue/42/authorized-author",
+      external_effect_saga = "fork-and-block",
+      external_effect_step = "create-fork",
+      parent_comment_target = {
+        repo = "owner/x",
+        issue_number = 42,
+      },
+      source_ref = {
+        kind = "external",
+        ref = "owner/x#issue/42",
+      },
+    }).payload
+    mock_write_env("1")
+    mock_bot_env()
+    mock_source_issue_author("trusted-human")
+    local intent_comment = {
+      body = core.issue_create_intent_marker(payload.dedup_key),
+      author_login = "fkst-test-bot",
+    }
+    h.mock_comment_view({ intent_comment })
+    h.mock_comment_view({ intent_comment })
+    mock_issue_create_search("[]\n")
+    mock_issue_create()
+    mock_parent_issue_comment_write()
+
+    local result = t.run_department("departments/github_issue_create/main.lua", {
+      queue = "github_issue_create_request",
+      payload = payload,
+    }, opts("fork-issue-create-authorized-author", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh api repos/owner/x/issues/42"), 1)
+    t.eq(count_calls("gh issue list"), 1)
+    t.eq(count_calls("gh issue create"), 1)
+    t.eq(count_calls("gh issue comment 42 --repo owner/x"), 1)
   end,
 }
