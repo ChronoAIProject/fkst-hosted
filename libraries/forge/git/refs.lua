@@ -210,12 +210,12 @@ local function diff_check_argv(worktree, cached)
   return worktree_argv(worktree, "diff", "--check")
 end
 
-local function conflict_markers_argv(worktree)
-  local pattern = "^(" .. string.rep("<", 7) .. "|" .. string.rep("=", 7) .. "|" .. string.rep(">", 7) .. ")"
+local function diff_check_range_argv(worktree, base_sha, candidate_sha)
+  local range = tostring(base_sha) .. ".." .. tostring(candidate_sha)
   if worktree == nil then
-    return { "git", "grep", "-n", "-I", "-E", pattern, "--", "." }
+    return { "git", "diff", "--check", range }
   end
-  return worktree_argv(worktree, "grep", "-n", "-I", "-E", pattern, "--", ".")
+  return worktree_argv(worktree, "diff", "--check", range)
 end
 
 local function commit_message_file_argv(worktree, message_file)
@@ -503,8 +503,10 @@ function M.install(handle)
     return exec_result(handle, diff_check_argv(worktree, cached), timeout, "git diff --check")
   end
 
-  function handle.conflict_markers(worktree, timeout)
-    return exec_result(handle, conflict_markers_argv(worktree), timeout, "git grep conflict markers")
+  function handle.diff_check_range(worktree, base_sha, candidate_sha, timeout)
+    local safe_base = gitref.require_safe_sha("diff base sha", base_sha, "forge.git")
+    local safe_candidate = gitref.require_safe_sha("diff candidate sha", candidate_sha, "forge.git")
+    return exec_result(handle, diff_check_range_argv(worktree, safe_base, safe_candidate), timeout, "git diff range --check")
   end
 
   function handle.commit_message_file(worktree, message_file, timeout)

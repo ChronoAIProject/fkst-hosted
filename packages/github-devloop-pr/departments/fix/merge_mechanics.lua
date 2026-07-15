@@ -224,15 +224,18 @@ function M.make(core)
     end
   end
 
-  local function assert_no_conflict_markers(worktree)
-    local markers_result = git("github-devloop").conflict_markers(worktree, 30)
-    if markers_result.exit_code == 1 then
+  local function assert_candidate_diff_clean(worktree, reviewed_head_sha, candidate_head_sha)
+    local check_result = git("github-devloop").diff_check_range(worktree, reviewed_head_sha, candidate_head_sha, 30)
+    if check_result.exit_code == 0 then
       return
     end
-    if markers_result.exit_code == 0 then
-      error("github-devloop: unresolved-conflict-markers: fix left conflict markers unresolved")
+    local stdout = tostring(check_result.stdout or "")
+    local stderr = tostring(check_result.stderr or "")
+    if check_result.exit_code == 2 then
+      error("github-devloop: unresolved-conflict-markers: candidate diff failed git diff --check: " .. stdout .. stderr)
     end
-    error("github-devloop: git-conflict-marker-check-failed: git conflict marker check failed: " .. tostring(markers_result.stderr))
+    error("github-devloop: git-candidate-diff-check-failed: git diff --check failed with exit_code="
+      .. tostring(check_result.exit_code) .. " stdout=" .. stdout .. " stderr=" .. stderr)
   end
 
   local function bounded_fix_summary(value)
@@ -250,7 +253,7 @@ function M.make(core)
     merge_predecessor_entries_for_fix = merge_predecessor_entries_for_fix,
     merge_speculative_predecessors_for_fix = merge_speculative_predecessors_for_fix,
     assert_no_unmerged_paths = assert_no_unmerged_paths,
-    assert_no_conflict_markers = assert_no_conflict_markers,
+    assert_candidate_diff_clean = assert_candidate_diff_clean,
     bounded_fix_summary = bounded_fix_summary,
   }
 end
