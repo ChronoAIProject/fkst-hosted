@@ -3,6 +3,7 @@ local issue = require("forge.github.issue")
 local argv_render = require("forge.argv")
 local forge_strings = require("forge.strings")
 local github_view = require("forge.github_view")
+local content_filter = require("forge.github.content_filter")
 
 local function copy(value)
   if type(value) ~= "table" then
@@ -19,12 +20,16 @@ function M.model(seed)
   return {
     issues = seed and seed.issues or {},
     writes = seed and seed.writes or {},
+    author_policy = seed and seed.author_policy or nil,
   }
 end
 
 function M.new(model)
   assert(type(model) == "table", "forge.github_fake.new requires a model")
   local handle = { _model = model }
+  function handle.is_authorized_author(login)
+    return content_filter.is_authorized(login, content_filter.policy_whitelist(model.author_policy))
+  end
   function handle._exec(argv, timeout, context)
     table.insert(model.writes, {
       kind = "exec",

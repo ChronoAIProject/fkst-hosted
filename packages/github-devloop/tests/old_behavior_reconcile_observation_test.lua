@@ -2,7 +2,6 @@ local config = require("devloop.config")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
-local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local h = require("tests.devloop_helpers")
 local observation_support = require("testkit.old_behavior_observation_support")
 local testing = require("testkit.testing")
@@ -19,35 +18,25 @@ local json_array = observation_support.json_array
 local nullable = observation_support.nullable
 local INVENTORY_PATH = "migration/restart-lifecycle.inventory.json"
 local SITE = {
-  path = "packages/github-devloop-pr/departments/reconcile/main.lua",
-  symbol = "pipeline_review",
-  ordinal = "versioned_transition_status:reviewing->blocked",
+  path = "packages/github-devloop/departments/reconcile/main.lua",
+  symbol = "pipeline",
+  ordinal = "versioned_transition_status:thinking->blocked",
 }
 
 local REPO = "owner/repo"
 local ISSUE_NUMBER = 42
 
-local function review_reconcile_event()
+local function reconcile_event()
   return {
-    queue = "devloop_review_reconcile",
-    payload = h.review_reconcile(),
+    queue = "devloop_reconcile",
+    payload = h.reconcile(),
     now_seconds = 1784048400,
   }
 end
 
 local function prepare_fixture(comments)
   h.mock_bot_env()
-  h.mock_default_issue_claim(REPO, ISSUE_NUMBER)
-  entity_read_mocks.mock_pr_view_selector(t, {
-    repo = REPO,
-    number = 7,
-    comments = comments,
-    head = "devloop-owner-repo-42-01HY",
-    head_sha = "def456",
-    state = "OPEN",
-    base_branch = "dev",
-    labels = {},
-  }, entity_read_mocks.pr_origin_selector, 1)
+  h.mock_issue_reconcile({}, comments)
 end
 
 local function observe_real_department(event, comments)
@@ -57,7 +46,7 @@ local function observe_real_department(event, comments)
     devloop_logging = devloop_logging,
     devloop_state = devloop_state,
     dept = "reconcile",
-    from_state = "reviewing",
+    from_state = "thinking",
     transition_kind = "versioned_transition_status",
     run = function()
       return testing.run_fake(reconcile_department, event)
@@ -68,22 +57,22 @@ local function observe_real_department(event, comments)
 end
 
 local EFFECTS = {
-  ["github-proxy.github_pr_comment_request"] = {
-    effect_id = "comment:pr:reconcile-reviewing-blocked",
+  ["github-proxy.github_issue_comment_request"] = {
+    effect_id = "comment:issue:reconcile-blocked",
     sink_kind = "comment",
     authority_class = "lifecycle-authoritative",
   },
   ["github-proxy.github_issue_label_request"] = {
-    effect_id = "label:issue:reconcile-reviewing-blocked",
+    effect_id = "label:issue:reconcile-blocked",
     sink_kind = "label",
     authority_class = "lifecycle-authoritative",
   },
 }
 
 local function outcome_status(probe, decision, apply)
-  t.eq(probe.outcome, "apply", "review reconcile reaches only the apply CAS regime")
-  t.eq(decision.outcome, "applied", "review reconcile routes the apply decision")
-  t.eq(apply.to_state, "blocked", "review reconcile applies blocked")
+  t.eq(probe.outcome, "apply", "issue reconcile reaches only the apply CAS regime")
+  t.eq(decision.outcome, "applied", "issue reconcile routes the apply decision")
+  t.eq(apply.to_state, "blocked", "issue reconcile applies blocked")
   return "apply", "apply", decision.outcome
 end
 
@@ -93,7 +82,7 @@ local function effects_from_raises(raises)
   for ordinal, raised in ipairs(raises) do
     local shape = EFFECTS[raised.queue]
     if shape == nil then
-      error("unclassified OLD reconcile raise: " .. tostring(raised.queue))
+      error("unclassified OLD issue reconcile raise: " .. tostring(raised.queue))
     end
     table.insert(effects, {
       effect_id = shape.effect_id,
@@ -113,10 +102,8 @@ end
 local function record_lineage(payload, incoming_version, decision)
   return {
     proposal_id = decision.proposal_id,
-    review_proposal_id = payload.review_proposal_id,
-    issue_version = payload.issue_version,
+    base_version = payload.base_version,
     round = payload.round,
-    head_sha = payload.head_sha,
     dedup_key = payload.dedup_key,
     incoming_version = incoming_version,
     source_ref = copy_value(payload.source_ref),
@@ -130,9 +117,9 @@ local function build_record(event, result, captured)
     event = event,
     result = result,
     captured = captured,
-    owner = "github-devloop-pr",
+    owner = "github-devloop",
     site = SITE,
-    observation_prefix = "writer:github-devloop-pr:reconcile-reviewing-blocked",
+    observation_prefix = "writer:github-devloop:reconcile-thinking-blocked",
     transition_kind = "versioned_transition_status",
     outcome_status = outcome_status,
     effects_from_raises = effects_from_raises,
@@ -143,13 +130,13 @@ local function build_record(event, result, captured)
 end
 
 local function capture_apply_record()
-  local event = review_reconcile_event()
-  local current_version = event.payload.issue_version
+  local event = reconcile_event()
+  local current_version = event.payload.base_version
   local result, captured = observe_real_department(event, json_array({
-    core.state_marker(event.payload.proposal_id, "reviewing", current_version),
+    core.state_marker(event.payload.proposal_id, "thinking", current_version),
   }))
   local record = build_record(event, result, captured)
-  local expected_version = conv_reconcile.review_reconcile_terminal_state_version(
+  local expected_version = conv_reconcile.reconcile_terminal_state_version(
     current_version,
     event.payload.round
   )
@@ -157,40 +144,40 @@ local function capture_apply_record()
   t.eq(captured.probes[1].incoming_version, expected_version, "reconcile derives the terminal version from current state")
   t.is_true(
     transition_version.compare(expected_version, current_version) > 0,
-    "reconcile terminal version is newer than the live reviewing marker"
+    "reconcile terminal version is newer than the live thinking marker"
   )
   t.eq(record.old_inputs.target_version, JSON_NULL, "four-argument versioned target_version")
-  t.eq(record.old_outcome.status, "apply", "captured reconcile status")
-  t.eq(record.old_outcome.reason_code, "apply", "captured reconcile disposition")
-  t.eq(record.old_outcome.cas_outcome, "applied", "captured reconcile CAS outcome")
-  t.eq(#record.old_outcome.emitted_effects, 2, "review reconcile emits comment and label effects")
-  t.eq(captured.liveness_read_count, 0, "deterministic reconcile never reads Codex liveness")
+  t.eq(record.old_outcome.status, "apply", "captured issue reconcile status")
+  t.eq(record.old_outcome.reason_code, "apply", "captured issue reconcile disposition")
+  t.eq(record.old_outcome.cas_outcome, "applied", "captured issue reconcile CAS outcome")
+  t.eq(#record.old_outcome.emitted_effects, 2, "issue reconcile emits comment and label effects")
+  t.eq(captured.liveness_read_count, 0, "deterministic issue reconcile never reads Codex liveness")
   return record
 end
 
 local function build_pre_cas_guard_record(event, result, captured, name, expected_outcome)
   local decision = captured.decisions[1]
   local current = decision.current
-  local incoming_version = conv_reconcile.review_reconcile_terminal_state_version(
-    event.payload.issue_version,
+  local incoming_version = conv_reconcile.reconcile_terminal_state_version(
+    event.payload.base_version,
     event.payload.round
   )
   local emitted_effects, observable_writes = effects_from_raises(result.raises)
   return {
     schema = "restart-old-behavior-observation.v2",
     observation_id = table.concat({
-      "writer:github-devloop-pr:reconcile-reviewing-blocked",
+      "writer:github-devloop:reconcile-thinking-blocked",
       "blocked",
       expected_outcome,
       name,
       "none",
     }, "/"),
-    owner = "github-devloop-pr",
+    owner = "github-devloop",
     site = copy_value(SITE),
     boundary = "writer",
     typed_intent = {
       kind = "versioned_transition_status",
-      source_state = "reviewing",
+      source_state = "thinking",
       source_boundary = JSON_NULL,
       target = "blocked",
       cause_schema_id = event.payload.schema,
@@ -207,7 +194,7 @@ local function build_pre_cas_guard_record(event, result, captured, name, expecte
         version = nullable(current.version),
         stage_rank = nullable(current.stage_rank),
       },
-      caller_from_states = json_array({ "reviewing" }),
+      caller_from_states = json_array({ "thinking" }),
       incoming_version = incoming_version,
       target_version = JSON_NULL,
       handoff_reference = JSON_NULL,
@@ -235,12 +222,12 @@ local function build_pre_cas_guard_record(event, result, captured, name, expecte
 end
 
 local function capture_pre_cas_guard(name, comments, expected_outcome)
-  local event = review_reconcile_event()
+  local event = reconcile_event()
   local result, captured = observe_real_department(event, comments(event))
   t.eq(#captured.probes, 0, name .. ": guard returns before the writer CAS probe")
   t.eq(#captured.decisions, 1, name .. ": guard logs one decision")
   t.eq(captured.decisions[1].dept, "reconcile", name .. ": disposition belongs to reconcile")
-  t.eq(captured.decisions[1].from_state, "reviewing", name .. ": disposition retains writer source")
+  t.eq(captured.decisions[1].from_state, "thinking", name .. ": disposition retains writer source")
   t.eq(captured.decisions[1].to_state, "blocked", name .. ": disposition retains writer target")
   t.eq(captured.decisions[1].outcome, expected_outcome, name .. ": captured guard disposition")
   t.eq(#captured.applies, 0, name .. ": guard emits no apply")
@@ -258,15 +245,15 @@ end
 
 local PRE_CAS_GUARDS = {
   {
-    name = "review-reconcile-marker-visible",
-    expected_outcome = "skip-idempotent(review reconcile marker already visible)",
+    name = "reconcile-marker-visible",
+    expected_outcome = "skip-idempotent(reconcile marker already visible)",
     comments = function(event)
-      local version = conv_reconcile.review_reconcile_terminal_state_version(
-        event.payload.issue_version,
+      local version = conv_reconcile.reconcile_terminal_state_version(
+        event.payload.base_version,
         event.payload.round
       )
       return json_array({
-        core.build_review_reconcile_comment_request(
+        core.build_reconcile_comment_request(
           REPO,
           tostring(ISSUE_NUMBER),
           event.payload,
@@ -281,8 +268,8 @@ local PRE_CAS_GUARDS = {
     name = "already-terminal",
     expected_outcome = "skip-idempotent(already terminal)",
     comments = function(event)
-      local version = conv_reconcile.review_reconcile_terminal_state_version(
-        event.payload.issue_version,
+      local version = conv_reconcile.reconcile_terminal_state_version(
+        event.payload.base_version,
         event.payload.round
       )
       return json_array({
@@ -295,7 +282,7 @@ local PRE_CAS_GUARDS = {
     expected_outcome = "skip-stale(state-advanced)",
     comments = function(event)
       return json_array({
-        core.state_marker(event.payload.proposal_id, "fixing", event.payload.issue_version .. "/fix/1"),
+        core.state_marker(event.payload.proposal_id, "ready", event.payload.base_version .. "/ready/1"),
       })
     end,
   },
@@ -324,7 +311,7 @@ local function committed_records()
 end
 
 return {
-  test_reconcile_old_observations_are_runtime_bound_to_inventory = function()
+  test_issue_reconcile_old_observations_are_runtime_bound_to_inventory = function()
     local actual = json_array()
     for _, fixture in ipairs(PRE_CAS_GUARDS) do
       local ok, record_or_failure = pcall(
@@ -334,7 +321,7 @@ return {
         fixture.expected_outcome
       )
       if not ok then
-        error("OLD reconcile guard " .. fixture.name .. " failed: " .. tostring(record_or_failure), 0)
+        error("OLD issue reconcile guard " .. fixture.name .. " failed: " .. tostring(record_or_failure), 0)
       end
       table.insert(actual, record_or_failure)
     end
@@ -344,10 +331,10 @@ return {
       return tostring(left.observation_id) < tostring(right.observation_id)
     end)
     local expected = committed_records()
-    local difference = first_difference(actual, expected, "old_behavior_observations[reconcile]")
+    local difference = first_difference(actual, expected, "old_behavior_observations[issue-reconcile]")
     if difference ~= nil or canonical_json(actual) ~= canonical_json(expected) then
       error(
-        "runtime-bound OLD reconcile observation differs at " .. tostring(difference or "canonical-json")
+        "runtime-bound OLD issue reconcile observation differs at " .. tostring(difference or "canonical-json")
           .. "; runtime_records=" .. canonical_json(actual),
         0
       )
