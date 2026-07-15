@@ -10,6 +10,17 @@ issue-driven implementation, review, and merge workflow. The bridge therefore ow
 PR detection and idempotent issue materialization; `github-devloop` remains unchanged and keeps all
 implementation, review, CI, and merge authority.
 
+## Author Admission
+
+External PR work creation is deny-by-default. Every scan and durable candidate re-derives the PR
+author and checks the same `forge.github` author policy immediately before the bridge path can
+write. `FKST_EXTERNAL_PR_TRUSTED_CONTRIBUTOR_LOGINS` is a comma-separated, action-scoped extension
+to that policy for contributors who are not already authorized globally. When it is unset or empty,
+an otherwise unauthorized external contributor is skipped and no bridge issue is created.
+
+Bridge issue identity contains only the PR number and canonical author login. Contributor prose is
+never used in the title, so a content-redaction marker cannot become a work-item identity.
+
 ## Why This Is Not `github-proxy`
 
 `github-proxy` is the GitHub protocol adapter. Its `github_poll` department polls issues and PRs as

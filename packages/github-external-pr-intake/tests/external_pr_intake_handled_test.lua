@@ -55,7 +55,7 @@ local function issue_json(issue)
 end
 
 local function new_fake_github(model)
-  local handle = { _model = model }
+  local handle = { _model = model, is_authorized_author = function(_login) return true end }
   function handle.pr_list(repo, timeout)
     table.insert(model.writes, { kind = "pr_list", repo = repo, timeout = timeout })
     local parts = {}
