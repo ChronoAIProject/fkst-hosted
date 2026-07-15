@@ -89,6 +89,25 @@ export const en: SiteContent = {
       cancel: 'Cancel',
       createFailed: 'Could not create the repository. Please try again.',
       createdNextStep: 'Next: install the App on this repo',
+      connect: 'Connect',
+      connectHint: 'Connect to enable repository creation and fkst sessions.',
+      manage: 'Manage',
+      uninstall: 'Uninstall',
+      uninstallConfirmTitle: 'Uninstall from {owner}?',
+      uninstallConfirmBody:
+        'This uninstalls the GitHub App from {owner}. Everything the App covers in this account — repository creation and every fkst session — stops working immediately.',
+      uninstallConfirm: 'Uninstall',
+      uninstallPending: 'Uninstalling…',
+      uninstallFailed: 'Could not uninstall the App. Please try again.',
+      remove: 'Remove',
+      removeConfirmTitle: 'Remove {repo}?',
+      removeConfirmBody:
+        'This removes {repo} from the App installation. fkst sessions on this repository stop working immediately.',
+      removeConfirm: 'Remove',
+      removePending: 'Removing…',
+      removeFailed: 'Could not remove the repository from the installation. Please try again.',
+      allModeHint:
+        'This installation covers all repositories — repository selection is managed on GitHub via Manage.',
     },
   },
   intro: {

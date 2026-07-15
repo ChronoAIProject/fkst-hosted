@@ -49,6 +49,7 @@ interface PullJob {
   error?: string | null;
 }
 interface UserRepo {
+  id: number;
   owner: string;
   name: string;
   private: boolean;
@@ -56,10 +57,16 @@ interface UserRepo {
   admin: boolean;
   installed: boolean;
 }
+interface InstallationView {
+  account: string;
+  installation_id: number;
+  repository_selection: 'all' | 'selected';
+}
 interface UserReposResponse {
   app_slug: string | null;
   viewer: { login: string };
   orgs: string[];
+  installations: InstallationView[];
   repos: UserRepo[];
 }
 interface CreateRepoBody {
@@ -216,11 +223,16 @@ function RepoRow({
   appSlug,
   rc,
   highlight = false,
+  selection = null,
+  onRemove,
 }: {
   repo: UserRepo;
   appSlug: string | null;
   rc: ReposContent;
   highlight?: boolean;
+  /** repository_selection of the account's installation, if any. */
+  selection?: InstallationView['repository_selection'] | null;
+  onRemove?: () => void;
 }) {
   return (
     <div
@@ -242,7 +254,21 @@ function RepoRow({
       {repo.org && <Chip tone="amber">{rc.org}</Chip>}
       <span className="flex-1" aria-hidden="true" />
       {repo.installed ? (
-        <span className="font-mono text-[11px] text-green flex-none">{`✓ ${rc.installed}`}</span>
+        <span className="flex items-center gap-2.5 flex-none">
+          <span
+            className="font-mono text-[11px] text-green"
+            title={selection === 'all' ? rc.allModeHint : undefined}
+          >{`✓ ${rc.installed}`}</span>
+          {selection === 'selected' && onRemove && (
+            <button
+              type="button"
+              onClick={onRemove}
+              className="font-ui font-semibold text-[11px] text-dim hover:text-red transition-colors cursor-pointer"
+            >
+              {rc.remove}
+            </button>
+          )}
+        </span>
       ) : (
         appSlug != null && (
           <a
@@ -473,6 +499,129 @@ function CreateRepoModal({
   );
 }
 
+/** Danger confirmation dialog: issues a DELETE to `path` on confirm; on a
+ *  non-2xx answer the error envelope's `message` is shown inside the dialog. */
+function ConfirmDialog({
+  title,
+  body,
+  confirmLabel,
+  pendingLabel,
+  cancelLabel,
+  path,
+  fallbackError,
+  onClose,
+  onDone,
+}: {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  pendingLabel: string;
+  cancelLabel: string;
+  /** DELETE target, e.g. `/api/v1/installations/{owner}`. */
+  path: string;
+  fallbackError: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const { apiFetch } = useAuth();
+  const [pending, setPending] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  // Close on Escape (the Cancel button is the pointer path).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const onConfirm = async () => {
+    if (pending) return;
+    setPending(true);
+    setServerError(null);
+    try {
+      const res = await apiFetch(path, { method: 'DELETE' });
+      if (res.ok) {
+        onDone();
+        return;
+      }
+      // Error envelope: {"error", "message"} — surface `message` verbatim.
+      let message = fallbackError;
+      try {
+        const envelope = (await res.json()) as { message?: unknown };
+        if (typeof envelope?.message === 'string' && envelope.message) message = envelope.message;
+      } catch {
+        /* non-JSON error body — keep the generic message */
+      }
+      setServerError(message);
+    } catch {
+      setServerError(fallbackError);
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <div className="anim-overlay-in fixed inset-0 z-50 flex items-center justify-center p-4 bg-[color-mix(in_oklab,var(--bg)_72%,transparent)]">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-dialog-title"
+        className="anim-modal-in w-full max-w-[460px] border border-line rounded-modal bg-raise shadow-modal-seat p-6 max-[600px]:p-5"
+      >
+        <div className="flex flex-col gap-4">
+          <h3 id="confirm-dialog-title" className="font-display font-semibold text-modal-title text-fg">
+            {title}
+          </h3>
+          <p className="text-[13.5px] leading-relaxed text-dim">{body}</p>
+
+          {serverError && (
+            <p className="border border-line border-l-2 border-l-red rounded-card bg-[color-mix(in_oklab,var(--raise-2)_70%,transparent)] px-3 py-2 text-[12.5px] text-dim">
+              {serverError}
+            </p>
+          )}
+
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="font-ui font-semibold text-[12.5px] border border-line rounded-control px-4 py-2 text-dim hover:text-fg transition-colors cursor-pointer"
+            >
+              {cancelLabel}
+            </button>
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={pending}
+              className={cn(
+                'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-colors',
+                pending
+                  ? 'bg-red/50 text-white/60 cursor-not-allowed'
+                  : 'bg-red text-white hover:brightness-[1.06] cursor-pointer'
+              )}
+            >
+              {pending ? pendingLabel : confirmLabel}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Pending danger action driving the shared ConfirmDialog. */
+type ConfirmTarget =
+  | { kind: 'uninstall'; owner: string }
+  | { kind: 'remove'; owner: string; name: string };
+
+/** Exact GitHub settings page for an installation on this account. */
+function manageUrl(owner: string, personal: boolean, installationId: number): string {
+  return personal
+    ? `https://github.com/settings/installations/${installationId}`
+    : `https://github.com/organizations/${owner}/settings/installations/${installationId}`;
+}
+
 function ReposSection() {
   const rc = useContent().dashboard.repos;
   const { apiFetch } = useAuth();
@@ -484,6 +633,8 @@ function ReposSection() {
   const [showCreate, setShowCreate] = useState(false);
   // `owner/name` of the repo created via the modal — highlighted after re-fetch.
   const [createdKey, setCreatedKey] = useState<string | null>(null);
+  // Pending danger action (account uninstall / per-repo remove), if any.
+  const [confirm, setConfirm] = useState<ConfirmTarget | null>(null);
 
   // Load the user's repositories + App installation status on mount; Refresh
   // (and a successful create) re-runs it by bumping `tick`.
@@ -512,8 +663,18 @@ function ReposSection() {
     setTick((t) => t + 1);
   }, []);
 
+  const onConfirmClose = useCallback(() => setConfirm(null), []);
+  const onConfirmDone = useCallback(() => {
+    setConfirm(null);
+    setTick((t) => t + 1); // the danger action changed installation state — re-fetch
+  }, []);
+
   const query = search.trim().toLowerCase();
   const groups = data == null ? [] : buildGroups(data.viewer.login, data.orgs, data.repos);
+  // App installation per account login (personal user or organization).
+  const installations = data?.installations ?? [];
+  const installationFor = (owner: string) =>
+    installations.find((i) => i.account === owner) ?? null;
   // Under an active search, a group keeps only matching rows and collapses
   // away entirely when nothing matches (empty creation-target groups too).
   const visibleGroups = groups
@@ -588,9 +749,11 @@ function ReposSection() {
                 <p className="font-mono text-[12.5px] text-ghost">{rc.searchEmpty}</p>
               ) : (
                 <div className="flex flex-col gap-5">
-                  {visibleGroups.map((g) => (
+                  {visibleGroups.map((g) => {
+                    const inst = installationFor(g.owner);
+                    return (
                     <section key={g.owner} className="flex flex-col gap-1">
-                      <div className="flex items-baseline gap-2.5 flex-wrap">
+                      <div className="flex items-center gap-2.5 flex-wrap">
                         <span className="font-mono text-eyebrow text-ghost uppercase">
                           {g.personal ? rc.personalGroup : rc.orgGroup}
                         </span>
@@ -606,6 +769,41 @@ function ReposSection() {
                             )
                             .replace('{total}', String(g.repos.length))}
                         </span>
+                        {inst != null ? (
+                          <span className="flex items-center gap-1.5">
+                            <a
+                              href={manageUrl(g.owner, g.personal, inst.installation_id)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="font-ui font-semibold text-[11px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg transition-colors"
+                            >
+                              {rc.manage}
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => setConfirm({ kind: 'uninstall', owner: g.owner })}
+                              className="font-ui font-semibold text-[11px] border border-line rounded-control px-2.5 py-1 text-red transition-colors hover:border-[color-mix(in_oklab,var(--red)_45%,var(--line))] cursor-pointer"
+                            >
+                              {rc.uninstall}
+                            </button>
+                          </span>
+                        ) : (
+                          data.app_slug != null && (
+                            <span className="flex items-center gap-2">
+                              <span className="font-ui text-[11px] text-ghost">
+                                {rc.connectHint}
+                              </span>
+                              <a
+                                href={`https://github.com/apps/${data.app_slug}/installations/new`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="font-ui font-semibold text-[11.5px] bg-amber text-amber-ink rounded-control px-3 py-1 transition-colors hover:brightness-[1.06]"
+                              >
+                                {rc.connect}
+                              </a>
+                            </span>
+                          )
+                        )}
                       </div>
                       {g.repos.length === 0 ? (
                         <p className="font-mono text-[12px] text-ghost italic py-1">
@@ -623,6 +821,17 @@ function ReposSection() {
                                   appSlug={data.app_slug}
                                   rc={rc}
                                   highlight={isNew}
+                                  selection={inst?.repository_selection ?? null}
+                                  onRemove={
+                                    inst?.repository_selection === 'selected'
+                                      ? () =>
+                                          setConfirm({
+                                            kind: 'remove',
+                                            owner: repo.owner,
+                                            name: repo.name,
+                                          })
+                                      : undefined
+                                  }
                                 />
                                 {isNew && !repo.installed && data.app_slug != null && (
                                   <div className="mb-2 flex items-center gap-3 flex-wrap border rounded-card px-3 py-2 text-[12.5px] text-dim border-[color-mix(in_oklab,var(--amber)_35%,var(--line))] bg-[color-mix(in_oklab,var(--amber)_8%,transparent)]">
@@ -643,7 +852,8 @@ function ReposSection() {
                         </div>
                       )}
                     </section>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </>
@@ -660,6 +870,33 @@ function ReposSection() {
           onCreated={onCreated}
         />
       )}
+
+      {confirm != null &&
+        (confirm.kind === 'uninstall' ? (
+          <ConfirmDialog
+            title={rc.uninstallConfirmTitle.replace('{owner}', confirm.owner)}
+            body={rc.uninstallConfirmBody.replace('{owner}', confirm.owner)}
+            confirmLabel={rc.uninstallConfirm}
+            pendingLabel={rc.uninstallPending}
+            cancelLabel={rc.cancel}
+            path={`/api/v1/installations/${encodeURIComponent(confirm.owner)}`}
+            fallbackError={rc.uninstallFailed}
+            onClose={onConfirmClose}
+            onDone={onConfirmDone}
+          />
+        ) : (
+          <ConfirmDialog
+            title={rc.removeConfirmTitle.replace('{repo}', `${confirm.owner}/${confirm.name}`)}
+            body={rc.removeConfirmBody.replace('{repo}', `${confirm.owner}/${confirm.name}`)}
+            confirmLabel={rc.removeConfirm}
+            pendingLabel={rc.removePending}
+            cancelLabel={rc.cancel}
+            path={`/api/v1/installations/${encodeURIComponent(confirm.owner)}/repositories/${encodeURIComponent(confirm.name)}`}
+            fallbackError={rc.removeFailed}
+            onClose={onConfirmClose}
+            onDone={onConfirmDone}
+          />
+        ))}
     </section>
   );
 }
