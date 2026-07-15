@@ -306,7 +306,7 @@ std/
     exec.lua            -- git exec wrapper
     worktree.lua        -- ensure_worktree / list_worktrees / force_clean (#678)
     branch.lua          -- fetch / push / show_ref / is_ancestor / remote_branch_head
-    diff.lua            -- diff_check / merge_tree_empty_delta / unmerged_paths / conflict_markers
+    diff.lua            -- diff_check / merge_tree_empty_delta / unmerged_paths
     merge.lua           -- merge_no_ff / fast_forward
 ```
 
