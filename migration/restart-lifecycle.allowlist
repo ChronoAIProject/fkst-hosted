@@ -3,7 +3,6 @@ writer:github-devloop:observe-issue-unmanaged-thinking
 writer:github-devloop:implement-enter
 writer:github-devloop:awaiting-pr-enter
 writer:github-devloop:awaiting-pr-exit
-writer:github-devloop:reconcile-thinking-blocked
 sink-catalog:github-devloop
 sink-catalog:github-devloop-pr
 row-replay:github-devloop:observe-issue

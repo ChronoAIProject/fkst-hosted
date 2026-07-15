@@ -1,7 +1,3 @@
-local config = require("devloop.config")
-local devloop_logging = require("devloop.logging")
-local devloop_state = require("devloop.state")
-
 local M = {}
 
 M.JSON_NULL = json.decode("null")
@@ -169,6 +165,9 @@ function M.first_difference(actual, expected, path)
 end
 
 function M.observe_department(opts)
+  local config = opts.config or error("OLD observation config dependency is required")
+  local devloop_logging = opts.devloop_logging or error("OLD observation logging dependency is required")
+  local devloop_state = opts.devloop_state or error("OLD observation state dependency is required")
   local captured = {
     probes = M.json_array(),
     decisions = M.json_array(),
