@@ -321,9 +321,10 @@ return {
     t.eq(count_calls("git push origin"), 1)
   end,
 
-  test_fix_pushes_validated_candidate_when_branch_moves_after_check = function()
+  test_fix_pushes_validated_candidate_to_max_length_managed_branch = function()
     local event = fixing({ gate_baseline_sha = "abc123", gate_failure_excerpt = "own-ci-red" })
-    local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
+    local branch = devloop_base.implement_branch("owner/repo", "42", string.rep("managed-version/", 20))
+    t.eq(#branch, 160)
     local reject_comment = "github-devloop merge gate failed: own-ci-red"
       .. "\n" .. core.state_marker(event.proposal_id, "fixing", event.version)
       .. "\n" .. m_builders.merge_gate_marker(event.proposal_id,
