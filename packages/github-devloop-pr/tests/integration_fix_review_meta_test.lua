@@ -534,7 +534,7 @@ return {
     }, branch, event.version)
     mock_pr_fix({ origin_marker }, branch, "def456")
     t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-packages-test/github-devloop/runtime", stderr = "", exit_code = 0 })
-    mock_existing_fix_worktree(branch, "feedface")
+    local worktree = mock_existing_fix_worktree(branch, "feedface"); t.mock_command("git -C " .. worktree .. " diff --check " .. event.reviewed_head_sha .. "..feedface", { stdout = "", stderr = "", exit_code = 0 })
     mock_implement_codex(0, "Fix commit already exists.")
     mock_git_status("")
     t.mock_command("rev-list --count", {
@@ -578,7 +578,7 @@ return {
     mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, comments, branch, event.version)
     mock_pr_fix({ origin_marker }, branch, "def456")
     t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-packages-test/github-devloop/runtime", stderr = "", exit_code = 0 })
-    mock_existing_fix_worktree(branch, "feedface")
+    local worktree = mock_existing_fix_worktree(branch, "feedface"); t.mock_command("git -C " .. worktree .. " diff --check " .. event.reviewed_head_sha .. "..feedface", { stdout = "", stderr = "", exit_code = 0 })
     mock_implement_codex(0, "")
     mock_git_status("")
     t.mock_command("rev-list --count", { stdout = "1\n", stderr = "", exit_code = 0 })

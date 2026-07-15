@@ -238,6 +238,19 @@ function M.make(core)
       .. tostring(check_result.exit_code) .. " stdout=" .. stdout .. " stderr=" .. stderr)
   end
 
+  local function assert_staged_diff_clean(worktree)
+    local check_result = git("github-devloop").diff_check(worktree, true, 30)
+    if check_result.exit_code == 0 then
+      return
+    end
+    local stdout = tostring(check_result.stdout or ""):gsub("\r", "\\r"):gsub("\n", "\\n")
+    local stderr = tostring(check_result.stderr or ""):gsub("\r", "\\r"):gsub("\n", "\\n")
+    error("github-devloop: staged-diff-check-failed: git diff --cached --check failed stdout="
+      .. (stdout ~= "" and stdout or "<empty>")
+      .. " stderr="
+      .. (stderr ~= "" and stderr or "<empty>"))
+  end
+
   local function bounded_fix_summary(value)
     local text = tostring(value or ""):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
     if #text > 600 then
@@ -254,6 +267,7 @@ function M.make(core)
     merge_speculative_predecessors_for_fix = merge_speculative_predecessors_for_fix,
     assert_no_unmerged_paths = assert_no_unmerged_paths,
     assert_candidate_diff_clean = assert_candidate_diff_clean,
+    assert_staged_diff_clean = assert_staged_diff_clean,
     bounded_fix_summary = bounded_fix_summary,
   }
 end
