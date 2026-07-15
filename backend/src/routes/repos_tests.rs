@@ -15,6 +15,7 @@ fn tok() -> SecretString {
 
 fn repo_json(owner: &str, kind: &str, name: &str, private: bool, admin: bool) -> serde_json::Value {
     serde_json::json!({
+        "id": 1000 + name.len() as i64,
         "name": name,
         "owner": { "login": owner, "type": kind },
         "private": private,
@@ -61,7 +62,7 @@ async fn user_all_repos_defaults_admin_closed_when_permissions_absent() {
     Mock::given(method("GET"))
         .and(path("/user/repos"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-            { "name": "bare", "owner": { "login": "x", "type": "User" }, "private": false }
+            { "id": 5, "name": "bare", "owner": { "login": "x", "type": "User" }, "private": false }
         ])))
         .mount(&server)
         .await;
@@ -164,6 +165,7 @@ async fn create_repo_personal_posts_user_repos_and_maps_the_created_repo() {
             "name": "fresh", "private": true, "description": "hello"
         })))
         .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+            "id": 4242,
             "name": "fresh",
             "owner": { "login": "shining", "type": "User" },
             "private": true,
@@ -191,6 +193,7 @@ async fn create_repo_org_posts_to_the_org_endpoint() {
     Mock::given(method("POST"))
         .and(path("/orgs/acme/repos"))
         .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+            "id": 4343,
             "name": "site",
             "owner": { "login": "acme", "type": "Organization" },
             "private": false
@@ -254,4 +257,90 @@ async fn create_repo_422_passes_githubs_message_through() {
     let msg = format!("{err}");
     assert!(msg.contains("name already exists"), "{msg}");
     assert!(msg.starts_with("invalid request"), "maps to 400: {msg}");
+}
+
+#[tokio::test]
+async fn remove_installation_repo_deletes_by_ids() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/user/installations/42/repositories/777"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let gh = DashboardGithub::new(&server.uri()).unwrap();
+    gh.remove_installation_repo(&tok(), 42, 777)
+        .await
+        .expect("removed");
+}
+
+#[tokio::test]
+async fn delete_installation_uses_the_app_jwt_route() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/app/installations/146704012"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let gh = DashboardGithub::new(&server.uri()).unwrap();
+    gh.delete_installation(&tok(), 146704012)
+        .await
+        .expect("uninstalled");
+}
+
+#[tokio::test]
+async fn delete_helpers_carry_githubs_message_on_404() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/app/installations/1"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+            "message": "Not Found"
+        })))
+        .mount(&server)
+        .await;
+
+    let gh = DashboardGithub::new(&server.uri()).unwrap();
+    let err = gh
+        .delete_installation(&tok(), 1)
+        .await
+        .expect_err("404 must error");
+    assert!(format!("{err}").contains("delete_installation"), "{err}");
+}
+
+#[tokio::test]
+async fn repo_id_reads_the_repo_object() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/shining/notes"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 777, "name": "notes", "owner": { "login": "shining", "type": "User" }
+        })))
+        .mount(&server)
+        .await;
+
+    let gh = DashboardGithub::new(&server.uri()).unwrap();
+    assert_eq!(
+        gh.repo_id(&tok(), "shining", "notes").await.expect("ok"),
+        777
+    );
+}
+
+#[tokio::test]
+async fn user_installations_carry_the_repository_selection() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/user/installations"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 1,
+            "installations": [{ "id": 9, "account": { "login": "acme" }, "repository_selection": "selected" }]
+        })))
+        .mount(&server)
+        .await;
+
+    let gh = DashboardGithub::new(&server.uri()).unwrap();
+    let insts = gh.user_installations(&tok()).await.expect("ok");
+    assert_eq!(insts[0].repository_selection, "selected");
 }
