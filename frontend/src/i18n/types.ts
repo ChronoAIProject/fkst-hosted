@@ -132,6 +132,7 @@ export interface SiteContent {
       connectHint: string;
       /** Group-header link to the installation's GitHub settings page. */
       manage: string;
+      manageRepoHint: string;
       /** Group-header danger action for a connected account. */
       uninstall: string;
       /** Uninstall confirm dialog title; `{owner}` placeholder. */
@@ -145,19 +146,12 @@ export interface SiteContent {
       /** Generic uninstall failure (no server message available). */
       uninstallFailed: string;
       /** Per-repo action removing it from a selected-mode installation. */
-      remove: string;
       /** Remove confirm dialog title; `{repo}` placeholder. */
-      removeConfirmTitle: string;
       /** Remove confirm dialog body; `{repo}` placeholder. */
-      removeConfirmBody: string;
       /** Remove confirm dialog: explicit confirm button. */
-      removeConfirm: string;
       /** Remove confirm button while the DELETE is in flight. */
-      removePending: string;
       /** Generic remove failure (no server message available). */
-      removeFailed: string;
       /** Title hint on Installed rows of an all-repositories installation. */
-      allModeHint: string;
     };
   };
   intro: {

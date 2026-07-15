@@ -288,47 +288,6 @@ async fn uninstall_account(
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
-/// `DELETE /api/v1/installations/{owner}/repositories/{repo}` — remove one repo
-/// from a SELECTED-mode installation (user token; 409 for all-repositories).
-#[utoipa::path(
-    delete,
-    path = "/installations/{owner}/repositories/{repo}",
-    tag = "repos",
-    operation_id = "uninstall_repo",
-    params(
-        ("owner" = String, Path, description = "Account (user or org) login"),
-        ("repo" = String, Path, description = "Repository name"),
-    ),
-    responses(
-        (status = 204, description = "Repository removed from the installation"),
-        (status = 401, description = "Missing or invalid GitHub token", body = ErrorEnvelope),
-        (status = 403, description = "Not allowlisted", body = ErrorEnvelope),
-        (status = 404, description = "No installation / unknown repository", body = ErrorEnvelope),
-        (status = 409, description = "Installation covers all repositories (manage on GitHub)", body = ErrorEnvelope),
-        (status = 503, description = "GitHub API unreachable", body = ErrorEnvelope),
-    )
-)]
-async fn uninstall_repo(
-    State(state): State<AppState>,
-    _user: GithubUser,
-    headers: HeaderMap,
-    Path((owner, repo)): Path<(String, String)>,
-) -> Result<axum::http::StatusCode, AppError> {
-    let token = bearer_token(&headers)?;
-    let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
-    let inst = find_installation(&gh, &token, &owner).await?;
-    if inst.repository_selection == "all" {
-        return Err(AppError::Conflict(
-            "the installation covers all repositories; change the repo selection on GitHub (Manage)"
-                .to_string(),
-        ));
-    }
-    let repo_id = gh.repo_id(&token, &owner, &repo).await?;
-    gh.remove_installation_repo(&token, inst.id, repo_id)
-        .await?;
-    Ok(axum::http::StatusCode::NO_CONTENT)
-}
-
 /// The repos router (nested under `/api/v1`). GitHub-token authenticated via
 /// the `GithubUser` extractor (like the dashboard), so no documented security
 /// scheme.
@@ -336,7 +295,6 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(list_repos, create_repo))
         .routes(routes!(uninstall_account))
-        .routes(routes!(uninstall_repo))
 }
 
 #[cfg(test)]

@@ -260,22 +260,6 @@ async fn create_repo_422_passes_githubs_message_through() {
 }
 
 #[tokio::test]
-async fn remove_installation_repo_deletes_by_ids() {
-    let server = MockServer::start().await;
-    Mock::given(method("DELETE"))
-        .and(path("/user/installations/42/repositories/777"))
-        .respond_with(ResponseTemplate::new(204))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let gh = DashboardGithub::new(&server.uri()).unwrap();
-    gh.remove_installation_repo(&tok(), 42, 777)
-        .await
-        .expect("removed");
-}
-
-#[tokio::test]
 async fn delete_installation_uses_the_app_jwt_route() {
     let server = MockServer::start().await;
     Mock::given(method("DELETE"))
@@ -308,24 +292,6 @@ async fn delete_helpers_carry_githubs_message_on_404() {
         .await
         .expect_err("404 must error");
     assert!(format!("{err}").contains("delete_installation"), "{err}");
-}
-
-#[tokio::test]
-async fn repo_id_reads_the_repo_object() {
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/repos/shining/notes"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "id": 777, "name": "notes", "owner": { "login": "shining", "type": "User" }
-        })))
-        .mount(&server)
-        .await;
-
-    let gh = DashboardGithub::new(&server.uri()).unwrap();
-    assert_eq!(
-        gh.repo_id(&tok(), "shining", "notes").await.expect("ok"),
-        777
-    );
 }
 
 #[tokio::test]

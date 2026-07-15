@@ -223,16 +223,17 @@ function RepoRow({
   appSlug,
   rc,
   highlight = false,
-  selection = null,
-  onRemove,
+  installed_via_installation = false,
 }: {
   repo: UserRepo;
   appSlug: string | null;
   rc: ReposContent;
   highlight?: boolean;
-  /** repository_selection of the account's installation, if any. */
-  selection?: InstallationView['repository_selection'] | null;
-  onRemove?: () => void;
+  /** True when the account has an installation — adding/removing this repo is
+   * done on that installation's GitHub settings page (the group's Manage link),
+   * since GitHub allows per-repo selection changes only there, not via our
+   * App user-to-server token. Drives the explanatory tooltip. */
+  installed_via_installation?: boolean;
 }) {
   return (
     <div
@@ -254,21 +255,10 @@ function RepoRow({
       {repo.org && <Chip tone="amber">{rc.org}</Chip>}
       <span className="flex-1" aria-hidden="true" />
       {repo.installed ? (
-        <span className="flex items-center gap-2.5 flex-none">
-          <span
-            className="font-mono text-[11px] text-green"
-            title={selection === 'all' ? rc.allModeHint : undefined}
-          >{`✓ ${rc.installed}`}</span>
-          {selection === 'selected' && onRemove && (
-            <button
-              type="button"
-              onClick={onRemove}
-              className="font-ui font-semibold text-[11px] text-dim hover:text-red transition-colors cursor-pointer"
-            >
-              {rc.remove}
-            </button>
-          )}
-        </span>
+        <span
+          className="font-mono text-[11px] text-green flex-none"
+          title={installed_via_installation ? rc.manageRepoHint : undefined}
+        >{`✓ ${rc.installed}`}</span>
       ) : (
         appSlug != null && (
           <a
@@ -611,9 +601,7 @@ function ConfirmDialog({
 }
 
 /** Pending danger action driving the shared ConfirmDialog. */
-type ConfirmTarget =
-  | { kind: 'uninstall'; owner: string }
-  | { kind: 'remove'; owner: string; name: string };
+type ConfirmTarget = { kind: 'uninstall'; owner: string };
 
 /** Exact GitHub settings page for an installation on this account. */
 function manageUrl(owner: string, personal: boolean, installationId: number): string {
@@ -821,17 +809,7 @@ function ReposSection() {
                                   appSlug={data.app_slug}
                                   rc={rc}
                                   highlight={isNew}
-                                  selection={inst?.repository_selection ?? null}
-                                  onRemove={
-                                    inst?.repository_selection === 'selected'
-                                      ? () =>
-                                          setConfirm({
-                                            kind: 'remove',
-                                            owner: repo.owner,
-                                            name: repo.name,
-                                          })
-                                      : undefined
-                                  }
+                                  installed_via_installation={inst != null}
                                 />
                                 {isNew && !repo.installed && data.app_slug != null && (
                                   <div className="mb-2 flex items-center gap-3 flex-wrap border rounded-card px-3 py-2 text-[12.5px] text-dim border-[color-mix(in_oklab,var(--amber)_35%,var(--line))] bg-[color-mix(in_oklab,var(--amber)_8%,transparent)]">
@@ -871,32 +849,19 @@ function ReposSection() {
         />
       )}
 
-      {confirm != null &&
-        (confirm.kind === 'uninstall' ? (
-          <ConfirmDialog
-            title={rc.uninstallConfirmTitle.replace('{owner}', confirm.owner)}
-            body={rc.uninstallConfirmBody.replace('{owner}', confirm.owner)}
-            confirmLabel={rc.uninstallConfirm}
-            pendingLabel={rc.uninstallPending}
-            cancelLabel={rc.cancel}
-            path={`/api/v1/installations/${encodeURIComponent(confirm.owner)}`}
-            fallbackError={rc.uninstallFailed}
-            onClose={onConfirmClose}
-            onDone={onConfirmDone}
-          />
-        ) : (
-          <ConfirmDialog
-            title={rc.removeConfirmTitle.replace('{repo}', `${confirm.owner}/${confirm.name}`)}
-            body={rc.removeConfirmBody.replace('{repo}', `${confirm.owner}/${confirm.name}`)}
-            confirmLabel={rc.removeConfirm}
-            pendingLabel={rc.removePending}
-            cancelLabel={rc.cancel}
-            path={`/api/v1/installations/${encodeURIComponent(confirm.owner)}/repositories/${encodeURIComponent(confirm.name)}`}
-            fallbackError={rc.removeFailed}
-            onClose={onConfirmClose}
-            onDone={onConfirmDone}
-          />
-        ))}
+      {confirm != null && (
+        <ConfirmDialog
+          title={rc.uninstallConfirmTitle.replace('{owner}', confirm.owner)}
+          body={rc.uninstallConfirmBody.replace('{owner}', confirm.owner)}
+          confirmLabel={rc.uninstallConfirm}
+          pendingLabel={rc.uninstallPending}
+          cancelLabel={rc.cancel}
+          path={`/api/v1/installations/${encodeURIComponent(confirm.owner)}`}
+          fallbackError={rc.uninstallFailed}
+          onClose={onConfirmClose}
+          onDone={onConfirmDone}
+        />
+      )}
     </section>
   );
 }

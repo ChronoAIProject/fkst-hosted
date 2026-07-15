@@ -524,41 +524,15 @@ describe('Dashboard — Repositories section', () => {
     expect(repoGetCalls(fetchMock)).toBe(1); // no re-fetch on failure
   });
 
-  it('removes a repo from a selected-mode installation after confirmation', async () => {
-    const user = userEvent.setup();
-    const initial: ReposBody = {
-      app_slug: 'chronoai-fkst',
-      viewer: { login: 'shining' },
-      orgs: ['acme'],
-      installations: [{ account: 'acme', installation_id: 22, repository_selection: 'selected' }],
-      repos: [repo({ owner: 'acme', name: 'widgets', org: true, installed: true })],
-    };
-    const fetchMock = stubDeleteApi({
-      initial,
-      after: { ...initial, repos: [repo({ owner: 'acme', name: 'widgets', org: true })] },
-      del: { status: 204 },
-    });
-    renderDashboard();
-
-    await user.click(await screen.findByRole('button', { name: 'Remove' }));
-    const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByText('Remove acme/widgets?')).toBeInTheDocument();
-    await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
-
-    await waitFor(() => expect(deleteCall(fetchMock)).toBeDefined());
-    expect(String(deleteCall(fetchMock)![0])).toMatch(
-      /\/api\/v1\/installations\/acme\/repositories\/widgets$/
-    );
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    await waitFor(() => expect(repoGetCalls(fetchMock)).toBe(2));
-  });
-
-  it('shows no Remove on all-mode installed rows, only the managed-on-GitHub hint', async () => {
+  it('shows no in-app per-repo Remove — installed rows carry the manage-on-GitHub hint', async () => {
+    // GitHub only allows per-repo selection changes on the installation settings
+    // page (not via our App user-to-server token), so an installed row has no
+    // Remove action; adding/removing a repo goes through the group's Manage link.
     stubApi({
       app_slug: 'chronoai-fkst',
       viewer: { login: 'shining' },
       orgs: [],
-      installations: [{ account: 'shining', installation_id: 11, repository_selection: 'all' }],
+      installations: [{ account: 'shining', installation_id: 11, repository_selection: 'selected' }],
       repos: [repo({ owner: 'shining', name: 'lab', installed: true })],
     });
     renderDashboard();
@@ -566,8 +540,13 @@ describe('Dashboard — Repositories section', () => {
     const installedMark = await screen.findByText('✓ Installed');
     expect(installedMark).toHaveAttribute(
       'title',
-      'This installation covers all repositories — repository selection is managed on GitHub via Manage.'
+      'Manage this repository on GitHub (add or remove it there).'
     );
     expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
+    // The account-level Manage link is the single entry point for repo selection.
+    expect(screen.getByRole('link', { name: 'Manage' })).toHaveAttribute(
+      'href',
+      'https://github.com/settings/installations/11'
+    );
   });
 });
