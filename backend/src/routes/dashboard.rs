@@ -493,39 +493,6 @@ impl DashboardGithub {
         })
     }
 
-    /// `GET /repos/{owner}/{repo}` (user token) — the repo's immutable id (the
-    /// removal endpoint keys off ids, not names).
-    pub(crate) async fn repo_id(
-        &self,
-        user_token: &SecretString,
-        owner: &str,
-        name: &str,
-    ) -> Result<i64, AppError> {
-        #[derive(Deserialize)]
-        struct RawId {
-            id: i64,
-        }
-        let url = format!("{}/repos/{owner}/{name}", self.api_base);
-        let (raw, _): (RawId, _) = self.get_page(&url, user_token, None, "repo_id").await?;
-        Ok(raw.id)
-    }
-
-    /// `DELETE /user/installations/{iid}/repositories/{rid}` (user token) —
-    /// remove ONE repo from a selected-mode installation (issue #509).
-    pub(crate) async fn remove_installation_repo(
-        &self,
-        user_token: &SecretString,
-        installation_id: i64,
-        repository_id: i64,
-    ) -> Result<(), AppError> {
-        let url = format!(
-            "{}/user/installations/{installation_id}/repositories/{repository_id}",
-            self.api_base
-        );
-        self.delete_no_content(&url, user_token, "remove_installation_repo")
-            .await
-    }
-
     /// `DELETE /app/installations/{id}` (APP JWT — the app uninstalls itself
     /// from the account; issue #509). The only non-user-token call here.
     pub(crate) async fn delete_installation(

@@ -94,6 +94,7 @@ export const zh: SiteContent = {
       connect: '连接',
       connectHint: '连接后即可创建仓库并运行 fkst 会话。',
       manage: '管理',
+      manageRepoHint: '在 GitHub 上管理此仓库的访问（在那里添加或移除）。',
       uninstall: '卸载',
       uninstallConfirmTitle: '从 {owner} 卸载？',
       uninstallConfirmBody:
@@ -101,13 +102,6 @@ export const zh: SiteContent = {
       uninstallConfirm: '卸载',
       uninstallPending: '正在卸载…',
       uninstallFailed: '无法卸载 App，请重试。',
-      remove: '移除',
-      removeConfirmTitle: '移除 {repo}？',
-      removeConfirmBody: '这将把 {repo} 从 App 安装中移除。该仓库上的 fkst 会话将立即停止工作。',
-      removeConfirm: '移除',
-      removePending: '正在移除…',
-      removeFailed: '无法从安装中移除该仓库，请重试。',
-      allModeHint: '此安装覆盖所有仓库 —— 仓库选择请通过“管理”在 GitHub 上调整。',
     },
   },
   intro: {
