@@ -1,5 +1,4 @@
 writer:github-devloop:implement-enter
-writer:github-devloop:awaiting-pr-exit
 sink-catalog:github-devloop
 sink-catalog:github-devloop-pr
 row-replay:github-devloop:observe-issue
