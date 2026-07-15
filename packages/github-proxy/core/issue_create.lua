@@ -81,6 +81,36 @@ local function issue_author_login(issue)
   return shared.strip_bot_login_suffix(raw)
 end
 
+local function is_fork_issue_create(payload)
+  return payload.external_effect_saga == "fork-and-block"
+    and payload.external_effect_step == "create-fork"
+end
+
+local function authorize_fork_issue_create(payload)
+  if not is_fork_issue_create(payload) then
+    return true
+  end
+  local github = shared.github()
+  local source_issue = github.read_issue(payload.source_ref, {
+    consumer = "github_issue_create_authorization",
+    force_fresh = true,
+    timeout = 30,
+  })
+  local author_login = issue_author_login(source_issue)
+  if github.is_authorized_author(author_login) then
+    return true
+  end
+  local outcome = (author_login == nil or author_login == "")
+    and "skip-fork-author-unknown"
+    or "skip-non-whitelisted-author"
+  shared.log_line("info", "github_issue_create", "SKIP", {
+    "outcome=" .. outcome,
+    "source_ref=" .. tostring(payload.source_ref.kind) .. ":" .. tostring(payload.source_ref.ref),
+    "dedup_key=" .. tostring(payload.dedup_key),
+  })
+  return false
+end
+
 function M.issue_create_marker(dedup_key)
   if not is_bounded_marker_value(dedup_key, max_dedup_len) then
     error("github-proxy: issue-create-dedup-key-invalid: invalid issue-create dedup_key")
@@ -449,6 +479,9 @@ function M.write_issue_create_request(payload)
 
   local bot_login = M.assert_trusted_bot_configured()
   with_lock(M.issue_create_lock_key(payload.dedup_key), function()
+    if not authorize_fork_issue_create(payload) then
+      return
+    end
     local parent = normalize_parent_comment_target(payload.parent_comment_target)
     if parent ~= nil then
       local parent_view = M.gh_exec(M.gh_issue_create_parent_view_cmd(parent), 30, "GitHub parent comment view")

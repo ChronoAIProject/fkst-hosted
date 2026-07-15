@@ -19,6 +19,12 @@ end
 local shared_helpers = {
   strip_bot_login_suffix = M.strip_bot_login_suffix,
   is_positive_integer = M.is_positive_integer,
+  github = function()
+    return M.github()
+  end,
+  log_line = function(...)
+    return M.log_line(...)
+  end,
 }
 
 -- Narrowest-surface proof for these shared helpers:
