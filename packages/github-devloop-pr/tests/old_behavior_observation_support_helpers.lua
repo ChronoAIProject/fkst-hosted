@@ -178,7 +178,11 @@ function M.observe_department(opts)
     handoff_direct_lookup_count = 0,
     liveness_read_count = 0,
   }
-  local original_cyclic = devloop_state.cyclic_transition_status
+  local transition_kind = opts.transition_kind or "cyclic_transition_status"
+  local original_transition = devloop_state[transition_kind]
+  if type(original_transition) ~= "function" then
+    error("OLD observation transition resolver is not callable: " .. tostring(transition_kind))
+  end
   local original_decision = devloop_logging.log_cas_decision
   local original_apply = devloop_logging.log_apply
   local original_raise = devloop_logging.log_raise
@@ -197,8 +201,8 @@ function M.observe_department(opts)
     end
     return { running = running or M.json_array() }
   end
-  devloop_state.cyclic_transition_status = function(current, from_states, to_state, incoming_version, target_version)
-    local outcome = original_cyclic(current, from_states, to_state, incoming_version, target_version)
+  devloop_state[transition_kind] = function(current, from_states, to_state, incoming_version, target_version)
+    local outcome = original_transition(current, from_states, to_state, incoming_version, target_version)
     table.insert(captured.probes, {
       current = M.copy_value(current),
       from_states = M.copy_value(from_states),
@@ -263,7 +267,7 @@ function M.observe_department(opts)
   devloop_logging.log_raise = original_raise
   devloop_logging.log_apply = original_apply
   devloop_logging.log_cas_decision = original_decision
-  devloop_state.cyclic_transition_status = original_cyclic
+  devloop_state[transition_kind] = original_transition
   if not ok then
     error(result, 0)
   end
@@ -287,13 +291,28 @@ function M.build_record(opts)
   local apply = captured.applies[1]
   local status, reason_code, cas_outcome = opts.outcome_status(probe, decision, apply, captured)
   local emitted_effects, observable_writes = opts.effects_from_raises(result.raises)
-  local observation_id = table.concat({
-    opts.observation_prefix,
-    tostring(probe.to_state),
+  local observation_id_parts = { opts.observation_prefix }
+  if opts.observation_variant ~= nil then
+    table.insert(observation_id_parts, tostring(opts.observation_variant))
+  end
+  for _, value in ipairs({
+    probe.to_state,
     status,
     reason_code,
-    apply and tostring(apply.to_state) or "none",
-  }, "/")
+    apply and apply.to_state or "none",
+  }) do
+    table.insert(observation_id_parts, tostring(value))
+  end
+  local observation_id = table.concat(observation_id_parts, "/")
+  local source_state = probe.from_states[1]
+  if type(opts.source_state) == "function" then
+    source_state = opts.source_state(probe, event)
+  end
+  local source_boundary = M.JSON_NULL
+  if type(opts.source_boundary) == "function" then
+    source_boundary = M.nullable(opts.source_boundary(probe, event))
+  end
+  local transition_kind = opts.transition_kind or "cyclic_transition_status"
 
   return {
     schema = "restart-old-behavior-observation.v2",
@@ -302,9 +321,9 @@ function M.build_record(opts)
     site = M.copy_value(opts.site),
     boundary = "writer",
     typed_intent = {
-      kind = "cyclic_transition_status",
-      source_state = probe.from_states[1],
-      source_boundary = M.JSON_NULL,
+      kind = transition_kind,
+      source_state = M.nullable(source_state),
+      source_boundary = source_boundary,
       target = probe.to_state,
       cause_schema_id = event.payload.schema,
       generation_epoch = {
@@ -312,7 +331,7 @@ function M.build_record(opts)
         incoming_version = probe.incoming_version,
         target_version = M.nullable(probe.target_version),
       },
-      lineage = opts.lineage(event.payload),
+      lineage = opts.lineage(event.payload, probe, decision),
     },
     old_inputs = {
       current_fact = {
@@ -337,7 +356,7 @@ function M.build_record(opts)
     evidence_refs = M.json_array({
       {
         kind = "runtime-cas-probe",
-        ref = "devloop.state.cyclic_transition_status:" .. tostring(probe.outcome),
+        ref = "devloop.state." .. transition_kind .. ":" .. tostring(probe.outcome),
       },
       {
         kind = "runtime-event-source",
