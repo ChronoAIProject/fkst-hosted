@@ -283,6 +283,17 @@ local function remote_ahead_count_argv(upstream, integration)
   }
 end
 
+local function log_subjects_between_remote_branch_argv(upstream, head_sha)
+  local safe_upstream = gitref.require_safe_branch("upstream branch", upstream, "forge.git")
+  local safe_head = gitref.require_safe_sha("history head", head_sha, "forge.git")
+  return {
+    "git",
+    "log",
+    "--format=%H%x09%s",
+    "refs/remotes/origin/" .. safe_upstream .. ".." .. safe_head,
+  }
+end
+
 local function branch_ahead_count_argv(base, branch)
   return { "git", "rev-list", "--count", tostring(base) .. "..refs/heads/" .. tostring(branch) }
 end
@@ -591,6 +602,15 @@ function M.install(handle)
 
   function handle.remote_ahead_count(upstream, integration, timeout)
     return exec_result(handle, remote_ahead_count_argv(upstream, integration), timeout, "git rev-list remote ahead count")
+  end
+
+  function handle.log_subjects_between_remote_branch(upstream, head_sha, timeout)
+    return exec_result(
+      handle,
+      log_subjects_between_remote_branch_argv(upstream, head_sha),
+      timeout,
+      "git log release-notes subjects"
+    )
   end
 
   function handle.branch_ahead_count(base, branch, timeout)
