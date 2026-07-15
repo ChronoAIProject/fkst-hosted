@@ -58,7 +58,15 @@ interface UserRepo {
 }
 interface UserReposResponse {
   app_slug: string | null;
+  viewer: { login: string };
+  orgs: string[];
   repos: UserRepo[];
+}
+interface CreateRepoBody {
+  owner: string | null;
+  name: string;
+  private: boolean;
+  description?: string;
 }
 
 type DashboardContent = ReturnType<typeof useContent>['dashboard'];
@@ -203,9 +211,25 @@ function SessionCard({ s, d }: { s: SessionGroup; d: DashboardContent }) {
   );
 }
 
-function RepoRow({ repo, appSlug, rc }: { repo: UserRepo; appSlug: string | null; rc: ReposContent }) {
+function RepoRow({
+  repo,
+  appSlug,
+  rc,
+  highlight = false,
+}: {
+  repo: UserRepo;
+  appSlug: string | null;
+  rc: ReposContent;
+  highlight?: boolean;
+}) {
   return (
-    <div className="flex items-center gap-2 py-2 text-[12.5px] min-w-0">
+    <div
+      className={cn(
+        'flex items-center gap-2 py-2 px-2 -mx-2 rounded-control text-[12.5px] min-w-0',
+        'transition-colors hover:bg-[color-mix(in_oklab,var(--raise-2)_80%,transparent)]',
+        highlight && 'anim-repo-pulse'
+      )}
+    >
       <a
         href={`https://github.com/${repo.owner}/${repo.name}`}
         target="_blank"
@@ -236,12 +260,415 @@ function RepoRow({ repo, appSlug, rc }: { repo: UserRepo; appSlug: string | null
   );
 }
 
+// ---- Repositories section (grouped + searchable + create flow) --------------
+
+interface RepoGroup {
+  owner: string;
+  personal: boolean;
+  repos: UserRepo[];
+}
+
+/** Group repos by owner: the viewer's personal group first (always present),
+ *  then org groups alphabetically. Orgs from `orgs` with zero repos are kept
+ *  as empty groups so they surface as creation targets. */
+function buildGroups(viewerLogin: string, orgs: string[], repos: UserRepo[]): RepoGroup[] {
+  const byOwner = new Map<string, UserRepo[]>();
+  for (const repo of repos) {
+    const list = byOwner.get(repo.owner);
+    if (list) list.push(repo);
+    else byOwner.set(repo.owner, [repo]);
+  }
+  const orgOwners = new Set<string>(orgs);
+  for (const owner of byOwner.keys()) {
+    if (owner !== viewerLogin) orgOwners.add(owner);
+  }
+  const sorted = [...orgOwners].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  return [
+    { owner: viewerLogin, personal: true, repos: byOwner.get(viewerLogin) ?? [] },
+    ...sorted.map((owner) => ({ owner, personal: false, repos: byOwner.get(owner) ?? [] })),
+  ];
+}
+
+/** Client-side mirror of GitHub's allowed repository-name characters. */
+const REPO_NAME_RE = /^[A-Za-z0-9._-]+$/;
+
+const FIELD_LABEL = 'font-mono text-eyebrow text-ghost uppercase';
+const FIELD_INPUT =
+  'w-full bg-bg border border-line rounded-control px-3 py-2 font-ui text-[13px] text-fg placeholder:text-ghost transition-colors focus:border-line-2';
+
+function CreateRepoModal({
+  viewerLogin,
+  orgs,
+  rc,
+  onClose,
+  onCreated,
+}: {
+  viewerLogin: string;
+  orgs: string[];
+  rc: ReposContent;
+  onClose: () => void;
+  onCreated: (repo: UserRepo) => void;
+}) {
+  const { apiFetch } = useAuth();
+  const [owner, setOwner] = useState(viewerLogin);
+  const [name, setName] = useState('');
+  const [priv, setPriv] = useState(true);
+  const [description, setDescription] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  // Close on Escape (the Cancel button is the pointer path).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const nameValid = REPO_NAME_RE.test(name);
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!nameValid || creating) return;
+    setCreating(true);
+    setServerError(null);
+    try {
+      const body: CreateRepoBody = {
+        owner: owner === viewerLogin ? null : owner,
+        name,
+        private: priv,
+      };
+      const desc = description.trim();
+      if (desc) body.description = desc;
+      const res = await apiFetch('/api/v1/repos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        onCreated((await res.json()) as UserRepo);
+        return;
+      }
+      // Error envelope: {"error", "message"} — surface `message` verbatim.
+      let message = rc.createFailed;
+      try {
+        const envelope = (await res.json()) as { message?: unknown };
+        if (typeof envelope?.message === 'string' && envelope.message) message = envelope.message;
+      } catch {
+        /* non-JSON error body — keep the generic message */
+      }
+      setServerError(message);
+    } catch {
+      setServerError(rc.createFailed);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="anim-overlay-in fixed inset-0 z-50 flex items-center justify-center p-4 bg-[color-mix(in_oklab,var(--bg)_72%,transparent)]">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-repo-title"
+        className="anim-modal-in w-full max-w-[460px] border border-line rounded-modal bg-raise shadow-modal-seat p-6 max-[600px]:p-5"
+      >
+        <form onSubmit={onSubmit} className="flex flex-col gap-4">
+          <h3 id="create-repo-title" className="font-display font-semibold text-modal-title text-fg">
+            {rc.createTitle}
+          </h3>
+
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="create-repo-owner" className={FIELD_LABEL}>
+              {rc.ownerLabel}
+            </label>
+            <select
+              id="create-repo-owner"
+              value={owner}
+              onChange={(e) => setOwner(e.target.value)}
+              className={cn(FIELD_INPUT, 'cursor-pointer')}
+            >
+              <option value={viewerLogin}>{rc.ownerPersonal.replace('{login}', viewerLogin)}</option>
+              {orgs.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="create-repo-name" className={FIELD_LABEL}>
+              {rc.nameLabel}
+            </label>
+            <input
+              id="create-repo-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              spellCheck={false}
+              autoComplete="off"
+              className={cn(FIELD_INPUT, 'font-mono', name !== '' && !nameValid && 'border-red')}
+            />
+            <p className={cn('font-mono text-[11px]', name !== '' && !nameValid ? 'text-red' : 'text-ghost')}>
+              {rc.nameHint}
+            </p>
+          </div>
+
+          <label className="flex items-center gap-2 text-[13px] text-fg cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={priv}
+              onChange={(e) => setPriv(e.target.checked)}
+              className="w-3.5 h-3.5 accent-amber"
+            />
+            {rc.privateLabel}
+          </label>
+
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="create-repo-description" className={FIELD_LABEL}>
+              {rc.descriptionLabel}
+            </label>
+            <input
+              id="create-repo-description"
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              autoComplete="off"
+              className={FIELD_INPUT}
+            />
+          </div>
+
+          {serverError && (
+            <p className="border border-line border-l-2 border-l-red rounded-card bg-[color-mix(in_oklab,var(--raise-2)_70%,transparent)] px-3 py-2 text-[12.5px] text-dim">
+              {serverError}
+            </p>
+          )}
+
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="font-ui font-semibold text-[12.5px] border border-line rounded-control px-4 py-2 text-dim hover:text-fg transition-colors cursor-pointer"
+            >
+              {rc.cancel}
+            </button>
+            <button
+              type="submit"
+              disabled={!nameValid || creating}
+              className={cn(
+                'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-colors',
+                !nameValid || creating
+                  ? 'bg-amber/50 text-amber-ink/60 cursor-not-allowed'
+                  : 'bg-amber text-amber-ink hover:brightness-[1.06] cursor-pointer'
+              )}
+            >
+              {creating ? rc.creating : rc.submit}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function ReposSection() {
+  const rc = useContent().dashboard.repos;
+  const { apiFetch } = useAuth();
+
+  const [data, setData] = useState<UserReposResponse | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [tick, setTick] = useState(0);
+  const [search, setSearch] = useState('');
+  const [showCreate, setShowCreate] = useState(false);
+  // `owner/name` of the repo created via the modal — highlighted after re-fetch.
+  const [createdKey, setCreatedKey] = useState<string | null>(null);
+
+  // Load the user's repositories + App installation status on mount; Refresh
+  // (and a successful create) re-runs it by bumping `tick`.
+  useEffect(() => {
+    let active = true;
+    setLoadError(false);
+    apiFetch('/api/v1/repos')
+      .then((r) =>
+        r.ok ? (r.json() as Promise<UserReposResponse>) : Promise.reject(new Error(String(r.status)))
+      )
+      .then((j) => {
+        if (active) setData(j);
+      })
+      .catch(() => {
+        if (active) setLoadError(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [apiFetch, tick]);
+
+  const onCreated = useCallback((repo: UserRepo) => {
+    setShowCreate(false);
+    setCreatedKey(`${repo.owner}/${repo.name}`);
+    setSearch(''); // make sure the new repo is visible whatever was typed
+    setTick((t) => t + 1);
+  }, []);
+
+  const query = search.trim().toLowerCase();
+  const groups = data == null ? [] : buildGroups(data.viewer.login, data.orgs, data.repos);
+  // Under an active search, a group keeps only matching rows and collapses
+  // away entirely when nothing matches (empty creation-target groups too).
+  const visibleGroups = groups
+    .map((g) => ({
+      ...g,
+      shown: query
+        ? g.repos.filter((r) => `${r.owner}/${r.name}`.toLowerCase().includes(query))
+        : g.repos,
+    }))
+    .filter((g) => !query || g.shown.length > 0);
+  const hasAnyTarget = data != null && (data.repos.length > 0 || data.orgs.length > 0);
+
+  // Global row index driving the staggered entrance (capped delay).
+  let animIdx = 0;
+  const nextStagger = () =>
+    ({ '--stagger': `${Math.min(animIdx++ * 30, 240)}ms` }) as React.CSSProperties;
+
+  return (
+    <section className="border border-line rounded-panel bg-raise p-8 max-[600px]:p-5 flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <h2 className="font-display font-semibold text-[18px] text-fg">{rc.title}</h2>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowCreate(true)}
+            disabled={data == null}
+            className={cn(
+              'font-ui font-semibold text-[12px] rounded-control px-3 py-1.5 transition-colors',
+              data == null
+                ? 'bg-amber/50 text-amber-ink/60 cursor-not-allowed'
+                : 'bg-amber text-amber-ink hover:brightness-[1.06] cursor-pointer'
+            )}
+          >
+            {rc.newRepo}
+          </button>
+          <button
+            type="button"
+            onClick={() => setTick((t) => t + 1)}
+            className="font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim hover:text-fg transition-colors cursor-pointer"
+          >
+            {rc.refresh}
+          </button>
+        </div>
+      </div>
+
+      {loadError ? (
+        <div className="border border-line border-l-2 border-l-red rounded-card bg-[color-mix(in_oklab,var(--raise)_55%,transparent)] px-4 py-3 text-[13px] text-dim">
+          {rc.loadFailed}
+        </div>
+      ) : data == null ? (
+        <p className="font-mono text-[12px] text-ghost">{rc.loading}</p>
+      ) : (
+        <>
+          {data.app_slug == null && (
+            <p className="font-mono text-[12px] text-ghost">{rc.appNotConfigured}</p>
+          )}
+          {!hasAnyTarget ? (
+            <p className="font-mono text-[12.5px] text-ghost">{rc.empty}</p>
+          ) : (
+            <>
+              {data.repos.length > 0 && (
+                <input
+                  type="search"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder={rc.searchPlaceholder}
+                  aria-label={rc.searchPlaceholder}
+                  className={FIELD_INPUT}
+                />
+              )}
+              {query && visibleGroups.length === 0 ? (
+                <p className="font-mono text-[12.5px] text-ghost">{rc.searchEmpty}</p>
+              ) : (
+                <div className="flex flex-col gap-5">
+                  {visibleGroups.map((g) => (
+                    <section key={g.owner} className="flex flex-col gap-1">
+                      <div className="flex items-baseline gap-2.5 flex-wrap">
+                        <span className="font-mono text-eyebrow text-ghost uppercase">
+                          {g.personal ? rc.personalGroup : rc.orgGroup}
+                        </span>
+                        <h3 className="font-display font-semibold text-[14.5px] text-fg">
+                          {g.owner}
+                        </h3>
+                        <span className="flex-1" aria-hidden="true" />
+                        <span className="font-mono text-[11px] text-ghost">
+                          {rc.groupCounts
+                            .replace(
+                              '{installed}',
+                              String(g.repos.filter((r) => r.installed).length)
+                            )
+                            .replace('{total}', String(g.repos.length))}
+                        </span>
+                      </div>
+                      {g.repos.length === 0 ? (
+                        <p className="font-mono text-[12px] text-ghost italic py-1">
+                          {rc.groupEmpty}
+                        </p>
+                      ) : (
+                        <div className="flex flex-col divide-y divide-[color-mix(in_oklab,var(--line)_55%,transparent)]">
+                          {g.shown.map((repo) => {
+                            const key = `${repo.owner}/${repo.name}`;
+                            const isNew = key === createdKey;
+                            return (
+                              <div key={key} className="anim-row-in" style={nextStagger()}>
+                                <RepoRow
+                                  repo={repo}
+                                  appSlug={data.app_slug}
+                                  rc={rc}
+                                  highlight={isNew}
+                                />
+                                {isNew && !repo.installed && data.app_slug != null && (
+                                  <div className="mb-2 flex items-center gap-3 flex-wrap border rounded-card px-3 py-2 text-[12.5px] text-dim border-[color-mix(in_oklab,var(--amber)_35%,var(--line))] bg-[color-mix(in_oklab,var(--amber)_8%,transparent)]">
+                                    <span>{rc.createdNextStep}</span>
+                                    <a
+                                      href={`https://github.com/apps/${data.app_slug}/installations/new`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="font-ui font-semibold text-[11.5px] bg-amber text-amber-ink rounded-control px-3 py-1 transition-colors hover:brightness-[1.06] flex-none"
+                                    >
+                                      {rc.install}
+                                    </a>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </section>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </>
+      )}
+
+      {showCreate && data != null && (
+        <CreateRepoModal
+          viewerLogin={data.viewer.login}
+          orgs={data.orgs}
+          rc={rc}
+          onClose={() => setShowCreate(false)}
+          onCreated={onCreated}
+        />
+      )}
+    </section>
+  );
+}
+
 // ---- Page -------------------------------------------------------------------
 
 export function Dashboard() {
   const c = useContent();
   const d = c.dashboard;
-  const rc = d.repos;
   const { lang } = useLang();
   const { configured, isAuthenticated, error, signIn, apiFetch } = useAuth();
 
@@ -249,9 +676,6 @@ export function Dashboard() {
   const [pulling, setPulling] = useState(false);
   const [progress, setProgress] = useState<PullJob | null>(null);
   const [pullError, setPullError] = useState<string | null>(null);
-  const [reposData, setReposData] = useState<UserReposResponse | null>(null);
-  const [reposError, setReposError] = useState(false);
-  const [reposTick, setReposTick] = useState(0);
   const cancelled = useRef(false);
 
   useEffect(() => {
@@ -276,27 +700,6 @@ export function Dashboard() {
       active = false;
     };
   }, [isAuthenticated, configured, apiFetch]);
-
-  // Load the user's repositories + App installation status on mount; the
-  // section's Refresh button re-runs it by bumping `reposTick`.
-  useEffect(() => {
-    if (!isAuthenticated || !configured) return;
-    let active = true;
-    setReposError(false);
-    apiFetch('/api/v1/repos')
-      .then((r) =>
-        r.ok ? (r.json() as Promise<UserReposResponse>) : Promise.reject(new Error(String(r.status)))
-      )
-      .then((j) => {
-        if (active) setReposData(j);
-      })
-      .catch(() => {
-        if (active) setReposError(true);
-      });
-    return () => {
-      active = false;
-    };
-  }, [isAuthenticated, configured, apiFetch, reposTick]);
 
   useEffect(
     () => () => {
@@ -483,45 +886,7 @@ export function Dashboard() {
         </>
       )}
 
-      <section className="border border-line rounded-panel bg-raise p-8 max-[600px]:p-5 flex flex-col gap-4">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <h2 className="font-display font-semibold text-[18px] text-fg">{rc.title}</h2>
-          <button
-            type="button"
-            onClick={() => setReposTick((t) => t + 1)}
-            className="font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim hover:text-fg transition-colors cursor-pointer"
-          >
-            {rc.refresh}
-          </button>
-        </div>
-        {reposError ? (
-          <div className="border border-line border-l-2 border-l-red rounded-card bg-[color-mix(in_oklab,var(--raise)_55%,transparent)] px-4 py-3 text-[13px] text-dim">
-            {rc.loadFailed}
-          </div>
-        ) : reposData == null ? (
-          <p className="font-mono text-[12px] text-ghost">{rc.loading}</p>
-        ) : (
-          <>
-            {reposData.app_slug == null && (
-              <p className="font-mono text-[12px] text-ghost">{rc.appNotConfigured}</p>
-            )}
-            {reposData.repos.length === 0 ? (
-              <p className="font-mono text-[12.5px] text-ghost">{rc.empty}</p>
-            ) : (
-              <div className="flex flex-col divide-y divide-[color-mix(in_oklab,var(--line)_55%,transparent)]">
-                {reposData.repos.map((repo) => (
-                  <RepoRow
-                    key={`${repo.owner}/${repo.name}`}
-                    repo={repo}
-                    appSlug={reposData.app_slug}
-                    rc={rc}
-                  />
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </section>
+      <ReposSection />
     </div>
   );
 }

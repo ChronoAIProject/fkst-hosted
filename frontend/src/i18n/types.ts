@@ -97,6 +97,35 @@ export interface SiteContent {
       install: string;
       nonAdminHint: string;
       appNotConfigured: string;
+      /** Group label for the viewer's own account. */
+      personalGroup: string;
+      /** Group label for an organization account. */
+      orgGroup: string;
+      /** Per-group counts template; `{installed}` / `{total}` placeholders. */
+      groupCounts: string;
+      /** Body line for a group (org creation target) with no repositories. */
+      groupEmpty: string;
+      searchPlaceholder: string;
+      /** One-line empty state when a search matches nothing. */
+      searchEmpty: string;
+      /** "New repository" button in the section header. */
+      newRepo: string;
+      createTitle: string;
+      ownerLabel: string;
+      /** Personal option in the owner select; `{login}` placeholder. */
+      ownerPersonal: string;
+      nameLabel: string;
+      /** Hint under the name input (allowed characters). */
+      nameHint: string;
+      privateLabel: string;
+      descriptionLabel: string;
+      submit: string;
+      creating: string;
+      cancel: string;
+      /** Generic creation failure (no server message available). */
+      createFailed: string;
+      /** Callout under a freshly created repo pointing at the Install step. */
+      createdNextStep: string;
     };
   };
   intro: {
