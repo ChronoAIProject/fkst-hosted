@@ -3,6 +3,7 @@ local strings = require("contract.strings")
 local S = {}
 local forge_validators = require("devloop.forge_validators")
 local github_factory = require("devloop.github_factory")
+local github_view = require("forge.github_view")
 
 function S.install(M)
 local max_release_notes_len = 4000
@@ -42,6 +43,87 @@ end
 
 local function utf8(...)
   return string.char(...)
+end
+
+local function json_string_array(values)
+  local encoded = {}
+  for _, value in ipairs(values or {}) do
+    table.insert(encoded, github_view.json_value(value))
+  end
+  return "[" .. table.concat(encoded, ",") .. "]"
+end
+
+local function comments_json(comments)
+  local encoded = {}
+  for _, comment in ipairs(comments or {}) do
+    table.insert(encoded, "{"
+      .. '"author_login":' .. github_view.json_value(comment.author_login)
+      .. ',"body":' .. github_view.json_value(comment.body)
+      .. ',"created_at":' .. github_view.json_value(comment.created_at)
+      .. "}")
+  end
+  return "[" .. table.concat(encoded, ",") .. "]"
+end
+
+local function referenced_issue_json(issue)
+  return "{"
+    .. '"number":' .. github_view.json_value(issue.number)
+    .. ',"title":' .. github_view.json_value(issue.title)
+    .. ',"body":' .. github_view.json_value(issue.body)
+    .. ',"state":' .. github_view.json_value(issue.state)
+    .. ',"labels":' .. json_string_array(issue.labels)
+    .. ',"comments":' .. comments_json(issue.comments)
+    .. "}"
+end
+
+local function referenced_numbers(commit_history)
+  local numbers = {}
+  local seen = {}
+  for line in (tostring(commit_history or "") .. "\n"):gmatch("(.-)\n") do
+    local subject = line:match("^[^\t]*\t(.*)$") or line
+    for number in subject:gmatch("#(%d+)") do
+      local normalized = tonumber(number)
+      if normalized ~= nil and normalized >= 1 and seen[normalized] ~= true then
+        seen[normalized] = true
+        table.insert(numbers, normalized)
+      end
+    end
+  end
+  return numbers
+end
+
+local function prefetch_release_notes_source(args)
+  local git = args.git or M.git
+  local github = args.github or github_factory.production_handle()
+  if type(git) ~= "table" or type(git.log_subjects_between_remote_branch) ~= "function" then
+    error("github-devloop: release-notes-git-port-missing: release notes require a git adapter")
+  end
+  if type(github) ~= "table" or type(github.read_issue) ~= "function" then
+    error("github-devloop: release-notes-github-port-missing: release notes require a GitHub adapter")
+  end
+
+  local history = git.log_subjects_between_remote_branch(args.upstream_branch, args.head_sha, 60)
+  if type(history) ~= "table" or tonumber(history.exit_code) ~= 0 then
+    local stderr = type(history) == "table" and history.stderr or "missing git result"
+    error("github-devloop: release-notes-git-log-failed: failed to read release notes history: " .. tostring(stderr))
+  end
+
+  local issues = {}
+  for _, number in ipairs(referenced_numbers(history.stdout)) do
+    local issue = github.read_issue({
+      kind = "external",
+      ref = tostring(args.repo) .. "#issue/" .. tostring(number),
+    }, {
+      consumer = "github-devloop-integration.release_notes",
+      force_fresh = true,
+      timeout = 30,
+    })
+    table.insert(issues, referenced_issue_json(issue))
+  end
+  return {
+    commit_history = tostring(history.stdout or ""):gsub("%s+$", ""),
+    referenced_github_context = "[" .. table.concat(issues, ",") .. "]",
+  }
 end
 
 local function zh_summary_label()
@@ -93,14 +175,19 @@ function M.normalize_release_notes(stdout)
   return body .. suffix
 end
 
-function M.build_release_notes_prompt(repo, upstream, integration, head_sha, ahead)
+function M.build_release_notes_prompt(args)
+  if type(args) ~= "table" then
+    error("github-devloop: release-notes-prompt-invalid: release notes prompt requires source data")
+  end
   local prompt = require("prompts.release_notes")
   return devloop_base.render_template(prompt.template, {
-    repo = devloop_base.neutralize_untrusted_prompt_text(repo),
-    upstream_branch = devloop_base.neutralize_untrusted_prompt_text(upstream),
-    integration_branch = devloop_base.neutralize_untrusted_prompt_text(integration),
-    head_sha = devloop_base.neutralize_untrusted_prompt_text(head_sha),
-    ahead = devloop_base.neutralize_untrusted_prompt_text(ahead),
+    repo = devloop_base.neutralize_untrusted_prompt_text(args.repo),
+    upstream_branch = devloop_base.neutralize_untrusted_prompt_text(args.upstream_branch),
+    integration_branch = devloop_base.neutralize_untrusted_prompt_text(args.integration_branch),
+    head_sha = devloop_base.neutralize_untrusted_prompt_text(args.head_sha),
+    ahead = devloop_base.neutralize_untrusted_prompt_text(args.ahead),
+    commit_history = devloop_base.neutralize_untrusted_prompt_text(args.commit_history),
+    referenced_github_context = devloop_base.neutralize_untrusted_prompt_text(args.referenced_github_context),
     max_bytes = tostring(max_release_notes_len),
     ai_sentinel = ai_sentinel,
   })
@@ -150,14 +237,24 @@ function M.draft_release_notes(args)
   if type(policy) ~= "table" then
     error("github-devloop: release-notes-policy-missing: release notes publish policy is required")
   end
+  local source_ok, source = pcall(prefetch_release_notes_source, args)
+  if not source_ok then
+    if policy.allow_fallback == true then
+      return M.release_notes_fallback_body(args.upstream_branch, args.integration_branch, args.ahead), "fallback"
+    end
+    error(source)
+  end
   local result = spawn_codex_sync({
-    prompt = M.build_release_notes_prompt(
-      args.repo,
-      args.upstream_branch,
-      args.integration_branch,
-      args.head_sha,
-      args.ahead
-    ),
+    prompt = M.build_release_notes_prompt({
+      repo = args.repo,
+      upstream_branch = args.upstream_branch,
+      integration_branch = args.integration_branch,
+      head_sha = args.head_sha,
+      ahead = args.ahead,
+      commit_history = source.commit_history,
+      referenced_github_context = source.referenced_github_context,
+    }),
+    sandbox = "read-only",
     timeout = 3600,
   })
   if type(result) ~= "table" or result.exit_code ~= 0 then
