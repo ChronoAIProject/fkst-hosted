@@ -4,7 +4,6 @@ writer:github-devloop:implement-enter
 writer:github-devloop:awaiting-pr-enter
 writer:github-devloop:awaiting-pr-exit
 writer:github-devloop:reconcile-thinking-blocked
-writer:github-devloop-pr:reconcile-state-blocked
 sink-catalog:github-devloop
 sink-catalog:github-devloop-pr
 row-replay:github-devloop:observe-issue
