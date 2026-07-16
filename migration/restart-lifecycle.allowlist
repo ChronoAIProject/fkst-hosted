@@ -25,9 +25,6 @@ entry:github-devloop:reconcile
 entry:github-devloop-pr:review-result
 entry:github-devloop-pr:fix
 entry:github-devloop-pr:reconcile
-ctor:github-devloop:execute-start-proposal
-ctor:github-devloop-pr:review-pr-proposal
-ctor:github-devloop-pr:review-replayer-merge-ready
 shared-row-export:github-devloop:state-marker-fields
 shared-row-export:github-devloop:dependency-wait-marker-fields
 fact:github-devloop:current-state

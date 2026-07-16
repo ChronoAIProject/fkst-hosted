@@ -1,5 +1,5 @@
 {
-  "artifact_sha256": "f7ee6a4be9f6ce67ca2caae2955eba5b463c1e5697538bb75cf7a0ad91e05b3d",
+  "artifact_sha256": "f893f88f672474137316f6f7893c57173a61ea434a46afc12cb6d9c4c75bfc64",
   "consumer_entry_acceptors": [
     {
       "ordinal": "consumes:consensus.consensus_converge",
@@ -61,7 +61,7 @@
       "ordinal": "build_devloop_merge_ready_payload",
       "path": "packages/github-devloop-pr/core/pr_review_replayer.lua",
       "site_id": "ctor:github-devloop-pr:review-replayer-merge-ready",
-      "symbol": "review_converge_fact"
+      "symbol": "replay_review_result"
     }
   ],
   "effect_sink_sites": [
@@ -15762,6 +15762,1055 @@
         "source_state": "awaiting-pr",
         "target": "awaiting-pr"
       }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-constructor-call",
+          "ref": "devloop.execution_start.build_execution_start_effects"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        },
+        {
+          "kind": "production-callsite",
+          "ref": "packages/github-devloop/departments/execute_start/main.lua:51"
+        }
+      ],
+      "observation_id": "ctor:github-devloop:execute-start-proposal/intake-enable",
+      "old_inputs": {
+        "caller_from_states": [
+          "execution-request"
+        ],
+        "current_fact": {
+          "stage_rank": null,
+          "state": null,
+          "version": null
+        },
+        "handoff_reference": {
+          "decision": "enable",
+          "dedup_key": "intake/github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "kind": "own-intake-decision",
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "incoming_version": "intake/github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+        "target_version": "intake/github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+      },
+      "old_outcome": {
+        "cas_outcome": "not-applicable-direct-constructor",
+        "emitted_effects": [
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "queue:consensus.proposal",
+            "ordinal": 1,
+            "sink_kind": "queue"
+          }
+        ],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [
+          {
+            "effect_id": "queue:consensus.proposal",
+            "payload": {
+              "body": "Judge the current GitHub issue from the full source content.\nIssue: owner/repo#42\nRecurrence: read recent closed issues in context; if this is the third same-class instance, reframe to a class solution or give an explicit waiver.",
+              "content_fetch": "runtime-cache:github-devloop/context-bundle-manifest-v2/github-devloop/issue/owner/repo/42/intake-github-devloop-issue-owner-repo-42-2026-06-0150137095",
+              "dedup_key": "intake/github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+              "effect_version": "intake/github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+              "intake_hand_off": {
+                "decision": "enable",
+                "dedup_key": "intake/github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+                "kind": "own-intake-decision",
+                "proposal_id": "github-devloop/issue/owner/repo/42",
+                "source_ref": {
+                  "kind": "external",
+                  "ref": "owner/repo#issue/42"
+                }
+              },
+              "proposal_id": "github-devloop/issue/owner/repo/42",
+              "schema": "consensus.proposal.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#issue/42"
+              },
+              "title": "Capture execute-start consensus proposal",
+              "verdict_mode": "converge",
+              "worktree": "."
+            },
+            "queue": "consensus.proposal"
+          }
+        ],
+        "reason_code": "intake-enable-proposal",
+        "status": "constructed",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "build_consensus_proposal",
+        "path": "packages/github-devloop/departments/execute_start/main.lua",
+        "symbol": "pipeline"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-devloop.execution-request.v1",
+        "generation_epoch": {
+          "current_version": null,
+          "payload_version": "intake/github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "source_version": "intake/github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+        },
+        "kind": "direct_constructor",
+        "lineage": {
+          "intake_hand_off": {
+            "decision": "enable",
+            "dedup_key": "intake/github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+            "kind": "own-intake-decision",
+            "proposal_id": "github-devloop/issue/owner/repo/42",
+            "source_ref": {
+              "kind": "external",
+              "ref": "owner/repo#issue/42"
+            }
+          },
+          "issue_number": 42,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": "devloop_execute_request",
+        "source_state": "execution-request",
+        "target": "consensus.proposal"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-constructor-call",
+          "ref": "devloop.payloads.builders.build_board_pr_review_proposal"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#pr/7"
+        },
+        {
+          "kind": "production-callsite",
+          "ref": "packages/github-devloop-pr/departments/review_pr/main.lua:166"
+        }
+      ],
+      "observation_id": "ctor:github-devloop-pr:review-pr-proposal/high-risk-existing-worktree",
+      "old_inputs": {
+        "caller_from_states": [
+          "reviewing"
+        ],
+        "current_fact": {
+          "stage_rank": 675,
+          "state": "reviewing",
+          "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/702"
+        },
+        "handoff_reference": null,
+        "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/702",
+        "target_version": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118404/def456/review"
+      },
+      "old_outcome": {
+        "cas_outcome": "not-applicable-direct-constructor",
+        "emitted_effects": [
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "queue:consensus.proposal",
+            "ordinal": 1,
+            "sink_kind": "queue"
+          }
+        ],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [
+          {
+            "effect_id": "queue:consensus.proposal",
+            "payload": {
+              "angles": [
+                "teleology",
+                "parsimony",
+                "fidelity",
+                "high-risk"
+              ],
+              "body": "Review the PR diff and decide whether it should advance to merge-ready.\nEntity proposal: github-devloop/issue/owner/repo/42\nReviewed PR head: def456\nIssue title: Capture review proposal constructor\nReview boundary: CI/mergeability/head-binding are later merge-gate facts; do not demand them in review.\nReview contract: reject only for a stated issue requirement the diff fails; beyond stated bounds is advisory/spec-amendment.\nRead the local context bundle before judging.",
+              "content_fetch": "runtime-cache:github-devloop/context-bundle-manifest-v2/github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-gi-1910139386/github-devloop-pr-review-owner-repo-2718475964-7-1697876604",
+              "dedup_key": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118404/def456/review",
+              "proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118404/def456",
+              "schema": "consensus.proposal.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#pr/7"
+              },
+              "title": "Review PR #7: Capture review proposal constructor",
+              "verdict_mode": "gate",
+              "worktree": "/tmp/fkst-packages-test/github-devloop/runtime/worktrees/devloop-owner-repo-42-1409188306"
+            },
+            "queue": "consensus.proposal"
+          }
+        ],
+        "reason_code": "high-risk-existing-worktree",
+        "status": "constructed",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop-pr",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "review proposal payload",
+        "path": "packages/github-devloop-pr/departments/review_pr/main.lua",
+        "symbol": "pipeline"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-devloop.reviewing.v1",
+        "generation_epoch": {
+          "current_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/702",
+          "payload_version": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118404/def456/review",
+          "review_delivery_dedup_key": null,
+          "source_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/702"
+        },
+        "kind": "direct_constructor",
+        "lineage": {
+          "angles": [
+            "teleology",
+            "parsimony",
+            "fidelity",
+            "high-risk"
+          ],
+          "pr_number": 7,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "review_proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118404/def456",
+          "reviewed_head_sha": "def456",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#pr/7"
+          },
+          "worktree": "/tmp/fkst-packages-test/github-devloop/runtime/worktrees/devloop-owner-repo-42-1409188306"
+        },
+        "source_boundary": "devloop_reviewing",
+        "source_state": "reviewing",
+        "target": "consensus.proposal"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-constructor-call",
+          "ref": "devloop.payloads.builders.build_board_pr_review_proposal"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#pr/7"
+        },
+        {
+          "kind": "production-callsite",
+          "ref": "packages/github-devloop-pr/departments/review_pr/main.lua:166"
+        }
+      ],
+      "observation_id": "ctor:github-devloop-pr:review-pr-proposal/normal-risk-fallback-worktree",
+      "old_inputs": {
+        "caller_from_states": [
+          "reviewing"
+        ],
+        "current_fact": {
+          "stage_rank": 675,
+          "state": "reviewing",
+          "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/701"
+        },
+        "handoff_reference": null,
+        "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/701",
+        "target_version": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118403/def456/review"
+      },
+      "old_outcome": {
+        "cas_outcome": "not-applicable-direct-constructor",
+        "emitted_effects": [
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "queue:consensus.proposal",
+            "ordinal": 1,
+            "sink_kind": "queue"
+          }
+        ],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [
+          {
+            "effect_id": "queue:consensus.proposal",
+            "payload": {
+              "body": "Review the PR diff and decide whether it should advance to merge-ready.\nEntity proposal: github-devloop/issue/owner/repo/42\nReviewed PR head: def456\nIssue title: Capture review proposal constructor\nReview boundary: CI/mergeability/head-binding are later merge-gate facts; do not demand them in review.\nReview contract: reject only for a stated issue requirement the diff fails; beyond stated bounds is advisory/spec-amendment.\nRead the local context bundle before judging.",
+              "content_fetch": "runtime-cache:github-devloop/context-bundle-manifest-v2/github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-gi-1849642421/github-devloop-pr-review-owner-repo-2718475964-7-2286247082",
+              "dedup_key": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118403/def456/review",
+              "proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118403/def456",
+              "schema": "consensus.proposal.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#pr/7"
+              },
+              "title": "Review PR #7: Capture review proposal constructor",
+              "verdict_mode": "gate",
+              "worktree": "."
+            },
+            "queue": "consensus.proposal"
+          }
+        ],
+        "reason_code": "normal-risk-fallback-worktree",
+        "status": "constructed",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop-pr",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "review proposal payload",
+        "path": "packages/github-devloop-pr/departments/review_pr/main.lua",
+        "symbol": "pipeline"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-devloop.reviewing.v1",
+        "generation_epoch": {
+          "current_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/701",
+          "payload_version": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118403/def456/review",
+          "review_delivery_dedup_key": null,
+          "source_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/701"
+        },
+        "kind": "direct_constructor",
+        "lineage": {
+          "angles": null,
+          "pr_number": 7,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "review_proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118403/def456",
+          "reviewed_head_sha": "def456",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#pr/7"
+          },
+          "worktree": "."
+        },
+        "source_boundary": "devloop_reviewing",
+        "source_state": "reviewing",
+        "target": "consensus.proposal"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-constructor-call",
+          "ref": "devloop.payloads.builders.build_board_pr_review_proposal"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#pr/7"
+        },
+        {
+          "kind": "production-callsite",
+          "ref": "packages/github-devloop-pr/departments/review_pr/main.lua:166"
+        }
+      ],
+      "observation_id": "ctor:github-devloop-pr:review-pr-proposal/redrive-delivery-identity",
+      "old_inputs": {
+        "caller_from_states": [
+          "reviewing"
+        ],
+        "current_fact": {
+          "stage_rank": 675,
+          "state": "reviewing",
+          "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/703"
+        },
+        "handoff_reference": null,
+        "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/703",
+        "target_version": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118405/def456/r/m/1783840000000/attempt/2"
+      },
+      "old_outcome": {
+        "cas_outcome": "not-applicable-direct-constructor",
+        "emitted_effects": [
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "queue:consensus.proposal",
+            "ordinal": 1,
+            "sink_kind": "queue"
+          }
+        ],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [
+          {
+            "effect_id": "queue:consensus.proposal",
+            "payload": {
+              "body": "Review the PR diff and decide whether it should advance to merge-ready.\nEntity proposal: github-devloop/issue/owner/repo/42\nReviewed PR head: def456\nIssue title: Capture review proposal constructor\nReview boundary: CI/mergeability/head-binding are later merge-gate facts; do not demand them in review.\nReview contract: reject only for a stated issue requirement the diff fails; beyond stated bounds is advisory/spec-amendment.\nRead the local context bundle before judging.",
+              "content_fetch": "runtime-cache:github-devloop/context-bundle-manifest-v2/github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-gi-1970636351/github-devloop-pr-review-owner-repo-2718475964-7-1109506126",
+              "dedup_key": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118405/def456/r/m/1783840000000/attempt/2",
+              "proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118405/def456",
+              "schema": "consensus.proposal.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#pr/7"
+              },
+              "title": "Review PR #7: Capture review proposal constructor",
+              "verdict_mode": "gate",
+              "worktree": "."
+            },
+            "queue": "consensus.proposal"
+          }
+        ],
+        "reason_code": "redrive-delivery-identity",
+        "status": "constructed",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop-pr",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "review proposal payload",
+        "path": "packages/github-devloop-pr/departments/review_pr/main.lua",
+        "symbol": "pipeline"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-devloop.reviewing.v1",
+        "generation_epoch": {
+          "current_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/703",
+          "payload_version": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118405/def456/r/m/1783840000000/attempt/2",
+          "review_delivery_dedup_key": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118405/def456/r/m/1783840000000/attempt/2",
+          "source_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/703"
+        },
+        "kind": "direct_constructor",
+        "lineage": {
+          "angles": null,
+          "pr_number": 7,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "review_proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118405/def456",
+          "reviewed_head_sha": "def456",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#pr/7"
+          },
+          "worktree": "."
+        },
+        "source_boundary": "devloop_reviewing",
+        "source_state": "reviewing",
+        "target": "consensus.proposal"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-constructor-call",
+          "ref": "devloop.payloads.builders.build_devloop_merge_ready_payload"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#pr/7"
+        },
+        {
+          "kind": "production-callsite",
+          "ref": "packages/github-devloop-pr/core/pr_review_replayer.lua:180"
+        }
+      ],
+      "observation_id": "ctor:github-devloop-pr:review-replayer-merge-ready/issue-backed-review-result-replay",
+      "old_inputs": {
+        "caller_from_states": [
+          "reviewing"
+        ],
+        "current_fact": {
+          "stage_rank": 675,
+          "state": "reviewing",
+          "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+        },
+        "handoff_reference": null,
+        "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+        "target_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+      },
+      "old_outcome": {
+        "cas_outcome": "not-applicable-direct-constructor",
+        "emitted_effects": [
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "queue:devloop_merge_ready",
+            "ordinal": 1,
+            "sink_kind": "queue"
+          }
+        ],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [
+          {
+            "effect_id": "queue:devloop_merge_ready",
+            "payload": {
+              "dedup_key": "merge-ready/github-devloop/issue/owner/repo/42/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/7/consensus-github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review/def456",
+              "pr_number": 7,
+              "proposal_id": "github-devloop/issue/owner/repo/42",
+              "review_dedup_key": "consensus:github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review",
+              "review_proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456",
+              "reviewed_head_sha": "def456",
+              "schema": "github-devloop.merge-ready.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#pr/7"
+              },
+              "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+            },
+            "queue": "devloop_merge_ready"
+          }
+        ],
+        "reason_code": "issue-backed-review-result-replay",
+        "status": "constructed",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop-pr",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "build_devloop_merge_ready_payload",
+        "path": "packages/github-devloop-pr/core/pr_review_replayer.lua",
+        "symbol": "replay_review_result"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "payload_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "source_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+        },
+        "kind": "direct_constructor",
+        "lineage": {
+          "current_head_sha": "def456",
+          "issue_number": 42,
+          "pr_number": 7,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "review_dedup_key": "consensus:github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456/review",
+          "review_proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-0661822820/def456",
+          "reviewed_head_sha": "def456",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#pr/7"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": "reviewing",
+        "target": "devloop_merge_ready"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-constructor-call",
+          "ref": "devloop.payloads.builders.build_board_pr_review_proposal"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#pr/7"
+        },
+        {
+          "kind": "production-callsite",
+          "ref": "packages/github-devloop-pr/departments/review_pr/main.lua:166"
+        }
+      ],
+      "observation_id": "ctor:github-devloop-pr:review-pr-proposal/normal-risk-existing-worktree",
+      "old_inputs": {
+        "caller_from_states": [
+          "reviewing"
+        ],
+        "current_fact": {
+          "stage_rank": 675,
+          "state": "reviewing",
+          "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/704"
+        },
+        "handoff_reference": null,
+        "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/704",
+        "target_version": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118406/def456/review"
+      },
+      "old_outcome": {
+        "cas_outcome": "not-applicable-direct-constructor",
+        "emitted_effects": [
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "queue:consensus.proposal",
+            "ordinal": 1,
+            "sink_kind": "queue"
+          }
+        ],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [
+          {
+            "effect_id": "queue:consensus.proposal",
+            "payload": {
+              "body": "Review the PR diff and decide whether it should advance to merge-ready.\nEntity proposal: github-devloop/issue/owner/repo/42\nReviewed PR head: def456\nIssue title: Capture review proposal constructor\nReview boundary: CI/mergeability/head-binding are later merge-gate facts; do not demand them in review.\nReview contract: reject only for a stated issue requirement the diff fails; beyond stated bounds is advisory/spec-amendment.\nRead the local context bundle before judging.",
+              "content_fetch": "runtime-cache:github-devloop/context-bundle-manifest-v2/github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-gi-2031133316/github-devloop-pr-review-owner-repo-2718475964-7-0521135648",
+              "dedup_key": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118406/def456/review",
+              "proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118406/def456",
+              "schema": "consensus.proposal.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#pr/7"
+              },
+              "title": "Review PR #7: Capture review proposal constructor",
+              "verdict_mode": "gate",
+              "worktree": "/tmp/fkst-packages-test/github-devloop/runtime/worktrees/devloop-owner-repo-42-1409188308"
+            },
+            "queue": "consensus.proposal"
+          }
+        ],
+        "reason_code": "normal-risk-existing-worktree",
+        "status": "constructed",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop-pr",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "review proposal payload",
+        "path": "packages/github-devloop-pr/departments/review_pr/main.lua",
+        "symbol": "pipeline"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-devloop.reviewing.v1",
+        "generation_epoch": {
+          "current_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/704",
+          "payload_version": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118406/def456/review",
+          "review_delivery_dedup_key": null,
+          "source_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/704"
+        },
+        "kind": "direct_constructor",
+        "lineage": {
+          "angles": null,
+          "pr_number": 7,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "review_proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118406/def456",
+          "reviewed_head_sha": "def456",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#pr/7"
+          },
+          "worktree": "/tmp/fkst-packages-test/github-devloop/runtime/worktrees/devloop-owner-repo-42-1409188308"
+        },
+        "source_boundary": "devloop_reviewing",
+        "source_state": "reviewing",
+        "target": "consensus.proposal"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-constructor-call",
+          "ref": "devloop.payloads.builders.build_board_pr_review_proposal"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#pr/7"
+        },
+        {
+          "kind": "production-callsite",
+          "ref": "packages/github-devloop-pr/departments/review_pr/main.lua:166"
+        }
+      ],
+      "observation_id": "ctor:github-devloop-pr:review-pr-proposal/high-risk-fallback-worktree",
+      "old_inputs": {
+        "caller_from_states": [
+          "reviewing"
+        ],
+        "current_fact": {
+          "stage_rank": 675,
+          "state": "reviewing",
+          "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/705"
+        },
+        "handoff_reference": null,
+        "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/705",
+        "target_version": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118407/def456/review"
+      },
+      "old_outcome": {
+        "cas_outcome": "not-applicable-direct-constructor",
+        "emitted_effects": [
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "queue:consensus.proposal",
+            "ordinal": 1,
+            "sink_kind": "queue"
+          }
+        ],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [
+          {
+            "effect_id": "queue:consensus.proposal",
+            "payload": {
+              "angles": [
+                "teleology",
+                "parsimony",
+                "fidelity",
+                "high-risk"
+              ],
+              "body": "Review the PR diff and decide whether it should advance to merge-ready.\nEntity proposal: github-devloop/issue/owner/repo/42\nReviewed PR head: def456\nIssue title: Capture review proposal constructor\nReview boundary: CI/mergeability/head-binding are later merge-gate facts; do not demand them in review.\nReview contract: reject only for a stated issue requirement the diff fails; beyond stated bounds is advisory/spec-amendment.\nRead the local context bundle before judging.",
+              "content_fetch": "runtime-cache:github-devloop/context-bundle-manifest-v2/github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-gi-2091630281/github-devloop-pr-review-owner-repo-2718475964-7-4227732461",
+              "dedup_key": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118407/def456/review",
+              "proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118407/def456",
+              "schema": "consensus.proposal.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#pr/7"
+              },
+              "title": "Review PR #7: Capture review proposal constructor",
+              "verdict_mode": "gate",
+              "worktree": "."
+            },
+            "queue": "consensus.proposal"
+          }
+        ],
+        "reason_code": "high-risk-fallback-worktree",
+        "status": "constructed",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop-pr",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "review proposal payload",
+        "path": "packages/github-devloop-pr/departments/review_pr/main.lua",
+        "symbol": "pipeline"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-devloop.reviewing.v1",
+        "generation_epoch": {
+          "current_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/705",
+          "payload_version": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118407/def456/review",
+          "review_delivery_dedup_key": null,
+          "source_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/705"
+        },
+        "kind": "direct_constructor",
+        "lineage": {
+          "angles": [
+            "teleology",
+            "parsimony",
+            "fidelity",
+            "high-risk"
+          ],
+          "pr_number": 7,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "review_proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118407/def456",
+          "reviewed_head_sha": "def456",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#pr/7"
+          },
+          "worktree": "."
+        },
+        "source_boundary": "devloop_reviewing",
+        "source_state": "reviewing",
+        "target": "consensus.proposal"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-constructor-call",
+          "ref": "devloop.payloads.builders.build_board_pr_review_proposal"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#pr/7"
+        },
+        {
+          "kind": "production-callsite",
+          "ref": "packages/github-devloop-pr/departments/review_pr/main.lua:166"
+        }
+      ],
+      "observation_id": "ctor:github-devloop-pr:review-pr-proposal/normal-risk-existing-worktree-redrive",
+      "old_inputs": {
+        "caller_from_states": [
+          "reviewing"
+        ],
+        "current_fact": {
+          "stage_rank": 675,
+          "state": "reviewing",
+          "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/706"
+        },
+        "handoff_reference": null,
+        "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/706",
+        "target_version": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118408/def456/r/m/1783840000000/attempt/2"
+      },
+      "old_outcome": {
+        "cas_outcome": "not-applicable-direct-constructor",
+        "emitted_effects": [
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "queue:consensus.proposal",
+            "ordinal": 1,
+            "sink_kind": "queue"
+          }
+        ],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [
+          {
+            "effect_id": "queue:consensus.proposal",
+            "payload": {
+              "body": "Review the PR diff and decide whether it should advance to merge-ready.\nEntity proposal: github-devloop/issue/owner/repo/42\nReviewed PR head: def456\nIssue title: Capture review proposal constructor\nReview boundary: CI/mergeability/head-binding are later merge-gate facts; do not demand them in review.\nReview contract: reject only for a stated issue requirement the diff fails; beyond stated bounds is advisory/spec-amendment.\nRead the local context bundle before judging.",
+              "content_fetch": "runtime-cache:github-devloop/context-bundle-manifest-v2/github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-gi-2152127246/github-devloop-pr-review-owner-repo-2718475964-7-3639361983",
+              "dedup_key": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118408/def456/r/m/1783840000000/attempt/2",
+              "proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118408/def456",
+              "schema": "consensus.proposal.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#pr/7"
+              },
+              "title": "Review PR #7: Capture review proposal constructor",
+              "verdict_mode": "gate",
+              "worktree": "/tmp/fkst-packages-test/github-devloop/runtime/worktrees/devloop-owner-repo-42-1409188310"
+            },
+            "queue": "consensus.proposal"
+          }
+        ],
+        "reason_code": "normal-risk-existing-worktree-redrive",
+        "status": "constructed",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop-pr",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "review proposal payload",
+        "path": "packages/github-devloop-pr/departments/review_pr/main.lua",
+        "symbol": "pipeline"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-devloop.reviewing.v1",
+        "generation_epoch": {
+          "current_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/706",
+          "payload_version": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118408/def456/r/m/1783840000000/attempt/2",
+          "review_delivery_dedup_key": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118408/def456/r/m/1783840000000/attempt/2",
+          "source_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/706"
+        },
+        "kind": "direct_constructor",
+        "lineage": {
+          "angles": null,
+          "pr_number": 7,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "review_proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118408/def456",
+          "reviewed_head_sha": "def456",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#pr/7"
+          },
+          "worktree": "/tmp/fkst-packages-test/github-devloop/runtime/worktrees/devloop-owner-repo-42-1409188310"
+        },
+        "source_boundary": "devloop_reviewing",
+        "source_state": "reviewing",
+        "target": "consensus.proposal"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-constructor-call",
+          "ref": "devloop.payloads.builders.build_board_pr_review_proposal"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#pr/7"
+        },
+        {
+          "kind": "production-callsite",
+          "ref": "packages/github-devloop-pr/departments/review_pr/main.lua:166"
+        }
+      ],
+      "observation_id": "ctor:github-devloop-pr:review-pr-proposal/high-risk-fallback-worktree-redrive",
+      "old_inputs": {
+        "caller_from_states": [
+          "reviewing"
+        ],
+        "current_fact": {
+          "stage_rank": 675,
+          "state": "reviewing",
+          "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/707"
+        },
+        "handoff_reference": null,
+        "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/707",
+        "target_version": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118409/def456/r/m/1783840000000/attempt/2"
+      },
+      "old_outcome": {
+        "cas_outcome": "not-applicable-direct-constructor",
+        "emitted_effects": [
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "queue:consensus.proposal",
+            "ordinal": 1,
+            "sink_kind": "queue"
+          }
+        ],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [
+          {
+            "effect_id": "queue:consensus.proposal",
+            "payload": {
+              "angles": [
+                "teleology",
+                "parsimony",
+                "fidelity",
+                "high-risk"
+              ],
+              "body": "Review the PR diff and decide whether it should advance to merge-ready.\nEntity proposal: github-devloop/issue/owner/repo/42\nReviewed PR head: def456\nIssue title: Capture review proposal constructor\nReview boundary: CI/mergeability/head-binding are later merge-gate facts; do not demand them in review.\nReview contract: reject only for a stated issue requirement the diff fails; beyond stated bounds is advisory/spec-amendment.\nRead the local context bundle before judging.",
+              "content_fetch": "runtime-cache:github-devloop/context-bundle-manifest-v2/github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-gi-2212624211/github-devloop-pr-review-owner-repo-2718475964-7-3050991505",
+              "dedup_key": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118409/def456/r/m/1783840000000/attempt/2",
+              "proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118409/def456",
+              "schema": "consensus.proposal.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#pr/7"
+              },
+              "title": "Review PR #7: Capture review proposal constructor",
+              "verdict_mode": "gate",
+              "worktree": "."
+            },
+            "queue": "consensus.proposal"
+          }
+        ],
+        "reason_code": "high-risk-fallback-worktree-redrive",
+        "status": "constructed",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop-pr",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "review proposal payload",
+        "path": "packages/github-devloop-pr/departments/review_pr/main.lua",
+        "symbol": "pipeline"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-devloop.reviewing.v1",
+        "generation_epoch": {
+          "current_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/707",
+          "payload_version": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118409/def456/r/m/1783840000000/attempt/2",
+          "review_delivery_dedup_key": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118409/def456/r/m/1783840000000/attempt/2",
+          "source_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/707"
+        },
+        "kind": "direct_constructor",
+        "lineage": {
+          "angles": [
+            "teleology",
+            "parsimony",
+            "fidelity",
+            "high-risk"
+          ],
+          "pr_number": 7,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "review_proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118409/def456",
+          "reviewed_head_sha": "def456",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#pr/7"
+          },
+          "worktree": "."
+        },
+        "source_boundary": "devloop_reviewing",
+        "source_state": "reviewing",
+        "target": "consensus.proposal"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-constructor-call",
+          "ref": "devloop.payloads.builders.build_board_pr_review_proposal"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#pr/7"
+        },
+        {
+          "kind": "production-callsite",
+          "ref": "packages/github-devloop-pr/departments/review_pr/main.lua:166"
+        }
+      ],
+      "observation_id": "ctor:github-devloop-pr:review-pr-proposal/high-risk-existing-worktree-redrive",
+      "old_inputs": {
+        "caller_from_states": [
+          "reviewing"
+        ],
+        "current_fact": {
+          "stage_rank": 675,
+          "state": "reviewing",
+          "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/708"
+        },
+        "handoff_reference": null,
+        "incoming_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/708",
+        "target_version": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118410/def456/r/m/1783840000000/attempt/2"
+      },
+      "old_outcome": {
+        "cas_outcome": "not-applicable-direct-constructor",
+        "emitted_effects": [
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "queue:consensus.proposal",
+            "ordinal": 1,
+            "sink_kind": "queue"
+          }
+        ],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [
+          {
+            "effect_id": "queue:consensus.proposal",
+            "payload": {
+              "angles": [
+                "teleology",
+                "parsimony",
+                "fidelity",
+                "high-risk"
+              ],
+              "body": "Review the PR diff and decide whether it should advance to merge-ready.\nEntity proposal: github-devloop/issue/owner/repo/42\nReviewed PR head: def456\nIssue title: Capture review proposal constructor\nReview boundary: CI/mergeability/head-binding are later merge-gate facts; do not demand them in review.\nReview contract: reject only for a stated issue requirement the diff fails; beyond stated bounds is advisory/spec-amendment.\nRead the local context bundle before judging.",
+              "content_fetch": "runtime-cache:github-devloop/context-bundle-manifest-v2/github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-gi-1437434159/github-devloop-pr-review-owner-repo-2718475964-7-2378013341",
+              "dedup_key": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118410/def456/r/m/1783840000000/attempt/2",
+              "proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118410/def456",
+              "schema": "consensus.proposal.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#pr/7"
+              },
+              "title": "Review PR #7: Capture review proposal constructor",
+              "verdict_mode": "gate",
+              "worktree": "/tmp/fkst-packages-test/github-devloop/runtime/worktrees/devloop-owner-repo-42-1409188312"
+            },
+            "queue": "consensus.proposal"
+          }
+        ],
+        "reason_code": "high-risk-existing-worktree-redrive",
+        "status": "constructed",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop-pr",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "review proposal payload",
+        "path": "packages/github-devloop-pr/departments/review_pr/main.lua",
+        "symbol": "pipeline"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-devloop.reviewing.v1",
+        "generation_epoch": {
+          "current_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/708",
+          "payload_version": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118410/def456/r/m/1783840000000/attempt/2",
+          "review_delivery_dedup_key": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118410/def456/r/m/1783840000000/attempt/2",
+          "source_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/708"
+        },
+        "kind": "direct_constructor",
+        "lineage": {
+          "angles": [
+            "teleology",
+            "parsimony",
+            "fidelity",
+            "high-risk"
+          ],
+          "pr_number": 7,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "review_proposal_id": "github-devloop/pr-review/owner-repo-2718475964/7/ready-consensus-github-devloo-2455118410/def456",
+          "reviewed_head_sha": "def456",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#pr/7"
+          },
+          "worktree": "/tmp/fkst-packages-test/github-devloop/runtime/worktrees/devloop-owner-repo-42-1409188312"
+        },
+        "source_boundary": "devloop_reviewing",
+        "source_state": "reviewing",
+        "target": "consensus.proposal"
+      }
     }
   ],
   "old_pending_projection": {
@@ -16235,30 +17284,6 @@
       "path": "packages/github-devloop-pr/departments/reconcile/main.lua",
       "site_id": "entry:github-devloop-pr:reconcile",
       "symbol": "pipeline",
-      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
-    },
-    {
-      "category": "direct_constructor_sites",
-      "ordinal": "build_consensus_proposal",
-      "path": "packages/github-devloop/departments/execute_start/main.lua",
-      "site_id": "ctor:github-devloop:execute-start-proposal",
-      "symbol": "pipeline",
-      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
-    },
-    {
-      "category": "direct_constructor_sites",
-      "ordinal": "review proposal payload",
-      "path": "packages/github-devloop-pr/departments/review_pr/main.lua",
-      "site_id": "ctor:github-devloop-pr:review-pr-proposal",
-      "symbol": "pipeline",
-      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
-    },
-    {
-      "category": "direct_constructor_sites",
-      "ordinal": "build_devloop_merge_ready_payload",
-      "path": "packages/github-devloop-pr/core/pr_review_replayer.lua",
-      "site_id": "ctor:github-devloop-pr:review-replayer-merge-ready",
-      "symbol": "review_converge_fact",
       "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
     },
     {
