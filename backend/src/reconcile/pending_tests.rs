@@ -74,7 +74,10 @@ async fn positive_count_is_pending() {
     let listing = FakeListing::ok(3);
     let token = SecretString::from("ghs_x".to_string());
     let gate = LabelCountPending::new(&listing, &token);
-    assert!(gate.has_pending(42, &repo(), "fkst-run").await.expect("ok"));
+    assert!(gate
+        .has_pending(42, &repo(), &["fkst-run".to_string()])
+        .await
+        .expect("ok"));
 }
 
 #[tokio::test]
@@ -82,7 +85,10 @@ async fn zero_count_is_not_pending() {
     let listing = FakeListing::ok(0);
     let token = SecretString::from("ghs_x".to_string());
     let gate = LabelCountPending::new(&listing, &token);
-    assert!(!gate.has_pending(42, &repo(), "fkst-run").await.expect("ok"));
+    assert!(!gate
+        .has_pending(42, &repo(), &["fkst-run".to_string()])
+        .await
+        .expect("ok"));
 }
 
 #[tokio::test]
@@ -91,9 +97,28 @@ async fn transport_error_propagates() {
     let token = SecretString::from("ghs_x".to_string());
     let gate = LabelCountPending::new(&listing, &token);
     let err = gate
-        .has_pending(42, &repo(), "fkst-run")
+        .has_pending(42, &repo(), &["fkst-run".to_string()])
         .await
         .expect_err("must propagate");
     // The rate-limit GithubAppError maps onto AppError::Unavailable (503).
     assert!(matches!(err, AppError::Unavailable(_)));
+}
+
+#[tokio::test]
+async fn empty_label_set_is_never_pending() {
+    let listing = FakeListing::ok(5);
+    let token = SecretString::from("ghs_x".to_string());
+    let gate = LabelCountPending::new(&listing, &token);
+    assert!(!gate.has_pending(42, &repo(), &[]).await.expect("ok"));
+}
+
+#[tokio::test]
+async fn or_across_labels_short_circuits_on_first_hit() {
+    // FakeListing::ok(n) returns n for every label, so any non-empty set with a
+    // positive count is pending; the empty-set case is covered above.
+    let listing = FakeListing::ok(1);
+    let token = SecretString::from("ghs_x".to_string());
+    let gate = LabelCountPending::new(&listing, &token);
+    let labels = vec!["fkst-a".to_string(), "fkst-b".to_string()];
+    assert!(gate.has_pending(42, &repo(), &labels).await.expect("ok"));
 }
