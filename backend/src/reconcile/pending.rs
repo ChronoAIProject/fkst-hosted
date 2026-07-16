@@ -22,15 +22,17 @@ use crate::models::RepoRef;
 /// against a fake, mirroring [`crate::github_app::listing::GithubListing`].
 #[async_trait]
 pub trait PendingWork: Send + Sync {
-    /// True when at least one OPEN issue in `repo` carries `work_label` — the
-    /// session has claimable work and is "pending". `installation_id` identifies
-    /// the installation the caller minted its token from (an impl backed by a
-    /// pre-scoped token ignores it).
+    /// True when at least one OPEN issue in `repo` carries ANY of `work_labels` —
+    /// the session has claimable work and is "pending". The set is the trigger's
+    /// explicit work label plus every label its packages auto-declare
+    /// ([`crate::reconcile::work_labels`]); an empty set is never pending.
+    /// `installation_id` identifies the installation the caller minted its token
+    /// from (an impl backed by a pre-scoped token ignores it).
     async fn has_pending(
         &self,
         installation_id: i64,
         repo: &RepoRef,
-        work_label: &str,
+        work_labels: &[String],
     ) -> Result<bool, AppError>;
 }
 
@@ -59,15 +61,23 @@ impl PendingWork for LabelCountPending<'_> {
         &self,
         _installation_id: i64,
         repo: &RepoRef,
-        work_label: &str,
+        work_labels: &[String],
     ) -> Result<bool, AppError> {
         // The token already encodes the installation, so `installation_id` is
         // unused here; it stays on the trait for impls that mint per-check.
-        let count = self
-            .listing
-            .count_open_issues_with_label(self.token, &repo.owner, &repo.name, work_label)
-            .await?;
-        Ok(count > 0)
+        // GitHub Search ANDs multiple `label:` qualifiers, so a single OR query
+        // isn't available — count each label (cheap, `per_page=1`) and
+        // short-circuit on the first hit.
+        for label in work_labels {
+            let count = self
+                .listing
+                .count_open_issues_with_label(self.token, &repo.owner, &repo.name, label)
+                .await?;
+            if count > 0 {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 

@@ -180,13 +180,35 @@ pub async fn reconcile_repo(
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("list substrate-session pods: {e}")))?;
 
-    // 4. Gate each registration on its work label's open-issue count.
+    // 4. Gate each registration on the open-issue count of its work-label SET:
+    //    the trigger's explicit label plus every label its packages auto-declare
+    //    (`[github].work_labels`, resolved transitively over `[event_deps]`). So a
+    //    session wakes on any of its packages' own labels without the operator
+    //    restating them in the trigger issue. Discovered labels are cached per
+    //    config-hash (packages are immutable per session config) to bound the
+    //    extra manifest fetches to one resolve per distinct session config.
     let gate = LabelCountPending::new(ctx.listing.as_ref(), &token);
     let mut pending: HashMap<String, bool> = HashMap::new();
+    let mut discovered_cache: HashMap<String, std::collections::BTreeSet<String>> = HashMap::new();
     for reg in &regs {
-        let is_pending = gate
-            .has_pending(installation_id, repo, &reg.def.work_label)
-            .await?;
+        let discovered = match discovered_cache.get(&reg.config_hash) {
+            Some(set) => set.clone(),
+            None => {
+                let set = crate::reconcile::work_labels::resolve_work_labels(
+                    &ctx.http,
+                    &ctx.config.github_api_base_url,
+                    &token,
+                    &reg.def.packages,
+                )
+                .await;
+                discovered_cache.insert(reg.config_hash.clone(), set.clone());
+                set
+            }
+        };
+        let mut labels: std::collections::BTreeSet<String> = discovered;
+        labels.insert(reg.def.work_label.clone());
+        let labels: Vec<String> = labels.into_iter().collect();
+        let is_pending = gate.has_pending(installation_id, repo, &labels).await?;
         pending.insert(reg.session_id.clone(), is_pending);
     }
 
