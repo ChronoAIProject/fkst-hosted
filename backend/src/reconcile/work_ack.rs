@@ -58,15 +58,11 @@ pub async fn ack_open_work_issues(
         return;
     }
     for reg in regs {
-        ack_label(
-            github,
-            listing,
-            token,
-            repo,
-            &reg.def.name,
-            &reg.def.work_label,
-        )
-        .await;
+        // Only an explicit work label is acked here; a label-less session's work
+        // is discovered from its packages and needs no trigger-side ack.
+        if let Some(work_label) = reg.def.work_label.as_deref() {
+            ack_label(github, listing, token, repo, &reg.def.name, work_label).await;
+        }
     }
 }
 

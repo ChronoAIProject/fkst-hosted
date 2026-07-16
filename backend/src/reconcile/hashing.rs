@@ -68,7 +68,7 @@ fn hex_digest<T: Serialize>(value: &T, what: &str) -> String {
 /// spawn suppression). Guarded by `config_hash_is_digest_stable_for_old_configs`.
 pub fn config_hash(
     packages: &[PackageRef],
-    work_label: &str,
+    work_label: Option<&str>,
     environment: Option<&str>,
     output_lang: Option<&str>,
     engine_config: &BTreeMap<String, String>,
@@ -76,7 +76,11 @@ pub fn config_hash(
     #[derive(Serialize)]
     struct Canonical<'a> {
         packages: Vec<CanonPackage<'a>>,
-        work_label: &'a str,
+        // Skip-if-none keeps the digest stable: a `Some("x")` serializes
+        // byte-identically to the pre-optional `&str "x"`, so existing sessions
+        // never drift; an absent label simply omits the field.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        work_label: Option<&'a str>,
         environment: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         output_lang: Option<&'a str>,
@@ -112,7 +116,9 @@ pub fn full_config_hash(reg: &SessionRegistration) -> String {
     #[derive(Serialize)]
     struct Canonical<'a> {
         packages: Vec<CanonPackage<'a>>,
-        work_label: &'a str,
+        // See config_hash: skip-if-none keeps old (Some) configs byte-stable.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        work_label: Option<&'a str>,
         environment: Option<&'a str>,
         name: &'a str,
         auto_merge: bool,
@@ -126,7 +132,7 @@ pub fn full_config_hash(reg: &SessionRegistration) -> String {
     }
     let canonical = Canonical {
         packages: canon_packages(&reg.def.packages),
-        work_label: &reg.def.work_label,
+        work_label: reg.def.work_label.as_deref(),
         environment: reg.def.environment.as_deref(),
         name: &reg.def.name,
         auto_merge: reg.auto_merge,

@@ -36,7 +36,7 @@ pub struct SessionDef {
     /// author order.
     pub packages: Vec<PackageRef>,
     /// The single GitHub work label parsed from `### Work Label`.
-    pub work_label: String,
+    pub work_label: Option<String>,
     /// The optional named environment parsed from `### Environment`.
     pub environment: Option<String>,
     /// The optional session output locale parsed from `### Output Language`
@@ -167,7 +167,7 @@ pub enum ReconcileAction {
     /// can list that label's open issues, comment "session retired, no longer worked",
     /// latch [`crate::reconcile::SUBSTRATE_RETIRED_LABEL`], and drop the now-stale
     /// picked-up label — leaving each issue OPEN.
-    RetireWorkIssues { work_label: String },
+    RetireWorkIssues { work_label: Option<String> },
     /// Flag an invalid trigger issue (comment + label), first observation only.
     FlagInvalid { trigger_issue: i64, detail: String },
     /// Clear the invalid flag from an issue that now parses.
@@ -184,8 +184,10 @@ pub enum ReconcileAction {
         session_id: String,
         /// The session name (`### Session Name`).
         session_name: String,
-        /// The GitHub work label whose open issues queue this session's work.
-        work_label: String,
+        /// The explicit GitHub work label whose open issues queue this session's
+        /// work, or `None` for a label-less session (wake labels auto-discovered
+        /// from its packages) — the announce comment omits the work-label line.
+        work_label: Option<String>,
         /// The package refs rendered back to `owner/repo@ref:path`, in author order.
         packages: Vec<String>,
         /// The named environment, or `None` for a no-environment session.
@@ -398,9 +400,9 @@ pub fn plan_repo(
                 // they no longer look claimed (a retired session is no longer working
                 // them). Only when the pod recorded its work label — an older pod
                 // without the annotation carries no label to list.
-                if let Some(work_label) = &pod.work_label {
+                if pod.work_label.is_some() {
                     actions.push(ReconcileAction::RetireWorkIssues {
-                        work_label: work_label.clone(),
+                        work_label: pod.work_label.clone(),
                     });
                 }
             }

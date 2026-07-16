@@ -38,7 +38,7 @@ use regex::Regex;
 /// the original config is durably latched on the issue for the immutability check.
 pub fn announce_session_comment(
     session_name: &str,
-    work_label: &str,
+    work_label: Option<&str>,
     packages: &[String],
     environment: Option<&str>,
     auto_merge: bool,
@@ -47,10 +47,14 @@ pub fn announce_session_comment(
 ) -> String {
     let mut body = format!("🟢 **fkst session `{session_name}` registered.**\n\n");
 
-    body.push_str(&format!(
-        "**Work label:** `{work_label}` — open issues with this label in this repo to \
-         queue work for this session.\n\n"
-    ));
+    // A label-less session's work is auto-discovered from its packages' declared
+    // labels; there is no single trigger-side label to advertise here.
+    if let Some(work_label) = work_label {
+        body.push_str(&format!(
+            "**Work label:** `{work_label}` — open issues with this label in this repo to \
+             queue work for this session.\n\n"
+        ));
+    }
 
     body.push_str(&format!("**Packages:** {}\n", packages.len()));
     for r in packages {
@@ -132,7 +136,7 @@ mod tests {
         ];
         let body = announce_session_comment(
             "mysession",
-            "fkst-run",
+            Some("fkst-run"),
             &packages,
             Some("prod"),
             true,
@@ -165,7 +169,8 @@ mod tests {
 
     #[test]
     fn renders_zero_packages_no_environment_and_auto_merge_off() {
-        let body = announce_session_comment("solo", "run", &[], None, false, None, "deadbeef");
+        let body =
+            announce_session_comment("solo", Some("run"), &[], None, false, None, "deadbeef");
 
         assert!(body.contains("**Packages:** 0"));
         // No bullets when there are no packages.
@@ -182,7 +187,7 @@ mod tests {
     fn the_rendered_marker_round_trips_through_the_parser() {
         // The marker the renderer writes is exactly what the parser reads back — the
         // load-bearing contract for the immutability check.
-        let body = announce_session_comment("s", "wl", &[], None, false, None, "0a1b2c3d");
+        let body = announce_session_comment("s", Some("wl"), &[], None, false, None, "0a1b2c3d");
         assert_eq!(
             parse_config_hash_marker(&[body]).as_deref(),
             Some("0a1b2c3d"),
@@ -233,10 +238,29 @@ mod tests {
     fn omits_the_log_line_when_no_url_is_configured() {
         // No public base URL => `None` => the log line is absent entirely (no bare
         // "Logs:" label, no dangling link).
-        let body = announce_session_comment("solo", "run", &[], None, false, None, "cfghash");
+        let body = announce_session_comment("solo", Some("run"), &[], None, false, None, "cfghash");
         assert!(
             !body.contains("Logs:"),
             "the log line must be omitted when no URL is configured: {body}"
         );
+    }
+}
+
+#[cfg(test)]
+mod optional_work_label_tests {
+    use super::announce_session_comment;
+
+    #[test]
+    fn present_label_shows_the_work_label_line() {
+        let body = announce_session_comment("s", Some("fkst-x"), &[], None, false, None, "h");
+        assert!(body.contains("**Work label:** `fkst-x`"), "{body}");
+    }
+
+    #[test]
+    fn absent_label_omits_the_work_label_line() {
+        let body = announce_session_comment("s", None, &[], None, false, None, "h");
+        assert!(!body.contains("**Work label:**"), "{body}");
+        // The rest of the announce still renders.
+        assert!(body.contains("fkst session `s` registered"), "{body}");
     }
 }

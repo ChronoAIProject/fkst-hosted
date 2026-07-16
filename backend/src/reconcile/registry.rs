@@ -39,7 +39,7 @@ pub fn parse_registration(
     // Hash the launch inputs BEFORE moving them into the def (config_hash borrows).
     let hash = config_hash(
         &spec.packages,
-        &spec.work_label,
+        spec.work_label.as_deref(),
         spec.environment.as_deref(),
         spec.output_lang.as_deref(),
         &spec.engine_config,

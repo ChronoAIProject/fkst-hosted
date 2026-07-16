@@ -110,9 +110,12 @@ pub struct TriggerSpec {
     /// is a fully-qualified GitHub package reference (`owner/repo@ref:path`);
     /// fetching + resolving it is deferred to a later pass.
     pub packages: Vec<PackageRef>,
-    /// The single GitHub work label the launcher applies to drive the session.
-    /// Guaranteed ≤ 50 chars and comma-free.
-    pub work_label: String,
+    /// The OPTIONAL explicit GitHub work label the `### Work Label` section names.
+    /// `None` when the section is absent — the session's wake labels are then
+    /// auto-discovered from its packages' `[github].work_labels`
+    /// ([`crate::reconcile::work_labels`]). When present: guaranteed ≤ 50 chars
+    /// and comma-free.
+    pub work_label: Option<String>,
     /// The single named ENVIRONMENT the OPTIONAL `### Environment` section selects,
     /// or `None` when the section is absent or blank.
     pub environment: Option<String>,
@@ -408,15 +411,19 @@ fn parse_package_ref(value: &str) -> Result<PackageRef, AppError> {
 /// substrate reads the label from a comma-separated env var, so a comma would split
 /// it into two labels. Zero or two-plus lines is a 422; an over-long or comma-bearing
 /// value is a 422 naming the section.
-fn parse_work_label(sections: &[(String, String)]) -> Result<String, AppError> {
-    let block = sections
+fn parse_work_label(sections: &[(String, String)]) -> Result<Option<String>, AppError> {
+    // OPTIONAL since work-label auto-discovery: an absent section resolves to
+    // `None` (the wake labels come from the packages' `[github].work_labels`).
+    let Some((_, content)) = sections
         .iter()
         .find(|(heading, _)| heading == HEADING_WORK_LABEL)
-        .map(|(_, content)| strip_html_comments(content))
-        .ok_or_else(|| {
-            AppError::Unprocessable("the `### Work Label` section is required".to_string())
-        })?;
+    else {
+        return Ok(None);
+    };
+    let block = strip_html_comments(content);
+    // A present-but-blank section is a `None` too (nothing to name), not a 422.
     let label = match non_empty_lines(&block).as_slice() {
+        [] => return Ok(None),
         [label] => label.clone(),
         _ => {
             return Err(AppError::Unprocessable(
@@ -436,7 +443,7 @@ fn parse_work_label(sections: &[(String, String)]) -> Result<String, AppError> {
              substrate reads a comma-separated env var, so a comma would split it into two labels"
         )));
     }
-    Ok(label)
+    Ok(Some(label))
 }
 
 #[cfg(test)]
