@@ -90,7 +90,9 @@ fn tokens(api: std::sync::Arc<SeedFake>) -> GithubAppTokens {
 fn seed_body_round_trips_through_the_real_trigger_parser() {
     // The seed body MUST parse as a valid trigger issue — this pins the seeder to
     // the parser so the two can never drift.
-    let spec = parse_trigger_issue_body(&build_seed_body("octo-owner"))
+    let default_pkgs =
+        vec!["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()];
+    let spec = parse_trigger_issue_body(&build_seed_body(&default_pkgs, "octo-owner"))
         .expect("seed body is a valid trigger issue");
     assert_eq!(spec.name, "evolve");
     assert_eq!(spec.work_label, "fkst-evolve");
@@ -112,6 +114,7 @@ async fn seeds_a_repo_with_no_open_trigger_issue() {
     seed_trigger_issues(
         &github,
         "fkst-substrate-trigger",
+        &["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()],
         "octo-owner",
         &["octo-owner/repo-a".to_string()],
     )
@@ -137,6 +140,7 @@ async fn skips_a_repo_that_already_has_an_open_trigger_issue() {
     seed_trigger_issues(
         &github,
         "fkst-substrate-trigger",
+        &["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()],
         "octo-owner",
         &["octo-owner/repo-a".to_string()],
     )
@@ -146,4 +150,33 @@ async fn skips_a_repo_that_already_has_an_open_trigger_issue() {
         0,
         "must NOT create a second trigger issue"
     );
+}
+
+#[test]
+fn seed_body_with_multiple_packages_round_trips_in_order() {
+    // A configured multi-package list renders one `### Packages` line each and
+    // parses back to the same ordered refs — pins FKST_SEED_PACKAGES support.
+    let pkgs = vec![
+        "chronoai-shining/fkst-packages@feat/workflow-engine:packages/workflow-dev".to_string(),
+        "chronoai-shining/fkst-packages@feat/workflow-engine:packages/workflow-security"
+            .to_string(),
+        "chronoai-shining/fkst-packages@feat/workflow-engine:packages/workflow-writer".to_string(),
+    ];
+    let spec = parse_trigger_issue_body(&build_seed_body(&pkgs, "octo-owner"))
+        .expect("multi-package seed body is valid");
+    assert_eq!(spec.packages.len(), 3);
+    let paths: Vec<&str> = spec.packages.iter().map(|p| p.path.as_str()).collect();
+    assert_eq!(
+        paths,
+        vec![
+            "packages/workflow-dev",
+            "packages/workflow-security",
+            "packages/workflow-writer"
+        ]
+    );
+    for p in &spec.packages {
+        assert_eq!(p.owner, "chronoai-shining");
+        assert_eq!(p.repo, "fkst-packages");
+        assert_eq!(p.git_ref, "feat/workflow-engine");
+    }
 }

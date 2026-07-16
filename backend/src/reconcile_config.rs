@@ -74,6 +74,12 @@ mod defaults {
         2700
     }
 
+    pub(super) fn seed_packages() -> Vec<String> {
+        // The default package(s) an auto-seeded trigger issue loads when
+        // FKST_SEED_PACKAGES is unset: the composed github-devloop-workflow root.
+        vec!["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()]
+    }
+
     pub(super) fn pod_session_max_lifetime_secs() -> u64 {
         // Hard ceiling on a single session pod's wall-clock lifetime. 0 = unbounded
         // (a session runs until it goes idle or its trigger closes).
@@ -119,6 +125,10 @@ struct ReconcileVars {
     /// Auto-create a seed trigger issue when the App is installed on a repo.
     #[serde(default)]
     seed_trigger_issue_on_install: bool,
+    /// Whitespace-separated `owner/repo@ref:path` package refs the seeded trigger
+    /// issue loads. Unset → the github-devloop-workflow default.
+    #[serde(default)]
+    seed_packages: Option<String>,
 }
 
 /// Model B reconciler configuration (issue #359 §4). Config surface only — no
@@ -164,6 +174,11 @@ pub struct ReconcileConfig {
     /// `FKST_SEED_TRIGGER_ISSUE_ON_INSTALL`. Default false (opt-in — it writes to
     /// the user's repo).
     pub seed_trigger_issue_on_install: bool,
+    /// The `### Packages` refs an auto-seeded trigger issue lists (one per line).
+    /// Env: `FKST_SEED_PACKAGES` (whitespace-separated). Default: the
+    /// github-devloop-workflow root. Never empty (a blank env value falls back to
+    /// the default).
+    pub seed_packages: Vec<String>,
 }
 
 impl Default for ReconcileConfig {
@@ -172,6 +187,7 @@ impl Default for ReconcileConfig {
             substrate_trigger_label: defaults::substrate_trigger_label(),
             github_bot_login: None,
             seed_trigger_issue_on_install: false,
+            seed_packages: defaults::seed_packages(),
             reconcile_interval_secs: defaults::reconcile_interval_secs(),
             pod_full_resync_interval_secs: defaults::pod_full_resync_interval_secs(),
             session_idle_grace_secs: defaults::session_idle_grace_secs(),
@@ -243,6 +259,20 @@ impl ReconcileConfig {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
 
+        // Whitespace-separated package refs; a blank/all-whitespace value falls
+        // back to the default so a stray empty ConfigMap value cannot seed an
+        // issue with an empty `### Packages` section (which the parser rejects).
+        let seed_packages = env
+            .seed_packages
+            .as_deref()
+            .map(|raw| {
+                raw.split_whitespace()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(defaults::seed_packages);
+
         Ok(ReconcileConfig {
             substrate_trigger_label: env.substrate_trigger_label,
             github_bot_login,
@@ -255,6 +285,7 @@ impl ReconcileConfig {
             pod_session_max_lifetime_secs: env.pod_session_max_lifetime_secs,
             health_scrape_secs: env.health_scrape_secs,
             seed_trigger_issue_on_install: env.seed_trigger_issue_on_install,
+            seed_packages,
         })
     }
 }
