@@ -38,10 +38,14 @@ data:
   FKST_WEBHOOK_TRIGGER_LABEL: "fkst"
 
   # Auto-seed a trigger issue when the App is installed on a repo (writes to the
-  # user's repo, so opt-in). "true" seeds session=evolve, the github-devloop-workflow
-  # package, work label fkst-evolve, auto-merge on, log access = repo owner;
-  # idempotent + best-effort. Default false.
+  # user's repo, so opt-in). "true" seeds session=evolve, work label fkst-evolve,
+  # auto-merge on, log access = repo owner; idempotent + best-effort. Default false.
   # FKST_SEED_TRIGGER_ISSUE_ON_INSTALL: "false"
+  # The `### Packages` refs the seeded issue loads (whitespace-separated, one ref
+  # per line). Unset = the github-devloop-workflow default.
+  # FKST_SEED_PACKAGES: |-
+  #   owner/repo@ref:packages/foo
+  #   owner/repo@ref:packages/bar
 
   # --- Deployment-wide access allowlist (OPTIONAL) ---
   # Comma-separated GitHub numeric ids and/or logins. Unset = open. Set = only

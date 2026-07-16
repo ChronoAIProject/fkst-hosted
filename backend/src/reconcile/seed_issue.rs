@@ -18,25 +18,24 @@ use crate::github_app::GithubAppTokens;
 /// env-name the parser accepts.
 const SEED_SESSION_NAME: &str = "evolve";
 
-/// The single package ref the seed session loads (`### Packages`). The composed
-/// `github-devloop-workflow` root; the engine resolves its event-deps at runtime.
-const SEED_PACKAGE_REF: &str = "ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow";
-
 /// The seed session's work label (`### Work Label`).
 const SEED_WORK_LABEL: &str = "fkst-evolve";
 
 /// The issue title.
 const SEED_TITLE: &str = "[session] evolve (auto-seeded)";
 
-/// Render the seed trigger-issue body. `log_access_owner` is the repo owner login,
-/// placed in the `### FKST Contributors` (auto-merge is on). The leading marker
-/// comment is intro text the parser ignores (it starts at the first `### ` heading)
-/// and marks the issue as auto-seeded for humans.
-fn build_seed_body(log_access_owner: &str) -> String {
+/// Render the seed trigger-issue body. `packages` are the configured
+/// `### Packages` refs (one per line — the parser accepts multiple), and
+/// `log_access_owner` is the repo owner login placed in `### FKST Contributors`
+/// (auto-merge is on). The leading marker comment is intro text the parser
+/// ignores (it starts at the first `### ` heading) and marks the issue as
+/// auto-seeded for humans.
+fn build_seed_body(packages: &[String], log_access_owner: &str) -> String {
+    let package_lines = packages.join("\n");
     format!(
         "<!-- fkst auto-seeded trigger (v1) -->\n\n\
          ### Session Name\n{SEED_SESSION_NAME}\n\n\
-         ### Packages\n{SEED_PACKAGE_REF}\n\n\
+         ### Packages\n{package_lines}\n\n\
          ### Work Label\n{SEED_WORK_LABEL}\n\n\
          ### Auto-merge\ntrue\n\n\
          ### FKST Contributors\n{log_access_owner}\n"
@@ -52,11 +51,12 @@ fn build_seed_body(log_access_owner: &str) -> String {
 pub async fn seed_trigger_issues(
     github: &GithubAppTokens,
     trigger_label: &str,
+    packages: &[String],
     owner_login: &str,
     repos: &[String],
 ) {
     let labels = [trigger_label.to_string()];
-    let body = build_seed_body(owner_login);
+    let body = build_seed_body(packages, owner_login);
     for owner_repo in repos {
         match github
             .open_issues_with_label(owner_repo, trigger_label)

@@ -313,10 +313,17 @@ fn maybe_seed_trigger_issues(state: &AppState, owner_login: &str, repos: &[RepoO
         return;
     }
     let label = state.config.reconcile.substrate_trigger_label.clone();
+    let packages = state.config.reconcile.seed_packages.clone();
     let owner = owner_login.to_string();
     tokio::spawn(async move {
-        crate::reconcile::seed_issue::seed_trigger_issues(&github, &label, &owner, &owner_repos)
-            .await;
+        crate::reconcile::seed_issue::seed_trigger_issues(
+            &github,
+            &label,
+            &packages,
+            &owner,
+            &owner_repos,
+        )
+        .await;
     });
 }
 
