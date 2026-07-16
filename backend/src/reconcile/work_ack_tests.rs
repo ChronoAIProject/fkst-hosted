@@ -234,7 +234,7 @@ fn registration(name: &str, work_label: &str) -> SessionRegistration {
         def: SessionDef {
             name: name.to_string(),
             packages: Vec::new(),
-            work_label: work_label.to_string(),
+            work_label: Some(work_label.to_string()),
             environment: None,
             output_lang: None,
             engine_config: std::collections::BTreeMap::new(),

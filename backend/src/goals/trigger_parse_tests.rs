@@ -72,7 +72,7 @@ prod-env
                     path: "pkg/thing".to_string(),
                 },
             ],
-            work_label: "fkst-cloud".to_string(),
+            work_label: Some("fkst-cloud".to_string()),
             environment: Some("prod-env".to_string()),
             auto_merge: false,
             log_access: vec![],
@@ -350,11 +350,15 @@ fn package_ref_illegal_space_char_is_422_naming_the_value() {
 // ---- Work Label (each names the offending section in the 422) ----
 
 #[test]
-fn missing_work_label_is_422_naming_the_section() {
-    let msg = err_message(&format!(
+fn missing_work_label_is_optional_and_parses_to_none() {
+    // The `### Work Label` section is OPTIONAL since auto-discovery: absent → the
+    // trigger parses with `work_label: None` (wake labels come from the packages'
+    // `[github].work_labels`). (Previously this was a 422.)
+    let spec = parse_trigger_issue_body(&format!(
         "### Session Name\nsess\n### Packages\n{VALID_PKG}\n"
-    ));
-    assert!(msg.contains("Work Label"), "must name the section: {msg}");
+    ))
+    .expect("a trigger with no Work Label section is valid");
+    assert_eq!(spec.work_label, None);
 }
 
 #[test]
@@ -505,7 +509,7 @@ fn the_full_pristine_bundled_template_parses_with_its_sample_values() {
     let body = include_str!("../github_app/templates_assets/fkst-substrate-session.md");
     let spec = parse_trigger_issue_body(body).expect("the pristine template must parse");
     assert_eq!(spec.name, "my-first-session");
-    assert_eq!(spec.work_label, "fkst-work");
+    assert_eq!(spec.work_label.as_deref(), Some("fkst-work"));
     assert_eq!(spec.packages.len(), 1);
     assert_eq!(spec.packages[0].repo, "fkst-packages");
     assert_eq!(spec.environment, None, "comment-only section is unset");
@@ -535,7 +539,7 @@ staging
     let spec = parse_trigger_issue_body(body).expect("comment + value parses");
     assert_eq!(spec.name, "sess");
     assert_eq!(spec.packages.len(), 1);
-    assert_eq!(spec.work_label, "label");
+    assert_eq!(spec.work_label.as_deref(), Some("label"));
     assert_eq!(spec.environment.as_deref(), Some("staging"));
 }
 
@@ -601,4 +605,22 @@ fn fkst_contributors_and_legacy_sections_merge_deduped() {
         spec.log_access,
         vec!["alice".to_string(), "Bob".to_string(), "carol".to_string()]
     );
+}
+
+#[test]
+fn work_label_section_is_optional() {
+    // Absent `### Work Label` → None (labels auto-discovered from packages).
+    let body = "### Session Name\nsess\n### Packages\no/r@dev:pkg\n";
+    let spec = parse_trigger_issue_body(body).expect("no Work Label section is valid");
+    assert_eq!(spec.work_label, None);
+
+    // Present-but-blank section is also None, not a 422.
+    let blank = "### Session Name\nsess\n### Packages\no/r@dev:pkg\n### Work Label\n\n";
+    let spec = parse_trigger_issue_body(blank).expect("blank Work Label is valid");
+    assert_eq!(spec.work_label, None);
+
+    // Present + named still parses to Some.
+    let named = "### Session Name\nsess\n### Packages\no/r@dev:pkg\n### Work Label\nfkst-x\n";
+    let spec = parse_trigger_issue_body(named).expect("named Work Label is valid");
+    assert_eq!(spec.work_label.as_deref(), Some("fkst-x"));
 }

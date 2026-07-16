@@ -233,7 +233,7 @@ pub(super) fn registration() -> SessionRegistration {
                     path: "packages/proxy".to_string(),
                 },
             ],
-            work_label: "fkst-run".to_string(),
+            work_label: Some("fkst-run".to_string()),
             environment: None,
             output_lang: None,
             engine_config: std::collections::BTreeMap::new(),

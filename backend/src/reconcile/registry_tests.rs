@@ -59,7 +59,7 @@ fn valid_body_yields_a_registration() {
             path: "pkg/demo".to_string(),
         }]
     );
-    assert_eq!(reg.def.work_label, "fkst-demo");
+    assert_eq!(reg.def.work_label.as_deref(), Some("fkst-demo"));
     assert_eq!(reg.def.environment, None);
     assert!(!reg.auto_merge, "a body with no Auto-merge section is off");
     assert!(
@@ -72,7 +72,7 @@ fn valid_body_yields_a_registration() {
     assert_eq!(reg.session_id, want_id);
     let want_hash = config_hash(
         &reg.def.packages,
-        &reg.def.work_label,
+        reg.def.work_label.as_deref(),
         None,
         None,
         &reg.def.engine_config,
@@ -110,7 +110,7 @@ fn environment_section_is_captured() {
         reg.config_hash,
         config_hash(
             &reg.def.packages,
-            &reg.def.work_label,
+            reg.def.work_label.as_deref(),
             Some("staging"),
             None,
             &reg.def.engine_config

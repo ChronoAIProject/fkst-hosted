@@ -23,7 +23,7 @@ fn base_reg() -> SessionRegistration {
         def: SessionDef {
             name: "sess".to_string(),
             packages: vec![pkg("acme", "tools", "main", "pkg/a")],
-            work_label: "wl".to_string(),
+            work_label: Some("wl".to_string()),
             environment: Some("env".to_string()),
             output_lang: None,
             engine_config: std::collections::BTreeMap::new(),
@@ -61,7 +61,7 @@ fn full_config_hash_changes_with_each_config_field() {
 
     // work_label
     let mut reg = base_reg();
-    reg.def.work_label = "other".to_string();
+    reg.def.work_label = Some("other".to_string());
     assert_ne!(
         base,
         full_config_hash(&reg),
@@ -146,7 +146,7 @@ fn full_config_hash_is_a_strict_superset_of_config_hash() {
     let base = base_reg();
     let base_config = config_hash(
         &base.def.packages,
-        &base.def.work_label,
+        base.def.work_label.as_deref(),
         base.def.environment.as_deref(),
         base.def.output_lang.as_deref(),
         &base.def.engine_config,
@@ -157,7 +157,7 @@ fn full_config_hash_is_a_strict_superset_of_config_hash() {
     toggled.auto_merge = true;
     let toggled_config = config_hash(
         &toggled.def.packages,
-        &toggled.def.work_label,
+        toggled.def.work_label.as_deref(),
         toggled.def.environment.as_deref(),
         toggled.def.output_lang.as_deref(),
         &toggled.def.engine_config,

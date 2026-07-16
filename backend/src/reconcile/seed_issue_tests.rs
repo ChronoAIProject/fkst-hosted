@@ -95,7 +95,7 @@ fn seed_body_round_trips_through_the_real_trigger_parser() {
     let spec = parse_trigger_issue_body(&build_seed_body(&default_pkgs, "octo-owner"))
         .expect("seed body is a valid trigger issue");
     assert_eq!(spec.name, "evolve");
-    assert_eq!(spec.work_label, "fkst-evolve");
+    assert_eq!(spec.work_label.as_deref(), Some("fkst-evolve"));
     assert!(spec.auto_merge, "seed sets auto-merge on");
     assert_eq!(spec.log_access, vec!["octo-owner".to_string()]);
     assert_eq!(spec.packages.len(), 1);

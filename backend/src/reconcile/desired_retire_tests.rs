@@ -42,7 +42,7 @@ fn orphan_live_pod_with_work_label_also_retires_its_work_issues() {
                     reason: KillReason::TriggerClosed,
                 },
                 ReconcileAction::RetireWorkIssues {
-                    work_label: "fkst-run".to_string(),
+                    work_label: Some("fkst-run".to_string()),
                 },
             ],
             "orphan {liveness:?} pod with a work label must Kill + RetireWorkIssues"

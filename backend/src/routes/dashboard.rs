@@ -149,7 +149,7 @@ fn build_session(
     SessionGroup {
         session_id: Some(reg.session_id.clone()),
         name: Some(reg.def.name.clone()),
-        work_label: Some(reg.def.work_label.clone()),
+        work_label: reg.def.work_label.clone(),
         auto_merge: Some(reg.auto_merge),
         environment: reg.def.environment.clone(),
         packages: reg
@@ -784,9 +784,13 @@ async fn scan_repo_sessions(
     for trigger in &triggers {
         match parse_registration(installation_id, repo, trigger) {
             Ok(reg) => {
-                let work = gh
-                    .issues_by_label_all(&inst_token, &repo.owner, &repo.name, &reg.def.work_label)
-                    .await?;
+                let work = match reg.def.work_label.as_deref() {
+                    Some(work_label) => {
+                        gh.issues_by_label_all(&inst_token, &repo.owner, &repo.name, work_label)
+                            .await?
+                    }
+                    None => Vec::new(),
+                };
                 sessions.push(build_session(trigger, &reg, work));
             }
             Err((_, reason)) => sessions.push(build_invalid_session(trigger, reason)),

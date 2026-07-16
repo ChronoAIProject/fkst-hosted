@@ -43,7 +43,7 @@ pub(super) fn reg(session_id: &str, trigger_issue: i64, config_hash: &str) -> Se
         def: SessionDef {
             name: "demo".to_string(),
             packages: vec![],
-            work_label: "wl".to_string(),
+            work_label: Some("wl".to_string()),
             environment: None,
             output_lang: None,
             engine_config: std::collections::BTreeMap::new(),

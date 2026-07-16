@@ -90,7 +90,11 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
         ReconcileAction::Kill { session_id, reason } => kill(&session_id, reason, ctx).await,
         ReconcileAction::CleanupTerminal { session_id } => cleanup_terminal(&session_id, ctx).await,
         ReconcileAction::RetireWorkIssues { work_label } => {
-            retire_work_issues(&ctx.github, ctx.listing.as_ref(), repo, &work_label).await
+            // Only an explicit work label has trigger-side work issues to retire;
+            // a label-less session has none to notify.
+            if let Some(work_label) = work_label {
+                retire_work_issues(&ctx.github, ctx.listing.as_ref(), repo, &work_label).await
+            }
         }
         ReconcileAction::FlagInvalid {
             trigger_issue,
@@ -126,7 +130,7 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
                 });
             let comment = announce_session_comment(
                 &session_name,
-                &work_label,
+                work_label.as_deref(),
                 &packages,
                 environment.as_deref(),
                 auto_merge,
@@ -258,7 +262,7 @@ fn session_pod_spec_from(reg: &SessionRegistration, bot_login: Option<String>) -
             .iter()
             .map(reachability::render_ref)
             .collect(),
-        work_label: reg.def.work_label.clone(),
+        work_label: reg.def.work_label.clone().unwrap_or_default(),
         bot_login: bot_login.unwrap_or_default(),
         config_hash: reg.config_hash.clone(),
         output_lang: reg.def.output_lang.clone(),

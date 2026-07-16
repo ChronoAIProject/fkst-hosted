@@ -206,7 +206,9 @@ pub async fn reconcile_repo(
             }
         };
         let mut labels: std::collections::BTreeSet<String> = discovered;
-        labels.insert(reg.def.work_label.clone());
+        if let Some(wl) = &reg.def.work_label {
+            labels.insert(wl.clone());
+        }
         let labels: Vec<String> = labels.into_iter().collect();
         let is_pending = gate.has_pending(installation_id, repo, &labels).await?;
         pending.insert(reg.session_id.clone(), is_pending);
