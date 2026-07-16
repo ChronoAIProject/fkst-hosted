@@ -1,5 +1,5 @@
 {
-  "artifact_sha256": "08041eae087a165649d8e1cfb0035dad7bc43f8a9cdb831b965782d6bbb2130e",
+  "artifact_sha256": "f7ee6a4be9f6ce67ca2caae2955eba5b463c1e5697538bb75cf7a0ad91e05b3d",
   "consumer_entry_acceptors": [
     {
       "ordinal": "consumes:consensus.consensus_converge",
@@ -93,6 +93,320 @@
     }
   ],
   "old_behavior_observations": [
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-constructor-call",
+          "ref": "devloop.payloads.builders.build_devloop_ready_payload"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        },
+        {
+          "kind": "production-callsite",
+          "ref": "packages/github-devloop/departments/observe_issue/main.lua:551"
+        }
+      ],
+      "observation_id": "ctor:github-devloop:observe-issue-ready/blocked-implementing-timeout-without-pr",
+      "old_inputs": {
+        "caller_from_states": [
+          "blocked"
+        ],
+        "current_fact": {
+          "stage_rank": 800,
+          "state": "blocked",
+          "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/timeout-reconcile/implementing/3"
+        },
+        "handoff_reference": {
+          "command": "reimplement",
+          "from_state": "blocked",
+          "impl_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "state_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/timeout-reconcile/implementing/3",
+          "terminal_reason": "implementing-timeout-without-pr",
+          "timeout_round": 3
+        },
+        "incoming_version": "consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+        "target_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+      },
+      "old_outcome": {
+        "cas_outcome": "not-applicable-direct-constructor",
+        "emitted_effects": [
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "queue:devloop_ready",
+            "ordinal": 1,
+            "sink_kind": "queue"
+          }
+        ],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [
+          {
+            "effect_id": "queue:devloop_ready",
+            "payload": {
+              "dedup_key": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+              "impl_retry_attempt": 2,
+              "operator_reentry": {
+                "command": "reimplement",
+                "from_state": "blocked",
+                "impl_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+                "state_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/timeout-reconcile/implementing/3",
+                "terminal_reason": "implementing-timeout-without-pr",
+                "timeout_round": 3
+              },
+              "proposal_id": "github-devloop/issue/owner/repo/42",
+              "schema": "github-devloop.ready.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#issue/42"
+              }
+            },
+            "queue": "devloop_ready"
+          }
+        ],
+        "reason_code": "operator-reimplement-blocked-implementing-timeout-without-pr",
+        "status": "constructed",
+        "timeout_evidence_source": "trusted-timeout-reconcile-marker"
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "build_devloop_ready_payload",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/timeout-reconcile/implementing/3",
+          "impl_retry_attempt": 2,
+          "payload_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "source_version": "consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+        },
+        "kind": "direct_constructor",
+        "lineage": {
+          "issue_number": 42,
+          "operator_reentry": {
+            "command": "reimplement",
+            "from_state": "blocked",
+            "impl_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+            "state_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/timeout-reconcile/implementing/3",
+            "terminal_reason": "implementing-timeout-without-pr",
+            "timeout_round": 3
+          },
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": "blocked",
+        "target": "devloop_ready"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-constructor-call",
+          "ref": "devloop.payloads.builders.build_devloop_ready_payload"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        },
+        {
+          "kind": "production-callsite",
+          "ref": "packages/github-devloop/departments/observe_issue/main.lua:551"
+        }
+      ],
+      "observation_id": "ctor:github-devloop:observe-issue-ready/blocked-open-pr",
+      "old_inputs": {
+        "caller_from_states": [
+          "blocked"
+        ],
+        "current_fact": {
+          "stage_rank": 800,
+          "state": "blocked",
+          "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/3"
+        },
+        "handoff_reference": {
+          "command": "reimplement",
+          "from_state": "blocked",
+          "impl_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "pr_number": 7,
+          "state_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/3"
+        },
+        "incoming_version": "consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+        "target_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+      },
+      "old_outcome": {
+        "cas_outcome": "not-applicable-direct-constructor",
+        "emitted_effects": [
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "queue:devloop_ready",
+            "ordinal": 1,
+            "sink_kind": "queue"
+          }
+        ],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [
+          {
+            "effect_id": "queue:devloop_ready",
+            "payload": {
+              "dedup_key": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+              "impl_retry_attempt": 2,
+              "operator_reentry": {
+                "command": "reimplement",
+                "from_state": "blocked",
+                "impl_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+                "pr_number": 7,
+                "state_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/3"
+              },
+              "proposal_id": "github-devloop/issue/owner/repo/42",
+              "schema": "github-devloop.ready.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#issue/42"
+              }
+            },
+            "queue": "devloop_ready"
+          }
+        ],
+        "reason_code": "operator-reimplement-blocked-open-pr",
+        "status": "constructed",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "build_devloop_ready_payload",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/3",
+          "impl_retry_attempt": 2,
+          "payload_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "source_version": "consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+        },
+        "kind": "direct_constructor",
+        "lineage": {
+          "issue_number": 42,
+          "operator_reentry": {
+            "command": "reimplement",
+            "from_state": "blocked",
+            "impl_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+            "pr_number": 7,
+            "state_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/3"
+          },
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": "blocked",
+        "target": "devloop_ready"
+      }
+    },
+    {
+      "boundary": "writer",
+      "evidence_refs": [
+        {
+          "kind": "runtime-constructor-call",
+          "ref": "devloop.payloads.builders.build_devloop_ready_payload"
+        },
+        {
+          "kind": "runtime-event-source",
+          "ref": "owner/repo#issue/42"
+        },
+        {
+          "kind": "production-callsite",
+          "ref": "packages/github-devloop/departments/observe_issue/main.lua:551"
+        }
+      ],
+      "observation_id": "ctor:github-devloop:observe-issue-ready/impl-failed",
+      "old_inputs": {
+        "caller_from_states": [
+          "impl-failed"
+        ],
+        "current_fact": {
+          "stage_rank": 750,
+          "state": "impl-failed",
+          "version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+        },
+        "handoff_reference": null,
+        "incoming_version": "consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+        "target_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+      },
+      "old_outcome": {
+        "cas_outcome": "not-applicable-direct-constructor",
+        "emitted_effects": [
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "queue:devloop_ready",
+            "ordinal": 1,
+            "sink_kind": "queue"
+          }
+        ],
+        "handoff_direct_lookup_count": 0,
+        "observable_writes": [
+          {
+            "effect_id": "queue:devloop_ready",
+            "payload": {
+              "dedup_key": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+              "impl_retry_attempt": 3,
+              "proposal_id": "github-devloop/issue/owner/repo/42",
+              "schema": "github-devloop.ready.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#issue/42"
+              }
+            },
+            "queue": "devloop_ready"
+          }
+        ],
+        "reason_code": "operator-reimplement-impl-failed",
+        "status": "constructed",
+        "timeout_evidence_source": null
+      },
+      "owner": "github-devloop",
+      "schema": "restart-old-behavior-observation.v2",
+      "site": {
+        "ordinal": "build_devloop_ready_payload",
+        "path": "packages/github-devloop/departments/observe_issue/main.lua",
+        "symbol": "process_issue_event"
+      },
+      "typed_intent": {
+        "cause_schema_id": "github-proxy.v1",
+        "generation_epoch": {
+          "current_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "impl_retry_attempt": 3,
+          "payload_version": "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+          "source_version": "consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+        },
+        "kind": "direct_constructor",
+        "lineage": {
+          "issue_number": 42,
+          "operator_reentry": null,
+          "proposal_id": "github-devloop/issue/owner/repo/42",
+          "source_ref": {
+            "kind": "external",
+            "ref": "owner/repo#issue/42"
+          }
+        },
+        "source_boundary": "github-proxy.github_entity_changed",
+        "source_state": "impl-failed",
+        "target": "devloop_ready"
+      }
+    },
     {
       "boundary": "writer",
       "evidence_refs": [
@@ -15929,14 +16243,6 @@
       "path": "packages/github-devloop/departments/execute_start/main.lua",
       "site_id": "ctor:github-devloop:execute-start-proposal",
       "symbol": "pipeline",
-      "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
-    },
-    {
-      "category": "direct_constructor_sites",
-      "ordinal": "build_devloop_ready_payload",
-      "path": "packages/github-devloop/departments/observe_issue/main.lua",
-      "site_id": "ctor:github-devloop:observe-issue-ready",
-      "symbol": "process_issue_event",
       "why": "Enumerated from OLD live code or OLD sink inventory; not yet captured as a fully observed OLD behavior record in increment 1."
     },
     {
