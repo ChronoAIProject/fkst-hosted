@@ -1,10 +1,16 @@
+import { lazy, Suspense } from 'react';
 import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
 import { Shell } from './shell';
 import { Introduction } from '../pages/introduction';
 import { GetStarted } from '../pages/get-started';
-import { Dashboard } from '../pages/dashboard';
 import { LanguageProvider } from '../i18n';
 import { AuthProvider } from '../lib/auth/github-auth';
+
+// The dashboard carries the canvas stack (React Flow, recharts,
+// framer-motion) — lazy-load it so the docs pages stay a light bundle.
+const Dashboard = lazy(() =>
+  import('../pages/dashboard').then((m) => ({ default: m.Dashboard }))
+);
 
 // Vite injects BASE_URL from `base` at build time: '/' for dev/preview, and
 // '/fkst-hosted/' for the GitHub Pages build. Deriving the router basename from
@@ -22,7 +28,14 @@ const router = createBrowserRouter(
       children: [
         { path: '', element: <Introduction /> },
         { path: 'get-started', element: <GetStarted /> },
-        { path: 'dashboard', element: <Dashboard /> },
+        {
+          path: 'dashboard',
+          element: (
+            <Suspense fallback={null}>
+              <Dashboard />
+            </Suspense>
+          ),
+        },
         // Unknown paths fall back to the landing page.
         { path: '*', element: <Navigate to="/" replace /> },
       ],
