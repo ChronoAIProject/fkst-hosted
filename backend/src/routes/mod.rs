@@ -1,6 +1,9 @@
 //! HTTP route handlers.
 
 pub mod auth;
+// The canvas dashboard's live REST surface: whole-account overview + per-repo
+// session detail/create/stop, all computed from live GitHub reads (stateless).
+pub mod canvas;
 pub mod dashboard;
 pub mod environments;
 pub mod github_app_webhook;
