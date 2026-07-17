@@ -134,7 +134,11 @@ async fn close_linked_issue(github: &GithubAppTokens, owner_repo: &str, pr: &Pul
 ///   a numeric owner/repo cannot be mistaken for it.
 /// - Title: `… implementation for #<N>` / `… implementation PR for issue #<N>` — the
 ///   first `#<digits>` run.
-fn linked_issue_number(branch: &str, title: &str) -> Option<u64> {
+///
+/// `pub(crate)`: this is THE devloop PR→work-issue parse — the canvas dashboard's
+/// PR listing (`crate::routes::canvas`) reuses it to link a bot PR back to its
+/// work issue, so the grammar lives in exactly one place.
+pub(crate) fn linked_issue_number(branch: &str, title: &str) -> Option<u64> {
     issue_number_from_branch(branch).or_else(|| issue_number_from_title(title))
 }
 
