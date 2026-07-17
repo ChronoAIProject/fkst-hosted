@@ -62,17 +62,6 @@ export interface SiteContent {
     signInBody: string;
     notConfigured: string;
     authError: string;
-    update: string;
-    updating: string;
-    updatesNote: string;
-    lastUpdated: string;
-    never: string;
-    updateFailed: string;
-    firstVisitTitle: string;
-    firstVisitBody: string;
-    loadingTitle: string;
-    reposScanned: string;
-    noRepos: string;
     noSessions: string;
     installed: string;
     workLabel: string;
@@ -182,11 +171,8 @@ export interface SiteContent {
       createFailed: string;
     };
     repos: {
-      title: string;
       refresh: string;
-      loading: string;
       loadFailed: string;
-      empty: string;
       private: string;
       public: string;
       org: string;
@@ -202,9 +188,6 @@ export interface SiteContent {
       groupCounts: string;
       /** Body line for a group (org creation target) with no repositories. */
       groupEmpty: string;
-      searchPlaceholder: string;
-      /** One-line empty state when a search matches nothing. */
-      searchEmpty: string;
       /** "New repository" button in the section header. */
       newRepo: string;
       createTitle: string;
@@ -242,13 +225,6 @@ export interface SiteContent {
       uninstallPending: string;
       /** Generic uninstall failure (no server message available). */
       uninstallFailed: string;
-      /** Per-repo action removing it from a selected-mode installation. */
-      /** Remove confirm dialog title; `{repo}` placeholder. */
-      /** Remove confirm dialog body; `{repo}` placeholder. */
-      /** Remove confirm dialog: explicit confirm button. */
-      /** Remove confirm button while the DELETE is in flight. */
-      /** Generic remove failure (no server message available). */
-      /** Title hint on Installed rows of an all-repositories installation. */
     };
   };
   intro: {
