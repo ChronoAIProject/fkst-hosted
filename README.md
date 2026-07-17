@@ -32,5 +32,5 @@ authentication, the permissions it requires, and its request/response shapes.
 
 ---
 
-<sub>Deploying fkst-hosted? See the full local Kubernetes setup guide:
-[`opensandbox-developer-guide.md`](opensandbox-developer-guide.md).</sub>
+<sub>Deploying fkst-hosted? See the **FKST Local Deployment Guide** section in
+[`CLAUDE.md`](CLAUDE.md#fkst-local-deployment-guide).</sub>

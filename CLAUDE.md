@@ -49,14 +49,15 @@ fkst-hosted integrates with the following ChronoAI platform services. When doing
 
 ## FKST Local Deployment Guide
 
-> The complete local deployment guide, embedded in full below. A standalone
-> copy lives at `opensandbox-developer-guide.md` (referenced by the READMEs) —
-> **any edit must update both copies identically.** The guide must stay safe
-> for public distribution: no internal/production identifiers (private repo
-> URLs, real domains, registry paths, cluster/project names, real App/user
-> IDs) — only `<placeholders>` and `127.0.0.1` port-forward addresses. The
-> `chronoai-fkst` / `fkst-*` / `opensandbox-*` namespace and resource names are
-> the stack's functional naming convention, deliberately kept.
+> The complete local deployment guide, embedded in full below. **This is the
+> single source of truth** — there is no standalone copy (the former
+> `opensandbox-developer-guide.md` was deleted; the READMEs and code comments
+> link here). The guide must stay safe for public distribution: no
+> internal/production identifiers (private repo URLs, real domains, registry
+> paths, cluster/project names, real App/user IDs) — only `<placeholders>` and
+> `127.0.0.1` port-forward addresses. The `chronoai-fkst` / `fkst-*` /
+> `opensandbox-*` namespace and resource names are the stack's functional
+> naming convention, deliberately kept.
 
 This guide walks a new developer, step by step, through standing up a **complete
 fkst stack on a local Kubernetes cluster** (on your laptop): the OpenSandbox
@@ -1797,7 +1798,7 @@ A running session's devloop works the repo's open work-label issues **in paralle
 
 - Stay within the user-facing/public-interface scope; never touch the kernel engine.
 - The control plane serves a dynamic OpenAPI 3 spec at `/openapi.json` (no static file). New/changed public endpoints MUST be annotated with `#[utoipa::path]` + `ToSchema`/`IntoParams` and registered via `OpenApiRouter`/`routes!`; pin `utoipa-axum` to `0.1` (axum 0.7). See **API Contract (OpenAPI)**.
-- The fkst deployables run exclusively on Kubernetes — the full local setup is embedded above in **FKST Local Deployment Guide** (standalone copy: `opensandbox-developer-guide.md`; keep both in sync); `docker-compose` is not used in this repo.
+- The fkst deployables run exclusively on Kubernetes — the full local setup is embedded above in **FKST Local Deployment Guide** (the single source of truth; there is no standalone copy); `docker-compose` is not used in this repo.
 - Each deployment needs its own GitHub App registration — permissions, OAuth callbacks, and env-var mapping are in **GitHub App Guide**; never set `FKST_GITHUB_OAUTH_CLIENT_ID` without its client secret, never commit App secrets.
 - Treat the upstream engine and packages repos as read-only references.
 - When filing work issues for a substrate session, **wave the backlog by dependency** (merge foundation before dependent issues), one feature per issue; an open work issue keeps the session's pod alive until closed/merged; never share a work label between two trigger issues in one repo. See **Authoring work issues for a substrate session**.
