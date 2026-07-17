@@ -1,6 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { Eyebrow } from '@/components/layout/eyebrow';
+import { Chip } from '@/components/ui/chip';
+import { FIELD_INPUT } from '@/components/ui/field';
+import { ConfirmDialog } from '@/components/modals/confirm-dialog';
+import { CreateRepoModal } from '@/components/modals/create-repo-modal';
+import type { UserRepo } from '@/components/modals/create-repo-modal';
 import { useContent, useLang } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
 
@@ -48,15 +53,6 @@ interface PullJob {
   total: number;
   error?: string | null;
 }
-interface UserRepo {
-  id: number;
-  owner: string;
-  name: string;
-  private: boolean;
-  org: boolean;
-  admin: boolean;
-  installed: boolean;
-}
 interface InstallationView {
   account: string;
   installation_id: number;
@@ -69,13 +65,6 @@ interface UserReposResponse {
   installations: InstallationView[];
   repos: UserRepo[];
 }
-interface CreateRepoBody {
-  owner: string | null;
-  name: string;
-  private: boolean;
-  description?: string;
-}
-
 type DashboardContent = ReturnType<typeof useContent>['dashboard'];
 type ReposContent = DashboardContent['repos'];
 
@@ -96,27 +85,6 @@ export function formatSgt(ms: number, lang: 'en' | 'zh'): string {
 const delay = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
 
 // ---- Small presentational pieces -------------------------------------------
-
-function Chip({
-  children,
-  tone = 'neutral',
-}: {
-  children: React.ReactNode;
-  tone?: 'neutral' | 'amber' | 'green';
-}) {
-  return (
-    <span
-      className={cn(
-        'font-mono text-[10.5px] px-1.5 py-0.5 rounded-chip border',
-        tone === 'amber' && 'text-amber border-[color-mix(in_oklab,var(--amber)_40%,var(--line))]',
-        tone === 'green' && 'text-green border-[color-mix(in_oklab,var(--green)_40%,var(--line))]',
-        tone === 'neutral' && 'text-ghost border-line-2'
-      )}
-    >
-      {children}
-    </span>
-  );
-}
 
 function IssueRow({
   issue,
@@ -305,300 +273,6 @@ function buildGroups(viewerLogin: string, orgs: string[], repos: UserRepo[]): Re
   ];
 }
 
-/** Client-side mirror of GitHub's allowed repository-name characters. */
-const REPO_NAME_RE = /^[A-Za-z0-9._-]+$/;
-
-const FIELD_LABEL = 'font-mono text-eyebrow text-ghost uppercase';
-const FIELD_INPUT =
-  'w-full bg-bg border border-line rounded-control px-3 py-2 font-ui text-[13px] text-fg placeholder:text-ghost transition-colors focus:border-line-2';
-
-function CreateRepoModal({
-  viewerLogin,
-  orgs,
-  rc,
-  onClose,
-  onCreated,
-}: {
-  viewerLogin: string;
-  orgs: string[];
-  rc: ReposContent;
-  onClose: () => void;
-  onCreated: (repo: UserRepo) => void;
-}) {
-  const { apiFetch } = useAuth();
-  const [owner, setOwner] = useState(viewerLogin);
-  const [name, setName] = useState('');
-  const [priv, setPriv] = useState(true);
-  const [description, setDescription] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [serverError, setServerError] = useState<string | null>(null);
-
-  // Close on Escape (the Cancel button is the pointer path).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  const nameValid = REPO_NAME_RE.test(name);
-
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!nameValid || creating) return;
-    setCreating(true);
-    setServerError(null);
-    try {
-      const body: CreateRepoBody = {
-        owner: owner === viewerLogin ? null : owner,
-        name,
-        private: priv,
-      };
-      const desc = description.trim();
-      if (desc) body.description = desc;
-      const res = await apiFetch('/api/v1/repos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (res.ok) {
-        onCreated((await res.json()) as UserRepo);
-        return;
-      }
-      // Error envelope: {"error", "message"} — surface `message` verbatim.
-      let message = rc.createFailed;
-      try {
-        const envelope = (await res.json()) as { message?: unknown };
-        if (typeof envelope?.message === 'string' && envelope.message) message = envelope.message;
-      } catch {
-        /* non-JSON error body — keep the generic message */
-      }
-      setServerError(message);
-    } catch {
-      setServerError(rc.createFailed);
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  return (
-    <div className="anim-overlay-in fixed inset-0 z-50 flex items-center justify-center p-4 bg-[color-mix(in_oklab,var(--bg)_72%,transparent)]">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="create-repo-title"
-        className="anim-modal-in w-full max-w-[460px] border border-line rounded-modal bg-raise shadow-modal-seat p-6 max-[600px]:p-5"
-      >
-        <form onSubmit={onSubmit} className="flex flex-col gap-4">
-          <h3 id="create-repo-title" className="font-display font-semibold text-modal-title text-fg">
-            {rc.createTitle}
-          </h3>
-
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="create-repo-owner" className={FIELD_LABEL}>
-              {rc.ownerLabel}
-            </label>
-            <select
-              id="create-repo-owner"
-              value={owner}
-              onChange={(e) => setOwner(e.target.value)}
-              className={cn(FIELD_INPUT, 'cursor-pointer')}
-            >
-              <option value={viewerLogin}>{rc.ownerPersonal.replace('{login}', viewerLogin)}</option>
-              {orgs.map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="create-repo-name" className={FIELD_LABEL}>
-              {rc.nameLabel}
-            </label>
-            <input
-              id="create-repo-name"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              spellCheck={false}
-              autoComplete="off"
-              className={cn(FIELD_INPUT, 'font-mono', name !== '' && !nameValid && 'border-red')}
-            />
-            <p className={cn('font-mono text-[11px]', name !== '' && !nameValid ? 'text-red' : 'text-ghost')}>
-              {rc.nameHint}
-            </p>
-          </div>
-
-          <label className="flex items-center gap-2 text-[13px] text-fg cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={priv}
-              onChange={(e) => setPriv(e.target.checked)}
-              className="w-3.5 h-3.5 accent-amber"
-            />
-            {rc.privateLabel}
-          </label>
-
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="create-repo-description" className={FIELD_LABEL}>
-              {rc.descriptionLabel}
-            </label>
-            <input
-              id="create-repo-description"
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              autoComplete="off"
-              className={FIELD_INPUT}
-            />
-          </div>
-
-          {serverError && (
-            <p className="border border-line border-l-2 border-l-red rounded-card bg-[color-mix(in_oklab,var(--raise-2)_70%,transparent)] px-3 py-2 text-[12.5px] text-dim">
-              {serverError}
-            </p>
-          )}
-
-          <div className="flex items-center justify-end gap-2 pt-1">
-            <button
-              type="button"
-              onClick={onClose}
-              className="font-ui font-semibold text-[12.5px] border border-line rounded-control px-4 py-2 text-dim hover:text-fg transition-colors cursor-pointer"
-            >
-              {rc.cancel}
-            </button>
-            <button
-              type="submit"
-              disabled={!nameValid || creating}
-              className={cn(
-                'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-colors',
-                !nameValid || creating
-                  ? 'bg-amber/50 text-amber-ink/60 cursor-not-allowed'
-                  : 'bg-amber text-amber-ink hover:brightness-[1.06] cursor-pointer'
-              )}
-            >
-              {creating ? rc.creating : rc.submit}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-/** Danger confirmation dialog: issues a DELETE to `path` on confirm; on a
- *  non-2xx answer the error envelope's `message` is shown inside the dialog. */
-function ConfirmDialog({
-  title,
-  body,
-  confirmLabel,
-  pendingLabel,
-  cancelLabel,
-  path,
-  fallbackError,
-  onClose,
-  onDone,
-}: {
-  title: string;
-  body: string;
-  confirmLabel: string;
-  pendingLabel: string;
-  cancelLabel: string;
-  /** DELETE target, e.g. `/api/v1/installations/{owner}`. */
-  path: string;
-  fallbackError: string;
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const { apiFetch } = useAuth();
-  const [pending, setPending] = useState(false);
-  const [serverError, setServerError] = useState<string | null>(null);
-
-  // Close on Escape (the Cancel button is the pointer path).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  const onConfirm = async () => {
-    if (pending) return;
-    setPending(true);
-    setServerError(null);
-    try {
-      const res = await apiFetch(path, { method: 'DELETE' });
-      if (res.ok) {
-        onDone();
-        return;
-      }
-      // Error envelope: {"error", "message"} — surface `message` verbatim.
-      let message = fallbackError;
-      try {
-        const envelope = (await res.json()) as { message?: unknown };
-        if (typeof envelope?.message === 'string' && envelope.message) message = envelope.message;
-      } catch {
-        /* non-JSON error body — keep the generic message */
-      }
-      setServerError(message);
-    } catch {
-      setServerError(fallbackError);
-    } finally {
-      setPending(false);
-    }
-  };
-
-  return (
-    <div className="anim-overlay-in fixed inset-0 z-50 flex items-center justify-center p-4 bg-[color-mix(in_oklab,var(--bg)_72%,transparent)]">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="confirm-dialog-title"
-        className="anim-modal-in w-full max-w-[460px] border border-line rounded-modal bg-raise shadow-modal-seat p-6 max-[600px]:p-5"
-      >
-        <div className="flex flex-col gap-4">
-          <h3 id="confirm-dialog-title" className="font-display font-semibold text-modal-title text-fg">
-            {title}
-          </h3>
-          <p className="text-[13.5px] leading-relaxed text-dim">{body}</p>
-
-          {serverError && (
-            <p className="border border-line border-l-2 border-l-red rounded-card bg-[color-mix(in_oklab,var(--raise-2)_70%,transparent)] px-3 py-2 text-[12.5px] text-dim">
-              {serverError}
-            </p>
-          )}
-
-          <div className="flex items-center justify-end gap-2 pt-1">
-            <button
-              type="button"
-              onClick={onClose}
-              className="font-ui font-semibold text-[12.5px] border border-line rounded-control px-4 py-2 text-dim hover:text-fg transition-colors cursor-pointer"
-            >
-              {cancelLabel}
-            </button>
-            <button
-              type="button"
-              onClick={onConfirm}
-              disabled={pending}
-              className={cn(
-                'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-colors',
-                pending
-                  ? 'bg-red/50 text-white/60 cursor-not-allowed'
-                  : 'bg-red text-white hover:brightness-[1.06] cursor-pointer'
-              )}
-            >
-              {pending ? pendingLabel : confirmLabel}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /** Pending danger action driving the shared ConfirmDialog. */
 type ConfirmTarget = { kind: 'uninstall'; owner: string };

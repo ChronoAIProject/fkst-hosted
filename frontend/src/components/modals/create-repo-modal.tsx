@@ -1,0 +1,183 @@
+import { useState } from 'react';
+import type React from 'react';
+import { cn } from '@/lib/utils';
+import { useAuth } from '@/lib/auth/github-auth';
+import { readErrorMessage } from '@/lib/api/canvas';
+import type { SiteContent } from '@/i18n';
+import { ModalShell } from './modal-shell';
+import { ErrorNote } from '@/components/ui/error-note';
+import { FIELD_INPUT, FIELD_LABEL } from '@/components/ui/field';
+
+type ReposContent = SiteContent['dashboard']['repos'];
+
+/** The wire shape of a repo row from POST /api/v1/repos. */
+export interface UserRepo {
+  id: number;
+  owner: string;
+  name: string;
+  private: boolean;
+  org: boolean;
+  admin: boolean;
+  installed: boolean;
+}
+
+interface CreateRepoBody {
+  owner: string | null;
+  name: string;
+  private: boolean;
+  description?: string;
+}
+
+/** Client-side mirror of GitHub's allowed repository-name characters. */
+const REPO_NAME_RE = /^[A-Za-z0-9._-]+$/;
+
+export function CreateRepoModal({
+  viewerLogin,
+  orgs,
+  rc,
+  onClose,
+  onCreated,
+}: {
+  viewerLogin: string;
+  orgs: string[];
+  rc: ReposContent;
+  onClose: () => void;
+  onCreated: (repo: UserRepo) => void;
+}) {
+  const { apiFetch } = useAuth();
+  const [owner, setOwner] = useState(viewerLogin);
+  const [name, setName] = useState('');
+  const [priv, setPriv] = useState(true);
+  const [description, setDescription] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  const nameValid = REPO_NAME_RE.test(name);
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!nameValid || creating) return;
+    setCreating(true);
+    setServerError(null);
+    try {
+      const body: CreateRepoBody = {
+        owner: owner === viewerLogin ? null : owner,
+        name,
+        private: priv,
+      };
+      const desc = description.trim();
+      if (desc) body.description = desc;
+      const res = await apiFetch('/api/v1/repos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        onCreated((await res.json()) as UserRepo);
+        return;
+      }
+      // Error envelope: {"error", "message"} — surface `message` verbatim.
+      setServerError((await readErrorMessage(res)) ?? rc.createFailed);
+    } catch {
+      setServerError(rc.createFailed);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <ModalShell titleId="create-repo-title" title={rc.createTitle} onClose={onClose}>
+      <form onSubmit={onSubmit} className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="create-repo-owner" className={FIELD_LABEL}>
+            {rc.ownerLabel}
+          </label>
+          <select
+            id="create-repo-owner"
+            value={owner}
+            onChange={(e) => setOwner(e.target.value)}
+            className={cn(FIELD_INPUT, 'cursor-pointer')}
+          >
+            <option value={viewerLogin}>{rc.ownerPersonal.replace('{login}', viewerLogin)}</option>
+            {orgs.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="create-repo-name" className={FIELD_LABEL}>
+            {rc.nameLabel}
+          </label>
+          <input
+            id="create-repo-name"
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            spellCheck={false}
+            autoComplete="off"
+            className={cn(FIELD_INPUT, 'font-mono', name !== '' && !nameValid && 'border-red')}
+          />
+          <p
+            className={cn(
+              'font-mono text-[11px]',
+              name !== '' && !nameValid ? 'text-red' : 'text-ghost'
+            )}
+          >
+            {rc.nameHint}
+          </p>
+        </div>
+
+        <label className="flex items-center gap-2 text-[13px] text-fg cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={priv}
+            onChange={(e) => setPriv(e.target.checked)}
+            className="w-3.5 h-3.5 accent-amber"
+          />
+          {rc.privateLabel}
+        </label>
+
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="create-repo-description" className={FIELD_LABEL}>
+            {rc.descriptionLabel}
+          </label>
+          <input
+            id="create-repo-description"
+            type="text"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            autoComplete="off"
+            className={FIELD_INPUT}
+          />
+        </div>
+
+        {serverError && <ErrorNote message={serverError} />}
+
+        <div className="flex items-center justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onClose}
+            className="font-ui font-semibold text-[12.5px] border border-line rounded-control px-4 py-2 text-dim hover:text-fg transition-colors cursor-pointer"
+          >
+            {rc.cancel}
+          </button>
+          <button
+            type="submit"
+            disabled={!nameValid || creating}
+            className={cn(
+              'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-colors',
+              !nameValid || creating
+                ? 'bg-amber/50 text-amber-ink/60 cursor-not-allowed'
+                : 'bg-amber text-amber-ink hover:brightness-[1.06] cursor-pointer'
+            )}
+          >
+            {creating ? rc.creating : rc.submit}
+          </button>
+        </div>
+      </form>
+    </ModalShell>
+  );
+}
