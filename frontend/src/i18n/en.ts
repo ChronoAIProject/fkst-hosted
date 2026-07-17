@@ -25,6 +25,7 @@ export const en: SiteContent = {
   },
   dashboard: {
     metaTitle: 'FKST — Dashboard',
+    loading: 'Loading the dashboard…',
     eyebrow: 'Dashboard',
     title: 'Your fkst sessions',
     lede: 'Across the repositories where the fkst-hosted App is installed, see every trigger issue and its work issues — grouped session by session.',

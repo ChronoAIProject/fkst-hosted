@@ -29,6 +29,7 @@ export const zh: SiteContent = {
   },
   dashboard: {
     metaTitle: 'FKST — 仪表盘',
+    loading: '正在加载仪表盘…',
     eyebrow: '仪表盘',
     title: '你的 fkst 会话',
     lede: '在所有安装了 fkst-hosted App 的仓库中，查看每一个触发 issue 及其工作 issue —— 按会话逐个分组。',

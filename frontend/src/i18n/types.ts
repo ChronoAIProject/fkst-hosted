@@ -55,6 +55,8 @@ export interface SiteContent {
   };
   dashboard: {
     metaTitle: string;
+    /** Route-level skeleton label while the lazy dashboard chunk downloads. */
+    loading: string;
     eyebrow: string;
     title: string;
     lede: string;
