@@ -33,6 +33,12 @@ export function Level1Sidebar({
 
   const shown = filterRepos(account.repos, query);
 
+  // Clamp the chart scope to the filtered options (same rule as level 0): a
+  // selection the name filter removed falls back to "all repositories".
+  const scopeOptions = shown.map((r) => r.name);
+  const effectiveScope =
+    chartScope != null && scopeOptions.includes(chartScope) ? chartScope : null;
+
   return (
     <div className="flex flex-col gap-4">
       <ViewDescription text={cc.viewAccount.replace('{login}', account.login)} />
@@ -68,20 +74,20 @@ export function Level1Sidebar({
           id="chart-scope-repo"
           label={cc.chartScopeAriaRepos}
           allLabel={cc.chartScopeAllRepos}
-          options={shown.map((r) => r.name)}
-          value={chartScope}
+          options={scopeOptions}
+          value={effectiveScope}
           onChange={setChartScope}
         />
         {/* Both charts consume the same filtered set, so they always describe
             one population — the repos listed above them. */}
         <CanvasBarChart
           title={cc.chartSessionsTitle}
-          rows={sessionsByRepo(shown, chartScope)}
+          rows={sessionsByRepo(shown, effectiveScope)}
           hue="amber"
         />
         <CanvasBarChart
           title={cc.chartPackagesTitle}
-          rows={packagesByRepo(shown, chartScope)}
+          rows={packagesByRepo(shown, effectiveScope)}
           hue="green"
         />
       </div>

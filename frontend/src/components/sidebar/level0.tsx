@@ -42,6 +42,13 @@ export function Level0Sidebar({
   const shown = filterAccounts(accounts, query);
   const orgs = accounts.filter((a) => a.kind === 'org').map((a) => a.login);
 
+  // Clamp the chart scope to the filtered options: a selection the name
+  // filter removed falls back to "all", so the select never sits on an
+  // invisible value while the charts silently scope to a hidden account.
+  const scopeOptions = shown.map((a) => a.login);
+  const effectiveScope =
+    chartScope != null && scopeOptions.includes(chartScope) ? chartScope : null;
+
   const onUninstall = useCallback((login: string) => setUninstallLogin(login), []);
   const closeUninstall = useCallback(() => setUninstallLogin(null), []);
   const doneUninstall = useCallback(() => {
@@ -94,18 +101,18 @@ export function Level0Sidebar({
           id="chart-scope-account"
           label={cc.chartScopeAriaAccounts}
           allLabel={cc.chartScopeAllAccounts}
-          options={shown.map((a) => a.login)}
-          value={chartScope}
+          options={scopeOptions}
+          value={effectiveScope}
           onChange={setChartScope}
         />
         <CanvasBarChart
           title={cc.chartSessionsTitle}
-          rows={sessionsByAccount(shown, chartScope)}
+          rows={sessionsByAccount(shown, effectiveScope)}
           hue="amber"
         />
         <CanvasBarChart
           title={cc.chartPackagesTitle}
-          rows={packagesByAccount(shown, chartScope)}
+          rows={packagesByAccount(shown, effectiveScope)}
           hue="green"
         />
       </div>

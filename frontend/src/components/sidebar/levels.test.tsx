@@ -121,6 +121,37 @@ describe('Level0Sidebar', () => {
     );
     expect(screen.getByText('No accounts match your filter.')).toBeInTheDocument();
   });
+
+  it('resets the chart scope to All when the filter removes the scoped account', async () => {
+    const user = userEvent.setup();
+    const data = [
+      account({ login: 'shining' }),
+      account({ login: 'acme', kind: 'org' }),
+    ];
+    const props = {
+      onQueryChange: () => {},
+      onOpenAccount: () => {},
+      onRepoCreated: () => {},
+      onChanged: () => {},
+    };
+    const { rerender } = render(
+      <AuthProvider>
+        <Level0Sidebar overview={overview(data)} query="" {...props} />
+      </AuthProvider>
+    );
+
+    const scope = screen.getByLabelText('Scope charts to an account');
+    await user.selectOptions(scope, 'acme');
+    expect(scope).toHaveValue('acme');
+
+    // Filtering 'acme' away must not leave the select on an invisible value.
+    rerender(
+      <AuthProvider>
+        <Level0Sidebar overview={overview(data)} query="shin" {...props} />
+      </AuthProvider>
+    );
+    expect(scope).toHaveValue('');
+  });
 });
 
 describe('Level1Sidebar', () => {
@@ -180,6 +211,33 @@ describe('Level1Sidebar', () => {
     // Charts scoped to the account.
     expect(screen.getByRole('figure', { name: 'Running sessions' })).toBeInTheDocument();
     expect(screen.getByLabelText('Scope charts to a repository')).toBeInTheDocument();
+  });
+
+  it('resets the chart scope to All when the filter removes the scoped repo', async () => {
+    const user = userEvent.setup();
+    const props = {
+      account: acc,
+      appSlug: 'chronoai-fkst',
+      onQueryChange: () => {},
+      createdKey: null,
+      onOpenRepo: () => {},
+    };
+    const { rerender } = render(
+      <AuthProvider>
+        <Level1Sidebar {...props} query="" />
+      </AuthProvider>
+    );
+
+    const scope = screen.getByLabelText('Scope charts to a repository');
+    await user.selectOptions(scope, 'gears');
+    expect(scope).toHaveValue('gears');
+
+    rerender(
+      <AuthProvider>
+        <Level1Sidebar {...props} query="widg" />
+      </AuthProvider>
+    );
+    expect(scope).toHaveValue('');
   });
 
   it('opens a repo from the row affordance', async () => {
