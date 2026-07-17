@@ -257,6 +257,67 @@ async fn overview_marks_counts_incomplete_when_a_trigger_read_fails() {
 }
 
 #[tokio::test]
+async fn overview_renders_an_omitted_repository_selection_as_null() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/user/repos"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([repo_json(
+                "acme",
+                "Organization",
+                "site",
+                2
+            )])),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/user/orgs"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([{ "login": "acme" }])),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/user/memberships/orgs"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "role": "admin", "organization": { "login": "acme" } }
+        ])))
+        .mount(&server)
+        .await;
+    // GitHub omits repository_selection entirely on this installation.
+    Mock::given(method("GET"))
+        .and(path("/user/installations"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 1,
+            "installations": [{ "id": 77, "account": { "login": "acme" } }]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/user/installations/77/repositories"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 1,
+            "repositories": [{ "name": "site", "owner": { "login": "acme" } }]
+        })))
+        .mount(&server)
+        .await;
+
+    // No App configured: the account still resolves its installation, which is
+    // all this test cares about.
+    let state = test_state(&server.uri(), None);
+    let Json(view) = overview(State(state), viewer_user(), auth_headers())
+        .await
+        .expect("200");
+    let org = &view.accounts[1];
+    assert!(org.installed);
+    assert_eq!(
+        org.repository_selection, None,
+        "an omitted repository_selection must serialize as null, never \"\""
+    );
+}
+
+#[tokio::test]
 async fn overview_marks_counts_incomplete_when_the_app_is_unconfigured() {
     let server = MockServer::start().await;
     mount_user_reads(&server).await;

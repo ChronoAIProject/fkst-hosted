@@ -64,7 +64,9 @@ pub struct AccountOverview {
     pub installed: bool,
     /// The installation id; null when not installed.
     pub installation_id: Option<i64>,
-    /// `all` or `selected`; null when not installed.
+    /// `all` or `selected`; null when not installed OR when GitHub omits the
+    /// field (never an empty string — the contract union is
+    /// `'all' | 'selected' | null`).
     pub repository_selection: Option<String>,
     /// False when any of this account's repo trigger reads failed (the counts
     /// below may undercount; the call itself still succeeds).
@@ -370,7 +372,12 @@ pub(super) async fn overview(
             owner,
             installed: installation.is_some(),
             installation_id: installation.map(|i| i.id),
-            repository_selection: installation.map(|i| i.repository_selection.clone()),
+            // The raw DTO defaults an omitted field to "" — collapse that to
+            // null so the wire value stays within the contract's union.
+            repository_selection: installation.and_then(|i| {
+                let value = i.repository_selection.clone();
+                (!value.is_empty()).then_some(value)
+            }),
             counts_complete,
             repos: repo_views,
         });
