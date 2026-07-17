@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::error::{AppError, ErrorEnvelope};
+use crate::github_app::listing::IssueSummary;
 use crate::github_identity::GithubUser;
 use crate::reconcile::automerge::linked_issue_number;
 use crate::reconcile::desired::PodLiveness;
@@ -67,7 +68,9 @@ pub struct SessionDetail {
     pub packages: Vec<String>,
     /// The parse error when the trigger body is malformed; else null.
     pub invalid_reason: Option<String>,
-    /// The `fkst-*` control-plane status labels on the trigger issue.
+    /// The `fkst-*` control-plane status labels on the trigger issue, minus
+    /// the configured trigger label itself (present on every session by
+    /// definition, so it is noise as a status marker).
     pub status_labels: Vec<String>,
     /// The trigger issue itself.
     pub trigger: IssueDetail,
@@ -154,8 +157,22 @@ fn devloop_prs(pulls: &[RepoPull], bot_login: Option<&str>) -> Vec<PrDetail> {
         .collect()
 }
 
+/// The canvas projection of a trigger's `fkst-*` labels: the dashboard's
+/// [`status_labels`] MINUS the configured trigger label itself — that label is
+/// what makes the issue a session at all, not a status marker worth a chip.
+fn canvas_status_labels(issue: &IssueSummary, trigger_label: &str) -> Vec<String> {
+    status_labels(issue)
+        .into_iter()
+        .filter(|label| label != trigger_label)
+        .collect()
+}
+
 /// A session detail for a trigger issue whose body failed to parse.
-fn invalid_session_detail(trigger: &IssueWithMeta, reason: String) -> SessionDetail {
+fn invalid_session_detail(
+    trigger: &IssueWithMeta,
+    reason: String,
+    trigger_label: &str,
+) -> SessionDetail {
     SessionDetail {
         session_id: None,
         name: None,
@@ -164,7 +181,7 @@ fn invalid_session_detail(trigger: &IssueWithMeta, reason: String) -> SessionDet
         environment: None,
         packages: Vec::new(),
         invalid_reason: Some(reason),
-        status_labels: status_labels(&trigger.summary),
+        status_labels: canvas_status_labels(&trigger.summary, trigger_label),
         trigger: IssueDetail::from(trigger),
         work_issues: Vec::new(),
         log_url: None,
@@ -304,7 +321,7 @@ pub(super) async fn repo_sessions(
                     environment: reg.def.environment.clone(),
                     packages: reg.def.packages.iter().map(render_package_ref).collect(),
                     invalid_reason: None,
-                    status_labels: status_labels(&trigger.summary),
+                    status_labels: canvas_status_labels(&trigger.summary, trigger_label),
                     trigger: IssueDetail::from(trigger),
                     work_issues: work.iter().map(IssueDetail::from).collect(),
                     log_url,
@@ -312,7 +329,9 @@ pub(super) async fn repo_sessions(
                     prs,
                 });
             }
-            Err((_, reason)) => sessions.push(invalid_session_detail(trigger, reason)),
+            Err((_, reason)) => {
+                sessions.push(invalid_session_detail(trigger, reason, trigger_label))
+            }
         }
     }
 

@@ -20,13 +20,16 @@ use crate::session_spec::derive_session_id;
 const VALID_TRIGGER_BODY: &str = "### Session Name\nsite\n\n### Packages\n\
 acme/pkgs@main:packages/devloop\n\n### Work Label\nsite-build\n";
 
-fn issue_json(number: i64, body: &str, label: &str, state: &str) -> serde_json::Value {
+fn issue_json(number: i64, body: &str, labels: &[&str], state: &str) -> serde_json::Value {
     serde_json::json!({
         "number": number,
         "title": format!("issue-{number}"),
         "body": body,
         "state": state,
-        "labels": [{ "name": label }],
+        "labels": labels
+            .iter()
+            .map(|label| serde_json::json!({ "name": label }))
+            .collect::<Vec<_>>(),
         "user": { "login": "shining", "id": 9 },
         "html_url": format!("https://github.com/acme/site/issues/{number}"),
         "created_at": "2026-07-01T00:00:00Z",
@@ -85,8 +88,13 @@ async fn repo_sessions_assembles_the_full_detail() {
         .and(query_param("labels", "fkst-substrate-trigger"))
         .and(query_param("state", "all"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-            issue_json(5, VALID_TRIGGER_BODY, "fkst-substrate-trigger", "open"),
-            issue_json(6, "no headings", "fkst-substrate-trigger", "open"),
+            issue_json(
+                5,
+                VALID_TRIGGER_BODY,
+                &["fkst-substrate-trigger", "fkst-substrate-active"],
+                "open"
+            ),
+            issue_json(6, "no headings", &["fkst-substrate-trigger"], "open"),
         ])))
         .mount(&server)
         .await;
@@ -95,8 +103,8 @@ async fn repo_sessions_assembles_the_full_detail() {
         .and(query_param("labels", "site-build"))
         .and(query_param("state", "all"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-            issue_json(8, "work", "site-build", "open"),
-            issue_json(9, "done work", "site-build", "closed"),
+            issue_json(8, "work", &["site-build"], "open"),
+            issue_json(9, "done work", &["site-build"], "closed"),
         ])))
         .mount(&server)
         .await;
@@ -186,7 +194,8 @@ async fn repo_sessions_assembles_the_full_detail() {
     assert!(session.invalid_reason.is_none());
     assert_eq!(
         session.status_labels,
-        vec!["fkst-substrate-trigger".to_string()]
+        vec!["fkst-substrate-active".to_string()],
+        "the trigger label itself is filtered out of the status projection"
     );
     assert_eq!(session.trigger.number, 5);
     assert_eq!(
@@ -217,6 +226,10 @@ async fn repo_sessions_assembles_the_full_detail() {
     let invalid = &view.sessions[1];
     assert!(invalid.session_id.is_none());
     assert!(invalid.invalid_reason.is_some());
+    assert!(
+        invalid.status_labels.is_empty(),
+        "the trigger label alone projects no status chips"
+    );
     assert!(invalid.work_issues.is_empty());
     assert!(invalid.prs.is_empty());
     assert!(invalid.liveness.is_none());
@@ -239,7 +252,7 @@ async fn repo_sessions_canonicalizes_a_case_variant_path() {
             ResponseTemplate::new(200).set_body_json(serde_json::json!([issue_json(
                 5,
                 body,
-                "fkst-substrate-trigger",
+                &["fkst-substrate-trigger"],
                 "open"
             )])),
         )
