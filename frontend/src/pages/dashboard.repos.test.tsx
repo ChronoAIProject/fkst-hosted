@@ -3,6 +3,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   account,
+  jsonResponse,
   openAccount,
   overviewBody,
   overviewGetCalls,
@@ -98,6 +99,48 @@ describe('Dashboard — repository browsing on the canvas', () => {
 
     await user.click(screen.getByRole('button', { name: 'Refresh' }));
     await waitFor(() => expect(overviewGetCalls(fetchMock)).toBe(2));
+  });
+
+  it('shows an in-flight Refresh indicator and a stale notice when the refresh fails', async () => {
+    const user = userEvent.setup();
+    const pending: ((r: Response) => void)[] = [];
+    let calls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/v1/overview')) {
+        calls += 1;
+        if (calls === 1) return jsonResponse(overviewBody([account({ login: 'shining' })]));
+        return new Promise<Response>((resolve) => {
+          pending.push(resolve);
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderDashboard();
+
+    // Loaded state: the idle Refresh button, no notices.
+    const refresh = await screen.findByRole('button', { name: 'Refresh' });
+    expect(
+      screen.queryByText('Refresh failed — showing the last loaded data.')
+    ).not.toBeInTheDocument();
+
+    // While the re-fetch is in flight the button turns into a busy indicator.
+    await user.click(refresh);
+    const busy = await screen.findByRole('button', { name: 'Refreshing…' });
+    expect(busy).toBeDisabled();
+    expect(busy).toHaveAttribute('aria-busy', 'true');
+
+    // The refresh fails: last-good data stays, a non-blocking notice appears.
+    pending[0]!(jsonResponse(null, 500));
+    expect(
+      await screen.findByText('Refresh failed — showing the last loaded data.')
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled();
+    expect(screen.getByText('Legend')).toBeInTheDocument(); // canvas view kept
+    expect(
+      screen.queryByText('Could not load your repositories. Please try again.')
+    ).not.toBeInTheDocument();
   });
 
   it('shows a compact error line when the overview endpoint fails', async () => {

@@ -174,7 +174,11 @@ export interface SiteContent {
     };
     repos: {
       refresh: string;
+      /** Refresh button label while the overview re-fetch is in flight. */
+      refreshing: string;
       loadFailed: string;
+      /** Non-blocking notice when a refresh failed but last-good data shows. */
+      refreshFailedStale: string;
       private: string;
       public: string;
       org: string;

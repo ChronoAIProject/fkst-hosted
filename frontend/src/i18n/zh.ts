@@ -129,7 +129,9 @@ export const zh: SiteContent = {
     },
     repos: {
       refresh: '刷新',
+      refreshing: '正在刷新…',
       loadFailed: '无法加载你的仓库，请重试。',
+      refreshFailedStale: '刷新失败 —— 显示最近一次加载的数据。',
       private: '私有',
       public: '公开',
       org: '组织',

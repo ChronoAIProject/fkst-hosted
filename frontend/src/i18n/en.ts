@@ -127,7 +127,9 @@ export const en: SiteContent = {
     },
     repos: {
       refresh: 'Refresh',
+      refreshing: 'Refreshing…',
       loadFailed: 'Could not load your repositories. Please try again.',
+      refreshFailedStale: 'Refresh failed — showing the last loaded data.',
       private: 'private',
       public: 'public',
       org: 'org',

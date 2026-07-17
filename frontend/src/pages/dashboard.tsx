@@ -37,6 +37,9 @@ export function Dashboard() {
 
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
   const [overviewFailed, setOverviewFailed] = useState(false);
+  // True while an overview (re-)fetch is in flight — drives the Refresh
+  // button's spinner so every fetch has a visible loading state.
+  const [overviewRefreshing, setOverviewRefreshing] = useState(false);
   const [tick, setTick] = useState(0);
 
   const [level, setLevel] = useState<CanvasLevel>({ kind: 'root' });
@@ -64,12 +67,16 @@ export function Dashboard() {
     if (!isAuthenticated || !configured) return;
     let active = true;
     setOverviewFailed(false);
+    setOverviewRefreshing(true);
     getOverview(apiFetch)
       .then((body) => {
         if (active) setOverview(body);
       })
       .catch(() => {
         if (active) setOverviewFailed(true);
+      })
+      .finally(() => {
+        if (active) setOverviewRefreshing(false);
       });
     return () => {
       active = false;
@@ -245,9 +252,17 @@ export function Dashboard() {
         <button
           type="button"
           onClick={refetchOverview}
-          className="font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim hover:text-fg transition-colors cursor-pointer"
+          disabled={overviewRefreshing}
+          aria-busy={overviewRefreshing}
+          className="font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim hover:text-fg transition-colors cursor-pointer disabled:cursor-default disabled:hover:text-dim inline-flex items-center gap-1.5"
         >
-          {d.repos.refresh}
+          {overviewRefreshing && (
+            <span
+              aria-hidden="true"
+              className="anim-spin inline-block w-3 h-3 border border-line-2 border-t-amber rounded-full flex-none"
+            />
+          )}
+          {overviewRefreshing ? d.repos.refreshing : d.repos.refresh}
         </button>
       </div>
 
@@ -255,6 +270,14 @@ export function Dashboard() {
         <div className="border border-line border-l-2 border-l-red rounded-card bg-[color-mix(in_oklab,var(--raise)_55%,transparent)] px-4 py-3 text-[13px] text-dim">
           {d.repos.loadFailed}
         </div>
+      )}
+
+      {/* A refresh that fails with data on screen must not blank it — flag
+          the staleness without blocking the (still valid) last-good view. */}
+      {overviewFailed && overview != null && (
+        <p className="border border-line border-l-2 border-l-amber rounded-card bg-[color-mix(in_oklab,var(--raise)_55%,transparent)] px-3 py-2 font-mono text-[11.5px] text-dim">
+          {d.repos.refreshFailedStale}
+        </p>
       )}
 
       <div className="flex gap-5 items-stretch max-[1100px]:flex-col">
