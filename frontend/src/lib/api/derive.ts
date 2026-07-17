@@ -107,9 +107,11 @@ export function sessionsByAccount(
     .sort(byValueDesc);
 }
 
-/** Active sessions per repository of one account (level-1 chart). */
-export function sessionsByRepo(account: AccountOverview, repoName?: string | null): ChartRow[] {
-  return account.repos
+/** Active sessions per repository (level-1 chart). Takes the already
+ *  name-filtered repo set so the chart describes exactly the listed
+ *  population — mirroring how level 0 feeds `shown` into its builders. */
+export function sessionsByRepo(repos: RepoOverview[], repoName?: string | null): ChartRow[] {
+  return repos
     .filter((r) => !repoName || r.name === repoName)
     .map((r) => ({ key: r.name, label: r.name, value: r.active_sessions }))
     .sort(byValueDesc);
@@ -135,10 +137,11 @@ export function packagesByAccount(
     .sort(byValueDesc);
 }
 
-/** Package usage within one account, optionally scoped to a single repo. */
-export function packagesByRepo(account: AccountOverview, repoName?: string | null): ChartRow[] {
+/** Package usage across the given (already name-filtered) repos, optionally
+ *  scoped to a single repo — same population rule as `sessionsByRepo`. */
+export function packagesByRepo(repos: RepoOverview[], repoName?: string | null): ChartRow[] {
   const counts = new Map<string, number>();
-  for (const repo of account.repos) {
+  for (const repo of repos) {
     if (repoName && repo.name !== repoName) continue;
     for (const ref of repo.packages) {
       counts.set(ref, (counts.get(ref) ?? 0) + 1);

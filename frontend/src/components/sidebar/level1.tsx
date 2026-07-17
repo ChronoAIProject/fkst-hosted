@@ -72,16 +72,16 @@ export function Level1Sidebar({
           value={chartScope}
           onChange={setChartScope}
         />
+        {/* Both charts consume the same filtered set, so they always describe
+            one population — the repos listed above them. */}
         <CanvasBarChart
           title={cc.chartSessionsTitle}
-          rows={sessionsByRepo(account, chartScope).filter((row) =>
-            shown.some((r) => r.name === row.key)
-          )}
+          rows={sessionsByRepo(shown, chartScope)}
           hue="amber"
         />
         <CanvasBarChart
           title={cc.chartPackagesTitle}
-          rows={packagesByRepo(account, chartScope)}
+          rows={packagesByRepo(shown, chartScope)}
           hue="green"
         />
       </div>

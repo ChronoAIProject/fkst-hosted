@@ -194,11 +194,13 @@ describe('chart row builders', () => {
   });
 
   it('lists sessions per repo of one account, zero rows included', () => {
-    expect(sessionsByRepo(accounts[0]!)).toEqual([
+    expect(sessionsByRepo(accounts[0]!.repos)).toEqual([
       { key: 'lab', label: 'lab', value: 2 },
       { key: 'idle', label: 'idle', value: 0 },
     ]);
-    expect(sessionsByRepo(accounts[0]!, 'idle')).toEqual([{ key: 'idle', label: 'idle', value: 0 }]);
+    expect(sessionsByRepo(accounts[0]!.repos, 'idle')).toEqual([
+      { key: 'idle', label: 'idle', value: 0 },
+    ]);
   });
 
   it('counts package usage across accounts and scopes by account', () => {
@@ -213,11 +215,19 @@ describe('chart row builders', () => {
   });
 
   it('counts package usage within an account and scopes by repo', () => {
-    expect(packagesByRepo(accounts[1]!)).toEqual([
+    expect(packagesByRepo(accounts[1]!.repos)).toEqual([
       { key: pkgA, label: 'base', value: 1 },
       { key: pkgB, label: 'triage', value: 1 },
     ]);
-    expect(packagesByRepo(accounts[0]!, 'idle')).toEqual([]);
+    expect(packagesByRepo(accounts[0]!.repos, 'idle')).toEqual([]);
+  });
+
+  it('describes only the given (name-filtered) repo set in BOTH level-1 builders', () => {
+    // A filter that dropped 'lab' must drop its sessions AND its packages —
+    // the two charts share one population.
+    const filtered = accounts[0]!.repos.filter((r) => r.name === 'idle');
+    expect(sessionsByRepo(filtered)).toEqual([{ key: 'idle', label: 'idle', value: 0 }]);
+    expect(packagesByRepo(filtered)).toEqual([]);
   });
 
   it('shortens package refs to the path tail, falling back to the full ref', () => {
