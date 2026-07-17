@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AuthProvider } from '@/lib/auth/github-auth';
 import type { IssueDetail, RepoSessionsResponse, SessionDetail } from '@/lib/api/types';
+import { buildCreateRequest } from '@/components/modals/create-trigger-modal';
 import { Level2Sidebar } from './level2';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -51,6 +52,41 @@ const body = (sessions: SessionDetail[], installed = true): RepoSessionsResponse
   name: 'lab',
   installed,
   sessions,
+});
+
+describe('buildCreateRequest', () => {
+  it('trims fields and omits blank optionals entirely', () => {
+    expect(
+      buildCreateRequest({
+        name: '  sess  ',
+        packages: [' o/p@main:a ', '', '   '],
+        workLabel: '  ',
+        environment: '',
+        autoMerge: false,
+        logAccess: '  ',
+      })
+    ).toEqual({ name: 'sess', packages: ['o/p@main:a'] });
+  });
+
+  it('carries the optional knobs when set, splitting the allowlist', () => {
+    expect(
+      buildCreateRequest({
+        name: 'sess',
+        packages: ['o/p@main:a', 'o/p@main:b'],
+        workLabel: 'lab-work',
+        environment: 'staging',
+        autoMerge: true,
+        logAccess: '@alice, bob  77',
+      })
+    ).toEqual({
+      name: 'sess',
+      packages: ['o/p@main:a', 'o/p@main:b'],
+      work_label: 'lab-work',
+      environment: 'staging',
+      auto_merge: true,
+      log_access: ['@alice', 'bob', '77'],
+    });
+  });
 });
 
 function renderLevel2(props: Partial<Parameters<typeof Level2Sidebar>[0]> = {}) {

@@ -1,16 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { Dashboard } from './dashboard';
-import { AuthProvider } from '@/lib/auth/github-auth';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { jsonResponse, renderDashboard } from './canvas-test-kit';
 import type {
   AccountOverview,
   OverviewResponse,
   RepoSessionsResponse,
 } from '@/lib/api/types';
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
-}
 
 const accounts: AccountOverview[] = [
   {
@@ -75,14 +70,6 @@ const sessionsBody: RepoSessionsResponse = {
     },
   ],
 };
-
-function renderDashboard() {
-  return render(
-    <AuthProvider>
-      <Dashboard />
-    </AuthProvider>
-  );
-}
 
 describe('Dashboard — canvas levels and loading', () => {
   beforeEach(() => {
