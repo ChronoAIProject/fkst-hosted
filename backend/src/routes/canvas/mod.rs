@@ -17,6 +17,22 @@
 //! extractor verifies the caller, and the SAME bearer token drives the
 //! user-scoped GitHub reads/writes.
 
+mod github;
+mod overview;
+#[cfg(test)]
+pub(crate) mod test_support;
 mod types;
 
 pub use types::IssueDetail;
+
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
+
+use crate::state::AppState;
+
+/// The canvas router (nested under `/api/v1`). GitHub-token authenticated via
+/// the `GithubUser` extractor (like the dashboard), so no documented security
+/// scheme.
+pub fn router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new().routes(routes!(overview::overview))
+}

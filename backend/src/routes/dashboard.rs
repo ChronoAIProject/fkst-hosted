@@ -185,10 +185,12 @@ fn build_invalid_session(trigger: &IssueSummary, reason: String) -> SessionGroup
 
 /// A minimal GitHub read client for the dashboard: the user-token installation
 /// enumeration + `state=all` issue reads that the reconciler's `GithubListing`
-/// does not expose.
+/// does not expose. Fields are `pub(crate)` because the canvas endpoints
+/// ([`crate::routes::canvas`]) extend this client with their own methods in a
+/// sibling module (same crate, separate file to respect the file-size budget).
 pub(crate) struct DashboardGithub {
-    api_base: String,
-    client: reqwest::Client,
+    pub(crate) api_base: String,
+    pub(crate) client: reqwest::Client,
 }
 
 #[derive(Deserialize)]
@@ -337,7 +339,9 @@ impl DashboardGithub {
     }
 
     /// GET a page with Bearer `auth`; return the decoded body + the `rel="next"` URL.
-    async fn get_page<T: serde::de::DeserializeOwned>(
+    /// `pub(crate)` so the canvas extension methods reuse the same paging +
+    /// error-mapping transport instead of duplicating it.
+    pub(crate) async fn get_page<T: serde::de::DeserializeOwned>(
         &self,
         url: &str,
         auth: &SecretString,

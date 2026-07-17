@@ -98,6 +98,8 @@ async fn paths_are_the_trimmed_v1_surface() {
         "/api/v1/dashboard",
         "/api/v1/dashboard/pull",
         "/api/v1/dashboard/pull/{job_id}",
+        // The canvas dashboard's live overview.
+        "/api/v1/overview",
         "/health",
         "/metrics",
     ] {
