@@ -57,7 +57,15 @@ export function Level2Sidebar({
         <p className="font-mono text-[12px] text-ghost">{cc.notInstalledNote}</p>
       )}
 
-      {loadFailed ? (
+      {/* A failed refresh with last-good data present keeps the list and
+          only flags staleness; the blocking error is for no-data-at-all. */}
+      {loadFailed && data != null && (
+        <p className="border border-line border-l-2 border-l-amber rounded-card bg-[color-mix(in_oklab,var(--raise)_55%,transparent)] px-3 py-2 font-mono text-[11.5px] text-dim">
+          {cc.sessionsStaleNotice}
+        </p>
+      )}
+
+      {loadFailed && data == null ? (
         <div className="border border-line border-l-2 border-l-red rounded-card bg-[color-mix(in_oklab,var(--raise)_55%,transparent)] px-4 py-3 text-[13px] text-dim">
           {cc.sessionsLoadFailed}
         </div>

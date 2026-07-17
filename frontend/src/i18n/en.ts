@@ -88,6 +88,7 @@ export const en: SiteContent = {
       sessionsTitle: 'Sessions',
       pollNote: 'Auto-refreshes every 15 s while open.',
       sessionsLoadFailed: 'Could not load the sessions of this repository. Please try again.',
+      sessionsStaleNotice: 'Refresh failed — showing the last loaded sessions.',
       notInstalledNote: 'The App is not installed on this repository, so sessions cannot run here.',
       newTrigger: 'New session',
       livenessStarting: 'starting',

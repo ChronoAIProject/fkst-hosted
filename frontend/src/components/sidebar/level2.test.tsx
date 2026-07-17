@@ -188,6 +188,17 @@ describe('Level2Sidebar', () => {
     ).toBeInTheDocument();
   });
 
+  it('keeps the session list with a stale notice when a refresh fails', () => {
+    renderLevel2({ data: body([session({})]), loadFailed: true });
+
+    // Last-good data stays on screen; only the non-blocking notice is added.
+    expect(screen.getByText('nightly')).toBeInTheDocument();
+    expect(screen.getByText('Refresh failed — showing the last loaded sessions.')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Could not load the sessions of this repository. Please try again.')
+    ).not.toBeInTheDocument();
+  });
+
   it('creates a trigger: POSTs the form, omits blank optionals, notifies', async () => {
     const user = userEvent.setup();
     const onChanged = vi.fn();

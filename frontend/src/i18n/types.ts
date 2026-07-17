@@ -130,6 +130,8 @@ export interface SiteContent {
       /** Note that level-2 data refreshes on a poll. */
       pollNote: string;
       sessionsLoadFailed: string;
+      /** Non-blocking notice when a refresh failed but last-good data shows. */
+      sessionsStaleNotice: string;
       notInstalledNote: string;
       newTrigger: string;
       livenessStarting: string;

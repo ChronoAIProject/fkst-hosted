@@ -90,6 +90,7 @@ export const zh: SiteContent = {
       sessionsTitle: '会话',
       pollNote: '打开期间每 15 s 自动刷新。',
       sessionsLoadFailed: '无法加载此仓库的会话，请重试。',
+      sessionsStaleNotice: '刷新失败 —— 显示最近一次加载的会话。',
       notInstalledNote: '此仓库尚未安装 App，会话无法在这里运行。',
       newTrigger: '新建会话',
       livenessStarting: '启动中',
