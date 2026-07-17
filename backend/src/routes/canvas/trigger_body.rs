@@ -148,12 +148,23 @@ pub(super) fn validated_trigger_body(req: &CreateSessionRequest) -> Result<Strin
     let rendered_packages: Vec<String> = spec.packages.iter().map(render_package_ref).collect();
     let requested_packages: Vec<String> =
         req.packages.iter().map(|p| p.trim().to_string()).collect();
+    // The parser splits a log-access line on ANY whitespace/comma (and strips a
+    // leading '@'), so one requested entry can silently become several
+    // grantees — and that list doubles as the session's authorized-logins
+    // policy. Compare it entry-for-entry like every other field.
+    let requested_log_access: Vec<String> = req
+        .log_access
+        .iter()
+        .map(|entry| entry.trim().to_string())
+        .filter(|entry| !entry.is_empty())
+        .collect();
     let round_trips = spec.name == req.name.trim()
         && rendered_packages == requested_packages
         && spec.work_label.as_deref() == trimmed(req.work_label.as_deref())
         && spec.environment.as_deref() == trimmed(req.environment.as_deref())
         && spec.output_lang.as_deref() == trimmed(req.output_lang.as_deref())
         && spec.auto_merge == (req.auto_merge == Some(true))
+        && spec.log_access == requested_log_access
         && spec.engine_config.is_empty();
     if !round_trips {
         // Defense in depth: reachable only if a value slips past the inline

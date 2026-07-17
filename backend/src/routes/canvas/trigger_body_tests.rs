@@ -168,6 +168,25 @@ fn multi_line_and_heading_shaped_values_are_rejected() {
 }
 
 #[test]
+fn a_log_access_entry_hiding_multiple_grantees_is_a_400() {
+    // "alice bob" renders as ONE allowlist line but the parser splits on any
+    // whitespace/comma, so the created trigger would grant log download (and
+    // FKST_GITHUB_AUTHORIZED_LOGINS trust) to grantees the request never
+    // listed as separate entries. The round-trip check must fail closed.
+    for entry in ["alice bob", "alice,bob"] {
+        let req = CreateSessionRequest {
+            log_access: vec![entry.to_string()],
+            ..full_request()
+        };
+        let err = validated_trigger_body(&req).expect_err(entry);
+        assert!(
+            matches!(err, AppError::Validation(_)),
+            "{entry:?}: expected Validation, got {err:?}"
+        );
+    }
+}
+
+#[test]
 fn an_invalid_session_name_is_a_400_naming_the_section() {
     let req = CreateSessionRequest {
         name: "Not A Valid Name".to_string(),
