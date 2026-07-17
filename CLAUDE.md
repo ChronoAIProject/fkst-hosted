@@ -28,6 +28,12 @@ These are **reference-only** dependencies. Do **not** modify them from within fk
 | Engine    | https://github.com/ChronoAIProject/fkst-substrate |
 | Packages  | https://github.com/ChronoAIProject/fkst-packages   |
 
+> **fkst-hosted package home:** all fkst-hosted packages reside on the
+> [`fkst-hosted` branch of `fkst-packages`](https://github.com/ChronoAIProject/fkst-packages/tree/fkst-hosted).
+> When referencing a package for this deployment — a trigger issue's
+> `### Packages` entries or `FKST_SEED_PACKAGES`, both in `owner/repo@ref:path`
+> form — use `ChronoAIProject/fkst-packages@fkst-hosted:<path>`.
+
 ## Integrations & Platform
 
 fkst-hosted integrates with the following ChronoAI platform services. When doing related work, **always reference the latest `main` branch** of the corresponding repo for the current contracts and APIs.
@@ -54,10 +60,10 @@ fkst-hosted integrates with the following ChronoAI platform services. When doing
 > `opensandbox-developer-guide.md` was deleted; the READMEs and code comments
 > link here). The guide must stay safe for public distribution: no
 > internal/production identifiers (private repo URLs, real domains, registry
-> paths, cluster/project names, real App/user IDs) — only `<placeholders>` and
-> `127.0.0.1` port-forward addresses. The `chronoai-fkst` / `fkst-*` /
-> `opensandbox-*` namespace and resource names are the stack's functional
-> naming convention, deliberately kept.
+> paths, cluster/project names, real App/user IDs) — only `<placeholders>`,
+> `127.0.0.1` addresses, and the `*.chronoai-fkst.local` hosts-file hostnames.
+> The `chronoai-fkst` / `fkst-*` / `opensandbox-*` namespace and resource
+> names are the stack's functional naming convention, deliberately kept.
 
 This guide walks a new developer, step by step, through standing up a **complete
 fkst stack on a local Kubernetes cluster** (on your laptop): the OpenSandbox
@@ -181,9 +187,12 @@ Read this before trusting the environment for anything security-sensitive.
   leaves headroom for autoscaled clusters, where a sandbox node may have to
   cold-start; on kind's static nodes creates are simply faster and the timeout
   is never exercised.
-- **Port-forward access.** Every Service is plain ClusterIP; any
-  load-balancer/ingress/Gateway-API layer you'd put in front of them in a real
-  cluster is out of scope here (§12, §16).
+- **Local-only exposure.** The opensandbox server stays a plain ClusterIP
+  Service reached by port-forward (§12). The two fkst services get real local
+  HTTPS origins — `https://app.chronoai-fkst.local` (frontend) and
+  `https://api.chronoai-fkst.local` (backend) — via an in-cluster
+  ingress-nginx, a mkcert-issued certificate, and `/etc/hosts` entries (§16);
+  any cloud load-balancer/Gateway-API layer remains out of scope.
 - **Locally built images.** The fkst backend and frontend images are built
   from this repository and side-loaded into kind (`kind load docker-image`) —
   no container registry involved.
@@ -208,6 +217,7 @@ Install (macOS: `brew install …`; Linux: distro packages or upstream releases)
 | helm | ≥ 3.12 | `helm version` |
 | cilium CLI | latest | `cilium version --client` |
 | node + npx | ≥ 20.18 (smee-client 5.x requirement; runs the §14.2 webhook relay) | `node --version` |
+| mkcert | latest (local CA + TLS cert for the §16 HTTPS hostnames; Firefox on Linux also needs `certutil` from nss/libnss3-tools) | `mkcert -version` |
 | git, curl, openssl, python3 | any recent | — |
 
 Create a workspace — every file this guide writes lives under it — and anchor
@@ -221,12 +231,14 @@ export OSB_LOCAL="$HOME/opensandbox-local"
 mkdir -p "$OSB_LOCAL"
 ```
 
-> **If you open a new terminal** mid-guide (likely — port-forwards run in the
-> background and the backend image build takes a while), re-run both `export`
-> lines first.
+> **If you open a new terminal** mid-guide (likely — the §12 port-forward and
+> the §14.2 relay client run in the background and the backend image build
+> takes a while), re-run both `export` lines first.
 
-> **Kubernetes version:** any recent kind node image works (the chart requires
-> only ≥ 1.21); pick a current one from the
+> **Kubernetes version:** any recent kind node image works (the opensandbox
+> chart requires only ≥ 1.21, but the §16.1 ingress-nginx 4.15.1 pin is
+> project-supported on k8s 1.31–1.35 — prefer a v1.31+ node image); pick a
+> current one from the
 > [kind releases page](https://github.com/kubernetes-sigs/kind/releases) and add
 > `image: kindest/node:v1.3x.y@sha256:…` to every node in §4 if you want to pin.
 
@@ -294,7 +306,7 @@ RuntimeClass):
 
 | kind node | Purpose | Label | Taint |
 |---|---|---|---|
-| control-plane | Kubernetes control plane | — | control-plane (kind default) |
+| control-plane | Kubernetes control plane + host 80/443 entry point for the §16 ingress | — | control-plane (kind default) |
 | worker 1 | shared: server + controller land here | — | none |
 | worker 2 | gVisor sandbox node | `sandbox.gke.io/runtime=gvisor` | `sandbox.gke.io/runtime=gvisor:NoSchedule` |
 
@@ -311,6 +323,18 @@ networking:
   disableDefaultCNI: true
 nodes:
   - role: control-plane
+    # Host 80/443 → the §16 ingress-nginx NodePorts (30080/30443): gives the
+    # fkst services their https://*.chronoai-fkst.local origins. Routed via
+    # NodePort (not hostPort) so the mapping works regardless of the CNI's
+    # hostPort support; NodePort answers on every node, the control-plane is
+    # simply the stable place to pin the host mapping.
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 80
+        protocol: TCP
+      - containerPort: 30443
+        hostPort: 443
+        protocol: TCP
   - role: worker   # shared node: server + controller (the only untainted worker)
   - role: worker   # gVisor sandbox node
     labels:
@@ -330,6 +354,11 @@ kind create cluster --config "$OSB_LOCAL/kind-cluster.yaml"
 
 > Nodes will show `NotReady` until Cilium is installed (no CNI yet). That is
 > expected — continue to §5.
+
+> Host ports **80 and 443 must be free** on your machine (stop any local web
+> server first), and `extraPortMappings` are **create-time only**: a cluster
+> built from an older config without them must be deleted and recreated
+> (Appendix B has a port-forward fallback if you cannot recreate).
 
 ### 5. Install Cilium (NetworkPolicy enforcement)
 
@@ -1069,7 +1098,7 @@ GitHub delivers webhooks by POSTing **from GitHub's servers** to the App's
 webhook URL — it can never reach `127.0.0.1` or your kind cluster directly. A
 relay bridges the gap: [smee.io](https://smee.io) gives you a public channel
 URL GitHub can POST to, plus a local client that replays every delivery to
-your port-forwarded backend.
+the backend's local HTTPS origin (§16).
 
 Without the relay the stack still functions — the reconciler is level-based
 and re-enumerates the App's installations on a periodic poll — but every
@@ -1090,11 +1119,18 @@ happens.
 export SMEE_CHANNEL="https://smee.io/<your-channel-id>"
 
 # 2. Relay deliveries to the backend's webhook endpoint (through the §16
-#    port-forward). Run it in a spare terminal and KEEP IT RUNNING — like the
-#    port-forwards, it is a long-lived process, and its per-delivery log
-#    lines are your first stop when debugging webhook problems.
+#    ingress). DEFER THIS COMMAND until §16 is complete — it needs the api
+#    hostname resolving AND the §16.2 mkcert CA on disk, and Node loads
+#    NODE_EXTRA_CA_CERTS only at launch (a client started early keeps
+#    rejecting the local TLS cert until restarted). Then run it in a spare
+#    terminal and KEEP IT RUNNING — like the §12 port-forward, it is a
+#    long-lived process, and its per-delivery log lines are your first stop
+#    when debugging webhook problems.
+#    NODE_EXTRA_CA_CERTS: Node ignores the OS trust store, so hand it the
+#    §16.2 mkcert root CA or the client rejects the local TLS cert.
+NODE_EXTRA_CA_CERTS="$(mkcert -CAROOT)/rootCA.pem" \
 npx smee-client --url "$SMEE_CHANNEL" \
-  --target http://127.0.0.1:18081/api/v1/github/app/webhook
+  --target https://api.chronoai-fkst.local/api/v1/github/app/webhook
 ```
 
 Notes:
@@ -1106,14 +1142,15 @@ Notes:
   payloads expose repo/issue content, so treat the URL like a dev credential
   and don't reuse it beyond local dev.
 - **Ordering:** only the *channel* must exist before §14.3 (the form wants
-  the URL); the *client* matters once the backend is reachable (§16).
-  Deliveries relayed while the target is down are dropped by the client —
-  that's fine: the reconciler's startup + periodic resync re-derives state,
-  and any delivery can be replayed from the App's **Advanced → Recent
-  Deliveries** page (Redeliver).
-- smee is for **webhooks only**. The OAuth callback URLs (§14.3) stay on
-  `http://127.0.0.1:18081` — a callback is a browser redirect, which happens
-  on your machine and needs no relay.
+  the URL); run the *client* once §16 is in place — it needs the backend
+  reachable at its hostname AND the §16.2 mkcert CA on disk. Deliveries
+  relayed while the target is down are dropped by the client — that's fine:
+  the reconciler's startup + periodic resync re-derives state, and any
+  delivery can be replayed from the App's **Advanced → Recent Deliveries**
+  page (Redeliver).
+- smee is for **webhooks only**. The OAuth callback URLs (§14.3) point at the
+  same `https://api.chronoai-fkst.local` origin — a callback is a browser
+  redirect, which happens on your machine and needs no relay.
 
 #### 14.3 Register your GitHub App
 
@@ -1151,9 +1188,9 @@ downloads use this same App as the OAuth provider. Under **"Identifying and
 authorizing users"**:
 
 - Add **both** callback URLs (the base must equal `FKST_PUBLIC_BASE_URL` —
-  locally the §16 port-forward origin):
-  - `http://127.0.0.1:18081/api/v1/auth/github/callback`
-  - `http://127.0.0.1:18081/api/v1/logs/oauth/callback`
+  locally the §16 backend hostname):
+  - `https://api.chronoai-fkst.local/api/v1/auth/github/callback`
+  - `https://api.chronoai-fkst.local/api/v1/logs/oauth/callback`
 - Leave **"Expire user authorization tokens" ON** (the default) — the SPA
   refreshes via `POST /api/v1/auth/github/refresh`, which needs refresh tokens.
 
@@ -1299,9 +1336,9 @@ data:
   FKST_GITHUB_BOT_LOGIN: <your-app-slug>[bot]
   FKST_GITHUB_OAUTH_CLIENT_ID: <your App's Client ID>
 
-  # ---- URLs handed to browsers (the §16 port-forward addresses) ----
-  FKST_PUBLIC_BASE_URL: http://127.0.0.1:18081
-  FKST_FRONTEND_URL: http://127.0.0.1:18090
+  # ---- URLs handed to browsers (the §16 ingress origins) ----
+  FKST_PUBLIC_BASE_URL: https://api.chronoai-fkst.local
+  FKST_FRONTEND_URL: https://app.chronoai-fkst.local
 
   # ---- optional ----
   # Allow-list of numeric GitHub user IDs; unset = any authenticated user.
@@ -1497,12 +1534,17 @@ kubectl -n chronoai-fkst rollout status deploy/fkst-control-plane --timeout=180s
 For a faster edit-compile loop you can skip §14.6–§14.8 and run the backend
 natively against the port-forwarded server (`FKST_OSB_BASE_URL=http://127.0.0.1:18080`,
 `FKST_OSB_API_KEY_FILE` → `$OSB_LOCAL/.fkst.key`, plus the same
-`FKST_POD_*`/`FKST_LLM_*`/GitHub vars as env exports). Listen on **18081**
-(`FKST_HOSTED_PORT=18081`; the default is 8080) so the §14.3 callback URLs,
-the §14.2 relay target, `FKST_PUBLIC_BASE_URL`, and the frontend's baked
-`VITE_FKST_API_BASE` keep working unchanged — otherwise rebuild the frontend,
-re-register the App callbacks, and re-run the §14.2 smee client with the new
-`--target`. The full variable
+`FKST_POD_*`/`FKST_LLM_*`/GitHub vars as env exports). Know what you trade
+away: the §16 ingress routes `https://api.chronoai-fkst.local` to the
+in-cluster Service, so a native backend cannot sit behind the canonical
+origin — pick a local port (e.g. `FKST_HOSTED_PORT=18081`) and re-point
+everything that carries the backend origin at `http://127.0.0.1:18081`:
+`FKST_PUBLIC_BASE_URL`, the §14.3 App callback URLs, the §14.2 smee
+`--target`, and the frontend's baked `VITE_FKST_API_BASE` (a §15 rebuild).
+Also skip the `api.chronoai-fkst.local` checks in §16.3/§16.4 — with no
+in-cluster backend Service behind it, the api Ingress rule answers 503 and
+the §16.3 health wait-loop would spin forever; verify the native backend
+directly at `http://127.0.0.1:18081/health` instead. The full variable
 reference is `backend/src/osb_config.rs` + `backend/src/config.rs`. Notes that
 apply either way: `*_FILE` variants win over inline values;
 `FKST_OSB_USE_SERVER_PROXY` defaults to `true` and `false` is rejected (the
@@ -1516,12 +1558,12 @@ opensandbox mode (the BatchSandbox template owns them).
 
 The frontend is a static SPA served by nginx. `VITE_` vars bake into the
 bundle at build time, so the backend origin must be set **at build**: our local
-topology is cross-origin (two port-forwards), which the backend's permissive
-dev CORS allows.
+topology is cross-origin (two §16 hostnames, `app.` and
+`api.chronoai-fkst.local`), which the backend's permissive dev CORS allows.
 
 ```bash
 docker build -f "$FKST_REPO/frontend/Dockerfile" \
-  --build-arg VITE_FKST_API_BASE=http://127.0.0.1:18081 \
+  --build-arg VITE_FKST_API_BASE=https://api.chronoai-fkst.local \
   -t fkst-frontend:local "$FKST_REPO/frontend"
 kind load docker-image fkst-frontend:local --name opensandbox-local
 
@@ -1603,24 +1645,127 @@ kubectl apply -f "$OSB_LOCAL/manifests/fkst-frontend.yaml"
 kubectl -n chronoai-fkst rollout status deploy/fkst-frontend --timeout=120s
 ```
 
-### 16. Reach and verify the fkst services
+### 16. Expose and verify the fkst services (local HTTPS)
 
-Port-forward both (the addresses must match `FKST_PUBLIC_BASE_URL` /
-`FKST_FRONTEND_URL` in §14.6, the §14.2 webhook relay target, and the
-frontend's baked `VITE_FKST_API_BASE` — change them together or
-logins/XHRs/webhooks break):
+The two fkst services are served at real local HTTPS origins:
+
+| Service | Origin |
+|---|---|
+| frontend (SPA) | `https://app.chronoai-fkst.local` |
+| backend (API) | `https://api.chronoai-fkst.local` |
+
+Three local pieces make that work: an **ingress-nginx** controller reached
+through the §4 host-port mappings, a **mkcert** certificate your OS already
+trusts, and an **/etc/hosts** entry (one line, both hostnames). These origins
+are baked into §14.3
+(App callback URLs), §14.6 (`FKST_PUBLIC_BASE_URL` / `FKST_FRONTEND_URL`),
+§15 (`VITE_FKST_API_BASE`), and the §14.2 relay `--target` — change any of
+them together or logins/XHRs/webhooks break.
+
+#### 16.1 Install the ingress controller
+
+The pinned NodePorts must match the §4 `extraPortMappings` (host 80/443 →
+30080/30443); a NodePort answers on every node, so the control-plane mapping
+reaches the controller pod wherever it schedules (the untainted shared
+worker):
 
 ```bash
-kubectl -n chronoai-fkst port-forward svc/fkst-control-plane 18081:80 >/dev/null 2>&1 &
-kubectl -n chronoai-fkst port-forward svc/fkst-frontend      18090:80 >/dev/null 2>&1 &
-until curl -sf http://127.0.0.1:18081/health >/dev/null; do sleep 1; done
-until curl -sf http://127.0.0.1:18090/ >/dev/null; do sleep 1; done
+helm upgrade --install ingress-nginx ingress-nginx \
+  --repo https://kubernetes.github.io/ingress-nginx --version 4.15.1 \
+  --namespace ingress-nginx --create-namespace \
+  --set controller.service.type=NodePort \
+  --set controller.service.nodePorts.http=30080 \
+  --set controller.service.nodePorts.https=30443
+kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s
 ```
+
+#### 16.2 Hostnames + trusted TLS
+
+> Heads-up: both steps below change state on your machine, not the cluster —
+> `mkcert -install` adds a local CA to your OS/browser trust stores, and the
+> hosts-file append needs sudo. Each is one line to undo (`mkcert
+> -uninstall`; delete the hosts line).
+
+```bash
+# Local CA (once per machine; restart browsers afterwards). Firefox on Linux
+# needs certutil (nss/libnss3-tools) for its own store — see §3.
+mkcert -install
+
+# One cert covering both hostnames + the TLS Secret the Ingress references.
+mkcert -cert-file "$OSB_LOCAL/fkst-local.pem" \
+       -key-file  "$OSB_LOCAL/fkst-local-key.pem" \
+       app.chronoai-fkst.local api.chronoai-fkst.local
+kubectl -n chronoai-fkst create secret tls fkst-local-tls \
+  --cert="$OSB_LOCAL/fkst-local.pem" --key="$OSB_LOCAL/fkst-local-key.pem"
+
+# Name resolution: hosts-file entries win over mDNS for .local names on both
+# OSes — macOS's libinfo checks /etc/hosts first, and on Linux either
+# nsswitch's `files` entry or systemd-resolved's built-in /etc/hosts support
+# answers before mDNS.
+echo '127.0.0.1 app.chronoai-fkst.local api.chronoai-fkst.local' | sudo tee -a /etc/hosts
+```
+
+#### 16.3 Route the hostnames
+
+```bash
+cat > "$OSB_LOCAL/manifests/fkst-ingress.yaml" <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fkst
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - app.chronoai-fkst.local
+        - api.chronoai-fkst.local
+      secretName: fkst-local-tls
+  rules:
+    - host: api.chronoai-fkst.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: fkst-control-plane
+                port:
+                  name: http
+    - host: app.chronoai-fkst.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: fkst-frontend
+                port:
+                  name: http
+EOF
+kubectl apply -f "$OSB_LOCAL/manifests/fkst-ingress.yaml"
+
+# admission + nginx config reload take a moment
+until curl -sf https://api.chronoai-fkst.local/health >/dev/null; do sleep 1; done
+until curl -sf https://app.chronoai-fkst.local/ >/dev/null; do sleep 1; done
+```
+
+(Plain `http://` on either hostname 308-redirects to HTTPS — ingress-nginx's
+default once a rule carries TLS.)
+
+With the origins live, **start the deferred §14.2 smee relay client now** —
+and if one was already running, restart it: Node loads `NODE_EXTRA_CA_CERTS`
+only at launch, so a client started before the §16.2 CA existed keeps
+rejecting the certificate.
+
+#### 16.4 Verify
 
 **1. Backend healthy and configured:**
 
 ```bash
-curl -s http://127.0.0.1:18081/health; echo
+curl -s https://api.chronoai-fkst.local/health; echo
 kubectl -n chronoai-fkst logs deploy/fkst-control-plane --tail=30   # startup lines, no fail-closed config errors;
                                                                     # with the §14.7 webhook secret set, includes
                                                                     # "github app webhook endpoint mounted"
@@ -1629,12 +1774,13 @@ kubectl -n chronoai-fkst logs deploy/fkst-control-plane --tail=30   # startup li
 **2. Frontend serves the SPA:**
 
 ```bash
-curl -s http://127.0.0.1:18090/ | grep -o '<title>[^<]*</title>'
+curl -s https://app.chronoai-fkst.local/ | grep -o '<title>[^<]*</title>'
 ```
 
-then open `http://127.0.0.1:18090` in a browser. With the GitHub App
-configured (§14.3), *Sign in with GitHub* completes the OAuth round-trip
-through `http://127.0.0.1:18081`.
+then open `https://app.chronoai-fkst.local` in a browser (no certificate
+warning — that's the §16.2 mkcert CA at work). With the GitHub App configured
+(§14.3), *Sign in with GitHub* completes the OAuth round-trip through
+`https://api.chronoai-fkst.local`.
 
 **3. Env-store RBAC actually grants what the backend needs:**
 
@@ -1671,7 +1817,8 @@ lifecycle API → BatchSandbox → controller → caged gVisor pod.
 | **Rebuild the backend after code changes** | `docker build -f "$FKST_REPO/backend/Dockerfile" -t fkst-control-plane:local "$FKST_REPO" && kind load docker-image fkst-control-plane:local --name opensandbox-local && kubectl -n chronoai-fkst rollout restart deploy/fkst-control-plane` (`kind load` replaces the image on the nodes; the restart picks it up) |
 | **Rebuild the frontend** | same pattern with the §15 build command (`$FKST_REPO/frontend` + the `VITE_FKST_API_BASE` build-arg) and `deploy/fkst-frontend` |
 | Change backend config | edit + `kubectl apply -f "$OSB_LOCAL/manifests/fkst-control-plane-config.yaml"`, then `kubectl -n chronoai-fkst rollout restart deploy/fkst-control-plane` (env is read at startup) |
-| Restart the webhook relay | re-run the §14.2 `npx smee-client …` command (it is a long-lived process, like the port-forwards); deliveries missed while it was down can be replayed from the App's **Advanced → Recent Deliveries** page |
+| Restart the webhook relay | re-run the §14.2 `npx smee-client …` command (it is a long-lived process, like the §12 port-forward); deliveries missed while it was down can be replayed from the App's **Advanced → Recent Deliveries** page |
+| Renew the local TLS cert (mkcert leaf certs expire after ~2 years) | re-run the §16.2 `mkcert` cert command, then `kubectl -n chronoai-fkst create secret tls fkst-local-tls --cert=… --key=… --dry-run=client -o yaml \| kubectl apply -f -` — ingress-nginx reloads on Secret change, no restart needed |
 | Change server values (image pin bump, `configToml` edit) | edit `$OSB_LOCAL/server-values.yaml`, then `helm upgrade opensandbox-server "$OSB_LOCAL/charts/opensandbox-server" -n opensandbox-system -f "$OSB_LOCAL/server-values.yaml"` |
 | Update the vendored server chart | refresh your copy at `$OSB_LOCAL/charts/opensandbox-server` (re-run the §3 gate check), same `helm upgrade` |
 | Bump the controller chart | `helm upgrade opensandbox` with the new `.tgz` URL and values |
@@ -1694,7 +1841,8 @@ Everything this guide creates lives under `$OSB_LOCAL`:
 
 ```
 opensandbox-local/
-├── kind-cluster.yaml                         # §4  — node topology (labels/taints)
+├── kind-cluster.yaml                         # §4  — node topology (labels/taints) + host 80/443
+│                                             #       mappings for the §16 ingress (create-time only)
 ├── runtimeclass-gvisor.yaml                  # §6  — gvisor RuntimeClass + scheduling
 ├── charts/opensandbox-server/                # §3  — vendored lifecycle-server chart
 ├── manifests/
@@ -1703,10 +1851,12 @@ opensandbox-local/
 │   ├── fkst-envstore-rbac.yaml               # §14.5
 │   ├── fkst-control-plane-config.yaml        # §14.6
 │   ├── fkst-control-plane.yaml               # §14.8 — Deployment + Service
-│   └── fkst-frontend.yaml                    # §15  — Deployment + Service
+│   ├── fkst-frontend.yaml                    # §15  — Deployment + Service
+│   └── fkst-ingress.yaml                     # §16.3 — HTTPS hostname routing
 ├── controller-values.yaml                    # §10
 ├── server-values.yaml                        # §11
 ├── .fkst.key                                 # §9  — generated API key (never commit)
+├── fkst-local.pem, fkst-local-key.pem        # §16.2 — mkcert TLS cert + key (never commit)
 └── runsc*, containerd-shim-runsc-v1*         # §6  — gVisor downloads (+ .sha512 files);
                                               #       safe to delete after the docker cp
 ```
@@ -1714,7 +1864,10 @@ opensandbox-local/
 (Plus two locally built images, `fkst-control-plane:local` and
 `fkst-frontend:local`, and the `fkst-control-plane-secret` created imperatively
 in §14.7. The §14.2 smee channel URL lives only in your shell/App form —
-nothing on disk.)
+nothing on disk. Also created imperatively: the `fkst-local-tls` TLS Secret
+(§16.2). Outside `$OSB_LOCAL` on your machine: the mkcert root CA
+(`mkcert -CAROOT`) and the §16.2 `/etc/hosts` line — one line carrying both
+hostnames.)
 
 ### Appendix B — Troubleshooting
 
@@ -1731,15 +1884,21 @@ nothing on disk.)
 | §13.7 probe shows kube API REACHABLE | NetworkPolicy not enforced — Cilium unhealthy or not installed (`cilium status`), or the guardrails file wasn't applied. |
 | Sandbox create with a private-registry image → `ImagePullBackOff` | kind nodes have no registry credentials. `docker pull` it with your own credentials, then `kind load docker-image <image> --name opensandbox-local`, or add `imagePullSecrets` to the tenant namespace. |
 | Docker Hub pull rate-limit errors on sandbox creation | Pre-pull on the host and `kind load docker-image <image> --name opensandbox-local`, or add authenticated pull secrets. |
-| Create call hangs / can't reach server | Port-forward died (it's a background job) — re-run the §12 / §16 commands. |
+| Create call hangs / can't reach server | Port-forward died (it's a background job) — re-run the §12 command. |
 | `fkst-control-plane` / `fkst-frontend` pod `ErrImagePull` on `:local` image | The image wasn't side-loaded (or was rebuilt without re-loading) — re-run the §14.4 / §15 `kind load docker-image` command. |
 | Backend pod `CreateContainerConfigError` | `fkst-control-plane-config` ConfigMap or `fkst-control-plane-secret` Secret missing — `envFrom` requires both to exist (§14.6/§14.7). |
 | Backend pod crash-loops with a `FKST_… must be set` / `must be a valid URL` error | The startup validation is fail-closed and names the exact variable — set it (or replace the leftover `<placeholder>`) in the ConfigMap/Secret and restart. Pair rules count too: `FKST_GITHUB_OAUTH_CLIENT_ID` set without `FKST_GITHUB_OAUTH_CLIENT_SECRET` crash-loops (§14.7 deferral note). |
-| Browser login bounces or XHRs fail with connection errors | The three URLs must agree: `FKST_PUBLIC_BASE_URL`/`FKST_FRONTEND_URL` (§14.6), the frontend's baked `VITE_FKST_API_BASE` (§15), and the actual §16 port-forward ports. Rebuild/redeploy after changing any of them. |
+| Browser login bounces or XHRs fail with connection errors | The three URL sets must agree: `FKST_PUBLIC_BASE_URL`/`FKST_FRONTEND_URL` (§14.6), the frontend's baked `VITE_FKST_API_BASE` (§15), and the hostnames the §16 ingress actually serves. Rebuild/redeploy after changing any of them. |
+| `*.chronoai-fkst.local` does not resolve | The §16.2 `/etc/hosts` line is missing (or was removed by a hosts-file manager). `ping api.chronoai-fkst.local` must answer from `127.0.0.1`. |
+| Browser or curl distrusts the certificate | `mkcert -install` was never run, the browser predates it (restart it), or Firefox on Linux lacks `certutil` (§3). A curl built against its own CA bundle (e.g. Homebrew curl) can also distrust it — use the system curl or add `$(mkcert -CAROOT)/rootCA.pem` to that bundle. |
+| Connection refused on `https://…local` (port 443) | The cluster was created without the §4 `extraPortMappings` — they are create-time only, so recreate the cluster. Fallback without recreating: `kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 443:443` (needs sudo/CAP_NET_BIND_SERVICE on Linux). |
+| `kind create cluster` fails with `port is already allocated` | Another local server owns host port 80/443 at create time — stop it first (§4 note). If something grabs 443 *after* the cluster exists you'll instead see its wrong certificate/content on the hostnames. |
+| Ingress answers `404 Not Found` from nginx | The request lacked a routed `Host` header (e.g. curl by IP), or the §16.3 Ingress isn't applied — `kubectl -n chronoai-fkst get ingress fkst` should list both hosts. |
+| smee client exits with a TLS verification error | `NODE_EXTRA_CA_CERTS` not set on the §14.2 command, or it was set while the CA file didn't exist yet (Node reads it only at launch) — point it at `$(mkcert -CAROOT)/rootCA.pem` and restart the client after §16.2's `mkcert -install`. |
 | Webhook deliveries respond `404` (App page → **Advanced → Recent Deliveries**, or the smee client output) | `FKST_GITHUB_APP_WEBHOOK_SECRET` unset — the endpoint is only mounted when the secret is configured (§14.7). |
 | Webhook deliveries respond `401` | Secret mismatch: the §14.3 form value and `FKST_GITHUB_APP_WEBHOOK_SECRET` (§14.7) must be the same string. A delivery whose bytes were altered in transit fails the same way — the HMAC is verified over the exact signed bytes (this is why the §14.3 content type must be `application/json`: the smee client re-serializes the JSON body, which round-trips, while a form-encoded body does not). |
 | Webhook deliveries respond `202` but nothing ever happens | The backend ACKed a payload it could not parse (deliberate — a `4xx`/`5xx` would make GitHub hammer redeliveries): usually the App's webhook content type is not `application/json` (§14.3). The parse failure is in the backend logs. |
-| Trigger issue ignored for minutes (session does start eventually) | The webhook path is down — smee client not running, backend port-forward dead, or the App's webhook inactive / pointing at the wrong channel (§14.2/§14.3). The reconciler's full resync (default 600 s) is the fallback that eventually catches up; check the smee client output and the App's Recent Deliveries. |
+| Trigger issue ignored for minutes (session does start eventually) | The webhook path is down — smee client not running, the §16 ingress unreachable, or the App's webhook inactive / pointing at the wrong channel (§14.2/§14.3). The reconciler's full resync (default 600 s) is the fallback that eventually catches up; check the smee client output and the App's Recent Deliveries. |
 | Session sandbox pod stuck `Pending` (untainted nodes full) | Each session requests 2 CPU / 4 Gi (`FKST_OSB_SESSION_CPU`/`MEMORY`) on the gVisor node — enlarge the Docker VM or lower those values (§16 sizing note). |
 | Named-environment API calls fail with `Forbidden` | The env-store RBAC (§14.5) wasn't applied — the backend needs the `fkst-control-plane-envstore` Role bound to `fkst-ksa`. |
 
@@ -1868,7 +2027,7 @@ A running session's devloop works the repo's open work-label issues **in paralle
 - The control plane serves a dynamic OpenAPI 3 spec at `/openapi.json` (no static file). New/changed public endpoints MUST be annotated with `#[utoipa::path]` + `ToSchema`/`IntoParams` and registered via `OpenApiRouter`/`routes!`; pin `utoipa-axum` to `0.1` (axum 0.7). See **API Contract (OpenAPI)**.
 - The fkst deployables run exclusively on Kubernetes — the full local setup is embedded above in **FKST Local Deployment Guide** (the single source of truth; there is no standalone copy); `docker-compose` is not used in this repo.
 - Each deployment needs its own GitHub App registration — permissions, OAuth callbacks, and env-var mapping are in the deployment guide's **§14.3 Register your GitHub App** (local webhook delivery needs the **§14.2 smee relay** — GitHub cannot POST to `127.0.0.1`); never set `FKST_GITHUB_OAUTH_CLIENT_ID` without its client secret, never commit App secrets.
-- Treat the upstream engine and packages repos as read-only references.
+- Treat the upstream engine and packages repos as read-only references; all fkst-hosted packages reside on the `fkst-hosted` branch of `fkst-packages` (reference form `ChronoAIProject/fkst-packages@fkst-hosted:<path>`).
 - When filing work issues for a substrate session, **wave the backlog by dependency** (merge foundation before dependent issues), one feature per issue; an open work issue keeps the session's pod alive until closed/merged; never share a work label between two trigger issues in one repo. See **Authoring work issues for a substrate session**.
 - Keep commits small and self-contained.
 - Never add `Co-Authored-By`; always act under the user's own GitHub identity (never a bot/AI identity).
