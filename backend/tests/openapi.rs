@@ -101,6 +101,7 @@ async fn paths_are_the_trimmed_v1_surface() {
         // The canvas dashboard's live overview + per-repo session surface.
         "/api/v1/overview",
         "/api/v1/repos/{owner}/{name}/sessions",
+        "/api/v1/repos/{owner}/{name}/sessions/{issue_number}",
         "/health",
         "/metrics",
     ] {

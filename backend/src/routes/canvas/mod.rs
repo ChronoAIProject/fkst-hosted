@@ -18,10 +18,12 @@
 //! user-scoped GitHub reads/writes.
 
 mod github;
+mod mutate;
 mod overview;
 mod sessions;
 #[cfg(test)]
 pub(crate) mod test_support;
+mod trigger_body;
 mod types;
 
 pub use types::IssueDetail;
@@ -37,5 +39,6 @@ use crate::state::AppState;
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(overview::overview))
-        .routes(routes!(sessions::repo_sessions))
+        .routes(routes!(sessions::repo_sessions, mutate::create_session))
+        .routes(routes!(mutate::stop_session))
 }

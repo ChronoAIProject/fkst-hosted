@@ -1,10 +1,12 @@
 //! Canvas-specific GitHub calls, added onto [`DashboardGithub`] as a sibling
 //! `impl` block: the org-membership role read the overview's owner detection
-//! needs. Follows the dashboard client's raw-DTO + paged `get_page` pattern
-//! (same transport, same error mapping); lives in its own file so neither
-//! module grows past the file-size budget.
+//! needs, the repo pull-request listing, and the USER-token issue writes the
+//! create/stop-session endpoints act with (the human stays the issue author —
+//! and thus the session authz owner). Follows the dashboard client's raw-DTO +
+//! wiremock-tested pattern (same transport, same error mapping); lives in its
+//! own file so neither module grows past the file-size budget.
 
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 
 use crate::error::AppError;
@@ -60,6 +62,46 @@ struct RawPull {
     merged_at: Option<String>,
     user: Option<RawPullUser>,
     head: Option<RawPullHead>,
+}
+
+/// The issue created by [`DashboardGithub::create_issue`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CreatedIssue {
+    pub number: i64,
+    pub html_url: String,
+}
+
+/// Pull GitHub's own `message` out of an error response body (it names the
+/// real cause: permission missing, issues disabled, validation detail) without
+/// leaking anything else; falls back to the bare status.
+async fn github_error_message(response: reqwest::Response) -> String {
+    let status = response.status();
+    response
+        .json::<serde_json::Value>()
+        .await
+        .ok()
+        .and_then(|value| {
+            value
+                .get("message")
+                .and_then(|message| message.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| format!("github returned status {status}"))
+}
+
+/// Map a failed GitHub issue-write status onto the API error surface. GitHub
+/// answers 404 for both "no such repo" and "no access" (deliberate
+/// anti-enumeration), so both surface as not-found here.
+fn issue_write_error(op: &str, status: reqwest::StatusCode, message: String) -> AppError {
+    match status.as_u16() {
+        401 => AppError::Unauthorized(format!("github rejected the token: {message}")),
+        403 => AppError::Forbidden(format!("GitHub refused {op}: {message}")),
+        404 => AppError::NotFound(format!("github {op}: {message}")),
+        // 410 Gone = issues are disabled on the repo.
+        410 => AppError::Unprocessable(format!("github {op}: {message}")),
+        422 => AppError::Validation(format!("GitHub rejected {op}: {message}")),
+        _ => AppError::Unavailable(format!("github {op} returned status {status}")),
+    }
 }
 
 /// One pull request as the canvas sessions endpoint consumes it.
@@ -141,6 +183,85 @@ impl DashboardGithub {
                 head_ref: raw.head.map(|h| h.head_ref).unwrap_or_default(),
             })
             .collect())
+    }
+
+    /// `POST /repos/{owner}/{repo}/issues` with the USER token — the trigger
+    /// issue is created AS the signed-in human, who thereby becomes the
+    /// session's authz owner (the reconciler trusts the issue author). The
+    /// body/labels are the caller's responsibility (rendered + round-trip
+    /// validated before this is ever called).
+    pub(crate) async fn create_issue(
+        &self,
+        user_token: &SecretString,
+        owner: &str,
+        repo: &str,
+        title: &str,
+        body: &str,
+        labels: &[String],
+    ) -> Result<CreatedIssue, AppError> {
+        let url = format!("{}/repos/{owner}/{repo}/issues", self.api_base);
+        let response = self
+            .client
+            .post(&url)
+            .bearer_auth(user_token.expose_secret())
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+            .json(&serde_json::json!({ "title": title, "body": body, "labels": labels }))
+            .send()
+            .await
+            .map_err(|e| {
+                tracing::warn!(error = %e, "github create-issue transport error");
+                AppError::Unavailable("github create-issue request failed".to_string())
+            })?;
+        let status = response.status();
+        if status.is_success() {
+            #[derive(Deserialize)]
+            struct RawCreated {
+                number: i64,
+                #[serde(default)]
+                html_url: String,
+            }
+            let raw: RawCreated = response.json().await.map_err(|e| {
+                tracing::warn!(error = %e, "github create-issue response did not parse");
+                AppError::Upstream("github create-issue response was malformed".to_string())
+            })?;
+            return Ok(CreatedIssue {
+                number: raw.number,
+                html_url: raw.html_url,
+            });
+        }
+        let message = github_error_message(response).await;
+        Err(issue_write_error("create_issue", status, message))
+    }
+
+    /// `PATCH /repos/{owner}/{repo}/issues/{number}` `state=closed` with the
+    /// USER token — closing the trigger issue IS the stop/retire contract, and
+    /// GitHub natively enforces whether THIS caller may close it.
+    pub(crate) async fn close_issue(
+        &self,
+        user_token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<(), AppError> {
+        let url = format!("{}/repos/{owner}/{repo}/issues/{number}", self.api_base);
+        let response = self
+            .client
+            .patch(&url)
+            .bearer_auth(user_token.expose_secret())
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+            .json(&serde_json::json!({ "state": "closed" }))
+            .send()
+            .await
+            .map_err(|e| {
+                tracing::warn!(error = %e, "github close-issue transport error");
+                AppError::Unavailable("github close-issue request failed".to_string())
+            })?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        let message = github_error_message(response).await;
+        Err(issue_write_error("close_issue", status, message))
     }
 }
 
