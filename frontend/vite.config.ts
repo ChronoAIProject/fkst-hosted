@@ -13,8 +13,8 @@ export default defineConfig({
     port: 3000,
     // Dev convenience for the same-origin API contract: the SPA calls
     // relative /api/v1/* URLs, which the dev server forwards to a locally
-    // running backend. Production gets the same effect from the shared
-    // ingress (see k8s_sample/ingress.yaml).
+    // running backend. A deployed same-origin topology gets the same effect
+    // from a shared ingress fronting both services.
     proxy: {
       '/api': 'http://localhost:8080',
     },

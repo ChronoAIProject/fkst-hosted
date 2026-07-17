@@ -1,5 +1,6 @@
 # fkst-frontend — the static SPA served by nginx, deployed like every other
-# fkst deployable (see frontend/k8s_sample/). Built once per API topology:
+# fkst deployable (see opensandbox-developer-guide.md §15). Built once per API
+# topology:
 # VITE_ vars are baked into the bundle at build time, so a cross-origin
 # backend needs a rebuild with VITE_FKST_API_BASE set; the default (empty)
 # means SAME-ORIGIN — the normal layout with one ingress fronting both this

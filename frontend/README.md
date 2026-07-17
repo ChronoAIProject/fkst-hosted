@@ -35,19 +35,22 @@ The production build in `dist/` is a plain static bundle — host it on any stat
 ## Deploy (Kubernetes, like every fkst deployable)
 
 The frontend ships as a container image — nginx serving the built SPA with a
-deep-link fallback — plus sample manifests under `k8s_sample/`:
+deep-link fallback:
 
 ```bash
 docker build -t fkst-frontend:dev frontend/
-kubectl apply -n <ns> -k frontend/k8s_sample
 ```
 
+The full Kubernetes deployment (Deployment + Service, plus the rest of the
+stack) is documented in [`../opensandbox-developer-guide.md`](../opensandbox-developer-guide.md)
+(§15 for the frontend).
+
 The default build targets the SAME-ORIGIN topology: one ingress fronts both
-this SPA and the backend (`k8s_sample/ingress.yaml`), so the login/dashboard
-XHRs never cross origins and no CORS setup exists. Only a cross-origin
-backend needs `--build-arg VITE_FKST_API_BASE=https://api.example.com`
-(VITE_ vars bake into the bundle at build time). `npm run dev` proxies
-`/api` to a local backend on :8080.
+this SPA and the backend, so the login/dashboard XHRs never cross origins and
+no CORS setup exists. A cross-origin backend needs
+`--build-arg VITE_FKST_API_BASE=https://api.example.com` (VITE_ vars bake into
+the bundle at build time). `npm run dev` proxies `/api` to a local backend
+on :8080.
 
 ## Layout
 

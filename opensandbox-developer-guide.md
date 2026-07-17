@@ -1,62 +1,4 @@
-# CLAUDE.md
-
-This file guides Claude Code (and any AI agent) when working in the **fkst-hosted** repository. These instructions are authoritative for this repo and must be followed exactly.
-
-## Project Overview
-
-**fkst-hosted** serves the **fkst** project's hosting-related concerns and is deployed as **ChronoAI's cloud services**.
-
-- **Backend:** Rust-based backend service.
-- **Frontend:** React.
-- **Purpose:** User-facing and public interfaces for the fkst project, running as ChronoAI's hosted cloud offering.
-
-## Scope & Boundaries
-
-fkst-hosted has a deliberately narrow scope. Respect these boundaries on every change:
-
-- ✅ **In scope:** Only user-facing and public interfaces that matter to the user.
-- ❌ **Out of scope:** Anything related to the **kernel engine**. fkst-hosted does **not** change or include kernel-engine code.
-
-> When a task seems to require touching engine internals, stop and reconsider — that work belongs upstream (see below), not in this repo.
-
-## Upstream Source Repositories
-
-These are **reference-only** dependencies. Do **not** modify them from within fkst-hosted; consult them to understand contracts and behavior.
-
-| Component | Repository |
-|-----------|------------|
-| Engine    | https://github.com/ChronoAIProject/fkst-substrate |
-| Packages  | https://github.com/ChronoAIProject/fkst-packages   |
-
-## Integrations & Platform
-
-fkst-hosted integrates with the following ChronoAI platform services. When doing related work, **always reference the latest `main` branch** of the corresponding repo for the current contracts and APIs.
-
-| Integration | Area | Reference (latest `main`) |
-|-------------|------|---------------------------|
-| **NyxID** | IAM (identity & access management). fkst-hosted is deployed **under NyxID as one of its downstream services**. | https://github.com/ChronoAIProject/NyxID |
-| **Ornn** | Agent-skill features. | https://github.com/ChronoAIProject/Ornn |
-
-- For any **NyxID / IAM**-related work, reference NyxID's latest `main`.
-- For any **Ornn / agent-skill**-related work, reference Ornn's latest `main`.
-
-## Repository Layout
-
-| Area      | Stack | Responsibility |
-|-----------|-------|----------------|
-| Backend   | Rust  | Hosted backend service, public APIs, user-facing endpoints |
-| Frontend  | React | User-facing web interface |
-
-## FKST Local Deployment Guide
-
-> The complete local deployment guide, embedded in full below. A standalone
-> copy lives at `opensandbox-developer-guide.md` (referenced by the READMEs) —
-> **any edit must update both copies identically.** The guide must stay safe
-> for public distribution: no internal/production identifiers (private repo
-> URLs, real domains, registry paths, cluster/project names, real App/user
-> IDs) — only `<placeholders>` and `127.0.0.1` port-forward addresses. The
-> `chronoai-fkst` / `fkst-*` / `opensandbox-*` namespace and resource names are
-> the stack's functional naming convention, deliberately kept.
+# OpenSandbox Developer Guide — Local Environment (kind)
 
 This guide walks a new developer, step by step, through standing up a **complete
 fkst stack on a local Kubernetes cluster** (on your laptop): the OpenSandbox
@@ -79,7 +21,7 @@ project (plus one vendored chart — see §3).
 
 ---
 
-### 0. What you are building
+## 0. What you are building
 
 The stack runs the **OpenSandbox controller** and the **OpenSandbox lifecycle
 API server** in the `opensandbox-system` namespace, plus the **tenant
@@ -129,7 +71,7 @@ How a sandbox is born, end to end:
    ServiceAccount, LimitRange, ResourceQuota, label-scoped lockdown
    NetworkPolicy) cage every sandbox pod regardless of what the server does.
 
-### 1. Components and version pins
+## 1. Components and version pins
 
 | Component | Image / version | Notes |
 |---|---|---|
@@ -139,7 +81,7 @@ How a sandbox is born, end to end:
 | Server image | `opensandbox/server@sha256:4b386f107a4222320928b0b4dd38df8dc5154250ea4c90b4d36767a62f69ce7c` | a **`main`-branch build pinned by digest**: tenant-based namespace routing is not in any released tag yet (v0.2.1 has no tenants module). The digest makes it reproducible; re-pin to a released tag once one ships with the tenants module |
 | execd (exec daemon injected into sandboxes) | `opensandbox/execd:v1.0.20` | set in `configToml` |
 
-### 2. Scope and caveats
+## 2. Scope and caveats
 
 Read this before trusting the environment for anything security-sensitive.
 
@@ -194,7 +136,7 @@ Read this before trusting the environment for anything security-sensitive.
   (`169.254.169.254`) and RFC1918 ranges. The metadata rule is inert on kind
   (nothing answers that address) but is kept so the policy stays complete.
 
-### 3. Prerequisites
+## 3. Prerequisites
 
 Install (macOS: `brew install …`; Linux: distro packages or upstream releases):
 
@@ -227,7 +169,7 @@ mkdir -p "$OSB_LOCAL"
 > [kind releases page](https://github.com/kubernetes-sigs/kind/releases) and add
 > `image: kindest/node:v1.3x.y@sha256:…` to every node in §4 if you want to pin.
 
-#### Getting the lifecycle-server chart
+### Getting the lifecycle-server chart
 
 Upstream publishes a release asset only for the *controller* chart; the
 lifecycle-server chart must be **vendored**: copy
@@ -279,7 +221,7 @@ grep -c 'checksum/config'  "$OSB_LOCAL/charts/opensandbox-server/templates/serve
 grep -c 'image.digest'     "$OSB_LOCAL/charts/opensandbox-server/templates/_helpers.tpl"   # ≥1 (patch 3)
 ```
 
-### 4. Create the kind cluster
+## 4. Create the kind cluster
 
 Workloads are separated onto dedicated nodes so every scheduling constraint in
 the stack can actually be exercised: an untainted node for the
@@ -328,7 +270,7 @@ kind create cluster --config "$OSB_LOCAL/kind-cluster.yaml"
 > Nodes will show `NotReady` until Cilium is installed (no CNI yet). That is
 > expected — continue to §5.
 
-### 5. Install Cilium (NetworkPolicy enforcement)
+## 5. Install Cilium (NetworkPolicy enforcement)
 
 The tenant guardrails rely on Kubernetes NetworkPolicy; this stack standardizes
 on **Cilium** as the enforcement engine:
@@ -349,7 +291,7 @@ kubectl get node -l sandbox.gke.io/runtime=gvisor \
   -o custom-columns='NAME:.metadata.name,TAINTS:.spec.taints[*].key'
 ```
 
-### 6. gVisor runtime on the sandbox node
+## 6. gVisor runtime on the sandbox node
 
 The server injects `runtimeClassName: gvisor` into every sandbox pod
 (`[secure_runtime]` in the §11 values), and the BatchSandbox template
@@ -358,7 +300,7 @@ to work, the cluster needs (a) a **RuntimeClass named `gvisor`** whose
 scheduling matches the sandbox node, and (b) a node that can actually run that
 handler.
 
-#### Option A (default) — real gVisor via runsc
+### Option A (default) — real gVisor via runsc
 
 gVisor's default **systrap** platform needs no KVM and runs inside kind's
 privileged node containers, on both x86_64 and aarch64 (Apple Silicon).
@@ -413,7 +355,7 @@ EOF
 '
 ```
 
-#### Option B (fallback) — alias RuntimeClass to runc
+### Option B (fallback) — alias RuntimeClass to runc
 
 Only if Option A fails on your machine: point the `gvisor` RuntimeClass at the
 node's stock `runc` handler. **Everything about scheduling and server behavior
@@ -421,7 +363,7 @@ stays identical, but there is NO kernel isolation** — fine for developing the
 control plane, never a substitute when testing sandbox-escape/security behavior.
 (In the RuntimeClass below, set `handler: runc` instead of `handler: gvisor`.)
 
-#### Apply the RuntimeClass (both options)
+### Apply the RuntimeClass (both options)
 
 The `scheduling` block lets pods that declare `runtimeClassName: gvisor`
 tolerate and select the gVisor node (at admission, the `nodeSelector` is merged
@@ -458,14 +400,14 @@ kubectl run gvisor-smoke --rm -it --restart=Never \
 # Option A expected: "Starting gVisor..." lines
 ```
 
-### 7. Namespaces
+## 7. Namespaces
 
 ```bash
 kubectl create namespace opensandbox-system
 # chronoai-fkst is created BY its guardrails file (§8)
 ```
 
-### 8. Platform manifests
+## 8. Platform manifests
 
 Two manifests: the BatchSandbox base template the server stamps sandboxes from,
 and the tenant-namespace guardrails. Write both, then apply.
@@ -474,7 +416,7 @@ and the tenant-namespace guardrails. Write both, then apply.
 a tenant namespace without them runs untrusted code with kube-API and network
 reach.
 
-#### 8.1 BatchSandbox base template
+### 8.1 BatchSandbox base template
 
 ```bash
 mkdir -p "$OSB_LOCAL/manifests"
@@ -524,7 +466,7 @@ data:
 EOF
 ```
 
-#### 8.2 Guardrails — `chronoai-fkst`
+### 8.2 Guardrails — `chronoai-fkst`
 
 ```bash
 cat > "$OSB_LOCAL/manifests/fkst-guardrails.yaml" <<'EOF'
@@ -632,14 +574,14 @@ spec:
 EOF
 ```
 
-#### 8.3 Apply both
+### 8.3 Apply both
 
 ```bash
 kubectl apply -f "$OSB_LOCAL/manifests/batchsandbox-template-configmap.yaml"
 kubectl apply -f "$OSB_LOCAL/manifests/fkst-guardrails.yaml"
 ```
 
-### 9. Tenant API key
+## 9. Tenant API key
 
 The server consumes the tenant key as a **file** under `/var/secrets/` — its
 entrypoint `cat`s the file into `tenants.toml` at startup:
@@ -673,7 +615,7 @@ echo "$FKST_KEY" > "$OSB_LOCAL/.fkst.key"
 chmod 600 "$OSB_LOCAL/.fkst.key"
 ```
 
-### 10. Install the OpenSandbox controller
+## 10. Install the OpenSandbox controller
 
 The controller chart is a public upstream release asset:
 
@@ -731,7 +673,7 @@ kubectl get crd | grep opensandbox.io   # batchsandboxes, pools, sandboxsnapshot
 The controller must be installed **before** the server: its informers watch
 the CRDs the controller installs.
 
-### 11. Install the lifecycle server
+## 11. Install the lifecycle server
 
 ```bash
 cat > "$OSB_LOCAL/server-values.yaml" <<'EOF'
@@ -849,7 +791,7 @@ kubectl -n opensandbox-system rollout status deploy/opensandbox-server --timeout
 > The release **name** matters: the chart's `app.kubernetes.io/instance`
 > selector label is the release name. Keep `opensandbox-server` exactly.
 
-### 12. Reaching the server
+## 12. Reaching the server
 
 The server is a plain ClusterIP service in `opensandbox-system` —
 port-forward it:
@@ -874,7 +816,7 @@ port-forward. The fkst backend hard-requires the proxy transport
 (`FKST_OSB_USE_SERVER_PROXY=false` is rejected at startup —
 `backend/src/osb_config.rs`).
 
-### 13. Verification checklist
+## 13. Verification checklist
 
 Run all of these in order (they share shell variables). Each maps to a designed
 behavior of the stack.
@@ -1034,7 +976,7 @@ curl -s -X POST http://127.0.0.1:18080/v1/sandboxes \
 Clean up test sandboxes with `DELETE /v1/sandboxes/{id}` (same auth header), e.g.
 `curl -X DELETE -H "OPEN-SANDBOX-API-KEY: $FKST_KEY" http://127.0.0.1:18080/v1/sandboxes/$FKST_SBX`.
 
-### 14. Deploy the fkst backend (control plane)
+## 14. Deploy the fkst backend (control plane)
 
 The backend (`fkst-control-plane`) is a single binary that is **both** the API
 server and, inside a session sandbox, the substrate entrypoint — which is why
@@ -1042,7 +984,7 @@ server and, inside a session sandbox, the substrate entrypoint — which is why
 and binary. It runs in `chronoai-fkst` as the `fkst-ksa` ServiceAccount and
 reaches the opensandbox server in-cluster via service DNS.
 
-#### 14.1 External prerequisites
+### 14.1 External prerequisites
 
 Two things no local cluster can provide:
 
@@ -1072,7 +1014,7 @@ Two things no local cluster can provide:
    Then **install the App** on the repo(s) you want sessions to work on —
    registration alone does nothing.
 
-#### 14.2 Build the image and load it into kind
+### 14.2 Build the image and load it into kind
 
 The build context is the repo checkout (`$FKST_REPO`, from §3); the engine
 toolchain compile makes the first build slow — tens of minutes:
@@ -1086,7 +1028,7 @@ kind load docker-image fkst-control-plane:local --name opensandbox-local
 image runs as the backend (shared node) and as the session sandbox (gVisor
 node).
 
-#### 14.3 Env-store RBAC
+### 14.3 Env-store RBAC
 
 The backend persists each user's named environments as paired
 `fkst-env-<id>-<name>` ConfigMap + Secret in its own namespace
@@ -1133,7 +1075,7 @@ EOF
 kubectl apply -f "$OSB_LOCAL/manifests/fkst-envstore-rbac.yaml"
 ```
 
-#### 14.4 ConfigMap
+### 14.4 ConfigMap
 
 Fill in the four `<…>` placeholders (LLM endpoint/model and your GitHub App's
 slug + Client ID). Optional features stay commented out:
@@ -1207,7 +1149,7 @@ grep -En '^  [A-Z_]+: .*<' "$OSB_LOCAL/manifests/fkst-control-plane-config.yaml"
 (`FKST_POD_NAMESPACE` is deliberately absent — the Deployment injects it via
 the downward API.)
 
-#### 14.5 Secret
+### 14.5 Secret
 
 ```bash
 kubectl -n chronoai-fkst create secret generic fkst-control-plane-secret \
@@ -1228,7 +1170,7 @@ keeping `FKST_GITHUB_BOT_LOGIN` set to any placeholder (required while
 The webhook secret is unused while the App's webhook is inactive, but harmless
 to set.
 
-#### 14.6 Deployment + Service
+### 14.6 Deployment + Service
 
 Notable hardening baked into the spec: `strategy: Recreate` (the control plane
 is single-writer — a rollout must never run two instances),
@@ -1368,7 +1310,7 @@ kubectl apply -f "$OSB_LOCAL/manifests/fkst-control-plane.yaml"
 kubectl -n chronoai-fkst rollout status deploy/fkst-control-plane --timeout=180s
 ```
 
-#### 14.7 Alternative: run the backend on your laptop instead
+### 14.7 Alternative: run the backend on your laptop instead
 
 For a faster edit-compile loop you can skip §14.4–§14.6 and run the backend
 natively against the port-forwarded server (`FKST_OSB_BASE_URL=http://127.0.0.1:18080`,
@@ -1387,7 +1329,7 @@ server proxy is the only supported execd transport — §12/§13.9);
 `FKST_POD_RUNTIME_CLASS` and `FKST_POD_TERMINATION_GRACE_SECS` are ignored in
 opensandbox mode (the BatchSandbox template owns them).
 
-### 15. Deploy the fkst frontend
+## 15. Deploy the fkst frontend
 
 The frontend is a static SPA served by nginx. `VITE_` vars bake into the
 bundle at build time, so the backend origin must be set **at build**: our local
@@ -1478,7 +1420,7 @@ kubectl apply -f "$OSB_LOCAL/manifests/fkst-frontend.yaml"
 kubectl -n chronoai-fkst rollout status deploy/fkst-frontend --timeout=120s
 ```
 
-### 16. Reach and verify the fkst services
+## 16. Reach and verify the fkst services
 
 Port-forward both (the addresses must match `FKST_PUBLIC_BASE_URL` /
 `FKST_FRONTEND_URL` in §14.4 and the frontend's baked `VITE_FKST_API_BASE` —
@@ -1532,7 +1474,7 @@ lifecycle API → BatchSandbox → controller → caged gVisor pod.
 > is small, lower those two values — they are a per-session knob, not a
 > platform invariant.
 
-### 17. Day-2: common maintenance operations
+## 17. Day-2: common maintenance operations
 
 | Operation | How |
 |---|---|
@@ -1547,7 +1489,7 @@ lifecycle API → BatchSandbox → controller → caged gVisor pod.
 | Rotate the tenant key | update the k8s Secret data key (`kubectl create secret generic … --dry-run=client -o yaml \| kubectl apply -f -`), then `kubectl -n opensandbox-system rollout restart deploy/opensandbox-server` — `tenants.toml` renders only at pod startup. Update the consumer-side copy too (the `chronoai-fkst` secret, §9) and restart the backend |
 | Watch upstream | the server digest pin — replace it with a released tag once upstream ships the tenants module in a release |
 
-### 18. Teardown
+## 18. Teardown
 
 ```bash
 kind delete cluster --name opensandbox-local
@@ -1555,7 +1497,7 @@ rm -rf "$OSB_LOCAL"           # contains the generated API key — shred if you 
 docker rmi fkst-control-plane:local fkst-frontend:local   # optional
 ```
 
-### Appendix A — file inventory
+## Appendix A — file inventory
 
 Everything this guide creates lives under `$OSB_LOCAL`:
 
@@ -1582,7 +1524,7 @@ opensandbox-local/
 `fkst-frontend:local`, and the `fkst-control-plane-secret` created imperatively
 in §14.5.)
 
-### Appendix B — Troubleshooting
+## Appendix B — Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
@@ -1610,205 +1552,3 @@ in §14.5.)
 *References: upstream [OpenSandbox](https://github.com/opensandbox-group/OpenSandbox)
 (lifecycle API, charts, images); `backend/src/osb_config.rs` +
 `backend/src/config.rs` in this repository for the backend wiring.*
-
-## GitHub App Guide
-
-The fkst control plane authenticates to GitHub as a **GitHub App** (session
-work on repos, installs, and OAuth login for the dashboard). Every deployment
-— including each developer's local environment — needs its **own** App
-registration. Register at *GitHub → Settings → Developer settings → GitHub
-Apps → New GitHub App* (for an org:
-`https://github.com/organizations/<org>/settings/apps/new`).
-
-### Registration form
-
-| Section | Setting | Value |
-|---|---|---|
-| Basic | App name | your choice — GitHub derives the **slug** from it, and the bot identity becomes `<slug>[bot]` |
-| Basic | Homepage URL | anything reachable (the repo URL is fine) |
-| Webhook | Active | ON only when the control plane has a public HTTPS endpoint; **OFF for local dev** (no public URL — the reconcile loop polls) |
-| Webhook | Webhook URL | `<public-base-url>/api/v1/github/app/webhook` |
-| Webhook | Webhook secret | generate one; the SAME string becomes `FKST_GITHUB_APP_WEBHOOK_SECRET` |
-| Repository permissions | Contents | **Read & write** — clone / commit / push, git refs, ensure issue templates, read `fkst.toml` |
-| | Issues | **Read & write** — trigger issues, status comments, labels |
-| | Pull requests | **Read & write** — open and merge the session's PRs |
-| | Workflows | **Read & write** — GitHub blocks pushes touching `.github/workflows/` without it |
-| | Metadata | Read-only (mandatory, auto-selected) |
-| Subscribe to events | | **Issues** only (the only event acted on) |
-| Where can this App be installed? | | "Only on this account" keeps it private to your org/user |
-
-> The permission set above is exactly what the backend's GitHub API calls
-> need — **no organization permissions, no Administration**; grant nothing
-> more.
-
-### OAuth (dashboard / browser login)
-
-The web dashboard and browser log downloads use this same App as the OAuth
-provider. Under **"Identifying and authorizing users"**:
-
-- Add **both** callback URLs:
-  - `<public-base-url>/api/v1/auth/github/callback`
-  - `<public-base-url>/api/v1/logs/oauth/callback`
-
-  (local dev: `http://127.0.0.1:18081/…` — the deployment guide's port-forward
-  address; the base URL must equal `FKST_PUBLIC_BASE_URL`.)
-- Leave **"Expire user authorization tokens" ON** (the default) — the SPA
-  refreshes via `POST /api/v1/auth/github/refresh`, which needs refresh tokens.
-
-### Collect the outputs → configuration
-
-| From the App page / action | Goes to |
-|---|---|
-| **App ID** (numeric, top of the settings page) | `FKST_GITHUB_APP_ID` (Secret) |
-| **slug** (in the settings URL `…/apps/<slug>`) | `FKST_GITHUB_APP_SLUG` (Secret), and derives `FKST_GITHUB_BOT_LOGIN: <slug>[bot]` (ConfigMap) |
-| **Generate a private key** → downloads a `.pem` | `FKST_GITHUB_APP_PRIVATE_KEY_PEM` (Secret; `kubectl create secret … --from-file=`) |
-| **Client ID** (shown on the page, `Iv…`, public) | `FKST_GITHUB_OAUTH_CLIENT_ID` (ConfigMap) |
-| **Generate a new client secret** (shown once) | `FKST_GITHUB_OAUTH_CLIENT_SECRET` (Secret) |
-| the webhook secret you generated | `FKST_GITHUB_APP_WEBHOOK_SECRET` (Secret) |
-
-### Rules & gotchas
-
-- **Install the App** on every repo sessions should work on — registration
-  alone does nothing until it is installed.
-- App creds are enablement-gated: `FKST_GITHUB_APP_ID` unset = App features
-  disabled, the backend still boots. But **never set
-  `FKST_GITHUB_OAUTH_CLIENT_ID` without `FKST_GITHUB_OAUTH_CLIENT_SECRET`** —
-  the pair is validated fail-closed and the pod crash-loops.
-- The webhook URL and OAuth callbacks need a public HTTPS endpoint; if it
-  isn't live yet, create the App with Webhook **Active = off** (or a
-  placeholder URL) and edit it later.
-- Never commit any secret output (private key PEM, client secret, webhook
-  secret) — deliver them as k8s Secrets (deployment guide §14.5).
-
-## API Contract (OpenAPI)
-
-The control plane (`backend/`, a single Rust crate) serves a **dynamically generated OpenAPI 3.1 document at `GET /openapi.json`**. It is assembled at runtime from the live Axum routes and Rust types via `utoipa` + `utoipa-axum` — there is **no static / checked-in spec file**, and the route registration *is* the documented path (`utoipa-axum`'s `OpenApiRouter` + `routes!`), so the spec never drifts from the code. The assembly + serving lives in `src/openapi.rs`; `src/router.rs::build_router` composes the routers and `split_for_parts()` yields `(Router, OpenApi)`.
-
-When you add or change a **public** HTTP endpoint, the spec does **not** auto-reflect the handler signature — you must keep it in sync:
-
-- **Annotate the handler** with `#[utoipa::path(method, path = "/x/{id}", tag, operation_id, params(...), request_body = ..., responses(...))]`. The `path` here is the single source of truth (`utoipa-axum` maps `{id}` → axum's `:id`). A handler without this annotation will NOT appear in the spec.
-- **Register via `OpenApiRouter`**: every `routes::*::router()` returns `utoipa_axum::router::OpenApiRouter<AppState>` and adds routes with `.routes(routes!(handler, ...))` (group same-path handlers in one `routes!`). Do not introduce a bare `axum::Router` for a public route module.
-- **Derive schemas**: `#[derive(ToSchema)]` on every request/response DTO; `#[derive(IntoParams)]` + `#[into_params(parameter_in = Query)]` on typed query structs. Error responses reference the public `error::ErrorEnvelope`.
-- **Security**: protected `/api/v1/*` operations carry `security(("NyxIdIdentity" = []))`; the public surface (`/health`, `/metrics`, `/openapi.json`, the signature-verified GitHub App webhook) carries none.
-
-Scope and constraints:
-
-- **Wire types** are plain modules in the crate and derive `ToSchema` directly (the backend is one crate — there is no separate shared/worker crate, so no off-by-default `schema` feature to gate). A new request/response DTO needs `#[derive(ToSchema)]`, or it won't appear in the spec.
-- **Scope is the public surface only**: `/api/v1/*`, `/health`, `/metrics`, and the GitHub App webhook (only when a webhook secret is configured — the spec tracks live config).
-- **Component names** are derived from the Rust type identifier, so duplicate idents collide in the spec — give colliding types distinct names or consolidate them into one type.
-- **Version pins**: `utoipa = "5"`, `utoipa-axum = "0.1"` (the axum-0.7 line; `utoipa-axum` 0.2+ targets axum 0.8 — do not bump it until axum itself is upgraded).
-- **Keep `tests/openapi.rs` green**: it drives the real `build_router` and asserts the spec's paths/schemas/security.
-
-## Git Workflow
-
-### Commit Rules
-
-- **Every commit must be small and self-contained.** No large commits are allowed.
-- Each commit should represent one coherent, reviewable unit of change.
-
-### Commit Authorship & Identity
-
-- **Never include `Co-Authored-By`** — or any other AI / co-author trailer — in commit messages.
-- **Always use the user's own GitHub identity** for every git operation (commits) and GitHub operation (issues, PRs, reviews, merges). Never commit or act as a bot, shared, or AI/Claude identity.
-- Git is configured with the human maintainer's own name/email and the `gh` CLI is authenticated as that same person — keep the two consistent.
-
-### Branch Model
-
-| Branch         | Role |
-|----------------|------|
-| `main`         | **Production** branch. |
-| `develop`      | **Active development** branch. |
-| `develop-auto` | Branch actively developed and evolved by **unattended AI agent looping sessions**. |
-
-### Branching & Merge Rules
-
-- All features and bug fixes **must** land via a **pull request** into `develop` or `develop-auto`.
-- **Only `develop` may be merged into `main`.** (`develop-auto` does not merge directly into `main`.)
-- **No force push** is allowed on `main`, `develop`, or `develop-auto`.
-
-### Issue & Pull Request Discipline
-
-- **All work must be done via a proper pull request.** No direct commits to shared branches (`main`, `develop`, `develop-auto`); always branch, then open a PR.
-- **Every pull request must have a corresponding GitHub issue.** Open the issue first, then reference it from the PR so it auto-closes on merge (e.g., `Closes #123`).
-- A PR without a linked issue is not ready to merge.
-- Standard flow: **open an issue → create a branch → implement → open a PR linking the issue → review → merge**.
-
-### Auto-merge Policy (AI agents)
-
-- **Unless the user explicitly says otherwise, auto-merge every PR you open into `develop` as soon as CI passes** (all required checks green). Use GitHub auto-merge: `gh pr merge --auto --merge`.
-- **If any CI check fails, work on the resolution and auto-merge once CI passes.** Never leave a red PR open or hand it back unresolved.
-- Applies to PRs targeting `develop` (the unattended `develop-auto` loop follows the same auto-merge-on-green behavior). PRs into `main` still require review (1 approval); a release is cut manually as a git tag on `main`.
-
-### Flow
-
-```mermaid
-graph LR
-    I[GitHub issue] --> F[feature / bugfix branch]
-    F -->|pull request: Closes #issue| D[develop]
-    F -->|pull request: Closes #issue| DA[develop-auto]
-    D -->|merge| M[main / production]
-```
-
-## Issue & PR Templates
-
-Every issue and pull request uses a standard template, stored under `.github/`:
-
-| Template | Path | Use |
-|----------|------|-----|
-| Bug report | `.github/ISSUE_TEMPLATE/bug_report.md` | Report a defect in a user-facing/public interface. |
-| Feature request | `.github/ISSUE_TEMPLATE/feature_request.md` | Propose a new user-facing feature or improvement. |
-| Issue chooser config | `.github/ISSUE_TEMPLATE/config.yml` | Disables blank issues; routes engine/packages issues upstream. |
-| Pull request | `.github/PULL_REQUEST_TEMPLATE.md` | Auto-applied to every PR; requires a linked issue. |
-
-- GitHub auto-applies these templates when opening issues/PRs in the web UI.
-- When creating issues/PRs via `gh` or the API (including unattended AI agent loops), fill the same template fields so structure and the required issue link are preserved.
-
-## Versioning
-
-The product version lives in the root `package.json` (`version`) and is read by
-the Docker build. There is **no automated release pipeline** (the Changesets +
-release-note + tag workflows were removed): PRs into `develop` do **not** need a
-changeset, and a release — if ever cut — is a plain git tag on `main`.
-
-## CI (pull requests into `develop`)
-
-PRs into `develop` run exactly five checks, all under `.github/workflows/`:
-
-| Check | Workflow | What it does |
-|-------|----------|--------------|
-| `rust lint` | `rust-ci.yml` | `cargo fmt --check` + `cargo clippy --all-targets -D warnings` |
-| `rust build` | `rust-ci.yml` | `cargo build --workspace --locked` |
-| `rust test` | `rust-ci.yml` | `cargo test --workspace --locked` |
-| `docker build` | `docker-build.yml` | builds `backend/Dockerfile` `--target server-builder` |
-| `gitleaks` | `gitleaks.yml` | scans the working tree for committed secrets |
-
-Keep this set minimal — do not add new PR gates without good reason.
-
-## Authoring work issues for a substrate session
-
-A running session's devloop works the repo's open work-label issues **in parallel, each as an independent PR branched off `main`** — so an issue that depends on shared scaffolding another issue produces is coded against a `main` that does **not** yet contain it. Shape the backlog accordingly:
-
-- **Wave the backlog by dependency.** Land the foundational issues first (shared config, base modules, scaffolding), **merge them**, and only then file the issues that build on them. Do **not** file a large set of interdependent issues at once: a dependent issue worked before its foundation is merged can yield an empty diff (codex returns `no-changes`) or reference files not yet on `main`. In live testing, content clarity was never the failure mode — **dependency ordering** was.
-- **One feature/page per issue**, named in the title, with exact files + real content + checkable acceptance criteria. Each issue is coded in isolation (codex sees that one issue + the repo, not the sibling backlog), so cross-referencing every other issue in each body does not help — correct per-issue scoping does.
-- **An open work issue keeps its session's pod alive until it is closed or its PR merges.** A created-but-unmerged PR does NOT idle the session — the reconciler's pending gate counts open work-label issues, not un-PR'd ones. Merge/close finished work to let a session idle down.
-- **Never give two open trigger issues in one repo the same work label** — each spawns a competing pod over the same work queue (double-claim / duplicate PRs). One session = one distinct work label.
-
-## Quick Rules Summary
-
-- Stay within the user-facing/public-interface scope; never touch the kernel engine.
-- The control plane serves a dynamic OpenAPI 3 spec at `/openapi.json` (no static file). New/changed public endpoints MUST be annotated with `#[utoipa::path]` + `ToSchema`/`IntoParams` and registered via `OpenApiRouter`/`routes!`; pin `utoipa-axum` to `0.1` (axum 0.7). See **API Contract (OpenAPI)**.
-- The fkst deployables run exclusively on Kubernetes — the full local setup is embedded above in **FKST Local Deployment Guide** (standalone copy: `opensandbox-developer-guide.md`; keep both in sync); `docker-compose` is not used in this repo.
-- Each deployment needs its own GitHub App registration — permissions, OAuth callbacks, and env-var mapping are in **GitHub App Guide**; never set `FKST_GITHUB_OAUTH_CLIENT_ID` without its client secret, never commit App secrets.
-- Treat the upstream engine and packages repos as read-only references.
-- When filing work issues for a substrate session, **wave the backlog by dependency** (merge foundation before dependent issues), one feature per issue; an open work issue keeps the session's pod alive until closed/merged; never share a work label between two trigger issues in one repo. See **Authoring work issues for a substrate session**.
-- Keep commits small and self-contained.
-- Never add `Co-Authored-By`; always act under the user's own GitHub identity (never a bot/AI identity).
-- All work goes through a pull request — no direct commits to shared branches.
-- For PRs into `develop`, auto-merge as soon as CI is green; if CI fails, fix it then auto-merge — unless told otherwise.
-- Every PR must have a corresponding GitHub issue and link it (`Closes #N`).
-- Use the issue/PR templates under `.github/`.
-- Use pull requests into `develop` or `develop-auto`; only `develop` merges into `main`.
-- Never force push `main`, `develop`, or `develop-auto`.
-- For NyxID / IAM work, reference NyxID's latest `main`; for Ornn / agent-skill work, reference Ornn's latest `main`.
-- PRs into `develop` run exactly five checks (rust lint/build/test, docker build, gitleaks); there is no changeset or release-note requirement.
-- The product version lives in root `package.json`; there is no automated release pipeline — releases are manual git tags on `main`.
