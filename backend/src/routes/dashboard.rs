@@ -131,7 +131,8 @@ impl IssueView {
 }
 
 /// The `fkst-*` labels on a trigger issue (control-plane status markers).
-fn status_labels(issue: &IssueSummary) -> Vec<String> {
+/// `pub(crate)`: the canvas sessions endpoint renders the same projection.
+pub(crate) fn status_labels(issue: &IssueSummary) -> Vec<String> {
     issue
         .labels
         .iter()

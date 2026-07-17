@@ -98,8 +98,9 @@ async fn paths_are_the_trimmed_v1_surface() {
         "/api/v1/dashboard",
         "/api/v1/dashboard/pull",
         "/api/v1/dashboard/pull/{job_id}",
-        // The canvas dashboard's live overview.
+        // The canvas dashboard's live overview + per-repo session surface.
         "/api/v1/overview",
+        "/api/v1/repos/{owner}/{name}/sessions",
         "/health",
         "/metrics",
     ] {

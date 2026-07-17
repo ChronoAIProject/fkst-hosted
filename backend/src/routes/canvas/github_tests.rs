@@ -80,3 +80,65 @@ async fn user_org_memberships_maps_github_5xx_to_upstream_error() {
     let msg = format!("{err}");
     assert!(msg.contains("user_org_memberships"), "names the op: {msg}");
 }
+
+#[tokio::test]
+async fn list_pulls_all_maps_fields_and_derives_merged() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/pulls"))
+        .and(query_param("state", "all"))
+        .and(query_param("per_page", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "number": 12,
+                "title": "devloop implementation for #8",
+                "html_url": "https://github.com/acme/site/pull/12",
+                "state": "closed",
+                "merged_at": "2026-07-04T00:00:00Z",
+                "user": { "login": "fkst-test[bot]" },
+                "head": { "ref": "devloop/issue/acme/site/8/ready-1" }
+            },
+            {
+                "number": 13,
+                "title": "closed unmerged",
+                "html_url": "https://github.com/acme/site/pull/13",
+                "state": "closed",
+                "merged_at": null,
+                "user": null,
+                "head": null
+            }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let gh = DashboardGithub::new(&server.uri()).unwrap();
+    let pulls = gh.list_pulls_all(&tok(), "acme", "site").await.expect("ok");
+    assert_eq!(pulls.len(), 2);
+    assert_eq!(pulls[0].number, 12);
+    assert_eq!(pulls[0].author, "fkst-test[bot]");
+    assert_eq!(pulls[0].head_ref, "devloop/issue/acme/site/8/ready-1");
+    assert!(pulls[0].merged, "merged_at set derives merged=true");
+    assert_eq!(pulls[0].state, "closed");
+    assert!(!pulls[1].merged, "closed without merged_at stays unmerged");
+    assert!(pulls[1].author.is_empty(), "missing user defaults closed");
+    assert!(pulls[1].head_ref.is_empty(), "missing head defaults closed");
+}
+
+#[tokio::test]
+async fn list_pulls_all_maps_github_5xx_to_upstream_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/pulls"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+
+    let gh = DashboardGithub::new(&server.uri()).unwrap();
+    let err = gh
+        .list_pulls_all(&tok(), "acme", "site")
+        .await
+        .expect_err("500 must error");
+    let msg = format!("{err}");
+    assert!(msg.contains("list_pulls_all"), "names the op: {msg}");
+}

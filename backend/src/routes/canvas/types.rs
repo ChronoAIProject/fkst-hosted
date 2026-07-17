@@ -4,7 +4,17 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::goals::trigger_parse::PackageRef;
 use crate::routes::dashboard::IssueWithMeta;
+
+/// Render a parsed package reference back to its canonical
+/// `owner/repo@ref:path` form (the exact grammar the trigger parser accepts).
+pub(super) fn render_package_ref(package: &PackageRef) -> String {
+    format!(
+        "{}/{}@{}:{}",
+        package.owner, package.repo, package.git_ref, package.path
+    )
+}
 
 /// A GitHub issue as the canvas renders it: the trimmed dashboard view plus the
 /// link + ISO-8601 timestamps the level-2 detail panel shows.

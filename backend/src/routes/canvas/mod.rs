@@ -19,6 +19,7 @@
 
 mod github;
 mod overview;
+mod sessions;
 #[cfg(test)]
 pub(crate) mod test_support;
 mod types;
@@ -34,5 +35,7 @@ use crate::state::AppState;
 /// the `GithubUser` extractor (like the dashboard), so no documented security
 /// scheme.
 pub fn router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(overview::overview))
+    OpenApiRouter::new()
+        .routes(routes!(overview::overview))
+        .routes(routes!(sessions::repo_sessions))
 }

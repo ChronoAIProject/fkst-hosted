@@ -22,9 +22,9 @@ use utoipa::ToSchema;
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_app::GithubAppTokens;
 use crate::github_identity::GithubUser;
-use crate::goals::trigger_parse::PackageRef;
 use crate::models::RepoRef;
 use crate::reconcile::registry::parse_registration;
+use crate::routes::canvas::types::render_package_ref;
 use crate::routes::dashboard::{bearer_token, DashboardGithub, UserRepo};
 use crate::routes::repos::Viewer;
 use crate::state::AppState;
@@ -101,15 +101,6 @@ pub struct PackageCount {
     /// Active sessions referencing it (once per session, however many times
     /// the session lists it).
     pub count: usize,
-}
-
-/// Render a parsed package reference back to its canonical
-/// `owner/repo@ref:path` form (the exact grammar the trigger parser accepts).
-fn render_package_ref(package: &PackageRef) -> String {
-    format!(
-        "{}/{}@{}:{}",
-        package.owner, package.repo, package.git_ref, package.path
-    )
 }
 
 /// Scan one installed repo's OPEN trigger issues with an App token and return

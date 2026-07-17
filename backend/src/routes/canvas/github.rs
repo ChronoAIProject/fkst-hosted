@@ -32,6 +32,52 @@ pub(crate) struct OrgMembership {
     pub role: String,
 }
 
+#[derive(Deserialize)]
+struct RawPullUser {
+    #[serde(default)]
+    login: String,
+}
+
+#[derive(Deserialize)]
+struct RawPullHead {
+    /// The head BRANCH name (`ref` is a Rust keyword).
+    #[serde(rename = "ref", default)]
+    head_ref: String,
+}
+
+/// One element of the bare-array `GET /repos/{owner}/{repo}/pulls` response.
+#[derive(Deserialize)]
+struct RawPull {
+    number: i64,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    html_url: String,
+    #[serde(default)]
+    state: String,
+    /// Set only once the PR merged (the list endpoint has no `merged` bool).
+    #[serde(default)]
+    merged_at: Option<String>,
+    user: Option<RawPullUser>,
+    head: Option<RawPullHead>,
+}
+
+/// One pull request as the canvas sessions endpoint consumes it.
+#[derive(Debug, Clone)]
+pub(crate) struct RepoPull {
+    pub number: i64,
+    pub title: String,
+    pub html_url: String,
+    /// `open` or `closed`.
+    pub state: String,
+    /// Merged (derived from `merged_at`); a closed-unmerged PR stays false.
+    pub merged: bool,
+    /// The PR author's login (the devloop-bot filter keys on it).
+    pub author: String,
+    /// The head branch name (the devloop issue-number parse keys on it).
+    pub head_ref: String,
+}
+
 impl DashboardGithub {
     /// `GET /user/memberships/orgs?state=active` (user token), paginated — the
     /// caller's ACTIVE org memberships with their role. The overview uses
@@ -61,6 +107,40 @@ impl DashboardGithub {
                 None => return Ok(out),
             }
         }
+    }
+
+    /// `GET /repos/{owner}/{repo}/pulls?state=all` — the repo's newest 100 pull
+    /// requests (ONE page, deliberately unpaginated: the canvas links recent
+    /// devloop PRs, not the repo's full history). Works with either a user or
+    /// an installation token.
+    pub(crate) async fn list_pulls_all(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+    ) -> Result<Vec<RepoPull>, AppError> {
+        let url = format!("{}/repos/{owner}/{repo}/pulls", self.api_base);
+        let query: &[(&str, &str)] = &[
+            ("state", "all"),
+            ("per_page", "100"),
+            ("sort", "created"),
+            ("direction", "desc"),
+        ];
+        let (page, _next): (Vec<RawPull>, _) = self
+            .get_page(&url, token, Some(query), "list_pulls_all")
+            .await?;
+        Ok(page
+            .into_iter()
+            .map(|raw| RepoPull {
+                number: raw.number,
+                title: raw.title,
+                html_url: raw.html_url,
+                state: raw.state,
+                merged: raw.merged_at.is_some(),
+                author: raw.user.map(|u| u.login).unwrap_or_default(),
+                head_ref: raw.head.map(|h| h.head_ref).unwrap_or_default(),
+            })
+            .collect())
     }
 }
 
