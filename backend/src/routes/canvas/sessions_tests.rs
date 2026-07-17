@@ -224,6 +224,55 @@ async fn repo_sessions_assembles_the_full_detail() {
 }
 
 #[tokio::test]
+async fn repo_sessions_canonicalizes_a_case_variant_path() {
+    let server = MockServer::start().await;
+    // The installation listing carries GitHub's canonical `acme/site`.
+    mount_installation_covering_site(&server).await;
+    mount_app_token(&server, "acme", "site", 77).await;
+    // No `### Work Label` section, so the scan reads no work issues.
+    let body = "### Session Name\nsite\n\n### Packages\nacme/pkgs@main:packages/devloop\n";
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/issues"))
+        .and(query_param("labels", "fkst-substrate-trigger"))
+        .and(query_param("state", "all"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([issue_json(
+                5,
+                body,
+                "fkst-substrate-trigger",
+                "open"
+            )])),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/pulls"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(&server)
+        .await;
+
+    let state = test_state(&server.uri(), Some(test_app(&server.uri())));
+    let Json(view) = repo_sessions(
+        State(state),
+        Path(("ACME".to_string(), "Site".to_string())),
+        viewer_user(),
+        auth_headers(),
+    )
+    .await
+    .expect("200 for the case-variant path");
+
+    assert_eq!(view.owner, "acme", "the response echoes GitHub's casing");
+    assert_eq!(view.name, "site");
+    assert!(view.installed);
+    assert_eq!(view.sessions.len(), 1);
+    assert_eq!(
+        view.sessions[0].session_id.as_deref(),
+        Some(derive_session_id(77, "acme", "site", 5).as_str()),
+        "the session id must derive from the canonical casing, never the caller's"
+    );
+}
+
+#[tokio::test]
 async fn repo_sessions_outside_the_callers_installations_is_not_installed() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

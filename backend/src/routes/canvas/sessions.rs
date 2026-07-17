@@ -24,7 +24,6 @@ use utoipa::ToSchema;
 
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
-use crate::models::RepoRef;
 use crate::reconcile::automerge::linked_issue_number;
 use crate::reconcile::desired::PodLiveness;
 use crate::reconcile::registry::parse_registration;
@@ -36,7 +35,11 @@ use crate::state::AppState;
 /// One repo's sessions, scanned live.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RepoSessionsResponse {
+    /// GitHub's canonical owner casing when installed (a case-variant request
+    /// path is canonicalized); the caller's raw segment when not installed.
     pub owner: String,
+    /// GitHub's canonical repo-name casing when installed; the caller's raw
+    /// segment when not installed.
     pub name: String,
     /// The App covers this repo for the CALLER (an installation the caller can
     /// see lists it). False renders an empty canvas card, never an error.
@@ -202,22 +205,26 @@ pub(super) async fn repo_sessions(
 
     // Caller-scoped installation check: the user token only ever sees THIS
     // App's installations, so membership here is both the `installed` flag and
-    // the access gate on another user's session data.
+    // the access gate on another user's session data. The path segments match
+    // case-insensitively (GitHub treats owner/name that way), but the MATCHED
+    // installation repo carries GitHub's canonical casing — session ids, log
+    // URLs, and pod annotations are all derived case-sensitively from that
+    // casing, so the caller's variant must never leak into them.
     let installations = gh.user_installations(&token).await?;
     let installation = installations
         .iter()
         .find(|inst| inst.account.eq_ignore_ascii_case(&owner));
-    let covered = match installation {
+    let canonical = match installation {
         Some(inst) => gh
             .user_installation_repos(&token, inst.id)
             .await?
-            .iter()
-            .any(|repo| {
+            .into_iter()
+            .find(|repo| {
                 repo.owner.eq_ignore_ascii_case(&owner) && repo.name.eq_ignore_ascii_case(&name)
             }),
-        None => false,
+        None => None,
     };
-    let Some(installation) = installation.filter(|_| covered) else {
+    let (Some(installation), Some(repo_ref)) = (installation, canonical) else {
         tracing::debug!(owner = %owner, name = %name, "canvas sessions: repo not in the caller's installations");
         return Ok(Json(RepoSessionsResponse {
             owner,
@@ -226,16 +233,15 @@ pub(super) async fn repo_sessions(
             sessions: Vec::new(),
         }));
     };
+    // From here on GitHub's canonical casing is authoritative.
+    let owner = repo_ref.owner.clone();
+    let name = repo_ref.name.clone();
 
     let app = state.github_app.as_ref().ok_or_else(|| {
         AppError::Unavailable("the github app is not configured on this deployment".to_string())
     })?;
     let owner_repo = format!("{owner}/{name}");
     let inst_token = app.token_for_repo(&owner_repo, None).await?;
-    let repo_ref = RepoRef {
-        owner: owner.clone(),
-        name: name.clone(),
-    };
 
     let trigger_label = &state.config.reconcile.substrate_trigger_label;
     let triggers = gh
