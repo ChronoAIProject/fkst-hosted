@@ -153,6 +153,49 @@ describe('Dashboard — canvas levels and loading', () => {
     expect(screen.getByText(/every GitHub account you can reach/)).toBeInTheDocument();
   });
 
+  it('drops an out-of-order sessions response for the same repo', async () => {
+    const staleBody: RepoSessionsResponse = {
+      ...sessionsBody,
+      sessions: [{ ...sessionsBody.sessions[0]!, name: 'stale-old' }],
+    };
+    const pending: ((r: Response) => void)[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/v1/overview')) return jsonResponse(overviewBody);
+      if (url.endsWith('/api/v1/repos/shining/lab/sessions')) {
+        return new Promise<Response>((resolve) => {
+          pending.push(resolve);
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderDashboard();
+
+    // Enter the repo: request 1 goes out and stays in flight.
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Open account shining' }))[0]!);
+    fireEvent.click(
+      (await screen.findAllByRole('button', { name: 'Open repository shining/lab' }))[0]!
+    );
+    await waitFor(() => expect(pending).toHaveLength(1));
+
+    // Leave and re-enter the SAME repo: request 2 with the same level key.
+    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.click(
+      (await screen.findAllByRole('button', { name: 'Open repository shining/lab' }))[0]!
+    );
+    await waitFor(() => expect(pending).toHaveLength(2));
+
+    // The newer request resolves first; the older one straggles in after.
+    pending[1]!(jsonResponse(sessionsBody));
+    expect((await screen.findAllByText('nightly')).length).toBeGreaterThan(0);
+    pending[0]!(jsonResponse(staleBody));
+
+    // The stale payload must never land: 'nightly' stays, 'stale-old' never shows.
+    await waitFor(() => expect(screen.queryByText('stale-old')).not.toBeInTheDocument());
+    expect(screen.getAllByText('nightly').length).toBeGreaterThan(0);
+  });
+
   it('ignores Escape pressed inside an editable field (filter inputs)', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

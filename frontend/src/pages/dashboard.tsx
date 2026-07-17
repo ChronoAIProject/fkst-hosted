@@ -50,6 +50,9 @@ export function Dashboard() {
   // Guards stale async responses after the level moved on.
   const levelRef = useRef(levelKey(level));
   levelRef.current = levelKey(level);
+  // Monotonic id per sessions request: an out-of-order response for the SAME
+  // level key (slow poll racing a post-mutation refetch) must not win either.
+  const sessionsRequestRef = useRef(0);
 
   useEffect(() => {
     document.title = d.metaTitle;
@@ -78,14 +81,20 @@ export function Dashboard() {
   const refreshSessions = useCallback(() => {
     if (level.kind !== 'repo') return;
     const requestedFor = levelKey(level);
+    const requestId = ++sessionsRequestRef.current;
+    // A response only lands when it is BOTH for the current level key and the
+    // latest request issued — otherwise a stale slow response could overwrite
+    // fresher data (e.g. resurrect a just-stopped session).
+    const isCurrent = () =>
+      levelRef.current === requestedFor && sessionsRequestRef.current === requestId;
     getRepoSessions(apiFetch, level.owner, level.name)
       .then((body) => {
-        if (levelRef.current !== requestedFor) return; // stale — level moved on
+        if (!isCurrent()) return;
         setSessions(body);
         setSessionsFailed(false);
       })
       .catch(() => {
-        if (levelRef.current !== requestedFor) return;
+        if (!isCurrent()) return;
         setSessionsFailed(true);
       });
   }, [level, apiFetch]);
