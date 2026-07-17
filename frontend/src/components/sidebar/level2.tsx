@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useContent } from '@/i18n';
+import { useAuth } from '@/lib/auth/github-auth';
+import { stopTrigger } from '@/lib/api/canvas';
 import type { RepoSessionsResponse, SessionDetail } from '@/lib/api/types';
 import { ConfirmDialog } from '@/components/modals/confirm-dialog';
 import { CreateTriggerModal } from '@/components/modals/create-trigger-modal';
@@ -25,6 +27,7 @@ export function Level2Sidebar({
 }) {
   const c = useContent().dashboard;
   const cc = c.canvas;
+  const { apiFetch } = useAuth();
   const [showCreate, setShowCreate] = useState(false);
   const [stopTarget, setStopTarget] = useState<SessionDetail | null>(null);
 
@@ -105,7 +108,7 @@ export function Level2Sidebar({
           confirmLabel={cc.stopConfirm}
           pendingLabel={cc.stopPending}
           cancelLabel={c.repos.cancel}
-          path={`/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/sessions/${stopTarget.trigger.number}`}
+          action={() => stopTrigger(apiFetch, owner, name, stopTarget.trigger.number)}
           fallbackError={cc.stopFailed}
           onClose={() => setStopTarget(null)}
           onDone={() => {

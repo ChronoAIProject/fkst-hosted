@@ -1,5 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createTrigger, getOverview, getRepoSessions, readErrorMessage, stopTrigger } from './canvas';
+import {
+  createTrigger,
+  getOverview,
+  getRepoSessions,
+  readErrorMessage,
+  stopTrigger,
+  uninstallApp,
+} from './canvas';
 import type { ApiFetch } from './canvas';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -106,6 +113,23 @@ describe('stopTrigger', () => {
     expect(await stopTrigger(apiFetch, 'o', 'r', 42)).toEqual({
       ok: false,
       message: 'No such trigger issue.',
+    });
+  });
+});
+
+describe('uninstallApp', () => {
+  it('DELETEs the encoded installation path', async () => {
+    const apiFetch = vi.fn(async () => jsonResponse(null, 204)) as ApiFetch;
+    expect(await uninstallApp(apiFetch, 'a b')).toEqual({ ok: true, data: null });
+    expect(apiFetch).toHaveBeenCalledWith('/api/v1/installations/a%20b', { method: 'DELETE' });
+  });
+
+  it('returns the envelope message on failure', async () => {
+    const apiFetch = (async () =>
+      jsonResponse({ error: 'not_found', message: 'No installation for this account.' }, 404)) as ApiFetch;
+    expect(await uninstallApp(apiFetch, 'shining')).toEqual({
+      ok: false,
+      message: 'No installation for this account.',
     });
   });
 });

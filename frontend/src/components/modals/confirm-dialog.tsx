@@ -1,19 +1,20 @@
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
-import { useAuth } from '@/lib/auth/github-auth';
-import { readErrorMessage } from '@/lib/api/canvas';
+import type { MutationResult } from '@/lib/api/canvas';
 import { ModalShell } from './modal-shell';
 import { ErrorNote } from '@/components/ui/error-note';
 
-/** Danger confirmation dialog: issues a DELETE to `path` on confirm; on a
- *  non-2xx answer the error envelope's `message` is shown inside the dialog. */
+/** Danger confirmation dialog: runs the caller's mutation on confirm. Taking
+ *  the API-layer function (not a raw path) keeps every URL construction in
+ *  one tested place; on failure the envelope's `message` is shown inside the
+ *  dialog, falling back to the caller's generic string. */
 export function ConfirmDialog({
   title,
   body,
   confirmLabel,
   pendingLabel,
   cancelLabel,
-  path,
+  action,
   fallbackError,
   onClose,
   onDone,
@@ -23,13 +24,12 @@ export function ConfirmDialog({
   confirmLabel: string;
   pendingLabel: string;
   cancelLabel: string;
-  /** DELETE target, e.g. `/api/v1/installations/{owner}`. */
-  path: string;
+  /** The mutation to run, e.g. `() => stopTrigger(apiFetch, owner, name, n)`. */
+  action: () => Promise<MutationResult<unknown>>;
   fallbackError: string;
   onClose: () => void;
   onDone: () => void;
 }) {
-  const { apiFetch } = useAuth();
   const [pending, setPending] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
 
@@ -38,13 +38,12 @@ export function ConfirmDialog({
     setPending(true);
     setServerError(null);
     try {
-      const res = await apiFetch(path, { method: 'DELETE' });
-      if (res.ok) {
+      const result = await action();
+      if (result.ok) {
         onDone();
         return;
       }
-      // Error envelope: {"error", "message"} — surface `message` verbatim.
-      setServerError((await readErrorMessage(res)) ?? fallbackError);
+      setServerError(result.message ?? fallbackError);
     } catch {
       setServerError(fallbackError);
     } finally {

@@ -1,5 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useContent } from '@/i18n';
+import { useAuth } from '@/lib/auth/github-auth';
+import { uninstallApp } from '@/lib/api/canvas';
 import { filterAccounts, packagesByAccount, sessionsByAccount } from '@/lib/api/derive';
 import type { OverviewResponse } from '@/lib/api/types';
 import { FIELD_INPUT } from '@/components/ui/field';
@@ -33,6 +35,7 @@ export function Level0Sidebar({
   const c = useContent().dashboard;
   const rc = c.repos;
   const cc = c.canvas;
+  const { apiFetch } = useAuth();
 
   const [showCreate, setShowCreate] = useState(false);
   const [uninstallLogin, setUninstallLogin] = useState<string | null>(null);
@@ -137,7 +140,7 @@ export function Level0Sidebar({
           confirmLabel={rc.uninstallConfirm}
           pendingLabel={rc.uninstallPending}
           cancelLabel={rc.cancel}
-          path={`/api/v1/installations/${encodeURIComponent(uninstallLogin)}`}
+          action={() => uninstallApp(apiFetch, uninstallLogin)}
           fallbackError={rc.uninstallFailed}
           onClose={closeUninstall}
           onDone={doneUninstall}

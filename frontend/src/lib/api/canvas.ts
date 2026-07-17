@@ -95,3 +95,16 @@ export async function stopTrigger(
   if (res.ok) return { ok: true, data: null };
   return { ok: false, message: await readErrorMessage(res) };
 }
+
+/** DELETE /api/v1/installations/{owner} — uninstall the GitHub App from an
+ *  account. */
+export async function uninstallApp(
+  apiFetch: ApiFetch,
+  owner: string
+): Promise<MutationResult<null>> {
+  const res = await apiFetch(`/api/v1/installations/${encodeURIComponent(owner)}`, {
+    method: 'DELETE',
+  });
+  if (res.ok) return { ok: true, data: null };
+  return { ok: false, message: await readErrorMessage(res) };
+}
