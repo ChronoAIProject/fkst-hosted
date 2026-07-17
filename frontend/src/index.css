@@ -85,11 +85,70 @@
   animation: repo-pulse 1.1s ease-in-out 3;
 }
 
+/* ---- Canvas status + loading vocabulary ----------------------------------
+   The three canvas status classes: grey (no App) and static amber highlight
+   are plain token styling on the node; ACTIVE additionally blinks via these
+   keyframes. Active nodes also carry a textual "{n} active" badge, so the
+   state never rides on motion or color alone (reduced-motion safe). */
+
+@keyframes node-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    box-shadow: 0 0 22px 2px color-mix(in oklab, var(--amber) 45%, transparent);
+  }
+}
+
+@keyframes dot-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Blinking amber glow on canvas nodes with >=1 active session. */
+.anim-node-glow {
+  animation: node-glow 1.8s ease-in-out infinite;
+}
+
+/* Blinking repo dot (active repo) inside an account card. */
+.anim-dot-blink {
+  animation: dot-blink 1.2s ease-in-out infinite;
+}
+
+/* Loading shimmer sweep for skeleton blocks (canvas + sidebar). */
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.anim-shimmer {
+  background: linear-gradient(100deg, var(--raise) 40%, var(--raise-2) 50%, var(--raise) 60%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .anim-row-in,
   .anim-overlay-in,
   .anim-modal-in,
-  .anim-repo-pulse {
+  .anim-repo-pulse,
+  .anim-node-glow,
+  .anim-dot-blink {
     animation: none;
+  }
+
+  .anim-shimmer {
+    animation: none;
+    background: var(--raise-2);
   }
 }

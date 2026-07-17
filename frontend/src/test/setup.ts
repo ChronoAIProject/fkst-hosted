@@ -42,6 +42,62 @@ if (
   });
 }
 
+// ---- Canvas-stack shims -----------------------------------------------------
+// @xyflow/react (React Flow 12) and recharts measure themselves with browser
+// APIs jsdom does not implement. These are the mocks React Flow's own testing
+// guide prescribes: no-op ResizeObserver, a DOMMatrixReadOnly that only knows
+// the zoom scale, element sizes, and SVG getBBox. framer-motion additionally
+// queries matchMedia for prefers-reduced-motion.
+
+class ResizeObserverMock {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+class DOMMatrixReadOnlyMock {
+  m22: number;
+  constructor(transform?: string) {
+    const scale = transform?.match(/scale\(([1-9.])\)/)?.[1];
+    this.m22 = scale !== undefined ? +scale : 1;
+  }
+}
+
+globalThis.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+globalThis.DOMMatrixReadOnly = DOMMatrixReadOnlyMock as unknown as typeof DOMMatrixReadOnly;
+
+Object.defineProperties(globalThis.HTMLElement.prototype, {
+  offsetHeight: {
+    configurable: true,
+    get() {
+      return parseFloat(this.style.height) || 1;
+    },
+  },
+  offsetWidth: {
+    configurable: true,
+    get() {
+      return parseFloat(this.style.width) || 1;
+    },
+  },
+});
+
+(globalThis.SVGElement.prototype as unknown as { getBBox: () => DOMRect }).getBBox = () =>
+  ({ x: 0, y: 0, width: 0, height: 0 }) as DOMRect;
+
+if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
+  window.matchMedia = (query: string): MediaQueryList =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }) as MediaQueryList;
+}
+
 afterEach(() => {
   cleanup();
 });
