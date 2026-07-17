@@ -105,15 +105,41 @@ async fn repo_sessions_assembles_the_full_detail() {
         .and(query_param("state", "all"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
             // The one devloop PR belonging to work issue #8 (merged).
-            pull_json(12, "fkst-test[bot]", "devloop/issue/acme/site/8/ready-1",
-                      "devloop implementation for #8", "closed", true),
+            pull_json(
+                12,
+                "fkst-test[bot]",
+                "devloop/issue/acme/site/8/ready-1",
+                "devloop implementation for #8",
+                "closed",
+                true
+            ),
             // A human PR on a devloop-looking branch: filtered by author.
-            pull_json(13, "human", "devloop/issue/acme/site/8/ready-2", "manual fix", "open", false),
+            pull_json(
+                13,
+                "human",
+                "devloop/issue/acme/site/8/ready-2",
+                "manual fix",
+                "open",
+                false
+            ),
             // A bot PR that is NOT devloop (no parseable issue): filtered.
-            pull_json(14, "fkst-test[bot]", "fkst/issue-templates-v3", "fkst issue templates", "open", false),
+            pull_json(
+                14,
+                "fkst-test[bot]",
+                "fkst/issue-templates-v3",
+                "fkst issue templates",
+                "open",
+                false
+            ),
             // A bot devloop PR for an issue outside this session's work label.
-            pull_json(15, "fkst-test[bot]", "devloop/issue/acme/site/99/ready-1",
-                      "devloop implementation for #99", "open", false),
+            pull_json(
+                15,
+                "fkst-test[bot]",
+                "devloop/issue/acme/site/99/ready-1",
+                "devloop implementation for #99",
+                "open",
+                false
+            ),
         ])))
         .mount(&server)
         .await;
@@ -179,7 +205,11 @@ async fn repo_sessions_assembles_the_full_detail() {
         "trailing base-URL slash must not double up"
     );
     assert_eq!(session.liveness.as_deref(), Some("live"));
-    assert_eq!(session.prs.len(), 1, "only the bot devloop PR for #8 belongs");
+    assert_eq!(
+        session.prs.len(),
+        1,
+        "only the bot devloop PR for #8 belongs"
+    );
     assert_eq!(session.prs[0].number, 12);
     assert!(session.prs[0].merged);
     assert_eq!(session.prs[0].work_issue, Some(8));
@@ -277,7 +307,10 @@ async fn repo_sessions_rejects_a_malformed_owner() {
 fn liveness_label_maps_only_the_three_visible_phases() {
     assert_eq!(liveness_label(PodLiveness::Starting), Some("starting"));
     assert_eq!(liveness_label(PodLiveness::Live), Some("live"));
-    assert_eq!(liveness_label(PodLiveness::Terminating), Some("terminating"));
+    assert_eq!(
+        liveness_label(PodLiveness::Terminating),
+        Some("terminating")
+    );
     assert_eq!(liveness_label(PodLiveness::Absent), None);
     assert_eq!(liveness_label(PodLiveness::Terminal), None);
 }

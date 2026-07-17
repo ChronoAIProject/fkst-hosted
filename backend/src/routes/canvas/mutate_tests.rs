@@ -76,7 +76,10 @@ async fn create_session_rejects_an_invalid_spec_before_any_github_write() {
     .expect_err("an invalid package ref is a 400");
     match err {
         AppError::Validation(message) => {
-            assert!(message.contains("### Packages"), "parser message: {message}")
+            assert!(
+                message.contains("### Packages"),
+                "parser message: {message}"
+            )
         }
         other => panic!("expected Validation, got {other:?}"),
     }

@@ -667,8 +667,11 @@ impl DashboardGithub {
         state: &str,
     ) -> Result<Vec<IssueWithMeta>, AppError> {
         let mut url = format!("{}/repos/{owner}/{repo}/issues", self.api_base);
-        let mut query: Option<Vec<(&str, &str)>> =
-            Some(vec![("labels", label), ("state", state), ("per_page", "100")]);
+        let mut query: Option<Vec<(&str, &str)>> = Some(vec![
+            ("labels", label),
+            ("state", state),
+            ("per_page", "100"),
+        ]);
         let mut out = Vec::new();
         loop {
             let (page, next): (Vec<RawIssue>, _) = self

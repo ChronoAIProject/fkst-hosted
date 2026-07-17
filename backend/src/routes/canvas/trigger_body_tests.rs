@@ -32,7 +32,10 @@ fn full_request_round_trips_through_the_trigger_parser() {
     assert_eq!(spec.work_label.as_deref(), Some("site-build"));
     assert_eq!(spec.environment.as_deref(), Some("prod-env"));
     assert!(spec.auto_merge);
-    assert_eq!(spec.log_access, vec!["reviewer".to_string(), "12345".to_string()]);
+    assert_eq!(
+        spec.log_access,
+        vec!["reviewer".to_string(), "12345".to_string()]
+    );
     assert_eq!(spec.output_lang.as_deref(), Some("zh-CN"));
     assert!(spec.engine_config.is_empty());
 }
@@ -73,7 +76,10 @@ fn auto_merge_false_and_blank_optionals_render_like_absent() {
     };
     let body = validated_trigger_body(&req).expect("valid");
     assert!(!body.contains("### Auto-merge"), "false renders no section");
-    assert!(!body.contains("### Work Label"), "blank collapses to absent");
+    assert!(
+        !body.contains("### Work Label"),
+        "blank collapses to absent"
+    );
     let spec = parse_trigger_issue_body(&body).expect("parses");
     assert!(!spec.auto_merge);
     assert_eq!(spec.work_label, None);
@@ -88,8 +94,14 @@ fn an_invalid_package_ref_is_a_400_carrying_the_parsers_message() {
     let err = validated_trigger_body(&req).expect_err("must reject");
     match err {
         AppError::Validation(message) => {
-            assert!(message.contains("### Packages"), "names the section: {message}");
-            assert!(message.contains("not-a-package-ref"), "echoes the value: {message}");
+            assert!(
+                message.contains("### Packages"),
+                "names the section: {message}"
+            );
+            assert!(
+                message.contains("not-a-package-ref"),
+                "echoes the value: {message}"
+            );
         }
         other => panic!("expected Validation, got {other:?}"),
     }
@@ -110,26 +122,41 @@ fn multi_line_and_heading_shaped_values_are_rejected() {
     // A newline could smuggle an extra heading into the body; a leading '#'
     // could BE a heading. Both must 400 for every field.
     let injections = [
-        ("name", CreateSessionRequest {
-            name: "site\n\n### Engine Config\nFKST_X=1".to_string(),
-            ..full_request()
-        }),
-        ("work_label", CreateSessionRequest {
-            work_label: Some("### Engine Config".to_string()),
-            ..full_request()
-        }),
-        ("environment", CreateSessionRequest {
-            environment: Some("env\r\nFKST_X=1".to_string()),
-            ..full_request()
-        }),
-        ("log_access", CreateSessionRequest {
-            log_access: vec!["### Auto-merge".to_string()],
-            ..full_request()
-        }),
-        ("packages", CreateSessionRequest {
-            packages: vec!["acme/pkgs@main:p\n### Output Language\nzh".to_string()],
-            ..full_request()
-        }),
+        (
+            "name",
+            CreateSessionRequest {
+                name: "site\n\n### Engine Config\nFKST_X=1".to_string(),
+                ..full_request()
+            },
+        ),
+        (
+            "work_label",
+            CreateSessionRequest {
+                work_label: Some("### Engine Config".to_string()),
+                ..full_request()
+            },
+        ),
+        (
+            "environment",
+            CreateSessionRequest {
+                environment: Some("env\r\nFKST_X=1".to_string()),
+                ..full_request()
+            },
+        ),
+        (
+            "log_access",
+            CreateSessionRequest {
+                log_access: vec!["### Auto-merge".to_string()],
+                ..full_request()
+            },
+        ),
+        (
+            "packages",
+            CreateSessionRequest {
+                packages: vec!["acme/pkgs@main:p\n### Output Language\nzh".to_string()],
+                ..full_request()
+            },
+        ),
     ];
     for (field, req) in injections {
         let err = validated_trigger_body(&req).expect_err(field);

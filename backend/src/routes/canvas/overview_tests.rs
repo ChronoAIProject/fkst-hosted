@@ -136,7 +136,10 @@ async fn overview_assembles_accounts_counts_and_totals() {
 
     assert_eq!(view.totals.sessions, 1);
     assert_eq!(view.totals.packages.len(), 1);
-    assert_eq!(view.totals.packages[0].package, "acme/pkgs@main:packages/devloop");
+    assert_eq!(
+        view.totals.packages[0].package,
+        "acme/pkgs@main:packages/devloop"
+    );
     assert_eq!(view.totals.packages[0].count, 1);
 }
 
@@ -178,7 +181,10 @@ async fn overview_marks_counts_incomplete_when_the_app_is_unconfigured() {
         !org.counts_complete,
         "an installed repo with no App creds cannot be counted"
     );
-    assert!(view.accounts[0].counts_complete, "no installed repos, nothing missing");
+    assert!(
+        view.accounts[0].counts_complete,
+        "no installed repos, nothing missing"
+    );
 }
 
 #[tokio::test]

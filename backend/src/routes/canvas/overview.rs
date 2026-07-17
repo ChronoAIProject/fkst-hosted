@@ -190,16 +190,13 @@ pub(super) async fn overview(
     let mut package_counts: BTreeMap<String, usize> = BTreeMap::new();
 
     // The personal account first, then every org sorted.
-    let account_list: Vec<(String, &'static str, bool)> = std::iter::once((
-        user.login.clone(),
-        "personal",
-        true,
-    ))
-    .chain(orgs.into_iter().map(|org| {
-        let owner = admin_orgs.contains(&org.to_ascii_lowercase());
-        (org, "org", owner)
-    }))
-    .collect();
+    let account_list: Vec<(String, &'static str, bool)> =
+        std::iter::once((user.login.clone(), "personal", true))
+            .chain(orgs.into_iter().map(|org| {
+                let owner = admin_orgs.contains(&org.to_ascii_lowercase());
+                (org, "org", owner)
+            }))
+            .collect();
 
     for (login, kind, owner) in account_list {
         let installation = installations
@@ -213,8 +210,8 @@ pub(super) async fn overview(
         let mut counts_complete = true;
         let mut repo_views = Vec::with_capacity(repos.len());
         for repo in repos {
-            let installed =
-                installed_repos.contains(&format!("{}/{}", repo.owner, repo.name).to_ascii_lowercase());
+            let installed = installed_repos
+                .contains(&format!("{}/{}", repo.owner, repo.name).to_ascii_lowercase());
             let mut active_sessions = 0usize;
             let mut packages: Vec<String> = Vec::new();
             if installed {
@@ -224,8 +221,14 @@ pub(super) async fn overview(
                             owner: repo.owner.clone(),
                             name: repo.name.clone(),
                         };
-                        match scan_repo_sessions_packages(&gh, app, inst.id, &repo_ref, trigger_label)
-                            .await
+                        match scan_repo_sessions_packages(
+                            &gh,
+                            app,
+                            inst.id,
+                            &repo_ref,
+                            trigger_label,
+                        )
+                        .await
                         {
                             Ok(sessions) => {
                                 active_sessions = sessions.len();
@@ -237,7 +240,8 @@ pub(super) async fn overview(
                                     let mut seen_in_session: HashSet<&str> = HashSet::new();
                                     for package in &session_packages {
                                         if seen_in_session.insert(package) {
-                                            *package_counts.entry(package.clone()).or_default() += 1;
+                                            *package_counts.entry(package.clone()).or_default() +=
+                                                1;
                                         }
                                         if !packages.contains(package) {
                                             packages.push(package.clone());
@@ -303,7 +307,11 @@ pub(super) async fn overview(
         .into_iter()
         .map(|(package, count)| PackageCount { package, count })
         .collect();
-    packages.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.package.cmp(&b.package)));
+    packages.sort_by(|a, b| {
+        b.count
+            .cmp(&a.count)
+            .then_with(|| a.package.cmp(&b.package))
+    });
 
     tracing::debug!(
         user_id = user.id,

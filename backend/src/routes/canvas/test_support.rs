@@ -66,7 +66,9 @@ pub(crate) fn test_state(server_uri: &str, github_app: Option<GithubAppTokens>) 
 pub(crate) async fn mount_app_token(server: &MockServer, owner: &str, name: &str, inst_id: i64) {
     Mock::given(method("GET"))
         .and(path(format!("/repos/{owner}/{name}/installation")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": inst_id })))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": inst_id })),
+        )
         .mount(server)
         .await;
     Mock::given(method("POST"))

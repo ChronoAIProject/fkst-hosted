@@ -42,5 +42,8 @@ fn issue_detail_keeps_open_issue_closed_at_null_in_json() {
     let detail = IssueDetail::from(&meta(6, "open", None));
     let json = serde_json::to_value(&detail).expect("serialize");
     assert_eq!(json["state"], "open");
-    assert!(json["closed_at"].is_null(), "open issue renders closed_at null");
+    assert!(
+        json["closed_at"].is_null(),
+        "open issue renders closed_at null"
+    );
 }
