@@ -32,5 +32,5 @@ authentication, the permissions it requires, and its request/response shapes.
 
 ---
 
-<sub>Deploying fkst-hosted? See the Kubernetes samples
-[`backend/k8s_sample/README.md`](backend/k8s_sample/README.md).</sub>
+<sub>Deploying fkst-hosted? See the full local Kubernetes setup guide:
+[`opensandbox-developer-guide.md`](opensandbox-developer-guide.md).</sub>

@@ -22,7 +22,8 @@
 //! ([`crate::reconcile::loops::run_reconcile_loop`]) is the SOLE queue consumer and
 //! reconciles each repo serially — "the single consumer guarantees per-repo
 //! serialization (never two concurrent reconciles of the same repo)". The Deployment
-//! runs `replicas: 1` with `strategy.type: Recreate` (`k8s_sample/deployment.yaml`), so
+//! runs `replicas: 1` with `strategy.type: Recreate` (see the control-plane
+//! Deployment in `opensandbox-developer-guide.md` §14.6), so
 //! a rollout never overlaps two writers. The live loop's `ensure_session` list-guard is
 //! thus race-free in steady state; the `list_fleet` duplicate-reaper is the
 //! cross-restart / split-brain BACKSTOP that converges the fleet back to one sandbox

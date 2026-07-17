@@ -6,5 +6,4 @@ docs
 playwright-report
 test-results
 Dockerfile
-k8s_sample
 README.md
