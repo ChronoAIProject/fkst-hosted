@@ -126,6 +126,24 @@ pub(super) async fn stop_session(
     }
     let token = bearer_token(&headers)?;
     let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
+
+    // Pre-flight: only ever close an actual trigger issue. GitHub's issues
+    // PATCH also closes pull requests and any unrelated issue the caller can
+    // write, so a stale/wrong number from the UI must not silently retire the
+    // wrong thing — refuse anything that is a PR or lacks the trigger label.
+    let trigger_label = &state.config.reconcile.substrate_trigger_label;
+    let issue = gh.get_issue(&token, &owner, &name, issue_number).await?;
+    if issue.is_pull_request {
+        return Err(AppError::Validation(format!(
+            "#{issue_number} is a pull request, not a session trigger issue"
+        )));
+    }
+    if !issue.labels.iter().any(|label| label == trigger_label) {
+        return Err(AppError::NotFound(format!(
+            "#{issue_number} is not a session trigger issue (missing the {trigger_label} label)"
+        )));
+    }
+
     gh.close_issue(&token, &owner, &name, issue_number).await?;
     tracing::info!(
         owner = %owner,

@@ -138,9 +138,34 @@ async fn create_session_maps_a_github_404_to_not_found() {
     assert!(matches!(err, AppError::NotFound(_)), "got {err:?}");
 }
 
+/// Mount the stop-session pre-flight GET returning an issue with the given
+/// labels (and optionally flagged as a pull request).
+async fn mount_get_issue(server: &MockServer, number: i64, labels: &[&str], is_pr: bool) {
+    let mut body = serde_json::json!({
+        "number": number,
+        "labels": labels.iter().map(|l| serde_json::json!({ "name": l })).collect::<Vec<_>>(),
+    });
+    if is_pr {
+        body["pull_request"] = serde_json::json!({ "url": "https://example.test/pull" });
+    }
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/acme/site/issues/{number}")))
+        .and(header("authorization", "Bearer user-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(server)
+        .await;
+}
+
 #[tokio::test]
 async fn stop_session_closes_the_trigger_issue_as_the_user() {
     let server = MockServer::start().await;
+    mount_get_issue(
+        &server,
+        21,
+        &["fkst-substrate-trigger", "fkst-substrate-active"],
+        false,
+    )
+    .await;
     Mock::given(method("PATCH"))
         .and(path("/repos/acme/site/issues/21"))
         .and(header("authorization", "Bearer user-token"))
@@ -167,7 +192,8 @@ async fn stop_session_closes_the_trigger_issue_as_the_user() {
 #[tokio::test]
 async fn stop_session_maps_a_github_404_to_not_found() {
     let server = MockServer::start().await;
-    Mock::given(method("PATCH"))
+    // The pre-flight GET itself 404s (no such issue / no access).
+    Mock::given(method("GET"))
         .and(path("/repos/acme/site/issues/999"))
         .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
             "message": "Not Found"
@@ -185,6 +211,53 @@ async fn stop_session_maps_a_github_404_to_not_found() {
     .await
     .expect_err("404 maps");
     assert!(matches!(err, AppError::NotFound(_)), "got {err:?}");
+}
+
+#[tokio::test]
+async fn stop_session_refuses_a_non_trigger_issue_without_closing_it() {
+    let server = MockServer::start().await;
+    mount_get_issue(&server, 30, &["bug", "fkst-substrate-active"], false).await;
+    // No PATCH mock: the guard must reject before any close reaches GitHub.
+    Mock::given(method("PATCH"))
+        .and(path("/repos/acme/site/issues/30"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let state = test_state(&server.uri(), None);
+    let err = stop_session(
+        State(state),
+        Path(("acme".to_string(), "site".to_string(), 30)),
+        viewer_user(),
+        auth_headers(),
+    )
+    .await
+    .expect_err("missing the trigger label");
+    assert!(matches!(err, AppError::NotFound(_)), "got {err:?}");
+}
+
+#[tokio::test]
+async fn stop_session_refuses_a_pull_request() {
+    let server = MockServer::start().await;
+    mount_get_issue(&server, 42, &["fkst-substrate-trigger"], true).await;
+    Mock::given(method("PATCH"))
+        .and(path("/repos/acme/site/issues/42"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let state = test_state(&server.uri(), None);
+    let err = stop_session(
+        State(state),
+        Path(("acme".to_string(), "site".to_string(), 42)),
+        viewer_user(),
+        auth_headers(),
+    )
+    .await
+    .expect_err("a PR is not a trigger issue");
+    assert!(matches!(err, AppError::Validation(_)), "got {err:?}");
 }
 
 #[tokio::test]

@@ -112,6 +112,27 @@ async fn paths_are_the_trimmed_v1_surface() {
         );
     }
 
+    // Per-operation guard for the multi-verb canvas paths: a path staying
+    // present via one verb must not mask another verb silently dropping its
+    // #[utoipa::path] annotation.
+    for (path, verb) in [
+        ("/api/v1/overview", "get"),
+        ("/api/v1/repos/{owner}/{name}/sessions", "get"),
+        ("/api/v1/repos/{owner}/{name}/sessions", "post"),
+        (
+            "/api/v1/repos/{owner}/{name}/sessions/{issue_number}",
+            "delete",
+        ),
+    ] {
+        assert!(
+            paths[path].get(verb).is_some(),
+            "spec must document {verb} {path}; operations = {:?}",
+            paths[path]
+                .as_object()
+                .map(|m| m.keys().collect::<Vec<_>>())
+        );
+    }
+
     // Absent: the removed legacy API + the removed REST session query/stop
     // (a session is controlled solely through its GitHub issue).
     for gone in [

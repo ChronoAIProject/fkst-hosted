@@ -104,6 +104,15 @@ fn issue_write_error(op: &str, status: reqwest::StatusCode, message: String) -> 
     }
 }
 
+/// One issue as fetched by [`DashboardGithub::get_issue`]: just what the
+/// stop-session pre-flight gate needs — the label names, and whether the
+/// "issue" is actually a pull request (GitHub's issues API serves PRs too).
+#[derive(Debug, Clone)]
+pub(crate) struct FetchedIssue {
+    pub labels: Vec<String>,
+    pub is_pull_request: bool,
+}
+
 /// One pull request as the canvas sessions endpoint consumes it.
 #[derive(Debug, Clone)]
 pub(crate) struct RepoPull {
@@ -231,6 +240,54 @@ impl DashboardGithub {
         }
         let message = github_error_message(response).await;
         Err(issue_write_error("create_issue", status, message))
+    }
+
+    /// `GET /repos/{owner}/{repo}/issues/{number}` with the USER token — the
+    /// stop-session pre-flight read. GitHub answers 404 for both "no such
+    /// issue" and "no access" (anti-enumeration), mapped to not-found here.
+    pub(crate) async fn get_issue(
+        &self,
+        user_token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<FetchedIssue, AppError> {
+        let url = format!("{}/repos/{owner}/{repo}/issues/{number}", self.api_base);
+        let response = self
+            .client
+            .get(&url)
+            .bearer_auth(user_token.expose_secret())
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+            .send()
+            .await
+            .map_err(|e| {
+                tracing::warn!(error = %e, "github get-issue transport error");
+                AppError::Unavailable("github get-issue request failed".to_string())
+            })?;
+        let status = response.status();
+        if status.is_success() {
+            #[derive(Deserialize)]
+            struct RawIssueLabel {
+                name: String,
+            }
+            #[derive(Deserialize)]
+            struct RawFetchedIssue {
+                #[serde(default)]
+                labels: Vec<RawIssueLabel>,
+                /// Present only when this "issue" is actually a PR.
+                pull_request: Option<serde_json::Value>,
+            }
+            let raw: RawFetchedIssue = response.json().await.map_err(|e| {
+                tracing::warn!(error = %e, "github get-issue response did not parse");
+                AppError::Upstream("github get-issue response was malformed".to_string())
+            })?;
+            return Ok(FetchedIssue {
+                labels: raw.labels.into_iter().map(|label| label.name).collect(),
+                is_pull_request: raw.pull_request.is_some(),
+            });
+        }
+        let message = github_error_message(response).await;
+        Err(issue_write_error("get_issue", status, message))
     }
 
     /// `PATCH /repos/{owner}/{repo}/issues/{number}` `state=closed` with the
