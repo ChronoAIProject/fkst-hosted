@@ -3,7 +3,12 @@
 // here is a plain function of its inputs — no fetching, no React — so the
 // status/filter/chart logic is unit-testable in isolation.
 
-import type { AccountOverview, RepoOverview } from './types';
+import type {
+  AccountOverview,
+  RepoOverview,
+  RepoSessionsResponse,
+  SessionDetail,
+} from './types';
 
 /** The three visual status classes of the canvas (contract §frontend):
  *  - `none`       grey — App not installed
@@ -21,6 +26,23 @@ export function repoStatus(repo: RepoOverview): CanvasStatus {
 export function accountStatus(account: AccountOverview): CanvasStatus {
   if (account.repos.some((r) => repoStatus(r) === 'active')) return 'active';
   return account.installed ? 'installed' : 'none';
+}
+
+/** A level-2 session row counts as active when its trigger issue is open and
+ *  parsed OK — the same registration-level notion the overview counts. */
+export function sessionActive(session: SessionDetail): boolean {
+  return session.trigger.state === 'open' && session.invalid_reason == null;
+}
+
+/** Level-2 card status from the live sessions payload — same contract as
+ *  `repoStatus`: blinking `active` requires the App installed, so a repo the
+ *  App was removed from reads grey even while a trigger issue is still open. */
+export function repoDetailStatus(
+  installed: boolean,
+  sessions: RepoSessionsResponse | null
+): CanvasStatus {
+  if (!installed) return 'none';
+  return sessions != null && sessions.sessions.some(sessionActive) ? 'active' : 'installed';
 }
 
 // ---- Name filters -----------------------------------------------------------

@@ -2,7 +2,7 @@ import type { Node, NodeProps } from '@xyflow/react';
 import { cn } from '@/lib/utils';
 import { useContent } from '@/i18n';
 import { Chip } from '@/components/ui/chip';
-import { accountStatus, repoStatus } from '@/lib/api/derive';
+import { accountStatus, repoDetailStatus, repoStatus, sessionActive } from '@/lib/api/derive';
 import type { CanvasStatus } from '@/lib/api/derive';
 import type { AccountOverview, RepoOverview, RepoSessionsResponse } from '@/lib/api/types';
 import { ACCOUNT_NODE, DETAIL_NODE, REPO_NODE } from './layout';
@@ -178,13 +178,7 @@ export function RepoDetailNode({ data }: NodeProps<DetailFlowNode>) {
       style={{ width: DETAIL_NODE.width }}
       className={cn(
         'border rounded-card bg-raise p-4 flex flex-col gap-2.5',
-        statusCardClasses(
-          sessions && sessions.sessions.some((s) => s.trigger.state === 'open' && !s.invalid_reason)
-            ? 'active'
-            : installed
-              ? 'installed'
-              : 'none'
-        )
+        statusCardClasses(repoDetailStatus(installed, sessions))
       )}
     >
       <div className="flex items-center justify-between gap-2">
@@ -208,9 +202,7 @@ export function RepoDetailNode({ data }: NodeProps<DetailFlowNode>) {
         <div className="flex flex-col gap-1">
           {sessions.sessions.slice(0, 6).map((s, i) => (
             <span key={s.session_id ?? `t-${s.trigger.number}-${i}`} className="flex items-center gap-2">
-              <RepoDot
-                status={s.trigger.state === 'open' && !s.invalid_reason ? 'active' : 'none'}
-              />
+              <RepoDot status={sessionActive(s) ? 'active' : 'none'} />
               <span className="font-mono text-[11.5px] text-dim truncate">
                 {s.name ?? c.invalidTrigger}
               </span>

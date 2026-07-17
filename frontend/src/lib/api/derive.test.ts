@@ -7,11 +7,13 @@ import {
   packageShortLabel,
   packagesByAccount,
   packagesByRepo,
+  repoDetailStatus,
   repoStatus,
+  sessionActive,
   sessionsByAccount,
   sessionsByRepo,
 } from './derive';
-import type { AccountOverview, RepoOverview } from './types';
+import type { AccountOverview, RepoOverview, SessionDetail } from './types';
 
 let nextId = 1;
 const repo = (over: Partial<RepoOverview> & Pick<RepoOverview, 'name'>): RepoOverview => ({
@@ -72,6 +74,58 @@ describe('status derivation', () => {
     expect(accountStatus(account({ login: 'acme', repos: [repo({ name: 'x' })] }))).toBe('none');
     // Installation present but zero repos still reads as installed.
     expect(accountStatus(account({ login: 'acme', installed: true }))).toBe('installed');
+  });
+
+  const session = (over: Partial<SessionDetail>): SessionDetail => ({
+    session_id: null,
+    name: 'sess',
+    work_label: null,
+    auto_merge: null,
+    environment: null,
+    packages: [],
+    invalid_reason: null,
+    status_labels: [],
+    trigger: {
+      number: 1,
+      title: 'sess',
+      state: 'open',
+      author: 'shining',
+      labels: [],
+      html_url: 'https://github.com/o/r/issues/1',
+      created_at: '2026-07-01T00:00:00Z',
+      updated_at: '2026-07-01T00:00:00Z',
+      closed_at: null,
+    },
+    work_issues: [],
+    log_url: null,
+    liveness: null,
+    prs: [],
+    ...over,
+  });
+
+  it('counts a session as active only while its trigger is open and parsed OK', () => {
+    expect(sessionActive(session({}))).toBe(true);
+    expect(
+      sessionActive(session({ trigger: { ...session({}).trigger, state: 'closed' } }))
+    ).toBe(false);
+    expect(sessionActive(session({ invalid_reason: 'Packages: unreachable.' }))).toBe(false);
+  });
+
+  it('derives the level-2 card status with active gated on installed', () => {
+    const withOpen = { owner: 'o', name: 'r', installed: true, sessions: [session({})] };
+    expect(repoDetailStatus(true, withOpen)).toBe('active');
+    // Uninstalled wins even while a trigger issue is still open — matching
+    // how repoStatus() greys the same repo at levels 0/1.
+    expect(repoDetailStatus(false, { ...withOpen, installed: false })).toBe('none');
+    // Installed with only closed/invalid sessions (or none loaded yet).
+    expect(
+      repoDetailStatus(true, {
+        ...withOpen,
+        sessions: [session({ invalid_reason: 'bad' })],
+      })
+    ).toBe('installed');
+    expect(repoDetailStatus(true, null)).toBe('installed');
+    expect(repoDetailStatus(false, null)).toBe('none');
   });
 });
 
