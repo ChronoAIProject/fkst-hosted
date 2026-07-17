@@ -105,10 +105,15 @@ export function Dashboard() {
   useVisibilityPoll(refreshSessions, SESSIONS_POLL_MS, level.kind === 'repo');
 
   // Escape mirrors the Back button — unless a dialog is open (dialogs own
-  // Escape; ModalShell also stops propagation as the first line of defense).
+  // Escape; ModalShell also stops propagation as the first line of defense)
+  // or the key was pressed inside an editable field (WebKit/Blink natively
+  // clear a search input on Escape; that must not also change the level).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]')) {
+        return;
+      }
       if (document.querySelector('[role="dialog"]')) return;
       setLevel((current) => parentLevel(current) ?? current);
     };

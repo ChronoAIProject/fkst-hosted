@@ -153,6 +153,33 @@ describe('Dashboard — canvas levels and loading', () => {
     expect(screen.getByText(/every GitHub account you can reach/)).toBeInTheDocument();
   });
 
+  it('ignores Escape pressed inside an editable field (filter inputs)', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/v1/overview')) return jsonResponse(overviewBody);
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderDashboard();
+
+    const openAccountButtons = await screen.findAllByRole('button', {
+      name: 'Open account shining',
+    });
+    fireEvent.click(openAccountButtons[0]!);
+    expect(await screen.findByText(/repositories of shining/)).toBeInTheDocument();
+
+    // Escape inside the repo filter clears the field natively (WebKit/Blink);
+    // it must NOT also walk the canvas up a level.
+    const filter = screen.getByLabelText('Filter repositories…');
+    filter.focus();
+    fireEvent.keyDown(filter, { key: 'Escape' });
+    expect(screen.getByText(/repositories of shining/)).toBeInTheDocument();
+
+    // Outside the field the shortcut still works.
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(await screen.findByText(/every GitHub account you can reach/)).toBeInTheDocument();
+  });
+
   it('navigates via the breadcrumb Back button', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
