@@ -57,6 +57,7 @@ export const en: SiteContent = {
     closed: 'closed',
     canvas: {
       canvasAria: 'Accounts and repositories canvas',
+      sidebarAria: 'Details panel',
       breadcrumbAria: 'Canvas level',
       breadcrumbRoot: 'Accounts',
       back: '← Back',

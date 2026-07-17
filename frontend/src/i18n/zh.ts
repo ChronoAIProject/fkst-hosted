@@ -61,6 +61,7 @@ export const zh: SiteContent = {
     closed: '已关闭',
     canvas: {
       canvasAria: '账户与仓库画布',
+      sidebarAria: '详情面板',
       breadcrumbAria: '画布层级',
       breadcrumbRoot: '账户',
       back: '← 返回',

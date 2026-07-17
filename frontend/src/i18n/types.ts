@@ -87,6 +87,7 @@ export interface SiteContent {
     /** The zoomable canvas surface (levels 0–2) and its sidebar. */
     canvas: {
       canvasAria: string;
+      sidebarAria: string;
       breadcrumbAria: string;
       /** Root crumb label (level 0). */
       breadcrumbRoot: string;
