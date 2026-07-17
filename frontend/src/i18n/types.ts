@@ -170,6 +170,9 @@ export interface SiteContent {
       createAutoMergeLabel: string;
       createLogAccessLabel: string;
       createLogAccessHint: string;
+      createOutputLangLabel: string;
+      /** Hint naming what the value drives (the '### Output Language' section). */
+      createOutputLangHint: string;
       createSubmit: string;
       createPending: string;
       createFailed: string;

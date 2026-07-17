@@ -124,6 +124,8 @@ export const zh: SiteContent = {
       createAutoMergeLabel: '自动合并',
       createLogAccessLabel: '日志访问允许列表（可选）',
       createLogAccessHint: '额外的 GitHub 登录名或 id，以逗号或空格分隔。',
+      createOutputLangLabel: '输出语言（可选）',
+      createOutputLangHint: '会话输出所使用的语言，例如 `English` 或 `中文`。',
       createSubmit: '创建触发 issue',
       createPending: '正在创建…',
       createFailed: '无法创建触发 issue，请重试。',

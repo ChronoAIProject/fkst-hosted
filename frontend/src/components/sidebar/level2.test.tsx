@@ -64,6 +64,7 @@ describe('buildCreateRequest', () => {
         environment: '',
         autoMerge: false,
         logAccess: '  ',
+        outputLang: '   ',
       })
     ).toEqual({ name: 'sess', packages: ['o/p@main:a'] });
   });
@@ -77,6 +78,7 @@ describe('buildCreateRequest', () => {
         environment: 'staging',
         autoMerge: true,
         logAccess: '@alice, bob  77',
+        outputLang: ' 中文 ',
       })
     ).toEqual({
       name: 'sess',
@@ -85,6 +87,7 @@ describe('buildCreateRequest', () => {
       environment: 'staging',
       auto_merge: true,
       log_access: ['@alice', 'bob', '77'],
+      output_lang: '中文',
     });
   });
 });
@@ -231,6 +234,7 @@ describe('Level2Sidebar', () => {
 
     await user.type(within(dialog).getByLabelText('Work label (optional)'), 'lab-work');
     await user.click(within(dialog).getByRole('checkbox', { name: 'Auto-merge' }));
+    await user.type(within(dialog).getByLabelText('Output language (optional)'), 'English');
     await user.click(submit);
 
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
@@ -240,6 +244,7 @@ describe('Level2Sidebar', () => {
       packages: ['o/p@main:pkg/a'],
       work_label: 'lab-work',
       auto_merge: true,
+      output_lang: 'English',
     });
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });

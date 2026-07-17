@@ -122,6 +122,8 @@ export const en: SiteContent = {
       createAutoMergeLabel: 'Auto-merge',
       createLogAccessLabel: 'Log access allowlist (optional)',
       createLogAccessHint: 'Extra GitHub logins or ids, comma or space separated.',
+      createOutputLangLabel: 'Output language (optional)',
+      createOutputLangHint: 'The language the session writes its output in, e.g. `English` or `中文`.',
       createSubmit: 'Create trigger issue',
       createPending: 'Creating…',
       createFailed: 'Could not create the trigger issue. Please try again.',

@@ -26,6 +26,7 @@ export function buildCreateRequest(form: {
   environment: string;
   autoMerge: boolean;
   logAccess: string;
+  outputLang: string;
 }): CreateSessionRequest {
   const request: CreateSessionRequest = {
     name: form.name.trim(),
@@ -38,6 +39,8 @@ export function buildCreateRequest(form: {
   if (form.autoMerge) request.auto_merge = true;
   const logAccess = parseAllowlist(form.logAccess);
   if (logAccess.length > 0) request.log_access = logAccess;
+  const outputLang = form.outputLang.trim();
+  if (outputLang) request.output_lang = outputLang;
   return request;
 }
 
@@ -64,6 +67,7 @@ export function CreateTriggerModal({
   const [environment, setEnvironment] = useState('');
   const [autoMerge, setAutoMerge] = useState(false);
   const [logAccess, setLogAccess] = useState('');
+  const [outputLang, setOutputLang] = useState('');
   const [pending, setPending] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
 
@@ -91,6 +95,7 @@ export function CreateTriggerModal({
           environment,
           autoMerge,
           logAccess,
+          outputLang,
         })
       );
       if (result.ok) {
@@ -214,6 +219,22 @@ export function CreateTriggerModal({
             className={cn(FIELD_INPUT, 'font-mono')}
           />
           <p className="font-mono text-[11px] text-ghost">{cc.createLogAccessHint}</p>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="trigger-output-lang" className={FIELD_LABEL}>
+            {cc.createOutputLangLabel}
+          </label>
+          <input
+            id="trigger-output-lang"
+            type="text"
+            value={outputLang}
+            onChange={(e) => setOutputLang(e.target.value)}
+            spellCheck={false}
+            autoComplete="off"
+            className={cn(FIELD_INPUT, 'font-mono')}
+          />
+          <p className="font-mono text-[11px] text-ghost">{cc.createOutputLangHint}</p>
         </div>
 
         {serverError && <ErrorNote message={serverError} />}
