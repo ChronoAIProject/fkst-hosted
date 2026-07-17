@@ -49,14 +49,15 @@ fkst-hosted integrates with the following ChronoAI platform services. When doing
 
 ## FKST Local Deployment Guide
 
-> The complete local deployment guide, embedded in full below. A standalone
-> copy lives at `opensandbox-developer-guide.md` (referenced by the READMEs) —
-> **any edit must update both copies identically.** The guide must stay safe
-> for public distribution: no internal/production identifiers (private repo
-> URLs, real domains, registry paths, cluster/project names, real App/user
-> IDs) — only `<placeholders>` and `127.0.0.1` port-forward addresses. The
-> `chronoai-fkst` / `fkst-*` / `opensandbox-*` namespace and resource names are
-> the stack's functional naming convention, deliberately kept.
+> The complete local deployment guide, embedded in full below. **This is the
+> single source of truth** — there is no standalone copy (the former
+> `opensandbox-developer-guide.md` was deleted; the READMEs and code comments
+> link here). The guide must stay safe for public distribution: no
+> internal/production identifiers (private repo URLs, real domains, registry
+> paths, cluster/project names, real App/user IDs) — only `<placeholders>` and
+> `127.0.0.1` port-forward addresses. The `chronoai-fkst` / `fkst-*` /
+> `opensandbox-*` namespace and resource names are the stack's functional
+> naming convention, deliberately kept.
 
 This guide walks a new developer, step by step, through standing up a **complete
 fkst stack on a local Kubernetes cluster** (on your laptop): the OpenSandbox
@@ -188,8 +189,9 @@ Read this before trusting the environment for anything security-sensitive.
   no container registry involved.
 - **You supply two external prerequisites** for the fkst backend: an
   OpenAI-compatible LLM endpoint + API key, and (for any GitHub-driven
-  functionality) your own GitHub App registration (§14.1). Neither can be
-  provided by a local cluster.
+  functionality) your own GitHub App registration, fronted by a free smee.io
+  webhook relay channel so GitHub's deliveries can reach your laptop
+  (§14.1–§14.3). Neither can be provided by a local cluster.
 - The lockdown NetworkPolicy blocks cloud metadata endpoints
   (`169.254.169.254`) and RFC1918 ranges. The metadata rule is inert on kind
   (nothing answers that address) but is kept so the policy stays complete.
@@ -205,6 +207,7 @@ Install (macOS: `brew install …`; Linux: distro packages or upstream releases)
 | kubectl | matching cluster minor | `kubectl version --client` |
 | helm | ≥ 3.12 | `helm version` |
 | cilium CLI | latest | `cilium version --client` |
+| node + npx | ≥ 20.18 (smee-client 5.x requirement; runs the §14.2 webhook relay) | `node --version` |
 | git, curl, openssl, python3 | any recent | — |
 
 Create a workspace — every file this guide writes lives under it — and anchor
@@ -550,7 +553,7 @@ automountServiceAccountToken: false
 # Identity for the fkst backend Deployment (§14, trusted caller): reads its
 # own api key. automountServiceAccountToken is false HERE (SA-level default);
 # the backend Deployment overrides it to true at the POD level because its
-# env-store needs the k8s API (RBAC granted in §14.3).
+# env-store needs the k8s API (RBAC granted in §14.5).
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -1055,24 +1058,142 @@ Two things no local cluster can provide:
 2. **Your own GitHub App** — required for anything GitHub-driven (login,
    installs, sessions working repos). The backend boots without one
    (`FKST_GITHUB_APP_ID` unset = App features disabled), so you can defer this,
-   but a real end-to-end test needs it. Register at *GitHub → Settings →
-   Developer settings → New GitHub App* with:
+   but a real end-to-end test needs it. Setting it up locally is a two-step
+   affair, **in this order**: create the webhook relay channel first (§14.2 —
+   the App registration form asks for a webhook URL GitHub can reach, which
+   `127.0.0.1` is not), then register the App with that URL (§14.3).
 
-   | Setting | Value |
-   |---|---|
-   | Repository permissions | **Contents** R/W, **Issues** R/W, **Pull requests** R/W, **Workflows** R/W, Metadata RO |
-   | Subscribe to events | **Issues** |
-   | Webhook | **Active = off** for local dev (no public URL to deliver to; the reconcile loop polls) |
-   | Callback URLs (under *Identifying and authorizing users*) | `http://127.0.0.1:18081/api/v1/auth/github/callback` and `http://127.0.0.1:18081/api/v1/logs/oauth/callback` |
-   | Expire user authorization tokens | leave **ON** — the SPA refreshes via `POST /api/v1/auth/github/refresh` |
+#### 14.2 GitHub webhook relay (smee)
 
-   Collect from the App page: the numeric **App ID**, the **slug** (from the
-   settings URL — the bot login is `<slug>[bot]`), a generated **private key**
-   (`.pem` download), the **Client ID**, and a generated **client secret**.
-   Then **install the App** on the repo(s) you want sessions to work on —
-   registration alone does nothing.
+GitHub delivers webhooks by POSTing **from GitHub's servers** to the App's
+webhook URL — it can never reach `127.0.0.1` or your kind cluster directly. A
+relay bridges the gap: [smee.io](https://smee.io) gives you a public channel
+URL GitHub can POST to, plus a local client that replays every delivery to
+your port-forwarded backend.
 
-#### 14.2 Build the image and load it into kind
+Without the relay the stack still functions — the reconciler is level-based
+and re-enumerates the App's installations on a periodic poll — but every
+reaction is poll-bound: a work issue for an already-registered session waits
+for the reconcile sweep (default 30 s), a brand-new trigger issue on a
+not-yet-registered repo waits for the next full resync (default 600 s,
+`FKST_POD_FULL_RESYNC_INTERVAL_SECS`), and install-time seeding
+(`FKST_SEED_TRIGGER_ISSUE_ON_INSTALL`) never fires at all, because it acts on
+the live `installation` / `installation_repositories` webhook events. With
+the relay, deliveries (`issues`, `installation`,
+`installation_repositories`) nudge the reconciler the moment something
+happens.
+
+```bash
+# 1. Create a channel: open https://smee.io/new in a browser — it redirects
+#    to your channel URL. Save it: the §14.3 App form wants it as the
+#    webhook URL.
+export SMEE_CHANNEL="https://smee.io/<your-channel-id>"
+
+# 2. Relay deliveries to the backend's webhook endpoint (through the §16
+#    port-forward). Run it in a spare terminal and KEEP IT RUNNING — like the
+#    port-forwards, it is a long-lived process, and its per-delivery log
+#    lines are your first stop when debugging webhook problems.
+npx smee-client --url "$SMEE_CHANNEL" \
+  --target http://127.0.0.1:18081/api/v1/github/app/webhook
+```
+
+Notes:
+
+- **The channel URL is public but unguessable.** Anyone holding it can read
+  the relayed payloads and POST forgeries — the backend is protected by the
+  HMAC signature check (`X-Hub-Signature-256` verified against
+  `FKST_GITHUB_APP_WEBHOOK_SECRET`, §14.7), so forged posts get `401`; but
+  payloads expose repo/issue content, so treat the URL like a dev credential
+  and don't reuse it beyond local dev.
+- **Ordering:** only the *channel* must exist before §14.3 (the form wants
+  the URL); the *client* matters once the backend is reachable (§16).
+  Deliveries relayed while the target is down are dropped by the client —
+  that's fine: the reconciler's startup + periodic resync re-derives state,
+  and any delivery can be replayed from the App's **Advanced → Recent
+  Deliveries** page (Redeliver).
+- smee is for **webhooks only**. The OAuth callback URLs (§14.3) stay on
+  `http://127.0.0.1:18081` — a callback is a browser redirect, which happens
+  on your machine and needs no relay.
+
+#### 14.3 Register your GitHub App
+
+The fkst control plane authenticates to GitHub as a **GitHub App** (session
+work on repos, installs, and OAuth login for the dashboard). Every deployment
+— including each developer's local environment — needs its **own** App
+registration. Register at *GitHub → Settings → Developer settings → GitHub
+Apps → New GitHub App* (for an org:
+`https://github.com/organizations/<org>/settings/apps/new`).
+
+**Registration form:**
+
+| Section | Setting | Value |
+|---|---|---|
+| Basic | App name | your choice — GitHub derives the **slug** from it, and the bot identity becomes `<slug>[bot]` |
+| Basic | Homepage URL | anything reachable (the repo URL is fine) |
+| Webhook | Active | **ON** |
+| Webhook | Webhook URL | your §14.2 smee channel URL. (A production deployment, whose control plane has a public HTTPS endpoint, uses `<public-base-url>/api/v1/github/app/webhook` directly — no relay.) |
+| Webhook | Content type | `application/json` — the endpoint parses JSON; a form-encoded payload is ACKed (`202`, to stop GitHub redelivery hammering) but never acted on |
+| Webhook | Webhook secret | generate one (e.g. `openssl rand -hex 24`) and save it: the SAME string becomes `FKST_GITHUB_APP_WEBHOOK_SECRET` in §14.7 |
+| Repository permissions | Contents | **Read & write** — clone / commit / push, git refs, ensure issue templates, read `fkst.toml` |
+| | Issues | **Read & write** — trigger issues, status comments, labels |
+| | Pull requests | **Read & write** — open and merge the session's PRs |
+| | Workflows | **Read & write** — GitHub blocks pushes touching `.github/workflows/` without it |
+| | Metadata | Read-only (mandatory, auto-selected) |
+| Subscribe to events | | **Issues** only — the only *subscribed* event acted on (`installation` / `installation_repositories` are always delivered to Apps, no subscription needed) |
+| Where can this App be installed? | | "Only on this account" keeps it private to your org/user |
+
+> The permission set above is exactly what the backend's GitHub API calls
+> need — **no organization permissions, no Administration**; grant nothing
+> more.
+
+**OAuth (dashboard / browser login).** The web dashboard and browser log
+downloads use this same App as the OAuth provider. Under **"Identifying and
+authorizing users"**:
+
+- Add **both** callback URLs (the base must equal `FKST_PUBLIC_BASE_URL` —
+  locally the §16 port-forward origin):
+  - `http://127.0.0.1:18081/api/v1/auth/github/callback`
+  - `http://127.0.0.1:18081/api/v1/logs/oauth/callback`
+- Leave **"Expire user authorization tokens" ON** (the default) — the SPA
+  refreshes via `POST /api/v1/auth/github/refresh`, which needs refresh tokens.
+
+**Collect the outputs.** Each maps to a §14.6 ConfigMap or §14.7 Secret key:
+
+| From the App page / action | Goes to |
+|---|---|
+| **App ID** (numeric, top of the settings page) | `FKST_GITHUB_APP_ID` (Secret, §14.7) |
+| **slug** (in the settings URL `…/apps/<slug>`) | `FKST_GITHUB_APP_SLUG` (Secret, §14.7), and derives `FKST_GITHUB_BOT_LOGIN: <slug>[bot]` (ConfigMap, §14.6) |
+| **Generate a private key** → downloads a `.pem` | `FKST_GITHUB_APP_PRIVATE_KEY_PEM` (Secret, §14.7; `kubectl create secret … --from-file=`) |
+| **Client ID** (shown on the page, `Iv…`, public) | `FKST_GITHUB_OAUTH_CLIENT_ID` (ConfigMap, §14.6) |
+| **Generate a new client secret** (shown once) | `FKST_GITHUB_OAUTH_CLIENT_SECRET` (Secret, §14.7) |
+| the webhook secret you entered in the form | `FKST_GITHUB_APP_WEBHOOK_SECRET` (Secret, §14.7) |
+
+**Rules & gotchas:**
+
+- **Install the App** on every repo sessions should work on (App page →
+  *Install App*) — registration alone does nothing until it is installed. If
+  you rely on `FKST_SEED_TRIGGER_ISSUE_ON_INSTALL`, install *after* the
+  backend and relay are up (§16): seeding acts on the live `installation` /
+  `installation_repositories` webhook events, so an install delivered while
+  the backend is down seeds nothing (the reconciler still discovers the
+  installation on its next resync — only the auto-seeded trigger issue is
+  skipped).
+- App creds are enablement-gated: `FKST_GITHUB_APP_ID` unset = App features
+  disabled, the backend still boots. But **never set
+  `FKST_GITHUB_OAUTH_CLIENT_ID` without `FKST_GITHUB_OAUTH_CLIENT_SECRET`** —
+  the pair is validated fail-closed and the pod crash-loops.
+- The webhook endpoint is mounted **only when
+  `FKST_GITHUB_APP_WEBHOOK_SECRET` is set** (§14.7): with it missing, every
+  relayed delivery 404s; with a value that differs from the form's, every
+  delivery 401s.
+- Production bootstrap: a deployment whose public HTTPS endpoint isn't live
+  yet can register the App with Webhook **Active = off** (or a placeholder
+  URL) and edit it later — every App setting stays editable after creation.
+  (Locally this never applies: the §14.2 channel exists before the form.)
+- Never commit any secret output (private key PEM, client secret, webhook
+  secret) — deliver them as k8s Secrets (§14.7).
+
+#### 14.4 Build the image and load it into kind
 
 The build context is the repo checkout (`$FKST_REPO`, from §3); the engine
 toolchain compile makes the first build slow — tens of minutes:
@@ -1086,7 +1207,7 @@ kind load docker-image fkst-control-plane:local --name opensandbox-local
 image runs as the backend (shared node) and as the session sandbox (gVisor
 node).
 
-#### 14.3 Env-store RBAC
+#### 14.5 Env-store RBAC
 
 The backend persists each user's named environments as paired
 `fkst-env-<id>-<name>` ConfigMap + Secret in its own namespace
@@ -1133,7 +1254,7 @@ EOF
 kubectl apply -f "$OSB_LOCAL/manifests/fkst-envstore-rbac.yaml"
 ```
 
-#### 14.4 ConfigMap
+#### 14.6 ConfigMap
 
 Fill in the four `<…>` placeholders (LLM endpoint/model and your GitHub App's
 slug + Client ID). Optional features stay commented out:
@@ -1171,7 +1292,7 @@ data:
   FKST_LLM_MODEL: <model id served by your LLM endpoint>
   FKST_LLM_WIRE_API: responses
 
-  # ---- GitHub App (yours, §14.1) ----
+  # ---- GitHub App (yours, §14.3) ----
   # Deferring the App? Keep BOT_LOGIN set (any placeholder string works — it
   # is required while FKST_POD_DISPATCH=true) but COMMENT OUT the client id:
   # a client id without FKST_GITHUB_OAUTH_CLIENT_SECRET is a fail-closed pair.
@@ -1207,7 +1328,7 @@ grep -En '^  [A-Z_]+: .*<' "$OSB_LOCAL/manifests/fkst-control-plane-config.yaml"
 (`FKST_POD_NAMESPACE` is deliberately absent — the Deployment injects it via
 the downward API.)
 
-#### 14.5 Secret
+#### 14.7 Secret
 
 ```bash
 kubectl -n chronoai-fkst create secret generic fkst-control-plane-secret \
@@ -1216,19 +1337,22 @@ kubectl -n chronoai-fkst create secret generic fkst-control-plane-secret \
   --from-literal=FKST_GITHUB_APP_ID='<numeric App ID>' \
   --from-file=FKST_GITHUB_APP_PRIVATE_KEY_PEM='<path/to/downloaded.private-key.pem>' \
   --from-literal=FKST_GITHUB_APP_SLUG='<your-app-slug>' \
-  --from-literal=FKST_GITHUB_APP_WEBHOOK_SECRET="$(openssl rand -hex 24)" \
+  --from-literal=FKST_GITHUB_APP_WEBHOOK_SECRET='<the webhook secret from the §14.3 App form>' \
   --from-literal=FKST_GITHUB_OAUTH_CLIENT_SECRET='<your App client secret>'
 ```
 
+The webhook secret must be the **exact string you entered in the §14.3
+registration form** — the endpoint verifies every delivery's HMAC against it,
+so a mismatch 401s everything the §14.2 relay forwards.
+
 If you deferred the GitHub App (§14.1): create the Secret with only the first
-two literals **and comment out `FKST_GITHUB_OAUTH_CLIENT_ID` in the §14.4
+two literals **and comment out `FKST_GITHUB_OAUTH_CLIENT_ID` in the §14.6
 ConfigMap** (a client id without its client secret is a fail-closed pair),
 keeping `FKST_GITHUB_BOT_LOGIN` set to any placeholder (required while
-`FKST_POD_DISPATCH=true`). The backend then boots with App features disabled.
-The webhook secret is unused while the App's webhook is inactive, but harmless
-to set.
+`FKST_POD_DISPATCH=true`). The backend then boots with App features disabled
+(the webhook endpoint is not mounted while the webhook secret is unset).
 
-#### 14.6 Deployment + Service
+#### 14.8 Deployment + Service
 
 Notable hardening baked into the spec: `strategy: Recreate` (the control plane
 is single-writer — a rollout must never run two instances),
@@ -1262,7 +1386,7 @@ spec:
         app.kubernetes.io/name: fkst-control-plane
         app.kubernetes.io/part-of: fkst-hosted
     spec:
-      # the env-store needs the k8s API (§14.3) — overrides the SA-level default
+      # the env-store needs the k8s API (§14.5) — overrides the SA-level default
       automountServiceAccountToken: true
       serviceAccountName: fkst-ksa
       enableServiceLinks: false
@@ -1368,16 +1492,17 @@ kubectl apply -f "$OSB_LOCAL/manifests/fkst-control-plane.yaml"
 kubectl -n chronoai-fkst rollout status deploy/fkst-control-plane --timeout=180s
 ```
 
-#### 14.7 Alternative: run the backend on your laptop instead
+#### 14.9 Alternative: run the backend on your laptop instead
 
-For a faster edit-compile loop you can skip §14.4–§14.6 and run the backend
+For a faster edit-compile loop you can skip §14.6–§14.8 and run the backend
 natively against the port-forwarded server (`FKST_OSB_BASE_URL=http://127.0.0.1:18080`,
 `FKST_OSB_API_KEY_FILE` → `$OSB_LOCAL/.fkst.key`, plus the same
 `FKST_POD_*`/`FKST_LLM_*`/GitHub vars as env exports). Listen on **18081**
-(`FKST_HOSTED_PORT=18081`; the default is 8080) so the §14.1 callback URLs,
-`FKST_PUBLIC_BASE_URL`, and the frontend's baked `VITE_FKST_API_BASE` keep
-working unchanged — otherwise rebuild the frontend and re-register the App
-callbacks for the new origin. The full variable
+(`FKST_HOSTED_PORT=18081`; the default is 8080) so the §14.3 callback URLs,
+the §14.2 relay target, `FKST_PUBLIC_BASE_URL`, and the frontend's baked
+`VITE_FKST_API_BASE` keep working unchanged — otherwise rebuild the frontend,
+re-register the App callbacks, and re-run the §14.2 smee client with the new
+`--target`. The full variable
 reference is `backend/src/osb_config.rs` + `backend/src/config.rs`. Notes that
 apply either way: `*_FILE` variants win over inline values;
 `FKST_OSB_USE_SERVER_PROXY` defaults to `true` and `false` is rejected (the
@@ -1481,8 +1606,9 @@ kubectl -n chronoai-fkst rollout status deploy/fkst-frontend --timeout=120s
 ### 16. Reach and verify the fkst services
 
 Port-forward both (the addresses must match `FKST_PUBLIC_BASE_URL` /
-`FKST_FRONTEND_URL` in §14.4 and the frontend's baked `VITE_FKST_API_BASE` —
-change them together or logins/XHRs break):
+`FKST_FRONTEND_URL` in §14.6, the §14.2 webhook relay target, and the
+frontend's baked `VITE_FKST_API_BASE` — change them together or
+logins/XHRs/webhooks break):
 
 ```bash
 kubectl -n chronoai-fkst port-forward svc/fkst-control-plane 18081:80 >/dev/null 2>&1 &
@@ -1495,7 +1621,9 @@ until curl -sf http://127.0.0.1:18090/ >/dev/null; do sleep 1; done
 
 ```bash
 curl -s http://127.0.0.1:18081/health; echo
-kubectl -n chronoai-fkst logs deploy/fkst-control-plane --tail=30   # startup lines, no fail-closed config errors
+kubectl -n chronoai-fkst logs deploy/fkst-control-plane --tail=30   # startup lines, no fail-closed config errors;
+                                                                    # with the §14.7 webhook secret set, includes
+                                                                    # "github app webhook endpoint mounted"
 ```
 
 **2. Frontend serves the SPA:**
@@ -1505,7 +1633,7 @@ curl -s http://127.0.0.1:18090/ | grep -o '<title>[^<]*</title>'
 ```
 
 then open `http://127.0.0.1:18090` in a browser. With the GitHub App
-configured (§14.1), *Sign in with GitHub* completes the OAuth round-trip
+configured (§14.3), *Sign in with GitHub* completes the OAuth round-trip
 through `http://127.0.0.1:18081`.
 
 **3. Env-store RBAC actually grants what the backend needs:**
@@ -1516,8 +1644,12 @@ kubectl auth can-i create pods    --as=system:serviceaccount:chronoai-fkst:fkst-
 ```
 
 **4. Full end-to-end smoke (needs the App installed on a test repo):** open an
-issue on that repo with the session work label. The reconcile loop picks it
-up, creates a sandbox via the opensandbox server, and a session pod appears:
+issue on that repo with the session work label. The webhook delivery — watch
+the §14.2 smee client log the forwarded POST — nudges the reconciler
+immediately (with the relay down, the ~30 s sweep still catches a work issue
+on a registered session; only a brand-new trigger issue on an unregistered
+repo waits for the ~10 min full resync), a sandbox is created via the
+opensandbox server, and a session pod appears:
 
 ```bash
 kubectl -n chronoai-fkst get pods -l opensandbox.io/workload=sandbox -w
@@ -1528,7 +1660,7 @@ gvisor` on the sandbox node — the complete end-to-end path: backend →
 lifecycle API → BatchSandbox → controller → caged gVisor pod.
 
 > Sizing note: each session sandbox requests `FKST_OSB_SESSION_CPU`/`MEMORY`
-> (2 CPU / 4 Gi as configured in §14.4) on the gVisor node. If your Docker VM
+> (2 CPU / 4 Gi as configured in §14.6) on the gVisor node. If your Docker VM
 > is small, lower those two values — they are a per-session knob, not a
 > platform invariant.
 
@@ -1539,6 +1671,7 @@ lifecycle API → BatchSandbox → controller → caged gVisor pod.
 | **Rebuild the backend after code changes** | `docker build -f "$FKST_REPO/backend/Dockerfile" -t fkst-control-plane:local "$FKST_REPO" && kind load docker-image fkst-control-plane:local --name opensandbox-local && kubectl -n chronoai-fkst rollout restart deploy/fkst-control-plane` (`kind load` replaces the image on the nodes; the restart picks it up) |
 | **Rebuild the frontend** | same pattern with the §15 build command (`$FKST_REPO/frontend` + the `VITE_FKST_API_BASE` build-arg) and `deploy/fkst-frontend` |
 | Change backend config | edit + `kubectl apply -f "$OSB_LOCAL/manifests/fkst-control-plane-config.yaml"`, then `kubectl -n chronoai-fkst rollout restart deploy/fkst-control-plane` (env is read at startup) |
+| Restart the webhook relay | re-run the §14.2 `npx smee-client …` command (it is a long-lived process, like the port-forwards); deliveries missed while it was down can be replayed from the App's **Advanced → Recent Deliveries** page |
 | Change server values (image pin bump, `configToml` edit) | edit `$OSB_LOCAL/server-values.yaml`, then `helm upgrade opensandbox-server "$OSB_LOCAL/charts/opensandbox-server" -n opensandbox-system -f "$OSB_LOCAL/server-values.yaml"` |
 | Update the vendored server chart | refresh your copy at `$OSB_LOCAL/charts/opensandbox-server` (re-run the §3 gate check), same `helm upgrade` |
 | Bump the controller chart | `helm upgrade opensandbox` with the new `.tgz` URL and values |
@@ -1567,9 +1700,9 @@ opensandbox-local/
 ├── manifests/
 │   ├── batchsandbox-template-configmap.yaml  # §8.1
 │   ├── fkst-guardrails.yaml                  # §8.2
-│   ├── fkst-envstore-rbac.yaml               # §14.3
-│   ├── fkst-control-plane-config.yaml        # §14.4
-│   ├── fkst-control-plane.yaml               # §14.6 — Deployment + Service
+│   ├── fkst-envstore-rbac.yaml               # §14.5
+│   ├── fkst-control-plane-config.yaml        # §14.6
+│   ├── fkst-control-plane.yaml               # §14.8 — Deployment + Service
 │   └── fkst-frontend.yaml                    # §15  — Deployment + Service
 ├── controller-values.yaml                    # §10
 ├── server-values.yaml                        # §11
@@ -1580,7 +1713,8 @@ opensandbox-local/
 
 (Plus two locally built images, `fkst-control-plane:local` and
 `fkst-frontend:local`, and the `fkst-control-plane-secret` created imperatively
-in §14.5.)
+in §14.7. The §14.2 smee channel URL lives only in your shell/App form —
+nothing on disk.)
 
 ### Appendix B — Troubleshooting
 
@@ -1598,87 +1732,22 @@ in §14.5.)
 | Sandbox create with a private-registry image → `ImagePullBackOff` | kind nodes have no registry credentials. `docker pull` it with your own credentials, then `kind load docker-image <image> --name opensandbox-local`, or add `imagePullSecrets` to the tenant namespace. |
 | Docker Hub pull rate-limit errors on sandbox creation | Pre-pull on the host and `kind load docker-image <image> --name opensandbox-local`, or add authenticated pull secrets. |
 | Create call hangs / can't reach server | Port-forward died (it's a background job) — re-run the §12 / §16 commands. |
-| `fkst-control-plane` / `fkst-frontend` pod `ErrImagePull` on `:local` image | The image wasn't side-loaded (or was rebuilt without re-loading) — re-run the §14.2 / §15 `kind load docker-image` command. |
-| Backend pod `CreateContainerConfigError` | `fkst-control-plane-config` ConfigMap or `fkst-control-plane-secret` Secret missing — `envFrom` requires both to exist (§14.4/§14.5). |
-| Backend pod crash-loops with a `FKST_… must be set` / `must be a valid URL` error | The startup validation is fail-closed and names the exact variable — set it (or replace the leftover `<placeholder>`) in the ConfigMap/Secret and restart. Pair rules count too: `FKST_GITHUB_OAUTH_CLIENT_ID` set without `FKST_GITHUB_OAUTH_CLIENT_SECRET` crash-loops (§14.5 deferral note). |
-| Browser login bounces or XHRs fail with connection errors | The three URLs must agree: `FKST_PUBLIC_BASE_URL`/`FKST_FRONTEND_URL` (§14.4), the frontend's baked `VITE_FKST_API_BASE` (§15), and the actual §16 port-forward ports. Rebuild/redeploy after changing any of them. |
+| `fkst-control-plane` / `fkst-frontend` pod `ErrImagePull` on `:local` image | The image wasn't side-loaded (or was rebuilt without re-loading) — re-run the §14.4 / §15 `kind load docker-image` command. |
+| Backend pod `CreateContainerConfigError` | `fkst-control-plane-config` ConfigMap or `fkst-control-plane-secret` Secret missing — `envFrom` requires both to exist (§14.6/§14.7). |
+| Backend pod crash-loops with a `FKST_… must be set` / `must be a valid URL` error | The startup validation is fail-closed and names the exact variable — set it (or replace the leftover `<placeholder>`) in the ConfigMap/Secret and restart. Pair rules count too: `FKST_GITHUB_OAUTH_CLIENT_ID` set without `FKST_GITHUB_OAUTH_CLIENT_SECRET` crash-loops (§14.7 deferral note). |
+| Browser login bounces or XHRs fail with connection errors | The three URLs must agree: `FKST_PUBLIC_BASE_URL`/`FKST_FRONTEND_URL` (§14.6), the frontend's baked `VITE_FKST_API_BASE` (§15), and the actual §16 port-forward ports. Rebuild/redeploy after changing any of them. |
+| Webhook deliveries respond `404` (App page → **Advanced → Recent Deliveries**, or the smee client output) | `FKST_GITHUB_APP_WEBHOOK_SECRET` unset — the endpoint is only mounted when the secret is configured (§14.7). |
+| Webhook deliveries respond `401` | Secret mismatch: the §14.3 form value and `FKST_GITHUB_APP_WEBHOOK_SECRET` (§14.7) must be the same string. A delivery whose bytes were altered in transit fails the same way — the HMAC is verified over the exact signed bytes (this is why the §14.3 content type must be `application/json`: the smee client re-serializes the JSON body, which round-trips, while a form-encoded body does not). |
+| Webhook deliveries respond `202` but nothing ever happens | The backend ACKed a payload it could not parse (deliberate — a `4xx`/`5xx` would make GitHub hammer redeliveries): usually the App's webhook content type is not `application/json` (§14.3). The parse failure is in the backend logs. |
+| Trigger issue ignored for minutes (session does start eventually) | The webhook path is down — smee client not running, backend port-forward dead, or the App's webhook inactive / pointing at the wrong channel (§14.2/§14.3). The reconciler's full resync (default 600 s) is the fallback that eventually catches up; check the smee client output and the App's Recent Deliveries. |
 | Session sandbox pod stuck `Pending` (untainted nodes full) | Each session requests 2 CPU / 4 Gi (`FKST_OSB_SESSION_CPU`/`MEMORY`) on the gVisor node — enlarge the Docker VM or lower those values (§16 sizing note). |
-| Named-environment API calls fail with `Forbidden` | The env-store RBAC (§14.3) wasn't applied — the backend needs the `fkst-control-plane-envstore` Role bound to `fkst-ksa`. |
+| Named-environment API calls fail with `Forbidden` | The env-store RBAC (§14.5) wasn't applied — the backend needs the `fkst-control-plane-envstore` Role bound to `fkst-ksa`. |
 
 ---
 
 *References: upstream [OpenSandbox](https://github.com/opensandbox-group/OpenSandbox)
 (lifecycle API, charts, images); `backend/src/osb_config.rs` +
 `backend/src/config.rs` in this repository for the backend wiring.*
-
-## GitHub App Guide
-
-The fkst control plane authenticates to GitHub as a **GitHub App** (session
-work on repos, installs, and OAuth login for the dashboard). Every deployment
-— including each developer's local environment — needs its **own** App
-registration. Register at *GitHub → Settings → Developer settings → GitHub
-Apps → New GitHub App* (for an org:
-`https://github.com/organizations/<org>/settings/apps/new`).
-
-### Registration form
-
-| Section | Setting | Value |
-|---|---|---|
-| Basic | App name | your choice — GitHub derives the **slug** from it, and the bot identity becomes `<slug>[bot]` |
-| Basic | Homepage URL | anything reachable (the repo URL is fine) |
-| Webhook | Active | ON only when the control plane has a public HTTPS endpoint; **OFF for local dev** (no public URL — the reconcile loop polls) |
-| Webhook | Webhook URL | `<public-base-url>/api/v1/github/app/webhook` |
-| Webhook | Webhook secret | generate one; the SAME string becomes `FKST_GITHUB_APP_WEBHOOK_SECRET` |
-| Repository permissions | Contents | **Read & write** — clone / commit / push, git refs, ensure issue templates, read `fkst.toml` |
-| | Issues | **Read & write** — trigger issues, status comments, labels |
-| | Pull requests | **Read & write** — open and merge the session's PRs |
-| | Workflows | **Read & write** — GitHub blocks pushes touching `.github/workflows/` without it |
-| | Metadata | Read-only (mandatory, auto-selected) |
-| Subscribe to events | | **Issues** only (the only event acted on) |
-| Where can this App be installed? | | "Only on this account" keeps it private to your org/user |
-
-> The permission set above is exactly what the backend's GitHub API calls
-> need — **no organization permissions, no Administration**; grant nothing
-> more.
-
-### OAuth (dashboard / browser login)
-
-The web dashboard and browser log downloads use this same App as the OAuth
-provider. Under **"Identifying and authorizing users"**:
-
-- Add **both** callback URLs:
-  - `<public-base-url>/api/v1/auth/github/callback`
-  - `<public-base-url>/api/v1/logs/oauth/callback`
-
-  (local dev: `http://127.0.0.1:18081/…` — the deployment guide's port-forward
-  address; the base URL must equal `FKST_PUBLIC_BASE_URL`.)
-- Leave **"Expire user authorization tokens" ON** (the default) — the SPA
-  refreshes via `POST /api/v1/auth/github/refresh`, which needs refresh tokens.
-
-### Collect the outputs → configuration
-
-| From the App page / action | Goes to |
-|---|---|
-| **App ID** (numeric, top of the settings page) | `FKST_GITHUB_APP_ID` (Secret) |
-| **slug** (in the settings URL `…/apps/<slug>`) | `FKST_GITHUB_APP_SLUG` (Secret), and derives `FKST_GITHUB_BOT_LOGIN: <slug>[bot]` (ConfigMap) |
-| **Generate a private key** → downloads a `.pem` | `FKST_GITHUB_APP_PRIVATE_KEY_PEM` (Secret; `kubectl create secret … --from-file=`) |
-| **Client ID** (shown on the page, `Iv…`, public) | `FKST_GITHUB_OAUTH_CLIENT_ID` (ConfigMap) |
-| **Generate a new client secret** (shown once) | `FKST_GITHUB_OAUTH_CLIENT_SECRET` (Secret) |
-| the webhook secret you generated | `FKST_GITHUB_APP_WEBHOOK_SECRET` (Secret) |
-
-### Rules & gotchas
-
-- **Install the App** on every repo sessions should work on — registration
-  alone does nothing until it is installed.
-- App creds are enablement-gated: `FKST_GITHUB_APP_ID` unset = App features
-  disabled, the backend still boots. But **never set
-  `FKST_GITHUB_OAUTH_CLIENT_ID` without `FKST_GITHUB_OAUTH_CLIENT_SECRET`** —
-  the pair is validated fail-closed and the pod crash-loops.
-- The webhook URL and OAuth callbacks need a public HTTPS endpoint; if it
-  isn't live yet, create the App with Webhook **Active = off** (or a
-  placeholder URL) and edit it later.
-- Never commit any secret output (private key PEM, client secret, webhook
-  secret) — deliver them as k8s Secrets (deployment guide §14.5).
 
 ## API Contract (OpenAPI)
 
@@ -1797,8 +1866,8 @@ A running session's devloop works the repo's open work-label issues **in paralle
 
 - Stay within the user-facing/public-interface scope; never touch the kernel engine.
 - The control plane serves a dynamic OpenAPI 3 spec at `/openapi.json` (no static file). New/changed public endpoints MUST be annotated with `#[utoipa::path]` + `ToSchema`/`IntoParams` and registered via `OpenApiRouter`/`routes!`; pin `utoipa-axum` to `0.1` (axum 0.7). See **API Contract (OpenAPI)**.
-- The fkst deployables run exclusively on Kubernetes — the full local setup is embedded above in **FKST Local Deployment Guide** (standalone copy: `opensandbox-developer-guide.md`; keep both in sync); `docker-compose` is not used in this repo.
-- Each deployment needs its own GitHub App registration — permissions, OAuth callbacks, and env-var mapping are in **GitHub App Guide**; never set `FKST_GITHUB_OAUTH_CLIENT_ID` without its client secret, never commit App secrets.
+- The fkst deployables run exclusively on Kubernetes — the full local setup is embedded above in **FKST Local Deployment Guide** (the single source of truth; there is no standalone copy); `docker-compose` is not used in this repo.
+- Each deployment needs its own GitHub App registration — permissions, OAuth callbacks, and env-var mapping are in the deployment guide's **§14.3 Register your GitHub App** (local webhook delivery needs the **§14.2 smee relay** — GitHub cannot POST to `127.0.0.1`); never set `FKST_GITHUB_OAUTH_CLIENT_ID` without its client secret, never commit App secrets.
 - Treat the upstream engine and packages repos as read-only references.
 - When filing work issues for a substrate session, **wave the backlog by dependency** (merge foundation before dependent issues), one feature per issue; an open work issue keeps the session's pod alive until closed/merged; never share a work label between two trigger issues in one repo. See **Authoring work issues for a substrate session**.
 - Keep commits small and self-contained.

@@ -42,8 +42,9 @@ docker build -t fkst-frontend:dev frontend/
 ```
 
 The full Kubernetes deployment (Deployment + Service, plus the rest of the
-stack) is documented in [`../opensandbox-developer-guide.md`](../opensandbox-developer-guide.md)
-(§15 for the frontend).
+stack) is documented in the **FKST Local Deployment Guide** section of
+[`../CLAUDE.md`](../CLAUDE.md#fkst-local-deployment-guide) (§15 for the
+frontend).
 
 The default build targets the SAME-ORIGIN topology: one ingress fronts both
 this SPA and the backend, so the login/dashboard XHRs never cross origins and
