@@ -28,6 +28,12 @@ These are **reference-only** dependencies. Do **not** modify them from within fk
 | Engine    | https://github.com/ChronoAIProject/fkst-substrate |
 | Packages  | https://github.com/ChronoAIProject/fkst-packages   |
 
+> **fkst-hosted package home:** all fkst-hosted packages reside on the
+> [`fkst-hosted` branch of `fkst-packages`](https://github.com/ChronoAIProject/fkst-packages/tree/fkst-hosted).
+> When referencing a package for this deployment — a trigger issue's
+> `### Packages` entries or `FKST_SEED_PACKAGES`, both in `owner/repo@ref:path`
+> form — use `ChronoAIProject/fkst-packages@fkst-hosted:<path>`.
+
 ## Integrations & Platform
 
 fkst-hosted integrates with the following ChronoAI platform services. When doing related work, **always reference the latest `main` branch** of the corresponding repo for the current contracts and APIs.
@@ -2021,7 +2027,7 @@ A running session's devloop works the repo's open work-label issues **in paralle
 - The control plane serves a dynamic OpenAPI 3 spec at `/openapi.json` (no static file). New/changed public endpoints MUST be annotated with `#[utoipa::path]` + `ToSchema`/`IntoParams` and registered via `OpenApiRouter`/`routes!`; pin `utoipa-axum` to `0.1` (axum 0.7). See **API Contract (OpenAPI)**.
 - The fkst deployables run exclusively on Kubernetes — the full local setup is embedded above in **FKST Local Deployment Guide** (the single source of truth; there is no standalone copy); `docker-compose` is not used in this repo.
 - Each deployment needs its own GitHub App registration — permissions, OAuth callbacks, and env-var mapping are in the deployment guide's **§14.3 Register your GitHub App** (local webhook delivery needs the **§14.2 smee relay** — GitHub cannot POST to `127.0.0.1`); never set `FKST_GITHUB_OAUTH_CLIENT_ID` without its client secret, never commit App secrets.
-- Treat the upstream engine and packages repos as read-only references.
+- Treat the upstream engine and packages repos as read-only references; all fkst-hosted packages reside on the `fkst-hosted` branch of `fkst-packages` (reference form `ChronoAIProject/fkst-packages@fkst-hosted:<path>`).
 - When filing work issues for a substrate session, **wave the backlog by dependency** (merge foundation before dependent issues), one feature per issue; an open work issue keeps the session's pod alive until closed/merged; never share a work label between two trigger issues in one repo. See **Authoring work issues for a substrate session**.
 - Keep commits small and self-contained.
 - Never add `Co-Authored-By`; always act under the user's own GitHub identity (never a bot/AI identity).
