@@ -10,12 +10,20 @@
 //! here means exactly "would register" (a malformed trigger counts as invalid,
 //! not active). A repo whose trigger read fails NEVER fails the whole call: the
 //! account is marked `counts_complete: false` and the canvas renders what it has.
+//!
+//! The per-repo scans are bounded in BOTH dimensions: at most
+//! [`REPO_SCAN_CONCURRENCY`] scans run at once (never one sequential GitHub
+//! crawl per installed repo), and each scan carries a [`REPO_SCAN_TIMEOUT`]
+//! deadline — a hung repo times out and flags its account incomplete instead of
+//! stalling the whole canvas.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::time::Duration;
 
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::Json;
+use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -101,6 +109,33 @@ pub struct PackageCount {
     /// Active sessions referencing it (once per session, however many times
     /// the session lists it).
     pub count: usize,
+}
+
+/// At most this many per-repo trigger scans run concurrently within one call.
+const REPO_SCAN_CONCURRENCY: usize = 8;
+
+/// Per-repo scan deadline. Generous enough for a token mint plus a paginated
+/// issue listing, small enough that a hung repo degrades (account flagged
+/// incomplete) instead of holding the canvas for the transport timeout.
+#[cfg(not(test))]
+const REPO_SCAN_TIMEOUT: Duration = Duration::from_secs(8);
+/// Tests script the "slow" repo with sub-second wiremock delays so the suite
+/// stays fast; the timeout mechanism under test is identical.
+#[cfg(test)]
+const REPO_SCAN_TIMEOUT: Duration = Duration::from_millis(300);
+
+/// One repo's trigger-scan disposition within a single overview call.
+enum ScanOutcome {
+    /// The repo is not installed — there is nothing to scan.
+    NotScanned,
+    /// Queued for the bounded concurrent scan; always overwritten by a result
+    /// (rendered as incomplete if a bug ever left it in place).
+    Pending,
+    /// Each parsed-OK open trigger's rendered package refs.
+    Sessions(Vec<Vec<String>>),
+    /// The scan failed, timed out, or the App was unusable — the owning
+    /// account is flagged `counts_complete: false`.
+    Incomplete,
 }
 
 /// Scan one installed repo's OPEN trigger issues with an App token and return
@@ -207,74 +242,114 @@ pub(super) async fn overview(
             .unwrap_or_default();
         repos.sort_by(|a, b| a.name.cmp(&b.name));
 
+        // Disposition first, reads second: decide synchronously what each repo
+        // needs, then run the actual GitHub scans through a bounded stream so
+        // one call never becomes an unbounded sequential crawl, and one hung
+        // repo only times itself out.
+        let mut outcomes: Vec<ScanOutcome> = repos
+            .iter()
+            .map(|repo| {
+                let installed = installed_repos
+                    .contains(&format!("{}/{}", repo.owner, repo.name).to_ascii_lowercase());
+                if !installed {
+                    ScanOutcome::NotScanned
+                } else if app.is_none() || installation.is_none() {
+                    // Installed repo but no App creds (or no visible
+                    // installation) to read triggers with — the count is
+                    // unknowable, not zero.
+                    tracing::debug!(
+                        owner = %repo.owner,
+                        name = %repo.name,
+                        "canvas overview: repo installed but the GitHub App is not usable; \
+                         marking counts incomplete"
+                    );
+                    ScanOutcome::Incomplete
+                } else {
+                    ScanOutcome::Pending
+                }
+            })
+            .collect();
+
+        if let (Some(app), Some(inst)) = (app, installation) {
+            let gh = &gh;
+            let mut scans = Vec::new();
+            for (idx, repo) in repos.iter().enumerate() {
+                if !matches!(outcomes[idx], ScanOutcome::Pending) {
+                    continue;
+                }
+                let repo_ref = RepoRef {
+                    owner: repo.owner.clone(),
+                    name: repo.name.clone(),
+                };
+                scans.push(async move {
+                    let scanned = tokio::time::timeout(
+                        REPO_SCAN_TIMEOUT,
+                        scan_repo_sessions_packages(gh, app, inst.id, &repo_ref, trigger_label),
+                    )
+                    .await;
+                    let outcome = match scanned {
+                        Ok(Ok(sessions)) => ScanOutcome::Sessions(sessions),
+                        Ok(Err(error)) => {
+                            // Degrade, never fail the whole canvas: the repo
+                            // renders with zero counts and the account is
+                            // flagged incomplete.
+                            tracing::warn!(
+                                owner = %repo_ref.owner,
+                                name = %repo_ref.name,
+                                error = %error,
+                                "canvas overview: trigger scan failed; marking counts incomplete"
+                            );
+                            ScanOutcome::Incomplete
+                        }
+                        Err(_elapsed) => {
+                            tracing::warn!(
+                                owner = %repo_ref.owner,
+                                name = %repo_ref.name,
+                                timeout_ms = REPO_SCAN_TIMEOUT.as_millis() as u64,
+                                "canvas overview: trigger scan timed out; marking counts incomplete"
+                            );
+                            ScanOutcome::Incomplete
+                        }
+                    };
+                    (idx, outcome)
+                });
+            }
+            let results: Vec<(usize, ScanOutcome)> = stream::iter(scans)
+                .buffer_unordered(REPO_SCAN_CONCURRENCY)
+                .collect()
+                .await;
+            for (idx, outcome) in results {
+                outcomes[idx] = outcome;
+            }
+        }
+
         let mut counts_complete = true;
         let mut repo_views = Vec::with_capacity(repos.len());
-        for repo in repos {
-            let installed = installed_repos
-                .contains(&format!("{}/{}", repo.owner, repo.name).to_ascii_lowercase());
+        for (repo, outcome) in repos.into_iter().zip(outcomes) {
+            let installed = !matches!(outcome, ScanOutcome::NotScanned);
             let mut active_sessions = 0usize;
             let mut packages: Vec<String> = Vec::new();
-            if installed {
-                match (app, installation) {
-                    (Some(app), Some(inst)) => {
-                        let repo_ref = RepoRef {
-                            owner: repo.owner.clone(),
-                            name: repo.name.clone(),
-                        };
-                        match scan_repo_sessions_packages(
-                            &gh,
-                            app,
-                            inst.id,
-                            &repo_ref,
-                            trigger_label,
-                        )
-                        .await
-                        {
-                            Ok(sessions) => {
-                                active_sessions = sessions.len();
-                                total_sessions += sessions.len();
-                                for session_packages in sessions {
-                                    // Count each package ONCE per session, and
-                                    // union into the repo's list in
-                                    // first-appearance order.
-                                    let mut seen_in_session: HashSet<&str> = HashSet::new();
-                                    for package in &session_packages {
-                                        if seen_in_session.insert(package) {
-                                            *package_counts.entry(package.clone()).or_default() +=
-                                                1;
-                                        }
-                                        if !packages.contains(package) {
-                                            packages.push(package.clone());
-                                        }
-                                    }
-                                }
+            match outcome {
+                ScanOutcome::NotScanned => {}
+                ScanOutcome::Sessions(sessions) => {
+                    active_sessions = sessions.len();
+                    total_sessions += sessions.len();
+                    for session_packages in sessions {
+                        // Count each package ONCE per session, and union into
+                        // the repo's list in first-appearance order.
+                        let mut seen_in_session: HashSet<&str> = HashSet::new();
+                        for package in &session_packages {
+                            if seen_in_session.insert(package) {
+                                *package_counts.entry(package.clone()).or_default() += 1;
                             }
-                            Err(error) => {
-                                // Degrade, never fail the whole canvas: the repo
-                                // renders with zero counts and the account is
-                                // flagged incomplete.
-                                tracing::warn!(
-                                    owner = %repo.owner,
-                                    name = %repo.name,
-                                    error = %error,
-                                    "canvas overview: trigger scan failed; marking counts incomplete"
-                                );
-                                counts_complete = false;
+                            if !packages.contains(package) {
+                                packages.push(package.clone());
                             }
                         }
                     }
-                    _ => {
-                        // Installed repo but no App creds (or no visible
-                        // installation) to read triggers with — the count is
-                        // unknowable, not zero.
-                        tracing::debug!(
-                            owner = %repo.owner,
-                            name = %repo.name,
-                            "canvas overview: repo installed but the GitHub App is not usable; \
-                             marking counts incomplete"
-                        );
-                        counts_complete = false;
-                    }
+                }
+                ScanOutcome::Incomplete | ScanOutcome::Pending => {
+                    counts_complete = false;
                 }
             }
             repo_views.push(RepoOverview {

@@ -144,6 +144,97 @@ async fn overview_assembles_accounts_counts_and_totals() {
 }
 
 #[tokio::test]
+async fn overview_returns_promptly_when_one_repo_scan_hangs() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/user/repos"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            repo_json("acme", "Organization", "site", 2),
+            repo_json("acme", "Organization", "slow", 3),
+        ])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/user/orgs"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([{ "login": "acme" }])),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/user/memberships/orgs"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "role": "admin", "organization": { "login": "acme" } }
+        ])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/user/installations"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 1,
+            "installations": [
+                { "id": 77, "account": { "login": "acme" }, "repository_selection": "all" }
+            ]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/user/installations/77/repositories"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 2,
+            "repositories": [
+                { "name": "site", "owner": { "login": "acme" } },
+                { "name": "slow", "owner": { "login": "acme" } }
+            ]
+        })))
+        .mount(&server)
+        .await;
+    mount_app_token(&server, "acme", "site", 77).await;
+    mount_app_token(&server, "acme", "slow", 77).await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/issues"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "number": 5, "title": "trigger", "body": VALID_TRIGGER_BODY, "state": "open",
+                "labels": [{ "name": "fkst-substrate-trigger" }],
+                "user": { "login": "shining", "id": 9 }
+            }
+        ])))
+        .mount(&server)
+        .await;
+    // The hung repo: its trigger read answers only after 2s, far beyond the
+    // (test-shortened) per-scan timeout. The call must NOT wait for it.
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/slow/issues"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(std::time::Duration::from_secs(2))
+                .set_body_json(serde_json::json!([])),
+        )
+        .mount(&server)
+        .await;
+
+    let state = test_state(&server.uri(), Some(test_app(&server.uri())));
+    let started = std::time::Instant::now();
+    let Json(view) = overview(State(state), viewer_user(), auth_headers())
+        .await
+        .expect("a hung repo scan must NOT fail or stall the whole call");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(2),
+        "the call must return before the hung repo's 2s delay, took {:?}",
+        started.elapsed()
+    );
+
+    let org = &view.accounts[1];
+    assert!(!org.counts_complete, "the timed-out scan flags the account");
+    let site = org.repos.iter().find(|r| r.name == "site").expect("site");
+    assert_eq!(site.active_sessions, 1, "the healthy repo still counts");
+    let slow = org.repos.iter().find(|r| r.name == "slow").expect("slow");
+    assert_eq!(slow.active_sessions, 0);
+    assert_eq!(view.totals.sessions, 1);
+}
+
+#[tokio::test]
 async fn overview_marks_counts_incomplete_when_a_trigger_read_fails() {
     let server = MockServer::start().await;
     mount_user_reads(&server).await;
