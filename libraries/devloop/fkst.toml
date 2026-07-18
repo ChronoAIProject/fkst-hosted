@@ -150,4 +150,6 @@ allow = [
   "github-devloop-workflow",
   "fkst-substrate-ref-maintainer",
   "github-proxy",
+  "workflow-security",
+  "workflow-writer",
 ]
