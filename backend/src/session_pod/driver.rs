@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{ExitCode, Stdio};
 
 use secrecy::{ExposeSecret, SecretString};
@@ -42,6 +42,12 @@ const GH_SHIM_NAME: &str = "gh";
 const PLATFORM_SUBDIR: &str = "platform";
 const PROJECT_SUBDIR: &str = "project";
 const GITCRED_SUBDIR: &str = "gitcred";
+/// Repo-local workflow catalog. workflow-writer authors new `fkst.workflow.v1`
+/// files here (as PRs to the target repo) and github-devloop-workflow's
+/// `workflow_select` loads + runs them from here. Defaulted to the target repo's
+/// `.fkst/packages/` (set-if-absent, so an operator-pinned session value wins).
+const WORKFLOW_CATALOG_ROOT_ENV: &str = "FKST_WORKFLOW_CATALOG_ROOT";
+const WORKFLOW_CATALOG_SUBDIR: &str = ".fkst/packages";
 const SHIM_SUBDIR: &str = "binshim";
 /// Env var the credential helper + gh shim read the mounted token path from.
 const TOKEN_FILE_ENV: &str = "FKST_GITHUB_TOKEN_FILE";
@@ -216,6 +222,16 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     );
     // Prepend the shim dir so our `gh` wins over /usr/bin/gh on PATH.
     prepend_path(&mut child_env, &shim_dir);
+    // Repo-local workflow catalog: point both workflow-writer (which authors new
+    // workflow files here as PRs) and the github-devloop-workflow host (which loads
+    // + runs them) at the target repo's `.fkst/packages/`. Set-if-absent so an
+    // operator/session-pinned FKST_WORKFLOW_CATALOG_ROOT wins over this default.
+    let workflow_catalog_root = workflow_catalog_root_default(&project_root);
+    default_env(
+        &mut child_env,
+        WORKFLOW_CATALOG_ROOT_ENV,
+        &workflow_catalog_root.to_string_lossy(),
+    );
 
     // 6b. Log streaming: spawn the in-pod collector BEFORE supervise so it captures
     //     the whole run. Streaming is unconditional — the collector redacts every
@@ -398,6 +414,22 @@ fn upsert_env(env: &mut Vec<(String, String)>, key: &str, value: &str) {
     }
 }
 
+/// Insert `key=value` only when the child env does not already carry `key`, so a
+/// value the operator pinned on the session (via its env) wins over a computed
+/// default. Unlike [`upsert_env`], an existing binding is left untouched.
+fn default_env(env: &mut Vec<(String, String)>, key: &str, value: &str) {
+    if !env.iter().any(|(k, _)| k == key) {
+        env.push((key.to_string(), value.to_string()));
+    }
+}
+
+/// The default repo-local workflow-catalog root for a session: the target repo's
+/// `.fkst/packages/` under the cloned project root. workflow-writer writes new
+/// `fkst.workflow.v1` files here and github-devloop-workflow loads + runs them.
+fn workflow_catalog_root_default(project_root: &Path) -> PathBuf {
+    project_root.join(WORKFLOW_CATALOG_SUBDIR)
+}
+
 /// Prepend `dir` to the child env's `PATH` so a bare `gh` resolves to the shim.
 fn prepend_path(env: &mut Vec<(String, String)>, dir: &Path) {
     let dir = dir.to_string_lossy();
@@ -410,4 +442,46 @@ fn prepend_path(env: &mut Vec<(String, String)>, dir: &Path) {
         _ => dir.to_string(),
     };
     upsert_env(env, PATH_ENV, &new_path);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workflow_catalog_root_defaults_to_repo_local_fkst_packages() {
+        let project = Path::new("/var/lib/fkst/runtime/project");
+        assert_eq!(
+            workflow_catalog_root_default(project),
+            PathBuf::from("/var/lib/fkst/runtime/project/.fkst/packages"),
+        );
+    }
+
+    #[test]
+    fn default_env_inserts_when_absent() {
+        let mut env = vec![("PATH".to_string(), "/usr/bin".to_string())];
+        default_env(&mut env, WORKFLOW_CATALOG_ROOT_ENV, "/p/.fkst/packages");
+        let got = env.iter().find(|(k, _)| k == WORKFLOW_CATALOG_ROOT_ENV);
+        assert_eq!(got.map(|(_, v)| v.as_str()), Some("/p/.fkst/packages"));
+    }
+
+    #[test]
+    fn default_env_leaves_an_operator_pinned_value_untouched() {
+        // A value already on the session env (operator/`### Environment`) must win.
+        let mut env = vec![(
+            WORKFLOW_CATALOG_ROOT_ENV.to_string(),
+            "/custom/location".to_string(),
+        )];
+        default_env(&mut env, WORKFLOW_CATALOG_ROOT_ENV, "/p/.fkst/packages");
+        let vals: Vec<&str> = env
+            .iter()
+            .filter(|(k, _)| k == WORKFLOW_CATALOG_ROOT_ENV)
+            .map(|(_, v)| v.as_str())
+            .collect();
+        assert_eq!(
+            vals,
+            vec!["/custom/location"],
+            "operator value must win, no duplicate"
+        );
+    }
 }
