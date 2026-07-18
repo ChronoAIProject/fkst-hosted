@@ -10,13 +10,14 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::time::Duration;
 
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::k8s::session_launcher::session_env_pairs;
 use crate::k8s::SessionPodSpec;
 use crate::session_backend::opensandbox::derive_execd_token;
-use crate::session_backend::opensandbox::dto::CreateSandboxRequest;
+use crate::session_backend::opensandbox::dto::{CreateSandboxRequest, OsbError};
 use crate::session_backend::{BackendError, EnsureOutcome};
 use crate::session_pod::log_stream::{ENV_POD_NAME, ENV_POD_UID};
 use crate::session_spec::creds::{CredsLayout, DEFAULT_CREDS_DIR};
@@ -27,6 +28,17 @@ use super::{correlate, managed_session_filter, OsbBackend};
 /// (0o400), matching the Kubernetes backend's Secret mount. `pub(super)` so the
 /// rotation heal path ([`super::rotation`]) rewrites a single file with the SAME mode.
 pub(super) const CREDS_FILE_MODE: u32 = 0o400;
+
+/// How many times the initial credential upload is retried while execd finishes
+/// starting up (see [`OsbBackend::upload_creds`]).
+const UPLOAD_MAX_ATTEMPTS: u32 = 20;
+/// Backoff between credential-upload retries. Production paces at 1.5s (≈30s
+/// total headroom for execd startup); tests use a tiny value so the retry path
+/// runs fast.
+#[cfg(not(test))]
+const UPLOAD_RETRY_BACKOFF: Duration = Duration::from_millis(1500);
+#[cfg(test)]
+const UPLOAD_RETRY_BACKOFF: Duration = Duration::from_millis(2);
 
 /// The never-matching session id the reachability probe filters on (one empty page).
 const REACHABILITY_PROBE_ID: &str = "__reachability_probe__";
@@ -149,6 +161,43 @@ impl OsbBackend {
         session_id: &str,
         creds: &BTreeMap<String, SecretString>,
     ) -> Result<(), BackendError> {
+        // execd starts a moment AFTER the sandbox first reports Running, so the
+        // very first `/files/upload` races that startup: the server proxy cannot
+        // yet reach execd and answers 5xx (observed live: 502 "Could not connect
+        // to the backend sandbox endpoint"), or the connection tears as a
+        // transport error. Retry the whole (idempotent, overwriting) upload with
+        // backoff until execd is ready. Bounded so a genuinely dead sandbox still
+        // fails loudly instead of hanging the spawn.
+        let mut attempt: u32 = 0;
+        loop {
+            attempt += 1;
+            match self.upload_creds_once(sandbox_id, session_id, creds).await {
+                Ok(()) => return Ok(()),
+                Err(error) if attempt < UPLOAD_MAX_ATTEMPTS && execd_not_ready(&error) => {
+                    tracing::debug!(
+                        sandbox_id = %sandbox_id,
+                        attempt,
+                        error = %error,
+                        "opensandbox ensure_session: execd not ready for credential \
+                         upload; retrying"
+                    );
+                    tokio::time::sleep(UPLOAD_RETRY_BACKOFF).await;
+                }
+                Err(error) => return Err(BackendError::from(error)),
+            }
+        }
+    }
+
+    /// One full credential push: every file, then the completeness sentinel LAST
+    /// (only once every credential is on disk does the in-pod engine-start gate
+    /// pass). Returns the raw [`OsbError`] so [`upload_creds`] can classify a
+    /// not-yet-ready execd for retry before it folds into [`BackendError`].
+    async fn upload_creds_once(
+        &self,
+        sandbox_id: &str,
+        session_id: &str,
+        creds: &BTreeMap<String, SecretString>,
+    ) -> Result<(), OsbError> {
         let execd = (self.execd_factory)(sandbox_id, session_id);
         let layout = CredsLayout::new(DEFAULT_CREDS_DIR);
         for (file, secret) in creds {
@@ -157,12 +206,19 @@ impl OsbBackend {
                 .upload_file(&path, secret.expose_secret().as_bytes(), CREDS_FILE_MODE)
                 .await?;
         }
-        // The completeness sentinel LAST: only once every credential is on disk does
-        // the in-pod engine-start gate pass.
         let sentinel = path_str(&layout.creds_complete());
         execd.upload_file(&sentinel, b"1", CREDS_FILE_MODE).await?;
         Ok(())
     }
+}
+
+/// Whether a credential-upload failure is the transient "execd not ready yet"
+/// race right after sandbox create (retryable) rather than a real fault. The
+/// server proxy surfaces an unreachable execd as a 5xx, and a torn connection as
+/// a transport error; any 4xx (auth/validation) or NotFound is NOT retried.
+fn execd_not_ready(error: &OsbError) -> bool {
+    matches!(error, OsbError::Api { status, .. } if *status >= 500)
+        || matches!(error, OsbError::Transport(_))
 }
 
 /// Render a credential path as the string execd's `/files/upload` expects. Credential
