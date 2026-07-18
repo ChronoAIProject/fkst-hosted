@@ -131,7 +131,8 @@ impl IssueView {
 }
 
 /// The `fkst-*` labels on a trigger issue (control-plane status markers).
-fn status_labels(issue: &IssueSummary) -> Vec<String> {
+/// `pub(crate)`: the canvas sessions endpoint renders the same projection.
+pub(crate) fn status_labels(issue: &IssueSummary) -> Vec<String> {
     issue
         .labels
         .iter()
@@ -185,10 +186,12 @@ fn build_invalid_session(trigger: &IssueSummary, reason: String) -> SessionGroup
 
 /// A minimal GitHub read client for the dashboard: the user-token installation
 /// enumeration + `state=all` issue reads that the reconciler's `GithubListing`
-/// does not expose.
+/// does not expose. Fields are `pub(crate)` because the canvas endpoints
+/// ([`crate::routes::canvas`]) extend this client with their own methods in a
+/// sibling module (same crate, separate file to respect the file-size budget).
 pub(crate) struct DashboardGithub {
-    api_base: String,
-    client: reqwest::Client,
+    pub(crate) api_base: String,
+    pub(crate) client: reqwest::Client,
 }
 
 #[derive(Deserialize)]
@@ -276,6 +279,32 @@ struct RawIssue {
     user: RawUser,
     /// Present only when this "issue" is actually a PR (filtered out).
     pull_request: Option<serde_json::Value>,
+    // Presentation metadata the canvas dashboard renders (issue links + ISO
+    // timestamps). Defaulted defensively — GitHub always sends them, but a
+    // missing field must never fail the whole listing.
+    #[serde(default)]
+    html_url: String,
+    #[serde(default)]
+    created_at: String,
+    #[serde(default)]
+    updated_at: String,
+    #[serde(default)]
+    closed_at: Option<String>,
+}
+
+/// One issue from a `state=all` label read: the reconciler-shaped
+/// [`IssueSummary`] (what `parse_registration` consumes) PLUS the presentation
+/// metadata GitHub sends alongside it (link + ISO-8601 timestamps) that the
+/// canvas dashboard renders. Kept as a wrapper — not extra `IssueSummary`
+/// fields — so the reconciler's widely-constructed summary type stays lean.
+#[derive(Debug, Clone)]
+pub(crate) struct IssueWithMeta {
+    pub summary: IssueSummary,
+    pub html_url: String,
+    pub created_at: String,
+    pub updated_at: String,
+    /// `None` while the issue is open.
+    pub closed_at: Option<String>,
 }
 
 /// Coerce a possibly-`null` JSON value into `T::default()` (GitHub sends
@@ -311,7 +340,9 @@ impl DashboardGithub {
     }
 
     /// GET a page with Bearer `auth`; return the decoded body + the `rel="next"` URL.
-    async fn get_page<T: serde::de::DeserializeOwned>(
+    /// `pub(crate)` so the canvas extension methods reuse the same paging +
+    /// error-mapping transport instead of duplicating it.
+    pub(crate) async fn get_page<T: serde::de::DeserializeOwned>(
         &self,
         url: &str,
         auth: &SecretString,
@@ -619,30 +650,51 @@ impl DashboardGithub {
         owner: &str,
         repo: &str,
         label: &str,
-    ) -> Result<Vec<IssueSummary>, AppError> {
+    ) -> Result<Vec<IssueWithMeta>, AppError> {
+        self.issues_by_label(token, owner, repo, label, "all").await
+    }
+
+    /// `GET /repos/{owner}/{repo}/issues?labels=<label>&state=<state>` (any
+    /// bearer token), following pagination; PRs are excluded. `state` is one of
+    /// GitHub's `open`/`closed`/`all` — the canvas overview reads `open` only so
+    /// counting active sessions never pages through a repo's closed history.
+    pub(crate) async fn issues_by_label(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        label: &str,
+        state: &str,
+    ) -> Result<Vec<IssueWithMeta>, AppError> {
         let mut url = format!("{}/repos/{owner}/{repo}/issues", self.api_base);
         let mut query: Option<Vec<(&str, &str)>> = Some(vec![
             ("labels", label),
-            ("state", "all"),
+            ("state", state),
             ("per_page", "100"),
         ]);
         let mut out = Vec::new();
         loop {
             let (page, next): (Vec<RawIssue>, _) = self
-                .get_page(&url, token, query.as_deref(), "issues_by_label_all")
+                .get_page(&url, token, query.as_deref(), "issues_by_label")
                 .await?;
             out.extend(
                 page.into_iter()
                     .filter(|r| r.pull_request.is_none())
-                    .map(|r| IssueSummary {
-                        number: r.number,
-                        title: r.title,
-                        body: r.body,
-                        labels: r.labels.into_iter().map(|l| l.name).collect(),
-                        state: r.state,
-                        assignees: Vec::new(),
-                        user_login: r.user.login,
-                        user_id: r.user.id,
+                    .map(|r| IssueWithMeta {
+                        summary: IssueSummary {
+                            number: r.number,
+                            title: r.title,
+                            body: r.body,
+                            labels: r.labels.into_iter().map(|l| l.name).collect(),
+                            state: r.state,
+                            assignees: Vec::new(),
+                            user_login: r.user.login,
+                            user_id: r.user.id,
+                        },
+                        html_url: r.html_url,
+                        created_at: r.created_at,
+                        updated_at: r.updated_at,
+                        closed_at: r.closed_at,
                     }),
             );
             match next {
@@ -777,18 +829,26 @@ async fn scan_repo_sessions(
     };
     let owner_repo = format!("{}/{}", repo.owner, repo.name);
     let inst_token = app.token_for_repo(&owner_repo, None).await?;
-    let triggers = gh
+    // This cached view renders only the reconciler-shaped summary; the
+    // per-issue presentation metadata is dropped here (the canvas endpoints
+    // are the consumer that keeps it).
+    let triggers: Vec<IssueSummary> = gh
         .issues_by_label_all(&inst_token, &repo.owner, &repo.name, trigger_label)
-        .await?;
+        .await?
+        .into_iter()
+        .map(|issue| issue.summary)
+        .collect();
     let mut sessions = Vec::new();
     for trigger in &triggers {
         match parse_registration(installation_id, repo, trigger) {
             Ok(reg) => {
-                let work = match reg.def.work_label.as_deref() {
-                    Some(work_label) => {
-                        gh.issues_by_label_all(&inst_token, &repo.owner, &repo.name, work_label)
-                            .await?
-                    }
+                let work: Vec<IssueSummary> = match reg.def.work_label.as_deref() {
+                    Some(work_label) => gh
+                        .issues_by_label_all(&inst_token, &repo.owner, &repo.name, work_label)
+                        .await?
+                        .into_iter()
+                        .map(|issue| issue.summary)
+                        .collect(),
                     None => Vec::new(),
                 };
                 sessions.push(build_session(trigger, &reg, work));

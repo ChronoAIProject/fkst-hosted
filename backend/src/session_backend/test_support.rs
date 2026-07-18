@@ -34,6 +34,8 @@ pub(crate) struct FakeSessionBackend {
     mark_pending_not_found: bool,
     /// The fleet `list_fleet` returns.
     fleet: Vec<SessionHandle>,
+    /// The pods `observe_repo` returns (regardless of repo).
+    observed: Vec<LivePod>,
     /// Sessions whose `deliver_credential` reports [`DeliveryOutcome::SessionGone`].
     gone_sessions: HashSet<String>,
     /// Per-session scripted `recent_output` (absent → `None`).
@@ -51,6 +53,12 @@ impl FakeSessionBackend {
     /// Script the fleet `list_fleet` returns.
     pub(crate) fn with_fleet(mut self, fleet: Vec<SessionHandle>) -> Self {
         self.fleet = fleet;
+        self
+    }
+
+    /// Script the pods `observe_repo` returns (any repo).
+    pub(crate) fn with_observed(mut self, observed: Vec<LivePod>) -> Self {
+        self.observed = observed;
         self
     }
 
@@ -89,7 +97,7 @@ impl SessionBackend for FakeSessionBackend {
     }
 
     async fn observe_repo(&self, _repo: &RepoRef) -> Result<Vec<LivePod>, BackendError> {
-        Ok(Vec::new())
+        Ok(self.observed.clone())
     }
 
     async fn mark_pending(&self, session_id: &str) -> Result<(), BackendError> {

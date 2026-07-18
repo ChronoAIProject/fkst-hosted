@@ -55,6 +55,8 @@ export interface SiteContent {
   };
   dashboard: {
     metaTitle: string;
+    /** Route-level skeleton label while the lazy dashboard chunk downloads. */
+    loading: string;
     eyebrow: string;
     title: string;
     lede: string;
@@ -62,17 +64,6 @@ export interface SiteContent {
     signInBody: string;
     notConfigured: string;
     authError: string;
-    update: string;
-    updating: string;
-    updatesNote: string;
-    lastUpdated: string;
-    never: string;
-    updateFailed: string;
-    firstVisitTitle: string;
-    firstVisitBody: string;
-    loadingTitle: string;
-    reposScanned: string;
-    noRepos: string;
     noSessions: string;
     installed: string;
     workLabel: string;
@@ -84,12 +75,115 @@ export interface SiteContent {
     workIssues: string;
     open: string;
     closed: string;
+    /** The zoomable canvas surface (levels 0–2) and its sidebar. */
+    canvas: {
+      canvasAria: string;
+      sidebarAria: string;
+      breadcrumbAria: string;
+      /** Root crumb label (level 0). */
+      breadcrumbRoot: string;
+      back: string;
+      backAria: string;
+      /** Small keyboard hint next to the breadcrumb. */
+      escHint: string;
+      loadingCanvas: string;
+      loadingSidebar: string;
+      legendTitle: string;
+      legendNone: string;
+      legendInstalled: string;
+      legendActive: string;
+      /** Sidebar lede stating what level 0 represents. */
+      viewRoot: string;
+      /** Sidebar lede for level 1; `{login}` placeholder. */
+      viewAccount: string;
+      /** Sidebar lede for level 2; `{repo}` placeholder. */
+      viewRepo: string;
+      /** Badge on accounts where the viewer is owner/admin. */
+      ownerBadge: string;
+      statusNone: string;
+      statusInstalled: string;
+      /** Active badge; `{n}` placeholder. */
+      statusActiveCount: string;
+      /** `{n}` placeholder. */
+      repoCount: string;
+      /** Overflow marker for the in-card repo dots; `{n}` placeholder. */
+      moreRepos: string;
+      /** `{login}` placeholder. */
+      openAccountAria: string;
+      /** `{repo}` placeholder. */
+      openRepoAria: string;
+      /** Warning when the backend flagged counts_complete=false. */
+      countsIncomplete: string;
+      filterAccountsPlaceholder: string;
+      filterReposPlaceholder: string;
+      noAccountsMatch: string;
+      noReposMatch: string;
+      noAccounts: string;
+      chartSessionsTitle: string;
+      chartPackagesTitle: string;
+      chartScopeAllAccounts: string;
+      chartScopeAllRepos: string;
+      chartScopeAriaAccounts: string;
+      chartScopeAriaRepos: string;
+      chartEmpty: string;
+      /** Aggregate row label when the chart tail is folded. */
+      chartOther: string;
+      sessionsTitle: string;
+      /** Note that level-2 data refreshes on a poll. */
+      pollNote: string;
+      sessionsLoadFailed: string;
+      /** Non-blocking notice when a refresh failed but last-good data shows. */
+      sessionsStaleNotice: string;
+      notInstalledNote: string;
+      newTrigger: string;
+      livenessStarting: string;
+      livenessLive: string;
+      livenessTerminating: string;
+      logDownload: string;
+      prsTitle: string;
+      prMerged: string;
+      /** PR → work-issue link text; `{n}` placeholder. */
+      prForIssue: string;
+      createdWord: string;
+      updatedWord: string;
+      closedWord: string;
+      stop: string;
+      /** `{name}` placeholder. */
+      stopAria: string;
+      /** `{name}` placeholder. */
+      stopConfirmTitle: string;
+      /** `{number}` placeholder (the trigger issue number). */
+      stopConfirmBody: string;
+      stopConfirm: string;
+      stopPending: string;
+      stopFailed: string;
+      createTitle: string;
+      createNameLabel: string;
+      createNameHint: string;
+      createPackagesLabel: string;
+      createPackagePlaceholder: string;
+      addPackage: string;
+      /** `{n}` placeholder (1-based row index). */
+      removePackageAria: string;
+      createWorkLabelLabel: string;
+      createEnvironmentLabel: string;
+      createAutoMergeLabel: string;
+      createLogAccessLabel: string;
+      createLogAccessHint: string;
+      createOutputLangLabel: string;
+      /** Hint naming what the value drives (the '### Output Language' section). */
+      createOutputLangHint: string;
+      createSubmit: string;
+      createPending: string;
+      createFailed: string;
+    };
     repos: {
-      title: string;
       refresh: string;
-      loading: string;
+      /** Refresh button label while the overview re-fetch is in flight. */
+      refreshing: string;
       loadFailed: string;
-      empty: string;
+      /** Non-blocking notice when a refresh failed but last-good data shows. */
+      refreshFailedStale: string;
       private: string;
       public: string;
       org: string;
@@ -105,9 +199,6 @@ export interface SiteContent {
       groupCounts: string;
       /** Body line for a group (org creation target) with no repositories. */
       groupEmpty: string;
-      searchPlaceholder: string;
-      /** One-line empty state when a search matches nothing. */
-      searchEmpty: string;
       /** "New repository" button in the section header. */
       newRepo: string;
       createTitle: string;
@@ -145,13 +236,6 @@ export interface SiteContent {
       uninstallPending: string;
       /** Generic uninstall failure (no server message available). */
       uninstallFailed: string;
-      /** Per-repo action removing it from a selected-mode installation. */
-      /** Remove confirm dialog title; `{repo}` placeholder. */
-      /** Remove confirm dialog body; `{repo}` placeholder. */
-      /** Remove confirm dialog: explicit confirm button. */
-      /** Remove confirm button while the DELETE is in flight. */
-      /** Generic remove failure (no server message available). */
-      /** Title hint on Installed rows of an all-repositories installation. */
     };
   };
   intro: {
