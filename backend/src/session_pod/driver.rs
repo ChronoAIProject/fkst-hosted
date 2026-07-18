@@ -481,7 +481,9 @@ async fn run_env_install_commands(
         "run-substrate: running environment install commands"
     );
     for (idx, command) in commands.iter().enumerate() {
-        let output = Command::new("/bin/sh")
+        // bash (not sh): matches the PUT-time validator's `bash -c` contract so an
+        // install command validated once behaves identically in the session.
+        let output = Command::new("bash")
             .arg("-c")
             .arg(command)
             .envs(child_env.iter().map(|(k, v)| (k.clone(), v.clone())))
