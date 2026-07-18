@@ -268,19 +268,34 @@ function M.build_workflow_select_prompt(ctx, eligible)
 end
 
 function M.parse_workflow_selection(stdout)
-  local lines = {}
+  -- A reasoning model may prepend explanation lines before the required sentinel,
+  -- so scan for the UNIQUE sentinel line rather than demanding the whole output be
+  -- exactly one line (which made every verbose selection "none-or-unparseable" and
+  -- silently defeated repo-local workflow routing). Uniqueness is preserved as the
+  -- safety property: zero or multiple sentinels stays ambiguous (nil), so an echoed
+  -- or injected second sentinel cannot smuggle a different selection. A bare
+  -- single-line id with no sentinel is still accepted for back-compat.
+  local marker_values = {}
+  local nonempty = {}
   for line in (tostring(stdout or "") .. "\n"):gmatch("(.-)\n") do
     local trimmed = strings.trim(line)
     if trimmed ~= "" then
-      table.insert(lines, trimmed)
+      table.insert(nonempty, trimmed)
+      local marked = trimmed:match("^" .. M.WORKFLOW_SELECT_LABEL .. "%s+(.+)$")
+      if marked ~= nil then
+        table.insert(marker_values, strings.trim(marked))
+      end
     end
   end
-  if #lines ~= 1 then
+
+  local value
+  if #marker_values == 1 then
+    value = marker_values[1]
+  elseif #marker_values == 0 and #nonempty == 1 then
+    value = strings.trim(nonempty[1])
+  else
     return nil
   end
-
-  local value = lines[1]:match("^" .. M.WORKFLOW_SELECT_LABEL .. "%s+(.+)$") or lines[1]
-  value = strings.trim(value)
   if value == "" or value == "none" then
     return nil
   end
