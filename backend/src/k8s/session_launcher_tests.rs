@@ -16,7 +16,7 @@ fn creds_map<'a>(
     user_env: impl IntoIterator<Item = (&'a str, &'a str)>,
     storage: Option<StorageWriterCreds<'_>>,
 ) -> BTreeMap<String, SecretString> {
-    credential_secret_data(github_token_json, llm_api_key, user_env, storage)
+    credential_secret_data(github_token_json, llm_api_key, user_env, &[], storage)
         .into_iter()
         .map(|(k, v)| (k, SecretString::from(v)))
         .collect()

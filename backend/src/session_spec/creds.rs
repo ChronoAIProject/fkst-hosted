@@ -27,6 +27,11 @@ pub const LLM_API_KEY_FILE: &str = "llm-api-key";
 /// (`^[A-Za-z_][A-Za-z0-9_]*$`), so the composite `userenv.<KEY>` is a valid
 /// Kubernetes Secret data key (`[-._a-zA-Z0-9]+`).
 pub const USER_ENV_PREFIX: &str = "userenv.";
+/// The named-environment install commands, delivered as a single JSON-array file
+/// (the ordered command strings). The in-pod driver runs them once, with the
+/// injected env available, before starting the engine — so a profile that installs
+/// a tool (e.g. an encoder) actually provisions the session, not just validates.
+pub const INSTALL_FILE: &str = "install";
 
 /// The chrono-storage SA client id the in-pod log uploader mints its OAuth2
 /// token with. Non-secret (an OAuth client identifier), mounted alongside the
@@ -86,6 +91,7 @@ pub fn credential_secret_data<'a>(
     github_token: &str,
     llm_api_key: &str,
     user_env: impl IntoIterator<Item = (&'a str, &'a str)>,
+    install: &[String],
     storage: Option<StorageWriterCreds<'_>>,
 ) -> BTreeMap<String, String> {
     let mut data = BTreeMap::new();
@@ -93,6 +99,14 @@ pub fn credential_secret_data<'a>(
     data.insert(LLM_API_KEY_FILE.to_string(), llm_api_key.to_string());
     for (key, value) in user_env {
         data.insert(format!("{USER_ENV_PREFIX}{key}"), value.to_string());
+    }
+    // The environment profile's ordered install commands, as a JSON array. Absent
+    // (no environment, or an environment with no install step) ⇒ no key, so the
+    // layout stays byte-identical for the common no-install case.
+    if !install.is_empty() {
+        if let Ok(encoded) = serde_json::to_string(install) {
+            data.insert(INSTALL_FILE.to_string(), encoded);
+        }
     }
     if let Some(storage) = storage {
         data.insert(
@@ -146,6 +160,13 @@ impl CredsLayout {
     /// Path to the static LLM API key file.
     pub fn llm_api_key(&self) -> PathBuf {
         self.base.join(LLM_API_KEY_FILE)
+    }
+
+    /// Path to the environment-profile install-commands file ([`INSTALL_FILE`], a
+    /// JSON array). Absent when the session declared no environment or one with no
+    /// install step; the driver treats a missing file as "no install commands".
+    pub fn install_commands(&self) -> PathBuf {
+        self.base.join(INSTALL_FILE)
     }
 
     /// Path to the credentials-complete sentinel ([`CREDS_COMPLETE_SENTINEL`]) the
@@ -294,7 +315,7 @@ mod tests {
     #[test]
     fn credential_secret_data_carries_the_base_creds_and_user_env() {
         let user_env = [("FOO", "foo-val"), ("API_TOKEN", "tok-val")];
-        let data = credential_secret_data("ghs_json", "sk-key", user_env, None);
+        let data = credential_secret_data("ghs_json", "sk-key", user_env, &[], None);
         assert_eq!(data["github-token"], "ghs_json");
         assert_eq!(data["llm-api-key"], "sk-key");
         assert_eq!(data["userenv.FOO"], "foo-val");
@@ -304,8 +325,26 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn credential_secret_data_carries_install_commands_as_json_when_present() {
+        let install = vec![
+            "curl -L https://example/ffmpeg -o \"$FKST_ENV_BIN/ffmpeg\"".to_string(),
+            "chmod +x \"$FKST_ENV_BIN/ffmpeg\"".to_string(),
+        ];
+        let data = credential_secret_data("ghs", "sk", std::iter::empty(), &install, None);
+        let encoded = data.get(INSTALL_FILE).expect("install key present");
+        let round: Vec<String> = serde_json::from_str(encoded).expect("valid json array");
+        assert_eq!(round, install);
+    }
+
+    #[test]
+    fn credential_secret_data_omits_install_key_when_no_install_commands() {
+        let data = credential_secret_data("ghs", "sk", std::iter::empty(), &[], None);
+        assert!(!data.contains_key(INSTALL_FILE));
+    }
+
     fn credential_secret_data_with_no_user_env_carries_only_the_base_creds() {
-        let data = credential_secret_data("ghs_json", "sk-key", std::iter::empty(), None);
+        let data = credential_secret_data("ghs_json", "sk-key", std::iter::empty(), &[], None);
         assert_eq!(data.len(), 2);
         assert!(data.contains_key("github-token"));
         assert!(data.contains_key("llm-api-key"));
@@ -322,7 +361,8 @@ mod tests {
             base_url: "https://storage.example/proxy",
             bucket: "fkst-logs",
         };
-        let data = credential_secret_data("ghs_json", "sk-key", std::iter::empty(), Some(storage));
+        let data =
+            credential_secret_data("ghs_json", "sk-key", std::iter::empty(), &[], Some(storage));
         assert_eq!(data["storage-client-id"], "writer-client");
         assert_eq!(data["storage-client-secret"], "writer-secret");
         assert_eq!(data["storage-token-url"], "https://nyx.example/oauth/token");

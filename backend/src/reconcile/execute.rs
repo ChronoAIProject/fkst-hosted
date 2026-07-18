@@ -184,14 +184,14 @@ async fn spawn_session(reg: SessionRegistration, ctx: &ReconcileCtx) {
 
     // 2. Environment: a named environment must exist + be `ready` for the author;
     //    otherwise post feedback and skip (fail closed, no doomed pod).
-    let user_env = match resolve_environment(
+    let (user_env, install_commands) = match resolve_environment(
         ctx.env_store.as_ref(),
         reg.trigger_author_id,
         reg.def.environment.as_deref(),
     )
     .await
     {
-        EnvResolution::Proceed { user_env } => user_env,
+        EnvResolution::Proceed { user_env, install } => (user_env, install),
         EnvResolution::Blocked { comment } => {
             post_comment_best_effort(&ctx.github, &owner_repo, reg.trigger_issue, &comment).await;
             return;
@@ -227,6 +227,7 @@ async fn spawn_session(reg: SessionRegistration, ctx: &ReconcileCtx) {
         &github_token_json,
         ctx.config.llm_api_key.expose_secret(),
         user_env.iter().map(|(k, v)| (k.as_str(), v.as_str())),
+        &install_commands,
         storage,
     )
     .into_iter()
@@ -444,9 +445,13 @@ async fn post_comment_best_effort(
 
 /// The outcome of pre-flighting the issue's named environment.
 enum EnvResolution {
-    /// Launch with the merged variables/secret VALUES to inject (empty when the
-    /// issue declared no environment).
-    Proceed { user_env: BTreeMap<String, String> },
+    /// Launch with the merged variables/secret VALUES to inject and the ordered
+    /// install commands to run in the pod (both empty when the issue declared no
+    /// environment).
+    Proceed {
+        user_env: BTreeMap<String, String>,
+        install: Vec<String>,
+    },
     /// Do NOT launch; post `comment` on the trigger issue explaining why.
     Blocked { comment: String },
 }
@@ -464,6 +469,7 @@ async fn resolve_environment(
         None => {
             return EnvResolution::Proceed {
                 user_env: BTreeMap::new(),
+                install: Vec::new(),
             }
         }
         Some(name) => name,
@@ -483,7 +489,7 @@ async fn resolve_environment(
                         env_vars = user_env.len(),
                         "reconcile spawn: named environment resolved"
                     );
-                    EnvResolution::Proceed { user_env }
+                    EnvResolution::Proceed { user_env, install }
                 }
                 Ok(None) => EnvResolution::Blocked {
                     comment: env_not_ready_comment(name),
