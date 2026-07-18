@@ -108,7 +108,7 @@ local intake_handlers = intake_mod.build({
   workflow_id = security_logic.WORKFLOW_ID,
   repo = repo,
   materialization_tick_queue = security_logic.MATERIALIZATION_TICK_QUEUE,
-  consumes = { security_logic.REVIEW_REQUEST_QUEUE, security_logic.TICK_QUEUE },
+  consumes = { security_logic.TICK_QUEUE },
 })
 
 -- The kernel config, in the exact shape engine.make_departments consumes. The
@@ -126,15 +126,15 @@ local config = {
   materialize_next = {
     consumes = { security_logic.MATERIALIZATION_TICK_QUEUE },
     produces = {
-      "github-proxy.github_issue_create_request",
-      "github-proxy.github_issue_comment_request",
+      "github-issue-effect.github_issue_create_request",
+      "github-comment-effect.github_issue_comment_request",
     },
   },
   intake = {
-    consumes = { security_logic.REVIEW_REQUEST_QUEUE, security_logic.TICK_QUEUE },
+    consumes = { security_logic.TICK_QUEUE },
     produces = {
       security_logic.MATERIALIZATION_TICK_QUEUE,
-      "github-proxy.github_issue_comment_request",
+      "github-comment-effect.github_issue_comment_request",
     },
     handlers = function()
       return intake_handlers

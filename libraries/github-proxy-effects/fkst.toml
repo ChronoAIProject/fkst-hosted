@@ -1,0 +1,22 @@
+kind = "library"
+name = "github-proxy-effects"
+
+[code]
+root = "."
+
+[lib_deps]
+libraries = ["contract", "workflow", "forge", "devloop"]
+
+[dependency_constraints]
+allowed_lib_deps = ["contract", "workflow", "forge", "devloop"]
+
+[library]
+name = "github-proxy-effects"
+stable_id = "fkst.library.github-proxy-effects"
+version = "workspace"
+
+[exports]
+public = ["github-proxy-effects.*"]
+
+[visibility]
+allow = ["github-proxy", "github-comment-effect", "github-issue-effect"]

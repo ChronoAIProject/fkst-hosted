@@ -1,8 +1,8 @@
 -- workflow-writer: the OWN intake seat (select department handlers).
 --
--- This adapter claims work through its OWN label/queue path -- NEVER the dev intake
--- candidate seam (INTAKE_POLICY_SET). It consumes its own workflow_authoring_request
--- queue and its own cron tick, discovers open fkst-workflow-labelled request issues,
+-- This adapter claims work through its OWN label path -- NEVER the dev intake
+-- candidate seam (INTAKE_POLICY_SET). It consumes its own cron tick, discovers open
+-- fkst-workflow-labelled request issues via the github-issue discovery seam,
 -- stamps the authoring-flow blueprint marker on any that lack one, and drives the
 -- reconcile tick so the materialize_next department advances the single authoring step.
 --
@@ -48,7 +48,7 @@ function M.build(deps)
     if marker_text == nil then
       return
     end
-    raise("github-proxy.github_issue_comment_request", {
+    raise("github-comment-effect.github_issue_comment_request", {
       schema = "github-proxy.issue-comment.v1",
       repo = scope.repo or deps.repo,
       issue_number = scope.number,

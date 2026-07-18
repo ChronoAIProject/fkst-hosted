@@ -139,6 +139,7 @@ exact = true
 
 [visibility]
 allow = [
+  "github-proxy-effects",
   "archaudit",
   "github-devloop",
   "github-devloop-decompose",

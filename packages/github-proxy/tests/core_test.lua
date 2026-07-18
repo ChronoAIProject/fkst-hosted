@@ -1,4 +1,4 @@
-local core = require("core")
+local core = require("github-proxy-effects.core")
 local error_facts = require("contract.error_facts")
 local author_policy = require("testkit.github_author_policy")
 local t = fkst.test
@@ -245,7 +245,7 @@ return {
     }
 
     local comment_target = {}
-    require("core.comment").install(comment_target, helpers)
+    require("github-proxy-effects.core.comment").install(comment_target, helpers)
     t.eq(comment_target._comment_author_login({
       author = { login = "fkst-test-bot[bot]" },
     }), "fkst-test-bot")
@@ -258,7 +258,7 @@ return {
         return { stdout = "{}", stderr = "", exit_code = 0 }
       end,
     }
-    require("core.blocked_by").install(blocked_by_target, helpers)
+    require("github-proxy-effects.core.blocked_by").install(blocked_by_target, helpers)
     t.eq(blocked_by_target.validate_issue_blocked_by_payload({
       schema = "github-proxy.issue-blocked-by.v1",
       repo = "owner/repo",
@@ -269,7 +269,7 @@ return {
     }), true)
 
     local issue_create_target = {}
-    require("core.issue_create").install(issue_create_target, helpers)
+    require("github-proxy-effects.core.issue_create").install(issue_create_target, helpers)
     t.eq(issue_create_target.validate_issue_create_payload({
       schema = "github-proxy.issue-create.v1",
       repo = "owner/repo",

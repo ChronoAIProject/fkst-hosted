@@ -125,7 +125,7 @@ function M.build(deps)
       return nil, marker_err or "invalid-step-marker"
     end
     local scope = step_ctx.scope or {}
-    raise("github-proxy.github_issue_comment_request", {
+    raise("github-comment-effect.github_issue_comment_request", {
       schema = "github-proxy.issue-comment.v1",
       repo = scope.repo or repo,
       issue_number = scope.number,
@@ -166,7 +166,7 @@ function M.build(deps)
     if marker_text == nil then
       return nil
     end
-    raise("github-proxy.github_issue_comment_request", {
+    raise("github-comment-effect.github_issue_comment_request", {
       schema = "github-proxy.issue-comment.v1",
       repo = (scope or {}).repo or repo,
       issue_number = (scope or {}).number,

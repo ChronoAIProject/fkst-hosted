@@ -5,10 +5,10 @@ local saga = require("workflow.saga")
 local bindings = require("bindings")
 
 local spec = {
-  consumes = { "workflow_authoring_request", "workflow_writer_tick" },
+  consumes = { "workflow_writer_tick" },
   produces = {
     "workflow_writer_materialization_tick",
-    "github-proxy.github_issue_comment_request",
+    "github-comment-effect.github_issue_comment_request",
   },
   stall_window = "2m",
 }

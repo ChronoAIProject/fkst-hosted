@@ -9,7 +9,7 @@ local bindings = require("bindings")
 local spec = {
   consumes = { "workflow_writer_materialization_tick" },
   produces = {
-    "github-proxy.github_issue_comment_request",
+    "github-comment-effect.github_issue_comment_request",
   },
   stall_window = "10m",
 }

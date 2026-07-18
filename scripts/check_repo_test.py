@@ -787,7 +787,7 @@ class GhGitAdapterRatchetTest(unittest.TestCase):
             rel: (root / rel).read_text(encoding="utf-8")
             for rel in (
                 "packages/github-devloop-integration/departments/rollup_scan/main.lua",
-                "packages/github-proxy/core/blocked_by.lua",
+                "libraries/github-proxy-effects/core/blocked_by.lua",
                 "packages/github-devloop-ops/core/ensure_repo.lua",
                 "packages/fkst-substrate-ref-maintainer/core/substrate_ref.lua",
             )
@@ -796,7 +796,7 @@ class GhGitAdapterRatchetTest(unittest.TestCase):
 
         self.assertNotIn("git rollup", heads_by_file.get("packages/github-devloop-integration/departments/rollup_scan/main.lua", set()))
         self.assertNotIn("gh rollup", heads_by_file.get("packages/github-devloop-integration/departments/rollup_scan/main.lua", set()))
-        self.assertNotIn("gh blockedBy", heads_by_file.get("packages/github-proxy/core/blocked_by.lua", set()))
+        self.assertNotIn("gh blockedBy", heads_by_file.get("libraries/github-proxy-effects/core/blocked_by.lua", set()))
         self.assertNotIn("git integration", heads_by_file.get("packages/github-devloop-ops/core/ensure_repo.lua", set()))
         self.assertNotIn("gh substrate-ref", heads_by_file.get("packages/fkst-substrate-ref-maintainer/core/substrate_ref.lua", set()))
         self.assertNotIn("git substrate-ref", heads_by_file.get("packages/fkst-substrate-ref-maintainer/core/substrate_ref.lua", set()))

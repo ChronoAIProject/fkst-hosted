@@ -6,4 +6,4 @@ persistence_class = "stateless_adapter"
 root = "."
 
 [lib_deps]
-libraries = ["contract", "workflow", "testkit", "forge", "devloop"]
+libraries = ["contract", "workflow", "testkit", "forge", "devloop", "github-proxy-effects"]

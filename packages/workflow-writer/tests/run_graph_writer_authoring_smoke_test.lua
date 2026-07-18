@@ -3,7 +3,7 @@
 -- port degrades to empty), one materialization tick reaches the materializer and the
 -- graph goes quiescent with no downstream raise -- the honest "nothing to author" trace.
 --
--- The adapter's productive outbound edge (github-proxy.github_issue_comment_request ->
+-- The adapter's productive outbound edge (github-comment-effect.github_issue_comment_request ->
 -- github-proxy.github_comment) shares its edge_id with the already-covered github-devloop
 -- edge, so the cross-package integration ratchet is satisfied without re-asserting it;
 -- this smoke proves the writer's own tick -> materializer wiring drives cleanly.

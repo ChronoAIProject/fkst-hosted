@@ -1,5 +1,5 @@
 local t = fkst.test
-local core = require("core")
+local core = require("github-proxy-effects.core")
 local author_policy = require("testkit.github_author_policy")
 
 local raw_mock_command = t.mock_command

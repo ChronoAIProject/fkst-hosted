@@ -1,8 +1,8 @@
 local M = {}
-local github_env = require("core.env")
+local github_env = require("github-proxy-effects.core.env")
 local forge_strings = require("forge.strings")
 
-require("core.error_facts").install(M)
+require("github-proxy-effects.core.error_facts").install(M)
 
 
 -- A GitHub App's author login is "<slug>[bot]" via the REST API but bare
@@ -32,16 +32,16 @@ local shared_helpers = {
 -- forge_status = "shared-with-ratchet-migration-slicer"
 -- collapse_status = "multi-call-site-behavioral-reuse"
 
-require("core.issue_create").install(M, shared_helpers)
-require("core.github_graphql").install(M)
-require("core.blocked_by").install(M, shared_helpers)
-require("core.external_effect_sagas").install(M)
-require("core.rest_view").install(M)
-require("core.entity_view").install(M)
-require("core.gh_rate").install(M)
-require("core.comment").install(M, shared_helpers)
-require("core.marker_guard").install(M)
-require("core.claims").install(M)
+require("github-proxy-effects.core.issue_create").install(M, shared_helpers)
+require("github-proxy-effects.core.github_graphql").install(M)
+require("github-proxy-effects.core.blocked_by").install(M, shared_helpers)
+require("github-proxy-effects.core.external_effect_sagas").install(M)
+require("github-proxy-effects.core.rest_view").install(M)
+require("github-proxy-effects.core.entity_view").install(M)
+require("github-proxy-effects.core.gh_rate").install(M)
+require("github-proxy-effects.core.comment").install(M, shared_helpers)
+require("github-proxy-effects.core.marker_guard").install(M)
+require("github-proxy-effects.core.claims").install(M)
 
 local trusted_bot_login = nil
 

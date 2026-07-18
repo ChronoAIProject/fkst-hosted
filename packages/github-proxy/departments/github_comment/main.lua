@@ -1,4 +1,4 @@
-local core = require("core")
+local core = require("github-proxy-effects.core")
 local saga = require("workflow.saga")
 
 local spec = {

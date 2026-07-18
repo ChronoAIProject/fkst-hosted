@@ -22,7 +22,7 @@ packages/github-devloop-integration/core/release_notes.lua:M.gh_pr_create_body
 packages/github-devloop-workflow/core/materialize/lease.lua:github
 packages/github-devloop-workflow/core/materialize/actions.lua:M.find_created_issue_by_dedup
 packages/github-devloop-workflow/core/materialize/actions.lua:M.read_created_issue_by_number
-packages/github-proxy/core/gh_rate.lua:production_github
+libraries/github-proxy-effects/core/gh_rate.lua:production_github
 packages/archaudit/departments/audit/main.lua:ports_lib.install
 packages/integration-coverage-producer/departments/produce/main.lua:ports_lib.install
 packages/github-external-pr-intake/departments/external_pr_intake/main.lua:ports_seam.install

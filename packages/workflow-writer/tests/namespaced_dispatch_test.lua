@@ -39,7 +39,7 @@ local function intake_handlers()
     workflow_id = authoring.WORKFLOW_ID,
     repo = "owner/repo",
     materialization_tick_queue = authoring.MATERIALIZATION_TICK_QUEUE,
-    consumes = { authoring.AUTHORING_REQUEST_QUEUE, authoring.TICK_QUEUE },
+    consumes = { authoring.TICK_QUEUE },
   })
 end
 
@@ -56,9 +56,8 @@ end
 return {
   test_intake_accepts_namespaced_own_queues = function()
     local handlers = intake_handlers()
-    t.is_true(handlers.accept({ queue = "workflow-writer.workflow_authoring_request" }))
     t.is_true(handlers.accept({ queue = "workflow-writer.workflow_writer_tick" }))
-    t.is_true(handlers.accept({ queue = "workflow_authoring_request" }))
+    t.is_true(handlers.accept({ queue = "workflow_writer_tick" }))
   end,
 
   test_intake_rejects_dev_candidate_and_foreign = function()

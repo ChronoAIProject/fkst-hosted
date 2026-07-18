@@ -38,7 +38,7 @@ local function intake_handlers()
     workflow_id = security_logic.WORKFLOW_ID,
     repo = "owner/repo",
     materialization_tick_queue = security_logic.MATERIALIZATION_TICK_QUEUE,
-    consumes = { security_logic.REVIEW_REQUEST_QUEUE, security_logic.TICK_QUEUE },
+    consumes = { security_logic.TICK_QUEUE },
   })
 end
 
@@ -55,10 +55,9 @@ end
 return {
   test_intake_accepts_namespaced_own_queues = function()
     local handlers = intake_handlers()
-    t.is_true(handlers.accept({ queue = "workflow-security.security_review_request" }))
     t.is_true(handlers.accept({ queue = "workflow-security.workflow_security_tick" }))
     -- bare (non-namespaced) form must also route for local dispatch
-    t.is_true(handlers.accept({ queue = "security_review_request" }))
+    t.is_true(handlers.accept({ queue = "workflow_security_tick" }))
   end,
 
   test_intake_rejects_foreign_queue = function()

@@ -1,4 +1,4 @@
-local core = require("core")
+local core = require("github-proxy-effects.core")
 local author_policy = require("testkit.github_author_policy")
 local t = fkst.test
 

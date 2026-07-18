@@ -109,7 +109,7 @@ function M.build(deps)
     end
     local requests = security_logic.build_finding_requests(repo, findings, deps.label_available, deps.max_requests)
     for _, request in ipairs(requests) do
-      raise("github-proxy.github_issue_create_request", request)
+      raise("github-issue-effect.github_issue_create_request", request)
     end
     return #requests, nil
   end
@@ -120,7 +120,7 @@ function M.build(deps)
       return nil, marker_err or "invalid-step-marker"
     end
     local scope = step_ctx.scope or {}
-    raise("github-proxy.github_issue_comment_request", {
+    raise("github-comment-effect.github_issue_comment_request", {
       schema = "github-proxy.issue-comment.v1",
       repo = scope.repo or repo,
       issue_number = scope.number,
@@ -161,7 +161,7 @@ function M.build(deps)
     if marker_text == nil then
       return nil
     end
-    raise("github-proxy.github_issue_comment_request", {
+    raise("github-comment-effect.github_issue_comment_request", {
       schema = "github-proxy.issue-comment.v1",
       repo = (scope or {}).repo or repo,
       issue_number = (scope or {}).number,

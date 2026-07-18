@@ -147,7 +147,7 @@ local intake_handlers = intake_mod.build({
   workflow_id = authoring.WORKFLOW_ID,
   repo = repo,
   materialization_tick_queue = authoring.MATERIALIZATION_TICK_QUEUE,
-  consumes = { authoring.AUTHORING_REQUEST_QUEUE, authoring.TICK_QUEUE },
+  consumes = { authoring.TICK_QUEUE },
 })
 
 -- The kernel config, in the exact shape engine.make_departments consumes. The
@@ -165,14 +165,14 @@ local config = {
   materialize_next = {
     consumes = { authoring.MATERIALIZATION_TICK_QUEUE },
     produces = {
-      "github-proxy.github_issue_comment_request",
+      "github-comment-effect.github_issue_comment_request",
     },
   },
   intake = {
-    consumes = { authoring.AUTHORING_REQUEST_QUEUE, authoring.TICK_QUEUE },
+    consumes = { authoring.TICK_QUEUE },
     produces = {
       authoring.MATERIALIZATION_TICK_QUEUE,
-      "github-proxy.github_issue_comment_request",
+      "github-comment-effect.github_issue_comment_request",
     },
     handlers = function()
       return intake_handlers

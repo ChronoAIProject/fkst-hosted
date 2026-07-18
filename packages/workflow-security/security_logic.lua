@@ -212,7 +212,7 @@ local function require_bounded(ok, field)
   end
 end
 
--- Build one github-proxy.github_issue_create_request for a finding. The label is
+-- Build one github-issue-effect.github_issue_create_request for a finding. The label is
 -- attached only when it exists in the repo (label_available), mirroring the
 -- github-proxy issue-create contract; the dedup key makes filing idempotent.
 function M.build_finding_issue_request(repo, finding, label_available)

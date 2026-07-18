@@ -1,0 +1,9 @@
+kind = "package"
+name = "github-issue-effect"
+persistence_class = "stateless_adapter"
+
+[code]
+root = "."
+
+[lib_deps]
+libraries = ["workflow", "github-proxy-effects"]

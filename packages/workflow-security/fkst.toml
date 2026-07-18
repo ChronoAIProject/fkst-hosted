@@ -14,7 +14,10 @@ root = "."
 libraries = ["contract", "workflow", "testkit", "forge", "devloop", "github-issue"]
 
 [event_deps]
-packages = ["github-proxy"]
+packages = ["github-comment-effect", "github-issue-effect"]
+
+[conformance]
+function = "core.saga_conformance_errors"
 
 # Host-readable declaration (issue #NNN): the work label this adapter polls,
 # mirrored from security_logic.LABEL so fkst-hosted can auto-discover it. The
