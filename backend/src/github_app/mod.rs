@@ -161,15 +161,27 @@ pub enum InstallationProbe {
     Installed,
     /// No installation covers the repo; the user must install the App.
     NotInstalled { install_url: Option<String> },
-    /// An installation exists but the requested permission is still pending
-    /// (an org owner must approve the new `administration` permission per #110).
+    /// An installation exists but a requested permission is not granted (the
+    /// mint 422s) — the owner must re-approve the install for the added
+    /// Repository permission.
     AwaitingApproval,
 }
 
-/// Default session permissions: admin-equivalent access to the target repo for
-/// the whole session (issue #110). `administration: write` is GitHub's closest
-/// analogue to a repo-admin role (branch protection / rulesets, collaborator &
-/// team management, repo settings, visibility, rename/transfer, deploy keys).
+/// Default token permissions for the general reconcile/read/comment mints
+/// (`token_for_repo(repo, None)`): write to `contents` (issue-template PR files,
+/// reading package refs), `issues` (trigger/work-issue comments, labels, seed
+/// issues), and `pull_requests` (list/merge the App bot's PRs).
+///
+/// It deliberately withholds `administration`. The pre-Model-B design (issue
+/// #110) requested `administration: write` to give sessions an admin-equivalent
+/// role, but Model B (#359) moved the session pod to least-privilege
+/// [`session_permissions`], auto-merge and issue-templates got their own
+/// no-admin presets, and repo creation runs on the *user's* token — so no
+/// App-token operation performs a repo-administration action. Leaving
+/// `administration` in the default forced every unscoped mint to require an
+/// admin grant the App is documented NOT to hold (deployment guide §14.3: "no
+/// Administration"), 422-ing the whole reconcile on a correctly least-privilege
+/// install.
 ///
 /// The mint can only request a subset of what the GitHub App was granted; the
 /// App must declare these as Read & write Repository permissions or the mint
@@ -180,7 +192,7 @@ pub fn default_permissions() -> TokenPermissions {
         contents: Some("write".to_string()),
         pull_requests: Some("write".to_string()),
         issues: Some("write".to_string()),
-        administration: Some("write".to_string()),
+        administration: None,
         metadata: None,
     }
 }
@@ -188,11 +200,11 @@ pub fn default_permissions() -> TokenPermissions {
 /// Least-privilege permissions for the SESSION POD's installation token
 /// (Model B, issue #359). The pod needs to push commits (`contents`), manage the
 /// driving issue and its labels (`issues`), and open pull requests
-/// (`pull_requests`) — but it must NOT administer the repo. This deliberately
-/// withholds the `administration: write` that [`default_permissions`] requests,
-/// scoping the longer-lived per-session token to the minimum the engine needs
-/// (least privilege). `metadata` is omitted because installation tokens always
-/// include `metadata: read` implicitly.
+/// (`pull_requests`) — but it must NOT administer the repo, so it withholds
+/// `administration`. (Post-Model-B this matches [`default_permissions`]; the two
+/// are kept distinct because the session token is the longer-lived per-pod one
+/// and its scope is asserted independently.) `metadata` is omitted because
+/// installation tokens always include `metadata: read` implicitly.
 pub fn session_permissions() -> TokenPermissions {
     TokenPermissions {
         contents: Some("write".to_string()),
@@ -712,20 +724,20 @@ impl GithubAppTokens {
             }
             Err(GithubAppError::TokenRequestRejected(detail)) => {
                 // A 422 here almost always means the GitHub App was not granted
-                // a permission we requested (e.g. `administration`), so the mint
-                // can only subset what the App holds. Surface it loudly at the
-                // mint site so it is diagnosable on EVERY caller path (including
-                // the background token refresh, which otherwise only logs the
-                // permission-less Display string). The detail is GitHub's 422
-                // message describing the rejected permission, never the token
-                // (the token only appears in a 201 success body).
+                // a permission we requested, so the mint can only subset what the
+                // App holds. Surface it loudly at the mint site so it is
+                // diagnosable on EVERY caller path (including the background token
+                // refresh, which otherwise only logs the permission-less Display
+                // string). The detail is GitHub's 422 message describing the
+                // rejected permission, never the token (the token only appears in
+                // a 201 success body).
                 tracing::error!(
                     owner_repo = %owner_repo,
                     detail = %detail,
                     "github installation-token mint rejected (422); verify the \
                      fkst-hosted GitHub App declares the requested Repository \
-                     permissions (administration, pull_requests, contents, \
-                     issues) at Read & write and the install was re-approved"
+                     permissions (contents, issues, pull_requests) at Read & \
+                     write and the install was re-approved"
                 );
                 return Err(GithubAppError::TokenRequestRejected(detail));
             }
@@ -1313,23 +1325,28 @@ mod tests {
     }
 
     #[test]
-    fn default_permissions_grants_session_admin_set() {
-        // Issue #110: sessions hold admin-equivalent access for the whole
-        // session. All four are `write`; `metadata` is implicit on installation
-        // tokens, so it is deliberately left unset.
+    fn default_permissions_is_least_privilege_without_administration() {
+        // Post-Model-B: the default reconcile/read/comment mint writes
+        // contents/issues/pull_requests but MUST NOT request `administration`
+        // — no App-token operation administers the repo, and the App is
+        // documented not to hold Administration (deployment guide §14.3), so a
+        // default that carried it would 422 the whole reconcile. `metadata` is
+        // implicit on installation tokens, so it is deliberately left unset.
         let perms = default_permissions();
         assert_eq!(perms.contents.as_deref(), Some("write"));
         assert_eq!(perms.pull_requests.as_deref(), Some("write"));
         assert_eq!(perms.issues.as_deref(), Some("write"));
-        assert_eq!(perms.administration.as_deref(), Some("write"));
+        assert_eq!(
+            perms.administration, None,
+            "default token must not request administration"
+        );
         assert_eq!(perms.metadata, None);
     }
 
     #[test]
     fn session_permissions_is_least_privilege_without_administration() {
         // Issue #359 (Model B): the session pod's token grants write to
-        // contents/issues/pull_requests but MUST NOT carry `administration`
-        // (the one permission the admin-equivalent `default_permissions` adds).
+        // contents/issues/pull_requests but MUST NOT carry `administration`.
         let perms = session_permissions();
         assert_eq!(perms.contents.as_deref(), Some("write"));
         assert_eq!(perms.issues.as_deref(), Some("write"));
@@ -1339,11 +1356,9 @@ mod tests {
             "session token must not request administration"
         );
         assert_eq!(perms.metadata, None);
-        // Concretely contrast the admin-equivalent default.
-        assert_eq!(
-            default_permissions().administration.as_deref(),
-            Some("write")
-        );
+        // No App-token preset requests administration any more (the App is
+        // documented not to hold it).
+        assert_eq!(default_permissions().administration, None);
     }
 
     // ---- stateless resolution (#141) -----------------------------------------
