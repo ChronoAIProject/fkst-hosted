@@ -185,22 +185,37 @@ RUN test -x /cli-dist/nyxid \
 # ---- server build stage: dep-cache warm-up, then build only the control-plane ----
 FROM rust:${RUST_VERSION}-bookworm AS server-builder
 WORKDIR /app
-# 1) cache the dependency graph first (the single crate manifest + lockfile +
-#    stub sources). The stubs compile, so this warm build must succeed. The
-#    backend is one flat crate rooted at `backend/`, so its sources live in
-#    `src/` (no nested member directory).
+# A shared cargo registry + target cache mount (ids cp-cargo-*) persists the
+# compiled dependency graph across builds, so an edit to `backend/src`
+# recompiles only the control-plane crate — not all ~357 dependencies. The
+# cache mount is ephemeral (never committed to the image), so the finished
+# binary is copied OUT to a real layer dir (/out) for the runtime `COPY --from`
+# below — mirroring how engine-builder copies to /engine-dist. Both RUNs share
+# the same mount ids so step 1's dependency compile is reused by step 2.
+#
+# 1) warm the dependency graph (the single crate manifest + lockfile + stub
+#    sources). The stubs compile, so this warm build must succeed. The backend
+#    is one flat crate rooted at `backend/`, so its sources live in `src/`.
 COPY backend/Cargo.toml backend/Cargo.lock ./
-RUN mkdir -p src \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cp-cargo-registry \
+    --mount=type=cache,target=/app/target,id=cp-cargo-target \
+    mkdir -p src \
     && echo 'fn main() {}' > src/main.rs \
     && echo '' > src/lib.rs \
     && cargo build --release --locked
-# 2) copy the real sources and build the control-plane binary.
+# 2) copy the real sources, build the control-plane binary, then copy it out of
+#    the cache-mounted target into /out (a real layer dir the runtime COPY can
+#    read).
 # touch: the copied sources keep their (older) context mtimes, so without it
 # cargo's mtime-based freshness check would keep the stub-built binaries.
 COPY backend/ ./
-RUN touch src/main.rs src/lib.rs \
-    && cargo build --release --locked
-RUN test -x /app/target/release/fkst-control-plane \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cp-cargo-registry \
+    --mount=type=cache,target=/app/target,id=cp-cargo-target \
+    touch src/main.rs src/lib.rs \
+    && cargo build --release --locked \
+    && mkdir -p /out \
+    && cp target/release/fkst-control-plane /out/fkst-control-plane
+RUN test -x /out/fkst-control-plane \
     || (echo "ERROR: fkst-control-plane binary not produced by the server build" && exit 1)
 
 # ---- worker runtime image (engine-laden) ----
@@ -232,7 +247,7 @@ RUN groupadd -g 10001 fkst && useradd -m -u 10001 -g 10001 -s /usr/sbin/nologin 
 COPY --from=engine-builder /engine-dist/bin/ /usr/local/bin/
 COPY --from=engine-builder /engine-dist/ENGINE_SHA /etc/fkst-engine-sha
 COPY --from=engine-builder /engine-dist/ENGINE_VERSION /etc/fkst-engine-version
-COPY --from=server-builder /app/target/release/fkst-control-plane /usr/local/bin/fkst-control-plane
+COPY --from=server-builder /out/fkst-control-plane /usr/local/bin/fkst-control-plane
 # (nyxid CLI removed: NyxID is gone in Model B — the session substrate uses only
 # git/gh/codex; the cli-builder stage is now unreferenced and no longer built.)
 # codex CLI (issue #112): the engine requires it on PATH (fkst-substrate does
