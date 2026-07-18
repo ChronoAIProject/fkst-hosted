@@ -135,7 +135,11 @@ impl OsbBackend {
         let timeout_ms = u64::try_from(self.config.validate_deadline_secs)
             .unwrap_or(0)
             .saturating_mul(1000);
-        let cmd = execd.run_command(&command, Some(timeout_ms), false).await?;
+        // Launch in the BACKGROUND: run_command keeps only the init-frame id and
+        // discards the SSE body, so the verdict is read via the poll-by-id
+        // status/logs below — and execd rejects those on a foreground command
+        // ("command <id> is not running in background").
+        let cmd = execd.run_command(&command, Some(timeout_ms), true).await?;
 
         // 5. Poll the command to completion, bounded by a hard wall-clock timeout so a
         //    holder whose command never finishes still aborts → conservative timed-out
