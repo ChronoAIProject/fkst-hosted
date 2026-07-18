@@ -3,11 +3,15 @@ local contract_strings = require("contract.strings")
 
 local S = {}
 
+-- Strip a GitHub App actor's affixes: the "app/" prefix (gh `issue view --json
+-- author` for an App-authored issue) and the "[bot]" suffix (REST), so all
+-- three actor forms (incl. bare GraphQL "<slug>") canonicalize alike. A real
+-- username can never contain "/", so the "app/" prefix is unambiguous.
 function S.strip_bot_login_suffix(login)
   if login == nil then
     return nil
   end
-  return (tostring(login):gsub("%[bot%]$", ""))
+  return (tostring(login):gsub("^app/", ""):gsub("%[bot%]$", ""))
 end
 
 function S.split_repo(repo)

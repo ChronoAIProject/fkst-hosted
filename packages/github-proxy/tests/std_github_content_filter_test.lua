@@ -28,6 +28,21 @@ return {
     t.is_nil(cf.canon_login(""))
   end,
 
+  -- Regression: gh's `issue view --json author` returns "app/<slug>" for an
+  -- App-authored ISSUE, so the bot's own materialized workflow-step issues were
+  -- treated as untrusted (is_authorized false) and github-devloop-intake
+  -- declined them ("no actionable code request"), stalling the workflow. All
+  -- three App-actor forms must canonicalize to the same bare slug.
+  test_canon_login_strips_app_prefix_for_app_authored_issues = function()
+    t.eq(cf.canon_login("app/chronoai-fkst-test"), "chronoai-fkst-test")
+    t.eq(cf.canon_login("App/Fkst-Bot[bot]"), "fkst-bot")
+    -- All three surfaces agree, so is_authorized accepts the bot on any of them.
+    local wl_bot = wl("chronoai-fkst-test[bot]")
+    t.is_true(cf.is_authorized("app/chronoai-fkst-test", wl_bot))
+    t.is_true(cf.is_authorized("chronoai-fkst-test", wl_bot))
+    t.is_true(cf.is_authorized("chronoai-fkst-test[bot]", wl_bot))
+  end,
+
   test_filter_cell_idempotent_on_existing_marker = function()
     local body = cf.redaction_marker("body", "mallory", 20)
     local filtered, rec = cf.filter_cell(body, "bot", "body", wl("bot"))

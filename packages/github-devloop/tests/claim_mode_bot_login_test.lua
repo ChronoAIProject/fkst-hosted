@@ -97,6 +97,13 @@ return {
     t.eq(devloop_base.strip_bot_login_suffix(nil), nil)
     -- Only a trailing [bot] is stripped.
     t.eq(devloop_base.strip_bot_login_suffix("user[bot]name"), "user[bot]name")
+    -- The "app/<slug>" App-actor form (gh `issue view --json author`) canon-
+    -- icalizes to the same bare slug, so an App-authored issue/comment is
+    -- recognized as the bot in author-vs-bot comparisons.
+    t.eq(devloop_base.strip_bot_login_suffix("app/chronoai-bot"), "chronoai-bot")
+    t.eq(devloop_base.strip_bot_login_suffix("app/chronoai-bot[bot]"), "chronoai-bot")
+    -- "app" without the slash is an ordinary username, left intact.
+    t.eq(devloop_base.strip_bot_login_suffix("appendix"), "appendix")
   end,
 
   test_configure_trusted_bot_login_normalizes_bracket_bot_suffix = function()

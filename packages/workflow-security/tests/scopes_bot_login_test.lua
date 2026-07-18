@@ -37,6 +37,16 @@ return {
     t.is_true(text:find("fkst:blueprint:v1", 1, true) ~= nil)
   end,
 
+  -- App-actor form: gh returns "app/<slug>" for an App author on some surfaces
+  -- (e.g. `issue view --json author`); it must still match the pinned bot.
+  test_trusted_text_matches_when_login_has_app_prefix = function()
+    local text = scopes.trusted_text(
+      issue_with_bot_comment("app/chronoai-fkst-test"),
+      "chronoai-fkst-test[bot]"
+    )
+    t.is_true(text:find("fkst:blueprint:v1", 1, true) ~= nil)
+  end,
+
   -- A non-bot author is still excluded (trust boundary preserved).
   test_trusted_text_excludes_non_bot_author = function()
     local text = scopes.trusted_text(

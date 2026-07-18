@@ -143,17 +143,19 @@ end
 
 local is_path_safe_key = strings.is_path_safe_key
 
--- A GitHub App's author login is "<slug>[bot]" via the REST API but bare
--- "<slug>" via GraphQL. Strip the suffix so callers comparing against a
--- configured bot login match regardless of which API populated the field.
--- Nil-safe (nil in → nil out) and a no-op for ordinary user logins (which never
--- end in "[bot]"), so claim_owner() and author comparisons keep their existing
--- nil semantics when the bot login is unconfigured.
+-- A GitHub App's author login has three forms: "<slug>[bot]" (REST), bare
+-- "<slug>" (GraphQL), and "app/<slug>" (gh's `issue view --json author` for an
+-- App-authored ISSUE). Strip the "app/" prefix and the "[bot]" suffix so
+-- callers comparing against a configured bot login match regardless of which
+-- surface populated the field. Nil-safe (nil in → nil out) and a no-op for
+-- ordinary user logins (which never carry either affix — a real username can
+-- never contain "/"), so claim_owner() and author comparisons keep their
+-- existing nil semantics when the bot login is unconfigured.
 function C.strip_bot_login_suffix(login)
   if login == nil then
     return nil
   end
-  return (strings.trim(login):lower():gsub("%[bot%]$", ""))
+  return (strings.trim(login):lower():gsub("^app/", ""):gsub("%[bot%]$", ""))
 end
 
 function C.configure_trusted_bot_login(login)

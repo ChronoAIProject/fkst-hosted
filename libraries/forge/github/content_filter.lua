@@ -371,7 +371,13 @@ function M.canon_login(login)
   if login == nil then
     return nil
   end
-  local value = strings.trim(login):lower():gsub("%[bot%]$", "")
+  -- A GitHub App actor's login has three forms across GitHub's surfaces: bare
+  -- "<slug>" (GraphQL comment authors), "<slug>[bot]" (REST) and "app/<slug>"
+  -- (gh's `issue view --json author` for an App-authored ISSUE). Strip the
+  -- "app/" prefix and the "[bot]" suffix so all three canonicalize to the same
+  -- "<slug>" the whitelist stores. A real username can never contain "/", so
+  -- the "app/" prefix is unambiguously the App-actor form.
+  local value = strings.trim(login):lower():gsub("^app/", ""):gsub("%[bot%]$", "")
   value = strings.trim(value)
   if value == "" then
     return nil

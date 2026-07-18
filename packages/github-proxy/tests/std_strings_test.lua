@@ -15,6 +15,11 @@ return {
     t.eq(forge_strings.strip_bot_login_suffix("fkst-test-bot[bot]"), "fkst-test-bot")
     t.eq(forge_strings.strip_bot_login_suffix("fkst-test-bot"), "fkst-test-bot")
     t.eq(forge_strings.strip_bot_login_suffix("user[bot]name"), "user[bot]name")
+    -- The "app/<slug>" App-actor form (gh `issue view --json author`).
+    t.eq(forge_strings.strip_bot_login_suffix("app/fkst-test-bot"), "fkst-test-bot")
+    t.eq(forge_strings.strip_bot_login_suffix("app/fkst-test-bot[bot]"), "fkst-test-bot")
+    -- "app" without the slash is an ordinary username, left intact.
+    t.eq(forge_strings.strip_bot_login_suffix("appendix"), "appendix")
     t.is_nil(forge_strings.strip_bot_login_suffix(nil))
   end,
 

@@ -37,16 +37,18 @@ end
 
 M.open_state = open_state
 
--- A GitHub App's author login is "<slug>[bot]" via the REST API but bare "<slug>"
--- via GraphQL (which `gh issue view --json comments` uses to populate
--- comment.author.login). Normalize both sides -- lowercase and strip a trailing
--- "[bot]" -- so a comment authored by the bot matches the configured
--- FKST_GITHUB_BOT_LOGIN regardless of which API populated the field. No-op for
--- ordinary user logins (which never end in "[bot]"). Mirrors the shared
--- forge.strings / devloop.base normalizer, inlined here to keep this a leaf
--- library with no lib_deps.
+-- A GitHub App's author login has three forms across GitHub's surfaces: bare
+-- "<slug>" via GraphQL (which `gh issue view --json comments` uses to populate
+-- comment.author.login), "<slug>[bot]" via the REST API, and "app/<slug>" via
+-- gh's `issue view --json author` for an App-authored ISSUE. Normalize both
+-- sides -- lowercase, strip a leading "app/" and a trailing "[bot]" -- so bot
+-- authorship matches the configured FKST_GITHUB_BOT_LOGIN regardless of which
+-- surface populated the field. No-op for ordinary user logins (which never
+-- carry either affix; a real username can never contain "/"). Mirrors the
+-- shared forge.strings / devloop.base normalizer, inlined here to keep this a
+-- leaf library with no lib_deps.
 local function normalize_login(login)
-  return (tostring(login or ""):lower():gsub("%[bot%]$", ""))
+  return (tostring(login or ""):lower():gsub("^app/", ""):gsub("%[bot%]$", ""))
 end
 
 M.normalize_login = normalize_login
