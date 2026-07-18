@@ -166,7 +166,10 @@ impl OsbBackend {
             "FKST_RUNTIME_ROOT".to_string(),
             format!("{OSB_SESSION_ROOT}/runtime"),
         );
-        env.insert("CODEX_HOME".to_string(), format!("{OSB_SESSION_ROOT}/codex"));
+        env.insert(
+            "CODEX_HOME".to_string(),
+            format!("{OSB_SESSION_ROOT}/codex"),
+        );
         env.insert(ENV_POD_NAME.to_string(), spec.session_id.clone());
         env.insert(ENV_POD_UID.to_string(), spec.session_id.clone());
         let token = derive_execd_token(&self.config.execd_seed, &spec.session_id);
