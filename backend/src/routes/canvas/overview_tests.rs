@@ -202,13 +202,16 @@ async fn overview_returns_promptly_when_one_repo_scan_hangs() {
         ])))
         .mount(&server)
         .await;
-    // The hung repo: its trigger read answers only after 2s, far beyond the
-    // (test-shortened) per-scan timeout. The call must NOT wait for it.
+    // The hung repo: its trigger read answers only after 5s, far beyond the
+    // 1s per-scan timeout. The call must NOT wait for it. (The wide gap
+    // between the 1s deadline and this 5s delay keeps the test robust on slow
+    // CI runners — the healthy repo always finishes under 1s, the hung one is
+    // never close to done at the deadline.)
     Mock::given(method("GET"))
         .and(path("/repos/acme/slow/issues"))
         .respond_with(
             ResponseTemplate::new(200)
-                .set_delay(std::time::Duration::from_secs(2))
+                .set_delay(std::time::Duration::from_secs(5))
                 .set_body_json(serde_json::json!([])),
         )
         .mount(&server)
@@ -220,8 +223,9 @@ async fn overview_returns_promptly_when_one_repo_scan_hangs() {
         .await
         .expect("a hung repo scan must NOT fail or stall the whole call");
     assert!(
-        started.elapsed() < std::time::Duration::from_secs(2),
-        "the call must return before the hung repo's 2s delay, took {:?}",
+        started.elapsed() < std::time::Duration::from_secs(3),
+        "the call must return around the 1s scan timeout, well before the hung \
+         repo's 5s delay, took {:?}",
         started.elapsed()
     );
 

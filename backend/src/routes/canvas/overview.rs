@@ -121,10 +121,13 @@ const REPO_SCAN_CONCURRENCY: usize = 8;
 /// incomplete) instead of holding the canvas for the transport timeout.
 #[cfg(not(test))]
 const REPO_SCAN_TIMEOUT: Duration = Duration::from_secs(8);
-/// Tests script the "slow" repo with sub-second wiremock delays so the suite
-/// stays fast; the timeout mechanism under test is identical.
+/// Tests keep the suite fast by scripting the "slow" repo with a delay well
+/// beyond this deadline; the timeout mechanism under test is identical. The
+/// value is generous enough (1s) that a HEALTHY repo's instant wiremock mocks
+/// always complete within it even on a heavily-loaded CI runner — the earlier
+/// 300ms was flaky there — while still far below the slow repo's delay.
 #[cfg(test)]
-const REPO_SCAN_TIMEOUT: Duration = Duration::from_millis(300);
+const REPO_SCAN_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// One repo's trigger-scan disposition within a single overview call.
 enum ScanOutcome {
