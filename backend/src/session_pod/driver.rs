@@ -49,10 +49,9 @@ const GITCRED_SUBDIR: &str = "gitcred";
 const WORKFLOW_CATALOG_ROOT_ENV: &str = "FKST_WORKFLOW_CATALOG_ROOT";
 const WORKFLOW_CATALOG_SUBDIR: &str = ".fkst/packages";
 /// Writable per-session tool dir, put on the FRONT of PATH and exposed as
-/// [`ENV_BIN_ENV`] so a named-environment install step can drop a tool binary the
-/// workflow then calls by bare name.
+/// `FKST_ENV_BIN` (see [`crate::install::TOOL_DIR_ENV`]) so a named-environment
+/// install step can drop a tool binary the workflow then calls by bare name.
 const ENV_BIN_SUBDIR: &str = "env-bin";
-const ENV_BIN_ENV: &str = "FKST_ENV_BIN";
 const SHIM_SUBDIR: &str = "binshim";
 /// Env var the credential helper + gh shim read the mounted token path from.
 const TOKEN_FILE_ENV: &str = "FKST_GITHUB_TOKEN_FILE";
@@ -470,7 +469,11 @@ async fn run_env_install_commands(
     let env_bin = runtime_root.join(ENV_BIN_SUBDIR);
     create_dir_idempotent(&env_bin)?;
     prepend_path(child_env, &env_bin);
-    upsert_env(child_env, ENV_BIN_ENV, &env_bin.to_string_lossy());
+    upsert_env(
+        child_env,
+        crate::install::TOOL_DIR_ENV,
+        &env_bin.to_string_lossy(),
+    );
 
     tracing::info!(
         count = commands.len(),
@@ -482,7 +485,9 @@ async fn run_env_install_commands(
             .arg("-c")
             .arg(command)
             .envs(child_env.iter().map(|(k, v)| (k.clone(), v.clone())))
-            .current_dir(runtime_root)
+            // Run in the on-PATH env-bin so a relative install (`-o ffmpeg`) also
+            // lands where the workflow can call it, matching $FKST_ENV_BIN.
+            .current_dir(&env_bin)
             .output()
             .await
             .map_err(|error| format!("spawn install command #{idx}: {error}"))?;

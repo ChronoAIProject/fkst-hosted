@@ -36,6 +36,13 @@ pub const VALIDATE_SPEC_PATH: &str = "/var/run/fkst/validate/validate-spec.json"
 /// dispatch can never drift on the literal.
 pub const VALIDATE_ENV_SUBCOMMAND: &str = "validate-env";
 
+/// Env var exposing the writable "drop a tool binary here" directory to every
+/// install command, so a profile can `cp <tool> "$FKST_ENV_BIN/"` and have it work
+/// identically at PUT-time validation (points at the shared scratch workdir) and at
+/// session run time (points at the on-PATH env-bin the run-substrate driver adds).
+/// One source of truth shared by the validator runner and the session driver.
+pub const TOOL_DIR_ENV: &str = "FKST_ENV_BIN";
+
 /// In-pod cap on how many trailing stderr bytes a failed command surfaces in the
 /// verdict frame. Mirrors `FKST_ENV_INSTALL_STDERR_TAIL_BYTES`'s default so the
 /// pod bounds the frame the same way the control-plane config documents.
@@ -162,6 +169,9 @@ pub async fn run_ordered(
             // Kill the child if the timeout drops its wait future, so a slow
             // command cannot outlive the sequence's deadline.
             .kill_on_drop(true);
+        // Expose the shared scratch dir as the tool-drop dir so an install step that
+        // targets $FKST_ENV_BIN validates the same way it runs in a session.
+        cmd.env(TOOL_DIR_ENV, workdir.path());
         for (key, value) in variables {
             cmd.env(key, value);
         }
