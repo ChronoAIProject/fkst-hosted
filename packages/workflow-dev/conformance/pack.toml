@@ -1,0 +1,27 @@
+# Declarative conformance pack OWNED BY the workflow-dev package.
+# Interpreted by the engine's generic DeclarativeRulePack (no arbitrary code).
+# Scope is fenced to this package's own tree; it cannot read host or sibling files.
+#
+# workflow-dev is a thin composed profile package: it must carry no engine or
+# business logic. These rules keep it thin.
+schema = 1
+runner_protocol = "fkst-declarative-rulepack@1"
+owner_package = "workflow-dev"
+
+[[rules]]
+id = "source.max-lines"
+severity = "error"
+kind = "max_line_count"
+include = ["**/*.lua"]
+exclude = ["tests/**", "**/*_test.lua"]
+max = 1000
+message = "workflow-dev source files must stay under the 1000-line limit"
+
+[[rules]]
+id = "profile.no-forge-or-gh-egress"
+severity = "error"
+kind = "text_forbid_regex"
+include = ["**/*.lua"]
+exclude = ["tests/**"]
+pattern = "forge\\.git|forge\\.github|\\bgh api\\b|git commit|git push"
+message = "workflow-dev is a profile package; gh/git/forge egress belongs in the composed devloop packages, not here"

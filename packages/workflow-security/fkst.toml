@@ -1,0 +1,24 @@
+kind = "package.composed"
+name = "workflow-security"
+persistence_class = "saga"
+
+[code]
+root = "."
+
+# workflow-security is a genuinely multi-step security-review adapter on the shared
+# workflow.engine.* kernel. It claims its OWN work (the fkst-security label + its own
+# cron tick / security_review_request queue) and NEVER consumes the dev intake
+# candidate seam (github-devloop-intake), so the single-intake INTAKE_POLICY_SET
+# invariant is preserved. Findings are filed as github-proxy issues.
+[lib_deps]
+libraries = ["contract", "workflow", "testkit", "forge", "devloop", "github-issue"]
+
+[event_deps]
+packages = ["github-proxy"]
+
+# Host-readable declaration (issue #NNN): the work label this adapter polls,
+# mirrored from security_logic.LABEL so fkst-hosted can auto-discover it. The
+# engine ignores this section (UnitManifestToml has no deny_unknown_fields);
+# github-issue.conformance pins it to the used label.
+[github]
+work_labels = ["fkst-security"]

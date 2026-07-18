@@ -1,0 +1,22 @@
+kind = "library"
+name = "github-issue"
+
+[code]
+root = "."
+
+[lib_deps]
+libraries = []
+
+[dependency_constraints]
+allowed_lib_deps = []
+
+[library]
+name = "github-issue"
+stable_id = "fkst.library.github-issue"
+version = "workspace"
+
+[exports]
+public = ["github-issue.*"]
+
+[visibility]
+public = false

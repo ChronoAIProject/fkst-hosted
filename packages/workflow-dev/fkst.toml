@@ -1,0 +1,41 @@
+kind = "package.composed"
+name = "workflow-dev"
+persistence_class = "saga"
+
+[code]
+root = "."
+
+[lib_deps]
+libraries = ["contract", "workflow"]
+
+# workflow-dev is the DEVELOPMENT adapter topology: it composes the existing
+# github-devloop package family and selects the workflow-engine intake policy
+# (github-devloop-workflow) rather than the default topology. It carries no
+# engine/business logic of its own — the dev engine lives in
+# github-devloop-workflow; the shared kernel lives in workflow.engine.*.
+[event_deps]
+packages = [
+  "github-proxy",
+  "consensus",
+  "github-devloop-intake",
+  "github-devloop-workflow",
+  "github-devloop-decompose",
+  "github-devloop",
+  "github-devloop-pr",
+  "github-devloop-ops",
+  "github-devloop-integration",
+]
+
+# Package-owned conformance: these rules travel WITH this package. The engine
+# runs them whenever workflow-dev is an active package root.
+[conformance]
+pack = "conformance/pack.toml"
+
+# Host-readable declaration: the work label this dev topology is intended to be
+# driven by (fkst-dev), so fkst-hosted can auto-discover it for the session
+# wake-gate. NOTE: today workflow-dev still composes github-devloop-workflow's
+# poll-all intake; making the runtime intake genuinely fkst-dev-scoped (via the
+# shared github-issue discovery + a candidate builder) is a deferred rearchitecture
+# that needs codex/integration validation. The declaration is engine-ignored.
+[github]
+work_labels = ["fkst-dev"]

@@ -1,0 +1,50 @@
+{
+  "schema": "fkst.workflow.v1",
+  "id": "security-review",
+  "version": "v1",
+  "summary": "Multi-step security review: profile the stack, match dependencies against GitHub advisories, audit code and tests, then file findings as issues.",
+  "applies_when": "A repository requests a security review via the fkst-security label or the security_review_request queue.",
+  "selector": {
+    "labels_any": [
+      "fkst-security"
+    ],
+    "title_contains_any": [
+      "security review",
+      "security-review"
+    ]
+  },
+  "steps": [
+    {
+      "id": "profile-stack",
+      "title": "Profile the technology stack and dependency manifests",
+      "content": {
+        "kind": "generated",
+        "generator": "You are a security reviewer profiling a repository's technology stack. Read the checked-out repository yourself (package manifests, lockfiles, Dockerfiles, CI config). Do NOT edit files, run git, or open the network. Produce a strict JSON array of dependency records: {\"ecosystem\":\"npm|pip|cargo|go|maven|rubygems\",\"name\":\"<package>\",\"version\":\"<pinned-or-range>\",\"manifest\":\"<path>\"}. Return the JSON array and nothing else."
+      }
+    },
+    {
+      "id": "match-dependencies",
+      "title": "Match dependencies against GitHub Security Advisories",
+      "content": {
+        "kind": "generated",
+        "generator": "You are a security reviewer matching declared dependencies against known advisories. Fetch the predecessor profile via its source_ref first. For each dependency query GitHub Security Advisories with NO new network capability, using the ambient GitHub CLI advisory database, e.g. gh api -H 'Accept: application/vnd.github+json' /advisories?ecosystem=<eco>&affects=<name>. Do NOT edit files or run git. Produce a strict JSON array of findings: {\"severity\":\"critical|high|medium|low|informational\",\"area\":\"dependency:<name>\",\"file\":\"<manifest>\",\"advisory\":\"GHSA-...\",\"summary\":\"<why vulnerable>\",\"remediation\":\"<upgrade/patch>\"}. Only report real advisory matches. Return the JSON array only."
+      }
+    },
+    {
+      "id": "audit-code-tests",
+      "title": "Audit code coverage, tests and security best practices",
+      "content": {
+        "kind": "generated",
+        "generator": "You are a security reviewer auditing code, tests and security best practices. Read the repository and the predecessor step results via their source_refs first. Look for concrete issues: missing input validation, injection sinks, unsafe deserialization, secrets in source, missing authz checks, thin or absent security-path test coverage. Do NOT edit files, run git, or open the network. Produce a strict JSON array of findings: {\"severity\":\"critical|high|medium|low|informational\",\"area\":\"<category>\",\"file\":\"<path>\",\"summary\":\"<concrete issue with evidence>\",\"remediation\":\"<small concrete fix>\"}. Cite exact files. Return the JSON array only."
+      }
+    },
+    {
+      "id": "file-findings",
+      "title": "Consolidate the security findings for filing",
+      "content": {
+        "kind": "generated",
+        "generator": "You are consolidating a security review for filing. Fetch every predecessor step result via its source_ref: the dependency-advisory findings and the code/test audit findings. Merge them, drop duplicates, keep the most actionable set. Do NOT edit files, run git, open the network, or create issues yourself; the workflow engine files each finding as a github-proxy issue. Produce the final strict JSON array of findings: {\"severity\":\"critical|high|medium|low|informational\",\"area\":\"<category>\",\"file\":\"<path or omitted>\",\"advisory\":\"<GHSA id or omitted>\",\"summary\":\"<one clear paragraph>\",\"remediation\":\"<concrete fix>\"}. Return the JSON array and nothing else. An empty array [] means no findings."
+      }
+    }
+  ]
+}

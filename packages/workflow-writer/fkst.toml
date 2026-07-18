@@ -1,0 +1,26 @@
+kind = "package.composed"
+name = "workflow-writer"
+persistence_class = "saga"
+
+[code]
+root = "."
+
+# workflow-writer is a META-adapter on the shared workflow.engine.* kernel: it lets a
+# user AUTHOR a new fkst.workflow.v1 template OR REFINE an existing workflow package's
+# template (e.g. edit workflow-security's security-review steps) by filing an
+# fkst-workflow-labelled request issue. It claims its OWN work (the fkst-workflow label
+# + its own cron tick / workflow_authoring_request queue) and NEVER consumes the dev
+# intake candidate seam (github-devloop-intake), so the single-intake INTAKE_POLICY_SET
+# invariant is preserved. The deliverable is a reviewable github-proxy PR that adds/edits
+# a template file under the target package; the kernel's blueprint.validate gates it.
+[lib_deps]
+libraries = ["contract", "workflow", "testkit", "forge", "devloop", "github-issue"]
+
+[event_deps]
+packages = ["github-proxy"]
+
+# Host-readable declaration: the work label this adapter polls, mirrored from
+# authoring.LABEL so fkst-hosted can auto-discover it (engine ignores this
+# section; github-issue.conformance pins it to the used label).
+[github]
+work_labels = ["fkst-workflow"]
