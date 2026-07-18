@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use serde_json::json;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{body_partial_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::install::VALIDATE_ENV_SUBCOMMAND;
@@ -54,6 +54,11 @@ async fn mount_holder_flow(server: &MockServer, logs_body: &str) {
         .await;
     Mock::given(method("POST"))
         .and(path("/v1/sandboxes/holder-1/proxy/44772/command"))
+        // The verdict is read via the poll-by-id status/logs below, which execd
+        // permits ONLY for a background command — pin `background: true` so a
+        // regression to a foreground launch fails here instead of 400-ing
+        // ("command <id> is not running in background") against real execd.
+        .and(body_partial_json(json!({ "background": true })))
         .respond_with(
             ResponseTemplate::new(200)
                 .insert_header("content-type", "text/event-stream")

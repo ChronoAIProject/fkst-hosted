@@ -45,8 +45,11 @@ impl OsbBackend {
         let execd = (self.execd_factory)(&view.id, session_id);
 
         let failed = |detail: String| ObserveError::Failed(detail);
+        // Background launch: the status/logs poll below reads by id, which execd
+        // permits only for a background command (a foreground command discards
+        // its id and streams inline).
         let cmd = execd
-            .run_command(&observe_command(limit), Some(OBSERVE_TIMEOUT_MS), false)
+            .run_command(&observe_command(limit), Some(OBSERVE_TIMEOUT_MS), true)
             .await
             .map_err(|e| failed(format!("observe run_command: {e}")))?;
 
@@ -97,7 +100,7 @@ impl OsbBackend {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{body_partial_json, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::super::backend_test_support::{backend, list_page, osb_config, sandbox_json};
@@ -126,6 +129,9 @@ mod tests {
             .await;
         Mock::given(method("POST"))
             .and(path("/v1/sandboxes/sbx-1/proxy/44772/command"))
+            // The status/logs poll below reads by id, valid only for a background
+            // command — pin it so a foreground regression fails here.
+            .and(body_partial_json(json!({ "background": true })))
             .respond_with(
                 ResponseTemplate::new(200)
                     .set_body_string("data: {\"type\":\"init\",\"text\":\"cmd-9\"}\n\n"),
