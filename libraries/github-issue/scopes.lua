@@ -37,6 +37,20 @@ end
 
 M.open_state = open_state
 
+-- A GitHub App's author login is "<slug>[bot]" via the REST API but bare "<slug>"
+-- via GraphQL (which `gh issue view --json comments` uses to populate
+-- comment.author.login). Normalize both sides -- lowercase and strip a trailing
+-- "[bot]" -- so a comment authored by the bot matches the configured
+-- FKST_GITHUB_BOT_LOGIN regardless of which API populated the field. No-op for
+-- ordinary user logins (which never end in "[bot]"). Mirrors the shared
+-- forge.strings / devloop.base normalizer, inlined here to keep this a leaf
+-- library with no lib_deps.
+local function normalize_login(login)
+  return (tostring(login or ""):lower():gsub("%[bot%]$", ""))
+end
+
+M.normalize_login = normalize_login
+
 -- Concatenate the issue body with every comment body the bot authored (or all
 -- comments when no bot_login is pinned). This is the trusted marker-carrying text
 -- the kernel parses adapter state out of.
@@ -44,10 +58,11 @@ local function trusted_text(issue, bot_login)
   local parts = { tostring(issue.body or "") }
   local comments = issue.comments
   if type(comments) == "table" then
+    local trusted = normalize_login(bot_login)
     for _, comment in ipairs(comments) do
       if type(comment) == "table" then
         local login = type(comment.author) == "table" and comment.author.login or comment.author_login
-        if bot_login == nil or bot_login == "" or tostring(login or "") == tostring(bot_login) then
+        if bot_login == nil or bot_login == "" or normalize_login(login) == trusted then
           table.insert(parts, tostring(comment.body or ""))
         end
       end
