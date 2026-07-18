@@ -272,6 +272,55 @@ async fn ensure_session_rolls_back_the_sandbox_on_a_credential_upload_failure() 
 }
 
 #[tokio::test]
+async fn ensure_session_retries_credential_upload_until_execd_is_ready() {
+    // execd is briefly unreachable right after the sandbox reports Running: the
+    // server proxy answers 502 until execd binds. The upload must retry rather
+    // than roll the sandbox back (observed live before the fix).
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/sandboxes"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(list_page(json!([]))))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/sandboxes"))
+        .respond_with(ResponseTemplate::new(202).set_body_json(sandbox_json(
+            "sbx-1",
+            "Running",
+            "2026-07-09T00:00:00Z",
+            json!({}),
+        )))
+        .mount(&server)
+        .await;
+    // The first two uploads race execd startup and 502; the mock then falls
+    // through to the success mount below.
+    Mock::given(method("POST"))
+        .and(path(UPLOAD_PATH))
+        .respond_with(ResponseTemplate::new(502))
+        .up_to_n_times(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(UPLOAD_PATH))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    // No rollback DELETE: a retried-then-successful upload must NOT tear the
+    // sandbox down.
+    Mock::given(method("DELETE"))
+        .and(path("/v1/sandboxes/sbx-1"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    backend(&server.uri(), osb_config())
+        .ensure_session_impl(&spec(), one_cred())
+        .await
+        .expect("a not-yet-ready execd must be retried, not rolled back");
+}
+
+#[tokio::test]
 async fn ensure_session_is_already_live_when_a_sandbox_exists() {
     let server = MockServer::start().await;
     // A managed sandbox already exists for this session → AlreadyLive, no create.
