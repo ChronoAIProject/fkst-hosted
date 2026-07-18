@@ -48,6 +48,10 @@ const GITCRED_SUBDIR: &str = "gitcred";
 /// `.fkst/packages/` (set-if-absent, so an operator-pinned session value wins).
 const WORKFLOW_CATALOG_ROOT_ENV: &str = "FKST_WORKFLOW_CATALOG_ROOT";
 const WORKFLOW_CATALOG_SUBDIR: &str = ".fkst/packages";
+/// Writable per-session tool dir, put on the FRONT of PATH and exposed as
+/// `FKST_ENV_BIN` (see [`crate::install::TOOL_DIR_ENV`]) so a named-environment
+/// install step can drop a tool binary the workflow then calls by bare name.
+const ENV_BIN_SUBDIR: &str = "env-bin";
 const SHIM_SUBDIR: &str = "binshim";
 /// Env var the credential helper + gh shim read the mounted token path from.
 const TOKEN_FILE_ENV: &str = "FKST_GITHUB_TOKEN_FILE";
@@ -232,6 +236,13 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
         WORKFLOW_CATALOG_ROOT_ENV,
         &workflow_catalog_root.to_string_lossy(),
     );
+
+    // Provision the named-environment profile: run its ordered install commands in
+    // the pod BEFORE supervise, with the injected env available and a writable
+    // env-bin on PATH. This is what makes a profile that installs a tool (e.g. an
+    // encoder) actually work at run time, not only pass PUT-time validation. Fail
+    // closed — a broken install must not start a half-provisioned engine.
+    run_env_install_commands(&creds, &mut child_env, runtime_root).await?;
 
     // 6b. Log streaming: spawn the in-pod collector BEFORE supervise so it captures
     //     the whole run. Streaming is unconditional — the collector redacts every
@@ -428,6 +439,73 @@ fn default_env(env: &mut Vec<(String, String)>, key: &str, value: &str) {
 /// `fkst.workflow.v1` files here and github-devloop-workflow loads + runs them.
 fn workflow_catalog_root_default(project_root: &Path) -> PathBuf {
     project_root.join(WORKFLOW_CATALOG_SUBDIR)
+}
+
+/// Run the named-environment profile's ordered install commands inside the pod.
+/// A writable env-bin dir is created under the runtime root, placed at the FRONT
+/// of PATH, and exposed as `FKST_ENV_BIN` so an install step can drop a tool
+/// binary there that the workflow later calls by bare name. Each command runs via
+/// `sh -c` with the already-assembled child env, so the profile's own
+/// variables/secrets are visible to the install step. A missing install file is a
+/// no-op; a non-zero exit fails the launch closed (a broken install must not start
+/// a half-provisioned engine). The commands were bounded + validated at PUT time.
+async fn run_env_install_commands(
+    creds: &CredsLayout,
+    child_env: &mut Vec<(String, String)>,
+    runtime_root: &Path,
+) -> Result<(), String> {
+    let path = creds.install_commands();
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("read install commands {}: {error}", path.display())),
+    };
+    let commands: Vec<String> =
+        serde_json::from_str(&raw).map_err(|error| format!("parse install commands: {error}"))?;
+    if commands.is_empty() {
+        return Ok(());
+    }
+
+    let env_bin = runtime_root.join(ENV_BIN_SUBDIR);
+    create_dir_idempotent(&env_bin)?;
+    prepend_path(child_env, &env_bin);
+    upsert_env(
+        child_env,
+        crate::install::TOOL_DIR_ENV,
+        &env_bin.to_string_lossy(),
+    );
+
+    tracing::info!(
+        count = commands.len(),
+        env_bin = %env_bin.display(),
+        "run-substrate: running environment install commands"
+    );
+    for (idx, command) in commands.iter().enumerate() {
+        // bash (not sh): matches the PUT-time validator's `bash -c` contract so an
+        // install command validated once behaves identically in the session.
+        let output = Command::new("bash")
+            .arg("-c")
+            .arg(command)
+            .envs(child_env.iter().map(|(k, v)| (k.clone(), v.clone())))
+            // Run in the on-PATH env-bin so a relative install (`-o ffmpeg`) also
+            // lands where the workflow can call it, matching $FKST_ENV_BIN.
+            .current_dir(&env_bin)
+            .output()
+            .await
+            .map_err(|error| format!("spawn install command #{idx}: {error}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let tail = stderr
+                .get(stderr.len().saturating_sub(2048)..)
+                .unwrap_or(&stderr);
+            return Err(format!(
+                "environment install command #{idx} failed (exit {:?}): {tail}",
+                output.status.code()
+            ));
+        }
+        tracing::info!(index = idx, "run-substrate: environment install command ok");
+    }
+    Ok(())
 }
 
 /// Prepend `dir` to the child env's `PATH` so a bare `gh` resolves to the shim.
