@@ -420,8 +420,15 @@ end
 -- "approve-ish"); the reply sentinel must be anchored at line start. A proposal body/context
 -- is untrusted and may be echoed into stdout, so requiring a UNIQUE ADJACENT pair closes both
 -- duplicate injection (a second clean sentinel pair) and orphan pairing (a lone echoed reply
--- attached to a verdict that lacked its own reply). Overlong replies are NOT truncated here;
--- aggregate() rejects them so we never raise a partial body.
+-- attached to a verdict that lacked its own reply). Uniqueness/adjacency is decided over the
+-- FULL untrusted text before the winning reply is bounded below, so bounding can never smuggle
+-- a second pair past the injection defense. The winning reply is then bounded to max_reply_len
+-- at this ingest boundary -- the same bound every downstream consumer (angle_digests, the
+-- reached/converge payload bodies) already re-applies -- so a compliant-but-verbose model
+-- (observed with gpt-5.5 emitting a single-line reply over the cap) parses instead of failing
+-- the entire decide as angle-output-unparseable and looping forever. aggregate()/is_valid keep
+-- the strict length invariant as defence-in-depth for any result that reaches them by a path
+-- other than this parser.
 function M.parse_angle_output(stdout, verdict_mode)
   local text = tostring(stdout or "")
   local mode = verdict_mode == "gate" and "gate" or "converge"
@@ -488,7 +495,7 @@ function M.parse_angle_output(stdout, verdict_mode)
 
   return {
     verdict = verdict,
-    reply = reply,
+    reply = bounded(reply, max_reply_len),
     blocking_gap = gap,
   }
 end
@@ -760,6 +767,7 @@ require("core.prompt_rendering").install(M, {
   gap_label = gap_label,
   stance_label = stance_label,
   max_key_len = max_key_len,
+  max_reply_len = max_reply_len,
   max_digest_len = max_digest_len,
   findings_record_len = findings_record_len,
   is_bounded_string = is_bounded_string,

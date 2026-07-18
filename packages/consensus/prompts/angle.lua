@@ -8,7 +8,7 @@ Response contract:
 {{mode_contract}}
 Then emit exactly one adjacent sentinel pair:
 - The marker ⟦FKST:VERDICT⟧ followed by one word - {{verdict_options}}.
-- The marker ⟦FKST:REPLY⟧ followed by one concise paragraph.
+- The marker ⟦FKST:REPLY⟧ followed, on the same single line, by one concise paragraph of at most {{reply_budget}} characters.
 {{readiness_instruction}}
 {{weakest_instruction}}
 

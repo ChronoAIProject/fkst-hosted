@@ -200,6 +200,7 @@ function M.install(core, deps)
       findings_record_block = findings_record_block,
       mode_contract = angle_mode_contract(verdict_mode, angle),
       verdict_options = verdict_mode == "gate" and "approve, comment, reject, or abstain" or "approve or abstain",
+      reply_budget = deps.max_reply_len,
       readiness_instruction = verdict_mode == "gate"
         and "Use reject ONLY for a goal-blocking gap and you MUST name exactly one blocking gap on a third line: ⟦FKST:GAP⟧ <short named gap>. Keep the ⟦FKST:GAP⟧ line a short label of a few words (for example \"missing regression test\"); put every diff citation, quotation, and detailed justification in ⟦FKST:REPLY⟧, never in the gap line. Advisory observations are comment. Abstain only when you genuinely cannot judge."
         or converge_seat_readiness(angle, false),
@@ -239,6 +240,7 @@ function M.install(core, deps)
       own_output = render_full_angle_output(neutralize, own_result),
       peer_outputs = render_peer_outputs(neutralize, peer_results),
       verdict_options = verdict_mode == "gate" and "approve, comment, reject, or abstain" or "approve or abstain",
+      reply_budget = deps.max_reply_len,
       readiness_instruction = verdict_mode == "gate"
         and "Use reject ONLY for a goal-blocking gap and you MUST name exactly one blocking gap on a third line: ⟦FKST:GAP⟧ <short named gap>. Keep the ⟦FKST:GAP⟧ line a short label of a few words (for example \"missing regression test\"); put every diff citation, quotation, and detailed justification in ⟦FKST:REPLY⟧, never in the gap line. Advisory observations are comment. Abstain only when you genuinely cannot judge."
         or converge_seat_readiness(own_result.angle, true),

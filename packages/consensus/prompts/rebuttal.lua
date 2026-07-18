@@ -10,7 +10,7 @@ Response contract:
 - If stance is update, the same line must name the specific peer claim that moved you using "because <peer claim>".
 - Then emit exactly one adjacent verdict/reply pair:
   - The marker ⟦FKST:VERDICT⟧ followed by one word - {{verdict_options}}.
-  - The marker ⟦FKST:REPLY⟧ followed by one concise paragraph.
+  - The marker ⟦FKST:REPLY⟧ followed, on the same single line, by one concise paragraph of at most {{reply_budget}} characters.
 {{readiness_instruction}}
 
 Proposal:
