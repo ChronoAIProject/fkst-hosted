@@ -325,7 +325,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn credential_secret_data_carries_install_commands_as_json_when_present() {
         let install = vec![
             "curl -L https://example/ffmpeg -o \"$FKST_ENV_BIN/ffmpeg\"".to_string(),
@@ -343,6 +342,7 @@ mod tests {
         assert!(!data.contains_key(INSTALL_FILE));
     }
 
+    #[test]
     fn credential_secret_data_with_no_user_env_carries_only_the_base_creds() {
         let data = credential_secret_data("ghs_json", "sk-key", std::iter::empty(), &[], None);
         assert_eq!(data.len(), 2);
