@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { FkstMark } from '../components/brand/fkst-mark';
 import { LanguageToggle } from '../components/layout/language-toggle';
 import { RouteTransition } from '../components/ui/motion';
+import { EnvironmentsDrawer } from '@/components/environments/environments-drawer';
 import { useContent } from '../i18n';
 import { REPO, MANUAL_URL } from '../i18n/literals';
 import { useAuth } from '../lib/auth/github-auth';
@@ -24,11 +25,24 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
       : 'text-faint hover:text-dim hover:bg-[color-mix(in_oklab,var(--raise)_55%,transparent)]'
   }`;
 
+/** Shared mono action styling for the inline auth/GitHub/CTA topbar controls. */
+const inlineActionClass =
+  'font-mono text-[12px] text-faint hover:text-fg no-underline px-2.5 py-[7px] rounded-control transition-colors cursor-pointer';
+
+/** Full-width row styling for the same actions inside the overflow menu. */
+const menuItemClass =
+  'font-mono text-[12px] text-left text-faint hover:text-fg no-underline px-2.5 py-2 rounded-control transition-colors cursor-pointer';
+
 export function Shell() {
   const [condensed, setCondensed] = useState(false);
+  // Local UI state for the two shell-owned surfaces: the responsive overflow
+  // menu and the environments manager drawer.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [envOpen, setEnvOpen] = useState(false);
   const c = useContent();
-  const { isAuthenticated, signOut } = useAuth();
+  const { isAuthenticated, signIn, signOut } = useAuth();
   const location = useLocation();
+  const menuRef = useRef<HTMLDivElement>(null);
   // The single <main> is the app's sole scroll region (the body's overflow is
   // clipped by the css foundation), so the condense heuristic must observe THAT
   // element's scrollTop — window.scrollY stays 0 in a fixed-viewport shell.
@@ -48,6 +62,36 @@ export function Shell() {
     handleScroll(); // initial sync (e.g. restored scroll position)
     return () => el.removeEventListener('scroll', handleScroll);
   }, []);
+
+  // Dismiss the overflow menu on an outside click or Escape. Listeners are only
+  // bound while the menu is open so the closed shell adds no global handlers.
+  useEffect(() => {
+    if (!menuOpen) {
+      return;
+    }
+    const onPointerDown = (e: PointerEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menuOpen]);
+
+  // A route change while the menu is open should not leave it hanging over the
+  // new page.
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [location.pathname]);
 
   return (
     <div className="h-[100dvh] bg-bg text-fg font-ui flex flex-col overflow-hidden">
@@ -81,20 +125,46 @@ export function Shell() {
 
             <div className="flex items-center gap-2 ml-auto">
               <LanguageToggle />
+
+              {/* Environments manager entry — authenticated users only. Kept
+                  visible at every width (short label); toggles the drawer. */}
               {isAuthenticated && (
                 <button
                   type="button"
+                  onClick={() => setEnvOpen(true)}
+                  className={`${inlineActionClass} flex-none`}
+                >
+                  {c.nav.environments}
+                </button>
+              )}
+
+              {/* Inline auth action. Sign in was previously ABSENT from the
+                  topbar entirely; it now sits here (signed-out) and Sign out
+                  here (signed-in). Both progressively hide below 600px but stay
+                  reachable through the overflow menu. */}
+              {isAuthenticated ? (
+                <button
+                  type="button"
                   onClick={signOut}
-                  className="font-mono text-[12px] text-faint hover:text-fg px-2.5 py-[7px] rounded-control transition-colors cursor-pointer max-[600px]:hidden"
+                  className={`${inlineActionClass} max-[600px]:hidden`}
                 >
                   {c.auth.signOut}
                 </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={signIn}
+                  className={`${inlineActionClass} max-[600px]:hidden`}
+                >
+                  {c.auth.signIn}
+                </button>
               )}
+
               <a
                 href={REPO}
                 target="_blank"
                 rel="noreferrer"
-                className="font-mono text-[12px] text-faint hover:text-fg no-underline px-2.5 py-[7px] rounded-control transition-colors max-[720px]:hidden"
+                className={`${inlineActionClass} max-[720px]:hidden`}
               >
                 GitHub ↗
               </a>
@@ -104,6 +174,77 @@ export function Shell() {
               >
                 {c.nav.getStartedCta}
               </NavLink>
+
+              {/* Responsive overflow menu — shown once the first inline item
+                  (GitHub, ≤720px) starts collapsing, so the auth action, the
+                  GitHub link, and the CTA are never unreachable on a narrow
+                  viewport. Hidden at ≥721px where every inline item shows. */}
+              <div ref={menuRef} className="relative flex-none min-[721px]:hidden">
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen((open) => !open)}
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen}
+                  aria-label={c.nav.menuAria}
+                  className="inline-flex items-center justify-center w-8 h-8 rounded-control text-faint hover:text-fg hover:bg-raise transition-colors cursor-pointer"
+                >
+                  {/* Decorative glyph; the control is named by aria-label. */}
+                  <span aria-hidden="true" className="text-[15px] leading-none">
+                    ☰
+                  </span>
+                </button>
+
+                {menuOpen && (
+                  <div
+                    role="menu"
+                    className="anim-notice-in absolute right-0 top-[calc(100%+6px)] z-50 min-w-[168px] rounded-control border border-line bg-raise shadow-modal-seat flex flex-col p-1"
+                  >
+                    {isAuthenticated ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          signOut();
+                        }}
+                        className={menuItemClass}
+                      >
+                        {c.auth.signOut}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          signIn();
+                        }}
+                        className={menuItemClass}
+                      >
+                        {c.auth.signIn}
+                      </button>
+                    )}
+                    <a
+                      role="menuitem"
+                      href={REPO}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={() => setMenuOpen(false)}
+                      className={menuItemClass}
+                    >
+                      GitHub ↗
+                    </a>
+                    <NavLink
+                      role="menuitem"
+                      to="/get-started"
+                      onClick={() => setMenuOpen(false)}
+                      className={menuItemClass}
+                    >
+                      {c.nav.getStartedCta}
+                    </NavLink>
+                  </div>
+                )}
+              </div>
             </div>
           </header>
         </div>
@@ -138,6 +279,11 @@ export function Shell() {
           </footer>
         </main>
       </div>
+
+      {/* Environments manager: a full-height right drawer overlaying the shell.
+          It owns its own open→close animation (OverlayPresence), so it is
+          always mounted and driven by `open`. */}
+      <EnvironmentsDrawer open={envOpen} onClose={() => setEnvOpen(false)} />
     </div>
   );
 }
