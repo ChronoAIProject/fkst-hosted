@@ -709,6 +709,7 @@ mod tests {
             session_backend: None,
             storage: None,
             log_registry: Default::default(),
+            log_bundle_cache: Default::default(),
         };
         (state, rx)
     }
@@ -790,6 +791,7 @@ mod tests {
             session_backend: None,
             storage: None,
             log_registry: Default::default(),
+            log_bundle_cache: Default::default(),
         };
         let handled = handle_installation(&state, body).await.expect("dispatch");
         assert_eq!(handled.as_str(), "cache_busted");
