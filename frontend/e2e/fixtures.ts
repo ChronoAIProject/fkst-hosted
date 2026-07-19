@@ -5,6 +5,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Page, Route } from '@playwright/test';
+import type { EnvStore } from './env-fixtures';
+import { LOG_CONTENT, observeSnapshot, TEXT_BLOBS } from './payloads';
 
 const asset = (name: string): Buffer =>
   readFileSync(fileURLToPath(new URL(`./assets/${name}`, import.meta.url)));
@@ -164,6 +166,10 @@ const liveSession = {
   ],
   log_url: 'https://api.chronoai-fkst.local/api/v1/logs/' + LIVE_SESSION_ID,
   liveness: 'live',
+  // Frozen config the ConfigPanel (Packages tab) surfaces: the log-access
+  // allowlist (extra GitHub logins) and the output locale.
+  log_access: [PERSONAL, 'collab-bob'],
+  output_lang: 'zh',
   prs: [
     {
       number: 300,
@@ -209,6 +215,21 @@ export const repoSessions = {
   installed: true,
   sessions: [liveSession, degradedSession],
 };
+
+/** A repo with many sessions so the level-2 sidebar panel overflows its fixed
+ *  height and its INTERNAL ScrollArea (not the page) scrolls. The first two are
+ *  the real live/degraded sessions so drawer flows still work off this payload. */
+export function manyRepoSessions(count = 24) {
+  const extra = Array.from({ length: count }, (_, i) => ({
+    ...degradedSession,
+    session_id: `bulk${String(i).padStart(12, '0')}`,
+    name: `bulk-session-${i}`,
+    status_labels: ['fkst-substrate-active'],
+    trigger: issue(500 + i, `bulk session ${i}`, 'open', ['fkst-substrate-trigger']),
+    work_issues: [],
+  }));
+  return { owner: PERSONAL, name: REPO, installed: true, sessions: [liveSession, ...extra] };
+}
 
 // ---- GET /api/v1/repos/{o}/{n}/sessions/{issue}/outcomes --------------------
 
@@ -292,21 +313,6 @@ export const outcomes = {
   ],
 };
 
-const TEXT_BLOBS: Record<string, string> = {
-  'sha-text-login': [
-    "import { useState } from 'react';",
-    '',
-    'export function LoginForm() {',
-    '  const [email, setEmail] = useState("");',
-    '  // renders the OAuth entry point',
-    '  return <form aria-label="Sign in">…</form>;',
-    '}',
-  ].join('\n'),
-  'sha-text-session':
-    'export const SESSION_COOKIE = "fkst.sid";\n// 8h sliding TTL, refreshed on activity\n',
-  'sha-text-index': 'export * from "./login";\nexport * from "./session";\n',
-};
-
 // ---- GET /api/v1/logs/{session_id}/manifest & /file -------------------------
 
 export const logManifest = {
@@ -320,29 +326,6 @@ export const logManifest = {
     { path: 'README.md', size: 512, label: 'README' },
     { path: 'meta.json', size: 256, label: 'Meta' },
   ],
-};
-
-// Each log file's text. The driver log carries the searchable token
-// "reconcile" several times so the in-file search highlights matches.
-const LOG_CONTENT: Record<string, string> = {
-  'fkst-substrate/driver/driver.log': [
-    '2026-07-18T09:20:01Z INFO  driver: startup, watching installation 1001',
-    '2026-07-18T09:20:03Z DEBUG driver: reconcile tick begin (repo octo-dev/web-app)',
-    '2026-07-18T09:20:03Z DEBUG driver: reconcile discovered 3 open work issues',
-    '2026-07-18T09:20:04Z INFO  driver: claimed work issue #111 (thinking)',
-    '2026-07-18T09:20:31Z DEBUG driver: reconcile tick begin',
-    '2026-07-18T09:20:31Z WARN  driver: pod liveness probe slow (1.8s)',
-    '2026-07-18T09:20:59Z DEBUG driver: reconcile tick begin',
-    '2026-07-18T09:21:00Z ERROR driver: transient GitHub 502 on comment, retrying',
-    '2026-07-18T09:21:02Z INFO  driver: reconcile settled, 2 in flight',
-  ].join('\n'),
-  'fkst-substrate/supervise/supervise.log':
-    '2026-07-18T09:20:02Z INFO supervise: launching codex\n2026-07-18T09:20:05Z INFO supervise: codex healthy\n',
-  'fkst-substrate/codex/codex.log':
-    '2026-07-18T09:20:06Z codex: session started\n2026-07-18T09:20:40Z codex: proposed patch for #112\n',
-  'fkst-substrate/misc/notes.log': 'misc: nothing notable\n',
-  'README.md': '# Session log bundle\n\nRedacted logs for session feature-auth.\n',
-  'meta.json': '{\n  "session": "feature-auth",\n  "schema": 1\n}\n',
 };
 
 function logFileBody(path: string) {
@@ -359,44 +342,6 @@ function logFileBody(path: string) {
   };
 }
 
-// ---- GET /api/v1/sessions/{session_id}/observe (raw engine JSON) ------------
-
-export const observeSnapshot = {
-  schema_version: 1,
-  generated_at_ms: 1_752_830_000_000,
-  source: 'engine',
-  limits: { max_queues: 64 },
-  truncated: false,
-  queues: [
-    {
-      queue: 'workflow-writer.workflow_writer_materialization_tick',
-      depth: 3,
-      pending: 2,
-      in_flight: 1,
-      retrying: 0,
-      oldest_pending_age_ms: 12_000,
-    },
-    {
-      queue: 'github-devloop.reconcile_tick',
-      depth: 1,
-      pending: 1,
-      in_flight: 0,
-      retrying: 0,
-      oldest_pending_age_ms: null,
-    },
-    {
-      queue: 'codex.candidate_poll',
-      depth: 0,
-      pending: 0,
-      in_flight: 0,
-      retrying: 1,
-      oldest_pending_age_ms: 400,
-    },
-  ],
-  deliveries: [{ id: 'd1' }, { id: 'd2' }],
-  dead_letters: [],
-};
-
 // ---- Router -----------------------------------------------------------------
 
 const json = (route: Route, body: unknown, status = 200) =>
@@ -405,7 +350,25 @@ const json = (route: Route, body: unknown, status = 200) =>
 export interface RouteOptions {
   /** Force GET /overview to 500 (drives the load-failed error screen). */
   failOverview?: boolean;
+  /** Force GET /overview to a given status (401 → reactive refresh → with no
+   *  refresh token, an involuntary session expiry / re-auth prompt). */
+  overviewStatus?: number;
+  /** Return an overview whose account carries a malformed (null) `repos`, so a
+   *  render-time throw escapes into the ErrorBoundary/route error fallback. */
+  malformedOverview?: boolean;
+  /** Serve a large session list at level 2 so the sidebar panel overflows. */
+  manySessions?: boolean;
+  /** A stateful environment-profile store; when present its handler serves every
+   *  `/environment-profiles` path (list/get/put/delete) with real mutations. */
+  envStore?: EnvStore;
 }
+
+/** An overview whose first account has `repos: null` — passes the client's
+ *  array/login shape checks but throws when a level renders its repos. */
+const malformedOverviewBody = {
+  ...overview,
+  accounts: [{ ...overview.accounts[0], repos: null }],
+};
 
 /** Register one handler for every /api/v1/* call the SPA makes. */
 export async function installApiRoutes(page: Page, opts: RouteOptions = {}) {
@@ -413,8 +376,15 @@ export async function installApiRoutes(page: Page, opts: RouteOptions = {}) {
     const url = new URL(route.request().url());
     const p = url.pathname;
 
+    // Stateful env-profile store owns its own paths when supplied.
+    if (opts.envStore && (await opts.envStore.handle(route, url))) return;
+
     if (p.endsWith('/api/v1/overview')) {
       if (opts.failOverview) return json(route, { error: 'internal', message: 'boom' }, 500);
+      if (opts.overviewStatus) {
+        return json(route, { error: 'unauthorized', message: 'token expired' }, opts.overviewStatus);
+      }
+      if (opts.malformedOverview) return json(route, malformedOverviewBody);
       return json(route, overview);
     }
 
@@ -432,9 +402,18 @@ export async function installApiRoutes(page: Page, opts: RouteOptions = {}) {
       return json(route, { owner: PERSONAL, name: REPO, trigger_issue: trigger, prs: [] });
     }
 
-    // repo sessions: /repos/{o}/{n}/sessions
+    // stop a session: DELETE /repos/{o}/{n}/sessions/{issueNumber}
+    if (/\/repos\/[^/]+\/[^/]+\/sessions\/\d+$/.test(p)) {
+      return json(route, { ok: true });
+    }
+
+    // create/list sessions: POST/GET /repos/{o}/{n}/sessions
     if (/\/repos\/[^/]+\/[^/]+\/sessions$/.test(p)) {
-      return json(route, repoSessions);
+      if (route.request().method() === 'POST') {
+        // CreateSessionResponse: the created trigger issue.
+        return json(route, { issue_number: 999, html_url: 'https://github.com/x/y/issues/999' });
+      }
+      return json(route, opts.manySessions ? manyRepoSessions() : repoSessions);
     }
 
     // blob: /repos/{o}/{n}/blob/{sha}
