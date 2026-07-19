@@ -66,6 +66,13 @@ pub struct SessionDetail {
     pub environment: Option<String>,
     /// The `### Packages`, rendered as `owner/repo@ref:path`.
     pub packages: Vec<String>,
+    /// The `### Log Access Allowlist` grantees (extra log-download logins/ids,
+    /// beyond the trigger author + global admins); empty when invalid or none
+    /// were specified. Frozen by config-immutability after registration.
+    pub log_access: Vec<String>,
+    /// The `### Output Language` locale (rendered into the session as
+    /// `FKST_OUTPUT_LANG`); null when invalid or unspecified.
+    pub output_lang: Option<String>,
     /// The parse error when the trigger body is malformed; else null.
     pub invalid_reason: Option<String>,
     /// The `fkst-*` control-plane status labels on the trigger issue, minus
@@ -183,6 +190,8 @@ fn invalid_session_detail(
         auto_merge: None,
         environment: None,
         packages: Vec::new(),
+        log_access: Vec::new(),
+        output_lang: None,
         invalid_reason: Some(reason),
         status_labels: canvas_status_labels(&trigger.summary, trigger_label),
         trigger: IssueDetail::from(trigger),
@@ -323,6 +332,8 @@ pub(super) async fn repo_sessions(
                     auto_merge: Some(reg.auto_merge),
                     environment: reg.def.environment.clone(),
                     packages: reg.def.packages.iter().map(render_package_ref).collect(),
+                    log_access: reg.log_access.clone(),
+                    output_lang: reg.def.output_lang.clone(),
                     invalid_reason: None,
                     status_labels: canvas_status_labels(&trigger.summary, trigger_label),
                     trigger: IssueDetail::from(trigger),
