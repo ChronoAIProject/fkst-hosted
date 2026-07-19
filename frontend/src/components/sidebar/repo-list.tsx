@@ -36,7 +36,7 @@ function RepoRow({
     <div
       className={cn(
         'flex items-center gap-2 py-2 px-2 -mx-2 rounded-control text-[12.5px] min-w-0',
-        'transition-colors hover:bg-[color-mix(in_oklab,var(--raise-2)_80%,transparent)]',
+        'transition-[background-color,box-shadow] hover:bg-[color-mix(in_oklab,var(--raise-2)_80%,transparent)] hover:shadow-1',
         highlight && 'anim-repo-pulse'
       )}
     >
@@ -44,7 +44,7 @@ function RepoRow({
         href={`https://github.com/${full}`}
         target="_blank"
         rel="noreferrer"
-        className="font-mono text-[12px] text-fg hover:text-amber transition-colors truncate min-w-0"
+        className="hover-underline font-mono text-[12px] text-fg hover:text-amber transition-colors truncate min-w-0"
       >
         {full}
       </a>
@@ -85,7 +85,7 @@ function RepoRow({
             target="_blank"
             rel="noreferrer"
             title={repo.admin ? undefined : rc.nonAdminHint}
-            className="font-ui font-semibold text-[11.5px] bg-amber text-amber-ink rounded-control px-3 py-1 transition-colors hover:brightness-[1.06] flex-none"
+            className="font-ui font-semibold text-[11.5px] bg-grad-accent text-amber-ink rounded-control px-3 py-1 shadow-[var(--shadow-1),var(--glow-amber)] transition-[filter,box-shadow] hover:brightness-110 flex-none"
           >
             {rc.install}
           </a>
@@ -130,13 +130,13 @@ export function RepoList({
               onOpenRepo={onOpenRepo}
             />
             {isNew && !repo.installed && appSlug != null && (
-              <div className="mb-2 flex items-center gap-3 flex-wrap border rounded-card px-3 py-2 text-[12.5px] text-dim border-[color-mix(in_oklab,var(--amber)_35%,var(--line))] bg-[color-mix(in_oklab,var(--amber)_8%,transparent)]">
+              <div className="anim-notice-in grad-border grad-border-accent mb-2 flex items-center gap-3 flex-wrap rounded-card px-3 py-2 text-[12.5px] text-dim shadow-[var(--shadow-2),var(--glow-amber)]">
                 <span>{rc.createdNextStep}</span>
                 <a
                   href={`https://github.com/apps/${appSlug}/installations/new`}
                   target="_blank"
                   rel="noreferrer"
-                  className="font-ui font-semibold text-[11.5px] bg-amber text-amber-ink rounded-control px-3 py-1 transition-colors hover:brightness-[1.06] flex-none"
+                  className="anim-sheen font-ui font-semibold text-[11.5px] bg-grad-accent text-amber-ink rounded-control px-3 py-1 shadow-[var(--shadow-1),var(--glow-amber)] transition-[filter,box-shadow] hover:brightness-110 flex-none"
                 >
                   {rc.install}
                 </a>

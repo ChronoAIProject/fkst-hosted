@@ -16,11 +16,12 @@ import { FIELD_INPUT } from '@/components/ui/field';
 import { cn } from '@/lib/utils';
 
 // Sidebar charts, per the dataviz method: single-series horizontal bars
-// (nominal categories → ONE hue per chart, no legend), thin marks (12px,
-// 4px rounded data-end, square baseline), hairline solid grid, values
-// direct-labeled at every bar tip in text tokens (never the series color).
-// Mark hues validated against the raised surface: amber 9.9:1, green 8.3:1
-// (≥3:1 required); label/axis text uses --dim at 7.3:1.
+// (nominal categories → ONE hue per chart, no legend), thin marks (12px, softly
+// rounded caps), hairline solid grid, values direct-labeled at every bar tip in
+// text tokens (never the series color). Marks are filled with the brand accent
+// gradient (amber→gold / green→green-gold, see ChartDefs) and lifted with a soft
+// matched glow. Endpoint hues stay validated against the raised surface: amber
+// 9.9:1, green 8.3:1 (≥3:1 required); label/axis text uses --dim at 7.3:1.
 
 const ROW_HEIGHT = 26;
 const AXIS_BAND = 12;
@@ -31,7 +32,39 @@ const BAR_ANIM_MS = 300;
 /** Dataviz cap: past ~7 classes the tail folds into "Other". */
 const MAX_ROWS = 7;
 
-const HUES = { amber: 'var(--amber)', green: 'var(--green)' } as const;
+// Per-hue SVG fill/glow ids. Bars are filled with an accent gradient defined in
+// <defs> (amber→gold for the primary series, green→bright-green for packages)
+// rather than a flat token, and lifted off the surface with a soft matched glow
+// filter. The gradient sweeps along the bar's growth axis (left→right, x only).
+const HUES = {
+  amber: { fill: 'url(#bar-fill-amber)', glow: 'url(#bar-glow-amber)' },
+  green: { fill: 'url(#bar-fill-green)', glow: 'url(#bar-glow-green)' },
+} as const;
+
+/** Gradient + glow definitions for both series, emitted once per chart into the
+ *  BarChart's SVG. Kept as a component so recharts treats it as a valid child. */
+function ChartDefs() {
+  return (
+    <defs>
+      <linearGradient id="bar-fill-amber" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stopColor="var(--amber)" />
+        <stop offset="100%" stopColor="var(--gold)" />
+      </linearGradient>
+      <linearGradient id="bar-fill-green" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stopColor="var(--green)" />
+        <stop offset="100%" stopColor="color-mix(in oklab, var(--green) 70%, var(--gold))" />
+      </linearGradient>
+      {/* Soft status-matched bloom under each bar; strokeless, low-opacity so it
+          reads as depth, not a halo. */}
+      <filter id="bar-glow-amber" x="-20%" y="-60%" width="140%" height="220%">
+        <feDropShadow dx="0" dy="0" stdDeviation="2.5" floodColor="var(--amber)" floodOpacity="0.35" />
+      </filter>
+      <filter id="bar-glow-green" x="-20%" y="-60%" width="140%" height="220%">
+        <feDropShadow dx="0" dy="0" stdDeviation="2.5" floodColor="var(--green)" floodOpacity="0.3" />
+      </filter>
+    </defs>
+  );
+}
 
 /** Renders a YAxis category tick as SVG text carrying a native `<title>`, so a
  *  label clipped by the fixed 92px axis width stays recoverable on hover. The
@@ -81,8 +114,8 @@ function ChartTooltip({
   if (!active || !payload?.length) return null;
   const row = payload[0]!.payload;
   return (
-    <div className="border border-line rounded-card bg-raise px-2.5 py-1.5 flex items-baseline gap-2">
-      <span className="font-mono text-[12px] font-semibold text-fg">{row.value}</span>
+    <div className="grad-border rounded-card bg-glass backdrop-blur-glass px-2.5 py-1.5 flex items-baseline gap-2 shadow-[var(--shadow-2),var(--glow-amber)]">
+      <span className="font-mono text-[12px] font-semibold grad-text-fg">{row.value}</span>
       <span className="font-mono text-[10.5px] text-dim break-all">{row.key}</span>
     </div>
   );
@@ -122,6 +155,7 @@ export function CanvasBarChart({
               layout="vertical"
               margin={{ top: 2, right: 30, bottom: 2, left: 0 }}
             >
+              <ChartDefs />
               <CartesianGrid horizontal={false} stroke="var(--line)" strokeWidth={1} />
               <XAxis type="number" hide domain={[0, 'dataMax']} allowDecimals={false} />
               <YAxis
@@ -138,9 +172,10 @@ export function CanvasBarChart({
               />
               <Bar
                 dataKey="value"
-                fill={HUES[hue]}
+                fill={HUES[hue].fill}
+                filter={HUES[hue].glow}
                 barSize={12}
-                radius={[0, 4, 4, 0]}
+                radius={[3, 4, 4, 3]}
                 isAnimationActive={!reduce}
                 animationDuration={BAR_ANIM_MS}
                 animationEasing="ease-out"

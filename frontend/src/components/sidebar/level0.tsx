@@ -89,7 +89,7 @@ export function Level0Sidebar({
           type="button"
           onClick={() => setShowCreate(true)}
           data-tour="new-repo"
-          className="font-ui font-semibold text-[12px] bg-amber text-amber-ink rounded-control px-3 py-1.5 transition-colors hover:brightness-[1.06] cursor-pointer flex-none"
+          className="anim-sheen font-ui font-semibold text-[12px] bg-grad-accent text-amber-ink rounded-control px-3 py-1.5 shadow-[var(--shadow-1),var(--glow-amber)] transition-[filter,box-shadow] hover:brightness-110 cursor-pointer flex-none"
         >
           {rc.newRepo}
         </button>
@@ -98,15 +98,17 @@ export function Level0Sidebar({
       {showFirstRun && overview.app_slug != null && (
         // `overview.app_slug != null` is re-checked so `appSlug` narrows to a
         // string for the install URL (showFirstRun already implies it).
-        <div className="anim-notice-in flex flex-col gap-2 border rounded-card px-4 py-3.5 border-[color-mix(in_oklab,var(--amber)_35%,var(--line))] bg-[color-mix(in_oklab,var(--amber)_8%,transparent)]">
-          <h2 className="font-display font-semibold text-[15px] text-fg">{cc.firstRunTitle}</h2>
+        <div className="anim-notice-in grad-border grad-border-accent flex flex-col gap-2 rounded-card px-4 py-3.5 shadow-[var(--shadow-2),var(--glow-amber)]">
+          <h2 className="grad-text anim-gradient-shift font-display font-semibold text-display-sm">
+            {cc.firstRunTitle}
+          </h2>
           <p className="font-ui text-[12.5px] text-dim leading-relaxed">{cc.firstRunBody}</p>
           <div className="flex items-center gap-3 flex-wrap pt-1">
             <a
               href={`https://github.com/apps/${overview.app_slug}/installations/new`}
               target="_blank"
               rel="noreferrer"
-              className="font-ui font-semibold text-[12px] bg-amber text-amber-ink rounded-control px-3.5 py-1.5 transition-colors hover:brightness-[1.06]"
+              className="anim-sheen font-ui font-semibold text-[12px] bg-grad-accent text-amber-ink rounded-control px-3.5 py-1.5 shadow-[var(--shadow-1),var(--glow-amber)] transition-[filter,box-shadow] hover:brightness-110"
             >
               {cc.firstRunInstall}
             </a>
@@ -116,7 +118,7 @@ export function Level0Sidebar({
                 perfectly acceptable for a first-run secondary link. */}
             <a
               href="/get-started"
-              className="font-ui font-semibold text-[12px] text-dim hover:text-fg transition-colors no-underline"
+              className="hover-underline font-ui font-semibold text-[12px] text-dim hover:text-fg transition-colors no-underline"
             >
               {cc.firstRunGuide}
             </a>
