@@ -30,6 +30,7 @@ fn app(webhook_secret: bool) -> axum::Router {
         session_backend: None,
         storage: None,
         log_registry: Default::default(),
+        log_bundle_cache: Default::default(),
     })
     .expect("router builds")
 }

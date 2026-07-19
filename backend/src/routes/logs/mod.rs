@@ -286,12 +286,23 @@ pub(crate) fn authorize(
 }
 
 /// Fetch a session's redacted bundle from chrono-storage (server-side, gzip'd tar).
-/// Shared by the whole-bundle download and the in-bundle log viewer ([`viewer`]).
-/// A missing object → 404; any other storage failure → a URL-free 502.
+/// Shared by the whole-bundle download and the in-bundle log viewer ([`viewer`]),
+/// each of which reads the bundle repeatedly (the viewer once per manifest AND once
+/// per file). A fresh cache hit ([`crate::log_bundle_cache`], ~30s TTL) short-circuits
+/// the download entirely; on a miss the bundle is fetched, cached, and returned.
+///
+/// A missing object → 404; any other storage failure → a URL-free 502. Errors are
+/// NEVER cached — only a successful download is stored — so a not-yet-uploaded bundle
+/// keeps returning 404 until it exists.
 pub(super) async fn fetch_bundle(
     state: &AppState,
     session_id: &str,
 ) -> Result<axum::body::Bytes, AppError> {
+    // Serve from the cache when a fresh bundle is already in hand: a burst of
+    // manifest/file requests for one session then hits storage at most once per TTL.
+    if let Some(bytes) = state.log_bundle_cache.get(session_id) {
+        return Ok(bytes);
+    }
     let Some(storage) = state.storage.as_ref() else {
         return Err(AppError::Unavailable(
             "log storage is not configured".to_string(),
@@ -299,7 +310,12 @@ pub(super) async fn fetch_bundle(
     };
     let key = log_object_key(session_id);
     match storage.download(&key).await {
-        Ok(bytes) => Ok(bytes),
+        Ok(bytes) => {
+            state
+                .log_bundle_cache
+                .put(session_id.to_string(), bytes.clone());
+            Ok(bytes)
+        }
         Err(StorageError::Status { status: 404 }) => {
             Err(AppError::NotFound("no logs available yet".to_string()))
         }
@@ -444,6 +460,9 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(viewer::log_file))
 }
 
+#[cfg(test)]
+#[path = "bundle_cache_tests.rs"]
+mod bundle_cache_tests;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]

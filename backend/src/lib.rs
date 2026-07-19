@@ -22,6 +22,10 @@ pub mod goals;
 // hash) but cannot itself yield. The reconciler writes it each sweep; the endpoint
 // reads it.
 pub mod log_access;
+// TTL-bounded in-memory cache of each session's redacted log bundle, so the log
+// viewer's manifest + per-file reads (and the whole-bundle download) do not
+// re-download + re-gunzip the whole `tar.gz` from chrono-storage on every request.
+pub mod log_bundle_cache;
 // On-demand session-log download config knobs (`FKST_LOG_ADMINS`,
 // `FKST_PUBLIC_BASE_URL`, `FKST_GITHUB_OAUTH_*`): the global-admin allow-list, the
 // public base URL the announce comment links, and the browser-mode OAuth creds.

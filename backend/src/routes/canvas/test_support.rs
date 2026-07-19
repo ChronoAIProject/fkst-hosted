@@ -59,6 +59,7 @@ pub(crate) fn test_state(server_uri: &str, github_app: Option<GithubAppTokens>) 
         session_backend: None,
         storage: None,
         log_registry: Default::default(),
+        log_bundle_cache: Default::default(),
     }
 }
 

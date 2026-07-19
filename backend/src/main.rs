@@ -238,6 +238,7 @@ async fn main() -> ExitCode {
         session_backend,
         storage,
         log_registry,
+        log_bundle_cache: fkst_control_plane::log_bundle_cache::LogBundleCache::new(),
     }) {
         Ok(router) => router,
         Err(error) => {

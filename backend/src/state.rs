@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::config::Config;
 use crate::github_app::GithubAppTokens;
 use crate::log_access::LogAccessRegistry;
+use crate::log_bundle_cache::LogBundleCache;
 use crate::reconcile::ReconcileHandle;
 use crate::session_backend::SessionBackend;
 use crate::storage::ChronoStorageClient;
@@ -48,4 +49,9 @@ pub struct AppState {
     /// the identity-gated `/api/v1/logs/{session_id}` endpoint authorizes against.
     /// Populated by the reconciler each sweep; a cheap `Arc`-backed handle.
     pub log_registry: LogAccessRegistry,
+    /// TTL-bounded cache of each session's redacted log bundle (the gzip'd `tar.gz`
+    /// fetched from chrono-storage). Lets the log viewer's manifest + per-file reads
+    /// and the whole-bundle download share one storage fetch per ~30s window instead
+    /// of re-downloading + re-gunzipping on every request. A cheap `Arc`-backed handle.
+    pub log_bundle_cache: LogBundleCache,
 }
