@@ -49,31 +49,36 @@ export function ErrorFallbackView({ detail }: { detail?: string }) {
   return (
     <div
       role="alert"
-      className="min-h-[50vh] flex flex-col items-center justify-center gap-5 text-center px-4"
+      className="min-h-[50vh] flex flex-col items-center justify-center px-4"
     >
-      <h1 className="font-display font-semibold text-[clamp(22px,4vw,34px)] leading-tight tracking-[-0.01em] text-fg">
-        {s.errorTitle}
-      </h1>
-      <p className="text-[14px] leading-relaxed text-dim max-w-[52ch]">{s.errorBody}</p>
+      {/* Elevated glass card: an accent gradient hairline + composed depth and
+          amber bloom lift the failure state out of a bare centered column into
+          a deliberate, in-shell surface. Purely presentational. */}
+      <div className="grad-border grad-border-accent bg-glass backdrop-blur-glass w-full max-w-[560px] rounded-panel shadow-[var(--highlight-top),var(--shadow-2),var(--glow-amber)] flex flex-col items-center gap-5 text-center px-8 py-10">
+        <h1 className="grad-text grad-text-fg font-display font-bold text-display-md leading-tight">
+          {s.errorTitle}
+        </h1>
+        <p className="text-[14px] leading-relaxed text-dim max-w-[52ch]">{s.errorBody}</p>
 
-      {detail && (
-        <details className="w-full max-w-[52ch] text-left">
-          <summary className="font-mono text-[11.5px] text-ghost cursor-pointer select-none hover:text-faint">
-            {s.errorDetailsSummary}
-          </summary>
-          <pre className="mt-2 overflow-x-auto rounded-card border border-line bg-raise px-3 py-2 font-mono text-[11.5px] text-dim whitespace-pre-wrap break-words">
-            {detail}
-          </pre>
-        </details>
-      )}
+        {detail && (
+          <details className="w-full max-w-[52ch] text-left">
+            <summary className="font-mono text-[11.5px] text-ghost cursor-pointer select-none hover:text-faint transition-colors">
+              {s.errorDetailsSummary}
+            </summary>
+            <pre className="mt-2 overflow-x-auto rounded-card border border-line bg-raise px-3 py-2 font-mono text-[11.5px] text-dim whitespace-pre-wrap break-words">
+              {detail}
+            </pre>
+          </details>
+        )}
 
-      <button
-        type="button"
-        onClick={() => window.location.reload()}
-        className="font-ui font-semibold text-[13.5px] bg-amber text-amber-ink rounded-control px-5 py-2.5 transition-colors hover:brightness-[1.06] cursor-pointer"
-      >
-        {s.errorReload}
-      </button>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="anim-sheen font-ui font-semibold text-[13.5px] bg-grad-accent text-amber-ink rounded-control px-5 py-2.5 shadow-[var(--shadow-2),var(--glow-amber)] transition-[filter,box-shadow] hover:brightness-110 cursor-pointer"
+        >
+          {s.errorReload}
+        </button>
+      </div>
     </div>
   );
 }

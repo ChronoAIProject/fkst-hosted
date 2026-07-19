@@ -15,7 +15,8 @@ export function LanguageToggle({ className }: { className?: string }) {
       role="group"
       aria-label={c.toggle.aria}
       className={cn(
-        'inline-flex items-center rounded-control border border-line bg-raise p-0.5',
+        // Frosted segmented control: gradient hairline over a blurred glass fill.
+        'inline-flex items-center rounded-control grad-border bg-glass backdrop-blur-glass p-0.5 shadow-1',
         className
       )}
     >
@@ -28,8 +29,13 @@ export function LanguageToggle({ className }: { className?: string }) {
             onClick={() => setLang(o.value)}
             aria-pressed={active}
             className={cn(
-              'font-mono text-[11.5px] px-2 py-[3px] rounded-chip transition-colors cursor-pointer',
-              active ? 'bg-raise-2 text-fg' : 'text-faint hover:text-dim'
+              'font-mono text-[11.5px] px-2 py-[3px] rounded-chip cursor-pointer',
+              'transition-[color,background-color,box-shadow] duration-200',
+              // Active pill wears the amber accent fill + a soft glow; inactive
+              // stays quiet and warms toward amber on hover.
+              active
+                ? 'bg-grad-accent text-amber-ink shadow-glow-amber'
+                : 'text-faint hover:text-amber'
             )}
           >
             {o.label}

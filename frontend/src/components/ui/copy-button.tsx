@@ -100,8 +100,14 @@ export function CopyButton({ value, label = 'Copy', className }: CopyButtonProps
       aria-label={label}
       className={cn(
         'inline-flex items-center gap-1.5 flex-none font-mono text-[10.5px]',
-        'px-2 py-0.5 rounded-chip border border-line-2 bg-raise-2 text-faint',
-        'hover:text-fg hover:border-faint transition-colors cursor-pointer',
+        'px-2 py-0.5 rounded-chip border bg-raise-2 cursor-pointer',
+        'transition-[color,border-color,box-shadow] duration-200',
+        // Resting: quiet chip. Hover: amber lift with a soft glow. Copied: the
+        // whole chip settles into a confirmed green state so the success reads
+        // beyond the single checkmark glyph.
+        copied
+          ? 'border-green text-green shadow-glow-green'
+          : 'border-line-2 text-faint hover:text-amber hover:border-amber hover:shadow-glow-amber',
         className
       )}
     >
