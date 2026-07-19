@@ -1,3 +1,4 @@
+import { useReducedMotion } from 'framer-motion';
 import {
   Bar,
   BarChart,
@@ -23,10 +24,52 @@ import { cn } from '@/lib/utils';
 
 const ROW_HEIGHT = 26;
 const AXIS_BAND = 12;
+const AXIS_WIDTH = 92;
+/** Grow-in duration for the bars; brief so a scope change reads as a settle,
+ *  not an entrance. Collapsed to instant under reduced motion. */
+const BAR_ANIM_MS = 300;
 /** Dataviz cap: past ~7 classes the tail folds into "Other". */
 const MAX_ROWS = 7;
 
 const HUES = { amber: 'var(--amber)', green: 'var(--green)' } as const;
+
+/** Renders a YAxis category tick as SVG text carrying a native `<title>`, so a
+ *  label clipped by the fixed 92px axis width stays recoverable on hover. The
+ *  title prefers the row's full `key` (e.g. the whole `owner/repo@ref:path`),
+ *  which the axis `label` may have shortened; it falls back to the label. */
+function AxisTick(fullByLabel: Map<string, string>) {
+  return function Tick({
+    x,
+    y,
+    payload,
+  }: {
+    // recharts' tick-content props type x/y as string | number; keep the param
+    // wide enough to accept that (SVG text x/y take either) so the renderer is
+    // assignable to YAxis's `tick` prop.
+    x?: number | string;
+    y?: number | string;
+    payload?: { value?: string | number };
+  }) {
+    const label = payload?.value == null ? '' : String(payload.value);
+    const full = fullByLabel.get(label) ?? label;
+    return (
+      <text
+        x={x}
+        y={y}
+        dy={3}
+        dx={-4}
+        textAnchor="end"
+        fill="var(--dim)"
+        fontSize={10.5}
+        fontFamily="var(--mono)"
+      >
+        {/* Native SVG tooltip — the discoverable fallback for clipped labels. */}
+        <title>{full}</title>
+        {label}
+      </text>
+    );
+  };
+}
 
 function ChartTooltip({
   active,
@@ -56,9 +99,15 @@ export function CanvasBarChart({
   hue: keyof typeof HUES;
 }) {
   const cc = useContent().dashboard.canvas;
+  // The bar grow-in is decorative; suppress it entirely under reduced motion so
+  // bars snap to their final length (the original instant-render behavior).
+  const reduce = useReducedMotion();
   const shown = foldTail(rows, MAX_ROWS, cc.chartOther);
   // Container height includes the axis band so labels never clip (dataviz).
   const height = shown.length * ROW_HEIGHT + AXIS_BAND;
+  // Recover the full identity for each (possibly shortened) axis label so the
+  // tick tooltip can surface it on hover.
+  const fullByLabel = new Map(shown.map((r) => [r.label, r.key]));
 
   return (
     <figure aria-label={title} className="flex flex-col gap-2 min-w-0">
@@ -78,10 +127,10 @@ export function CanvasBarChart({
               <YAxis
                 type="category"
                 dataKey="label"
-                width={92}
+                width={AXIS_WIDTH}
                 tickLine={false}
                 axisLine={{ stroke: 'var(--line)', strokeWidth: 1 }}
-                tick={{ fill: 'var(--dim)', fontSize: 10.5, fontFamily: 'var(--mono)' }}
+                tick={AxisTick(fullByLabel)}
               />
               <Tooltip
                 content={<ChartTooltip />}
@@ -92,7 +141,9 @@ export function CanvasBarChart({
                 fill={HUES[hue]}
                 barSize={12}
                 radius={[0, 4, 4, 0]}
-                isAnimationActive={false}
+                isAnimationActive={!reduce}
+                animationDuration={BAR_ANIM_MS}
+                animationEasing="ease-out"
               >
                 <LabelList
                   dataKey="value"
