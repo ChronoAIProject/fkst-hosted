@@ -79,6 +79,8 @@ export function Level2Sidebar({
           {data.sessions.map((session, i) => (
             <SessionCard
               key={session.session_id ?? `trigger-${session.trigger.number}-${i}`}
+              owner={owner}
+              name={name}
               session={session}
               onStop={setStopTarget}
             />

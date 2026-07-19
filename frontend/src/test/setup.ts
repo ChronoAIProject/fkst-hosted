@@ -84,6 +84,21 @@ Object.defineProperties(globalThis.HTMLElement.prototype, {
 (globalThis.SVGElement.prototype as unknown as { getBBox: () => DOMRect }).getBBox = () =>
   ({ x: 0, y: 0, width: 0, height: 0 }) as DOMRect;
 
+// jsdom's Blob does not implement the async reader methods (`text()`,
+// `arrayBuffer()`). The outcome-file preview reads committed text via
+// `blob.text()`, so polyfill it through jsdom's FileReader — the same
+// "browser API jsdom omits" pattern as the shims above.
+if (typeof Blob !== 'undefined' && typeof Blob.prototype.text !== 'function') {
+  Blob.prototype.text = function (this: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(this);
+    });
+  };
+}
+
 if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
   window.matchMedia = (query: string): MediaQueryList =>
     ({

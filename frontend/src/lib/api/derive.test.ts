@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   accountStatus,
+  decodeSessionStatus,
+  decodeWorkItemStatus,
   filterAccounts,
   filterRepos,
   foldTail,
+  packageRole,
   packageShortLabel,
   packagesByAccount,
   packagesByRepo,
@@ -13,7 +16,7 @@ import {
   sessionsByAccount,
   sessionsByRepo,
 } from './derive';
-import type { AccountOverview, RepoOverview, SessionDetail } from './types';
+import type { AccountOverview, IssueDetail, RepoOverview, SessionDetail } from './types';
 
 let nextId = 1;
 const repo = (over: Partial<RepoOverview> & Pick<RepoOverview, 'name'>): RepoOverview => ({
@@ -243,5 +246,171 @@ describe('chart row builders', () => {
     const folded = foldTail(rows, 3, 'Other');
     expect(folded).toHaveLength(3);
     expect(folded[2]).toEqual({ key: '__other__', label: 'Other', value: 3 + 2 + 1 });
+  });
+});
+
+// ---- Session-detail decoders ------------------------------------------------
+
+const issueFixture = (
+  over: Partial<IssueDetail> & Pick<IssueDetail, 'number'>
+): IssueDetail => ({
+  title: `issue ${over.number}`,
+  state: 'open',
+  author: 'shining',
+  labels: [],
+  html_url: `https://github.com/o/r/issues/${over.number}`,
+  created_at: '2026-07-01T00:00:00Z',
+  updated_at: '2026-07-01T00:00:00Z',
+  closed_at: null,
+  ...over,
+});
+
+const sessionFixture = (over: Partial<SessionDetail> = {}): SessionDetail => ({
+  session_id: 'abc12345-0000',
+  name: 'sess',
+  work_label: 'fkst-work',
+  auto_merge: true,
+  environment: null,
+  packages: [],
+  invalid_reason: null,
+  status_labels: [],
+  trigger: issueFixture({ number: 1 }),
+  work_issues: [],
+  log_url: null,
+  liveness: null,
+  prs: [],
+  ...over,
+});
+
+describe('decodeSessionStatus', () => {
+  it('marks an invalid session from invalid_reason OR the label OR config-rejected', () => {
+    expect(decodeSessionStatus(sessionFixture({ invalid_reason: 'Packages: bad.' })).phase).toBe(
+      'invalid'
+    );
+    expect(
+      decodeSessionStatus(sessionFixture({ status_labels: ['fkst-substrate-invalid'] })).phase
+    ).toBe('invalid');
+    expect(
+      decodeSessionStatus(sessionFixture({ status_labels: ['fkst-config-rejected'] })).phase
+    ).toBe('invalid');
+  });
+
+  it('retires on the retired label or a closed trigger, over a stale active label', () => {
+    expect(
+      decodeSessionStatus(sessionFixture({ status_labels: ['fkst-session-retired'] })).phase
+    ).toBe('retired');
+    expect(
+      decodeSessionStatus(
+        sessionFixture({
+          status_labels: ['fkst-substrate-active'],
+          trigger: issueFixture({ number: 1, state: 'closed', closed_at: '2026-07-02T00:00:00Z' }),
+          liveness: null,
+        })
+      ).phase
+    ).toBe('retired');
+  });
+
+  it('reports degraded phase + health from the degraded label', () => {
+    const d = decodeSessionStatus(
+      sessionFixture({ status_labels: ['fkst-substrate-active', 'fkst-degraded'], liveness: 'live' })
+    );
+    expect(d.phase).toBe('degraded');
+    expect(d.health).toBe('degraded');
+  });
+
+  it('is active from the active label or from live pod liveness', () => {
+    expect(
+      decodeSessionStatus(sessionFixture({ status_labels: ['fkst-substrate-active'] })).phase
+    ).toBe('active');
+    const live = decodeSessionStatus(sessionFixture({ liveness: 'live' }));
+    expect(live.phase).toBe('active');
+    expect(live.health).toBe('ok');
+  });
+
+  it('falls back to registered (open trigger, no markers) then picked-up/idle', () => {
+    expect(decodeSessionStatus(sessionFixture({})).phase).toBe('registered');
+    expect(
+      decodeSessionStatus(sessionFixture({ status_labels: ['fkst-picked-up'] })).phase
+    ).toBe('picked-up');
+    // Closed trigger with no retired label still resolves to retired (terminal).
+    expect(
+      decodeSessionStatus(
+        sessionFixture({ trigger: issueFixture({ number: 1, state: 'closed' }) })
+      ).phase
+    ).toBe('retired');
+  });
+
+  it('health is unknown without positive liveness and not degraded', () => {
+    expect(decodeSessionStatus(sessionFixture({ liveness: null })).health).toBe('unknown');
+    expect(decodeSessionStatus(sessionFixture({ liveness: 'starting' })).health).toBe('unknown');
+    expect(decodeSessionStatus(sessionFixture({ liveness: 'live' })).health).toBe('ok');
+  });
+
+  it('passes liveness through verbatim', () => {
+    expect(decodeSessionStatus(sessionFixture({ liveness: 'terminating' })).liveness).toBe(
+      'terminating'
+    );
+    expect(decodeSessionStatus(sessionFixture({ liveness: null })).liveness).toBeNull();
+  });
+});
+
+describe('decodeWorkItemStatus', () => {
+  const withLabels = (labels: string[], state: 'open' | 'closed' = 'open') =>
+    decodeWorkItemStatus(issueFixture({ number: 5, state, labels }));
+
+  it('maps a closed issue to done regardless of stale in-flight labels', () => {
+    expect(withLabels(['fkst-dev:implementing'], 'closed')).toEqual({
+      state: 'done',
+      tone: 'good',
+    });
+  });
+
+  it('decodes each fkst-dev:* label to its state and tone', () => {
+    expect(withLabels(['fkst-dev:impl-failed'])).toEqual({ state: 'failed', tone: 'bad' });
+    expect(withLabels(['fkst-dev:ready'])).toEqual({ state: 'ready', tone: 'good' });
+    expect(withLabels(['fkst-dev:implementing'])).toEqual({ state: 'implementing', tone: 'progress' });
+    expect(withLabels(['fkst-dev:thinking'])).toEqual({ state: 'thinking', tone: 'progress' });
+    expect(withLabels(['fkst-dev:claimed'])).toEqual({ state: 'claimed', tone: 'progress' });
+    expect(withLabels(['fkst-dev:enabled'])).toEqual({ state: 'queued', tone: 'neutral' });
+  });
+
+  it('prefers the highest-signal label when several are present', () => {
+    // A ready+failed race resolves to failed (terminal-bad wins).
+    expect(withLabels(['fkst-dev:ready', 'fkst-dev:impl-failed'])).toEqual({
+      state: 'failed',
+      tone: 'bad',
+    });
+    // implementing over thinking.
+    expect(withLabels(['fkst-dev:thinking', 'fkst-dev:implementing'])).toEqual({
+      state: 'implementing',
+      tone: 'progress',
+    });
+  });
+
+  it('is queued when open with no dev label, and other for an unknown dev label', () => {
+    expect(withLabels([])).toEqual({ state: 'queued', tone: 'neutral' });
+    expect(withLabels(['bug', 'enhancement'])).toEqual({ state: 'queued', tone: 'neutral' });
+    expect(withLabels(['fkst-dev:mystery'])).toEqual({ state: 'other', tone: 'neutral' });
+  });
+});
+
+describe('packageRole', () => {
+  it('names the known roles from the path tail', () => {
+    expect(packageRole('o/r@ref:workflow-dev')).toEqual({ short: 'workflow-dev', role: 'Dev workflow' });
+    expect(packageRole('o/r@ref:github-devloop-v2')).toEqual({
+      short: 'github-devloop-v2',
+      role: 'Devloop',
+    });
+    expect(packageRole('o/r@ref:codex/consensus')).toEqual({ short: 'consensus', role: 'Consensus' });
+    expect(packageRole('o/r@ref:codex/triage')).toEqual({ short: 'triage', role: 'Triage' });
+    expect(packageRole('o/r@ref:codex/base')).toEqual({ short: 'base', role: 'Base' });
+  });
+
+  it('falls back to the short handle for an unmapped tail or unparseable ref', () => {
+    expect(packageRole('o/r@ref:custom-thing')).toEqual({
+      short: 'custom-thing',
+      role: 'custom-thing',
+    });
+    expect(packageRole('not-a-ref')).toEqual({ short: 'not-a-ref', role: 'not-a-ref' });
   });
 });

@@ -1,4 +1,5 @@
 import type { FieldKey, GrammarKey, SignalKey, StepId, FlowKey, MentalKey } from './literals';
+import type { SessionHealth, SessionPhase, WorkItemState } from '@/lib/api/derive';
 
 export type Lang = 'en' | 'zh';
 
@@ -236,6 +237,90 @@ export interface SiteContent {
       uninstallPending: string;
       /** Generic uninstall failure (no server message available). */
       uninstallFailed: string;
+    };
+    /** The per-session detail drawer (status / packages / logs / outcomes). */
+    detail: {
+      /** "Details" action on a session card + its aria label (`{name}`). */
+      open: string;
+      openAria: string;
+      /** Drawer heading + close affordance. */
+      title: string;
+      close: string;
+      closeAria: string;
+      tabsAria: string;
+      tabStatus: string;
+      tabPackages: string;
+      tabLogs: string;
+      tabOutcomes: string;
+      // ---- Status tab ----
+      lifecycle: string;
+      /** Decoded lifecycle phase labels — one per `SessionPhase`. */
+      phase: Record<SessionPhase, string>;
+      healthLabel: string;
+      /** Decoded health labels — one per `SessionHealth`. */
+      health: Record<SessionHealth, string>;
+      workItems: string;
+      noWorkItems: string;
+      /** Decoded work-item state labels — one per `WorkItemState`. */
+      work: Record<WorkItemState, string>;
+      liveEngine: string;
+      liveEngineLoading: string;
+      /** Note that observe is a slow pod exec. */
+      liveEngineSlow: string;
+      liveEngineError: string;
+      liveEngineEmpty: string;
+      queues: string;
+      queueDepth: string;
+      queueInFlight: string;
+      queueRetrying: string;
+      /** Codex-run count line; `{n}` placeholder. */
+      codexRuns: string;
+      /** Dead-letter count line; `{n}` placeholder. */
+      deadLetters: string;
+      // ---- Packages tab ----
+      packagesNone: string;
+      packageRefAria: string;
+      queueActivity: string;
+      // ---- Logs tab ----
+      logsUnavailable: string;
+      logsLoading: string;
+      logsError: string;
+      logsEmpty: string;
+      logsFilesAria: string;
+      logsSelectFile: string;
+      logsFileLoading: string;
+      logsFileError: string;
+      logsSearchPlaceholder: string;
+      /** Match count for the in-file find; `{n}` placeholder. */
+      logsSearchCount: string;
+      logsRefresh: string;
+      /** Tail notice; `{shown}` / `{total}` placeholders (already formatted). */
+      logsTruncated: string;
+      logsDownloadBundle: string;
+      // ---- Outcomes tab ----
+      outcomesLoading: string;
+      outcomesError: string;
+      outcomesEmpty: string;
+      outcomesFilesError: string;
+      outcomesNoFiles: string;
+      /** File status chip labels — known GitHub statuses; unknown falls back. */
+      fileStatus: Record<'added' | 'modified' | 'removed' | 'renamed', string>;
+      /** `{n}` placeholder. */
+      additionsAria: string;
+      /** `{n}` placeholder. */
+      deletionsAria: string;
+      /** `{from}` placeholder. */
+      renamedFrom: string;
+      preview: string;
+      previewClose: string;
+      previewLoading: string;
+      previewError: string;
+      previewTooLarge: string;
+      previewBinary: string;
+      openOnGithub: string;
+      download: string;
+      /** `{name}` placeholder. */
+      downloadAria: string;
     };
   };
   intro: {

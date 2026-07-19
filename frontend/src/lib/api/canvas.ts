@@ -30,8 +30,9 @@ export async function readErrorMessage(res: Response): Promise<string | null> {
 }
 
 /** Minimal boundary validation: the fields the UI dereferences must exist.
- *  A malformed payload fails loudly here instead of deep inside a component. */
-function assertShape(cond: boolean, what: string): asserts cond {
+ *  A malformed payload fails loudly here instead of deep inside a component.
+ *  Exported so the sibling clients (outcomes/logs) share one validation style. */
+export function assertShape(cond: boolean, what: string): asserts cond {
   if (!cond) throw new Error(`malformed ${what} response`);
 }
 

@@ -118,6 +118,91 @@ export interface CreateSessionResponse {
   html_url: string;
 }
 
+// ---- GET /api/v1/repos/{owner}/{name}/sessions/{issue}/outcomes -------------
+// A session's committed outcome files, grouped by devloop PR (spec B2). The
+// wire is snake_case; these mirror the backend DTOs field for field.
+
+/** How a committed file previews — guessed from the extension by the backend. */
+export type OutcomeFileKind = 'text' | 'image' | 'video' | 'audio' | 'binary';
+
+export interface OutcomeFile {
+  filename: string;
+  /** GitHub file status: `added` | `modified` | `removed` | `renamed`. */
+  status: string;
+  additions: number;
+  deletions: number;
+  /** Blob SHA — the handle the `/blob/{sha}` endpoint streams. */
+  sha: string;
+  previous_filename: string | null;
+  kind: OutcomeFileKind;
+  /** additions+deletions for text, null for binary. */
+  size_hint: number | null;
+}
+
+export interface PrOutcome {
+  number: number;
+  title: string;
+  html_url: string;
+  state: string;
+  merged: boolean;
+  work_issue: number | null;
+  files: OutcomeFile[];
+  /** True when this PR's file list could not be fetched (best-effort per PR). */
+  files_error: boolean;
+}
+
+export interface SessionOutcomes {
+  owner: string;
+  name: string;
+  trigger_issue: number;
+  prs: PrOutcome[];
+}
+
+// ---- GET /api/v1/logs/{session_id}/manifest & /file -------------------------
+// The in-bundle log viewer (spec B4). Bundle files are already redacted.
+
+export interface LogFileEntry {
+  /** In-bundle path, e.g. `fkst-substrate/codex/codex.log`. */
+  path: string;
+  size: number;
+  /** Fixed classification: `Driver` | `Supervise` | `Codex` | `Misc` | `README` | `Meta`. */
+  label: string;
+}
+
+export interface LogManifest {
+  session_id: string;
+  files: LogFileEntry[];
+  generated_at: string;
+}
+
+export interface LogFileContent {
+  session_id: string;
+  path: string;
+  content: string;
+  total_bytes: number;
+  returned_bytes: number;
+  truncated: boolean;
+}
+
+// ---- GET /api/v1/sessions/{session_id}/observe (raw engine JSON) ------------
+// The live engine read-model. The backend returns the engine's own JSON
+// verbatim (spec B5 — no server-side shaping), so every field is optional and
+// the UI renders only what is present. NEVER assume a field exists.
+
+export interface ObserveQueue {
+  name?: string;
+  depth?: number;
+  in_flight?: number;
+  retrying?: number;
+}
+
+export interface ObserveSnapshot {
+  queues?: ObserveQueue[];
+  dead_letters?: unknown[];
+  codex_runs?: unknown[];
+  [k: string]: unknown;
+}
+
 // ---- Shared -----------------------------------------------------------------
 
 /** The backend's uniform error body. */
