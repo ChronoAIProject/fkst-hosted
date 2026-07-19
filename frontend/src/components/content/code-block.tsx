@@ -30,7 +30,9 @@ export function CodeBlock({ code, caption, className }: CodeBlockProps) {
   return (
     <div
       className={cn(
-        'border border-line rounded-card bg-raise overflow-hidden min-w-0',
+        // Elevated console surface: translucent glass lifted on the card shadow
+        // with an inner top highlight for a raised, premium feel.
+        'border border-line rounded-card bg-glass backdrop-blur-glass overflow-hidden min-w-0 shadow-[var(--shadow-2),var(--highlight-top)]',
         className
       )}
     >
@@ -41,7 +43,8 @@ export function CodeBlock({ code, caption, className }: CodeBlockProps) {
         <button
           type="button"
           onClick={handleCopy}
-          className="flex-none font-mono text-[10.5px] px-2 py-0.5 rounded-chip border border-line-2 bg-raise-2 text-faint hover:text-fg hover:border-faint transition-colors cursor-pointer"
+          // Copy affordance lights a soft amber glow on hover.
+          className="flex-none font-mono text-[10.5px] px-2 py-0.5 rounded-chip border border-line-2 bg-raise-2 text-faint hover:text-fg hover:border-faint hover:shadow-glow-amber transition-[color,border-color,box-shadow] cursor-pointer"
         >
           {copied ? 'copied ✓' : 'copy'}
         </button>

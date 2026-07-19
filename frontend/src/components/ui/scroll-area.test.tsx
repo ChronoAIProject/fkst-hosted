@@ -57,7 +57,9 @@ describe('ScrollArea', () => {
     const { container } = render(<ScrollArea>body</ScrollArea>);
     const el = scrollEl(container);
     expect(el.style.scrollbarWidth).toBe('thin');
-    expect(el.style.scrollbarColor).toBe('var(--line-2) transparent');
+    expect(el.style.scrollbarColor).toBe(
+      'color-mix(in oklab, var(--line-2) 85%, var(--amber)) transparent'
+    );
   });
 
   it('merges a passthrough className without dropping the base classes', () => {

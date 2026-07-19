@@ -9,12 +9,14 @@ export function Eyebrow({ children, className, ...props }: EyebrowProps) {
   return (
     <div
       className={cn(
-        'text-eyebrow font-semibold font-mono uppercase text-ghost flex items-center min-w-0',
+        // Brighter label (ghost -> faint) + a small amber->gold gradient tick in
+        // place of the flat dash, giving the eyebrow a touch of brand energy.
+        'text-eyebrow font-semibold font-mono uppercase text-faint flex items-center min-w-0',
         className
       )}
       {...props}
     >
-      <span className="w-[18px] h-px bg-ghost mr-2 flex-none" aria-hidden="true" />
+      <span className="w-[18px] h-px bg-grad-accent mr-2 flex-none" aria-hidden="true" />
       <span className="truncate min-w-0">{children}</span>
     </div>
   );

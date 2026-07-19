@@ -17,7 +17,9 @@ export function Rich({ children }: { children: string }) {
           return (
             <code
               key={i}
-              className="font-mono text-[0.92em] text-fg bg-raise-2 rounded-chip px-1 py-0.5"
+              // Refined inline chip: raised surface + a hairline for a crisper,
+              // more premium code literal within prose.
+              className="font-mono text-[0.92em] text-fg bg-raise-2 border border-line rounded-chip px-1 py-0.5"
             >
               {part.slice(1, -1)}
             </code>

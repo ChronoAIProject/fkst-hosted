@@ -18,7 +18,9 @@ export function SectionHeading({
       className={cn('flex items-baseline gap-3 flex-wrap min-w-0', className)}
       {...props}
     >
-      <h2 className="font-display text-[16px] font-semibold tracking-[0.01em] text-fg truncate min-w-0">
+      {/* Refined display scale + a bright fg->dim gradient sweep (.grad-text-fg,
+          legible low end) so section titles read as crisp, premium display type. */}
+      <h2 className="grad-text grad-text-fg font-display text-display-sm font-semibold truncate min-w-0">
         {children}
       </h2>
       {count !== undefined && (

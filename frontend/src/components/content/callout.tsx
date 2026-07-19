@@ -23,7 +23,10 @@ export function Callout({ tone = 'note', title, children, className }: CalloutPr
   return (
     <div
       className={cn(
-        'border border-line border-l-2 rounded-card px-4 py-3.5 bg-[color-mix(in_oklab,var(--raise)_55%,transparent)]',
+        // Elevated aside: a translucent glass panel lifted on the card shadow
+        // with an inner top highlight (fakes light on a raised edge); the
+        // tone-coloured left edge + label still carry the note/tip/warn meaning.
+        'border border-line border-l-2 rounded-card px-4 py-3.5 bg-glass backdrop-blur-glass shadow-[var(--shadow-2),var(--highlight-top)]',
         t.edge,
         className
       )}

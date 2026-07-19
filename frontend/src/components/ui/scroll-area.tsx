@@ -21,8 +21,10 @@ export type ScrollAreaProps = {
  *  utility can't express, and this component owns no global CSS file. */
 const SCROLLBAR_STYLE: CSSProperties = {
   scrollbarWidth: 'thin',
-  // thumb, then track — token-tinted so it reads on both raise surfaces.
-  scrollbarColor: 'var(--line-2) transparent',
+  // thumb, then track. The thumb carries a whisper of the amber brand (15% mix
+  // into --line-2) so the scrollbar feels part of the elevated palette rather
+  // than a neutral gray; the track stays transparent to read on any surface.
+  scrollbarColor: 'color-mix(in oklab, var(--line-2) 85%, var(--amber)) transparent',
 };
 
 /**
