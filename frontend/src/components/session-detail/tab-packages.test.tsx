@@ -57,7 +57,7 @@ describe('TabPackages', () => {
     rerender(
       <TabPackages
         session={session()}
-        observe={{ status: 'loaded', snapshot: { queues: [{ name: 'events', depth: 5 }] } }}
+        observe={{ status: 'loaded', snapshot: { queues: [{ queue: 'events', depth: 5 }] } }}
       />
     );
     expect(screen.getByText('Queue activity')).toBeInTheDocument();
