@@ -6,10 +6,21 @@
 @tailwind utilities;
 
 @layer base {
+  /* The window/body must never be the scroll container: a single <main>
+     region owns all vertical scrolling (set up by a sibling). Pinning the
+     full chain to 100% height and clipping the body's overflow guarantees
+     no stray body/html scrollbar can appear behind that region. */
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
   body {
     background: var(--bg);
     color: var(--fg);
     font-family: var(--ui);
+    overflow: hidden;
   }
 
   :focus-visible {
@@ -78,10 +89,53 @@
   }
 }
 
+/* Entrance for a chip that appears on a poll tick (e.g. a status/count chip
+   showing up on refreshed data): a small scale + fade so it "pops in" without
+   shifting layout. */
+@keyframes chip-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Entrance for an inline notice / toast: rise + fade so it reads as arriving
+   rather than blinking into place. */
+@keyframes notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* Staggered fade/slide-in for list rows; per-row delay via --stagger. */
 .anim-row-in {
   animation: row-in 300ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
   animation-delay: var(--stagger, 0ms);
+}
+
+/* Chip appearing on a poll tick (small scale+fade). */
+.anim-chip-in {
+  animation: chip-in 160ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+/* Inline notice / toast entrance (translateY+fade). */
+.anim-notice-in {
+  animation: notice-in 180ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+/* Smooth-scroll helper for the single <main> scroll container. Reduced-motion
+   users get instant jumps via the block below. */
+.main-scroll {
+  scroll-behavior: smooth;
 }
 
 .anim-overlay-in {
@@ -168,6 +222,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .anim-row-in,
+  .anim-chip-in,
+  .anim-notice-in,
   .anim-overlay-in,
   .anim-modal-in,
   .anim-drawer-in,
@@ -181,5 +237,10 @@
   .anim-shimmer {
     animation: none;
     background: var(--raise-2);
+  }
+
+  /* Smooth programmatic scrolling collapses to instant jumps. */
+  .main-scroll {
+    scroll-behavior: auto;
   }
 }
