@@ -324,7 +324,7 @@ impl EnvironmentProfileStore for EnvStore {
         &self,
         id: i64,
         name: &str,
-    ) -> Result<Option<(Vec<String>, BTreeMap<String, String>)>, AppError> {
+    ) -> Result<Option<(Vec<String>, BTreeMap<String, String>, Vec<String>)>, AppError> {
         let kube = &self.0;
         let object = env_object_name(id, name);
         let cm = match configmap_api(kube)
@@ -338,17 +338,21 @@ impl EnvironmentProfileStore for EnvStore {
         let data = cm.data.unwrap_or_default();
         let install = parse_install(&data);
         let mut merged = parse_variables(&data);
-        // Overlay secret values. Keys are unique across the two stores (the route
-        // layer forbids a name in both), so this only fills secret-only keys.
+        // Overlay secret values, remembering their KEY NAMES (not values) so the
+        // caller can keep them out of the codex config. Keys are unique across the
+        // two stores (the route layer forbids a name in both), so this only fills
+        // secret-only keys.
+        let mut secret_keys = Vec::new();
         if let Some(secret) = secret_api(kube)
             .get_opt(&object)
             .await
             .map_err(map_kube_err)?
         {
             for (k, v) in decode_secret_values(&secret) {
+                secret_keys.push(k.clone());
                 merged.insert(k, v);
             }
         }
-        Ok(Some((install, merged)))
+        Ok(Some((install, merged, secret_keys)))
     }
 }

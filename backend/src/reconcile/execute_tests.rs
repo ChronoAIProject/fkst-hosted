@@ -182,7 +182,7 @@ fn storage_creds_carry_the_single_nyxid_sa_into_the_session_secret() {
     assert_eq!(creds.base_url, "https://storage.example/proxy");
     assert_eq!(creds.bucket, "fkst-logs");
 
-    let data = credential_secret_data("ghs", "sk-llm", std::iter::empty(), &[], Some(creds));
+    let data = credential_secret_data("ghs", "sk-llm", std::iter::empty(), &[], &[], Some(creds));
     assert_eq!(data["storage-client-id"], "sa-client");
     assert_eq!(data["storage-client-secret"], "sa-secret");
     assert_eq!(data["storage-token-url"], "https://nyx.example/oauth/token");

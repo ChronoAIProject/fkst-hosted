@@ -11,7 +11,7 @@
 //! rotation (§5.4) is always picked up; only the static LLM key + user-env values
 //! are read (into `SecretString` / a plaintext map) and never logged.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{ExitCode, Stdio};
@@ -22,7 +22,7 @@ use tokio::process::Command;
 use crate::reserved_env::{is_reserved_env_key, LLM_ENV_KEY};
 use crate::session_spec::creds::CredsLayout;
 
-use super::codex::render_codex_config;
+use super::codex::{render_codex_config, CodexShellEnv};
 use super::creds_gate::{
     creds_wait_timeout_from_env, wait_for_creds_complete, CREDS_POLL_INTERVAL,
 };
@@ -198,9 +198,9 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     std::fs::write(&workspace_manifest, "[workspace]\nunits = []\n")
         .map_err(|e| format!("write {}: {e}", workspace_manifest.display()))?;
 
-    // 5. Render CODEX_HOME/config.toml (the API key rides LLM_ENV_KEY, never the
-    //    toml itself).
-    render_codex(env)?;
+    // 5. (CODEX_HOME/config.toml is rendered in step 6c below — after the
+    //    named-environment install — so its shell-environment policy can expose the
+    //    env-bin PATH + profile variables to codex's own shell commands.)
 
     // 6. Build the supervise argv + the child env.
     let args = build_supervise_args(
@@ -243,6 +243,20 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     // encoder) actually work at run time, not only pass PUT-time validation. Fail
     // closed — a broken install must not start a half-provisioned engine.
     run_env_install_commands(&creds, &mut child_env, runtime_root).await?;
+
+    // 6c. Render CODEX_HOME/config.toml NOW that child_env is final: its
+    //     [shell_environment_policy] exposes the named-environment's env-bin PATH +
+    //     FKST_ENV_BIN + non-secret variables to codex's own shell commands, so a
+    //     profile-installed tool (e.g. ffmpeg) is reachable from inside codex, not
+    //     only by the supervise process. (The API key rides LLM_ENV_KEY, never the
+    //     toml itself.)
+    //
+    //     The env-profile's SECRET values ride `user_env` too (the session injects
+    //     them via child_env), but they must NEVER be written into the plaintext
+    //     config.toml — so expose only the NON-SECRET variables to codex, per the
+    //     mounted secret-key manifest.
+    let codex_variables = non_secret_variables(&creds, &user_env);
+    render_codex(env, &child_env, &codex_variables)?;
 
     // 6b. Log streaming: spawn the in-pod collector BEFORE supervise so it captures
     //     the whole run. Streaming is unconditional — the collector redacts every
@@ -327,6 +341,52 @@ fn read_user_env(creds: &CredsLayout) -> BTreeMap<String, String> {
     map
 }
 
+/// The subset of `user_env` that is SAFE to write into the codex `config.toml`:
+/// the profile's non-secret variables, with the secret-valued keys removed per the
+/// mounted [`CredsLayout::secret_keys`] manifest. The secrets themselves still ride
+/// `user_env` (the session injects them into its process env) — they are only kept
+/// out of the plaintext config here.
+///
+/// Fails CLOSED: an unreadable or corrupt manifest exposes NO variables to codex
+/// (an empty map) rather than risk leaking a secret. An ABSENT manifest means the
+/// profile declared no secrets, so every variable is exposed.
+fn non_secret_variables(
+    creds: &CredsLayout,
+    user_env: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let secret_keys = match read_secret_keys(creds) {
+        Some(keys) => keys,
+        None => return BTreeMap::new(),
+    };
+    user_env
+        .iter()
+        .filter(|(key, _)| !secret_keys.contains(key.as_str()))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
+}
+
+/// Read the mounted secret-key manifest ([`CredsLayout::secret_keys`], a JSON array
+/// of env-var names). `Some(set)` on success (an empty set when the manifest is
+/// ABSENT — no secrets); `None` when the manifest exists but cannot be read or
+/// parsed, signalling the caller to fail closed.
+fn read_secret_keys(creds: &CredsLayout) -> Option<BTreeSet<String>> {
+    let path = creds.secret_keys();
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => match serde_json::from_str::<Vec<String>>(&raw) {
+            Ok(keys) => Some(keys.into_iter().collect()),
+            Err(error) => {
+                tracing::error!(error = %error, "run-substrate: corrupt secret-keys manifest; exposing NO variables to codex (fail closed)");
+                None
+            }
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Some(BTreeSet::new()),
+        Err(error) => {
+            tracing::error!(error = %error, "run-substrate: unreadable secret-keys manifest; exposing NO variables to codex (fail closed)");
+            None
+        }
+    }
+}
+
 /// Materialize the executable `gh` PATH shim into `shim_dir`.
 fn install_gh_shim(shim_dir: &Path) -> Result<(), String> {
     create_dir_idempotent(shim_dir)?;
@@ -339,7 +399,16 @@ fn install_gh_shim(shim_dir: &Path) -> Result<(), String> {
 }
 
 /// Render the operator-pinned codex `config.toml` into `CODEX_HOME`.
-fn render_codex(env: &SubstrateEnv) -> Result<(), String> {
+///
+/// `child_env` is the FINAL supervise env (after the named-environment install), and
+/// `user_env` the profile's non-secret variables. Both feed the rendered
+/// `[shell_environment_policy]` so codex's shell commands see the profile's tools
+/// and variables — secrets are deliberately not among them.
+fn render_codex(
+    env: &SubstrateEnv,
+    child_env: &[(String, String)],
+    user_env: &BTreeMap<String, String>,
+) -> Result<(), String> {
     let home = Path::new(&env.codex_home);
     create_dir_idempotent(home)?;
     // Best-effort tighten to 0700 (the config references the env_key, not the key
@@ -349,11 +418,28 @@ fn render_codex(env: &SubstrateEnv) -> Result<(), String> {
     {
         tracing::warn!(error = %error, "run-substrate: could not chmod CODEX_HOME to 0700");
     }
+    // Pull the env-bin-prepended PATH + FKST_ENV_BIN from the FINAL child_env
+    // (last write wins → search from the back); empty string when unset (no profile
+    // tools), which the renderer treats as "nothing to expose".
+    let lookup = |key: &str| -> &str {
+        child_env
+            .iter()
+            .rev()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value.as_str())
+            .unwrap_or("")
+    };
+    let shell_env = CodexShellEnv {
+        path: lookup(PATH_ENV),
+        tool_dir: lookup(crate::install::TOOL_DIR_ENV),
+        variables: user_env,
+    };
     let toml = render_codex_config(
         &env.llm_model,
         &env.llm_base_url,
         &env.llm_wire_api,
         LLM_ENV_KEY,
+        Some(&shell_env),
     );
     std::fs::write(home.join("config.toml"), toml)
         .map_err(|error| format!("write codex config.toml: {error}"))
@@ -561,5 +647,44 @@ mod tests {
             vec!["/custom/location"],
             "operator value must win, no duplicate"
         );
+    }
+
+    #[test]
+    fn non_secret_variables_exposes_all_when_no_secret_manifest() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let creds = CredsLayout::new(dir.path());
+        let user_env = BTreeMap::from([
+            ("BRAND_COLOR".to_string(), "0x0B5FFF".to_string()),
+            ("FONT_FILE".to_string(), "OpenSans.ttf".to_string()),
+        ]);
+        // No manifest on disk ⇒ the profile declared no secrets ⇒ expose every var.
+        assert_eq!(non_secret_variables(&creds, &user_env), user_env);
+    }
+
+    #[test]
+    fn non_secret_variables_excludes_the_manifest_secret_keys() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let creds = CredsLayout::new(dir.path());
+        std::fs::write(creds.secret_keys(), r#"["WATERMARK_TOKEN"]"#).expect("write manifest");
+        let user_env = BTreeMap::from([
+            ("BRAND_COLOR".to_string(), "0x0B5FFF".to_string()),
+            ("WATERMARK_TOKEN".to_string(), "shh".to_string()),
+        ]);
+        let got = non_secret_variables(&creds, &user_env);
+        assert!(got.contains_key("BRAND_COLOR"));
+        assert!(
+            !got.contains_key("WATERMARK_TOKEN"),
+            "a secret-valued key must never reach the codex config"
+        );
+    }
+
+    #[test]
+    fn non_secret_variables_fails_closed_on_a_corrupt_manifest() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let creds = CredsLayout::new(dir.path());
+        std::fs::write(creds.secret_keys(), "not json at all").expect("write manifest");
+        let user_env = BTreeMap::from([("BRAND_COLOR".to_string(), "0x0B5FFF".to_string())]);
+        // An unparseable manifest exposes NOTHING rather than risk leaking a secret.
+        assert!(non_secret_variables(&creds, &user_env).is_empty());
     }
 }
