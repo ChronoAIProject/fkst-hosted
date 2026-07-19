@@ -140,6 +140,7 @@ export function Level2Sidebar({
         <button
           type="button"
           onClick={() => setShowCreate(true)}
+          data-tour="new-session"
           className="font-ui font-semibold text-[12px] bg-amber text-amber-ink rounded-control px-3 py-1.5 transition-colors hover:brightness-[1.06] cursor-pointer"
         >
           {cc.newTrigger}
@@ -206,6 +207,7 @@ export function Level2Sidebar({
                   <button
                     type="button"
                     onClick={() => setWorkItemTarget(session)}
+                    data-tour="new-work-item"
                     className="self-start font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg transition-colors cursor-pointer"
                   >
                     {cc.addWorkItem}

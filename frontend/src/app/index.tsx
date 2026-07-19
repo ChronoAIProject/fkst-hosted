@@ -6,6 +6,7 @@ import { GetStarted } from '../pages/get-started';
 import { NotFound } from '../pages/not-found';
 import { ErrorBoundary, RouteErrorElement } from '../components/ui/error-boundary';
 import { ToastProvider, Toaster } from '../components/ui/toast';
+import { TourProvider } from '../components/tour/tour-context';
 import { LanguageProvider, useContent } from '../i18n';
 import { AuthProvider } from '../lib/auth/github-auth';
 
@@ -100,9 +101,14 @@ export function App() {
       <ErrorBoundary>
         <AuthProvider>
           {/* ToastProvider wraps the whole router tree so any page can raise
-              notices via useToast(); the one Toaster is mounted alongside. */}
+              notices via useToast(); the one Toaster is mounted alongside.
+              TourProvider wraps the RouterProvider tree so every route can
+              useTour() (the <TourOverlay/> itself is mounted inside Shell, the
+              router root, so the finish step's react-router Link resolves). */}
           <ToastProvider>
-            <RouterProvider router={router} future={{ v7_startTransition: true }} />
+            <TourProvider>
+              <RouterProvider router={router} future={{ v7_startTransition: true }} />
+            </TourProvider>
             <ShellToaster />
           </ToastProvider>
         </AuthProvider>

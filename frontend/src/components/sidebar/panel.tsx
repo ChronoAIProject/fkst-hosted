@@ -39,6 +39,7 @@ export function SidebarPanel({
   return (
     <aside
       aria-label={cc.sidebarAria}
+      data-tour="sidebar"
       // flex column so the ScrollArea's flex-1 min-h-0 can fill it; h-full
       // consumes the row height on desktop, while the narrow layout falls back
       // to a min-height floor (h-auto) since the stacked column no longer

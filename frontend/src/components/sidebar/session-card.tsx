@@ -81,7 +81,10 @@ export function SessionCard({
   const invalid = !!session.invalid_reason;
 
   return (
-    <div className="border border-line rounded-card bg-bg p-4 flex flex-col gap-3 min-w-0">
+    <div
+      data-tour="session-card"
+      className="border border-line rounded-card bg-bg p-4 flex flex-col gap-3 min-w-0"
+    >
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="min-w-0">
           <span className="font-display font-semibold text-[15px] text-fg">

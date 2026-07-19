@@ -88,6 +88,7 @@ export function Level0Sidebar({
         <button
           type="button"
           onClick={() => setShowCreate(true)}
+          data-tour="new-repo"
           className="font-ui font-semibold text-[12px] bg-amber text-amber-ink rounded-control px-3 py-1.5 transition-colors hover:brightness-[1.06] cursor-pointer flex-none"
         >
           {rc.newRepo}
