@@ -271,10 +271,11 @@ export interface SiteContent {
       liveEngineEmpty: string;
       queues: string;
       queueDepth: string;
+      queuePending: string;
       queueInFlight: string;
       queueRetrying: string;
-      /** Codex-run count line; `{n}` placeholder. */
-      codexRuns: string;
+      /** Pending-delivery count line; `{n}` placeholder. */
+      deliveries: string;
       /** Dead-letter count line; `{n}` placeholder. */
       deadLetters: string;
       // ---- Packages tab ----

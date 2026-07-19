@@ -86,7 +86,7 @@ describe('SessionDetailDrawer', () => {
     const user = userEvent.setup();
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse({ queues: [{ name: 'events', depth: 4 }], codex_runs: [] }))
+      vi.fn(async () => jsonResponse({ queues: [{ queue: 'events', depth: 4 }], deliveries: [] }))
     );
     render(
       <AuthProvider>
