@@ -78,13 +78,13 @@ describe('TabStatus', () => {
         session={session()}
         observe={{
           status: 'loaded',
-          snapshot: { queues: [{ name: 'events', depth: 3, in_flight: 1 }], codex_runs: [{}, {}] },
+          snapshot: { queues: [{ queue: 'events', depth: 3, in_flight: 1 }], deliveries: [{}, {}] },
         }}
         onLoadObserve={() => {}}
       />
     );
     expect(screen.getByText('events')).toBeInTheDocument();
-    expect(screen.getByText('2 codex runs')).toBeInTheDocument();
+    expect(screen.getByText('2 deliveries pending')).toBeInTheDocument();
   });
 
   it('shows the error state with a retry', () => {

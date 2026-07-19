@@ -8,7 +8,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 describe('getObserve', () => {
   it('GETs the encoded session observe path and returns the snapshot', async () => {
-    const snap = { queues: [{ name: 'q', depth: 3 }], codex_runs: [] };
+    const snap = { queues: [{ queue: 'q', depth: 3 }], deliveries: [] };
     const apiFetch = vi.fn(async () => jsonResponse(snap)) as ApiFetch;
     const body = await getObserve(apiFetch, 'abc 123');
     expect(apiFetch).toHaveBeenCalledWith('/api/v1/sessions/abc%20123/observe');

@@ -190,16 +190,22 @@ export interface LogFileContent {
 // the UI renders only what is present. NEVER assume a field exists.
 
 export interface ObserveQueue {
-  name?: string;
+  // The engine names the queue in a `queue` field (e.g.
+  // "workflow-writer.workflow_writer_materialization_tick").
+  queue?: string;
   depth?: number;
+  pending?: number;
   in_flight?: number;
   retrying?: number;
+  oldest_pending_age_ms?: number | null;
 }
 
 export interface ObserveSnapshot {
   queues?: ObserveQueue[];
+  // The delivery-queue snapshot (pending/retrying deliveries); the engine emits
+  // it as `deliveries`, not `codex_runs`.
+  deliveries?: unknown[];
   dead_letters?: unknown[];
-  codex_runs?: unknown[];
   [k: string]: unknown;
 }
 

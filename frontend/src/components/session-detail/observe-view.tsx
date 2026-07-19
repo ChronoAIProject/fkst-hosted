@@ -12,12 +12,13 @@ function QueueRow({ queue }: { queue: ObserveQueue }) {
   const t = useContent().dashboard.detail;
   const stats: Array<[string, number | undefined]> = [
     [t.queueDepth, queue.depth],
+    [t.queuePending, queue.pending],
     [t.queueInFlight, queue.in_flight],
     [t.queueRetrying, queue.retrying],
   ];
   return (
     <div className="flex items-center justify-between gap-3 py-1.5 min-w-0">
-      <code className="font-mono text-[11.5px] text-fg truncate min-w-0">{queue.name ?? '—'}</code>
+      <code className="font-mono text-[11.5px] text-fg truncate min-w-0">{queue.queue ?? '—'}</code>
       <div className="flex items-center gap-2 flex-none">
         {stats
           .filter(([, n]) => typeof n === 'number')
@@ -32,16 +33,17 @@ function QueueRow({ queue }: { queue: ObserveQueue }) {
 }
 
 /** Renders whatever an observe snapshot happens to carry — queues (with their
- *  depth / in-flight / retrying counters), a codex-run count and a dead-letter
- *  count. Tolerant by construction: absent or wrongly-typed fields are simply
- *  skipped, and when nothing usable is present the caller's `empty` shows. */
+ *  depth / pending / in-flight / retrying counters), a pending-delivery count and
+ *  a dead-letter count. Tolerant by construction: absent or wrongly-typed fields
+ *  are simply skipped, and when nothing usable is present the caller's `empty`
+ *  shows. */
 export function ObserveView({ snapshot }: { snapshot: ObserveSnapshot }) {
   const t = useContent().dashboard.detail;
   const queues = Array.isArray(snapshot.queues) ? snapshot.queues : [];
-  const codexRuns = arrayLen(snapshot.codex_runs);
+  const deliveries = arrayLen(snapshot.deliveries);
   const deadLetters = arrayLen(snapshot.dead_letters);
 
-  const nothing = queues.length === 0 && codexRuns == null && deadLetters == null;
+  const nothing = queues.length === 0 && deliveries == null && deadLetters == null;
   if (nothing) return <p className="font-mono text-[11.5px] text-ghost">{t.liveEngineEmpty}</p>;
 
   return (
@@ -51,13 +53,13 @@ export function ObserveView({ snapshot }: { snapshot: ObserveSnapshot }) {
           <SectionLabel>{t.queues}</SectionLabel>
           <div className="divide-y divide-[color-mix(in_oklab,var(--line)_55%,transparent)]">
             {queues.map((queue, i) => (
-              <QueueRow key={queue.name ?? `queue-${i}`} queue={queue} />
+              <QueueRow key={queue.queue ?? `queue-${i}`} queue={queue} />
             ))}
           </div>
         </div>
       )}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-dim">
-        {codexRuns != null && <span>{t.codexRuns.replace('{n}', String(codexRuns))}</span>}
+        {deliveries != null && <span>{t.deliveries.replace('{n}', String(deliveries))}</span>}
         {deadLetters != null && deadLetters > 0 && (
           <span className="text-red">{t.deadLetters.replace('{n}', String(deadLetters))}</span>
         )}
