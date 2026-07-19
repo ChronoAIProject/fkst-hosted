@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
+import { Link, NavLink, useLocation, useOutlet } from 'react-router-dom';
 import { FkstMark } from '../components/brand/fkst-mark';
 import { LanguageToggle } from '../components/layout/language-toggle';
 import { RouteTransition } from '../components/ui/motion';
@@ -42,6 +42,16 @@ export function Shell() {
   const c = useContent();
   const { isAuthenticated, signIn, signOut } = useAuth();
   const location = useLocation();
+  // useOutlet() snapshots the CURRENT route element; passing that (not a live
+  // <Outlet/>) into the keyed crossfade lets the exiting frame keep the old
+  // route while the entering frame shows the new one — a live <Outlet/> would
+  // render the destination in BOTH frames (double-mount) during the transition.
+  const outlet = useOutlet();
+  // The dashboard is a fixed-viewport app view: it fills <main> exactly and its
+  // panels scroll internally, so it must NOT sit inside the auto-height padded
+  // wrapper (that collapses its h-full chain) and carries no marketing footer.
+  // Doc/marketing routes keep the padded, footer-terminated scrolling layout.
+  const isApp = location.pathname.startsWith('/dashboard');
   const menuRef = useRef<HTMLDivElement>(null);
   // The single <main> is the app's sole scroll region (the body's overflow is
   // clipped by the css foundation), so the condense heuristic must observe THAT
@@ -254,29 +264,37 @@ export function Shell() {
             its end-of-document position). */}
         <main ref={mainRef} className="flex-1 min-h-0 overflow-y-auto">
           {/* Keyed on the pathname so a route change crossfades on the shared
-              curve; collapses to an instant swap under reduced motion. */}
-          <RouteTransition k={location.pathname}>
-            <div className="py-10 max-[480px]:py-8">
-              <Outlet />
-            </div>
+              curve; collapses to an instant swap under reduced motion. On the
+              app route the transition is h-full (main is a definite-height flex
+              item, so h-full resolves and the dashboard fills it); on doc routes
+              it is auto-height so its content overflows and <main> scrolls. */}
+          <RouteTransition
+            k={location.pathname}
+            className={isApp ? 'h-full' : ''}
+          >
+            <div className={isApp ? 'h-full' : 'py-10 max-[480px]:py-8'}>{outlet}</div>
           </RouteTransition>
 
-          {/* footer */}
-          <footer className="border-t border-line py-7 flex items-center gap-x-6 gap-y-2 flex-wrap font-mono text-[11.5px] text-ghost">
-            <span className="flex items-center gap-2">
-              <FkstMark className="text-[13px] text-dim" />
-              <span>{c.footer.tagline}</span>
-            </span>
-            <NavLink to="/get-started" className="text-faint hover:text-fg no-underline">
-              {c.footer.getStarted}
-            </NavLink>
-            <a href={REPO} target="_blank" rel="noreferrer" className="text-faint hover:text-fg no-underline">
-              {c.footer.github}
-            </a>
-            <a href={MANUAL_URL} target="_blank" rel="noreferrer" className="text-faint hover:text-fg no-underline">
-              {c.footer.manual}
-            </a>
-          </footer>
+          {/* Marketing footer — only on doc/marketing routes (it scrolls in at
+              the end of content). The app dashboard omits it so it can own the
+              full viewport without a scroll to reveal the footer. */}
+          {!isApp && (
+            <footer className="border-t border-line py-7 flex items-center gap-x-6 gap-y-2 flex-wrap font-mono text-[11.5px] text-ghost">
+              <span className="flex items-center gap-2">
+                <FkstMark className="text-[13px] text-dim" />
+                <span>{c.footer.tagline}</span>
+              </span>
+              <NavLink to="/get-started" className="text-faint hover:text-fg no-underline">
+                {c.footer.getStarted}
+              </NavLink>
+              <a href={REPO} target="_blank" rel="noreferrer" className="text-faint hover:text-fg no-underline">
+                {c.footer.github}
+              </a>
+              <a href={MANUAL_URL} target="_blank" rel="noreferrer" className="text-faint hover:text-fg no-underline">
+                {c.footer.manual}
+              </a>
+            </footer>
+          )}
         </main>
       </div>
 
