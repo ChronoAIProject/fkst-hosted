@@ -86,7 +86,7 @@ export function DrawerShell({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="anim-modal-in relative w-full max-w-[560px] h-full border-l border-line bg-raise shadow-modal-seat overflow-y-auto"
+        className="anim-drawer-in relative w-full max-w-[560px] h-full border-l border-line bg-raise shadow-modal-seat overflow-y-auto"
       >
         {children}
       </div>
