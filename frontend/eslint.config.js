@@ -92,12 +92,12 @@ export default tseslint.config({ ignores: ['dist', 'node_modules', 'storybook-st
         message: 'Banned decorative background gradient in template string (design.md §9). Use solid background colors instead.',
       },
       {
-        selector: 'Literal[value=/\\bshadow(?!-modal-seat\\b)(?:-[a-zA-Z0-9_-]+)?\\b/]',
-        message: 'Banned shadow class. Only "shadow-modal-seat" is allowed.',
+        selector: 'Literal[value=/\\bshadow-(?:sm|md|lg|xl|2xl|inner)\\b/]',
+        message: 'Banned Tailwind default shadow. Use the design-system shadow scale: shadow-1/2/3, shadow-glow(-amber|green|red), shadow-highlight-top, shadow-modal-seat, or shadow-[var(--shadow-N)].',
       },
       {
-        selector: 'TemplateElement[value.raw=/\\bshadow(?!-modal-seat\\b)(?:-[a-zA-Z0-9_-]+)?\\b/]',
-        message: 'Banned shadow class in template string. Only "shadow-modal-seat" is allowed.',
+        selector: 'TemplateElement[value.raw=/\\bshadow-(?:sm|md|lg|xl|2xl|inner)\\b/]',
+        message: 'Banned Tailwind default shadow in template string. Use the design-system shadow scale: shadow-1/2/3, shadow-glow(-amber|green|red), shadow-highlight-top, shadow-modal-seat, or shadow-[var(--shadow-N)].',
       },
     ],
   },

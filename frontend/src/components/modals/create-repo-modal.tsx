@@ -101,19 +101,21 @@ export function CreateRepoModal({
       <button
         type="button"
         onClick={onClose}
-        className="font-ui font-semibold text-[12.5px] border border-line rounded-control px-4 py-2 text-dim hover:text-fg transition-colors cursor-pointer"
+        className="font-ui font-semibold text-[12.5px] bg-glass border border-line rounded-control px-4 py-2 text-dim transition-[color,border-color,box-shadow,background] hover:text-fg hover:border-line-2 hover:bg-glass-2 hover:shadow-glow-amber cursor-pointer"
       >
         {rc.cancel}
       </button>
+      {/* Primary CTA: the brand amber→gold gradient fill, seated on a soft amber
+          glow with a one-shot sheen sweep on mount; hover lifts brightness. */}
       <button
         type="submit"
         form={FORM_ID}
         disabled={!nameValid || creating}
         className={cn(
-          'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-colors',
+          'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-[filter,box-shadow]',
           !nameValid || creating
-            ? 'bg-amber/50 text-amber-ink/60 cursor-not-allowed'
-            : 'bg-amber text-amber-ink hover:brightness-[1.06] cursor-pointer'
+            ? 'bg-amber/40 text-amber-ink/50 cursor-not-allowed'
+            : 'bg-grad-accent text-amber-ink shadow-[var(--shadow-1),var(--glow-amber)] anim-sheen hover:brightness-110 cursor-pointer'
         )}
       >
         {creating ? rc.creating : rc.submit}
@@ -195,7 +197,14 @@ export function CreateRepoModal({
           />
         </div>
 
-        {serverError && <ErrorNote message={serverError} />}
+        {/* Keyed on the message so a fresh error re-triggers the entrance: the
+            note rises + fades in (`.anim-notice-in`, disabled under reduced
+            motion) rather than popping. */}
+        {serverError && (
+          <div key={serverError} className="anim-notice-in">
+            <ErrorNote message={serverError} />
+          </div>
+        )}
       </form>
     </ModalShell>
   );

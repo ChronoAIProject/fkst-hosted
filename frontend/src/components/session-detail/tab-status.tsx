@@ -29,7 +29,7 @@ function WorkItemRow({ issue }: { issue: IssueDetail }) {
         href={issue.html_url}
         target="_blank"
         rel="noreferrer"
-        className="font-mono text-[11px] text-ghost hover:text-amber transition-colors flex-none"
+        className="hover-underline font-mono text-[11px] text-ghost hover:text-amber transition-colors flex-none"
       >
         #{issue.number}
       </a>
@@ -89,12 +89,18 @@ export function TabStatus({
                 <span
                   aria-hidden="true"
                   className={
-                    // transition-colors tweens the fill as a stage advances,
-                    // so the strip animates a stage lighting up rather than
-                    // snapping. Reduced-motion users get the instant color via
-                    // the global transition suppression.
-                    'w-1.5 h-1.5 rounded-full flex-none transition-colors ' +
-                    (current ? 'bg-amber' : reached ? 'bg-green' : 'bg-ghost')
+                    // transition-colors tweens the fill as a stage advances, so
+                    // the strip animates a stage lighting up rather than
+                    // snapping. The current stage breathes an amber glow
+                    // (anim-glow-pulse); reached stages carry a static green
+                    // bloom. Both collapse to their resting fill under
+                    // prefers-reduced-motion via the global suppression.
+                    'w-2 h-2 rounded-full flex-none transition-colors ' +
+                    (current
+                      ? 'bg-amber anim-glow-pulse'
+                      : reached
+                        ? 'bg-green shadow-glow-green'
+                        : 'bg-ghost')
                   }
                 />
                 <span
@@ -145,7 +151,7 @@ export function TabStatus({
           <button
             type="button"
             onClick={onLoadObserve}
-            className="self-start font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim hover:text-fg transition-colors cursor-pointer"
+            className="self-start font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim transition-[color,border-color,box-shadow] duration-150 hover:text-fg hover:border-line-2 hover:shadow-glow-amber cursor-pointer"
           >
             {t.liveEngine}
           </button>
@@ -167,7 +173,7 @@ export function TabStatus({
             <button
               type="button"
               onClick={onLoadObserve}
-              className="font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim hover:text-fg transition-colors cursor-pointer"
+              className="font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim transition-[color,border-color,box-shadow] duration-150 hover:text-fg hover:border-line-2 hover:shadow-glow-amber cursor-pointer"
             >
               {t.logsRefresh}
             </button>

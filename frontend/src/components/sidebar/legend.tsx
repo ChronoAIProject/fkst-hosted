@@ -5,8 +5,8 @@ import { Reveal } from '@/components/ui/motion';
 
 const rows = [
   { key: 'none', dot: 'bg-line-2' },
-  { key: 'installed', dot: 'bg-amber' },
-  { key: 'active', dot: 'bg-amber anim-dot-blink' },
+  { key: 'installed', dot: 'bg-amber shadow-glow-amber' },
+  { key: 'active', dot: 'bg-amber anim-dot-blink anim-glow-pulse' },
 ] as const;
 
 /** The three-status legend shown on every sidebar level, so the canvas's
@@ -30,7 +30,7 @@ export function StatusLegend() {
   } as const;
 
   return (
-    <div className="border border-line rounded-card bg-bg px-3 py-2.5 flex flex-col gap-1.5">
+    <div className="bg-glass backdrop-blur-glass border border-line rounded-card shadow-2 px-3 py-2.5 flex flex-col gap-1.5">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -40,7 +40,7 @@ export function StatusLegend() {
       >
         <span
           aria-hidden="true"
-          className={cn('font-mono text-[10px] text-ghost flex-none transition-transform', open && 'rotate-90')}
+          className={cn('font-mono text-[10px] text-ghost flex-none transition-transform group-hover:text-amber', open && 'rotate-90')}
         >
           ▸
         </span>

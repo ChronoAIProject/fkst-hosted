@@ -2,8 +2,10 @@ import { useContent } from '@/i18n';
 import { parentLevel } from './level';
 import type { CanvasLevel } from './level';
 
+// Ancestor crumb: quiet by default, brightens on hover with an underline-grow
+// (a gradient accent hairline that scales in from the left — .hover-underline).
 const crumbButton =
-  'font-mono text-[12px] text-dim hover:text-fg transition-colors cursor-pointer px-1.5 py-1 rounded-chip';
+  'hover-underline font-mono text-[12px] text-dim hover:text-fg transition-colors cursor-pointer px-1.5 py-1 rounded-chip';
 
 /** Breadcrumb + back affordance above the canvas. The current level renders
  *  as plain text (aria-current); ancestors are buttons that jump straight to
@@ -39,14 +41,19 @@ export function CanvasBreadcrumb({
   return (
     <nav
       aria-label={cc.breadcrumbAria}
-      className="flex items-center gap-1 flex-wrap min-h-[34px]"
+      // Elevated glass crumb bar: frosted translucent pill with a hairline
+      // border and a soft inner top highlight, so the trail floats above the
+      // canvas as its own surface. Layout (flex-wrap + min-h) is unchanged.
+      className="flex items-center gap-1 flex-wrap min-h-[34px] bg-glass backdrop-blur-glass border border-line rounded-control px-2 shadow-[var(--shadow-1),var(--highlight-top)]"
     >
       {parent != null && (
         <button
           type="button"
           onClick={() => onNavigate(parent)}
           aria-label={cc.backAria}
-          className="font-ui font-semibold text-[12px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg transition-colors cursor-pointer mr-2"
+          // Secondary glass button; hover warms the text and blooms a subtle
+          // amber glow, echoing the Controls cluster on the canvas.
+          className="font-ui font-semibold text-[12px] bg-glass-2 border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber transition-[color,border-color,box-shadow] cursor-pointer mr-2"
         >
           {cc.back}
         </button>
@@ -63,7 +70,13 @@ export function CanvasBreadcrumb({
               {crumb.label}
             </button>
           ) : (
-            <span aria-current="page" className="font-mono text-[12px] text-fg px-1.5 py-1">
+            // Current level: brand amber→gold gradient accent (clipped into the
+            // text) marks "you are here" without color alone carrying meaning —
+            // aria-current="page" is the semantic signal.
+            <span
+              aria-current="page"
+              className="grad-text font-mono font-semibold text-[12px] px-1.5 py-1"
+            >
               {crumb.label}
             </span>
           )}

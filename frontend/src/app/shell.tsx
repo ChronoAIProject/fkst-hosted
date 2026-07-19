@@ -20,11 +20,14 @@ export function nextCondensed(prev: boolean, y: number): boolean {
   return prev;
 }
 
+// Nav links carry the underline-grow hover cue (`.hover-underline` scales a
+// gradient underline in from the left); the active route keeps its raised pill
+// so the current page reads without relying on the hover-only underline.
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-  `text-[13.5px] no-underline px-3 py-[7px] rounded-control transition-colors ${
+  `hover-underline text-nav no-underline px-3 py-[7px] rounded-control transition-colors ${
     isActive
-      ? 'text-fg bg-raise hover:bg-raise-2'
-      : 'text-faint hover:text-dim hover:bg-[color-mix(in_oklab,var(--raise)_55%,transparent)]'
+      ? 'text-fg bg-raise'
+      : 'text-faint hover:text-dim'
   }`;
 
 /** Shared mono action styling for the inline auth/GitHub/CTA topbar controls. */
@@ -108,12 +111,15 @@ export function Shell() {
   }, [location.pathname]);
 
   return (
-    <div className="h-[100dvh] bg-bg text-fg font-ui flex flex-col overflow-hidden">
+    <div className="h-[100dvh] bg-bg bg-bg-glow bg-fixed text-fg font-ui flex flex-col overflow-hidden">
       <div className="max-w-shell w-full mx-auto px-6 max-[480px]:px-4 flex-1 min-h-0 flex flex-col">
-        {/* pinned topbar (the column itself never scrolls, so no sticky needed) */}
-        <div className="flex-none z-40 bg-bg">
+        {/* pinned topbar (the column itself never scrolls, so no sticky needed).
+            Refined glass bar: translucent --raise fill + backdrop-blur floats it
+            over the app bloom, a soft shadow-1 separates it, and a gradient
+            hairline (below) replaces the flat bottom border for a lit edge. */}
+        <div className="flex-none z-40 relative bg-glass backdrop-blur-glass shadow-1">
           <header
-            className={`flex items-center gap-4 border-b border-line transition-[height] duration-200 motion-reduce:transition-none ${
+            className={`flex items-center gap-4 transition-[height] duration-200 motion-reduce:transition-none ${
               condensed ? 'h-[48px]' : 'h-[62px]'
             }`}
           >
@@ -122,7 +128,10 @@ export function Shell() {
               className="text-fg no-underline inline-block flex-none"
               aria-label={c.nav.homeAria}
             >
-              <FkstMark className="text-[19px]" />
+              {/* Wordmark clips the amber→gold brand gradient into the letters
+                  (`.grad-text`); the mark's own amber counter-dot renders on top
+                  unaffected (it is a separately-filled child element). */}
+              <FkstMark className="text-[19px] grad-text" />
             </Link>
 
             <nav className="flex gap-0.5">
@@ -200,7 +209,9 @@ export function Shell() {
               </a>
               <NavLink
                 to="/get-started"
-                className="font-ui font-semibold text-[12.5px] bg-amber text-amber-ink rounded-control px-3.5 py-[7px] flex-none no-underline transition-colors hover:brightness-[1.06] max-[480px]:hidden"
+                // Primary CTA: brand gradient fill + card depth & amber bloom
+                // (`shadow-glow`); hover lifts brightness and glow together.
+                className="font-ui font-semibold text-[12.5px] bg-grad-accent text-amber-ink shadow-glow rounded-control px-3.5 py-[7px] flex-none no-underline transition-[filter,box-shadow] duration-150 hover:brightness-110 max-[480px]:hidden"
               >
                 {c.nav.getStartedCta}
               </NavLink>
@@ -227,7 +238,7 @@ export function Shell() {
                 {menuOpen && (
                   <div
                     role="menu"
-                    className="anim-notice-in absolute right-0 top-[calc(100%+6px)] z-50 min-w-[168px] rounded-control border border-line bg-raise shadow-modal-seat flex flex-col p-1"
+                    className="anim-notice-in absolute right-0 top-[calc(100%+6px)] z-50 min-w-[168px] rounded-control border border-line bg-glass backdrop-blur-glass shadow-modal-seat flex flex-col p-1"
                   >
                     {isAuthenticated ? (
                       <button
@@ -277,6 +288,13 @@ export function Shell() {
               </div>
             </div>
           </header>
+          {/* Gradient hairline bottom edge — a top-lit 1px sweep in place of the
+              flat border, reading like light catching the bar's lower lip. Pure
+              paint, no layout, ignores pointer events. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-grad-hairline"
+          />
         </div>
 
         {/* The SOLE scroll container: topbar stays pinned above; both the routed

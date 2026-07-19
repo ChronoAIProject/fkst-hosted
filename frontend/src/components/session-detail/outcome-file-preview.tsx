@@ -116,7 +116,7 @@ export function OutcomeFilePreview({
   };
 
   const retryClasses =
-    'self-start inline-flex items-center gap-1.5 font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg transition-colors cursor-pointer';
+    'self-start inline-flex items-center gap-1.5 font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber transition-[color,border-color,box-shadow] duration-150 cursor-pointer';
 
   return (
     <div className="flex flex-col gap-2 border-t border-line pt-2 mt-1">
@@ -146,7 +146,7 @@ export function OutcomeFilePreview({
             href={githubHref}
             target="_blank"
             rel="noreferrer"
-            className="font-ui font-semibold text-[11.5px] text-amber hover:brightness-[1.1] transition-colors"
+            className="hover-underline font-ui font-semibold text-[11.5px] text-amber hover:brightness-[1.1] transition-[filter] cursor-pointer"
           >
             {t.openOnGithub}
           </a>
@@ -154,20 +154,27 @@ export function OutcomeFilePreview({
       )}
 
       {state === 'ready' && file.kind === 'text' && text != null && (
-        <pre className="max-h-[40vh] overflow-auto border border-line rounded-card bg-bg p-3 font-mono text-[11.5px] leading-relaxed text-dim whitespace-pre-wrap break-words">
+        // Glass console surface, matching the log viewer + code-block treatment.
+        <pre className="max-h-[40vh] overflow-auto border border-line rounded-card bg-glass backdrop-blur-glass shadow-[var(--shadow-2),var(--highlight-top)] p-3 font-mono text-[11.5px] leading-relaxed text-dim whitespace-pre-wrap break-words">
           {text}
         </pre>
       )}
       {state === 'ready' && file.kind === 'image' && objectUrl && (
+        // Glass frame: translucent fill (shows through transparent PNGs) + card
+        // depth so committed media sits in a lifted preview, not on bare canvas.
         <img
           src={objectUrl}
           alt={basename(file.filename)}
-          className="max-w-full max-h-[40vh] rounded-card border border-line object-contain"
+          className="max-w-full max-h-[40vh] rounded-card border border-line bg-glass backdrop-blur-glass shadow-[var(--shadow-2),var(--highlight-top)] object-contain"
         />
       )}
       {state === 'ready' && file.kind === 'video' && objectUrl && (
         // eslint-disable-next-line jsx-a11y/media-has-caption -- user-committed media has no caption track
-        <video src={objectUrl} controls className="max-w-full max-h-[40vh] rounded-card border border-line" />
+        <video
+          src={objectUrl}
+          controls
+          className="max-w-full max-h-[40vh] rounded-card border border-line bg-glass backdrop-blur-glass shadow-[var(--shadow-2),var(--highlight-top)]"
+        />
       )}
       {state === 'ready' && file.kind === 'audio' && objectUrl && (
         // eslint-disable-next-line jsx-a11y/media-has-caption -- user-committed audio has no caption track
@@ -184,7 +191,7 @@ export function OutcomeFilePreview({
           onClick={onDownload}
           disabled={downloading}
           aria-label={t.downloadAria.replace('{name}', basename(file.filename))}
-          className="self-start inline-flex items-center gap-1.5 font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg transition-colors cursor-pointer disabled:cursor-default disabled:hover:text-dim"
+          className="self-start inline-flex items-center gap-1.5 font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber transition-[color,border-color,box-shadow] duration-150 cursor-pointer disabled:cursor-default disabled:hover:text-dim disabled:hover:border-line disabled:hover:shadow-none"
         >
           {downloading && <Spinner />}
           {t.download}

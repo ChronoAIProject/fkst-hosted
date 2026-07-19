@@ -156,12 +156,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return <ToastContext.Provider value={value}>{children}</ToastContext.Provider>;
 }
 
-/** Left-edge accent per intent. Info stays neutral so success/error read as the
- *  only colored states (semaphore used sparingly, per the token guidance). */
+/** Left-edge accent + status-matched glow per intent. Info stays neutral so
+ *  success/error read as the only colored states (semaphore used sparingly, per
+ *  the token guidance). The glow rides on the resting card via a composed
+ *  shadow (card depth + colored bloom) so the intent registers at a glance. */
 const KIND_ACCENT: Record<ToastKind, string> = {
-  success: 'border-l-green',
-  error: 'border-l-red',
-  info: 'border-l-line-2',
+  success: 'border-l-green shadow-[var(--highlight-top),var(--shadow-2),var(--glow-green)]',
+  error: 'border-l-red shadow-[var(--highlight-top),var(--shadow-2),var(--glow-red)]',
+  info: 'border-l-line-2 shadow-[var(--highlight-top),var(--shadow-2)]',
 };
 
 /**
@@ -206,7 +208,10 @@ export function Toaster({
             exit={reduce ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.98 }}
             transition={{ duration: reduce ? 0 : NOTICE_MS / 1000, ease: MOTION_EASE }}
             className={cn(
-              'pointer-events-auto flex items-start gap-3 rounded-card border border-line border-l-2 bg-raise-2 px-3 py-2 text-[12.5px] text-dim',
+              // Frosted glass notice: translucent raise fill + backdrop blur,
+              // a hairline border with a thicker status-colored left edge, and
+              // the inner top highlight from .glass for a lit raised edge.
+              'glass pointer-events-auto flex items-start gap-3 rounded-card border border-line border-l-2 backdrop-blur-glass px-3 py-2 text-[12.5px] text-dim',
               KIND_ACCENT[t.kind]
             )}
           >

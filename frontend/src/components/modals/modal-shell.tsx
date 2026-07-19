@@ -124,18 +124,41 @@ export function ModalShell({
     // OverlayPresence owns MOTION ONLY (scrim fade + panel scale/fade on both
     // open AND close). Its panel is neutralized to `presentation` so the real
     // labelled dialog — with the focus trap ref, aria-labelledby and Escape
-    // handling — stays in ModalShell, exactly as before this refactor.
-    <OverlayPresence open={open} variant="modal" role="presentation" className="w-full max-w-[460px]">
+    // handling — stays in ModalShell, exactly as before this refactor. The scrim
+    // gains a faint backdrop blur so the page recedes behind the dialog (a
+    // subtly stronger scrim than a flat dim); it collapses to nothing under
+    // reduced motion isn't needed — a static blur is pure paint, not motion.
+    <OverlayPresence
+      open={open}
+      variant="modal"
+      role="presentation"
+      className="w-full max-w-[460px]"
+      backdropClassName="backdrop-blur-[2px]"
+    >
+      {/* Premium glass panel: a translucent --glass fill (padding-box) over a
+          neutral top-lit gradient hairline (border-box) so the 1px edge catches
+          light, backdrop-blurred, seated on a deep drop shadow + inner top
+          highlight + a soft amber bloom. The two-layer padding/border-box
+          background is the same mechanism as `.grad-border`, kept inline here so
+          the fill stays translucent (glass) instead of the utility's opaque
+          --raise, which would defeat the backdrop blur. */}
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="flex max-h-[85vh] flex-col overflow-hidden border border-line rounded-modal bg-raise shadow-modal-seat"
+        style={{
+          background:
+            'linear-gradient(var(--glass), var(--glass)) padding-box, var(--grad-hairline) border-box',
+        }}
+        className="flex max-h-[85vh] flex-col overflow-hidden rounded-modal border border-transparent backdrop-blur-glass shadow-[var(--highlight-top),0_24px_60px_-22px_rgba(0,0,0,.62),var(--glow-amber)]"
       >
         <div className="shrink-0 px-6 pt-6 max-[600px]:px-5 max-[600px]:pt-5">
-          <h3 id={titleId} className="font-display font-semibold text-modal-title text-fg">
+          <h3
+            id={titleId}
+            className="grad-text grad-text-fg font-display font-semibold text-modal-title"
+          >
             {title}
           </h3>
         </div>
@@ -145,7 +168,10 @@ export function ModalShell({
           <div className="flex flex-col gap-4">{children}</div>
         </ScrollArea>
         {footer != null && (
-          <div className="shrink-0 border-t border-line bg-raise px-6 py-4 max-[600px]:px-5">
+          // Sticky action bar: a lighter nested glass tint + top hairline reads
+          // as a raised footer over the blurred panel (bg-raise would go opaque
+          // and break the glass illusion at the bottom edge).
+          <div className="shrink-0 border-t border-line bg-glass-2 px-6 py-4 max-[600px]:px-5">
             {footer}
           </div>
         )}

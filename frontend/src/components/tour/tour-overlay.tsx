@@ -85,9 +85,9 @@ function placeTooltip(
 }
 
 const SECONDARY_BTN =
-  'font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim hover:text-fg transition-colors cursor-pointer';
+  'font-ui font-semibold text-[12px] grad-border bg-glass backdrop-blur-glass rounded-control px-3 py-1.5 text-dim hover:text-fg hover:shadow-glow-amber transition-[color,box-shadow] duration-200 cursor-pointer';
 const PRIMARY_BTN =
-  'font-ui font-semibold text-[12px] bg-amber text-amber-ink rounded-control px-3.5 py-1.5 no-underline inline-flex items-center transition-[filter] hover:brightness-[1.06] cursor-pointer';
+  'anim-sheen font-ui font-semibold text-[12px] bg-grad-accent text-amber-ink rounded-control px-3.5 py-1.5 no-underline inline-flex items-center shadow-[var(--shadow-2),var(--glow-amber)] transition-[filter,box-shadow] hover:brightness-110 cursor-pointer';
 
 /** Progress counter + Skip/Back/Next controls, shared by modal and spotlight
  *  steps. The final (finish) step swaps Skip/Next for a Get Started link and a
@@ -319,9 +319,11 @@ function SpotlightStep({
             width: rect.width + PAD * 2,
             height: rect.height + PAD * 2,
             borderRadius: 10,
-            // The huge spread paints the surrounding dim; the element interior
-            // stays clear so the target shows through, ringed by the outline.
-            boxShadow: `0 0 0 9999px ${dimBg}`,
+            // The huge spread paints the surrounding dim (kept dim, unchanged);
+            // the element interior stays clear so the target shows through. A
+            // trailing amber bloom rings the highlight so the focus target reads
+            // as brand-lit, not just outlined.
+            boxShadow: `0 0 0 9999px ${dimBg}, var(--glow-amber)`,
             outline: '2px solid var(--amber)',
             outlineOffset: 2,
           }}
@@ -337,7 +339,7 @@ function SpotlightStep({
         aria-modal="true"
         aria-labelledby={`tour-${step.id}`}
         tabIndex={-1}
-        className="fixed w-[320px] max-w-[calc(100vw-24px)] border border-line rounded-panel bg-raise shadow-modal-seat p-5 outline-none"
+        className="fixed w-[320px] max-w-[calc(100vw-24px)] grad-border grad-border-accent bg-glass backdrop-blur-glass rounded-panel shadow-[var(--highlight-top),var(--shadow-3),var(--glow-amber)] p-5 outline-none"
         style={{
           top: pos?.top ?? 0,
           left: pos?.left ?? 0,
@@ -350,7 +352,7 @@ function SpotlightStep({
       >
         <h3
           id={`tour-${step.id}`}
-          className="font-display font-semibold text-[15px] text-fg"
+          className="grad-text grad-text-fg font-display font-semibold text-[15px]"
         >
           {copy.title}
         </h3>

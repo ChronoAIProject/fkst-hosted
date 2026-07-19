@@ -44,7 +44,12 @@ export function SidebarPanel({
       // consumes the row height on desktop, while the narrow layout falls back
       // to a min-height floor (h-auto) since the stacked column no longer
       // bounds it. overflow-hidden clips the scroll body to the rounded shell.
-      className="w-[400px] max-[1100px]:w-full flex-none flex flex-col min-h-0 h-full max-[1100px]:h-auto max-[1100px]:min-h-[22rem] border border-line rounded-panel bg-raise overflow-hidden"
+      //
+      // Elevated glass card: a translucent --raise fill + backdrop-blur lifts
+      // the panel off the canvas, a hairline + shadow-2 give it a defined,
+      // floating edge. Purely visual — the flex/ScrollArea scroll architecture
+      // is untouched.
+      className="w-[400px] max-[1100px]:w-full flex-none flex flex-col min-h-0 h-full max-[1100px]:h-auto max-[1100px]:min-h-[22rem] border border-line rounded-panel bg-glass backdrop-blur-glass shadow-2 overflow-hidden"
     >
       <ScrollArea className="p-5">
         <FadeSwap k={`${levelKey(level)}:${loaded ? 'ready' : 'loading'}`}>{children}</FadeSwap>

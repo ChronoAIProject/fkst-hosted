@@ -141,7 +141,7 @@ export function Level2Sidebar({
           type="button"
           onClick={() => setShowCreate(true)}
           data-tour="new-session"
-          className="font-ui font-semibold text-[12px] bg-amber text-amber-ink rounded-control px-3 py-1.5 transition-colors hover:brightness-[1.06] cursor-pointer"
+          className="anim-sheen font-ui font-semibold text-[12px] bg-grad-accent text-amber-ink rounded-control px-3 py-1.5 shadow-[var(--shadow-1),var(--glow-amber)] transition-[filter,box-shadow] hover:brightness-110 cursor-pointer"
         >
           {cc.newTrigger}
         </button>
@@ -168,7 +168,7 @@ export function Level2Sidebar({
       {/* A failed refresh with last-good data present keeps the list and
           only flags staleness; the blocking error is for no-data-at-all. */}
       {loadFailed && data != null && (
-        <p className="border border-line border-l-2 border-l-amber rounded-card bg-[color-mix(in_oklab,var(--raise)_55%,transparent)] px-3 py-2 font-mono text-[11.5px] text-dim">
+        <p className="glass border border-line border-l-2 border-l-amber rounded-card px-3 py-2 font-mono text-[11.5px] text-dim shadow-[var(--shadow-1),var(--glow-amber)]">
           {cc.sessionsStaleNotice}
         </p>
       )}
@@ -176,13 +176,13 @@ export function Level2Sidebar({
       {loadFailed && data == null ? (
         // The first fetch failed with nothing to show: recovery must not depend
         // on the silent 15 s poll, so offer an immediate Retry.
-        <div className="border border-line border-l-2 border-l-red rounded-card bg-[color-mix(in_oklab,var(--raise)_55%,transparent)] px-4 py-3 flex flex-col gap-3 text-[13px] text-dim">
+        <div className="glass border border-line border-l-2 border-l-red rounded-card px-4 py-3 flex flex-col gap-3 text-[13px] text-dim shadow-[var(--shadow-2),var(--glow-red)]">
           <span>{cc.sessionsLoadFailed}</span>
           <button
             type="button"
             onClick={requestRefresh}
             disabled={refreshing}
-            className="self-start inline-flex items-center gap-1.5 font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-fg transition-colors hover:border-[color-mix(in_oklab,var(--amber)_45%,var(--line))] disabled:opacity-60 disabled:cursor-default cursor-pointer"
+            className="self-start inline-flex items-center gap-1.5 font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-fg transition-[color,border-color,box-shadow] hover:border-line-2 hover:shadow-glow-amber disabled:opacity-60 disabled:cursor-default cursor-pointer"
           >
             {refreshing && <Spinner className="w-2.5 h-2.5" />}
             {refreshing ? cc.sessionsRefreshing : cc.sessionsRetry}
@@ -208,7 +208,7 @@ export function Level2Sidebar({
                     type="button"
                     onClick={() => setWorkItemTarget(session)}
                     data-tour="new-work-item"
-                    className="self-start font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg transition-colors cursor-pointer"
+                    className="self-start font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim transition-[color,border-color,box-shadow] hover:text-fg hover:border-line-2 hover:shadow-glow-amber cursor-pointer"
                   >
                     {cc.addWorkItem}
                   </button>

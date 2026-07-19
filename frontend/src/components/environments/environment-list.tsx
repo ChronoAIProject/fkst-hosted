@@ -6,6 +6,22 @@ import type { EnvironmentProfileSummary } from '@/lib/api/types';
 import type { EnvManagerStrings } from '@/i18n/en/environments';
 import { Note, Spinner, fmt, statusTone, type ListState } from './environments-drawer';
 
+/** Resting depth + a soft status-matched glow so a profile's health reads at a
+ *  glance (mirrors the session-card treatment). `.hover-lift` swaps in the raised
+ *  shadow + amber bloom on hover, so this returns only the resting composition. */
+function statusGlow(status: string): string {
+  switch (statusTone(status)) {
+    case 'green':
+      return 'shadow-[var(--shadow-2),var(--glow-green)]';
+    case 'red':
+      return 'shadow-[var(--shadow-2),var(--glow-red)]';
+    case 'amber':
+      return 'shadow-[var(--shadow-2),var(--glow-amber)]';
+    default:
+      return 'shadow-2';
+  }
+}
+
 /** One tappable row: name + status chip, validated timestamp, and the three
  *  content counts. Whole row is a button so keyboard users open it with Enter. */
 function EnvironmentRow({
@@ -30,10 +46,17 @@ function EnvironmentRow({
         type="button"
         onClick={() => onOpen(profile.name)}
         aria-label={fmt(t.openAria, { name: profile.name })}
-        className="w-full text-left rounded-card border border-line bg-raise-2 px-3.5 py-3 flex flex-col gap-2 hover:border-line-2 transition-colors cursor-pointer"
+        // Elevated glass card: gradient hairline edge + status-matched resting
+        // glow, with a hover-lift into raised depth + amber bloom. The whole row
+        // stays a single focusable button (behavior/roles unchanged).
+        className={`grad-border hover-lift group w-full text-left rounded-card px-3.5 py-3 flex flex-col gap-2 cursor-pointer ${statusGlow(
+          profile.status
+        )}`}
       >
         <div className="flex items-center justify-between gap-2">
-          <span className="font-mono text-[13px] text-fg truncate">{profile.name}</span>
+          <span className="font-display font-semibold text-[13.5px] text-fg truncate group-hover:text-amber transition-colors">
+            {profile.name}
+          </span>
           <Chip tone={statusTone(profile.status)}>{profile.status}</Chip>
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -71,7 +94,9 @@ export function EnvironmentList({
         <button
           type="button"
           onClick={onNew}
-          className="font-ui font-semibold text-[12.5px] rounded-control px-3.5 py-2 bg-amber text-amber-ink hover:brightness-[1.06] transition-colors cursor-pointer"
+          // Primary CTA: brand gradient fill on amber ink, card depth + amber
+          // bloom, a one-shot sheen sweep on mount, brightening on hover.
+          className="anim-sheen font-ui font-semibold text-[12.5px] rounded-control px-3.5 py-2 bg-grad-accent text-amber-ink shadow-[var(--shadow-2),var(--glow-amber)] hover:brightness-110 transition-[filter,box-shadow] cursor-pointer"
         >
           + {t.newEnvironment}
         </button>
@@ -85,12 +110,12 @@ export function EnvironmentList({
       )}
 
       {state.status === 'error' && (
-        <div className="flex flex-col items-start gap-2">
+        <div className="anim-row-in flex flex-col items-start gap-2 rounded-card bg-glass backdrop-blur-glass border border-line border-l-2 border-l-red px-3.5 py-3 shadow-[var(--shadow-2),var(--glow-red)]">
           <Note>{t.listLoadFailed}</Note>
           <button
             type="button"
             onClick={onRetry}
-            className="font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg transition-colors cursor-pointer"
+            className="font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber transition-[color,border-color,box-shadow] cursor-pointer"
           >
             {t.retry}
           </button>
@@ -98,8 +123,8 @@ export function EnvironmentList({
       )}
 
       {state.status === 'loaded' && state.profiles.length === 0 && (
-        <div className="flex flex-col gap-1.5 rounded-card border border-dashed border-line px-4 py-6 text-center">
-          <p className="font-ui text-[13px] text-dim">{t.listEmpty}</p>
+        <div className="anim-row-in flex flex-col gap-1.5 rounded-card border border-dashed border-line-2 bg-glass backdrop-blur-glass px-4 py-7 text-center shadow-1">
+          <p className="font-display font-semibold text-[13.5px] text-dim">{t.listEmpty}</p>
           <p className="font-mono text-[11.5px] text-ghost">{t.listEmptyHint}</p>
         </div>
       )}

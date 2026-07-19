@@ -223,7 +223,8 @@ export function Dashboard() {
   const header = (
     <header className="flex-none">
       <Eyebrow>{d.eyebrow}</Eyebrow>
-      <h1 className="mt-5 font-display font-bold text-[clamp(28px,4vw,40px)] leading-[1.1] tracking-[-0.02em] text-fg">
+      {/* Page headline as a bright fg->dim gradient sweep (legible low end). */}
+      <h1 className="grad-text grad-text-fg mt-5 font-display font-bold text-[clamp(28px,4vw,40px)] leading-[1.1] tracking-[-0.02em]">
         {d.title}
       </h1>
       <p className="mt-5 text-[15px] leading-relaxed text-dim max-w-[68ch]">{d.lede}</p>
@@ -245,7 +246,8 @@ export function Dashboard() {
     <div className="flex flex-col gap-8 max-w-[960px]">
       {header}
       {error && !errorDismissed && (
-        <div className="border border-line border-l-2 border-l-red rounded-card bg-[color-mix(in_oklab,var(--raise)_55%,transparent)] px-4 py-3 flex items-start gap-3">
+        // Frosted danger notice: glass fill, red left accent + a soft red bloom.
+        <div className="anim-row-in border border-line border-l-2 border-l-red rounded-card bg-glass backdrop-blur-glass shadow-[var(--shadow-1),var(--glow-red)] px-4 py-3 flex items-start gap-3">
           <div className="min-w-0 flex-1">
             {/* Map the callback's real OAuth slug to specific copy; the raw slug
                 stays visible (mono) so an unrecognized one is still diagnosable. */}
@@ -261,14 +263,15 @@ export function Dashboard() {
           </button>
         </div>
       )}
-      <section className="border border-line rounded-panel bg-raise p-8 max-[600px]:p-5 flex flex-col items-start gap-4">
-        <h2 className="font-display font-semibold text-[20px] text-fg">{d.signInTitle}</h2>
+      {/* Hero-accent sign-in card: amber->gold hairline + card depth & amber bloom. */}
+      <section className="anim-row-in grad-border grad-border-accent rounded-panel p-8 max-[600px]:p-5 flex flex-col items-start gap-4 shadow-glow shadow-highlight-top">
+        <h2 className="grad-text grad-text-fg font-display font-semibold text-[20px]">{d.signInTitle}</h2>
         <p className="text-[14px] leading-relaxed text-dim max-w-[56ch]">{d.signInBody}</p>
         {configured ? (
           <button
             type="button"
             onClick={signIn}
-            className="font-ui font-semibold text-[13.5px] bg-amber text-amber-ink rounded-control px-5 py-2.5 transition-colors hover:brightness-[1.06] cursor-pointer"
+            className="anim-sheen relative overflow-hidden font-ui font-semibold text-[13.5px] bg-grad-accent text-amber-ink rounded-control px-5 py-2.5 transition-[filter] hover:brightness-110 cursor-pointer shadow-[var(--shadow-2),var(--glow-amber)]"
           >
             {c.auth.signIn}
           </button>
@@ -282,7 +285,10 @@ export function Dashboard() {
   const unconfiguredBody = (
     <div className="flex flex-col gap-8 max-w-[960px]">
       {header}
-      <p className="font-mono text-[12px] text-ghost">{d.notConfigured}</p>
+      {/* Gradient-hairline glass card frames the not-configured notice. */}
+      <section className="anim-row-in grad-border rounded-panel p-8 max-[600px]:p-5 shadow-2 shadow-highlight-top">
+        <p className="font-mono text-[12px] text-ghost">{d.notConfigured}</p>
+      </section>
     </div>
   );
 
@@ -315,7 +321,10 @@ export function Dashboard() {
       <CanvasSkeleton />
     ) : canvasView === 'empty' ? (
       <div className="w-full h-full flex items-center justify-center p-8">
-        <p className="text-[13.5px] text-dim text-center max-w-[36ch]">{cc.noAccounts}</p>
+        {/* Gradient-hairline glass card lifts the empty message off the canvas. */}
+        <div className="anim-row-in grad-border rounded-card px-6 py-5 shadow-2 shadow-highlight-top">
+          <p className="text-[13.5px] text-dim text-center max-w-[36ch]">{cc.noAccounts}</p>
+        </div>
       </div>
     ) : (
       <CanvasFlow
@@ -377,7 +386,9 @@ export function Dashboard() {
       {/* Involuntary expiry: prompt to re-authenticate WITHOUT tearing down the
           body, so the last-good canvas + the user's level/selection persist. */}
       {sessionExpired && (
-        <div className="flex-none border border-line border-l-2 border-l-amber rounded-card bg-[color-mix(in_oklab,var(--raise)_55%,transparent)] px-4 py-3 flex items-center gap-4 flex-wrap">
+        // Frosted re-auth prompt: glass fill, amber left accent + a soft amber
+        // bloom, and a gradient CTA — without tearing down the last-good body.
+        <div className="anim-row-in flex-none border border-line border-l-2 border-l-amber rounded-card bg-glass backdrop-blur-glass shadow-[var(--shadow-1),var(--glow-amber)] px-4 py-3 flex items-center gap-4 flex-wrap">
           <div className="min-w-0">
             <p className="font-ui font-semibold text-[13.5px] text-fg">{d.sessionExpiredTitle}</p>
             <p className="text-[12.5px] text-dim mt-0.5 max-w-[64ch]">{d.sessionExpiredBody}</p>
@@ -385,7 +396,7 @@ export function Dashboard() {
           <button
             type="button"
             onClick={signIn}
-            className="ml-auto flex-none font-ui font-semibold text-[12.5px] bg-amber text-amber-ink rounded-control px-4 py-2 transition-colors hover:brightness-[1.06] cursor-pointer"
+            className="anim-sheen relative overflow-hidden ml-auto flex-none font-ui font-semibold text-[12.5px] bg-grad-accent text-amber-ink rounded-control px-4 py-2 transition-[filter] hover:brightness-110 cursor-pointer shadow-[var(--shadow-1),var(--glow-amber)]"
           >
             {d.sessionExpiredAction}
           </button>
@@ -404,7 +415,7 @@ export function Dashboard() {
           disabled={overviewRefreshing}
           aria-busy={overviewRefreshing}
           data-tour="refresh"
-          className="font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim hover:text-fg transition-colors cursor-pointer disabled:cursor-default disabled:hover:text-dim inline-flex items-center gap-1.5"
+          className="font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim hover:text-fg hover:shadow-glow-amber transition-[color,box-shadow] cursor-pointer disabled:cursor-default disabled:hover:text-dim disabled:hover:shadow-none inline-flex items-center gap-1.5"
         >
           {overviewRefreshing && (
             <span
@@ -419,20 +430,21 @@ export function Dashboard() {
       {/* A refresh that fails with data on screen must not blank it — flag the
           staleness without blocking the (still valid) last-good view. */}
       {overviewFailed && overview != null && (
-        <p className="flex-none border border-line border-l-2 border-l-amber rounded-card bg-[color-mix(in_oklab,var(--raise)_55%,transparent)] px-3 py-2 font-mono text-[11.5px] text-dim">
+        <p className="anim-row-in flex-none border border-line border-l-2 border-l-amber rounded-card bg-glass backdrop-blur-glass shadow-[var(--shadow-1),var(--glow-amber)] px-3 py-2 font-mono text-[11.5px] text-dim">
           {d.repos.refreshFailedStale}
         </p>
       )}
 
       {overviewLoadError ? (
         <div className="flex-1 min-h-0 flex items-center justify-center border border-line rounded-panel bg-bg p-8">
-          <div className="flex flex-col items-center gap-4 text-center max-w-[42ch]">
+          {/* Gradient-hairline glass card centers the failure + a glowing retry. */}
+          <div className="anim-row-in grad-border rounded-card px-8 py-7 shadow-2 shadow-highlight-top flex flex-col items-center gap-4 text-center max-w-[42ch]">
             <p className="text-[14px] text-dim">{d.repos.loadFailed}</p>
             <button
               type="button"
               onClick={refetchOverview}
               disabled={overviewRefreshing}
-              className="font-ui font-semibold text-[12.5px] border border-line rounded-control px-4 py-2 text-fg hover:brightness-[1.06] transition-colors cursor-pointer disabled:cursor-default"
+              className="font-ui font-semibold text-[12.5px] border border-line rounded-control px-4 py-2 text-fg hover:shadow-glow-amber hover:brightness-110 transition-[filter,box-shadow] cursor-pointer disabled:cursor-default disabled:hover:shadow-none"
             >
               {d.retry}
             </button>

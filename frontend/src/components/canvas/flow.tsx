@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { CSSProperties } from 'react';
-import { Controls, ReactFlow, useReactFlow } from '@xyflow/react';
+import { Background, BackgroundVariant, Controls, ReactFlow, useReactFlow } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useContent } from '@/i18n';
 import type { AccountOverview, RepoOverview, RepoSessionsResponse } from '@/lib/api/types';
@@ -28,17 +28,33 @@ const nodeTypes = {
 // disabled under prefers-reduced-motion (collapses to the visible end state).
 const NODE_ENTER_CLASS = 'anim-overlay-in';
 
-// Dark/light theme tokens for the zoom/fit Controls, wired through React
-// Flow's documented CSS custom properties so the buttons match the app
-// surface instead of the library's default white chrome. Cast because
-// custom properties are not part of the CSSProperties type.
+// Theme tokens for the zoom/fit Controls, wired through React Flow's documented
+// CSS custom properties so the buttons read as a glass control cluster instead
+// of the library's default white chrome. Buttons sit transparent so the glass
+// container behind them (className) shows through; hover paints an amber tint
+// (the reduced-motion-safe stand-in for the amber glow). Cast because custom
+// properties are not part of the CSSProperties type.
 const CONTROLS_STYLE = {
-  '--xy-controls-button-background-color': 'var(--raise)',
-  '--xy-controls-button-background-color-hover': 'var(--raise-2)',
-  '--xy-controls-button-color': 'var(--fg)',
-  '--xy-controls-button-color-hover': 'var(--fg)',
-  '--xy-controls-button-border-color': 'var(--line)',
+  '--xy-controls-button-background-color': 'transparent',
+  '--xy-controls-button-background-color-hover': 'color-mix(in oklab, var(--amber) 20%, transparent)',
+  '--xy-controls-button-color': 'var(--dim)',
+  '--xy-controls-button-color-hover': 'var(--amber)',
+  '--xy-controls-button-border-color': 'color-mix(in oklab, var(--line) 70%, transparent)',
 } as CSSProperties;
+
+// Glass cluster chrome for the Controls container: translucent frosted panel,
+// hairline border, layered card depth + inner top highlight, corners clipped so
+// the stacked buttons read as one rounded pill. `!` overrides React Flow's own
+// `.react-flow__controls` background/shadow/radius defaults. Amber hover glow on
+// each button comes from CONTROLS_STYLE above (transition-safe tint, not motion).
+const CONTROLS_CLASS =
+  '!bg-glass backdrop-blur-glass !border !border-line !rounded-control overflow-hidden ' +
+  '!shadow-[var(--shadow-2),var(--highlight-top)]';
+
+// Faint low-contrast dot field: gives the dark canvas a sense of depth and a
+// paper-like texture without competing with the amber nodes. Pure paint (SVG
+// pattern), no layout, no scroll — a fixed backdrop the nodes float above.
+const BG_DOT_COLOR = 'color-mix(in oklab, var(--fg) 7%, transparent)';
 
 // Match the viewport fit the controller uses, so the Controls "fit view"
 // reset re-centers to the same framing as an automatic refit.
@@ -187,6 +203,8 @@ export function CanvasFlow({
       proOptions={{ hideAttribution: false }}
       className="bg-bg"
     >
+      {/* Ambient dot texture behind the nodes (low-contrast, tasteful depth). */}
+      <Background variant={BackgroundVariant.Dots} gap={24} size={1} color={BG_DOT_COLOR} />
       {/* Discoverable re-center path: when a large fleet is squeezed by fitView
           against minZoom, the fit-view button restores framing and zoom in/out
           give explicit zoom now that the wheel no longer zooms. showInteractive
@@ -195,6 +213,7 @@ export function CanvasFlow({
         showInteractive={false}
         fitViewOptions={FIT_VIEW_OPTIONS}
         style={CONTROLS_STYLE}
+        className={CONTROLS_CLASS}
       />
       <FitViewController dep={fitDep} />
     </ReactFlow>

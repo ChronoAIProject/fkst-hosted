@@ -64,8 +64,13 @@ function ValidationReport({
     [t.validationTimedOut, error.timed_out ? t.yes : t.no],
   ];
   return (
-    <div className="border border-line border-l-2 border-l-red rounded-card bg-[color-mix(in_oklab,var(--raise-2)_70%,transparent)] px-3 py-2.5 flex flex-col gap-2">
-      <span className="font-mono text-[12px] text-red">{t.validationTitle}</span>
+    // Elevated failure surface: translucent glass with a red left-edge accent,
+    // lifted on card depth + a soft red glow so a failed install validation reads
+    // as a distinct, raised alert. Enters on the shared row-in curve.
+    <div className="anim-row-in border border-line border-l-2 border-l-red rounded-card bg-glass backdrop-blur-glass px-3.5 py-3 flex flex-col gap-2.5 shadow-[var(--shadow-2),var(--glow-red)]">
+      <span className="font-mono text-eyebrow text-red uppercase tracking-[0.14em]">
+        {t.validationTitle}
+      </span>
       <p className="font-mono text-[11.5px] text-dim break-words">{error.message}</p>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
         {rows.map(([label, value]) => (
@@ -77,7 +82,7 @@ function ValidationReport({
       </dl>
       <div className="flex flex-col gap-1">
         <SectionLabel>{t.validationStderr}</SectionLabel>
-        <pre className="font-mono text-[11px] text-dim bg-bg border border-line rounded-control px-2.5 py-2 overflow-x-auto whitespace-pre-wrap break-words">
+        <pre className="font-mono text-[11px] text-dim bg-bg border border-[color-mix(in_oklab,var(--red)_25%,var(--line))] rounded-control px-2.5 py-2 overflow-x-auto whitespace-pre-wrap break-words shadow-highlight-top">
           {error.stderr_tail || '—'}
         </pre>
       </div>
@@ -186,7 +191,7 @@ export function EnvironmentEditor({
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-5">
-      <h3 className="font-display font-semibold text-[15px] text-fg">
+      <h3 className="grad-text-fg font-display font-semibold text-display-sm">
         {editing ? t.editorEditTitle : t.editorCreateTitle}
       </h3>
 
@@ -240,7 +245,7 @@ export function EnvironmentEditor({
                 type="button"
                 onClick={() => removeInstallAt(i)}
                 aria-label={fmt(t.removeInstallAria, { n: i + 1 })}
-                className="font-mono text-[13px] text-dim hover:text-red transition-colors cursor-pointer px-2 py-1 border border-line rounded-control flex-none"
+                className="font-mono text-[13px] text-dim hover:text-red hover:border-[color-mix(in_oklab,var(--red)_45%,var(--line))] hover:shadow-glow-red transition-[color,border-color,box-shadow] cursor-pointer px-2 py-1 border border-line rounded-control flex-none"
               >
                 ×
               </button>
@@ -250,7 +255,7 @@ export function EnvironmentEditor({
         <button
           type="button"
           onClick={() => setInstall((rows) => [...rows, ''])}
-          className="self-start font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg transition-colors cursor-pointer"
+          className="self-start font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber transition-[color,border-color,box-shadow] cursor-pointer"
         >
           {t.addInstall}
         </button>
@@ -287,7 +292,7 @@ export function EnvironmentEditor({
                 type="button"
                 onClick={() => removeKv(setVariables, i)}
                 aria-label={fmt(t.removeVariableAria, { n: i + 1 })}
-                className="font-mono text-[13px] text-dim hover:text-red transition-colors cursor-pointer px-2 py-1 border border-line rounded-control flex-none"
+                className="font-mono text-[13px] text-dim hover:text-red hover:border-[color-mix(in_oklab,var(--red)_45%,var(--line))] hover:shadow-glow-red transition-[color,border-color,box-shadow] cursor-pointer px-2 py-1 border border-line rounded-control flex-none"
               >
                 ×
               </button>
@@ -297,7 +302,7 @@ export function EnvironmentEditor({
         <button
           type="button"
           onClick={() => setVariables((rows) => [...rows, { name: '', value: '' }])}
-          className="self-start font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg transition-colors cursor-pointer"
+          className="self-start font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber transition-[color,border-color,box-shadow] cursor-pointer"
         >
           {t.addVariable}
         </button>
@@ -334,7 +339,7 @@ export function EnvironmentEditor({
                 type="button"
                 onClick={() => removeKv(setSecrets, i)}
                 aria-label={fmt(t.removeSecretAria, { n: i + 1 })}
-                className="font-mono text-[13px] text-dim hover:text-red transition-colors cursor-pointer px-2 py-1 border border-line rounded-control flex-none"
+                className="font-mono text-[13px] text-dim hover:text-red hover:border-[color-mix(in_oklab,var(--red)_45%,var(--line))] hover:shadow-glow-red transition-[color,border-color,box-shadow] cursor-pointer px-2 py-1 border border-line rounded-control flex-none"
               >
                 ×
               </button>
@@ -344,7 +349,7 @@ export function EnvironmentEditor({
         <button
           type="button"
           onClick={() => setSecrets((rows) => [...rows, { name: '', value: '' }])}
-          className="self-start font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg transition-colors cursor-pointer"
+          className="self-start font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber transition-[color,border-color,box-shadow] cursor-pointer"
         >
           {t.addSecret}
         </button>
@@ -355,7 +360,9 @@ export function EnvironmentEditor({
       {serverError && <ErrorNote message={serverError} />}
 
       {pending && (
-        <div className="flex items-center gap-2">
+        // The PUT runs the install commands in a throwaway pod — a slow round-trip.
+        // A glass pill with a breathing amber glow signals live, in-progress work.
+        <div className="anim-glow-pulse anim-row-in flex items-center gap-2.5 rounded-card bg-glass backdrop-blur-glass border border-[color-mix(in_oklab,var(--amber)_28%,var(--line))] px-3.5 py-2.5">
           <Spinner />
           <Note>{t.validatingNote}</Note>
         </div>
@@ -367,8 +374,8 @@ export function EnvironmentEditor({
           onClick={onCancel}
           disabled={pending}
           className={cn(
-            'font-ui font-semibold text-[12.5px] border border-line rounded-control px-4 py-2 text-dim transition-colors',
-            pending ? 'opacity-60 cursor-not-allowed' : 'hover:text-fg cursor-pointer'
+            'font-ui font-semibold text-[12.5px] border border-line rounded-control px-4 py-2 text-dim transition-[color,border-color,box-shadow]',
+            pending ? 'opacity-60 cursor-not-allowed' : 'hover:text-fg hover:border-line-2 hover:shadow-glow-amber cursor-pointer'
           )}
         >
           {t.cancel}
@@ -377,10 +384,11 @@ export function EnvironmentEditor({
           type="submit"
           disabled={!canSave}
           className={cn(
-            'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-colors',
+            'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-[filter,box-shadow,background-color]',
             !canSave
               ? 'bg-amber/50 text-amber-ink/60 cursor-not-allowed'
-              : 'bg-amber text-amber-ink hover:brightness-[1.06] cursor-pointer'
+              : // Primary CTA: brand gradient fill + amber bloom, brightening on hover.
+                'anim-sheen bg-grad-accent text-amber-ink shadow-[var(--shadow-2),var(--glow-amber)] hover:brightness-110 cursor-pointer'
           )}
         >
           {pending ? t.saving : t.save}
