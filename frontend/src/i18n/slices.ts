@@ -27,6 +27,8 @@ export type NavSlice = SiteContent['nav'];
 export type CommonSlice = Pick<SiteContent, 'toggle' | 'auth' | 'footer' | 'shell'>;
 /** Marketing / get-started long-form pages. */
 export type PagesSlice = Pick<SiteContent, 'intro' | 'gs'>;
+/** Guided product-tour strings (its own top-level domain). */
+export type TourSlice = SiteContent['tour'];
 /** Per-session detail drawer (session-detail cluster owns this). */
 export type DetailSlice = DashboardContent['detail'];
 

@@ -518,4 +518,35 @@ export interface SiteContent {
     fullRefPrefix: string;
     fullRefLink: string;
   };
+  /** Guided product tour: the `?` help launcher, the coachmark controls shared
+   *  by every step, and one `{title, body}` card per step. The `steps` keys map
+   *  1:1 to the step ids in `components/tour/tour-steps.ts`. */
+  tour: {
+    /** Accessible name for the topbar `?` launcher. */
+    helpAria: string;
+    /** Accessible name for the coachmark/modal end-tour control. */
+    closeAria: string;
+    /** Step counter; `{n}` = current (1-based), `{m}` = total. */
+    progress: string;
+    skip: string;
+    back: string;
+    next: string;
+    done: string;
+    /** Finish-step CTA that navigates to the Get Started route. */
+    getStarted: string;
+    steps: {
+      welcome: TitleBody;
+      canvas: TitleBody;
+      breadcrumb: TitleBody;
+      sidebar: TitleBody;
+      newSession: TitleBody;
+      sessionDetail: TitleBody;
+      workItem: TitleBody;
+      environments: TitleBody;
+      newRepo: TitleBody;
+      refresh: TitleBody;
+      help: TitleBody;
+      finish: TitleBody;
+    };
+  };
 }
