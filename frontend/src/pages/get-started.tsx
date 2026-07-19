@@ -26,6 +26,33 @@ const DOT_TONE: Record<SignalTone, string> = {
   red: 'bg-red',
 };
 
+/**
+ * Scroll a step section into view inside the `<main>` scroll container.
+ *
+ * Native `#id` jumps DO work here (the anchors live inside the sole scroll
+ * container, so `scroll-mt-[80px]` is honoured), but a nested — non-window —
+ * scroll container is exactly where browsers have historically mis-targeted an
+ * in-page hash. Driving the scroll ourselves makes the target deterministic;
+ * `scrollIntoView` still respects the section's `scroll-margin-top`, so the
+ * heading clears the now-flex (non-sticky) topbar. Falls back to instant under
+ * reduced motion, and no-ops when the target or the API is unavailable
+ * (e.g. jsdom without a real layout engine).
+ */
+export function scrollToAnchor(id: string): void {
+  if (typeof document === 'undefined') {
+    return;
+  }
+  const el = document.getElementById(id);
+  if (!el || typeof el.scrollIntoView !== 'function') {
+    return;
+  }
+  const prefersReduced =
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  el.scrollIntoView({ behavior: prefersReduced ? 'auto' : 'smooth', block: 'start' });
+}
+
 function Step({
   word,
   n,
@@ -68,6 +95,29 @@ export function GetStarted() {
     document.title = gs.metaTitle;
   }, [gs.metaTitle]);
 
+  // Deep-link support: a `/get-started#status` load is an SPA route change, so
+  // the browser does not fire its own hash scroll. Re-drive it once, after the
+  // section has mounted and `<main>` has laid out.
+  useEffect(() => {
+    const hash = typeof window !== 'undefined' ? window.location.hash.slice(1) : '';
+    if (!hash) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => scrollToAnchor(hash));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  // Explicitly target the section instead of relying on the browser's native
+  // in-nested-container jump, and keep the hash for shareable deep-links
+  // without provoking a second (native) jump.
+  const handleIndexClick = (e: React.MouseEvent<HTMLAnchorElement>, id: string) => {
+    e.preventDefault();
+    scrollToAnchor(id);
+    if (typeof window !== 'undefined' && window.history?.replaceState) {
+      window.history.replaceState(null, '', `#${id}`);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-16 max-w-[880px]">
       {/* Header */}
@@ -85,6 +135,7 @@ export function GetStarted() {
               <li key={id} className="bg-raise">
                 <a
                   href={`#${id}`}
+                  onClick={(e) => handleIndexClick(e, id)}
                   className="flex items-baseline gap-3 px-4 py-3 no-underline group hover:bg-raise-2 transition-colors"
                 >
                   <span className="font-mono text-[11px] text-ghost tabular-nums flex-none">
