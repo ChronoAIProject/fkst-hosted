@@ -241,9 +241,17 @@
   -webkit-text-fill-color: transparent;
 }
 
-/* Bright fg→dim vertical sweep variant for large display headings. */
+/* Bright fg→dim sweep variant for large display headings. Self-contained so it
+   works standalone OR composed with .grad-text: it sets ONLY background-image
+   (never the `background` shorthand, which would reset background-clip) plus its
+   own clip, so text is always clipped to the glyphs — never a solid block. */
 .grad-text-fg {
-  background: var(--grad-fg);
+  background-image: var(--grad-fg);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
 }
 
 /* Gradient hairline border. Two stacked backgrounds: an opaque --raise fill
