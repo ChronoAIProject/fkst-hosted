@@ -91,6 +91,12 @@ export interface SessionDetail {
   /** Pod liveness from the session backend; null when backend absent/error. */
   liveness: SessionLiveness | null;
   prs: PrDetail[];
+  /** GitHub logins allowed to download this session's logs. Optional: a later
+   *  backend/UI item populates it, so it is harmless/undefined until then. */
+  log_access?: string[] | null;
+  /** Preferred natural-language for the session's output. Optional: populated
+   *  by a later item, undefined until then. */
+  output_lang?: string | null;
 }
 
 export interface RepoSessionsResponse {
@@ -207,6 +213,69 @@ export interface ObserveSnapshot {
   deliveries?: unknown[];
   dead_letters?: unknown[];
   [k: string]: unknown;
+}
+
+// ---- /api/v1/users/me/environment-profiles ----------------------------------
+// The named-environment REST API (backend `routes/environments.rs`). Each named
+// environment bundles ordered install commands, non-secret variables, and
+// write-only secrets. Secret VALUES never cross the wire in any direction that
+// echoes them back — a view exposes secret KEY names only. Names are snake_case
+// exactly as the Rust `#[derive(Serialize/Deserialize)]` DTOs emit them.
+
+/** Anchored environment-NAME pattern (mirrors the backend's `env_name_regex`),
+ *  so the composed `fkst-env-<id>-<name>` object stays a valid k8s name. Used by
+ *  the UI to validate a name before the (slow) PUT round-trip. */
+export const ENV_NAME_REGEX = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+/** The backend's `MAX_NAME_LEN`: the ceiling on an environment `name`. */
+export const ENV_MAX_NAME_LEN = 40;
+
+/** A compact list-view of one named environment: counts only, no contents. */
+export interface EnvironmentProfileSummary {
+  name: string;
+  status: string;
+  validated_at: string;
+  install_command_count: number;
+  variable_count: number;
+  secret_count: number;
+}
+
+/** The full view of one named environment. Secret VALUES are deliberately
+ *  absent — only their key NAMES appear (`secret_keys`), locked server-side. */
+export interface EnvironmentProfileView {
+  name: string;
+  status: string;
+  validated_at: string;
+  install: string[];
+  variables: Record<string, string>;
+  /** Secret key NAMES only — values are write-only and never returned. */
+  secret_keys: string[];
+}
+
+/** PUT body: the desired environment contents. Every field is required on the
+ *  wire but the backend defaults each to empty, so an empty map/array is valid.
+ *  `secrets` VALUES are write-only (accepted here, never echoed back). */
+export interface EnvironmentProfileSpec {
+  install: string[];
+  variables: Record<string, string>;
+  secrets: Record<string, string>;
+}
+
+/** The detailed `422` body PUT returns when the install commands fail
+ *  validation in the isolated pod (nothing is persisted). Distinct from a plain
+ *  `ErrorEnvelope` 422 by its fixed `error: "install_validation_failed"`. */
+export interface InstallValidationError {
+  error: string;
+  message: string;
+  /** Zero-based index of the failing command (0 when the run timed out). */
+  failed_command_index: number;
+  /** The exact command that failed (empty when the run timed out). */
+  failed_command: string;
+  /** The command's exit code (`-1` when unknown / timed out). */
+  exit_code: number;
+  /** Whether the sequence exceeded the validation deadline. */
+  timed_out: boolean;
+  /** Trailing bytes of the failing command's stderr (bounded by the backend). */
+  stderr_tail: string;
 }
 
 // ---- Shared -----------------------------------------------------------------
