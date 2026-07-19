@@ -38,7 +38,9 @@ use jwt::{build_encoding_key, mint_app_jwt};
 pub use config::GithubAppConfig;
 
 /// Re-export API types for downstream consumers.
-pub use api::{InstallationId, InstallationToken, PullRequestSummary, TokenPermissions};
+pub use api::{
+    InstallationId, InstallationToken, PullFileMeta, PullRequestSummary, TokenPermissions,
+};
 
 /// Re-export the Contents READ helper types (#179): the `get_contents` result
 /// shapes + the injectable `ContentsReader` abstraction the pre-flight uses.
@@ -114,6 +116,8 @@ pub enum GithubAppError {
     InvalidRepoRef,
     #[error("git ref already exists")]
     RefExists,
+    #[error("blob exceeds the maximum previewable size")]
+    BlobTooLarge,
     #[error("github http error")]
     Http(String),
 }
@@ -146,6 +150,7 @@ impl std::fmt::Debug for GithubAppError {
             Self::InvalidKey => write!(f, "InvalidKey"),
             Self::InvalidRepoRef => write!(f, "InvalidRepoRef"),
             Self::RefExists => write!(f, "RefExists"),
+            Self::BlobTooLarge => write!(f, "BlobTooLarge"),
             // Redact the HTTP context from Debug as well: it may contain
             // response bodies with sensitive data.
             Self::Http(_) => write!(f, "Http(<redacted>)"),
@@ -515,6 +520,54 @@ impl GithubAppTokens {
         self.inner
             .api
             .remove_issue_label(&token, owner, repo, number, label)
+            .await
+    }
+
+    /// List the changed files of `owner/repo`'s pull request `pull_number` as the
+    /// App (mints an installation token, then delegates to the transport). The
+    /// canvas outcomes surface calls this once per session PR.
+    pub async fn list_pull_files(
+        &self,
+        owner_repo: &str,
+        pull_number: i64,
+    ) -> Result<Vec<api::PullFileMeta>, GithubAppError> {
+        let (owner, repo) = owner_repo
+            .split_once('/')
+            .ok_or(GithubAppError::InvalidRepoRef)?;
+        let token = self.token_for_repo(owner_repo, None).await?;
+        self.inner
+            .api
+            .list_pull_files(
+                secrecy::ExposeSecret::expose_secret(&token),
+                owner,
+                repo,
+                pull_number,
+            )
+            .await
+    }
+
+    /// Read `owner/repo`'s blob `blob_sha` RAW bytes as the App, capped to
+    /// `max_bytes` ([`GithubAppError::BlobTooLarge`] above it). The blob-stream
+    /// endpoint serves file previews/downloads with this.
+    pub async fn get_blob_raw(
+        &self,
+        owner_repo: &str,
+        blob_sha: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, GithubAppError> {
+        let (owner, repo) = owner_repo
+            .split_once('/')
+            .ok_or(GithubAppError::InvalidRepoRef)?;
+        let token = self.token_for_repo(owner_repo, None).await?;
+        self.inner
+            .api
+            .get_blob_raw(
+                secrecy::ExposeSecret::expose_secret(&token),
+                owner,
+                repo,
+                blob_sha,
+                max_bytes,
+            )
             .await
     }
 

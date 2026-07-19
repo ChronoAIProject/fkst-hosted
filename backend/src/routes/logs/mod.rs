@@ -33,6 +33,9 @@ mod identity;
 // Shared with `crate::routes::auth` (the frontend login flow reuses the signed-state
 // + authorize-URL + token-exchange primitives).
 pub(crate) mod oauth;
+// The in-bundle log viewer: a manifest of the redacted bundle's files + one
+// decompressed (optionally tailed) file, both identity-gated by `authorize`.
+mod viewer;
 
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
@@ -282,6 +285,31 @@ pub(crate) fn authorize(
     }
 }
 
+/// Fetch a session's redacted bundle from chrono-storage (server-side, gzip'd tar).
+/// Shared by the whole-bundle download and the in-bundle log viewer ([`viewer`]).
+/// A missing object → 404; any other storage failure → a URL-free 502.
+pub(super) async fn fetch_bundle(
+    state: &AppState,
+    session_id: &str,
+) -> Result<axum::body::Bytes, AppError> {
+    let Some(storage) = state.storage.as_ref() else {
+        return Err(AppError::Unavailable(
+            "log storage is not configured".to_string(),
+        ));
+    };
+    let key = log_object_key(session_id);
+    match storage.download(&key).await {
+        Ok(bytes) => Ok(bytes),
+        Err(StorageError::Status { status: 404 }) => {
+            Err(AppError::NotFound("no logs available yet".to_string()))
+        }
+        Err(err) => {
+            tracing::warn!(session_id = %session_id, error = %err, "log download failed");
+            Err(AppError::Upstream("log storage error".to_string()))
+        }
+    }
+}
+
 /// Fetch the session's bundle from chrono-storage (server-side) and return it as an
 /// `attachment` download. Serving it THROUGH the control plane — rather than 302-ing the
 /// browser to the presigned S3 URL — means the caller only ever talks to THIS host (robust
@@ -290,22 +318,7 @@ pub(crate) fn authorize(
 /// into the void (a cross-origin nav to an `application/gzip` URL lacking that header is
 /// silently discarded by some browsers). API (Bearer) callers still receive a presigned URL.
 async fn stream_download(state: &AppState, session_id: &str) -> Result<Response, AppError> {
-    let Some(storage) = state.storage.as_ref() else {
-        return Err(AppError::Unavailable(
-            "log storage is not configured".to_string(),
-        ));
-    };
-    let key = log_object_key(session_id);
-    let bytes = match storage.download(&key).await {
-        Ok(bytes) => bytes,
-        Err(StorageError::Status { status: 404 }) => {
-            return Err(AppError::NotFound("no logs available yet".to_string()));
-        }
-        Err(err) => {
-            tracing::warn!(session_id = %session_id, error = %err, "log download failed");
-            return Err(AppError::Upstream("log storage error".to_string()));
-        }
-    };
+    let bytes = fetch_bundle(state, session_id).await?;
     let disposition = format!("attachment; filename=\"fkst-logs-{session_id}.tar.gz\"");
     Ok((
         StatusCode::OK,
@@ -427,6 +440,8 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(download_session_logs))
         .routes(routes!(oauth_callback))
+        .routes(routes!(viewer::log_manifest))
+        .routes(routes!(viewer::log_file))
 }
 
 #[cfg(test)]

@@ -21,6 +21,11 @@ use super::GithubAppError;
 /// Request timeout for every GitHub API call.
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
+/// Hard page cap for [`GithubApi::list_pull_files`] (100 files/page → ~300
+/// files). The canvas outcomes surface lists a PR's changed files, not an
+/// unbounded mega-PR, so a fixed cap bounds the fan-out.
+const MAX_PULL_FILE_PAGES: u32 = 3;
+
 /// Opaque installation ID resolved from the GitHub API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct InstallationId(pub u64);
@@ -81,6 +86,24 @@ pub struct PullRequestSummary {
     /// The PR title (GitHub `title`). A fallback source for the work-issue number
     /// (`… for #<N>` / `… for issue #<N>`) when the branch name does not carry it.
     pub title: String,
+}
+
+/// One changed file of a pull request (`GET /repos/{o}/{r}/pulls/{n}/files`),
+/// trimmed to what the canvas outcomes surface renders. The `sha` is the
+/// file's BLOB sha at the PR head — the handle the blob-stream endpoint reads
+/// bytes with. `previous_filename` is set only for a rename.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullFileMeta {
+    pub filename: String,
+    /// GitHub's file status: `added`/`modified`/`removed`/`renamed`/`copied`/`changed`.
+    pub status: String,
+    pub additions: i64,
+    pub deletions: i64,
+    pub changes: i64,
+    /// The file's blob sha at the PR head.
+    pub sha: String,
+    /// The prior path, present only when `status == "renamed"`.
+    pub previous_filename: Option<String>,
 }
 
 // Hand-written: the token must never appear in Debug.
@@ -367,6 +390,38 @@ pub trait GithubApi: Send + Sync {
     ) -> Result<Option<bool>, GithubAppError> {
         let _ = (token, owner, repo, number);
         unimplemented!("pull_request_mergeable is only implemented by the HTTP transport")
+    }
+
+    /// `GET {base}/repos/{owner}/{repo}/pulls/{number}/files?per_page=100` — the
+    /// PR's changed files, paginated up to [`MAX_PULL_FILE_PAGES`] pages (a hard
+    /// ~300-file cap: the canvas outcomes surface lists a PR's files, not an
+    /// unbounded mega-PR). Default panics. Works with any bearer token.
+    async fn list_pull_files(
+        &self,
+        installation_token: &str,
+        owner: &str,
+        repo: &str,
+        pull_number: i64,
+    ) -> Result<Vec<PullFileMeta>, GithubAppError> {
+        let _ = (installation_token, owner, repo, pull_number);
+        unimplemented!("list_pull_files is only implemented by the HTTP transport")
+    }
+
+    /// `GET {base}/repos/{owner}/{repo}/git/blobs/{sha}` with
+    /// `Accept: application/vnd.github.raw` — the file's RAW bytes. Capped to
+    /// `max_bytes`: a blob larger than that yields [`GithubAppError::BlobTooLarge`]
+    /// (the caller renders "too large, open on GitHub") rather than buffering it.
+    /// Default panics.
+    async fn get_blob_raw(
+        &self,
+        installation_token: &str,
+        owner: &str,
+        repo: &str,
+        blob_sha: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, GithubAppError> {
+        let _ = (installation_token, owner, repo, blob_sha, max_bytes);
+        unimplemented!("get_blob_raw is only implemented by the HTTP transport")
     }
 
     /// `DELETE {base}/repos/{owner}/{repo}/git/refs/heads/{branch}` deleting a
@@ -1287,6 +1342,123 @@ impl GithubApi for HttpGithubApi {
         // `mergeable` is `null` until GitHub computes it — `as_bool()` maps that
         // (and an absent field) to `None`, the "retry next reconcile" signal.
         Ok(body["mergeable"].as_bool())
+    }
+
+    async fn list_pull_files(
+        &self,
+        installation_token: &str,
+        owner: &str,
+        repo: &str,
+        pull_number: i64,
+    ) -> Result<Vec<PullFileMeta>, GithubAppError> {
+        let mut out = Vec::new();
+        // Positional `?page=N` paging (bounded, no Link-header parse): stop as
+        // soon as a page comes back short — a full 100 means "there may be more".
+        for page in 1..=MAX_PULL_FILE_PAGES {
+            let url = format!(
+                "{}/repos/{owner}/{repo}/pulls/{pull_number}/files",
+                self.api_base
+            );
+            let response = self
+                .client
+                .get(&url)
+                .header("accept", "application/vnd.github+json")
+                .header("user-agent", "fkst-hosted")
+                .bearer_auth(installation_token)
+                .query(&[("per_page", "100".to_string()), ("page", page.to_string())])
+                .send()
+                .await
+                .map_err(|e| GithubAppError::Http(format!("list_pull_files: {e}")))?;
+            let status = response.status();
+            if let Some(err) = classify_auth_status(status, response.headers()) {
+                return Err(err);
+            }
+            if !status.is_success() {
+                let body = response.text().await.unwrap_or_default();
+                return Err(GithubAppError::Http(format!(
+                    "list_pull_files status {status}: {body}"
+                )));
+            }
+            let body: serde_json::Value = response
+                .json()
+                .await
+                .map_err(|e| GithubAppError::Http(format!("list_pull_files body: {e}")))?;
+            let arr = body.as_array().cloned().unwrap_or_default();
+            let page_len = arr.len();
+            for file in &arr {
+                out.push(PullFileMeta {
+                    filename: file["filename"].as_str().unwrap_or_default().to_string(),
+                    status: file["status"].as_str().unwrap_or_default().to_string(),
+                    additions: file["additions"].as_i64().unwrap_or_default(),
+                    deletions: file["deletions"].as_i64().unwrap_or_default(),
+                    changes: file["changes"].as_i64().unwrap_or_default(),
+                    sha: file["sha"].as_str().unwrap_or_default().to_string(),
+                    previous_filename: file["previous_filename"].as_str().map(str::to_string),
+                });
+            }
+            // A short page (fewer than the per-page ceiling) is the last page.
+            if page_len < 100 {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
+    async fn get_blob_raw(
+        &self,
+        installation_token: &str,
+        owner: &str,
+        repo: &str,
+        blob_sha: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, GithubAppError> {
+        let url = format!(
+            "{}/repos/{owner}/{repo}/git/blobs/{blob_sha}",
+            self.api_base
+        );
+        let response = self
+            .client
+            .get(&url)
+            // The `raw` media type makes GitHub return the file bytes verbatim
+            // (rather than the base64 JSON envelope).
+            .header("accept", "application/vnd.github.raw")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(installation_token)
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("get_blob_raw: {e}")))?;
+        let status = response.status();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Err(GithubAppError::NotFound {
+                owner_repo: format!("{owner}/{repo}"),
+                path: format!("git/blobs/{blob_sha}"),
+            });
+        }
+        if let Some(err) = classify_auth_status(status, response.headers()) {
+            return Err(err);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "get_blob_raw status {status}: {body}"
+            )));
+        }
+        // Reject an over-cap blob up front by its advertised length so we never
+        // buffer the whole thing into memory just to discard it.
+        if let Some(len) = response.content_length() {
+            if len > max_bytes as u64 {
+                return Err(GithubAppError::BlobTooLarge);
+            }
+        }
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("get_blob_raw body: {e}")))?;
+        // Defence in depth for a chunked response with no Content-Length.
+        if bytes.len() > max_bytes {
+            return Err(GithubAppError::BlobTooLarge);
+        }
+        Ok(bytes.to_vec())
     }
 
     async fn delete_ref(
