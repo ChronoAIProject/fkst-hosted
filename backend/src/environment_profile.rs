@@ -67,14 +67,16 @@ pub trait EnvironmentProfileStore: Send + Sync {
     /// Delete one profile. Idempotent; returns whether anything existed.
     async fn delete_environment(&self, id: i64, name: &str) -> Result<bool, AppError>;
 
-    /// SERVER-SIDE ONLY: resolve one profile into `(install, merged_env)` for the
-    /// session launcher — the ONLY method that reads secret VALUES. Never wired to
-    /// a user-facing route. `None` when absent.
+    /// SERVER-SIDE ONLY: resolve one profile into `(install, merged_env, secret_keys)`
+    /// for the session launcher — the ONLY method that reads secret VALUES.
+    /// `secret_keys` are the NAMES of the env vars whose values are secrets (so the
+    /// launcher can inject them but keep them out of the codex config). Never wired
+    /// to a user-facing route. `None` when absent.
     async fn load_environment_for_session(
         &self,
         id: i64,
         name: &str,
-    ) -> Result<Option<(Vec<String>, BTreeMap<String, String>)>, AppError>;
+    ) -> Result<Option<(Vec<String>, BTreeMap<String, String>, Vec<String>)>, AppError>;
 }
 
 /// Build the configured environment-profile store — THE single place the concrete

@@ -33,6 +33,14 @@ pub const USER_ENV_PREFIX: &str = "userenv.";
 /// a tool (e.g. an encoder) actually provisions the session, not just validates.
 pub const INSTALL_FILE: &str = "install";
 
+/// The env-var NAMES that came from the environment profile's SECRET store (as
+/// opposed to its non-secret variables), delivered as a single JSON-array file.
+/// Their VALUES still ride the `userenv.<KEY>` files (the session injects them into
+/// its process env), but the driver reads this manifest to keep those keys OUT of
+/// the codex `config.toml` — a secret must never be written into a plaintext,
+/// on-disk config. Absent ⇒ the environment declared no secrets.
+pub const SECRET_KEYS_FILE: &str = "secret-keys";
+
 /// The chrono-storage SA client id the in-pod log uploader mints its OAuth2
 /// token with. Non-secret (an OAuth client identifier), mounted alongside the
 /// secret below. Present only when the control plane configured chrono-storage;
@@ -92,6 +100,7 @@ pub fn credential_secret_data<'a>(
     llm_api_key: &str,
     user_env: impl IntoIterator<Item = (&'a str, &'a str)>,
     install: &[String],
+    secret_keys: &[String],
     storage: Option<StorageWriterCreds<'_>>,
 ) -> BTreeMap<String, String> {
     let mut data = BTreeMap::new();
@@ -106,6 +115,15 @@ pub fn credential_secret_data<'a>(
     if !install.is_empty() {
         if let Ok(encoded) = serde_json::to_string(install) {
             data.insert(INSTALL_FILE.to_string(), encoded);
+        }
+    }
+    // The NAMES of the env vars whose values are secrets, as a JSON array. Their
+    // values are already among the `userenv.<KEY>` entries above (the session
+    // injects them); this manifest exists only so the driver can exclude them from
+    // the codex `config.toml`. Absent ⇒ no secrets, byte-identical layout.
+    if !secret_keys.is_empty() {
+        if let Ok(encoded) = serde_json::to_string(secret_keys) {
+            data.insert(SECRET_KEYS_FILE.to_string(), encoded);
         }
     }
     if let Some(storage) = storage {
@@ -167,6 +185,13 @@ impl CredsLayout {
     /// install step; the driver treats a missing file as "no install commands".
     pub fn install_commands(&self) -> PathBuf {
         self.base.join(INSTALL_FILE)
+    }
+
+    /// Path to the [`SECRET_KEYS_FILE`] manifest (a JSON array of the env-var names
+    /// whose values are secrets). The driver reads it to keep those keys out of the
+    /// codex config; a missing file means the environment declared no secrets.
+    pub fn secret_keys(&self) -> PathBuf {
+        self.base.join(SECRET_KEYS_FILE)
     }
 
     /// Path to the credentials-complete sentinel ([`CREDS_COMPLETE_SENTINEL`]) the
@@ -315,7 +340,7 @@ mod tests {
     #[test]
     fn credential_secret_data_carries_the_base_creds_and_user_env() {
         let user_env = [("FOO", "foo-val"), ("API_TOKEN", "tok-val")];
-        let data = credential_secret_data("ghs_json", "sk-key", user_env, &[], None);
+        let data = credential_secret_data("ghs_json", "sk-key", user_env, &[], &[], None);
         assert_eq!(data["github-token"], "ghs_json");
         assert_eq!(data["llm-api-key"], "sk-key");
         assert_eq!(data["userenv.FOO"], "foo-val");
@@ -330,7 +355,7 @@ mod tests {
             "curl -L https://example/ffmpeg -o \"$FKST_ENV_BIN/ffmpeg\"".to_string(),
             "chmod +x \"$FKST_ENV_BIN/ffmpeg\"".to_string(),
         ];
-        let data = credential_secret_data("ghs", "sk", std::iter::empty(), &install, None);
+        let data = credential_secret_data("ghs", "sk", std::iter::empty(), &install, &[], None);
         let encoded = data.get(INSTALL_FILE).expect("install key present");
         let round: Vec<String> = serde_json::from_str(encoded).expect("valid json array");
         assert_eq!(round, install);
@@ -338,13 +363,38 @@ mod tests {
 
     #[test]
     fn credential_secret_data_omits_install_key_when_no_install_commands() {
-        let data = credential_secret_data("ghs", "sk", std::iter::empty(), &[], None);
+        let data = credential_secret_data("ghs", "sk", std::iter::empty(), &[], &[], None);
         assert!(!data.contains_key(INSTALL_FILE));
     }
 
     #[test]
+    fn credential_secret_data_carries_secret_keys_manifest_when_present() {
+        let data = credential_secret_data(
+            "ghs",
+            "sk",
+            std::iter::once(("WATERMARK_TOKEN", "shh")),
+            &[],
+            &["WATERMARK_TOKEN".to_string()],
+            None,
+        );
+        // The secret VALUE still rides the userenv.* entry (the session injects it)…
+        assert_eq!(data["userenv.WATERMARK_TOKEN"], "shh");
+        // …and its KEY NAME rides the secret-keys manifest so the driver can keep it
+        // out of the codex config.
+        let manifest = data.get(SECRET_KEYS_FILE).expect("secret-keys present");
+        let keys: Vec<String> = serde_json::from_str(manifest).expect("valid json array");
+        assert_eq!(keys, vec!["WATERMARK_TOKEN".to_string()]);
+    }
+
+    #[test]
+    fn credential_secret_data_omits_secret_keys_when_none() {
+        let data = credential_secret_data("ghs", "sk", std::iter::empty(), &[], &[], None);
+        assert!(!data.contains_key(SECRET_KEYS_FILE));
+    }
+
+    #[test]
     fn credential_secret_data_with_no_user_env_carries_only_the_base_creds() {
-        let data = credential_secret_data("ghs_json", "sk-key", std::iter::empty(), &[], None);
+        let data = credential_secret_data("ghs_json", "sk-key", std::iter::empty(), &[], &[], None);
         assert_eq!(data.len(), 2);
         assert!(data.contains_key("github-token"));
         assert!(data.contains_key("llm-api-key"));
@@ -361,8 +411,14 @@ mod tests {
             base_url: "https://storage.example/proxy",
             bucket: "fkst-logs",
         };
-        let data =
-            credential_secret_data("ghs_json", "sk-key", std::iter::empty(), &[], Some(storage));
+        let data = credential_secret_data(
+            "ghs_json",
+            "sk-key",
+            std::iter::empty(),
+            &[],
+            &[],
+            Some(storage),
+        );
         assert_eq!(data["storage-client-id"], "writer-client");
         assert_eq!(data["storage-client-secret"], "writer-secret");
         assert_eq!(data["storage-token-url"], "https://nyx.example/oauth/token");

@@ -184,14 +184,18 @@ async fn spawn_session(reg: SessionRegistration, ctx: &ReconcileCtx) {
 
     // 2. Environment: a named environment must exist + be `ready` for the author;
     //    otherwise post feedback and skip (fail closed, no doomed pod).
-    let (user_env, install_commands) = match resolve_environment(
+    let (user_env, install_commands, secret_keys) = match resolve_environment(
         ctx.env_store.as_ref(),
         reg.trigger_author_id,
         reg.def.environment.as_deref(),
     )
     .await
     {
-        EnvResolution::Proceed { user_env, install } => (user_env, install),
+        EnvResolution::Proceed {
+            user_env,
+            install,
+            secret_keys,
+        } => (user_env, install, secret_keys),
         EnvResolution::Blocked { comment } => {
             post_comment_best_effort(&ctx.github, &owner_repo, reg.trigger_issue, &comment).await;
             return;
@@ -228,6 +232,7 @@ async fn spawn_session(reg: SessionRegistration, ctx: &ReconcileCtx) {
         ctx.config.llm_api_key.expose_secret(),
         user_env.iter().map(|(k, v)| (k.as_str(), v.as_str())),
         &install_commands,
+        &secret_keys,
         storage,
     )
     .into_iter()
@@ -445,12 +450,14 @@ async fn post_comment_best_effort(
 
 /// The outcome of pre-flighting the issue's named environment.
 enum EnvResolution {
-    /// Launch with the merged variables/secret VALUES to inject and the ordered
-    /// install commands to run in the pod (both empty when the issue declared no
-    /// environment).
+    /// Launch with the merged variables/secret VALUES to inject, the ordered install
+    /// commands to run in the pod, and the NAMES of the env vars that are secrets
+    /// (so the pod can keep them out of the codex config). All empty when the issue
+    /// declared no environment.
     Proceed {
         user_env: BTreeMap<String, String>,
         install: Vec<String>,
+        secret_keys: Vec<String>,
     },
     /// Do NOT launch; post `comment` on the trigger issue explaining why.
     Blocked { comment: String },
@@ -470,6 +477,7 @@ async fn resolve_environment(
             return EnvResolution::Proceed {
                 user_env: BTreeMap::new(),
                 install: Vec::new(),
+                secret_keys: Vec::new(),
             }
         }
         Some(name) => name,
@@ -481,15 +489,20 @@ async fn resolve_environment(
                 .load_environment_for_session(author_id, name)
                 .await
             {
-                Ok(Some((install, user_env))) => {
+                Ok(Some((install, user_env, secret_keys))) => {
                     tracing::info!(
                         github_user_id = author_id,
                         environment = %name,
                         install_commands = install.len(),
                         env_vars = user_env.len(),
+                        secret_env_vars = secret_keys.len(),
                         "reconcile spawn: named environment resolved"
                     );
-                    EnvResolution::Proceed { user_env, install }
+                    EnvResolution::Proceed {
+                        user_env,
+                        install,
+                        secret_keys,
+                    }
                 }
                 Ok(None) => EnvResolution::Blocked {
                     comment: env_not_ready_comment(name),
