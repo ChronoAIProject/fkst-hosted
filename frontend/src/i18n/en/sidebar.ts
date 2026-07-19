@@ -14,6 +14,9 @@ export const canvasSidebar: CanvasSidebarSlice = {
     'You are looking at the fkst sessions of {repo} — every trigger issue with its work issues and pull requests.',
   sessionsTitle: 'Sessions',
   pollNote: 'Auto-refreshes every 15 s while open.',
+  sessionsFreshness: 'updated {time}',
+  sessionsRetry: 'Retry',
+  sessionsRefreshing: 'Refreshing…',
   sessionsLoadFailed: 'Could not load the sessions of this repository. Please try again.',
   sessionsStaleNotice: 'Refresh failed — showing the last loaded sessions.',
   notInstalledNote: 'The App is not installed on this repository, so sessions cannot run here.',
@@ -27,4 +30,11 @@ export const canvasSidebar: CanvasSidebarSlice = {
   createdWord: 'created',
   updatedWord: 'updated',
   closedWord: 'closed',
+  firstRunTitle: 'Get started with fkst',
+  firstRunBody:
+    'Install the GitHub App on your account or an organization to let fkst run coding sessions straight from your GitHub issues.',
+  firstRunInstall: 'Install the GitHub App',
+  firstRunGuide: 'How it works →',
+  needsInstall: 'Needs install',
+  needsInstallHint: 'Install the App on this repository so its sessions can run here.',
 };

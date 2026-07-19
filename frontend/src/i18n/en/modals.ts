@@ -31,6 +31,12 @@ export const canvasModals: CanvasModalsSlice = {
   createSubmit: 'Create trigger issue',
   createPending: 'Creating…',
   createFailed: 'Could not create the trigger issue. Please try again.',
+  createEnvironmentNone: 'None',
+  createEnvironmentNote: 'Only a saved environment can be referenced. Create one in the Environments manager in the top bar.',
+  createEnvironmentLoadFailed: 'Could not load your environments — enter a name manually.',
+  createWorkLabelHint: 'One work label per trigger — the session claims every issue that carries it.',
+  createWorkLabelHintLink: 'Learn more in Get started.',
+  createdToast: 'Session created',
 };
 
 export const reposModals: ReposModalsSlice = {
@@ -47,6 +53,7 @@ export const reposModals: ReposModalsSlice = {
   cancel: 'Cancel',
   createFailed: 'Could not create the repository. Please try again.',
   createdNextStep: 'Next: install the App on this repo',
+  createdToast: 'Repository created',
   uninstall: 'Uninstall',
   uninstallConfirmTitle: 'Uninstall from {owner}?',
   uninstallConfirmBody:

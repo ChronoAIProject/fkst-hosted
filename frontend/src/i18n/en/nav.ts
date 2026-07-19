@@ -6,4 +6,6 @@ export const nav: NavSlice = {
   dashboard: 'Dashboard',
   getStartedCta: 'Get started →',
   homeAria: 'FKST — home',
+  environments: 'Environments',
+  menuAria: 'More',
 };

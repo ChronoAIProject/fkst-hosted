@@ -6,4 +6,6 @@ export const nav: NavSlice = {
   dashboard: '仪表盘',
   getStartedCta: '开始使用 →',
   homeAria: 'FKST — 首页',
+  environments: '环境',
+  menuAria: '更多',
 };

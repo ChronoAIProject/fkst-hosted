@@ -38,6 +38,10 @@ export interface SiteContent {
     dashboard: string;
     getStartedCta: string;
     homeAria: string;
+    /** Authenticated-only topbar entry opening the environments manager. */
+    environments: string;
+    /** Accessible name for the responsive overflow (hamburger) menu button. */
+    menuAria: string;
   };
   toggle: {
     aria: string;
@@ -161,8 +165,15 @@ export interface SiteContent {
       /** Aggregate row label when the chart tail is folded. */
       chartOther: string;
       sessionsTitle: string;
-      /** Note that level-2 data refreshes on a poll. */
+      /** Poll cadence, now surfaced as the freshness line's tooltip. */
       pollNote: string;
+      /** Live freshness line replacing the static poll note; `{time}` holds a
+       *  relative "2 min ago" rendered by the formatter. */
+      sessionsFreshness: string;
+      /** Retry affordance on the no-data sessions load error. */
+      sessionsRetry: string;
+      /** Spinner label while a manual sessions refresh is in flight. */
+      sessionsRefreshing: string;
       sessionsLoadFailed: string;
       /** Non-blocking notice when a refresh failed but last-good data shows. */
       sessionsStaleNotice: string;
@@ -179,6 +190,19 @@ export interface SiteContent {
       createdWord: string;
       updatedWord: string;
       closedWord: string;
+      /** First-run empty state (level 0): heading shown when the viewer has
+       *  connected the App to no account yet. */
+      firstRunTitle: string;
+      /** One-line explanation under the first-run heading. */
+      firstRunBody: string;
+      /** Primary "Install the GitHub App" call-to-action in the first-run state. */
+      firstRunInstall: string;
+      /** Secondary link from the first-run state to the get-started guide. */
+      firstRunGuide: string;
+      /** Persistent badge on a level-1 repo row that still needs the App. */
+      needsInstall: string;
+      /** Tooltip on the needs-install badge. */
+      needsInstallHint: string;
       stop: string;
       /** `{name}` placeholder. */
       stopAria: string;
@@ -208,6 +232,14 @@ export interface SiteContent {
       createSubmit: string;
       createPending: string;
       createFailed: string;
+      /** Modals-cluster additions for the create-trigger environment picker +
+       *  work-label hint (owned by the create-trigger modal item). */
+      createEnvironmentNone: string;
+      createEnvironmentNote: string;
+      createEnvironmentLoadFailed: string;
+      createWorkLabelHint: string;
+      createWorkLabelHintLink: string;
+      createdToast: string;
     };
     repos: {
       refresh: string;
@@ -249,6 +281,8 @@ export interface SiteContent {
       createFailed: string;
       /** Callout under a freshly created repo pointing at the Install step. */
       createdNextStep: string;
+      /** Success toast raised when a repository is created. */
+      createdToast: string;
       /** Group-header CTA for an account without an App installation. */
       connect: string;
       /** Short hint next to the Connect CTA (why connecting matters). */
@@ -283,6 +317,8 @@ export interface SiteContent {
       tabPackages: string;
       tabLogs: string;
       tabOutcomes: string;
+      /** Copy-affordance label on the full session id in the drawer header. */
+      sessionIdCopy: string;
       // ---- Status tab ----
       lifecycle: string;
       /** Decoded lifecycle phase labels — one per `SessionPhase`. */
@@ -312,7 +348,24 @@ export interface SiteContent {
       // ---- Packages tab ----
       packagesNone: string;
       packageRefAria: string;
+      /** Copy-affordance label on each package `<code>` ref. */
+      packageRefCopy: string;
       queueActivity: string;
+      // ---- Packages tab: frozen-config panel ----
+      configLabel: string;
+      /** Note that the config below is frozen at registration. */
+      configFrozenNote: string;
+      configWorkLabel: string;
+      configEnvironment: string;
+      configAutoMerge: string;
+      configOutputLang: string;
+      configLogAccess: string;
+      /** Placeholder for a scalar the session did not carry. */
+      configUnset: string;
+      configYes: string;
+      configNo: string;
+      /** Rendered when the log-access allowlist is empty. */
+      configLogAccessNone: string;
       // ---- Logs tab ----
       logsUnavailable: string;
       logsLoading: string;
@@ -326,8 +379,21 @@ export interface SiteContent {
       /** Match count for the in-file find; `{n}` placeholder. */
       logsSearchCount: string;
       logsRefresh: string;
+      /** Retry affordance on a failed manifest load. */
+      logsRetry: string;
       /** Tail notice; `{shown}` / `{total}` placeholders (already formatted). */
       logsTruncated: string;
+      /** Match count when the shown content is only a tail; `{n}` placeholder.
+       *  Nudges the reader to load the full file to search everything. */
+      logsSearchCountTail: string;
+      /** Action that fetches the whole file (drops the tail window). */
+      logsLoadFull: string;
+      /** In-flight label while the full file loads. */
+      logsLoadingFull: string;
+      /** Shown when a failed Refresh left the last-good content on screen. */
+      logsStale: string;
+      /** Copy-affordance label on the shown log file's name. */
+      logsFilenameCopy: string;
       logsDownloadBundle: string;
       // ---- Outcomes tab ----
       outcomesLoading: string;
@@ -343,8 +409,13 @@ export interface SiteContent {
       deletionsAria: string;
       /** `{from}` placeholder. */
       renamedFrom: string;
+      /** Per-file changed-line count shown next to the row. `{n}` placeholder. */
+      sizeLines: string;
       preview: string;
       previewClose: string;
+      /** Explicit "fetch and preview this file's bytes" affordance — the fetch
+       *  is deferred behind this click so a row never streams media blind. */
+      previewLoad: string;
       previewLoading: string;
       previewError: string;
       previewTooLarge: string;
