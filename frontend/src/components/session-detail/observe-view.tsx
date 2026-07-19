@@ -18,14 +18,16 @@ function QueueRow({ queue }: { queue: ObserveQueue }) {
     [t.queueRetrying, queue.retrying],
   ];
   return (
-    <div className="flex items-center justify-between gap-3 py-1.5 min-w-0">
+    // Frosted glass chip: a translucent raise-2 fill + hairline lifts each
+    // queue off the panel; the amber-tinted count values pop the live numbers.
+    <div className="flex items-center justify-between gap-3 rounded-chip bg-glass-2 border border-line px-2.5 py-1.5 min-w-0">
       <code className="font-mono text-[11.5px] text-fg truncate min-w-0">{queue.queue ?? '—'}</code>
       <div className="flex items-center gap-2 flex-none">
         {stats
           .filter(([, n]) => typeof n === 'number')
           .map(([label, n]) => (
             <span key={label} className="font-mono text-[10.5px] text-dim">
-              {label} <span className="text-fg">{n}</span>
+              {label} <span className="text-amber">{n}</span>
             </span>
           ))}
       </div>
@@ -52,7 +54,7 @@ export function ObserveView({ snapshot }: { snapshot: ObserveSnapshot }) {
       {queues.length > 0 && (
         <div className="flex flex-col gap-0.5">
           <SectionLabel>{t.queues}</SectionLabel>
-          <div className="divide-y divide-[color-mix(in_oklab,var(--line)_55%,transparent)]">
+          <div className="flex flex-col gap-1 mt-1">
             {queues.map((queue, i) => (
               // BUG B3: the observe payload is untrusted engine JSON, so two
               // queues can legitimately share a `queue` name. Keying on the name

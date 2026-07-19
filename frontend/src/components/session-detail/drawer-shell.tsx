@@ -98,15 +98,18 @@ export function DrawerShell({
   // hardcoded `aria-modal`, so the browser drops the presentation role and
   // treats it as a plain generic container — leaving the inner element below as
   // the single, correctly-labelled `dialog` (a second `role="dialog"` here would
-  // give the page two dialogs). The opaque `bg-raise` lives on the animated
-  // panel itself so nothing bleeds through while it slides.
+  // give the page two dialogs). A frosted `bg-glass` + `backdrop-blur` panel
+  // rides over the dimmed scrim for depth; the blur keeps its content legible
+  // while the level-2 sidebar shows only faintly behind it. An amber→gold
+  // gradient hairline (border-image) traces the left edge, catching the light as
+  // the panel slides in, and a layered shadow + amber bloom seat it off the page.
   return (
     <OverlayPresence
       open={open}
       variant="drawer"
       role="presentation"
       onBackdropClick={onClose}
-      className="relative flex w-full max-w-[560px] flex-col overflow-hidden border-l border-line bg-raise shadow-modal-seat"
+      className="relative flex w-full max-w-[560px] flex-col overflow-hidden border-l border-l-transparent [border-image:var(--grad-hairline-accent)_1] bg-glass backdrop-blur-glass shadow-[var(--shadow-3),var(--glow-amber),var(--highlight-top)]"
     >
       <div
         ref={panelRef}

@@ -42,11 +42,13 @@ export function TabPackages({
               const decoded = packageRole(ref);
               return (
                 // Stagger each row in on the shared curve; collapses to the
-                // final state under prefers-reduced-motion (see index.css).
+                // final state under prefers-reduced-motion (see index.css). Glass
+                // package card with a gradient hairline edge + a hover lift so the
+                // list reads as a stack of lifted surfaces, not flat rows.
                 <StaggerItem
                   key={ref}
                   index={index}
-                  className="border border-line rounded-card bg-bg px-3 py-2 flex flex-col gap-1 min-w-0"
+                  className="grad-border hover-lift rounded-card px-3 py-2.5 flex flex-col gap-1 min-w-0 shadow-1"
                 >
                   <div className="flex items-baseline gap-2 min-w-0">
                     <span className="font-ui font-semibold text-[13px] text-fg flex-none">

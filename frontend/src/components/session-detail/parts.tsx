@@ -24,10 +24,13 @@ export function Note({ children }: { children: ReactNode }) {
   return <p className="font-mono text-[11.5px] text-ghost">{children}</p>;
 }
 
-/** A non-blocking amber staleness/notice line. */
+/** A non-blocking amber staleness/notice line. Frosted glass surface with an
+ *  amber left rule + soft amber bloom so it reads as an advisory without
+ *  shouting; rises in on mount (collapses to its final state under
+ *  prefers-reduced-motion). */
 export function NoticeLine({ children }: { children: ReactNode }) {
   return (
-    <p className="border border-line border-l-2 border-l-amber rounded-card bg-[color-mix(in_oklab,var(--raise)_55%,transparent)] px-3 py-2 font-mono text-[11.5px] text-dim">
+    <p className="anim-notice-in bg-glass backdrop-blur-glass border border-line border-l-2 border-l-amber rounded-card shadow-[var(--shadow-1),var(--glow-amber),var(--highlight-top)] px-3 py-2 font-mono text-[11.5px] text-dim">
       {children}
     </p>
   );

@@ -164,7 +164,7 @@ export function TabLogs({ session }: { session: SessionDetail }) {
         <button
           type="button"
           onClick={loadManifest}
-          className="inline-flex items-center gap-1.5 font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg transition-colors cursor-pointer"
+          className="inline-flex items-center gap-1.5 font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber transition-[color,border-color,box-shadow] duration-150 cursor-pointer"
         >
           {t.logsRetry}
         </button>
@@ -182,7 +182,7 @@ export function TabLogs({ session }: { session: SessionDetail }) {
             href={session.log_url}
             target="_blank"
             rel="noreferrer"
-            className="font-ui font-semibold text-[11.5px] text-amber hover:brightness-[1.1] transition-colors"
+            className="hover-underline font-ui font-semibold text-[11.5px] text-amber hover:brightness-[1.1] transition-[filter] cursor-pointer"
           >
             {t.logsDownloadBundle}
           </a>
@@ -213,8 +213,13 @@ export function TabLogs({ session }: { session: SessionDetail }) {
                 onClick={() => setSelected(entry.path)}
                 title={entry.path}
                 className={cn(
-                  'inline-flex items-center gap-1.5 font-mono text-[11px] border rounded-control px-2.5 py-1 transition-colors cursor-pointer max-w-full',
-                  active ? 'border-line-2 text-fg bg-raise-2' : 'border-line text-dim hover:text-fg'
+                  'inline-flex items-center gap-1.5 font-mono text-[11px] border rounded-control px-2.5 py-1 transition-[color,border-color,background-color,box-shadow] duration-150 cursor-pointer max-w-full',
+                  // Active file: amber-tinted glass surface + a soft amber bloom
+                  // so the selected tab reads at a glance; inactive tabs stay quiet
+                  // and warm their border + a subtle glow on hover.
+                  active
+                    ? 'border-[color-mix(in_oklab,var(--amber)_40%,var(--line))] text-fg bg-[color-mix(in_oklab,var(--amber)_12%,var(--raise-2))] shadow-glow-amber'
+                    : 'border-line text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber'
                 )}
               >
                 <span className="truncate">{entry.path.split('/').pop()}</span>
@@ -230,7 +235,7 @@ export function TabLogs({ session }: { session: SessionDetail }) {
           type="button"
           onClick={refresh}
           disabled={fileState === 'loading' || !selected}
-          className="inline-flex items-center gap-1.5 font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg transition-colors cursor-pointer disabled:cursor-default disabled:hover:text-dim"
+          className="inline-flex items-center gap-1.5 font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber transition-[color,border-color,box-shadow] duration-150 cursor-pointer disabled:cursor-default disabled:hover:text-dim disabled:hover:border-line disabled:hover:shadow-none"
         >
           {fileState === 'loading' && <Spinner />}
           {t.logsRefresh}

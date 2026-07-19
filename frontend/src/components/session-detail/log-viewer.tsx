@@ -107,7 +107,7 @@ export function LogViewer({ file, onLoadFull, loadingFull, stale }: LogViewerPro
           onChange={(e) => setSearch(e.target.value)}
           placeholder={t.logsSearchPlaceholder}
           aria-label={t.logsSearchPlaceholder}
-          className="flex-1 min-w-[160px] font-mono text-[12px] bg-bg border border-line rounded-control px-2.5 py-1.5 text-fg placeholder:text-ghost focus:outline-none focus:border-line-2"
+          className="flex-1 min-w-[160px] font-mono text-[12px] bg-bg border border-line rounded-control px-2.5 py-1.5 text-fg placeholder:text-ghost transition-[border-color,box-shadow] duration-150 focus:outline-none focus:border-[color-mix(in_oklab,var(--amber)_45%,var(--line))] focus:shadow-glow-amber"
         />
         {query && (
           <span className="font-mono text-[10.5px] text-ghost flex-none">{countLabel}</span>
@@ -127,7 +127,7 @@ export function LogViewer({ file, onLoadFull, loadingFull, stale }: LogViewerPro
                 type="button"
                 onClick={onLoadFull}
                 disabled={loadingFull}
-                className="inline-flex items-center gap-1.5 font-ui font-semibold text-[11px] text-amber hover:brightness-[1.1] transition-colors cursor-pointer disabled:cursor-default disabled:opacity-70"
+                className="hover-underline inline-flex items-center gap-1.5 font-ui font-semibold text-[11px] text-amber hover:brightness-[1.1] transition-[filter] cursor-pointer disabled:cursor-default disabled:opacity-70"
               >
                 {loadingFull && <Spinner />}
                 {loadingFull ? t.logsLoadingFull : t.logsLoadFull}
@@ -137,14 +137,22 @@ export function LogViewer({ file, onLoadFull, loadingFull, stale }: LogViewerPro
         </NoticeLine>
       )}
 
-      <pre className="max-h-[46vh] overflow-auto border border-line rounded-card bg-bg p-3 font-mono text-[11.5px] leading-relaxed text-dim whitespace-pre-wrap break-words">
-        {lines.map((line, i) => (
-          <div key={i}>
-            {query && line.toLowerCase().includes(query.toLowerCase())
-              ? highlight(line, query)
-              : line || ' '}
-          </div>
-        ))}
+      {/* Elevated console surface: translucent glass on the card shadow with an
+          inner top highlight, mirroring the app's code-block treatment. */}
+      <pre className="max-h-[46vh] overflow-auto border border-line rounded-card bg-glass backdrop-blur-glass shadow-[var(--shadow-2),var(--highlight-top)] p-3 font-mono text-[11.5px] leading-relaxed text-dim whitespace-pre-wrap break-words">
+        {lines.map((line, i) => {
+          const hit = !!query && line.toLowerCase().includes(query.toLowerCase());
+          return (
+            // A matching line gets a faint amber wash bleeding to the padding
+            // edge so hits read as rows, reinforcing the inline <mark> spans.
+            <div
+              key={i}
+              className={hit ? 'bg-[color-mix(in_oklab,var(--amber)_7%,transparent)] -mx-3 px-3 rounded-[2px]' : undefined}
+            >
+              {hit ? highlight(line, query) : line || ' '}
+            </div>
+          );
+        })}
       </pre>
     </div>
   );

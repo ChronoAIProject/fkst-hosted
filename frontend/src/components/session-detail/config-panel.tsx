@@ -63,23 +63,29 @@ export function ConfigPanel({ session }: { session: SessionDetail }) {
   return (
     <section className="flex flex-col gap-2.5">
       <SectionLabel>{t.configLabel}</SectionLabel>
-      <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 min-w-0">
-        <ConfigRow label={t.configWorkLabel}>{workLabel}</ConfigRow>
-        <ConfigRow label={t.configEnvironment}>{environment}</ConfigRow>
-        <ConfigRow label={t.configAutoMerge}>{autoMerge}</ConfigRow>
-        <ConfigRow label={t.configOutputLang}>{outputLang}</ConfigRow>
-        <ConfigRow label={t.configLogAccess}>
-          {logAccess.length === 0 ? (
-            <span className="text-ghost">{t.configLogAccessNone}</span>
-          ) : (
-            <span className="flex flex-wrap gap-1.5">
-              {logAccess.map((viewer) => (
-                <Chip key={viewer}>{viewer}</Chip>
-              ))}
-            </span>
-          )}
-        </ConfigRow>
-      </dl>
+      {/* Frozen configuration reads as a single translucent glass panel lifted
+          off the drawer — the one place the immutable registration is confirmed,
+          so it earns a defined surface (top-highlight + shadow-2 depth) rather
+          than a bare list. */}
+      <div className="bg-glass backdrop-blur-glass border border-line rounded-card px-4 py-3.5 shadow-[var(--shadow-2),var(--highlight-top)]">
+        <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 min-w-0">
+          <ConfigRow label={t.configWorkLabel}>{workLabel}</ConfigRow>
+          <ConfigRow label={t.configEnvironment}>{environment}</ConfigRow>
+          <ConfigRow label={t.configAutoMerge}>{autoMerge}</ConfigRow>
+          <ConfigRow label={t.configOutputLang}>{outputLang}</ConfigRow>
+          <ConfigRow label={t.configLogAccess}>
+            {logAccess.length === 0 ? (
+              <span className="text-ghost">{t.configLogAccessNone}</span>
+            ) : (
+              <span className="flex flex-wrap gap-1.5">
+                {logAccess.map((viewer) => (
+                  <Chip key={viewer}>{viewer}</Chip>
+                ))}
+              </span>
+            )}
+          </ConfigRow>
+        </dl>
+      </div>
       <Note>{t.configFrozenNote}</Note>
     </section>
   );

@@ -94,10 +94,15 @@ export function SessionDetailDrawer({
 
   return (
     <DrawerShell titleId={titleId} onClose={onClose}>
-      <div className="sticky top-0 z-10 bg-raise border-b border-line px-5 py-4 flex flex-col gap-3">
+      {/* Frosted sticky header: a translucent bg-glass strip with backdrop-blur
+          keeps it legible while body content scrolls faintly beneath it, and a
+          layered highlight/hairline seats it above the panel. */}
+      <div className="sticky top-0 z-10 bg-glass backdrop-blur-glass border-b border-line px-5 py-4 flex flex-col gap-3 shadow-[var(--shadow-1),var(--highlight-top)]">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex flex-col gap-1.5">
-            <h2 id={titleId} className="font-display font-semibold text-[17px] text-fg truncate">
+            {/* Bright fg→dim display sweep on the session name for a premium
+                heading; truncation and font are preserved. */}
+            <h2 id={titleId} className="font-display font-semibold text-[17px] grad-text grad-text-fg truncate">
               {session.name ?? c.invalidTrigger}
             </h2>
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -130,7 +135,7 @@ export function SessionDetailDrawer({
             type="button"
             onClick={onClose}
             aria-label={t.closeAria}
-            className="font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim hover:text-fg transition-colors cursor-pointer flex-none"
+            className="font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim transition-[color,border-color,box-shadow] duration-150 hover:text-fg hover:border-line-2 hover:shadow-glow-amber cursor-pointer flex-none"
           >
             {t.close}
           </button>
@@ -143,7 +148,9 @@ export function SessionDetailDrawer({
           // Roving tabindex lives on the tabs; -1 here just makes the container
           // a valid focus target for the delegated arrow-key handler.
           tabIndex={-1}
-          className="flex items-center gap-1 flex-wrap"
+          // Glass segmented strip: a translucent frosted rail with a hairline
+          // seats the tabs as one control off the header.
+          className="flex items-center gap-1 flex-wrap glass border border-line rounded-control p-1"
         >
           {tabs.map(({ key, label }) => (
             <button
@@ -160,11 +167,14 @@ export function SessionDetailDrawer({
               // move between the rest.
               tabIndex={tab === key ? 0 : -1}
               onClick={() => setTab(key)}
+              // `hover-underline` grows an amber gradient underline under any tab
+              // on hover/focus (underline-grow); the active tab is a raised
+              // frosted pill with amber text + a soft amber bloom.
               className={cn(
-                'font-ui font-semibold text-[12.5px] rounded-control px-3 py-1.5 transition-colors cursor-pointer',
+                'hover-underline font-ui font-semibold text-[12.5px] rounded-control px-3 py-1.5 transition-[color,background-color,box-shadow] duration-150 cursor-pointer',
                 tab === key
-                  ? 'bg-raise-2 text-fg border border-line-2'
-                  : 'text-dim hover:text-fg border border-transparent'
+                  ? 'bg-glass-2 text-amber shadow-[var(--shadow-1),var(--glow-amber)]'
+                  : 'text-dim hover:text-fg'
               )}
             >
               {label}

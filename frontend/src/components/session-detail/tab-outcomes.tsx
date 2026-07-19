@@ -110,14 +110,29 @@ function PrBlock({
   const cc = d.canvas;
   const filesHref = `${pr.html_url}/files`;
 
+  // PR state reads through a soft, status-matched glow on the card: merged =
+  // green (success), still-open = amber (in-flight), closed-unmerged = quiet
+  // depth only. The Chip below always carries the textual state (never glow
+  // alone). Glass fill + hover-lift give each PR a lifted, premium surface.
+  const stateGlow = pr.merged
+    ? 'shadow-[var(--shadow-2),var(--glow-green)]'
+    : pr.state === 'open'
+      ? 'shadow-[var(--shadow-2),var(--glow-amber)]'
+      : 'shadow-2';
+
   return (
-    <div className="border border-line rounded-card bg-bg p-3 flex flex-col gap-2 min-w-0">
+    <div
+      className={cn(
+        'grad-border hover-lift rounded-card p-3 flex flex-col gap-2 min-w-0',
+        stateGlow
+      )}
+    >
       <div className="flex items-center gap-2 min-w-0">
         <a
           href={pr.html_url}
           target="_blank"
           rel="noreferrer"
-          className="font-mono text-[11px] text-ghost hover:text-amber transition-colors flex-none"
+          className="hover-underline font-mono text-[11px] text-ghost hover:text-amber transition-colors flex-none"
         >
           #{pr.number}
         </a>
@@ -222,7 +237,7 @@ export function TabOutcomes({
         <button
           type="button"
           onClick={load}
-          className="inline-flex items-center gap-1.5 font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg transition-colors cursor-pointer"
+          className="inline-flex items-center gap-1.5 font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber transition-[color,border-color,box-shadow] duration-150 cursor-pointer"
         >
           {t.logsRetry}
         </button>
