@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useContent } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
 import { cn } from '@/lib/utils';
 import { getSessionOutcomes } from '@/lib/api/outcomes';
 import type { OutcomeFile, PrOutcome, SessionOutcomes } from '@/lib/api/types';
 import { Chip } from '@/components/ui/chip';
+import { Reveal } from '@/components/ui/motion';
 import { Note, SectionLabel, Spinner } from './parts';
 import { OutcomeFilePreview } from './outcome-file-preview';
 
@@ -35,6 +36,10 @@ function FileRow({
   const t = useContent().dashboard.detail;
   const known = file.status in t.fileStatus ? (file.status as keyof typeof t.fileStatus) : null;
   const statusLabel = known ? t.fileStatus[known] : file.status;
+  // `size_hint` is the payload's only size signal (changed-line count for text,
+  // null for binary/media). Surface it so a row's weight is visible before the
+  // preview is ever fetched.
+  const sizeLabel = file.size_hint != null ? t.sizeLines.replace('{n}', String(file.size_hint)) : null;
 
   return (
     <div className="flex flex-col">
@@ -69,6 +74,7 @@ function FileRow({
             -{file.deletions}
           </span>
         )}
+        {sizeLabel && <span className="font-mono text-[10px] text-ghost flex-none tabular-nums">{sizeLabel}</span>}
         <Chip tone={STATUS_TONE[file.status] ?? 'neutral'}>{statusLabel}</Chip>
       </button>
       {file.previous_filename && (
@@ -76,9 +82,12 @@ function FileRow({
           {t.renamedFrom.replace('{from}', file.previous_filename)}
         </span>
       )}
-      {expanded && (
+      {/* Reveal animates the disclosure (height+opacity) and — because it runs
+          through AnimatePresence — also animates the collapse before the preview
+          unmounts, which is what revokes its object URL. */}
+      <Reveal open={expanded}>
         <OutcomeFilePreview owner={owner} name={name} file={file} githubHref={githubHref} />
-      )}
+      </Reveal>
     </div>
   );
 }
@@ -87,13 +96,13 @@ function PrBlock({
   owner,
   name,
   pr,
-  expandedKey,
+  isExpanded,
   onToggle,
 }: {
   owner: string;
   name: string;
   pr: PrOutcome;
-  expandedKey: string | null;
+  isExpanded: (key: string) => boolean;
   onToggle: (key: string) => void;
 }) {
   const d = useContent().dashboard;
@@ -138,7 +147,7 @@ function PrBlock({
                 name={name}
                 file={file}
                 githubHref={filesHref}
-                expanded={expandedKey === key}
+                expanded={isExpanded(key)}
                 onToggle={() => onToggle(key)}
               />
             );
@@ -150,8 +159,9 @@ function PrBlock({
 }
 
 /** Outcomes tab: the session's devloop PRs, each with its committed files.
- *  Clicking a file expands an inline preview (single expansion at a time to
- *  avoid many concurrent media fetches). */
+ *  Rows expand INDEPENDENTLY (a set of open keys) so opening a second file no
+ *  longer silently collapses the first, and each expanded preview defers its
+ *  byte fetch behind an explicit "Load preview" click. */
 export function TabOutcomes({
   owner,
   name,
@@ -168,9 +178,9 @@ export function TabOutcomes({
 
   const [outcomes, setOutcomes] = useState<SessionOutcomes | null>(null);
   const [state, setState] = useState<LoadState>('loading');
-  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => new Set());
 
-  useEffect(() => {
+  const load = useCallback(() => {
     let active = true;
     setState('loading');
     getSessionOutcomes(apiFetch, owner, name, issue)
@@ -185,6 +195,18 @@ export function TabOutcomes({
     };
   }, [apiFetch, owner, name, issue]);
 
+  useEffect(() => load(), [load]);
+
+  const toggle = useCallback((key: string) => {
+    setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      // Explicit per-row toggle: flip only this key; siblings stay as they are.
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
   if (state === 'loading') {
     return (
       <span className="inline-flex items-center gap-2 font-mono text-[11.5px] text-dim">
@@ -193,7 +215,20 @@ export function TabOutcomes({
       </span>
     );
   }
-  if (state === 'error') return <p className="text-[12.5px] text-red">{t.outcomesError}</p>;
+  if (state === 'error') {
+    return (
+      <div className="flex items-center gap-2 flex-wrap">
+        <p className="text-[12.5px] text-red">{t.outcomesError}</p>
+        <button
+          type="button"
+          onClick={load}
+          className="inline-flex items-center gap-1.5 font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg transition-colors cursor-pointer"
+        >
+          {t.logsRetry}
+        </button>
+      </div>
+    );
+  }
   if (!outcomes || outcomes.prs.length === 0) return <Note>{t.outcomesEmpty}</Note>;
 
   return (
@@ -208,8 +243,8 @@ export function TabOutcomes({
           owner={owner}
           name={name}
           pr={pr}
-          expandedKey={expandedKey}
-          onToggle={(key) => setExpandedKey((prev) => (prev === key ? null : key))}
+          isExpanded={(key) => expandedKeys.has(key)}
+          onToggle={toggle}
         />
       ))}
     </div>
