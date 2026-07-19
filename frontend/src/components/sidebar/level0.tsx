@@ -45,6 +45,14 @@ export function Level0Sidebar({
   const shown = filterAccounts(accounts, query);
   const orgs = accounts.filter((a) => a.kind === 'org').map((a) => a.login);
 
+  // First-run guidance: a brand-new viewer has connected the App nowhere, so a
+  // muted "no accounts" line gives them nothing to act on. Show the prominent
+  // Install call-to-action whenever NO installation exists (not only at zero
+  // accounts) — a viewer with reachable-but-uninstalled accounts still needs
+  // the primary path. Requires a configured App (an install URL to point at).
+  const hasAnyInstallation = accounts.some((a) => a.installation_id != null);
+  const showFirstRun = overview.app_slug != null && !hasAnyInstallation;
+
   // Clamp the chart scope to the filtered options: a selection the name
   // filter removed falls back to "all", so the select never sits on an
   // invisible value while the charts silently scope to a hidden account.
@@ -86,8 +94,42 @@ export function Level0Sidebar({
         </button>
       </div>
 
+      {showFirstRun && overview.app_slug != null && (
+        // `overview.app_slug != null` is re-checked so `appSlug` narrows to a
+        // string for the install URL (showFirstRun already implies it).
+        <div className="anim-notice-in flex flex-col gap-2 border rounded-card px-4 py-3.5 border-[color-mix(in_oklab,var(--amber)_35%,var(--line))] bg-[color-mix(in_oklab,var(--amber)_8%,transparent)]">
+          <h2 className="font-display font-semibold text-[15px] text-fg">{cc.firstRunTitle}</h2>
+          <p className="font-ui text-[12.5px] text-dim leading-relaxed">{cc.firstRunBody}</p>
+          <div className="flex items-center gap-3 flex-wrap pt-1">
+            <a
+              href={`https://github.com/apps/${overview.app_slug}/installations/new`}
+              target="_blank"
+              rel="noreferrer"
+              className="font-ui font-semibold text-[12px] bg-amber text-amber-ink rounded-control px-3.5 py-1.5 transition-colors hover:brightness-[1.06]"
+            >
+              {cc.firstRunInstall}
+            </a>
+            {/* Plain internal anchor rather than react-router `Link`: the
+                sidebar renders inside test harnesses that mount the dashboard
+                without a Router, and a hard nav to the get-started route is
+                perfectly acceptable for a first-run secondary link. */}
+            <a
+              href="/get-started"
+              className="font-ui font-semibold text-[12px] text-dim hover:text-fg transition-colors no-underline"
+            >
+              {cc.firstRunGuide}
+            </a>
+          </div>
+        </div>
+      )}
+
       {accounts.length === 0 ? (
-        <p className="font-mono text-[12.5px] text-ghost">{cc.noAccounts}</p>
+        // With the first-run callout already carrying the Install CTA, the muted
+        // "no accounts" line is redundant; keep it only when the App is not
+        // configured (no callout, nothing else to say).
+        showFirstRun ? null : (
+          <p className="font-mono text-[12.5px] text-ghost">{cc.noAccounts}</p>
+        )
       ) : shown.length === 0 ? (
         <p className="font-mono text-[12.5px] text-ghost">{cc.noAccountsMatch}</p>
       ) : (

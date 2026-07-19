@@ -2,6 +2,7 @@ import { cn } from '@/lib/utils';
 import { useContent } from '@/i18n';
 import type { AccountOverview, RepoOverview } from '@/lib/api/types';
 import { Chip } from '@/components/ui/chip';
+import { StaggerItem } from '@/components/ui/motion';
 
 /** One repository row of the level-1 sidebar: GitHub link, visibility/org
  *  chips, and the App install affordance (the old dashboard's RepoRow
@@ -63,6 +64,15 @@ function RepoRow({
           {cc.statusActiveCount.replace('{n}', String(repo.active_sessions))}
         </span>
       )}
+      {/* Persistent status derived purely from repo state: a not-yet-installed
+          repo carries the badge on every visit until the App is actually
+          installed — unlike the transient freshly-created callout below, which
+          only appears the one time you drill in right after creating it. */}
+      {!repo.installed && appSlug != null && (
+        <span className="flex-none" title={cc.needsInstallHint}>
+          <Chip tone="amber">{cc.needsInstall}</Chip>
+        </span>
+      )}
       {repo.installed ? (
         <span
           className="font-mono text-[11px] text-green flex-none"
@@ -105,11 +115,12 @@ export function RepoList({
 
   return (
     <div className="flex flex-col divide-y divide-[color-mix(in_oklab,var(--line)_55%,transparent)]">
-      {repos.map((repo) => {
+      {repos.map((repo, i) => {
         const key = `${repo.owner}/${repo.name}`;
         const isNew = key === createdKey;
         return (
-          <div key={key}>
+          // Staggered entrance per row (reduced-motion-safe via .anim-row-in).
+          <StaggerItem key={key} index={i}>
             <RepoRow
               repo={repo}
               isOrg={account.kind === 'org'}
@@ -131,7 +142,7 @@ export function RepoList({
                 </a>
               </div>
             )}
-          </div>
+          </StaggerItem>
         );
       })}
     </div>
