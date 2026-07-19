@@ -5,9 +5,11 @@
 
 import type {
   AccountOverview,
+  IssueDetail,
   RepoOverview,
   RepoSessionsResponse,
   SessionDetail,
+  SessionLiveness,
 } from './types';
 
 /** The three visual status classes of the canvas (contract §frontend):
@@ -166,4 +168,149 @@ export function foldTail(rows: ChartRow[], max: number, otherLabel: string): Cha
       value: tail.reduce((n, r) => n + r.value, 0),
     },
   ];
+}
+
+// ---- Session-detail decoders (drawer) ---------------------------------------
+// Pure classifiers over the control-plane status markers. The label strings
+// are the ones the reconciler latches on the trigger issue (see
+// `backend/src/reconcile/mod.rs`); the `fkst-dev:*` work-item labels are set by
+// the running session's devloop package.
+
+/** The lifecycle phase of a session, decoded from its status labels + trigger
+ *  state + liveness. Ordered here roughly as the lifecycle progresses. */
+export type SessionPhase =
+  | 'registered'
+  | 'active'
+  | 'picked-up'
+  | 'degraded'
+  | 'retired'
+  | 'invalid'
+  | 'idle';
+
+/** A coarse health signal separate from the phase: `ok` needs positive
+ *  liveness, `degraded` is latched by the reconciler, everything else is
+ *  `unknown` (we have no positive signal, not necessarily bad). */
+export type SessionHealth = 'ok' | 'degraded' | 'unknown';
+
+export interface DecodedSessionStatus {
+  phase: SessionPhase;
+  health: SessionHealth;
+  liveness: SessionLiveness | null;
+}
+
+/** Trigger-issue status labels the reconciler latches. */
+const SESSION_LABELS = {
+  invalid: 'fkst-substrate-invalid',
+  active: 'fkst-substrate-active',
+  pickedUp: 'fkst-picked-up',
+  retired: 'fkst-session-retired',
+  degraded: 'fkst-degraded',
+  configRejected: 'fkst-config-rejected',
+} as const;
+
+/** Decode a session's lifecycle phase + health from its labels, invalid reason,
+ *  trigger state and pod liveness. Precedence is terminal-first: an invalid /
+ *  config-rejected session overrides everything, then a retired/closed one,
+ *  then degraded, then active. */
+export function decodeSessionStatus(session: SessionDetail): DecodedSessionStatus {
+  const labels = new Set(session.status_labels);
+  const has = (label: string) => labels.has(label);
+  const degraded = has(SESSION_LABELS.degraded);
+  const liveness = session.liveness ?? null;
+
+  let phase: SessionPhase;
+  if (session.invalid_reason != null || has(SESSION_LABELS.invalid) || has(SESSION_LABELS.configRejected)) {
+    phase = 'invalid';
+  } else if (has(SESSION_LABELS.retired) || session.trigger.state === 'closed') {
+    phase = 'retired';
+  } else if (degraded) {
+    phase = 'degraded';
+  } else if (has(SESSION_LABELS.active) || liveness != null) {
+    phase = 'active';
+  } else if (has(SESSION_LABELS.pickedUp)) {
+    phase = 'picked-up';
+  } else if (session.trigger.state === 'open') {
+    phase = 'registered';
+  } else {
+    phase = 'idle';
+  }
+
+  const health: SessionHealth = degraded ? 'degraded' : liveness === 'live' ? 'ok' : 'unknown';
+  return { phase, health, liveness };
+}
+
+/** A decoded work-item (queue issue) state + a semantic tone for the chip. */
+export type WorkItemState =
+  | 'queued'
+  | 'thinking'
+  | 'implementing'
+  | 'ready'
+  | 'failed'
+  | 'done'
+  | 'claimed'
+  | 'other';
+
+export type WorkItemTone = 'neutral' | 'progress' | 'good' | 'bad';
+
+export interface DecodedWorkItem {
+  state: WorkItemState;
+  tone: WorkItemTone;
+}
+
+/** The devloop marks its progress on a work issue with `fkst-dev:<suffix>`
+ *  labels. */
+const DEV_LABEL_PREFIX = 'fkst-dev:';
+
+/** Decode one work issue's state from its `fkst-dev:*` labels and open/closed
+ *  state. A closed issue is `done` regardless of any stale in-flight marker —
+ *  the devloop closes it when its PR merges. Open issues resolve highest-signal
+ *  first: a terminal failure, then a ready PR, then the in-flight phases, then
+ *  the pre-work latches, falling back to `queued` (waiting) or `other`. */
+export function decodeWorkItemStatus(issue: IssueDetail): DecodedWorkItem {
+  if (issue.state === 'closed') return { state: 'done', tone: 'good' };
+
+  const suffixes = new Set(
+    issue.labels
+      .filter((label) => label.startsWith(DEV_LABEL_PREFIX))
+      .map((label) => label.slice(DEV_LABEL_PREFIX.length))
+  );
+  const has = (suffix: string) => suffixes.has(suffix);
+
+  if (has('impl-failed')) return { state: 'failed', tone: 'bad' };
+  if (has('ready')) return { state: 'ready', tone: 'good' };
+  if (has('implementing')) return { state: 'implementing', tone: 'progress' };
+  if (has('thinking')) return { state: 'thinking', tone: 'progress' };
+  if (has('claimed')) return { state: 'claimed', tone: 'progress' };
+  if (has('enabled')) return { state: 'queued', tone: 'neutral' };
+  if (suffixes.size === 0) return { state: 'queued', tone: 'neutral' };
+  return { state: 'other', tone: 'neutral' };
+}
+
+/** A package reference decoded into a short handle (the path tail) and a
+ *  friendly role name. */
+export interface PackageRole {
+  short: string;
+  role: string;
+}
+
+/** Ordered role rules: the first whose matcher hits the (lower-cased) path tail
+ *  wins. Mapping the role from the tail keeps the busy `owner/repo@ref:path`
+ *  string out of the primary UI while the full ref stays available in a
+ *  tooltip / `<code>`. Falls back to the short handle itself. */
+const ROLE_RULES: ReadonlyArray<{ match: (tail: string) => boolean; role: string }> = [
+  { match: (t) => t.startsWith('workflow-dev'), role: 'Dev workflow' },
+  { match: (t) => t.startsWith('github-devloop'), role: 'Devloop' },
+  { match: (t) => t.includes('consensus'), role: 'Consensus' },
+  { match: (t) => t.includes('triage'), role: 'Triage' },
+  { match: (t) => t.includes('review'), role: 'Review' },
+  { match: (t) => t.includes('security'), role: 'Security' },
+  { match: (t) => t.includes('intake'), role: 'Intake' },
+  { match: (t) => t === 'base' || t.endsWith('/base'), role: 'Base' },
+];
+
+export function packageRole(ref: string): PackageRole {
+  const short = packageShortLabel(ref);
+  const tail = short.toLowerCase();
+  const rule = ROLE_RULES.find((candidate) => candidate.match(tail));
+  return { short, role: rule ? rule.role : short };
 }

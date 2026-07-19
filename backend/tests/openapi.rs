@@ -102,6 +102,12 @@ async fn paths_are_the_trimmed_v1_surface() {
         "/api/v1/overview",
         "/api/v1/repos/{owner}/{name}/sessions",
         "/api/v1/repos/{owner}/{name}/sessions/{issue_number}",
+        // A session's outcome files grouped by PR + the raw blob-stream.
+        "/api/v1/repos/{owner}/{name}/sessions/{issue_number}/outcomes",
+        "/api/v1/repos/{owner}/{name}/blob/{sha}",
+        // The in-bundle log viewer (manifest + one decompressed file).
+        "/api/v1/logs/{session_id}/manifest",
+        "/api/v1/logs/{session_id}/file",
         "/health",
         "/metrics",
     ] {
@@ -172,6 +178,13 @@ async fn components_include_the_named_environment_schemas_and_not_the_removed_on
         "EnvironmentProfileList",
         "EnvironmentProfileSummary",
         "InstallValidationError",
+        // The outcomes + log-viewer DTOs (dashboard surface feature).
+        "SessionOutcomes",
+        "PrOutcome",
+        "OutcomeFile",
+        "LogManifest",
+        "LogFileEntry",
+        "LogFileContent",
     ] {
         assert!(
             schemas.get(expected).is_some(),

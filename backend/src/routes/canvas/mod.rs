@@ -19,6 +19,7 @@
 
 mod github;
 mod mutate;
+mod outcomes;
 mod overview;
 mod sessions;
 #[cfg(test)]
@@ -41,4 +42,6 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(overview::overview))
         .routes(routes!(sessions::repo_sessions, mutate::create_session))
         .routes(routes!(mutate::stop_session))
+        .routes(routes!(outcomes::session_outcomes))
+        .routes(routes!(outcomes::outcome_blob))
 }

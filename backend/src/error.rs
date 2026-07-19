@@ -122,6 +122,12 @@ impl From<crate::github_app::GithubAppError> for AppError {
                 AppError::Validation("invalid repository reference".to_string())
             }
             GithubAppError::RefExists => AppError::Conflict("git ref already exists".to_string()),
+            // A too-large blob is a client-visible size limit. The raw blob-stream
+            // endpoint intercepts this to answer 413 directly (its response is
+            // bytes, not the JSON envelope); this arm is the JSON fallback.
+            GithubAppError::BlobTooLarge => {
+                AppError::Unprocessable("file is too large to preview".to_string())
+            }
             GithubAppError::Http(context) => {
                 AppError::Internal(anyhow::anyhow!("github http error: {context}"))
             }

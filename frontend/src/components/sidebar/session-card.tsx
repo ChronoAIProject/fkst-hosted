@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useContent, useLang } from '@/i18n';
 import { formatIsoSgt } from '@/lib/format';
 import type { IssueDetail, SessionDetail } from '@/lib/api/types';
 import { Chip } from '@/components/ui/chip';
+import { SessionDetailDrawer } from '@/components/session-detail/session-detail-drawer';
 
 function IssueLine({ issue }: { issue: IssueDetail }) {
   const d = useContent().dashboard;
@@ -43,9 +45,15 @@ function LivenessChip({ liveness }: { liveness: NonNullable<SessionDetail['liven
  *  packages, liveness, log download, trigger + work issues, PR outcomes,
  *  and the stop affordance for open triggers. */
 export function SessionCard({
+  owner,
+  name,
   session,
   onStop,
 }: {
+  /** Repo coordinates from the level-2 context — the detail drawer's fetches
+   *  are repo-scoped (outcomes, blobs). */
+  owner: string;
+  name: string;
   session: SessionDetail;
   /** Open the stop-confirm flow; absent for closed triggers. */
   onStop: (session: SessionDetail) => void;
@@ -53,6 +61,7 @@ export function SessionCard({
   const c = useContent().dashboard;
   const cc = c.canvas;
   const { lang } = useLang();
+  const [showDetail, setShowDetail] = useState(false);
   const invalid = !!session.invalid_reason;
   const created = formatIsoSgt(session.trigger.created_at, lang);
   const updated = formatIsoSgt(session.trigger.updated_at, lang);
@@ -79,6 +88,14 @@ export function SessionCard({
               {label}
             </Chip>
           ))}
+          <button
+            type="button"
+            onClick={() => setShowDetail(true)}
+            aria-label={c.detail.openAria.replace('{name}', session.name ?? `#${session.trigger.number}`)}
+            className="font-ui font-semibold text-[11px] border border-line rounded-control px-2.5 py-1 text-dim transition-colors hover:text-fg cursor-pointer"
+          >
+            {c.detail.open}
+          </button>
           {session.trigger.state === 'open' && (
             <button
               type="button"
@@ -198,6 +215,15 @@ export function SessionCard({
           </>
         )}
       </div>
+
+      {showDetail && (
+        <SessionDetailDrawer
+          owner={owner}
+          name={name}
+          session={session}
+          onClose={() => setShowDetail(false)}
+        />
+      )}
     </div>
   );
 }

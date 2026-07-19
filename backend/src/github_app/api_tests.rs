@@ -1,7 +1,7 @@
 //! Transport-layer tests for `HttpGithubApi` (extracted from api.rs to keep it
 //! under the 500-line budget; sibling `#[path]` module, mirrors repo.rs).
 
-use wiremock::matchers::{body_partial_json, header, method, path};
+use wiremock::matchers::{body_partial_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
@@ -787,6 +787,128 @@ async fn close_issue_surfaces_non_success() {
         .await
         .expect_err("410 is an error");
     assert!(matches!(err, GithubAppError::Http(_)));
+}
+
+// ---- list_pull_files -----------------------------------------------------
+
+#[tokio::test]
+async fn list_pull_files_paginates_until_a_short_page() {
+    let server = MockServer::start().await;
+    // A FULL page (100) makes the transport request page 2; page 2 is short (1),
+    // which ends the loop.
+    let full_page: Vec<serde_json::Value> = (0..100)
+        .map(|i| {
+            serde_json::json!({
+                "filename": format!("f{i}.txt"),
+                "status": "added",
+                "additions": 1,
+                "deletions": 0,
+                "changes": 1,
+                "sha": format!("sha{i}"),
+            })
+        })
+        .collect();
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/pulls/7/files"))
+        .and(query_param("page", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(&full_page))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/pulls/7/files"))
+        .and(query_param("page", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"filename": "last.md", "status": "modified", "additions": 3, "deletions": 1, "changes": 4, "sha": "shalast"}
+        ])))
+        .mount(&server)
+        .await;
+    let files = api(&server.uri())
+        .list_pull_files("ghs_tok", "acme", "site", 7)
+        .await
+        .expect("ok");
+    assert_eq!(files.len(), 101);
+    assert_eq!(files[0].filename, "f0.txt");
+    assert_eq!(files[100].filename, "last.md");
+    assert_eq!(files[100].additions, 3);
+    assert_eq!(files[100].deletions, 1);
+}
+
+#[tokio::test]
+async fn list_pull_files_carries_previous_filename_for_a_rename() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/pulls/9/files"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "filename": "src/new.rs", "status": "renamed",
+                "additions": 0, "deletions": 0, "changes": 0,
+                "sha": "abc", "previous_filename": "src/old.rs"
+            }
+        ])))
+        .mount(&server)
+        .await;
+    let files = api(&server.uri())
+        .list_pull_files("ghs_tok", "acme", "site", 9)
+        .await
+        .expect("ok");
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].filename, "src/new.rs");
+    assert_eq!(files[0].status, "renamed");
+    assert_eq!(files[0].previous_filename.as_deref(), Some("src/old.rs"));
+    assert_eq!(files[0].sha, "abc");
+}
+
+// ---- get_blob_raw --------------------------------------------------------
+
+#[tokio::test]
+async fn get_blob_raw_returns_bytes_with_the_raw_media_type() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/git/blobs/deadbeef"))
+        .and(header("accept", "application/vnd.github.raw"))
+        .and(header("authorization", "Bearer ghs_tok"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"hello bytes".to_vec()))
+        .mount(&server)
+        .await;
+    let bytes = api(&server.uri())
+        .get_blob_raw("ghs_tok", "acme", "site", "deadbeef", 1024)
+        .await
+        .expect("ok");
+    assert_eq!(bytes, b"hello bytes");
+}
+
+#[tokio::test]
+async fn get_blob_raw_404_is_not_found() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/git/blobs/nope"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    let err = api(&server.uri())
+        .get_blob_raw("ghs_tok", "acme", "site", "nope", 1024)
+        .await
+        .expect_err("must fail");
+    assert!(
+        matches!(err, GithubAppError::NotFound { .. }),
+        "got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn get_blob_raw_over_cap_is_too_large() {
+    let server = MockServer::start().await;
+    // 50 bytes with a max of 10 — the Content-Length gate rejects it up front.
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/git/blobs/big"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0u8; 50]))
+        .mount(&server)
+        .await;
+    let err = api(&server.uri())
+        .get_blob_raw("ghs_tok", "acme", "site", "big", 10)
+        .await
+        .expect_err("must fail");
+    assert!(matches!(err, GithubAppError::BlobTooLarge), "got {err:?}");
 }
 
 #[tokio::test]

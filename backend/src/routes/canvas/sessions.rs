@@ -135,7 +135,10 @@ fn liveness_label(liveness: PodLiveness) -> Option<&'static str> {
 /// parseable work-issue number in the devloop head branch / title (the SAME
 /// parse auto-merge uses). Template-reconcile and other non-devloop bot PRs
 /// carry no such number and drop out.
-fn devloop_prs(pulls: &[RepoPull], bot_login: Option<&str>) -> Vec<PrDetail> {
+///
+/// `pub(super)` so the outcomes endpoint reuses the exact same devloop-PR
+/// projection (one grouping rule for both surfaces).
+pub(super) fn devloop_prs(pulls: &[RepoPull], bot_login: Option<&str>) -> Vec<PrDetail> {
     let Some(bot) = bot_login else {
         tracing::debug!("canvas sessions: FKST_GITHUB_BOT_LOGIN unset; listing no devloop PRs");
         return Vec::new();
