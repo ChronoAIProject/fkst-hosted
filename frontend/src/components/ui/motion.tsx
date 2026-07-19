@@ -77,9 +77,12 @@ export function RouteTransition({
 }
 
 /**
- * (b) Keyed crossfade for tab bodies and loaded-vs-loading swaps. `mode="wait"`
- * so the outgoing body fully fades before the incoming one appears (no overlap
- * flash between two differently-sized panels). Instant under reduced motion.
+ * (b) Keyed crossfade for tab bodies and loaded-vs-loading swaps. `mode="popLayout"`
+ * pops the OUTGOING body out of layout flow (position:absolute) as it fades, so
+ * the incoming body mounts and takes over layout IMMEDIATELY — no overlap flash
+ * between two differently-sized panels, and (unlike `mode="wait"`) the new
+ * content is present the instant the key changes rather than after the outgoing
+ * exit resolves. Instant under reduced motion.
  */
 export function FadeSwap({
   k,
@@ -93,7 +96,7 @@ export function FadeSwap({
 }) {
   const reduce = useReducedMotion();
   return (
-    <AnimatePresence mode="wait" initial={false}>
+    <AnimatePresence mode="popLayout" initial={false}>
       <motion.div
         key={k}
         className={className}
