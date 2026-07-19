@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { AuthProvider } from '@/lib/auth/github-auth';
+import { ToastProvider } from '@/components/ui/toast';
 import type { IssueDetail, RepoSessionsResponse, SessionDetail } from '@/lib/api/types';
 import { buildCreateRequest } from '@/components/modals/create-trigger-modal';
 import { Level2Sidebar } from './level2';
@@ -94,16 +96,20 @@ describe('buildCreateRequest', () => {
 
 function renderLevel2(props: Partial<Parameters<typeof Level2Sidebar>[0]> = {}) {
   return render(
-    <AuthProvider>
-      <Level2Sidebar
-        owner="shining"
-        name="lab"
-        data={body([session({})])}
-        loadFailed={false}
-        onChanged={() => {}}
-        {...props}
-      />
-    </AuthProvider>
+    <MemoryRouter>
+      <ToastProvider>
+        <AuthProvider>
+          <Level2Sidebar
+            owner="shining"
+            name="lab"
+            data={body([session({})])}
+            loadFailed={false}
+            onChanged={() => {}}
+            {...props}
+          />
+        </AuthProvider>
+      </ToastProvider>
+    </MemoryRouter>
   );
 }
 
@@ -137,9 +143,17 @@ describe('Level2Sidebar', () => {
       screen.getByText('ChronoAIProject/fkst-packages@fkst-hosted:codex/base')
     ).toBeInTheDocument();
 
-    // Timestamps from the trigger issue (SGT-rendered).
-    expect(screen.getByText(/created .*SGT/)).toBeInTheDocument();
-    expect(screen.getByText(/updated .*SGT/)).toBeInTheDocument();
+    // Trigger timestamps render as viewer-local relative text with the full
+    // absolute value one hover away (title tooltip). The exact relative bucket
+    // depends on the wall clock, so assert the label + that a tooltip backs it.
+    const created = screen.getByText(/^created\b/);
+    expect(created).toHaveAttribute('title');
+
+    // The header freshness line ticks off the last successful poll — seeded at
+    // mount, so it reads "updated now" immediately (distinct from the card's
+    // own "updated …" trigger timestamp).
+    const freshness = screen.getByText('updated now');
+    expect(freshness).toHaveAttribute('title', 'Auto-refreshes every 15 s while open.');
 
     // Log download link goes straight at log_url.
     const log = screen.getByRole('link', { name: /Download logs/ });
@@ -318,6 +332,106 @@ describe('Level2Sidebar', () => {
       ]),
     });
     expect(screen.queryByRole('button', { name: /Stop session/ })).not.toBeInTheDocument();
-    expect(screen.getByText(/closed .*SGT/)).toBeInTheDocument();
+    // Closed trigger renders a "closed <relative>" timestamp (a bare "closed"
+    // issue-state word also exists, so require text after the label).
+    expect(screen.getByText(/^closed\s+\S/)).toBeInTheDocument();
+  });
+
+  it('offers a Retry on a no-data load failure and refreshes immediately', async () => {
+    const user = userEvent.setup();
+    const onChanged = vi.fn();
+    const { rerender } = render(
+      <AuthProvider>
+        <Level2Sidebar owner="shining" name="lab" data={null} loadFailed onChanged={onChanged} />
+      </AuthProvider>
+    );
+
+    // The dead-end red note now carries an actionable Retry.
+    expect(
+      screen.getByText('Could not load the sessions of this repository. Please try again.')
+    ).toBeInTheDocument();
+    const retry = screen.getByRole('button', { name: 'Retry' });
+    await user.click(retry);
+
+    // Recovery does not wait for the silent poll: the parent re-fetch fires now.
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    // In-flight: the button flips to the pending label and is disabled.
+    expect(screen.getByRole('button', { name: 'Refreshing…' })).toBeDisabled();
+
+    // The parent resolves the refresh with data → list shows and freshness is
+    // stamped, clearing the spinner.
+    rerender(
+      <AuthProvider>
+        <Level2Sidebar
+          owner="shining"
+          name="lab"
+          data={body([session({})])}
+          loadFailed={false}
+          onChanged={onChanged}
+        />
+      </AuthProvider>
+    );
+    expect(screen.getByText('nightly')).toBeInTheDocument();
+    expect(screen.getByText('updated now')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Refreshing…' })).not.toBeInTheDocument();
+  });
+
+  it('hides the freshness line until a load actually succeeds', () => {
+    // Mounting with a stale payload behind a failed refresh: we never observed
+    // a success, so no misleading "updated" time is shown — only the notice.
+    renderLevel2({ data: body([session({})]), loadFailed: true });
+    expect(screen.queryByText('updated now')).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Refresh failed — showing the last loaded sessions.')
+    ).toBeInTheDocument();
+  });
+
+  it('keeps a session card mounted across a poll reorder (stable key, B2)', () => {
+    // Two sessions; a poll swaps their order. With a positional-index key the
+    // cards would remount (slamming an open drawer shut). The key is the stable
+    // session_id, so the DOM node for a given session must survive the reorder.
+    // Trigger titles are kept distinct from the session names so the name span
+    // is the sole element matching 'alpha' (the trigger title also renders).
+    const alpha = session({
+      session_id: 'aaaaaaaa-0000-0000-0000-000000000000',
+      name: 'alpha',
+      work_issues: [],
+      prs: [],
+      trigger: issue({ number: 1, title: 'a-trig' }),
+    });
+    const beta = session({
+      session_id: 'bbbbbbbb-1111-1111-1111-111111111111',
+      name: 'beta',
+      work_issues: [],
+      prs: [],
+      trigger: issue({ number: 2, title: 'b-trig' }),
+    });
+
+    const { rerender } = render(
+      <AuthProvider>
+        <Level2Sidebar
+          owner="shining"
+          name="lab"
+          data={body([alpha, beta])}
+          loadFailed={false}
+          onChanged={() => {}}
+        />
+      </AuthProvider>
+    );
+    const alphaNode = screen.getByText('alpha', { selector: 'span' });
+
+    rerender(
+      <AuthProvider>
+        <Level2Sidebar
+          owner="shining"
+          name="lab"
+          data={body([beta, alpha])}
+          loadFailed={false}
+          onChanged={() => {}}
+        />
+      </AuthProvider>
+    );
+    // Same element instance ⇒ React moved (did not remount) the card.
+    expect(screen.getByText('alpha', { selector: 'span' })).toBe(alphaNode);
   });
 });
