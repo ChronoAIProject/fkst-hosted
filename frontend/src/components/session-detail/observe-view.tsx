@@ -1,5 +1,6 @@
 import { useContent } from '@/i18n';
 import type { ObserveSnapshot, ObserveQueue } from '@/lib/api/types';
+import { StaggerItem } from '@/components/ui/motion';
 import { SectionLabel } from './parts';
 
 /** Length of a value only if it is actually an array (the observe payload is
@@ -53,7 +54,14 @@ export function ObserveView({ snapshot }: { snapshot: ObserveSnapshot }) {
           <SectionLabel>{t.queues}</SectionLabel>
           <div className="divide-y divide-[color-mix(in_oklab,var(--line)_55%,transparent)]">
             {queues.map((queue, i) => (
-              <QueueRow key={queue.queue ?? `queue-${i}`} queue={queue} />
+              // BUG B3: the observe payload is untrusted engine JSON, so two
+              // queues can legitimately share a `queue` name. Keying on the name
+              // alone would collide; always append the positional index so the
+              // React key is unique regardless of duplicate names. The stagger
+              // gives the rows a settle-in cadence as the snapshot reveals.
+              <StaggerItem key={`${queue.queue ?? 'q'}-${i}`} index={i}>
+                <QueueRow queue={queue} />
+              </StaggerItem>
             ))}
           </div>
         </div>
