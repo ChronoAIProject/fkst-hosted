@@ -16,6 +16,19 @@ export const dashboardScalars: DashboardScalars = {
   signInBody: 'Connect your GitHub account to load your fkst sessions and issues. You stay signed in — the token refreshes automatically.',
   notConfigured: 'The dashboard backend is not configured for this deployment yet.',
   authError: 'Sign-in was cancelled or failed. Please try again.',
+  authErrorBySlug: {
+    access_denied:
+      'You cancelled or denied the GitHub authorization. Sign in again whenever you are ready.',
+    redirect_uri_mismatch:
+      'The sign-in redirect did not match this deployment. Check the GitHub App callback URLs and try again.',
+    application_suspended:
+      'This GitHub App is suspended, so sign-in cannot complete. Contact the deployment owner.',
+  },
+  retry: 'Retry',
+  sessionExpiredTitle: 'Your session expired',
+  sessionExpiredBody:
+    'You were signed out because your GitHub token could not be refreshed. Sign in again to pick up right where you left off — your place on the dashboard is kept.',
+  sessionExpiredAction: 'Sign in again',
   noSessions: 'No fkst sessions in this repository.',
   installed: 'installed',
   workLabel: 'Work label',

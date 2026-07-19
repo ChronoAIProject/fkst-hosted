@@ -1,8 +1,11 @@
 import { lazy, Suspense } from 'react';
-import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import { Shell } from './shell';
 import { Introduction } from '../pages/introduction';
 import { GetStarted } from '../pages/get-started';
+import { NotFound } from '../pages/not-found';
+import { ErrorBoundary, RouteErrorElement } from '../components/ui/error-boundary';
+import { ToastProvider, Toaster } from '../components/ui/toast';
 import { LanguageProvider, useContent } from '../i18n';
 import { AuthProvider } from '../lib/auth/github-auth';
 
@@ -45,19 +48,32 @@ const router = createBrowserRouter(
     {
       path: '/',
       element: <Shell />,
+      // Shell itself throwing has no chrome left to preserve, so fall back to
+      // the full-area error view here.
+      errorElement: <RouteErrorElement />,
       children: [
-        { path: '', element: <Introduction /> },
-        { path: 'get-started', element: <GetStarted /> },
         {
-          path: 'dashboard',
-          element: (
-            <Suspense fallback={<DashboardFallback />}>
-              <Dashboard />
-            </Suspense>
-          ),
+          // Pathless layout route: React Router renders its implicit <Outlet />
+          // into the Shell, and swaps in this errorElement *in that slot* when a
+          // page throws — so the topbar/footer stay put and the fallback shows
+          // in-shell rather than blanking the whole app.
+          errorElement: <RouteErrorElement />,
+          children: [
+            { path: '', element: <Introduction /> },
+            { path: 'get-started', element: <GetStarted /> },
+            {
+              path: 'dashboard',
+              element: (
+                <Suspense fallback={<DashboardFallback />}>
+                  <Dashboard />
+                </Suspense>
+              ),
+            },
+            // Unknown paths render a real 404 that names the missing path,
+            // instead of silently redirecting to the landing page.
+            { path: '*', element: <NotFound /> },
+          ],
         },
-        // Unknown paths fall back to the landing page.
-        { path: '*', element: <Navigate to="/" replace /> },
       ],
     },
   ],
@@ -69,12 +85,28 @@ const router = createBrowserRouter(
   }
 );
 
+/** The single global Toaster, localized. Split out so it can read `useContent`
+ *  inside the providers while `App` stays a plain provider-mount tree. */
+function ShellToaster() {
+  const s = useContent().shell;
+  return <Toaster dismissLabel={s.toastDismiss} />;
+}
+
 export function App() {
   return (
     <LanguageProvider>
-      <AuthProvider>
-        <RouterProvider router={router} future={{ v7_startTransition: true }} />
-      </AuthProvider>
+      {/* Outermost boundary catches render throws the router's errorElement
+          cannot reach (providers, the router host, the toaster). */}
+      <ErrorBoundary>
+        <AuthProvider>
+          {/* ToastProvider wraps the whole router tree so any page can raise
+              notices via useToast(); the one Toaster is mounted alongside. */}
+          <ToastProvider>
+            <RouterProvider router={router} future={{ v7_startTransition: true }} />
+            <ShellToaster />
+          </ToastProvider>
+        </AuthProvider>
+      </ErrorBoundary>
     </LanguageProvider>
   );
 }

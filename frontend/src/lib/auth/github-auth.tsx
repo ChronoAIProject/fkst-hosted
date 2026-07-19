@@ -74,6 +74,13 @@ export interface AuthContextValue {
   isAuthenticated: boolean;
   /** OAuth error slug from the callback (e.g. `access_denied`), else null. */
   error: string | null;
+  /**
+   * The session was lost involuntarily (a 401 whose refresh could not recover
+   * it), as opposed to an explicit sign-out. Stays true until the next fresh
+   * sign-in so the dashboard can show a context-preserving "re-authenticate"
+   * prompt rather than the cold sign-in card.
+   */
+  sessionExpired: boolean;
   /** Begin login: navigate the browser to the backend authorize endpoint. */
   signIn: () => void;
   /** Forget the local token set. */
@@ -89,12 +96,24 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => !!ls.get(ACCESS_KEY));
   const [error, setError] = useState<string | null>(null);
+  const [sessionExpired, setSessionExpired] = useState<boolean>(false);
   // Coalesce concurrent refreshes into a single in-flight request.
   const inflight = useRef<Promise<string | null> | null>(null);
 
   const signOut = useCallback(() => {
     clearTokens();
     setIsAuthenticated(false);
+    // An explicit sign-out is a deliberate clean exit, not an expiry — leave
+    // sessionExpired alone so a real expiry flag can't be masked by it.
+  }, []);
+
+  // Involuntary loss of an authenticated session: a 401 whose refresh could not
+  // recover it (refresh token missing or rejected). Flags sessionExpired so the
+  // dashboard can prompt to re-authenticate while keeping the user's context.
+  const expireSession = useCallback(() => {
+    clearTokens();
+    setIsAuthenticated(false);
+    setSessionExpired(true);
   }, []);
 
   // Capture the token set (or error) the login callback delivered in the fragment.
@@ -107,8 +126,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (token) {
       storeTokens(token, params.get('gh_refresh'), Number(params.get('gh_expires_in')) || null);
       setIsAuthenticated(true);
+      // A fresh sign-in clears any prior expiry/error so the dashboard drops the
+      // re-authenticate prompt and returns to the normal signed-in view.
       setError(null);
+      setSessionExpired(false);
     } else if (errSlug) {
+      // Surface the callback's real OAuth error slug (e.g. `access_denied`) so
+      // the dashboard can map it to a specific message + retry/dismiss.
       setError(errSlug);
     }
     if (token || errSlug) {
@@ -125,7 +149,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (inflight.current) return inflight.current;
     const rt = ls.get(REFRESH_KEY);
     if (!rt) {
-      signOut();
+      // No refresh token to recover with: the access token cannot be renewed,
+      // so the session is over involuntarily.
+      expireSession();
       return Promise.resolve(null);
     }
     const run = (async (): Promise<string | null> => {
@@ -136,8 +162,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           body: JSON.stringify({ refresh_token: rt }),
         });
         if (res.status === 401) {
-          // The refresh token itself was rejected → must re-login.
-          signOut();
+          // The refresh token itself was rejected → the session expired and
+          // must be re-established via a fresh login.
+          expireSession();
           return null;
         }
         if (!res.ok) return null; // transient (5xx/network) — keep the session
@@ -153,7 +180,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })();
     inflight.current = run;
     return run;
-  }, [signOut]);
+  }, [expireSession]);
 
   const getToken = useCallback(async (): Promise<string | null> => {
     const access = ls.get(ACCESS_KEY);
@@ -193,6 +220,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     configured: API_CONFIGURED,
     isAuthenticated,
     error,
+    sessionExpired,
     signIn,
     signOut,
     getToken,

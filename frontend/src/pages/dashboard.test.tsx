@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { Dashboard, formatSgt } from './dashboard';
 import { AuthProvider } from '@/lib/auth/github-auth';
 
@@ -31,6 +31,32 @@ describe('Dashboard', () => {
     expect(
       screen.queryByText('The dashboard backend is not configured for this deployment yet.')
     ).not.toBeInTheDocument();
+  });
+
+  it('renders a slug-specific OAuth error and dismisses it', () => {
+    // The callback delivered a real OAuth slug in the fragment; the gate maps it
+    // to specific copy and offers a Dismiss control (the sign-in button is the
+    // try-again path).
+    window.location.hash = '#gh_error=access_denied';
+    renderDashboard();
+    expect(
+      screen.getByText(/cancelled or denied the GitHub authorization/)
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(
+      screen.queryByText(/cancelled or denied the GitHub authorization/)
+    ).not.toBeInTheDocument();
+  });
+
+  it('falls back to the generic message for an unrecognized OAuth slug', () => {
+    window.location.hash = '#gh_error=some_unknown_slug';
+    renderDashboard();
+    expect(
+      screen.getByText('Sign-in was cancelled or failed. Please try again.')
+    ).toBeInTheDocument();
+    // The raw slug stays visible so an unmapped failure is still diagnosable.
+    expect(screen.getByText('some_unknown_slug')).toBeInTheDocument();
   });
 });
 

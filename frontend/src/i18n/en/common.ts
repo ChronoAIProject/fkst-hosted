@@ -17,4 +17,18 @@ export const common: CommonSlice = {
     github: 'GitHub',
     manual: 'Operator manual',
   },
+  shell: {
+    errorTitle: 'Something went wrong',
+    errorBody:
+      'An unexpected error interrupted this page. Reloading usually clears it — if it keeps happening, the detail below helps track it down.',
+    errorReload: 'Reload the page',
+    errorDetailsSummary: 'Error details',
+    notFoundEyebrow: 'Error 404',
+    notFoundTitle: 'This page does not exist',
+    notFoundBody:
+      'Nothing is routed at `{path}`. It may have moved, or the link was mistyped.',
+    notFoundHome: 'Back to the introduction →',
+    notFoundMetaTitle: 'FKST — Page not found',
+    toastDismiss: 'Dismiss',
+  },
 };
