@@ -242,4 +242,120 @@ describe('Dashboard — canvas levels and loading', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back to the previous level' }));
     expect(await screen.findByText(/every GitHub account you can reach/)).toBeInTheDocument();
   });
+
+  it('fills its region: the canvas section uses h-full, not a fixed magic height', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('/api/v1/overview')) return jsonResponse(overviewBody);
+        throw new Error(`unexpected fetch: ${String(input)}`);
+      })
+    );
+    const { container } = renderDashboard();
+
+    await screen.findAllByRole('button', { name: 'Open account shining' });
+    const section = container.querySelector('section[aria-label="Accounts and repositories canvas"]');
+    expect(section).not.toBeNull();
+    expect(section!.className).toContain('h-full');
+    // The former viewport-overflowing magic heights are gone.
+    expect(section!.className).not.toContain('h-[640px]');
+    expect(section!.className).not.toContain('h-[440px]');
+  });
+
+  it('shows an in-canvas empty message when there are zero accounts', async () => {
+    const emptyBody: OverviewResponse = {
+      app_slug: 'chronoai-fkst',
+      viewer: { login: 'shining' },
+      accounts: [],
+      totals: { sessions: 0, packages: [] },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('/api/v1/overview')) return jsonResponse(emptyBody);
+        throw new Error(`unexpected fetch: ${String(input)}`);
+      })
+    );
+    renderDashboard();
+
+    // The empty-accounts message renders in the canvas (and possibly the
+    // sidebar); at least one instance must appear rather than a blank canvas.
+    expect((await screen.findAllByText('No accounts found.')).length).toBeGreaterThan(0);
+  });
+
+  it('renders an in-panel error with a working Retry when the overview load fails', async () => {
+    let calls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/v1/overview')) {
+        calls += 1;
+        // First load fails (no data); the Retry re-fetch succeeds.
+        return calls === 1 ? jsonResponse(null, 500) : jsonResponse(overviewBody);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderDashboard();
+
+    expect(
+      await screen.findByText('Could not load your repositories. Please try again.')
+    ).toBeInTheDocument();
+    // The sidebar must NOT be stuck on a skeleton behind a blank canvas.
+    expect(screen.queryByTestId('sidebar-skeleton')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    // The retry re-fetch lands and the canvas replaces the error panel.
+    expect(
+      (await screen.findAllByRole('button', { name: 'Open account shining' })).length
+    ).toBeGreaterThan(0);
+    expect(
+      screen.queryByText('Could not load your repositories. Please try again.')
+    ).not.toBeInTheDocument();
+  });
+
+  it('refreshes the visible session list (not only counts) on Refresh at repo level', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/v1/overview')) return jsonResponse(overviewBody);
+      if (url.endsWith('/api/v1/repos/shining/lab/sessions')) return jsonResponse(sessionsBody);
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderDashboard();
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Open account shining' }))[0]!);
+    fireEvent.click(
+      (await screen.findAllByRole('button', { name: 'Open repository shining/lab' }))[0]!
+    );
+    await screen.findAllByText('nightly');
+
+    const sessionCalls = () =>
+      fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/sessions')).length;
+    const before = sessionCalls();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    // Refresh at level 2 re-hits the sessions endpoint, not just /overview.
+    await waitFor(() => expect(sessionCalls()).toBeGreaterThan(before));
+  });
+
+  it('keeps the dashboard body and prompts re-auth (not the cold card) on involuntary expiry', async () => {
+    // An expired access token with no refresh token → the first apiFetch cannot
+    // recover the session, so the auth context flips to sessionExpired.
+    window.localStorage.setItem('fkst-gh-expires', String(Date.now() - 1000));
+    window.localStorage.removeItem('fkst-gh-refresh');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('/api/v1/overview')) return jsonResponse(overviewBody);
+        throw new Error(`unexpected fetch: ${String(input)}`);
+      })
+    );
+    renderDashboard();
+
+    expect(await screen.findByText('Your session expired')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sign in again' })).toBeInTheDocument();
+    // The cold sign-in card must NOT replace the (context-preserving) body.
+    expect(screen.queryByText('Sign in to view your dashboard')).not.toBeInTheDocument();
+  });
 });
