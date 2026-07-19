@@ -65,6 +65,9 @@ describe('buildNodes', () => {
     expect(nodes.every((n) => n.type === 'account')).toBe(true);
     expect(nodes[0]!.position).toEqual({ x: 0, y: 0 });
     expect(nodes[1]!.position.x).toBeGreaterThan(0);
+    // Grid nodes carry the opacity-only enter class so filtered-in results
+    // fade rather than teleport (reduced-motion collapses it to instant).
+    expect(nodes.every((n) => n.className === 'anim-overlay-in')).toBe(true);
   });
 
   it('produces repo nodes at level 1 and a single detail node at level 2', () => {
@@ -78,6 +81,7 @@ describe('buildNodes', () => {
       onOpenRepo: noop,
     });
     expect(repoNodes.map((n) => n.id)).toEqual(['repo:shining/lab', 'repo:shining/rocket']);
+    expect(repoNodes.every((n) => n.className === 'anim-overlay-in')).toBe(true);
 
     const detail = buildNodes({
       level: { kind: 'repo', owner: 'shining', name: 'lab' },
@@ -90,6 +94,10 @@ describe('buildNodes', () => {
     });
     expect(detail).toHaveLength(1);
     expect(detail[0]!.type).toBe('repoDetail');
+    // The single detail node is not part of a filterable grid and is left
+    // unmeasured (no width/height) so React Flow governs its own visibility —
+    // it must NOT carry the opacity enter class that would fight that.
+    expect(detail[0]!.className).toBeUndefined();
   });
 });
 
@@ -134,6 +142,17 @@ describe('CanvasFlow', () => {
     const org = screen.getByRole('button', { name: 'Open account acme' });
     expect(org.className).not.toContain('anim-node-glow');
     expect(screen.getByText('no App')).toBeInTheDocument();
+  });
+
+  it('renders the zoom + fit-view Controls so wheel-free zoom stays reachable', () => {
+    // With zoomOnScroll off the wheel no longer zooms, so the Controls are the
+    // discoverable zoom/re-center path. React Flow labels the buttons "Zoom
+    // In" / "Zoom Out" / "Fit View"; the interactivity lock is hidden.
+    renderFlow({ accounts: [account({ login: 'shining' })] });
+    expect(screen.getByRole('button', { name: 'Zoom In' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Zoom Out' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Fit View' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Toggle Interactivity' })).toBeNull();
   });
 
   it('opens an account on click', () => {

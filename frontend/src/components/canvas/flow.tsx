@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { ReactFlow, useReactFlow } from '@xyflow/react';
+import type { CSSProperties } from 'react';
+import { Controls, ReactFlow, useReactFlow } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useContent } from '@/i18n';
 import type { AccountOverview, RepoOverview, RepoSessionsResponse } from '@/lib/api/types';
@@ -16,6 +17,32 @@ const nodeTypes = {
   repo: RepoNode,
   repoDetail: RepoDetailNode,
 };
+
+// Enter cue for grid nodes (accounts/repos). A node keeps the same id → the
+// same DOM element across data-poll rebuilds, so the CSS animation replays
+// ONLY when a node truly mounts — i.e. a filter/level change brings it in —
+// giving filtered-in results a fade instead of a teleport. Opacity-only on
+// purpose: `.react-flow__node` already carries React Flow's positioning
+// `transform`, so a transform-based keyframe would fight it and snap the node
+// to (0,0) mid-animation. `anim-overlay-in` is a pure opacity fade and is
+// disabled under prefers-reduced-motion (collapses to the visible end state).
+const NODE_ENTER_CLASS = 'anim-overlay-in';
+
+// Dark/light theme tokens for the zoom/fit Controls, wired through React
+// Flow's documented CSS custom properties so the buttons match the app
+// surface instead of the library's default white chrome. Cast because
+// custom properties are not part of the CSSProperties type.
+const CONTROLS_STYLE = {
+  '--xy-controls-button-background-color': 'var(--raise)',
+  '--xy-controls-button-background-color-hover': 'var(--raise-2)',
+  '--xy-controls-button-color': 'var(--fg)',
+  '--xy-controls-button-color-hover': 'var(--fg)',
+  '--xy-controls-button-border-color': 'var(--line)',
+} as CSSProperties;
+
+// Match the viewport fit the controller uses, so the Controls "fit view"
+// reset re-centers to the same framing as an automatic refit.
+const FIT_VIEW_OPTIONS = { padding: 0.16, maxZoom: 1.1 } as const;
 
 /** Build the node set for the current level. Pure — exported for tests. */
 export function buildNodes(args: {
@@ -41,6 +68,7 @@ export function buildNodes(args: {
         width: ACCOUNT_NODE.width,
         height: ACCOUNT_NODE.height,
         draggable: false,
+        className: NODE_ENTER_CLASS,
         data: { account, onOpen: onOpenAccount },
       }));
     }
@@ -53,6 +81,7 @@ export function buildNodes(args: {
         width: REPO_NODE.width,
         height: REPO_NODE.height,
         draggable: false,
+        className: NODE_ENTER_CLASS,
         data: { repo, onOpen: onOpenRepo },
       }));
     }
@@ -147,9 +176,26 @@ export function CanvasFlow({
       minZoom={0.25}
       maxZoom={1.5}
       fitView
+      // Never trap the mouse wheel: a wheel event must scroll the surrounding
+      // page/<main>, not zoom or pan the canvas. zoomOnScroll/panOnScroll off
+      // make zoom + pan EXPLICIT gestures (drag to pan, pinch or the Controls
+      // to zoom); preventScrolling=false stops React Flow from calling
+      // preventDefault on the wheel, so the event reaches the page scroller.
+      zoomOnScroll={false}
+      panOnScroll={false}
+      preventScrolling={false}
       proOptions={{ hideAttribution: false }}
       className="bg-bg"
     >
+      {/* Discoverable re-center path: when a large fleet is squeezed by fitView
+          against minZoom, the fit-view button restores framing and zoom in/out
+          give explicit zoom now that the wheel no longer zooms. showInteractive
+          is off — the lock toggles node dragging, which is disabled here. */}
+      <Controls
+        showInteractive={false}
+        fitViewOptions={FIT_VIEW_OPTIONS}
+        style={CONTROLS_STYLE}
+      />
       <FitViewController dep={fitDep} />
     </ReactFlow>
   );
