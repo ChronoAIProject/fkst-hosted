@@ -1,0 +1,56 @@
+import type { CanvasModalsSlice, ReposModalsSlice } from '../slices';
+
+// 对话框字符串。`canvasModals` 覆盖创建会话与停止会话对话框（组合进
+// `dashboard.canvas`）；`reposModals` 覆盖创建仓库与卸载确认对话框（组合进
+// `dashboard.repos`）。归 modals 集群所有。
+
+export const canvasModals: CanvasModalsSlice = {
+  newTrigger: '新建会话',
+  stop: '停止',
+  stopAria: '停止会话 {name}',
+  stopConfirmTitle: '停止会话 {name}？',
+  stopConfirmBody:
+    '这会关闭触发 issue #{number}。该会话将永久退役 —— 已关闭的触发 issue 绝不会被重新注册。若要重新开始，请新开一个触发 issue。',
+  stopConfirm: '停止会话',
+  stopPending: '正在停止…',
+  stopFailed: '无法停止该会话，请重试。',
+  createTitle: '启动新会话',
+  createNameLabel: '会话名称',
+  createNameHint: '仅小写字母、数字和连字符。',
+  createPackagesLabel: 'Package',
+  createPackagePlaceholder: 'owner/repo@ref:path',
+  addPackage: '添加 package',
+  removePackageAria: '移除第 {n} 个 package',
+  createWorkLabelLabel: '工作标签（可选）',
+  createAutoMergeLabel: '自动合并',
+  createLogAccessLabel: '日志访问允许列表（可选）',
+  createLogAccessHint: '额外的 GitHub 登录名或 id，以逗号或空格分隔。',
+  createOutputLangLabel: '输出语言（可选）',
+  createOutputLangHint: '会话输出所使用的语言，例如 `English` 或 `中文`。',
+  createSubmit: '创建触发 issue',
+  createPending: '正在创建…',
+  createFailed: '无法创建触发 issue，请重试。',
+};
+
+export const reposModals: ReposModalsSlice = {
+  newRepo: '新建仓库',
+  createTitle: '创建仓库',
+  ownerLabel: '所有者',
+  ownerPersonal: '个人（{login}）',
+  nameLabel: '仓库名称',
+  nameHint: '仅允许字母、数字和 . _ - 字符。',
+  privateLabel: '私有',
+  descriptionLabel: '描述（可选）',
+  submit: '创建仓库',
+  creating: '正在创建…',
+  cancel: '取消',
+  createFailed: '无法创建仓库，请重试。',
+  createdNextStep: '下一步：在此仓库上安装 App',
+  uninstall: '卸载',
+  uninstallConfirmTitle: '从 {owner} 卸载？',
+  uninstallConfirmBody:
+    '这将从 {owner} 卸载 GitHub App。该账户下 App 覆盖的一切 —— 仓库创建和所有 fkst 会话 —— 都会立即停止工作。',
+  uninstallConfirm: '卸载',
+  uninstallPending: '正在卸载…',
+  uninstallFailed: '无法卸载 App，请重试。',
+};
