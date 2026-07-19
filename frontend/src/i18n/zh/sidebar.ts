@@ -34,4 +34,5 @@ export const canvasSidebar: CanvasSidebarSlice = {
   firstRunGuide: '了解工作原理 →',
   needsInstall: '待安装',
   needsInstallHint: '在此仓库上安装 App，会话才能在这里运行。',
+  addWorkItem: '添加任务',
 };

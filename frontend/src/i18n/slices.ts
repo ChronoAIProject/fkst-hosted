@@ -107,6 +107,7 @@ export type CanvasSidebarSlice = Pick<
   | 'firstRunGuide'
   | 'needsInstall'
   | 'needsInstallHint'
+  | 'addWorkItem'
 >;
 /** Canvas dialogs: create-session + stop-session (modals cluster). */
 export type CanvasModalsSlice = Pick<
@@ -141,6 +142,16 @@ export type CanvasModalsSlice = Pick<
   | 'createWorkLabelHint'
   | 'createWorkLabelHintLink'
   | 'createdToast'
+  | 'workItemTitle'
+  | 'workItemTitleLabel'
+  | 'workItemTitleHint'
+  | 'workItemBodyLabel'
+  | 'workItemBodyHint'
+  | 'workItemLabelNote'
+  | 'workItemSubmit'
+  | 'workItemPending'
+  | 'workItemFailed'
+  | 'workItemCreatedToast'
 >;
 /** Environment picker string in the create-session form (environments cluster). */
 export type CanvasEnvSlice = Pick<CanvasContent, 'createEnvironmentLabel'>;

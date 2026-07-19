@@ -80,7 +80,6 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
     let api_routes = routes::environments::router()
         .merge(routes::logs::router())
         .merge(routes::auth::router())
-        .merge(routes::dashboard::router())
         .merge(routes::repos::router())
         // The canvas dashboard's live overview + per-repo session surface.
         .merge(routes::canvas::router())

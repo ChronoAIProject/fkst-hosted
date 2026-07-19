@@ -6,6 +6,7 @@ import { formatRelative } from '@/lib/format';
 import type { RepoSessionsResponse, SessionDetail } from '@/lib/api/types';
 import { ConfirmDialog } from '@/components/modals/confirm-dialog';
 import { CreateTriggerModal } from '@/components/modals/create-trigger-modal';
+import { CreateWorkItemModal } from '@/components/modals/create-work-item-modal';
 import { Spinner } from '@/components/session-detail/parts';
 import { StaggerItem } from '@/components/ui/motion';
 import { StatusLegend, ViewDescription } from './legend';
@@ -22,8 +23,22 @@ const FRESHNESS_TICK_MS = 30_000;
  *  this timeout force-clears the spinner in that one case. */
 const REFRESH_SPINNER_MAX_MS = 20_000;
 
+/** A work item can be queued only against a registered, still-open session that
+ *  carries an EXPLICIT work label: the backend resolves the queue from that
+ *  label (an invalid body, a closed/retired trigger, or an auto-discovered
+ *  session with no explicit label all have nothing to stamp), so the affordance
+ *  is shown exactly when the queue will succeed. */
+function canQueueWork(session: SessionDetail): boolean {
+  return (
+    session.invalid_reason == null &&
+    session.work_label != null &&
+    session.trigger.state === 'open'
+  );
+}
+
 /** Level-2 sidebar: the sessions of one repository — trigger list with
- *  config metadata and outcomes, session creation, and session stop. */
+ *  config metadata and outcomes, session creation, session stop, and queuing
+ *  work items onto an active session. */
 export function Level2Sidebar({
   owner,
   name,
@@ -45,6 +60,7 @@ export function Level2Sidebar({
   const { apiFetch } = useAuth();
   const [showCreate, setShowCreate] = useState(false);
   const [stopTarget, setStopTarget] = useState<SessionDetail | null>(null);
+  const [workItemTarget, setWorkItemTarget] = useState<SessionDetail | null>(null);
 
   // Freshness bookkeeping. `lastUpdated` is the wall-clock of the most recent
   // SUCCESSFUL poll (data present, no failure) — seeded on mount when the first
@@ -184,7 +200,18 @@ export function Level2Sidebar({
               key={session.session_id ?? `trigger-${session.trigger.number}`}
               index={i}
             >
-              <SessionCard owner={owner} name={name} session={session} onStop={setStopTarget} />
+              <div className="flex flex-col gap-2">
+                <SessionCard owner={owner} name={name} session={session} onStop={setStopTarget} />
+                {canQueueWork(session) && (
+                  <button
+                    type="button"
+                    onClick={() => setWorkItemTarget(session)}
+                    className="self-start font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg transition-colors cursor-pointer"
+                  >
+                    {cc.addWorkItem}
+                  </button>
+                )}
+              </div>
             </StaggerItem>
           ))}
         </div>
@@ -197,6 +224,20 @@ export function Level2Sidebar({
           onClose={() => setShowCreate(false)}
           onCreated={() => {
             setShowCreate(false);
+            onChanged();
+          }}
+        />
+      )}
+
+      {workItemTarget != null && workItemTarget.work_label != null && (
+        <CreateWorkItemModal
+          owner={owner}
+          name={name}
+          triggerIssue={workItemTarget.trigger.number}
+          workLabel={workItemTarget.work_label}
+          onClose={() => setWorkItemTarget(null)}
+          onCreated={() => {
+            setWorkItemTarget(null);
             onChanged();
           }}
         />

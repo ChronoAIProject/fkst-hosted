@@ -95,14 +95,12 @@ async fn paths_are_the_trimmed_v1_surface() {
         "/api/v1/auth/github/login",
         "/api/v1/auth/github/callback",
         "/api/v1/auth/github/refresh",
-        // The user's sessions dashboard (cache read + async pull-job + status poll).
-        "/api/v1/dashboard",
-        "/api/v1/dashboard/pull",
-        "/api/v1/dashboard/pull/{job_id}",
         // The canvas dashboard's live overview + per-repo session surface.
         "/api/v1/overview",
         "/api/v1/repos/{owner}/{name}/sessions",
         "/api/v1/repos/{owner}/{name}/sessions/{issue_number}",
+        // Queue a work item on a session (opens a work-label-stamped issue).
+        "/api/v1/repos/{owner}/{name}/sessions/{issue_number}/work-items",
         // A session's outcome files grouped by PR + the raw blob-stream.
         "/api/v1/repos/{owner}/{name}/sessions/{issue_number}/outcomes",
         "/api/v1/repos/{owner}/{name}/blob/{sha}",
@@ -130,6 +128,10 @@ async fn paths_are_the_trimmed_v1_surface() {
             "/api/v1/repos/{owner}/{name}/sessions/{issue_number}",
             "delete",
         ),
+        (
+            "/api/v1/repos/{owner}/{name}/sessions/{issue_number}/work-items",
+            "post",
+        ),
     ] {
         assert!(
             paths[path].get(verb).is_some(),
@@ -145,6 +147,11 @@ async fn paths_are_the_trimmed_v1_surface() {
     for gone in [
         // `/api/v1/health` collapsed into the single top-level `/health`.
         "/api/v1/health",
+        // The UI-less legacy cached-dashboard + async pull surface (no frontend
+        // consumer; the canvas /overview serves this data live).
+        "/api/v1/dashboard",
+        "/api/v1/dashboard/pull",
+        "/api/v1/dashboard/pull/{job_id}",
         "/api/v1/sessions/{owner}/{repo}/{issue}",
         "/api/v1/sessions/{owner}/{repo}/{issue}/stop",
         // The flat per-user env store was replaced by named environments.
@@ -194,6 +201,17 @@ async fn components_include_the_named_environment_schemas_and_not_the_removed_on
         );
     }
     for gone in [
+        // The cached-dashboard + pull-job DTOs went with the removed surface.
+        "DashboardResponse",
+        "PullJob",
+        "DashboardView",
+        "RepoView",
+        "SessionGroup",
+        "IssueView",
+        // The read-side repo listing DTOs (GET /api/v1/repos) went with it; the
+        // canvas /overview serves that data instead.
+        "ReposResponse",
+        "InstallationInfo",
         // The REST session DTOs went with the endpoints.
         "SessionView",
         "StopResponse",
@@ -302,7 +320,6 @@ async fn document_tags_are_exactly_the_live_surface() {
         tags,
         vec![
             "auth".to_string(),
-            "dashboard".to_string(),
             "logs".to_string(),
             "system".to_string(),
             "users".to_string(),
