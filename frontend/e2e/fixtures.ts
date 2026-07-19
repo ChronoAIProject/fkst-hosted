@@ -458,11 +458,21 @@ export async function installApiRoutes(page: Page, opts: RouteOptions = {}) {
   });
 }
 
+/** The guided-tour per-login "seen" key for the fixture viewer (PERSONAL is
+ *  overview.viewer.login). seedAuth marks it seen so the first-run auto-prompt
+ *  doesn't overlay unrelated dashboard tests; the onboarding spec clears it. */
+export const TOUR_SEEN_KEY = `fkst-tour-seen-v1:${PERSONAL}`;
+
 /** Seed a fake access token so useAuth() renders as an authenticated user
- *  BEFORE any page script runs (isAuthenticated reads localStorage on init). */
-export async function seedAuth(page: Page) {
-  await page.addInitScript(() => {
+ *  BEFORE any page script runs (isAuthenticated reads localStorage on init).
+ *  Also marks the guided tour as already seen (the default is a returning,
+ *  onboarded user); pass {firstRun: true} to leave it unseen so the tour
+ *  auto-prompts. */
+export async function seedAuth(page: Page, opts: { firstRun?: boolean } = {}) {
+  const seenKey = opts.firstRun ? null : TOUR_SEEN_KEY;
+  await page.addInitScript((k) => {
     window.localStorage.setItem('fkst-gh-access', 'e2e-fake-access-token');
     // No expiry key → treated as non-expiring, so getToken() never refreshes.
-  });
+    if (k) window.localStorage.setItem(k, String(1));
+  }, seenKey);
 }

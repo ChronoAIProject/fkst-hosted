@@ -7,6 +7,7 @@ import { canvasModals, reposModals } from './zh/modals';
 import { canvasEnv, environmentScalar } from './zh/environments';
 import { detail } from './zh/detail';
 import { pages } from './zh/pages';
+import { tour } from './zh/tour';
 
 // 简体中文目录，由 `zh/` 下的各领域模块组合而成，与 `en.ts` 的组合方式逐一对应，
 // 因此两种语言的键路径始终一致。带反引号的 token、`###` 标题、代码、命令、正则、
@@ -24,4 +25,5 @@ export const zh: SiteContent = {
     detail,
   },
   ...pages,
+  tour,
 };

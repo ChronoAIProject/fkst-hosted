@@ -16,6 +16,7 @@ import { Level0Sidebar } from '@/components/sidebar/level0';
 import { Level1Sidebar } from '@/components/sidebar/level1';
 import { Level2Sidebar } from '@/components/sidebar/level2';
 import { SidebarPanel } from '@/components/sidebar/panel';
+import { useTour } from '@/components/tour/tour-context';
 import { useVisibilityPoll } from '@/lib/hooks/use-visibility-poll';
 
 // Re-exported from its new home so existing imports (tests included) hold.
@@ -34,6 +35,7 @@ export function Dashboard() {
   const d = c.dashboard;
   const cc = d.canvas;
   const { configured, isAuthenticated, error, sessionExpired, signIn, apiFetch } = useAuth();
+  const { startIfUnseen } = useTour();
 
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
   const [overviewFailed, setOverviewFailed] = useState(false);
@@ -68,6 +70,21 @@ export function Dashboard() {
   useEffect(() => {
     document.title = d.metaTitle;
   }, [d.metaTitle]);
+
+  // Auto-prompt the guided tour once, on the first authenticated visit for this
+  // login on this browser. The per-user key comes from the overview's viewer,
+  // so we wait for it to load. A ref guards against the effect firing twice
+  // (overview polls bump its identity); startIfUnseen itself is also idempotent
+  // per login, so this is belt-and-braces.
+  const tourPromptedRef = useRef(false);
+  useEffect(() => {
+    if (tourPromptedRef.current) return;
+    if (!isAuthenticated) return;
+    const login = overview?.viewer.login;
+    if (!login) return;
+    tourPromptedRef.current = true;
+    startIfUnseen(login);
+  }, [isAuthenticated, overview, startIfUnseen]);
 
   // Load (and on `tick` bumps, re-load) the overview. Existing data is kept
   // during a refetch, so refreshes never blank the canvas.
@@ -375,7 +392,10 @@ export function Dashboard() {
         </div>
       )}
 
-      <div className="flex-none flex items-center gap-3 flex-wrap pb-3 border-b border-line">
+      <div
+        data-tour="breadcrumb"
+        className="flex-none flex items-center gap-3 flex-wrap pb-3 border-b border-line"
+      >
         <CanvasBreadcrumb level={level} onNavigate={navigate} />
         <span className="flex-1" aria-hidden="true" />
         <button
@@ -383,6 +403,7 @@ export function Dashboard() {
           onClick={onRefreshClick}
           disabled={overviewRefreshing}
           aria-busy={overviewRefreshing}
+          data-tour="refresh"
           className="font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim hover:text-fg transition-colors cursor-pointer disabled:cursor-default disabled:hover:text-dim inline-flex items-center gap-1.5"
         >
           {overviewRefreshing && (
@@ -421,6 +442,7 @@ export function Dashboard() {
         <div className="flex-1 min-h-0 flex gap-5 items-stretch max-[1100px]:flex-col">
           <section
             aria-label={cc.canvasAria}
+            data-tour="canvas"
             className="flex-1 min-w-0 border border-line rounded-panel bg-bg overflow-hidden h-full"
           >
             {/* Skeleton↔empty↔canvas crossfade (instant under reduced motion). */}

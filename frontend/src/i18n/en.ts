@@ -7,6 +7,7 @@ import { canvasModals, reposModals } from './en/modals';
 import { canvasEnv, environmentScalar } from './en/environments';
 import { detail } from './en/detail';
 import { pages } from './en/pages';
+import { tour } from './en/tour';
 
 // English catalog, composed from the per-domain modules under `en/`. The split
 // is the point: parallel work items each own a disjoint module, so they never
@@ -25,4 +26,5 @@ export const en: SiteContent = {
     detail,
   },
   ...pages,
+  tour,
 };

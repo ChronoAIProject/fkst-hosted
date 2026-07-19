@@ -4,6 +4,8 @@ import { FkstMark } from '../components/brand/fkst-mark';
 import { LanguageToggle } from '../components/layout/language-toggle';
 import { RouteTransition } from '../components/ui/motion';
 import { EnvironmentsDrawer } from '@/components/environments/environments-drawer';
+import { TourOverlay } from '@/components/tour/tour-overlay';
+import { useTour } from '@/components/tour/tour-context';
 import { useContent } from '../i18n';
 import { REPO, MANUAL_URL } from '../i18n/literals';
 import { useAuth } from '../lib/auth/github-auth';
@@ -41,6 +43,8 @@ export function Shell() {
   const [envOpen, setEnvOpen] = useState(false);
   const c = useContent();
   const { isAuthenticated, signIn, signOut } = useAuth();
+  // The guided tour is launched on demand from the topbar `?` control.
+  const { start: startTour } = useTour();
   const location = useLocation();
   // useOutlet() snapshots the CURRENT route element; passing that (not a live
   // <Outlet/>) into the keyed crossfade lets the exiting frame keep the old
@@ -142,11 +146,27 @@ export function Shell() {
                 <button
                   type="button"
                   onClick={() => setEnvOpen(true)}
+                  data-tour="environments"
                   className={`${inlineActionClass} flex-none`}
                 >
                   {c.nav.environments}
                 </button>
               )}
+
+              {/* Guided-tour launcher — re-opens the tour on demand, ignoring
+                  the per-login seen flag. Named by aria-label (glyph is
+                  decorative). */}
+              <button
+                type="button"
+                onClick={startTour}
+                data-tour="help"
+                aria-label={c.tour.helpAria}
+                className="inline-flex items-center justify-center w-8 h-8 flex-none rounded-control text-faint hover:text-fg hover:bg-raise transition-colors cursor-pointer"
+              >
+                <span aria-hidden="true" className="text-[14px] leading-none font-semibold">
+                  ?
+                </span>
+              </button>
 
               {/* Inline auth action. Sign in was previously ABSENT from the
                   topbar entirely; it now sits here (signed-out) and Sign out
@@ -302,6 +322,11 @@ export function Shell() {
           It owns its own open→close animation (OverlayPresence), so it is
           always mounted and driven by `open`. */}
       <EnvironmentsDrawer open={envOpen} onClose={() => setEnvOpen(false)} />
+
+      {/* The guided-tour overlay. Mounted here (the router root) so its finish
+          step's react-router Link resolves; it renders nothing until active and
+          portals itself to <body>. */}
+      <TourOverlay />
     </div>
   );
 }
