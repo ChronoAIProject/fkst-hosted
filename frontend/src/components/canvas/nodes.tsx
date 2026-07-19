@@ -46,18 +46,29 @@ export type RepoFlowNode = Node<RepoNodeData, 'repo'>;
 export type DetailFlowNode = Node<DetailNodeData, 'repoDetail'>;
 export type CanvasNode = AccountFlowNode | RepoFlowNode | DetailFlowNode;
 
-/** Card chrome for the three status classes: grey (no App), static amber
- *  highlight (installed), amber highlight + blinking glow (active). The glow
- *  keyframes are disabled under prefers-reduced-motion; active state also
- *  carries a textual "{n} active" badge so it never rides on motion alone. */
+/** Card chrome for the three status classes: quiet raised (no App), amber-tinted
+ *  + resting amber bloom (installed), amber-tinted + blinking glow (active).
+ *
+ *  Depth is carried by the layered shadow scale + a status-matched glow, and the
+ *  hover accent is a box-shadow/border change only — NO transform. That is
+ *  deliberate: React Flow owns a positioning `transform` on the outer node
+ *  wrapper and the body already runs `anim-row-in` (a transform keyframe with
+ *  fill `both`), so a hover translate would be suppressed by the lingering
+ *  animation fill anyway. Animating depth via shadow keeps the lift reading
+ *  cleanly. The glow keyframes collapse under prefers-reduced-motion; every
+ *  state also carries a textual badge so it never rides on motion/color alone. */
 function statusCardClasses(status: CanvasStatus): string {
   switch (status) {
     case 'none':
-      return 'border-line';
+      return 'border-line bg-raise shadow-2 hover:shadow-3 hover:border-line-2';
     case 'installed':
-      return 'border-[color-mix(in_oklab,var(--amber)_55%,var(--line))] bg-[color-mix(in_oklab,var(--amber)_7%,var(--raise))]';
+      // shadow-glow = card depth + amber bloom; hover deepens the shadow and
+      // brightens the hairline toward the active treatment.
+      return 'border-[color-mix(in_oklab,var(--amber)_50%,var(--line))] bg-[color-mix(in_oklab,var(--amber)_8%,var(--raise))] shadow-glow hover:shadow-[var(--shadow-3),var(--glow-amber)] hover:border-[color-mix(in_oklab,var(--amber)_72%,var(--line))]';
     case 'active':
-      return 'border-[color-mix(in_oklab,var(--amber)_70%,var(--line))] bg-[color-mix(in_oklab,var(--amber)_9%,var(--raise))] anim-node-glow';
+      // anim-node-glow owns box-shadow (a breathing amber pulse), so no static
+      // shadow utility here — the pulse is the depth cue for a live node.
+      return 'border-[color-mix(in_oklab,var(--amber)_72%,var(--line))] bg-[color-mix(in_oklab,var(--amber)_11%,var(--raise))] anim-node-glow';
   }
 }
 
@@ -65,7 +76,7 @@ function StatusBadge({ status, activeCount }: { status: CanvasStatus; activeCoun
   const cc = useContent().dashboard.canvas;
   if (status === 'active') {
     return (
-      <span className="font-mono text-[10.5px] px-1.5 py-0.5 rounded-chip bg-amber text-amber-ink font-semibold">
+      <span className="font-mono text-[10.5px] px-1.5 py-0.5 rounded-chip bg-grad-accent text-amber-ink font-semibold shadow-glow-amber">
         {cc.statusActiveCount.replace('{n}', String(activeCount))}
       </span>
     );
@@ -116,8 +127,10 @@ export function AccountNode({ data }: NodeProps<AccountFlowNode>) {
       // `anim-row-in`'s translateY animates safely here without fighting layout.
       style={{ width: ACCOUNT_NODE.width, height: ACCOUNT_NODE.height, ...staggerStyle(index ?? 0) }}
       className={cn(
-        'anim-row-in text-left border rounded-card bg-raise p-4 flex flex-col gap-2 cursor-pointer',
-        'transition-colors hover:border-line-2',
+        'anim-row-in text-left border rounded-card p-4 flex flex-col gap-2 cursor-pointer',
+        // Surface (bg/border/shadow/glow) is owned by statusCardClasses; here we
+        // just declare which paint properties ease on the hover accent.
+        'transition-[box-shadow,border-color,background-color] duration-200',
         statusCardClasses(status)
       )}
     >
@@ -167,8 +180,8 @@ export function RepoNode({ data }: NodeProps<RepoFlowNode>) {
       // keyframe rides the body rather than the React-Flow wrapper.
       style={{ width: REPO_NODE.width, height: REPO_NODE.height, ...staggerStyle(index ?? 0) }}
       className={cn(
-        'anim-row-in text-left border rounded-card bg-raise p-3.5 flex flex-col gap-1.5 cursor-pointer',
-        'transition-colors hover:border-line-2',
+        'anim-row-in text-left border rounded-card p-3.5 flex flex-col gap-1.5 cursor-pointer',
+        'transition-[box-shadow,border-color,background-color] duration-200',
         statusCardClasses(status)
       )}
     >
@@ -281,7 +294,8 @@ export function RepoDetailNode({ data }: NodeProps<DetailFlowNode>) {
       // like the grid cards. Index defaults to 0 (one node) → a plain fade.
       style={{ width: DETAIL_NODE.width, ...staggerStyle(index ?? 0) }}
       className={cn(
-        'anim-row-in border rounded-card bg-raise p-4 flex flex-col gap-2.5',
+        'anim-row-in border rounded-card p-4 flex flex-col gap-2.5',
+        'transition-[box-shadow,border-color,background-color] duration-200',
         statusCardClasses(repoDetailStatus(installed, sessions))
       )}
     >

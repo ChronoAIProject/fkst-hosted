@@ -80,10 +80,29 @@ export function SessionCard({
   const [showDetail, setShowDetail] = useState(false);
   const invalid = !!session.invalid_reason;
 
+  // Resting depth + a soft status-matched glow (red = invalid, green = live,
+  // amber = starting, none otherwise) so a session's health reads at a glance
+  // without relying on the chip alone. `.hover-lift` swaps in the raised shadow
+  // + amber bloom on hover; this card runs no entrance keyframe on its root, so
+  // the hover transform is unencumbered.
+  const statusGlow = invalid
+    ? 'shadow-[var(--shadow-2),var(--glow-red)]'
+    : session.liveness === 'live'
+      ? 'shadow-[var(--shadow-2),var(--glow-green)]'
+      : session.liveness === 'starting'
+        ? 'shadow-[var(--shadow-2),var(--glow-amber)]'
+        : 'shadow-2';
+
   return (
     <div
       data-tour="session-card"
-      className="border border-line rounded-card bg-bg p-4 flex flex-col gap-3 min-w-0"
+      // Elevated card: `.grad-border` paints an opaque --raise fill with a
+      // gradient hairline edge (it reads as a solid surface lifted off the glass
+      // sidebar behind it), plus depth/glow and a hover lift.
+      className={cn(
+        'grad-border hover-lift rounded-card p-4 flex flex-col gap-3 min-w-0',
+        statusGlow
+      )}
     >
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="min-w-0">
@@ -125,7 +144,7 @@ export function SessionCard({
             type="button"
             onClick={() => setShowDetail(true)}
             aria-label={c.detail.openAria.replace('{name}', session.name ?? `#${session.trigger.number}`)}
-            className="font-ui font-semibold text-[11px] border border-line rounded-control px-2.5 py-1 text-dim transition-colors hover:text-fg cursor-pointer"
+            className="font-ui font-semibold text-[11px] border border-line rounded-control px-2.5 py-1 text-dim transition-[color,border-color,box-shadow] duration-150 hover:text-fg hover:border-line-2 hover:shadow-glow-amber cursor-pointer"
           >
             {c.detail.open}
           </button>
@@ -134,7 +153,7 @@ export function SessionCard({
               type="button"
               onClick={() => onStop(session)}
               aria-label={cc.stopAria.replace('{name}', session.name ?? `#${session.trigger.number}`)}
-              className="font-ui font-semibold text-[11px] border border-line rounded-control px-2.5 py-1 text-red transition-colors hover:border-[color-mix(in_oklab,var(--red)_45%,var(--line))] cursor-pointer"
+              className="font-ui font-semibold text-[11px] border border-line rounded-control px-2.5 py-1 text-red transition-[color,border-color,box-shadow] duration-150 hover:border-[color-mix(in_oklab,var(--red)_45%,var(--line))] hover:shadow-glow-red cursor-pointer"
             >
               {cc.stop}
             </button>
