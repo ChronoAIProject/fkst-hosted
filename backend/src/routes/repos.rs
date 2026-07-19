@@ -1,20 +1,14 @@
-//! The signed-in user's full repo listing with App-installation status (issue
-//! #499): every repo the USER token can access — private, public, and
-//! organization repos — each flagged with whether THIS GitHub App is installed
-//! on it, so the dashboard can render per-repo status and the guided install
-//! entry point (`https://github.com/apps/<slug>/installations/new` — GitHub
-//! offers no API to create an installation; consent happens on github.com).
+//! The signed-in user's repo mutations against GitHub (issue #503, #509): create
+//! a repository as the user, and uninstall the App from an account. The read-side
+//! repo listing is served by the canvas overview (`GET /api/v1/overview`), which
+//! carries per-repo App-installation status — so there is no `GET /api/v1/repos`.
+//! GitHub offers no API to CREATE an installation; consent happens on github.com
+//! via the guided install link (`https://github.com/apps/<slug>/installations/new`,
+//! built from `app_slug` in the overview payload).
 //!
-//! - `GET /api/v1/repos` — computed live from GitHub on every call (no cache:
-//!   the listing is one paginated `/user/repos` walk plus the installation
-//!   enumeration the dashboard pull already does; freshness matters right
-//!   after the user returns from installing).
-//!
-//! Auth mirrors the dashboard: the [`GithubUser`] extractor verifies the
-//! caller's GitHub token (and enforces the deployment allowlist); the SAME
-//! bearer token then drives the user-scoped GitHub reads.
-
-use std::collections::HashSet;
+//! Auth: the [`GithubUser`] extractor verifies the caller's GitHub token (and
+//! enforces the deployment allowlist); the SAME bearer token then drives the
+//! user-scoped GitHub writes.
 
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
@@ -57,35 +51,6 @@ pub struct Viewer {
     pub login: String,
 }
 
-/// The repo listing plus what the frontend needs to build the install link,
-/// group by account, and offer create-repo targets.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct ReposResponse {
-    /// The App's slug (install page: `https://github.com/apps/{app_slug}/installations/new`);
-    /// null when the deployment has no App slug configured.
-    pub app_slug: Option<String>,
-    /// The signed-in user (the "personal" grouping/creation target).
-    pub viewer: Viewer,
-    /// Organizations the user belongs to (creation targets + empty groups),
-    /// sorted.
-    pub orgs: Vec<String>,
-    /// This App's installations the user can see, one per connected account.
-    pub installations: Vec<InstallationInfo>,
-    /// Every repo the user can access, sorted by `owner/name`.
-    pub repos: Vec<RepoStatus>,
-}
-
-/// One App installation the signed-in user can see (account-level connection).
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct InstallationInfo {
-    /// The connected account (user or organization login).
-    pub account: String,
-    /// The installation id (drives the Manage deep-link + uninstall).
-    pub installation_id: i64,
-    /// `"all"` or `"selected"` — whether the installation covers every repo.
-    pub repository_selection: String,
-}
-
 /// Request body for creating a repository as the signed-in user.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CreateRepoRequest {
@@ -98,75 +63,6 @@ pub struct CreateRepoRequest {
     pub private: bool,
     /// Optional repository description.
     pub description: Option<String>,
-}
-
-/// `GET /api/v1/repos` — every repo the signed-in user can access, each flagged
-/// with whether this App is installed on it. Computed live from GitHub.
-#[utoipa::path(
-    get,
-    path = "/repos",
-    tag = "repos",
-    operation_id = "list_repos",
-    responses(
-        (status = 200, description = "All user-accessible repos with installation status", body = ReposResponse),
-        (status = 401, description = "Missing or invalid GitHub token", body = ErrorEnvelope),
-        (status = 403, description = "Verified GitHub identity not allowlisted (FKST_ACCESS_ALLOWED_USERS)", body = ErrorEnvelope),
-        (status = 502, description = "GitHub API error", body = ErrorEnvelope),
-    )
-)]
-async fn list_repos(
-    State(state): State<AppState>,
-    user: GithubUser,
-    headers: HeaderMap,
-) -> Result<Json<ReposResponse>, AppError> {
-    let token = bearer_token(&headers)?;
-    let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
-
-    let accessible = gh.user_all_repos(&token).await?;
-    let insts = gh.user_installations(&token).await?;
-    let mut installed: HashSet<String> = HashSet::new();
-    for inst in &insts {
-        for repo in gh.user_installation_repos(&token, inst.id).await? {
-            installed.insert(format!("{}/{}", repo.owner, repo.name));
-        }
-    }
-    let mut installations: Vec<InstallationInfo> = insts
-        .into_iter()
-        .map(|i| InstallationInfo {
-            account: i.account,
-            installation_id: i.id,
-            repository_selection: i.repository_selection,
-        })
-        .collect();
-    installations.sort_by(|a, b| a.account.cmp(&b.account));
-
-    let mut repos: Vec<RepoStatus> = accessible
-        .into_iter()
-        .map(|r| RepoStatus {
-            installed: installed.contains(&format!("{}/{}", r.owner, r.name)),
-            id: r.id,
-            owner: r.owner,
-            name: r.name,
-            private: r.private,
-            org: r.org,
-            admin: r.admin,
-        })
-        .collect();
-    repos.sort_by(|a, b| (&a.owner, &a.name).cmp(&(&b.owner, &b.name)));
-
-    let mut orgs = gh.user_orgs(&token).await?;
-    orgs.sort();
-
-    Ok(Json(ReposResponse {
-        app_slug: state
-            .github_app
-            .as_ref()
-            .and_then(|g| g.app_slug().map(str::to_string)),
-        viewer: Viewer { login: user.login },
-        orgs,
-        installations,
-        repos,
-    }))
 }
 
 /// `POST /api/v1/repos` — create a repository AS the signed-in user (their
@@ -293,7 +189,7 @@ async fn uninstall_account(
 /// scheme.
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(list_repos, create_repo))
+        .routes(routes!(create_repo))
         .routes(routes!(uninstall_account))
 }
 

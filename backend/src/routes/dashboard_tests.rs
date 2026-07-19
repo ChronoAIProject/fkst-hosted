@@ -19,9 +19,6 @@ fn issue(number: i64, body: &str, labels: &[&str], state: &str) -> IssueSummary 
     }
 }
 
-const VALID_TRIGGER_BODY: &str = "### Session Name\nsite\n\n### Packages\n\
-acme/pkgs@main:packages/devloop\n\n### Work Label\nsite-build\n\n### Auto-merge\ntrue\n";
-
 #[tokio::test]
 async fn user_installations_maps_id_and_account() {
     let server = MockServer::start().await;
@@ -143,85 +140,6 @@ async fn a_401_from_github_is_unauthorized() {
         .await
         .expect_err("401 rejects");
     assert!(matches!(err, AppError::Unauthorized(_)), "got {err:?}");
-}
-
-#[test]
-fn build_session_groups_trigger_and_work_issues() {
-    let trigger = issue(
-        5,
-        VALID_TRIGGER_BODY,
-        &["fkst-substrate-trigger", "fkst-substrate-active"],
-        "open",
-    );
-    let repo = RepoRef {
-        owner: "acme".to_string(),
-        name: "site".to_string(),
-    };
-    let reg = parse_registration(42, &repo, &trigger).expect("valid trigger parses");
-    let work = vec![issue(6, "", &["site-build"], "closed")];
-    let s = build_session(&trigger, &reg, work);
-
-    assert_eq!(s.name.as_deref(), Some("site"));
-    assert_eq!(s.work_label.as_deref(), Some("site-build"));
-    assert_eq!(s.auto_merge, Some(true));
-    assert_eq!(
-        s.packages,
-        vec!["acme/pkgs@main:packages/devloop".to_string()]
-    );
-    assert_eq!(
-        s.status_labels,
-        vec![
-            "fkst-substrate-trigger".to_string(),
-            "fkst-substrate-active".to_string()
-        ]
-    );
-    assert!(s.session_id.is_some());
-    assert!(s.invalid_reason.is_none());
-    assert_eq!(s.work_issues.len(), 1);
-    assert_eq!(s.work_issues[0].number, 6);
-    assert_eq!(s.work_issues[0].state, "closed");
-}
-
-#[test]
-fn build_invalid_session_carries_reason_and_no_work() {
-    let trigger = issue(7, "no headings here", &["fkst-substrate-invalid"], "open");
-    let s = build_invalid_session(&trigger, "missing ### Session Name".to_string());
-    assert!(s.session_id.is_none());
-    assert!(s.name.is_none());
-    assert_eq!(
-        s.invalid_reason.as_deref(),
-        Some("missing ### Session Name")
-    );
-    assert_eq!(s.status_labels, vec!["fkst-substrate-invalid".to_string()]);
-    assert!(s.work_issues.is_empty());
-    assert!(s.packages.is_empty());
-}
-
-#[test]
-fn pull_job_round_trips_through_json() {
-    let job = PullJob {
-        job_id: "9-123".to_string(),
-        user_id: 9,
-        state: "running".to_string(),
-        phase: "scanning sessions".to_string(),
-        done: 2,
-        total: 5,
-        error: None,
-    };
-    let bytes = serde_json::to_vec(&job).expect("serialize");
-    let back: PullJob = serde_json::from_slice(&bytes).expect("deserialize");
-    assert_eq!(back.job_id, "9-123");
-    assert_eq!(back.user_id, 9);
-    assert_eq!(back.state, "running");
-    assert_eq!(back.done, 2);
-    assert_eq!(back.total, 5);
-    assert!(back.error.is_none(), "absent error must round-trip to None");
-}
-
-#[test]
-fn storage_keys_are_namespaced() {
-    assert_eq!(result_key(42), "dashboards/42.json");
-    assert_eq!(job_key("42-999"), "dashboards/jobs/42-999.json");
 }
 
 #[test]

@@ -26,6 +26,7 @@ mod sessions;
 pub(crate) mod test_support;
 mod trigger_body;
 mod types;
+mod work_item;
 
 pub use types::IssueDetail;
 
@@ -42,6 +43,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(overview::overview))
         .routes(routes!(sessions::repo_sessions, mutate::create_session))
         .routes(routes!(mutate::stop_session))
+        .routes(routes!(work_item::create_work_item))
         .routes(routes!(outcomes::session_outcomes))
         .routes(routes!(outcomes::outcome_blob))
 }
