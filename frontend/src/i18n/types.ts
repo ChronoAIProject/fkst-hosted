@@ -203,6 +203,8 @@ export interface SiteContent {
       needsInstall: string;
       /** Tooltip on the needs-install badge. */
       needsInstallHint: string;
+      /** Per-session affordance that opens the queue-work-item dialog. */
+      addWorkItem: string;
       stop: string;
       /** `{name}` placeholder. */
       stopAria: string;
@@ -240,6 +242,20 @@ export interface SiteContent {
       createWorkLabelHint: string;
       createWorkLabelHintLink: string;
       createdToast: string;
+      /** Modals-cluster additions for the queue-work-item dialog (owned by the
+       *  create-work-item modal item). */
+      workItemTitle: string;
+      workItemTitleLabel: string;
+      workItemTitleHint: string;
+      workItemBodyLabel: string;
+      workItemBodyHint: string;
+      /** Note naming the session's work label the issue is stamped with;
+       *  `{label}` placeholder. */
+      workItemLabelNote: string;
+      workItemSubmit: string;
+      workItemPending: string;
+      workItemFailed: string;
+      workItemCreatedToast: string;
     };
     repos: {
       refresh: string;

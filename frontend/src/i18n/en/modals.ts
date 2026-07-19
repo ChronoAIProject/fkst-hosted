@@ -37,6 +37,16 @@ export const canvasModals: CanvasModalsSlice = {
   createWorkLabelHint: 'One work label per trigger — the session claims every issue that carries it.',
   createWorkLabelHintLink: 'Learn more in Get started.',
   createdToast: 'Session created',
+  workItemTitle: 'Queue work',
+  workItemTitleLabel: 'Title',
+  workItemTitleHint: 'A short summary of the task, like a GitHub issue title.',
+  workItemBodyLabel: 'Details (optional)',
+  workItemBodyHint: 'Markdown is supported.',
+  workItemLabelNote: 'Opens an issue labeled `{label}`, which this session claims and works.',
+  workItemSubmit: 'Queue work item',
+  workItemPending: 'Queuing…',
+  workItemFailed: 'Could not queue the work item. Please try again.',
+  workItemCreatedToast: 'Work item queued',
 };
 
 export const reposModals: ReposModalsSlice = {

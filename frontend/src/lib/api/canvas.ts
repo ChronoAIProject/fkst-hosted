@@ -81,6 +81,42 @@ export async function createTrigger(
   return { ok: false, message: await readErrorMessage(res) };
 }
 
+/** POST /api/v1/repos/{owner}/{name}/sessions/{issue}/work-items body — a work
+ *  item to queue on an existing session. Defined here (not in ./types) so the
+ *  work-item cluster owns its own wire shape. */
+export interface CreateWorkItemRequest {
+  title: string;
+  body?: string;
+}
+
+/** The created work issue (mirrors CreateSessionResponse's shape). */
+export interface CreateWorkItemResponse {
+  issue_number: number;
+  html_url: string;
+}
+
+/** POST /api/v1/repos/{owner}/{name}/sessions/{issue}/work-items — open a work
+ *  issue stamped with the session's work label so the reconciler claims it for
+ *  that session. Server-side validation failures (400/422) surface verbatim. */
+export async function createWorkItem(
+  apiFetch: ApiFetch,
+  owner: string,
+  name: string,
+  triggerIssue: number,
+  request: CreateWorkItemRequest
+): Promise<MutationResult<CreateWorkItemResponse>> {
+  const res = await apiFetch(
+    `/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/sessions/${triggerIssue}/work-items`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    }
+  );
+  if (res.ok) return { ok: true, data: (await res.json()) as CreateWorkItemResponse };
+  return { ok: false, message: await readErrorMessage(res) };
+}
+
 /** DELETE /api/v1/repos/{owner}/{name}/sessions/{issue} — close the trigger
  *  issue, which IS the stop/retire contract. */
 export async function stopTrigger(

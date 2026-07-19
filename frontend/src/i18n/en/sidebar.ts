@@ -37,4 +37,5 @@ export const canvasSidebar: CanvasSidebarSlice = {
   firstRunGuide: 'How it works →',
   needsInstall: 'Needs install',
   needsInstallHint: 'Install the App on this repository so its sessions can run here.',
+  addWorkItem: 'Add work item',
 };

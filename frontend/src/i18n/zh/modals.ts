@@ -36,6 +36,16 @@ export const canvasModals: CanvasModalsSlice = {
   createWorkLabelHint: '每个触发只用一个工作标签 —— 会话会认领所有带此标签的 issue。',
   createWorkLabelHintLink: '在快速开始中了解更多。',
   createdToast: '会话已创建',
+  workItemTitle: '排入任务',
+  workItemTitleLabel: '标题',
+  workItemTitleHint: '任务的简短摘要，类似 GitHub issue 标题。',
+  workItemBodyLabel: '详情（可选）',
+  workItemBodyHint: '支持 Markdown。',
+  workItemLabelNote: '将新建一个带 `{label}` 标签的 issue，该会话会认领并处理它。',
+  workItemSubmit: '排入任务',
+  workItemPending: '正在排入…',
+  workItemFailed: '无法排入任务，请重试。',
+  workItemCreatedToast: '任务已排入',
 };
 
 export const reposModals: ReposModalsSlice = {
