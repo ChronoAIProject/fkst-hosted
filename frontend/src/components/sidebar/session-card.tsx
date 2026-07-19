@@ -1,10 +1,26 @@
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useContent, useLang } from '@/i18n';
-import { formatIsoSgt } from '@/lib/format';
+import type { Lang } from '@/i18n';
+import { formatAbsolute, formatRelative } from '@/lib/format';
 import type { IssueDetail, SessionDetail } from '@/lib/api/types';
 import { Chip } from '@/components/ui/chip';
+import { CopyButton } from '@/components/ui/copy-button';
 import { SessionDetailDrawer } from '@/components/session-detail/session-detail-drawer';
+
+/** One "created/updated/closed" timestamp: viewer-local RELATIVE text ("2 min
+ *  ago") for at-a-glance recency, with the full, zone-qualified absolute value
+ *  in a title tooltip so the exact instant is one hover away. Renders nothing
+ *  when the timestamp is absent or unparseable (e.g. an open trigger's null
+ *  closed_at), matching the previous null-guard behavior. */
+function TimeStamp({ word, iso, lang }: { word: string; iso: string | null; lang: Lang }) {
+  if (!iso || Number.isNaN(Date.parse(iso))) return null;
+  return (
+    <span title={formatAbsolute(iso, lang)}>
+      {word} {formatRelative(iso, lang)}
+    </span>
+  );
+}
 
 function IssueLine({ issue }: { issue: IssueDetail }) {
   const d = useContent().dashboard;
@@ -63,9 +79,6 @@ export function SessionCard({
   const { lang } = useLang();
   const [showDetail, setShowDetail] = useState(false);
   const invalid = !!session.invalid_reason;
-  const created = formatIsoSgt(session.trigger.created_at, lang);
-  const updated = formatIsoSgt(session.trigger.updated_at, lang);
-  const closedAt = formatIsoSgt(session.trigger.closed_at, lang);
 
   return (
     <div className="border border-line rounded-card bg-bg p-4 flex flex-col gap-3 min-w-0">
@@ -75,18 +88,35 @@ export function SessionCard({
             {invalid ? c.invalidTrigger : (session.name ?? '—')}
           </span>
           {session.session_id && (
-            <span className="font-mono text-[10.5px] text-ghost ml-2 break-all">
-              {session.session_id.slice(0, 8)}
+            // Show the readable 8-char prefix, but copy the FULL id (the prefix
+            // alone can't be pasted back into an API/log lookup).
+            <span className="inline-flex items-center gap-1.5 ml-2 align-middle">
+              <span className="font-mono text-[10.5px] text-ghost break-all">
+                {session.session_id.slice(0, 8)}
+              </span>
+              <CopyButton value={session.session_id} label={c.detail.sessionIdCopy} />
             </span>
           )}
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
-          {session.liveness && <LivenessChip liveness={session.liveness} />}
-          {session.auto_merge && <Chip tone="green">{c.autoMerge}</Chip>}
+          {/* Chips mount-animate (anim-chip-in) so a status/liveness change
+              surfacing on the 15 s poll reads as motion, not a silent swap. The
+              CSS animation replays whenever the element mounts — keying the
+              liveness wrapper on its value remounts it on a transition. */}
+          {session.liveness && (
+            <span key={session.liveness} className="anim-chip-in inline-flex">
+              <LivenessChip liveness={session.liveness} />
+            </span>
+          )}
+          {session.auto_merge && (
+            <span className="anim-chip-in inline-flex">
+              <Chip tone="green">{c.autoMerge}</Chip>
+            </span>
+          )}
           {session.status_labels.map((label) => (
-            <Chip key={label} tone="amber">
-              {label}
-            </Chip>
+            <span key={label} className="anim-chip-in inline-flex">
+              <Chip tone="amber">{label}</Chip>
+            </span>
           ))}
           <button
             type="button"
@@ -137,21 +167,9 @@ export function SessionCard({
       )}
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10.5px] text-ghost">
-        {created && (
-          <span>
-            {cc.createdWord} {created}
-          </span>
-        )}
-        {updated && (
-          <span>
-            {cc.updatedWord} {updated}
-          </span>
-        )}
-        {closedAt && (
-          <span>
-            {cc.closedWord} {closedAt}
-          </span>
-        )}
+        <TimeStamp word={cc.createdWord} iso={session.trigger.created_at} lang={lang} />
+        <TimeStamp word={cc.updatedWord} iso={session.trigger.updated_at} lang={lang} />
+        <TimeStamp word={cc.closedWord} iso={session.trigger.closed_at} lang={lang} />
       </div>
 
       {session.packages.length > 0 && (

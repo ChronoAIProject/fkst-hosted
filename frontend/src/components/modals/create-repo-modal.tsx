@@ -7,8 +7,13 @@ import type { SiteContent } from '@/i18n';
 import { ModalShell } from './modal-shell';
 import { ErrorNote } from '@/components/ui/error-note';
 import { FIELD_INPUT, FIELD_LABEL } from '@/components/ui/field';
+import { useToast } from '@/components/ui/toast';
 
 type ReposContent = SiteContent['dashboard']['repos'];
+
+/** The `<form>` element id, referenced by the sticky-footer submit button so it
+ *  can live outside the form subtree yet still submit it. */
+const FORM_ID = 'create-repo-form';
 
 /** The wire shape of a repo row from POST /api/v1/repos. */
 export interface UserRepo {
@@ -45,6 +50,7 @@ export function CreateRepoModal({
   onCreated: (repo: UserRepo) => void;
 }) {
   const { apiFetch } = useAuth();
+  const toast = useToast();
   const [owner, setOwner] = useState(viewerLogin);
   const [name, setName] = useState('');
   const [priv, setPriv] = useState(true);
@@ -73,7 +79,12 @@ export function CreateRepoModal({
         body: JSON.stringify(body),
       });
       if (res.ok) {
-        onCreated((await res.json()) as UserRepo);
+        const created = (await res.json()) as UserRepo;
+        // Confirm the mutation before handing back — the parent closes the
+        // dialog on `onCreated`, and previously the create landed silently,
+        // leaving the user to infer success from the list poll.
+        toast.show({ kind: 'success', message: rc.createdToast });
+        onCreated(created);
         return;
       }
       // Error envelope: {"error", "message"} — surface `message` verbatim.
@@ -85,9 +96,39 @@ export function CreateRepoModal({
     }
   };
 
+  const footer = (
+    <div className="flex items-center justify-end gap-2">
+      <button
+        type="button"
+        onClick={onClose}
+        className="font-ui font-semibold text-[12.5px] border border-line rounded-control px-4 py-2 text-dim hover:text-fg transition-colors cursor-pointer"
+      >
+        {rc.cancel}
+      </button>
+      <button
+        type="submit"
+        form={FORM_ID}
+        disabled={!nameValid || creating}
+        className={cn(
+          'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-colors',
+          !nameValid || creating
+            ? 'bg-amber/50 text-amber-ink/60 cursor-not-allowed'
+            : 'bg-amber text-amber-ink hover:brightness-[1.06] cursor-pointer'
+        )}
+      >
+        {creating ? rc.creating : rc.submit}
+      </button>
+    </div>
+  );
+
   return (
-    <ModalShell titleId="create-repo-title" title={rc.createTitle} onClose={onClose}>
-      <form onSubmit={onSubmit} className="flex flex-col gap-4">
+    <ModalShell
+      titleId="create-repo-title"
+      title={rc.createTitle}
+      onClose={onClose}
+      footer={footer}
+    >
+      <form id={FORM_ID} onSubmit={onSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-1.5">
           <label htmlFor="create-repo-owner" className={FIELD_LABEL}>
             {rc.ownerLabel}
@@ -155,28 +196,6 @@ export function CreateRepoModal({
         </div>
 
         {serverError && <ErrorNote message={serverError} />}
-
-        <div className="flex items-center justify-end gap-2 pt-1">
-          <button
-            type="button"
-            onClick={onClose}
-            className="font-ui font-semibold text-[12.5px] border border-line rounded-control px-4 py-2 text-dim hover:text-fg transition-colors cursor-pointer"
-          >
-            {rc.cancel}
-          </button>
-          <button
-            type="submit"
-            disabled={!nameValid || creating}
-            className={cn(
-              'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-colors',
-              !nameValid || creating
-                ? 'bg-amber/50 text-amber-ink/60 cursor-not-allowed'
-                : 'bg-amber text-amber-ink hover:brightness-[1.06] cursor-pointer'
-            )}
-          >
-            {creating ? rc.creating : rc.submit}
-          </button>
-        </div>
       </form>
     </ModalShell>
   );

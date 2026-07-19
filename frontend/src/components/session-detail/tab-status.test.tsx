@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { IssueDetail, SessionDetail } from '@/lib/api/types';
@@ -35,6 +35,10 @@ const session = (over: Partial<SessionDetail> = {}): SessionDetail => ({
 });
 
 const idle: ObserveState = { status: 'idle' };
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('TabStatus', () => {
   it('renders the decoded phase pill, liveness and a per-work-item state chip', () => {
@@ -92,5 +96,54 @@ describe('TabStatus', () => {
       <TabStatus session={session()} observe={{ status: 'error' }} onLoadObserve={() => {}} />
     );
     expect(screen.getByText('Could not load the live engine details.')).toBeInTheDocument();
+  });
+
+  it('renders duplicately-named queues without a React key collision (bug B3)', () => {
+    // The observe payload is untrusted engine JSON: two queues can carry the
+    // same `queue` name. A name-only key would collide and React would warn;
+    // the fix appends the positional index so both rows key uniquely.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(
+      <TabStatus
+        session={session()}
+        observe={{
+          status: 'loaded',
+          snapshot: {
+            queues: [
+              { queue: 'events', depth: 1 },
+              { queue: 'events', depth: 4 },
+            ],
+          },
+        }}
+        onLoadObserve={() => {}}
+      />
+    );
+    // Both duplicate-named rows render.
+    expect(screen.getAllByText('events')).toHaveLength(2);
+    // And no "same key" warning was emitted.
+    const keyWarned = errorSpy.mock.calls.some((args) =>
+      args.some((a) => typeof a === 'string' && /same key/i.test(a))
+    );
+    expect(keyWarned).toBe(false);
+  });
+
+  it('reveals the fetched snapshot when observe resolves from loading to loaded', () => {
+    const { rerender } = render(
+      <TabStatus session={session()} observe={{ status: 'loading' }} onLoadObserve={() => {}} />
+    );
+    expect(screen.getByText('Loading engine details…')).toBeInTheDocument();
+    rerender(
+      <TabStatus
+        session={session()}
+        observe={{
+          status: 'loaded',
+          snapshot: { queues: [{ queue: 'events', depth: 3 }] },
+        }}
+        onLoadObserve={() => {}}
+      />
+    );
+    // The crossfade mounts the loaded body immediately (popLayout), so the
+    // queue is present without waiting on an exit animation.
+    expect(screen.getByText('events')).toBeInTheDocument();
   });
 });

@@ -1,14 +1,18 @@
 import { useContent } from '@/i18n';
+import { CopyButton } from '@/components/ui/copy-button';
+import { StaggerItem } from '@/components/ui/motion';
 import type { SessionDetail } from '@/lib/api/types';
 import { packageRole } from '@/lib/api/derive';
 import { Note, SectionLabel } from './parts';
+import { ConfigPanel } from './config-panel';
 import { ObserveView } from './observe-view';
 import type { ObserveState } from './observe-state';
 
-/** Packages tab: each declared package decoded to a friendly role + short
- *  handle, with the full `owner/repo@ref:path` kept in a tooltip / `<code>`.
- *  When the Status tab has already fetched the engine snapshot, the same
- *  per-queue activity is surfaced here too (no second fetch). */
+/** Packages tab: the frozen session configuration (ConfigPanel), then each
+ *  declared package decoded to a friendly role + short handle with the full
+ *  `owner/repo@ref:path` kept verbatim in a copyable `<code>`. When the Status
+ *  tab has already fetched the engine snapshot, the same per-queue activity is
+ *  surfaced here too (no second fetch). */
 export function TabPackages({
   session,
   observe,
@@ -21,6 +25,8 @@ export function TabPackages({
 
   return (
     <div className="flex flex-col gap-5">
+      <ConfigPanel session={session} />
+
       <section className="flex flex-col gap-2">
         <SectionLabel>
           {d.packages}
@@ -32,11 +38,14 @@ export function TabPackages({
           <Note>{t.packagesNone}</Note>
         ) : (
           <ul className="flex flex-col gap-2">
-            {session.packages.map((ref) => {
+            {session.packages.map((ref, index) => {
               const decoded = packageRole(ref);
               return (
-                <li
+                // Stagger each row in on the shared curve; collapses to the
+                // final state under prefers-reduced-motion (see index.css).
+                <StaggerItem
                   key={ref}
+                  index={index}
                   className="border border-line rounded-card bg-bg px-3 py-2 flex flex-col gap-1 min-w-0"
                 >
                   <div className="flex items-baseline gap-2 min-w-0">
@@ -49,13 +58,16 @@ export function TabPackages({
                       </span>
                     )}
                   </div>
-                  <code
-                    title={t.packageRefAria}
-                    className="font-mono text-[10.5px] text-ghost break-all"
-                  >
-                    {ref}
-                  </code>
-                </li>
+                  <div className="flex items-start gap-2 min-w-0">
+                    <code
+                      title={t.packageRefAria}
+                      className="font-mono text-[10.5px] text-ghost break-all min-w-0 flex-1"
+                    >
+                      {ref}
+                    </code>
+                    <CopyButton value={ref} label={t.packageRefCopy} />
+                  </div>
+                </StaggerItem>
               );
             })}
           </ul>

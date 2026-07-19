@@ -30,6 +30,8 @@ const session = (over: Partial<SessionDetail> = {}): SessionDetail => ({
   log_url: null,
   liveness: null,
   prs: [],
+  log_access: null,
+  output_lang: null,
   ...over,
 });
 
@@ -62,5 +64,69 @@ describe('TabPackages', () => {
     );
     expect(screen.getByText('Queue activity')).toBeInTheDocument();
     expect(screen.getByText('events')).toBeInTheDocument();
+  });
+
+  it('renders a copyable ref button on each package row', () => {
+    render(
+      <TabPackages
+        session={session({
+          packages: [
+            'ChronoAIProject/fkst-packages@fkst-hosted:codex/triage',
+            'ChronoAIProject/fkst-packages@fkst-hosted:tools/lint',
+          ],
+        })}
+        observe={idle}
+      />
+    );
+    // One copy affordance per declared package, all labelled the same.
+    expect(screen.getAllByRole('button', { name: 'Copy ref' })).toHaveLength(2);
+  });
+
+  it('renders the frozen configuration with all fields populated', () => {
+    render(
+      <TabPackages
+        session={session({
+          work_label: 'nightly-work',
+          environment: 'video-studio',
+          auto_merge: true,
+          output_lang: 'zh',
+          log_access: ['alice', 'bob'],
+        })}
+        observe={idle}
+      />
+    );
+    expect(screen.getByText('Configuration')).toBeInTheDocument();
+    expect(screen.getByText('Frozen at registration — these cannot be changed.')).toBeInTheDocument();
+
+    // Scalars.
+    expect(screen.getByText('Work label')).toBeInTheDocument();
+    expect(screen.getByText('nightly-work')).toBeInTheDocument();
+    expect(screen.getByText('video-studio')).toBeInTheDocument();
+    expect(screen.getByText('zh')).toBeInTheDocument();
+    // auto_merge = true -> "Yes".
+    expect(screen.getByText('Yes')).toBeInTheDocument();
+
+    // Log-access allowlist rendered as one chip per viewer.
+    expect(screen.getByText('Log access')).toBeInTheDocument();
+    expect(screen.getByText('alice')).toBeInTheDocument();
+    expect(screen.getByText('bob')).toBeInTheDocument();
+  });
+
+  it('renders "No" when auto-merge is disabled', () => {
+    render(<TabPackages session={session({ auto_merge: false })} observe={idle} />);
+    expect(screen.getByText('No')).toBeInTheDocument();
+  });
+
+  it('renders an explicit "None" for an empty log-access allowlist', () => {
+    // Empty list, null, and undefined must all read as "no additional viewers"
+    // rather than a blank cell — an unset allowlist is a real, frozen state.
+    for (const log_access of [[] as string[], null, undefined]) {
+      const { unmount } = render(
+        <TabPackages session={session({ log_access })} observe={idle} />
+      );
+      expect(screen.getByText('Log access')).toBeInTheDocument();
+      expect(screen.getByText('None')).toBeInTheDocument();
+      unmount();
+    }
   });
 });

@@ -11,6 +11,9 @@ export const canvasSidebar: CanvasSidebarSlice = {
   viewRepo: '你正在查看 {repo} 的 fkst 会话 —— 每个触发 issue 及其工作 issue 和拉取请求。',
   sessionsTitle: '会话',
   pollNote: '打开期间每 15 s 自动刷新。',
+  sessionsFreshness: '更新于 {time}',
+  sessionsRetry: '重试',
+  sessionsRefreshing: '刷新中…',
   sessionsLoadFailed: '无法加载此仓库的会话，请重试。',
   sessionsStaleNotice: '刷新失败 —— 显示最近一次加载的会话。',
   notInstalledNote: '此仓库尚未安装 App，会话无法在这里运行。',
@@ -24,4 +27,11 @@ export const canvasSidebar: CanvasSidebarSlice = {
   createdWord: '创建于',
   updatedWord: '更新于',
   closedWord: '关闭于',
+  firstRunTitle: '开始使用 fkst',
+  firstRunBody:
+    '在你的账户或某个组织上安装 GitHub App，让 fkst 直接从你的 GitHub issue 运行编码会话。',
+  firstRunInstall: '安装 GitHub App',
+  firstRunGuide: '了解工作原理 →',
+  needsInstall: '待安装',
+  needsInstallHint: '在此仓库上安装 App，会话才能在这里运行。',
 };

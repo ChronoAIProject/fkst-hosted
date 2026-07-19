@@ -9,6 +9,11 @@ function jsonResponse(body: unknown, status = 200): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
 }
 
+/** Parse the `path` / `tail_bytes` query of a stubbed file-fetch URL. */
+function fileQuery(url: string): URLSearchParams {
+  return new URL(url, 'http://x').searchParams;
+}
+
 const trigger: IssueDetail = {
   number: 7,
   title: 'sess',
@@ -104,7 +109,7 @@ describe('TabLogs', () => {
     await waitFor(() => expect(screen.getByText(/beta line/)).toBeInTheDocument());
   });
 
-  it('counts in-file search matches', async () => {
+  it('counts in-file search matches (debounced)', async () => {
     const user = userEvent.setup();
     vi.stubGlobal(
       'fetch',
@@ -117,13 +122,136 @@ describe('TabLogs', () => {
     renderLogs();
     const search = await screen.findByPlaceholderText('Find in file…');
     await user.type(search, 'alpha');
-    // "alpha" appears twice in the fixture.
+    // "alpha" appears twice in the fixture; the count settles after the debounce.
     expect(await screen.findByText('2 matches')).toBeInTheDocument();
   });
 
-  it('surfaces a manifest load error', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(null, 403)));
+  it('surfaces a manifest load error and retries on demand', async () => {
+    const user = userEvent.setup();
+    let manifestCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/manifest')) {
+          manifestCalls += 1;
+          return manifestCalls === 1 ? jsonResponse(null, 403) : jsonResponse(manifest);
+        }
+        return jsonResponse(fileContent);
+      })
+    );
     renderLogs();
     expect(await screen.findByText('Could not load the session logs.')).toBeInTheDocument();
+
+    // Retry re-invokes the manifest fetch and, on success, lists the files.
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('driver.log')).toBeInTheDocument();
+  });
+
+  it('drops a stale in-flight response when the file selection changes (B1)', async () => {
+    const user = userEvent.setup();
+    // The first-selected file (driver) resolves slowly; the newly-selected file
+    // (codex) resolves immediately. The late driver response must NOT overwrite
+    // the codex content that is already on screen.
+    let releaseDriver!: () => void;
+    const driverGate = new Promise<void>((resolve) => {
+      releaseDriver = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/manifest')) return jsonResponse(manifest);
+        if (url.includes('/file?')) {
+          const path = fileQuery(url).get('path');
+          if (path === 'fkst-substrate/driver.log') {
+            await driverGate; // stays pending until the test releases it
+            return jsonResponse({ ...fileContent, path, content: 'DRIVER-OLD' });
+          }
+          return jsonResponse({ ...fileContent, path, content: 'CODEX-NEW' });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+    renderLogs();
+
+    // Auto-selects driver (its fetch is now parked). Switch to codex.
+    const codexTab = await screen.findByRole('tab', { name: /codex\.log/ });
+    await user.click(codexTab);
+    expect(await screen.findByText('CODEX-NEW')).toBeInTheDocument();
+
+    // Release the stale driver response; it must be discarded, leaving codex.
+    releaseDriver();
+    await waitFor(() => expect(screen.getByText('CODEX-NEW')).toBeInTheDocument());
+    expect(screen.queryByText('DRIVER-OLD')).not.toBeInTheDocument();
+  });
+
+  it('keeps the last-good content and flags staleness on a failed Refresh', async () => {
+    const user = userEvent.setup();
+    let fileCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/manifest')) return jsonResponse(manifest);
+        if (url.includes('/file?')) {
+          fileCalls += 1;
+          return fileCalls === 1 ? jsonResponse(fileContent) : jsonResponse(null, 500);
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+    renderLogs();
+    await screen.findByText(/beta line/);
+
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+    // The failed refresh surfaces the staleness notice but does NOT wipe the
+    // content the user was reading.
+    expect(
+      await screen.findByText('Showing the last loaded content — the refresh failed.')
+    ).toBeInTheDocument();
+    expect(screen.getByText(/beta line/)).toBeInTheDocument();
+  });
+
+  it('caveats the search count on a truncated tail and loads the full file on demand', async () => {
+    const user = userEvent.setup();
+    const truncated = {
+      ...fileContent,
+      content: 'alpha\nbeta\nalpha',
+      returned_bytes: 200 * 1024,
+      total_bytes: 500 * 1024,
+      truncated: true,
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/manifest')) return jsonResponse(manifest);
+        if (url.includes('/file?')) {
+          // A tail request returns the truncated view; a full request (no
+          // tail_bytes) returns the whole file.
+          return fileQuery(url).has('tail_bytes')
+            ? jsonResponse(truncated)
+            : jsonResponse({ ...fileContent, content: 'whole file body here', truncated: false });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+    renderLogs();
+
+    // Truncation notice + load-full affordance are present.
+    expect(await screen.findByRole('button', { name: 'Load full file' })).toBeInTheDocument();
+
+    // The search count is caveated as covering only the shown tail.
+    const search = await screen.findByPlaceholderText('Find in file…');
+    await user.type(search, 'alpha');
+    expect(await screen.findByText(/in the shown tail/)).toBeInTheDocument();
+
+    // Loading the full file replaces the tail; the truncation UI disappears.
+    await user.click(screen.getByRole('button', { name: 'Load full file' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Load full file' })).not.toBeInTheDocument()
+    );
+    expect(screen.getByText(/whole file body here/)).toBeInTheDocument();
   });
 });

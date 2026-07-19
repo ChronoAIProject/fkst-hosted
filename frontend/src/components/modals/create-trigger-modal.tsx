@@ -1,13 +1,20 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type React from 'react';
+import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth/github-auth';
 import { useContent } from '@/i18n';
 import { createTrigger } from '@/lib/api/canvas';
+import { listEnvironmentProfiles } from '@/lib/api/environments';
 import type { CreateSessionRequest, CreateSessionResponse } from '@/lib/api/types';
 import { ModalShell } from './modal-shell';
 import { ErrorNote } from '@/components/ui/error-note';
 import { FIELD_INPUT, FIELD_LABEL } from '@/components/ui/field';
+import { useToast } from '@/components/ui/toast';
+
+/** The `<form>` element id, referenced by the sticky-footer submit button so it
+ *  can live outside the form subtree yet still submit it. */
+const FORM_ID = 'create-trigger-form';
 
 /** Split a free-text allowlist into entries (whitespace/comma separated). */
 function parseAllowlist(raw: string): string[] {
@@ -44,6 +51,78 @@ export function buildCreateRequest(form: {
   return request;
 }
 
+/** Load state for the environment picker. `profiles === null` is "still
+ *  loading"; `error` flips the field to the free-text fallback so a failed
+ *  fetch never blocks the whole dialog. */
+interface EnvLoad {
+  profiles: string[] | null;
+  error: boolean;
+}
+
+/** Environment field: a <select> over the caller's saved profiles (plus a
+ *  blank "none"), degrading to a free-text input when the profile list cannot
+ *  be loaded — the design closes the parity gap (a session may only reference a
+ *  profile that exists) without ever trapping the user behind a failed fetch. */
+function EnvironmentField({
+  cc,
+  value,
+  onChange,
+  load,
+}: {
+  cc: ReturnType<typeof useContent>['dashboard']['canvas'];
+  value: string;
+  onChange: (v: string) => void;
+  load: EnvLoad;
+}) {
+  const label = (
+    <label htmlFor="trigger-environment" className={FIELD_LABEL}>
+      {cc.createEnvironmentLabel}
+    </label>
+  );
+
+  // Fetch failed: keep the modal usable with a free-text input + a note.
+  if (load.error) {
+    return (
+      <div className="flex flex-col gap-1.5">
+        {label}
+        <input
+          id="trigger-environment"
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          spellCheck={false}
+          autoComplete="off"
+          className={cn(FIELD_INPUT, 'font-mono')}
+        />
+        <p className="font-mono text-[11px] text-ghost">{cc.createEnvironmentLoadFailed}</p>
+      </div>
+    );
+  }
+
+  const profiles = load.profiles ?? [];
+  return (
+    <div className="flex flex-col gap-1.5">
+      {label}
+      <select
+        id="trigger-environment"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        // Disabled only while the very first fetch is in flight (profiles null).
+        disabled={load.profiles === null}
+        className={cn(FIELD_INPUT, 'font-mono cursor-pointer')}
+      >
+        <option value="">{cc.createEnvironmentNone}</option>
+        {profiles.map((p) => (
+          <option key={p} value={p}>
+            {p}
+          </option>
+        ))}
+      </select>
+      <p className="font-mono text-[11px] text-ghost">{cc.createEnvironmentNote}</p>
+    </div>
+  );
+}
+
 /** Create-trigger form: session name + ≥1 package rows + the optional knobs.
  *  Server-side validation failures (the trigger parser's 400) are surfaced
  *  verbatim inside the dialog. */
@@ -61,6 +140,7 @@ export function CreateTriggerModal({
   const c = useContent().dashboard;
   const cc = c.canvas;
   const { apiFetch } = useAuth();
+  const toast = useToast();
   const [sessionName, setSessionName] = useState('');
   const [packages, setPackages] = useState<string[]>(['']);
   const [workLabel, setWorkLabel] = useState('');
@@ -70,6 +150,23 @@ export function CreateTriggerModal({
   const [outputLang, setOutputLang] = useState('');
   const [pending, setPending] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [envLoad, setEnvLoad] = useState<EnvLoad>({ profiles: null, error: false });
+
+  // Populate the environment picker once on open. A failed fetch is NOT fatal:
+  // it flips the field to a free-text fallback rather than blocking the dialog.
+  useEffect(() => {
+    let alive = true;
+    listEnvironmentProfiles(apiFetch)
+      .then((summaries) => {
+        if (alive) setEnvLoad({ profiles: summaries.map((s) => s.name), error: false });
+      })
+      .catch(() => {
+        if (alive) setEnvLoad({ profiles: null, error: true });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [apiFetch]);
 
   const valid = sessionName.trim() !== '' && packages.some((p) => p.trim() !== '');
 
@@ -99,6 +196,7 @@ export function CreateTriggerModal({
         })
       );
       if (result.ok) {
+        toast.show({ kind: 'success', message: cc.createdToast });
         onCreated(result.data);
         return;
       }
@@ -110,9 +208,39 @@ export function CreateTriggerModal({
     }
   };
 
+  const footer = (
+    <div className="flex items-center justify-end gap-2">
+      <button
+        type="button"
+        onClick={onClose}
+        className="font-ui font-semibold text-[12.5px] border border-line rounded-control px-4 py-2 text-dim hover:text-fg transition-colors cursor-pointer"
+      >
+        {c.repos.cancel}
+      </button>
+      <button
+        type="submit"
+        form={FORM_ID}
+        disabled={!valid || pending}
+        className={cn(
+          'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-colors',
+          !valid || pending
+            ? 'bg-amber/50 text-amber-ink/60 cursor-not-allowed'
+            : 'bg-amber text-amber-ink hover:brightness-[1.06] cursor-pointer'
+        )}
+      >
+        {pending ? cc.createPending : cc.createSubmit}
+      </button>
+    </div>
+  );
+
   return (
-    <ModalShell titleId="create-trigger-title" title={cc.createTitle} onClose={onClose}>
-      <form onSubmit={onSubmit} className="flex flex-col gap-4">
+    <ModalShell
+      titleId="create-trigger-title"
+      title={cc.createTitle}
+      onClose={onClose}
+      footer={footer}
+    >
+      <form id={FORM_ID} onSubmit={onSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-1.5">
           <label htmlFor="trigger-name" className={FIELD_LABEL}>
             {cc.createNameLabel}
@@ -178,22 +306,18 @@ export function CreateTriggerModal({
             autoComplete="off"
             className={cn(FIELD_INPUT, 'font-mono')}
           />
+          <p className="font-mono text-[11px] text-ghost">
+            {cc.createWorkLabelHint}{' '}
+            <Link
+              to="/get-started"
+              className="text-dim hover:text-fg underline underline-offset-2 transition-colors"
+            >
+              {cc.createWorkLabelHintLink}
+            </Link>
+          </p>
         </div>
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="trigger-environment" className={FIELD_LABEL}>
-            {cc.createEnvironmentLabel}
-          </label>
-          <input
-            id="trigger-environment"
-            type="text"
-            value={environment}
-            onChange={(e) => setEnvironment(e.target.value)}
-            spellCheck={false}
-            autoComplete="off"
-            className={cn(FIELD_INPUT, 'font-mono')}
-          />
-        </div>
+        <EnvironmentField cc={cc} value={environment} onChange={setEnvironment} load={envLoad} />
 
         <label className="flex items-center gap-2 text-[13px] text-fg cursor-pointer select-none">
           <input
@@ -238,28 +362,6 @@ export function CreateTriggerModal({
         </div>
 
         {serverError && <ErrorNote message={serverError} />}
-
-        <div className="flex items-center justify-end gap-2 pt-1">
-          <button
-            type="button"
-            onClick={onClose}
-            className="font-ui font-semibold text-[12.5px] border border-line rounded-control px-4 py-2 text-dim hover:text-fg transition-colors cursor-pointer"
-          >
-            {c.repos.cancel}
-          </button>
-          <button
-            type="submit"
-            disabled={!valid || pending}
-            className={cn(
-              'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-colors',
-              !valid || pending
-                ? 'bg-amber/50 text-amber-ink/60 cursor-not-allowed'
-                : 'bg-amber text-amber-ink hover:brightness-[1.06] cursor-pointer'
-            )}
-          >
-            {pending ? cc.createPending : cc.createSubmit}
-          </button>
-        </div>
       </form>
     </ModalShell>
   );

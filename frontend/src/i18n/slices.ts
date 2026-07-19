@@ -85,6 +85,9 @@ export type CanvasSidebarSlice = Pick<
   | 'viewRepo'
   | 'sessionsTitle'
   | 'pollNote'
+  | 'sessionsFreshness'
+  | 'sessionsRetry'
+  | 'sessionsRefreshing'
   | 'sessionsLoadFailed'
   | 'sessionsStaleNotice'
   | 'notInstalledNote'
@@ -98,6 +101,12 @@ export type CanvasSidebarSlice = Pick<
   | 'createdWord'
   | 'updatedWord'
   | 'closedWord'
+  | 'firstRunTitle'
+  | 'firstRunBody'
+  | 'firstRunInstall'
+  | 'firstRunGuide'
+  | 'needsInstall'
+  | 'needsInstallHint'
 >;
 /** Canvas dialogs: create-session + stop-session (modals cluster). */
 export type CanvasModalsSlice = Pick<
@@ -126,6 +135,12 @@ export type CanvasModalsSlice = Pick<
   | 'createSubmit'
   | 'createPending'
   | 'createFailed'
+  | 'createEnvironmentNone'
+  | 'createEnvironmentNote'
+  | 'createEnvironmentLoadFailed'
+  | 'createWorkLabelHint'
+  | 'createWorkLabelHintLink'
+  | 'createdToast'
 >;
 /** Environment picker string in the create-session form (environments cluster). */
 export type CanvasEnvSlice = Pick<CanvasContent, 'createEnvironmentLabel'>;
@@ -169,6 +184,7 @@ export type ReposModalsSlice = Pick<
   | 'cancel'
   | 'createFailed'
   | 'createdNextStep'
+  | 'createdToast'
   | 'uninstall'
   | 'uninstallConfirmTitle'
   | 'uninstallConfirmBody'

@@ -1,5 +1,6 @@
 import { useContent } from '@/i18n';
 import type { AccountOverview } from '@/lib/api/types';
+import { StaggerItem } from '@/components/ui/motion';
 
 /** Exact GitHub settings page for an installation on this account. */
 export function manageUrl(login: string, personal: boolean, installationId: number): string {
@@ -27,10 +28,13 @@ export function AccountList({
 
   return (
     <div className="flex flex-col gap-4">
-      {accounts.map((account) => {
+      {accounts.map((account, i) => {
         const installedCount = account.repos.filter((r) => r.installed).length;
         return (
-          <section key={account.login} className="flex flex-col gap-1">
+          // Staggered entrance for the account rows; collapses to the final
+          // state under prefers-reduced-motion (the .anim-row-in class is
+          // disabled there in index.css).
+          <StaggerItem key={account.login} index={i} className="flex flex-col gap-1">
             <div className="flex items-center gap-2.5 flex-wrap">
               <span className="font-mono text-eyebrow text-ghost uppercase">
                 {account.kind === 'personal' ? rc.personalGroup : rc.orgGroup}
@@ -91,7 +95,7 @@ export function AccountList({
             {account.repos.length === 0 && (
               <p className="font-mono text-[12px] text-ghost italic py-1">{rc.groupEmpty}</p>
             )}
-          </section>
+          </StaggerItem>
         );
       })}
     </div>

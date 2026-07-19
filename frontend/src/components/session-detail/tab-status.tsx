@@ -1,5 +1,7 @@
+import type { ReactNode } from 'react';
 import { useContent } from '@/i18n';
 import { Chip } from '@/components/ui/chip';
+import { FadeSwap } from '@/components/ui/motion';
 import type { IssueDetail, SessionDetail } from '@/lib/api/types';
 import { decodeSessionStatus, decodeWorkItemStatus, type SessionPhase } from '@/lib/api/derive';
 import { Note, SectionLabel, Spinner } from './parts';
@@ -57,7 +59,12 @@ export function TabStatus({
       <section className="flex flex-col gap-2">
         <SectionLabel>{t.lifecycle}</SectionLabel>
         <div className="flex items-center gap-1.5 flex-wrap">
-          <Chip tone={PHASE_TONE[status.phase]}>{t.phase[status.phase]}</Chip>
+          {/* Chips pop in on mount (anim-chip-in): the phase pill always, and
+              the liveness chip whenever it (re)appears on a fresh snapshot.
+              Chip has no className slot, so the entrance rides a wrapper span. */}
+          <span className="anim-chip-in inline-flex">
+            <Chip tone={PHASE_TONE[status.phase]}>{t.phase[status.phase]}</Chip>
+          </span>
           <span className="font-mono text-[10.5px] text-ghost">
             {t.healthLabel}:{' '}
             <span className={status.health === 'degraded' ? 'text-red' : 'text-dim'}>
@@ -65,7 +72,11 @@ export function TabStatus({
             </span>
           </span>
           {status.liveness && (
-            <Chip tone={status.liveness === 'live' ? 'green' : 'neutral'}>{status.liveness}</Chip>
+            <span className="anim-chip-in inline-flex">
+              <Chip tone={status.liveness === 'live' ? 'green' : 'neutral'}>
+                {status.liveness}
+              </Chip>
+            </span>
           )}
         </div>
         {/* Lifecycle stage strip. */}
@@ -78,7 +89,11 @@ export function TabStatus({
                 <span
                   aria-hidden="true"
                   className={
-                    'w-1.5 h-1.5 rounded-full flex-none ' +
+                    // transition-colors tweens the fill as a stage advances,
+                    // so the strip animates a stage lighting up rather than
+                    // snapping. Reduced-motion users get the instant color via
+                    // the global transition suppression.
+                    'w-1.5 h-1.5 rounded-full flex-none transition-colors ' +
                     (current ? 'bg-amber' : reached ? 'bg-green' : 'bg-ghost')
                   }
                 />
@@ -115,7 +130,18 @@ export function TabStatus({
 
       <section className="flex flex-col gap-2">
         <SectionLabel>{t.liveEngine}</SectionLabel>
-        {observe.status === 'idle' && (
+        {/* Crossfade the observe states keyed on `status`: the fetched engine
+            snapshot slides in under the label as loading resolves to loaded,
+            rather than popping the panel in. Instant under reduced motion. */}
+        <FadeSwap k={observe.status}>{renderObserve()}</FadeSwap>
+      </section>
+    </div>
+  );
+
+  function renderObserve(): ReactNode {
+    switch (observe.status) {
+      case 'idle':
+        return (
           <button
             type="button"
             onClick={onLoadObserve}
@@ -123,8 +149,9 @@ export function TabStatus({
           >
             {t.liveEngine}
           </button>
-        )}
-        {observe.status === 'loading' && (
+        );
+      case 'loading':
+        return (
           <div className="flex flex-col gap-1.5">
             <span className="inline-flex items-center gap-2 font-mono text-[11.5px] text-dim">
               <Spinner />
@@ -132,8 +159,9 @@ export function TabStatus({
             </span>
             <Note>{t.liveEngineSlow}</Note>
           </div>
-        )}
-        {observe.status === 'error' && (
+        );
+      case 'error':
+        return (
           <div className="flex flex-col items-start gap-2">
             <p className="text-[12.5px] text-red">{t.liveEngineError}</p>
             <button
@@ -144,9 +172,9 @@ export function TabStatus({
               {t.logsRefresh}
             </button>
           </div>
-        )}
-        {observe.status === 'loaded' && <ObserveView snapshot={observe.snapshot} />}
-      </section>
-    </div>
-  );
+        );
+      case 'loaded':
+        return <ObserveView snapshot={observe.snapshot} />;
+    }
+  }
 }

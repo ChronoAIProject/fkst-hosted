@@ -30,6 +30,12 @@ export const canvasModals: CanvasModalsSlice = {
   createSubmit: '创建触发 issue',
   createPending: '正在创建…',
   createFailed: '无法创建触发 issue，请重试。',
+  createEnvironmentNone: '无',
+  createEnvironmentNote: '只能引用已保存的环境。请在顶栏的环境管理器中创建。',
+  createEnvironmentLoadFailed: '无法加载你的环境 —— 请手动输入名称。',
+  createWorkLabelHint: '每个触发只用一个工作标签 —— 会话会认领所有带此标签的 issue。',
+  createWorkLabelHintLink: '在快速开始中了解更多。',
+  createdToast: '会话已创建',
 };
 
 export const reposModals: ReposModalsSlice = {
@@ -46,6 +52,7 @@ export const reposModals: ReposModalsSlice = {
   cancel: '取消',
   createFailed: '无法创建仓库，请重试。',
   createdNextStep: '下一步：在此仓库上安装 App',
+  createdToast: '仓库已创建',
   uninstall: '卸载',
   uninstallConfirmTitle: '从 {owner} 卸载？',
   uninstallConfirmBody:
