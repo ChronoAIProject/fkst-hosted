@@ -83,19 +83,21 @@ export function ConfirmDialog({
         <button
           type="button"
           onClick={onClose}
-          className="font-ui font-semibold text-[12.5px] border border-line rounded-control px-4 py-2 text-dim hover:text-fg transition-colors cursor-pointer"
+          className="font-ui font-semibold text-[12.5px] bg-glass border border-line rounded-control px-4 py-2 text-dim transition-[color,border-color,box-shadow,background] hover:text-fg hover:border-line-2 hover:bg-glass-2 hover:shadow-glow-amber cursor-pointer"
         >
           {cancelLabel}
         </button>
+        {/* Destructive CTA: red fill seated on a soft red glow with a one-shot
+            sheen sweep on mount; hover lifts brightness. */}
         <button
           type="button"
           onClick={onConfirm}
           disabled={pending}
           className={cn(
-            'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-colors',
+            'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-[filter,box-shadow]',
             pending
-              ? 'bg-red/50 text-white/60 cursor-not-allowed'
-              : 'bg-red text-white hover:brightness-[1.06] cursor-pointer'
+              ? 'bg-red/40 text-white/50 cursor-not-allowed'
+              : 'bg-red text-white shadow-[var(--shadow-1),var(--glow-red)] anim-sheen hover:brightness-110 cursor-pointer'
           )}
         >
           {pending ? pendingLabel : confirmLabel}

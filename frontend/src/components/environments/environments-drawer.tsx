@@ -128,19 +128,22 @@ export function EnvironmentsDrawer({ open, onClose }: { open: boolean; onClose: 
 
   return (
     <DrawerShell titleId={titleId} onClose={onClose} open={open}>
-      <div className="sticky top-0 z-10 bg-raise border-b border-line px-5 py-4 flex items-center justify-between gap-3">
+      <div className="sticky top-0 z-10 bg-glass backdrop-blur-glass border-b border-line px-5 py-4 flex items-center justify-between gap-3">
         <div className="min-w-0 flex items-center gap-2">
           {notList && (
             <button
               type="button"
               onClick={goList}
               aria-label={t.backAria}
-              className="font-ui font-semibold text-[12px] border border-line rounded-control px-2.5 py-1.5 text-dim hover:text-fg transition-colors cursor-pointer flex-none"
+              className="font-ui font-semibold text-[12px] border border-line rounded-control px-2.5 py-1.5 text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber transition-[color,border-color,box-shadow] cursor-pointer flex-none"
             >
               ← {t.back}
             </button>
           )}
-          <h2 id={titleId} className="font-display font-semibold text-[17px] text-fg truncate">
+          <h2
+            id={titleId}
+            className="grad-text-fg font-display font-semibold text-modal-title truncate"
+          >
             {t.title}
           </h2>
         </div>
@@ -148,7 +151,7 @@ export function EnvironmentsDrawer({ open, onClose }: { open: boolean; onClose: 
           type="button"
           onClick={onClose}
           aria-label={t.closeAria}
-          className="font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim hover:text-fg transition-colors cursor-pointer flex-none"
+          className="font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber transition-[color,border-color,box-shadow] cursor-pointer flex-none"
         >
           {t.close}
         </button>
