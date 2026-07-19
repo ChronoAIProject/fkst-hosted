@@ -22,8 +22,9 @@ export type ReposContent = DashboardContent['repos'];
 
 /** Top-nav labels. */
 export type NavSlice = SiteContent['nav'];
-/** Shared chrome shared by every page: language toggle, auth, footer. */
-export type CommonSlice = Pick<SiteContent, 'toggle' | 'auth' | 'footer'>;
+/** Shared chrome shared by every page: language toggle, auth, footer, and the
+ *  app-shell error/404/toast strings. */
+export type CommonSlice = Pick<SiteContent, 'toggle' | 'auth' | 'footer' | 'shell'>;
 /** Marketing / get-started long-form pages. */
 export type PagesSlice = Pick<SiteContent, 'intro' | 'gs'>;
 /** Per-session detail drawer (session-detail cluster owns this). */

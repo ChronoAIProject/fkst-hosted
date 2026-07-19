@@ -54,6 +54,26 @@ export interface SiteContent {
     github: string;
     manual: string;
   };
+  /** App-shell error states shared across every route: the render-error
+   *  fallback (route errorElement + top-level ErrorBoundary), the real 404
+   *  view, and the one string the global Toaster needs. */
+  shell: {
+    /** Render-error fallback. */
+    errorTitle: string;
+    errorBody: string;
+    errorReload: string;
+    /** Collapsible technical detail below the friendly copy. */
+    errorDetailsSummary: string;
+    /** 404 view. */
+    notFoundEyebrow: string;
+    notFoundTitle: string;
+    /** `{path}` placeholder — the unmatched URL path. */
+    notFoundBody: string;
+    notFoundHome: string;
+    notFoundMetaTitle: string;
+    /** Accessible label for the global Toaster's per-notice dismiss control. */
+    toastDismiss: string;
+  };
   dashboard: {
     metaTitle: string;
     /** Route-level skeleton label while the lazy dashboard chunk downloads. */
@@ -64,7 +84,18 @@ export interface SiteContent {
     signInTitle: string;
     signInBody: string;
     notConfigured: string;
+    /** Generic OAuth-callback error (fallback when the slug is unrecognized). */
     authError: string;
+    /** Known OAuth-callback error slugs → specific copy; `authError` is the
+     *  fallback for any slug not listed here. */
+    authErrorBySlug: Record<string, string>;
+    /** Retry action on the in-panel overview load error. */
+    retry: string;
+    /** Involuntary-expiry re-authenticate prompt: shown in place of the cold
+     *  sign-in card so the user's level/selection is preserved. */
+    sessionExpiredTitle: string;
+    sessionExpiredBody: string;
+    sessionExpiredAction: string;
     noSessions: string;
     installed: string;
     workLabel: string;

@@ -15,6 +15,16 @@ export const dashboardScalars: DashboardScalars = {
   signInBody: '连接你的 GitHub 账户以加载你的 fkst 会话和 issue。你会保持登录状态 —— token 会自动刷新。',
   notConfigured: '此部署尚未配置仪表盘后端。',
   authError: '登录被取消或失败，请重试。',
+  authErrorBySlug: {
+    access_denied: '你取消或拒绝了 GitHub 授权。准备好后可重新登录。',
+    redirect_uri_mismatch: '登录回调地址与此部署不匹配。请检查 GitHub App 的回调 URL 后重试。',
+    application_suspended: '此 GitHub App 已被停用，无法完成登录。请联系部署所有者。',
+  },
+  retry: '重试',
+  sessionExpiredTitle: '你的会话已过期',
+  sessionExpiredBody:
+    '由于无法刷新你的 GitHub token，你已被登出。重新登录即可从中断处继续 —— 你在仪表盘中的位置会被保留。',
+  sessionExpiredAction: '重新登录',
   noSessions: '此仓库中没有 fkst 会话。',
   installed: '已安装',
   workLabel: '工作标签',

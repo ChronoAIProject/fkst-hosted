@@ -17,4 +17,17 @@ export const common: CommonSlice = {
     github: 'GitHub',
     manual: '操作手册',
   },
+  shell: {
+    errorTitle: '出错了',
+    errorBody:
+      '发生了意外错误，页面被中断。刷新通常即可恢复；若仍然反复出现，下方的详细信息有助于定位问题。',
+    errorReload: '刷新页面',
+    errorDetailsSummary: '错误详情',
+    notFoundEyebrow: '错误 404',
+    notFoundTitle: '此页面不存在',
+    notFoundBody: '`{path}` 没有对应的路由。它可能已被移动，或链接输入有误。',
+    notFoundHome: '返回介绍页 →',
+    notFoundMetaTitle: 'FKST — 页面未找到',
+    toastDismiss: '关闭',
+  },
 };
