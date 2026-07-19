@@ -2,6 +2,7 @@ import type { Node, NodeProps } from '@xyflow/react';
 import { cn } from '@/lib/utils';
 import { useContent } from '@/i18n';
 import { Chip } from '@/components/ui/chip';
+import { FadeSwap, staggerStyle } from '@/components/ui/motion';
 import { accountStatus, repoDetailStatus, repoStatus, sessionActive } from '@/lib/api/derive';
 import type { CanvasStatus } from '@/lib/api/derive';
 import type { AccountOverview, RepoOverview, RepoSessionsResponse } from '@/lib/api/types';
@@ -9,13 +10,22 @@ import { ACCOUNT_NODE, DETAIL_NODE, REPO_NODE } from './layout';
 
 // Custom node payloads. Type aliases (not interfaces) so they satisfy React
 // Flow's Record<string, unknown> node-data constraint structurally.
+//
+// `index` is the node's position within its level. It feeds the mount stagger
+// (`anim-row-in` + `--stagger`) so a level's cards unfold as a cascading set
+// rather than snapping in together. It is OPTIONAL because the producer
+// (`flow.tsx::buildNodes`) is a sibling-owned file: absent it, `staggerStyle`
+// degrades to a zero delay and every card fades in on the same frame — still
+// animated, just not cascaded. See the cross-item note in the PR.
 export type AccountNodeData = {
   account: AccountOverview;
   onOpen: (login: string) => void;
+  index?: number;
 };
 export type RepoNodeData = {
   repo: RepoOverview;
   onOpen: (owner: string, name: string) => void;
+  index?: number;
 };
 export type DetailNodeData = {
   owner: string;
@@ -23,6 +33,12 @@ export type DetailNodeData = {
   installed: boolean;
   /** Null while the level-2 fetch is in flight → mini skeleton. */
   sessions: RepoSessionsResponse | null;
+  /** True when the level-2 fetch FAILED (distinct from still-loading `null`):
+   *  renders a short "could not load" line instead of shimmering forever.
+   *  Optional — the sibling-owned producer wires it; absent it reads falsy and
+   *  a null payload keeps meaning "loading". */
+  sessionsFailed?: boolean;
+  index?: number;
 };
 
 export type AccountFlowNode = Node<AccountNodeData, 'account'>;
@@ -83,7 +99,7 @@ function RepoDot({ status }: { status: CanvasStatus }) {
 export function AccountNode({ data }: NodeProps<AccountFlowNode>) {
   const c = useContent().dashboard;
   const cc = c.canvas;
-  const { account, onOpen } = data;
+  const { account, onOpen, index } = data;
   const status = accountStatus(account);
   const activeCount = account.repos.reduce((n, r) => n + r.active_sessions, 0);
   const shown = account.repos.slice(0, MAX_REPO_DOTS);
@@ -94,9 +110,13 @@ export function AccountNode({ data }: NodeProps<AccountFlowNode>) {
       type="button"
       onClick={() => onOpen(account.login)}
       aria-label={cc.openAccountAria.replace('{login}', account.login)}
-      style={{ width: ACCOUNT_NODE.width, height: ACCOUNT_NODE.height }}
+      // Mount stagger on the card BODY (not the React-Flow wrapper): the wrapper
+      // carries React Flow's positioning `transform`, so its enter cue must stay
+      // opacity-only (`anim-overlay-in`); the body is an independent box, so
+      // `anim-row-in`'s translateY animates safely here without fighting layout.
+      style={{ width: ACCOUNT_NODE.width, height: ACCOUNT_NODE.height, ...staggerStyle(index ?? 0) }}
       className={cn(
-        'text-left border rounded-card bg-raise p-4 flex flex-col gap-2 cursor-pointer',
+        'anim-row-in text-left border rounded-card bg-raise p-4 flex flex-col gap-2 cursor-pointer',
         'transition-colors hover:border-line-2',
         statusCardClasses(status)
       )}
@@ -135,7 +155,7 @@ export function AccountNode({ data }: NodeProps<AccountFlowNode>) {
 export function RepoNode({ data }: NodeProps<RepoFlowNode>) {
   const c = useContent().dashboard;
   const cc = c.canvas;
-  const { repo, onOpen } = data;
+  const { repo, onOpen, index } = data;
   const status = repoStatus(repo);
 
   return (
@@ -143,9 +163,11 @@ export function RepoNode({ data }: NodeProps<RepoFlowNode>) {
       type="button"
       onClick={() => onOpen(repo.owner, repo.name)}
       aria-label={cc.openRepoAria.replace('{repo}', `${repo.owner}/${repo.name}`)}
-      style={{ width: REPO_NODE.width, height: REPO_NODE.height }}
+      // Body-level mount stagger; see AccountNode for why the transform-carrying
+      // keyframe rides the body rather than the React-Flow wrapper.
+      style={{ width: REPO_NODE.width, height: REPO_NODE.height, ...staggerStyle(index ?? 0) }}
       className={cn(
-        'text-left border rounded-card bg-raise p-3.5 flex flex-col gap-1.5 cursor-pointer',
+        'anim-row-in text-left border rounded-card bg-raise p-3.5 flex flex-col gap-1.5 cursor-pointer',
         'transition-colors hover:border-line-2',
         statusCardClasses(status)
       )}
@@ -166,18 +188,100 @@ export function RepoNode({ data }: NodeProps<RepoFlowNode>) {
   );
 }
 
-/** Level 2 — a single wide card for the opened repository; the sidebar holds
- *  the full detail, this node anchors the zoom target. */
+/** The dynamic body of the level-2 card, keyed by fetch state so the parent's
+ *  `FadeSwap` can crossfade loading→loaded (no shimmer→list hard cut) and give
+ *  a failed fetch a terminal state instead of an endless shimmer.
+ *
+ *  UX decision (dead-card fix): rather than reducing this card to reclaim room
+ *  for the sidebar — which would mean editing the sibling-owned `layout.ts`
+ *  (`DETAIL_NODE.width`) and would break the sibling `flow.test.tsx` that asserts
+ *  the session name/number render here — we make the card USEFUL in place: a
+ *  compact status summary (active-count badge + total) tops the short session
+ *  list, so the node conveys at-a-glance health the raw sidebar list does not.
+ *  This is the lower-risk option (touches only files this item owns). */
+function RepoDetailBody({
+  bodyKey,
+  sessions,
+  installed,
+}: {
+  bodyKey: DetailBodyKey;
+  sessions: RepoSessionsResponse | null;
+  installed: boolean;
+}) {
+  const c = useContent().dashboard;
+  const cc = c.canvas;
+
+  switch (bodyKey) {
+    case 'loading':
+      return (
+        <output aria-label={cc.loadingSidebar} className="flex flex-col gap-1.5">
+          <span className="anim-shimmer h-3 rounded-chip w-3/4" />
+          <span className="anim-shimmer h-3 rounded-chip w-1/2" />
+        </output>
+      );
+    case 'failed':
+      // Terminal: a failed level-2 fetch must not shimmer forever.
+      return <span className="font-mono text-[11.5px] text-ghost">{cc.sessionsLoadFailed}</span>;
+    case 'empty':
+      return <span className="font-mono text-[11.5px] text-ghost">{c.noSessions}</span>;
+    case 'ready': {
+      // `bodyKey === 'ready'` already guarantees a non-empty payload.
+      const list = sessions!.sessions;
+      const activeCount = list.filter(sessionActive).length;
+      return (
+        <div className="flex flex-col gap-2.5">
+          <div className="flex items-center gap-2">
+            <StatusBadge status={repoDetailStatus(installed, sessions)} activeCount={activeCount} />
+            <span className="font-mono text-[10.5px] text-ghost">
+              {cc.sessionsTitle} · {list.length}
+            </span>
+          </div>
+          <div className="flex flex-col gap-1">
+            {list.slice(0, 6).map((s) => (
+              // BUG B2: key is the stable session id, falling back to the trigger
+              // NUMBER alone — the old `-${i}` positional suffix churned the key on
+              // every reorder, forcing needless remounts of otherwise-stable rows.
+              <span key={s.session_id ?? `t-${s.trigger.number}`} className="flex items-center gap-2">
+                <RepoDot status={sessionActive(s) ? 'active' : 'none'} />
+                <span className="font-mono text-[11.5px] text-dim truncate">
+                  {s.name ?? c.invalidTrigger}
+                </span>
+                <span className="font-mono text-[10.5px] text-ghost">#{s.trigger.number}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      );
+    }
+  }
+}
+
+type DetailBodyKey = 'loading' | 'failed' | 'empty' | 'ready';
+
+/** Classify the level-2 fetch state into the `FadeSwap` key. A null payload is
+ *  either a failed fetch (terminal) or still loading; a present payload is empty
+ *  or ready. */
+function detailBodyKey(sessions: RepoSessionsResponse | null, failed: boolean): DetailBodyKey {
+  if (sessions == null) return failed ? 'failed' : 'loading';
+  return sessions.sessions.length === 0 ? 'empty' : 'ready';
+}
+
+/** Level 2 — a single wide card for the opened repository. The sidebar holds
+ *  the full detail; this node anchors the zoom target and shows a compact
+ *  status summary (see `RepoDetailBody` for the dead-card rationale). */
 export function RepoDetailNode({ data }: NodeProps<DetailFlowNode>) {
   const c = useContent().dashboard;
   const cc = c.canvas;
-  const { owner, name, installed, sessions } = data;
+  const { owner, name, installed, sessions, sessionsFailed, index } = data;
+  const bodyKey = detailBodyKey(sessions, sessionsFailed === true);
 
   return (
     <div
-      style={{ width: DETAIL_NODE.width }}
+      // The single detail node is unmeasured, so its enter cue rides the body
+      // like the grid cards. Index defaults to 0 (one node) → a plain fade.
+      style={{ width: DETAIL_NODE.width, ...staggerStyle(index ?? 0) }}
       className={cn(
-        'border rounded-card bg-raise p-4 flex flex-col gap-2.5',
+        'anim-row-in border rounded-card bg-raise p-4 flex flex-col gap-2.5',
         statusCardClasses(repoDetailStatus(installed, sessions))
       )}
     >
@@ -191,26 +295,11 @@ export function RepoDetailNode({ data }: NodeProps<DetailFlowNode>) {
           <span className="font-mono text-[10.5px] text-ghost">{cc.statusNone}</span>
         )}
       </div>
-      {sessions == null ? (
-        <output aria-label={cc.loadingSidebar} className="flex flex-col gap-1.5">
-          <span className="anim-shimmer h-3 rounded-chip w-3/4" />
-          <span className="anim-shimmer h-3 rounded-chip w-1/2" />
-        </output>
-      ) : sessions.sessions.length === 0 ? (
-        <span className="font-mono text-[11.5px] text-ghost">{c.noSessions}</span>
-      ) : (
-        <div className="flex flex-col gap-1">
-          {sessions.sessions.slice(0, 6).map((s, i) => (
-            <span key={s.session_id ?? `t-${s.trigger.number}-${i}`} className="flex items-center gap-2">
-              <RepoDot status={sessionActive(s) ? 'active' : 'none'} />
-              <span className="font-mono text-[11.5px] text-dim truncate">
-                {s.name ?? c.invalidTrigger}
-              </span>
-              <span className="font-mono text-[10.5px] text-ghost">#{s.trigger.number}</span>
-            </span>
-          ))}
-        </div>
-      )}
+      {/* Crossfade the body when the payload arrives (loading→ready) rather than
+          hard-cutting the shimmer to the list. Reduced-motion-safe via FadeSwap. */}
+      <FadeSwap k={bodyKey}>
+        <RepoDetailBody bodyKey={bodyKey} sessions={sessions} installed={installed} />
+      </FadeSwap>
     </div>
   );
 }
