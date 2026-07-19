@@ -84,6 +84,13 @@ Object.defineProperties(globalThis.HTMLElement.prototype, {
 (globalThis.SVGElement.prototype as unknown as { getBBox: () => DOMRect }).getBBox = () =>
   ({ x: 0, y: 0, width: 0, height: 0 }) as DOMRect;
 
+// jsdom does not implement Element.scrollIntoView; the in-page anchor nav
+// (get-started) calls it and its tests spy on it. Install a no-op so both the
+// call and the spy work — same "browser API jsdom omits" pattern as above.
+if (typeof globalThis.HTMLElement !== 'undefined' && !globalThis.HTMLElement.prototype.scrollIntoView) {
+  globalThis.HTMLElement.prototype.scrollIntoView = function scrollIntoView() {};
+}
+
 // jsdom's Blob does not implement the async reader methods (`text()`,
 // `arrayBuffer()`). The outcome-file preview reads committed text via
 // `blob.text()`, so polyfill it through jsdom's FileReader — the same
