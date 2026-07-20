@@ -35,11 +35,12 @@ async fn mount_user_reads(server: &MockServer) {
         ])))
         .mount(server)
         .await;
+    // `/user/orgs` returns an EMPTY list for GitHub App user-to-server tokens
+    // (the login this dashboard uses), so the org account below MUST be sourced
+    // from `/user/memberships/orgs` — this mocks the real production behavior.
     Mock::given(method("GET"))
         .and(path("/user/orgs"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!([{ "login": "acme" }])),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
         .mount(server)
         .await;
     Mock::given(method("GET"))
@@ -156,9 +157,7 @@ async fn overview_returns_promptly_when_one_repo_scan_hangs() {
         .await;
     Mock::given(method("GET"))
         .and(path("/user/orgs"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!([{ "login": "acme" }])),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
         .mount(&server)
         .await;
     Mock::given(method("GET"))
@@ -277,9 +276,7 @@ async fn overview_renders_an_omitted_repository_selection_as_null() {
         .await;
     Mock::given(method("GET"))
         .and(path("/user/orgs"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!([{ "login": "acme" }])),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
         .mount(&server)
         .await;
     Mock::given(method("GET"))
