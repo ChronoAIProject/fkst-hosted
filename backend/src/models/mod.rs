@@ -14,6 +14,18 @@ pub struct RepoRef {
     pub name: String,
 }
 
+/// A GitHub actor (user) reduced to the two identity fields authorization keys
+/// on: the stable numeric `id` and the human-readable `login`. Produced by
+/// `GithubListing::list_repo_admins` and (in a later PR, R3) compared against a
+/// work-issue author to gate the org-owner/repo-admin authority tier.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubActor {
+    /// Stable numeric GitHub user id — never reused, so the reliable identity key.
+    pub id: i64,
+    /// GitHub login/handle — can be renamed, kept for logging and display.
+    pub login: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

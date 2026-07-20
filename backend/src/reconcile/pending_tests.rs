@@ -8,6 +8,7 @@ use secrecy::SecretString;
 use super::*;
 use crate::github_app::listing::{InstallationSummary, IssueSummary};
 use crate::github_app::GithubAppError;
+use crate::models::GithubActor;
 
 /// A fake listing whose open-issue count (or error) is fixed per construction.
 struct FakeListing {
@@ -58,6 +59,15 @@ impl GithubListing for FakeListing {
         &self,
         _token: &SecretString,
     ) -> Result<Vec<RepoRef>, GithubAppError> {
+        Ok(Vec::new())
+    }
+
+    async fn list_repo_admins(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+    ) -> Result<Vec<GithubActor>, GithubAppError> {
         Ok(Vec::new())
     }
 }

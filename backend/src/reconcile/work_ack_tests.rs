@@ -18,6 +18,7 @@ use crate::github_app::api::{
 use crate::github_app::config::GithubAppConfig;
 use crate::github_app::listing::{InstallationSummary, IssueSummary};
 use crate::github_app::GithubAppError;
+use crate::models::GithubActor;
 use crate::reconcile::desired::SessionDef;
 
 // ---- recording fake GitHub transport (mirrors execute_tests) ----------------
@@ -140,10 +141,13 @@ fn tokens(api: std::sync::Arc<RecordingApi>) -> GithubAppTokens {
 // ---- fake listing -----------------------------------------------------------
 
 /// A fake listing whose `list_issues_by_label` result (or error) is fixed per
-/// construction, recording how many times it was called.
+/// construction, recording how many times it was called. `repo_admins` is the
+/// programmable hook the later R3 work-issue-authority tests inject an admin set
+/// through — F2 wires no consumer, so it defaults empty.
 struct FakeListing {
     issues: Result<Vec<IssueSummary>, GithubAppError>,
     list_calls: AtomicUsize,
+    repo_admins: Vec<GithubActor>,
 }
 
 impl FakeListing {
@@ -151,12 +155,14 @@ impl FakeListing {
         Self {
             issues: Ok(issues),
             list_calls: AtomicUsize::new(0),
+            repo_admins: Vec::new(),
         }
     }
     fn err() -> Self {
         Self {
             issues: Err(GithubAppError::RateLimited(30)),
             list_calls: AtomicUsize::new(0),
+            repo_admins: Vec::new(),
         }
     }
     fn list_calls(&self) -> usize {
@@ -199,6 +205,15 @@ impl GithubListing for FakeListing {
         _token: &SecretString,
     ) -> Result<Vec<RepoRef>, GithubAppError> {
         Ok(Vec::new())
+    }
+
+    async fn list_repo_admins(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+    ) -> Result<Vec<GithubActor>, GithubAppError> {
+        Ok(self.repo_admins.clone())
     }
 }
 

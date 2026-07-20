@@ -21,7 +21,7 @@ use serde::Deserialize;
 
 use super::api::{is_rate_limited, reset_seconds};
 use super::GithubAppError;
-use crate::models::RepoRef;
+use crate::models::{GithubActor, RepoRef};
 
 /// Request timeout for every listing call (mirrors `api.rs`).
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
@@ -204,6 +204,16 @@ pub trait GithubListing: Send + Sync {
         &self,
         token: &SecretString,
     ) -> Result<Vec<RepoRef>, GithubAppError>;
+
+    /// `GET /repos/{owner}/{repo}/collaborators?permission=admin&per_page=100`,
+    /// paginated + deduped by id; installation-token auth (only Metadata: read). The
+    /// ADMIN set is the org-owner/repo-admin authority tier a later PR (R3) consumes.
+    async fn list_repo_admins(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+    ) -> Result<Vec<GithubActor>, GithubAppError>;
 }
 
 /// Production HTTP transport backed by reqwest (mirrors [`super::api::HttpGithubApi`]).
@@ -393,6 +403,38 @@ impl GithubListing for HttpGithubListing {
                 None => break,
             }
         }
+        Ok(out)
+    }
+
+    async fn list_repo_admins(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+    ) -> Result<Vec<GithubActor>, GithubAppError> {
+        let mut url = format!("{}/repos/{owner}/{repo}/collaborators", self.api_base);
+        let mut query: Option<Vec<(&str, &str)>> =
+            Some(vec![("permission", "admin"), ("per_page", "100")]);
+        // RawUser decodes a collaborator too (it also carries `login` + `id`).
+        let mut out: Vec<GithubActor> = Vec::new();
+        loop {
+            let (page, next): (Vec<RawUser>, _) = self
+                .get_page(&url, token, query.as_deref(), "list_repo_admins")
+                .await?;
+            out.extend(page.into_iter().map(|raw| GithubActor {
+                id: raw.id,
+                login: raw.login,
+            }));
+            match next {
+                Some(n) => {
+                    url = n;
+                    query = None;
+                }
+                None => break,
+            }
+        }
+        let mut seen = std::collections::HashSet::new();
+        out.retain(|a| seen.insert(a.id)); // dedupe by id (multi-affiliation dup)
         Ok(out)
     }
 }

@@ -21,7 +21,7 @@ use crate::github_app::{GithubAppError, GithubAppTokens};
 use crate::goals::trigger_parse::PackageRef;
 use crate::k8s::env_store::EnvStore;
 use crate::log_access::LogAccessRegistry;
-use crate::models::RepoRef;
+use crate::models::{GithubActor, RepoRef};
 use crate::reconcile::desired::{SessionDef, SessionRegistration};
 use crate::session_backend::SessionBackend;
 
@@ -178,6 +178,15 @@ impl GithubListing for FakeListing {
         &self,
         _token: &SecretString,
     ) -> Result<Vec<RepoRef>, GithubAppError> {
+        Ok(Vec::new())
+    }
+
+    async fn list_repo_admins(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+    ) -> Result<Vec<GithubActor>, GithubAppError> {
         Ok(Vec::new())
     }
 }
