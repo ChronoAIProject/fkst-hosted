@@ -166,7 +166,8 @@ mod tests {
         state.config.access = crate::access_policy::AccessPolicy::from_vars(&[(
             "FKST_ACCESS_ALLOWED_USERS".to_string(),
             allowlist.to_string(),
-        )]);
+        )])
+        .expect("test allowlist parses");
         state
     }
 

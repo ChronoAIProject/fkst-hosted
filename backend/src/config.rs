@@ -641,9 +641,11 @@ impl Config {
         // snapshot; fails closed only on a half-configured OAuth id/secret pair.
         let log = LogConfig::from_vars(&vars)?;
 
-        // Deployment-wide access policy (FKST_ACCESS_ALLOWED_USERS). Never fails:
-        // unset = open, set = enforced (set-but-empty = enforced deny-all).
-        let access = crate::access_policy::AccessPolicy::from_vars(&vars);
+        // Deployment-wide access policy (FKST_ACCESS_ALLOWED_USERS +
+        // FKST_AUTH_MODEL). Legacy default: unset = open, set = enforced
+        // (set-but-empty = enforced deny-all). Fails closed only on an
+        // unrecognized FKST_AUTH_MODEL value (naming the var).
+        let access = crate::access_policy::AccessPolicy::from_vars(&vars)?;
 
         Ok(Config {
             port: http.port,
@@ -1002,6 +1004,27 @@ mod tests {
         assert!(config.access.allows(583231, "x"));
         assert!(config.access.allows(2, "Alice"));
         assert!(!config.access.allows(2, "mallory"));
+    }
+
+    #[test]
+    fn auth_model_all_overrides_a_present_allowlist() {
+        // FKST_AUTH_MODEL=all opens the service even with a populated list.
+        let config = Config::from_vars(vars(&[
+            ("FKST_ACCESS_ALLOWED_USERS", "583231"),
+            ("FKST_AUTH_MODEL", "all"),
+        ]))
+        .expect("config with auth model loads");
+        assert!(!config.access.enforced());
+        assert!(config.access.allows(999, "mallory"));
+    }
+
+    #[test]
+    fn bad_auth_model_fails_config_closed() {
+        // A non-empty unrecognized FKST_AUTH_MODEL must fail the whole config
+        // load, naming the var (threaded via `?` from AccessPolicy::from_vars).
+        let err = Config::from_vars(vars(&[("FKST_AUTH_MODEL", "nope")]))
+            .expect_err("bad auth model must fail closed");
+        assert!(err.to_string().contains("FKST_AUTH_MODEL"));
     }
 
     #[test]

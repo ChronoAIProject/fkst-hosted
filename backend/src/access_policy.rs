@@ -25,21 +25,64 @@
 //! routes and the trigger gate (both have the login in hand). Matching is
 //! delegated to [`entry_matches`] — one source of truth shared with the
 //! log-download authz tiers ([`crate::reconcile::log_authz`]).
+//!
+//! `FKST_AUTH_MODEL` (issue #594) makes the auth model an explicit choice that
+//! overrides the entries-derived default, without changing any gate: it is
+//! resolved centrally in [`AccessPolicy::allows`]/[`AccessPolicy::enforced`].
+//! Three states:
+//!
+//! - **`all`** → open unconditionally, even if a stale `FKST_ACCESS_ALLOWED_USERS`
+//!   list is still present (the explicit "everyone" model always wins).
+//! - **`allowlist`** (also `allow-list` / `selected`) → enforce the entries
+//!   exactly as an enforced list does today, INCLUDING the fail-closed rule that
+//!   an absent/empty list denies everyone.
+//! - **unset** → the exact legacy behavior: entries-if-set, else open.
+//!
+//! A non-empty but UNRECOGNIZED `FKST_AUTH_MODEL` fails closed at startup
+//! (`from_vars` returns a config error naming the var + bad value), consistent
+//! with the other hand-parsed enum knobs (e.g. `FKST_POD_MODE`).
+
+use crate::error::AppError;
 
 /// The env var holding the allowlist.
 const ACCESS_ALLOWED_USERS_VAR: &str = "FKST_ACCESS_ALLOWED_USERS";
 
-/// The resolved access policy. `entries: None` = open (var unset/blank);
-/// `Some(list)` = enforced against the list (possibly empty = deny all).
+/// The env var selecting the auth model (see [`AuthModel`]).
+const AUTH_MODEL_VAR: &str = "FKST_AUTH_MODEL";
+
+/// The platform auth model, selected by `FKST_AUTH_MODEL`. An explicit override
+/// of the entries-derived default; `None` (var unset) keeps the legacy behavior.
+/// Hand-parsed in [`AccessPolicy::from_vars`] (like [`crate::config::PodMode`]) so
+/// a bad value surfaces our own precise error text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthModel {
+    /// Every authenticated GitHub user is allowed — open even if a stale
+    /// allowlist is present.
+    All,
+    /// Only allowlisted users are allowed — enforce `entries` (absent/empty list
+    /// denies everyone, the fail-closed rule).
+    Allowlist,
+}
+
+/// The resolved access policy. `entries: None` = no list (var unset/blank);
+/// `Some(list)` = a list is present (possibly empty). `mode` is the explicit
+/// `FKST_AUTH_MODEL` override (`None` = derive the model from `entries`, the
+/// legacy behavior). The model is applied centrally in [`Self::allows`] /
+/// [`Self::enforced`] so the two gates never branch on it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AccessPolicy {
     entries: Option<Vec<String>>,
+    mode: Option<AuthModel>,
 }
 
 impl AccessPolicy {
     /// Resolve the policy from the caller's already-collected env snapshot
     /// (the [`crate::config::Config::from_vars`] testable-seam convention).
-    pub(crate) fn from_vars(vars: &[(String, String)]) -> Self {
+    ///
+    /// Fails closed (returns [`AppError::Config`]) when `FKST_AUTH_MODEL` is set
+    /// to a non-empty, unrecognized value — an operator's explicit auth-model
+    /// choice must never be silently ignored.
+    pub(crate) fn from_vars(vars: &[(String, String)]) -> Result<Self, AppError> {
         let raw = vars
             .iter()
             .find(|(key, _)| key == ACCESS_ALLOWED_USERS_VAR)
@@ -53,33 +96,82 @@ impl AccessPolicy {
                 .map(str::to_string)
                 .collect::<Vec<_>>()
         });
-        Self { entries }
+
+        // Explicit auth-model override. Case-insensitive; blank/unset defers to
+        // the entries-derived default. A non-empty unrecognized value fails
+        // closed, naming the var + the offending value (matching FKST_POD_MODE).
+        let mode = match vars
+            .iter()
+            .find(|(key, _)| key == AUTH_MODEL_VAR)
+            .map(|(_, value)| value.trim())
+            .filter(|value| !value.is_empty())
+        {
+            None => None,
+            Some(value) => match value.to_ascii_lowercase().as_str() {
+                "all" => Some(AuthModel::All),
+                "allowlist" | "allow-list" | "selected" => Some(AuthModel::Allowlist),
+                _ => {
+                    return Err(AppError::Config(format!(
+                        "FKST_AUTH_MODEL must be one of \"all\" | \"allowlist\" (got \"{value}\")"
+                    )));
+                }
+            },
+        };
+
+        Ok(Self { entries, mode })
     }
 
-    /// Whether the policy is enforcing (the var was set non-blank).
+    /// The explicit `FKST_AUTH_MODEL` override, or `None` when the model is
+    /// derived from the presence of a list. Used by startup logging to name the
+    /// resolved model without exposing the entries.
+    pub fn model(&self) -> Option<AuthModel> {
+        self.mode
+    }
+
+    /// Whether the policy is enforcing (an identity may be rejected). Driven by
+    /// the explicit model when set, else derived from the presence of a list.
     pub fn enforced(&self) -> bool {
-        self.entries.is_some()
+        match self.mode {
+            Some(AuthModel::All) => false,
+            Some(AuthModel::Allowlist) => true,
+            None => self.entries.is_some(),
+        }
     }
 
-    /// Number of allowlist entries (0 when open OR when set-but-empty; pair with
-    /// [`Self::enforced`] for the startup log).
+    /// Number of allowlist entries (0 when no list is present OR when set-but-empty;
+    /// pair with [`Self::enforced`] for the startup log). Independent of `mode`.
     pub fn entry_count(&self) -> usize {
         self.entries.as_ref().map(Vec::len).unwrap_or(0)
     }
 
     /// Whether the VERIFIED GitHub identity `(id, login)` may use the service.
-    /// Open policy allows everyone; an enforced policy allows only a matching
-    /// entry (numeric id as decimal string, or login case-insensitively).
+    ///
+    /// - `mode = All` → allowed unconditionally (open even with a stale list).
+    /// - `mode = Allowlist` → only a matching entry is allowed; an absent/empty
+    ///   list denies everyone (fail closed).
+    /// - `mode` unset → legacy behavior: open when no list is present, else only
+    ///   a matching entry.
     pub fn allows(&self, id: i64, login: &str) -> bool {
-        match &self.entries {
-            None => true,
-            Some(entries) => {
-                let id_str = id.to_string();
-                entries
-                    .iter()
-                    .any(|entry| entry_matches(entry, &id_str, login))
-            }
+        match self.mode {
+            Some(AuthModel::All) => true,
+            Some(AuthModel::Allowlist) => self.matches_entries(id, login),
+            None => match self.entries {
+                None => true,
+                Some(_) => self.matches_entries(id, login),
+            },
         }
+    }
+
+    /// Match `(id, login)` against the entries list, treating an absent list as
+    /// empty (⇒ no match). Used only by the enforcing paths, so an absent list
+    /// denies everyone (the fail-closed rule).
+    fn matches_entries(&self, id: i64, login: &str) -> bool {
+        let id_str = id.to_string();
+        self.entries
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .any(|entry| entry_matches(entry, &id_str, login))
     }
 }
 
@@ -126,10 +218,15 @@ mod tests {
             .collect()
     }
 
+    /// Unwrap a policy the test expects to parse cleanly.
+    fn policy(vars: &[(String, String)]) -> AccessPolicy {
+        AccessPolicy::from_vars(vars).expect("policy should parse")
+    }
+
     #[test]
     fn unset_or_blank_is_open() {
         for v in [vars(&[]), vars(&[("FKST_ACCESS_ALLOWED_USERS", "   ")])] {
-            let policy = AccessPolicy::from_vars(&v);
+            let policy = policy(&v);
             assert!(!policy.enforced());
             assert!(policy.allows(1, "anyone"), "open policy allows everyone");
         }
@@ -137,7 +234,7 @@ mod tests {
 
     #[test]
     fn set_list_enforces_by_id_and_login() {
-        let policy = AccessPolicy::from_vars(&vars(&[(
+        let policy = policy(&vars(&[(
             "FKST_ACCESS_ALLOWED_USERS",
             " 583231 , @Alice-Dev ,bob",
         )]));
@@ -177,7 +274,7 @@ mod tests {
     fn set_but_empty_enforces_and_denies_all() {
         // "," yields zero valid entries: the operator asked for enforcement, so
         // this must deny everyone rather than silently fall open.
-        let policy = AccessPolicy::from_vars(&vars(&[("FKST_ACCESS_ALLOWED_USERS", " , ")]));
+        let policy = policy(&vars(&[("FKST_ACCESS_ALLOWED_USERS", " , ")]));
         assert!(policy.enforced());
         assert_eq!(policy.entry_count(), 0);
         assert!(!policy.allows(583231, "octocat"));
@@ -185,10 +282,70 @@ mod tests {
 
     #[test]
     fn junk_entries_never_grant_access() {
-        let policy = AccessPolicy::from_vars(&vars(&[("FKST_ACCESS_ALLOWED_USERS", "@,alice")]));
+        let policy = policy(&vars(&[("FKST_ACCESS_ALLOWED_USERS", "@,alice")]));
         // "@" normalizes to empty → never matches, even an empty login.
         assert!(!policy.allows(7, ""));
         assert!(policy.allows(7, "alice"));
+    }
+
+    #[test]
+    fn auth_model_all_opens_even_with_a_populated_list() {
+        // Explicit "all" wins over a present (stale) allowlist: everyone allowed.
+        for value in ["all", "ALL", "All"] {
+            let policy = policy(&vars(&[
+                ("FKST_ACCESS_ALLOWED_USERS", "583231, alice"),
+                ("FKST_AUTH_MODEL", value),
+            ]));
+            assert!(!policy.enforced(), "all model is never enforcing");
+            assert!(
+                policy.allows(999, "mallory"),
+                "all model allows a non-listed user"
+            );
+            assert!(policy.allows(583231, "alice"));
+        }
+    }
+
+    #[test]
+    fn auth_model_allowlist_enforces_and_empty_denies_all() {
+        // "allowlist" with a list enforces it exactly like the legacy set path.
+        for value in ["allowlist", "allow-list", "selected", "AllowList"] {
+            let policy = policy(&vars(&[
+                ("FKST_ACCESS_ALLOWED_USERS", "583231"),
+                ("FKST_AUTH_MODEL", value),
+            ]));
+            assert!(policy.enforced());
+            assert!(policy.allows(583231, "whatever"));
+            assert!(!policy.allows(999, "mallory"));
+        }
+        // "allowlist" with NO list present is fail-closed deny-all (not open).
+        let policy = policy(&vars(&[("FKST_AUTH_MODEL", "allowlist")]));
+        assert!(policy.enforced());
+        assert_eq!(policy.entry_count(), 0);
+        assert!(
+            !policy.allows(583231, "octocat"),
+            "allowlist + empty denies all"
+        );
+    }
+
+    #[test]
+    fn auth_model_unrecognized_fails_closed_naming_the_var() {
+        let err = AccessPolicy::from_vars(&vars(&[("FKST_AUTH_MODEL", "everyone")]))
+            .expect_err("an unrecognized auth model must fail closed");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("FKST_AUTH_MODEL"),
+            "error names the var: {msg}"
+        );
+        assert!(msg.contains("everyone"), "error names the bad value: {msg}");
+    }
+
+    #[test]
+    fn auth_model_blank_defers_to_the_entries_default() {
+        // A blank FKST_AUTH_MODEL is treated as unset: legacy entries-derived
+        // behavior (here: no list ⇒ open).
+        let policy = policy(&vars(&[("FKST_AUTH_MODEL", "  ")]));
+        assert!(!policy.enforced());
+        assert!(policy.allows(1, "anyone"));
     }
 
     #[test]
