@@ -347,6 +347,19 @@ export interface SiteContent {
       noWorkItems: string;
       /** Decoded work-item state labels — one per `WorkItemState`. */
       work: Record<WorkItemState, string>;
+      // ---- Status tab: overview cards (progress + distribution donut) ----
+      /** Progress card eyebrow. */
+      overviewProgress: string;
+      /** Work-distribution donut card eyebrow + aria label. */
+      overviewDistribution: string;
+      /** Aggregate stat label for the in-progress group (thinking + implementing
+       *  + claimed) — no single `work.*` label spans the group. */
+      statInProgress: string;
+      /** Caption under the donut's centered total. */
+      donutTotalLabel: string;
+      /** Friendly note shown in the donut card when there are no work items
+       *  (distinct from `noWorkItems` so the two never collide on screen). */
+      donutEmpty: string;
       liveEngine: string;
       liveEngineLoading: string;
       /** Note that observe is a slow pod exec. */

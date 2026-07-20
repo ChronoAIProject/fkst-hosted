@@ -1,9 +1,25 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
+import type { ReactNode } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { IssueDetail, SessionDetail } from '@/lib/api/types';
 import { TabStatus } from './tab-status';
 import type { ObserveState } from './observe-state';
+
+// recharts cannot measure itself under jsdom (it warns width/height 0 and draws
+// nothing). The donut's numbers + legend are plain HTML overlays, so passthrough
+// stubs keep the tab's assertions deterministic and the output warning-free;
+// status-charts.test.tsx covers the props the chart hands to <Pie>.
+vi.mock('recharts', () => {
+  const Passthrough = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
+  return {
+    ResponsiveContainer: Passthrough,
+    PieChart: Passthrough,
+    Pie: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+    Cell: () => null,
+    Tooltip: () => null,
+  };
+});
 
 const issue = (over: Partial<IssueDetail> & Pick<IssueDetail, 'number'>): IssueDetail => ({
   title: `issue ${over.number}`,
@@ -55,7 +71,36 @@ describe('TabStatus', () => {
     render(
       <TabStatus session={session({ work_issues: [] })} observe={idle} onLoadObserve={() => {}} />
     );
+    // The section note is distinct from the donut's own empty note, so exactly
+    // one "No work items yet." shows (getByText throws on a collision).
     expect(screen.getByText('No work items yet.')).toBeInTheDocument();
+    // The distribution card shows its own friendly note rather than a hollow ring.
+    expect(screen.getByText('No items to chart.')).toBeInTheDocument();
+    // The progress meter reads a 0% ratio (no divide-by-zero on zero items).
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0');
+  });
+
+  it('renders the overview grid: progress meter + distribution + lifecycle cards', () => {
+    const mixed = session({
+      work_issues: [
+        issue({ number: 1, state: 'closed' }), // done
+        issue({ number: 2, labels: ['fkst-dev:ready'] }), // ready
+        issue({ number: 3, labels: ['fkst-dev:implementing'] }), // in progress
+        issue({ number: 4, labels: ['fkst-dev:impl-failed'] }), // failed
+        issue({ number: 5, labels: ['fkst-dev:enabled'] }), // queued
+      ],
+    });
+    render(<TabStatus session={mixed} observe={idle} onLoadObserve={() => {}} />);
+
+    // Both overview chart cards are present and labelled.
+    expect(screen.getByLabelText('Progress')).toBeInTheDocument();
+    expect(screen.getByLabelText('Distribution')).toBeInTheDocument();
+
+    // 1 of 5 done → 20% meter.
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '20');
+
+    // "In progress" heads both a progress sub-stat and a donut legend row.
+    expect(screen.getAllByText('In progress')).toHaveLength(2);
   });
 
   it('offers the Live engine details button and fires the callback', async () => {
