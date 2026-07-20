@@ -397,3 +397,143 @@ async fn list_installation_repos_plain_403_is_app_auth() {
         .expect_err("must fail");
     assert!(matches!(err, GithubAppError::AppAuth), "got {err:?}");
 }
+
+// ---- list_repo_admins ------------------------------------------------------
+
+#[tokio::test]
+async fn list_repo_admins_maps_id_login_and_sends_permission_query() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/collaborators"))
+        .and(header("authorization", format!("Bearer {TOKEN}").as_str()))
+        .and(query_param("permission", "admin"))
+        .and(query_param("per_page", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            // A collaborator object carries many fields; only id + login are read.
+            { "login": "alice", "id": 4242, "permissions": { "admin": true } },
+            { "login": "org-owner", "id": 7 }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let admins = listing(&server.uri())
+        .list_repo_admins(&tok(), "acme", "site")
+        .await
+        .expect("ok");
+
+    assert_eq!(
+        admins,
+        vec![
+            GithubActor {
+                id: 4242,
+                login: "alice".to_string()
+            },
+            GithubActor {
+                id: 7,
+                login: "org-owner".to_string()
+            },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn list_repo_admins_follows_link_pagination_and_dedupes_by_id() {
+    let server = MockServer::start().await;
+    let next_link = format!(
+        "<{}/repos/acme/site/collaborators?permission=admin&per_page=100&page=2>; rel=\"next\"",
+        server.uri()
+    );
+
+    // Page 1: two admins + a `Link: rel="next"` header pointing at page 2.
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/collaborators"))
+        .and(query_param_is_missing("page"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("link", next_link.as_str())
+                .set_body_json(serde_json::json!([
+                    { "login": "alice", "id": 1 },
+                    { "login": "bob", "id": 2 }
+                ])),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    // Page 2: a fresh admin plus a DUPLICATE of alice (id 1) that must be deduped.
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/collaborators"))
+        .and(query_param("page", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "login": "carol", "id": 3 },
+            { "login": "alice", "id": 1 }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let admins = listing(&server.uri())
+        .list_repo_admins(&tok(), "acme", "site")
+        .await
+        .expect("ok");
+
+    let ids: Vec<i64> = admins.iter().map(|a| a.id).collect();
+    assert_eq!(
+        ids,
+        vec![1, 2, 3],
+        "both pages collected in first-seen order, the duplicate id 1 deduped"
+    );
+    assert_eq!(admins[0].login, "alice");
+}
+
+#[tokio::test]
+async fn list_repo_admins_empty_is_ok_empty() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/collaborators"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(&server)
+        .await;
+
+    let admins = listing(&server.uri())
+        .list_repo_admins(&tok(), "acme", "site")
+        .await
+        .expect("ok");
+    assert!(admins.is_empty(), "an empty page yields no admins");
+}
+
+#[tokio::test]
+async fn list_repo_admins_plain_403_is_app_auth() {
+    // A non-2xx must map to the SAME error category as the sibling list methods
+    // (shared `classify_error`): a plain 403 is an auth failure.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&server)
+        .await;
+
+    let err = listing(&server.uri())
+        .list_repo_admins(&tok(), "acme", "site")
+        .await
+        .expect_err("must fail");
+    assert!(matches!(err, GithubAppError::AppAuth), "got {err:?}");
+}
+
+#[tokio::test]
+async fn list_repo_admins_404_is_not_found() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+
+    let err = listing(&server.uri())
+        .list_repo_admins(&tok(), "acme", "gone")
+        .await
+        .expect_err("must fail");
+    assert!(
+        matches!(err, GithubAppError::NotFound { .. }),
+        "got {err:?}"
+    );
+}
