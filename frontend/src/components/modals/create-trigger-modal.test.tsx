@@ -14,7 +14,12 @@ function jsonResponse(body: unknown, status = 200): Response {
 const ENV_PATH = '/api/v1/users/me/environment-profiles';
 const SESSIONS_PATH = '/sessions';
 
-function renderModal(over: { onCreated?: (r: { issue_number: number; html_url: string }) => void } = {}) {
+function renderModal(
+  over: {
+    onCreated?: (r: { issue_number: number; html_url: string }) => void;
+    inUseWorkLabels?: readonly string[];
+  } = {}
+) {
   const onCreated = over.onCreated ?? vi.fn();
   const onClose = vi.fn();
   render(
@@ -24,6 +29,7 @@ function renderModal(over: { onCreated?: (r: { issue_number: number; html_url: s
           <CreateTriggerModal
             owner="acme"
             name="app"
+            inUseWorkLabels={over.inUseWorkLabels}
             onClose={onClose}
             onCreated={onCreated}
           />
@@ -228,5 +234,55 @@ describe('CreateTriggerModal', () => {
     expect(await screen.findByText('bad work label')).toBeInTheDocument();
     expect(onCreated).not.toHaveBeenCalled();
     expect(screen.queryByText('Session created')).not.toBeInTheDocument();
+  });
+});
+
+describe('CreateTriggerModal · work-label collision advisory', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem('fkst-gh-access', 'ghu_x');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse({ environment_profiles: [] }))
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('warns and blocks submit once the typed label matches an in-use one', async () => {
+    const user = userEvent.setup();
+    renderModal({ inUseWorkLabels: ['fkst-work'] });
+
+    await user.type(await screen.findByLabelText('Session name'), 'nightly');
+    await user.type(screen.getByLabelText('Packages 1'), 'a/b@main:pkg');
+
+    // A blank label is not a collision: the form is submittable and unwarned.
+    const submit = screen.getByRole('button', { name: 'Create trigger issue' });
+    expect(submit).toBeEnabled();
+    expect(screen.queryByText(/already uses this work label/)).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Work label (optional)'), 'fkst-work');
+
+    // Exact match with an open session's label: warning shown, submit disabled.
+    expect(screen.getByRole('alert')).toHaveTextContent(/already uses this work label/);
+    expect(submit).toBeDisabled();
+  });
+
+  it('leaves a label distinct from every in-use one unwarned and submittable', async () => {
+    const user = userEvent.setup();
+    renderModal({ inUseWorkLabels: ['fkst-work'] });
+
+    await user.type(await screen.findByLabelText('Session name'), 'nightly');
+    await user.type(screen.getByLabelText('Packages 1'), 'a/b@main:pkg');
+    await user.type(screen.getByLabelText('Work label (optional)'), 'fkst-other');
+
+    expect(screen.queryByText(/already uses this work label/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create trigger issue' })).toBeEnabled();
+  });
+
+  it('does not warn on an empty label even when labels are in use', async () => {
+    renderModal({ inUseWorkLabels: ['fkst-work'] });
+
+    expect(await screen.findByLabelText('Work label (optional)')).toHaveValue('');
+    expect(screen.queryByText(/already uses this work label/)).not.toBeInTheDocument();
   });
 });

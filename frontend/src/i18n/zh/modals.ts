@@ -38,6 +38,7 @@ export const canvasModals: CanvasModalsSlice = {
   createEnvironmentLoadFailed: '无法加载你的环境 —— 请手动输入名称。',
   createWorkLabelHint: '每个触发只用一个工作标签 —— 会话会认领所有带此标签的 issue。',
   createWorkLabelHintLink: '在快速开始中了解更多。',
+  createWorkLabelCollision: '该仓库已有会话在使用此工作标签 —— 提交会被拒绝。请改用其他标签。',
   createdToast: '会话已创建',
   workItemTitle: '排入任务',
   workItemTitleLabel: '标题',

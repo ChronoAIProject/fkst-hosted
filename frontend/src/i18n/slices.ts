@@ -146,6 +146,7 @@ export type CanvasModalsSlice = Pick<
   | 'createEnvironmentLoadFailed'
   | 'createWorkLabelHint'
   | 'createWorkLabelHintLink'
+  | 'createWorkLabelCollision'
   | 'createdToast'
   | 'workItemTitle'
   | 'workItemTitleLabel'

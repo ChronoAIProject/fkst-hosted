@@ -125,6 +125,40 @@ describe('RepoWorkspace', () => {
     expect(screen.queryByRole('heading', { level: 2 })).not.toBeInTheDocument();
   });
 
+  it('flags a create-trigger work label used by an OPEN session, not a CLOSED one', async () => {
+    const user = userEvent.setup();
+    const openSession = session({
+      session_id: 'cccccccc-2222-2222-2222-222222222222',
+      name: 'gamma',
+      work_label: 'open-label',
+      trigger: issue({ number: 3, title: 'g-trig', state: 'open' }),
+    });
+    const closedSession = session({
+      session_id: 'dddddddd-3333-3333-3333-333333333333',
+      name: 'delta',
+      work_label: 'closed-label',
+      trigger: issue({
+        number: 4,
+        title: 'd-trig',
+        state: 'closed',
+        closed_at: '2026-07-03T04:00:00Z',
+      }),
+    });
+    renderWorkspace({ data: body([openSession, closedSession]) });
+
+    await user.click(screen.getByRole('button', { name: 'New session' }));
+    const labelInput = await screen.findByLabelText('Work label (optional)');
+
+    // A label only a CLOSED session held is free again — no advisory.
+    await user.type(labelInput, 'closed-label');
+    expect(screen.queryByText(/already uses this work label/)).not.toBeInTheDocument();
+
+    // The OPEN session's label still collides — the advisory appears.
+    await user.clear(labelInput);
+    await user.type(labelInput, 'open-label');
+    expect(screen.getByText(/already uses this work label/)).toBeInTheDocument();
+  });
+
   it('offers a Retry on a no-data load failure', async () => {
     const user = userEvent.setup();
     const onChanged = vi.fn();
