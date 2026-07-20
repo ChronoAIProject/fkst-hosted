@@ -40,7 +40,10 @@ pub fn runs_index_key(session_id: &str) -> String {
 pub struct LogRun {
     /// The run id (== the collector instance id: `<UTC-basic-stamp>Z-<pod8>`).
     pub run_id: String,
-    /// When the run's pod started (RFC3339, UTC).
+    /// When the run's pod started (RFC3339, UTC). MAY be empty for the legacy
+    /// synthetic `latest` run the `/runs` endpoint fabricates for a pre-#568
+    /// bundle (no run index exists, so the original start time is unknown) — an
+    /// empty value there is a documented contract, not a violation.
     pub started_at: String,
     /// When the run ended (RFC3339, UTC); absent while the run is still live.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -89,14 +92,20 @@ pub fn upsert_run(existing: Option<&[u8]>, run: &LogRun) -> String {
     serialize_index(&runs)
 }
 
-/// Stamp `ended_at` onto the entry whose `run_id` matches (a no-op when no entry
-/// matches — e.g. a lost `upsert_run`). Returns the serialized index.
-pub fn finalize_run(existing: Option<&[u8]>, run_id: &str, ended_at: &str) -> String {
+/// UPSERT-then-stamp `run` (which carries the run identity + its `ended_at`) into
+/// the index: when an entry already lists its `run_id`, stamp that entry's end time
+/// while PRESERVING its recorded `started_at`; otherwise push `run` as-is. The
+/// upsert is the shutdown RECOVERY path — a run whose bundle uploaded fine but whose
+/// one-shot `upsert_run` was lost to a transient index error is re-added here rather
+/// than staying permanently absent. Returns the serialized index.
+pub fn finalize_run(existing: Option<&[u8]>, run: &LogRun) -> String {
     let mut runs = parse_existing(existing);
-    for run in runs.iter_mut() {
-        if run.run_id == run_id {
-            run.ended_at = Some(ended_at.to_string());
-        }
+    match runs.iter_mut().find(|r| r.run_id == run.run_id) {
+        // Known run: stamp its end time, keeping the start time it was added with.
+        Some(existing) => existing.ended_at = run.ended_at.clone(),
+        // Unknown run (a lost add): recover it in full so shutdown never drops a
+        // run whose bundle already uploaded.
+        None => runs.push(run.clone()),
     }
     serialize_index(&runs)
 }
@@ -149,29 +158,41 @@ mod tests {
     }
 
     #[test]
-    fn finalize_stamps_the_matching_run_end_time() {
-        let idx = upsert_run(None, &run("r1", "t1", None));
-        let out = finalize_run(Some(idx.as_bytes()), "r1", "2026-07-20T11:00:00Z");
-        let runs = parse_runs(out.as_bytes());
-        assert_eq!(runs[0].ended_at.as_deref(), Some("2026-07-20T11:00:00Z"));
-    }
-
-    #[test]
-    fn finalize_is_a_no_op_for_an_unknown_run_id() {
-        let idx = upsert_run(None, &run("r1", "t1", None));
-        let out = finalize_run(Some(idx.as_bytes()), "does-not-exist", "t-end");
-        let runs = parse_runs(out.as_bytes());
-        assert_eq!(runs.len(), 1);
-        assert!(
-            runs[0].ended_at.is_none(),
-            "untouched run keeps no end time"
+    fn finalize_stamps_an_existing_run_preserving_its_start_time() {
+        let idx = upsert_run(None, &run("r1", "2026-07-20T10:00:00Z", None));
+        let out = finalize_run(
+            Some(idx.as_bytes()),
+            &run("r1", "IGNORED-START", Some("2026-07-20T11:00:00Z")),
         );
+        let runs = parse_runs(out.as_bytes());
+        assert_eq!(runs.len(), 1, "no duplicate is added for a known run");
+        assert_eq!(runs[0].ended_at.as_deref(), Some("2026-07-20T11:00:00Z"));
+        // The existing entry's start time is preserved, NOT overwritten.
+        assert_eq!(runs[0].started_at, "2026-07-20T10:00:00Z");
     }
 
     #[test]
-    fn finalize_on_empty_index_yields_empty() {
-        let out = finalize_run(None, "r1", "t-end");
-        assert!(parse_runs(out.as_bytes()).is_empty());
+    fn finalize_recovers_a_missing_run_with_its_start_and_end() {
+        // The one-shot add was lost (index missing this run); finalize UPSERTS it
+        // in full so a run whose bundle uploaded is never permanently absent.
+        let idx = upsert_run(None, &run("r1", "t1", None));
+        let out = finalize_run(
+            Some(idx.as_bytes()),
+            &run("r2", "2026-07-20T12:00:00Z", Some("2026-07-20T12:30:00Z")),
+        );
+        let runs = parse_runs(out.as_bytes());
+        assert_eq!(runs.len(), 2, "the missing run was added, not dropped");
+        let recovered = runs.iter().find(|r| r.run_id == "r2").expect("r2 added");
+        assert_eq!(recovered.started_at, "2026-07-20T12:00:00Z");
+        assert_eq!(recovered.ended_at.as_deref(), Some("2026-07-20T12:30:00Z"));
+    }
+
+    #[test]
+    fn finalize_on_empty_index_adds_the_run() {
+        // Nothing to stamp → the recovery path adds the run outright.
+        let out = finalize_run(None, &run("r1", "2026-07-20T09:00:00Z", Some("t-end")));
+        let runs = parse_runs(out.as_bytes());
+        assert_eq!(runs, vec![run("r1", "2026-07-20T09:00:00Z", Some("t-end"))]);
     }
 
     #[test]

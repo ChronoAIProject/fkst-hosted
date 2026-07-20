@@ -330,6 +330,10 @@ pub(super) async fn fetch_bundle(
     session_id: &str,
     run: Option<&str>,
 ) -> Result<axum::body::Bytes, AppError> {
+    // Normalize an empty / whitespace `?run=` to "latest" (None): `Some("")` must
+    // NOT resolve to `logs/<sid>/runs/.tar.gz` (a guaranteed 404). Done once here so
+    // download, manifest, and file all treat a blank run selector as the latest.
+    let run = run.filter(|r| !r.trim().is_empty());
     // Cache key: the bare session id for the latest bundle (so the existing cache
     // hits are unchanged), else `<session_id>#<run>` so per-run bundles never collide
     // with each other or with latest.

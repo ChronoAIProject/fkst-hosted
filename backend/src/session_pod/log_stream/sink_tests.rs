@@ -49,6 +49,53 @@ async fn fake_sink_can_be_programmed_to_fail() {
 }
 
 #[tokio::test]
+async fn fake_sink_fail_key_contains_scopes_failure_to_matching_keys() {
+    // Permanent: only keys containing "runs.json" fail; other keys still succeed.
+    let fake = FakeSink {
+        fail_key_contains: Some("runs.json".to_string()),
+        ..Default::default()
+    };
+    // A non-matching key succeeds and records normally.
+    fake.put("logs/s1/latest.tar.gz", Bytes::from_static(b"gz"))
+        .await
+        .expect("non-matching put ok");
+    assert_eq!(
+        fake.get("logs/s1/latest.tar.gz").await.expect("ok"),
+        Some(Bytes::from_static(b"gz"))
+    );
+    // The matching index key fails on both put and get, every time.
+    assert!(fake
+        .put("logs/s1/runs.json", Bytes::from_static(b"[]"))
+        .await
+        .is_err());
+    assert!(fake.get("logs/s1/runs.json").await.is_err());
+    assert!(fake.get("logs/s1/runs.json").await.is_err());
+}
+
+#[tokio::test]
+async fn fake_sink_fail_key_remaining_is_transient() {
+    // Transient: fail only the first matching op, then let matching ops succeed —
+    // modelling an outage that clears (so a lost write can later be recovered).
+    let fake = FakeSink {
+        fail_key_contains: Some("runs.json".to_string()),
+        fail_key_remaining: std::sync::Arc::new(std::sync::Mutex::new(Some(1))),
+        ..Default::default()
+    };
+    assert!(
+        fake.get("logs/s1/runs.json").await.is_err(),
+        "first matching op fails"
+    );
+    // Budget exhausted → matching ops now succeed.
+    fake.put("logs/s1/runs.json", Bytes::from_static(b"[]"))
+        .await
+        .expect("second matching op succeeds");
+    assert_eq!(
+        fake.get("logs/s1/runs.json").await.expect("ok"),
+        Some(Bytes::from_static(b"[]"))
+    );
+}
+
+#[tokio::test]
 async fn fake_sink_get_returns_the_last_put_value_and_none_for_absent() {
     let fake = FakeSink::default();
     // Absent key → None.

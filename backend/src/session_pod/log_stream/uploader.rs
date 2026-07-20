@@ -103,12 +103,21 @@ impl Uploader {
             .block_on(self.sink.put(&self.index_key, Bytes::from(updated)))
     }
 
-    /// Stamp this run's end time into the session's run index (read-modify-write).
+    /// Stamp this run's end time into the session's run index (read-modify-write),
+    /// passing the FULL run identity so [`runs::finalize_run`] can UPSERT it — a
+    /// run whose one-shot [`Self::add_run_to_index`] was lost to a transient error
+    /// is recovered here at shutdown rather than staying absent from the index.
     /// Best-effort — returns the error for the caller to log-swallow.
     pub(super) fn finalize_run_in_index(&self, ended_at: DateTime<Utc>) -> Result<(), SinkError> {
         let existing = self.runtime.block_on(self.sink.get(&self.index_key))?;
-        let updated =
-            runs::finalize_run(existing.as_deref(), &self.run_id, &runs::rfc3339(ended_at));
+        let updated = runs::finalize_run(
+            existing.as_deref(),
+            &LogRun {
+                run_id: self.run_id.clone(),
+                started_at: runs::rfc3339(self.started_at),
+                ended_at: Some(runs::rfc3339(ended_at)),
+            },
+        );
         self.runtime
             .block_on(self.sink.put(&self.index_key, Bytes::from(updated)))
     }
@@ -202,6 +211,28 @@ mod tests {
             .upload(Bytes::from_static(b"gz"))
             .expect_err("a failing sink surfaces the error");
         assert!(matches!(err, SinkError::Upload(_)));
+    }
+
+    #[test]
+    fn upload_keeps_latest_authoritative_when_only_the_per_run_put_fails() {
+        // Only the per-run object (key contains "runs/") fails; the latest PUT,
+        // which runs FIRST, still lands.
+        let fake = FakeSink {
+            fail_key_contains: Some("runs/".to_string()),
+            ..Default::default()
+        };
+        let err = uploader(fake.clone())
+            .upload(Bytes::from_static(b"gz"))
+            .expect_err("the per-run failure surfaces so the flush is retried");
+        assert!(matches!(err, SinkError::Upload(_)));
+        // Despite the error, `latest.tar.gz` is present (written before the run
+        // object) — latest stays authoritative on a per-run failure.
+        assert_eq!(
+            fake.stored("logs/sess-1/latest.tar.gz").as_deref(),
+            Some(&b"gz"[..])
+        );
+        // The per-run object never landed.
+        assert!(fake.stored("logs/sess-1/runs/run-1.tar.gz").is_none());
     }
 
     #[test]

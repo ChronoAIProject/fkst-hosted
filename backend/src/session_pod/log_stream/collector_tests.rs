@@ -314,6 +314,61 @@ fn collector_uploads_the_self_describing_baseline_on_the_final_flush() {
 }
 
 #[test]
+fn collector_swallows_a_failed_index_add_and_recovers_the_run_at_shutdown() {
+    let dir = tempfile::tempdir().expect("dir");
+    let config = collector_config(dir.path(), "sess-recover", 1);
+    // The run-INDEX ops fail TRANSIENTLY: the first matching op (the one-shot
+    // add's index read) fails — modelling a transient index outage — then clears.
+    // So the bundle PUTs still succeed, the collector never panics, and shutdown's
+    // finalize UPSERTS the run the failed add dropped (FIX 1's recovery path).
+    let fake = FakeSink {
+        fail_key_contains: Some("runs.json".to_string()),
+        fail_key_remaining: std::sync::Arc::new(std::sync::Mutex::new(Some(1))),
+        ..Default::default()
+    };
+    let uploader = fake_uploader(fake.clone(), "sess-recover");
+
+    let (tx, rx) = sync_channel::<CollectorRecord>(64);
+    tx.send((LogClass::Supervise, "a line".to_string()))
+        .expect("send");
+    drop(tx); // disconnect so the loop drains, does a final flush, and exits
+
+    // (a) Must not panic, and BOTH bundle objects were still put despite the
+    // index-add failure.
+    collect(config, rx, Some(uploader));
+    let calls = fake.calls();
+    assert!(
+        calls
+            .iter()
+            .any(|(key, _)| key == "logs/sess-recover/latest.tar.gz"),
+        "latest.tar.gz uploaded despite the index failure"
+    );
+    assert!(
+        calls
+            .iter()
+            .any(|(key, _)| key == "logs/sess-recover/runs/inst-test.tar.gz"),
+        "per-run object uploaded despite the index failure"
+    );
+
+    // (b) The failed add dropped the run, but shutdown's finalize recovered it —
+    // the index ends up containing the run WITH an end time (start time intact).
+    let index = fake
+        .stored("logs/sess-recover/runs.json")
+        .expect("the dropped run was recovered into the index at shutdown");
+    let runs = runs::parse_runs(&index);
+    assert_eq!(runs.len(), 1, "the dropped run was recovered exactly once");
+    assert_eq!(runs[0].run_id, "inst-test");
+    assert!(
+        !runs[0].started_at.is_empty(),
+        "the recovered run keeps its start time"
+    );
+    assert!(
+        runs[0].ended_at.is_some(),
+        "the recovered run carries an end time"
+    );
+}
+
+#[test]
 fn collector_without_an_uploader_still_captures_to_disk_and_never_crashes() {
     let dir = tempfile::tempdir().expect("dir");
     let config = collector_config(dir.path(), "sess-3", 1);

@@ -128,8 +128,10 @@ fn read_trimmed(path: &std::path::Path) -> Option<String> {
 /// A recording [`LogSink`] fake for tests: it captures every `(key, bytes)` put IN
 /// ORDER (`calls`) AND keeps the last-put value per key (`store`) so `get` returns
 /// what was last `put` (and `None` for an absent key) — letting the run-index
-/// read-modify-write be exercised without a network. Can be programmed to fail every
-/// `put`/`get`. Shared across the sink + collector test modules.
+/// read-modify-write be exercised without a network. Failures can be programmed
+/// globally (`fail`) OR scoped to keys containing a substring (`fail_key_contains`),
+/// so an index-only or per-run-only failure is isolable. Shared across the sink +
+/// collector test modules.
 #[cfg(test)]
 #[derive(Clone, Default)]
 pub(crate) struct FakeSink {
@@ -139,6 +141,15 @@ pub(crate) struct FakeSink {
     pub store: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, Bytes>>>,
     /// When set, every `put`/`get` returns an error (drives the swallow-and-continue path).
     pub fail: bool,
+    /// When set, only `put`/`get` on a key CONTAINING this substring fail — so a
+    /// best-effort/partial path (e.g. an index-only failure while bundle PUTs
+    /// succeed) can be exercised in isolation. `fail` still fails every op.
+    pub fail_key_contains: Option<String>,
+    /// Makes `fail_key_contains` TRANSIENT: fail only the first N matching ops (an
+    /// outage that later clears), then let them succeed — so a lost one-shot write
+    /// followed by a successful shutdown recovery can be exercised. `None` (default)
+    /// = permanent (every matching op fails). Shared across clones + interior-mutable.
+    pub fail_key_remaining: std::sync::Arc<std::sync::Mutex<Option<usize>>>,
 }
 
 #[cfg(test)]
@@ -150,6 +161,32 @@ impl FakeSink {
     /// The current stored object for `key` (the last successful `put`), or `None`.
     pub fn stored(&self, key: &str) -> Option<Bytes> {
         self.store.lock().expect("lock").get(key).cloned()
+    }
+
+    /// Whether an op on `key` should fail: globally (`fail`), or because `key`
+    /// matches `fail_key_contains` — permanently (`fail_key_remaining` unset) or
+    /// while a transient budget lasts (decremented per matching op).
+    fn should_fail(&self, key: &str) -> bool {
+        if self.fail {
+            return true;
+        }
+        let Some(needle) = self.fail_key_contains.as_deref() else {
+            return false;
+        };
+        if !key.contains(needle) {
+            return false;
+        }
+        let mut remaining = self.fail_key_remaining.lock().expect("lock");
+        match *remaining {
+            // Permanent outage: every matching op fails.
+            None => true,
+            // Transient outage: fail while the budget lasts, then succeed.
+            Some(0) => false,
+            Some(n) => {
+                *remaining = Some(n - 1);
+                true
+            }
+        }
     }
 }
 
@@ -163,7 +200,7 @@ impl LogSink for FakeSink {
             .lock()
             .expect("lock")
             .push((key.to_string(), gz.clone()));
-        if self.fail {
+        if self.should_fail(key) {
             return Err(SinkError::Upload("status 500".to_string()));
         }
         self.store.lock().expect("lock").insert(key.to_string(), gz);
@@ -171,7 +208,7 @@ impl LogSink for FakeSink {
     }
 
     async fn get(&self, key: &str) -> Result<Option<Bytes>, SinkError> {
-        if self.fail {
+        if self.should_fail(key) {
             return Err(SinkError::Upload("status 500".to_string()));
         }
         Ok(self.store.lock().expect("lock").get(key).cloned())

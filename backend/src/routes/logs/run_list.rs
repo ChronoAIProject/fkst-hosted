@@ -34,6 +34,7 @@ use crate::storage::StorageError;
         (status = 401, description = "Missing/invalid GitHub token", body = ErrorEnvelope),
         (status = 403, description = "Authenticated but not authorized for this session's logs", body = ErrorEnvelope),
         (status = 404, description = "Unknown session", body = ErrorEnvelope),
+        (status = 502, description = "The run index could not be read", body = ErrorEnvelope),
         (status = 503, description = "Log storage is not configured", body = ErrorEnvelope),
     )
 )]
