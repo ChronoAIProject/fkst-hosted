@@ -78,6 +78,20 @@ pub struct SessionRegistration {
     pub trigger_author_login: String,
     /// The launch inputs.
     pub def: SessionDef,
+    /// The session's EFFECTIVE package set (epic #594 I7): the explicit `### Packages`
+    /// ([`def.packages`](SessionDef::packages), author order) followed by the union of
+    /// every `### Manifest` reference expanded into its packages, deduped by the full
+    /// `(owner, repo, ref, path)` identity (explicit-first). Resolved PER PASS by the
+    /// reconcile driver (which fetches each manifest), so — like the discovered
+    /// work-label set — it is deliberately NOT part of either config hash: `manifest_refs`
+    /// is hashed BY REFERENCE, never by its mutable expansion. Every downstream consumer
+    /// (package reachability, `FKST_SESSION_PACKAGE_ROOTS`, and work-label
+    /// auto-discovery) reads THIS set, so a manifest's packages are cloned into the pod
+    /// AND their `[github].work_labels` are discovered. A manifest-free session's
+    /// effective set equals its explicit packages, so its behavior is byte-identical.
+    /// Defaults to the explicit packages at parse time; the driver overwrites it with the
+    /// expanded union before any consumer reads it.
+    pub effective_packages: Vec<PackageRef>,
     /// The deterministic session id (see [`crate::session_spec::derive_session_id`]).
     pub session_id: String,
     /// A stable hash over the launch inputs; a live pod whose recorded hash differs

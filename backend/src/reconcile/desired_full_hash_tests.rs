@@ -29,6 +29,7 @@ fn base_reg() -> SessionRegistration {
             output_lang: None,
             engine_config: std::collections::BTreeMap::new(),
         },
+        effective_packages: vec![pkg("acme", "tools", "main", "pkg/a")],
         session_id: "sid".to_string(),
         config_hash: "ignored".to_string(),
         auto_merge: false,

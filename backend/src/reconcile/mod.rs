@@ -21,6 +21,11 @@ pub mod automerge;
 // sessions that would compete over the same work-label queue on one repo.
 pub mod collision;
 pub mod desired;
+// Resolve each session's EFFECTIVE package set for one pass (I7): explicit `### Packages`
+// ∪ every `### Manifest` reference expanded via `manifest_expand`, deduped explicit-first.
+// FAIL-CLOSED: a failed expansion (or an empty union) demotes the session into the
+// planner's `invalid` input. Every downstream consumer reads this set.
+pub mod effective_packages;
 pub mod execute;
 mod execute_comments;
 pub mod hashing;

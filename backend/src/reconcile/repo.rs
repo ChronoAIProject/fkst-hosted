@@ -23,6 +23,7 @@ use crate::models::RepoRef;
 use crate::reconcile::announce::parse_config_hash_marker;
 use crate::reconcile::collision::{detect_missing_work_labels, detect_work_label_collisions};
 use crate::reconcile::desired::{plan_repo, SessionRegistration};
+use crate::reconcile::effective_packages::EffectivePackages;
 use crate::reconcile::execute::{execute, ReconcileCtx};
 use crate::reconcile::pending::{LabelCountPending, PendingWork};
 use crate::reconcile::registry::parse_registration;
@@ -181,12 +182,49 @@ pub async fn reconcile_repo(
         WorkAuthz::off()
     };
 
+    // I7 manifest expand pass (epic #594). Resolve each session's EFFECTIVE package set —
+    // its explicit `### Packages` followed by every `### Manifest` reference expanded into
+    // packages (deduped, explicit-first) — using the repo installation token minted above.
+    // FAIL-CLOSED: a session whose manifest cannot be fetched/parsed/validated, or whose
+    // effective set comes out empty, is DEMOTED into `invalid` here (the SAME
+    // flag/comment/auto-clear path as a collision or a missing label) and removed from
+    // `regs` before it can spawn. The resolved set is stamped onto each SURVIVING reg so
+    // every downstream consumer (reachability, package roots, work-label discovery) reads
+    // it. Done BEFORE resolve_work_label_sets so label discovery walks the effective set,
+    // surfacing a manifest package's `[github].work_labels`.
+    let EffectivePackages {
+        by_session: effective_by_session,
+        demotions: manifest_demotions,
+    } = crate::reconcile::effective_packages::resolve_effective_packages(
+        &ctx.http,
+        &ctx.config.github_api_base_url,
+        &token,
+        &regs,
+    )
+    .await;
+    if !manifest_demotions.is_empty() {
+        let losers: HashSet<i64> = manifest_demotions.iter().map(|(issue, _)| *issue).collect();
+        tracing::info!(
+            owner_repo = %owner_repo,
+            demoted = manifest_demotions.len(),
+            "reconcile: manifest expansion failed for trigger(s); demoting to invalid"
+        );
+        regs.retain(|reg| !losers.contains(&reg.trigger_issue));
+        invalid.extend(manifest_demotions);
+    }
+    for reg in &mut regs {
+        if let Some(packages) = effective_by_session.get(&reg.session_id) {
+            reg.effective_packages = packages.clone();
+        }
+    }
+
     // Resolve each session's FULL work-label set (explicit ∪ package-discovered) ONCE
     // for this pass, keyed by session id. Shared by the reject surface (so it rejects
     // over the same set the pending gate authorizes over — no asymmetry) and the
     // pending gate below. Discovered labels are cached per config-hash (packages are
     // immutable per session config), bounding the manifest fetches to one resolve per
-    // distinct session config.
+    // distinct session config. Walks each session's EFFECTIVE package set (I7), so a
+    // manifest's packages' `[github].work_labels` are auto-discovered too.
     let work_labels_by_session = resolve_work_label_sets(ctx, &token, &regs).await;
 
     // I4 label-less reject (epic #594). A session whose EFFECTIVE work-label set is empty
@@ -320,9 +358,13 @@ pub async fn reconcile_repo(
 
 /// Resolve every registration's FULL work-label set (explicit `### Work Label` ∪ the
 /// labels its packages auto-declare) into a `session_id -> labels` map, once per pass.
-/// Discovered labels are cached per `config_hash` (packages are immutable per session
-/// config), so the manifest fetches are bounded to one resolve per distinct config.
-/// Shared by the ack/reject surface and the pending gate so both act on the same set.
+/// Walks each session's EFFECTIVE package set (explicit ∪ manifest-expanded, I7), so a
+/// package reachable only through a `### Manifest` still contributes its
+/// `[github].work_labels`. Discovered labels are cached per `config_hash` (both the
+/// explicit packages AND the manifest references are part of the hash, so the effective
+/// set is fixed per config), so the manifest fetches are bounded to one resolve per
+/// distinct config. Shared by the ack/reject surface and the pending gate so both act on
+/// the same set.
 async fn resolve_work_label_sets(
     ctx: &ReconcileCtx,
     token: &SecretString,
@@ -338,7 +380,7 @@ async fn resolve_work_label_sets(
                     &ctx.http,
                     &ctx.config.github_api_base_url,
                     token,
-                    &reg.def.packages,
+                    &reg.effective_packages,
                 )
                 .await;
                 discovered_cache.insert(reg.config_hash.clone(), set.clone());

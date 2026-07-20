@@ -13,10 +13,13 @@ async fn spawn_action_routes_to_ensure_session() {
     let backend = Arc::new(FakeSessionBackend::default());
     let ctx = test_ctx(backend.clone());
     let mut reg = registration();
-    // Empty package set → the reachability pre-flight is a no-op (touches no network);
-    // no named environment → the env-store read is skipped. Both preconditions then
-    // pass and the spawn reaches `ensure_session` (token mint goes via the fake API).
+    // Empty EFFECTIVE package set → the reachability pre-flight is a no-op (touches no
+    // network); no named environment → the env-store read is skipped. Both preconditions
+    // then pass and the spawn reaches `ensure_session` (token mint goes via the fake API).
+    // Reachability + package_roots read `effective_packages` (I7), so it is the set that
+    // must be emptied here.
     reg.def.packages = Vec::new();
+    reg.effective_packages = Vec::new();
     reg.def.environment = None;
     let repo = reg.repo.clone();
 

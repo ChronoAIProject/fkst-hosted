@@ -137,6 +137,32 @@ fn session_pod_spec_is_built_from_the_registration() {
 }
 
 #[test]
+fn package_roots_come_from_the_effective_set_not_just_explicit_packages() {
+    // Epic #594 I7: `FKST_SESSION_PACKAGE_ROOTS` is built from the EFFECTIVE set
+    // (explicit ∪ manifest-expanded), which the reconcile driver stamps onto the reg. A
+    // manifest-only package present only in `effective_packages` (not `def.packages`) is
+    // therefore cloned into the pod too.
+    let mut reg = registration();
+    reg.effective_packages
+        .push(crate::goals::trigger_parse::PackageRef {
+            owner: "acme".to_string(),
+            repo: "manifests-pkgs".to_string(),
+            git_ref: "main".to_string(),
+            path: "packages/from-manifest".to_string(),
+        });
+    let spec = session_pod_spec_from(&reg, &["fkst-run".to_string()], None);
+    assert_eq!(
+        spec.package_roots,
+        vec![
+            "ChronoAIProject/fkst-packages@dev:packages/github-devloop".to_string(),
+            "acme/pkgs@main:packages/proxy".to_string(),
+            "acme/manifests-pkgs@main:packages/from-manifest".to_string(),
+        ],
+        "package_roots reflect effective_packages, including the manifest-only entry"
+    );
+}
+
+#[test]
 fn spec_work_label_is_the_comma_joined_detected_set() {
     // Epic #594 I4: the pod work label is the FULL effective set (explicit ∪
     // package-discovered), comma-joined — github-proxy splits it back on the comma, so
