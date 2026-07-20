@@ -109,6 +109,8 @@ async fn oauth_callback_happy_path_streams_the_bundle_as_a_download() {
         public_base_url: Some("https://fkst.example".to_string()),
         oauth_client_id: Some("Iv1.clientid".to_string()),
         oauth_client_secret: Some(SecretString::from("oauth-secret".to_string())),
+        broader_oauth_client_id: None,
+        broader_oauth_client_secret: None,
         oauth_base_url: gh.uri(),
         frontend_url: None,
     };

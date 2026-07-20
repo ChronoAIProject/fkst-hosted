@@ -21,6 +21,9 @@ mod github;
 mod mutate;
 mod outcomes;
 mod overview;
+// Broader-visibility enumeration-token resolution (issue #572): decides whether the
+// overview enumerates with the App token or a caller-supplied broader-OAuth token.
+mod overview_broader;
 mod sessions;
 #[cfg(test)]
 pub(crate) mod test_support;

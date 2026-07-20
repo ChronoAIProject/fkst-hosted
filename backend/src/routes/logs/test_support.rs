@@ -61,6 +61,8 @@ pub(crate) fn log_config(admins: &[&str], oauth: bool) -> LogConfig {
         public_base_url: oauth.then(|| "https://fkst.example".to_string()),
         oauth_client_id: oauth.then(|| "Iv1.clientid".to_string()),
         oauth_client_secret: oauth.then(|| SecretString::from("oauth-secret".to_string())),
+        broader_oauth_client_id: None,
+        broader_oauth_client_secret: None,
         oauth_base_url: "https://github.test".to_string(),
         frontend_url: None,
     }

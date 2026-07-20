@@ -120,7 +120,15 @@ async fn github_login(State(state): State<AppState>) -> Response {
     };
     let redirect_uri = callback_redirect_uri(public_base);
     let state_param = oauth::sign_state(secret.expose_secret().as_bytes(), &login_state_message());
-    match oauth::authorize_url(&log.oauth_base_url, client_id, &redirect_uri, &state_param) {
+    // The primary login flow requests NO scopes: an unscoped user-to-server token
+    // resolves `/user`, which is all identity establishment needs.
+    match oauth::authorize_url(
+        &log.oauth_base_url,
+        client_id,
+        &redirect_uri,
+        &state_param,
+        None,
+    ) {
         Ok(url) => redirect_302(&url),
         Err(err) => err.into_response(),
     }
@@ -294,15 +302,18 @@ fn now_unix() -> i64 {
         .unwrap_or(0)
 }
 
-/// The signed-state payload: `login:<unix-seconds>` (freshness-checked on return).
-fn login_state_message() -> String {
-    format!("login:{}", now_unix())
+/// A signed-state payload `"<kind>:<unix-seconds>"` (freshness-checked on return).
+/// `kind` namespaces the flow (`login`, `broader`) so a state minted for one flow can
+/// never be replayed into another — defense in depth on top of the HMAC signature.
+pub(super) fn signed_state_message(kind: &str) -> String {
+    format!("{kind}:{}", now_unix())
 }
 
-/// Whether a recovered `login:<ts>` state is within the freshness window (allowing a
-/// small backward clock skew).
-fn state_is_fresh(message: &str) -> bool {
-    let Some(ts_str) = message.strip_prefix("login:") else {
+/// Whether a recovered `"<kind>:<ts>"` state is within the freshness window (allowing
+/// a small backward clock skew). A message whose prefix is not exactly `"<kind>:"` is
+/// not fresh, so a `login` state does not satisfy a `broader` check and vice versa.
+pub(super) fn state_is_fresh_for(kind: &str, message: &str) -> bool {
+    let Some(ts_str) = message.strip_prefix(&format!("{kind}:")) else {
         return false;
     };
     let Ok(ts) = ts_str.parse::<i64>() else {
@@ -310,6 +321,16 @@ fn state_is_fresh(message: &str) -> bool {
     };
     let age = now_unix() - ts;
     (-30..=STATE_MAX_AGE_SECS).contains(&age)
+}
+
+/// The login flow's signed-state payload: `login:<unix-seconds>`.
+fn login_state_message() -> String {
+    signed_state_message("login")
+}
+
+/// Whether a recovered `login:<ts>` state is within the freshness window.
+fn state_is_fresh(message: &str) -> bool {
+    state_is_fresh_for("login", message)
 }
 
 /// Build the frontend redirect URL carrying the token set in the fragment. GitHub
@@ -351,7 +372,7 @@ fn unconfigured() -> Response {
 
 /// A 302 redirect to `location`. An un-encodable location renders a 500 rather than
 /// panicking (never happens for our own URLs).
-fn redirect_302(location: &str) -> Response {
+pub(super) fn redirect_302(location: &str) -> Response {
     match HeaderValue::from_str(location) {
         Ok(value) => (StatusCode::FOUND, [(header::LOCATION, value)]).into_response(),
         Err(_) => AppError::Internal(anyhow::anyhow!("invalid redirect location")).into_response(),
@@ -359,7 +380,7 @@ fn redirect_302(location: &str) -> Response {
 }
 
 /// A browser-friendly HTML error page (fixed, escaping-free message text).
-fn html_error(status: StatusCode, message: &str) -> Response {
+pub(super) fn html_error(status: StatusCode, message: &str) -> Response {
     let body = format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>{code}</title></head>\
          <body><h1>{code}</h1><p>{message}</p></body></html>",
@@ -374,7 +395,7 @@ fn html_error(status: StatusCode, message: &str) -> Response {
 }
 
 /// A pooled HTTP client for the OAuth token exchange/refresh (bounded timeout + UA).
-fn http_client() -> &'static reqwest::Client {
+pub(super) fn http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
@@ -411,124 +432,11 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(github_login))
         .routes(routes!(github_login_callback))
         .routes(routes!(github_refresh_token))
+        // The optional broader-visibility classic-OAuth connect flow (issue #572);
+        // its routes are inert (return 503) unless the broader pair is configured.
+        .merge(crate::routes::auth_broader::router())
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn callback_redirect_uri_appends_the_path_and_trims_slash() {
-        assert_eq!(
-            callback_redirect_uri("https://fkst.example/"),
-            "https://fkst.example/api/v1/auth/github/callback"
-        );
-        assert_eq!(
-            callback_redirect_uri("https://fkst.example"),
-            "https://fkst.example/api/v1/auth/github/callback"
-        );
-    }
-
-    #[test]
-    fn a_freshly_signed_state_round_trips_and_is_fresh() {
-        let secret = b"client-secret";
-        let state = oauth::sign_state(secret, &login_state_message());
-        let message = oauth::verify_state(secret, &state).expect("verifies");
-        assert!(state_is_fresh(&message), "just-issued state must be fresh");
-    }
-
-    #[test]
-    fn an_old_state_is_rejected_as_stale() {
-        // A timestamp well outside the window.
-        let old = now_unix() - (STATE_MAX_AGE_SECS + 60);
-        assert!(!state_is_fresh(&format!("login:{old}")));
-    }
-
-    #[test]
-    fn malformed_state_messages_are_not_fresh() {
-        assert!(!state_is_fresh("not-a-login-message"));
-        assert!(!state_is_fresh("login:not-a-number"));
-        assert!(!state_is_fresh("login:"));
-    }
-
-    #[test]
-    fn success_url_carries_all_tokens_in_the_fragment() {
-        let tokens = oauth::TokenSet {
-            access_token: SecretString::from("ghu_access".to_string()),
-            refresh_token: Some(SecretString::from("ghr_refresh".to_string())),
-            expires_in: Some(28800),
-            refresh_token_expires_in: Some(15811200),
-        };
-        let url = frontend_success_url("https://app.example/fkst/", &tokens);
-        assert_eq!(
-            url,
-            "https://app.example/fkst/#gh_token=ghu_access&gh_refresh=ghr_refresh&gh_expires_in=28800"
-        );
-    }
-
-    #[test]
-    fn success_url_omits_refresh_when_absent() {
-        let tokens = oauth::TokenSet {
-            access_token: SecretString::from("ghu_access".to_string()),
-            refresh_token: None,
-            expires_in: None,
-            refresh_token_expires_in: None,
-        };
-        let url = frontend_success_url("https://app.example/", &tokens);
-        assert_eq!(url, "https://app.example/#gh_token=ghu_access");
-    }
-
-    #[test]
-    fn token_response_exposes_the_tokens_and_bearer_type() {
-        let tokens = oauth::TokenSet {
-            access_token: SecretString::from("ghu_x".to_string()),
-            refresh_token: Some(SecretString::from("ghr_y".to_string())),
-            expires_in: Some(28800),
-            refresh_token_expires_in: None,
-        };
-        let resp = token_response(&tokens);
-        assert_eq!(resp.access_token, "ghu_x");
-        assert_eq!(resp.refresh_token.as_deref(), Some("ghr_y"));
-        assert_eq!(resp.expires_in, Some(28800));
-        assert_eq!(resp.token_type, "bearer");
-    }
-}
-
-#[cfg(test)]
-mod post_install_tests {
-    use super::post_install_redirect;
-
-    #[test]
-    fn stateless_install_redirects_to_the_dashboard() {
-        assert_eq!(
-            post_install_redirect(
-                None,
-                Some("install"),
-                Some("146704012"),
-                "https://fkst.example/"
-            ),
-            Some("https://fkst.example/dashboard".to_string())
-        );
-        // installation_id alone is enough (setup_action can be absent).
-        assert_eq!(
-            post_install_redirect(Some(""), None, Some("1"), "https://fkst.example"),
-            Some("https://fkst.example/dashboard".to_string())
-        );
-    }
-
-    #[test]
-    fn a_real_login_callback_is_untouched() {
-        // State present -> normal login path even if GitHub echoes extras.
-        assert_eq!(
-            post_install_redirect(
-                Some("signed-state"),
-                Some("install"),
-                Some("1"),
-                "https://f"
-            ),
-            None
-        );
-        // No install markers + no state -> not an install; the 400 path owns it.
-        assert_eq!(post_install_redirect(None, None, None, "https://f"), None);
-    }
-}
+#[path = "auth_tests.rs"]
+mod tests;

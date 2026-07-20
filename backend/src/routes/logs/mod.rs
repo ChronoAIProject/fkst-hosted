@@ -266,7 +266,13 @@ fn browser_redirect(state: &AppState, session_id: &str) -> Response {
     };
     let redirect_uri = callback_redirect_uri(base);
     let state_param = oauth::sign_state(secret.expose_secret().as_bytes(), session_id);
-    match oauth::authorize_url(&log.oauth_base_url, client_id, &redirect_uri, &state_param) {
+    match oauth::authorize_url(
+        &log.oauth_base_url,
+        client_id,
+        &redirect_uri,
+        &state_param,
+        None,
+    ) {
         Ok(url) => redirect_302(&url),
         Err(err) => err.into_response(),
     }

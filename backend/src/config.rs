@@ -1292,4 +1292,34 @@ mod tests {
         assert!(matches!(err, AppError::Config(_)));
         assert!(err.to_string().contains("FKST_GITHUB_OAUTH_CLIENT_SECRET"));
     }
+
+    #[test]
+    fn broader_oauth_is_inert_by_default_and_surfaces_when_configured() {
+        // Unset → the whole broader-visibility feature is inert.
+        let config = Config::from_vars(vars(&[])).expect("defaults");
+        assert!(config.log.broader_oauth().is_none());
+        // Both vars set → the accessor resolves the classic-OAuth pair.
+        let config = Config::from_vars(vars(&[
+            ("FKST_GITHUB_BROADER_OAUTH_CLIENT_ID", "classic-id"),
+            ("FKST_GITHUB_BROADER_OAUTH_CLIENT_SECRET", "classic-secret"),
+        ]))
+        .expect("full broader pair loads");
+        assert_eq!(
+            config.log.broader_oauth().map(|(id, _)| id),
+            Some("classic-id")
+        );
+    }
+
+    #[test]
+    fn half_configured_broader_oauth_pair_fails_closed_through_config_from_vars() {
+        let err = Config::from_vars(vars(&[(
+            "FKST_GITHUB_BROADER_OAUTH_CLIENT_ID",
+            "classic-id",
+        )]))
+        .expect_err("half broader OAuth config must fail closed through Config");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(err
+            .to_string()
+            .contains("FKST_GITHUB_BROADER_OAUTH_CLIENT_SECRET"));
+    }
 }
