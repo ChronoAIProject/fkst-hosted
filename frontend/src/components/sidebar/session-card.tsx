@@ -57,22 +57,38 @@ function LivenessChip({ liveness }: { liveness: NonNullable<SessionDetail['liven
   return <Chip tone={liveness === 'live' ? 'green' : liveness === 'starting' ? 'amber' : 'neutral'}>{label}</Chip>;
 }
 
-/** One session (trigger issue) of the level-2 sidebar: config metadata,
- *  packages, liveness, log download, trigger + work issues, PR outcomes,
- *  and the stop affordance for open triggers. */
+/** One session (trigger issue). Two rendering modes:
+ *
+ *  - **Drawer mode** (default — `onSelect` omitted): the full card with config
+ *    metadata, packages, liveness, log download, trigger + work issues, PR
+ *    outcomes, and a Details button that opens the embedded
+ *    {@link SessionDetailDrawer}. Kept for backward-compat with the level-2
+ *    sidebar.
+ *  - **Select mode** (`onSelect` supplied): a COMPACT, whole-card-button row for
+ *    the repo-workspace rail. The full breakdown now lives in the workspace's
+ *    inline detail, so the row shows only identity, health chips, the session id
+ *    and recency; clicking it selects the session (it does NOT open the drawer),
+ *    and `selected` paints the amber accent hairline + glow. The stop / work
+ *    affordances are owned by the rail beside the card, not here. */
 export function SessionCard({
   owner,
   name,
   session,
   onStop,
+  onSelect,
+  selected,
 }: {
   /** Repo coordinates from the level-2 context — the detail drawer's fetches
    *  are repo-scoped (outcomes, blobs). */
   owner: string;
   name: string;
   session: SessionDetail;
-  /** Open the stop-confirm flow; absent for closed triggers. */
-  onStop: (session: SessionDetail) => void;
+  /** Open the stop-confirm flow (drawer mode only); absent for closed triggers. */
+  onStop?: (session: SessionDetail) => void;
+  /** Select-mode switch: when present the card becomes a selectable rail row. */
+  onSelect?: () => void;
+  /** Whether this row is the workspace's currently-selected session. */
+  selected?: boolean;
 }) {
   const c = useContent().dashboard;
   const cc = c.canvas;
@@ -92,6 +108,72 @@ export function SessionCard({
       : session.liveness === 'starting'
         ? 'shadow-[var(--shadow-2),var(--glow-amber)]'
         : 'shadow-2';
+
+  // Select mode (rail): a compact whole-card button. A stretched `absolute
+  // inset-0` button captures the click for selection while the CopyButton floats
+  // above it (`relative z-[2]`) so it stays independently clickable — nesting a
+  // real <button> inside the select button would be invalid HTML. When
+  // `selected`, the resting health glow is swapped for the amber accent hairline
+  // (`.grad-border-accent`) + amber bloom so the active row reads at a glance.
+  if (onSelect) {
+    return (
+      <div
+        data-tour="session-card"
+        className={cn(
+          'relative grad-border hover-lift rounded-card p-3.5 flex flex-col gap-2 min-w-0 transition-[box-shadow] duration-200',
+          selected ? 'grad-border-accent shadow-[var(--shadow-2),var(--glow-amber)]' : statusGlow
+        )}
+      >
+        <button
+          type="button"
+          onClick={onSelect}
+          aria-label={c.detail.openAria.replace('{name}', session.name ?? `#${session.trigger.number}`)}
+          aria-current={selected ? 'true' : undefined}
+          className="absolute inset-0 z-[1] rounded-card cursor-pointer"
+        />
+        {/* Compact rail card: name on its own line (full width, truncates), the
+            status chips wrapping BELOW it — a fixed 300px rail is too narrow to
+            put the wide chips beside the name (they'd squeeze it to nothing). */}
+        <div className="flex flex-col gap-1.5 min-w-0">
+          <span className="font-display font-semibold text-[14px] text-fg truncate">
+            {invalid ? c.invalidTrigger : (session.name ?? '—')}
+          </span>
+          <div className="flex items-center gap-1 flex-wrap">
+            {session.liveness && (
+              <span key={session.liveness} className="anim-chip-in inline-flex">
+                <LivenessChip liveness={session.liveness} />
+              </span>
+            )}
+            {session.auto_merge && (
+              <span className="anim-chip-in inline-flex">
+                <Chip tone="green">{c.autoMerge}</Chip>
+              </span>
+            )}
+            {session.status_labels.map((label) => (
+              <span key={label} className="anim-chip-in inline-flex">
+                <Chip tone="amber">{label}</Chip>
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {session.session_id && (
+          // Compact id summary only — no CopyButton here. Lifting an interactive
+          // control above the stretched select button made it intercept clicks
+          // meant for the card; the full id + copy live in the detail header.
+          <span className="font-mono text-[10.5px] text-ghost break-all self-start">
+            {session.session_id.slice(0, 8)}
+          </span>
+        )}
+
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10.5px] text-ghost">
+          <TimeStamp word={cc.createdWord} iso={session.trigger.created_at} lang={lang} />
+          <TimeStamp word={cc.updatedWord} iso={session.trigger.updated_at} lang={lang} />
+          <TimeStamp word={cc.closedWord} iso={session.trigger.closed_at} lang={lang} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -148,7 +230,7 @@ export function SessionCard({
           >
             {c.detail.open}
           </button>
-          {session.trigger.state === 'open' && (
+          {session.trigger.state === 'open' && onStop && (
             <button
               type="button"
               onClick={() => onStop(session)}
