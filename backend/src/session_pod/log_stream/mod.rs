@@ -19,20 +19,23 @@
 //! [`classify`] maps a log source into the tree, [`tail`] tracks the incremental
 //! read offset of a growing file, [`seed`] derives the known-secret table from the
 //! mounted creds, [`instance`] computes the per-pod instance id + the `meta.json`/
-//! `README` shapes, [`tee`] splits the supervise child stream so `kubectl logs`
-//! stays byte-for-byte intact, [`bundle`] tar+gzips the redacted tree, [`sink`]
-//! hides the upload destination behind a trait, and [`collector`] wires them
-//! together.
+//! `README` shapes, [`runs`] models the per-run bundle keys + the run-index
+//! transforms (per-pod-incarnation log separation), [`tee`] splits the supervise
+//! child stream so `kubectl logs` stays byte-for-byte intact, [`bundle`] tar+gzips
+//! the redacted tree, [`sink`] hides the upload destination behind a trait, and
+//! [`collector`] wires them together.
 
 pub mod bundle;
 pub mod classify;
 pub mod collector;
 pub mod instance;
 pub mod redact;
+pub mod runs;
 pub mod seed;
 pub mod sink;
 pub mod tail;
 pub mod tee;
+pub mod uploader;
 
 pub use classify::LogClass;
 pub use collector::{spawn_collector, CollectorConfig, CollectorRecord, LogStreamHandle};

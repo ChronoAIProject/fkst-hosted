@@ -45,13 +45,15 @@ async fn second_fetch_within_ttl_serves_from_cache() {
     );
 
     // First fetch: a cache miss → one real storage download, and it is cached.
-    let first = fetch_bundle(&st, SESSION_ID).await.expect("first ok");
+    let first = fetch_bundle(&st, SESSION_ID, None).await.expect("first ok");
     assert_eq!(first.as_ref(), BUNDLE_BYTES);
     assert_eq!(download_hits(&server).await, 1, "first fetch hits storage");
 
     // Second fetch (real clock, microseconds later → well inside the 30s TTL): a
     // cache hit that must NOT touch storage again.
-    let second = fetch_bundle(&st, SESSION_ID).await.expect("second ok");
+    let second = fetch_bundle(&st, SESSION_ID, None)
+        .await
+        .expect("second ok");
     assert_eq!(second.as_ref(), BUNDLE_BYTES);
     assert_eq!(
         download_hits(&server).await,
@@ -82,7 +84,7 @@ async fn fetch_after_ttl_redownloads() {
     );
 
     // The stale entry is ignored → a real download happens and returns the fresh bytes.
-    let fetched = fetch_bundle(&st, SESSION_ID).await.expect("ok");
+    let fetched = fetch_bundle(&st, SESSION_ID, None).await.expect("ok");
     assert_eq!(
         fetched.as_ref(),
         BUNDLE_BYTES,
@@ -95,7 +97,7 @@ async fn fetch_after_ttl_redownloads() {
     );
 
     // The re-download refreshed the cache: a follow-up fetch is a hit again.
-    let again = fetch_bundle(&st, SESSION_ID).await.expect("ok");
+    let again = fetch_bundle(&st, SESSION_ID, None).await.expect("ok");
     assert_eq!(again.as_ref(), BUNDLE_BYTES);
     assert_eq!(
         download_hits(&server).await,

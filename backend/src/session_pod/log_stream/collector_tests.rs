@@ -11,7 +11,12 @@ use std::sync::mpsc::sync_channel;
 
 use flate2::read::GzDecoder;
 
+use crate::session_pod::log_stream::runs;
 use crate::session_pod::log_stream::sink::FakeSink;
+
+/// The run id every fake uploader in these tests writes under (matches the
+/// `collector_config` instance id).
+const TEST_RUN_ID: &str = "inst-test";
 
 /// A minimal collector config rooted at `dir`, with the flush thresholds the caller
 /// wants. `creds_dir` holds a `github-token` so the redactor seeds a known secret.
@@ -43,13 +48,21 @@ fn collector_config(
 }
 
 /// An uploader wrapping a fake sink + a dedicated current-thread runtime (the
-/// collector runs on a non-tokio thread, so it owns its own runtime).
+/// collector runs on a non-tokio thread, so it owns its own runtime). Uses
+/// [`TEST_RUN_ID`] as the run id, so the per-run object + index entry are
+/// deterministic.
 fn fake_uploader(fake: FakeSink, session_id: &str) -> Uploader {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("runtime");
-    Uploader::new(Box::new(fake), runtime, bundle_key(session_id))
+    Uploader::new(
+        Box::new(fake),
+        runtime,
+        session_id,
+        TEST_RUN_ID.to_string(),
+        Utc::now(),
+    )
 }
 
 /// Decode a `tar.gz` into `(path, contents)` pairs (leading `./` trimmed).
@@ -192,13 +205,29 @@ fn collector_uploads_a_redacted_bundle_on_the_size_cadence() {
         !calls.is_empty(),
         "the collector uploaded at least one bundle"
     );
-    // Every upload targets the session's stable object key.
-    for (key, _) in &calls {
-        assert_eq!(key, "logs/sess-1/latest.tar.gz");
-    }
-    // Decode the last bundle: it is a valid gzip, the secret was redacted BEFORE it
-    // reached the archive, and the masked label survived.
-    let entries = extract(&calls.last().expect("a bundle").1);
+    // The bundle is PUT to BOTH the authoritative latest object (unchanged legacy
+    // path) AND this run's per-incarnation object.
+    assert!(
+        calls
+            .iter()
+            .any(|(key, _)| key == "logs/sess-1/latest.tar.gz"),
+        "latest.tar.gz uploaded"
+    );
+    assert!(
+        calls
+            .iter()
+            .any(|(key, _)| key == "logs/sess-1/runs/inst-test.tar.gz"),
+        "per-run object uploaded"
+    );
+    // Decode the last LATEST bundle: it is a valid gzip, the secret was redacted
+    // BEFORE it reached the archive, and the masked label survived.
+    let latest = calls
+        .iter()
+        .rev()
+        .find(|(key, _)| key == "logs/sess-1/latest.tar.gz")
+        .map(|(_, gz)| gz.clone())
+        .expect("a latest bundle");
+    let entries = extract(&latest);
     let supervise = entries
         .iter()
         .find(|(p, _)| p.ends_with("fkst-substrate/framework/supervise.log"))
@@ -215,6 +244,20 @@ fn collector_uploads_a_redacted_bundle_on_the_size_cadence() {
     // The self-describing baseline rode along too.
     assert!(entries.iter().any(|(p, _)| p.ends_with("meta.json")));
     assert!(entries.iter().any(|(p, _)| p.ends_with("README.md")));
+
+    // The run was registered in the session's run index on the first upload, and
+    // stamped with an end time on the final (shutdown) flush.
+    let index = fake
+        .stored("logs/sess-1/runs.json")
+        .expect("runs.json written to the index");
+    let runs = runs::parse_runs(&index);
+    assert_eq!(runs.len(), 1, "exactly one run in the index");
+    assert_eq!(runs[0].run_id, "inst-test");
+    assert!(!runs[0].started_at.is_empty(), "run carries a start time");
+    assert!(
+        runs[0].ended_at.is_some(),
+        "the run was finalized with an end time at shutdown"
+    );
 }
 
 #[test]
@@ -232,9 +275,24 @@ fn collector_uploads_the_self_describing_baseline_on_the_final_flush() {
     collect(config, rx, Some(uploader));
 
     let calls = fake.calls();
-    assert_eq!(calls.len(), 1, "exactly one (final) upload of the baseline");
-    assert_eq!(calls[0].0, "logs/sess-2/latest.tar.gz");
-    let entries = extract(&calls[0].1);
+    // Exactly one LATEST upload of the baseline (unchanged legacy cadence), plus the
+    // additive per-run object.
+    let latest_calls: Vec<_> = calls
+        .iter()
+        .filter(|(key, _)| key == "logs/sess-2/latest.tar.gz")
+        .collect();
+    assert_eq!(
+        latest_calls.len(),
+        1,
+        "exactly one (final) latest upload of the baseline"
+    );
+    assert!(
+        calls
+            .iter()
+            .any(|(key, _)| key == "logs/sess-2/runs/inst-test.tar.gz"),
+        "per-run baseline object uploaded"
+    );
+    let entries = extract(&latest_calls[0].1);
     let meta = entries
         .iter()
         .find(|(p, _)| p.ends_with("meta.json"))
@@ -243,6 +301,70 @@ fn collector_uploads_the_self_describing_baseline_on_the_final_flush() {
     assert!(
         meta.contains("\"repo\": \"acme/site\""),
         "meta shape: {meta}"
+    );
+    // The run index was written even for a no-records session (the baseline still
+    // constitutes a run), and finalized with an end time.
+    let index = fake
+        .stored("logs/sess-2/runs.json")
+        .expect("runs.json written to the index");
+    let runs = runs::parse_runs(&index);
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].run_id, "inst-test");
+    assert!(runs[0].ended_at.is_some());
+}
+
+#[test]
+fn collector_swallows_a_failed_index_add_and_recovers_the_run_at_shutdown() {
+    let dir = tempfile::tempdir().expect("dir");
+    let config = collector_config(dir.path(), "sess-recover", 1);
+    // The run-INDEX ops fail TRANSIENTLY: the first matching op (the one-shot
+    // add's index read) fails — modelling a transient index outage — then clears.
+    // So the bundle PUTs still succeed, the collector never panics, and shutdown's
+    // finalize UPSERTS the run the failed add dropped (FIX 1's recovery path).
+    let fake = FakeSink {
+        fail_key_contains: Some("runs.json".to_string()),
+        fail_key_remaining: std::sync::Arc::new(std::sync::Mutex::new(Some(1))),
+        ..Default::default()
+    };
+    let uploader = fake_uploader(fake.clone(), "sess-recover");
+
+    let (tx, rx) = sync_channel::<CollectorRecord>(64);
+    tx.send((LogClass::Supervise, "a line".to_string()))
+        .expect("send");
+    drop(tx); // disconnect so the loop drains, does a final flush, and exits
+
+    // (a) Must not panic, and BOTH bundle objects were still put despite the
+    // index-add failure.
+    collect(config, rx, Some(uploader));
+    let calls = fake.calls();
+    assert!(
+        calls
+            .iter()
+            .any(|(key, _)| key == "logs/sess-recover/latest.tar.gz"),
+        "latest.tar.gz uploaded despite the index failure"
+    );
+    assert!(
+        calls
+            .iter()
+            .any(|(key, _)| key == "logs/sess-recover/runs/inst-test.tar.gz"),
+        "per-run object uploaded despite the index failure"
+    );
+
+    // (b) The failed add dropped the run, but shutdown's finalize recovered it —
+    // the index ends up containing the run WITH an end time (start time intact).
+    let index = fake
+        .stored("logs/sess-recover/runs.json")
+        .expect("the dropped run was recovered into the index at shutdown");
+    let runs = runs::parse_runs(&index);
+    assert_eq!(runs.len(), 1, "the dropped run was recovered exactly once");
+    assert_eq!(runs[0].run_id, "inst-test");
+    assert!(
+        !runs[0].started_at.is_empty(),
+        "the recovered run keeps its start time"
+    );
+    assert!(
+        runs[0].ended_at.is_some(),
+        "the recovered run carries an end time"
     );
 }
 

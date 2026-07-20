@@ -9,8 +9,8 @@ function jsonResponse(body: unknown, status = 200): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
 }
 
-/** Parse the `path` / `tail_bytes` query of a stubbed file-fetch URL. */
-function fileQuery(url: string): URLSearchParams {
+/** Parse the `path` / `tail_bytes` / `run` query of a stubbed fetch URL. */
+function query(url: string): URLSearchParams {
   return new URL(url, 'http://x').searchParams;
 }
 
@@ -42,6 +42,18 @@ const session = (over: Partial<SessionDetail> = {}): SessionDetail => ({
   prs: [],
   ...over,
 });
+
+// A legacy session's single synthetic run: empty start ⇒ the compact "Latest
+// logs" label, no per-run picker. Most tests only care about the file view, so
+// they use this to keep the runs layer inert.
+const singleLatestRun = [{ run_id: 'latest', started_at: '' }];
+
+// Two real incarnations, newest first: r-2 is still running (no ended_at); r-1
+// is a completed window.
+const twoRuns = [
+  { run_id: 'r-2', started_at: '2026-07-20T02:00:00Z' },
+  { run_id: 'r-1', started_at: '2026-07-20T01:00:00Z', ended_at: '2026-07-20T01:30:00Z' },
+];
 
 const manifest = {
   session_id: 'sess-1',
@@ -91,7 +103,8 @@ describe('TabLogs', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.endsWith('/manifest')) return jsonResponse(manifest);
+        if (url.endsWith('/runs')) return jsonResponse(singleLatestRun);
+        if (url.includes('/manifest')) return jsonResponse(manifest);
         if (url.includes('/file?')) return jsonResponse(fileContent);
         throw new Error(`unexpected fetch: ${url}`);
       })
@@ -115,7 +128,8 @@ describe('TabLogs', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.endsWith('/manifest')) return jsonResponse(manifest);
+        if (url.endsWith('/runs')) return jsonResponse(singleLatestRun);
+        if (url.includes('/manifest')) return jsonResponse(manifest);
         return jsonResponse(fileContent);
       })
     );
@@ -133,7 +147,8 @@ describe('TabLogs', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.endsWith('/manifest')) {
+        if (url.endsWith('/runs')) return jsonResponse(singleLatestRun);
+        if (url.includes('/manifest')) {
           manifestCalls += 1;
           return manifestCalls === 1 ? jsonResponse(null, 403) : jsonResponse(manifest);
         }
@@ -155,7 +170,8 @@ describe('TabLogs', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.endsWith('/manifest')) return jsonResponse(null, 503);
+        if (url.endsWith('/runs')) return jsonResponse(singleLatestRun);
+        if (url.includes('/manifest')) return jsonResponse(null, 503);
         return jsonResponse(fileContent);
       })
     );
@@ -180,9 +196,10 @@ describe('TabLogs', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.endsWith('/manifest')) return jsonResponse(manifest);
+        if (url.endsWith('/runs')) return jsonResponse(singleLatestRun);
+        if (url.includes('/manifest')) return jsonResponse(manifest);
         if (url.includes('/file?')) {
-          const path = fileQuery(url).get('path');
+          const path = query(url).get('path');
           if (path === 'fkst-substrate/driver.log') {
             await driverGate; // stays pending until the test releases it
             return jsonResponse({ ...fileContent, path, content: 'DRIVER-OLD' });
@@ -212,7 +229,8 @@ describe('TabLogs', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.endsWith('/manifest')) return jsonResponse(manifest);
+        if (url.endsWith('/runs')) return jsonResponse(singleLatestRun);
+        if (url.includes('/manifest')) return jsonResponse(manifest);
         if (url.includes('/file?')) {
           fileCalls += 1;
           return fileCalls === 1 ? jsonResponse(fileContent) : jsonResponse(null, 500);
@@ -245,11 +263,12 @@ describe('TabLogs', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.endsWith('/manifest')) return jsonResponse(manifest);
+        if (url.endsWith('/runs')) return jsonResponse(singleLatestRun);
+        if (url.includes('/manifest')) return jsonResponse(manifest);
         if (url.includes('/file?')) {
           // A tail request returns the truncated view; a full request (no
           // tail_bytes) returns the whole file.
-          return fileQuery(url).has('tail_bytes')
+          return query(url).has('tail_bytes')
             ? jsonResponse(truncated)
             : jsonResponse({ ...fileContent, content: 'whole file body here', truncated: false });
         }
@@ -272,5 +291,112 @@ describe('TabLogs', () => {
       expect(screen.queryByRole('button', { name: 'Load full file' })).not.toBeInTheDocument()
     );
     expect(screen.getByText(/whole file body here/)).toBeInTheDocument();
+  });
+
+  // ---- Per-run picker (issue #568) -----------------------------------------
+
+  it('renders a run picker (newest default) and reloads the bundle when switching runs', async () => {
+    const user = userEvent.setup();
+    const manifestRuns: (string | null)[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/runs')) return jsonResponse(twoRuns);
+        if (url.includes('/manifest')) {
+          manifestRuns.push(query(url).get('run'));
+          return jsonResponse(manifest);
+        }
+        if (url.includes('/file?')) {
+          const run = query(url).get('run');
+          return jsonResponse({ ...fileContent, content: `content for ${run}` });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+    renderLogs();
+
+    // The picker defaults to the newest run (r-2), which is still running.
+    const select = (await screen.findByRole('combobox')) as HTMLSelectElement;
+    expect(select.value).toBe('r-2');
+    expect(screen.getByRole('option', { name: /running/ })).toBeInTheDocument();
+    // Its bundle loaded with run=r-2.
+    await waitFor(() => expect(screen.getByText('content for r-2')).toBeInTheDocument());
+    expect(manifestRuns[0]).toBe('r-2');
+
+    // Switching to the older run reloads the manifest + file for that run.
+    await user.selectOptions(select, 'r-1');
+    await waitFor(() => expect(screen.getByText('content for r-1')).toBeInTheDocument());
+    expect(manifestRuns).toContain('r-1');
+  });
+
+  it('renders a compact single label (no dropdown) for a legacy synthetic run', async () => {
+    const manifestRuns: (string | null)[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/runs')) return jsonResponse(singleLatestRun);
+        if (url.includes('/manifest')) {
+          manifestRuns.push(query(url).get('run'));
+          return jsonResponse(manifest);
+        }
+        if (url.includes('/file?')) return jsonResponse(fileContent);
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+    renderLogs();
+
+    // Compact "Latest logs" label, and NO run dropdown.
+    expect(await screen.findByText('Latest logs')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    // The synthetic "latest" run carries no run param.
+    await screen.findByText('driver.log');
+    expect(manifestRuns).toEqual([null]);
+  });
+
+  it('falls back to the latest bundle (with a notice) when the run list fails', async () => {
+    const manifestRuns: (string | null)[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/runs')) return jsonResponse(null, 500);
+        if (url.includes('/manifest')) {
+          manifestRuns.push(query(url).get('run'));
+          return jsonResponse(manifest);
+        }
+        if (url.includes('/file?')) return jsonResponse(fileContent);
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+    renderLogs();
+
+    // A non-blocking notice, no picker, and the latest bundle still loads with
+    // no run param.
+    expect(
+      await screen.findByText("Couldn't load the run list — showing the latest logs.")
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(await screen.findByText('driver.log')).toBeInTheDocument();
+    expect(manifestRuns).toEqual([null]);
+  });
+
+  it('shows the no-storage message when the run list returns 503', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/runs')) return jsonResponse(null, 503);
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+    renderLogs();
+
+    expect(
+      await screen.findByText("Log storage isn't configured for this deployment.")
+    ).toBeInTheDocument();
+    // No file view is attempted on a 503.
+    expect(screen.queryByText('driver.log')).not.toBeInTheDocument();
   });
 });
