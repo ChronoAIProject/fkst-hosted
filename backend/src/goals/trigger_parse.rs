@@ -409,7 +409,11 @@ fn parse_packages(sections: &[(String, String)]) -> Result<Vec<PackageRef>, AppE
 /// `ref:path`) then the FIRST `:` (`ref` vs `path`). Every failure is a 422 that
 /// names the section, echoes the offending value, states which part failed, and
 /// recalls the expected form.
-fn parse_package_ref(value: &str) -> Result<PackageRef, AppError> {
+///
+/// `pub(crate)` so the manifest expander ([`crate::reconcile::manifest_expand`])
+/// can validate a fkst-manifest's `packages` entries with the EXACT same grammar
+/// and path-safety rules — a manifest package string is a `### Packages` line.
+pub(crate) fn parse_package_ref(value: &str) -> Result<PackageRef, AppError> {
     let reject = |reason: &str| {
         AppError::Unprocessable(format!(
             "the `### Packages` section lists an invalid package reference {value:?}: {reason}; \

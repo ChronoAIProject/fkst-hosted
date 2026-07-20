@@ -29,6 +29,11 @@ pub mod hashing;
 // identity-gated `/api/v1/logs/{session_id}` endpoint.
 pub mod log_authz;
 mod loops;
+// Fetch + validate a fkst-manifest JSON (referenced as `owner/repo@ref:path`) into
+// its package list. FAIL-CLOSED (a manifest is a required, complete set): any fetch,
+// parse, schema, or per-ref failure is an error, not best-effort. NOT yet wired into
+// the sweep — a later PR expands a trigger's `### Manifest` refs through this.
+pub mod manifest_expand;
 pub mod pending;
 pub mod reachability;
 pub mod registry;
