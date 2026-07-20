@@ -135,6 +135,7 @@ mod tests {
             def: SessionDef {
                 name: "site".to_string(),
                 packages: Vec::<PackageRef>::new(),
+                manifest_refs: Vec::<PackageRef>::new(),
                 work_label: Some("fkst-run".to_string()),
                 environment: None,
                 output_lang: None,

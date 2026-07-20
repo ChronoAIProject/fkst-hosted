@@ -23,6 +23,7 @@ fn base_reg() -> SessionRegistration {
         def: SessionDef {
             name: "sess".to_string(),
             packages: vec![pkg("acme", "tools", "main", "pkg/a")],
+            manifest_refs: vec![],
             work_label: Some("wl".to_string()),
             environment: Some("env".to_string()),
             output_lang: None,
@@ -161,6 +162,7 @@ fn full_config_hash_is_a_strict_superset_of_config_hash() {
         base.def.environment.as_deref(),
         base.def.output_lang.as_deref(),
         &base.def.engine_config,
+        &base.def.manifest_refs,
     );
     let base_full = full_config_hash(&base);
 
@@ -172,6 +174,7 @@ fn full_config_hash_is_a_strict_superset_of_config_hash() {
         toggled.def.environment.as_deref(),
         toggled.def.output_lang.as_deref(),
         &toggled.def.engine_config,
+        &toggled.def.manifest_refs,
     );
 
     assert_eq!(
@@ -230,6 +233,7 @@ fn full_config_hash_non_empty_collaborators_moves_full_but_not_config_hash() {
         base.def.environment.as_deref(),
         base.def.output_lang.as_deref(),
         &base.def.engine_config,
+        &base.def.manifest_refs,
     );
 
     let mut reg = base_reg();
@@ -240,6 +244,7 @@ fn full_config_hash_non_empty_collaborators_moves_full_but_not_config_hash() {
         reg.def.environment.as_deref(),
         reg.def.output_lang.as_deref(),
         &reg.def.engine_config,
+        &reg.def.manifest_refs,
     );
 
     assert_ne!(
@@ -250,6 +255,38 @@ fn full_config_hash_non_empty_collaborators_moves_full_but_not_config_hash() {
     assert_eq!(
         base_config, reg_config,
         "collaborators are outside config_hash (the pod is unaffected)"
+    );
+}
+
+#[test]
+fn full_config_hash_empty_manifest_matches_pre_field_baseline() {
+    // (a) A session WITHOUT manifest references must hash byte-identically to the
+    // pinned pre-`manifest_refs` baseline — the skip-if-empty guard keeps old configs
+    // stable across the deploy (no fleet-wide `fkst-config-rejected`). base_reg carries
+    // no manifest_refs, so the trailing skip-if-empty field is omitted and the digest
+    // is unchanged (the same pin `full_config_hash_is_digest_stable_for_old_configs`
+    // and the collaborators addition also guard).
+    assert!(base_reg().def.manifest_refs.is_empty());
+    assert_eq!(
+        full_config_hash(&base_reg()),
+        "0a97c6a26cf3dc2ae4326ea253f7ee33e8bf8e28bd3416b8e33443e7999fb091",
+        "an empty manifest list must leave the full hash at the pre-field baseline"
+    );
+}
+
+#[test]
+fn full_config_hash_moves_with_the_manifest_refs() {
+    // (b) A non-empty manifest reference flips the FULL hash, FREEZING it under
+    // config-immutability. Unlike the opt-ins and collaborators, manifest_refs is ALSO
+    // part of config_hash (it is pod-affecting), so it moves the pod-subset hash too —
+    // that relationship is asserted in `desired_hash_tests`.
+    let base = full_config_hash(&base_reg());
+    let mut reg = base_reg();
+    reg.def.manifest_refs = vec![pkg("acme", "manifests", "main", "manifests/team.json")];
+    assert_ne!(
+        base,
+        full_config_hash(&reg),
+        "manifest_refs must move the full hash (it is frozen by config-immutability)"
     );
 }
 

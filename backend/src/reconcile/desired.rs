@@ -35,6 +35,13 @@ pub struct SessionDef {
     /// The fully-qualified package references parsed from `### Packages`, in
     /// author order.
     pub packages: Vec<PackageRef>,
+    /// The fully-qualified fkst-manifest references parsed from `### Manifest`, in
+    /// author order (epic #594 I3). Each names a JSON file a LATER pass will expand
+    /// into packages; carried here BY REFERENCE only (no fetch/expansion in this PR).
+    /// Part of BOTH hashes (it will change the effective package set, so editing it
+    /// after registration is a rejected config change) — but hashed as the REFERENCE
+    /// string, never the manifest's mutable contents (see [`crate::reconcile::hashing`]).
+    pub manifest_refs: Vec<PackageRef>,
     /// The single GitHub work label parsed from `### Work Label`.
     pub work_label: Option<String>,
     /// The optional named environment parsed from `### Environment`.
@@ -156,6 +163,14 @@ pub enum KillReason {
 
 /// One reconciliation action. The output of [`plan_repo`]; PR5b's executor turns
 /// each into the corresponding Kubernetes/GitHub call.
+// The `Spawn`/`AnnounceSession` variants inherently carry a full
+// `SessionRegistration` / the announce metadata, so the enum is naturally large and
+// the inter-variant size gap widens by design each time a launch input is added
+// (here: `manifest_refs`). These actions are produced into a short `Vec` once per
+// reconcile pass, so the size is not hot; boxing `Spawn.reg` would ripple the type
+// through the executor + every test constructor for no real benefit — deferred as a
+// separate refactor rather than folded into this field addition.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReconcileAction {
     /// Spawn a session pod for this registration (it is desired but absent).
