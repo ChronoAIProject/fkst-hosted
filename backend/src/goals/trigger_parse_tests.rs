@@ -744,7 +744,16 @@ fn the_full_pristine_bundled_template_parses_with_its_sample_values() {
     let body = include_str!("../github_app/templates_assets/fkst-substrate-session.md");
     let spec = parse_trigger_issue_body(body).expect("the pristine template must parse");
     assert_eq!(spec.name, "my-first-session");
-    assert_eq!(spec.work_label.as_deref(), Some("fkst-work"));
+    // `### Work Label` is now an optional, comment-only section (no default
+    // value) — a pristine template parses to `None`, and the session
+    // auto-detects its wake labels from its packages' `[github].work_labels`.
+    assert_eq!(spec.work_label, None, "comment-only Work Label is unset");
+    // `### Manifest` is likewise optional and comment-only in the pristine
+    // template, so no manifest references are carried.
+    assert!(
+        spec.manifest_refs.is_empty(),
+        "comment-only Manifest section carries no references"
+    );
     assert_eq!(spec.packages.len(), 1);
     assert_eq!(spec.packages[0].repo, "fkst-packages");
     assert_eq!(spec.environment, None, "comment-only section is unset");

@@ -30,14 +30,23 @@ at a PUBLIC repo that has an `fkst.toml` at that path. At least one is required.
 -->
 ChronoAIProject/fkst-packages@main:packages/example
 
+### Manifest
+
+<!--
+Optional. One `owner/repo@ref:path` per line pointing at a fkst-manifest JSON (a
+reusable package bundle) — its packages are added to any you list in `### Packages`.
+Delete this section if unused.
+-->
+
 ### Work Label
 
 <!--
-One line. The GitHub label whose OPEN issues are this session's work queue. Max 50
-characters, no commas. Create work items as separate issues carrying this label
-(see the "fkst work item" template).
+Optional. Delete this whole section to auto-detect the work label(s) from your
+packages' `[github].work_labels` — a session with no explicit label is driven by
+every label its packages declare. Otherwise name ONE GitHub label whose OPEN issues
+are this session's work queue: max 50 characters, no commas. Create work items as
+separate issues carrying this label (see the "fkst work item" template).
 -->
-fkst-work
 
 ### Environment
 
