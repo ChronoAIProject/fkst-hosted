@@ -242,6 +242,7 @@ pub(super) fn registration() -> SessionRegistration {
                     path: "packages/proxy".to_string(),
                 },
             ],
+            manifest_refs: vec![],
             work_label: Some("fkst-run".to_string()),
             environment: None,
             output_lang: None,

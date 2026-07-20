@@ -32,6 +32,14 @@ use crate::goals::section_parse::{
 /// The canonical `fkst-substrate-trigger` section headings, in template order.
 const HEADING_SESSION_NAME: &str = "### Session Name";
 const HEADING_PACKAGES: &str = "### Packages";
+/// The OPTIONAL `### Manifest` section (epic #594 I3). Zero or more GitHub
+/// references spelled IDENTICALLY to a `### Packages` line (`owner/repo@ref:path`):
+/// a fkst-manifest is a JSON file that a LATER pass expands into a package list.
+/// Because a manifest ref and a package ref are indistinguishable by spelling, they
+/// are disambiguated POSITIONALLY — a ref under `### Manifest` is a manifest, a ref
+/// under `### Packages` is a package. This PR only PARSES + CARRIES the reference; it
+/// does NOT fetch or expand it.
+const HEADING_MANIFEST: &str = "### Manifest";
 const HEADING_WORK_LABEL: &str = "### Work Label";
 const HEADING_ENVIRONMENT: &str = "### Environment";
 const HEADING_AUTO_MERGE: &str = "### Auto-merge";
@@ -114,6 +122,14 @@ pub struct TriggerSpec {
     /// is a fully-qualified GitHub package reference (`owner/repo@ref:path`);
     /// fetching + resolving it is deferred to a later pass.
     pub packages: Vec<PackageRef>,
+    /// One [`PackageRef`] per non-empty `### Manifest` line, in author order (epic
+    /// #594 I3). Each is a fully-qualified GitHub reference (`owner/repo@ref:path`,
+    /// the SAME grammar as `### Packages`) to a fkst-manifest JSON file that a LATER
+    /// pass will expand into a package list. OPTIONAL: an absent or blank section
+    /// yields an empty Vec. This PR carries the REFERENCE only — no fetch, no
+    /// expansion (which is exactly why the config hash is over the reference, not the
+    /// manifest's mutable contents; see [`crate::reconcile::hashing`]).
+    pub manifest_refs: Vec<PackageRef>,
     /// The OPTIONAL explicit GitHub work label the `### Work Label` section names.
     /// `None` when the section is absent — the session's wake labels are then
     /// auto-discovered from its packages' `[github].work_labels`
@@ -168,6 +184,7 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
 
     let name = parse_session_name(&sections)?;
     let packages = parse_packages(&sections)?;
+    let manifest_refs = parse_manifest_refs(&sections)?;
     let work_label = parse_work_label(&sections)?;
 
     // `### Environment` — OPTIONAL, reusing the shared rule verbatim: absent or
@@ -199,6 +216,7 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
     Ok(TriggerSpec {
         name,
         packages,
+        manifest_refs,
         work_label,
         environment,
         auto_merge,
@@ -459,6 +477,30 @@ fn parse_package_ref(value: &str) -> Result<PackageRef, AppError> {
         git_ref: git_ref.to_string(),
         path: path.to_string(),
     })
+}
+
+/// `### Manifest` — OPTIONAL; zero or more non-empty lines, EACH a fully-qualified
+/// GitHub reference `owner/repo@ref:path`. Reuses [`parse_package_ref`] VERBATIM, so
+/// the grammar, path-safety, and 422-on-malformed behavior are byte-for-byte those of
+/// `### Packages`. A manifest is a JSON file a LATER pass expands into packages; this
+/// PR only parses + carries the reference. Absent, blank, or comment-only → an empty
+/// Vec (the template's explanatory `<!-- … -->` is stripped first, as the other
+/// optional sections do, so a pristine section never errors). Unlike `### Packages`,
+/// an EMPTY `### Manifest` is not a 422 — the section is optional.
+fn parse_manifest_refs(sections: &[(String, String)]) -> Result<Vec<PackageRef>, AppError> {
+    let Some((_, content)) = sections
+        .iter()
+        .find(|(heading, _)| heading == HEADING_MANIFEST)
+    else {
+        return Ok(Vec::new());
+    };
+    let block = strip_html_comments(content);
+    let lines = non_empty_lines(&block);
+    let mut manifest_refs = Vec::with_capacity(lines.len());
+    for line in &lines {
+        manifest_refs.push(parse_package_ref(line)?);
+    }
+    Ok(manifest_refs)
 }
 
 /// `### Work Label` — required; EXACTLY ONE non-empty line that is a valid GitHub

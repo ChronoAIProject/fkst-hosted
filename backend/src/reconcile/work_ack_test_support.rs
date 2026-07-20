@@ -292,6 +292,7 @@ pub(super) fn registration(name: &str, work_label: &str) -> SessionRegistration 
         def: SessionDef {
             name: name.to_string(),
             packages: Vec::new(),
+            manifest_refs: Vec::new(),
             work_label: Some(work_label.to_string()),
             environment: None,
             output_lang: None,

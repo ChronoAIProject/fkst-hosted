@@ -72,6 +72,7 @@ prod-env
                     path: "pkg/thing".to_string(),
                 },
             ],
+            manifest_refs: vec![],
             work_label: Some("fkst-cloud".to_string()),
             environment: Some("prod-env".to_string()),
             auto_merge: false,
@@ -459,6 +460,126 @@ fn package_ref_illegal_space_char_is_422_naming_the_value() {
         "must echo the value: {msg}"
     );
     assert!(msg.contains("path"), "must flag the path part: {msg}");
+}
+
+// ---- Manifest (optional; reuses the `### Packages` grammar verbatim) ----
+
+/// Build a body with the required sections held valid plus a `### Manifest`
+/// section carrying `val`, so a parse's `manifest_refs` reflects only that value.
+fn body_with_manifest(val: &str) -> String {
+    format!(
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Manifest\n{val}\n### Work Label\nlabel\n"
+    )
+}
+
+#[test]
+fn manifest_absent_defaults_empty() {
+    let spec = parse_trigger_issue_body(&body_with_package(VALID_PKG)).expect("parses");
+    assert!(
+        spec.manifest_refs.is_empty(),
+        "an absent `### Manifest` section defaults to an empty list"
+    );
+}
+
+#[test]
+fn manifest_single_ref_parses_with_the_package_grammar() {
+    let spec = parse_trigger_issue_body(&body_with_manifest(
+        "acme/manifests@main:manifests/team.json",
+    ))
+    .expect("a valid manifest ref parses");
+    assert_eq!(
+        spec.manifest_refs,
+        vec![PackageRef {
+            owner: "acme".to_string(),
+            repo: "manifests".to_string(),
+            git_ref: "main".to_string(),
+            path: "manifests/team.json".to_string(),
+        }],
+        "the `### Manifest` ref uses the identical `owner/repo@ref:path` grammar"
+    );
+}
+
+#[test]
+fn manifest_multiple_refs_parse_in_author_order() {
+    let body = body_with_manifest("acme/manifests@main:a.json\nacme/manifests@dev:b.json");
+    let spec = parse_trigger_issue_body(&body).expect("parses");
+    assert_eq!(spec.manifest_refs.len(), 2);
+    assert_eq!(spec.manifest_refs[0].path, "a.json");
+    assert_eq!(spec.manifest_refs[1].git_ref, "dev");
+}
+
+#[test]
+fn manifest_malformed_ref_is_422_reusing_the_package_grammar() {
+    // The manifest reuses `parse_package_ref` VERBATIM, so a malformed line is the
+    // same 422 (path-safety and all) as a malformed `### Packages` line — here a ref
+    // missing its `:` separator.
+    let msg = err_message(&body_with_manifest("owner/repo@dev"));
+    assert!(
+        msg.contains("owner/repo@dev"),
+        "must echo the offending value: {msg}"
+    );
+    // Path-traversal safety carries over identically.
+    let traversal = err_message(&body_with_manifest("o/r@dev:foo/../bar"));
+    assert!(
+        traversal.contains(".."),
+        "must reject a `..` traversal like `### Packages` does: {traversal}"
+    );
+}
+
+#[test]
+fn manifest_blank_or_comment_only_section_is_empty() {
+    // Blank section.
+    let spec = parse_trigger_issue_body(&body_with_manifest("   \n\n")).expect("parses");
+    assert!(
+        spec.manifest_refs.is_empty(),
+        "a blank section yields empty"
+    );
+    // Comment-only (pristine template) section: the comment is stripped before
+    // tokenizing, so no prose leaks in — an empty list, never a 422.
+    let spec = parse_trigger_issue_body(&body_with_manifest(
+        "<!--\nOptional. One owner/repo@ref:path per line.\n-->",
+    ))
+    .expect("comment-only section parses");
+    assert!(
+        spec.manifest_refs.is_empty(),
+        "a comment-only `### Manifest` section parses to an empty list"
+    );
+}
+
+#[test]
+fn manifest_and_packages_are_independent_lists() {
+    // A ref under `### Manifest` is a manifest; a ref under `### Packages` is a
+    // package — they never bleed into each other (positional disambiguation).
+    let body = "### Session Name\nsess\n### Packages\no/r@dev:pkg\n### Manifest\nacme/manifests@main:m.json\n### Work Label\nlabel\n";
+    let spec = parse_trigger_issue_body(body).expect("both sections parse");
+    assert_eq!(spec.packages.len(), 1);
+    assert_eq!(spec.packages[0].path, "pkg");
+    assert_eq!(spec.manifest_refs.len(), 1);
+    assert_eq!(spec.manifest_refs[0].repo, "manifests");
+}
+
+#[test]
+fn duplicate_manifest_heading_is_422() {
+    // Matches every other section: a duplicate `### ` heading is a 422 naming it.
+    let body = format!(
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Manifest\nacme/m@main:a.json\n### Manifest\nacme/m@main:b.json\n### Work Label\nlabel\n"
+    );
+    let msg = err_message(&body);
+    assert!(msg.contains("duplicate"), "must flag the duplicate: {msg}");
+    assert!(msg.contains("Manifest"), "must name the section: {msg}");
+}
+
+#[test]
+fn manifest_present_does_not_relax_the_packages_requirement() {
+    // A manifest does NOT substitute for `### Packages` in this PR: a body with a
+    // manifest but no packages is still a 422 (the manifest-only allowance lands with
+    // the later expansion pass).
+    let body = "### Session Name\nsess\n### Manifest\nacme/m@main:a.json\n### Work Label\nlabel\n";
+    let msg = err_message(body);
+    assert!(
+        msg.contains("Packages"),
+        "the `### Packages` section is still required: {msg}"
+    );
 }
 
 // ---- Work Label (each names the offending section in the 422) ----

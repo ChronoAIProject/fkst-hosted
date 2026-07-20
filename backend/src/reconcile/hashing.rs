@@ -54,11 +54,19 @@ fn hex_digest<T: Serialize>(value: &T, what: &str) -> String {
 }
 
 /// A stable content hash over a session's launch inputs: its ordered package
-/// references, its work label, its optional environment, and its optional output
-/// language. Mirrors [`crate::k8s::env_store_meta::content_hash`] (canonical JSON
-/// → SHA-256 hex) so a live pod's recorded hash can be compared for drift. Stable
-/// and, for a fixed package ORDER, deterministic (packages are author-ordered, so
-/// order is part of the identity).
+/// references, its work label, its optional environment, its optional output
+/// language, its engine config, and its ordered fkst-manifest references. Mirrors
+/// [`crate::k8s::env_store_meta::content_hash`] (canonical JSON → SHA-256 hex) so a
+/// live pod's recorded hash can be compared for drift. Stable and, for a fixed
+/// package ORDER, deterministic (packages are author-ordered, so order is part of the
+/// identity).
+///
+/// HASH-BY-REFERENCE INVARIANT (`manifest_refs`): the manifest is hashed as the
+/// author's REFERENCE string (`owner/repo@ref:path`), NOT its expanded contents —
+/// there is no expansion here, which is the whole point. The referenced JSON file is
+/// mutable; hashing its bytes would flip a session's config hash on any upstream edit
+/// (a false `fkst-config-rejected` + respawn). Hashing the reference pins the config
+/// to what the author wrote, so only an author edit to the ref moves the hash.
 ///
 /// DIGEST-STABILITY INVARIANT: fields added after the original trio serialize
 /// ONLY when set (`skip_serializing_if`), so a config that does not use them
@@ -72,6 +80,7 @@ pub fn config_hash(
     environment: Option<&str>,
     output_lang: Option<&str>,
     engine_config: &BTreeMap<String, String>,
+    manifest_refs: &[PackageRef],
 ) -> String {
     #[derive(Serialize)]
     struct Canonical<'a> {
@@ -86,6 +95,13 @@ pub fn config_hash(
         output_lang: Option<&'a str>,
         #[serde(skip_serializing_if = "BTreeMap::is_empty")]
         engine_config: &'a BTreeMap<String, String>,
+        // The manifest REFERENCES (epic #594 I3), appended LAST and skip-if-empty so
+        // a session WITHOUT a manifest serializes byte-for-byte as it did before the
+        // field existed — no fleet-wide hash drift. A non-empty list flips the hash.
+        // These are the REFERENCE strings only (owner/repo@ref:path), never the
+        // manifest's contents — see the hash-by-reference invariant above.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        manifest_refs: Vec<CanonPackage<'a>>,
     }
     let canonical = Canonical {
         packages: canon_packages(packages),
@@ -93,6 +109,7 @@ pub fn config_hash(
         environment,
         output_lang,
         engine_config,
+        manifest_refs: canon_packages(manifest_refs),
     };
     hex_digest(&canonical, "config-hash")
 }
@@ -108,12 +125,14 @@ pub fn config_hash(
 ///
 /// Canonical form: SHA-256 over the canonical JSON of
 /// `{packages, work_label, environment, name, auto_merge, log_access, output_lang,
-/// engine_config, collaborators}` (the optional trailing fields serialize only when
-/// set — see the digest-stability invariant on [`config_hash`]). The field order
-/// below IS part of the canonical form (serde serialises in declaration order), so
-/// identical inputs always hash identically and any changed field flips the hash —
-/// including `log_access` and `collaborators`, so both are FROZEN by the
-/// config-immutability check (neither can be widened after registration).
+/// engine_config, collaborators, manifest_refs}` (the optional trailing fields
+/// serialize only when set — see the digest-stability invariant on [`config_hash`]).
+/// The field order below IS part of the canonical form (serde serialises in
+/// declaration order), so identical inputs always hash identically and any changed
+/// field flips the hash — including `log_access`, `collaborators`, and the manifest
+/// references, so all are FROZEN by the config-immutability check (none can be
+/// widened after registration). `manifest_refs` is hashed BY REFERENCE, never by the
+/// referenced file's contents — see the hash-by-reference invariant on [`config_hash`].
 pub fn full_config_hash(reg: &SessionRegistration) -> String {
     #[derive(Serialize)]
     struct Canonical<'a> {
@@ -138,6 +157,15 @@ pub fn full_config_hash(reg: &SessionRegistration) -> String {
         // full hash, FREEZING the list under config-immutability.
         #[serde(skip_serializing_if = "<[String]>::is_empty")]
         collaborators: &'a [String],
+        // The fkst-manifest REFERENCES (epic #594 I3). Appended LAST (after
+        // collaborators) and skip-if-empty for the same digest-stability reason: a
+        // manifest-free session hashes byte-for-byte as it did before this field
+        // existed. Hashed as the REFERENCE strings only (owner/repo@ref:path), never
+        // the manifest's mutable contents — see the hash-by-reference invariant on
+        // [`config_hash`]. A non-empty list flips the full hash, FREEZING the
+        // references under config-immutability.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        manifest_refs: Vec<CanonPackage<'a>>,
     }
     let canonical = Canonical {
         packages: canon_packages(&reg.def.packages),
@@ -149,6 +177,7 @@ pub fn full_config_hash(reg: &SessionRegistration) -> String {
         output_lang: reg.def.output_lang.as_deref(),
         engine_config: &reg.def.engine_config,
         collaborators: &reg.collaborators,
+        manifest_refs: canon_packages(&reg.def.manifest_refs),
     };
     hex_digest(&canonical, "full-config-hash")
 }

@@ -70,6 +70,10 @@ fn valid_body_yields_a_registration() {
         reg.collaborators.is_empty(),
         "a body with no Session Collaborators section has an empty list"
     );
+    assert!(
+        reg.def.manifest_refs.is_empty(),
+        "a body with no Manifest section has an empty manifest list"
+    );
 
     // The session id + config hash must match the canonical derivations.
     let want_id = derive_session_id(INSTALLATION_ID, "acme", "site", 7);
@@ -80,6 +84,7 @@ fn valid_body_yields_a_registration() {
         None,
         None,
         &reg.def.engine_config,
+        &reg.def.manifest_refs,
     );
     assert_eq!(reg.config_hash, want_hash);
 }
@@ -117,7 +122,8 @@ fn environment_section_is_captured() {
             reg.def.work_label.as_deref(),
             Some("staging"),
             None,
-            &reg.def.engine_config
+            &reg.def.engine_config,
+            &reg.def.manifest_refs
         )
     );
 }
@@ -147,9 +153,59 @@ fn collaborators_section_round_trips_onto_the_registration() {
             reg.def.work_label.as_deref(),
             None,
             None,
-            &reg.def.engine_config
+            &reg.def.engine_config,
+            &reg.def.manifest_refs
         ),
         "collaborators must not affect config_hash"
+    );
+}
+
+#[test]
+fn manifest_section_round_trips_onto_the_registration() {
+    let body = "### Session Name\n\
+                demo\n\n\
+                ### Packages\n\
+                acme/tools@main:pkg/demo\n\n\
+                ### Manifest\n\
+                acme/manifests@main:manifests/team.json\n\n\
+                ### Work Label\n\
+                fkst-demo\n";
+    let reg = parse_registration(INSTALLATION_ID, &repo(), &issue(17, body, 1)).expect("parses");
+    assert_eq!(
+        reg.def.manifest_refs,
+        vec![PackageRef {
+            owner: "acme".to_string(),
+            repo: "manifests".to_string(),
+            git_ref: "main".to_string(),
+            path: "manifests/team.json".to_string(),
+        }],
+        "the `### Manifest` refs thread onto the registration"
+    );
+    // The manifest REFERENCE (never its unfetched contents) participates in
+    // config_hash: the registration's hash equals the derivation that includes the
+    // manifest ref, and differs from the no-manifest derivation.
+    assert_eq!(
+        reg.config_hash,
+        config_hash(
+            &reg.def.packages,
+            reg.def.work_label.as_deref(),
+            None,
+            None,
+            &reg.def.engine_config,
+            &reg.def.manifest_refs,
+        ),
+    );
+    assert_ne!(
+        reg.config_hash,
+        config_hash(
+            &reg.def.packages,
+            reg.def.work_label.as_deref(),
+            None,
+            None,
+            &reg.def.engine_config,
+            &[],
+        ),
+        "the manifest ref moves the config hash"
     );
 }
 

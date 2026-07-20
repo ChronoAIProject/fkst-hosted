@@ -318,6 +318,7 @@ fn authz_registration(
         def: SessionDef {
             name: String::new(),
             packages: Vec::new(),
+            manifest_refs: Vec::new(),
             work_label: None,
             environment: None,
             output_lang: None,

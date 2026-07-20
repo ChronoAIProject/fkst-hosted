@@ -122,6 +122,7 @@ fn registration(trigger_author_id: i64, collaborators: &[&str]) -> SessionRegist
         def: SessionDef {
             name: "demo".to_string(),
             packages: Vec::<PackageRef>::new(),
+            manifest_refs: Vec::<PackageRef>::new(),
             work_label: Some("fkst-run".to_string()),
             environment: None,
             output_lang: None,
