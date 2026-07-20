@@ -10,13 +10,25 @@ import type { LogFileContent, LogManifest } from './types';
  *  read and keeps the response (and the DOM) bounded on multi-MB logs. */
 export const DEFAULT_LOG_TAIL_BYTES = 200 * 1024;
 
+/** Error carrying the HTTP status of a failed log request so a caller can tell
+ *  503 (log storage not configured for this deployment) from a transient
+ *  failure without string-matching. */
+export class LogError extends Error {
+  readonly status: number;
+  constructor(kind: 'manifest' | 'file', status: number) {
+    super(`log ${kind} failed: ${status}`);
+    this.name = 'LogError';
+    this.status = status;
+  }
+}
+
 /** GET /api/v1/logs/{session_id}/manifest — the bundle's file listing. */
 export async function getLogManifest(
   apiFetch: ApiFetch,
   sessionId: string
 ): Promise<LogManifest> {
   const res = await apiFetch(`/api/v1/logs/${encodeURIComponent(sessionId)}/manifest`);
-  if (!res.ok) throw new Error(`log manifest failed: ${res.status}`);
+  if (!res.ok) throw new LogError('manifest', res.status);
   const body = (await res.json()) as LogManifest;
   assertShape(Array.isArray(body?.files), 'log manifest');
   return body;
@@ -37,7 +49,7 @@ export async function getLogFile(
   const res = await apiFetch(
     `/api/v1/logs/${encodeURIComponent(sessionId)}/file?${query.toString()}`
   );
-  if (!res.ok) throw new Error(`log file failed: ${res.status}`);
+  if (!res.ok) throw new LogError('file', res.status);
   const body = (await res.json()) as LogFileContent;
   assertShape(typeof body?.content === 'string', 'log file');
   return body;

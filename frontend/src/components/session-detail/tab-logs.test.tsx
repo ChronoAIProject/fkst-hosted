@@ -148,6 +148,25 @@ describe('TabLogs', () => {
     expect(await screen.findByText('driver.log')).toBeInTheDocument();
   });
 
+  it('explains a 503 manifest error as unconfigured log storage', async () => {
+    // A 503 from the manifest endpoint means the deployment has no log storage;
+    // the copy says so specifically instead of the generic failure line.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/manifest')) return jsonResponse(null, 503);
+        return jsonResponse(fileContent);
+      })
+    );
+    renderLogs();
+    expect(
+      await screen.findByText("Log storage isn't configured for this deployment.")
+    ).toBeInTheDocument();
+    // The generic failure line is NOT shown for a 503.
+    expect(screen.queryByText('Could not load the session logs.')).not.toBeInTheDocument();
+  });
+
   it('drops a stale in-flight response when the file selection changes (B1)', async () => {
     const user = userEvent.setup();
     // The first-selected file (driver) resolves slowly; the newly-selected file

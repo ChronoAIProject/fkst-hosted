@@ -318,13 +318,73 @@ describe('decodeSessionStatus', () => {
     expect(d.health).toBe('degraded');
   });
 
-  it('is active from the active label or from live pod liveness', () => {
-    expect(
-      decodeSessionStatus(sessionFixture({ status_labels: ['fkst-substrate-active'] })).phase
-    ).toBe('active');
+  it('is active ONLY with a live pod — a latched active label alone is not active', () => {
     const live = decodeSessionStatus(sessionFixture({ liveness: 'live' }));
     expect(live.phase).toBe('active');
     expect(live.health).toBe('ok');
+    // The announce label is a DURABLE latch (set once at registration, never
+    // removed): with the pod reaped (no live liveness) and no open work, the
+    // session is idle (paused) — NOT active on the stale label alone.
+    expect(
+      decodeSessionStatus(sessionFixture({ status_labels: ['fkst-substrate-active'] })).phase
+    ).toBe('idle');
+  });
+
+  it('resolves an announced, pod-reaped session with no open work to idle (paused)', () => {
+    // Core new case: trigger OPEN, announced before, no live pod, no OPEN work.
+    expect(
+      decodeSessionStatus(
+        sessionFixture({ status_labels: ['fkst-substrate-active'], liveness: null, work_issues: [] })
+      ).phase
+    ).toBe('idle');
+    // A non-live liveness (starting/terminating) with no open work is still idle.
+    expect(
+      decodeSessionStatus(
+        sessionFixture({
+          status_labels: ['fkst-substrate-active'],
+          liveness: 'terminating',
+          work_issues: [],
+        })
+      ).phase
+    ).toBe('idle');
+    // A session that finished all its work (every item closed) is idle too.
+    expect(
+      decodeSessionStatus(
+        sessionFixture({
+          status_labels: ['fkst-substrate-active'],
+          liveness: null,
+          work_issues: [
+            issueFixture({ number: 2, state: 'closed', closed_at: '2026-07-02T00:00:00Z' }),
+          ],
+        })
+      ).phase
+    ).toBe('idle');
+  });
+
+  it('does not read idle when a live pod runs or work is pending', () => {
+    // Live pod → active, never idle, even with an empty work queue.
+    expect(
+      decodeSessionStatus(
+        sessionFixture({ status_labels: ['fkst-substrate-active'], liveness: 'live', work_issues: [] })
+      ).phase
+    ).toBe('active');
+    // Announced with an OPEN work item but no live pod → reviving (picked-up).
+    expect(
+      decodeSessionStatus(
+        sessionFixture({
+          status_labels: ['fkst-substrate-active'],
+          liveness: null,
+          work_issues: [issueFixture({ number: 2, state: 'open' })],
+        })
+      ).phase
+    ).toBe('picked-up');
+  });
+
+  it('reads a never-activated open trigger as registered, not idle', () => {
+    // No announce label, no live pod, open trigger → registered (never ran yet).
+    expect(
+      decodeSessionStatus(sessionFixture({ status_labels: [], liveness: null })).phase
+    ).toBe('registered');
   });
 
   it('falls back to registered (open trigger, no markers) then picked-up/idle', () => {
