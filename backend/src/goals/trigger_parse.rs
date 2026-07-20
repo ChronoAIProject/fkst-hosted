@@ -185,6 +185,19 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
     let name = parse_session_name(&sections)?;
     let packages = parse_packages(&sections)?;
     let manifest_refs = parse_manifest_refs(&sections)?;
+    // A session needs SOME package source. Since I7 a `### Manifest` reference can supply
+    // the packages, so the hard `### Packages`-required rule is relaxed to "≥1 of
+    // `### Packages` / `### Manifest`": a trigger declaring neither is a 422. (The real
+    // guard that the effective set is non-empty is the reconcile driver's post-expansion
+    // check — a manifest could in principle fail to contribute — but rejecting the
+    // obviously-empty case here gives the author immediate, cheap feedback.)
+    if packages.is_empty() && manifest_refs.is_empty() {
+        return Err(AppError::Unprocessable(
+            "the trigger must list at least one package source: a `### Packages` line or a \
+             `### Manifest` reference"
+                .to_string(),
+        ));
+    }
     let work_label = parse_work_label(&sections)?;
 
     // `### Environment` — OPTIONAL, reusing the shared rule verbatim: absent or
@@ -379,24 +392,23 @@ fn parse_session_name(sections: &[(String, String)]) -> Result<String, AppError>
     }
 }
 
-/// `### Packages` — required; at least one non-empty line, EACH a fully-qualified
-/// GitHub package reference `owner/repo@ref:path`. A missing/empty section, or any
-/// malformed line, is a 422 naming the section (and, for a malformed line, the
-/// offending value and which part failed).
+/// `### Packages` — OPTIONAL since I7 (epic #594): a `### Manifest` reference can now
+/// supply a session's packages, so an absent or blank `### Packages` section yields an
+/// EMPTY list rather than a 422. Each non-empty line must still be a fully-qualified
+/// GitHub package reference `owner/repo@ref:path` — a malformed line is a 422 naming the
+/// section, the offending value, and which part failed. The "must have SOME package
+/// source" rule now lives in [`parse_trigger_issue_body`] (≥1 of `### Packages` /
+/// `### Manifest`), and the real guard is the reconcile driver's post-expansion
+/// empty-union check.
 fn parse_packages(sections: &[(String, String)]) -> Result<Vec<PackageRef>, AppError> {
-    let block = sections
+    let Some((_, content)) = sections
         .iter()
         .find(|(heading, _)| heading == HEADING_PACKAGES)
-        .map(|(_, content)| strip_html_comments(content))
-        .ok_or_else(|| {
-            AppError::Unprocessable("the `### Packages` section is required".to_string())
-        })?;
+    else {
+        return Ok(Vec::new());
+    };
+    let block = strip_html_comments(content);
     let lines = non_empty_lines(&block);
-    if lines.is_empty() {
-        return Err(AppError::Unprocessable(
-            "the `### Packages` section must list at least one package".to_string(),
-        ));
-    }
     let mut packages = Vec::with_capacity(lines.len());
     for line in &lines {
         packages.push(parse_package_ref(line)?);

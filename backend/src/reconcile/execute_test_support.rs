@@ -248,6 +248,22 @@ pub(super) fn registration() -> SessionRegistration {
             output_lang: None,
             engine_config: std::collections::BTreeMap::new(),
         },
+        // A manifest-free registration: the effective set equals the explicit packages, so
+        // `package_roots` + reachability read exactly these two refs.
+        effective_packages: vec![
+            PackageRef {
+                owner: "ChronoAIProject".to_string(),
+                repo: "fkst-packages".to_string(),
+                git_ref: "dev".to_string(),
+                path: "packages/github-devloop".to_string(),
+            },
+            PackageRef {
+                owner: "acme".to_string(),
+                repo: "pkgs".to_string(),
+                git_ref: "main".to_string(),
+                path: "packages/proxy".to_string(),
+            },
+        ],
         session_id: "sess-abc".to_string(),
         config_hash: "hash123".to_string(),
         auto_merge: false,

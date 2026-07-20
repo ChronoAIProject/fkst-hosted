@@ -46,6 +46,13 @@ pub fn parse_registration(
         &spec.manifest_refs,
     );
 
+    // Manifest-free default for `effective_packages`: the explicit packages. The
+    // reconcile driver's expand pass ([`crate::reconcile::effective_packages`]) overwrites
+    // this with (explicit ∪ manifest-expanded) before any consumer reads it, so a
+    // manifest-free session stays byte-identical. Cloned here because `spec.packages` is
+    // moved into `def.packages` below.
+    let effective_packages = spec.packages.clone();
+
     Ok(SessionRegistration {
         installation_id,
         repo: repo.clone(),
@@ -61,6 +68,7 @@ pub fn parse_registration(
             output_lang: spec.output_lang,
             engine_config: spec.engine_config,
         },
+        effective_packages,
         session_id,
         config_hash: hash,
         auto_merge: spec.auto_merge,

@@ -170,14 +170,15 @@ async fn spawn_session(
 ) {
     let owner_repo = format!("{}/{}", reg.repo.owner, reg.repo.name);
 
-    // 1. Reachability: every package ref must resolve on public GitHub. A failure
-    //    flags the trigger issue (comment + latch label) and skips the spawn. The
-    //    probe is authenticated with the repo's installation token (best-effort mint;
-    //    falls back to unauthenticated) so a large package closure across repeated
-    //    reconciles rides the 5000/hour token budget, not the 60/hour per-IP one.
+    // 1. Reachability: every EFFECTIVE package ref (explicit ∪ manifest-expanded, I7)
+    //    must resolve on public GitHub. A failure flags the trigger issue (comment +
+    //    latch label) and skips the spawn. The probe is authenticated with the repo's
+    //    installation token (best-effort mint; falls back to unauthenticated) so a large
+    //    package closure across repeated reconciles rides the 5000/hour token budget, not
+    //    the 60/hour per-IP one.
     let reach_token = ctx.github.token_for_repo(&owner_repo, None).await.ok();
     if let Err(bad) = reachability::check_reachable(
-        &reg.def.packages,
+        &reg.effective_packages,
         &ctx.http,
         &ctx.config.github_api_base_url,
         reach_token.as_ref().map(|t| t.expose_secret()),
@@ -275,12 +276,13 @@ async fn spawn_session(
 }
 
 /// Build the launch spec from a registration + its effective work-label set (pure;
-/// unit-tested). `package_roots` are the refs rendered back to `owner/repo@ref:path`;
-/// the pod's `work_label` is the comma-joined `detected_work_labels` (the explicit
-/// `### Work Label` ∪ package-discovered labels — the set that actually wakes the
-/// session), NOT just the explicit label, so a `### Work Label`-less session runs on its
-/// packages' auto-declared labels (epic #594 I4). `bot_login` falls back to empty when
-/// unset.
+/// unit-tested). `package_roots` are the EFFECTIVE package refs (explicit ∪
+/// manifest-expanded, I7) rendered back to `owner/repo@ref:path` — so the pod clones a
+/// manifest's packages too (`FKST_SESSION_PACKAGE_ROOTS`). The pod's `work_label` is the
+/// comma-joined `detected_work_labels` (the explicit `### Work Label` ∪ package-discovered
+/// labels — the set that actually wakes the session), NOT just the explicit label, so a
+/// `### Work Label`-less session runs on its packages' auto-declared labels (epic #594
+/// I4). `bot_login` falls back to empty when unset.
 fn session_pod_spec_from(
     reg: &SessionRegistration,
     detected_work_labels: &[String],
@@ -292,8 +294,7 @@ fn session_pod_spec_from(
         repo: reg.repo.clone(),
         trigger_issue_number: reg.trigger_issue,
         package_roots: reg
-            .def
-            .packages
+            .effective_packages
             .iter()
             .map(reachability::render_ref)
             .collect(),

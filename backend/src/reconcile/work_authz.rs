@@ -141,6 +141,7 @@ mod tests {
                 output_lang: None,
                 engine_config: std::collections::BTreeMap::new(),
             },
+            effective_packages: Vec::new(),
             session_id: "sess-abc".to_string(),
             config_hash: "hash123".to_string(),
             auto_merge: false,

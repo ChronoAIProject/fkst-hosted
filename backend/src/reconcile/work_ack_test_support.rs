@@ -298,6 +298,7 @@ pub(super) fn registration(name: &str, work_label: &str) -> SessionRegistration 
             output_lang: None,
             engine_config: std::collections::BTreeMap::new(),
         },
+        effective_packages: Vec::new(),
         session_id: "sess-1".to_string(),
         config_hash: "hash".to_string(),
         auto_merge: false,

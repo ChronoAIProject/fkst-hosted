@@ -342,14 +342,16 @@ fn invalid_session_name_chars_is_422_naming_the_value() {
 // ---- Packages (each names the section; malformed lines also name the value) ----
 
 #[test]
-fn missing_packages_lines_is_422_naming_the_section() {
-    // The heading is present but has zero non-empty lines.
+fn empty_packages_and_no_manifest_is_422_naming_the_section() {
+    // The `### Packages` heading is present but has zero non-empty lines, and there is no
+    // `### Manifest` — so the trigger has no package source at all (I7 relaxed the
+    // hard-require to "≥1 of `### Packages` / `### Manifest`").
     let body = "### Session Name\nsess\n### Packages\n\n### Work Label\nlabel\n";
     let msg = err_message(body);
     assert!(msg.contains("Packages"), "must name the section: {msg}");
     assert!(
         msg.contains("at least one"),
-        "must flag the emptiness: {msg}"
+        "must flag the missing package source: {msg}"
     );
 }
 
@@ -570,16 +572,36 @@ fn duplicate_manifest_heading_is_422() {
 }
 
 #[test]
-fn manifest_present_does_not_relax_the_packages_requirement() {
-    // A manifest does NOT substitute for `### Packages` in this PR: a body with a
-    // manifest but no packages is still a 422 (the manifest-only allowance lands with
-    // the later expansion pass).
+fn manifest_only_trigger_is_valid_without_a_packages_section() {
+    // Epic #594 I7: a `### Manifest` reference can now supply the session's packages, so a
+    // body with a manifest but NO `### Packages` section is VALID at parse. The
+    // post-expansion empty-union check (in the reconcile driver) is the real guard.
     let body = "### Session Name\nsess\n### Manifest\nacme/m@main:a.json\n### Work Label\nlabel\n";
+    let spec = parse_trigger_issue_body(body).expect("a manifest-only trigger parses");
+    assert!(
+        spec.packages.is_empty(),
+        "an absent `### Packages` section yields empty packages"
+    );
+    assert_eq!(
+        spec.manifest_refs.len(),
+        1,
+        "the manifest reference is carried for the driver to expand"
+    );
+    assert_eq!(spec.manifest_refs[0].repo, "m");
+}
+
+#[test]
+fn neither_packages_nor_manifest_is_422_naming_both_sources() {
+    // A trigger declaring NEITHER a `### Packages` line NOR a `### Manifest` reference has
+    // no package source at all — a 422 naming both remedies.
+    let body = "### Session Name\nsess\n### Work Label\nlabel\n";
     let msg = err_message(body);
     assert!(
-        msg.contains("Packages"),
-        "the `### Packages` section is still required: {msg}"
+        msg.contains("at least one"),
+        "must flag the missing package source: {msg}"
     );
+    assert!(msg.contains("Packages"), "must name `### Packages`: {msg}");
+    assert!(msg.contains("Manifest"), "must name `### Manifest`: {msg}");
 }
 
 // ---- Work Label (each names the offending section in the 422) ----

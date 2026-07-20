@@ -324,6 +324,7 @@ fn authz_registration(
             output_lang: None,
             engine_config: std::collections::BTreeMap::new(),
         },
+        effective_packages: Vec::new(),
         session_id: String::new(),
         config_hash: String::new(),
         auto_merge: false,
