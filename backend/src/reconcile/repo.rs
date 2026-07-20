@@ -12,9 +12,10 @@
 //! and retries next sweep). Per-ACTION effects are best-effort inside [`execute`],
 //! which never propagates, so one bad action never blocks the rest.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use k8s_openapi::chrono::Utc;
+use secrecy::SecretString;
 
 use crate::error::AppError;
 use crate::log_access::LogSessionContext;
@@ -24,6 +25,7 @@ use crate::reconcile::desired::{plan_repo, SessionRegistration};
 use crate::reconcile::execute::{execute, ReconcileCtx};
 use crate::reconcile::pending::{LabelCountPending, PendingWork};
 use crate::reconcile::registry::parse_registration;
+use crate::reconcile::work_authz::WorkAuthz;
 
 use super::{SUBSTRATE_ANNOUNCED_LABEL, SUBSTRATE_CONFIG_REJECTED_LABEL, SUBSTRATE_INVALID_LABEL};
 
@@ -147,6 +149,45 @@ pub async fn reconcile_repo(
     // upsert; carries only public metadata (ids + the allow-list), never a token.
     record_log_contexts(ctx, &regs);
 
+    // R3 work-issue AUTHORITY gate (epic #572). THREE states, resolved once per pass
+    // and shared by the reject surface + the pending gate:
+    //   - flag OFF                        -> WorkAuthz::off()      (byte-identical pre-R3)
+    //   - flag ON + admin lookup OK       -> enforce w/ the admin set
+    //   - flag ON + admin lookup FAILED   -> enforce w/ an EMPTY admin set: author ∪
+    //     collaborators (which need no API) are STILL enforced, so strangers are
+    //     still rejected during a transient blip; only the admin tier is unavailable
+    //     that pass (it recovers next sweep). Never a full fail-open.
+    // The admin fetch is skipped entirely (and stays off) when the flag is off or the
+    // repo has no registrations — one fetch per repo per pass, mirroring the
+    // per-config-hash work-label cache.
+    let authz = if cfg.enforce_work_issue_authz && !regs.is_empty() {
+        match ctx
+            .listing
+            .list_repo_admins(&token, &repo.owner, &repo.name)
+            .await
+        {
+            Ok(admins) => WorkAuthz::enforcing(admins),
+            Err(error) => {
+                tracing::warn!(
+                    owner_repo = %owner_repo,
+                    error = %error,
+                    "reconcile: repo-admin lookup failed; enforcing author+collaborators only this pass (admin tier unavailable)"
+                );
+                WorkAuthz::enforcing(Vec::new())
+            }
+        }
+    } else {
+        WorkAuthz::off()
+    };
+
+    // Resolve each session's FULL work-label set (explicit ∪ package-discovered) ONCE
+    // for this pass, keyed by session id. Shared by the reject surface (so it rejects
+    // over the same set the pending gate authorizes over — no asymmetry) and the
+    // pending gate below. Discovered labels are cached per config-hash (packages are
+    // immutable per session config), bounding the manifest fetches to one resolve per
+    // distinct session config.
+    let work_labels_by_session = resolve_work_label_sets(ctx, &token, &regs).await;
+
     // Best-effort, non-failing: if ANY registered session on this repo opted into
     // auto-merge (`### Auto-merge`), merge the App bot's mergeable open PRs. Mirrors
     // the ensure_issue_templates hook — a failure here never aborts the reconcile.
@@ -170,6 +211,8 @@ pub async fn reconcile_repo(
         &token,
         repo,
         &regs,
+        &work_labels_by_session,
+        &authz,
     )
     .await;
 
@@ -180,37 +223,27 @@ pub async fn reconcile_repo(
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("list substrate-session pods: {e}")))?;
 
-    // 4. Gate each registration on the open-issue count of its work-label SET:
-    //    the trigger's explicit label plus every label its packages auto-declare
-    //    (`[github].work_labels`, resolved transitively over `[event_deps]`). So a
-    //    session wakes on any of its packages' own labels without the operator
-    //    restating them in the trigger issue. Discovered labels are cached per
-    //    config-hash (packages are immutable per session config) to bound the
-    //    extra manifest fetches to one resolve per distinct session config.
+    // 4. Gate each registration on the open-issue count of its work-label SET
+    //    (`work_labels_by_session`, resolved above): the trigger's explicit label plus
+    //    every label its packages auto-declare (`[github].work_labels`, resolved
+    //    transitively over `[event_deps]`). So a session wakes on any of its packages'
+    //    own labels without the operator restating them in the trigger issue.
     let gate = LabelCountPending::new(ctx.listing.as_ref(), &token);
     let mut pending: HashMap<String, bool> = HashMap::new();
-    let mut discovered_cache: HashMap<String, std::collections::BTreeSet<String>> = HashMap::new();
     for reg in &regs {
-        let discovered = match discovered_cache.get(&reg.config_hash) {
-            Some(set) => set.clone(),
-            None => {
-                let set = crate::reconcile::work_labels::resolve_work_labels(
-                    &ctx.http,
-                    &ctx.config.github_api_base_url,
-                    &token,
-                    &reg.def.packages,
-                )
-                .await;
-                discovered_cache.insert(reg.config_hash.clone(), set.clone());
-                set
-            }
+        let labels = work_labels_by_session
+            .get(&reg.session_id)
+            .cloned()
+            .unwrap_or_default();
+        // When enforcing, a session is pending only while it has an OPEN work-label
+        // issue raised by an AUTHORIZED author; otherwise the cheap author-blind
+        // Search count (byte-identical pre-R3 behavior).
+        let is_pending = if authz.enforce {
+            gate.has_pending_authorized(installation_id, repo, &labels, reg, &authz.admins)
+                .await?
+        } else {
+            gate.has_pending(installation_id, repo, &labels).await?
         };
-        let mut labels: std::collections::BTreeSet<String> = discovered;
-        if let Some(wl) = &reg.def.work_label {
-            labels.insert(wl.clone());
-        }
-        let labels: Vec<String> = labels.into_iter().collect();
-        let is_pending = gate.has_pending(installation_id, repo, &labels).await?;
         pending.insert(reg.session_id.clone(), is_pending);
     }
 
@@ -239,6 +272,42 @@ pub async fn reconcile_repo(
         execute(action, repo, ctx).await;
     }
     Ok(())
+}
+
+/// Resolve every registration's FULL work-label set (explicit `### Work Label` ∪ the
+/// labels its packages auto-declare) into a `session_id -> labels` map, once per pass.
+/// Discovered labels are cached per `config_hash` (packages are immutable per session
+/// config), so the manifest fetches are bounded to one resolve per distinct config.
+/// Shared by the ack/reject surface and the pending gate so both act on the same set.
+async fn resolve_work_label_sets(
+    ctx: &ReconcileCtx,
+    token: &SecretString,
+    regs: &[SessionRegistration],
+) -> HashMap<String, Vec<String>> {
+    let mut discovered_cache: HashMap<String, BTreeSet<String>> = HashMap::new();
+    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    for reg in regs {
+        let discovered = match discovered_cache.get(&reg.config_hash) {
+            Some(set) => set.clone(),
+            None => {
+                let set = crate::reconcile::work_labels::resolve_work_labels(
+                    &ctx.http,
+                    &ctx.config.github_api_base_url,
+                    token,
+                    &reg.def.packages,
+                )
+                .await;
+                discovered_cache.insert(reg.config_hash.clone(), set.clone());
+                set
+            }
+        };
+        let mut labels: BTreeSet<String> = discovered;
+        if let Some(wl) = &reg.def.work_label {
+            labels.insert(wl.clone());
+        }
+        out.insert(reg.session_id.clone(), labels.into_iter().collect());
+    }
+    out
 }
 
 /// Upsert every valid registration's [`LogSessionContext`] into the shared registry

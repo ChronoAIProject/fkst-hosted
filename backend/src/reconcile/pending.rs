@@ -15,7 +15,9 @@ use secrecy::SecretString;
 
 use crate::error::AppError;
 use crate::github_app::listing::GithubListing;
-use crate::models::RepoRef;
+use crate::models::{GithubActor, RepoRef};
+use crate::reconcile::desired::SessionRegistration;
+use crate::reconcile::work_authz::is_work_author_allowed;
 
 /// The spawn/idle gate. Returns whether a session's work label still has open
 /// issues to claim (its "pending" signal). Injected so the driver is unit-testable
@@ -33,6 +35,24 @@ pub trait PendingWork: Send + Sync {
         installation_id: i64,
         repo: &RepoRef,
         work_labels: &[String],
+    ) -> Result<bool, AppError>;
+
+    /// Author-FILTERED pending gate (R3 authority gate, epic #572). Like
+    /// [`has_pending`](Self::has_pending), but a session is pending only while at
+    /// least one OPEN work-label issue was raised by an author AUTHORIZED to raise
+    /// work for it (the session's author ∪ Session Collaborators ∪ repo `admins`,
+    /// per [`is_work_author_allowed`]). Because GitHub Search cannot filter by
+    /// author, this ENUMERATES the label's open issues (not a blind count) so each
+    /// author can be checked; an empty label set is never pending. Used only when
+    /// the operator opts into enforcement — the driver keeps calling the cheap
+    /// blind [`has_pending`](Self::has_pending) when the flag is off.
+    async fn has_pending_authorized(
+        &self,
+        installation_id: i64,
+        repo: &RepoRef,
+        work_labels: &[String],
+        reg: &SessionRegistration,
+        admins: &[GithubActor],
     ) -> Result<bool, AppError>;
 }
 
@@ -74,6 +94,32 @@ impl PendingWork for LabelCountPending<'_> {
                 .count_open_issues_with_label(self.token, &repo.owner, &repo.name, label)
                 .await?;
             if count > 0 {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    async fn has_pending_authorized(
+        &self,
+        _installation_id: i64,
+        repo: &RepoRef,
+        work_labels: &[String],
+        reg: &SessionRegistration,
+        admins: &[GithubActor],
+    ) -> Result<bool, AppError> {
+        // Enumerate rather than count: the authorization decision needs each open
+        // issue's AUTHOR, which the Search count does not expose. Short-circuit on
+        // the first issue by an authorized author (labels OR'd, like `has_pending`).
+        for label in work_labels {
+            let issues = self
+                .listing
+                .list_issues_by_label(self.token, &repo.owner, &repo.name, label)
+                .await?;
+            if issues
+                .iter()
+                .any(|issue| is_work_author_allowed(reg, admins, issue.user_id, &issue.user_login))
+            {
                 return Ok(true);
             }
         }

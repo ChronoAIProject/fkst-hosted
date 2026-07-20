@@ -34,6 +34,10 @@ pub mod retire;
 pub mod seed_issue;
 pub mod templates;
 pub mod work_ack;
+// Pure work-issue AUTHORITY predicate (R3): which GitHub user may raise work for a
+// session (author ∪ Session Collaborators ∪ repo admins/org owners). Consumed by the
+// pending gate + the work-ack reject surface; gated behind an operator opt-in flag.
+pub mod work_authz;
 pub mod work_labels;
 
 // Shared executor/loop test fixtures (the recording GitHub transport, the ctx
@@ -79,6 +83,18 @@ pub const SUBSTRATE_ANNOUNCED_LABEL: &str = "fkst-substrate-active";
 /// re-reads it and never re-acks. There is no clear/removal path (like the announce
 /// latch) — an acknowledged work issue stays acknowledged for its lifetime.
 pub const WORK_PICKED_UP_LABEL: &str = "fkst-picked-up";
+
+/// The DURABLE latch label the reconciler adds to a WORK issue whose author is NOT
+/// authorized to raise work for the session (R3 authority gate — epic #572). When
+/// the operator opts in (`FKST_ENFORCE_WORK_ISSUE_AUTHZ`) and a work-label issue is
+/// opened by someone who is neither the session's author, a listed Session
+/// Collaborator, nor a repo admin / org owner, the reconciler does NOT pick it up;
+/// instead it comments ONCE (naming who may raise work) and latches THIS label.
+/// Read back from GitHub each reconcile, the label is the "already told them" dedupe
+/// signal that guarantees the rejection is posted exactly once. Mirrors the one-way
+/// [`WORK_PICKED_UP_LABEL`] latch — there is no clear/removal path. The whole feature
+/// is inert (no fetch, no filtering, no reject) while the opt-in flag is off.
+pub const WORK_UNAUTHORIZED_LABEL: &str = "fkst-unauthorized";
 
 /// The DURABLE latch label the reconciler adds to a WORK issue when its session is
 /// RETIRED — i.e. the session's trigger issue was closed, so the orphan pod is killed

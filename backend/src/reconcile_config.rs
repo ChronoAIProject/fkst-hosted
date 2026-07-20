@@ -125,6 +125,10 @@ struct ReconcileVars {
     /// Auto-create a seed trigger issue when the App is installed on a repo.
     #[serde(default)]
     seed_trigger_issue_on_install: bool,
+    /// Operator opt-in for the R3 work-issue authority gate. Default false =
+    /// today's permissive behavior (any author may raise work).
+    #[serde(default)]
+    enforce_work_issue_authz: bool,
     /// Whitespace-separated `owner/repo@ref:path` package refs the seeded trigger
     /// issue loads. Unset → the github-devloop-workflow default.
     #[serde(default)]
@@ -174,6 +178,16 @@ pub struct ReconcileConfig {
     /// `FKST_SEED_TRIGGER_ISSUE_ON_INSTALL`. Default false (opt-in — it writes to
     /// the user's repo).
     pub seed_trigger_issue_on_install: bool,
+    /// Operator opt-in for the R3 work-issue AUTHORITY gate (epic #572). Env:
+    /// `FKST_ENFORCE_WORK_ISSUE_AUTHZ`. Default false = today's permissive behavior:
+    /// any GitHub user who opens a work-label issue has it picked up. When true, the
+    /// reconciler fetches the repo's admin/org-owner set and only a session's
+    /// **author ∪ Session Collaborators ∪ repo admins/org owners** may raise work for
+    /// it — anyone else is visibly rejected (comment + `fkst-unauthorized` latch) and
+    /// never picked up. Enforcement FAILS OPEN on any admin-lookup error (a lookup
+    /// blip must never lock out work). The flag being off is byte-identical to
+    /// pre-R3 behavior (no admin fetch, no author filtering, no reject).
+    pub enforce_work_issue_authz: bool,
     /// The `### Packages` refs an auto-seeded trigger issue lists (one per line).
     /// Env: `FKST_SEED_PACKAGES` (whitespace-separated). Default: the
     /// github-devloop-workflow root. Never empty (a blank env value falls back to
@@ -187,6 +201,7 @@ impl Default for ReconcileConfig {
             substrate_trigger_label: defaults::substrate_trigger_label(),
             github_bot_login: None,
             seed_trigger_issue_on_install: false,
+            enforce_work_issue_authz: false,
             seed_packages: defaults::seed_packages(),
             reconcile_interval_secs: defaults::reconcile_interval_secs(),
             pod_full_resync_interval_secs: defaults::pod_full_resync_interval_secs(),
@@ -285,6 +300,7 @@ impl ReconcileConfig {
             pod_session_max_lifetime_secs: env.pod_session_max_lifetime_secs,
             health_scrape_secs: env.health_scrape_secs,
             seed_trigger_issue_on_install: env.seed_trigger_issue_on_install,
+            enforce_work_issue_authz: env.enforce_work_issue_authz,
             seed_packages,
         })
     }
@@ -314,6 +330,19 @@ mod tests {
         assert_eq!(config.pod_token_refresh_secs, 2700);
         assert_eq!(config.pod_session_max_lifetime_secs, 0);
         assert_eq!(config.health_scrape_secs, 150);
+        // R3 authority gate is OFF by default (today's permissive behavior).
+        assert!(!config.enforce_work_issue_authz);
+    }
+
+    #[test]
+    fn enforce_work_issue_authz_is_opt_in() {
+        // Unset → false (permissive), the only value that preserves pre-R3 behavior.
+        let off = ReconcileConfig::from_vars(&vars(&[])).expect("defaults");
+        assert!(!off.enforce_work_issue_authz);
+        // Explicitly opted in.
+        let on = ReconcileConfig::from_vars(&vars(&[("FKST_ENFORCE_WORK_ISSUE_AUTHZ", "true")]))
+            .expect("override");
+        assert!(on.enforce_work_issue_authz);
     }
 
     #[test]
@@ -354,6 +383,10 @@ mod tests {
             from_env.pod_session_max_lifetime_secs
         );
         assert_eq!(from_default.health_scrape_secs, from_env.health_scrape_secs);
+        assert_eq!(
+            from_default.enforce_work_issue_authz,
+            from_env.enforce_work_issue_authz
+        );
     }
 
     #[test]

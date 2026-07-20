@@ -110,12 +110,14 @@ fn empty_and_whitespace_entries_never_match() {
 }
 
 #[test]
-fn a_numeric_login_is_not_confused_with_a_different_id() {
-    // A caller whose LOGIN happens to be numeric ("42") but whose ID is 2002 must not
-    // match an entry "42" unless that entry actually equals their id-string or login.
-    // Here the entry "42" equals the login "42", so it DOES match (by login) — the
-    // matcher is symmetric across id and login, which is the intended lenient rule.
-    assert!(is_authorized(2002, "42", AUTHOR_ID, &s(&["42"]), &[]));
-    // But a caller with login "43" and id 2002 does NOT match entry "42".
+fn a_numeric_entry_addresses_the_id_namespace_only() {
+    // A numeric entry ("42") addresses the ID namespace ONLY: it must NOT admit a
+    // caller merely because their LOGIN is the same digits. All-numeric GitHub
+    // usernames exist, so conflating the two would let someone register the login
+    // "42" and impersonate the identity an operator listed by id 42.
+    assert!(!is_authorized(2002, "42", AUTHOR_ID, &s(&["42"]), &[]));
+    // It DOES admit the caller whose numeric id equals the entry.
+    assert!(is_authorized(42, "anything", AUTHOR_ID, &s(&["42"]), &[]));
+    // A caller matching neither the id nor a login entry is denied.
     assert!(!is_authorized(2002, "43", AUTHOR_ID, &s(&["42"]), &[]));
 }
