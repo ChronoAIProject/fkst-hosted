@@ -21,6 +21,7 @@ use crate::error::AppError;
 use crate::log_access::LogSessionContext;
 use crate::models::RepoRef;
 use crate::reconcile::announce::parse_config_hash_marker;
+use crate::reconcile::collision::detect_work_label_collisions;
 use crate::reconcile::desired::{plan_repo, SessionRegistration};
 use crate::reconcile::execute::{execute, ReconcileCtx};
 use crate::reconcile::pending::{LabelCountPending, PendingWork};
@@ -187,6 +188,27 @@ pub async fn reconcile_repo(
     // immutable per session config), bounding the manifest fetches to one resolve per
     // distinct session config.
     let work_labels_by_session = resolve_work_label_sets(ctx, &token, &regs).await;
+
+    // R4a work-label collision backstop (epic #572). A trigger issue can be created
+    // directly on GitHub, so this server-side guard — not the authoring convention — is
+    // the real guarantee that two active sessions never compete over the same
+    // work-label queue on one repo. Among the OPEN, otherwise-valid registrations the
+    // lowest-trigger-issue holder OWNS each shared label; every loser is DEMOTED into
+    // the `invalid` set here, so it flows through the SAME flag/comment/auto-clear path
+    // as a parse failure (it un-flags itself the moment the collision resolves and it
+    // becomes a plain valid registration again). Removing losers from `regs` before the
+    // pending gate + planner is what actually blocks the competing pod from spawning.
+    let collisions = detect_work_label_collisions(&regs, &work_labels_by_session);
+    if !collisions.is_empty() {
+        let losers: HashSet<i64> = collisions.iter().map(|(issue, _)| *issue).collect();
+        tracing::info!(
+            owner_repo = %owner_repo,
+            demoted = collisions.len(),
+            "reconcile: work-label collision(s) detected; demoting the losing trigger(s) to invalid"
+        );
+        regs.retain(|reg| !losers.contains(&reg.trigger_issue));
+        invalid.extend(collisions);
+    }
 
     // Best-effort, non-failing: if ANY registered session on this repo opted into
     // auto-merge (`### Auto-merge`), merge the App bot's mergeable open PRs. Mirrors
