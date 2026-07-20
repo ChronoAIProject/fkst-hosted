@@ -25,6 +25,14 @@ use regex::Regex;
 
 /// Render the announcement comment body for a newly-registered session.
 ///
+/// `detected_work_labels` is the session's FULL effective work-label set (its explicit
+/// `### Work Label` ∪ the labels its packages auto-declare) — the set that actually
+/// wakes it. The comment lists EVERY label in it, so a label-less/auto-detect session
+/// (no `### Work Label`, wake labels discovered from its packages) still gets concrete
+/// labeling guidance. When the set is empty (shouldn't happen — a zero-label session is
+/// rejected upstream), it falls back to the single explicit `work_label` (rendered only
+/// when `Some`), matching the pre-multi-label behavior.
+///
 /// `packages` are the refs already rendered to `owner/repo@ref:path` (author order);
 /// `environment` is the named environment or `None`; `auto_merge` reflects the
 /// trigger's `### Auto-merge` opt-in. `log_url`, when `Some`, is the identity-gated
@@ -36,9 +44,13 @@ use regex::Regex;
 ///
 /// `full_config_hash` is appended as a hidden marker (see [`config_hash_marker`]) so
 /// the original config is durably latched on the issue for the immutability check.
+// Each parameter is a distinct piece of PUBLIC announcement metadata rendered into the
+// comment; they are not a cohesive struct worth introducing for a single call site.
+#[allow(clippy::too_many_arguments)]
 pub fn announce_session_comment(
     session_name: &str,
     work_label: Option<&str>,
+    detected_work_labels: &[String],
     packages: &[String],
     environment: Option<&str>,
     auto_merge: bool,
@@ -47,9 +59,32 @@ pub fn announce_session_comment(
 ) -> String {
     let mut body = format!("🟢 **fkst session `{session_name}` registered.**\n\n");
 
-    // A label-less session's work is auto-discovered from its packages' declared
-    // labels; there is no single trigger-side label to advertise here.
-    if let Some(work_label) = work_label {
+    // List the session's FULL effective work-label set (explicit `### Work Label` ∪ its
+    // packages' auto-declared labels) — the set that actually wakes it. This surfaces the
+    // auto-DISCOVERED labels of a label-less session, which the old single-`work_label`
+    // rendering omitted entirely (leaving an auto-detect session with no labeling
+    // guidance). Trimmed + deduped defensively, first-occurrence order preserved.
+    let effective: Vec<&str> = detected_work_labels.iter().fold(Vec::new(), |mut acc, l| {
+        let trimmed = l.trim();
+        if !trimmed.is_empty() && !acc.contains(&trimmed) {
+            acc.push(trimmed);
+        }
+        acc
+    });
+    if !effective.is_empty() {
+        let rendered = effective
+            .iter()
+            .map(|l| format!("`{l}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        body.push_str(&format!(
+            "**Work label(s):** {rendered} — open an issue with any of these labels in this \
+             repo to queue work for this session.\n\n"
+        ));
+    } else if let Some(work_label) = work_label {
+        // Fallback for the (upstream-rejected) zero-label case: the pre-multi-label
+        // single-label rendering. A label-less session with no discovered labels advertises
+        // nothing, exactly as before.
         body.push_str(&format!(
             "**Work label:** `{work_label}` — open issues with this label in this repo to \
              queue work for this session.\n\n"
@@ -137,6 +172,7 @@ mod tests {
         let body = announce_session_comment(
             "mysession",
             Some("fkst-run"),
+            &["fkst-run".to_string()],
             &packages,
             Some("prod"),
             true,
@@ -146,8 +182,9 @@ mod tests {
 
         // Session name headline.
         assert!(body.contains("fkst session `mysession` registered."));
-        // Work label, verbatim in backticks.
-        assert!(body.contains("**Work label:** `fkst-run`"));
+        // The effective work-label set, verbatim in backticks (a single-label set here).
+        assert!(body.contains("**Work label(s):** `fkst-run`"));
+        assert!(body.contains("open an issue with any of these labels"));
         // Package count + each rendered ref bulleted.
         assert!(body.contains("**Packages:** 2"));
         assert!(body.contains("- `ChronoAIProject/fkst-packages@dev:packages/github-devloop`"));
@@ -169,8 +206,16 @@ mod tests {
 
     #[test]
     fn renders_zero_packages_no_environment_and_auto_merge_off() {
-        let body =
-            announce_session_comment("solo", Some("run"), &[], None, false, None, "deadbeef");
+        let body = announce_session_comment(
+            "solo",
+            Some("run"),
+            &["run".to_string()],
+            &[],
+            None,
+            false,
+            None,
+            "deadbeef",
+        );
 
         assert!(body.contains("**Packages:** 0"));
         // No bullets when there are no packages.
@@ -187,7 +232,16 @@ mod tests {
     fn the_rendered_marker_round_trips_through_the_parser() {
         // The marker the renderer writes is exactly what the parser reads back — the
         // load-bearing contract for the immutability check.
-        let body = announce_session_comment("s", Some("wl"), &[], None, false, None, "0a1b2c3d");
+        let body = announce_session_comment(
+            "s",
+            Some("wl"),
+            &["wl".to_string()],
+            &[],
+            None,
+            false,
+            None,
+            "0a1b2c3d",
+        );
         assert_eq!(
             parse_config_hash_marker(&[body]).as_deref(),
             Some("0a1b2c3d"),
@@ -238,7 +292,16 @@ mod tests {
     fn omits_the_log_line_when_no_url_is_configured() {
         // No public base URL => `None` => the log line is absent entirely (no bare
         // "Logs:" label, no dangling link).
-        let body = announce_session_comment("solo", Some("run"), &[], None, false, None, "cfghash");
+        let body = announce_session_comment(
+            "solo",
+            Some("run"),
+            &["run".to_string()],
+            &[],
+            None,
+            false,
+            None,
+            "cfghash",
+        );
         assert!(
             !body.contains("Logs:"),
             "the log line must be omitted when no URL is configured: {body}"
@@ -247,20 +310,115 @@ mod tests {
 }
 
 #[cfg(test)]
-mod optional_work_label_tests {
+mod work_label_set_tests {
     use super::announce_session_comment;
 
-    #[test]
-    fn present_label_shows_the_work_label_line() {
-        let body = announce_session_comment("s", Some("fkst-x"), &[], None, false, None, "h");
-        assert!(body.contains("**Work label:** `fkst-x`"), "{body}");
+    // Convenience: a `Vec<String>` from string literals for the detected-set arg.
+    fn labels(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
     }
 
     #[test]
-    fn absent_label_omits_the_work_label_line() {
-        let body = announce_session_comment("s", None, &[], None, false, None, "h");
-        assert!(!body.contains("**Work label:**"), "{body}");
+    fn explicit_label_lists_that_single_label_with_guidance() {
+        // An explicit `### Work Label` session: its detected set is exactly that one
+        // label, so the announce lists it plus the labeling instruction.
+        let body = announce_session_comment(
+            "s",
+            Some("fkst-x"),
+            &labels(&["fkst-x"]),
+            &[],
+            None,
+            false,
+            None,
+            "h",
+        );
+        assert!(body.contains("**Work label(s):** `fkst-x`"), "{body}");
+        assert!(
+            body.contains("open an issue with any of these labels in this repo"),
+            "{body}"
+        );
+    }
+
+    #[test]
+    fn discovered_only_label_less_session_lists_the_discovered_labels() {
+        // The headline I5 case: a label-less/auto-detect session (no `### Work Label`,
+        // so `work_label` is None) whose wake labels are auto-discovered from its
+        // packages. The old rendering omitted the block entirely — leaving no labeling
+        // guidance; now the discovered labels + the instruction are shown.
+        let body = announce_session_comment(
+            "auto",
+            None,
+            &labels(&["pkg-alpha", "pkg-beta"]),
+            &[],
+            None,
+            false,
+            None,
+            "h",
+        );
+        assert!(
+            body.contains("**Work label(s):** `pkg-alpha`, `pkg-beta`"),
+            "the label-less session must now list its DISCOVERED labels: {body}"
+        );
+        assert!(
+            body.contains("open an issue with any of these labels in this repo"),
+            "{body}"
+        );
         // The rest of the announce still renders.
+        assert!(body.contains("fkst session `auto` registered"), "{body}");
+    }
+
+    #[test]
+    fn multi_label_session_lists_the_full_effective_set() {
+        // Explicit `### Work Label` ∪ package-discovered: every label in the effective
+        // set is listed, in the order the set carries.
+        let body = announce_session_comment(
+            "multi",
+            Some("explicit"),
+            &labels(&["explicit", "disc-one", "disc-two"]),
+            &[],
+            None,
+            false,
+            None,
+            "h",
+        );
+        assert!(
+            body.contains("**Work label(s):** `explicit`, `disc-one`, `disc-two`"),
+            "{body}"
+        );
+    }
+
+    #[test]
+    fn blank_and_duplicate_labels_are_dropped_and_deduped() {
+        // Defensive: blank tokens are dropped and duplicates collapsed, first-occurrence
+        // order preserved — the rendered list never carries an empty `` `` `` entry.
+        let body = announce_session_comment(
+            "s",
+            None,
+            &labels(&["a", "", "  ", "a", "b"]),
+            &[],
+            None,
+            false,
+            None,
+            "h",
+        );
+        assert!(body.contains("**Work label(s):** `a`, `b`"), "{body}");
+        assert!(!body.contains("``"), "no empty backtick pair: {body}");
+    }
+
+    #[test]
+    fn empty_detected_set_falls_back_to_the_single_explicit_label() {
+        // A zero-label detected set shouldn't happen (rejected upstream), but if it does
+        // the renderer falls back to the pre-multi-label single-`work_label` rendering.
+        let body = announce_session_comment("s", Some("only"), &[], &[], None, false, None, "h");
+        assert!(body.contains("**Work label:** `only`"), "{body}");
+    }
+
+    #[test]
+    fn no_labels_at_all_omits_the_work_label_line() {
+        // Empty detected set AND no explicit label: nothing to advertise — the block is
+        // omitted, exactly as before. The rest of the announce still renders.
+        let body = announce_session_comment("s", None, &[], &[], None, false, None, "h");
+        assert!(!body.contains("**Work label"), "{body}");
         assert!(body.contains("fkst session `s` registered"), "{body}");
     }
 }
