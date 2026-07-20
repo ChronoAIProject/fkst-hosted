@@ -280,7 +280,15 @@ async fn retires_an_unretired_open_work_issue() {
     // One open work issue still carrying the (now-stale) picked-up latch, not retired.
     let listing = FakeListing::ok(vec![issue(5, &["fkst-run", WORK_PICKED_UP_LABEL])]);
 
-    retire_open_work_issues(&github, &listing, &token(), &repo(), "fkst-run").await;
+    retire_open_work_issues(
+        &github,
+        &listing,
+        &token(),
+        &repo(),
+        "fkst-run",
+        &mut std::collections::HashSet::new(),
+    )
+    .await;
 
     // Exactly one comment, the rendered retire notice for the right issue.
     let comments = api.comments.lock().unwrap();
@@ -302,13 +310,51 @@ async fn retires_an_unretired_open_work_issue() {
 }
 
 #[tokio::test]
+async fn retire_work_issues_lists_every_label_and_dedups_a_shared_issue() {
+    // A multi-label session (epic #594 I4): the executor entry point retires across EACH
+    // of the session's labels. The fake listing returns the SAME issue for both labels
+    // (an issue carrying two of the session's labels), so the in-pass dedup must retire
+    // it EXACTLY once — while both labels are still queried.
+    let api = std::sync::Arc::new(RecordingApi::default());
+    let github = tokens(api.clone());
+    let listing = FakeListing::ok(vec![issue(5, &["fkst-run", WORK_PICKED_UP_LABEL])]);
+
+    retire_work_issues(
+        &github,
+        &listing,
+        &repo(),
+        &["alpha".to_string(), "beta".to_string()],
+    )
+    .await;
+
+    // Both labels were listed (the retire spans the whole set)...
+    assert_eq!(listing.list_calls(), 2, "each label's queue is listed");
+    // ...but the shared issue is notified/latched/un-latched EXACTLY once (deduped).
+    assert_eq!(
+        api.comments.lock().unwrap().len(),
+        1,
+        "a shared issue is retired once across labels"
+    );
+    assert_eq!(api.labels_added.lock().unwrap().len(), 1);
+    assert_eq!(api.labels_removed.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn skips_an_already_retired_issue() {
     let api = std::sync::Arc::new(RecordingApi::default());
     let github = tokens(api.clone());
     // The issue already carries the retired latch → must be skipped entirely.
     let listing = FakeListing::ok(vec![issue(5, &["fkst-run", SUBSTRATE_RETIRED_LABEL])]);
 
-    retire_open_work_issues(&github, &listing, &token(), &repo(), "fkst-run").await;
+    retire_open_work_issues(
+        &github,
+        &listing,
+        &token(),
+        &repo(),
+        "fkst-run",
+        &mut std::collections::HashSet::new(),
+    )
+    .await;
 
     assert!(
         api.comments.lock().unwrap().is_empty(),
@@ -330,7 +376,15 @@ async fn no_op_when_the_list_is_empty() {
     let github = tokens(api.clone());
     let listing = FakeListing::ok(vec![]);
 
-    retire_open_work_issues(&github, &listing, &token(), &repo(), "fkst-run").await;
+    retire_open_work_issues(
+        &github,
+        &listing,
+        &token(),
+        &repo(),
+        "fkst-run",
+        &mut std::collections::HashSet::new(),
+    )
+    .await;
 
     assert_eq!(listing.list_calls(), 1, "the list was queried once");
     assert!(api.comments.lock().unwrap().is_empty());
@@ -345,7 +399,15 @@ async fn swallows_a_listing_failure() {
     let listing = FakeListing::err();
 
     // Must not panic/propagate — the failure is logged and skipped.
-    retire_open_work_issues(&github, &listing, &token(), &repo(), "fkst-run").await;
+    retire_open_work_issues(
+        &github,
+        &listing,
+        &token(),
+        &repo(),
+        "fkst-run",
+        &mut std::collections::HashSet::new(),
+    )
+    .await;
 
     assert_eq!(listing.list_calls(), 1, "the list was attempted once");
     assert!(
@@ -365,7 +427,15 @@ async fn swallows_a_comment_failure_but_still_latches_and_unlatches() {
     let github = tokens(api.clone());
     let listing = FakeListing::ok(vec![issue(5, &["fkst-run", WORK_PICKED_UP_LABEL])]);
 
-    retire_open_work_issues(&github, &listing, &token(), &repo(), "fkst-run").await;
+    retire_open_work_issues(
+        &github,
+        &listing,
+        &token(),
+        &repo(),
+        "fkst-run",
+        &mut std::collections::HashSet::new(),
+    )
+    .await;
 
     assert!(
         api.comments.lock().unwrap().is_empty(),

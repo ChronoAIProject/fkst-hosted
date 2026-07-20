@@ -111,7 +111,13 @@ async fn clear_invalid_removes_the_label() {
 #[test]
 fn session_pod_spec_is_built_from_the_registration() {
     let reg = registration();
-    let spec = session_pod_spec_from(&reg, Some("fkst-bot".to_string()));
+    // A single-label session: the detected set is the one explicit label; the pod work
+    // label renders as the bare label (no comma), byte-identical to the pre-I4 value.
+    let spec = session_pod_spec_from(
+        &reg,
+        &["fkst-run".to_string()],
+        Some("fkst-bot".to_string()),
+    );
 
     assert_eq!(spec.session_id, "sess-abc");
     assert_eq!(spec.installation_id, 42);
@@ -131,8 +137,36 @@ fn session_pod_spec_is_built_from_the_registration() {
 }
 
 #[test]
+fn spec_work_label_is_the_comma_joined_detected_set() {
+    // Epic #594 I4: the pod work label is the FULL effective set (explicit ∪
+    // package-discovered), comma-joined — github-proxy splits it back on the comma, so
+    // the session wakes on ANY of its labels. Order is preserved; blanks/dupes dropped.
+    let reg = registration();
+
+    // Discovered-only (no explicit `### Work Label`): the pod still gets a work label.
+    let discovered_only = session_pod_spec_from(
+        &reg,
+        &["pkg-a".to_string(), "pkg-b".to_string()],
+        Some("fkst-bot".to_string()),
+    );
+    assert_eq!(discovered_only.work_label, "pkg-a,pkg-b");
+
+    // Explicit + discovered union, comma-joined in the given order, deduped.
+    let union = session_pod_spec_from(
+        &reg,
+        &[
+            "fkst-run".to_string(),
+            "pkg-a".to_string(),
+            "fkst-run".to_string(),
+        ],
+        Some("fkst-bot".to_string()),
+    );
+    assert_eq!(union.work_label, "fkst-run,pkg-a");
+}
+
+#[test]
 fn missing_bot_login_defaults_to_empty() {
-    let spec = session_pod_spec_from(&registration(), None);
+    let spec = session_pod_spec_from(&registration(), &["fkst-run".to_string()], None);
     assert_eq!(spec.bot_login, "", "an unset bot login renders as empty");
 }
 

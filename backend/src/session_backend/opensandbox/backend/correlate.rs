@@ -22,15 +22,21 @@
 //!   It is split into two ≤63-char keys ([`KEY_CONFIG_HASH`] = first 32 hex,
 //!   [`KEY_CONFIG_HASH_2`] = last 32 hex) and reassembled by concatenation in
 //!   [`to_live_pod`]. Each half is pure hex, so unconditionally label-safe.
-//! - **`fkst-work-label`** is an arbitrary-UTF-8 GitHub label (spaces / emoji). The
+//! - **`fkst-work-label`** is the session's comma-joined effective work-label SET (epic
+//!   #594 I4) — arbitrary-UTF-8 GitHub labels (spaces / emoji) joined by `,`. The
 //!   reconciler DOES consume it on observe (`plan_repo`'s orphan branch reads the
-//!   OBSERVED `LivePod.work_label` to emit `RetireWorkIssues`), so it must round-trip.
-//!   It is stored as lowercase-hex of its UTF-8 bytes ([`hex_encode`]) — a form that
-//!   is unconditionally label-safe (`[0-9a-f]`, always alphanumeric-bounded) — and
-//!   decoded back in [`to_live_pod`]. **Length caveat:** hex doubles the byte length,
-//!   so a work label longer than 31 UTF-8 bytes exceeds the 63-char value cap and is
-//!   rejected LOUDLY by [`is_valid_label_value`] (never a silently-rejected create).
-//!   fkst work labels are short DNS-label-ish tokens, so this is not a practical limit.
+//!   OBSERVED `LivePod.work_labels` to emit `RetireWorkIssues`), so it must round-trip.
+//!   It is stored as lowercase-hex of the joined value's UTF-8 bytes ([`hex_encode`]) — a
+//!   form that is unconditionally label-safe (`[0-9a-f]`, always alphanumeric-bounded).
+//!   Because hex DOUBLES the byte length, a multi-label set easily exceeds the 63-char
+//!   value cap — the DEFAULT `fkst-dev,fkst-security,fkst-workflow` manifest is 36 bytes →
+//!   72 hex — so the hex is CHUNKED across as many keys as needed: chunk 0 in the base
+//!   [`KEY_WORK_LABEL`], chunk N≥1 in `fkst-work-label-2` / `fkst-work-label-3` / …
+//!   ([`work_label_chunk_key`]), each ≤63 chars. [`to_live_pod`] reassembles the chunks in
+//!   order, hex-decodes, and splits on `,`. A single short label is exactly ONE chunk,
+//!   hex byte-identical to the pre-chunk stamp — so there is no length limit any more, and
+//!   the K8s-annotation backend (whose annotation values have no such cap) still stores
+//!   the set as one comma-joined value.
 //!
 //! `fkst-owner` / `fkst-repo` are GitHub logins / repo names, normally label-valid and
 //! stored RAW (so the `observe_repo` metadata filter matches). A pathological name
@@ -41,6 +47,7 @@ use std::collections::BTreeMap;
 
 use k8s_openapi::chrono::{DateTime, Utc};
 
+use crate::k8s::work_label_wire::split_work_labels;
 use crate::k8s::SessionPodSpec;
 use crate::models::RepoRef;
 use crate::reconcile::desired::{LivePod, PodLiveness};
@@ -67,11 +74,31 @@ pub const KEY_REPO: &str = "fkst-repo";
 pub const KEY_CONFIG_HASH: &str = "fkst-config-hash";
 /// Last 32 hex of the 64-hex config hash; reassembled with [`KEY_CONFIG_HASH`].
 pub const KEY_CONFIG_HASH_2: &str = "fkst-config-hash-2";
-/// The work label as lowercase-hex of its UTF-8 bytes (see the module doc).
+/// The FIRST chunk of the work-label SET stored as lowercase-hex of its UTF-8 bytes (see
+/// the module doc). A short set fits entirely here (byte-identical to the pre-chunk
+/// stamp); a longer one spills into the numbered continuation keys `fkst-work-label-2`,
+/// `fkst-work-label-3`, … (chunk N → [`work_label_chunk_key`]).
 pub const KEY_WORK_LABEL: &str = "fkst-work-label";
 
 /// Where the 64-hex config hash is split into two label-safe halves.
 const CONFIG_HASH_SPLIT: usize = 32;
+
+/// Max hex chars per work-label chunk key. Kept ≤ the 63-char label-value cap, and EVEN
+/// so each chunk holds a whole number of hex bytes (a nicety — reassembly concatenates
+/// every chunk before decoding, so an odd boundary would round-trip just as well).
+const WORK_LABEL_HEX_CHUNK: usize = 62;
+
+/// The metadata key for chunk `index` of the hex-encoded work-label SET: chunk 0 is the
+/// base [`KEY_WORK_LABEL`] (so a single-label session is byte-identical to the pre-chunk
+/// stamp), chunk N≥1 is `fkst-work-label-<N+1>` (`-2`, `-3`, …). The single source of
+/// truth for the numbering, used by both [`stamp`] and [`to_live_pod`].
+fn work_label_chunk_key(index: usize) -> String {
+    if index == 0 {
+        KEY_WORK_LABEL.to_string()
+    } else {
+        format!("{KEY_WORK_LABEL}-{}", index + 1)
+    }
+}
 
 /// Stamp `spec`'s identity + drift state onto a fresh sandbox's `metadata`.
 ///
@@ -101,12 +128,34 @@ pub fn stamp(spec: &SessionPodSpec) -> Result<BTreeMap<String, String>, BackendE
     put(&mut meta, KEY_REPO, spec.repo.name.clone())?;
     put(&mut meta, KEY_CONFIG_HASH, hash_a)?;
     put(&mut meta, KEY_CONFIG_HASH_2, hash_b)?;
-    put(
-        &mut meta,
-        KEY_WORK_LABEL,
-        hex_encode(spec.work_label.as_bytes()),
-    )?;
+    // The work-label SET → lowercase-hex → chunked across as many keys as needed so an
+    // arbitrarily long set (e.g. the default 3-label manifest, 72 hex chars) still fits
+    // the 63-char label-value cap. A single short label is exactly one chunk (byte-
+    // identical to the pre-chunk stamp).
+    for (index, chunk) in work_label_hex_chunks(&spec.work_label)
+        .into_iter()
+        .enumerate()
+    {
+        put(&mut meta, &work_label_chunk_key(index), chunk)?;
+    }
     Ok(meta)
+}
+
+/// Hex-encode the work-label SET and split it into ≤[`WORK_LABEL_HEX_CHUNK`]-char pieces,
+/// each independently label-safe (pure hex, 1..=62 chars). An EMPTY set yields no chunks
+/// (no work-label keys stamped) — the reconciler rejects a label-less session upstream,
+/// so this is only a defensive default. hex is pure ASCII, so byte slicing is on char
+/// boundaries.
+fn work_label_hex_chunks(work_label: &str) -> Vec<String> {
+    let hex = hex_encode(work_label.as_bytes());
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    while start < hex.len() {
+        let end = (start + WORK_LABEL_HEX_CHUNK).min(hex.len());
+        chunks.push(hex[start..end].to_string());
+        start = end;
+    }
+    chunks
 }
 
 /// Recover the kube-free [`SessionHandle`] a live sandbox belongs to from its stamped
@@ -137,8 +186,9 @@ pub fn recover(view: &SandboxView) -> Option<SessionHandle> {
 /// never planned on. Field parity with the Kubernetes backend's `pod_to_live`:
 /// `config_hash` is the reassembled 64-hex canonical hash (both halves present, else
 /// `None` = "no drift decision"); `created_at` falls back to now ONLY on a
-/// malformed/absent timestamp (so a real timestamp is never shadowed); `work_label`
-/// is the hex-decoded original (absent/undecodable → `None` = no retire-notify).
+/// malformed/absent timestamp (so a real timestamp is never shadowed); `work_labels` is
+/// the reassembled + hex-decoded + comma-split SET (absent/undecodable → empty = no
+/// retire-notify).
 pub fn to_live_pod(view: &SandboxView) -> Option<LivePod> {
     let m = &view.metadata;
     let session_id = m.get(KEY_SESSION_ID)?.clone();
@@ -162,10 +212,10 @@ pub fn to_live_pod(view: &SandboxView) -> Option<LivePod> {
         (Some(a), Some(b)) => Some(format!("{a}{b}")),
         _ => None,
     };
-    let work_label = m
-        .get(KEY_WORK_LABEL)
-        .and_then(|s| hex_decode(s))
-        .and_then(|bytes| String::from_utf8(bytes).ok());
+    // Reassemble the work-label SET from its ordered hex chunks (base key + numbered
+    // continuations, epic #594 I4), hex-decode, and split on comma into the individual
+    // labels so an orphaned session retires its work issues across EVERY label.
+    let work_labels = reassemble_work_labels(m);
 
     Some(LivePod {
         session_id,
@@ -174,7 +224,7 @@ pub fn to_live_pod(view: &SandboxView) -> Option<LivePod> {
         created_at,
         last_pending_at,
         config_hash,
-        work_label,
+        work_labels,
     })
 }
 
@@ -261,6 +311,25 @@ fn hex_decode(text: &str) -> Option<Vec<u8>> {
         .step_by(2)
         .map(|i| u8::from_str_radix(&text[i..i + 2], 16).ok())
         .collect()
+}
+
+/// Reassemble the work-label SET from its ordered hex chunks ([`KEY_WORK_LABEL`] then the
+/// numbered continuations), hex-decode, and split on comma into the individual labels.
+/// Concatenation stops at the FIRST missing chunk index, so a stray continuation left by a
+/// partial rewrite is ignored; a malformed / odd-length reassembly hex-decodes to `None`
+/// (→ empty set), and no chunks at all (an older / label-less sandbox) also yields an
+/// empty set — never a crash, never a retire-notify on garbage.
+fn reassemble_work_labels(meta: &BTreeMap<String, String>) -> Vec<String> {
+    let mut hex = String::new();
+    let mut index = 0usize;
+    while let Some(chunk) = meta.get(&work_label_chunk_key(index)) {
+        hex.push_str(chunk);
+        index += 1;
+    }
+    hex_decode(&hex)
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .map(|value| split_work_labels(&value))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

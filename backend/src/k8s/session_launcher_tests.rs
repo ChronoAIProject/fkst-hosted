@@ -558,6 +558,30 @@ fn build_session_secret_carries_the_storage_sa_when_configured() {
 }
 
 #[test]
+fn multi_label_work_label_feeds_the_poll_prefix_and_session_label_verbatim() {
+    // Epic #594 I4: a comma-joined effective set on `SessionPodSpec.work_label` flows
+    // verbatim into FKST_GITHUB_PROXY_POLL_LABEL_PREFIX (github-proxy comma-splits it)
+    // AND FKST_SESSION_WORK_LABEL, and lands on the pod annotation unchanged.
+    let mut spec = spec();
+    spec.work_label = "alpha,beta".to_string();
+    let pod = build_session_pod(&spec, &config()).expect("pod builds");
+    let pod_spec = pod.spec.as_ref().expect("spec");
+    let env = pod_spec.containers[0].env.as_ref().expect("env");
+    assert_eq!(
+        env_value(env, "FKST_GITHUB_PROXY_POLL_LABEL_PREFIX"),
+        Some("alpha,beta")
+    );
+    assert_eq!(
+        env_value(env, "FKST_SESSION_WORK_LABEL"),
+        Some("alpha,beta")
+    );
+    assert_eq!(
+        pod.metadata.annotations.as_ref().expect("annotations")["fkst.chrono-ai.fun/work-label"],
+        "alpha,beta"
+    );
+}
+
+#[test]
 fn pod_owner_reference_is_none_without_a_uid() {
     let pod = Pod {
         metadata: ObjectMeta {

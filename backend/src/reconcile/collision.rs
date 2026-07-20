@@ -1,26 +1,70 @@
-//! Work-label collision backstop for the reconcile planner (epic #572, R4a).
+//! Work-label demotion backstops for the reconcile planner: two server-side guards that
+//! demote an OPEN, otherwise-valid registration into the planner's `invalid` input
+//! based purely on its EFFECTIVE work-label set (explicit `### Work Label` ∪
+//! package-discovered, precomputed per session by the reconcile driver).
 //!
-//! A `fkst-substrate-trigger` issue can be created directly on GitHub, so the
-//! one-work-label-per-trigger authoring rule cannot be enforced at authoring time
-//! alone. This module is the AUTHORITATIVE server-side guard that stops two active
-//! sessions on the same repo from competing over one work-label queue: among the
-//! repo's OPEN, otherwise-valid registrations it finds every group whose EFFECTIVE
-//! work-label sets (explicit `### Work Label` ∪ package-discovered, precomputed per
-//! session by the reconcile driver) intersect, and demotes the losers so only one
-//! session ever claims a given queue.
+//! 1. **Collision** (epic #572, R4a — [`detect_work_label_collisions`]): a
+//!    `fkst-substrate-trigger` issue can be created directly on GitHub, so the
+//!    one-work-label-per-trigger authoring rule cannot be enforced at authoring time
+//!    alone. This is the AUTHORITATIVE guard that stops two active sessions on the same
+//!    repo from competing over one work-label queue: among the OPEN registrations it
+//!    finds every group whose effective sets intersect and demotes the losers so only
+//!    one session ever claims a given queue.
+//! 2. **Missing label** (epic #594, I4 — [`detect_missing_work_labels`]): a session
+//!    whose effective set is EMPTY (no explicit `### Work Label` AND no package-declared
+//!    `[github].work_labels`) can never be woken by anything, so it is demoted — this is
+//!    what lets `### Work Label` be omitted safely (a session with discoverable labels
+//!    runs; one with none is rejected instead of spawning a pod that fails its in-pod
+//!    work-label guard).
 //!
-//! The result is folded into the reconcile planner's `invalid` input
+//! Each guard's result is folded into the reconcile planner's `invalid` input
 //! ([`crate::reconcile::desired::plan_repo`]), so a demoted loser flows through the
 //! EXISTING invalid path — it is flagged with `fkst-substrate-invalid` + a comment and
-//! AUTO-CLEARS the moment the collision is resolved (the winner is closed, or the
-//! loser's work label is changed), when it re-appears as a plain valid registration.
+//! AUTO-CLEARS the moment the cause is resolved (the winner is closed / the loser's work
+//! label changes, or a work label finally appears), when it re-appears as a plain valid
+//! registration.
 //!
-//! Collision tests live alongside the planner tests in `desired_collision_tests.rs`
-//! (registered under the `desired` module) so they can reuse the shared fixtures.
+//! Tests live alongside the planner tests in `desired_collision_tests.rs` (registered
+//! under the `desired` module) so they can reuse the shared fixtures.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::reconcile::desired::SessionRegistration;
+
+/// The feedback detail a label-less session is demoted with (rendered into the
+/// standard invalid-flag comment). Names both remedies: add the section, or use packages
+/// that declare their own labels.
+pub const MISSING_WORK_LABEL_DETAIL: &str =
+    "no work label: add a `### Work Label` section or use packages that declare \
+     `[github].work_labels`";
+
+/// Detect registrations whose EFFECTIVE work-label set is EMPTY and return their demotion
+/// markers `(trigger_issue, reason)` for the reconcile driver to fold into the planner's
+/// `invalid` Vec — mirroring [`detect_work_label_collisions`].
+///
+/// A session with no explicit `### Work Label` AND no package-declared `[github].work_labels`
+/// has nothing that could ever queue work for it, so spawning a pod would only produce one
+/// that fails its own in-pod work-label guard. Demoting it here rejects it up front with a
+/// clear, actionable reason instead. Markers are returned sorted ascending by trigger issue
+/// (determinism); a session absent from `work_labels_by_session` is treated as label-less
+/// (the driver fills every session, so this is only a defensive default).
+pub fn detect_missing_work_labels(
+    regs: &[SessionRegistration],
+    work_labels_by_session: &HashMap<String, Vec<String>>,
+) -> Vec<(i64, String)> {
+    let mut missing: Vec<(i64, String)> = regs
+        .iter()
+        .filter(|reg| {
+            work_labels_by_session
+                .get(&reg.session_id)
+                .map(|labels| labels.is_empty())
+                .unwrap_or(true)
+        })
+        .map(|reg| (reg.trigger_issue, MISSING_WORK_LABEL_DETAIL.to_string()))
+        .collect();
+    missing.sort_by_key(|(issue, _)| *issue);
+    missing
+}
 
 /// Detect work-label collisions among OPEN, otherwise-valid registrations and return
 /// the loser markers `(trigger_issue, reason)` for the reconcile driver to fold into

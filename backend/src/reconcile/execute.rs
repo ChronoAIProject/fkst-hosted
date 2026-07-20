@@ -85,21 +85,22 @@ pub struct ReconcileCtx {
 pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx) {
     let owner_repo = format!("{}/{}", repo.owner, repo.name);
     match action {
-        // `detected_work_labels` is threaded onto the action (I2, epic #594) but not
-        // yet consumed here — the pod spec is built exactly as before, so spawning is
-        // byte-identical. A later PR reads it to auto-label the session's issues.
+        // The session's FULL effective work-label set (explicit ∪ package-discovered)
+        // becomes the pod's comma-joined work label (epic #594 I4), so a session whose
+        // `### Work Label` was omitted still wakes on its packages' auto-declared labels.
         ReconcileAction::Spawn {
             reg,
-            detected_work_labels: _,
-        } => spawn_session(reg, ctx).await,
+            detected_work_labels,
+        } => spawn_session(reg, detected_work_labels, ctx).await,
         ReconcileAction::TouchPending { session_id } => touch_pending(&session_id, ctx).await,
         ReconcileAction::Kill { session_id, reason } => kill(&session_id, reason, ctx).await,
         ReconcileAction::CleanupTerminal { session_id } => cleanup_terminal(&session_id, ctx).await,
-        ReconcileAction::RetireWorkIssues { work_label } => {
-            // Only an explicit work label has trigger-side work issues to retire;
-            // a label-less session has none to notify.
-            if let Some(work_label) = work_label {
-                retire_work_issues(&ctx.github, ctx.listing.as_ref(), repo, &work_label).await
+        ReconcileAction::RetireWorkIssues { work_labels } => {
+            // Retire the still-open work issues across EVERY label the retired session
+            // claimed (its full effective set, recovered from the pod annotation). An
+            // empty set (a pre-multi-label pod that recorded no label) has none to notify.
+            if !work_labels.is_empty() {
+                retire_work_issues(&ctx.github, ctx.listing.as_ref(), repo, &work_labels).await
             }
         }
         ReconcileAction::FlagInvalid {
@@ -159,8 +160,14 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
 
 /// Spawn a session pod for a desired-but-absent registration: reachability →
 /// environment → token → pod. Any gate that fails posts issue feedback and skips
-/// the spawn (never a partial pod).
-async fn spawn_session(reg: SessionRegistration, ctx: &ReconcileCtx) {
+/// the spawn (never a partial pod). `detected_work_labels` is the session's FULL
+/// effective work-label set — the reconciler rejects a label-less session upstream, so
+/// this is always non-empty here (the pod's comma-joined work label is built from it).
+async fn spawn_session(
+    reg: SessionRegistration,
+    detected_work_labels: Vec<String>,
+    ctx: &ReconcileCtx,
+) {
     let owner_repo = format!("{}/{}", reg.repo.owner, reg.repo.name);
 
     // 1. Reachability: every package ref must resolve on public GitHub. A failure
@@ -227,8 +234,12 @@ async fn spawn_session(reg: SessionRegistration, ctx: &ReconcileCtx) {
     };
     let github_token_json = session_github_token_json(&token, expires_at);
 
-    // 4. Assemble the pod spec from the registration.
-    let spec = session_pod_spec_from(&reg, ctx.config.reconcile.github_bot_login.clone());
+    // 4. Assemble the pod spec from the registration + its effective work-label set.
+    let spec = session_pod_spec_from(
+        &reg,
+        &detected_work_labels,
+        ctx.config.reconcile.github_bot_login.clone(),
+    );
 
     // 5. Assemble the per-session credential map (the executor now owns the credential
     //    layout, threading it through the backend as `SecretString`s). Always inject
@@ -263,10 +274,18 @@ async fn spawn_session(reg: SessionRegistration, ctx: &ReconcileCtx) {
     }
 }
 
-/// Build the launch spec from a registration (pure; unit-tested). `package_roots`
-/// are the refs rendered back to `owner/repo@ref:path`; `bot_login` falls back to
-/// empty when unset.
-fn session_pod_spec_from(reg: &SessionRegistration, bot_login: Option<String>) -> SessionPodSpec {
+/// Build the launch spec from a registration + its effective work-label set (pure;
+/// unit-tested). `package_roots` are the refs rendered back to `owner/repo@ref:path`;
+/// the pod's `work_label` is the comma-joined `detected_work_labels` (the explicit
+/// `### Work Label` ∪ package-discovered labels — the set that actually wakes the
+/// session), NOT just the explicit label, so a `### Work Label`-less session runs on its
+/// packages' auto-declared labels (epic #594 I4). `bot_login` falls back to empty when
+/// unset.
+fn session_pod_spec_from(
+    reg: &SessionRegistration,
+    detected_work_labels: &[String],
+    bot_login: Option<String>,
+) -> SessionPodSpec {
     SessionPodSpec {
         session_id: reg.session_id.clone(),
         installation_id: reg.installation_id,
@@ -278,7 +297,7 @@ fn session_pod_spec_from(reg: &SessionRegistration, bot_login: Option<String>) -
             .iter()
             .map(reachability::render_ref)
             .collect(),
-        work_label: reg.def.work_label.clone().unwrap_or_default(),
+        work_label: crate::k8s::work_label_wire::join_work_labels(detected_work_labels),
         bot_login: bot_login.unwrap_or_default(),
         config_hash: reg.config_hash.clone(),
         output_lang: reg.def.output_lang.clone(),

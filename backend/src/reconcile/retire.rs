@@ -4,11 +4,13 @@
 //! cleaned up (the orphan-pod `Kill { TriggerClosed }`). But the WORK issues that
 //! session was working stay OPEN and otherwise keep a now-stale
 //! [`crate::reconcile::WORK_PICKED_UP_LABEL`] + "picked up" comment, with no signal
-//! that nobody is working them anymore. This step closes that gap: for the retired
-//! session's `work_label` it LISTs the open issues carrying it and, for each one NOT
-//! yet retired, posts a "session retired, no longer worked" comment, latches the
-//! durable [`crate::reconcile::SUBSTRATE_RETIRED_LABEL`], and removes the stale
-//! picked-up label. Each issue is LEFT OPEN.
+//! that nobody is working them anymore. This step closes that gap: for EACH of the
+//! retired session's effective work labels (epic #594 I4 — a session may claim more than
+//! one) it LISTs the open issues carrying that label and, for each one NOT yet retired,
+//! posts a "session retired, no longer worked" comment, latches the durable
+//! [`crate::reconcile::SUBSTRATE_RETIRED_LABEL`], and removes the stale picked-up label.
+//! Each issue is LEFT OPEN. An issue shared by two of the session's labels is retired
+//! ONCE (an in-pass `retired` set dedups across labels).
 //!
 //! It exactly mirrors [`crate::reconcile::work_ack::ack_open_work_issues`]: emitted
 //! from the pure planner (the orphan-pod branch, alongside the kill) and executed
@@ -18,6 +20,8 @@
 //! secret. The retired latch, read back from GitHub each reconcile, makes it
 //! idempotent: an already-retired issue is skipped, so the ~60s the orphan pod lingers
 //! before deletion never re-notifies.
+
+use std::collections::HashSet;
 
 use secrecy::SecretString;
 
@@ -39,42 +43,53 @@ pub fn retire_notice_comment(work_label: &str) -> String {
 }
 
 /// Executor entry point (the [`crate::reconcile::desired::ReconcileAction::RetireWorkIssues`]
-/// arm): mint the repo-scoped installation token, then delegate to
-/// [`retire_open_work_issues`]. A token-mint failure is logged and skipped — the next
-/// reconcile retries while the orphan pod still lingers, and the retired latch keeps
-/// that retry from re-notifying an already-handled issue. The minted token is passed
-/// straight through and NEVER logged.
+/// arm): mint the repo-scoped installation token ONCE, then retire across EACH of the
+/// session's effective `work_labels` (epic #594 I4) via [`retire_open_work_issues`]. A
+/// token-mint failure is logged and skipped — the next reconcile retries while the orphan
+/// pod still lingers, and the retired latch keeps that retry from re-notifying an
+/// already-handled issue. An in-pass `retired` set dedups an issue shared by two of the
+/// session's labels so it is notified once. The minted token is passed straight through
+/// and NEVER logged.
 pub async fn retire_work_issues(
     github: &GithubAppTokens,
     listing: &dyn GithubListing,
     repo: &RepoRef,
-    work_label: &str,
+    work_labels: &[String],
 ) {
     let owner_repo = format!("{}/{}", repo.owner, repo.name);
     let token = match github.token_for_repo(&owner_repo, None).await {
         Ok(token) => token,
         Err(error) => {
-            tracing::warn!(owner_repo = %owner_repo, work_label = %work_label, error = %error, "retire: token mint failed; skipping (retry next reconcile)");
+            tracing::warn!(owner_repo = %owner_repo, labels = work_labels.len(), error = %error, "retire: token mint failed; skipping (retry next reconcile)");
             return;
         }
     };
-    retire_open_work_issues(github, listing, &token, repo, work_label).await;
+    // Dedup an issue carrying more than one of the session's labels so it is retired
+    // once per pass, independent of GitHub's list read-after-write timing.
+    let mut retired: HashSet<i64> = HashSet::new();
+    for work_label in work_labels {
+        retire_open_work_issues(github, listing, &token, repo, work_label, &mut retired).await;
+    }
 }
 
-/// Best-effort, NON-failing: retire-notify every still-open work issue exactly once.
+/// Best-effort, NON-failing: retire-notify every still-open work issue carrying
+/// `work_label` exactly once.
 ///
-/// LIST the open issues carrying `work_label` and, for each returned issue whose
-/// labels do NOT already include [`SUBSTRATE_RETIRED_LABEL`], post the retire notice,
-/// latch the retired label, then remove the now-stale [`WORK_PICKED_UP_LABEL`]. The
-/// issue is LEFT OPEN. Reuses the repo-scoped installation `token` the executor
-/// minted. Every GitHub call is best-effort: a failure is logged and skipped, never
-/// propagated, so one bad issue never stalls the rest of the reconcile.
+/// LIST the open issues carrying `work_label` and, for each returned issue whose labels
+/// do NOT already include [`SUBSTRATE_RETIRED_LABEL`] and that `retired` has not already
+/// handled this pass, post the retire notice, latch the retired label, then remove the
+/// now-stale [`WORK_PICKED_UP_LABEL`]. The issue number is inserted into `retired` so a
+/// sibling label in the same pass never re-notifies it (epic #594 I4). The issue is LEFT
+/// OPEN. Reuses the repo-scoped installation `token` the executor minted. Every GitHub
+/// call is best-effort: a failure is logged and skipped, never propagated, so one bad
+/// issue never stalls the rest of the reconcile.
 pub async fn retire_open_work_issues(
     github: &GithubAppTokens,
     listing: &dyn GithubListing,
     token: &SecretString,
     repo: &RepoRef,
     work_label: &str,
+    retired: &mut HashSet<i64>,
 ) {
     let issues = match listing
         .list_issues_by_label(token, &repo.owner, &repo.name, work_label)
@@ -94,6 +109,11 @@ pub async fn retire_open_work_issues(
     };
 
     for issue in issues {
+        // Already handled under a sibling label THIS pass (a multi-label session's issue
+        // that carries two of its labels) — retire it once.
+        if retired.contains(&issue.number) {
+            continue;
+        }
         // The durable latch (read back from GitHub each reconcile) makes this
         // idempotent across the ~60s the orphan pod lingers before deletion: an
         // already-retired issue is skipped, so it is never re-notified.
@@ -101,6 +121,7 @@ pub async fn retire_open_work_issues(
             continue;
         }
         retire_issue(github, repo, issue.number, work_label).await;
+        retired.insert(issue.number);
     }
 }
 

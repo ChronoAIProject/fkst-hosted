@@ -21,6 +21,11 @@ pub mod health_eval;
 pub mod health_scrape;
 pub(crate) mod isolation;
 pub mod session_launcher;
+// The work-label SET ↔ single wire-value codec (epic #594 I4): join_work_labels (write
+// side, the reconcile executor) + split_work_labels (observe-side inverse, both session
+// backends' pod/sandbox projections). Standalone so the round-trip stays testable in
+// isolation and the two halves can never drift.
+pub(crate) mod work_label_wire;
 // Model B (issue #359 §5.4, PR5b): the in-place per-session installation-token
 // rotation loop that keeps a long-lived session pod's mounted `github-token`
 // current (server-side patch of the per-session Secret). Gated on pod dispatch.

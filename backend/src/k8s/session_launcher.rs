@@ -159,7 +159,14 @@ pub struct SessionPodSpec {
     /// Declared platform-package names / repo paths (consumed by the PR4
     /// `run-substrate` entrypoint to build the supervise command).
     pub package_roots: Vec<String>,
-    /// The claim/poll work label (`FKST_GITHUB_PROXY_POLL_LABEL_PREFIX`).
+    /// The session's effective work-label SET, comma-joined into one value (epic #594
+    /// I4) — the explicit `### Work Label` ∪ its packages' auto-declared labels. Feeds
+    /// `FKST_GITHUB_PROXY_POLL_LABEL_PREFIX` (which github-proxy comma-splits back into
+    /// its poll-label list), `FKST_SESSION_WORK_LABEL`, and the
+    /// `fkst.chrono-ai.fun/work-label` pod annotation. A single-label session renders as
+    /// the bare label (no comma), byte-identical to the pre-multi-label value. Built via
+    /// [`crate::k8s::work_label_wire::join_work_labels`]; recovered on observe via
+    /// [`crate::k8s::work_label_wire::split_work_labels`].
     pub work_label: String,
     /// The bot login (`FKST_GITHUB_BOT_LOGIN` + git author/committer name).
     pub bot_login: String,

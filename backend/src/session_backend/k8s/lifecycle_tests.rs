@@ -60,7 +60,24 @@ fn maps_a_running_pod_to_a_live_pod() {
     assert_eq!(live.last_pending_at, Some(ts("2026-07-01T10:00:00Z")));
     assert_eq!(live.config_hash.as_deref(), Some("hash-xyz"));
     // The work-label annotation is carried so an orphaned pod can retire-notify.
-    assert_eq!(live.work_label.as_deref(), Some("fkst-run"));
+    assert_eq!(live.work_labels, vec!["fkst-run".to_string()]);
+}
+
+#[test]
+fn maps_a_comma_joined_work_label_annotation_to_the_full_set() {
+    // A multi-label session (epic #594 I4) records its effective set comma-joined; the
+    // projection splits it back so the planner can retire across every label.
+    let mut pod = sample_pod(Some("Running"), false);
+    pod.metadata
+        .annotations
+        .as_mut()
+        .unwrap()
+        .insert(ANNOTATION_WORK_LABEL.to_string(), "alpha,beta".to_string());
+    let live = pod_to_live(&pod).expect("maps");
+    assert_eq!(
+        live.work_labels,
+        vec!["alpha".to_string(), "beta".to_string()]
+    );
 }
 
 #[test]
@@ -116,7 +133,7 @@ fn missing_last_pending_and_config_hash_map_to_none() {
     assert_eq!(live.last_pending_at, None);
     assert_eq!(live.config_hash, None);
     // An older pod predating the work-label annotation carries no label to retire.
-    assert_eq!(live.work_label, None);
+    assert!(live.work_labels.is_empty());
     assert_eq!(live.liveness, PodLiveness::Starting);
 }
 
