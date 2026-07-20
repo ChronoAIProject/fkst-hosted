@@ -11,12 +11,14 @@ import {
 } from '@/lib/api/derive';
 import { Note, SectionLabel, Spinner } from './parts';
 import { ObserveView } from './observe-view';
+import { SessionTimeline } from './session-timeline';
 import { PHASE_TONE, WORK_TONE } from './tones';
 import type { ObserveState } from './observe-state';
 import { ProgressCard, StatusCard, WorkDonut, countWorkItems } from './status-charts';
 
 /** The happy-path lifecycle stages, in order. Off-path phases (degraded /
- *  invalid / idle / picked-up) still surface as the prominent pill above. */
+ *  invalid / picked-up) still surface as the prominent pill above; an idle
+ *  (paused) session rests at the 'active' stage (see the paused rendering). */
 const STAGES: SessionPhase[] = ['registered', 'active', 'retired'];
 
 /** CSS-var accent color for a work-item tone. Container-agnostic so a row's left
@@ -29,7 +31,15 @@ const ACCENT: Record<WorkItemTone, string> = {
 };
 
 function stageReached(stage: SessionPhase, phase: SessionPhase, liveness: string | null): boolean {
-  const advanced = phase === 'active' || phase === 'picked-up' || phase === 'degraded' || phase === 'retired' || liveness != null;
+  // `idle` counts as advanced: a paused session ran at least once, so it has
+  // moved past 'registered' and rests between 'active' and 'retired'.
+  const advanced =
+    phase === 'active' ||
+    phase === 'picked-up' ||
+    phase === 'degraded' ||
+    phase === 'retired' ||
+    phase === 'idle' ||
+    liveness != null;
   if (stage === 'registered') return true;
   if (stage === 'active') return advanced;
   return phase === 'retired';
@@ -95,6 +105,10 @@ function LifecycleCard({ session }: { session: SessionDetail }) {
         {STAGES.map((stage) => {
           const reached = stageReached(stage, status.phase, status.liveness);
           const current = stage === status.phase;
+          // An idle session rests at the 'active' stage: it ran but its pod was
+          // paused (reaped for lack of work). Render it as a distinct "paused"
+          // node — not completed (green) nor currently-live (pulsing amber).
+          const paused = status.phase === 'idle' && stage === 'active';
           return (
             <li key={stage} className="flex items-center gap-1.5">
               <span
@@ -103,23 +117,27 @@ function LifecycleCard({ session }: { session: SessionDetail }) {
                   // transition-colors tweens the fill as a stage advances, so the
                   // strip animates a stage lighting up rather than snapping. The
                   // current stage breathes an amber glow (anim-glow-pulse);
-                  // reached stages carry a static green bloom. Both collapse to
-                  // their resting fill under prefers-reduced-motion via the
-                  // global suppression.
+                  // reached stages carry a static green bloom; a paused stage is a
+                  // quiet ghost dot inside an amber ring. All collapse to their
+                  // resting fill under prefers-reduced-motion via the global
+                  // suppression.
                   'w-2 h-2 rounded-full flex-none transition-colors ' +
                   (current
                     ? 'bg-amber anim-glow-pulse'
-                    : reached
-                      ? 'bg-green shadow-glow-green'
-                      : 'bg-ghost')
+                    : paused
+                      ? 'bg-ghost ring-2 ring-[color-mix(in_oklab,var(--amber)_45%,transparent)]'
+                      : reached
+                        ? 'bg-green shadow-glow-green'
+                        : 'bg-ghost')
                 }
               />
               <span
                 className={
-                  'font-mono text-[10.5px] ' + (reached || current ? 'text-dim' : 'text-ghost')
+                  'font-mono text-[10.5px] ' +
+                  (reached || current || paused ? 'text-dim' : 'text-ghost')
                 }
               >
-                {t.phase[stage]}
+                {paused ? t.stagePaused : t.phase[stage]}
               </span>
             </li>
           );
@@ -130,11 +148,12 @@ function LifecycleCard({ session }: { session: SessionDetail }) {
 }
 
 /** Status tab: an at-a-glance overview grid (progress meter, work-item
- *  distribution donut, lifecycle), the promoted per-work-item list, and an
- *  on-demand "Live engine details" fetch (slow pod exec — spinner + "may take a
- *  minute" note). Fills the wide detail panel: the overview grid is CSS
- *  auto-fit so it lays 2–3 tiles wide and stacks when narrow; the work items
- *  flow into two columns on wider viewports. */
+ *  distribution donut, lifecycle), a chronological session timeline, the
+ *  promoted per-work-item list, and an on-demand "Live engine details" fetch —
+ *  the fetch is only offered while the pod is LIVE (`liveness === 'live'`); when
+ *  the session is paused/idle it shows a calm note instead. Fills the wide detail
+ *  panel: the overview grid is CSS auto-fit so it lays 2–3 tiles wide and stacks
+ *  when narrow; the work items flow into two columns on wider viewports. */
 export function TabStatus({
   session,
   observe,
@@ -146,6 +165,16 @@ export function TabStatus({
 }) {
   const t = useContent().dashboard.detail;
   const counts = countWorkItems(session.work_issues);
+  // The live-engine observe fetch pod-execs INTO the running pod, so it is only
+  // meaningful — and only permitted — while the pod is live. A latched active
+  // label whose pod has been reaped is NOT live (see decodeSessionStatus).
+  const isLive = session.liveness === 'live';
+
+  // Hard gate: never let the observe fetch fire unless the pod is live, even if
+  // a stray caller reaches the handler.
+  const handleLoadObserve = () => {
+    if (isLive) onLoadObserve();
+  };
 
   // Inline auto-fit template: the tiles size themselves to the panel width
   // (container-driven), unlike Tailwind's viewport breakpoints — so the grid
@@ -161,6 +190,8 @@ export function TabStatus({
         <WorkDonut counts={counts} />
         <LifecycleCard session={session} />
       </section>
+
+      <SessionTimeline session={session} />
 
       <section className="flex flex-col gap-2">
         <SectionLabel>
@@ -182,10 +213,16 @@ export function TabStatus({
 
       <section className="flex flex-col gap-2">
         <SectionLabel>{t.liveEngine}</SectionLabel>
-        {/* Crossfade the observe states keyed on `status`: the fetched engine
-            snapshot slides in under the label as loading resolves to loaded,
-            rather than popping the panel in. Instant under reduced motion. */}
-        <FadeSwap k={observe.status}>{renderObserve()}</FadeSwap>
+        {isLive ? (
+          // Crossfade the observe states keyed on `status`: the fetched engine
+          // snapshot slides in under the label as loading resolves to loaded,
+          // rather than popping the panel in. Instant under reduced motion.
+          <FadeSwap k={observe.status}>{renderObserve()}</FadeSwap>
+        ) : (
+          // Paused/idle: the pod is gone, so there is nothing to observe. Explain
+          // it calmly instead of offering a fetch that would only error.
+          <Note>{t.liveEnginePaused}</Note>
+        )}
       </section>
     </div>
   );
@@ -196,7 +233,7 @@ export function TabStatus({
         return (
           <button
             type="button"
-            onClick={onLoadObserve}
+            onClick={handleLoadObserve}
             className="self-start font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim transition-[color,border-color,box-shadow] duration-150 hover:text-fg hover:border-line-2 hover:shadow-glow-amber cursor-pointer"
           >
             {t.liveEngine}
@@ -212,19 +249,29 @@ export function TabStatus({
             <Note>{t.liveEngineSlow}</Note>
           </div>
         );
-      case 'error':
+      case 'error': {
+        // Explain the failure: 409 == no durable delivery store to observe;
+        // anything else is a transient/defensive fallback (the section is
+        // already gated on live, so this is rarely reached). A 409 will not
+        // recover on retry, so only offer the retry for the transient case.
+        const noStore = observe.httpStatus === 409;
         return (
           <div className="flex flex-col items-start gap-2">
-            <p className="text-[12.5px] text-red">{t.liveEngineError}</p>
-            <button
-              type="button"
-              onClick={onLoadObserve}
-              className="font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim transition-[color,border-color,box-shadow] duration-150 hover:text-fg hover:border-line-2 hover:shadow-glow-amber cursor-pointer"
-            >
-              {t.logsRefresh}
-            </button>
+            <p className="text-[12.5px] text-red">
+              {noStore ? t.liveEngineErrorNoStore : t.liveEngineNotLive}
+            </p>
+            {!noStore && (
+              <button
+                type="button"
+                onClick={handleLoadObserve}
+                className="font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim transition-[color,border-color,box-shadow] duration-150 hover:text-fg hover:border-line-2 hover:shadow-glow-amber cursor-pointer"
+              >
+                {t.logsRefresh}
+              </button>
+            )}
           </div>
         );
+      }
       case 'loaded':
         return <ObserveView snapshot={observe.snapshot} />;
     }

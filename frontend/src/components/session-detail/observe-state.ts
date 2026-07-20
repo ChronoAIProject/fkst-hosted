@@ -6,5 +6,9 @@ import type { ObserveSnapshot } from '@/lib/api/types';
 export type ObserveState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'error' }
+  // `httpStatus` carries the failed request's HTTP status (from `ObserveError`)
+  // so the Status tab can explain itself — e.g. 409 == no durable delivery store
+  // to observe — instead of a bare red line. Undefined when the failure carried
+  // no status (network error / non-`ObserveError` throw).
+  | { status: 'error'; httpStatus?: number }
   | { status: 'loaded'; snapshot: ObserveSnapshot };

@@ -111,6 +111,46 @@ describe('TabStatus', () => {
     expect(onLoad).toHaveBeenCalledTimes(1);
   });
 
+  it('renders the session timeline (started → now) in the Status tab', () => {
+    render(<TabStatus session={session()} observe={idle} onLoadObserve={() => {}} />);
+    expect(screen.getByText('Timeline')).toBeInTheDocument();
+    expect(screen.getByText('Session started')).toBeInTheDocument();
+  });
+
+  it('gates the live engine on a live pod: paused note, no fetch button when idle', () => {
+    // A latched active label whose pod was reaped (no live liveness) with no open
+    // work is idle/paused — the observe fetch must NOT be offered.
+    const paused = session({ liveness: null, status_labels: ['fkst-substrate-active'], work_issues: [] });
+    const onLoad = vi.fn();
+    render(<TabStatus session={paused} observe={idle} onLoadObserve={onLoad} />);
+    expect(
+      screen.getByText(
+        'Live engine details are available while the session is running. It is paused now — no pending work.'
+      )
+    ).toBeInTheDocument();
+    // No fetch affordance, so the slow pod-exec can never be triggered.
+    expect(screen.queryByRole('button', { name: 'Live engine details' })).not.toBeInTheDocument();
+    expect(onLoad).not.toHaveBeenCalled();
+  });
+
+  it('does not reveal an observe snapshot once the pod is no longer live', () => {
+    // Even a previously-fetched snapshot is withheld while paused — the gate wins.
+    const paused = session({ liveness: null, status_labels: ['fkst-substrate-active'], work_issues: [] });
+    render(
+      <TabStatus
+        session={paused}
+        observe={{ status: 'loaded', snapshot: { queues: [{ queue: 'events', depth: 3 }] } }}
+        onLoadObserve={() => {}}
+      />
+    );
+    expect(screen.queryByText('events')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Live engine details are available while the session is running. It is paused now — no pending work.'
+      )
+    ).toBeInTheDocument();
+  });
+
   it('shows the slow-note + spinner while observe is loading', () => {
     render(
       <TabStatus session={session()} observe={{ status: 'loading' }} onLoadObserve={() => {}} />
@@ -136,11 +176,31 @@ describe('TabStatus', () => {
     expect(screen.getByText('2 deliveries pending')).toBeInTheDocument();
   });
 
-  it('shows the error state with a retry', () => {
+  it('shows the transient observe error with a retry (defensive fallback)', () => {
+    // The session is live here, so the observe section renders; a status-less
+    // error maps to the generic "available while running" fallback + a retry.
     render(
       <TabStatus session={session()} observe={{ status: 'error' }} onLoadObserve={() => {}} />
     );
-    expect(screen.getByText('Could not load the live engine details.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Live engine details are available while the session is running.')
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
+  });
+
+  it('explains a 409 observe error as no durable delivery store, without a retry', () => {
+    render(
+      <TabStatus
+        session={session()}
+        observe={{ status: 'error', httpStatus: 409 }}
+        onLoadObserve={() => {}}
+      />
+    );
+    expect(
+      screen.getByText('This session has no durable delivery store to observe.')
+    ).toBeInTheDocument();
+    // A 409 cannot recover on retry, so no retry button is offered.
+    expect(screen.queryByRole('button', { name: 'Refresh' })).not.toBeInTheDocument();
   });
 
   it('renders duplicately-named queues without a React key collision (bug B3)', () => {

@@ -340,6 +340,9 @@ export interface SiteContent {
       lifecycle: string;
       /** Decoded lifecycle phase labels — one per `SessionPhase`. */
       phase: Record<SessionPhase, string>;
+      /** Stage-strip label shown at the 'active' node when the session is idle
+       *  (paused): it ran but its pod was reaped for lack of work. */
+      stagePaused: string;
       healthLabel: string;
       /** Decoded health labels — one per `SessionHealth`. */
       health: Record<SessionHealth, string>;
@@ -360,12 +363,37 @@ export interface SiteContent {
       /** Friendly note shown in the donut card when there are no work items
        *  (distinct from `noWorkItems` so the two never collide on screen). */
       donutEmpty: string;
+      // ---- Status tab: session timeline ----
+      /** Timeline card eyebrow. */
+      timeline: string;
+      /** First timeline node — the trigger issue's creation. */
+      timelineStarted: string;
+      /** A work issue entering the queue (its creation). */
+      timelineWorkQueued: string;
+      /** A work issue closing (finished / no longer worked). */
+      timelineWorkFinished: string;
+      /** A pull request being opened. */
+      timelinePrOpened: string;
+      /** A pull request merging. */
+      timelinePrMerged: string;
+      /** A pull request closing without a merge. */
+      timelinePrClosed: string;
+      /** The terminal "current state" node prefix (e.g. "Now — Idle"). */
+      timelineNow: string;
       liveEngine: string;
       liveEngineLoading: string;
       /** Note that observe is a slow pod exec. */
       liveEngineSlow: string;
-      liveEngineError: string;
       liveEngineEmpty: string;
+      /** Calm note shown in place of the observe fetch when the pod is NOT live
+       *  (the Status tab gates the live-engine fetch on `liveness === 'live'`). */
+      liveEnginePaused: string;
+      /** Defensive observe-error fallback (non-409): the live-engine read is
+       *  only available while the pod runs. */
+      liveEngineNotLive: string;
+      /** Observe-error message for HTTP 409 — the session has no durable
+       *  delivery store to observe. */
+      liveEngineErrorNoStore: string;
       queues: string;
       queueDepth: string;
       queuePending: string;
@@ -400,6 +428,9 @@ export interface SiteContent {
       logsUnavailable: string;
       logsLoading: string;
       logsError: string;
+      /** Logs manifest error for HTTP 503 — log storage isn't configured for
+       *  this deployment. */
+      logsErrorNoStorage: string;
       logsEmpty: string;
       logsFilesAria: string;
       logsSelectFile: string;

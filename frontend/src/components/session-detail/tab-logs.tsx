@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useContent } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
 import { cn } from '@/lib/utils';
-import { getLogFile, getLogManifest, DEFAULT_LOG_TAIL_BYTES } from '@/lib/api/logs';
+import { getLogFile, getLogManifest, LogError, DEFAULT_LOG_TAIL_BYTES } from '@/lib/api/logs';
 import type { LogFileContent, LogManifest, SessionDetail } from '@/lib/api/types';
 import { Chip } from '@/components/ui/chip';
 import { FadeSwap, StaggerItem } from '@/components/ui/motion';
@@ -26,6 +26,9 @@ export function TabLogs({ session }: { session: SessionDetail }) {
 
   const [manifest, setManifest] = useState<LogManifest | null>(null);
   const [manifestState, setManifestState] = useState<LoadState>('loading');
+  // HTTP status of a failed manifest load, so the error copy can explain a 503
+  // (log storage not configured) instead of the generic failure line.
+  const [manifestErrorStatus, setManifestErrorStatus] = useState<number | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [file, setFile] = useState<LogFileContent | null>(null);
   const [fileState, setFileState] = useState<LoadState>('idle');
@@ -59,6 +62,7 @@ export function TabLogs({ session }: { session: SessionDetail }) {
       return;
     }
     setManifestState('loading');
+    setManifestErrorStatus(null);
     getLogManifest(apiFetch, sessionId)
       .then((body) => {
         if (!mounted.current) return;
@@ -67,7 +71,11 @@ export function TabLogs({ session }: { session: SessionDetail }) {
         // Auto-select the first file so the viewer is never blank on open.
         if (body.files.length > 0) setSelected((prev) => prev ?? body.files[0]!.path);
       })
-      .catch(() => mounted.current && setManifestState('error'));
+      .catch((err) => {
+        if (!mounted.current) return;
+        setManifestErrorStatus(err instanceof LogError ? err.status : null);
+        setManifestState('error');
+      });
   }, [apiFetch, sessionId]);
 
   useEffect(() => {
@@ -158,9 +166,12 @@ export function TabLogs({ session }: { session: SessionDetail }) {
     );
   }
   if (manifestState === 'error') {
+    // 503 == the deployment has no log storage configured; everything else is a
+    // generic failure the reader can retry.
+    const errorMsg = manifestErrorStatus === 503 ? t.logsErrorNoStorage : t.logsError;
     return (
       <div className="flex items-center gap-2 flex-wrap">
-        <p className="text-[12.5px] text-red">{t.logsError}</p>
+        <p className="text-[12.5px] text-red">{errorMsg}</p>
         <button
           type="button"
           onClick={loadManifest}
