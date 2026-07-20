@@ -2,11 +2,14 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { Dashboard, formatSgt } from './dashboard';
 import { AuthProvider } from '@/lib/auth/github-auth';
+import { BroaderOAuthProvider } from '@/lib/auth/broader-oauth';
 
 function renderDashboard() {
   return render(
     <AuthProvider>
-      <Dashboard />
+      <BroaderOAuthProvider>
+        <Dashboard />
+      </BroaderOAuthProvider>
     </AuthProvider>
   );
 }

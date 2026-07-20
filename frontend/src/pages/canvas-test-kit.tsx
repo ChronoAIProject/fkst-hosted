@@ -2,6 +2,7 @@ import { vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { Dashboard } from './dashboard';
 import { AuthProvider } from '@/lib/auth/github-auth';
+import { BroaderOAuthProvider } from '@/lib/auth/broader-oauth';
 import { ToastProvider } from '@/components/ui/toast';
 import type { AccountOverview, OverviewResponse, RepoOverview } from '@/lib/api/types';
 
@@ -50,6 +51,7 @@ export const overviewBody = (
   viewer: { login: 'shining' },
   accounts,
   totals: { sessions: 0, packages: [] },
+  broader_oauth_available: false,
 });
 
 /** Stub global fetch: GET /api/v1/overview gets the given body/status. */
@@ -128,7 +130,9 @@ export function renderDashboard() {
   return render(
     <ToastProvider>
       <AuthProvider>
-        <Dashboard />
+        <BroaderOAuthProvider>
+          <Dashboard />
+        </BroaderOAuthProvider>
       </AuthProvider>
     </ToastProvider>
   );

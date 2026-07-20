@@ -53,6 +53,7 @@ const overview = (accounts: AccountOverview[], appSlug: string | null = 'chronoa
     viewer: { login: 'shining' },
     accounts,
     totals: { sessions: 0, packages: [] },
+    broader_oauth_available: false,
   }) satisfies OverviewResponse;
 
 describe('Level0Sidebar', () => {

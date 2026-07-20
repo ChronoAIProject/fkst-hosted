@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { AuthProvider } from '@/lib/auth/github-auth';
+import { BroaderOAuthProvider } from '@/lib/auth/broader-oauth';
 
 // The docs-only degrade state is opt-in (VITE_FKST_DOCS_ONLY=true at build
 // time). `import.meta.env` is baked at module load, so the flag is exercised
@@ -24,7 +25,9 @@ describe('Dashboard (docs-only build)', () => {
     window.localStorage.setItem('fkst-gh-access', 'ghu_x');
     render(
       <AuthProvider>
-        <Dashboard />
+        <BroaderOAuthProvider>
+          <Dashboard />
+        </BroaderOAuthProvider>
       </AuthProvider>
     );
     expect(

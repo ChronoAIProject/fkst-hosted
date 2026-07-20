@@ -22,14 +22,32 @@ const overviewBody = {
   viewer: { login: 'shining' },
   accounts: [],
   totals: { sessions: 0, packages: [] },
+  broader_oauth_available: false,
 };
 
 describe('getOverview', () => {
   it('GETs /api/v1/overview and returns the payload', async () => {
     const apiFetch = vi.fn(async () => jsonResponse(overviewBody)) as ApiFetch;
     const body = await getOverview(apiFetch);
+    // No broader token → single-arg call, byte-identical to before the header
+    // was added (no init object, so no X-Github-Broader-Token).
     expect(apiFetch).toHaveBeenCalledWith('/api/v1/overview');
     expect(body.viewer.login).toBe('shining');
+  });
+
+  it('omits the broader header when the token is null/undefined', async () => {
+    const apiFetch = vi.fn(async () => jsonResponse(overviewBody)) as ApiFetch;
+    await getOverview(apiFetch, null);
+    // Still the bare single-arg call — a null token adds no init object.
+    expect(apiFetch).toHaveBeenCalledWith('/api/v1/overview');
+  });
+
+  it('sends X-Github-Broader-Token when a broader token is present', async () => {
+    const apiFetch = vi.fn(async () => jsonResponse(overviewBody)) as ApiFetch;
+    await getOverview(apiFetch, 'brd_tok');
+    expect(apiFetch).toHaveBeenCalledWith('/api/v1/overview', {
+      headers: { 'X-Github-Broader-Token': 'brd_tok' },
+    });
   });
 
   it('throws on a non-2xx status', async () => {

@@ -76,6 +76,12 @@ export const canvasGraph: CanvasGraphSlice = {
   chartScopeAriaRepos: 'Scope charts to a repository',
   chartEmpty: 'Nothing to chart yet.',
   chartOther: 'Other',
+  broaderConnectTitle: 'See all your repositories',
+  broaderConnectHint:
+    'Authorize broader access to also show repositories and organizations where the fkst App is not installed.',
+  broaderConnect: 'Connect',
+  broaderShowingAll: 'Showing all repositories',
+  broaderDisconnect: 'Disconnect',
 };
 
 export const reposBase: ReposBaseSlice = {

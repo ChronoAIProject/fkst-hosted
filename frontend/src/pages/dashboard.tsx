@@ -3,10 +3,12 @@ import { Eyebrow } from '@/components/layout/eyebrow';
 import { FadeSwap } from '@/components/ui/motion';
 import { useContent } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
+import { useBroaderOAuth } from '@/lib/auth/broader-oauth';
 import { getOverview, getRepoSessions } from '@/lib/api/canvas';
 import type { OverviewResponse, RepoSessionsResponse } from '@/lib/api/types';
 import { filterAccounts, filterRepos } from '@/lib/api/derive';
 import { CanvasBreadcrumb } from '@/components/canvas/breadcrumb';
+import { BroaderVisibilityBanner } from '@/components/canvas/broader-visibility';
 import { CanvasFlow } from '@/components/canvas/flow';
 import { levelKey, parentLevel } from '@/components/canvas/level';
 import type { CanvasLevel } from '@/components/canvas/level';
@@ -35,6 +37,15 @@ export function Dashboard() {
   const d = c.dashboard;
   const cc = d.canvas;
   const { configured, isAuthenticated, error, sessionExpired, signIn, apiFetch } = useAuth();
+  // The optional broader-visibility credential: its token is threaded into the
+  // overview fetch so non-installed repos/orgs are enumerated, and its state
+  // drives the connect affordance below.
+  const {
+    connected: broaderConnected,
+    token: broaderToken,
+    connectBroader,
+    disconnectBroader,
+  } = useBroaderOAuth();
   const { startIfUnseen } = useTour();
 
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
@@ -87,13 +98,15 @@ export function Dashboard() {
   }, [isAuthenticated, overview, startIfUnseen]);
 
   // Load (and on `tick` bumps, re-load) the overview. Existing data is kept
-  // during a refetch, so refreshes never blank the canvas.
+  // during a refetch, so refreshes never blank the canvas. `broaderToken` is a
+  // dep so capturing (or clearing) the broader credential re-fetches WITH (or
+  // WITHOUT) the header, making non-installed repos appear (or disappear).
   useEffect(() => {
     if (!isAuthenticated || !configured) return;
     let active = true;
     setOverviewFailed(false);
     setOverviewRefreshing(true);
-    getOverview(apiFetch)
+    getOverview(apiFetch, broaderToken)
       .then((body) => {
         if (active) setOverview(body);
       })
@@ -106,7 +119,7 @@ export function Dashboard() {
     return () => {
       active = false;
     };
-  }, [isAuthenticated, configured, apiFetch, tick]);
+  }, [isAuthenticated, configured, apiFetch, tick, broaderToken]);
 
   // Level-2 sessions: re-fetch keeping the current frame (used by the poll
   // and after mutations); the level-change effect below handles the reset.
@@ -416,6 +429,17 @@ export function Dashboard() {
           {overviewRefreshing ? d.repos.refreshing : d.repos.refresh}
         </button>
       </div>
+
+      {/* Broader-visibility connect affordance — offered only when the backend
+          advertises the feature (overview.broader_oauth_available); nothing
+          renders otherwise. Connecting shows repos/orgs where the App is not
+          installed. */}
+      <BroaderVisibilityBanner
+        available={overview?.broader_oauth_available ?? false}
+        connected={broaderConnected}
+        onConnect={connectBroader}
+        onDisconnect={disconnectBroader}
+      />
 
       {/* A refresh that fails with data on screen must not blank it — flag the
           staleness without blocking the (still valid) last-good view. */}

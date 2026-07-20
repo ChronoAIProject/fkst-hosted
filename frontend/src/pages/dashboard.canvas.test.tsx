@@ -36,6 +36,7 @@ const overviewBody: OverviewResponse = {
   viewer: { login: 'shining' },
   accounts,
   totals: { sessions: 1, packages: [{ package: 'o/p@main:pkg/base', count: 1 }] },
+  broader_oauth_available: false,
 };
 
 const sessionsBody: RepoSessionsResponse = {
@@ -269,6 +270,7 @@ describe('Dashboard — canvas levels and loading', () => {
       viewer: { login: 'shining' },
       accounts: [],
       totals: { sessions: 0, packages: [] },
+      broader_oauth_available: false,
     };
     vi.stubGlobal(
       'fetch',

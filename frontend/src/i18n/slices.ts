@@ -77,6 +77,11 @@ export type CanvasGraphSlice = Pick<
   | 'chartScopeAriaRepos'
   | 'chartEmpty'
   | 'chartOther'
+  | 'broaderConnectTitle'
+  | 'broaderConnectHint'
+  | 'broaderConnect'
+  | 'broaderShowingAll'
+  | 'broaderDisconnect'
 >;
 /** Canvas details panel: level ledes, sessions/PRs listing (sidebar cluster). */
 export type CanvasSidebarSlice = Pick<

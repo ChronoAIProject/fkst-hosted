@@ -48,6 +48,11 @@ export interface OverviewResponse {
   viewer: { login: string };
   accounts: AccountOverview[];
   totals: OverviewTotals;
+  /** True when this deployment offers the broader (classic-OAuth) credential
+   *  that unlocks repos/orgs where the fkst App is NOT installed. Drives the
+   *  connect affordance on the canvas; when false the feature is off and the
+   *  affordance is never rendered. */
+  broader_oauth_available: boolean;
 }
 
 // ---- GET /api/v1/repos/{owner}/{name}/sessions ------------------------------
