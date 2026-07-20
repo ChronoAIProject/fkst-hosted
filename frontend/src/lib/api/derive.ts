@@ -211,12 +211,29 @@ const SESSION_LABELS = {
 /** Decode a session's lifecycle phase + health from its labels, invalid reason,
  *  trigger state and pod liveness. Precedence is terminal-first: an invalid /
  *  config-rejected session overrides everything, then a retired/closed one,
- *  then degraded, then active. */
+ *  then degraded, then a LIVE pod (active), then the paused (idle) / reviving
+ *  (picked-up) / fresh (registered) open-trigger states.
+ *
+ *  The `fkst-substrate-active` label is a DURABLE one-way latch the reconciler
+ *  sets ONCE at registration (backend/src/reconcile/mod.rs) — it records "this
+ *  session was announced", NOT "a pod is running right now" (there is no removal
+ *  path). So a latched active label alone is NOT enough to read "active": that
+ *  requires a live pod (`liveness === 'live'`). A session whose pod was reaped
+ *  for lack of work still carries the label but is IDLE (paused), and
+ *  auto-revives when a new work issue opens. */
 export function decodeSessionStatus(session: SessionDetail): DecodedSessionStatus {
   const labels = new Set(session.status_labels);
   const has = (label: string) => labels.has(label);
   const degraded = has(SESSION_LABELS.degraded);
   const liveness = session.liveness ?? null;
+  const live = liveness === 'live';
+  // The announce latch records that the session ran at least once — it is the
+  // signal that separates a paused (idle) session from a never-activated
+  // (registered) one, but only ever in combination with the live-pod check.
+  const announced = has(SESSION_LABELS.active);
+  // Open work items are what keep a session's pod alive; with none pending the
+  // reconciler idles/reaps the pod to save resources (the manual's IDLE state).
+  const hasOpenWork = session.work_issues.some((issue) => issue.state === 'open');
 
   let phase: SessionPhase;
   if (session.invalid_reason != null || has(SESSION_LABELS.invalid) || has(SESSION_LABELS.configRejected)) {
@@ -225,9 +242,17 @@ export function decodeSessionStatus(session: SessionDetail): DecodedSessionStatu
     phase = 'retired';
   } else if (degraded) {
     phase = 'degraded';
-  } else if (has(SESSION_LABELS.active) || liveness != null) {
+  } else if (live) {
+    // A live pod is the ONLY signal that reads as "active"; a latched announce
+    // label whose pod has since been reaped resolves to idle (below), not active.
     phase = 'active';
-  } else if (has(SESSION_LABELS.pickedUp)) {
+  } else if (announced && !hasOpenWork) {
+    // Announced before, no live pod, nothing queued: paused to save resources.
+    // A new work issue auto-revives it.
+    phase = 'idle';
+  } else if (has(SESSION_LABELS.pickedUp) || (announced && hasOpenWork)) {
+    // Claimed / reviving: picked up, or announced with pending work, but the pod
+    // is not live yet (e.g. `liveness === 'starting'`).
     phase = 'picked-up';
   } else if (session.trigger.state === 'open') {
     phase = 'registered';
@@ -235,7 +260,7 @@ export function decodeSessionStatus(session: SessionDetail): DecodedSessionStatu
     phase = 'idle';
   }
 
-  const health: SessionHealth = degraded ? 'degraded' : liveness === 'live' ? 'ok' : 'unknown';
+  const health: SessionHealth = degraded ? 'degraded' : live ? 'ok' : 'unknown';
   return { phase, health, liveness };
 }
 

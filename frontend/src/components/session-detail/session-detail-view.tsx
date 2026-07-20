@@ -2,7 +2,7 @@ import { useCallback, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { useContent } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
 import { cn } from '@/lib/utils';
-import { getObserve } from '@/lib/api/observe';
+import { getObserve, ObserveError } from '@/lib/api/observe';
 import { decodeSessionStatus } from '@/lib/api/derive';
 import type { SessionDetail } from '@/lib/api/types';
 import { Chip } from '@/components/ui/chip';
@@ -75,7 +75,15 @@ export function SessionDetailView({
     setObserve({ status: 'loading' });
     getObserve(apiFetch, sessionId)
       .then((snapshot) => setObserve({ status: 'loaded', snapshot }))
-      .catch(() => setObserve({ status: 'error' }));
+      // Thread the HTTP status through so the Status tab can distinguish 409 (no
+      // durable store to observe) from a transient failure; a non-ObserveError
+      // throw (e.g. network) carries no status.
+      .catch((err) =>
+        setObserve({
+          status: 'error',
+          httpStatus: err instanceof ObserveError ? err.status : undefined,
+        })
+      );
   }, [apiFetch, session.session_id]);
 
   const tabs: Array<{ key: TabKey; label: string }> = [
