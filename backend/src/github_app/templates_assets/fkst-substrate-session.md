@@ -73,6 +73,17 @@ matches contributors by LOGIN. Delete this whole section to trust only yourself.
 (The old heading `### Log Access Allowlist` is still accepted as an alias.)
 -->
 
+### Session Collaborators
+
+<!--
+Optional WORK-ITEM AUTHORITY list. List extra GitHub logins — one per line, or
+comma/space separated; a leading `@` is fine — granted authority over THIS
+session's work issues IN ADDITION to you (the issue author), who always has it.
+These users may raise, label, and comment on the session's work issues (its work
+queue). Delete this whole section to grant authority to only yourself. (Frozen at
+registration like every other setting in this issue.)
+-->
+
 ### Output Language
 
 <!--

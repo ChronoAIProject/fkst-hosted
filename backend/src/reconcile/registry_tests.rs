@@ -66,6 +66,10 @@ fn valid_body_yields_a_registration() {
         reg.log_access.is_empty(),
         "a body with no Log Access Allowlist section has an empty allow-list"
     );
+    assert!(
+        reg.collaborators.is_empty(),
+        "a body with no Session Collaborators section has an empty list"
+    );
 
     // The session id + config hash must match the canonical derivations.
     let want_id = derive_session_id(INSTALLATION_ID, "acme", "site", 7);
@@ -115,6 +119,37 @@ fn environment_section_is_captured() {
             None,
             &reg.def.engine_config
         )
+    );
+}
+
+#[test]
+fn collaborators_section_round_trips_onto_the_registration() {
+    let body = "### Session Name\n\
+                demo\n\n\
+                ### Packages\n\
+                acme/tools@main:pkg/demo\n\n\
+                ### Work Label\n\
+                fkst-demo\n\n\
+                ### Session Collaborators\n\
+                @alice, bob\n";
+    let reg = parse_registration(INSTALLATION_ID, &repo(), &issue(15, body, 1)).expect("parses");
+    assert_eq!(
+        reg.collaborators,
+        vec!["alice".to_string(), "bob".to_string()],
+        "the `### Session Collaborators` list threads onto the registration"
+    );
+    // Collaborators are NOT part of config_hash (pod identity): the hash equals
+    // the no-collaborators derivation over the SessionDef.
+    assert_eq!(
+        reg.config_hash,
+        config_hash(
+            &reg.def.packages,
+            reg.def.work_label.as_deref(),
+            None,
+            None,
+            &reg.def.engine_config
+        ),
+        "collaborators must not affect config_hash"
     );
 }
 

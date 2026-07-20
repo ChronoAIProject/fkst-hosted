@@ -76,6 +76,7 @@ prod-env
             environment: Some("prod-env".to_string()),
             auto_merge: false,
             log_access: vec![],
+            collaborators: vec![],
             output_lang: None,
             engine_config: std::collections::BTreeMap::new(),
         }
@@ -175,6 +176,119 @@ fn log_access_blank_section_is_empty() {
     assert!(
         spec.log_access.is_empty(),
         "a blank `### Log Access Allowlist` section yields an empty allow-list"
+    );
+}
+
+// ---- Session Collaborators (optional work-item authority list; lenient) ----
+
+/// Build a body with the required sections held valid plus a
+/// `### Session Collaborators` section carrying `val`, so a parse's
+/// `collaborators` reflects only that value.
+fn body_with_collaborators(val: &str) -> String {
+    format!(
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\nlabel\n### Session Collaborators\n{val}\n"
+    )
+}
+
+#[test]
+fn collaborators_absent_defaults_empty() {
+    let spec = parse_trigger_issue_body(&body_with_package(VALID_PKG)).expect("parses");
+    assert!(
+        spec.collaborators.is_empty(),
+        "an absent `### Session Collaborators` section defaults to an empty list"
+    );
+}
+
+#[test]
+fn collaborators_parse_comma_whitespace_and_newline_separated_tokens() {
+    // Commas, spaces, and newlines all separate tokens; a leading `@` is stripped.
+    let spec = parse_trigger_issue_body(&body_with_collaborators("@alice, bob   carol\ndave"))
+        .expect("parses");
+    assert_eq!(
+        spec.collaborators,
+        vec![
+            "alice".to_string(),
+            "bob".to_string(),
+            "carol".to_string(),
+            "dave".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn collaborators_are_deduped_case_insensitively_first_spelling_wins() {
+    let spec = parse_trigger_issue_body(&body_with_collaborators("Alice, alice, @ALICE, bob"))
+        .expect("parses");
+    assert_eq!(
+        spec.collaborators,
+        vec!["Alice".to_string(), "bob".to_string()],
+        "case-insensitive dedupe keeps the first spelling"
+    );
+}
+
+#[test]
+fn collaborators_blank_section_is_empty() {
+    let spec = parse_trigger_issue_body(&body_with_collaborators("   \n\n")).expect("parses");
+    assert!(
+        spec.collaborators.is_empty(),
+        "a blank `### Session Collaborators` section yields an empty list"
+    );
+}
+
+#[test]
+fn collaborators_and_log_access_are_independent_lists() {
+    // The two trusted-user lists are parsed separately and never bleed into each
+    // other — collaborators come only from `### Session Collaborators`.
+    let body = format!(
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\nlabel\n\
+         ### FKST Contributors\nlogviewer\n### Session Collaborators\n@worker\n"
+    );
+    let spec = parse_trigger_issue_body(&body).expect("both sections parse");
+    assert_eq!(spec.log_access, vec!["logviewer".to_string()]);
+    assert_eq!(spec.collaborators, vec!["worker".to_string()]);
+}
+
+#[test]
+fn duplicate_collaborators_heading_is_422() {
+    // Matches every other section: a duplicate `### ` heading is a 422 naming it.
+    let body = format!(
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\nlabel\n\
+         ### Session Collaborators\nx\n### Session Collaborators\ny\n"
+    );
+    let msg = err_message(&body);
+    assert!(msg.contains("duplicate"), "must flag the duplicate: {msg}");
+    assert!(
+        msg.contains("Session Collaborators"),
+        "must name the section: {msg}"
+    );
+}
+
+#[test]
+fn collaborators_comment_only_section_parses_to_empty() {
+    // A PRISTINE section (comment-only, even one whose prose MENTIONS @logins) must
+    // yield an EMPTY list: the HTML comment is stripped before tokenizing, so no
+    // garbage/@-mention word-tokens leak into the frozen authority list.
+    let spec = parse_trigger_issue_body(&body_with_collaborators(
+        "<!--\nOptional. Add @alice, @bob — one per line. Delete to trust only yourself.\n-->",
+    ))
+    .expect("comment-only section parses");
+    assert!(
+        spec.collaborators.is_empty(),
+        "a comment-only Session Collaborators section must parse to an empty list"
+    );
+}
+
+#[test]
+fn collaborators_comment_plus_value_parses_only_the_value() {
+    // The comment (including its @mention prose) is stripped; only the real value
+    // lines survive.
+    let spec = parse_trigger_issue_body(&body_with_collaborators(
+        "<!-- Optional. @ignored-in-comment -->\n@worker, @second",
+    ))
+    .expect("comment + value parses");
+    assert_eq!(
+        spec.collaborators,
+        vec!["worker".to_string(), "second".to_string()]
     );
 }
 
@@ -514,6 +628,13 @@ fn the_full_pristine_bundled_template_parses_with_its_sample_values() {
     assert_eq!(spec.packages[0].repo, "fkst-packages");
     assert_eq!(spec.environment, None, "comment-only section is unset");
     assert!(!spec.auto_merge, "the template ships `false`");
+    // The pristine `### Session Collaborators` section is comment-only; the parser
+    // strips the comment before tokenizing, so it parses to an EMPTY list — no
+    // comment prose (or its @mentions) leaks into the frozen authority list.
+    assert!(
+        spec.collaborators.is_empty(),
+        "the template's comment-only Session Collaborators section must parse to empty"
+    );
     assert_eq!(spec.output_lang, None);
     assert!(spec.engine_config.is_empty());
 }

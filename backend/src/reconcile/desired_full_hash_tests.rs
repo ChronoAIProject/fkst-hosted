@@ -32,6 +32,7 @@ fn base_reg() -> SessionRegistration {
         config_hash: "ignored".to_string(),
         auto_merge: false,
         log_access: vec!["alice".to_string()],
+        collaborators: vec![],
     }
 }
 
@@ -103,6 +104,16 @@ fn full_config_hash_changes_with_each_config_field() {
         base,
         full_config_hash(&reg),
         "clearing log_access must also move the hash"
+    );
+
+    // collaborators — like log_access, FROZEN by config-immutability, so adding a
+    // non-empty list MUST move the full hash (base_reg has none).
+    let mut reg = base_reg();
+    reg.collaborators = vec!["worker".to_string()];
+    assert_ne!(
+        base,
+        full_config_hash(&reg),
+        "collaborators must move the full hash (it is frozen by config-immutability)"
     );
 }
 
@@ -180,13 +191,65 @@ fn full_config_hash_is_a_strict_superset_of_config_hash() {
 
 #[test]
 fn full_config_hash_is_digest_stable_for_old_configs() {
-    // PINNED pre-`output_lang` digest (captured before the field existed): a
-    // registration that never set the new section must hash byte-identically
+    // PINNED pre-`output_lang` digest (captured before that field existed): a
+    // registration that never set the new sections must hash byte-identically
     // across the deploy, or every announced session's latched marker would
-    // mismatch and the immutability check would fire fleet-wide.
+    // mismatch and the immutability check would fire fleet-wide. base_reg carries
+    // NO output_lang / engine_config / collaborators, so every skip-if-empty
+    // trailing field is omitted and the digest is unchanged — this same pin also
+    // guards the later `collaborators` addition (issue #572 F3).
     assert_eq!(
         full_config_hash(&base_reg()),
         "0a97c6a26cf3dc2ae4326ea253f7ee33e8bf8e28bd3416b8e33443e7999fb091"
+    );
+}
+
+#[test]
+fn full_config_hash_empty_collaborators_matches_pre_field_baseline() {
+    // (a) A session WITHOUT collaborators must hash byte-identically to the pinned
+    // pre-`collaborators` baseline — the skip-if-empty guard keeps old configs
+    // stable across the deploy (no fleet-wide `fkst-config-rejected`).
+    assert!(base_reg().collaborators.is_empty());
+    assert_eq!(
+        full_config_hash(&base_reg()),
+        "0a97c6a26cf3dc2ae4326ea253f7ee33e8bf8e28bd3416b8e33443e7999fb091",
+        "an empty collaborators list must leave the full hash at the pre-field baseline"
+    );
+}
+
+#[test]
+fn full_config_hash_non_empty_collaborators_moves_full_but_not_config_hash() {
+    // (b) A non-empty collaborators list flips the FULL hash (freezing it) while
+    // leaving the pod-subset `config_hash` untouched — collaborators live on the
+    // registration, outside the SessionDef that `config_hash` covers.
+    let base = base_reg();
+    let base_full = full_config_hash(&base);
+    let base_config = config_hash(
+        &base.def.packages,
+        base.def.work_label.as_deref(),
+        base.def.environment.as_deref(),
+        base.def.output_lang.as_deref(),
+        &base.def.engine_config,
+    );
+
+    let mut reg = base_reg();
+    reg.collaborators = vec!["worker".to_string()];
+    let reg_config = config_hash(
+        &reg.def.packages,
+        reg.def.work_label.as_deref(),
+        reg.def.environment.as_deref(),
+        reg.def.output_lang.as_deref(),
+        &reg.def.engine_config,
+    );
+
+    assert_ne!(
+        base_full,
+        full_config_hash(&reg),
+        "collaborators are inside full_config_hash"
+    );
+    assert_eq!(
+        base_config, reg_config,
+        "collaborators are outside config_hash (the pod is unaffected)"
     );
 }
 

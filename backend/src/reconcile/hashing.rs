@@ -107,11 +107,13 @@ pub fn config_hash(
 /// edited, even one (like the auto-merge opt-in) that does not respawn the pod.
 ///
 /// Canonical form: SHA-256 over the canonical JSON of
-/// `{packages, work_label, environment, name, auto_merge, log_access}`. The field order
+/// `{packages, work_label, environment, name, auto_merge, log_access, output_lang,
+/// engine_config, collaborators}` (the optional trailing fields serialize only when
+/// set — see the digest-stability invariant on [`config_hash`]). The field order
 /// below IS part of the canonical form (serde serialises in declaration order), so
 /// identical inputs always hash identically and any changed field flips the hash —
-/// including `log_access`, so the log allow-list is FROZEN by the config-immutability
-/// check (it cannot be widened after registration).
+/// including `log_access` and `collaborators`, so both are FROZEN by the
+/// config-immutability check (neither can be widened after registration).
 pub fn full_config_hash(reg: &SessionRegistration) -> String {
     #[derive(Serialize)]
     struct Canonical<'a> {
@@ -129,6 +131,13 @@ pub fn full_config_hash(reg: &SessionRegistration) -> String {
         output_lang: Option<&'a str>,
         #[serde(skip_serializing_if = "BTreeMap::is_empty")]
         engine_config: &'a BTreeMap<String, String>,
+        // The work-item collaborators list (issue #572 F3). Appended LAST and
+        // skip-if-empty so a session WITHOUT collaborators serializes byte-for-byte
+        // as it did before the field existed — no fleet-wide hash drift (false
+        // `fkst-config-rejected` + spawn suppression). A non-empty list flips the
+        // full hash, FREEZING the list under config-immutability.
+        #[serde(skip_serializing_if = "<[String]>::is_empty")]
+        collaborators: &'a [String],
     }
     let canonical = Canonical {
         packages: canon_packages(&reg.def.packages),
@@ -139,6 +148,7 @@ pub fn full_config_hash(reg: &SessionRegistration) -> String {
         log_access: &reg.log_access,
         output_lang: reg.def.output_lang.as_deref(),
         engine_config: &reg.def.engine_config,
+        collaborators: &reg.collaborators,
     };
     hex_digest(&canonical, "full-config-hash")
 }

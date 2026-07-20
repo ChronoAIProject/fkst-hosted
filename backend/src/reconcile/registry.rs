@@ -63,6 +63,7 @@ pub fn parse_registration(
         config_hash: hash,
         auto_merge: spec.auto_merge,
         log_access: spec.log_access,
+        collaborators: spec.collaborators,
     })
 }
 
