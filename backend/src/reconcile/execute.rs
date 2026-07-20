@@ -85,7 +85,13 @@ pub struct ReconcileCtx {
 pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx) {
     let owner_repo = format!("{}/{}", repo.owner, repo.name);
     match action {
-        ReconcileAction::Spawn(reg) => spawn_session(reg, ctx).await,
+        // `detected_work_labels` is threaded onto the action (I2, epic #594) but not
+        // yet consumed here — the pod spec is built exactly as before, so spawning is
+        // byte-identical. A later PR reads it to auto-label the session's issues.
+        ReconcileAction::Spawn {
+            reg,
+            detected_work_labels: _,
+        } => spawn_session(reg, ctx).await,
         ReconcileAction::TouchPending { session_id } => touch_pending(&session_id, ctx).await,
         ReconcileAction::Kill { session_id, reason } => kill(&session_id, reason, ctx).await,
         ReconcileAction::CleanupTerminal { session_id } => cleanup_terminal(&session_id, ctx).await,
@@ -116,6 +122,10 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
             session_id,
             session_name,
             work_label,
+            // Carried (I2, epic #594) but not yet rendered — the announce comment is
+            // built exactly as before, so the posted body is byte-identical. A later
+            // PR reads this to surface the auto-discovered labels in the announcement.
+            detected_work_labels: _,
             packages,
             environment,
             auto_merge,

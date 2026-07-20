@@ -210,6 +210,7 @@ fn loser_folded_into_invalid_is_flagged_and_winner_stays_valid() {
     );
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &invalid,
         &[],
         &pending(&[("s1", false)]),
@@ -240,6 +241,7 @@ fn demoted_loser_never_spawns_a_competing_pod() {
     );
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &invalid,
         &[],
         &pending(&[("s1", true), ("s2", true)]),
@@ -251,13 +253,16 @@ fn demoted_loser_never_spawns_a_competing_pod() {
         &cfg(300, 120),
     );
     assert!(
-        actions.contains(&ReconcileAction::Spawn(regs[0].clone())),
+        actions.contains(&ReconcileAction::Spawn {
+            reg: regs[0].clone(),
+            detected_work_labels: vec![],
+        }),
         "the winner spawns",
     );
     assert!(
         !actions
             .iter()
-            .any(|a| matches!(a, ReconcileAction::Spawn(r) if r.trigger_issue == 2)),
+            .any(|a| matches!(a, ReconcileAction::Spawn { reg, .. } if reg.trigger_issue == 2)),
         "the demoted loser must never spawn a competing pod",
     );
     assert!(
@@ -279,6 +284,7 @@ fn already_flagged_loser_is_not_reflagged() {
     );
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &invalid,
         &[],
         &pending(&[("s1", false)]),
@@ -305,6 +311,7 @@ fn collision_resolved_auto_clears_the_invalid_flag() {
     assert!(invalid.is_empty(), "the sole holder is not a loser");
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &invalid,
         &[],
         &pending(&[("s2", false)]),
@@ -344,6 +351,7 @@ fn folded_losers_flag_in_deterministic_issue_order() {
     let announced = latched(&[1, 3]); // suppress the two winners' announces
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &invalid,
         &[],
         &pending(&[]),
