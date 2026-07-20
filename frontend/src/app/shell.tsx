@@ -310,7 +310,7 @@ export function Shell() {
             k={location.pathname}
             className={isApp ? 'h-full' : ''}
           >
-            <div className={isApp ? 'h-full' : 'py-10 max-[480px]:py-8'}>{outlet}</div>
+            <div className={isApp ? 'h-full pb-3' : 'py-10 max-[480px]:py-8'}>{outlet}</div>
           </RouteTransition>
 
           {/* Marketing footer — only on doc/marketing routes (it scrolls in at
@@ -334,6 +334,37 @@ export function Shell() {
             </footer>
           )}
         </main>
+
+        {/* Slim pinned footer — app route only. Sits as a flex-none row AFTER
+            <main> so topbar + main(flex-1) + this footer sum to the column
+            height: the dashboard keeps its internal scroll, this bar stays
+            pinned at the viewport bottom, and the window never scrolls. A
+            gradient hairline top edge + subtle glass mirror the topbar; it
+            reuses the same c.footer.* strings + REPO/MANUAL_URL the marketing
+            footer carries, in a compact ~44px bar. */}
+        {isApp && (
+          <footer className="flex-none relative bg-glass backdrop-blur-glass h-[44px] flex items-center gap-x-5 gap-y-1 flex-wrap px-1 font-mono text-[11px] text-ghost">
+            {/* Gradient hairline top edge — a lit sweep mirroring the topbar's
+                bottom lip; pure paint, no layout, ignores pointer events. */}
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 top-0 h-px bg-grad-hairline"
+            />
+            <span className="flex items-center gap-2">
+              <FkstMark className="text-[12px] text-dim" />
+              <span>{c.footer.tagline}</span>
+            </span>
+            <NavLink to="/get-started" className="text-faint hover:text-fg no-underline">
+              {c.footer.getStarted}
+            </NavLink>
+            <a href={REPO} target="_blank" rel="noreferrer" className="text-faint hover:text-fg no-underline">
+              {c.footer.github}
+            </a>
+            <a href={MANUAL_URL} target="_blank" rel="noreferrer" className="text-faint hover:text-fg no-underline">
+              {c.footer.manual}
+            </a>
+          </footer>
+        )}
       </div>
 
       {/* Environments manager: a full-height right drawer overlaying the shell.
