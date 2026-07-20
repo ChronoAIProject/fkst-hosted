@@ -5,7 +5,8 @@
 
 use axum::extract::State;
 use axum::http::HeaderMap;
-use wiremock::matchers::{method, path, query_param};
+use secrecy::SecretString;
+use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
@@ -142,6 +143,207 @@ async fn overview_assembles_accounts_counts_and_totals() {
         "acme/pkgs@main:packages/devloop"
     );
     assert_eq!(view.totals.packages[0].count, 1);
+    // The default test config has no broader OAuth pair, so the connect flow is off.
+    assert!(!view.broader_oauth_available);
+}
+
+/// Mount the ENUMERATION reads (`/user/repos`, `/user/orgs`,
+/// `/user/memberships/orgs`) so they match ONLY the given bearer token — the probe
+/// that proves which token the overview uses for enumeration (a wrong token gets no
+/// matching mock → the read fails).
+async fn mount_enumeration_reads(server: &MockServer, auth: &str) {
+    let bearer = format!("Bearer {auth}");
+    Mock::given(method("GET"))
+        .and(path("/user/repos"))
+        .and(header("authorization", bearer.clone()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            repo_json("shining", "User", "notes", 1),
+            repo_json("acme", "Organization", "site", 2),
+        ])))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/user/orgs"))
+        .and(header("authorization", bearer.clone()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/user/memberships/orgs"))
+        .and(header("authorization", bearer))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "role": "admin", "organization": { "login": "acme" } }
+        ])))
+        .mount(server)
+        .await;
+}
+
+/// Mount the INSTALLATION reads (`/user/installations` + its repos) so they match
+/// ONLY the given bearer token — proves the App token (never the broader token) reads
+/// the installed flags.
+async fn mount_installation_reads(server: &MockServer, auth: &str) {
+    let bearer = format!("Bearer {auth}");
+    Mock::given(method("GET"))
+        .and(path("/user/installations"))
+        .and(header("authorization", bearer.clone()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 1,
+            "installations": [
+                { "id": 77, "account": { "login": "acme" }, "repository_selection": "selected" }
+            ]
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/user/installations/77/repositories"))
+        .and(header("authorization", bearer))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 1,
+            "repositories": [{ "name": "site", "owner": { "login": "acme" } }]
+        })))
+        .mount(server)
+        .await;
+}
+
+/// Mount the site repo's App-token mint + open trigger scan (one valid trigger).
+async fn mount_site_trigger_scan(server: &MockServer) {
+    mount_app_token(server, "acme", "site", 77).await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/issues"))
+        .and(query_param("state", "open"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "number": 5, "title": "trigger", "body": VALID_TRIGGER_BODY, "state": "open",
+                "labels": [{ "name": "fkst-substrate-trigger" }],
+                "user": { "login": "shining", "id": 9 }
+            }
+        ])))
+        .mount(server)
+        .await;
+}
+
+/// Build the auth headers plus the optional broader-visibility token header.
+fn auth_headers_with_broader(broader: &str) -> HeaderMap {
+    let mut headers = auth_headers();
+    headers.insert(
+        super::super::overview_broader::BROADER_TOKEN_HEADER,
+        broader.parse().unwrap(),
+    );
+    headers
+}
+
+#[tokio::test]
+async fn overview_uses_the_broader_token_for_enumeration_on_same_user() {
+    let server = MockServer::start().await;
+    // The broader token verifies to the SAME id (9) as the Bearer identity.
+    Mock::given(method("GET"))
+        .and(path("/user"))
+        .and(header("authorization", "Bearer broader-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "login": "shining", "id": 9
+        })))
+        .mount(&server)
+        .await;
+    // Enumeration must ride the BROADER token; installations must ride the App token.
+    mount_enumeration_reads(&server, "broader-token").await;
+    mount_installation_reads(&server, "user-token").await;
+    mount_site_trigger_scan(&server).await;
+
+    let state = test_state(&server.uri(), Some(test_app(&server.uri())));
+    let Json(view) = overview(
+        State(state),
+        viewer_user(),
+        auth_headers_with_broader("broader-token"),
+    )
+    .await
+    .expect("same-user broader token drives enumeration");
+
+    // The org + its installed repo still resolve — proving the App token read the
+    // installed flags while the broader token drove enumeration.
+    assert_eq!(view.accounts.len(), 2);
+    let site = &view.accounts[1].repos[0];
+    assert!(site.installed);
+    assert_eq!(site.active_sessions, 1);
+}
+
+#[tokio::test]
+async fn overview_ignores_a_broader_token_for_a_different_user() {
+    let server = MockServer::start().await;
+    // The broader token verifies to a DIFFERENT id (999) — it must be ignored.
+    Mock::given(method("GET"))
+        .and(path("/user"))
+        .and(header("authorization", "Bearer foreign-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "login": "mallory", "id": 999
+        })))
+        .mount(&server)
+        .await;
+    // Both enumeration AND installations must fall back to the App user token; a
+    // broader-token enumeration read has NO matching mock and would fail the call.
+    mount_enumeration_reads(&server, "user-token").await;
+    mount_installation_reads(&server, "user-token").await;
+    mount_site_trigger_scan(&server).await;
+
+    let state = test_state(&server.uri(), Some(test_app(&server.uri())));
+    let Json(view) = overview(
+        State(state),
+        viewer_user(),
+        auth_headers_with_broader("foreign-token"),
+    )
+    .await
+    .expect("a foreign broader token is ignored, not fatal; the App token is used");
+
+    assert_eq!(
+        view.accounts.len(),
+        2,
+        "the call still assembles via the App token"
+    );
+    assert_eq!(view.accounts[1].repos[0].active_sessions, 1);
+}
+
+#[tokio::test]
+async fn overview_falls_back_to_the_app_token_when_the_broader_token_is_rejected() {
+    let server = MockServer::start().await;
+    // The broader token is rejected by /user (401) — the overview must NOT 500; it
+    // ignores the broader token and enumerates with the App token.
+    Mock::given(method("GET"))
+        .and(path("/user"))
+        .and(header("authorization", "Bearer bad-broader"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+    mount_enumeration_reads(&server, "user-token").await;
+    mount_installation_reads(&server, "user-token").await;
+    mount_site_trigger_scan(&server).await;
+
+    let state = test_state(&server.uri(), Some(test_app(&server.uri())));
+    let Json(view) = overview(
+        State(state),
+        viewer_user(),
+        auth_headers_with_broader("bad-broader"),
+    )
+    .await
+    .expect("a rejected broader token must degrade to the App token, never 500");
+    assert_eq!(view.accounts.len(), 2);
+}
+
+#[tokio::test]
+async fn overview_reports_broader_oauth_available_when_configured() {
+    let server = MockServer::start().await;
+    mount_user_reads(&server).await;
+
+    let mut state = test_state(&server.uri(), None);
+    state.config.log.broader_oauth_client_id = Some("classic-id".to_string());
+    state.config.log.broader_oauth_client_secret =
+        Some(SecretString::from("classic-secret".to_string()));
+
+    let Json(view) = overview(State(state), viewer_user(), auth_headers())
+        .await
+        .expect("200");
+    assert!(
+        view.broader_oauth_available,
+        "the broader pair is configured, so the connect flow must be advertised"
+    );
 }
 
 #[tokio::test]

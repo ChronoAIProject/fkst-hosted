@@ -32,6 +32,7 @@ use crate::github_app::GithubAppTokens;
 use crate::github_identity::GithubUser;
 use crate::models::RepoRef;
 use crate::reconcile::registry::parse_registration;
+use crate::routes::canvas::overview_broader::resolve_enumeration_token;
 use crate::routes::canvas::types::render_package_ref;
 use crate::routes::dashboard::{bearer_token, DashboardGithub, UserRepo};
 use crate::routes::repos::Viewer;
@@ -48,6 +49,11 @@ pub struct OverviewResponse {
     pub accounts: Vec<AccountOverview>,
     /// Sums across all accounts.
     pub totals: OverviewTotals,
+    /// Whether this deployment offers the broader-visibility OAuth connect flow
+    /// (`GET /api/v1/auth/github/broader`) — true iff the broader OAuth pair is
+    /// configured (issue #572). The SPA surfaces the "connect for full repo/org
+    /// visibility" action only when this is true.
+    pub broader_oauth_available: bool,
 }
 
 /// One account (the personal account or an org) on the canvas.
@@ -174,6 +180,9 @@ async fn scan_repo_sessions_packages(
     path = "/overview",
     tag = "canvas",
     operation_id = "canvas_overview",
+    params(
+        ("X-Github-Broader-Token" = Option<String>, Header, description = "Optional broader-visibility OAuth token (issue #572); when it verifies to the same GitHub id as the Bearer identity it drives repo/org enumeration so repos/orgs where the App is not installed still appear. Ignored on mismatch/verify failure."),
+    ),
     responses(
         (status = 200, description = "Every account with its repos, installation status, and live session/package counts", body = OverviewResponse),
         (status = 401, description = "Missing or invalid GitHub token", body = ErrorEnvelope),
@@ -190,16 +199,24 @@ pub(super) async fn overview(
     let token = bearer_token(&headers)?;
     let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
 
+    // The ENUMERATION token: the broader-visibility OAuth token when the caller
+    // supplies one that verifies to the same id, else the App user token (see
+    // `resolve_enumeration_token`). It drives the repo/org enumeration ONLY; the
+    // App token below still reads installations (the installed flags) and the
+    // reconciler-parity trigger scans.
+    let enum_token = resolve_enumeration_token(&state, &user, &token, &headers).await;
+
     // User-scoped enumeration (these failing fails the call — there is nothing
-    // to render without them).
-    let all_repos = gh.user_all_repos(&token).await?;
+    // to render without them). Uses the broader token when supplied so repos/orgs
+    // where the App is NOT installed still appear.
+    let all_repos = gh.user_all_repos(&enum_token).await?;
     // Org account cards come from the caller's ACTIVE org MEMBERSHIPS.
     // `GET /user/orgs` returns an EMPTY list for GitHub App user-to-server
     // tokens (the fine-grained token this dashboard's login issues), so it can
     // never enumerate the caller's orgs here; `/user/memberships/orgs` does
     // return them. `/user/orgs` is still unioned in so any token type that
-    // populates it (e.g. a classic OAuth token) loses nothing.
-    let memberships = gh.user_org_memberships(&token).await?;
+    // populates it (e.g. the broader classic OAuth token) loses nothing.
+    let memberships = gh.user_org_memberships(&enum_token).await?;
     let admin_orgs: HashSet<String> = memberships
         .iter()
         .filter(|m| m.role == "admin")
@@ -210,7 +227,7 @@ pub(super) async fn overview(
     for org in memberships
         .into_iter()
         .map(|m| m.org)
-        .chain(gh.user_orgs(&token).await?)
+        .chain(gh.user_orgs(&enum_token).await?)
     {
         if seen_orgs.insert(org.to_ascii_lowercase()) {
             orgs.push(org);
@@ -430,6 +447,7 @@ pub(super) async fn overview(
             sessions: total_sessions,
             packages,
         },
+        broader_oauth_available: state.config.log.broader_oauth().is_some(),
     }))
 }
 

@@ -14,6 +14,11 @@
 //!   App's *user* OAuth credentials, used by the endpoint's BROWSER mode (redirect →
 //!   callback code-exchange). Both or neither; the secret is held in a
 //!   [`SecretString`] and never logged.
+//! - `FKST_GITHUB_BROADER_OAUTH_CLIENT_ID` / `FKST_GITHUB_BROADER_OAUTH_CLIENT_SECRET`
+//!   — an OPTIONAL, ADDITIVE *classic* OAuth App carrying `repo` + `read:org`, used
+//!   ONLY to enumerate the caller's repos/orgs (including those where the GitHub App
+//!   is not installed). Same both-or-neither rule as the primary pair; unset leaves
+//!   the whole broader-visibility feature inert (today's behavior, byte-identical).
 //! - `FKST_GITHUB_OAUTH_BASE_URL` — the OAuth host for the authorize + token-exchange
 //!   calls. Default `https://github.com` (overridable for GitHub Enterprise or a
 //!   test mock; distinct from the REST `FKST_GITHUB_API_BASE_URL`).
@@ -54,6 +59,10 @@ struct LogVars {
     #[serde(default)]
     github_oauth_client_secret: Option<String>,
     #[serde(default)]
+    github_broader_oauth_client_id: Option<String>,
+    #[serde(default)]
+    github_broader_oauth_client_secret: Option<String>,
+    #[serde(default)]
     github_oauth_base_url: Option<String>,
     #[serde(default)]
     frontend_url: Option<String>,
@@ -79,6 +88,14 @@ pub struct LogConfig {
     /// `FKST_GITHUB_OAUTH_CLIENT_SECRET`. Held in a [`SecretString`]; never logged.
     /// Also doubles as the HMAC key that signs the OAuth `state` (CSRF protection).
     pub oauth_client_secret: Option<SecretString>,
+    /// The broader-visibility *classic* OAuth App client id (issue #572). Env:
+    /// `FKST_GITHUB_BROADER_OAUTH_CLIENT_ID`. `None` (blank coerced) → the
+    /// broader-visibility connect flow is unavailable and the SPA never offers it.
+    pub broader_oauth_client_id: Option<String>,
+    /// The broader-visibility classic OAuth App client secret (issue #572). Env:
+    /// `FKST_GITHUB_BROADER_OAUTH_CLIENT_SECRET`. Held in a [`SecretString`]; never
+    /// logged. Doubles as the HMAC key that signs the broader flow's OAuth `state`.
+    pub broader_oauth_client_secret: Option<SecretString>,
     /// The OAuth host for authorize + token-exchange. Env:
     /// `FKST_GITHUB_OAUTH_BASE_URL`. Default `https://github.com`.
     pub oauth_base_url: String,
@@ -95,6 +112,8 @@ impl Default for LogConfig {
             public_base_url: None,
             oauth_client_id: None,
             oauth_client_secret: None,
+            broader_oauth_client_id: None,
+            broader_oauth_client_secret: None,
             oauth_base_url: DEFAULT_OAUTH_BASE_URL.to_string(),
             frontend_url: None,
         }
@@ -154,6 +173,32 @@ impl LogConfig {
             _ => {}
         }
 
+        let broader_oauth_client_id = non_blank(raw.github_broader_oauth_client_id);
+        let broader_oauth_client_secret = non_blank(raw.github_broader_oauth_client_secret);
+        // Same all-or-nothing rule as the primary pair: the broader-visibility
+        // classic-OAuth flow needs BOTH the id and the secret, so exactly one set is
+        // an operator mistake — fail closed naming the missing half. Unset (both
+        // absent) leaves the whole feature inert.
+        match (&broader_oauth_client_id, &broader_oauth_client_secret) {
+            (Some(_), None) => {
+                return Err(AppError::Config(
+                    "FKST_GITHUB_BROADER_OAUTH_CLIENT_SECRET must be set when \
+                     FKST_GITHUB_BROADER_OAUTH_CLIENT_ID is set (broader-visibility \
+                     OAuth needs both)"
+                        .to_string(),
+                ))
+            }
+            (None, Some(_)) => {
+                return Err(AppError::Config(
+                    "FKST_GITHUB_BROADER_OAUTH_CLIENT_ID must be set when \
+                     FKST_GITHUB_BROADER_OAUTH_CLIENT_SECRET is set (broader-visibility \
+                     OAuth needs both)"
+                        .to_string(),
+                ))
+            }
+            _ => {}
+        }
+
         let oauth_base_url = non_blank(raw.github_oauth_base_url)
             .unwrap_or_else(|| DEFAULT_OAUTH_BASE_URL.to_string());
 
@@ -162,9 +207,26 @@ impl LogConfig {
             public_base_url: non_blank(raw.public_base_url),
             oauth_client_id,
             oauth_client_secret: oauth_client_secret.map(SecretString::from),
+            broader_oauth_client_id,
+            broader_oauth_client_secret: broader_oauth_client_secret.map(SecretString::from),
             oauth_base_url,
             frontend_url: non_blank(raw.frontend_url),
         })
+    }
+
+    /// The resolved broader-visibility OAuth `(client_id, client_secret)` pair — the
+    /// classic OAuth App carrying `repo` + `read:org`, used ONLY to enumerate the
+    /// caller's repos/orgs. `Some` only when BOTH vars are configured (the
+    /// all-or-nothing rule is enforced at load, so this can never see a lone half);
+    /// `None` leaves the whole broader-visibility feature inert.
+    pub fn broader_oauth(&self) -> Option<(&str, &SecretString)> {
+        match (
+            self.broader_oauth_client_id.as_deref(),
+            self.broader_oauth_client_secret.as_ref(),
+        ) {
+            (Some(id), Some(secret)) => Some((id, secret)),
+            _ => None,
+        }
     }
 }
 
@@ -259,6 +321,67 @@ mod tests {
         assert!(only_secret
             .to_string()
             .contains("FKST_GITHUB_OAUTH_CLIENT_ID"));
+    }
+
+    #[test]
+    fn broader_oauth_is_none_by_default() {
+        let config = LogConfig::from_vars(&vars(&[])).expect("defaults");
+        assert!(config.broader_oauth_client_id.is_none());
+        assert!(config.broader_oauth_client_secret.is_none());
+        assert!(
+            config.broader_oauth().is_none(),
+            "unset broader pair leaves the accessor empty (feature inert)"
+        );
+    }
+
+    #[test]
+    fn broader_oauth_pair_is_read_and_exposed_via_accessor() {
+        let config = LogConfig::from_vars(&vars(&[
+            ("FKST_GITHUB_BROADER_OAUTH_CLIENT_ID", "classic-id"),
+            ("FKST_GITHUB_BROADER_OAUTH_CLIENT_SECRET", "classic-secret"),
+        ]))
+        .expect("full broader pair loads");
+        let (id, secret) = config.broader_oauth().expect("broader pair resolved");
+        assert_eq!(id, "classic-id");
+        assert_eq!(secret.expose_secret(), "classic-secret");
+    }
+
+    #[test]
+    fn half_configured_broader_oauth_pair_fails_closed_naming_the_missing_half() {
+        let only_id = LogConfig::from_vars(&vars(&[(
+            "FKST_GITHUB_BROADER_OAUTH_CLIENT_ID",
+            "classic-id",
+        )]))
+        .expect_err("broader id without secret must fail");
+        assert!(only_id
+            .to_string()
+            .contains("FKST_GITHUB_BROADER_OAUTH_CLIENT_SECRET"));
+
+        let only_secret = LogConfig::from_vars(&vars(&[(
+            "FKST_GITHUB_BROADER_OAUTH_CLIENT_SECRET",
+            "classic-secret",
+        )]))
+        .expect_err("broader secret without id must fail");
+        assert!(only_secret
+            .to_string()
+            .contains("FKST_GITHUB_BROADER_OAUTH_CLIENT_ID"));
+    }
+
+    #[test]
+    fn broader_oauth_secret_is_redacted_in_debug_output() {
+        let config = LogConfig::from_vars(&vars(&[
+            ("FKST_GITHUB_BROADER_OAUTH_CLIENT_ID", "classic-id"),
+            (
+                "FKST_GITHUB_BROADER_OAUTH_CLIENT_SECRET",
+                "top-secret-broader",
+            ),
+        ]))
+        .expect("valid");
+        let debug = format!("{config:?}");
+        assert!(
+            !debug.contains("top-secret-broader"),
+            "Debug leaked the broader client secret: {debug}"
+        );
     }
 
     #[test]

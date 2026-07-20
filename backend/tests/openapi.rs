@@ -95,6 +95,9 @@ async fn paths_are_the_trimmed_v1_surface() {
         "/api/v1/auth/github/login",
         "/api/v1/auth/github/callback",
         "/api/v1/auth/github/refresh",
+        // The broader-visibility classic-OAuth connect flow (issue #572).
+        "/api/v1/auth/github/broader",
+        "/api/v1/auth/github/broader/callback",
         // The canvas dashboard's live overview + per-repo session surface.
         "/api/v1/overview",
         "/api/v1/repos/{owner}/{name}/sessions",

@@ -55,25 +55,30 @@ pub(crate) fn verify_state(secret: &[u8], state: &str) -> Option<String> {
         .map(|()| session_id.to_string())
 }
 
-/// Build the GitHub user-OAuth `authorize` URL to redirect the browser to. No scopes
-/// are requested — `/user` returns the caller's `{login, id}` with an unscoped token,
-/// which is all identity resolution needs.
+/// Build the GitHub user-OAuth `authorize` URL to redirect the browser to.
+///
+/// `scope` is appended as `&scope=...` ONLY when a non-empty value is supplied. The
+/// primary login / identity flows pass `None` — `/user` returns the caller's
+/// `{login, id}` with an unscoped token, which is all identity resolution needs. The
+/// broader-visibility flow (issue #572) passes `Some("repo read:org")` so the classic
+/// OAuth token can enumerate every repo/org the caller can access.
 pub(crate) fn authorize_url(
     oauth_base: &str,
     client_id: &str,
     redirect_uri: &str,
     state: &str,
+    scope: Option<&str>,
 ) -> Result<String, AppError> {
     let base = format!("{}/login/oauth/authorize", oauth_base.trim_end_matches('/'));
-    let url = reqwest::Url::parse_with_params(
-        &base,
-        &[
-            ("client_id", client_id),
-            ("redirect_uri", redirect_uri),
-            ("state", state),
-        ],
-    )
-    .map_err(|e| {
+    let mut params: Vec<(&str, &str)> = vec![
+        ("client_id", client_id),
+        ("redirect_uri", redirect_uri),
+        ("state", state),
+    ];
+    if let Some(scope) = scope.filter(|s| !s.is_empty()) {
+        params.push(("scope", scope));
+    }
+    let url = reqwest::Url::parse_with_params(&base, &params).map_err(|e| {
         // The error carries only the (non-secret) base URL, never the token/secret.
         AppError::Internal(anyhow::anyhow!("build oauth authorize url: {e}"))
     })?;
@@ -325,6 +330,7 @@ mod tests {
             "Iv1.abc",
             "https://fkst.example/api/v1/logs/oauth/callback",
             "sess-1.deadbeef",
+            None,
         )
         .expect("builds");
         assert!(url.starts_with("https://github.com/login/oauth/authorize?"));
@@ -332,5 +338,43 @@ mod tests {
         // The redirect_uri is percent-encoded.
         assert!(url.contains("redirect_uri=https%3A%2F%2Ffkst.example"));
         assert!(url.contains("state=sess-1.deadbeef"));
+        // No scope requested for the unscoped identity flow.
+        assert!(
+            !url.contains("scope="),
+            "unscoped flow must omit scope: {url}"
+        );
+    }
+
+    #[test]
+    fn authorize_url_appends_scope_only_when_present() {
+        // The broader-visibility flow requests `repo read:org`, percent-encoded.
+        let scoped = authorize_url(
+            "https://github.com",
+            "classic-id",
+            "https://fkst.example/api/v1/auth/github/broader/callback",
+            "broader-1.deadbeef",
+            Some("repo read:org"),
+        )
+        .expect("builds");
+        assert!(scoped.contains("client_id=classic-id"));
+        // A space in the scope must be percent-encoded (space → %20 or +).
+        assert!(
+            scoped.contains("scope=repo+read%3Aorg") || scoped.contains("scope=repo%20read%3Aorg"),
+            "scope must be present and encoded: {scoped}"
+        );
+
+        // An empty scope is treated as absent (never a bare `&scope=`).
+        let empty = authorize_url(
+            "https://github.com",
+            "classic-id",
+            "https://fkst.example/cb",
+            "s.deadbeef",
+            Some(""),
+        )
+        .expect("builds");
+        assert!(
+            !empty.contains("scope="),
+            "an empty scope must not be appended: {empty}"
+        );
     }
 }
