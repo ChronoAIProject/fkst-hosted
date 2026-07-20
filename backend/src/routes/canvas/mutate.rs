@@ -15,11 +15,13 @@
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
+use crate::goals::trigger_parse::parse_trigger_issue_body;
 use crate::routes::canvas::sessions::validate_repo_segment;
 use crate::routes::canvas::trigger_body::{validated_trigger_body, CreateSessionRequest};
 use crate::routes::dashboard::{bearer_token, DashboardGithub};
@@ -52,6 +54,7 @@ pub struct CreateSessionResponse {
         (status = 401, description = "Missing or invalid GitHub token", body = ErrorEnvelope),
         (status = 403, description = "Not allowlisted, or GitHub refused the write for this caller", body = ErrorEnvelope),
         (status = 404, description = "Repo not found (or the caller cannot see it)", body = ErrorEnvelope),
+        (status = 409, description = "The requested explicit work label collides with an existing open session on this repo (the message names the conflicting issue)", body = ErrorEnvelope),
         (status = 422, description = "Issues are disabled on the repo", body = ErrorEnvelope),
         (status = 503, description = "GitHub API unreachable", body = ErrorEnvelope),
     )
@@ -71,7 +74,24 @@ pub(super) async fn create_session(
 
     let token = bearer_token(&headers)?;
     let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
-    let labels = vec![state.config.reconcile.substrate_trigger_label.clone()];
+    let trigger_label = state.config.reconcile.substrate_trigger_label.clone();
+
+    // Pre-flight (R4b): refuse a create that would collide with an existing OPEN
+    // session's work label on this repo BEFORE opening the trigger issue —
+    // immediate UX for the reconciler's authoritative R4a collision backstop.
+    // Only runs when the request names an explicit work label (a request with no
+    // explicit label has no known label pre-creation; see the helper's contract).
+    if let Some(requested_label) = req
+        .work_label
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        ensure_no_work_label_collision(&gh, &token, &owner, &name, &trigger_label, requested_label)
+            .await?;
+    }
+
+    let labels = vec![trigger_label];
     let created = gh
         .create_issue(&token, &owner, &name, req.name.trim(), &body, &labels)
         .await?;
@@ -88,6 +108,52 @@ pub(super) async fn create_session(
             html_url: created.html_url,
         }),
     ))
+}
+
+/// Reject a canvas create that would collide with an existing OPEN session's
+/// work label on the same repo — the immediate-UX pre-flight fronting the
+/// reconciler's authoritative R4a collision backstop.
+///
+/// Contract: the caller invokes this ONLY when the new request names an explicit
+/// `### Work Label`. A request with no explicit label has no comparable label
+/// until it registers (its wake labels are auto-discovered from its packages
+/// AFTER creation), so there is nothing to check here — the R4a backstop owns
+/// that case.
+///
+/// It adds exactly ONE GitHub read: the repo's OPEN trigger issues, via the
+/// caller's own user token (the same token that opens the issue). Each open
+/// trigger is parsed with the shared trigger parser and compared on its EXPLICIT
+/// work label; a malformed trigger body has no comparable label and is skipped.
+/// Existing sessions that rely solely on package-discovered labels are likewise
+/// left to R4a — resolving those would fan out a manifest read per package,
+/// which this single-read fast path deliberately avoids.
+async fn ensure_no_work_label_collision(
+    gh: &DashboardGithub,
+    token: &SecretString,
+    owner: &str,
+    name: &str,
+    trigger_label: &str,
+    requested_label: &str,
+) -> Result<(), AppError> {
+    let open_triggers = gh
+        .issues_by_label(token, owner, name, trigger_label, "open")
+        .await?;
+    for trigger in &open_triggers {
+        // Tolerant parse: a trigger whose body no longer parses contributes no
+        // comparable label (the reconciler flags it invalid on its own pass).
+        let Ok(spec) = parse_trigger_issue_body(&trigger.summary.body) else {
+            continue;
+        };
+        let existing = spec.work_label.as_deref().map(str::trim).unwrap_or("");
+        if !existing.is_empty() && existing == requested_label {
+            return Err(AppError::Conflict(format!(
+                "work label \"{requested_label}\" is already in use by the open session \
+                 #{} on {owner}/{name}; close that session or choose a different work label",
+                trigger.summary.number
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// `DELETE /api/v1/repos/{owner}/{name}/sessions/{issue_number}` — close the
