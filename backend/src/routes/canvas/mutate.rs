@@ -172,7 +172,7 @@ async fn ensure_no_work_label_collision(
         (status = 204, description = "The trigger issue was closed (the reconciler retires the session on its next pass)"),
         (status = 400, description = "Malformed owner/name/issue number", body = ErrorEnvelope),
         (status = 401, description = "Missing or invalid GitHub token", body = ErrorEnvelope),
-        (status = 403, description = "Not allowlisted, or GitHub refused the close for this caller", body = ErrorEnvelope),
+        (status = 403, description = "Not allowlisted, the caller is not the session's trigger author nor a repo admin / org owner (session-management authority), or GitHub refused the close for this caller", body = ErrorEnvelope),
         (status = 404, description = "No such issue (or the caller cannot see the repo)", body = ErrorEnvelope),
         (status = 503, description = "GitHub API unreachable", body = ErrorEnvelope),
     )
@@ -180,7 +180,7 @@ async fn ensure_no_work_label_collision(
 pub(super) async fn stop_session(
     State(state): State<AppState>,
     Path((owner, name, issue_number)): Path<(String, String, u64)>,
-    _user: GithubUser,
+    user: GithubUser,
     headers: HeaderMap,
 ) -> Result<StatusCode, AppError> {
     validate_repo_segment(&owner, "owner")?;
@@ -210,6 +210,22 @@ pub(super) async fn stop_session(
         )));
     }
 
+    // Request-time SESSION-MANAGEMENT authorization (R5, epic #572): stopping a
+    // session is reserved to the caller who OWNS it — the trigger AUTHOR (matched
+    // by immutable id, never the renamable login) — or a repo admin / org owner.
+    // Session Collaborators hold WORK-ITEM authority only, never session
+    // management, so they are deliberately NOT admitted here. Enforced ALWAYS (not
+    // the reconciler's opt-in flag) so the canvas can never be a bypass around the
+    // reconciler-side gate; the author tier short-circuits the admin lookup.
+    let authorized =
+        user.id == issue.author_id || gh.caller_is_repo_admin(&token, &owner, &name).await?;
+    if !authorized {
+        return Err(AppError::Forbidden(format!(
+            "only the session's trigger author or a repo admin / org owner may stop \
+             #{issue_number}"
+        )));
+    }
+
     gh.close_issue(&token, &owner, &name, issue_number).await?;
     tracing::info!(
         owner = %owner,
@@ -223,3 +239,7 @@ pub(super) async fn stop_session(
 #[cfg(test)]
 #[path = "mutate_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "mutate_stop_tests.rs"]
+mod stop_tests;
