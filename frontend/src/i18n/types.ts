@@ -456,6 +456,18 @@ export interface SiteContent {
       /** Copy-affordance label on the shown log file's name. */
       logsFilenameCopy: string;
       logsDownloadBundle: string;
+      // ---- Logs tab: per-run picker ----
+      /** Eyebrow / accessible name for the run picker (a session is served by a
+       *  sequence of pod incarnations — "runs"). */
+      runPicker: string;
+      /** Label for the current, still-running incarnation; `{start}` = its SGT
+       *  start time. */
+      runRunning: string;
+      /** Compact label for a legacy session's single synthetic run (no window). */
+      runLatest: string;
+      /** Non-blocking notice when the run list failed to load and the tab fell
+       *  back to the latest bundle. */
+      runsError: string;
       // ---- Outcomes tab ----
       outcomesLoading: string;
       outcomesError: string;
