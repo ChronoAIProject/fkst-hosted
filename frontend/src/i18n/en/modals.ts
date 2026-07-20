@@ -26,6 +26,9 @@ export const canvasModals: CanvasModalsSlice = {
   createAutoMergeLabel: 'Auto-merge',
   createLogAccessLabel: 'Log access allowlist (optional)',
   createLogAccessHint: 'Extra GitHub logins or ids, comma or space separated.',
+  createCollaboratorsLabel: 'Collaborators (optional)',
+  createCollaboratorsHint:
+    'GitHub logins granted work-item authority — they can raise, label and comment on this session’s work issues. Comma or space separated. Distinct from log access.',
   createOutputLangLabel: 'Output language (optional)',
   createOutputLangHint: 'The language the session writes its output in, e.g. `English` or `中文`.',
   createSubmit: 'Create trigger issue',

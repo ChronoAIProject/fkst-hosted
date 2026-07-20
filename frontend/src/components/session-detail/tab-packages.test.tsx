@@ -31,6 +31,7 @@ const session = (over: Partial<SessionDetail> = {}): SessionDetail => ({
   liveness: null,
   prs: [],
   log_access: null,
+  collaborators: null,
   output_lang: null,
   ...over,
 });
@@ -91,6 +92,7 @@ describe('TabPackages', () => {
           auto_merge: true,
           output_lang: 'zh',
           log_access: ['alice', 'bob'],
+          collaborators: ['worker', 'helper'],
         })}
         observe={idle}
       />
@@ -110,6 +112,12 @@ describe('TabPackages', () => {
     expect(screen.getByText('Log access')).toBeInTheDocument();
     expect(screen.getByText('alice')).toBeInTheDocument();
     expect(screen.getByText('bob')).toBeInTheDocument();
+
+    // Collaborators (work-item authority) rendered as its own row, distinct
+    // from log access, one chip per login.
+    expect(screen.getByText('Collaborators')).toBeInTheDocument();
+    expect(screen.getByText('worker')).toBeInTheDocument();
+    expect(screen.getByText('helper')).toBeInTheDocument();
   });
 
   it('renders "No" when auto-merge is disabled', () => {
@@ -125,7 +133,23 @@ describe('TabPackages', () => {
         <TabPackages session={session({ log_access })} observe={idle} />
       );
       expect(screen.getByText('Log access')).toBeInTheDocument();
-      expect(screen.getByText('None')).toBeInTheDocument();
+      // The collaborators row (default null) also reads "None" here, so both
+      // rows render the placeholder — at least one must be present.
+      expect(screen.getAllByText('None').length).toBeGreaterThanOrEqual(1);
+      unmount();
+    }
+  });
+
+  it('renders an explicit "None" for an empty collaborators list', () => {
+    // Empty list, null, and undefined must all read as "no collaborators" — an
+    // unset collaborators list is a real, frozen state, distinct from log access.
+    for (const collaborators of [[] as string[], null, undefined]) {
+      const { unmount } = render(
+        <TabPackages session={session({ collaborators })} observe={idle} />
+      );
+      expect(screen.getByText('Collaborators')).toBeInTheDocument();
+      // Both the log-access and collaborators rows read "None" here.
+      expect(screen.getAllByText('None').length).toBeGreaterThanOrEqual(1);
       unmount();
     }
   });

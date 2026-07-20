@@ -19,7 +19,8 @@ use crate::session_spec::derive_session_id;
 
 const VALID_TRIGGER_BODY: &str = "### Session Name\nsite\n\n### Packages\n\
 acme/pkgs@main:packages/devloop\n\n### Work Label\nsite-build\n\n\
-### Log Access Allowlist\nalice\n\n### Output Language\nzh-CN\n";
+### Log Access Allowlist\nalice\n\n### Session Collaborators\nworker\n\n\
+### Output Language\nzh-CN\n";
 
 fn issue_json(number: i64, body: &str, labels: &[&str], state: &str) -> serde_json::Value {
     serde_json::json!({
@@ -198,6 +199,11 @@ async fn repo_sessions_assembles_the_full_detail() {
         "the `### Log Access Allowlist` grantees round-trip onto the detail"
     );
     assert_eq!(
+        session.collaborators,
+        vec!["worker".to_string()],
+        "the `### Session Collaborators` round-trip onto the detail"
+    );
+    assert_eq!(
         session.output_lang.as_deref(),
         Some("zh-CN"),
         "the `### Output Language` locale round-trips onto the detail"
@@ -248,6 +254,10 @@ async fn repo_sessions_assembles_the_full_detail() {
     assert!(
         invalid.log_access.is_empty(),
         "an unparseable trigger exposes no log-access grantees"
+    );
+    assert!(
+        invalid.collaborators.is_empty(),
+        "an unparseable trigger exposes no collaborators"
     );
     assert!(
         invalid.output_lang.is_none(),

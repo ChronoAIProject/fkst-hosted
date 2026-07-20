@@ -25,6 +25,9 @@ export const canvasModals: CanvasModalsSlice = {
   createAutoMergeLabel: '自动合并',
   createLogAccessLabel: '日志访问允许列表（可选）',
   createLogAccessHint: '额外的 GitHub 登录名或 id，以逗号或空格分隔。',
+  createCollaboratorsLabel: '协作者（可选）',
+  createCollaboratorsHint:
+    '被授予任务权限的 GitHub 登录名 —— 他们可以创建、打标签并评论该会话的任务 issue。以逗号或空格分隔。与日志访问互相独立。',
   createOutputLangLabel: '输出语言（可选）',
   createOutputLangHint: '会话输出所使用的语言，例如 `English` 或 `中文`。',
   createSubmit: '创建触发 issue',

@@ -70,6 +70,12 @@ pub struct SessionDetail {
     /// beyond the trigger author + global admins); empty when invalid or none
     /// were specified. Frozen by config-immutability after registration.
     pub log_access: Vec<String>,
+    /// The `### Session Collaborators` — GitHub logins granted WORK-ITEM
+    /// AUTHORITY over the session (beyond the trigger author); empty when
+    /// invalid or none were specified. A DISTINCT list from
+    /// [`log_access`](Self::log_access) (log-download access). Frozen by
+    /// config-immutability after registration.
+    pub collaborators: Vec<String>,
     /// The `### Output Language` locale (rendered into the session as
     /// `FKST_OUTPUT_LANG`); null when invalid or unspecified.
     pub output_lang: Option<String>,
@@ -191,6 +197,7 @@ fn invalid_session_detail(
         environment: None,
         packages: Vec::new(),
         log_access: Vec::new(),
+        collaborators: Vec::new(),
         output_lang: None,
         invalid_reason: Some(reason),
         status_labels: canvas_status_labels(&trigger.summary, trigger_label),
@@ -333,6 +340,7 @@ pub(super) async fn repo_sessions(
                     environment: reg.def.environment.clone(),
                     packages: reg.def.packages.iter().map(render_package_ref).collect(),
                     log_access: reg.log_access.clone(),
+                    collaborators: reg.collaborators.clone(),
                     output_lang: reg.def.output_lang.clone(),
                     invalid_reason: None,
                     status_labels: canvas_status_labels(&trigger.summary, trigger_label),
