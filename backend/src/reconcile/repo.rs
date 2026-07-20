@@ -21,7 +21,7 @@ use crate::error::AppError;
 use crate::log_access::LogSessionContext;
 use crate::models::RepoRef;
 use crate::reconcile::announce::parse_config_hash_marker;
-use crate::reconcile::collision::detect_work_label_collisions;
+use crate::reconcile::collision::{detect_missing_work_labels, detect_work_label_collisions};
 use crate::reconcile::desired::{plan_repo, SessionRegistration};
 use crate::reconcile::execute::{execute, ReconcileCtx};
 use crate::reconcile::pending::{LabelCountPending, PendingWork};
@@ -188,6 +188,27 @@ pub async fn reconcile_repo(
     // immutable per session config), bounding the manifest fetches to one resolve per
     // distinct session config.
     let work_labels_by_session = resolve_work_label_sets(ctx, &token, &regs).await;
+
+    // I4 label-less reject (epic #594). A session whose EFFECTIVE work-label set is empty
+    // (no explicit `### Work Label` AND no package-declared `[github].work_labels`) can
+    // never be woken, so it is DEMOTED into the `invalid` set here — flowing through the
+    // SAME flag/comment/auto-clear path as a parse failure or collision, and auto-clearing
+    // the moment a work label appears. Done BEFORE the collision + pending gate so a
+    // label-less trigger is removed from `regs` up front (a label-less session shares no
+    // queue, so it never collides anyway; ordering it first keeps its reason precise). A
+    // spawned session therefore always carries ≥1 work label, keeping the in-pod guard
+    // satisfied.
+    let missing = detect_missing_work_labels(&regs, &work_labels_by_session);
+    if !missing.is_empty() {
+        let losers: HashSet<i64> = missing.iter().map(|(issue, _)| *issue).collect();
+        tracing::info!(
+            owner_repo = %owner_repo,
+            demoted = missing.len(),
+            "reconcile: label-less trigger(s) detected; demoting to invalid"
+        );
+        regs.retain(|reg| !losers.contains(&reg.trigger_issue));
+        invalid.extend(missing);
+    }
 
     // R4a work-label collision backstop (epic #572). A trigger issue can be created
     // directly on GitHub, so this server-side guard — not the authoring convention — is

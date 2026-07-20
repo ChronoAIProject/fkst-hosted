@@ -2,7 +2,9 @@
 //! ([`crate::reconcile::collision::detect_work_label_collisions`]) plus the end-to-end
 //! fold-into-`invalid` + [`super::plan_repo`] flow the reconcile driver runs (demote →
 //! flag once → auto-clear on resolution). Split out of the planner test files to keep
-//! each under the 500-line limit; fixtures live in [`super::desired_test_fixtures`].
+//! each under the 500-line limit; fixtures live in [`super::desired_test_fixtures`]. The
+//! sibling missing-label reject backstop (epic #594 I4) is tested in
+//! `desired_missing_label_tests.rs`.
 //!
 //! The end-to-end tests mirror `reconcile::repo` exactly: detect the losers, remove
 //! them from `regs`, extend `invalid` with the markers, then plan — so they prove the

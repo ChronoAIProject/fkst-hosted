@@ -43,12 +43,53 @@ fn orphan_live_pod_with_work_label_also_retires_its_work_issues() {
                     reason: KillReason::TriggerClosed,
                 },
                 ReconcileAction::RetireWorkIssues {
-                    work_label: Some("fkst-run".to_string()),
+                    work_labels: vec!["fkst-run".to_string()],
                 },
             ],
             "orphan {liveness:?} pod with a work label must Kill + RetireWorkIssues"
         );
     }
+}
+
+#[test]
+fn orphan_live_pod_with_multiple_work_labels_retires_across_all_of_them() {
+    // A multi-label session (epic #594 I4): the orphan carries its FULL effective set, so
+    // the retire action lists EVERY label — not just one — when the trigger closes.
+    let live = vec![pod_with_work_labels(
+        "orphan",
+        9,
+        PodLiveness::Live,
+        ago(10),
+        Some(ago(1)),
+        Some("h"),
+        &["fkst-run", "pkg-discovered"],
+    )];
+    let actions = plan_repo(
+        &[],
+        &work_labels(&[]),
+        &[],
+        &live,
+        &pending(&[]),
+        &latched(&[]),
+        &latched(&[]),
+        &config_hashes(&[]),
+        &latched(&[]),
+        now(),
+        &cfg(300, 120),
+    );
+    assert_eq!(
+        actions,
+        vec![
+            ReconcileAction::Kill {
+                session_id: "orphan".to_string(),
+                reason: KillReason::TriggerClosed,
+            },
+            ReconcileAction::RetireWorkIssues {
+                work_labels: vec!["fkst-run".to_string(), "pkg-discovered".to_string()],
+            },
+        ],
+        "an orphan carrying a multi-label set must retire across every label"
+    );
 }
 
 #[test]

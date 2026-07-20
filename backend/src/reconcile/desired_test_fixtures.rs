@@ -72,12 +72,37 @@ pub(super) fn pod(
         created_at,
         last_pending_at,
         config_hash: config_hash.map(str::to_string),
-        work_label: None,
+        work_labels: Vec::new(),
     }
 }
 
-/// Like [`pod`] but stamped with a work label. An orphan of such a pod triggers the
-/// retire-notify of its still-open work issues (alongside the trigger-closed kill).
+/// Like [`pod`] but stamped with a SET of work labels. An orphan of such a pod triggers
+/// the retire-notify of its still-open work issues across every label (alongside the
+/// trigger-closed kill).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn pod_with_work_labels(
+    session_id: &str,
+    trigger_issue: i64,
+    liveness: PodLiveness,
+    created_at: DateTime<Utc>,
+    last_pending_at: Option<DateTime<Utc>>,
+    config_hash: Option<&str>,
+    work_labels: &[&str],
+) -> LivePod {
+    LivePod {
+        work_labels: work_labels.iter().map(|l| l.to_string()).collect(),
+        ..pod(
+            session_id,
+            trigger_issue,
+            liveness,
+            created_at,
+            last_pending_at,
+            config_hash,
+        )
+    }
+}
+
+/// [`pod_with_work_labels`] for the single-label case (the common fixture).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn pod_with_work_label(
     session_id: &str,
@@ -88,17 +113,15 @@ pub(super) fn pod_with_work_label(
     config_hash: Option<&str>,
     work_label: &str,
 ) -> LivePod {
-    LivePod {
-        work_label: Some(work_label.to_string()),
-        ..pod(
-            session_id,
-            trigger_issue,
-            liveness,
-            created_at,
-            last_pending_at,
-            config_hash,
-        )
-    }
+    pod_with_work_labels(
+        session_id,
+        trigger_issue,
+        liveness,
+        created_at,
+        last_pending_at,
+        config_hash,
+        &[work_label],
+    )
 }
 
 pub(super) fn pending(entries: &[(&str, bool)]) -> HashMap<String, bool> {

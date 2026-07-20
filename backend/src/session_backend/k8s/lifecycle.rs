@@ -14,6 +14,7 @@ use crate::k8s::session_launcher::{
     ANNOTATION_CONFIG_HASH, ANNOTATION_LAST_PENDING_AT, ANNOTATION_OWNER, ANNOTATION_REPO,
     ANNOTATION_TRIGGER_ISSUE, ANNOTATION_WORK_LABEL, SESSION_ID_LABEL,
 };
+use crate::k8s::work_label_wire::split_work_labels;
 use crate::k8s::{
     build_session_pod, create_session_pod, session_object_name, SessionPodOutcome, SessionPodSpec,
 };
@@ -178,9 +179,13 @@ fn pod_to_live(pod: &Pod) -> Option<LivePod> {
 
     let config_hash = annotation(pod, ANNOTATION_CONFIG_HASH).map(str::to_string);
 
-    // The work label lets the planner retire-notify this session's still-open work
-    // issues when the pod is orphaned (its trigger issue closed).
-    let work_label = annotation(pod, ANNOTATION_WORK_LABEL).map(str::to_string);
+    // The comma-joined work-label annotation is split back into the session's effective
+    // set (epic #594 I4) so the planner can retire-notify this session's still-open work
+    // issues across EVERY label when the pod is orphaned (its trigger issue closed). An
+    // absent/blank annotation (an older pod) yields an empty set (no retire-notify).
+    let work_labels = annotation(pod, ANNOTATION_WORK_LABEL)
+        .map(split_work_labels)
+        .unwrap_or_default();
 
     Some(LivePod {
         session_id,
@@ -189,7 +194,7 @@ fn pod_to_live(pod: &Pod) -> Option<LivePod> {
         created_at,
         last_pending_at,
         config_hash,
-        work_label,
+        work_labels,
     })
 }
 

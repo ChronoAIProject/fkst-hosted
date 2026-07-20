@@ -70,7 +70,7 @@ async fn observe_repo_maps_states_and_applies_the_owner_repo_filter() {
     assert_eq!(by("sess-pend").liveness, PodLiveness::Starting);
     assert_eq!(by("sess-fail").liveness, PodLiveness::Terminal);
     // The decoded work label + reassembled config hash ride through the projection.
-    assert_eq!(by("sess-run").work_label.as_deref(), Some("fkst-work"));
+    assert_eq!(by("sess-run").work_labels, vec!["fkst-work".to_string()]);
     assert_eq!(
         by("sess-run").config_hash.as_deref(),
         Some("a".repeat(64).as_str())

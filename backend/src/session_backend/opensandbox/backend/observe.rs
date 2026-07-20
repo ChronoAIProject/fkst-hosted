@@ -75,7 +75,7 @@ fn synthetic_terminating(session_id: String, trigger: i64) -> LivePod {
         created_at: Utc::now(),
         last_pending_at: None,
         config_hash: None,
-        work_label: None,
+        work_labels: Vec::new(),
     }
 }
 
