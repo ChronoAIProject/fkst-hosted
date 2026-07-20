@@ -146,7 +146,7 @@ test.describe('the intended inner container scrolls', () => {
   // while <main> stays put: on the app route the shell gives the routed content
   // an h-full wrapper, so the dashboard's h-full chain resolves and the `aside`
   // owns its own overflow instead of growing and pushing <main> to scroll.
-  test('the level-2 sidebar panel scrolls internally (panel, not <main>)', async ({
+  test('the level-2 workspace rail scrolls internally (rail, not <main>)', async ({
     page,
   }) => {
     await page.setViewportSize(DESKTOP);
@@ -155,8 +155,8 @@ test.describe('the intended inner container scrolls', () => {
     await openAccount(page, 'octo-dev');
     await openRepo(page, 'octo-dev', 'web-app');
     await settle(page);
-    const res = await probeInternalScroll(page, 'aside[aria-label="Details panel"]');
-    expect(res.found && res.moved, 'the sidebar panel scrollTop moves').toBe(true);
+    const res = await probeInternalScroll(page, '[data-testid="session-rail"]');
+    expect(res.found && res.moved, 'the workspace session rail scrollTop moves').toBe(true);
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
   });
 

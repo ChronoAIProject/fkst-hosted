@@ -58,7 +58,7 @@ test.describe('dashboard full UI journey', () => {
 
     // ---- Open the live session's detail drawer ------------------------------
     await page.getByRole('button', { name: 'Open details for session feature-auth' }).click();
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('session-detail');
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole('heading', { name: 'feature-auth' })).toBeVisible();
     await expect(drawerTab(page, 'Status')).toHaveAttribute('aria-selected', 'true');
@@ -130,13 +130,9 @@ test.describe('dashboard full UI journey', () => {
     await expect(dialog.locator('video')).toBeVisible();
     await shot(page, '08-outcomes-previews');
 
-    // Close the live-session drawer.
-    await dialog.getByRole('button', { name: 'Close session details' }).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
-
-    // ---- A degraded session -------------------------------------------------
+    // ---- A degraded session: select it in the rail to swap the inline detail -
     await page.getByRole('button', { name: 'Open details for session refactor-core' }).click();
-    const degraded = page.getByRole('dialog');
+    const degraded = page.getByTestId('session-detail');
     await expect(degraded.getByRole('heading', { name: 'refactor-core' })).toBeVisible();
     await expect(degraded.getByText('Degraded').first()).toBeVisible();
     await expect(degraded.getByText('Failed')).toBeVisible();
@@ -145,8 +141,6 @@ test.describe('dashboard full UI journey', () => {
     // Its live-engine fetch fails → error state.
     await degraded.getByRole('button', { name: 'Live engine details' }).click();
     await expect(degraded.getByText('Could not load the live engine details.')).toBeVisible();
-    await degraded.getByRole('button', { name: 'Close session details' }).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
 
     // ---- i18n toggle (the app is dark-only; no theme toggle) ----------------
     await page.getByRole('button', { name: '中文' }).click();

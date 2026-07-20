@@ -16,7 +16,7 @@ async function openLiveDrawer(page: Page) {
   await openAccount(page, 'octo-dev');
   await openRepo(page, 'octo-dev', 'web-app');
   await page.getByRole('button', { name: 'Open details for session feature-auth' }).click();
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByTestId('session-detail')).toBeVisible();
 }
 
 test.describe('accessibility, feedback, and error surfaces', () => {
@@ -61,7 +61,7 @@ test.describe('accessibility, feedback, and error surfaces', () => {
   }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await openLiveDrawer(page);
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('session-detail');
     // Full id (not the 8-char prefix) is rendered in the header.
     await expect(dialog.getByText(LIVE_SESSION_ID, { exact: true })).toBeVisible();
 
@@ -156,7 +156,7 @@ test.describe('prefers-reduced-motion', () => {
   test('transitions collapse to their final state; no content is hidden', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openLiveDrawer(page);
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('session-detail');
 
     // The drawer + its header content are at their FINAL state immediately (no
     // slide/fade to wait out) — content is present, never gated behind motion.

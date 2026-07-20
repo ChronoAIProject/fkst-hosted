@@ -173,7 +173,7 @@ test.describe('environment-profile CRUD parity', () => {
     await openAccount(page, 'octo-dev');
     await openRepo(page, 'octo-dev', 'web-app');
     await page.getByRole('button', { name: 'Open details for session feature-auth' }).click();
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('session-detail');
     await expect(dialog).toBeVisible();
 
     await drawerTab(page, 'Packages').click();
