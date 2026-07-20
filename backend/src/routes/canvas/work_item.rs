@@ -23,6 +23,9 @@ use utoipa::ToSchema;
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
 use crate::goals::trigger_parse::parse_trigger_issue_body;
+use crate::models::{GithubActor, RepoRef};
+use crate::reconcile::desired::{SessionDef, SessionRegistration};
+use crate::reconcile::work_authz::is_work_author_allowed;
 use crate::routes::canvas::sessions::validate_repo_segment;
 use crate::routes::dashboard::{bearer_token, DashboardGithub};
 use crate::state::AppState;
@@ -48,13 +51,17 @@ pub struct CreateWorkItemResponse {
 }
 
 /// The trigger issue as this endpoint reads it: the body (to parse the session's
-/// work label out of), the label names (to prove it really is a trigger), and
-/// whether the "issue" is actually a pull request (GitHub's issues API serves
-/// PRs too).
+/// work label + collaborators out of), the label names (to prove it really is a
+/// trigger), whether the "issue" is actually a pull request (GitHub's issues API
+/// serves PRs too), and the trigger AUTHOR's immutable numeric id (the
+/// request-time work-item gate authorizes the author by id).
 struct FetchedTrigger {
     body: String,
     labels: Vec<String>,
     is_pull_request: bool,
+    /// The trigger author's immutable numeric GitHub id (`0` if GitHub omits the
+    /// `user` block — a fail-safe: id 0 matches no real caller).
+    author_id: i64,
 }
 
 /// Pull GitHub's own `message` out of an error body without leaking anything
@@ -118,6 +125,11 @@ impl DashboardGithub {
                 name: String,
             }
             #[derive(Deserialize)]
+            struct RawUser {
+                #[serde(default)]
+                id: i64,
+            }
+            #[derive(Deserialize)]
             struct RawIssue {
                 /// GitHub sends `"body": null` for a body-less issue.
                 #[serde(default)]
@@ -126,6 +138,8 @@ impl DashboardGithub {
                 labels: Vec<RawLabel>,
                 /// Present only when this "issue" is actually a PR.
                 pull_request: Option<serde_json::Value>,
+                /// The trigger author; `None` only on a malformed response.
+                user: Option<RawUser>,
             }
             let raw: RawIssue = response.json().await.map_err(|e| {
                 tracing::warn!(error = %e, "github get-trigger response did not parse");
@@ -135,6 +149,7 @@ impl DashboardGithub {
                 body: raw.body.unwrap_or_default(),
                 labels: raw.labels.into_iter().map(|label| label.name).collect(),
                 is_pull_request: raw.pull_request.is_some(),
+                author_id: raw.user.map(|user| user.id).unwrap_or_default(),
             });
         }
         Err(trigger_read_error(status, github_message(response).await))
@@ -159,7 +174,7 @@ impl DashboardGithub {
         (status = 201, description = "The work issue was created", body = CreateWorkItemResponse),
         (status = 400, description = "Malformed owner/name/issue number, a blank title, or GitHub rejected the issue", body = ErrorEnvelope),
         (status = 401, description = "Missing or invalid GitHub token", body = ErrorEnvelope),
-        (status = 403, description = "Not allowlisted, or GitHub refused the write for this caller", body = ErrorEnvelope),
+        (status = 403, description = "Not allowlisted, the caller lacks work-item authority on this session (not the trigger author, a listed Session Collaborator, nor a repo admin / org owner), or GitHub refused the write for this caller", body = ErrorEnvelope),
         (status = 404, description = "No such trigger issue (or the caller cannot see the repo)", body = ErrorEnvelope),
         (status = 422, description = "The trigger issue is malformed, or the session has no explicit work label to queue against", body = ErrorEnvelope),
         (status = 503, description = "GitHub API unreachable", body = ErrorEnvelope),
@@ -168,7 +183,7 @@ impl DashboardGithub {
 pub(super) async fn create_work_item(
     State(state): State<AppState>,
     Path((owner, name, issue_number)): Path<(String, String, u64)>,
-    _user: GithubUser,
+    user: GithubUser,
     headers: HeaderMap,
     Json(req): Json<CreateWorkItemRequest>,
 ) -> Result<(StatusCode, Json<CreateWorkItemResponse>), AppError> {
@@ -211,6 +226,40 @@ pub(super) async fn create_work_item(
     // Parse with the reconciler's own grammar: a malformed trigger surfaces the
     // parser's section-naming 422 rather than silently mislabeling the work item.
     let spec = parse_trigger_issue_body(&trigger.body)?;
+
+    // Request-time WORK-ITEM authorization (R5, epic #572): only the session's
+    // trigger AUTHOR, a listed Session Collaborator, or a repo admin / org owner
+    // may queue work — the exact author ∪ collaborators ∪ admins predicate the
+    // reconciler enforces (R3, [`is_work_author_allowed`]), reused verbatim so the
+    // request-time and reconciler-side gates can never diverge. Enforced ALWAYS
+    // (not the reconciler's opt-in flag) so the canvas can never bypass R3. Runs
+    // BEFORE the work-label resolution so an unauthorized caller learns nothing
+    // about the session's config. The admin argument reflects THIS caller: one
+    // user-token repo read decides their repo-admin / org-owner tier.
+    let caller_is_admin = gh.caller_is_repo_admin(&token, &owner, &name).await?;
+    let admins = if caller_is_admin {
+        vec![GithubActor {
+            id: user.id,
+            login: user.login.clone(),
+        }]
+    } else {
+        Vec::new()
+    };
+    let reg = authz_registration(
+        &owner,
+        &name,
+        issue_number,
+        trigger.author_id,
+        &spec.collaborators,
+    );
+    if !is_work_author_allowed(&reg, &admins, user.id, &user.login) {
+        return Err(AppError::Forbidden(format!(
+            "your GitHub account lacks work-item authority on the session at \
+             #{issue_number}: only its trigger author, a listed Session Collaborator, \
+             or a repo admin / org owner may queue work items"
+        )));
+    }
+
     let work_label = spec.work_label.ok_or_else(|| {
         // Auto-discovered sessions resolve their wake labels from package
         // manifests, which this endpoint deliberately does not fetch; without an
@@ -241,6 +290,45 @@ pub(super) async fn create_work_item(
             html_url: created.html_url,
         }),
     ))
+}
+
+/// Build the minimal [`SessionRegistration`] the R3 work-authority predicate
+/// reads. [`is_work_author_allowed`] consults ONLY `trigger_author_id` and
+/// `collaborators` (plus the caller-side `admins` argument), so every other field
+/// is an inert placeholder here — this endpoint reconstructs just enough of a
+/// registration to reuse the reconciler's exact predicate rather than
+/// re-implementing the tiering, keeping the request-time and reconciler-side gates
+/// byte-identical.
+fn authz_registration(
+    owner: &str,
+    name: &str,
+    trigger_issue: u64,
+    trigger_author_id: i64,
+    collaborators: &[String],
+) -> SessionRegistration {
+    SessionRegistration {
+        installation_id: 0,
+        repo: RepoRef {
+            owner: owner.to_string(),
+            name: name.to_string(),
+        },
+        trigger_issue: trigger_issue as i64,
+        trigger_author_id,
+        trigger_author_login: String::new(),
+        def: SessionDef {
+            name: String::new(),
+            packages: Vec::new(),
+            work_label: None,
+            environment: None,
+            output_lang: None,
+            engine_config: std::collections::BTreeMap::new(),
+        },
+        session_id: String::new(),
+        config_hash: String::new(),
+        auto_merge: false,
+        log_access: Vec::new(),
+        collaborators: collaborators.to_vec(),
+    }
 }
 
 #[cfg(test)]

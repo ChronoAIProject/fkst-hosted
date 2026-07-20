@@ -4,7 +4,7 @@
 
 use axum::http::HeaderMap;
 use secrecy::SecretString;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::config::Config;
@@ -61,6 +61,21 @@ pub(crate) fn test_state(server_uri: &str, github_app: Option<GithubAppTokens>) 
         log_registry: Default::default(),
         log_bundle_cache: Default::default(),
     }
+}
+
+/// Mount `GET /repos/{owner}/{name}` (user token) returning the caller's repo
+/// permissions — programs the request-time repo-admin / org-owner authority tier
+/// the R5 gates read. `admin == true` reads as "the caller administers this repo"
+/// (which an org owner does on every org repo).
+pub(crate) async fn mount_repo_admin(server: &MockServer, owner: &str, name: &str, admin: bool) {
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/{owner}/{name}")))
+        .and(header("authorization", "Bearer user-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "permissions": { "admin": admin }
+        })))
+        .mount(server)
+        .await;
 }
 
 /// Mount the App-token mint pair (`…/installation` + `…/access_tokens`) for a repo.

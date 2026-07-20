@@ -105,12 +105,17 @@ fn issue_write_error(op: &str, status: reqwest::StatusCode, message: String) -> 
 }
 
 /// One issue as fetched by [`DashboardGithub::get_issue`]: just what the
-/// stop-session pre-flight gate needs — the label names, and whether the
-/// "issue" is actually a pull request (GitHub's issues API serves PRs too).
+/// stop-session gate needs — the label names, whether the "issue" is actually a
+/// pull request (GitHub's issues API serves PRs too), and the author's immutable
+/// numeric id (the request-time stop gate authorizes the trigger author by id).
 #[derive(Debug, Clone)]
 pub(crate) struct FetchedIssue {
     pub labels: Vec<String>,
     pub is_pull_request: bool,
+    /// The issue author's immutable numeric GitHub id (`0` if GitHub omits the
+    /// `user` block — a fail-safe: id 0 matches no real caller, so the author
+    /// tier simply never grants rather than granting wrongly).
+    pub author_id: i64,
 }
 
 /// One pull request as the canvas sessions endpoint consumes it.
@@ -194,6 +199,62 @@ impl DashboardGithub {
             .collect())
     }
 
+    /// `GET /repos/{owner}/{repo}` with the USER token → whether the CALLER holds
+    /// admin on the repo (`permissions.admin`). ONE read that answers BOTH
+    /// request-time authority tiers at once: a repo admin gets
+    /// `permissions.admin == true`, and an org owner holds admin on every repo the
+    /// org owns — so this single user-token call covers repo-admin AND org-owner
+    /// with no GitHub App permission required.
+    ///
+    /// GitHub answers 404 for a repo the caller cannot see (deliberate
+    /// anti-enumeration); that is simply "not an admin here", so it maps to `false`
+    /// and lets the other authority tiers decide, never a hard error. Any other
+    /// non-success status is a real failure and propagates.
+    pub(crate) async fn caller_is_repo_admin(
+        &self,
+        user_token: &SecretString,
+        owner: &str,
+        repo: &str,
+    ) -> Result<bool, AppError> {
+        let url = format!("{}/repos/{owner}/{repo}", self.api_base);
+        let response = self
+            .client
+            .get(&url)
+            .bearer_auth(user_token.expose_secret())
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+            .send()
+            .await
+            .map_err(|e| {
+                tracing::warn!(error = %e, "github get-repo transport error");
+                AppError::Unavailable("github get-repo request failed".to_string())
+            })?;
+        let status = response.status();
+        if status.is_success() {
+            #[derive(Deserialize)]
+            struct RawRepoPermissions {
+                #[serde(default)]
+                admin: bool,
+            }
+            #[derive(Deserialize)]
+            struct RawRepoView {
+                /// Present for authenticated reads; absent → not an admin.
+                permissions: Option<RawRepoPermissions>,
+            }
+            let raw: RawRepoView = response.json().await.map_err(|e| {
+                tracing::warn!(error = %e, "github get-repo response did not parse");
+                AppError::Upstream("github get-repo response was malformed".to_string())
+            })?;
+            return Ok(raw.permissions.map(|perms| perms.admin).unwrap_or(false));
+        }
+        // A repo the caller cannot even see is not one they administer — let the
+        // author/collaborator tiers decide rather than failing the whole request.
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(false);
+        }
+        let message = github_error_message(response).await;
+        Err(issue_write_error("get_repo", status, message))
+    }
+
     /// `POST /repos/{owner}/{repo}/issues` with the USER token — the trigger
     /// issue is created AS the signed-in human, who thereby becomes the
     /// session's authz owner (the reconciler trusts the issue author). The
@@ -271,11 +332,18 @@ impl DashboardGithub {
                 name: String,
             }
             #[derive(Deserialize)]
+            struct RawIssueUser {
+                #[serde(default)]
+                id: i64,
+            }
+            #[derive(Deserialize)]
             struct RawFetchedIssue {
                 #[serde(default)]
                 labels: Vec<RawIssueLabel>,
                 /// Present only when this "issue" is actually a PR.
                 pull_request: Option<serde_json::Value>,
+                /// The issue author; `None` only on a malformed response.
+                user: Option<RawIssueUser>,
             }
             let raw: RawFetchedIssue = response.json().await.map_err(|e| {
                 tracing::warn!(error = %e, "github get-issue response did not parse");
@@ -284,6 +352,7 @@ impl DashboardGithub {
             return Ok(FetchedIssue {
                 labels: raw.labels.into_iter().map(|label| label.name).collect(),
                 is_pull_request: raw.pull_request.is_some(),
+                author_id: raw.user.map(|user| user.id).unwrap_or_default(),
             });
         }
         let message = github_error_message(response).await;
