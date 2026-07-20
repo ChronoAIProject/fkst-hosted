@@ -88,6 +88,14 @@ pub struct SessionRegistration {
     /// but it IS part of [`full_config_hash`] so config-immutability FREEZES it — the
     /// allow-list cannot be edited after registration to grant access retroactively.
     pub log_access: Vec<String>,
+    /// Per-session work-item COLLABORATORS (from the trigger issue's `### Session
+    /// Collaborators`): the GitHub logins granted authority over this session's
+    /// work issues, IN ADDITION to the trigger author. Like [`log_access`](Self::log_access)
+    /// it is NOT part of `config_hash` (a pod runs identically regardless) but IS
+    /// part of [`full_config_hash`], so config-immutability FREEZES it — the list
+    /// cannot be edited after registration to grant authority retroactively. F3
+    /// carries + freezes the list only; the authority gate is a later PR.
+    pub collaborators: Vec<String>,
 }
 
 /// The lifecycle phase of a live session pod, as the reconciler observes it. This

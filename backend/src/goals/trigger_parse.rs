@@ -42,6 +42,10 @@ const HEADING_LOG_ACCESS: &str = "### Log Access Allowlist";
 /// change existing sessions' parsed list → flip their `full_config_hash` →
 /// false `fkst-config-rejected` across the fleet.
 const HEADING_FKST_CONTRIBUTORS: &str = "### FKST Contributors";
+/// The OPTIONAL work-item collaborators section (issue #572 F3). A separate list
+/// from [`HEADING_FKST_CONTRIBUTORS`]: it will later gate who may raise/label/
+/// comment on the session's WORK issues. F3 only parses + freezes it.
+const HEADING_SESSION_COLLABORATORS: &str = "### Session Collaborators";
 const HEADING_OUTPUT_LANGUAGE: &str = "### Output Language";
 const HEADING_ENGINE_CONFIG: &str = "### Engine Config";
 
@@ -131,6 +135,14 @@ pub struct TriggerSpec {
     /// FROZEN by config-immutability (it is part of `full_config_hash`) so it cannot
     /// be edited AFTER the session registers to grant access retroactively.
     pub log_access: Vec<String>,
+    /// The OPTIONAL `### Session Collaborators`: the GitHub logins granted
+    /// WORK-ITEM AUTHORITY on this session (beyond the trigger author) — they may
+    /// later raise/label/comment on the session's work issues. A
+    /// whitespace/comma/newline-separated list; lenient; default empty. FROZEN by
+    /// config-immutability (it is part of `full_config_hash`) so it cannot be
+    /// edited AFTER the session registers to grant authority retroactively. F3
+    /// parses + freezes this list only; the authority gate lands in a later PR.
+    pub collaborators: Vec<String>,
     /// The OPTIONAL `### Output Language`: the locale the session's packages emit
     /// user-visible prose in (`FKST_OUTPUT_LANG` → the engine's `t()` i18n SDK,
     /// resolving `locales/<value>.lua` by EXACT filename match, falling back to
@@ -171,6 +183,7 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
 
     let auto_merge = parse_auto_merge(&sections);
     let log_access = parse_log_access(&sections);
+    let collaborators = parse_session_collaborators(&sections);
     let output_lang = parse_output_language(&sections)?;
 
     // `### Engine Config` — OPTIONAL but STRICT; the allowlist parser owns the
@@ -190,6 +203,7 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
         environment,
         auto_merge,
         log_access,
+        collaborators,
         output_lang,
         engine_config,
     })
@@ -276,6 +290,47 @@ fn parse_log_access(sections: &[(String, String)]) -> Vec<String> {
                 seen.push(folded);
                 tokens.push(token.to_string());
             }
+        }
+    }
+    tokens
+}
+
+/// `### Session Collaborators` — OPTIONAL, lenient (keyed on a SINGLE heading, no
+/// legacy alias). The GitHub logins granted WORK-ITEM AUTHORITY on this session
+/// (beyond the trigger author): they may later raise/label/comment on the session's
+/// work issues. The template's explanatory HTML comment is STRIPPED first (as the
+/// environment/output-language/engine-config parsers do — the majority pattern), so
+/// a comment-only section yields an EMPTY list and no comment prose leaks into the
+/// frozen authority list; then tokens are separated by ANY whitespace, comma, or
+/// newline; a leading `@` is stripped; empty tokens dropped; deduped
+/// case-insensitively (first spelling wins). Absent/blank/comment-only → empty.
+/// Never errors. F3 only PARSES + FREEZES this list; the authority gate is a later
+/// PR, so a token that names no real account grants nothing yet.
+fn parse_session_collaborators(sections: &[(String, String)]) -> Vec<String> {
+    let mut tokens: Vec<String> = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    let Some((_, content)) = sections
+        .iter()
+        .find(|(h, _)| h == HEADING_SESSION_COLLABORATORS)
+    else {
+        return tokens;
+    };
+    // Strip the template's `<!-- … -->` comment BEFORE tokenizing so a pristine
+    // (comment-only) section is empty, not a bag of the comment's word-tokens. This
+    // deliberately DIVERGES from `parse_log_access`, which must stay non-stripping:
+    // collaborators is a NEW field with no live sessions, so it can parse cleanly,
+    // whereas changing `log_access` tokenization would move existing sessions'
+    // `full_config_hash` and fire `fkst-config-rejected` fleet-wide.
+    let stripped = strip_html_comments(content);
+    for token in stripped
+        .split(|c: char| c.is_whitespace() || c == ',')
+        .map(|token| token.trim().trim_start_matches('@'))
+        .filter(|token| !token.is_empty())
+    {
+        let folded = token.to_ascii_lowercase();
+        if !seen.contains(&folded) {
+            seen.push(folded);
+            tokens.push(token.to_string());
         }
     }
     tokens

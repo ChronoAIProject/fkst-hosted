@@ -242,5 +242,6 @@ pub(super) fn registration() -> SessionRegistration {
         config_hash: "hash123".to_string(),
         auto_merge: false,
         log_access: vec![],
+        collaborators: vec![],
     }
 }
