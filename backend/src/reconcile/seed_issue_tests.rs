@@ -86,16 +86,66 @@ fn tokens(api: std::sync::Arc<SeedFake>) -> GithubAppTokens {
     GithubAppTokens::with_api(&test_config(), api).expect("tokens")
 }
 
+/// The default fkst-manifest ref an I9 seed carries (matches
+/// `reconcile_config::DEFAULT_MANIFEST_REF`).
+const DEFAULT_MANIFEST: &str =
+    "ChronoAIProject/fkst-packages@fkst-hosted:manifests/default-workflows.json";
+
 #[test]
-fn seed_body_round_trips_through_the_real_trigger_parser() {
-    // The seed body MUST parse as a valid trigger issue — this pins the seeder to
-    // the parser so the two can never drift.
+fn manifest_seed_body_round_trips_with_manifest_and_no_packages_or_work_label() {
+    // The I9 default: a `### Manifest` reference supplies the packages and the wake
+    // labels auto-discover, so the body carries NEITHER `### Packages` NOR
+    // `### Work Label`. It must still parse as a valid trigger issue.
+    let body = build_seed_body(&[], Some(DEFAULT_MANIFEST), "octo-owner");
+    // Shape assertions: manifest present, packages/work-label absent.
+    assert!(body.contains("### Manifest"), "carries a manifest section");
+    assert!(
+        !body.contains("### Packages"),
+        "manifest seed omits ### Packages"
+    );
+    assert!(
+        !body.contains("### Work Label"),
+        "manifest seed omits ### Work Label (labels auto-detect)"
+    );
+
+    let spec =
+        parse_trigger_issue_body(&body).expect("manifest seed body is a valid trigger issue");
+    assert_eq!(spec.name, "default-workflows");
+    assert!(
+        spec.work_label.is_none(),
+        "no explicit work label — the wake labels auto-discover from the manifest's packages"
+    );
+    assert!(spec.packages.is_empty(), "no explicit ### Packages");
+    assert_eq!(
+        spec.manifest_refs.len(),
+        1,
+        "exactly the default manifest ref"
+    );
+    let m = &spec.manifest_refs[0];
+    assert_eq!(m.owner, "ChronoAIProject");
+    assert_eq!(m.repo, "fkst-packages");
+    assert_eq!(m.git_ref, "fkst-hosted");
+    assert_eq!(m.path, "manifests/default-workflows.json");
+    assert!(spec.auto_merge, "seed sets auto-merge on");
+    assert_eq!(spec.log_access, vec!["octo-owner".to_string()]);
+    assert!(spec.environment.is_none());
+}
+
+#[test]
+fn legacy_seed_body_round_trips_through_the_real_trigger_parser() {
+    // With NO default manifest configured, the seeder falls back to the legacy
+    // explicit `### Packages` + `### Work Label` body — this pins that shape to the
+    // parser so the two can never drift.
     let default_pkgs =
         vec!["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()];
-    let spec = parse_trigger_issue_body(&build_seed_body(&default_pkgs, "octo-owner"))
-        .expect("seed body is a valid trigger issue");
+    let spec = parse_trigger_issue_body(&build_seed_body(&default_pkgs, None, "octo-owner"))
+        .expect("legacy seed body is a valid trigger issue");
     assert_eq!(spec.name, "evolve");
     assert_eq!(spec.work_label.as_deref(), Some("fkst-evolve"));
+    assert!(
+        spec.manifest_refs.is_empty(),
+        "legacy body has no ### Manifest"
+    );
     assert!(spec.auto_merge, "seed sets auto-merge on");
     assert_eq!(spec.log_access, vec!["octo-owner".to_string()]);
     assert_eq!(spec.packages.len(), 1);
@@ -109,12 +159,15 @@ fn seed_body_round_trips_through_the_real_trigger_parser() {
 
 #[tokio::test]
 async fn seeds_a_repo_with_no_open_trigger_issue() {
+    // The default (manifest-driven) path: verify the created issue's title, labels,
+    // and that the recorded body is the manifest-driven trigger body.
     let api = std::sync::Arc::new(SeedFake::default()); // existing = empty
     let github = tokens(api.clone());
     seed_trigger_issues(
         &github,
         "fkst-substrate-trigger",
-        &["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()],
+        &[],
+        Some(DEFAULT_MANIFEST),
         "octo-owner",
         &["octo-owner/repo-a".to_string()],
     )
@@ -122,12 +175,16 @@ async fn seeds_a_repo_with_no_open_trigger_issue() {
 
     assert_eq!(api.create_calls.load(Ordering::SeqCst), 1);
     let created = api.created.lock().unwrap();
-    let (owner, repo, _title, body, labels) = &created[0];
+    let (owner, repo, title, body, labels) = &created[0];
     assert_eq!(owner, "octo-owner");
     assert_eq!(repo, "repo-a");
+    assert_eq!(title, "[session] default-workflows (auto-seeded)");
     assert_eq!(labels, &vec!["fkst-substrate-trigger".to_string()]);
-    // The recorded body is the trigger body (parses).
-    assert!(parse_trigger_issue_body(body).is_ok());
+    // The recorded body is the manifest-driven trigger body (parses; carries a
+    // manifest ref; no explicit work label).
+    let spec = parse_trigger_issue_body(body).expect("recorded body parses");
+    assert_eq!(spec.manifest_refs.len(), 1);
+    assert!(spec.work_label.is_none());
 }
 
 #[tokio::test]
@@ -140,7 +197,8 @@ async fn skips_a_repo_that_already_has_an_open_trigger_issue() {
     seed_trigger_issues(
         &github,
         "fkst-substrate-trigger",
-        &["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()],
+        &[],
+        Some(DEFAULT_MANIFEST),
         "octo-owner",
         &["octo-owner/repo-a".to_string()],
     )
@@ -152,17 +210,44 @@ async fn skips_a_repo_that_already_has_an_open_trigger_issue() {
     );
 }
 
+#[tokio::test]
+async fn legacy_seed_used_when_no_default_manifest_is_configured() {
+    // `default_manifest = None` (a blank FKST_DEFAULT_MANIFEST) → the legacy body,
+    // titled for the `evolve` session, carrying the configured packages.
+    let api = std::sync::Arc::new(SeedFake::default());
+    let github = tokens(api.clone());
+    seed_trigger_issues(
+        &github,
+        "fkst-substrate-trigger",
+        &["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()],
+        None,
+        "octo-owner",
+        &["octo-owner/repo-a".to_string()],
+    )
+    .await;
+
+    assert_eq!(api.create_calls.load(Ordering::SeqCst), 1);
+    let created = api.created.lock().unwrap();
+    let (_owner, _repo, title, body, _labels) = &created[0];
+    assert_eq!(title, "[session] evolve (auto-seeded)");
+    let spec = parse_trigger_issue_body(body).expect("recorded body parses");
+    assert_eq!(spec.work_label.as_deref(), Some("fkst-evolve"));
+    assert_eq!(spec.packages.len(), 1);
+    assert!(spec.manifest_refs.is_empty());
+}
+
 #[test]
-fn seed_body_with_multiple_packages_round_trips_in_order() {
+fn legacy_seed_body_with_multiple_packages_round_trips_in_order() {
     // A configured multi-package list renders one `### Packages` line each and
-    // parses back to the same ordered refs — pins FKST_SEED_PACKAGES support.
+    // parses back to the same ordered refs — pins FKST_SEED_PACKAGES support for the
+    // legacy (no-manifest) body.
     let pkgs = vec![
         "chronoai-shining/fkst-packages@feat/workflow-engine:packages/workflow-dev".to_string(),
         "chronoai-shining/fkst-packages@feat/workflow-engine:packages/workflow-security"
             .to_string(),
         "chronoai-shining/fkst-packages@feat/workflow-engine:packages/workflow-writer".to_string(),
     ];
-    let spec = parse_trigger_issue_body(&build_seed_body(&pkgs, "octo-owner"))
+    let spec = parse_trigger_issue_body(&build_seed_body(&pkgs, None, "octo-owner"))
         .expect("multi-package seed body is valid");
     assert_eq!(spec.packages.len(), 3);
     let paths: Vec<&str> = spec.packages.iter().map(|p| p.path.as_str()).collect();

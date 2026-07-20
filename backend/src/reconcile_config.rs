@@ -33,6 +33,16 @@ const RECONCILE_ENV_PREFIX: &str = "FKST_";
 /// refresh cadence must sit strictly below it.
 const INSTALLATION_TOKEN_TTL_SECS: u64 = 3600;
 
+/// The default fkst-manifest an auto-seeded trigger references (epic #594 I9): the
+/// composed default-workflows manifest bundling workflow-dev + security + writer.
+/// A manifest reference is spelled with the same `owner/repo@ref:path` grammar as a
+/// package reference; the reconciler's manifest expander fetches + expands it into a
+/// package list, and the session's wake labels auto-discover from those packages'
+/// `[github].work_labels`. Overridable via `FKST_DEFAULT_MANIFEST`; a blank override
+/// disables the manifest-driven seed and falls back to the legacy packages+label body.
+const DEFAULT_MANIFEST_REF: &str =
+    "ChronoAIProject/fkst-packages@fkst-hosted:manifests/default-workflows.json";
+
 /// Default values, shared by serde defaults and [`ReconcileConfig::default`].
 mod defaults {
     pub(super) fn substrate_trigger_label() -> String {
@@ -80,6 +90,20 @@ mod defaults {
         vec!["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()]
     }
 
+    pub(super) fn seed_trigger_issue_on_install() -> bool {
+        // ON by default (epic #594 I9): a successful App install auto-writes ONE
+        // manifest-driven trigger issue into every newly-installed repo (subject to
+        // the idempotency skip). Set FKST_SEED_TRIGGER_ISSUE_ON_INSTALL=false to
+        // disable the auto-seed entirely.
+        true
+    }
+
+    pub(super) fn default_manifest() -> Option<String> {
+        // The default fkst-manifest a seeded trigger references (I9). Unset →
+        // Some(the default-workflows ref); a blank override → None (legacy body).
+        Some(super::DEFAULT_MANIFEST_REF.to_string())
+    }
+
     pub(super) fn pod_session_max_lifetime_secs() -> u64 {
         // Hard ceiling on a single session pod's wall-clock lifetime. 0 = unbounded
         // (a session runs until it goes idle or its trigger closes).
@@ -123,7 +147,8 @@ struct ReconcileVars {
     #[serde(default = "defaults::health_scrape_secs")]
     health_scrape_secs: u64,
     /// Auto-create a seed trigger issue when the App is installed on a repo.
-    #[serde(default)]
+    /// Default TRUE (I9): a fresh install auto-writes a manifest-driven trigger.
+    #[serde(default = "defaults::seed_trigger_issue_on_install")]
     seed_trigger_issue_on_install: bool,
     /// Operator opt-in for the R3 work-issue authority gate. Default false =
     /// today's permissive behavior (any author may raise work).
@@ -133,6 +158,10 @@ struct ReconcileVars {
     /// issue loads. Unset → the github-devloop-workflow default.
     #[serde(default)]
     seed_packages: Option<String>,
+    /// The default fkst-manifest `owner/repo@ref:path` ref a seeded trigger loads.
+    /// Unset → the default-workflows manifest; a blank override → the legacy body.
+    #[serde(default = "defaults::default_manifest")]
+    default_manifest: Option<String>,
 }
 
 /// Model B reconciler configuration (issue #359 §4). Config surface only — no
@@ -172,11 +201,15 @@ pub struct ReconcileConfig {
     /// reads each live pod's status + recent framework logs to flag/clear a
     /// degraded session on its trigger issue.
     pub health_scrape_secs: u64,
-    /// When true, auto-create a seed trigger issue (packages =
-    /// github-devloop-workflow, work label `fkst-evolve`, auto-merge on) the first
-    /// time the App is installed on a repo with no open trigger issue. Env:
-    /// `FKST_SEED_TRIGGER_ISSUE_ON_INSTALL`. Default false (opt-in — it writes to
-    /// the user's repo).
+    /// When true, auto-create ONE seed trigger issue the first time the App is
+    /// installed on a repo with no open trigger issue. Env:
+    /// `FKST_SEED_TRIGGER_ISSUE_ON_INSTALL`. **Default TRUE (epic #594 I9)** — a
+    /// behaviour change: a successful App install now writes a trigger issue into
+    /// every newly-installed repo. When [`Self::default_manifest`] is set (the
+    /// default), that trigger is manifest-driven (a `### Manifest` reference, no
+    /// `### Packages`/`### Work Label` — the manifest supplies the packages and the
+    /// wake labels auto-discover). Set the env to `false` to disable the auto-seed
+    /// entirely.
     pub seed_trigger_issue_on_install: bool,
     /// Operator opt-in for the R3 work-issue AUTHORITY gate (epic #572). Env:
     /// `FKST_ENFORCE_WORK_ISSUE_AUTHZ`. Default false = today's permissive behavior:
@@ -191,8 +224,18 @@ pub struct ReconcileConfig {
     /// The `### Packages` refs an auto-seeded trigger issue lists (one per line).
     /// Env: `FKST_SEED_PACKAGES` (whitespace-separated). Default: the
     /// github-devloop-workflow root. Never empty (a blank env value falls back to
-    /// the default).
+    /// the default). Used ONLY for the legacy (no-manifest) seed body — when
+    /// [`Self::default_manifest`] is set, the manifest supplies the packages and
+    /// this list is not rendered.
     pub seed_packages: Vec<String>,
+    /// The default fkst-manifest reference (`owner/repo@ref:path`) a seeded trigger
+    /// loads under `### Manifest`. Env: `FKST_DEFAULT_MANIFEST`. Default:
+    /// `Some(the default-workflows manifest)` (epic #594 I9). A blank env value →
+    /// `None`, which makes the seeder fall back to the legacy packages+label body.
+    /// When `Some`, the seed body carries ONLY `### Manifest` (no `### Packages`,
+    /// no `### Work Label`): the manifest supplies the package set and the session's
+    /// wake labels auto-discover from those packages' `[github].work_labels`.
+    pub default_manifest: Option<String>,
 }
 
 impl Default for ReconcileConfig {
@@ -200,9 +243,10 @@ impl Default for ReconcileConfig {
         Self {
             substrate_trigger_label: defaults::substrate_trigger_label(),
             github_bot_login: None,
-            seed_trigger_issue_on_install: false,
+            seed_trigger_issue_on_install: defaults::seed_trigger_issue_on_install(),
             enforce_work_issue_authz: false,
             seed_packages: defaults::seed_packages(),
+            default_manifest: defaults::default_manifest(),
             reconcile_interval_secs: defaults::reconcile_interval_secs(),
             pod_full_resync_interval_secs: defaults::pod_full_resync_interval_secs(),
             session_idle_grace_secs: defaults::session_idle_grace_secs(),
@@ -288,6 +332,16 @@ impl ReconcileConfig {
             .filter(|v| !v.is_empty())
             .unwrap_or_else(defaults::seed_packages);
 
+        // Default manifest ref: an absent env value keeps the built-in default (the
+        // serde default already put it here); a blank/all-whitespace override is
+        // coerced to `None` so a stray empty ConfigMap value cleanly DISABLES the
+        // manifest-driven seed (the seeder then renders the legacy packages+label
+        // body) rather than emitting an unparseable empty `### Manifest`.
+        let default_manifest = env
+            .default_manifest
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
         Ok(ReconcileConfig {
             substrate_trigger_label: env.substrate_trigger_label,
             github_bot_login,
@@ -302,173 +356,11 @@ impl ReconcileConfig {
             seed_trigger_issue_on_install: env.seed_trigger_issue_on_install,
             enforce_work_issue_authz: env.enforce_work_issue_authz,
             seed_packages,
+            default_manifest,
         })
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn vars(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
-        pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect()
-    }
-
-    #[test]
-    fn defaults_apply_when_nothing_is_set() {
-        let config = ReconcileConfig::from_vars(&vars(&[])).expect("defaults should deserialize");
-        assert_eq!(config.substrate_trigger_label, "fkst-substrate-trigger");
-        assert_eq!(config.github_bot_login, None);
-        assert_eq!(config.reconcile_interval_secs, 30);
-        assert_eq!(config.pod_full_resync_interval_secs, 600);
-        assert_eq!(config.session_idle_grace_secs, 300);
-        assert_eq!(config.pod_min_lifetime_secs, 120);
-        assert_eq!(config.pod_termination_grace_secs, 60);
-        assert_eq!(config.pod_token_refresh_secs, 2700);
-        assert_eq!(config.pod_session_max_lifetime_secs, 0);
-        assert_eq!(config.health_scrape_secs, 150);
-        // R3 authority gate is OFF by default (today's permissive behavior).
-        assert!(!config.enforce_work_issue_authz);
-    }
-
-    #[test]
-    fn enforce_work_issue_authz_is_opt_in() {
-        // Unset → false (permissive), the only value that preserves pre-R3 behavior.
-        let off = ReconcileConfig::from_vars(&vars(&[])).expect("defaults");
-        assert!(!off.enforce_work_issue_authz);
-        // Explicitly opted in.
-        let on = ReconcileConfig::from_vars(&vars(&[("FKST_ENFORCE_WORK_ISSUE_AUTHZ", "true")]))
-            .expect("override");
-        assert!(on.enforce_work_issue_authz);
-    }
-
-    #[test]
-    fn default_impl_matches_env_defaults() {
-        let from_env = ReconcileConfig::from_vars(&vars(&[])).expect("defaults");
-        let from_default = ReconcileConfig::default();
-        assert_eq!(
-            from_default.substrate_trigger_label,
-            from_env.substrate_trigger_label
-        );
-        assert_eq!(from_default.github_bot_login, from_env.github_bot_login);
-        assert_eq!(
-            from_default.reconcile_interval_secs,
-            from_env.reconcile_interval_secs
-        );
-        assert_eq!(
-            from_default.pod_full_resync_interval_secs,
-            from_env.pod_full_resync_interval_secs
-        );
-        assert_eq!(
-            from_default.session_idle_grace_secs,
-            from_env.session_idle_grace_secs
-        );
-        assert_eq!(
-            from_default.pod_min_lifetime_secs,
-            from_env.pod_min_lifetime_secs
-        );
-        assert_eq!(
-            from_default.pod_termination_grace_secs,
-            from_env.pod_termination_grace_secs
-        );
-        assert_eq!(
-            from_default.pod_token_refresh_secs,
-            from_env.pod_token_refresh_secs
-        );
-        assert_eq!(
-            from_default.pod_session_max_lifetime_secs,
-            from_env.pod_session_max_lifetime_secs
-        );
-        assert_eq!(from_default.health_scrape_secs, from_env.health_scrape_secs);
-        assert_eq!(
-            from_default.enforce_work_issue_authz,
-            from_env.enforce_work_issue_authz
-        );
-    }
-
-    #[test]
-    fn every_knob_is_overridable() {
-        let config = ReconcileConfig::from_vars(&vars(&[
-            ("FKST_SUBSTRATE_TRIGGER_LABEL", "fkst-run"),
-            ("FKST_GITHUB_BOT_LOGIN", "fkst-bot"),
-            ("FKST_RECONCILE_INTERVAL_SECS", "15"),
-            ("FKST_POD_FULL_RESYNC_INTERVAL_SECS", "1200"),
-            ("FKST_SESSION_IDLE_GRACE_SECS", "600"),
-            ("FKST_POD_MIN_LIFETIME_SECS", "240"),
-            ("FKST_POD_TERMINATION_GRACE_SECS", "90"),
-            ("FKST_POD_TOKEN_REFRESH_SECS", "1800"),
-            ("FKST_POD_SESSION_MAX_LIFETIME_SECS", "86400"),
-            ("FKST_HEALTH_SCRAPE_SECS", "90"),
-        ]))
-        .expect("overrides should deserialize");
-        assert_eq!(config.substrate_trigger_label, "fkst-run");
-        assert_eq!(config.github_bot_login.as_deref(), Some("fkst-bot"));
-        assert_eq!(config.reconcile_interval_secs, 15);
-        assert_eq!(config.pod_full_resync_interval_secs, 1200);
-        assert_eq!(config.session_idle_grace_secs, 600);
-        assert_eq!(config.pod_min_lifetime_secs, 240);
-        assert_eq!(config.pod_termination_grace_secs, 90);
-        assert_eq!(config.pod_token_refresh_secs, 1800);
-        assert_eq!(config.pod_session_max_lifetime_secs, 86400);
-        assert_eq!(config.health_scrape_secs, 90);
-    }
-
-    #[test]
-    fn blank_bot_login_is_coerced_to_none() {
-        let config =
-            ReconcileConfig::from_vars(&vars(&[("FKST_GITHUB_BOT_LOGIN", "   ")])).expect("blank");
-        assert_eq!(config.github_bot_login, None);
-    }
-
-    #[test]
-    fn zero_cadence_bounds_are_config_errors_naming_the_var() {
-        for var in [
-            "FKST_RECONCILE_INTERVAL_SECS",
-            "FKST_POD_FULL_RESYNC_INTERVAL_SECS",
-            "FKST_SESSION_IDLE_GRACE_SECS",
-            "FKST_POD_TOKEN_REFRESH_SECS",
-            "FKST_HEALTH_SCRAPE_SECS",
-        ] {
-            let err = ReconcileConfig::from_vars(&vars(&[(var, "0")])).expect_err("zero must fail");
-            assert!(matches!(err, AppError::Config(_)));
-            assert!(err.to_string().contains(var), "error must name {var}");
-        }
-    }
-
-    #[test]
-    fn token_refresh_at_or_over_the_ttl_is_a_config_error() {
-        // At the TTL boundary: a refresh that fires exactly at expiry is too late.
-        let at = ReconcileConfig::from_vars(&vars(&[("FKST_POD_TOKEN_REFRESH_SECS", "3600")]))
-            .expect_err("at TTL must fail");
-        assert!(at.to_string().contains("FKST_POD_TOKEN_REFRESH_SECS"));
-        // Over the TTL.
-        let over = ReconcileConfig::from_vars(&vars(&[("FKST_POD_TOKEN_REFRESH_SECS", "7200")]))
-            .expect_err("over TTL must fail");
-        assert!(over.to_string().contains("FKST_POD_TOKEN_REFRESH_SECS"));
-    }
-
-    #[test]
-    fn zero_valued_shield_and_lifetime_knobs_are_allowed() {
-        // A zero min-lifetime / termination-grace / max-lifetime are all valid
-        // (no shield / no drain / unbounded) — they must NOT fail closed.
-        let config = ReconcileConfig::from_vars(&vars(&[
-            ("FKST_POD_MIN_LIFETIME_SECS", "0"),
-            ("FKST_POD_TERMINATION_GRACE_SECS", "0"),
-            ("FKST_POD_SESSION_MAX_LIFETIME_SECS", "0"),
-        ]))
-        .expect("zero shields are valid");
-        assert_eq!(config.pod_min_lifetime_secs, 0);
-        assert_eq!(config.pod_termination_grace_secs, 0);
-        assert_eq!(config.pod_session_max_lifetime_secs, 0);
-    }
-
-    #[test]
-    fn non_numeric_interval_is_a_config_error() {
-        let err = ReconcileConfig::from_vars(&vars(&[("FKST_RECONCILE_INTERVAL_SECS", "soon")]))
-            .expect_err("non-numeric must fail");
-        assert!(matches!(err, AppError::Config(_)));
-    }
-}
+#[path = "reconcile_config_tests.rs"]
+mod tests;
