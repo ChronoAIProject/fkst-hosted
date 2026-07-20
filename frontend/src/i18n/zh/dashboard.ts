@@ -72,6 +72,11 @@ export const canvasGraph: CanvasGraphSlice = {
   chartScopeAriaRepos: '将图表限定到某个仓库',
   chartEmpty: '暂无可绘制的数据。',
   chartOther: '其他',
+  broaderConnectTitle: '查看你的全部仓库',
+  broaderConnectHint: '授权更广的访问权限，以同时显示尚未安装 fkst App 的仓库和组织。',
+  broaderConnect: '连接',
+  broaderShowingAll: '正在显示全部仓库',
+  broaderDisconnect: '断开连接',
 };
 
 export const reposBase: ReposBaseSlice = {

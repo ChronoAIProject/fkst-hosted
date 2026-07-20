@@ -36,9 +36,24 @@ export function assertShape(cond: boolean, what: string): asserts cond {
   if (!cond) throw new Error(`malformed ${what} response`);
 }
 
-/** GET /api/v1/overview — the whole level-0/1 canvas in one call. */
-export async function getOverview(apiFetch: ApiFetch): Promise<OverviewResponse> {
-  const res = await apiFetch('/api/v1/overview');
+/** GET /api/v1/overview — the whole level-0/1 canvas in one call.
+ *
+ *  `broaderToken` (the optional classic-OAuth credential from `useBroaderOAuth`)
+ *  is threaded here — and ONLY here — as the `X-Github-Broader-Token` header, so
+ *  enumeration can include repos/orgs where the App is NOT installed. When it is
+ *  absent the call is byte-identical to today (no header): the header is added
+ *  only when a token is present, never as an empty/undefined value. The backend
+ *  ignores a missing or invalid token and falls back to the installed-only
+ *  result, so this is a pure read hint, never an auth requirement. */
+export async function getOverview(
+  apiFetch: ApiFetch,
+  broaderToken?: string | null
+): Promise<OverviewResponse> {
+  const res = broaderToken
+    ? await apiFetch('/api/v1/overview', {
+        headers: { 'X-Github-Broader-Token': broaderToken },
+      })
+    : await apiFetch('/api/v1/overview');
   if (!res.ok) throw new Error(`overview failed: ${res.status}`);
   const body = (await res.json()) as OverviewResponse;
   assertShape(Array.isArray(body?.accounts), 'overview');

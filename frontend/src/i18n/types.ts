@@ -165,6 +165,17 @@ export interface SiteContent {
       chartEmpty: string;
       /** Aggregate row label when the chart tail is folded. */
       chartOther: string;
+      // ---- Broader-visibility (full repo/org) connect affordance ----
+      /** Connect-banner heading: invites authorizing the broader credential. */
+      broaderConnectTitle: string;
+      /** One-line explanation under the connect heading (what it unlocks). */
+      broaderConnectHint: string;
+      /** Connect CTA button label. */
+      broaderConnect: string;
+      /** Connected-state status text (broader token active). */
+      broaderShowingAll: string;
+      /** Inline disconnect action in the connected state. */
+      broaderDisconnect: string;
       sessionsTitle: string;
       /** Poll cadence, now surfaced as the freshness line's tooltip. */
       pollNote: string;

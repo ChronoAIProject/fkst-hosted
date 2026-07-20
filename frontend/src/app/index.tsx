@@ -9,6 +9,7 @@ import { ToastProvider, Toaster } from '../components/ui/toast';
 import { TourProvider } from '../components/tour/tour-context';
 import { LanguageProvider, useContent } from '../i18n';
 import { AuthProvider } from '../lib/auth/github-auth';
+import { BroaderOAuthProvider } from '../lib/auth/broader-oauth';
 
 // The dashboard carries the canvas stack (React Flow, recharts,
 // framer-motion) — lazy-load it so the docs pages stay a light bundle.
@@ -100,17 +101,22 @@ export function App() {
           cannot reach (providers, the router host, the toaster). */}
       <ErrorBoundary>
         <AuthProvider>
-          {/* ToastProvider wraps the whole router tree so any page can raise
-              notices via useToast(); the one Toaster is mounted alongside.
-              TourProvider wraps the RouterProvider tree so every route can
-              useTour() (the <TourOverlay/> itself is mounted inside Shell, the
-              router root, so the finish step's react-router Link resolves). */}
-          <ToastProvider>
-            <TourProvider>
-              <RouterProvider router={router} future={{ v7_startTransition: true }} />
-            </TourProvider>
-            <ShellToaster />
-          </ToastProvider>
+          {/* Captures the broader-visibility token from the return-redirect
+              fragment (#broader_token) app-wide, so it lands regardless of
+              which route the OAuth flow returns to — mirroring AuthProvider. */}
+          <BroaderOAuthProvider>
+            {/* ToastProvider wraps the whole router tree so any page can raise
+                notices via useToast(); the one Toaster is mounted alongside.
+                TourProvider wraps the RouterProvider tree so every route can
+                useTour() (the <TourOverlay/> itself is mounted inside Shell, the
+                router root, so the finish step's react-router Link resolves). */}
+            <ToastProvider>
+              <TourProvider>
+                <RouterProvider router={router} future={{ v7_startTransition: true }} />
+              </TourProvider>
+              <ShellToaster />
+            </ToastProvider>
+          </BroaderOAuthProvider>
         </AuthProvider>
       </ErrorBoundary>
     </LanguageProvider>
