@@ -24,6 +24,7 @@ fn latched_original_equal_to_current_is_not_rejected() {
     )];
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &live,
         &pending(&[("s1", true)]),
@@ -60,6 +61,7 @@ fn changed_config_is_rejected_once_and_does_not_respawn() {
     )];
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &live,
         &pending(&[("s1", true)]),
@@ -87,7 +89,7 @@ fn changed_config_is_rejected_once_and_does_not_respawn() {
             ReconcileAction::Kill {
                 reason: KillReason::ConfigChanged,
                 ..
-            } | ReconcileAction::Spawn(_)
+            } | ReconcileAction::Spawn { .. }
         )),
         "a rejected edit never respawns the pod"
     );
@@ -101,6 +103,7 @@ fn changed_config_suppresses_spawn_when_pod_absent() {
     let regs = vec![reg("s1", 1, "h2")];
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &[],
         &pending(&[("s1", true)]),
@@ -133,6 +136,7 @@ fn changed_config_already_rejected_is_not_re_emitted() {
     )];
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &live,
         &pending(&[("s1", true)]),
@@ -159,6 +163,7 @@ fn pre_announce_no_latched_hash_plans_normally() {
     let regs = vec![reg("s1", 1, "h")];
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &[],
         &pending(&[("s1", true)]),
@@ -172,7 +177,7 @@ fn pre_announce_no_latched_hash_plans_normally() {
     assert!(
         actions
             .iter()
-            .any(|a| matches!(a, ReconcileAction::Spawn(_))),
+            .any(|a| matches!(a, ReconcileAction::Spawn { .. })),
         "a pre-announce registration spawns normally"
     );
     assert!(

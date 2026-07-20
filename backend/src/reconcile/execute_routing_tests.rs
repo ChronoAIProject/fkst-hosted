@@ -20,7 +20,15 @@ async fn spawn_action_routes_to_ensure_session() {
     reg.def.environment = None;
     let repo = reg.repo.clone();
 
-    execute(ReconcileAction::Spawn(reg), &repo, &ctx).await;
+    execute(
+        ReconcileAction::Spawn {
+            reg,
+            detected_work_labels: vec![],
+        },
+        &repo,
+        &ctx,
+    )
+    .await;
 
     let ensured = backend.ensured.lock().unwrap();
     assert_eq!(

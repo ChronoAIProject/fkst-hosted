@@ -159,7 +159,15 @@ pub enum KillReason {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReconcileAction {
     /// Spawn a session pod for this registration (it is desired but absent).
-    Spawn(SessionRegistration),
+    Spawn {
+        /// The registration to spawn.
+        reg: SessionRegistration,
+        /// The session's FULL effective work-label set (explicit `### Work Label` ∪
+        /// its packages' auto-declared labels) — the set that actually wakes it.
+        /// Threaded (I2, epic #594) as a foundation for a later PR; carried but NOT
+        /// yet consumed, so the spawned pod spec stays byte-identical.
+        detected_work_labels: Vec<String>,
+    },
     /// Refresh the pod's `last-pending-at` (it is live and reported pending).
     TouchPending { session_id: String },
     /// Delete the pod for the given reason.
@@ -196,6 +204,11 @@ pub enum ReconcileAction {
         /// work, or `None` for a label-less session (wake labels auto-discovered
         /// from its packages) — the announce comment omits the work-label line.
         work_label: Option<String>,
+        /// The session's FULL effective work-label set (explicit ∪ package-discovered)
+        /// — the set that actually wakes it. Threaded (I2, epic #594) as a foundation
+        /// for a later PR; carried but NOT yet rendered, so the announcement body stays
+        /// byte-identical.
+        detected_work_labels: Vec<String>,
         /// The package refs rendered back to `owner/repo@ref:path`, in author order.
         packages: Vec<String>,
         /// The named environment, or `None` for a no-environment session.
@@ -277,6 +290,11 @@ fn config_change_rejected(
 #[allow(clippy::too_many_arguments)]
 pub fn plan_repo(
     regs: &[SessionRegistration],
+    // The per-session FULL effective work-label set (explicit UNION package-discovered),
+    // keyed by `session_id`, resolved once per pass by the driver. Read-only here: it
+    // populates the carried `detected_work_labels` on Spawn/AnnounceSession (I2, epic
+    // #594) and drives NO planning decision, so it never affects which actions emit.
+    work_labels_by_session: &HashMap<String, Vec<String>>,
     invalid: &[(i64, String)],
     live: &[LivePod],
     pending: &HashMap<String, bool>,
@@ -294,6 +312,15 @@ pub fn plan_repo(
         live.iter().map(|p| (p.session_id.as_str(), p)).collect();
     // The set of session ids that ARE desired (have an open registration).
     let desired_sessions: HashSet<&str> = regs.iter().map(|r| r.session_id.as_str()).collect();
+    // The FULL effective work-label set carried onto a session's Spawn/AnnounceSession
+    // (I2, epic #594); an unmapped session (shouldn't happen — the driver fills every
+    // one) defaults to empty. Read-only: it never influences which actions emit.
+    let detected = |session_id: &str| -> Vec<String> {
+        work_labels_by_session
+            .get(session_id)
+            .cloned()
+            .unwrap_or_default()
+    };
 
     // --- 1. Registration-driven actions (desired state present) ---------------
     for reg in regs {
@@ -314,7 +341,10 @@ pub fn plan_repo(
             // the session stays frozen until the author closes + reopens it.
             PodLiveness::Absent => {
                 if is_pending && !rejected {
-                    actions.push(ReconcileAction::Spawn(reg.clone()));
+                    actions.push(ReconcileAction::Spawn {
+                        reg: reg.clone(),
+                        detected_work_labels: detected(&reg.session_id),
+                    });
                 }
             }
             // A running/starting pod: drift beats idle; pending refreshes the
@@ -362,6 +392,7 @@ pub fn plan_repo(
                 session_id: reg.session_id.clone(),
                 session_name: reg.def.name.clone(),
                 work_label: reg.def.work_label.clone(),
+                detected_work_labels: detected(&reg.session_id),
                 packages: reg
                     .def
                     .packages

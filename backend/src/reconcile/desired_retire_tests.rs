@@ -24,6 +24,7 @@ fn orphan_live_pod_with_work_label_also_retires_its_work_issues() {
         )];
         let actions = plan_repo(
             &[],
+            &work_labels(&[]),
             &[],
             &live,
             &pending(&[]),
@@ -64,6 +65,7 @@ fn orphan_live_pod_without_work_label_only_kills() {
     )];
     let actions = plan_repo(
         &[],
+        &work_labels(&[]),
         &[],
         &live,
         &pending(&[]),
@@ -99,6 +101,7 @@ fn orphan_terminal_pod_with_work_label_only_cleans_up() {
     )];
     let actions = plan_repo(
         &[],
+        &work_labels(&[]),
         &[],
         &live,
         &pending(&[]),

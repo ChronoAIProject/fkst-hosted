@@ -17,6 +17,7 @@ fn valid_registration_not_yet_announced_is_announced() {
     let regs = vec![reg("s1", 1, "h")];
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &[],
         &pending(&[("s1", false)]),
@@ -34,6 +35,7 @@ fn valid_registration_not_yet_announced_is_announced() {
             session_id: "s1".to_string(),
             session_name: "demo".to_string(),
             work_label: Some("wl".to_string()),
+            detected_work_labels: vec![],
             packages: vec![],
             environment: None,
             auto_merge: false,
@@ -49,6 +51,7 @@ fn valid_registration_announces_alongside_spawn() {
     let regs = vec![reg("s1", 1, "h")];
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &[],
         &pending(&[("s1", true)]),
@@ -62,12 +65,16 @@ fn valid_registration_announces_alongside_spawn() {
     assert_eq!(
         actions,
         vec![
-            ReconcileAction::Spawn(regs[0].clone()),
+            ReconcileAction::Spawn {
+                reg: regs[0].clone(),
+                detected_work_labels: vec![],
+            },
             ReconcileAction::AnnounceSession {
                 trigger_issue: 1,
                 session_id: "s1".to_string(),
                 session_name: "demo".to_string(),
                 work_label: Some("wl".to_string()),
+                detected_work_labels: vec![],
                 packages: vec![],
                 environment: None,
                 auto_merge: false,
@@ -83,6 +90,7 @@ fn already_announced_registration_is_not_reannounced() {
     let regs = vec![reg("s1", 1, "h")];
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &[],
         &pending(&[("s1", false)]),
@@ -105,6 +113,7 @@ fn invalid_trigger_is_never_announced() {
     let invalid = vec![(5, "missing `### Work Label`".to_string())];
     let actions = plan_repo(
         &[],
+        &work_labels(&[]),
         &invalid,
         &[],
         &pending(&[]),
@@ -144,6 +153,7 @@ fn announcement_carries_rendered_packages_and_auto_merge() {
     let regs = vec![r];
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &[],
         &pending(&[("s1", false)]),
@@ -161,6 +171,7 @@ fn announcement_carries_rendered_packages_and_auto_merge() {
             session_id: "s1".to_string(),
             session_name: "demo".to_string(),
             work_label: Some("wl".to_string()),
+            detected_work_labels: vec![],
             packages: vec![
                 "ChronoAIProject/fkst-packages@dev:packages/github-devloop".to_string(),
                 "acme/pkgs@main:packages/proxy".to_string(),
@@ -169,6 +180,52 @@ fn announcement_carries_rendered_packages_and_auto_merge() {
             auto_merge: true,
             full_config_hash: full_config_hash(&regs[0]),
         }]
+    );
+}
+
+#[test]
+fn spawn_and_announce_carry_the_detected_work_label_set() {
+    // I2 plumbing (epic #594): the session's FULL effective work-label set (explicit
+    // UNION package-discovered), resolved by the driver into `work_labels_by_session`,
+    // is threaded onto BOTH the Spawn and the AnnounceSession action so a later PR can
+    // consume it. A pending, absent, not-yet-announced session emits both actions; each
+    // must carry the session's detected set verbatim (order preserved).
+    let regs = vec![reg("s1", 1, "h")];
+    let detected = work_labels(&[("s1", &["wl", "pkg-discovered"])]);
+    let actions = plan_repo(
+        &regs,
+        &detected,
+        &[],
+        &[],
+        &pending(&[("s1", true)]),
+        &latched(&[]),
+        &latched(&[]),
+        &config_hashes(&[]),
+        &latched(&[]),
+        now(),
+        &cfg(300, 120),
+    );
+    let expected = vec!["wl".to_string(), "pkg-discovered".to_string()];
+    assert_eq!(
+        actions,
+        vec![
+            ReconcileAction::Spawn {
+                reg: regs[0].clone(),
+                detected_work_labels: expected.clone(),
+            },
+            ReconcileAction::AnnounceSession {
+                trigger_issue: 1,
+                session_id: "s1".to_string(),
+                session_name: "demo".to_string(),
+                work_label: Some("wl".to_string()),
+                detected_work_labels: expected,
+                packages: vec![],
+                environment: None,
+                auto_merge: false,
+                full_config_hash: full_config_hash(&regs[0]),
+            },
+        ],
+        "the detected work-label set is threaded onto both actions unchanged"
     );
 }
 
@@ -185,6 +242,7 @@ fn clear_invalid_output_is_order_independent_of_the_set() {
     let announced = latched(&[3, 5, 8]);
     let plan_a = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &[],
         &pending(&[]),
@@ -197,6 +255,7 @@ fn clear_invalid_output_is_order_independent_of_the_set() {
     );
     let plan_b = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &[],
         &pending(&[]),
@@ -234,6 +293,7 @@ fn plan_output_is_order_independent_of_the_pending_map() {
     let announced = latched(&[1, 2]);
     let p1 = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &live,
         &m1,
@@ -246,6 +306,7 @@ fn plan_output_is_order_independent_of_the_pending_map() {
     );
     let p2 = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &live,
         &m2,

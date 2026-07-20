@@ -272,6 +272,7 @@ pub async fn reconcile_repo(
     // 5. Plan (pure), then execute each action best-effort.
     let actions = plan_repo(
         &regs,
+        &work_labels_by_session,
         &invalid,
         &live,
         &pending,

@@ -17,6 +17,7 @@ fn valid_absent_pending_spawns() {
     let regs = vec![reg("s1", 1, "h")];
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &[],
         &pending(&[("s1", true)]),
@@ -27,7 +28,13 @@ fn valid_absent_pending_spawns() {
         now(),
         &cfg(300, 120),
     );
-    assert_eq!(actions, vec![ReconcileAction::Spawn(regs[0].clone())]);
+    assert_eq!(
+        actions,
+        vec![ReconcileAction::Spawn {
+            reg: regs[0].clone(),
+            detected_work_labels: vec![],
+        }]
+    );
 }
 
 #[test]
@@ -35,6 +42,7 @@ fn valid_absent_not_pending_does_nothing() {
     let regs = vec![reg("s1", 1, "h")];
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &[],
         &pending(&[("s1", false)]),
@@ -56,6 +64,7 @@ fn absent_liveness_pod_is_treated_as_absent_and_spawns() {
     let live = vec![pod("s1", 1, PodLiveness::Absent, ago(10), None, None)];
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &live,
         &pending(&[("s1", true)]),
@@ -66,7 +75,13 @@ fn absent_liveness_pod_is_treated_as_absent_and_spawns() {
         now(),
         &cfg(300, 120),
     );
-    assert_eq!(actions, vec![ReconcileAction::Spawn(regs[0].clone())]);
+    assert_eq!(
+        actions,
+        vec![ReconcileAction::Spawn {
+            reg: regs[0].clone(),
+            detected_work_labels: vec![],
+        }]
+    );
 }
 
 #[test]
@@ -76,6 +91,7 @@ fn valid_live_pending_touches() {
         let live = vec![pod("s1", 1, liveness, ago(1000), Some(ago(1)), Some("h"))];
         let actions = plan_repo(
             &regs,
+            &work_labels(&[]),
             &[],
             &live,
             &pending(&[("s1", true)]),
@@ -110,6 +126,7 @@ fn valid_live_idle_past_both_clocks_kills_idle() {
     )];
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &live,
         &pending(&[("s1", false)]),
@@ -143,6 +160,7 @@ fn idle_not_killed_before_idle_grace() {
     )];
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &live,
         &pending(&[("s1", false)]),
@@ -171,6 +189,7 @@ fn idle_not_killed_before_min_lifetime() {
     )];
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &live,
         &pending(&[("s1", false)]),
@@ -199,6 +218,7 @@ fn config_mismatch_kills_config_changed_regardless_of_pending() {
         )];
         let actions = plan_repo(
             &regs,
+            &work_labels(&[]),
             &[],
             &live,
             &pending(&[("s1", is_pending)]),
@@ -234,6 +254,7 @@ fn config_drift_kill_beats_idle() {
     )];
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &live,
         &pending(&[("s1", false)]),
@@ -261,6 +282,7 @@ fn unknown_pod_config_hash_is_not_drift() {
     let live = vec![pod("s1", 1, PodLiveness::Live, ago(10), Some(ago(1)), None)];
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &live,
         &pending(&[("s1", true)]),
@@ -292,6 +314,7 @@ fn valid_terminal_cleans_up() {
     )];
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &live,
         &pending(&[("s1", true)]),
@@ -323,6 +346,7 @@ fn valid_terminating_does_nothing() {
     )];
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &live,
         &pending(&[("s1", false)]),
@@ -343,6 +367,7 @@ fn orphan_live_pod_is_killed_trigger_closed() {
         let live = vec![pod("orphan", 9, liveness, ago(10), Some(ago(1)), Some("h"))];
         let actions = plan_repo(
             &[],
+            &work_labels(&[]),
             &[],
             &live,
             &pending(&[]),
@@ -369,6 +394,7 @@ fn orphan_terminal_pod_is_cleaned_up() {
     let live = vec![pod("orphan", 9, PodLiveness::Terminal, ago(10), None, None)];
     let actions = plan_repo(
         &[],
+        &work_labels(&[]),
         &[],
         &live,
         &pending(&[]),
@@ -399,6 +425,7 @@ fn orphan_terminating_pod_does_nothing() {
     )];
     let actions = plan_repo(
         &[],
+        &work_labels(&[]),
         &[],
         &live,
         &pending(&[]),
@@ -417,6 +444,7 @@ fn invalid_issue_not_latched_is_flagged() {
     let invalid = vec![(5, "missing `### Packages`".to_string())];
     let actions = plan_repo(
         &[],
+        &work_labels(&[]),
         &invalid,
         &[],
         &pending(&[]),
@@ -441,6 +469,7 @@ fn invalid_issue_already_latched_is_not_reflagged() {
     let invalid = vec![(5, "still bad".to_string())];
     let actions = plan_repo(
         &[],
+        &work_labels(&[]),
         &invalid,
         &[],
         &pending(&[]),
@@ -465,6 +494,7 @@ fn latched_issue_that_reparses_is_cleared() {
     let regs = vec![reg("s5", 5, "h")];
     let actions = plan_repo(
         &regs,
+        &work_labels(&[]),
         &[],
         &[],
         &pending(&[("s5", false)]),
@@ -488,6 +518,7 @@ fn latched_issue_still_invalid_is_not_cleared() {
     let invalid = vec![(5, "still bad".to_string())];
     let actions = plan_repo(
         &[],
+        &work_labels(&[]),
         &invalid,
         &[],
         &pending(&[]),
@@ -505,6 +536,7 @@ fn latched_issue_still_invalid_is_not_cleared() {
 fn empty_inputs_produce_no_actions() {
     let actions = plan_repo(
         &[],
+        &work_labels(&[]),
         &[],
         &[],
         &pending(&[]),
