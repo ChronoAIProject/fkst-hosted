@@ -131,13 +131,14 @@ describe('Dashboard — canvas levels and loading', () => {
         )
       ).toBe(true)
     );
-    expect(await screen.findByTestId('sidebar-skeleton')).toBeInTheDocument();
+    expect(await screen.findByTestId('canvas-skeleton')).toBeInTheDocument();
 
-    // Data lands → the session list replaces the skeleton ('nightly' shows
-    // both on the canvas detail node and in the sidebar session card).
+    // Data lands → the repo workspace replaces the skeleton: the session shows
+    // in the rail AND as the inline detail (its name in the rail card + the
+    // detail heading), and the detail's Status tab confirms the inline view.
     resolveSessions!(jsonResponse(sessionsBody));
     expect((await screen.findAllByText('nightly')).length).toBeGreaterThan(0);
-    expect(screen.getByText(/fkst sessions of shining\/lab/)).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Status' })).toBeInTheDocument();
 
     // Breadcrumb shows the full path (the crumb is the aria-current element;
     // the canvas detail node repeats the name); Escape mirrors Back, one

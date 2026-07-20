@@ -43,6 +43,7 @@ export const dashboardScalars: DashboardScalars = {
 
 export const canvasGraph: CanvasGraphSlice = {
   canvasAria: 'Accounts and repositories canvas',
+  repoWorkspaceAria: 'Repository sessions workspace',
   breadcrumbAria: 'Canvas level',
   breadcrumbRoot: 'Accounts',
   back: '← Back',
