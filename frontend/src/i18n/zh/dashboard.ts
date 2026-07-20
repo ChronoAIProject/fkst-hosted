@@ -39,6 +39,7 @@ export const dashboardScalars: DashboardScalars = {
 
 export const canvasGraph: CanvasGraphSlice = {
   canvasAria: '账户与仓库画布',
+  repoWorkspaceAria: '仓库会话工作区',
   breadcrumbAria: '画布层级',
   breadcrumbRoot: '账户',
   back: '← 返回',

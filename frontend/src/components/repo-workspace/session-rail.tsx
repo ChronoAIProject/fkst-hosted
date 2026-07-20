@@ -9,8 +9,8 @@ import { CreateTriggerModal } from '@/components/modals/create-trigger-modal';
 import { CreateWorkItemModal } from '@/components/modals/create-work-item-modal';
 import { Spinner } from '@/components/session-detail/parts';
 import { StaggerItem } from '@/components/ui/motion';
-import { StatusLegend, ViewDescription } from './legend';
-import { SessionCard } from './session-card';
+import { SessionCard } from '@/components/sidebar/session-card';
+import { sessionKey } from './repo-workspace';
 
 /** How often the freshness line re-renders so its relative "N min ago" text
  *  advances between the parent's silent polls. Minute-grained buckets don't
@@ -36,15 +36,22 @@ function canQueueWork(session: SessionDetail): boolean {
   );
 }
 
-/** Level-2 sidebar: the sessions of one repository — trigger list with
- *  config metadata and outcomes, session creation, session stop, and queuing
- *  work items onto an active session. */
-export function Level2Sidebar({
+/** The workspace's left rail: the repo's sessions as a header (Sessions · N +
+ *  the New-session button), a live freshness line, and a vertical list of
+ *  COMPACT, selectable session rows. It owns everything the former Level2Sidebar
+ *  owned except the detail surface: session creation, per-session stop, work-item
+ *  queuing, and the freshness/retry state machine. Selection itself is lifted to
+ *  {@link RepoWorkspace} (which renders the chosen session's inline detail);
+ *  this component only reports the choice via `onSelect` and highlights the row
+ *  matching `selectedKey`. */
+export function SessionRail({
   owner,
   name,
   data,
   loadFailed,
   onChanged,
+  selectedKey,
+  onSelect,
 }: {
   owner: string;
   name: string;
@@ -53,6 +60,10 @@ export function Level2Sidebar({
   loadFailed: boolean;
   /** A trigger was created or stopped — the page re-fetches immediately. */
   onChanged: () => void;
+  /** The effective selected key (first session by default) — highlights its row. */
+  selectedKey: string | null;
+  /** Report the user's session choice by key. */
+  onSelect: (key: string) => void;
 }) {
   const c = useContent().dashboard;
   const cc = c.canvas;
@@ -71,9 +82,9 @@ export function Level2Sidebar({
     data != null && !loadFailed ? Date.now() : null
   );
   const [, setTick] = useState(0);
-  // True while a caller-initiated refresh (Retry, or the header affordance) is
-  // in flight — the parent owns the fetch, so completion is inferred from the
-  // next prop change (see the resolve effect).
+  // True while a caller-initiated refresh (Retry) is in flight — the parent owns
+  // the fetch, so completion is inferred from the next prop change (see the
+  // resolve effect).
   const [refreshing, setRefreshing] = useState(false);
   const spinnerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -123,13 +134,8 @@ export function Level2Sidebar({
     onChanged();
   }, [onChanged]);
 
-  const full = `${owner}/${name}`;
-
   return (
-    <div className="flex flex-col gap-4">
-      <ViewDescription text={cc.viewRepo.replace('{repo}', full)} />
-      <StatusLegend />
-
+    <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h3 className="font-display font-semibold text-[15px] text-fg">
           {cc.sessionsTitle}
@@ -147,10 +153,9 @@ export function Level2Sidebar({
         </button>
       </div>
 
-      {/* Live freshness in place of the old static poll note: "updated 2 min
-          ago", advancing on every successful poll, with an inline spinner while
-          a manual refresh is in flight. The poll cadence lives on in the
-          tooltip. */}
+      {/* Live freshness: "updated 2 min ago", advancing on every successful
+          poll, with an inline spinner while a manual refresh is in flight. The
+          poll cadence lives on in the tooltip. */}
       {data != null && lastUpdated != null && (
         <p
           title={cc.pollNote}
@@ -165,8 +170,8 @@ export function Level2Sidebar({
         <p className="font-mono text-[12px] text-ghost">{cc.notInstalledNote}</p>
       )}
 
-      {/* A failed refresh with last-good data present keeps the list and
-          only flags staleness; the blocking error is for no-data-at-all. */}
+      {/* A failed refresh with last-good data present keeps the list and only
+          flags staleness; the blocking error is for no-data-at-all. */}
       {loadFailed && data != null && (
         <p className="glass border border-line border-l-2 border-l-amber rounded-card px-3 py-2 font-mono text-[11.5px] text-dim shadow-[var(--shadow-1),var(--glow-amber)]">
           {cc.sessionsStaleNotice}
@@ -188,34 +193,50 @@ export function Level2Sidebar({
             {refreshing ? cc.sessionsRefreshing : cc.sessionsRetry}
           </button>
         </div>
-      ) : data != null && data.sessions.length === 0 ? (
-        <p className="font-mono text-[12px] text-ghost italic">{c.noSessions}</p>
       ) : data != null ? (
-        <div className="flex flex-col gap-3">
-          {data.sessions.map((session, i) => (
-            // Stable per-repo key: session_id when present, else the trigger
-            // number. Deliberately NOT the positional index — a poll that
-            // reorders the list must not remount a card (which would slam an
-            // open detail drawer shut).
-            <StaggerItem
-              key={session.session_id ?? `trigger-${session.trigger.number}`}
-              index={i}
-            >
-              <div className="flex flex-col gap-2">
-                <SessionCard owner={owner} name={name} session={session} onStop={setStopTarget} />
-                {canQueueWork(session) && (
-                  <button
-                    type="button"
-                    onClick={() => setWorkItemTarget(session)}
-                    data-tour="new-work-item"
-                    className="self-start font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim transition-[color,border-color,box-shadow] hover:text-fg hover:border-line-2 hover:shadow-glow-amber cursor-pointer"
-                  >
-                    {cc.addWorkItem}
-                  </button>
-                )}
-              </div>
-            </StaggerItem>
-          ))}
+        <div className="flex flex-col gap-2.5">
+          {data.sessions.map((session, i) => {
+            const key = sessionKey(session);
+            return (
+              // Stable per-repo key so a poll that reorders the list moves (not
+              // remounts) the row, keeping the selection visually anchored.
+              <StaggerItem key={key} index={i}>
+                <div className="flex flex-col gap-1.5">
+                  <SessionCard
+                    owner={owner}
+                    name={name}
+                    session={session}
+                    onSelect={() => onSelect(key)}
+                    selected={key === selectedKey}
+                  />
+                  {(canQueueWork(session) || session.trigger.state === 'open') && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {canQueueWork(session) && (
+                        <button
+                          type="button"
+                          onClick={() => setWorkItemTarget(session)}
+                          data-tour="new-work-item"
+                          className="font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim transition-[color,border-color,box-shadow] hover:text-fg hover:border-line-2 hover:shadow-glow-amber cursor-pointer"
+                        >
+                          {cc.addWorkItem}
+                        </button>
+                      )}
+                      {session.trigger.state === 'open' && (
+                        <button
+                          type="button"
+                          onClick={() => setStopTarget(session)}
+                          aria-label={cc.stopAria.replace('{name}', session.name ?? `#${session.trigger.number}`)}
+                          className="font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-red transition-[color,border-color,box-shadow] hover:border-[color-mix(in_oklab,var(--red)_45%,var(--line))] hover:shadow-glow-red cursor-pointer"
+                        >
+                          {cc.stop}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </StaggerItem>
+            );
+          })}
         </div>
       ) : null}
 

@@ -44,6 +44,7 @@ export type EnvironmentScalarSlice = Pick<DashboardContent, 'environment'>;
 export type CanvasGraphSlice = Pick<
   CanvasContent,
   | 'canvasAria'
+  | 'repoWorkspaceAria'
   | 'breadcrumbAria'
   | 'breadcrumbRoot'
   | 'back'

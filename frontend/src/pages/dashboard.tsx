@@ -14,7 +14,7 @@ import { CanvasSkeleton, SidebarSkeleton } from '@/components/canvas/skeletons';
 import type { UserRepo } from '@/components/modals/create-repo-modal';
 import { Level0Sidebar } from '@/components/sidebar/level0';
 import { Level1Sidebar } from '@/components/sidebar/level1';
-import { Level2Sidebar } from '@/components/sidebar/level2';
+import { RepoWorkspace } from '@/components/repo-workspace/repo-workspace';
 import { SidebarPanel } from '@/components/sidebar/panel';
 import { useTour } from '@/components/tour/tour-context';
 import { useVisibilityPoll } from '@/lib/hooks/use-visibility-poll';
@@ -350,29 +350,19 @@ export function Dashboard() {
         onRepoCreated={onRepoCreated}
         onChanged={refetchOverview}
       />
-    ) : level.kind === 'account' ? (
-      selectedAccount != null ? (
-        <Level1Sidebar
-          account={selectedAccount}
-          appSlug={overview.app_slug}
-          query={repoQuery}
-          onQueryChange={setRepoQuery}
-          createdKey={createdKey}
-          onOpenRepo={openRepo}
-        />
-      ) : (
-        <SidebarSkeleton />
-      )
-    ) : sessions == null && !sessionsFailed ? (
-      <SidebarSkeleton />
-    ) : (
-      <Level2Sidebar
-        owner={level.owner}
-        name={level.name}
-        data={sessions}
-        loadFailed={sessionsFailed}
-        onChanged={onSessionsChanged}
+    ) : level.kind === 'account' && selectedAccount != null ? (
+      <Level1Sidebar
+        account={selectedAccount}
+        appSlug={overview.app_slug}
+        query={repoQuery}
+        onQueryChange={setRepoQuery}
+        createdKey={createdKey}
+        onOpenRepo={openRepo}
       />
+    ) : (
+      // The repo level no longer uses the sidebar — it renders the full-width
+      // RepoWorkspace in the main region instead (see appBody's row below).
+      <SidebarSkeleton />
     );
 
   const appBody = (
@@ -452,20 +442,50 @@ export function Dashboard() {
         </div>
       ) : (
         <div className="flex-1 min-h-0 flex gap-5 items-stretch max-[1100px]:flex-col">
-          <section
-            aria-label={cc.canvasAria}
-            data-tour="canvas"
-            className="flex-1 min-w-0 border border-line rounded-panel bg-bg overflow-hidden h-full"
-          >
-            {/* Skeleton↔empty↔canvas crossfade (instant under reduced motion). */}
-            <FadeSwap k={canvasView} className="w-full h-full">
-              {canvasBody}
-            </FadeSwap>
-          </section>
+          {level.kind === 'repo' ? (
+            // Repo details: the full-width workspace (session rail + inline
+            // detail) replaces the graph + sidebar — the detail now lives in
+            // the canvas region rather than the cramped sidebar.
+            <section
+              aria-label={cc.repoWorkspaceAria}
+              data-tour="canvas"
+              className="flex-1 min-w-0 border border-line rounded-panel bg-bg overflow-hidden h-full"
+            >
+              <FadeSwap
+                k={sessions == null && !sessionsFailed ? 'loading' : 'ready'}
+                className="w-full h-full"
+              >
+                {sessions == null && !sessionsFailed ? (
+                  <CanvasSkeleton />
+                ) : (
+                  <RepoWorkspace
+                    owner={level.owner}
+                    name={level.name}
+                    data={sessions}
+                    loadFailed={sessionsFailed}
+                    onChanged={onSessionsChanged}
+                  />
+                )}
+              </FadeSwap>
+            </section>
+          ) : (
+            <>
+              <section
+                aria-label={cc.canvasAria}
+                data-tour="canvas"
+                className="flex-1 min-w-0 border border-line rounded-panel bg-bg overflow-hidden h-full"
+              >
+                {/* Skeleton↔empty↔canvas crossfade (instant under reduced motion). */}
+                <FadeSwap k={canvasView} className="w-full h-full">
+                  {canvasBody}
+                </FadeSwap>
+              </section>
 
-          <SidebarPanel level={level} loaded={sidebarLoaded}>
-            {sidebarBody}
-          </SidebarPanel>
+              <SidebarPanel level={level} loaded={sidebarLoaded}>
+                {sidebarBody}
+              </SidebarPanel>
+            </>
+          )}
         </div>
       )}
     </div>
