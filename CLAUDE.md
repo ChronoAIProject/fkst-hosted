@@ -1248,9 +1248,18 @@ node).
 
 The backend persists each user's named environments as paired
 `fkst-env-<id>-<name>` ConfigMap + Secret in its own namespace
-(`backend/src/k8s/env_store.rs`), so `fkst-ksa` needs exactly this Role —
-least-privilege verbs, deliberately **no pod rules** (in opensandbox mode the
-backend never touches Pods; that authority belongs to the opensandbox server):
+(`backend/src/k8s/env_store.rs`), and **validates** every profile by running its
+install commands in a throwaway, hard-isolated **validation Pod** the backend
+creates directly (`backend/src/k8s/env_validator.rs` →
+`backend/src/session_backend/k8s/validation.rs`) — this is independent of
+`FKST_POD_MODE`, so it happens even in opensandbox mode. So `fkst-ksa` needs this
+Role — least-privilege verbs on secrets + configmaps (the store) **plus `pods` +
+`pods/log`** (validation-pod create/status/logs/delete + the crash-recovery GC
+sweep). Session pods remain the opensandbox server's job — the backend never
+creates *those* — but the env-validation pod is the one exception where the
+control plane touches Pods directly. **Without the pod rules, the first
+`PUT /environment-profiles` (i.e. any "New environment" from the UI) fails with
+`pods is forbidden`:**
 
 ```bash
 cat > "$OSB_LOCAL/manifests/fkst-envstore-rbac.yaml" <<'EOF'
@@ -1267,10 +1276,20 @@ rules:
     resources: ["secrets"]
     verbs: ["create", "get", "list", "update", "delete"]
   # Named-environment store — install commands + non-secret variables
-  # (`fkst-env-<id>-<name>` ConfigMaps).
+  # (`fkst-env-<id>-<name>` ConfigMaps) + each validation Pod's spec ConfigMap.
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["create", "get", "list", "update", "delete"]
+  # Environment-profile validation Pods (throwaway, owner-referenced for GC):
+  # create the pod, poll its status, read its install output, delete it, and
+  # list+reap orphans a crashed control plane left behind.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "list", "delete"]
+  # Read the validation pod's logs to surface the failed install command's stderr.
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -1353,6 +1372,15 @@ data:
   # FKST_STORAGE_BUCKET: <bucket>
   # FKST_NYXID_CLIENT_ID: <service-account client id>
   # FKST_NYXID_TOKEN_URL: <oauth token url>
+  # Environment-profile knobs (all optional; sane defaults shown). Validation
+  # runs each profile's install commands in a pod (needs the §14.5 pod RBAC):
+  # FKST_ENV_MAX_PER_USER: "20"                   # named profiles per user
+  # FKST_ENV_VALIDATE_DEADLINE_SECS: "300"        # per-profile validation timeout
+  # FKST_ENV_VALIDATE_MAX_CONCURRENT: "..."       # concurrent validation pods cap
+  # FKST_ENV_VALIDATE_POLL_INTERVAL_SECS: "..."   # validation status poll interval
+  # FKST_ENV_INSTALL_MAX_COMMANDS: "..."          # max install commands per profile
+  # FKST_ENV_INSTALL_MAX_COMMAND_BYTES: "..."     # max bytes per install command
+  # FKST_ENV_INSTALL_STDERR_TAIL_BYTES: "..."     # stderr tail kept on failure
 EOF
 
 # gate check: unreplaced <placeholders> apply cleanly but fail later in
