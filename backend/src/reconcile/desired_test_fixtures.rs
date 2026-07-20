@@ -115,6 +115,21 @@ pub(super) fn config_hashes(entries: &[(i64, &str)]) -> HashMap<i64, String> {
     entries.iter().map(|(k, v)| (*k, v.to_string())).collect()
 }
 
+/// A `session_id -> effective work-label set` map, the collision detector's input.
+/// The label order per session is irrelevant (the detector sorts internally), so the
+/// slices may be given in any order.
+pub(super) fn work_labels(entries: &[(&str, &[&str])]) -> HashMap<String, Vec<String>> {
+    entries
+        .iter()
+        .map(|(sid, labels)| {
+            (
+                sid.to_string(),
+                labels.iter().map(|l| l.to_string()).collect(),
+            )
+        })
+        .collect()
+}
+
 pub(super) fn pkg(owner: &str, repo: &str, git_ref: &str, path: &str) -> PackageRef {
     PackageRef {
         owner: owner.to_string(),

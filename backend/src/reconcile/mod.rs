@@ -17,6 +17,9 @@
 
 pub mod announce;
 pub mod automerge;
+// Pure work-label collision backstop (R4a): demotes the lower-priority of two active
+// sessions that would compete over the same work-label queue on one repo.
+pub mod collision;
 pub mod desired;
 pub mod execute;
 mod execute_comments;
@@ -50,6 +53,7 @@ use tokio::sync::mpsc;
 
 use crate::models::RepoRef;
 
+pub use collision::detect_work_label_collisions;
 pub use desired::{
     config_hash, plan_repo, KillReason, LivePod, PodLiveness, ReconcileAction, SessionDef,
     SessionRegistration,

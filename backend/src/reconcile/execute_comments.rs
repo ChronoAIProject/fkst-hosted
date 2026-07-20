@@ -42,10 +42,14 @@ pub(super) fn config_rejected_comment() -> String {
 }
 
 pub(super) fn flag_invalid_comment(detail: &str) -> String {
+    // Covers BOTH a parse failure and a work-label collision demotion (R4a): the lead
+    // is phrased so either reason reads correctly, and the guidance names both the
+    // required body shape and the one-active-session-per-work-label rule.
     format!(
-        "⚠️ fkst couldn't parse this trigger issue: {detail}\n\nExpected the \
-         `fkst-substrate-trigger` body with `### Session Name`, `### Packages` (one \
-         `owner/repo@ref:path` per line), `### Work Label`, and an optional `### Environment`. \
-         Fix the issue body and the reconciler will retry."
+        "⚠️ fkst can't run this trigger issue as a session: {detail}\n\nA valid \
+         `fkst-substrate-trigger` needs a body with `### Session Name`, `### Packages` (one \
+         `owner/repo@ref:path` per line), `### Work Label`, and an optional `### Environment`, \
+         and its work label must not already be claimed by another active session on this repo. \
+         Fix the issue and the reconciler will retry."
     )
 }

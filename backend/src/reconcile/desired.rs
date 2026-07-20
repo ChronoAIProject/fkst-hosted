@@ -460,6 +460,9 @@ pub fn plan_repo(
 #[path = "desired_announce_tests.rs"]
 mod desired_announce_tests;
 #[cfg(test)]
+#[path = "desired_collision_tests.rs"]
+mod desired_collision_tests;
+#[cfg(test)]
 #[path = "desired_config_reject_tests.rs"]
 mod desired_config_reject_tests;
 #[cfg(test)]
