@@ -32,11 +32,11 @@ use super::classify::{discover_sources, LogClass, TreeAnchors};
 use super::instance::{compute_instance_id, readme_markdown, InstanceMeta};
 use super::redact::Redactor;
 use super::seed::{read_github_token, seed_secrets, LABEL_GITHUB_TOKEN};
-use super::sink::{ChronoStorageSink, LogSink, SinkError};
 use super::tail::TailTracker;
+use super::uploader::{build_uploader, Uploader};
 use super::{
-    bundle_key, DEFAULT_FLUSH_BYTES, DEFAULT_FLUSH_SECS, ENV_CONFIG_HASH, ENV_FLUSH_BYTES,
-    ENV_FLUSH_SECS, ENV_POD_NAME, ENV_POD_UID, ENV_SESSION_ID, ENV_TRIGGER_ISSUE,
+    DEFAULT_FLUSH_BYTES, DEFAULT_FLUSH_SECS, ENV_CONFIG_HASH, ENV_FLUSH_BYTES, ENV_FLUSH_SECS,
+    ENV_POD_NAME, ENV_POD_UID, ENV_SESSION_ID, ENV_TRIGGER_ISSUE,
 };
 
 /// One captured, not-yet-redacted log line + the tree class it routes to. The tee
@@ -191,59 +191,6 @@ fn parse_env_usize(key: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
-/// The bundle uploader: a [`LogSink`] + the current-thread runtime it is driven on +
-/// the session's stable object key. The collector thread is a plain OS thread (not a
-/// tokio worker), so a dedicated current-thread runtime lets it `block_on` the async
-/// `put` without ever touching the engine's async runtime.
-struct Uploader {
-    sink: Box<dyn LogSink>,
-    runtime: tokio::runtime::Runtime,
-    key: String,
-}
-
-impl Uploader {
-    fn new(sink: Box<dyn LogSink>, runtime: tokio::runtime::Runtime, key: String) -> Self {
-        Self { sink, runtime, key }
-    }
-
-    /// Upload `gz` under the session's stable key, blocking the collector thread for
-    /// the PUT (bounded by the storage client's request timeout).
-    fn upload(&self, gz: Bytes) -> Result<(), SinkError> {
-        self.runtime.block_on(self.sink.put(&self.key, gz))
-    }
-}
-
-/// Build the uploader from the mounted storage SA creds, or `None` when they are
-/// not configured / a runtime cannot be built — the fail-closed path: the collector
-/// still captures + redacts to disk, it just uploads nothing.
-fn build_uploader(creds: &CredsLayout, config: &CollectorConfig) -> Option<Uploader> {
-    let Some(sink) = ChronoStorageSink::from_creds(creds) else {
-        tracing::warn!("log-stream: storage SA creds not mounted; capturing without upload");
-        return None;
-    };
-    let runtime = build_upload_runtime()?;
-    Some(Uploader::new(
-        Box::new(sink),
-        runtime,
-        bundle_key(&config.session_id),
-    ))
-}
-
-/// Build the dedicated current-thread runtime the uploader blocks on. A build
-/// failure disables uploads (a warning) rather than crashing the collector.
-fn build_upload_runtime() -> Option<tokio::runtime::Runtime> {
-    match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(runtime) => Some(runtime),
-        Err(error) => {
-            tracing::warn!(error = %error, "log-stream: could not build upload runtime; no bundle upload");
-            None
-        }
-    }
-}
-
 /// The collector thread body: build the uploader, then run the capture loop.
 fn run_collector(config: CollectorConfig, rx: Receiver<CollectorRecord>) {
     let creds = CredsLayout::new(&config.creds_dir);
@@ -314,7 +261,7 @@ fn collect(config: CollectorConfig, rx: Receiver<CollectorRecord>, uploader: Opt
         if now.duration_since(last_flush) >= flush_interval
             || tree.pending_bytes() >= config.flush_bytes
         {
-            do_flush(&mut tree, uploader.as_ref(), &redactor, &mut uploaded_once);
+            flush_and_index(&mut tree, uploader.as_ref(), &redactor, &mut uploaded_once);
             last_flush = now;
         }
     }
@@ -322,8 +269,45 @@ fn collect(config: CollectorConfig, rx: Receiver<CollectorRecord>, uploader: Opt
     // Final drain: last tail read, flush the unterminated tails, then a final upload.
     tail_sources(&anchors, &mut tails, &redactor, &mut tree);
     finish_tails(&mut tails, &redactor, &mut tree);
-    do_flush(&mut tree, uploader.as_ref(), &redactor, &mut uploaded_once);
+    flush_and_index(&mut tree, uploader.as_ref(), &redactor, &mut uploaded_once);
+    // The run produced a bundle → stamp its end time into the session's run index.
+    if uploaded_once {
+        if let Some(uploader) = uploader.as_ref() {
+            if let Err(error) = uploader.finalize_run_in_index(Utc::now()) {
+                log_redacted(
+                    &redactor,
+                    &format!("log-stream: run-index finalize failed: {error}"),
+                );
+            }
+        }
+    }
     tracing::info!(instance = %config.instance_id, "log-stream: collector stopped");
+}
+
+/// A flush that, on the FIRST successful upload (the `uploaded_once` false→true
+/// transition), registers this run in the session's run index exactly once. The index
+/// write is best-effort and log-swallowed — a failed index write must never crash the
+/// session or block the flush cadence. The run-index read-modify-write is race-free
+/// because a session has exactly ONE live pod at a time (idle-reap → auto-revive is
+/// strictly sequential), so no two collectors ever contend for the same index object.
+fn flush_and_index(
+    tree: &mut TreeWriter,
+    uploader: Option<&Uploader>,
+    redactor: &Redactor,
+    uploaded_once: &mut bool,
+) {
+    let was_uploaded = *uploaded_once;
+    do_flush(tree, uploader, redactor, uploaded_once);
+    if !was_uploaded && *uploaded_once {
+        if let Some(uploader) = uploader {
+            if let Err(error) = uploader.add_run_to_index() {
+                log_redacted(
+                    redactor,
+                    &format!("log-stream: run-index add failed: {error}"),
+                );
+            }
+        }
+    }
 }
 
 /// Redact a captured line and append it to its tree-class buffer. The single choke
@@ -403,9 +387,10 @@ fn seed_tree_root(root: &Path, readme: &str, meta_json: &str, redactor: &Redacto
 
 /// One flush cycle: persist buffered redacted lines to disk (bounding memory), then
 /// — when new content landed and an uploader exists — fold the whole tree into a
-/// `tar.gz` and upload it, overwriting the session's `latest.tar.gz`. Every step is
-/// best-effort; a failure is logged (redacted) and the next flush retries. An
-/// unchanged tree is not re-uploaded (the baseline uploads exactly once).
+/// `tar.gz` and upload it (to BOTH the session's `latest.tar.gz` and this run's
+/// per-incarnation object; see [`Uploader::upload`]). Every step is best-effort; a
+/// failure is logged (redacted) and the next flush retries. An unchanged tree is not
+/// re-uploaded (the baseline uploads exactly once).
 fn do_flush(
     tree: &mut TreeWriter,
     uploader: Option<&Uploader>,

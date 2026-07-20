@@ -43,6 +43,29 @@ async fn fake_sink_can_be_programmed_to_fail() {
     assert!(matches!(err, SinkError::Upload(_)));
     // Even a failing put is still recorded (the collector saw the attempt).
     assert_eq!(fake.calls().len(), 1);
+    // A programmed failure also fails `get`.
+    let err = fake.get("k").await.expect_err("programmed get failure");
+    assert!(matches!(err, SinkError::Upload(_)));
+}
+
+#[tokio::test]
+async fn fake_sink_get_returns_the_last_put_value_and_none_for_absent() {
+    let fake = FakeSink::default();
+    // Absent key → None.
+    assert!(fake.get("logs/s1/runs.json").await.expect("ok").is_none());
+    // After a put, get returns the last-put value for that key.
+    fake.put("logs/s1/runs.json", Bytes::from_static(b"v1"))
+        .await
+        .expect("ok");
+    fake.put("logs/s1/runs.json", Bytes::from_static(b"v2"))
+        .await
+        .expect("ok");
+    assert_eq!(
+        fake.get("logs/s1/runs.json").await.expect("ok"),
+        Some(Bytes::from_static(b"v2"))
+    );
+    // A different key is still absent.
+    assert!(fake.get("logs/s1/other").await.expect("ok").is_none());
 }
 
 /// Write the five storage SA cred files into a fresh creds dir.
@@ -159,4 +182,70 @@ async fn put_succeeds_on_a_2xx_upload() {
     sink.put("logs/s1/latest.tar.gz", Bytes::from_static(b"gz"))
         .await
         .expect("upload succeeds");
+}
+
+/// Build a chrono-storage sink whose token endpoint mints `SA_TOKEN` and whose
+/// object DOWNLOAD endpoint responds with `status` (+ optional body), so the `get`
+/// mapping is exercised end to end.
+async fn sink_get_over(status: u16, body: Option<&[u8]>) -> (ChronoStorageSink, MockServer) {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/oauth/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "access_token": SA_TOKEN,
+            "expires_in": 3600,
+        })))
+        .mount(&server)
+        .await;
+    let mut template = ResponseTemplate::new(status);
+    if let Some(bytes) = body {
+        template = template.set_body_bytes(bytes.to_vec());
+    }
+    Mock::given(method("GET"))
+        .and(path("/api/buckets/logs/objects/download"))
+        .respond_with(template)
+        .mount(&server)
+        .await;
+    let config = ChronoStorageConfig {
+        base_url: server.uri(),
+        bucket: "logs".to_string(),
+        nyxid_token_url: format!("{}/oauth/token", server.uri()),
+        nyxid_client_id: "writer-client".to_string(),
+        nyxid_client_secret: SecretString::from(SA_SECRET.to_string()),
+    };
+    (
+        ChronoStorageSink::new(ChronoStorageClient::new(reqwest::Client::new(), config)),
+        server,
+    )
+}
+
+#[tokio::test]
+async fn get_maps_404_to_none() {
+    let (sink, _server) = sink_get_over(404, None).await;
+    let got = sink
+        .get("logs/s1/runs.json")
+        .await
+        .expect("404 is not an error");
+    assert!(got.is_none(), "a missing object reads as None");
+}
+
+#[tokio::test]
+async fn get_returns_the_object_bytes_on_200() {
+    let (sink, _server) = sink_get_over(200, Some(b"[\n]\n")).await;
+    let got = sink.get("logs/s1/runs.json").await.expect("ok");
+    assert_eq!(got.as_deref(), Some(&b"[\n]\n"[..]));
+}
+
+#[tokio::test]
+async fn get_maps_other_status_to_a_leak_free_error() {
+    let (sink, _server) = sink_get_over(500, None).await;
+    let err = sink
+        .get("logs/s1/runs.json")
+        .await
+        .expect_err("500 must error");
+    assert!(matches!(err, SinkError::Upload(_)));
+    let rendered = format!("{err} {err:?}");
+    assert!(!rendered.contains(SA_SECRET), "leaked secret: {rendered}");
+    assert!(!rendered.contains(SA_TOKEN), "leaked token: {rendered}");
+    assert!(rendered.contains("500"), "status carried: {rendered}");
 }
