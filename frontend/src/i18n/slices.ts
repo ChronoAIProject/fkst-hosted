@@ -134,6 +134,8 @@ export type CanvasModalsSlice = Pick<
   | 'createAutoMergeLabel'
   | 'createLogAccessLabel'
   | 'createLogAccessHint'
+  | 'createCollaboratorsLabel'
+  | 'createCollaboratorsHint'
   | 'createOutputLangLabel'
   | 'createOutputLangHint'
   | 'createSubmit'

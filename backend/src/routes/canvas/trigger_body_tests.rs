@@ -15,6 +15,7 @@ fn full_request() -> CreateSessionRequest {
         environment: Some("prod-env".to_string()),
         auto_merge: Some(true),
         log_access: vec!["reviewer".to_string(), "12345".to_string()],
+        collaborators: vec!["worker".to_string(), "helper".to_string()],
         output_lang: Some("zh-CN".to_string()),
     }
 }
@@ -36,6 +37,11 @@ fn full_request_round_trips_through_the_trigger_parser() {
         spec.log_access,
         vec!["reviewer".to_string(), "12345".to_string()]
     );
+    assert_eq!(
+        spec.collaborators,
+        vec!["worker".to_string(), "helper".to_string()],
+        "the `### Session Collaborators` grantees round-trip through the parser"
+    );
     assert_eq!(spec.output_lang.as_deref(), Some("zh-CN"));
     assert!(spec.engine_config.is_empty());
 }
@@ -49,6 +55,7 @@ fn minimal_request_omits_every_optional_section() {
         environment: None,
         auto_merge: None,
         log_access: Vec::new(),
+        collaborators: Vec::new(),
         output_lang: None,
     };
     let body = validated_trigger_body(&req).expect("valid");
@@ -56,11 +63,13 @@ fn minimal_request_omits_every_optional_section() {
     assert!(!body.contains("### Environment"));
     assert!(!body.contains("### Auto-merge"));
     assert!(!body.contains("### Log Access Allowlist"));
+    assert!(!body.contains("### Session Collaborators"));
     assert!(!body.contains("### Output Language"));
     let spec = parse_trigger_issue_body(&body).expect("parses");
     assert_eq!(spec.work_label, None);
     assert!(!spec.auto_merge);
     assert!(spec.log_access.is_empty());
+    assert!(spec.collaborators.is_empty());
 }
 
 #[test]
@@ -72,6 +81,7 @@ fn auto_merge_false_and_blank_optionals_render_like_absent() {
         environment: Some(String::new()),
         auto_merge: Some(false),
         log_access: vec!["  ".to_string()],
+        collaborators: vec!["  ".to_string()],
         output_lang: None,
     };
     let body = validated_trigger_body(&req).expect("valid");
@@ -80,9 +90,14 @@ fn auto_merge_false_and_blank_optionals_render_like_absent() {
         !body.contains("### Work Label"),
         "blank collapses to absent"
     );
+    assert!(
+        !body.contains("### Session Collaborators"),
+        "a blank-only collaborators list renders no section"
+    );
     let spec = parse_trigger_issue_body(&body).expect("parses");
     assert!(!spec.auto_merge);
     assert_eq!(spec.work_label, None);
+    assert!(spec.collaborators.is_empty());
 }
 
 #[test]
@@ -151,6 +166,13 @@ fn multi_line_and_heading_shaped_values_are_rejected() {
             },
         ),
         (
+            "collaborators",
+            CreateSessionRequest {
+                collaborators: vec!["### Auto-merge".to_string()],
+                ..full_request()
+            },
+        ),
+        (
             "packages",
             CreateSessionRequest {
                 packages: vec!["acme/pkgs@main:p\n### Output Language\nzh".to_string()],
@@ -176,6 +198,25 @@ fn a_log_access_entry_hiding_multiple_grantees_is_a_400() {
     for entry in ["alice bob", "alice,bob"] {
         let req = CreateSessionRequest {
             log_access: vec![entry.to_string()],
+            ..full_request()
+        };
+        let err = validated_trigger_body(&req).expect_err(entry);
+        assert!(
+            matches!(err, AppError::Validation(_)),
+            "{entry:?}: expected Validation, got {err:?}"
+        );
+    }
+}
+
+#[test]
+fn a_collaborators_entry_hiding_multiple_grantees_is_a_400() {
+    // "worker helper" renders as ONE collaborators line but the parser splits on
+    // any whitespace/comma, so the created trigger would grant work-item
+    // authority to grantees the request never listed as separate entries. Like
+    // log_access, the round-trip check must fail closed.
+    for entry in ["worker helper", "worker,helper"] {
+        let req = CreateSessionRequest {
+            collaborators: vec![entry.to_string()],
             ..full_request()
         };
         let err = validated_trigger_body(&req).expect_err(entry);

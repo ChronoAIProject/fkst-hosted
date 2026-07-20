@@ -35,6 +35,12 @@ pub struct CreateSessionRequest {
     /// Optional extra log-download grantees (`### Log Access Allowlist`).
     #[serde(default)]
     pub log_access: Vec<String>,
+    /// Optional work-item collaborators (`### Session Collaborators`): GitHub
+    /// logins granted authority over the session's WORK issues, beyond the
+    /// trigger author. A DISTINCT list from `log_access` (log-download access) —
+    /// it gates who may raise/label/comment on this session's work issues.
+    #[serde(default)]
+    pub collaborators: Vec<String>,
     /// The optional session output locale (`### Output Language`).
     pub output_lang: Option<String>,
 }
@@ -109,6 +115,15 @@ fn render_trigger_body(req: &CreateSessionRequest) -> Result<String, AppError> {
     for entry in &log_access {
         require_inline(entry, "log_access entry")?;
     }
+    let collaborators: Vec<&str> = req
+        .collaborators
+        .iter()
+        .map(|entry| entry.trim())
+        .filter(|entry| !entry.is_empty())
+        .collect();
+    for entry in &collaborators {
+        require_inline(entry, "collaborators entry")?;
+    }
 
     let mut body = String::new();
     push_section(&mut body, "### Session Name", &[name]);
@@ -124,6 +139,9 @@ fn render_trigger_body(req: &CreateSessionRequest) -> Result<String, AppError> {
     }
     if !log_access.is_empty() {
         push_section(&mut body, "### Log Access Allowlist", &log_access);
+    }
+    if !collaborators.is_empty() {
+        push_section(&mut body, "### Session Collaborators", &collaborators);
     }
     if let Some(value) = output_lang {
         push_section(&mut body, "### Output Language", &[value]);
@@ -158,6 +176,17 @@ pub(super) fn validated_trigger_body(req: &CreateSessionRequest) -> Result<Strin
         .map(|entry| entry.trim().to_string())
         .filter(|entry| !entry.is_empty())
         .collect();
+    // Collaborators are the work-item authority list — the same split-on-any-
+    // whitespace/comma-then-strip-'@' parsing as log_access, so one requested
+    // entry can silently fan out into several grantees. Compare it entry-for-
+    // entry too, so an entry that would grant authority the request never
+    // listed fails closed.
+    let requested_collaborators: Vec<String> = req
+        .collaborators
+        .iter()
+        .map(|entry| entry.trim().to_string())
+        .filter(|entry| !entry.is_empty())
+        .collect();
     let round_trips = spec.name == req.name.trim()
         && rendered_packages == requested_packages
         && spec.work_label.as_deref() == trimmed(req.work_label.as_deref())
@@ -165,6 +194,7 @@ pub(super) fn validated_trigger_body(req: &CreateSessionRequest) -> Result<Strin
         && spec.output_lang.as_deref() == trimmed(req.output_lang.as_deref())
         && spec.auto_merge == (req.auto_merge == Some(true))
         && spec.log_access == requested_log_access
+        && spec.collaborators == requested_collaborators
         && spec.engine_config.is_empty();
     if !round_trips {
         // Defense in depth: reachable only if a value slips past the inline

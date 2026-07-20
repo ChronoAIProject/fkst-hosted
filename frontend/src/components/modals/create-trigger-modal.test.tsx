@@ -44,6 +44,7 @@ describe('buildCreateRequest', () => {
       environment: '   ',
       autoMerge: false,
       logAccess: '   ',
+      collaborators: '   ',
       outputLang: '  ',
     });
     expect(req).toEqual({ name: 'nightly', packages: ['a/b@main:pkg'] });
@@ -57,6 +58,7 @@ describe('buildCreateRequest', () => {
       environment: 'staging',
       autoMerge: true,
       logAccess: 'alice, bob',
+      collaborators: 'worker helper',
       outputLang: 'English',
     });
     expect(req).toEqual({
@@ -66,6 +68,7 @@ describe('buildCreateRequest', () => {
       environment: 'staging',
       auto_merge: true,
       log_access: ['alice', 'bob'],
+      collaborators: ['worker', 'helper'],
       output_lang: 'English',
     });
   });
@@ -166,6 +169,41 @@ describe('CreateTriggerModal', () => {
         html_url: 'https://github.com/acme/app/issues/42',
       })
     );
+  });
+
+  it('sends the collaborators input as its own request field, distinct from log access', async () => {
+    const user = userEvent.setup();
+    let sentBody: unknown;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes(ENV_PATH)) return jsonResponse({ environment_profiles: [] });
+        if (url.includes(SESSIONS_PATH)) {
+          sentBody = JSON.parse(String(init?.body));
+          return jsonResponse({ issue_number: 7, html_url: 'https://github.com/acme/app/issues/7' });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+    renderModal();
+
+    await user.type(await screen.findByLabelText('Session name'), 'nightly');
+    await user.type(screen.getByLabelText('Packages 1'), 'a/b@main:pkg');
+    // The collaborators field is present, labelled as its own input, and its
+    // hint marks it as work-item authority distinct from log access.
+    await user.type(screen.getByLabelText('Collaborators (optional)'), 'worker, helper');
+    expect(screen.getByText(/granted work-item authority/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Create trigger issue' }));
+
+    await waitFor(() => expect(sentBody).toBeDefined());
+    expect(sentBody).toMatchObject({
+      name: 'nightly',
+      packages: ['a/b@main:pkg'],
+      collaborators: ['worker', 'helper'],
+    });
+    // Nothing was typed into log access, so it must be absent (distinct field).
+    expect((sentBody as Record<string, unknown>).log_access).toBeUndefined();
   });
 
   it('surfaces a server error and raises no toast when create fails', async () => {

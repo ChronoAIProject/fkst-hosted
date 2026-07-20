@@ -94,6 +94,11 @@ export interface SessionDetail {
   /** GitHub logins allowed to download this session's logs. Optional: a later
    *  backend/UI item populates it, so it is harmless/undefined until then. */
   log_access?: string[] | null;
+  /** GitHub logins granted WORK-ITEM authority over this session (they may
+   *  raise/label/comment on its work issues). A DISTINCT list from
+   *  {@link log_access} (log-download access). Optional: undefined until the
+   *  backend populates it. */
+  collaborators?: string[] | null;
   /** Preferred natural-language for the session's output. Optional: populated
    *  by a later item, undefined until then. */
   output_lang?: string | null;
@@ -116,6 +121,9 @@ export interface CreateSessionRequest {
   environment?: string;
   auto_merge?: boolean;
   log_access?: string[];
+  /** GitHub logins granted work-item authority (`### Session Collaborators`);
+   *  distinct from `log_access`. */
+  collaborators?: string[];
   output_lang?: string;
 }
 

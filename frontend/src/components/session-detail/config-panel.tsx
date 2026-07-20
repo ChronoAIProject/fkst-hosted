@@ -16,13 +16,13 @@ function ConfigRow({ label, children }: { label: string; children: ReactNode }) 
 }
 
 /** ConfigPanel: the FULL session configuration that is frozen at registration
- *  (work label, environment, auto-merge, output language, and the log-access
- *  allowlist). None of these are surfaced anywhere else in the UI today, so the
- *  detail drawer is the one place a viewer can confirm what a session was
- *  actually registered with. A scalar the session did not carry renders as a
- *  muted em-dash rather than a blank cell, and an empty log-access allowlist
- *  renders an explicit "none" so an unset allowlist is never confused with a
- *  failed render. */
+ *  (work label, environment, auto-merge, output language, the log-access
+ *  allowlist, and the work-item collaborators). None of these are surfaced
+ *  anywhere else in the UI today, so the detail drawer is the one place a viewer
+ *  can confirm what a session was actually registered with. A scalar the session
+ *  did not carry renders as a muted em-dash rather than a blank cell, and an
+ *  empty list (log access or collaborators) renders an explicit "none" so an
+ *  unset list is never confused with a failed render. */
 export function ConfigPanel({ session }: { session: SessionDetail }) {
   const t = useContent().dashboard.detail;
 
@@ -60,6 +60,10 @@ export function ConfigPanel({ session }: { session: SessionDetail }) {
   // (undefined / null / []) as "no additional viewers".
   const logAccess = session.log_access ?? [];
 
+  // collaborators is a DISTINCT frozen list (work-item authority, not log
+  // download); same optional/nullable wire shape, same empty-as-none handling.
+  const collaborators = session.collaborators ?? [];
+
   return (
     <section className="flex flex-col gap-2.5">
       <SectionLabel>{t.configLabel}</SectionLabel>
@@ -80,6 +84,17 @@ export function ConfigPanel({ session }: { session: SessionDetail }) {
               <span className="flex flex-wrap gap-1.5">
                 {logAccess.map((viewer) => (
                   <Chip key={viewer}>{viewer}</Chip>
+                ))}
+              </span>
+            )}
+          </ConfigRow>
+          <ConfigRow label={t.configCollaborators}>
+            {collaborators.length === 0 ? (
+              <span className="text-ghost">{t.configCollaboratorsNone}</span>
+            ) : (
+              <span className="flex flex-wrap gap-1.5">
+                {collaborators.map((login) => (
+                  <Chip key={login}>{login}</Chip>
                 ))}
               </span>
             )}

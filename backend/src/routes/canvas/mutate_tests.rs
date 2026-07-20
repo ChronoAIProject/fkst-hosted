@@ -18,6 +18,7 @@ fn create_request() -> CreateSessionRequest {
         environment: None,
         auto_merge: Some(true),
         log_access: Vec::new(),
+        collaborators: Vec::new(),
         output_lang: None,
     }
 }

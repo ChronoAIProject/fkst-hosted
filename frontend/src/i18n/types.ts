@@ -229,6 +229,9 @@ export interface SiteContent {
       createAutoMergeLabel: string;
       createLogAccessLabel: string;
       createLogAccessHint: string;
+      /** Collaborators (work-item authority) input — distinct from log access. */
+      createCollaboratorsLabel: string;
+      createCollaboratorsHint: string;
       createOutputLangLabel: string;
       /** Hint naming what the value drives (the '### Output Language' section). */
       createOutputLangHint: string;
@@ -418,12 +421,17 @@ export interface SiteContent {
       configAutoMerge: string;
       configOutputLang: string;
       configLogAccess: string;
+      /** Work-item authority list (`### Session Collaborators`); distinct from
+       *  the log-access allowlist. */
+      configCollaborators: string;
       /** Placeholder for a scalar the session did not carry. */
       configUnset: string;
       configYes: string;
       configNo: string;
       /** Rendered when the log-access allowlist is empty. */
       configLogAccessNone: string;
+      /** Rendered when the collaborators list is empty. */
+      configCollaboratorsNone: string;
       // ---- Logs tab ----
       logsUnavailable: string;
       logsLoading: string;
