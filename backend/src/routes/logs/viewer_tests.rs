@@ -16,6 +16,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use super::*;
 use crate::github_identity::GithubUser;
 use crate::routes::logs::test_support::{log_config, registry, state, AUTHOR_ID, SESSION_ID};
+use crate::routes::logs::RunQuery;
 use crate::storage::{ChronoStorageClient, ChronoStorageConfig};
 
 /// A codex log with several lines so the tail can snap to a line boundary.
@@ -47,6 +48,66 @@ fn make_bundle() -> Vec<u8> {
         builder.finish().expect("finish tar");
     }
     encoder.finish().expect("finish gzip")
+}
+
+/// A single-file gzip bundle carrying `driver` as `fkst-hosted/driver.log`, so two
+/// bundles with distinct driver lines can prove a `?run=` read hit the right object.
+fn bundle_with_driver(driver: &[u8]) -> Vec<u8> {
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    {
+        let mut builder = tar::Builder::new(&mut encoder);
+        append(&mut builder, "fkst-hosted/driver.log", driver);
+        builder.finish().expect("finish tar");
+    }
+    encoder.finish().expect("finish gzip")
+}
+
+/// A chrono-storage mock serving a `latest` bundle at the latest key AND a distinct
+/// `run` bundle at `logs/<sid>/runs/<run_id>.tar.gz`, so a `?run=` read can be shown
+/// to route to the per-run object rather than latest.
+async fn storage_serving_run(
+    run_id: &str,
+    latest: Vec<u8>,
+    run: Vec<u8>,
+) -> (Arc<ChronoStorageClient>, MockServer) {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/oauth/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "access_token": "sa-token",
+            "expires_in": 3600,
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/buckets/logs/objects/download"))
+        .and(query_param(
+            "key",
+            format!("logs/{SESSION_ID}/latest.tar.gz"),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(latest))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/buckets/logs/objects/download"))
+        .and(query_param(
+            "key",
+            format!("logs/{SESSION_ID}/runs/{run_id}.tar.gz"),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(run))
+        .mount(&server)
+        .await;
+    let config = ChronoStorageConfig {
+        base_url: server.uri(),
+        bucket: "logs".to_string(),
+        nyxid_token_url: format!("{}/oauth/token", server.uri()),
+        nyxid_client_id: "sa-client".to_string(),
+        nyxid_client_secret: SecretString::from("sa-secret".to_string()),
+    };
+    (
+        Arc::new(ChronoStorageClient::new(reqwest::Client::new(), config)),
+        server,
+    )
 }
 
 /// A chrono-storage mock that serves `bundle` for SESSION_ID's log key.
@@ -97,9 +158,14 @@ async fn manifest_lists_files_with_labels() {
         registry(&[]),
     );
 
-    let Json(manifest) = log_manifest(State(st), Path(SESSION_ID.to_string()), author())
-        .await
-        .expect("200");
+    let Json(manifest) = log_manifest(
+        State(st),
+        Path(SESSION_ID.to_string()),
+        Query(RunQuery { run: None }),
+        author(),
+    )
+    .await
+    .expect("200");
     assert_eq!(manifest.session_id, SESSION_ID);
     assert!(!manifest.generated_at.is_empty());
     let by_path = |p: &str| manifest.files.iter().find(|f| f.path == p).cloned();
@@ -137,6 +203,7 @@ async fn file_returns_full_content_untruncated() {
         Query(LogFileQuery {
             path: "fkst-substrate/codex/codex.log".to_string(),
             tail_bytes: None,
+            run: None,
         }),
         author(),
     )
@@ -166,6 +233,7 @@ async fn file_tail_snaps_to_a_line_boundary() {
         Query(LogFileQuery {
             path: "fkst-substrate/codex/codex.log".to_string(),
             tail_bytes: Some(7),
+            run: None,
         }),
         author(),
     )
@@ -193,6 +261,7 @@ async fn file_tail_larger_than_file_returns_all() {
         Query(LogFileQuery {
             path: "fkst-substrate/codex/codex.log".to_string(),
             tail_bytes: Some(9999),
+            run: None,
         }),
         author(),
     )
@@ -218,6 +287,7 @@ async fn file_unknown_path_is_404() {
         Query(LogFileQuery {
             path: "../../etc/passwd".to_string(),
             tail_bytes: None,
+            run: None,
         }),
         author(),
     )
@@ -241,9 +311,14 @@ async fn manifest_unauthorized_is_403() {
         login: "mallory".to_string(),
         id: 4004,
     };
-    let err = log_manifest(State(st), Path(SESSION_ID.to_string()), stranger)
-        .await
-        .expect_err("unauthorized caller → 403");
+    let err = log_manifest(
+        State(st),
+        Path(SESSION_ID.to_string()),
+        Query(RunQuery { run: None }),
+        stranger,
+    )
+    .await
+    .expect_err("unauthorized caller → 403");
     assert!(matches!(err, AppError::Forbidden(_)), "got {err:?}");
 }
 
@@ -257,9 +332,14 @@ async fn manifest_unknown_session_is_404() {
         registry(&[]),
     );
 
-    let err = log_manifest(State(st), Path("does-not-exist".to_string()), author())
-        .await
-        .expect_err("unknown session → 404");
+    let err = log_manifest(
+        State(st),
+        Path("does-not-exist".to_string()),
+        Query(RunQuery { run: None }),
+        author(),
+    )
+    .await
+    .expect_err("unknown session → 404");
     assert!(matches!(err, AppError::NotFound(_)), "got {err:?}");
 }
 
@@ -271,10 +351,63 @@ async fn manifest_storage_not_configured_is_503() {
         log_config(&[], false),
         registry(&[]),
     );
-    let err = log_manifest(State(st), Path(SESSION_ID.to_string()), author())
-        .await
-        .expect_err("no storage → 503");
+    let err = log_manifest(
+        State(st),
+        Path(SESSION_ID.to_string()),
+        Query(RunQuery { run: None }),
+        author(),
+    )
+    .await
+    .expect_err("no storage → 503");
     assert!(matches!(err, AppError::Unavailable(_)), "got {err:?}");
+}
+
+#[tokio::test]
+async fn file_reads_the_requested_run_bundle_not_latest() {
+    // Distinct content per object: the latest bundle and run `run-7`'s bundle each
+    // carry a different driver line.
+    let (storage, _s) = storage_serving_run(
+        "run-7",
+        bundle_with_driver(b"LATEST driver\n"),
+        bundle_with_driver(b"RUN-7 driver\n"),
+    )
+    .await;
+    let st = state(
+        "https://unused".to_string(),
+        Some(storage),
+        log_config(&[], false),
+        registry(&[]),
+    );
+
+    // `?run=run-7` must read the per-run object.
+    let Json(run_file) = log_file(
+        State(st.clone()),
+        Path(SESSION_ID.to_string()),
+        Query(LogFileQuery {
+            path: "fkst-hosted/driver.log".to_string(),
+            tail_bytes: None,
+            run: Some("run-7".to_string()),
+        }),
+        author(),
+    )
+    .await
+    .expect("200");
+    assert_eq!(run_file.content, "RUN-7 driver\n");
+
+    // No `run` → the authoritative latest bundle (unchanged behavior).
+    let Json(latest_file) = log_file(
+        State(st),
+        Path(SESSION_ID.to_string()),
+        Query(LogFileQuery {
+            path: "fkst-hosted/driver.log".to_string(),
+            tail_bytes: None,
+            run: None,
+        }),
+        author(),
+    )
+    .await
+    .expect("200");
+    assert_eq!(latest_file.content, "LATEST driver\n");
 }
 
 // ---- pure helpers -----------------------------------------------------------

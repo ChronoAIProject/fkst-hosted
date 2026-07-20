@@ -33,6 +33,8 @@ mod identity;
 // Shared with `crate::routes::auth` (the frontend login flow reuses the signed-state
 // + authorize-URL + token-exchange primitives).
 pub(crate) mod oauth;
+// The per-run listing endpoint (`GET /logs/{sid}/runs`), identity-gated by `authorize`.
+mod run_list;
 // The in-bundle log viewer: a manifest of the redacted bundle's files + one
 // decompressed (optionally tailed) file, both identity-gated by `authorize`.
 mod viewer;
@@ -52,12 +54,32 @@ use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
 use crate::log_config::LogConfig;
 use crate::reconcile::log_authz;
+use crate::session_pod::log_stream::runs;
 use crate::state::AppState;
 use crate::storage::StorageError;
 
-/// The chrono-storage object key the producer uploads a session's redacted bundle to.
-fn log_object_key(session_id: &str) -> String {
-    format!("logs/{session_id}/latest.tar.gz")
+/// The chrono-storage object key a session's redacted bundle is read from, per
+/// requested run (issue #568): `None` / `Some("latest")` → the authoritative
+/// `logs/{sid}/latest.tar.gz` the producer always overwrites (byte-for-byte the
+/// legacy key — zero regression for the default download path); `Some(run_id)` →
+/// that run's immutable per-incarnation object.
+fn object_key_for(session_id: &str, run: Option<&str>) -> String {
+    match run {
+        None | Some("latest") => format!("logs/{session_id}/latest.tar.gz"),
+        Some(run_id) => runs::run_bundle_key(session_id, run_id),
+    }
+}
+
+/// The optional `?run=<run_id>` selector shared by the whole-bundle download + the
+/// viewer manifest: absent (or `latest`) reads the authoritative `latest.tar.gz`;
+/// any other value reads that run's per-incarnation bundle. Run ids come from
+/// `GET /logs/{session_id}/runs`.
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct RunQuery {
+    /// The run to read; absent → the latest (whole-session) bundle.
+    #[serde(default)]
+    pub run: Option<String>,
 }
 
 /// The OAuth callback query (`?code=&state=` on success, `?error=` on user denial).
@@ -87,7 +109,10 @@ pub struct OAuthCallbackQuery {
     path = "/logs/{session_id}",
     tag = "logs",
     operation_id = "download_session_logs",
-    params(("session_id" = String, Path, description = "The deterministic session id (from the announce link)")),
+    params(
+        ("session_id" = String, Path, description = "The deterministic session id (from the announce link)"),
+        RunQuery,
+    ),
     responses(
         (status = 200, description = "The redacted log bundle, streamed as a gzip attachment (API mode — a Bearer token was supplied)", content_type = "application/gzip"),
         (status = 302, description = "Redirect: browser mode → GitHub OAuth"),
@@ -100,12 +125,16 @@ pub struct OAuthCallbackQuery {
 async fn download_session_logs(
     State(state): State<AppState>,
     Path(session_id): Path<String>,
+    Query(query): Query<RunQuery>,
     headers: HeaderMap,
 ) -> Response {
     match bearer_token(&headers) {
-        // API mode: a Bearer token is present — resolve identity + serve JSON.
-        Some(token) => api_mode(&state, &session_id, &token).await,
-        // Browser mode: no token — redirect into the GitHub OAuth flow.
+        // API mode: a Bearer token is present — resolve identity + serve the bundle
+        // for the requested run (absent → latest).
+        Some(token) => api_mode(&state, &session_id, &token, query.run.as_deref()).await,
+        // Browser mode: no token — redirect into the GitHub OAuth flow. The run
+        // selector is not carried across the OAuth round-trip (the signed state holds
+        // only the session id); browser downloads always serve the latest bundle.
         None => browser_redirect(&state, &session_id),
     }
 }
@@ -189,11 +218,13 @@ async fn oauth_callback(
             }
         };
 
-    // Authorize, then 302 to the presigned URL; render every failure as HTML.
+    // Authorize, then stream the latest bundle; render every failure as HTML. The
+    // browser path serves the latest bundle only (the run selector is not carried
+    // through the OAuth round-trip).
     if let Err(err) = authorize(&state, &session_id, &user) {
         return browser_error(err);
     }
-    match stream_download(&state, &session_id).await {
+    match stream_download(&state, &session_id, None).await {
         Ok(response) => response,
         Err(err) => browser_error(err),
     }
@@ -205,7 +236,7 @@ async fn oauth_callback(
 /// redacted bundle back as a gzip attachment — identical to the browser path, so NO
 /// presigned S3 URL is ever handed to a caller (the presigned URL is used server-side
 /// only, inside [`stream_download`]). Every failure renders the JSON [`AppError`] envelope.
-async fn api_mode(state: &AppState, session_id: &str, token: &str) -> Response {
+async fn api_mode(state: &AppState, session_id: &str, token: &str, run: Option<&str>) -> Response {
     let user = match identity::resolve(&state.config.github_api_base_url, token).await {
         Ok(user) => user,
         Err(err) => return err.into_response(),
@@ -213,7 +244,7 @@ async fn api_mode(state: &AppState, session_id: &str, token: &str) -> Response {
     if let Err(err) = authorize(state, session_id, &user) {
         return err.into_response();
     }
-    match stream_download(state, session_id).await {
+    match stream_download(state, session_id, run).await {
         Ok(response) => response,
         Err(err) => err.into_response(),
     }
@@ -297,10 +328,18 @@ pub(crate) fn authorize(
 pub(super) async fn fetch_bundle(
     state: &AppState,
     session_id: &str,
+    run: Option<&str>,
 ) -> Result<axum::body::Bytes, AppError> {
+    // Cache key: the bare session id for the latest bundle (so the existing cache
+    // hits are unchanged), else `<session_id>#<run>` so per-run bundles never collide
+    // with each other or with latest.
+    let cache_key = match run {
+        None | Some("latest") => session_id.to_string(),
+        Some(run_id) => format!("{session_id}#{run_id}"),
+    };
     // Serve from the cache when a fresh bundle is already in hand: a burst of
     // manifest/file requests for one session then hits storage at most once per TTL.
-    if let Some(bytes) = state.log_bundle_cache.get(session_id) {
+    if let Some(bytes) = state.log_bundle_cache.get(&cache_key) {
         return Ok(bytes);
     }
     let Some(storage) = state.storage.as_ref() else {
@@ -308,12 +347,10 @@ pub(super) async fn fetch_bundle(
             "log storage is not configured".to_string(),
         ));
     };
-    let key = log_object_key(session_id);
+    let key = object_key_for(session_id, run);
     match storage.download(&key).await {
         Ok(bytes) => {
-            state
-                .log_bundle_cache
-                .put(session_id.to_string(), bytes.clone());
+            state.log_bundle_cache.put(cache_key, bytes.clone());
             Ok(bytes)
         }
         Err(StorageError::Status { status: 404 }) => {
@@ -333,8 +370,12 @@ pub(super) async fn fetch_bundle(
 /// `Content-Disposition: attachment` makes the browser SAVE the bundle rather than fetch it
 /// into the void (a cross-origin nav to an `application/gzip` URL lacking that header is
 /// silently discarded by some browsers). API (Bearer) callers still receive a presigned URL.
-async fn stream_download(state: &AppState, session_id: &str) -> Result<Response, AppError> {
-    let bytes = fetch_bundle(state, session_id).await?;
+async fn stream_download(
+    state: &AppState,
+    session_id: &str,
+    run: Option<&str>,
+) -> Result<Response, AppError> {
+    let bytes = fetch_bundle(state, session_id, run).await?;
     let disposition = format!("attachment; filename=\"fkst-logs-{session_id}.tar.gz\"");
     Ok((
         StatusCode::OK,
@@ -456,6 +497,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(download_session_logs))
         .routes(routes!(oauth_callback))
+        .routes(routes!(run_list::list_session_runs))
         .routes(routes!(viewer::log_manifest))
         .routes(routes!(viewer::log_file))
 }
@@ -471,3 +513,6 @@ mod tests;
 #[cfg(test)]
 #[path = "tests_browser.rs"]
 mod tests_browser;
+#[cfg(test)]
+#[path = "tests_runs.rs"]
+mod tests_runs;

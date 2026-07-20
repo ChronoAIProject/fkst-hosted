@@ -107,6 +107,8 @@ async fn paths_are_the_trimmed_v1_surface() {
         // The in-bundle log viewer (manifest + one decompressed file).
         "/api/v1/logs/{session_id}/manifest",
         "/api/v1/logs/{session_id}/file",
+        // Per-run (per-pod-incarnation) log separation: the run listing.
+        "/api/v1/logs/{session_id}/runs",
         "/health",
         "/metrics",
     ] {
@@ -174,6 +176,30 @@ async fn paths_are_the_trimmed_v1_surface() {
     }
 }
 
+/// Per-run log separation (issue #568): the optional `?run=<run_id>` selector must
+/// be documented as a query parameter on the three existing log operations (download,
+/// manifest, file), so a client can target a specific pod incarnation's bundle.
+#[tokio::test]
+async fn run_query_param_is_documented_on_the_log_operations() {
+    let spec = fetch_spec(app(false)).await;
+    let paths = &spec["paths"];
+    for path in [
+        "/api/v1/logs/{session_id}",
+        "/api/v1/logs/{session_id}/manifest",
+        "/api/v1/logs/{session_id}/file",
+    ] {
+        let params = paths[path]["get"]["parameters"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{path} get must document parameters"));
+        assert!(
+            params
+                .iter()
+                .any(|p| p["name"] == "run" && p["in"] == "query"),
+            "{path} must document the ?run query param; params = {params:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn components_include_the_named_environment_schemas_and_not_the_removed_ones() {
     let spec = fetch_spec(app(false)).await;
@@ -193,6 +219,8 @@ async fn components_include_the_named_environment_schemas_and_not_the_removed_on
         "LogManifest",
         "LogFileEntry",
         "LogFileContent",
+        // The per-run (per-pod-incarnation) log-separation DTO (issue #568).
+        "LogRun",
     ] {
         assert!(
             schemas.get(expected).is_some(),

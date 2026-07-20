@@ -80,6 +80,10 @@ pub struct LogFileQuery {
     pub path: String,
     /// When set, return only the last N bytes (snapped to a line boundary).
     pub tail_bytes: Option<u64>,
+    /// The run to read (from `GET /logs/{session_id}/runs`); absent → the latest
+    /// (whole-session) bundle.
+    #[serde(default)]
+    pub run: Option<String>,
 }
 
 /// `GET /api/v1/logs/{session_id}/manifest`.
@@ -88,7 +92,10 @@ pub struct LogFileQuery {
     path = "/logs/{session_id}/manifest",
     tag = "logs",
     operation_id = "session_log_manifest",
-    params(("session_id" = String, Path, description = "The deterministic session id")),
+    params(
+        ("session_id" = String, Path, description = "The deterministic session id"),
+        super::RunQuery,
+    ),
     responses(
         (status = 200, description = "The bundle's file manifest", body = LogManifest),
         (status = 401, description = "Missing/invalid GitHub token", body = ErrorEnvelope),
@@ -101,10 +108,11 @@ pub struct LogFileQuery {
 pub(super) async fn log_manifest(
     State(state): State<AppState>,
     Path(session_id): Path<String>,
+    Query(query): Query<super::RunQuery>,
     user: GithubUser,
 ) -> Result<Json<LogManifest>, AppError> {
     super::authorize(&state, &session_id, &user)?;
-    let bytes = super::fetch_bundle(&state, &session_id).await?;
+    let bytes = super::fetch_bundle(&state, &session_id, query.run.as_deref()).await?;
 
     let mut entries = manifest_entries(bytes.as_ref())?;
     entries.sort_by(|a, b| a.0.cmp(&b.0));
@@ -150,7 +158,7 @@ pub(super) async fn log_file(
     user: GithubUser,
 ) -> Result<Json<LogFileContent>, AppError> {
     super::authorize(&state, &session_id, &user)?;
-    let bytes = super::fetch_bundle(&state, &session_id).await?;
+    let bytes = super::fetch_bundle(&state, &session_id, query.run.as_deref()).await?;
 
     // An exact-match read is the traversal guard: a `../…` or unknown path
     // matches no archive entry and falls through to 404.
