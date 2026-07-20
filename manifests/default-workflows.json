@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "name": "default-workflows",
+  "description": "Default fkst session bundle: the development (workflow-dev), security-review (workflow-security), and workflow-authoring (workflow-writer) adapters plus their package dependencies, resolved so a trigger need only reference this manifest. Each adapter auto-declares its own work label via [github].work_labels (fkst-dev / fkst-security / fkst-workflow), so a session using this manifest can omit ### Work Label and be driven by all three.",
+  "packages": [
+    "ChronoAIProject/fkst-packages@fkst-hosted:packages/workflow-dev",
+    "ChronoAIProject/fkst-packages@fkst-hosted:packages/github-proxy",
+    "ChronoAIProject/fkst-packages@fkst-hosted:packages/consensus",
+    "ChronoAIProject/fkst-packages@fkst-hosted:packages/github-devloop-intake",
+    "ChronoAIProject/fkst-packages@fkst-hosted:packages/github-devloop-workflow",
+    "ChronoAIProject/fkst-packages@fkst-hosted:packages/github-devloop-decompose",
+    "ChronoAIProject/fkst-packages@fkst-hosted:packages/github-devloop",
+    "ChronoAIProject/fkst-packages@fkst-hosted:packages/github-devloop-pr",
+    "ChronoAIProject/fkst-packages@fkst-hosted:packages/github-devloop-ops",
+    "ChronoAIProject/fkst-packages@fkst-hosted:packages/github-devloop-integration",
+    "ChronoAIProject/fkst-packages@fkst-hosted:packages/workflow-security",
+    "ChronoAIProject/fkst-packages@fkst-hosted:packages/github-comment-effect",
+    "ChronoAIProject/fkst-packages@fkst-hosted:packages/github-issue-effect",
+    "ChronoAIProject/fkst-packages@fkst-hosted:packages/workflow-writer"
+  ]
+}
