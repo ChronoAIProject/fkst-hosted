@@ -123,10 +123,10 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
             session_id,
             session_name,
             work_label,
-            // Carried (I2, epic #594) but not yet rendered — the announce comment is
-            // built exactly as before, so the posted body is byte-identical. A later
-            // PR reads this to surface the auto-discovered labels in the announcement.
-            detected_work_labels: _,
+            // The session's FULL effective work-label set (explicit ∪ package-discovered,
+            // I2, epic #594) — rendered into the announcement (I5) so a label-less
+            // auto-detect session's discovered labels appear, not just the explicit one.
+            detected_work_labels,
             packages,
             environment,
             auto_merge,
@@ -142,6 +142,7 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
             let comment = announce_session_comment(
                 &session_name,
                 work_label.as_deref(),
+                &detected_work_labels,
                 &packages,
                 environment.as_deref(),
                 auto_merge,
