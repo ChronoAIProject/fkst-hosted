@@ -193,15 +193,30 @@ pub(super) async fn overview(
     // User-scoped enumeration (these failing fails the call — there is nothing
     // to render without them).
     let all_repos = gh.user_all_repos(&token).await?;
-    let mut orgs = gh.user_orgs(&token).await?;
-    orgs.sort();
-    let admin_orgs: HashSet<String> = gh
-        .user_org_memberships(&token)
-        .await?
-        .into_iter()
+    // Org account cards come from the caller's ACTIVE org MEMBERSHIPS.
+    // `GET /user/orgs` returns an EMPTY list for GitHub App user-to-server
+    // tokens (the fine-grained token this dashboard's login issues), so it can
+    // never enumerate the caller's orgs here; `/user/memberships/orgs` does
+    // return them. `/user/orgs` is still unioned in so any token type that
+    // populates it (e.g. a classic OAuth token) loses nothing.
+    let memberships = gh.user_org_memberships(&token).await?;
+    let admin_orgs: HashSet<String> = memberships
+        .iter()
         .filter(|m| m.role == "admin")
         .map(|m| m.org.to_ascii_lowercase())
         .collect();
+    let mut seen_orgs: HashSet<String> = HashSet::new();
+    let mut orgs: Vec<String> = Vec::new();
+    for org in memberships
+        .into_iter()
+        .map(|m| m.org)
+        .chain(gh.user_orgs(&token).await?)
+    {
+        if seen_orgs.insert(org.to_ascii_lowercase()) {
+            orgs.push(org);
+        }
+    }
+    orgs.sort();
     let installations = gh.user_installations(&token).await?;
     let mut installed_repos: HashSet<String> = HashSet::new();
     for inst in &installations {
