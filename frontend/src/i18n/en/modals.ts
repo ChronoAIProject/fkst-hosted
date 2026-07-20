@@ -39,6 +39,8 @@ export const canvasModals: CanvasModalsSlice = {
   createEnvironmentLoadFailed: 'Could not load your environments — enter a name manually.',
   createWorkLabelHint: 'One work label per trigger — the session claims every issue that carries it.',
   createWorkLabelHintLink: 'Learn more in Get started.',
+  createWorkLabelCollision:
+    'A session on this repo already uses this work label — it will be rejected. Choose a different label.',
   createdToast: 'Session created',
   workItemTitle: 'Queue work',
   workItemTitleLabel: 'Title',

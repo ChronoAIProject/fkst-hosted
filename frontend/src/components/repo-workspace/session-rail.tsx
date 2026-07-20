@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useContent, useLang } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
 import { stopTrigger } from '@/lib/api/canvas';
@@ -124,6 +124,18 @@ export function SessionRail({
     []
   );
 
+  // Work labels already claimed by an OPEN session on this repo. Handed to the
+  // create-trigger modal so a typed label that collides is flagged BEFORE submit
+  // — the backend create pre-flight (409) and the reconciler remain the
+  // authoritative gate; this is an early advisory only.
+  const inUseWorkLabels = useMemo(
+    () =>
+      (data?.sessions ?? [])
+        .filter((s) => s.trigger.state === 'open' && s.work_label != null)
+        .map((s) => s.work_label as string),
+    [data]
+  );
+
   const requestRefresh = useCallback(() => {
     setRefreshing(true);
     if (spinnerTimer.current != null) clearTimeout(spinnerTimer.current);
@@ -244,6 +256,7 @@ export function SessionRail({
         <CreateTriggerModal
           owner={owner}
           name={name}
+          inUseWorkLabels={inUseWorkLabels}
           onClose={() => setShowCreate(false)}
           onCreated={() => {
             setShowCreate(false);

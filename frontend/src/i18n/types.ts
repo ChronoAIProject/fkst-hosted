@@ -245,6 +245,9 @@ export interface SiteContent {
       createEnvironmentLoadFailed: string;
       createWorkLabelHint: string;
       createWorkLabelHintLink: string;
+      /** Inline collision warning: the typed work label is already claimed by an
+       *  open session on this repo, so the backend would reject it. */
+      createWorkLabelCollision: string;
       createdToast: string;
       /** Modals-cluster additions for the queue-work-item dialog (owned by the
        *  create-work-item modal item). */

@@ -134,11 +134,16 @@ export function CreateTriggerModal({
   name,
   onClose,
   onCreated,
+  inUseWorkLabels = [],
 }: {
   owner: string;
   name: string;
   onClose: () => void;
   onCreated: (created: CreateSessionResponse) => void;
+  /** Work labels already claimed by an OPEN session on this repo. A typed label
+   *  that exactly matches one of these is flagged early and blocks submit — an
+   *  advisory that mirrors, but does not replace, the backend pre-flight 409. */
+  inUseWorkLabels?: readonly string[];
 }) {
   const c = useContent().dashboard;
   const cc = c.canvas;
@@ -174,6 +179,15 @@ export function CreateTriggerModal({
 
   const valid = sessionName.trim() !== '' && packages.some((p) => p.trim() !== '');
 
+  // Early collision advisory: the trimmed work label exactly matches one an open
+  // session on this repo already claims. This blocks submit client-side, but the
+  // backend pre-flight (409) stays authoritative — a label freed between poll
+  // and submit is still caught server-side, and the server error is shown below.
+  const trimmedWorkLabel = workLabel.trim();
+  const workLabelCollision =
+    trimmedWorkLabel !== '' && inUseWorkLabels.includes(trimmedWorkLabel);
+  const submitBlocked = !valid || pending || workLabelCollision;
+
   const setPackageAt = (i: number, value: string) =>
     setPackages((rows) => rows.map((row, j) => (j === i ? value : row)));
   const removePackageAt = (i: number) =>
@@ -181,7 +195,7 @@ export function CreateTriggerModal({
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!valid || pending) return;
+    if (submitBlocked) return;
     setPending(true);
     setServerError(null);
     try {
@@ -227,10 +241,10 @@ export function CreateTriggerModal({
       <button
         type="submit"
         form={FORM_ID}
-        disabled={!valid || pending}
+        disabled={submitBlocked}
         className={cn(
           'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-[filter,box-shadow]',
-          !valid || pending
+          submitBlocked
             ? 'bg-amber/40 text-amber-ink/50 cursor-not-allowed'
             : 'bg-grad-accent text-amber-ink shadow-[var(--shadow-1),var(--glow-amber)] anim-sheen hover:brightness-110 cursor-pointer'
         )}
@@ -311,8 +325,25 @@ export function CreateTriggerModal({
             onChange={(e) => setWorkLabel(e.target.value)}
             spellCheck={false}
             autoComplete="off"
+            aria-invalid={workLabelCollision}
+            aria-describedby={workLabelCollision ? 'trigger-work-label-collision' : undefined}
             className={cn(FIELD_INPUT, 'font-mono')}
           />
+          {/* Advisory only: the backend pre-flight (409) is authoritative and its
+              message still renders in the server-error note below. Keyed on the
+              label so a fresh collision re-triggers the reduced-motion-safe
+              entrance rather than popping. */}
+          {workLabelCollision && (
+            <div key={trimmedWorkLabel} className="anim-notice-in">
+              <p
+                id="trigger-work-label-collision"
+                role="alert"
+                className="border border-line border-l-2 border-l-amber rounded-card bg-glass backdrop-blur-glass px-3 py-2 font-mono text-[11.5px] text-dim shadow-[var(--shadow-1),var(--glow-amber)]"
+              >
+                {cc.createWorkLabelCollision}
+              </p>
+            </div>
+          )}
           <p className="font-mono text-[11px] text-ghost">
             {cc.createWorkLabelHint}{' '}
             <Link
