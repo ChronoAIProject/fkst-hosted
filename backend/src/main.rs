@@ -11,6 +11,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
+use fkst_control_plane::access_policy::AuthModel;
 use fkst_control_plane::config::{Config, PodMode};
 use fkst_control_plane::error::AppError;
 use fkst_control_plane::github_app::HttpGithubListing;
@@ -81,13 +82,26 @@ async fn main() -> ExitCode {
         log_level = %config.log_level,
         "config loaded"
     );
-    if config.access.enforced() {
-        tracing::info!(
-            allowed_users = config.access.entry_count(),
-            "access policy ENFORCED (FKST_ACCESS_ALLOWED_USERS)"
-        );
-    } else {
-        tracing::info!("access policy open (FKST_ACCESS_ALLOWED_USERS not set)");
+    // Log the RESOLVED auth model (FKST_AUTH_MODEL + FKST_ACCESS_ALLOWED_USERS),
+    // never the entries themselves. An explicit `all` reads as open; an explicit
+    // `allowlist` and a legacy set list both read as an enforced allowlist.
+    match config.access.model() {
+        Some(AuthModel::All) => {
+            tracing::info!(
+                "auth model: all (FKST_AUTH_MODEL=all; every authenticated user allowed)"
+            );
+        }
+        _ if config.access.enforced() => {
+            tracing::info!(
+                allowed_users = config.access.entry_count(),
+                "auth model: allowlist (selected users only)"
+            );
+        }
+        _ => {
+            tracing::info!(
+                "auth model: open (unset; FKST_AUTH_MODEL / FKST_ACCESS_ALLOWED_USERS not set)"
+            );
+        }
     }
 
     // 2b. Pod-per-session dispatch (milestone #9): when enabled IN K8S MODE, prove
