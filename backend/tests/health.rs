@@ -101,6 +101,10 @@ async fn readiness_is_immediate_when_dispatch_is_disabled() {
             "status": "ready",
             "version": env!("CARGO_PKG_VERSION"),
             "startup_resync_complete": true,
+            "leader_election_enabled": false,
+            "leader": false,
+            "leader_ready": false,
+            "leader_routing_ready": false,
         })
     );
 }
@@ -133,6 +137,33 @@ async fn readiness_transitions_from_recovering_to_ready_and_back_to_degraded() {
     let failure_body = json_body(later_failure).await;
     assert_eq!(failure_body["status"], "degraded");
     assert_eq!(failure_body["startup_resync_complete"], true);
+}
+
+#[tokio::test]
+async fn elected_replica_is_ready_only_after_resync_and_service_publication() {
+    let recovery = RecoveryMonitor::new(true);
+    recovery.enable_leader_election("pod-a".to_string());
+
+    recovery.record_leader_acquired(1);
+    recovery.record_attempt(ResyncResult::Success, Duration::from_millis(25), 2);
+    let unpublished = get(recovery.clone(), "/ready").await;
+    assert_eq!(unpublished.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = json_body(unpublished).await;
+    assert_eq!(body["leader"], true);
+    assert_eq!(body["leader_ready"], true);
+    assert_eq!(body["leader_routing_ready"], false);
+
+    recovery.record_leader_routing(true);
+    let published = get(recovery.clone(), "/ready").await;
+    assert_eq!(published.status(), StatusCode::OK);
+    assert_eq!(json_body(published).await["leader_routing_ready"], true);
+
+    recovery.record_leader_lost(Some("pod-b".to_string()), 2);
+    let follower = get(recovery, "/ready").await;
+    assert_eq!(follower.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = json_body(follower).await;
+    assert_eq!(body["leader"], false);
+    assert_eq!(body["startup_resync_complete"], false);
 }
 
 #[tokio::test]

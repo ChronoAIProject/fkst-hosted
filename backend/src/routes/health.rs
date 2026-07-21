@@ -62,6 +62,10 @@ pub struct ReadinessResponse {
     pub status: ReadinessStatus,
     pub version: &'static str,
     pub startup_resync_complete: bool,
+    pub leader_election_enabled: bool,
+    pub leader: bool,
+    pub leader_ready: bool,
+    pub leader_routing_ready: bool,
 }
 
 /// `GET /ready`: report whether the latest serialized discovery pass is complete.
@@ -98,6 +102,10 @@ pub async fn readiness(State(state): State<AppState>) -> (StatusCode, Json<Readi
             status,
             version: env!("CARGO_PKG_VERSION"),
             startup_resync_complete: snapshot.startup_resync_complete,
+            leader_election_enabled: snapshot.leader_election_enabled,
+            leader: snapshot.leader,
+            leader_ready: snapshot.leader_ready,
+            leader_routing_ready: snapshot.leader_routing_ready,
         }),
     )
 }
