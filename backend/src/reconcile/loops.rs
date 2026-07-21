@@ -402,3 +402,11 @@ mod tests {
 #[cfg(test)]
 #[path = "loops_recovery_tests.rs"]
 mod recovery_tests;
+
+#[cfg(test)]
+#[path = "recovery_chaos_support.rs"]
+mod recovery_chaos_support;
+
+#[cfg(test)]
+#[path = "recovery_chaos_tests.rs"]
+mod recovery_chaos_tests;
