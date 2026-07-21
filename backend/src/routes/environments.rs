@@ -34,6 +34,7 @@ use crate::config::Config;
 use crate::environment_profile::{default_store, EnvironmentProfileStore};
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
+use crate::k8s::env_store::meta::private_content_hash;
 use crate::k8s::env_store::{content_hash, env_object_name, EnvRecord, EnvSummary};
 use crate::k8s::env_validator::validate_environment;
 use crate::reserved_env::{is_reserved_env_key, LLM_ENV_KEY};
@@ -247,12 +248,7 @@ fn summary_from_record(summary: EnvSummary) -> EnvironmentProfileSummary {
 /// environment objects live in. An unreachable cluster surfaces as `503`, never a
 /// leaked client detail.
 async fn env_store(state: &AppState) -> Result<Arc<dyn EnvironmentProfileStore>, AppError> {
-    default_store(&state.config.pod.namespace)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "env store: kubernetes client unavailable");
-            AppError::Unavailable("environment store backend unavailable".to_string())
-        })
+    default_store(&state.config.env, &state.config.pod.namespace).await
 }
 
 /// `PUT /api/v1/users/me/environment-profiles/{name}` — validate the install commands in
@@ -269,6 +265,7 @@ async fn env_store(state: &AppState) -> Result<Arc<dyn EnvironmentProfileStore>,
         (status = 201, description = "Environment created and validated", body = EnvironmentProfileView),
         (status = 401, description = "Missing/invalid GitHub token", body = ErrorEnvelope),
         (status = 403, description = "Verified GitHub identity not allowlisted (FKST_ACCESS_ALLOWED_USERS)", body = ErrorEnvelope),
+        (status = 409, description = "A concurrent environment update won; retry with fresh state", body = ErrorEnvelope),
         (status = 422, description = "Install validation failed (detailed report)", body = InstallValidationError),
         (status = 429, description = "Validation capacity busy, or the same env is already validating", body = ErrorEnvelope),
         (status = 503, description = "Environment store backend unavailable", body = ErrorEnvelope),
@@ -293,6 +290,7 @@ async fn put_user_environment(
     // The sorted secret key NAMES feed the content hash + the view (never values).
     let secret_key_names: Vec<String> = spec.secrets.keys().cloned().collect();
     let new_hash = content_hash(&spec.install, &spec.variables, &secret_key_names);
+    let new_private_hash = private_content_hash(&spec.install, &spec.variables, &spec.secrets);
 
     // Existing env drives replace-detection, the per-user cap, and idempotency.
     let existing = store.get_environment(user.id, &name).await?;
@@ -315,7 +313,7 @@ async fn put_user_environment(
     //    construction, so we compare without exposing the annotation.
     if let Some(record) = &existing {
         if record.status == STATUS_READY
-            && content_hash(&record.install, &record.variables, &record.secret_keys) == new_hash
+            && record.private_content_hash.as_deref() == Some(new_private_hash.as_str())
         {
             tracing::info!(github_user_id = user.id, env = %name, "env put: unchanged; skipping re-validation");
             return Ok((StatusCode::OK, Json(view_from_record(record.clone()))).into_response());
@@ -385,6 +383,9 @@ async fn put_user_environment(
             &validated_at,
             &new_hash,
             &image,
+            existing
+                .as_ref()
+                .and_then(|record| record.store_version.as_deref()),
         )
         .await?;
 

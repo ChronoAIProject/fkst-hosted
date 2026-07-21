@@ -2,13 +2,19 @@
 set -eu
 
 usage() {
-  echo "usage: $0 --context CONTEXT [--overlay PATH] [--timeout DURATION] [--preflight-only]" >&2
+  echo "usage: $0 --context CONTEXT [--overlay PATH] [--timeout DURATION] [--durable-namespace NAMESPACE] [--preflight-only] [--sentinel-user-id ID --sentinel-name NAME --sentinel-content-hash SHA256 --sentinel-secret-keys CSV]" >&2
   exit 2
 }
 
 context=""
 timeout="10m"
 preflight_only="false"
+durable_namespace="fkst-recovery-source"
+sentinel_user_id=""
+sentinel_name=""
+sentinel_content_hash=""
+sentinel_secret_keys=""
+sentinel_fields=0
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 overlay="$script_dir/overlays/local"
 
@@ -29,6 +35,35 @@ while [ "$#" -gt 0 ]; do
       timeout=$2
       shift 2
       ;;
+    --durable-namespace)
+      [ "$#" -ge 2 ] || usage
+      durable_namespace=$2
+      shift 2
+      ;;
+    --sentinel-user-id)
+      [ "$#" -ge 2 ] || usage
+      sentinel_user_id=$2
+      sentinel_fields=$((sentinel_fields + 1))
+      shift 2
+      ;;
+    --sentinel-name)
+      [ "$#" -ge 2 ] || usage
+      sentinel_name=$2
+      sentinel_fields=$((sentinel_fields + 1))
+      shift 2
+      ;;
+    --sentinel-content-hash)
+      [ "$#" -ge 2 ] || usage
+      sentinel_content_hash=$2
+      sentinel_fields=$((sentinel_fields + 1))
+      shift 2
+      ;;
+    --sentinel-secret-keys)
+      [ "$#" -ge 2 ] || usage
+      sentinel_secret_keys=$2
+      sentinel_fields=$((sentinel_fields + 1))
+      shift 2
+      ;;
     --preflight-only)
       preflight_only="true"
       shift
@@ -46,6 +81,11 @@ done
   echo "overlay must provide an independently renderable secrets/ kustomization" >&2
   exit 1
 }
+[ -f "$overlay/durable-store/kustomization.yaml" ] || {
+  echo "overlay must provide an independently renderable durable-store/ kustomization" >&2
+  exit 1
+}
+[ "$sentinel_fields" -eq 0 ] || [ "$sentinel_fields" -eq 4 ] || usage
 
 kubectl --context "$context" config view --minify --output name >/dev/null
 kubectl --context "$context" get namespace opensandbox-system >/dev/null
@@ -91,7 +131,9 @@ kubectl --context "$context" --namespace opensandbox-system wait \
   --for=condition=Ready externalsecret/opensandbox-api-key --timeout="$timeout"
 
 echo "phase 3/5: durable environment-profile backend dependency"
-echo "external credential records are ready; the selected overlay must provide the I7 durable environment store"
+kubectl --context "$context" apply -k "$overlay/durable-store"
+"$script_dir/verify-envstore-rbac.sh" --context "$context" \
+  --durable-namespace "$durable_namespace"
 
 echo "phase 4/5: control plane, frontend, services, and route"
 kubectl --context "$context" apply -k "$overlay"
@@ -101,5 +143,15 @@ kubectl --context "$context" --namespace chronoai-fkst rollout status \
   deployment/fkst-frontend --timeout="$timeout"
 
 echo "phase 5/5: startup recovery and post-restore verification"
-"$script_dir/verify-namespace.sh" --context "$context" --timeout "$timeout"
+if [ "$sentinel_fields" -eq 4 ]; then
+  "$script_dir/verify-namespace.sh" --context "$context" --timeout "$timeout" \
+    --durable-namespace "$durable_namespace" \
+    --sentinel-user-id "$sentinel_user_id" \
+    --sentinel-name "$sentinel_name" \
+    --sentinel-content-hash "$sentinel_content_hash" \
+    --sentinel-secret-keys "$sentinel_secret_keys"
+else
+  "$script_dir/verify-namespace.sh" --context "$context" --timeout "$timeout" \
+    --durable-namespace "$durable_namespace"
+fi
 echo "fkst namespace restore converged on context $context"

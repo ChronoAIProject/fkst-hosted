@@ -15,7 +15,11 @@ context, deletes a resource, or contacts a production cluster implicitly.
 | `base/` | Namespace, Pod Security labels, service accounts, quota/limits, sandbox NetworkPolicy, env-store and Lease RBAC, configuration, workloads, Services, PDBs, Ingress, and the OpenSandbox base template. |
 | `external-secrets/` | Provider-neutral External Secrets Operator bindings. It contains remote record names and target key names, never credential values. |
 | `overlays/local/` | Disposable local-cluster overlay. Its Kubernetes provider reads source Secrets from `fkst-recovery-source`, outside the namespace being reconstructed. |
+| `overlays/local/durable-store/` | Cross-namespace, Secret-only Role and RoleBinding for the encrypted environment store. |
+| `overlays/local-migration/` | Temporary local overlay that enables one-time migration from legacy namespace-local profile pairs. |
+| `migrations/` | Temporary legacy ConfigMap/Secret read/delete RBAC; never part of the steady overlay. |
 | `opensandbox/server-values.yaml` | Canonical FKST tenant, API-key file, and BatchSandbox-template integration for the lifecycle-server chart. |
+| `migrate-environment-store.sh` | Convergent legacy migration followed by removal and denial verification of temporary permissions. |
 | `restore-namespace.sh` | Ordered, non-destructive namespace convergence. It requires an explicit context and waits for secret materialization before workloads. |
 | `verify-namespace.sh` | Redacted live verification of security, RBAC, ExternalSecret, rollout, route, and recovery-readiness contracts. |
 | `validate-manifests.sh` | Deterministic render and structural/security policy checks; also runs shellcheck and kubeconform when installed. |
@@ -37,7 +41,7 @@ The provider exposes three logical records:
 
 | Remote record | Materialized Secret | Required key names |
 |---|---|---|
-| `fkst-control-plane` | `chronoai-fkst/fkst-control-plane-secret` | `FKST_LLM_API_KEY`, `FKST_OSB_EXECD_TOKEN_SEED`, `FKST_GITHUB_APP_ID`, `FKST_GITHUB_APP_PRIVATE_KEY_PEM`, `FKST_GITHUB_APP_SLUG`, `FKST_GITHUB_APP_WEBHOOK_SECRET`, `FKST_GITHUB_OAUTH_CLIENT_SECRET` |
+| `fkst-control-plane` | `chronoai-fkst/fkst-control-plane-secret` | `FKST_LLM_API_KEY`, `FKST_OSB_EXECD_TOKEN_SEED`, `FKST_GITHUB_APP_ID`, `FKST_GITHUB_APP_PRIVATE_KEY_PEM`, `FKST_GITHUB_APP_SLUG`, `FKST_GITHUB_APP_WEBHOOK_SECRET`, `FKST_GITHUB_OAUTH_CLIENT_SECRET`, `FKST_ENV_STORE_ENCRYPTION_KEY` |
 | `fkst-opensandbox-tenant` | `chronoai-fkst/opensandbox-fkst-api-key` and `opensandbox-system/opensandbox-api-key` | `opensandbox-fkst-api-key` |
 | `fkst-ingress-tls` | `chronoai-fkst/fkst-ingress-tls` | `tls.crt`, `tls.key` |
 
@@ -47,10 +51,15 @@ control-plane record. Their non-secret client IDs, endpoints, and bucket names
 belong in the environment ConfigMap patch. ExternalSecret status and Secret key
 names are safe to inspect; Secret values are not.
 
-The backend currently stores named environment profiles as ConfigMap/Secret
-pairs in `chronoai-fkst`. These manifests do not claim that data is durable.
-I7 must supply the namespace-independent `EnvironmentProfileStore` and its
-connectivity before the full namespace-loss acceptance criterion can pass.
+`FKST_ENV_STORE_NAMESPACE` selects the namespace-independent profile store. It
+persists each profile as one AES-256-GCM encrypted Secret whose data keys are
+only `nonce` and `ciphertext`; public metadata includes the content hash and
+secret-key inventory needed for redacted recovery verification. The namespace
+must remain outside `chronoai-fkst`. The 32-byte standard-base64 encryption key
+must remain stable, backed up, and delivered through exactly one of
+`FKST_ENV_STORE_ENCRYPTION_KEY` or `FKST_ENV_STORE_ENCRYPTION_KEY_FILE`. Losing
+or rotating that key without an explicit re-encryption procedure makes every
+existing profile unreadable and fails startup closed.
 
 ## Local durable source
 
@@ -81,7 +90,8 @@ kubectl --context kind-opensandbox-local --namespace fkst-recovery-source \
   --from-file=FKST_GITHUB_APP_PRIVATE_KEY_PEM='<local private-key file>' \
   --from-literal=FKST_GITHUB_APP_SLUG='<local App slug>' \
   --from-literal=FKST_GITHUB_APP_WEBHOOK_SECRET='<local value>' \
-  --from-literal=FKST_GITHUB_OAUTH_CLIENT_SECRET='<local value>'
+  --from-literal=FKST_GITHUB_OAUTH_CLIENT_SECRET='<local value>' \
+  --from-literal=FKST_ENV_STORE_ENCRYPTION_KEY='<standard-base64 32-byte key>'
 
 kubectl --context kind-opensandbox-local --namespace fkst-recovery-source \
   create secret generic fkst-opensandbox-tenant \
@@ -117,15 +127,43 @@ deploy/kubernetes/restore-namespace.sh \
 Use `--preflight-only` to ask the target API server to validate the complete
 render without changing live resources.
 
-The script applies namespace/security policy, identity/RBAC/ExternalSecrets,
-waits for materialized credentials, applies services and routes, waits for both
-rollouts, and finally requires `/ready` to report a completed startup resync.
-It never creates plaintext Secrets, changes kube context, or performs deletion.
+The script applies namespace/security policy, the external durable namespace
+and RBAC, identity/RBAC/ExternalSecrets, waits for materialized credentials,
+applies services and routes, waits for both rollouts, and finally requires
+`/ready` to report a completed startup resync. It never creates plaintext
+Secrets, changes kube context, or performs deletion.
+
+For a pre-I7 installation, run the temporary migration exactly once after the
+external encryption key and durable namespace exist:
+
+```bash
+deploy/kubernetes/migrate-environment-store.sh \
+  --context kind-opensandbox-local
+```
+
+The migration overlay grants `fkst-ksa` only `get`, `list`, and `delete` on
+legacy ConfigMaps and Secrets. Startup copies and decrypt-verifies each complete
+pair before deleting it. A durable record always wins, so retrying after an
+interruption is safe. The script then reapplies the steady overlay, removes the
+temporary Role and RoleBinding, and proves the old access is denied.
 
 Run live verification independently at any time:
 
 ```bash
 deploy/kubernetes/verify-namespace.sh --context kind-opensandbox-local
+```
+
+After recording only a sentinel's public content-hash annotation and sorted
+secret-key annotation, a namespace-loss drill can verify them without reading
+values:
+
+```bash
+deploy/kubernetes/restore-namespace.sh \
+  --context kind-opensandbox-local \
+  --sentinel-user-id '<numeric GitHub ID>' \
+  --sentinel-name '<normalized profile name>' \
+  --sentinel-content-hash '<sha256>' \
+  --sentinel-secret-keys 'KEY_ONE,KEY_TWO'
 ```
 
 `verify-envstore-rbac.sh` remains the focused least-privilege check. It proves
@@ -145,13 +183,17 @@ than copy their objects. It must patch, at minimum:
 - public API/frontend hosts and TLS record;
 - LLM endpoint/model and GitHub App bot login/client ID;
 - access model, allowed GitHub logins, and global-admin logins;
+- a durable namespace outside `chronoai-fkst`, its Secret-only Role/RoleBinding,
+  and `FKST_ENV_STORE_NAMESPACE`;
 - optional storage/NyxID endpoints and identities;
 - the External Secret provider/store references and remote record identifiers;
 - provider-specific Workload Identity annotations;
 - runtime class, placement, resources, and replica policy appropriate to the
   environment.
 
-Keep provider credentials, Secret resources, private keys, bearer tokens, and
-encoded secret values outside Git. A production overlay belongs in the reviewed
-infrastructure repository when that environment's ownership boundary is
-separate from this application repository.
+Keep provider credentials, Secret resources, encryption keys, private keys,
+bearer tokens, and encoded secret values outside Git. A production overlay must
+bind its durable store to a separately backed-up provider/namespace and define
+key custody and recovery. It belongs in the reviewed infrastructure repository
+when that environment's ownership boundary is separate from this application
+repository.

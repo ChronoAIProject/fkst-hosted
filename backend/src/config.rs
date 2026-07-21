@@ -394,8 +394,7 @@ pub struct Config {
     /// default k8s-customized backend (or dispatch off). A required var missing
     /// under opensandbox fails closed at startup (see [`crate::osb_config::from_vars`]).
     pub opensandbox: Option<OpensandboxConfig>,
-    /// Named-environment / install-validation knobs (`FKST_ENV_*`, issue #338
-    /// §6.1). Config surface only — no behaviour reads these yet.
+    /// Named-environment storage and install-validation knobs (`FKST_ENV_*`).
     pub env: EnvConfig,
     /// Model B reconciler knobs (`FKST_*`, issue #359 §4). Config surface only —
     /// no behaviour reads these yet (PR5b wires the loop; PR6 flips Model B on).
@@ -615,6 +614,17 @@ impl Config {
         // Named-environment / install-validation knobs (FKST_ENV_*). Shares the
         // same `vars` snapshot; fails closed on its own zero bounds internally.
         let env = EnvConfig::from_vars(&vars)?;
+        if env
+            .store_namespace
+            .as_deref()
+            .is_some_and(|namespace| namespace == pod.namespace.trim())
+        {
+            return Err(AppError::Config(
+                "FKST_ENV_STORE_NAMESPACE must differ from FKST_POD_NAMESPACE so \
+                 environment profiles survive application-namespace loss"
+                    .to_string(),
+            ));
+        }
 
         // Optional chrono-storage log-streaming config (FKST_STORAGE_* /
         // FKST_NYXID_*). Shares the same `vars` snapshot; `None` when unset,
@@ -1198,6 +1208,20 @@ mod tests {
             .expect_err("zero env bound must fail closed through Config");
         assert!(matches!(err, AppError::Config(_)));
         assert!(err.to_string().contains("FKST_ENV_MAX_PER_USER"));
+    }
+
+    #[test]
+    fn durable_environment_store_must_be_outside_the_application_namespace() {
+        let key = "ERERERERERERERERERERERERERERERERERERERERERE=";
+        let err = Config::from_vars(vars(&[
+            ("FKST_POD_NAMESPACE", "chronoai-fkst"),
+            ("FKST_ENV_STORE_NAMESPACE", "chronoai-fkst"),
+            ("FKST_ENV_STORE_ENCRYPTION_KEY", key),
+        ]))
+        .expect_err("namespace-local durable store defeats namespace recovery");
+        assert!(err.to_string().contains("must differ"));
+        assert!(err.to_string().contains("FKST_POD_NAMESPACE"));
+        assert!(!err.to_string().contains(key));
     }
 
     // ---- Model B reconciler (FKST_*) wiring tests ------------------------------

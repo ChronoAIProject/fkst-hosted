@@ -1,9 +1,8 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - ../../base
-  - secrets
-  - durable-store
+  - ../local
+  - ../../migrations
 patches:
   - target:
       version: v1
@@ -12,5 +11,5 @@ patches:
       namespace: chronoai-fkst
     patch: |-
       - op: add
-        path: /data/FKST_ENV_STORE_NAMESPACE
-        value: fkst-recovery-source
+        path: /data/FKST_ENV_STORE_LEGACY_NAMESPACE
+        value: chronoai-fkst

@@ -109,6 +109,21 @@ async fn main() -> ExitCode {
         "global admin policy loaded"
     );
 
+    // The namespace-independent environment store is a startup dependency: prove
+    // connectivity and key integrity, then finish any configured legacy migration
+    // before either REST calls or reconciliation can observe profiles. The legacy
+    // namespace-local store remains lazy when durable storage is unconfigured.
+    let initialized_env_store =
+        match fkst_control_plane::environment_profile::initialize_configured_store(&config.env)
+            .await
+        {
+            Ok(store) => store,
+            Err(error) => {
+                tracing::error!(error = %error, "failed to initialize durable environment store");
+                return ExitCode::FAILURE;
+            }
+        };
+
     // 2b. Pod-per-session dispatch (milestone #9): when enabled IN K8S MODE, prove
     //     the Kubernetes API is reachable at startup so a misconfigured cluster
     //     surfaces in the logs immediately. Non-fatal — a transient API blip
@@ -240,6 +255,7 @@ async fn main() -> ExitCode {
                     log_registry.clone(),
                     backend,
                     recovery.clone(),
+                    initialized_env_store.clone(),
                 )
                 .await
             }
@@ -474,17 +490,31 @@ async fn spawn_reconciler(
     log_registry: fkst_control_plane::log_access::LogAccessRegistry,
     backend: Arc<dyn fkst_control_plane::session_backend::SessionBackend>,
     recovery: RecoveryMonitor,
+    initialized_env_store: Option<
+        Arc<dyn fkst_control_plane::environment_profile::EnvironmentProfileStore>,
+    >,
 ) -> Option<ReconcileHandle> {
     let Some(github) = github_app else {
         tracing::warn!("pod dispatch on but github app not configured; reconciler not started");
         return None;
     };
-    let kube = match fkst_control_plane::k8s::KubeClient::from_inferred(&config.pod.namespace).await
-    {
-        Ok(kube) => kube,
-        Err(error) => {
-            tracing::warn!(error = %error, "pod dispatch on but kubernetes client unavailable; reconciler not started");
-            return None;
+    let env_store = match initialized_env_store {
+        Some(store) => store,
+        None => {
+            let kube = match fkst_control_plane::k8s::KubeClient::from_inferred(
+                &config.pod.namespace,
+            )
+            .await
+            {
+                Ok(kube) => kube,
+                Err(error) => {
+                    tracing::warn!(error = %error, "pod dispatch on but kubernetes client unavailable; reconciler not started");
+                    return None;
+                }
+            };
+            Arc::new(fkst_control_plane::k8s::env_store::EnvStore::from_kube(
+                kube,
+            ))
         }
     };
     // The read-side listing transport + the unauthenticated reachability probe
@@ -509,11 +539,9 @@ async fn spawn_reconciler(
 
     let ctx = ReconcileCtx {
         backend,
-        // The env-store seam the spawn pre-flight reads; the reconciler shares one
-        // namespace-bound client with it (the backend owns its own).
-        env_store: std::sync::Arc::new(fkst_control_plane::k8s::env_store::EnvStore::from_kube(
-            kube,
-        )),
+        // The initialized durable store (or the legacy namespace-local fallback)
+        // the spawn pre-flight reads.
+        env_store,
         github,
         listing,
         http,

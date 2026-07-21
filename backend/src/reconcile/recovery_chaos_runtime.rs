@@ -36,6 +36,7 @@ impl EnvironmentProfileStore for FixtureEnvironmentStore {
         _validated_at: &str,
         _content_hash: &str,
         _validation_image: &str,
+        _expected_version: Option<&str>,
     ) -> Result<(), AppError> {
         Ok(())
     }
@@ -51,6 +52,8 @@ impl EnvironmentProfileStore for FixtureEnvironmentStore {
             install: vec!["tool install fixture".to_string()],
             variables: BTreeMap::from([("PUBLIC_VALUE".to_string(), "fixture".to_string())]),
             secret_keys: vec!["DEPLOY_KEY".to_string()],
+            store_version: None,
+            private_content_hash: None,
         }))
     }
 

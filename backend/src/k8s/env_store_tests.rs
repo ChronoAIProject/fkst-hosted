@@ -149,6 +149,16 @@ fn content_hash_is_independent_of_variable_insertion_order() {
     );
 }
 
+#[test]
+fn private_content_hash_detects_secret_value_changes() {
+    let install = vec!["a".to_string()];
+    let variables = vars(&[("FOO", "bar")]);
+    let first = private_content_hash(&install, &variables, &vars(&[("TOKEN", "first")]));
+    let second = private_content_hash(&install, &variables, &vars(&[("TOKEN", "second")]));
+    assert_ne!(first, second);
+    assert_eq!(first.len(), 64);
+}
+
 // ---- projection helpers ---------------------------------------------------
 
 #[test]
@@ -239,6 +249,8 @@ fn env_record_serializes_key_names_never_values() {
         install: vec!["apt-get install jq".to_string()],
         variables: vars(&[("FOO", "bar")]),
         secret_keys: vec!["TOKEN".to_string()],
+        store_version: Some("17".to_string()),
+        private_content_hash: None,
     };
     let json = serde_json::to_value(&record).expect("serializes");
     let obj = json.as_object().expect("object");

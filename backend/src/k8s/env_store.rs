@@ -34,7 +34,7 @@ use crate::error::AppError;
 use crate::k8s::{KubeClient, KubeError};
 
 #[path = "env_store_meta.rs"]
-mod meta;
+pub(crate) mod meta;
 
 // The data-layer vocabulary later PRs (route + launcher) consume through the
 // stable `crate::k8s::env_store::*` path.
@@ -171,6 +171,7 @@ impl EnvironmentProfileStore for EnvStore {
         validated_at: &str,
         content_hash: &str,
         validation_image: &str,
+        _expected_version: Option<&str>,
     ) -> Result<(), AppError> {
         let kube = &self.0;
         let object = env_object_name(id, name);
@@ -234,21 +235,25 @@ impl EnvironmentProfileStore for EnvStore {
             None => return Ok(None),
         };
         let data = cm.data.unwrap_or_default();
-        let secret_keys = match secret_api(kube)
+        let (secret_keys, secret_values) = match secret_api(kube)
             .get_opt(&object)
             .await
             .map_err(map_kube_err)?
         {
-            Some(secret) => secret_key_names(&secret),
-            None => Vec::new(),
+            Some(secret) => (secret_key_names(&secret), decode_secret_values(&secret)),
+            None => (Vec::new(), BTreeMap::new()),
         };
+        let install = parse_install(&data);
+        let variables = parse_variables(&data);
         Ok(Some(EnvRecord {
             name: annotation(&cm.metadata, ENV_NAME_ANNOTATION),
             status: annotation(&cm.metadata, STATUS_ANNOTATION),
             validated_at: annotation(&cm.metadata, VALIDATED_AT_ANNOTATION),
-            install: parse_install(&data),
-            variables: parse_variables(&data),
+            private_content_hash: Some(private_content_hash(&install, &variables, &secret_values)),
+            install,
+            variables,
             secret_keys,
+            store_version: cm.metadata.resource_version,
         }))
     }
 

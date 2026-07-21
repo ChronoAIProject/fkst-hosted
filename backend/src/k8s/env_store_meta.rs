@@ -45,7 +45,7 @@ pub(crate) const VARIABLES_KEY: &str = ".variables";
 /// The value written to [`STATUS_ANNOTATION`] once a full write completes. Stamped
 /// on the ConfigMap, which the validate-then-swap order persists LAST, so a
 /// half-write (Secret written, ConfigMap not) is never observed as ready.
-const STATUS_READY: &str = "ready";
+pub(crate) const STATUS_READY: &str = "ready";
 
 /// The deterministic object name for one named environment. Keyed by the
 /// immutable numeric GitHub id (logins are renamable) plus the env name.
@@ -226,6 +226,30 @@ pub fn content_hash(
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Internal idempotency fingerprint over the complete desired profile,
+/// including secret VALUES. It is computed in memory, never persisted as
+/// plaintext, serialized, logged, or returned through a public projection.
+pub(crate) fn private_content_hash(
+    install: &[String],
+    variables: &BTreeMap<String, String>,
+    secrets: &BTreeMap<String, String>,
+) -> String {
+    #[derive(Serialize)]
+    struct Canonical<'a> {
+        install: &'a [String],
+        variables: &'a BTreeMap<String, String>,
+        secrets: &'a BTreeMap<String, String>,
+    }
+    let json = serde_json::to_vec(&Canonical {
+        install,
+        variables,
+        secrets,
+    })
+    .expect("canonical private env hash json is infallible");
+    let digest = Sha256::digest(&json);
+    digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 // ---- record types (no secret values, ever) --------------------------------
 
 /// The full view of one named environment: its status, install commands,
@@ -238,6 +262,13 @@ pub struct EnvRecord {
     pub install: Vec<String>,
     pub variables: BTreeMap<String, String>,
     pub secret_keys: Vec<String>,
+    /// Backend concurrency token observed with this projection. It is passed
+    /// back only on replace and is never part of the public API response.
+    #[serde(skip)]
+    pub(crate) store_version: Option<String>,
+    /// Complete-content idempotency fingerprint. Never serialized publicly.
+    #[serde(skip)]
+    pub(crate) private_content_hash: Option<String>,
 }
 
 /// A compact list-view of one named environment: counts only, no contents.
