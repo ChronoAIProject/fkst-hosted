@@ -61,6 +61,29 @@ local function run_result(fn, timeout, error_class)
   return result, nil
 end
 
+local function is_label_already_exists(result)
+  local stderr = tostring(result and result.stderr or ""):lower()
+  local conflict = stderr:find("already_exists", 1, true) ~= nil
+    or stderr:find("already exists", 1, true) ~= nil
+    or stderr:find("name already exists", 1, true) ~= nil
+  return stderr:find("422", 1, true) ~= nil and conflict
+end
+
+local function create_or_converge_label(repo, desired)
+  local created = labels.gh_repo_label_create(repo, desired.name, desired.color, desired.description, 30)
+  if created.exit_code == 0 then
+    return "created"
+  end
+  if not is_label_already_exists(created) then
+    error("github-devloop: gh-command-failed: gh label create failed: " .. tostring(created.stderr))
+  end
+
+  run_gh(function(timeout)
+    return labels.gh_repo_label_update(repo, desired.name, desired.color, desired.description, timeout)
+  end, 30, "gh label converge after already_exists")
+  return "converged"
+end
+
 local function label_index(labels)
   local index = {}
   for _, label in ipairs(labels or {}) do
@@ -152,18 +175,26 @@ local function ensure_labels(repo, mode, existing_labels)
   end
 
   local created = 0
-  for _, desired in ipairs(missing) do
-    run_gh(function(timeout)
-      return labels.gh_repo_label_create(repo, desired.name, desired.color, desired.description, timeout)
-    end, 30, "gh label create")
-    created = created + 1
-    log_ensure("label", "created", {
-      "mode=real",
-      "repo=" .. repo,
-      "name=" .. desired.name,
-    })
-  end
   local updated = 0
+  for _, desired in ipairs(missing) do
+    local action = create_or_converge_label(repo, desired)
+    if action == "created" then
+      created = created + 1
+      log_ensure("label", "created", {
+        "mode=real",
+        "repo=" .. repo,
+        "name=" .. desired.name,
+      })
+    else
+      updated = updated + 1
+      log_ensure("label", "converged", {
+        "mode=real",
+        "repo=" .. repo,
+        "name=" .. desired.name,
+        "reason=create-race-already-exists",
+      })
+    end
+  end
   for _, desired in ipairs(drifted) do
     run_gh(function(timeout)
       return labels.gh_repo_label_update(repo, desired.name, desired.color, desired.description, timeout)
@@ -211,15 +242,19 @@ local function ensure_label(repo, mode, existing_labels, desired)
     })
     return { missing = 0, drifted = 1, created = 0, updated = 1 }
   end
-  run_gh(function(timeout)
-    return labels.gh_repo_label_create(repo, desired.name, desired.color, desired.description, timeout)
-  end, 30, "gh label create")
-  log_ensure("label", "created", {
+  local action = create_or_converge_label(repo, desired)
+  log_ensure("label", action, {
     "mode=real",
     "repo=" .. repo,
     "name=" .. desired.name,
+    action == "converged" and "reason=create-race-already-exists" or nil,
   })
-  return { missing = 1, drifted = 0, created = 1, updated = 0 }
+  return {
+    missing = 1,
+    drifted = 0,
+    created = action == "created" and 1 or 0,
+    updated = action == "converged" and 1 or 0,
+  }
 end
 
 local function issue_has_label(issue, name)

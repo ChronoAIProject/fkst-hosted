@@ -296,6 +296,86 @@ return {
     t.is_nil(first_call("operator-owned"))
   end,
 
+  test_real_mode_converges_stale_dashboard_label_snapshot_and_continues_claim_bootstrap = function()
+    local dashboard_create = core.gh_repo_label_create_cmd(
+      "owner/repo",
+      core.dashboard_label(),
+      "ededed",
+      "fkst observability dashboard singleton"
+    )
+    local dashboard_update = core.gh_repo_label_update_cmd(
+      "owner/repo",
+      core.dashboard_label(),
+      "ededed",
+      "fkst observability dashboard singleton"
+    )
+    local claim_create = core.gh_repo_label_create_cmd(
+      "owner/repo",
+      "fkst-dev:claimed",
+      "0E8A16",
+      "fkst-dev-label-mode-ownership-claim"
+    )
+    mock_env("1")
+    mock_labels(canonical_labels())
+    mock_dashboard_anchor(true)
+    mock_topology(0)
+    for _ = 1, 2 do
+      t.mock_command('printf %s "$FKST_GITHUB_CLAIM_MODE"', {
+        stdout = "label",
+        stderr = "",
+        exit_code = 0,
+      })
+    end
+    t.mock_command(dashboard_create, {
+      stdout = "",
+      stderr = "HTTP 422: Validation Failed (already_exists)\n",
+      exit_code = 1,
+    })
+    t.mock_command(dashboard_update, {
+      stdout = '{"name":"fkst-dashboard"}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(claim_create, {
+      stdout = '{"name":"fkst-dev:claimed"}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_ensure(opts("ensure-dashboard-create-race", {
+      FKST_GITHUB_CLAIM_MODE = "label",
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls(dashboard_create), 1)
+    t.eq(count_calls(dashboard_update), 1)
+    t.eq(count_calls(claim_create), 1)
+  end,
+
+  test_real_mode_keeps_unrelated_422_label_create_failure_fatal = function()
+    local dashboard_create = core.gh_repo_label_create_cmd(
+      "owner/repo",
+      core.dashboard_label(),
+      "ededed",
+      "fkst observability dashboard singleton"
+    )
+    mock_env("1")
+    mock_labels(canonical_labels())
+    mock_dashboard_anchor(true)
+    mock_topology(0)
+    t.mock_command(dashboard_create, {
+      stdout = "",
+      stderr = "HTTP 422: Validation Failed (invalid color)\n",
+      exit_code = 1,
+    })
+
+    local result = run_ensure(opts("ensure-dashboard-other-422", { FKST_GITHUB_WRITE = "1" }))
+
+    t.is_true(result.exit_code ~= 0)
+    t.eq(count_calls("gh api --method PATCH"), 0)
+  end,
+
   test_fully_converged_repo_performs_zero_writes = function()
     local labels = canonical_labels()
     table.insert(labels, {
