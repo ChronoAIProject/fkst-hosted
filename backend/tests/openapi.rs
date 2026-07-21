@@ -288,6 +288,51 @@ async fn overview_schema_exposes_the_required_global_admin_mode() {
 }
 
 #[tokio::test]
+async fn session_schema_exposes_typed_recovery_diagnostics() {
+    let spec = fetch_spec(app(false)).await;
+    let schemas = &spec["components"]["schemas"];
+    assert_eq!(
+        schemas["SessionDetail"]["properties"]["recovery"]["$ref"],
+        "#/components/schemas/SessionRecoveryProjection"
+    );
+    assert_eq!(
+        schemas["SessionRecoveryProjection"]["properties"]["state"]["$ref"],
+        "#/components/schemas/SessionRecoveryState"
+    );
+    assert_eq!(
+        schemas["SessionRecoveryProjection"]["properties"]["reason"]["$ref"],
+        "#/components/schemas/SessionRecoveryReason"
+    );
+    assert_eq!(
+        schemas["SessionRecoveryProjection"]["properties"]["runtime"]["$ref"],
+        "#/components/schemas/SessionRuntimeState"
+    );
+    assert_eq!(
+        schemas["SessionRecoveryState"]["enum"],
+        serde_json::json!([
+            "normal",
+            "idle",
+            "recovering",
+            "degraded",
+            "unknown",
+            "retired",
+            "invalid"
+        ])
+    );
+    assert_eq!(
+        schemas["SessionRuntimeState"]["enum"],
+        serde_json::json!([
+            "absent",
+            "starting",
+            "live",
+            "terminating",
+            "terminal",
+            "unknown"
+        ])
+    );
+}
+
+#[tokio::test]
 async fn no_operation_requires_security_the_whole_surface_is_open() {
     let spec = fetch_spec(app(true)).await;
     let paths = &spec["paths"];
