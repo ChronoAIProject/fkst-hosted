@@ -23,7 +23,7 @@ import {
 const DOT_TONE: Record<SignalTone, string> = {
   green: 'bg-green',
   neutral: 'bg-ghost',
-  amber: 'bg-amber',
+  amber: 'bg-warn',
   red: 'bg-red',
 };
 

@@ -111,6 +111,10 @@ test.describe('the intended inner container scrolls', () => {
     expect(res.found, '<main> has no overflow on the landing').toBe(false);
     // …and the body did not move either.
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    // "fits" must mean REACHABLE, not merely unscrollable: the hero clips its
+    // overflow, so assert the interactive content actually sits in view.
+    await expect(page.getByRole('link', { name: 'Get started' })).toBeInViewport();
+    await expect(page.getByText('a PR per task')).toBeInViewport(); // 844px ≥ the 560px pipe tier
     await shot(page, 'ls-01-intro-single-viewport');
   });
 

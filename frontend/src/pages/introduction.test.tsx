@@ -39,11 +39,14 @@ describe('Introduction', () => {
     );
   });
 
-  it('keeps the flow-line decorative (hidden from the accessibility tree)', () => {
-    renderIntro();
-    // The pipe repeats the lede's story visually; it must not add noise for
-    // screen readers.
-    expect(screen.queryByText('trigger issue')).not.toBeNull();
-    expect(screen.getByText('trigger issue').closest('[aria-hidden="true"]')).not.toBeNull();
+  it('exposes the flow-line labels to assistive tech, hiding only the ornaments', () => {
+    const { container } = renderIntro();
+    // The labels carry real information ("trigger issue → live session → a PR
+    // per task") and must stay in the accessibility tree…
+    for (const label of ['trigger issue', 'live session', 'a PR per task']) {
+      expect(screen.getByText(label).closest('[aria-hidden="true"]')).toBeNull();
+    }
+    // …while the connector hairlines/dots are purely decorative.
+    expect(container.querySelectorAll('[aria-hidden="true"]').length).toBeGreaterThanOrEqual(2);
   });
 });

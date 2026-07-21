@@ -27,6 +27,28 @@
     outline: 2px solid var(--amber);
     outline-offset: 2px;
   }
+
+  /* v2 global chrome (from the comp): accent-tinted text selection and slim
+     token-styled scrollbars on every inner scroller. */
+  ::selection {
+    background: color-mix(in oklab, var(--amber) 32%, transparent);
+  }
+
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--line-2) 80%, transparent);
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--line-2);
+  }
 }
 
 /* ---- Motion --------------------------------------------------------------
@@ -245,7 +267,7 @@
   animation: shimmer 1.4s linear infinite;
 }
 
-/* ---- Elevated dark + amber: static depth utilities ------------------------
+/* ---- Electric dark: static depth utilities --------------------------------
    These are safe under reduced motion — they are paint, not motion. The motion
    layer below animates them (gradient drift, glow pulse) but they read fully
    without it. Tint recipe stays color-mix(in oklab, var(--token) N%, transparent).
@@ -256,7 +278,7 @@
    background-size is what lets .anim-gradient-shift shimmer it; without the
    animation it simply renders a static amber→gold sweep. */
 .grad-text {
-  background: var(--grad-accent);
+  background: var(--grad-accent-text);
   background-size: 200% auto;
   background-position: 0% 50%;
   -webkit-background-clip: text;
@@ -314,7 +336,7 @@
   background: var(--glass-2);
 }
 
-/* ---- Elevated dark + amber: motion vocabulary -----------------------------
+/* ---- Electric dark: motion vocabulary -------------------------------------
    Rich but tasteful micro-motion. Every keyframe here is disabled in the
    reduced-motion block; the static utilities above keep the surface legible
    when motion is off. Keyframe names mirror DESIGN-LANGUAGE.md; the tailwind
@@ -334,6 +356,23 @@
 
 .anim-gradient-shift {
   animation: gradient-shift 6s ease-in-out infinite alternate;
+}
+
+/* The v2 hero shimmer: a symmetric there-and-back sweep (0% → 100% → 0%) so a
+   3-stop loop gradient always shows both hues — unlike gradient-shift, which
+   swings fully across a 200% canvas. 7s per the comp. */
+@keyframes gradient-loop {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.anim-gradient-loop {
+  animation: gradient-loop 7s ease-in-out infinite;
 }
 
 /* Breathing amber glow for active/primary elements. Starts from a spread-less
@@ -447,6 +486,7 @@
   /* New elevated-dark motion — collapse to the static final state. The static
      depth utilities (.grad-text, .grad-border, .glass, resting glows) stay. */
   .anim-gradient-shift,
+  .anim-gradient-loop,
   .anim-glow-pulse,
   .anim-float,
   .anim-sheen,

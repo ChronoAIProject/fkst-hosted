@@ -63,6 +63,8 @@ describe('Shell', () => {
     const footer = main.querySelector('footer');
     expect(footer).not.toBeNull();
     expect(main.lastElementChild).toBe(footer);
+    // …and the pinned bar must NOT also render (no double footer).
+    expect(main.nextElementSibling?.tagName).not.toBe('FOOTER');
   });
 
   it('pins the footer after <main> on the full-height landing route', () => {

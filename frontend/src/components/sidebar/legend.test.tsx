@@ -7,8 +7,8 @@ import { StatusLegend, ViewDescription } from './legend';
 // i18n/context.tsx), so these are the exact strings the component renders.
 const TITLE = 'Legend';
 const ROW_NONE = 'Grey — App not installed';
-const ROW_INSTALLED = 'Amber — App installed, no active sessions';
-const ROW_ACTIVE = 'Blinking amber — active sessions running';
+const ROW_INSTALLED = 'Blue — App installed, no active sessions';
+const ROW_ACTIVE = 'Blinking blue — active sessions running';
 
 describe('StatusLegend', () => {
   it('renders the title as a collapsed disclosure by default so the list sits higher', () => {

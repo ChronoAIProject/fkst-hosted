@@ -64,17 +64,21 @@ All tokens are CSS custom properties on `:root`, mapped into Tailwind
 
 | Token | Tailwind | Value | Purpose |
 |---|---|---|---|
-| `--amber` | `bg-amber` / `text-amber` | `oklch(66% 0.19 256)` | Brand accent (**blue** in Electric) |
-| `--gold` | `bg-gold` / `text-gold` | `oklch(62% 0.22 305)` | Accent complement (**violet**); `grad-accent` endpoint |
+| `--amber` | `bg-amber` / `text-amber` | `oklch(66% 0.19 256)` | Brand accent, TEXT tier (**blue** in Electric) — 6.5:1 on `--bg` |
+| `--gold` | `bg-gold` / `text-gold` | `oklch(62% 0.22 305)` | Accent complement, text tier (**violet**) |
+| `--amber-fill` / `--gold-fill` | (via `bg-grad-accent`) | `oklch(55% 0.19 256)` / `oklch(52% 0.22 305)` | FILL tier — deeper cousins used only under ink so `--amber-ink` clears WCAG AA (the comp's bright-pair fills sat at 3.1:1) |
 | `--green` | `bg-green` | `oklch(76% 0.14 158)` | Success semaphore |
 | `--red` | `bg-red` | `oklch(68% 0.19 20)` | Danger semaphore |
-| `--amber-ink` | `bg-amber-ink` | `oklch(99% 0.005 250)` | Near-white ink for text on accent-gradient fills |
+| `--warn` | `bg-warn` / `text-warn` | `oklch(80% 0.15 85)` | Warning semaphore — warm caution hue DECOUPLED from the accent (pre-v2 warnings rode on the then-amber accent) |
+| `--blue` | `bg-blue` | `oklch(78% 0.12 210)` | Comp chart hue (reserved) |
+| `--amber-ink` | `bg-amber-ink` | `oklch(99% 0.005 250)` | Near-white ink for text on accent-gradient FILLS (4.9–5.5:1 on the fill tier) |
 
 ### Gradients
 
 | Token | Tailwind | Purpose |
 |---|---|---|
-| `--grad-accent` | `bg-grad-accent` | Brand fill: `linear-gradient(135deg, amber→gold)` = blue→violet. Primary buttons, `.grad-text` accents, `.grad-border` |
+| `--grad-accent` | `bg-grad-accent` | Brand FILL: `linear-gradient(135deg, amber-fill→gold-fill)` — the deep tier, for ink-carrying buttons/badges/decorative fills |
+| `--grad-accent-text` | (via `.grad-text`) | Bright-tier sweep for gradient-clipped TEXT sitting on the dark bg |
 | `--grad-fg` | `bg-grad-fg` | Bright `fg→dim` vertical sweep for big display headings (low end stays legible) |
 | `--grad-hairline` | `bg-grad-hairline` | Neutral top-lit hairline for `.grad-border` (light catching a raised edge) |
 | `--grad-hairline-accent` | `bg-grad-hairline-accent` | Accent diagonal hairline for accent/hero card borders |
@@ -142,10 +146,10 @@ Static utilities (`.grad-text`, `.grad-border`, `.glass`) and motion utilities
 
 ### Static (safe under reduced motion)
 
-- **`.grad-text`** — clips `--grad-accent` into text (accent words, the hero's
-  second line). **`.grad-text-fg`** clips `--grad-fg` (display headings, the
-  hero's first line). Both keep 200% background-size so `.anim-gradient-shift`
-  can shimmer them.
+- **`.grad-text`** — clips `--grad-accent-text` (the bright tier) into text.
+  **`.grad-text-fg`** clips `--grad-fg` (display headings). Both keep 200%
+  background-size so the shimmer utilities can drift them. The landing hero
+  overrides both with its comp-specific recipes (see the landing recipe below).
 - **`.grad-border`** — gradient hairline border: `background:
   linear-gradient(var(--raise),var(--raise)) padding-box, var(--grad-hairline)
   border-box; border: 1px solid transparent;` (accent variant uses
@@ -163,6 +167,7 @@ Static utilities (`.grad-text`, `.grad-border`, `.glass`) and motion utilities
 | `.anim-float` | Tiny vertical bob for accent marks. |
 | `.anim-sheen` | One-shot highlight sweep across a surface. |
 | `.anim-beam-dot` | Traveling dot on the landing flow-line connectors (2.4s linear, second connector offset 1.2s). |
+| `.anim-gradient-loop` | The hero shimmer: symmetric 0%→100%→0% sweep (7s) so a 3-stop loop gradient always shows both hues. |
 | `.hover-lift` | On hover: `translateY(-2px)` + `shadow-3` + subtle glow, via **transition**. Interactive cards only. |
 | `.hover-underline` | `scaleX(0)→1` accent underline on link/nav hover. |
 | existing: `.anim-row-in` / `.anim-chip-in` / `.anim-notice-in` / `.anim-overlay-in` / `.anim-modal-in` / `.anim-drawer-in` / `.anim-repo-pulse` / `.anim-node-glow` / `.anim-dot-blink` / `.anim-spin` / `.anim-shimmer` | Preserved as-is. |
@@ -198,10 +203,13 @@ rest at their final state. Glass, gradients, shadows, static glows, and the
   Never remove the accessible focus outline.
 - **Landing hero** — single-viewport centered column over an 80px masked line
   grid (opacity .4) + accent glow blob: mono eyebrow (10px/.2em uppercase
-  ghost) → two-line headline (`.grad-text-fg` top, `.grad-text
-  .anim-gradient-shift` bottom) → 15px dim lede (max 44ch) → CTA pair (white
-  pill + quiet link) → the aria-hidden flow-line (`trigger issue ─●→ live
-  session ─●→ a PR per task`, hidden under 560px viewport height).
+  **faint** — 10px text must clear AA) → two-line headline (top: fg held to 30%
+  then sunk toward `--faint`; bottom: 3-stop `100deg` bright-tier loop gradient
+  + `.anim-gradient-loop`) → 15px dim lede (max 44ch) → CTA pair (white pill +
+  quiet link) → the flow-line (`trigger issue ─●→ live session ─●→ a PR per
+  task`; labels stay in the a11y tree, connectors/dots are aria-hidden; hidden
+  under 560px viewport height, and the landing's pinned footer hides under
+  760px).
 
 ---
 

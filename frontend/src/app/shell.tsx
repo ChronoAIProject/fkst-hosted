@@ -30,11 +30,11 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
       : 'text-faint hover:text-dim'
   }`;
 
-/** Shared mono action styling for the inline auth/GitHub/CTA topbar controls. */
+/** Shared mono action styling for the inline topbar utility controls. */
 const inlineActionClass =
   'font-mono text-[12px] text-faint hover:text-fg no-underline px-2.5 py-[7px] rounded-control transition-colors cursor-pointer';
 
-/** Full-width row styling for the same actions inside the overflow menu. */
+/** Full-width row styling for the auth/GitHub actions inside the overflow menu. */
 const menuItemClass =
   'font-mono text-[12px] text-left text-faint hover:text-fg no-underline px-2.5 py-2 rounded-control transition-colors cursor-pointer';
 
@@ -210,7 +210,9 @@ export function Shell() {
                 <button
                   type="button"
                   onClick={signIn}
-                  className="font-mono text-[12px] text-dim hover:text-fg border border-line-2 rounded-pill px-3.5 py-[6px] transition-[color,border-color,box-shadow] hover:shadow-glow-amber cursor-pointer flex-none max-[600px]:hidden"
+                  // Border is an fg tint (not --line-2, which computes 1.4:1 on
+                  // the bar — invisible): the outlined affordance must read at rest.
+                  className="font-mono text-[12px] text-dim hover:text-fg border border-[color-mix(in_oklab,var(--fg)_25%,transparent)] rounded-pill px-3.5 py-[6px] transition-[color,border-color,box-shadow] hover:shadow-glow-amber cursor-pointer flex-none max-[600px]:hidden"
                 >
                   {c.auth.signIn}
                 </button>
@@ -335,7 +337,13 @@ export function Shell() {
             the landing, fits exactly), this bar stays pinned at the viewport
             bottom, and the window never scrolls. */}
         {isFullHeight && (
-          <footer className="flex-none relative border-t border-line h-[44px] flex items-center justify-center gap-x-5 gap-y-1 flex-wrap px-1 font-mono text-[10.5px] text-ghost">
+          <footer
+            className={`flex-none relative border-t border-line h-[44px] flex items-center justify-center gap-x-5 gap-y-1 flex-wrap px-1 font-mono text-[10.5px] text-ghost ${
+              // Short-viewport tier (comp): the landing gives its footer row back
+              // to the hero; the dashboard keeps its bar at every height.
+              isLanding ? '[@media(max-height:760px)]:hidden' : ''
+            }`}
+          >
             <span className="flex items-center gap-2">
               <FkstMark className="text-[12px] text-dim" />
               <span>{c.footer.tagline}</span>

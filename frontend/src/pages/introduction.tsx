@@ -4,12 +4,13 @@ import { useContent } from '@/i18n';
 import { MANUAL_URL } from '@/i18n/literals';
 
 /** One 44px connector of the hero flow-line: a hairline with a traveling accent
- *  dot. The second connector's dot is phase-offset so the two alternate. Purely
- *  decorative (the parent is aria-hidden); the dot rests invisible under
- *  reduced motion, leaving the labels + hairlines as a static diagram. */
+ *  dot. The second connector's dot is phase-offset so the two alternate. The
+ *  connector (not the flow-line's text labels) is the decorative part, so the
+ *  aria-hidden sits here; the dot rests invisible under reduced motion, leaving
+ *  the labels + hairlines as a static diagram. */
 function PipeConnector({ delayed = false }: { delayed?: boolean }) {
   return (
-    <span className="relative w-11 h-px bg-line-2 flex-none">
+    <span aria-hidden="true" className="relative w-11 h-px bg-line-2 flex-none">
       <span
         className={`absolute left-0 top-[-2.5px] w-1.5 h-1.5 rounded-full bg-amber anim-beam-dot ${
           delayed ? '[animation-delay:1.2s]' : ''
@@ -31,7 +32,7 @@ export function Introduction() {
   }, [c.intro.metaTitle]);
 
   return (
-    <section className="relative h-full flex flex-col items-center justify-center text-center overflow-hidden px-6 py-5 max-[480px]:px-4">
+    <section className="relative h-full flex flex-col items-center justify-center text-center overflow-hidden px-6 pt-5 pb-4 max-[480px]:px-4">
       {/* Background layer 1 — an 80px line grid, radially masked so it fades
           out well before the edges. Pure paint. */}
       <div
@@ -57,17 +58,38 @@ export function Introduction() {
       />
 
       <div className="relative flex flex-col items-center">
-        <span className="font-mono text-[10px] tracking-[0.2em] uppercase text-ghost">
+        {/* faint (not ghost): 10px text must clear WCAG AA — ghost is 3.6:1. */}
+        <span className="font-mono text-[10px] tracking-[0.2em] uppercase text-faint">
           {c.intro.eyebrow}
         </span>
 
-        <h1 className="mt-[18px] font-display font-bold leading-[1.04] tracking-[-0.045em] text-[length:clamp(36px,4.4vw,58px)]">
-          <span className="grad-text-fg">{c.intro.heroTitleTop}</span>
+        <h1 className="mt-[18px] font-display font-bold leading-[1.04] tracking-[-0.045em] text-[length:clamp(36px,4.4vw,58px)] [@media(max-height:760px)]:text-[length:clamp(26px,3.4vw,38px)] max-w-[16ch]">
+          {/* Hero-specific gradients per the comp: the top line holds pure fg
+              through 30% then sinks toward --faint; the accent line loops a
+              3-stop bright-tier sweep so both hues stay visible as it shimmers
+              (unlike the app-wide .grad-text/-fg recipes). */}
+          <span
+            className="grad-text-fg"
+            style={{
+              backgroundImage:
+                'linear-gradient(180deg, var(--fg) 30%, color-mix(in oklab, var(--fg) 55%, var(--faint)))',
+            }}
+          >
+            {c.intro.heroTitleTop}
+          </span>
           <br />
-          <span className="grad-text anim-gradient-shift">{c.intro.heroTitleAccent}</span>
+          <span
+            className="grad-text anim-gradient-loop"
+            style={{
+              backgroundImage:
+                'linear-gradient(100deg, var(--amber), var(--gold) 60%, var(--amber))',
+            }}
+          >
+            {c.intro.heroTitleAccent}
+          </span>
         </h1>
 
-        <p className="mt-[18px] text-[15px] leading-relaxed text-dim max-w-[44ch]">
+        <p className="mt-[18px] text-[15px] leading-[1.6] text-dim max-w-[44ch]">
           {c.intro.heroLede}
         </p>
 
@@ -89,16 +111,17 @@ export function Introduction() {
         </div>
 
         {/* The flow-line: trigger issue ─●→ live session ─●→ a PR per task.
-            Decorative reinforcement of the lede (aria-hidden); hidden entirely
-            on very short viewports so the hero always fits. */}
-        <div
-          aria-hidden="true"
-          className="mt-11 flex items-center gap-[14px] font-mono text-[11.5px] text-ghost [@media(max-height:560px)]:hidden"
-        >
+            The text labels stay in the accessibility tree (they carry real
+            information); only the connectors and dots are decorative. Hidden
+            entirely on very short viewports so the hero always fits. */}
+        <div className="mt-11 flex items-center gap-[14px] font-mono text-[11.5px] text-faint [@media(max-height:560px)]:hidden">
           <span>{c.intro.pipeTrigger}</span>
           <PipeConnector />
           <span className="inline-flex items-center gap-[7px] text-dim">
-            <span className="w-[5px] h-[5px] rounded-full bg-green anim-dot-blink flex-none" />
+            <span
+              aria-hidden="true"
+              className="w-[5px] h-[5px] rounded-full bg-green anim-dot-blink [animation-duration:1.6s] flex-none"
+            />
             {c.intro.pipeSession}
           </span>
           <PipeConnector delayed />

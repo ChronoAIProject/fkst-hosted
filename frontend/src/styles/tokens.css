@@ -35,16 +35,33 @@
   --gold: oklch(62% 0.22 305);
   --green: oklch(76% 0.14 158);
   --red: oklch(68% 0.19 20);
+  --blue: oklch(78% 0.12 210);
 
-  /* Text on accent-gradient fills — near-white ink (the Electric accents are
-     mid-lightness, so light ink carries the contrast). */
+  /* Warning semaphore — a warm caution hue DECOUPLED from the accent pair.
+     Pre-v2, warning semantics rode on --amber (then literally amber); with the
+     accent now blue, anything meaning "caution" points here instead. */
+  --warn: oklch(80% 0.15 85);
+
+  /* Fill-tier accents — deeper cousins of --amber/--gold used ONLY under ink
+     (button/badge fills). At 66%/62% L the bright pair leaves near-white ink at
+     ~3.1:1 (the comp ships that, failing WCAG AA); dropping the FILL to 55%/52%
+     puts --amber-ink at 4.9–5.5:1 everywhere while the bright text-tier pair
+     keeps its 6.5:1 on the dark bg. Accent swaps must update both tiers. */
+  --amber-fill: oklch(55% 0.19 256);
+  --gold-fill: oklch(52% 0.22 305);
+
+  /* Text on accent-gradient fills — near-white ink over the fill-tier pair. */
   --amber-ink: oklch(99% 0.005 250);
 
   /* ---- Gradients ----------------------------------------------------------
-     grad-accent: the brand fill (buttons, .grad-border, .grad-text accents).
+     grad-accent: the brand FILL (buttons, badges, hover-underline, .grad-border
+     accents) — built from the deep fill tier so ink on it clears AA.
+     grad-accent-text: the bright pair for gradient-clipped TEXT (.grad-text),
+     where the letters sit on the dark bg and need the vivid tier.
      grad-fg: a bright fg→dim vertical sweep for big display headings; the low
      end is mixed to stay legible (never sinks to full --dim). */
-  --grad-accent: linear-gradient(135deg, var(--amber) 0%, var(--gold) 100%);
+  --grad-accent: linear-gradient(135deg, var(--amber-fill) 0%, var(--gold-fill) 100%);
+  --grad-accent-text: linear-gradient(135deg, var(--amber) 0%, var(--gold) 100%);
   --grad-fg: linear-gradient(
     180deg,
     var(--fg) 0%,

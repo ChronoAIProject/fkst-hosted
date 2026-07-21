@@ -16,7 +16,7 @@ keep the two in sync when the control-plane contract changes.
 
 - **React 18 + Vite + TypeScript**, routing via **react-router-dom**.
 - **Tailwind CSS** with a dark, oklch design system (`src/styles/tokens.css`) —
-  Space Grotesk (display), IBM Plex Sans (UI), IBM Plex Mono (mono), amber accent.
+  Space Grotesk (display), IBM Plex Sans (UI), IBM Plex Mono (mono), Electric blue→violet accent (see src/DESIGN-LANGUAGE.md).
 - **Vitest** + Testing Library (unit), **Playwright** (e2e smoke), **Storybook** (design docs).
 
 ## Develop

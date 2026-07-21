@@ -9,7 +9,7 @@ export const pages: PagesSlice = {
     heroTitleTop: '开一个 issue，',
     heroTitleAccent: '得到一个拉取请求。',
     heroLede:
-      'FKST 运行完全由 GitHub issue 驱动的长期编码 agent。无需运维任何基础设施，也没有任何学习成本。',
+      'FKST 运行完全由 GitHub issue 驱动的长期运行的编码 agent。无需运维任何基础设施，也没有任何学习成本。',
     ctaStart: '开始使用',
     ctaManual: '操作手册 →',
     pipeTrigger: '触发 issue',
