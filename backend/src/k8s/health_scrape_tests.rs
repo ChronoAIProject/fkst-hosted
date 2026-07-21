@@ -335,6 +335,26 @@ async fn scrape_one_clears_when_recent_output_is_readable() {
     assert_eq!(removed[0].3, SUBSTRATE_DEGRADED_LABEL);
 }
 
+#[tokio::test]
+async fn structured_bootstrap_failure_flags_and_explains_the_trigger() {
+    let api = Arc::new(RecordingApi::default());
+    let github = tokens(api.clone());
+    let (handle, _rx) = reconcile_channel(16);
+    let line = "TIMESTAMP=2026-07-21T14:18:05Z LEVEL=error MSG=github-devloop dept=ensure_repo proposal_id=unknown tag=FAILURE error_class=gh-command-failed fingerprint=fp-123 queue=devloop_ensure_repo_tick error=github-devloop: gh-command-failed: bootstrap failed";
+    let backend = FakeSessionBackend::default().with_recent("sess-1", Some(line.to_string()));
+
+    scrape_one(&backend, &github, &handle, &session("sess-1")).await;
+
+    let added = api.labels_added.lock().unwrap();
+    assert_eq!(added.len(), 1);
+    assert_eq!(added[0].3, vec![SUBSTRATE_DEGRADED_LABEL.to_string()]);
+    let comments = api.comments.lock().unwrap();
+    assert_eq!(comments.len(), 1);
+    assert!(comments[0].3.contains("dept=ensure_repo"));
+    assert!(comments[0].3.contains("error_class=gh-command-failed"));
+    assert!(comments[0].3.contains("queue=devloop_ensure_repo_tick"));
+}
+
 // ---- comment bodies ---------------------------------------------------------
 
 #[test]

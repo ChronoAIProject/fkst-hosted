@@ -1,12 +1,11 @@
 //! The work-label SET ↔ single wire-value codec (epic #594 I4).
 //!
-//! A substrate session's EFFECTIVE work-label set (its explicit `### Work Label` ∪ the
-//! labels its packages auto-declare) is carried through the pod as ONE value —
-//! [`crate::k8s::SessionPodSpec::work_label`], which feeds the
-//! `fkst.chrono-ai.fun/work-label` pod annotation, `FKST_GITHUB_PROXY_POLL_LABEL_PREFIX`,
-//! and `FKST_SESSION_WORK_LABEL`. github-proxy's `github_proxy_poll_label_prefixes`
-//! comma-splits `FKST_GITHUB_PROXY_POLL_LABEL_PREFIX` back into its (deduped) poll-label
-//! list, so a **comma-joined** value makes the session wake on ANY of its labels.
+//! A substrate session's EFFECTIVE work-label set (its explicit `### Work Label` plus
+//! the labels its packages auto-declare) is carried through the runtime as ONE value:
+//! [`crate::k8s::SessionPodSpec::work_label`]. It feeds exact package-side admission via
+//! `FKST_SESSION_WORK_LABEL` and the `fkst.chrono-ai.fun/work-label` pod annotation /
+//! OpenSandbox correlation metadata. The github-proxy lifecycle suppression prefixes
+//! are a separate, fixed launcher contract and deliberately do not use this value.
 //!
 //! This module is the single source of truth for that encoding: [`join_work_labels`]
 //! (write side — the reconcile executor builds the spec) and [`split_work_labels`]
@@ -16,8 +15,8 @@
 //! that a single-label session round-trips byte-identically to the pre-multi-label value.
 
 /// The separator joining an effective work-label SET into the single
-/// [`crate::k8s::SessionPodSpec::work_label`] wire value. A comma because github-proxy
-/// comma-splits `FKST_GITHUB_PROXY_POLL_LABEL_PREFIX` into its poll-label list.
+/// [`crate::k8s::SessionPodSpec::work_label`] wire value. A comma keeps the environment
+/// and runtime-correlation representation compact and reversible.
 const WORK_LABEL_SEP: &str = ",";
 
 /// Join a session's effective work-label set into the single comma-separated value

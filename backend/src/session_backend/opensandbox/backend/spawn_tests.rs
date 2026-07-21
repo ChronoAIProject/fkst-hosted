@@ -107,6 +107,10 @@ async fn ensure_session_creates_with_null_timeout_stamped_metadata_and_execd_tok
                 // create env too — proven here via the engine HostFact pair.
                 "FKST_CANDIDATE_PREFIX": "fkst-cand",
                 "FKST_CANDIDATE_FROM_SEP": "--from--",
+                // #626: both backends consume the corrected shared launcher pair.
+                "FKST_GITHUB_PROXY_POLL_LABEL_PREFIX":
+                    "fkst-dev:,fkst-class:,fkst-security:,fkst-workflow:,fkst-dashboard",
+                "FKST_SESSION_WORK_LABEL": "fkst-work",
             },
         })))
         .respond_with(ResponseTemplate::new(202).set_body_json(sandbox_json(

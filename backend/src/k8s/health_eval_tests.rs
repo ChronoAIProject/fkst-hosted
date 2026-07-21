@@ -38,6 +38,7 @@ fn error_stat(sample: &str, count: usize) -> MessageStat {
 /// The concrete motivating line: a codex-triage pod that is Running yet warns every
 /// cycle that it has no useful work to do.
 const CODEX_WARN: &str = "2026-07-01T12:00:00Z LEVEL=warn target=codex MSG=codex-triage/score_dedup: no issue mirror at .fkst/mirror/42 - run scripts/reconcile";
+const BOOTSTRAP_ERROR: &str = "TIMESTAMP=2026-07-21T14:18:05Z LEVEL=error MSG=github-devloop dept=ensure_repo proposal_id=unknown tag=FAILURE error_class=gh-command-failed fingerprint=fp-123 queue=devloop_ensure_repo_tick error=github-devloop: gh-command-failed: bootstrap failed";
 
 // ---- log parsing: space-kv format -------------------------------------------
 
@@ -60,6 +61,24 @@ fn parses_space_kv_error_line() {
     assert_eq!(stats.len(), 1);
     assert_eq!(stats[0].level, Severity::Error);
     assert_eq!(stats[0].sample_verbatim, "engine crashed: boom");
+}
+
+#[test]
+fn structured_bootstrap_failure_is_an_immediate_degraded_signal() {
+    let stats = parse_severity_lines(BOOTSTRAP_ERROR);
+    assert_eq!(stats.len(), 1);
+    assert_eq!(stats[0].level, Severity::Error);
+    assert!(stats[0].sample_verbatim.contains("dept=ensure_repo"));
+    assert!(stats[0]
+        .sample_verbatim
+        .contains("error_class=gh-command-failed"));
+
+    match evaluate_health(&running(), &stats) {
+        HealthVerdict::Degraded {
+            reason_verbatim, ..
+        } => assert_eq!(reason_verbatim, stats[0].sample_verbatim),
+        other => panic!("expected degraded, got {other:?}"),
+    }
 }
 
 #[test]
