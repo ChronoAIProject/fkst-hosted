@@ -4,7 +4,7 @@
 //! the `/v1/sandboxes/{id}/proxy/44772` lifecycle-proxy prefix, so no verb can drop
 //! a header or bypass the proxy.
 
-use wiremock::matchers::{body_string_contains, header, method, path, query_param};
+use wiremock::matchers::{body_json, body_string_contains, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::lifecycle::API_KEY_HEADER;
@@ -119,6 +119,47 @@ async fn file_info_404_is_not_found() {
         .file_info("/app/missing.txt")
         .await
         .expect_err("404");
+    assert!(matches!(err, OsbError::NotFound), "got {err:?}");
+}
+
+#[tokio::test]
+async fn move_file_sends_one_rename_item_with_both_headers() {
+    let server = MockServer::start().await;
+    // The wire body is the daemon's `[]RenameFileItem` array with exactly one item.
+    Mock::given(method("POST"))
+        .and(path(proxy("/files/mv")))
+        .and(header(API_KEY_HEADER, API_KEY))
+        .and(header(EXECD_TOKEN_HEADER, EXECD_TOKEN))
+        .and(body_json(serde_json::json!([
+            { "src": "/app/token.tmp", "dest": "/app/token" }
+        ])))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    client(&server.uri())
+        .move_file("/app/token.tmp", "/app/token")
+        .await
+        .expect("moved");
+}
+
+#[tokio::test]
+async fn move_file_maps_a_missing_source_to_not_found() {
+    let server = MockServer::start().await;
+    // The daemon stats the source before renaming; a vanished source is its 404.
+    Mock::given(method("POST"))
+        .and(path(proxy("/files/mv")))
+        .and(header(API_KEY_HEADER, API_KEY))
+        .and(header(EXECD_TOKEN_HEADER, EXECD_TOKEN))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+
+    let err = client(&server.uri())
+        .move_file("/app/token.tmp", "/app/token")
+        .await
+        .expect_err("missing source");
     assert!(matches!(err, OsbError::NotFound), "got {err:?}");
 }
 

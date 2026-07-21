@@ -18,8 +18,8 @@ use std::time::Duration;
 use secrecy::{ExposeSecret, SecretString};
 
 use super::dto::{
-    CommandRef, CommandStatus, ExecdFileMetadata, FileInfo, OsbError, RunCommandBody,
-    ServerStreamFrame,
+    CommandRef, CommandStatus, ExecdFileMetadata, FileInfo, OsbError, RenameFileItem,
+    RunCommandBody, ServerStreamFrame,
 };
 use super::lifecycle;
 
@@ -268,6 +268,29 @@ impl ExecdClient {
         let response = self
             .request(method.clone(), path, Some(self.timeouts.upload))
             .multipart(form)
+            .send()
+            .await?;
+        lifecycle::map_response(&method, path, response).await?;
+        Ok(())
+    }
+
+    /// `POST /files/mv` — atomically rename `source` onto `destination` inside the
+    /// sandbox. The daemon stats the source (missing → 404 → [`OsbError::NotFound`]),
+    /// ensures the destination's parent directory, then calls Go's `os.Rename` — a
+    /// same-filesystem `rename(2)`, so concurrent readers observe either the old or
+    /// the new COMPLETE file (never a partial one) and the destination's own
+    /// permission bits are irrelevant to the swap. The wire body is the daemon's
+    /// `[]RenameFileItem` array; this sends exactly one item.
+    pub async fn move_file(&self, source: &str, destination: &str) -> Result<(), OsbError> {
+        let body = [RenameFileItem {
+            src: source.to_string(),
+            dest: destination.to_string(),
+        }];
+        let path = "/files/mv";
+        let method = reqwest::Method::POST;
+        let response = self
+            .request(method.clone(), path, Some(self.timeouts.query))
+            .json(&body)
             .send()
             .await?;
         lifecycle::map_response(&method, path, response).await?;
