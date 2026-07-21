@@ -11,7 +11,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
 use crate::routes::canvas::test_support::{
-    auth_headers, mount_app_token, test_app, test_state, viewer_user,
+    auth_headers, grant_global_admin, mount_app_token, test_app, test_state, viewer_user,
 };
 
 const VALID_TRIGGER_BODY: &str = "### Session Name\nsite\n\n### Packages\n\
@@ -145,6 +145,81 @@ async fn overview_assembles_accounts_counts_and_totals() {
     assert_eq!(view.totals.packages[0].count, 1);
     // The default test config has no broader OAuth pair, so the connect flow is off.
     assert!(!view.broader_oauth_available);
+}
+
+#[tokio::test]
+async fn global_admin_overview_uses_app_wide_installations_and_is_read_only() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/app/installations"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                "id": 77,
+                "account": { "login": "acme", "type": "Organization" },
+                "repository_selection": "all"
+            }])),
+        )
+        .mount(&server)
+        .await;
+    mount_app_token(&server, "acme", "vault", 77).await;
+    Mock::given(method("GET"))
+        .and(path("/installation/repositories"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 1,
+            "repositories": [{
+                "id": 9001,
+                "name": "vault",
+                "owner": { "login": "acme", "type": "Organization" },
+                "private": true
+            }]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/vault/issues"))
+        .and(query_param("labels", "fkst-substrate-trigger"))
+        .and(query_param("state", "open"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(&server)
+        .await;
+
+    let mut state = test_state(&server.uri(), Some(test_app(&server.uri())));
+    grant_global_admin(&mut state, "@SHINING");
+    // Even if broader OAuth is configured, it cannot widen an App-wide view.
+    state.config.log.broader_oauth_client_id = Some("client".to_string());
+    state.config.log.broader_oauth_client_secret = Some(SecretString::from("secret".to_string()));
+
+    let Json(view) = overview(State(state), viewer_user(), auth_headers())
+        .await
+        .expect("global admin overview");
+
+    assert!(view.global_admin);
+    assert!(!view.broader_oauth_available);
+    assert_eq!(view.accounts.len(), 1);
+    let account = &view.accounts[0];
+    assert_eq!(account.login, "acme");
+    assert_eq!(account.kind, "org");
+    assert!(!account.owner);
+    assert!(account.installed);
+    assert_eq!(account.installation_id, Some(77));
+    assert_eq!(account.repository_selection.as_deref(), Some("all"));
+    assert_eq!(account.repos.len(), 1);
+    let repo = &account.repos[0];
+    assert_eq!(repo.id, 9001);
+    assert!(repo.private);
+    assert!(repo.installed);
+    assert!(
+        !repo.admin,
+        "cross-account App reads must not imply user admin"
+    );
+
+    let requests = server.received_requests().await.expect("recorded requests");
+    assert!(
+        requests
+            .iter()
+            .all(|request| !request.url.path().starts_with("/user/")),
+        "a global-admin overview must not collapse back to user-token visibility"
+    );
 }
 
 /// Mount the ENUMERATION reads (`/user/repos`, `/user/orgs`,
