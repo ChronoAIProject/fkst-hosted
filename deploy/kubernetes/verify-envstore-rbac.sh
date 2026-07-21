@@ -69,7 +69,7 @@ assert_cannot() {
   echo "no   $target_namespace $verb $resource"
 }
 
-for verb in create get list delete; do
+for verb in create get list patch delete; do
   assert_can "$verb" pods
 done
 assert_can get pods/log
@@ -81,7 +81,6 @@ for resource in configmaps secrets; do
   done
 done
 assert_cannot watch pods
-assert_cannot patch pods
 assert_cannot update pods
 assert_cannot update pods/status
 assert_cannot get deployments.apps

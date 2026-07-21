@@ -73,6 +73,19 @@ abort "FKST_ENV_STORE_NAMESPACE must select a durable namespace" if durable_name
 abort "durable environment store must be outside chronoai-fkst" if durable_namespace == "chronoai-fkst"
 abort "environment-store key material must not be rendered in a ConfigMap" if config_data.key?("FKST_ENV_STORE_ENCRYPTION_KEY") || config_data.key?("FKST_ENV_STORE_ENCRYPTION_KEY_FILE")
 
+leader_enabled = config_data["FKST_LEADER_ELECTION_ENABLED"].to_s == "true"
+leader_timings = %w[
+  FKST_LEADER_RETRY_PERIOD_SECS
+  FKST_LEADER_RENEW_DEADLINE_SECS
+  FKST_LEADER_LEASE_DURATION_SECS
+].map do |key|
+  Integer(config_data[key], exception: false) || abort("#{key} must be an integer")
+end
+abort "leader timings must satisfy retry < renew < lease" unless leader_timings[0] < leader_timings[1] && leader_timings[1] < leader_timings[2]
+lease_name = config_data["FKST_LEADER_LEASE_NAME"].to_s
+abort "canonical leader Lease name is missing" if lease_name.empty?
+abort "leader identity must come from the downward API, not the ConfigMap" if config_data.key?("FKST_LEADER_IDENTITY")
+
 durable_required = [
   ["Namespace", "", durable_namespace],
   ["Role", durable_namespace, "fkst-control-plane-durable-envstore"],
@@ -115,6 +128,21 @@ expected_application_rules = [
 ]
 application_role = index.fetch(["Role", "chronoai-fkst", "fkst-control-plane-envstore"])
 abort "application env-store Role must contain only validation-Pod permissions" unless application_role["rules"] == expected_application_rules
+
+expected_leader_rules = [
+  {
+    "apiGroups" => ["coordination.k8s.io"],
+    "resources" => ["leases"],
+    "verbs" => %w[create get list watch update patch]
+  },
+  {
+    "apiGroups" => [""],
+    "resources" => ["pods"],
+    "verbs" => %w[get list patch]
+  }
+]
+leader_role = index.fetch(["Role", "chronoai-fkst", "fkst-control-plane-leader-election"])
+abort "leader Role must contain exact Lease and routing-label permissions" unless leader_role["rules"] == expected_leader_rules
 
 expected_durable_rules = [
   {
@@ -165,6 +193,32 @@ abort "sandbox-runner must not mount an API token" unless sandbox_runner["automo
 network_policy = index.fetch(["NetworkPolicy", "chronoai-fkst", "sandbox-lockdown"])
 selector = network_policy.dig("spec", "podSelector", "matchLabels") || {}
 abort "sandbox lockdown selector drifted" unless selector["opensandbox.io/workload"] == "sandbox"
+
+control_plane = index.fetch(["Deployment", "chronoai-fkst", "fkst-control-plane"])
+replicas = control_plane.dig("spec", "replicas").to_i
+abort "canonical control plane must run two replicas" unless replicas == 2
+abort "multiple control-plane replicas require leader election" if replicas > 1 && !leader_enabled
+expected_strategy = {
+  "type" => "RollingUpdate",
+  "rollingUpdate" => { "maxSurge" => 1, "maxUnavailable" => 1 }
+}
+abort "control-plane rolling strategy drifted" unless control_plane.dig("spec", "strategy") == expected_strategy
+pod_labels = control_plane.dig("spec", "template", "metadata", "labels") || {}
+abort "control-plane pods must start withdrawn from leader routing" unless pod_labels["fkst.chronoai.io/leader-serving"] == "false"
+container = (control_plane.dig("spec", "template", "spec", "containers") || []).find { |item| item["name"] == "fkst-control-plane" }
+abort "control-plane container is missing" unless container
+identity_env = (container["env"] || []).find { |item| item["name"] == "FKST_LEADER_IDENTITY" }
+abort "leader identity must use metadata.name downward API" unless identity_env == {
+  "name" => "FKST_LEADER_IDENTITY",
+  "valueFrom" => { "fieldRef" => { "fieldPath" => "metadata.name" } }
+}
+abort "control-plane Pod readiness must track process health" unless container.dig("readinessProbe", "httpGet", "path") == "/health"
+service = index.fetch(["Service", "chronoai-fkst", "fkst-control-plane"])
+service_selector = service.dig("spec", "selector") || {}
+abort "control-plane Service must select only the published leader" unless service_selector == {
+  "app.kubernetes.io/name" => "fkst-control-plane",
+  "fkst.chronoai.io/leader-serving" => "true"
+}
 
 objects.select { |object| object.fetch("kind") == "Deployment" }.each do |deployment|
   name = deployment.dig("metadata", "name")
