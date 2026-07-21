@@ -66,10 +66,12 @@ test.describe('dashboard full UI journey', () => {
 
     // Status tab: decoded lifecycle + per-work-item chips.
     await expect(dialog.getByText('Health', { exact: false }).first()).toBeVisible();
-    await expect(dialog.getByText('Thinking')).toBeVisible();
-    await expect(dialog.getByText('Implementing')).toBeVisible();
-    await expect(dialog.getByText('Ready')).toBeVisible();
-    await expect(dialog.getByText('Done')).toBeVisible();
+    // .first(): the status-charts work repeats these phase words in the
+    // distribution chart + timeline, so a bare getByText is ambiguous.
+    await expect(dialog.getByText('Thinking').first()).toBeVisible();
+    await expect(dialog.getByText('Implementing').first()).toBeVisible();
+    await expect(dialog.getByText('Ready').first()).toBeVisible();
+    await expect(dialog.getByText('Done').first()).toBeVisible();
 
     // Live engine details → observe queues.
     await dialog.getByRole('button', { name: 'Live engine details' }).click();
@@ -135,12 +137,15 @@ test.describe('dashboard full UI journey', () => {
     const degraded = page.getByTestId('session-detail');
     await expect(degraded.getByRole('heading', { name: 'refactor-core' })).toBeVisible();
     await expect(degraded.getByText('Degraded').first()).toBeVisible();
-    await expect(degraded.getByText('Failed')).toBeVisible();
+    await expect(degraded.getByText('Failed').first()).toBeVisible();
     await shot(page, '09-degraded');
 
-    // Its live-engine fetch fails → error state.
-    await degraded.getByRole('button', { name: 'Live engine details' }).click();
-    await expect(degraded.getByText('Could not load the live engine details.')).toBeVisible();
+    // Not live → the live-engine fetch is not offered; the availability notice
+    // renders instead (the lifecycle-aware Status tab gates the button on
+    // liveness === 'live').
+    await expect(
+      degraded.getByText(/Live engine details are available while the session is running/)
+    ).toBeVisible();
 
     // ---- i18n toggle (the app is dark-only; no theme toggle) ----------------
     await page.getByRole('button', { name: '中文' }).click();

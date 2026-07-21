@@ -60,7 +60,8 @@ test.describe('static site smoke', () => {
     await page.goto('/');
     await page.getByRole('link', { name: 'Get started' }).click();
     await expect(page).toHaveURL(/\/get-started$/);
-    await page.getByRole('link', { name: 'Home' }).click();
+    // exact: the logo link's aria-label "FKST — home" would otherwise match too
+    await page.getByRole('link', { name: 'Home', exact: true }).click();
     await expect(page).toHaveURL(/\/$/);
   });
 
