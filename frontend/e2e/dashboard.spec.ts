@@ -27,6 +27,7 @@ test.describe('dashboard full UI journey', () => {
     // ---- Level 0: root — sidebar charts, legend, accounts -------------------
     await page.goto('/dashboard');
     await expect(page.getByRole('heading', { name: 'Your fkst sessions' })).toBeVisible();
+    await expect(page.getByText('Global admin')).toHaveCount(0);
 
     const side = sidebar(page);
     await expect(side.getByRole('button', { name: `Open account ${PERSONAL}` })).toBeVisible();
@@ -181,5 +182,18 @@ test.describe('dashboard full UI journey', () => {
       page.getByText('Could not load your repositories. Please try again.')
     ).toBeVisible();
     await shot(page, '11-overview-load-failed', true);
+  });
+
+  test('global-administrator overview is visibly identified', async ({ page }) => {
+    await page.unroute('**/api/v1/**');
+    await installApiRoutes(page, { globalAdmin: true });
+    await page.goto('/dashboard');
+
+    await expect(page.getByRole('heading', { name: 'Your fkst sessions' })).toBeVisible();
+    await expect(page.getByText('Global admin')).toBeVisible();
+    await expect(page.getByText('See all your repositories')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'New repository' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Uninstall' })).toHaveCount(0);
+    await shot(page, '13-global-admin-mode', true);
   });
 });

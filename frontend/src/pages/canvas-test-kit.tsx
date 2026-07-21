@@ -49,6 +49,7 @@ export const overviewBody = (
 ): OverviewResponse => ({
   app_slug: appSlug,
   viewer: { login: 'shining' },
+  global_admin: false,
   accounts,
   totals: { sessions: 0, packages: [] },
   broader_oauth_available: false,

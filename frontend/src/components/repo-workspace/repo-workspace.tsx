@@ -26,6 +26,7 @@ export function RepoWorkspace({
   data,
   loadFailed,
   onChanged,
+  readOnly = false,
 }: {
   owner: string;
   name: string;
@@ -34,6 +35,8 @@ export function RepoWorkspace({
   loadFailed: boolean;
   /** A trigger was created or stopped — the page re-fetches immediately. */
   onChanged: () => void;
+  /** Hide user-token mutations for an App-wide cross-account projection. */
+  readOnly?: boolean;
 }) {
   const c = useContent().dashboard;
   const sessions = data?.sessions ?? [];
@@ -63,6 +66,7 @@ export function RepoWorkspace({
             data={data}
             loadFailed={loadFailed}
             onChanged={onChanged}
+            readOnly={readOnly}
             // Always the EFFECTIVE selection (first by default) so the matching
             // row highlights even before the user has clicked anything.
             selectedKey={selected ? sessionKey(selected) : null}

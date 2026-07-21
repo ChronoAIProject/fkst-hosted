@@ -51,6 +51,7 @@ const overview = (accounts: AccountOverview[], appSlug: string | null = 'chronoa
   ({
     app_slug: appSlug,
     viewer: { login: 'shining' },
+    global_admin: false,
     accounts,
     totals: { sessions: 0, packages: [] },
     broader_oauth_available: false,
@@ -108,6 +109,39 @@ describe('Level0Sidebar', () => {
 
     // At least one installation exists → the first-run CTA stays hidden.
     expect(screen.queryByText('Get started with fkst')).not.toBeInTheDocument();
+  });
+
+  it('keeps cross-account global-administrator rows read-only', () => {
+    const adminOverview: OverviewResponse = {
+      ...overview([
+        account({
+          login: 'acme',
+          kind: 'org',
+          owner: false,
+          installed: true,
+          installation_id: 77,
+          repos: [repo({ owner: 'acme', name: 'private-site', installed: true, admin: false })],
+        }),
+      ]),
+      global_admin: true,
+    };
+    render(
+      wrap(
+        <Level0Sidebar
+          overview={adminOverview}
+          query=""
+          onQueryChange={() => {}}
+          onOpenAccount={() => {}}
+          onRepoCreated={() => {}}
+          onChanged={() => {}}
+        />
+      )
+    );
+
+    expect(screen.queryByRole('button', { name: 'New repository' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Uninstall' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Manage' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open account acme' })).toBeInTheDocument();
   });
 
   it('shows the first-run Install CTA when no installation exists anywhere', () => {

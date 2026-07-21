@@ -46,6 +46,9 @@ export interface AccountOverview {
 export interface OverviewResponse {
   app_slug: string | null;
   viewer: { login: string };
+  /** True when the verified viewer is a deployment global administrator and
+   *  the response spans every installation belonging to this GitHub App. */
+  global_admin: boolean;
   accounts: AccountOverview[];
   totals: OverviewTotals;
   /** True when this deployment offers the broader (classic-OAuth) credential

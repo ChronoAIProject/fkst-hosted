@@ -12,6 +12,7 @@ export const dashboardScalars: DashboardScalars = {
   eyebrow: 'Dashboard',
   title: 'Your fkst sessions',
   lede: 'Across the repositories where the fkst-hosted App is installed, see every trigger issue and its work issues — grouped session by session.',
+  globalAdmin: 'Global admin',
   signInTitle: 'Sign in to view your dashboard',
   signInBody: 'Connect your GitHub account to load your fkst sessions and issues. You stay signed in — the token refreshes automatically.',
   notConfigured: 'The dashboard backend is not configured for this deployment yet.',

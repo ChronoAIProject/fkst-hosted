@@ -104,6 +104,18 @@ describe('RepoWorkspace', () => {
     expect(screen.queryByRole('heading', { level: 2, name: 'beta' })).not.toBeInTheDocument();
   });
 
+  it('keeps App-wide cross-account sessions inspectable but read-only', () => {
+    renderWorkspace({ readOnly: true });
+
+    expect(
+      screen.getByRole('button', { name: 'Open details for session alpha' })
+    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'alpha' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'New session' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add work item' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Stop alpha' })).not.toBeInTheDocument();
+  });
+
   it('swaps the inline detail when another session is selected', async () => {
     const user = userEvent.setup();
     renderWorkspace();
