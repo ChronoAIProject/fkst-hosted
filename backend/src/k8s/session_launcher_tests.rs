@@ -137,7 +137,7 @@ fn build_session_pod_injects_the_section_5_2_env() {
     assert_eq!(env_value(env, "FKST_GITHUB_CLAIM_MODE"), Some("label"));
     assert_eq!(
         env_value(env, "FKST_GITHUB_PROXY_POLL_LABEL_PREFIX"),
-        Some("fkst")
+        Some("fkst-dev:,fkst-class:,fkst-security:,fkst-workflow:,fkst-dashboard")
     );
     // LLM provider config injected explicitly (pods don't inherit the ConfigMap).
     assert_eq!(env_value(env, "FKST_LLM_MODEL"), Some("gpt-5-codex"));
@@ -558,10 +558,9 @@ fn build_session_secret_carries_the_storage_sa_when_configured() {
 }
 
 #[test]
-fn multi_label_work_label_feeds_the_poll_prefix_and_session_label_verbatim() {
-    // Epic #594 I4: a comma-joined effective set on `SessionPodSpec.work_label` flows
-    // verbatim into FKST_GITHUB_PROXY_POLL_LABEL_PREFIX (github-proxy comma-splits it)
-    // AND FKST_SESSION_WORK_LABEL, and lands on the pod annotation unchanged.
+fn lifecycle_suppression_prefixes_are_separate_from_exact_work_labels() {
+    // #626: github-proxy gets only lifecycle-label suppression prefixes. The exact
+    // effective work-label set remains in its dedicated admission env and metadata.
     let mut spec = spec();
     spec.work_label = "alpha,beta".to_string();
     let pod = build_session_pod(&spec, &config()).expect("pod builds");
@@ -569,7 +568,7 @@ fn multi_label_work_label_feeds_the_poll_prefix_and_session_label_verbatim() {
     let env = pod_spec.containers[0].env.as_ref().expect("env");
     assert_eq!(
         env_value(env, "FKST_GITHUB_PROXY_POLL_LABEL_PREFIX"),
-        Some("alpha,beta")
+        Some("fkst-dev:,fkst-class:,fkst-security:,fkst-workflow:,fkst-dashboard")
     );
     assert_eq!(
         env_value(env, "FKST_SESSION_WORK_LABEL"),
@@ -579,6 +578,22 @@ fn multi_label_work_label_feeds_the_poll_prefix_and_session_label_verbatim() {
         pod.metadata.annotations.as_ref().expect("annotations")["fkst.chrono-ai.fun/work-label"],
         "alpha,beta"
     );
+
+    let prefixes: Vec<&str> = GITHUB_PROXY_POLL_LABEL_PREFIX_VALUE.split(',').collect();
+    let suppressed = |label: &str| prefixes.iter().any(|prefix| label.starts_with(prefix));
+    assert!(
+        !suppressed("fkst-dev"),
+        "the exact work label must be replayed"
+    );
+    for lifecycle in [
+        "fkst-dev:claimed",
+        "fkst-class:bug",
+        "fkst-security:reviewed",
+        "fkst-workflow:implementing",
+        "fkst-dashboard",
+    ] {
+        assert!(suppressed(lifecycle), "{lifecycle} must be suppressed");
+    }
 }
 
 #[test]

@@ -90,6 +90,12 @@ const GITHUB_CLAIM_MODE_ENV: &str = "FKST_GITHUB_CLAIM_MODE";
 /// work by LABEL, never by assignment. Must be `label`.
 const GITHUB_CLAIM_MODE_VALUE: &str = "label";
 const GITHUB_PROXY_POLL_LABEL_PREFIX_ENV: &str = "FKST_GITHUB_PROXY_POLL_LABEL_PREFIX";
+/// Package lifecycle labels suppressed from github-proxy's level replay. These are
+/// prefixes, not the session's positive work-item allowlist: notably `fkst-dev:`
+/// suppresses `fkst-dev:claimed` while leaving the exact work label `fkst-dev`
+/// eligible for replay and exact admission through [`SESSION_WORK_LABEL_ENV`].
+const GITHUB_PROXY_POLL_LABEL_PREFIX_VALUE: &str =
+    "fkst-dev:,fkst-class:,fkst-security:,fkst-workflow:,fkst-dashboard";
 /// Comma-separated GitHub logins the packages' github author policy trusts
 /// (issues/comments from anyone else are ignored by the session). The bot's own
 /// login is implicitly authorized package-side via `FKST_GITHUB_BOT_LOGIN`.
@@ -160,13 +166,12 @@ pub struct SessionPodSpec {
     /// `run-substrate` entrypoint to build the supervise command).
     pub package_roots: Vec<String>,
     /// The session's effective work-label SET, comma-joined into one value (epic #594
-    /// I4) — the explicit `### Work Label` ∪ its packages' auto-declared labels. Feeds
-    /// `FKST_GITHUB_PROXY_POLL_LABEL_PREFIX` (which github-proxy comma-splits back into
-    /// its poll-label list), `FKST_SESSION_WORK_LABEL`, and the
-    /// `fkst.chrono-ai.fun/work-label` pod annotation. A single-label session renders as
-    /// the bare label (no comma), byte-identical to the pre-multi-label value. Built via
-    /// [`crate::k8s::work_label_wire::join_work_labels`]; recovered on observe via
-    /// [`crate::k8s::work_label_wire::split_work_labels`].
+    /// I4) - the explicit `### Work Label` plus its packages' auto-declared labels.
+    /// Feeds the exact-admission `FKST_SESSION_WORK_LABEL` and the
+    /// `fkst.chrono-ai.fun/work-label` runtime correlation annotation. A single-label
+    /// session renders as the bare label (no comma), byte-identical to the pre-multi-
+    /// label value. Built via [`crate::k8s::work_label_wire::join_work_labels`];
+    /// recovered on observe via [`crate::k8s::work_label_wire::split_work_labels`].
     pub work_label: String,
     /// The bot login (`FKST_GITHUB_BOT_LOGIN` + git author/committer name).
     pub bot_login: String,
@@ -261,7 +266,10 @@ pub(crate) fn session_env_pairs(
         (GITHUB_BOT_LOGIN_ENV, spec.bot_login.clone()),
         (GITHUB_WRITE_ENV, GITHUB_WRITE_VALUE.to_string()),
         (GITHUB_CLAIM_MODE_ENV, GITHUB_CLAIM_MODE_VALUE.to_string()),
-        (GITHUB_PROXY_POLL_LABEL_PREFIX_ENV, spec.work_label.clone()),
+        (
+            GITHUB_PROXY_POLL_LABEL_PREFIX_ENV,
+            GITHUB_PROXY_POLL_LABEL_PREFIX_VALUE.to_string(),
+        ),
         (LLM_MODEL_ENV, config.llm_model.clone()),
         (LLM_BASE_URL_ENV, config.llm_base_url.clone()),
         (LLM_WIRE_API_ENV, config.llm_wire_api.clone()),
