@@ -22,5 +22,6 @@ end
 return saga.department(spec, {
   done = ensure_repo_done,
   act = act_ensure_repo,
+  wrap = devloop_logging.wrap_pipeline_failure,
   name = "ensure_repo",
 })

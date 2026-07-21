@@ -25,6 +25,22 @@ local function run_ensure(run_opts)
   }, run_opts or opts("ensure-repo"))
 end
 
+local ensure_repo_pipeline = nil
+
+local function run_ensure_inline()
+  local old_pipeline = pipeline
+  local module = require("departments.ensure_repo.main")
+  ensure_repo_pipeline = module.pipeline or pipeline or ensure_repo_pipeline
+  pipeline = old_pipeline
+  if type(ensure_repo_pipeline) ~= "function" then
+    error("github-devloop: ensure_repo department pipeline missing")
+  end
+  return ensure_repo_pipeline({
+    queue = "devloop_ensure_repo_tick",
+    payload = { schema = "github-devloop.ensure-repo-tick.v1" },
+  })
+end
+
 local function encode_json_string(value)
   return tostring(value or ""):gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n")
 end
@@ -369,11 +385,28 @@ return {
       stderr = "HTTP 422: Validation Failed (invalid color)\n",
       exit_code = 1,
     })
+    local captured = {}
+    local old_log = log
+    local function capture(message)
+      table.insert(captured, tostring(message))
+    end
+    log = {
+      error = capture,
+      info = capture,
+      warn = capture,
+    }
 
-    local result = run_ensure(opts("ensure-dashboard-other-422", { FKST_GITHUB_WRITE = "1" }))
+    local ok, err = pcall(run_ensure_inline)
+    log = old_log
 
-    t.is_true(result.exit_code ~= 0)
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("gh-command-failed", 1, true) ~= nil)
     t.eq(count_calls("gh api --method PATCH"), 0)
+    local failure = captured[#captured]
+    t.is_true(failure:find("github-devloop dept=ensure_repo proposal_id=unknown tag=FAILURE", 1, true) ~= nil)
+    t.is_true(failure:find("error_class=gh-command-failed", 1, true) ~= nil)
+    t.is_true(failure:find("fingerprint=", 1, true) ~= nil)
+    t.is_true(failure:find("queue=devloop_ensure_repo_tick", 1, true) ~= nil)
   end,
 
   test_fully_converged_repo_performs_zero_writes = function()
