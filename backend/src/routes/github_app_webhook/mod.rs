@@ -138,7 +138,7 @@ enum Handled {
         (status = 200, description = "Event handled (e.g. installation caches busted)"),
         (status = 202, description = "Event accepted (no action required)"),
         (status = 401, description = "Missing or mismatched webhook signature"),
-        (status = 503, description = "Webhook secret not configured")
+        (status = 503, description = "Webhook secret not configured, or this election-enabled replica is not the ready leader")
     )
 )]
 async fn webhook(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> StatusCode {
@@ -695,7 +695,7 @@ mod tests {
     // ---- Model B reconcile nudge (PR6) ---------------------------------------
 
     use crate::config::Config;
-    use crate::reconcile::{reconcile_channel, RepoKey};
+    use crate::reconcile::{reconcile_channel, ReconcileDispatcher, RepoKey};
     use tokio::sync::mpsc::Receiver;
 
     /// An `AppState` with a live reconcile queue (`github_app: None`, so the
@@ -708,7 +708,7 @@ mod tests {
             recovery: Default::default(),
             github_app: None,
             github_app_webhook_secret: None,
-            reconciler: Some(handle),
+            reconciler: Some(ReconcileDispatcher::from_handle(&handle)),
             session_backend: None,
             storage: None,
             log_registry: Default::default(),

@@ -6,7 +6,7 @@ use crate::config::Config;
 use crate::github_app::GithubAppTokens;
 use crate::log_access::LogAccessRegistry;
 use crate::log_bundle_cache::LogBundleCache;
-use crate::reconcile::ReconcileHandle;
+use crate::reconcile::ReconcileDispatcher;
 use crate::recovery::RecoveryMonitor;
 use crate::session_backend::SessionBackend;
 use crate::storage::ChronoStorageClient;
@@ -33,11 +33,11 @@ pub struct AppState {
     /// mounted. Held in a `SecretString` and never logged; the webhook handler
     /// uses it to verify `X-Hub-Signature-256` over the raw body before any parse.
     pub github_app_webhook_secret: Option<secrecy::SecretString>,
-    /// Model B reconcile queue handle (issue #359, PR5b): `Some` only when
-    /// `FKST_POD_DISPATCH` is on AND the reconciler spawned. The webhook will
-    /// enqueue repos through it at the PR6 flip; today nothing reads it (Model A
-    /// is unchanged), so it defaults to `None`.
-    pub reconciler: Option<ReconcileHandle>,
+    /// Dynamic Model B reconcile dispatcher: `Some` only when
+    /// `FKST_POD_DISPATCH` is on and the reconciler supervisor spawned. Webhook
+    /// hints forward to the current leader generation; followers have no active
+    /// queue and drop them because acquisition/full resync is authoritative.
+    pub reconciler: Option<ReconcileDispatcher>,
     /// The session runtime the env-validation REST path drives (issue #413): built
     /// ONCE at startup, UN-gated on pod dispatch so the `PUT` validate path stays
     /// available. `None` when the Kubernetes client could not be built — the validate

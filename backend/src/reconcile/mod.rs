@@ -200,19 +200,101 @@ impl ReconcileHandle {
     /// enqueue with a warning rather than blocking the caller (the periodic sweep +
     /// full-resync re-add it, so a dropped enqueue is at worst a bounded delay).
     pub fn enqueue(&self, key: RepoKey) {
-        match self.tx.try_send(key) {
-            Ok(()) => {}
-            Err(mpsc::error::TrySendError::Full(dropped)) => {
-                tracing::warn!(
-                    installation = dropped.0,
-                    owner = %dropped.1.owner,
-                    name = %dropped.1.name,
-                    "reconcile queue full; dropping enqueue (next sweep re-adds it)"
-                );
-            }
-            Err(mpsc::error::TrySendError::Closed(_)) => {
-                tracing::warn!("reconcile queue closed; enqueue dropped (loop stopped)");
-            }
+        enqueue_on(&self.tx, key);
+    }
+}
+
+#[derive(Default)]
+struct DispatchState {
+    next_generation: u64,
+    active: Option<(u64, mpsc::Sender<RepoKey>)>,
+}
+
+/// Process-local forwarding handle used by HTTP webhook producers. Followers
+/// have no active target and drop hints; every leader acquisition installs a
+/// fresh bounded queue. Correctness never depends on retained hints because the
+/// acquisition full resync and periodic resync rediscover authoritative state.
+#[derive(Clone, Default)]
+pub struct ReconcileDispatcher {
+    inner: std::sync::Arc<std::sync::Mutex<DispatchState>>,
+}
+
+impl ReconcileDispatcher {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Forward one hint only if this process currently owns a worker generation.
+    pub fn enqueue(&self, key: RepoKey) {
+        let target = self
+            .inner
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .active
+            .as_ref()
+            .map(|(_, tx)| tx.clone());
+        match target {
+            Some(tx) => enqueue_on(&tx, key),
+            None => tracing::debug!(
+                installation = key.0,
+                owner = %key.1.owner,
+                name = %key.1.name,
+                "reconcile hint dropped while this replica is not leader"
+            ),
+        }
+    }
+
+    /// Install a fresh leader queue and return its monotonic process-local id.
+    pub fn activate(&self, handle: &ReconcileHandle) -> u64 {
+        let mut state = self.inner.lock().unwrap_or_else(|error| error.into_inner());
+        state.next_generation = state.next_generation.saturating_add(1);
+        let generation = state.next_generation;
+        state.active = Some((generation, handle.tx.clone()));
+        generation
+    }
+
+    /// Remove only the generation that installed this target. A late cleanup from
+    /// an older task can never clear a newer acquisition's queue.
+    pub fn deactivate(&self, generation: u64) {
+        let mut state = self.inner.lock().unwrap_or_else(|error| error.into_inner());
+        if state
+            .active
+            .as_ref()
+            .is_some_and(|(active, _)| *active == generation)
+        {
+            state.active = None;
+        }
+    }
+
+    /// Stop forwarding immediately on leadership loss, before worker aborts join.
+    pub fn deactivate_current(&self) {
+        self.inner
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .active = None;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_handle(handle: &ReconcileHandle) -> Self {
+        let dispatcher = Self::new();
+        dispatcher.activate(handle);
+        dispatcher
+    }
+}
+
+fn enqueue_on(tx: &mpsc::Sender<RepoKey>, key: RepoKey) {
+    match tx.try_send(key) {
+        Ok(()) => {}
+        Err(mpsc::error::TrySendError::Full(dropped)) => {
+            tracing::warn!(
+                installation = dropped.0,
+                owner = %dropped.1.owner,
+                name = %dropped.1.name,
+                "reconcile queue full; dropping enqueue (next sweep re-adds it)"
+            );
+        }
+        Err(mpsc::error::TrySendError::Closed(_)) => {
+            tracing::warn!("reconcile queue closed; enqueue dropped (loop stopped)");
         }
     }
 }
@@ -263,5 +345,27 @@ mod mod_tests {
         drop(rx);
         // Must not panic — a closed channel is logged + dropped.
         handle.enqueue((7, repo()));
+    }
+
+    #[tokio::test]
+    async fn dispatcher_drops_as_follower_and_forwards_only_active_generation() {
+        let dispatcher = ReconcileDispatcher::new();
+        dispatcher.enqueue((1, repo()));
+
+        let (first, mut first_rx) = reconcile_channel(4);
+        let first_generation = dispatcher.activate(&first);
+        dispatcher.enqueue((2, repo()));
+        assert_eq!(first_rx.recv().await.expect("first").0, 2);
+
+        let (second, mut second_rx) = reconcile_channel(4);
+        let second_generation = dispatcher.activate(&second);
+        dispatcher.deactivate(first_generation);
+        dispatcher.enqueue((3, repo()));
+        assert_eq!(second_rx.recv().await.expect("second").0, 3);
+        assert!(first_rx.try_recv().is_err());
+
+        dispatcher.deactivate(second_generation);
+        dispatcher.enqueue((4, repo()));
+        assert!(second_rx.try_recv().is_err());
     }
 }

@@ -100,7 +100,7 @@ pub(super) async fn classify_and_enqueue(state: &AppState, body: &[u8]) -> Resul
 mod tests {
     use super::*;
     use crate::config::Config;
-    use crate::reconcile::{reconcile_channel, ReconcileHandle};
+    use crate::reconcile::{reconcile_channel, ReconcileDispatcher, ReconcileHandle};
 
     fn issues_body(action: &str) -> Vec<u8> {
         serde_json::to_vec(&serde_json::json!({
@@ -118,7 +118,7 @@ mod tests {
             recovery: Default::default(),
             github_app: None,
             github_app_webhook_secret: None,
-            reconciler,
+            reconciler: reconciler.map(|handle| ReconcileDispatcher::from_handle(&handle)),
             session_backend: None,
             storage: None,
             log_registry: Default::default(),

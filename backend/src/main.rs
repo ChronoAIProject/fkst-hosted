@@ -18,11 +18,12 @@ use fkst_control_plane::github_app::HttpGithubListing;
 use fkst_control_plane::osb_config::OpensandboxConfig;
 use fkst_control_plane::reconcile::{
     reconcile_channel, run_full_resync_loop, run_reconcile_loop, run_sweep_loop, ReconcileCtx,
-    ReconcileHandle,
+    ReconcileDispatcher,
 };
 use fkst_control_plane::recovery::RecoveryMonitor;
 use fkst_control_plane::router::build_router;
 use fkst_control_plane::state::AppState;
+use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -203,11 +204,8 @@ async fn main() -> ExitCode {
         }
     };
 
-    // Capture what the post-router background loops need BEFORE `config` moves
-    // into `AppState`. The env-validation GC sweep (below) needs its own copy of
-    // the namespace + the validation deadline; the reconciler gate reads dispatch.
+    // Capture the reconciler gate before `config` moves into `AppState`.
     let pod_dispatch = config.pod.dispatch;
-    let sweep_deadline = config.env.validate_deadline_secs;
 
     // The shared `session_id -> log-access context` registry the reconciler writes
     // each sweep and the log-download endpoint reads. Built here so ONE registry is
@@ -273,9 +271,6 @@ async fn main() -> ExitCode {
         recovery.mark_unavailable();
     }
 
-    // Clone the backend for the GC sweep (spawned after the router build consumes it).
-    let sweep_backend = session_backend.clone();
-
     let app = match build_router(AppState {
         config,
         recovery,
@@ -294,28 +289,6 @@ async fn main() -> ExitCode {
         }
     };
     tracing::info!("router built");
-
-    // Pod-per-session: spawn the env-validation GC sweep. A validation pod is a
-    // bare Pod (no `ttlSecondsAfterFinished`), so a control-plane crash mid-run
-    // can orphan one; this periodic sweep reaps any older than the deadline. Only
-    // when dispatch is on and a cluster is reachable (mirrors the watcher above).
-    if pod_dispatch {
-        match sweep_backend {
-            Some(backend) => {
-                // Sweep at least once per deadline window, never faster than 30s.
-                let interval = std::time::Duration::from_secs(
-                    u64::try_from(sweep_deadline).unwrap_or(300).max(30),
-                );
-                tokio::spawn(async move {
-                    fkst_control_plane::k8s::env_validator::run_sweep_loop(backend, interval).await;
-                });
-                tracing::info!("env-validation gc sweep spawned");
-            }
-            None => tracing::warn!(
-                "pod dispatch on but kubernetes client unavailable; env-validation gc sweep not started"
-            ),
-        }
-    }
 
     // 6. Bind and serve with graceful shutdown.
     let listener = match tokio::net::TcpListener::bind(&addr).await {
@@ -493,7 +466,7 @@ async fn spawn_reconciler(
     initialized_env_store: Option<
         Arc<dyn fkst_control_plane::environment_profile::EnvironmentProfileStore>,
     >,
-) -> Option<ReconcileHandle> {
+) -> Option<ReconcileDispatcher> {
     let Some(github) = github_app else {
         tracing::warn!("pod dispatch on but github app not configured; reconciler not started");
         return None;
@@ -519,13 +492,14 @@ async fn spawn_reconciler(
     };
     // The read-side listing transport + the unauthenticated reachability probe
     // client both target the configured GitHub REST base.
-    let listing = match HttpGithubListing::new(&config.github_api_base_url) {
-        Ok(listing) => Arc::new(listing),
-        Err(error) => {
-            tracing::warn!(error = %error, "reconciler listing transport build failed; reconciler not started");
-            return None;
-        }
-    };
+    let listing: Arc<dyn fkst_control_plane::github_app::GithubListing> =
+        match HttpGithubListing::new(&config.github_api_base_url) {
+            Ok(listing) => Arc::new(listing),
+            Err(error) => {
+                tracing::warn!(error = %error, "reconciler listing transport build failed; reconciler not started");
+                return None;
+            }
+        };
     let http = match reqwest::Client::builder()
         .user_agent("fkst-hosted-api")
         .build()
@@ -537,7 +511,7 @@ async fn spawn_reconciler(
         }
     };
 
-    let ctx = ReconcileCtx {
+    let mut factory = ReconcileWorkerFactory {
         backend,
         // The initialized durable store (or the legacy namespace-local fallback)
         // the spawn pre-flight reads.
@@ -546,58 +520,233 @@ async fn spawn_reconciler(
         listing,
         http,
         config: config.clone(),
-        active_repos: fkst_control_plane::reconcile::new_active_repos(),
-        ensured_templates: fkst_control_plane::reconcile::new_ensured_templates(),
         log_registry,
+        routing: None,
     };
+    let dispatcher = ReconcileDispatcher::new();
 
+    if config.leader.enabled {
+        let kube = match fkst_control_plane::k8s::KubeClient::from_inferred(&config.pod.namespace)
+            .await
+        {
+            Ok(kube) => kube,
+            Err(error) => {
+                tracing::warn!(error = %error, "leader election kubernetes client unavailable; reconciler not started");
+                return None;
+            }
+        };
+        let leadership = match fkst_control_plane::leader_election::spawn_leader_election(
+            kube.client().clone(),
+            &config.pod.namespace,
+            config.leader.clone(),
+            recovery.clone(),
+        ) {
+            Ok(leadership) => leadership,
+            Err(error) => {
+                tracing::warn!(error = %error, "leader election could not start; reconciler not started");
+                return None;
+            }
+        };
+        let Some(identity) = config.leader.identity.clone() else {
+            tracing::error!("validated leader identity is unexpectedly absent");
+            return None;
+        };
+        factory.routing = Some(
+            fkst_control_plane::leader_routing::LeaderServiceRouter::new(
+                kube.client().clone(),
+                &config.pod.namespace,
+                identity,
+            ),
+        );
+        let follower_dispatcher = dispatcher.clone();
+        let generation_dispatcher = dispatcher.clone();
+        let generation_recovery = recovery.clone();
+        let terminal_recovery = recovery.clone();
+        tokio::spawn(async move {
+            fkst_control_plane::leader_election::supervise_leader_generations(
+                leadership,
+                move || follower_dispatcher.deactivate_current(),
+                move |cancellation| {
+                    run_worker_generation(
+                        factory.clone(),
+                        generation_dispatcher.clone(),
+                        generation_recovery.clone(),
+                        cancellation,
+                    )
+                },
+            )
+            .await;
+            terminal_recovery.mark_unavailable();
+            tracing::error!("leader election task stopped; reconciler disabled");
+        });
+        tracing::info!("model B reconciler waiting for Lease leadership");
+    } else {
+        tokio::spawn(run_worker_generation(
+            factory,
+            dispatcher.clone(),
+            recovery,
+            CancellationToken::new(),
+        ));
+        tracing::info!("model B reconciler spawned in single-process mode");
+    }
+
+    Some(dispatcher)
+}
+
+/// Immutable dependencies shared across acquisitions. Queue state, active repos,
+/// and template gates are deliberately rebuilt for every leader generation.
+#[derive(Clone)]
+struct ReconcileWorkerFactory {
+    backend: Arc<dyn fkst_control_plane::session_backend::SessionBackend>,
+    env_store: Arc<dyn fkst_control_plane::environment_profile::EnvironmentProfileStore>,
+    github: fkst_control_plane::github_app::GithubAppTokens,
+    listing: Arc<dyn fkst_control_plane::github_app::GithubListing>,
+    http: reqwest::Client,
+    config: Config,
+    log_registry: fkst_control_plane::log_access::LogAccessRegistry,
+    routing: Option<fkst_control_plane::leader_routing::LeaderServiceRouter>,
+}
+
+impl ReconcileWorkerFactory {
+    fn context(&self) -> ReconcileCtx {
+        ReconcileCtx {
+            backend: self.backend.clone(),
+            env_store: self.env_store.clone(),
+            github: self.github.clone(),
+            listing: self.listing.clone(),
+            http: self.http.clone(),
+            config: self.config.clone(),
+            active_repos: fkst_control_plane::reconcile::new_active_repos(),
+            ensured_templates: fkst_control_plane::reconcile::new_ensured_templates(),
+            log_registry: self.log_registry.clone(),
+        }
+    }
+}
+
+/// Run all mutation-capable loops as one ownership lifetime. Cancellation aborts
+/// every task before this future returns. A remote GitHub/runtime request already
+/// accepted before cancellation cannot be rolled back; deterministic runtime ids,
+/// GitHub CAS operations, and durable latch labels are the failover backstops.
+async fn run_worker_generation(
+    factory: ReconcileWorkerFactory,
+    dispatcher: ReconcileDispatcher,
+    recovery: RecoveryMonitor,
+    cancellation: CancellationToken,
+) {
+    let ctx = factory.context();
     let (handle, rx) = reconcile_channel(1024);
+    let generation = dispatcher.activate(&handle);
+    let mut tasks = tokio::task::JoinSet::new();
 
-    // Consumer: one serial reconcile worker draining the queue.
     let consumer_ctx = ctx.clone();
-    tokio::spawn(async move { run_reconcile_loop(rx, consumer_ctx).await });
-    // Producer 1: the periodic pod sweep.
+    tasks.spawn(async move { run_reconcile_loop(rx, consumer_ctx).await });
+
     let sweep_ctx = ctx.clone();
     let sweep_handle = handle.clone();
-    tokio::spawn(async move { run_sweep_loop(sweep_ctx, sweep_handle).await });
-    // Producer 2: the periodic full resync (installations -> repos).
+    tasks.spawn(async move { run_sweep_loop(sweep_ctx, sweep_handle).await });
+
     let resync_ctx = ctx.clone();
     let resync_handle = handle.clone();
-    tokio::spawn(async move { run_full_resync_loop(resync_ctx, resync_handle, recovery).await });
-    // The in-place per-session token rotation loop (drives the fleet through the backend).
-    let rot_backend = ctx.backend.clone();
-    let rot_github = ctx.github.clone();
-    let rot_cfg = ctx.config.reconcile.clone();
-    let rot_handle = handle.clone();
-    tokio::spawn(async move {
+    let resync_recovery = recovery.clone();
+    tasks.spawn(
+        async move { run_full_resync_loop(resync_ctx, resync_handle, resync_recovery).await },
+    );
+
+    let rotation_backend = ctx.backend.clone();
+    let rotation_github = ctx.github.clone();
+    let rotation_config = ctx.config.reconcile.clone();
+    let rotation_handle = handle.clone();
+    tasks.spawn(async move {
         fkst_control_plane::k8s::run_token_rotation_loop(
-            rot_backend,
-            rot_github,
-            rot_cfg,
-            rot_handle,
+            rotation_backend,
+            rotation_github,
+            rotation_config,
+            rotation_handle,
         )
         .await
     });
-    // The package-agnostic session-health scrape loop (pod status + framework log
-    // severity → flag/clear the degraded label on the trigger issue).
+
     let health_backend = ctx.backend.clone();
     let health_github = ctx.github.clone();
-    let health_cfg = ctx.config.reconcile.clone();
+    let health_config = ctx.config.reconcile.clone();
     let health_handle = handle.clone();
-    tokio::spawn(async move {
+    tasks.spawn(async move {
         fkst_control_plane::k8s::run_health_scrape_loop(
             health_backend,
             health_github,
-            health_cfg,
+            health_config,
             health_handle,
         )
         .await
     });
 
-    tracing::info!(
-        "model B reconciler spawned (reconcile + sweep + full-resync + token rotation + health scrape)"
+    let validation_backend = ctx.backend.clone();
+    let validation_interval = Duration::from_secs(
+        u64::try_from(ctx.config.env.validate_deadline_secs)
+            .unwrap_or(300)
+            .max(30),
     );
-    Some(handle)
+    tasks.spawn(async move {
+        fkst_control_plane::k8s::env_validator::run_sweep_loop(
+            validation_backend,
+            validation_interval,
+        )
+        .await
+    });
+
+    if let Some(routing) = factory.routing.clone() {
+        let routing_recovery = recovery.clone();
+        let routing_interval = Duration::from_secs(factory.config.leader.retry_period_secs.max(1));
+        tasks.spawn(async move {
+            run_leader_routing_loop(routing, routing_recovery, routing_interval).await
+        });
+    }
+
+    tracing::info!(
+        generation,
+        "leader worker generation started (reconcile, sweep, full-resync, token rotation, health scrape, validation gc)"
+    );
+    tokio::select! {
+        _ = cancellation.cancelled() => {
+            tracing::info!(generation, "leader worker generation cancellation received");
+        }
+        result = tasks.join_next() => {
+            recovery.mark_unavailable();
+            tracing::error!(generation, ?result, "leader worker task exited unexpectedly");
+        }
+    }
+
+    dispatcher.deactivate(generation);
+    tasks.abort_all();
+    while tasks.join_next().await.is_some() {}
+    if let Some(routing) = factory.routing {
+        recovery.record_leader_routing(false);
+        if let Err(error) = routing.reconcile(false).await {
+            recovery.record_leader_routing_failure();
+            tracing::warn!(generation, error = %error, "leader Service routing withdrawal failed");
+        }
+    }
+    tracing::info!(generation, "leader worker generation stopped");
+}
+
+async fn run_leader_routing_loop(
+    routing: fkst_control_plane::leader_routing::LeaderServiceRouter,
+    recovery: RecoveryMonitor,
+    interval: Duration,
+) {
+    let mut ticker = tokio::time::interval(interval);
+    loop {
+        ticker.tick().await;
+        let snapshot = recovery.snapshot();
+        let publish = snapshot.leader && snapshot.leader_ready && !snapshot.degraded;
+        match routing.reconcile(publish).await {
+            Ok(()) => recovery.record_leader_routing(publish),
+            Err(error) => {
+                recovery.record_leader_routing_failure();
+                tracing::warn!(error = %error, publish, "leader Service routing reconcile failed");
+            }
+        }
+    }
 }
 
 /// Resolve when either SIGTERM (how Kubernetes terminates pods) or Ctrl-C
