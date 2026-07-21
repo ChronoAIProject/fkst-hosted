@@ -1,18 +1,7 @@
-import type { FieldKey, GrammarKey, SignalKey, StepId, FlowKey, MentalKey } from './literals';
+import type { FieldKey, GrammarKey, SignalKey, StepId } from './literals';
 import type { SessionHealth, SessionPhase, WorkItemState } from '@/lib/api/derive';
 
 export type Lang = 'en' | 'zh';
-
-export interface TermCard {
-  term: string;
-  is: string;
-  control: string;
-}
-
-export interface FlowStep {
-  label: string;
-  sub: string;
-}
 
 export interface TitleBody {
   title: string;
@@ -33,10 +22,8 @@ export interface LifecycleCard {
  */
 export interface SiteContent {
   nav: {
-    introduction: string;
-    getStarted: string;
+    home: string;
     dashboard: string;
-    getStartedCta: string;
     homeAria: string;
     /** Authenticated-only topbar entry opening the environments manager. */
     environments: string;
@@ -54,7 +41,6 @@ export interface SiteContent {
   };
   footer: {
     tagline: string;
-    getStarted: string;
     github: string;
     manual: string;
   };
@@ -529,27 +515,20 @@ export interface SiteContent {
       downloadAria: string;
     };
   };
+  /** The v2 landing: a single-viewport centered hero (no scrolling sections). */
   intro: {
     metaTitle: string;
     eyebrow: string;
-    heroTitle: string;
-    heroLede: string; // rendered right after the FKST wordmark
+    /** Hero headline, two stacked lines: fg-gradient top + accent-gradient bottom. */
+    heroTitleTop: string;
+    heroTitleAccent: string;
+    heroLede: string;
     ctaStart: string;
     ctaManual: string;
-    whatIsEyebrow: string;
-    whatIsTitle: string;
-    whatIsBody: string[];
-    thesis: string;
-    mentalEyebrow: string;
-    mental: Record<MentalKey, TermCard>;
-    providesEyebrow: string;
-    providesTitle: string;
-    features: TitleBody[];
-    flowEyebrow: string;
-    flow: Record<FlowKey, FlowStep>;
-    ctaTitle: string;
-    ctaBody: string;
-    ctaButton: string;
+    /** The decorative flow-line under the CTAs (aria-hidden, still localized). */
+    pipeTrigger: string;
+    pipeSession: string;
+    pipeWork: string;
   };
   gs: {
     metaTitle: string;

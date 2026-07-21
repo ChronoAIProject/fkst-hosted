@@ -13,7 +13,6 @@ export const common: CommonSlice = {
   },
   footer: {
     tagline: '· ChronoAI 托管云',
-    getStarted: '快速开始',
     github: 'GitHub',
     manual: '操作手册',
   },
@@ -26,7 +25,7 @@ export const common: CommonSlice = {
     notFoundEyebrow: '错误 404',
     notFoundTitle: '此页面不存在',
     notFoundBody: '`{path}` 没有对应的路由。它可能已被移动，或链接输入有误。',
-    notFoundHome: '返回介绍页 →',
+    notFoundHome: '返回首页 →',
     notFoundMetaTitle: 'FKST — 页面未找到',
     toastDismiss: '关闭',
   },

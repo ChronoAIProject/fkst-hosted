@@ -5,78 +5,16 @@ import type { PagesSlice } from '../slices';
 export const pages: PagesSlice = {
   intro: {
     metaTitle: 'FKST — 托管式自主编码会话',
-    eyebrow: 'ChronoAI · fkst-hosted',
-    heroTitle: '完全由 GitHub issue 驱动的自主编码会话。',
+    eyebrow: 'ChronoAI',
+    heroTitleTop: '开一个 issue，',
+    heroTitleAccent: '得到一个拉取请求。',
     heroLede:
-      'hosted 是 ChronoAI 为 fkst 引擎提供的托管云。开一个 issue 即可启动一个长期运行的编码 agent，用更多 issue 排队任务，它会为每个任务提交一个拉取请求（PR）。无需运维任何基础设施，也无需学习任何控制台。',
-    ctaStart: '开始使用 →',
-    ctaManual: '阅读操作手册 ↗',
-    whatIsEyebrow: '什么是 FKST',
-    whatIsTitle: '一个面向自主、由 package 驱动的编码 agent 的引擎 —— 以服务的形式为你运行。',
-    whatIsBody: [
-      '**fkst** 是一个运行自主编码 agent 的引擎（fkst-substrate）。它的行为来自 **package** —— 引擎加载并针对某个 GitHub 仓库运行的小型软件包。',
-      '**fkst-hosted** 以 ChronoAI 云服务的形式为你运行该引擎。这里没有控制台，也没有需要你手动调用的 REST API —— 整个控制面就是 GitHub issue。你通过开 issue 来启动会话，用更多 issue 排队工作，并通过关闭 issue 来停止它。',
-    ],
-    thesis:
-      '一个触发 issue = 一个会话。开着的、带有工作标签的 issue = 该会话处理的队列，每一个都会形成独立的拉取请求。',
-    mentalEyebrow: '心智模型',
-    mental: {
-      session: {
-        term: '会话（Session）',
-        is: '一个长期运行的编码 agent —— 即单个 Kubernetes Pod。',
-        control: '你通过开启或关闭一个触发 issue 来控制它。',
-      },
-      trigger: {
-        term: '触发 issue',
-        is: '会话的声明：它的名称、package 和工作标签。',
-        control: '一个打了 `fkst-substrate-trigger` 标签的 GitHub issue。',
-      },
-      work: {
-        term: '工作项（Work item）',
-        is: '交给会话处理的一个任务 —— 它会形成一个拉取请求。',
-        control: '任意带有该会话工作标签的 issue。',
-      },
-    },
-    providesEyebrow: '托管服务提供什么',
-    providesTitle: '为引擎提供一个托管的家 —— 你带来意图，它带来基础设施。',
-    features: [
-      {
-        title: 'Kubernetes 上的托管引擎',
-        body: '每个运行中的会话一个 Pod，自动置备、自动清理。无需你自己运行、修补或扩缩容任何集群。',
-      },
-      {
-        title: '原生于 GitHub 的操控',
-        body: '完全通过 issue 启动、排队、观察和停止会话。进展会以评论和标签的形式回写到同一批 issue 上。',
-      },
-      {
-        title: '每个任务一个拉取请求',
-        body: '每个工作项都会形成独立的 PR。开启自动合并后，完成的工作会落到你的默认分支并自动关闭。',
-      },
-      {
-        title: '空闲归零，自动复活',
-        body: '没有待处理工作时，会话进入空闲、其 Pod 被回收。开一个新的工作 issue，它便自行重新启动 —— 同一会话，无需重新配置。',
-      },
-      {
-        title: '脱敏日志，按身份鉴权',
-        body: '每个会话都会把脱敏日志流式写入存储。仅触发者、允许列表成员或管理员可从按身份鉴权的端点下载。',
-      },
-      {
-        title: '从设计上确保安全',
-        body: '已注册的配置被冻结，密钥绝不出现在 issue 中 —— 你选择一个预置的环境配置，具体取值在带外提供。',
-      },
-    ],
-    flowEyebrow: '流程如何运转',
-    flow: {
-      trigger: { label: '触发 issue', sub: '声明一个会话' },
-      session: { label: '会话', sub: '一个 K8s Pod' },
-      work: { label: '工作 issue', sub: '队列' },
-      pr: { label: '每任务一个 PR', sub: '独立变更' },
-      merge: { label: '合并', sub: '可选自动合并' },
-    },
-    ctaTitle: '开一个 issue，得到一个拉取请求。',
-    ctaBody:
-      '安装 GitHub App，开一个触发 issue，排入你的第一个任务。它会在一个轮询周期内完成协调 —— 是数秒级，而非即时。',
-    ctaButton: '开始使用 →',
+      'FKST 运行完全由 GitHub issue 驱动的长期编码 agent。无需运维任何基础设施，也没有任何学习成本。',
+    ctaStart: '开始使用',
+    ctaManual: '操作手册 →',
+    pipeTrigger: '触发 issue',
+    pipeSession: '运行中的会话',
+    pipeWork: '每任务一个 PR',
   },
   gs: {
     metaTitle: 'FKST — 快速开始',

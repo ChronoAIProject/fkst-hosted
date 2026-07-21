@@ -191,6 +191,31 @@
   animation: dot-blink 1.2s ease-in-out infinite;
 }
 
+/* Traveling dot on the landing hero's flow-line: crosses the 44px connector
+   and fades at both ends; a phase offset on the second connector makes the
+   two alternate. Purely decorative (the flow-line is aria-hidden). */
+@keyframes beam-dot {
+  0% {
+    transform: translateX(-2px);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(38px);
+    opacity: 0;
+  }
+}
+
+.anim-beam-dot {
+  animation: beam-dot 2.4s linear infinite;
+  opacity: 0;
+}
+
 /* Small rotating ring marking an in-flight refresh (e.g. the overview
    Refresh button). Under reduced motion the accompanying text state
    ("Refreshing…") carries the information alone. */
@@ -453,6 +478,7 @@
   .anim-repo-pulse,
   .anim-node-glow,
   .anim-dot-blink,
+  .anim-beam-dot,
   .anim-spin {
     animation: none;
   }

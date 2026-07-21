@@ -1,10 +1,8 @@
 import type { NavSlice } from '../slices';
 
 export const nav: NavSlice = {
-  introduction: 'Introduction',
-  getStarted: 'Get Started',
+  home: 'Home',
   dashboard: 'Dashboard',
-  getStartedCta: 'Get started →',
   homeAria: 'FKST — home',
   environments: 'Environments',
   menuAria: 'More',
