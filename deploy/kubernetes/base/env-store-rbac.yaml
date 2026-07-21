@@ -1,0 +1,35 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: fkst-control-plane-envstore
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/name: fkst-control-plane
+    app.kubernetes.io/part-of: fkst-hosted
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["create", "get", "list", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log", "pods/status"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: fkst-control-plane-envstore
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/name: fkst-control-plane
+    app.kubernetes.io/part-of: fkst-hosted
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: fkst-control-plane-envstore
+subjects:
+  - kind: ServiceAccount
+    name: fkst-ksa
+    namespace: chronoai-fkst

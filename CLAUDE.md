@@ -1322,62 +1322,24 @@ install commands in a throwaway, hard-isolated **validation Pod** the backend
 creates directly (`backend/src/k8s/env_validator.rs` →
 `backend/src/session_backend/k8s/validation.rs`) — this is independent of
 `FKST_POD_MODE`, so it happens even in opensandbox mode. So `fkst-ksa` needs this
-Role — least-privilege verbs on secrets + configmaps (the store) **plus `pods` +
-`pods/log`** (validation-pod create/status/logs/delete + the crash-recovery GC
-sweep). Session pods remain the opensandbox server's job — the backend never
-creates *those* — but the env-validation pod is the one exception where the
-control plane touches Pods directly. **Without the pod rules, the first
+Role — least-privilege verbs on secrets + configmaps (the store) **plus `pods`,
+`pods/log`, and `pods/status`** (validation-pod create/status/logs/delete + the
+crash-recovery GC sweep). Session pods remain the opensandbox server's job — the
+backend never creates *those* — but the env-validation pod is the one exception
+where the control plane touches Pods directly. **Without the pod rules, the first
 `PUT /environment-profiles` (i.e. any "New environment" from the UI) fails with
 `pods is forbidden`:**
 
 ```bash
-cat > "$OSB_LOCAL/manifests/fkst-envstore-rbac.yaml" <<'EOF'
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: fkst-control-plane-envstore
-  namespace: chronoai-fkst
-  labels:
-    app.kubernetes.io/part-of: fkst-hosted
-rules:
-  # Named-environment store — secret values (`fkst-env-<id>-<name>` Secrets).
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["create", "get", "list", "update", "delete"]
-  # Named-environment store — install commands + non-secret variables
-  # (`fkst-env-<id>-<name>` ConfigMaps) + each validation Pod's spec ConfigMap.
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    verbs: ["create", "get", "list", "update", "delete"]
-  # Environment-profile validation Pods (throwaway, owner-referenced for GC):
-  # create the pod, poll its status, read its install output, delete it, and
-  # list+reap orphans a crashed control plane left behind.
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["create", "get", "list", "delete"]
-  # Read the validation pod's logs to surface the failed install command's stderr.
-  - apiGroups: [""]
-    resources: ["pods/log"]
-    verbs: ["get"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: fkst-control-plane-envstore
-  namespace: chronoai-fkst
-  labels:
-    app.kubernetes.io/part-of: fkst-hosted
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: fkst-control-plane-envstore
-subjects:
-  - kind: ServiceAccount
-    name: fkst-ksa
-    namespace: chronoai-fkst
-EOF
-kubectl apply -f "$OSB_LOCAL/manifests/fkst-envstore-rbac.yaml"
+kubectl --context kind-opensandbox-local apply \
+  -f "$FKST_REPO/deploy/kubernetes/base/env-store-rbac.yaml"
+"$FKST_REPO/deploy/kubernetes/verify-envstore-rbac.sh" \
+  --context kind-opensandbox-local
 ```
+
+The checked-in manifest is the canonical RBAC source. The verifier requires an
+explicit context, checks every required grant, and also proves representative
+write/escalation verbs stay denied.
 
 #### 14.6 ConfigMap
 
@@ -1915,8 +1877,10 @@ warning — that's the §16.2 mkcert CA at work). With the GitHub App configured
 **3. Env-store RBAC actually grants what the backend needs:**
 
 ```bash
-kubectl auth can-i create secrets --as=system:serviceaccount:chronoai-fkst:fkst-ksa -n chronoai-fkst   # yes
-kubectl auth can-i create pods    --as=system:serviceaccount:chronoai-fkst:fkst-ksa -n chronoai-fkst   # no (by design)
+"$FKST_REPO/deploy/kubernetes/verify-envstore-rbac.sh" \
+  --context kind-opensandbox-local
+# Includes: create secrets = yes; create validation pods = yes;
+# pods/status get = yes; pod update/patch/watch = no.
 ```
 
 **4. Full end-to-end smoke (needs the App installed on a test repo):** open an
@@ -1979,7 +1943,6 @@ opensandbox-local/
 ├── manifests/
 │   ├── batchsandbox-template-configmap.yaml  # §8.1
 │   ├── fkst-guardrails.yaml                  # §8.2
-│   ├── fkst-envstore-rbac.yaml               # §14.5
 │   ├── fkst-control-plane-config.yaml        # §14.6
 │   ├── fkst-control-plane.yaml               # §14.8 — Deployment + Service
 │   ├── fkst-frontend.yaml                    # §15  — Deployment + Service
