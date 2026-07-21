@@ -4,7 +4,10 @@
 require "set"
 require "yaml"
 
-abort "usage: #{$PROGRAM_NAME} RENDERED_YAML" unless ARGV.length == 1
+abort "usage: #{$PROGRAM_NAME} RENDERED_YAML [steady|migration]" unless (1..2).cover?(ARGV.length)
+
+mode = ARGV.fetch(1, "steady")
+abort "render mode must be steady or migration" unless %w[steady migration].include?(mode)
 
 documents = YAML.load_stream(File.read(ARGV.fetch(0))).compact
 abort "render contains no Kubernetes objects" if documents.empty?
@@ -63,10 +66,98 @@ required = [
 missing = required.reject { |key| index.key?(key) }
 abort "render is missing required objects: #{missing.map { |key| key.join('/') }.join(', ')}" unless missing.empty?
 
+config = index.fetch(["ConfigMap", "chronoai-fkst", "fkst-control-plane-config"])
+config_data = config["data"] || {}
+durable_namespace = config_data["FKST_ENV_STORE_NAMESPACE"].to_s.strip
+abort "FKST_ENV_STORE_NAMESPACE must select a durable namespace" if durable_namespace.empty?
+abort "durable environment store must be outside chronoai-fkst" if durable_namespace == "chronoai-fkst"
+abort "environment-store key material must not be rendered in a ConfigMap" if config_data.key?("FKST_ENV_STORE_ENCRYPTION_KEY") || config_data.key?("FKST_ENV_STORE_ENCRYPTION_KEY_FILE")
+
+durable_required = [
+  ["Namespace", "", durable_namespace],
+  ["Role", durable_namespace, "fkst-control-plane-durable-envstore"],
+  ["RoleBinding", durable_namespace, "fkst-control-plane-durable-envstore"]
+]
+durable_missing = durable_required.reject { |key| index.key?(key) }
+abort "render is missing durable-store objects: #{durable_missing.map { |key| key.join('/') }.join(', ')}" unless durable_missing.empty?
+
+legacy_namespace = config_data["FKST_ENV_STORE_LEGACY_NAMESPACE"].to_s.strip
+migration_role_key = ["Role", "chronoai-fkst", "fkst-control-plane-envstore-migration"]
+migration_binding_key = ["RoleBinding", "chronoai-fkst", "fkst-control-plane-envstore-migration"]
+if mode == "migration"
+  abort "migration render must select chronoai-fkst as the legacy namespace" unless legacy_namespace == "chronoai-fkst"
+  abort "migration render is missing temporary RBAC" unless index.key?(migration_role_key) && index.key?(migration_binding_key)
+else
+  abort "steady render must not select a legacy namespace" unless legacy_namespace.empty?
+  abort "steady render contains temporary migration RBAC" if index.key?(migration_role_key) || index.key?(migration_binding_key)
+end
+
 namespace = index.fetch(["Namespace", "", "chronoai-fkst"])
 labels = namespace.dig("metadata", "labels") || {}
 abort "namespace must enforce baseline Pod Security" unless labels["pod-security.kubernetes.io/enforce"] == "baseline"
 abort "namespace must audit restricted Pod Security" unless labels["pod-security.kubernetes.io/audit"] == "restricted"
+
+durable = index.fetch(["Namespace", "", durable_namespace])
+durable_labels = durable.dig("metadata", "labels") || {}
+abort "durable namespace must declare the external durability boundary" unless durable_labels["fkst.chronoai.io/durability-boundary"] == "external"
+
+expected_application_rules = [
+  {
+    "apiGroups" => [""],
+    "resources" => ["pods"],
+    "verbs" => %w[create get list delete]
+  },
+  {
+    "apiGroups" => [""],
+    "resources" => ["pods/log", "pods/status"],
+    "verbs" => ["get"]
+  }
+]
+application_role = index.fetch(["Role", "chronoai-fkst", "fkst-control-plane-envstore"])
+abort "application env-store Role must contain only validation-Pod permissions" unless application_role["rules"] == expected_application_rules
+
+expected_durable_rules = [
+  {
+    "apiGroups" => [""],
+    "resources" => ["secrets"],
+    "verbs" => %w[create get list update delete]
+  }
+]
+durable_role = index.fetch(["Role", durable_namespace, "fkst-control-plane-durable-envstore"])
+abort "durable env-store Role must contain exact Secret CRUD permissions" unless durable_role["rules"] == expected_durable_rules
+
+expected_role_ref = {
+  "apiGroup" => "rbac.authorization.k8s.io",
+  "kind" => "Role",
+  "name" => "fkst-control-plane-durable-envstore"
+}
+expected_subjects = [
+  {
+    "kind" => "ServiceAccount",
+    "name" => "fkst-ksa",
+    "namespace" => "chronoai-fkst"
+  }
+]
+durable_binding = index.fetch(["RoleBinding", durable_namespace, "fkst-control-plane-durable-envstore"])
+abort "durable env-store RoleBinding roleRef drifted" unless durable_binding["roleRef"] == expected_role_ref
+abort "durable env-store RoleBinding subject drifted" unless durable_binding["subjects"] == expected_subjects
+
+if mode == "migration"
+  expected_migration_rules = [
+    {
+      "apiGroups" => [""],
+      "resources" => ["configmaps", "secrets"],
+      "verbs" => %w[get list delete]
+    }
+  ]
+  migration_role = index.fetch(migration_role_key)
+  abort "migration Role must contain exact legacy read/delete permissions" unless migration_role["rules"] == expected_migration_rules
+
+  expected_migration_ref = expected_role_ref.merge("name" => "fkst-control-plane-envstore-migration")
+  migration_binding = index.fetch(migration_binding_key)
+  abort "migration RoleBinding roleRef drifted" unless migration_binding["roleRef"] == expected_migration_ref
+  abort "migration RoleBinding subject drifted" unless migration_binding["subjects"] == expected_subjects
+end
 
 sandbox_runner = index.fetch(["ServiceAccount", "chronoai-fkst", "sandbox-runner"])
 abort "sandbox-runner must not mount an API token" unless sandbox_runner["automountServiceAccountToken"] == false
@@ -106,4 +197,4 @@ secret_signatures = [
 ]
 abort "render appears to contain credential material" if secret_signatures.any? { |pattern| rendered.match?(pattern) }
 
-puts "validated #{objects.length} rendered Kubernetes objects (secret values absent)"
+puts "validated #{objects.length} #{mode} Kubernetes objects (secret values absent)"
