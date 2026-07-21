@@ -15,11 +15,9 @@ spec:
     name: opensandbox-fkst-api-key
     creationPolicy: Orphan
     deletionPolicy: Retain
-  data:
-    - secretKey: opensandbox-fkst-api-key
-      remoteRef:
+  dataFrom:
+    - extract:
         key: fkst-opensandbox-tenant
-        property: opensandbox-fkst-api-key
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -38,8 +36,6 @@ spec:
     name: opensandbox-api-key
     creationPolicy: Orphan
     deletionPolicy: Retain
-  data:
-    - secretKey: opensandbox-fkst-api-key
-      remoteRef:
+  dataFrom:
+    - extract:
         key: fkst-opensandbox-tenant
-        property: opensandbox-fkst-api-key
