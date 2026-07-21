@@ -19,9 +19,9 @@ import { cn } from '@/lib/utils';
 // (nominal categories → ONE hue per chart, no legend), thin marks (12px, softly
 // rounded caps), hairline solid grid, values direct-labeled at every bar tip in
 // text tokens (never the series color). Marks are filled with the brand accent
-// gradient (amber→gold / green→green-gold, see ChartDefs) and lifted with a soft
-// matched glow. Endpoint hues stay validated against the raised surface: amber
-// 9.9:1, green 8.3:1 (≥3:1 required); label/axis text uses --dim at 7.3:1.
+// gradient (accent pair / green→bright-green, see ChartDefs) and lifted with a
+// soft matched glow. Endpoint hues must stay ≥3:1 against the raised surface;
+// label/axis text uses --dim.
 
 const ROW_HEIGHT = 26;
 const AXIS_BAND = 12;
@@ -33,7 +33,7 @@ const BAR_ANIM_MS = 300;
 const MAX_ROWS = 7;
 
 // Per-hue SVG fill/glow ids. Bars are filled with an accent gradient defined in
-// <defs> (amber→gold for the primary series, green→bright-green for packages)
+// <defs> (the accent pair for the primary series, green→bright-green for packages)
 // rather than a flat token, and lifted off the surface with a soft matched glow
 // filter. The gradient sweeps along the bar's growth axis (left→right, x only).
 const HUES = {
@@ -52,7 +52,7 @@ function ChartDefs() {
       </linearGradient>
       <linearGradient id="bar-fill-green" x1="0" y1="0" x2="1" y2="0">
         <stop offset="0%" stopColor="var(--green)" />
-        <stop offset="100%" stopColor="color-mix(in oklab, var(--green) 70%, var(--gold))" />
+        <stop offset="100%" stopColor="color-mix(in oklab, var(--green) 70%, var(--fg))" />
       </linearGradient>
       {/* Soft status-matched bloom under each bar; strokeless, low-opacity so it
           reads as depth, not a halo. */}

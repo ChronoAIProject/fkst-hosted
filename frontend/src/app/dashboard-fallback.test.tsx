@@ -32,7 +32,7 @@ describe('router fallback elements', () => {
     // The exact missing path is surfaced (as a mono chip via <Rich>), not hidden
     // behind a silent redirect.
     expect(screen.getByText('/does/not/exist')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /introduction/i })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('link', { name: /home/i })).toHaveAttribute('href', '/');
   });
 
   it('the error fallback shows a friendly alert with a reload action', () => {

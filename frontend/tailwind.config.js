@@ -25,6 +25,9 @@ export default {
       green: "var(--green)",
       red: "var(--red)",
       gold: "var(--gold)",
+      blue: "var(--blue)",
+      // Warning semaphore, decoupled from the (now blue) accent pair.
+      warn: "var(--warn)",
       // Translucent surfaces for backdrop-blur glass panels (bg-glass utility).
       glass: "var(--glass)",
       "glass-2": "var(--glass-2)",

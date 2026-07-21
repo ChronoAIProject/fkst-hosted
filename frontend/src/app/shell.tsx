@@ -30,11 +30,11 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
       : 'text-faint hover:text-dim'
   }`;
 
-/** Shared mono action styling for the inline auth/GitHub/CTA topbar controls. */
+/** Shared mono action styling for the inline topbar utility controls. */
 const inlineActionClass =
   'font-mono text-[12px] text-faint hover:text-fg no-underline px-2.5 py-[7px] rounded-control transition-colors cursor-pointer';
 
-/** Full-width row styling for the same actions inside the overflow menu. */
+/** Full-width row styling for the auth/GitHub actions inside the overflow menu. */
 const menuItemClass =
   'font-mono text-[12px] text-left text-faint hover:text-fg no-underline px-2.5 py-2 rounded-control transition-colors cursor-pointer';
 
@@ -59,6 +59,11 @@ export function Shell() {
   // wrapper (that collapses its h-full chain) and carries no marketing footer.
   // Doc/marketing routes keep the padded, footer-terminated scrolling layout.
   const isApp = location.pathname.startsWith('/dashboard');
+  // The v2 landing is a single-viewport centered hero: it fills <main> like the
+  // app view (no padding, no scroll) and pairs with the pinned slim footer so
+  // nav + hero + footer compose exactly one viewport.
+  const isLanding = location.pathname === '/';
+  const isFullHeight = isApp || isLanding;
   const menuRef = useRef<HTMLDivElement>(null);
   // The single <main> is the app's sole scroll region (the body's overflow is
   // clipped by the css foundation), so the condense heuristic must observe THAT
@@ -128,18 +133,14 @@ export function Shell() {
               className="text-fg no-underline inline-block flex-none"
               aria-label={c.nav.homeAria}
             >
-              {/* Wordmark clips the amber→gold brand gradient into the letters
-                  (`.grad-text`); the mark's own amber counter-dot renders on top
-                  unaffected (it is a separately-filled child element). */}
-              <FkstMark className="text-[19px] grad-text" />
+              {/* v2 wordmark: plain fg letters (no gradient clip) — the mark's
+                  own accent counter-dot is the only color carrier. */}
+              <FkstMark className="text-[19px]" />
             </Link>
 
             <nav className="flex gap-0.5">
               <NavLink to="/" end className={navLinkClass}>
-                {c.nav.introduction}
-              </NavLink>
-              <NavLink to="/get-started" className={navLinkClass}>
-                {c.nav.getStarted}
+                {c.nav.home}
               </NavLink>
               <NavLink to="/dashboard" className={navLinkClass}>
                 {c.nav.dashboard}
@@ -147,8 +148,6 @@ export function Shell() {
             </nav>
 
             <div className="flex items-center gap-2 ml-auto">
-              <LanguageToggle />
-
               {/* Environments manager entry — authenticated users only. Kept
                   visible at every width (short label); toggles the drawer. */}
               {isAuthenticated && (
@@ -164,7 +163,8 @@ export function Shell() {
 
               {/* Guided-tour launcher — re-opens the tour on demand, ignoring
                   the per-login seen flag. Named by aria-label (glyph is
-                  decorative). */}
+                  decorative). Kept from the previous chrome (the tour is a
+                  product feature the v2 comp does not model). */}
               <button
                 type="button"
                 onClick={startTour}
@@ -177,10 +177,27 @@ export function Shell() {
                 </span>
               </button>
 
-              {/* Inline auth action. Sign in was previously ABSENT from the
-                  topbar entirely; it now sits here (signed-out) and Sign out
-                  here (signed-in). Both progressively hide below 600px but stay
-                  reachable through the overflow menu. */}
+              <a
+                href={REPO}
+                target="_blank"
+                rel="noreferrer"
+                className={`${inlineActionClass} max-[720px]:hidden`}
+              >
+                GitHub ↗
+              </a>
+
+              <LanguageToggle />
+
+              {/* Hairline divider separating utilities from the auth action
+                  (v2 nav grammar). Decorative. */}
+              <span
+                aria-hidden="true"
+                className="w-px h-4 bg-line-2 flex-none max-[600px]:hidden"
+              />
+
+              {/* Inline auth action: Sign in wears the v2 outlined pill;
+                  Sign out stays a plain utility item. Both progressively hide
+                  below 600px but stay reachable through the overflow menu. */}
               {isAuthenticated ? (
                 <button
                   type="button"
@@ -193,28 +210,13 @@ export function Shell() {
                 <button
                   type="button"
                   onClick={signIn}
-                  className={`${inlineActionClass} max-[600px]:hidden`}
+                  // Border is an fg tint (not --line-2, which computes 1.4:1 on
+                  // the bar — invisible): the outlined affordance must read at rest.
+                  className="font-mono text-[12px] text-dim hover:text-fg border border-[color-mix(in_oklab,var(--fg)_25%,transparent)] rounded-pill px-3.5 py-[6px] transition-[color,border-color,box-shadow] hover:shadow-glow-amber cursor-pointer flex-none max-[600px]:hidden"
                 >
                   {c.auth.signIn}
                 </button>
               )}
-
-              <a
-                href={REPO}
-                target="_blank"
-                rel="noreferrer"
-                className={`${inlineActionClass} max-[720px]:hidden`}
-              >
-                GitHub ↗
-              </a>
-              <NavLink
-                to="/get-started"
-                // Primary CTA: brand gradient fill + card depth & amber bloom
-                // (`shadow-glow`); hover lifts brightness and glow together.
-                className="font-ui font-semibold text-[12.5px] bg-grad-accent text-amber-ink shadow-glow rounded-control px-3.5 py-[7px] flex-none no-underline transition-[filter,box-shadow] duration-150 hover:brightness-110 max-[480px]:hidden"
-              >
-                {c.nav.getStartedCta}
-              </NavLink>
 
               {/* Responsive overflow menu — shown once the first inline item
                   (GitHub, ≤720px) starts collapsing, so the auth action, the
@@ -275,14 +277,6 @@ export function Shell() {
                     >
                       GitHub ↗
                     </a>
-                    <NavLink
-                      role="menuitem"
-                      to="/get-started"
-                      onClick={() => setMenuOpen(false)}
-                      className={menuItemClass}
-                    >
-                      {c.nav.getStartedCta}
-                    </NavLink>
                   </div>
                 )}
               </div>
@@ -308,26 +302,28 @@ export function Shell() {
               it is auto-height so its content overflows and <main> scrolls. */}
           <RouteTransition
             k={location.pathname}
-            className={isApp ? 'h-full' : ''}
+            className={isFullHeight ? 'h-full' : ''}
           >
-            <div className={isApp ? 'h-full pb-3' : 'py-10 max-[480px]:py-8'}>{outlet}</div>
+            <div className={isApp ? 'h-full pb-3' : isLanding ? 'h-full' : 'py-10 max-[480px]:py-8'}>
+              {outlet}
+            </div>
           </RouteTransition>
 
-          {/* Marketing footer — only on doc/marketing routes (it scrolls in at
-              the end of content). The app dashboard omits it so it can own the
-              full viewport without a scroll to reveal the footer. */}
-          {!isApp && (
-            <footer className="border-t border-line py-7 flex items-center gap-x-6 gap-y-2 flex-wrap font-mono text-[11.5px] text-ghost">
+          {/* Marketing footer — only on scrolling doc routes (it scrolls in at
+              the end of content). Full-height routes (dashboard + landing) use
+              the pinned bar below instead. v2 grammar: wordmark · GitHub ·
+              Operator manual, dot-separated and centered. */}
+          {!isFullHeight && (
+            <footer className="border-t border-line py-7 flex items-center justify-center gap-x-5 gap-y-2 flex-wrap font-mono text-[10.5px] text-ghost">
               <span className="flex items-center gap-2">
                 <FkstMark className="text-[13px] text-dim" />
                 <span>{c.footer.tagline}</span>
               </span>
-              <NavLink to="/get-started" className="text-faint hover:text-fg no-underline">
-                {c.footer.getStarted}
-              </NavLink>
+              <span aria-hidden="true">·</span>
               <a href={REPO} target="_blank" rel="noreferrer" className="text-faint hover:text-fg no-underline">
                 {c.footer.github}
               </a>
+              <span aria-hidden="true">·</span>
               <a href={MANUAL_URL} target="_blank" rel="noreferrer" className="text-faint hover:text-fg no-underline">
                 {c.footer.manual}
               </a>
@@ -335,31 +331,28 @@ export function Shell() {
           )}
         </main>
 
-        {/* Slim pinned footer — app route only. Sits as a flex-none row AFTER
-            <main> so topbar + main(flex-1) + this footer sum to the column
-            height: the dashboard keeps its internal scroll, this bar stays
-            pinned at the viewport bottom, and the window never scrolls. A
-            gradient hairline top edge + subtle glass mirror the topbar; it
-            reuses the same c.footer.* strings + REPO/MANUAL_URL the marketing
-            footer carries, in a compact ~44px bar. */}
-        {isApp && (
-          <footer className="flex-none relative bg-glass backdrop-blur-glass h-[44px] flex items-center gap-x-5 gap-y-1 flex-wrap px-1 font-mono text-[11px] text-ghost">
-            {/* Gradient hairline top edge — a lit sweep mirroring the topbar's
-                bottom lip; pure paint, no layout, ignores pointer events. */}
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-x-0 top-0 h-px bg-grad-hairline"
-            />
+        {/* Slim pinned footer — full-height routes (dashboard + landing). Sits
+            as a flex-none row AFTER <main> so topbar + main(flex-1) + this bar
+            sum to the column height: content keeps its internal scroll (or, on
+            the landing, fits exactly), this bar stays pinned at the viewport
+            bottom, and the window never scrolls. */}
+        {isFullHeight && (
+          <footer
+            className={`flex-none relative border-t border-line h-[44px] flex items-center justify-center gap-x-5 gap-y-1 flex-wrap px-1 font-mono text-[10.5px] text-ghost ${
+              // Short-viewport tier (comp): the landing gives its footer row back
+              // to the hero; the dashboard keeps its bar at every height.
+              isLanding ? '[@media(max-height:760px)]:hidden' : ''
+            }`}
+          >
             <span className="flex items-center gap-2">
               <FkstMark className="text-[12px] text-dim" />
               <span>{c.footer.tagline}</span>
             </span>
-            <NavLink to="/get-started" className="text-faint hover:text-fg no-underline">
-              {c.footer.getStarted}
-            </NavLink>
+            <span aria-hidden="true">·</span>
             <a href={REPO} target="_blank" rel="noreferrer" className="text-faint hover:text-fg no-underline">
               {c.footer.github}
             </a>
+            <span aria-hidden="true">·</span>
             <a href={MANUAL_URL} target="_blank" rel="noreferrer" className="text-faint hover:text-fg no-underline">
               {c.footer.manual}
             </a>

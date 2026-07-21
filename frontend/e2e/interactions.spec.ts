@@ -128,7 +128,7 @@ test.describe('accessibility, feedback, and error surfaces', () => {
     await expect(page.getByRole('heading', { name: 'This page does not exist' })).toBeVisible();
     // The 404 names the exact path rather than silently redirecting.
     await expect(page.getByText('/this-route-does-not-exist')).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Back to the introduction →' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Back to home →' })).toBeVisible();
     await shot(page, 'ix-06-not-found');
   });
 

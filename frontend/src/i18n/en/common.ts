@@ -13,7 +13,6 @@ export const common: CommonSlice = {
   },
   footer: {
     tagline: '· ChronoAI hosted cloud',
-    getStarted: 'Get Started',
     github: 'GitHub',
     manual: 'Operator manual',
   },
@@ -27,7 +26,7 @@ export const common: CommonSlice = {
     notFoundTitle: 'This page does not exist',
     notFoundBody:
       'Nothing is routed at `{path}`. It may have moved, or the link was mistyped.',
-    notFoundHome: 'Back to the introduction →',
+    notFoundHome: 'Back to home →',
     notFoundMetaTitle: 'FKST — Page not found',
     toastDismiss: 'Dismiss',
   },

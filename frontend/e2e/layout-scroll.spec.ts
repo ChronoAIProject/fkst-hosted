@@ -101,16 +101,21 @@ test.describe('the window/body never scrolls', () => {
 });
 
 test.describe('the intended inner container scrolls', () => {
-  test('the <main> region scrolls on the introduction page', async ({ page }) => {
-    await page.setViewportSize(MOBILE); // small viewport guarantees overflow
+  test('the v2 landing fits one viewport — nothing scrolls', async ({ page }) => {
+    await page.setViewportSize(MOBILE);
     await page.goto('/');
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    // The landing is a single-viewport hero: <main> holds exactly-fitting
+    // full-height content, so there is no live overflow scroller anywhere…
     const res = await probeInternalScroll(page, 'main');
-    expect(res.found, '<main> is a live overflow scroller').toBe(true);
-    expect(res.found && res.moved, '<main> scrollTop moves').toBe(true);
-    // …and the body still did not move.
+    expect(res.found, '<main> has no overflow on the landing').toBe(false);
+    // …and the body did not move either.
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
-    await shot(page, 'ls-01-intro-main-scroll');
+    // "fits" must mean REACHABLE, not merely unscrollable: the hero clips its
+    // overflow, so assert the interactive content actually sits in view.
+    await expect(page.getByRole('link', { name: 'Get started' })).toBeInViewport();
+    await expect(page.getByText('a PR per task')).toBeInViewport(); // 844px ≥ the 560px pipe tier
+    await shot(page, 'ls-01-intro-single-viewport');
   });
 
   test('the <main> region scrolls on Get Started', async ({ page }) => {

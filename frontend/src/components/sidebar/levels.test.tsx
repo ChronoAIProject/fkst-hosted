@@ -90,8 +90,8 @@ describe('Level0Sidebar', () => {
     // higher in the height-constrained panel); expand it to read the color key.
     fireEvent.click(screen.getByText('Legend'));
     expect(screen.getByText('Grey — App not installed')).toBeInTheDocument();
-    expect(screen.getByText('Amber — App installed, no active sessions')).toBeInTheDocument();
-    expect(screen.getByText('Blinking amber — active sessions running')).toBeInTheDocument();
+    expect(screen.getByText('Blue — App installed, no active sessions')).toBeInTheDocument();
+    expect(screen.getByText('Blinking blue — active sessions running')).toBeInTheDocument();
 
     // Both charts render as labeled figures with the scope filter above them.
     expect(screen.getByRole('figure', { name: 'Running sessions' })).toBeInTheDocument();

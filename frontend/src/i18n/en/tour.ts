@@ -55,7 +55,7 @@ export const tour: TourSlice = {
     },
     help: {
       title: 'Re-open this tour',
-      body: 'Need it again? Re-launch this tour any time from the ? button. The topbar also carries the Get Started docs and a language toggle.',
+      body: 'Need it again? Re-launch this tour any time from the ? button. The topbar also carries a GitHub link and the language toggle; Get Started is reachable from the home page.',
     },
     finish: {
       title: 'You’re all set',

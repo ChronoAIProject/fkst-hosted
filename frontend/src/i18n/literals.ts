@@ -109,8 +109,3 @@ export const STEP_ORDER: StepId[] = [
   'lifecycle',
 ];
 
-export type FlowKey = 'trigger' | 'session' | 'work' | 'pr' | 'merge';
-export const FLOW_ORDER: FlowKey[] = ['trigger', 'session', 'work', 'pr', 'merge'];
-
-export type MentalKey = 'session' | 'trigger' | 'work';
-export const MENTAL_ORDER: MentalKey[] = ['session', 'trigger', 'work'];

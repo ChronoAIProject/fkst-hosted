@@ -6,7 +6,7 @@ type Tone = 'note' | 'tip' | 'warn';
 const TONES: Record<Tone, { edge: string; label: string; defaultTitle: string }> = {
   note: { edge: 'border-l-line-2', label: 'text-faint', defaultTitle: 'Note' },
   tip: { edge: 'border-l-green', label: 'text-green', defaultTitle: 'Tip' },
-  warn: { edge: 'border-l-amber', label: 'text-amber', defaultTitle: 'Heads up' },
+  warn: { edge: 'border-l-warn', label: 'text-warn', defaultTitle: 'Heads up' },
 };
 
 export interface CalloutProps {

@@ -256,7 +256,7 @@ export function CreateTriggerModal({
       >
         {c.repos.cancel}
       </button>
-      {/* Primary CTA: the brand amber→gold gradient fill, seated on a soft amber
+      {/* Primary CTA: the brand accent-gradient fill, seated on a soft accent
           glow with a one-shot sheen sweep on mount; hover lifts brightness. */}
       <button
         type="submit"

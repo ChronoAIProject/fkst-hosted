@@ -1,44 +1,67 @@
 :root {
   /* ============================================================================
-     PALETTE — "Elevated dark + amber" (premium refinement of the existing
-     identity, NOT a rebrand). Every historical token NAME is preserved so no
-     consumer breaks; only values are refined + new tokens added.
+     PALETTE — "Electric dark" (the v2 rebrand). Near-black neutral surfaces
+     with a blue→violet accent gradient. Every historical token NAME is
+     preserved (--amber/--gold are the accent pair's legacy names; in the
+     Electric theme they hold blue/violet) so no consumer breaks — swapping
+     these values is what rethemes the entire app.
+     Alternate accent sets from the design system (override --amber/--gold/
+     --amber-ink together): Emerald 72% 0.15 165 / 78% 0.14 185 / 15% 0.03 165;
+     Amber (legacy) 82% 0.155 78 / 83% 0.14 66 / 22% 0.045 78.
      All colors are oklch(L C H). Tint recipe stays:
        color-mix(in oklab, var(--token) N%, transparent) — never a 2nd opaque token.
      ========================================================================== */
 
-  /* Surfaces — bg deepened a touch and every surface given slightly more chroma
-     (hue nudged to 255, a cooler blue-black) so the dark reads rich, not flat.
-     The 4-step raise/line ramp keeps its original spacing for layering depth. */
-  --bg: oklch(14.5% 0.014 255);
-  --raise: oklch(19% 0.016 255);
-  --raise-2: oklch(23% 0.018 255);
-  --line: oklch(27% 0.018 255);
-  --line-2: oklch(34% 0.02 255);
+  /* Surfaces — a near-black, hue-neutral ramp (hue 260 at whisper chroma).
+     The dark reads deep and calm; depth comes from the raise/line ramp plus
+     glows, not from surface tint. */
+  --bg: oklch(8.5% 0.004 260);
+  --raise: oklch(12.5% 0.005 260);
+  --raise-2: oklch(16.5% 0.006 260);
+  --line: oklch(19.5% 0.006 260);
+  --line-2: oklch(27% 0.008 260);
 
-  /* Text ramp — fg slightly brighter; dim/faint/ghost each nudged UP one notch
-     for readability on the deeper background (the old values felt muddy). */
+  /* Text ramp — unchanged from the previous language; it was tuned for a deep
+     background and carries over to the darker one. */
   --fg: oklch(98% 0.006 245);
   --dim: oklch(77% 0.016 250);
   --faint: oklch(63% 0.016 250);
   --ghost: oklch(51% 0.015 250);
 
-  /* Accent + semaphore. amber punchier; gold re-tuned to be amber's WARMER
-     complement (hue pulled from 85→66, toward orange) so --grad-accent sweeps
-     amber→gold with real warmth/energy instead of a flat yellow. */
-  --amber: oklch(82% 0.155 78);
-  --gold: oklch(83% 0.14 66);
+  /* Accent + semaphore. Electric: --amber holds the BLUE accent (hue 256) and
+     --gold the VIOLET complement (hue 305); --grad-accent sweeps blue→violet.
+     The names are kept for compatibility across ~50 consumer files. */
+  --amber: oklch(66% 0.19 256);
+  --gold: oklch(62% 0.22 305);
   --green: oklch(76% 0.14 158);
   --red: oklch(68% 0.19 20);
+  --blue: oklch(78% 0.12 210);
 
-  /* Text on amber/gold fills (dark ink for contrast). */
-  --amber-ink: oklch(22% 0.045 78);
+  /* Warning semaphore — a warm caution hue DECOUPLED from the accent pair.
+     Pre-v2, warning semantics rode on --amber (then literally amber); with the
+     accent now blue, anything meaning "caution" points here instead. */
+  --warn: oklch(80% 0.15 85);
+
+  /* Fill-tier accents — deeper cousins of --amber/--gold used ONLY under ink
+     (button/badge fills). At 66%/62% L the bright pair leaves near-white ink at
+     ~3.1:1 (the comp ships that, failing WCAG AA); dropping the FILL to 55%/52%
+     puts --amber-ink at 4.9–5.5:1 everywhere while the bright text-tier pair
+     keeps its 6.5:1 on the dark bg. Accent swaps must update both tiers. */
+  --amber-fill: oklch(55% 0.19 256);
+  --gold-fill: oklch(52% 0.22 305);
+
+  /* Text on accent-gradient fills — near-white ink over the fill-tier pair. */
+  --amber-ink: oklch(99% 0.005 250);
 
   /* ---- Gradients ----------------------------------------------------------
-     grad-accent: the brand fill (buttons, .grad-border, .grad-text accents).
+     grad-accent: the brand FILL (buttons, badges, hover-underline, .grad-border
+     accents) — built from the deep fill tier so ink on it clears AA.
+     grad-accent-text: the bright pair for gradient-clipped TEXT (.grad-text),
+     where the letters sit on the dark bg and need the vivid tier.
      grad-fg: a bright fg→dim vertical sweep for big display headings; the low
      end is mixed to stay legible (never sinks to full --dim). */
-  --grad-accent: linear-gradient(135deg, var(--amber) 0%, var(--gold) 100%);
+  --grad-accent: linear-gradient(135deg, var(--amber-fill) 0%, var(--gold-fill) 100%);
+  --grad-accent-text: linear-gradient(135deg, var(--amber) 0%, var(--gold) 100%);
   --grad-fg: linear-gradient(
     180deg,
     var(--fg) 0%,
@@ -46,33 +69,28 @@
   );
 
   /* ---- App-background bloom -----------------------------------------------
-     --bg-glow: a faint radial bloom painted on <body> behind all content — a
-     warm amber wash from top-center plus a cool blue undertone off to the side.
-     Kept very low-alpha so it whispers depth without tinting UI. Applied fixed
+     --bg-glow: the v2 dual radial wash painted on <body> behind all content —
+     a faint blue bloom from top-center plus a violet whisper at top-right.
+     Very low alpha so it suggests depth without tinting UI. Applied fixed
      (see the body rule below) so it never scrolls or adds a scrollbar. */
   --bg-glow: radial-gradient(
-      120% 70% at 50% -12%,
-      color-mix(in oklab, var(--amber) 16%, transparent) 0%,
-      transparent 60%
-    ),
-    radial-gradient(
-      80% 60% at 88% 4%,
-      color-mix(in oklab, oklch(70% 0.13 262) 14%, transparent) 0%,
+      110% 60% at 50% -14%,
+      color-mix(in oklab, var(--amber) 9%, transparent) 0%,
       transparent 58%
     ),
     radial-gradient(
-      70% 60% at 6% 96%,
-      color-mix(in oklab, var(--gold) 9%, transparent) 0%,
+      70% 50% at 90% 0%,
+      color-mix(in oklab, var(--gold) 6%, transparent) 0%,
       transparent 55%
     );
 
   /* ---- Gradient hairline borders ------------------------------------------
      grad-hairline: neutral top-lit hairline (brighter at top, fading down) for
      the .grad-border recipe — reads like light catching a raised edge.
-     grad-hairline-accent: amber→gold diagonal for accent/hero card borders. */
+     grad-hairline-accent: accent-pair diagonal for accent/hero card borders. */
   --grad-hairline: linear-gradient(
     180deg,
-    color-mix(in oklab, var(--fg) 14%, transparent) 0%,
+    color-mix(in oklab, var(--fg) 12%, transparent) 0%,
     color-mix(in oklab, var(--line-2) 50%, transparent) 45%,
     color-mix(in oklab, var(--line) 30%, transparent) 100%
   );
@@ -84,28 +102,35 @@
   );
 
   /* ---- Glass surface ------------------------------------------------------
-     --glass: a translucent --raise fill for backdrop-blur panels. Pair with
-     backdrop-blur (utility) + a hairline border for the layered-glass look. */
-  --glass: color-mix(in oklab, var(--raise) 82%, transparent);
-  --glass-2: color-mix(in oklab, var(--raise-2) 80%, transparent);
+     --glass: a translucent --raise fill for backdrop-blur panels. v2 mixes are
+     more transparent (72/68%) — the darker base shows more through the glass.
+     Pair with backdrop-blur (utility) + a hairline border. */
+  --glass: color-mix(in oklab, var(--raise) 72%, transparent);
+  --glass-2: color-mix(in oklab, var(--raise-2) 68%, transparent);
 
   /* ---- Accent glows (box-shadow spreads) ----------------------------------
-     Status-matched soft glows built from the semaphore tokens; used behind
-     active chips/buttons/cards and by the glow-pulse motion. */
-  --glow-amber: 0 0 24px -2px color-mix(in oklab, var(--amber) 45%, transparent);
-  --glow-green: 0 0 24px -2px color-mix(in oklab, var(--green) 45%, transparent);
-  --glow-red: 0 0 24px -2px color-mix(in oklab, var(--red) 45%, transparent);
+     Status-matched soft glows built from the semaphore tokens. v2 pulls the
+     glows in (18px, -4px spread, 32% mix) — a quieter halo than the previous
+     language, matching the calmer near-black surface. */
+  --glow-amber: 0 0 18px -4px color-mix(in oklab, var(--amber) 32%, transparent);
+  --glow-green: 0 0 18px -4px color-mix(in oklab, var(--green) 32%, transparent);
+  --glow-red: 0 0 18px -4px color-mix(in oklab, var(--red) 32%, transparent);
 
   /* ---- Layered shadow scale -----------------------------------------------
      A cohesive elevation ramp (pure black alphas for neutral depth on the
-     blue-black bg). shadow-glow = card depth + amber accent bloom for primary
+     near-black bg). shadow-glow = card depth + accent bloom for primary
      surfaces. highlight-top = a 1px inner top edge that fakes light hitting a
-     raised card (the subtle inner top highlight the design language calls for). */
+     raised card. */
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 1px rgba(0, 0, 0, 0.22);
   --shadow-2: 0 4px 12px -2px rgba(0, 0, 0, 0.42), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
-  --shadow-3: 0 14px 34px -8px rgba(0, 0, 0, 0.55), 0 5px 14px -3px rgba(0, 0, 0, 0.42);
+  --shadow-3: 0 16px 40px -10px rgba(0, 0, 0, 0.6), 0 6px 16px -4px rgba(0, 0, 0, 0.45);
   --shadow-glow: var(--shadow-2), var(--glow-amber);
   --highlight-top: inset 0 1px 0 0 color-mix(in oklab, var(--fg) 8%, transparent);
+
+  /* ---- Shared motion curve ------------------------------------------------
+     The emphasized ease every transition/keyframe in the language uses
+     (mirrored by tailwind's `transition-emphasized`). */
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
 
   /* ---- Font stacks (unchanged pairing: Space Grotesk / IBM Plex Sans / Mono).
      No system-ui anywhere. --display used for headings via the .grad-text

@@ -5,80 +5,16 @@ import type { PagesSlice } from '../slices';
 export const pages: PagesSlice = {
   intro: {
     metaTitle: 'FKST — Autonomous coding sessions, hosted',
-    eyebrow: 'ChronoAI · fkst-hosted',
-    heroTitle: 'Autonomous coding sessions, driven entirely by GitHub issues.',
+    eyebrow: 'ChronoAI',
+    heroTitleTop: 'Open an issue.',
+    heroTitleAccent: 'Get a pull request.',
     heroLede:
-      'hosted is ChronoAI’s managed cloud for the fkst engine. Open an issue to start a long-lived coding agent, queue tasks as more issues, and it opens a pull request per task. No infrastructure to operate, no dashboard to learn.',
-    ctaStart: 'Get started →',
-    ctaManual: 'Read the operator manual ↗',
-    whatIsEyebrow: 'What is FKST',
-    whatIsTitle:
-      'An engine for autonomous, package-driven coding agents — run for you as a service.',
-    whatIsBody: [
-      '**fkst** is an engine (fkst-substrate) that runs autonomous coding agents. Its behavior comes from **packages** — small bundles the engine loads and runs against a GitHub repository.',
-      '**fkst-hosted** runs that engine for you as ChronoAI’s cloud service. There’s no dashboard and no REST API you drive by hand — the entire control surface is GitHub issues. You start a session by opening an issue, queue work with more issues, and stop it by closing them.',
-    ],
-    thesis:
-      'One trigger issue = one session. Open work-label issues = the queue that session works, each as its own pull request.',
-    mentalEyebrow: 'The mental model',
-    mental: {
-      session: {
-        term: 'Session',
-        is: 'One long-lived coding agent — a single Kubernetes pod.',
-        control: 'You control it by opening or closing a trigger issue.',
-      },
-      trigger: {
-        term: 'Trigger issue',
-        is: 'The session’s declaration: its name, packages, and work label.',
-        control: 'A GitHub issue labeled `fkst-substrate-trigger`.',
-      },
-      work: {
-        term: 'Work item',
-        is: 'One task for the session to pick up — it becomes a pull request.',
-        control: 'Any issue carrying the session’s work label.',
-      },
-    },
-    providesEyebrow: 'What the hosted service provides',
-    providesTitle:
-      'A managed home for the engine — you bring intent, it brings the infrastructure.',
-    features: [
-      {
-        title: 'Managed engine on Kubernetes',
-        body: 'One pod per live session, auto-provisioned and auto-cleaned. No clusters to run, patch, or scale yourself.',
-      },
-      {
-        title: 'GitHub-native control',
-        body: 'Start, queue, watch, and stop sessions entirely through issues. Progress comes back as comments and labels on those same issues.',
-      },
-      {
-        title: 'A pull request per task',
-        body: 'Each work item becomes its own isolated PR. Turn on auto-merge and finished work lands on your default branch and closes itself.',
-      },
-      {
-        title: 'Idle to zero, auto-revive',
-        body: 'With no open work a session idles and its pod is reclaimed. Open a new work issue and it respawns on its own — same session, no re-setup.',
-      },
-      {
-        title: 'Redacted logs, identity-gated',
-        body: 'Every session streams redacted logs to storage. Download them from an identity-gated endpoint — trigger author, allow-list, or admin only.',
-      },
-      {
-        title: 'Safe by construction',
-        body: 'Registered config is frozen and secrets never live in issues — you select a pre-provisioned environment profile, and values are supplied out of band.',
-      },
-    ],
-    flowEyebrow: 'How it flows',
-    flow: {
-      trigger: { label: 'Trigger issue', sub: 'declare a session' },
-      session: { label: 'Session', sub: 'one K8s pod' },
-      work: { label: 'Work issues', sub: 'the queue' },
-      pr: { label: 'PR per task', sub: 'isolated change' },
-      merge: { label: 'Merge', sub: 'optional auto-merge' },
-    },
-    ctaTitle: 'Open an issue. Get a pull request.',
-    ctaBody:
-      'Install the GitHub App, open a trigger issue, and queue your first task. It reconciles within a sweep — seconds, not instant.',
-    ctaButton: 'Get started →',
+      'FKST runs long-lived coding agents driven entirely by GitHub issues. No infrastructure, nothing to learn.',
+    ctaStart: 'Get started',
+    ctaManual: 'Operator manual →',
+    pipeTrigger: 'trigger issue',
+    pipeSession: 'live session',
+    pipeWork: 'a PR per task',
   },
   gs: {
     metaTitle: 'FKST — Get Started',

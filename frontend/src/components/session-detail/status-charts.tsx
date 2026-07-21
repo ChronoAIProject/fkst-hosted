@@ -8,7 +8,7 @@ import { Note, SectionLabel } from './parts';
 
 // At-a-glance Status-tab charts. The donut follows the dataviz method: a nominal
 // breakdown of the session's work items into five semaphore-keyed groups, one
-// hue per group (green done, amber in-progress, green-gold ready, red failed,
+// hue per group (green done, accent in-progress, bright-green ready, red failed,
 // ghost queued), with the count carried by an HTML legend + a centered total so
 // the meaning never rides color alone. The progress meter is a plain gradient
 // bar (done ÷ total) — a bar library would be overkill for a single ratio.
@@ -169,7 +169,7 @@ interface DonutSlice {
 }
 
 /** Slice descriptors in a stable order. Done + ready both read green (per the
- *  design tokens) but ready is nudged toward gold so two adjacent green arcs
+ *  design tokens) but ready is lightened toward fg so two adjacent green arcs
  *  stay distinguishable; the legend label carries the meaning regardless. */
 function donutSlices(counts: WorkItemCounts, t: ReturnType<typeof useContent>['dashboard']['detail']): DonutSlice[] {
   return [
@@ -179,7 +179,7 @@ function donutSlices(counts: WorkItemCounts, t: ReturnType<typeof useContent>['d
       key: 'ready',
       label: t.work.ready,
       value: counts.ready,
-      color: 'color-mix(in oklab, var(--green) 60%, var(--gold))',
+      color: 'color-mix(in oklab, var(--green) 60%, var(--fg))',
     },
     { key: 'failed', label: t.work.failed, value: counts.failed, color: 'var(--red)' },
     { key: 'queued', label: t.work.queued, value: counts.queued, color: 'var(--ghost)' },

@@ -9,7 +9,7 @@ import { Rich } from '@/components/content/rich';
 
 function Probe() {
   const c = useContent();
-  return <div>{c.nav.introduction}</div>;
+  return <div>{c.nav.home}</div>;
 }
 
 // Collect every leaf key path of a catalog. Objects recurse by key; arrays
@@ -42,18 +42,18 @@ describe('i18n', () => {
       </LanguageProvider>
     );
 
-    expect(screen.getByText('Introduction')).toBeInTheDocument();
+    expect(screen.getByText('Home')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '中文' }));
 
-    expect(screen.getByText('介绍')).toBeInTheDocument();
+    expect(screen.getByText('首页')).toBeInTheDocument();
     expect(document.documentElement.lang).toBe('zh');
     expect(window.localStorage.getItem('fkst-lang')).toBe('zh');
   });
 
   it('useContent works without a provider (English default)', () => {
     render(<Probe />);
-    expect(screen.getByText('Introduction')).toBeInTheDocument();
+    expect(screen.getByText('Home')).toBeInTheDocument();
   });
 });
 
