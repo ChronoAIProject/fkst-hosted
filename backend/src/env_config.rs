@@ -5,15 +5,14 @@
 //! environments a user may hold, how large an install script may be, and the
 //! deadline / concurrency / poll cadence of the isolated validation pod.
 //!
-//! Nothing here is wired to behaviour yet (this is the config surface only);
-//! later issues read these values when they build the validation pipeline.
-//!
 //! Every knob is a hard bound whose zero value is a misconfiguration: a
 //! zero cap, deadline, concurrency, or poll interval would either disable the
 //! feature silently or spin a pod that can never make progress. We therefore
 //! fail closed at startup, naming the offending variable, rather than defer the
 //! surprise to the first request.
 
+use base64::Engine;
+use secrecy::SecretString;
 use serde::Deserialize;
 
 use crate::error::AppError;
@@ -62,8 +61,16 @@ mod defaults {
 }
 
 /// `FKST_ENV_*`-prefixed variables (named-environment / install validation).
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct EnvVars {
+    #[serde(default)]
+    store_namespace: Option<String>,
+    #[serde(default)]
+    store_legacy_namespace: Option<String>,
+    #[serde(default)]
+    store_encryption_key: Option<String>,
+    #[serde(default)]
+    store_encryption_key_file: Option<String>,
     #[serde(default = "defaults::max_per_user")]
     max_per_user: usize,
     #[serde(default = "defaults::install_max_commands")]
@@ -83,6 +90,14 @@ struct EnvVars {
 /// Named-environment / install-validation configuration.
 #[derive(Clone, Debug)]
 pub struct EnvConfig {
+    /// Namespace-independent Kubernetes Secret store. Unset keeps the legacy
+    /// ConfigMap/Secret pair in `FKST_POD_NAMESPACE`.
+    pub store_namespace: Option<String>,
+    /// Optional namespace containing legacy pairs to migrate once at startup.
+    pub store_legacy_namespace: Option<String>,
+    /// Base64-encoded 32-byte AES-256-GCM key. Redacted by `SecretString` and
+    /// decoded only while constructing the durable store.
+    pub store_encryption_key: Option<SecretString>,
     /// Max named environments a single user may own. Env:
     /// `FKST_ENV_MAX_PER_USER`. Default 20; must be >= 1.
     pub max_per_user: usize,
@@ -109,6 +124,9 @@ pub struct EnvConfig {
 impl Default for EnvConfig {
     fn default() -> Self {
         Self {
+            store_namespace: None,
+            store_legacy_namespace: None,
+            store_encryption_key: None,
             max_per_user: defaults::max_per_user(),
             install_max_commands: defaults::install_max_commands(),
             install_max_command_bytes: defaults::install_max_command_bytes(),
@@ -130,6 +148,94 @@ impl EnvConfig {
         let env: EnvVars = envy::prefixed(ENV_PREFIX)
             .from_iter(vars.iter().cloned())
             .map_err(|e| AppError::Config(e.to_string()))?;
+
+        let optional = |value: Option<String>| {
+            value.and_then(|value| {
+                let value = value.trim();
+                (!value.is_empty()).then(|| value.to_string())
+            })
+        };
+        let store_namespace = optional(env.store_namespace);
+        let store_legacy_namespace = optional(env.store_legacy_namespace);
+        let inline_key = env.store_encryption_key;
+        let key_file = env.store_encryption_key_file;
+
+        if inline_key.is_some() && key_file.is_some() {
+            return Err(AppError::Config(
+                "set exactly one of FKST_ENV_STORE_ENCRYPTION_KEY or \
+                 FKST_ENV_STORE_ENCRYPTION_KEY_FILE"
+                    .to_string(),
+            ));
+        }
+        let key = match (inline_key, key_file) {
+            (Some(key), None) => {
+                let key = key.trim();
+                if key.is_empty() {
+                    return Err(AppError::Config(
+                        "FKST_ENV_STORE_ENCRYPTION_KEY must not be blank".to_string(),
+                    ));
+                }
+                Some(key.to_string())
+            }
+            (None, Some(path)) => {
+                let path = path.trim();
+                if path.is_empty() {
+                    return Err(AppError::Config(
+                        "FKST_ENV_STORE_ENCRYPTION_KEY_FILE must not be blank".to_string(),
+                    ));
+                }
+                let value = std::fs::read_to_string(&path).map_err(|error| {
+                    AppError::Config(format!(
+                        "FKST_ENV_STORE_ENCRYPTION_KEY_FILE could not be read: {error}"
+                    ))
+                })?;
+                let value = value.trim();
+                if value.is_empty() {
+                    return Err(AppError::Config(
+                        "FKST_ENV_STORE_ENCRYPTION_KEY_FILE is empty".to_string(),
+                    ));
+                }
+                Some(value.to_string())
+            }
+            (None, None) => None,
+            (Some(_), Some(_)) => unreachable!("conflicting key sources rejected above"),
+        };
+
+        if store_namespace.is_some() {
+            let Some(key) = key.as_deref() else {
+                return Err(AppError::Config(
+                    "FKST_ENV_STORE_ENCRYPTION_KEY or \
+                     FKST_ENV_STORE_ENCRYPTION_KEY_FILE must be set when \
+                     FKST_ENV_STORE_NAMESPACE is configured"
+                        .to_string(),
+                ));
+            };
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(key)
+                .map_err(|_| {
+                    AppError::Config(
+                        "FKST_ENV_STORE_ENCRYPTION_KEY must be base64-encoded".to_string(),
+                    )
+                })?;
+            if decoded.len() != 32 {
+                return Err(AppError::Config(
+                    "FKST_ENV_STORE_ENCRYPTION_KEY must decode to exactly 32 bytes".to_string(),
+                ));
+            }
+            if store_namespace == store_legacy_namespace {
+                return Err(AppError::Config(
+                    "FKST_ENV_STORE_LEGACY_NAMESPACE must differ from \
+                     FKST_ENV_STORE_NAMESPACE"
+                        .to_string(),
+                ));
+            }
+        } else if key.is_some() || store_legacy_namespace.is_some() {
+            return Err(AppError::Config(
+                "FKST_ENV_STORE_NAMESPACE must be set when durable-store key or legacy \
+                 migration configuration is present"
+                    .to_string(),
+            ));
+        }
 
         // Fail closed on any zero bound: a zero cap silently disables a limit,
         // a zero deadline/poll interval yields a pod that can never make
@@ -172,6 +278,9 @@ impl EnvConfig {
         }
 
         Ok(EnvConfig {
+            store_namespace,
+            store_legacy_namespace,
+            store_encryption_key: key.map(SecretString::from),
             max_per_user: env.max_per_user,
             install_max_commands: env.install_max_commands,
             install_max_command_bytes: env.install_max_command_bytes,
@@ -197,6 +306,9 @@ mod tests {
     #[test]
     fn defaults_apply_when_nothing_is_set() {
         let config = EnvConfig::from_vars(&vars(&[])).expect("defaults should deserialize");
+        assert!(config.store_namespace.is_none());
+        assert!(config.store_legacy_namespace.is_none());
+        assert!(config.store_encryption_key.is_none());
         assert_eq!(config.max_per_user, 20);
         assert_eq!(config.install_max_commands, 50);
         assert_eq!(config.install_max_command_bytes, 4096);
@@ -210,6 +322,12 @@ mod tests {
     fn default_impl_matches_env_defaults() {
         let from_env = EnvConfig::from_vars(&vars(&[])).expect("defaults should deserialize");
         let from_default = EnvConfig::default();
+        assert_eq!(from_default.store_namespace, from_env.store_namespace);
+        assert_eq!(
+            from_default.store_legacy_namespace,
+            from_env.store_legacy_namespace
+        );
+        assert!(from_default.store_encryption_key.is_none());
         assert_eq!(from_default.max_per_user, from_env.max_per_user);
         assert_eq!(
             from_default.install_max_commands,
@@ -275,5 +393,145 @@ mod tests {
             assert!(matches!(err, AppError::Config(_)));
             assert!(err.to_string().contains(var), "error must name {var}");
         }
+    }
+
+    const KEY_B64: &str = "ERERERERERERERERERERERERERERERERERERERERERE=";
+
+    #[test]
+    fn durable_store_accepts_one_inline_key_source() {
+        let config = EnvConfig::from_vars(&vars(&[
+            ("FKST_ENV_STORE_NAMESPACE", "durable-envs"),
+            ("FKST_ENV_STORE_LEGACY_NAMESPACE", "chronoai-fkst"),
+            ("FKST_ENV_STORE_ENCRYPTION_KEY", KEY_B64),
+        ]))
+        .expect("valid durable store config");
+        assert_eq!(config.store_namespace.as_deref(), Some("durable-envs"));
+        assert_eq!(
+            config.store_legacy_namespace.as_deref(),
+            Some("chronoai-fkst")
+        );
+        assert!(config.store_encryption_key.is_some());
+    }
+
+    #[test]
+    fn durable_store_accepts_a_trimmed_key_file() {
+        use secrecy::ExposeSecret;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("environment-store-key");
+        std::fs::write(&path, format!("\n{KEY_B64}\n")).expect("write key file");
+        let path = path.to_string_lossy().into_owned();
+        let config = EnvConfig::from_vars(&vars(&[
+            ("FKST_ENV_STORE_NAMESPACE", "durable-envs"),
+            ("FKST_ENV_STORE_ENCRYPTION_KEY_FILE", &path),
+        ]))
+        .expect("valid file-backed key");
+        assert_eq!(
+            config
+                .store_encryption_key
+                .as_ref()
+                .expect("key")
+                .expose_secret(),
+            KEY_B64
+        );
+    }
+
+    #[test]
+    fn durable_store_rejects_conflicting_key_sources() {
+        let err = EnvConfig::from_vars(&vars(&[
+            ("FKST_ENV_STORE_NAMESPACE", "durable-envs"),
+            ("FKST_ENV_STORE_ENCRYPTION_KEY", KEY_B64),
+            ("FKST_ENV_STORE_ENCRYPTION_KEY_FILE", "/tmp/not-read"),
+        ]))
+        .expect_err("two key sources must fail");
+        assert!(err.to_string().contains("exactly one"));
+    }
+
+    #[test]
+    fn durable_store_rejects_missing_or_blank_keys() {
+        for pairs in [
+            vec![("FKST_ENV_STORE_NAMESPACE", "durable-envs")],
+            vec![
+                ("FKST_ENV_STORE_NAMESPACE", "durable-envs"),
+                ("FKST_ENV_STORE_ENCRYPTION_KEY", "   "),
+            ],
+            vec![
+                ("FKST_ENV_STORE_NAMESPACE", "durable-envs"),
+                ("FKST_ENV_STORE_ENCRYPTION_KEY_FILE", "   "),
+            ],
+        ] {
+            let err = EnvConfig::from_vars(&vars(&pairs)).expect_err("key must fail closed");
+            assert!(err.to_string().contains("FKST_ENV_STORE_ENCRYPTION_KEY"));
+        }
+    }
+
+    #[test]
+    fn durable_store_rejects_an_empty_key_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("environment-store-key");
+        std::fs::write(&path, " \n").expect("write empty key file");
+        let path = path.to_string_lossy().into_owned();
+        let err = EnvConfig::from_vars(&vars(&[
+            ("FKST_ENV_STORE_NAMESPACE", "durable-envs"),
+            ("FKST_ENV_STORE_ENCRYPTION_KEY_FILE", &path),
+        ]))
+        .expect_err("empty file must fail");
+        assert!(err.to_string().contains("FILE is empty"));
+    }
+
+    #[test]
+    fn durable_store_rejects_invalid_base64_and_wrong_length() {
+        for key in ["not base64", "c2hvcnQ="] {
+            let err = EnvConfig::from_vars(&vars(&[
+                ("FKST_ENV_STORE_NAMESPACE", "durable-envs"),
+                ("FKST_ENV_STORE_ENCRYPTION_KEY", key),
+            ]))
+            .expect_err("invalid key must fail");
+            assert!(err.to_string().contains("FKST_ENV_STORE_ENCRYPTION_KEY"));
+            assert!(!err.to_string().contains(key));
+        }
+    }
+
+    #[test]
+    fn durable_store_rejects_key_or_migration_without_namespace() {
+        for pairs in [
+            vec![("FKST_ENV_STORE_ENCRYPTION_KEY", KEY_B64)],
+            vec![("FKST_ENV_STORE_LEGACY_NAMESPACE", "chronoai-fkst")],
+        ] {
+            let err = EnvConfig::from_vars(&vars(&pairs))
+                .expect_err("dependent config without durable namespace must fail");
+            assert!(err.to_string().contains("FKST_ENV_STORE_NAMESPACE"));
+        }
+    }
+
+    #[test]
+    fn durable_and_legacy_namespaces_must_differ() {
+        let err = EnvConfig::from_vars(&vars(&[
+            ("FKST_ENV_STORE_NAMESPACE", "durable-envs"),
+            ("FKST_ENV_STORE_LEGACY_NAMESPACE", "durable-envs"),
+            ("FKST_ENV_STORE_ENCRYPTION_KEY", KEY_B64),
+        ]))
+        .expect_err("same namespace would let migration delete durable records");
+        assert!(err.to_string().contains("must differ"));
+    }
+
+    #[test]
+    fn key_material_is_redacted_from_debug_and_errors() {
+        let config = EnvConfig::from_vars(&vars(&[
+            ("FKST_ENV_STORE_NAMESPACE", "durable-envs"),
+            ("FKST_ENV_STORE_ENCRYPTION_KEY", KEY_B64),
+        ]))
+        .expect("valid config");
+        let debug = format!("{config:?}");
+        assert!(!debug.contains(KEY_B64));
+        assert!(debug.contains("REDACTED"));
+
+        let bad_key = "this-sensitive-invalid-key-must-not-echo";
+        let error = EnvConfig::from_vars(&vars(&[
+            ("FKST_ENV_STORE_NAMESPACE", "durable-envs"),
+            ("FKST_ENV_STORE_ENCRYPTION_KEY", bad_key),
+        ]))
+        .expect_err("invalid key");
+        assert!(!error.to_string().contains(bad_key));
     }
 }
