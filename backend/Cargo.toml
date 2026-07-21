@@ -31,6 +31,8 @@ sha2 = "0.10"
 # envelope per record. The key is delivered by the external secret provider;
 # only nonce + ciphertext are persisted in Kubernetes.
 aes-gcm = "0.10"
+# Explicit because decoded key bytes are wiped after initializing AES-GCM.
+zeroize = "1"
 # Webhook signature verification (issue #108): HMAC-SHA256 over the raw GitHub
 # webhook body, constant-time compared against `X-Hub-Signature-256`. `hmac`
 # pairs with the already-present `sha2` (no GitHub SDK — consistent with the

@@ -8,10 +8,11 @@
 //! ([`crate::reconcile::execute`]) depend on. Neither ever names a concrete
 //! storage type.
 //!
-//! Today the sole implementation is the Kubernetes ConfigMap/Secret pair
-//! ([`crate::k8s::env_store::EnvStore`]); swapping to another backend (a database,
-//! or any other store) is a new `impl EnvironmentProfileStore` plus a one-line
-//! change in [`default_store`] — no route or spawn-path change.
+//! The default remains the legacy Kubernetes ConfigMap/Secret pair
+//! ([`crate::k8s::env_store::EnvStore`]). Setting
+//! `FKST_ENV_STORE_NAMESPACE` selects the namespace-independent, encrypted
+//! [`crate::k8s::durable_env_store::DurableEnvStore`] without changing routes or
+//! session materialization.
 //!
 //! Secret-value discipline is part of the contract: every reader except
 //! [`EnvironmentProfileStore::load_environment_for_session`] exposes secret KEY
@@ -38,8 +39,8 @@ pub trait EnvironmentProfileStore: Send + Sync {
     /// Create-or-replace one profile: its ordered install commands, non-secret
     /// variables, and secret VALUES, with the validation metadata. A backend MUST
     /// make the write atomic enough that a partial write is never observed as
-    /// `ready` (the K8s impl writes the secret first, the ready-marked config
-    /// last).
+    /// `ready`. `expected_version` is the opaque token returned by the preceding
+    /// read; a stale replace must surface a retriable conflict.
     #[allow(clippy::too_many_arguments)]
     async fn put_environment(
         &self,
@@ -52,10 +53,11 @@ pub trait EnvironmentProfileStore: Send + Sync {
         validated_at: &str,
         content_hash: &str,
         validation_image: &str,
+        expected_version: Option<&str>,
     ) -> Result<(), AppError>;
 
     /// One profile's public view (install + variables + status + secret KEY NAMES).
-    /// `None` when absent. MUST NOT read secret values.
+    /// `None` when absent. MUST NOT return secret values.
     async fn get_environment(&self, id: i64, name: &str) -> Result<Option<EnvRecord>, AppError>;
 
     /// The owner's profiles as compact summaries (counts only), stably ordered.
@@ -79,10 +81,8 @@ pub trait EnvironmentProfileStore: Send + Sync {
     ) -> Result<Option<(Vec<String>, BTreeMap<String, String>, Vec<String>)>, AppError>;
 }
 
-/// Build the configured environment-profile store — THE single place the concrete
-/// backend is selected. Today: the Kubernetes ConfigMap/Secret store bound to the
-/// control-plane `namespace`. A future backend is added here (e.g. switch on a
-/// `FKST_ENV_PROFILE_BACKEND` knob) without touching any caller.
+/// Build the legacy environment-profile store bound to `namespace`. The durable
+/// implementation is selected by the startup wiring in a subsequent unit.
 pub async fn default_store(namespace: &str) -> Result<Arc<dyn EnvironmentProfileStore>, KubeError> {
     Ok(Arc::new(EnvStore::from_inferred(namespace).await?))
 }
