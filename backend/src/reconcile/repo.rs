@@ -12,10 +12,9 @@
 //! and retries next sweep). Per-ACTION effects are best-effort inside [`execute`],
 //! which never propagates, so one bad action never blocks the rest.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use k8s_openapi::chrono::Utc;
-use secrecy::SecretString;
 
 use crate::error::AppError;
 use crate::log_access::LogSessionContext;
@@ -28,6 +27,7 @@ use crate::reconcile::execute::{execute, ReconcileCtx};
 use crate::reconcile::pending::{LabelCountPending, PendingWork};
 use crate::reconcile::registry::parse_registration;
 use crate::reconcile::work_authz::WorkAuthz;
+use crate::reconcile::work_labels::resolve_work_label_sets;
 
 use super::{SUBSTRATE_ANNOUNCED_LABEL, SUBSTRATE_CONFIG_REJECTED_LABEL, SUBSTRATE_INVALID_LABEL};
 
@@ -225,7 +225,8 @@ pub async fn reconcile_repo(
     // immutable per session config), bounding the manifest fetches to one resolve per
     // distinct session config. Walks each session's EFFECTIVE package set (I7), so a
     // manifest's packages' `[github].work_labels` are auto-discovered too.
-    let work_labels_by_session = resolve_work_label_sets(ctx, &token, &regs).await;
+    let work_labels_by_session =
+        resolve_work_label_sets(&ctx.http, &ctx.config.github_api_base_url, &token, &regs).await;
 
     // I4 label-less reject (epic #594). A session whose EFFECTIVE work-label set is empty
     // (no explicit `### Work Label` AND no package-declared `[github].work_labels`) can
@@ -354,46 +355,6 @@ pub async fn reconcile_repo(
         execute(action, repo, ctx).await;
     }
     Ok(())
-}
-
-/// Resolve every registration's FULL work-label set (explicit `### Work Label` ∪ the
-/// labels its packages auto-declare) into a `session_id -> labels` map, once per pass.
-/// Walks each session's EFFECTIVE package set (explicit ∪ manifest-expanded, I7), so a
-/// package reachable only through a `### Manifest` still contributes its
-/// `[github].work_labels`. Discovered labels are cached per `config_hash` (both the
-/// explicit packages AND the manifest references are part of the hash, so the effective
-/// set is fixed per config), so the manifest fetches are bounded to one resolve per
-/// distinct config. Shared by the ack/reject surface and the pending gate so both act on
-/// the same set.
-async fn resolve_work_label_sets(
-    ctx: &ReconcileCtx,
-    token: &SecretString,
-    regs: &[SessionRegistration],
-) -> HashMap<String, Vec<String>> {
-    let mut discovered_cache: HashMap<String, BTreeSet<String>> = HashMap::new();
-    let mut out: HashMap<String, Vec<String>> = HashMap::new();
-    for reg in regs {
-        let discovered = match discovered_cache.get(&reg.config_hash) {
-            Some(set) => set.clone(),
-            None => {
-                let set = crate::reconcile::work_labels::resolve_work_labels(
-                    &ctx.http,
-                    &ctx.config.github_api_base_url,
-                    token,
-                    &reg.effective_packages,
-                )
-                .await;
-                discovered_cache.insert(reg.config_hash.clone(), set.clone());
-                set
-            }
-        };
-        let mut labels: BTreeSet<String> = discovered;
-        if let Some(wl) = &reg.def.work_label {
-            labels.insert(wl.clone());
-        }
-        out.insert(reg.session_id.clone(), labels.into_iter().collect());
-    }
-    out
 }
 
 /// Upsert every valid registration's [`LogSessionContext`] into the shared registry
