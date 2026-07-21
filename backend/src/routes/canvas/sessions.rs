@@ -9,10 +9,12 @@
 //! head_ref/title parse), the session's log-download URL, and the live runtime
 //! liveness from the session backend.
 //!
-//! Access scoping: the CALLER's user token must see an App installation
+//! Access scoping: an ordinary CALLER's user token must see an App installation
 //! covering the repo (`/user/installations` + its repo listing). A repo outside
 //! the caller's installations renders `installed: false` with no sessions —
-//! never another user's private session data.
+//! never another user's private session data. A verified `FKST_GLOBAL_ADMINS`
+//! caller instead resolves through the App's complete installation inventory,
+//! which is the explicit operator-only exception to that anti-enumeration rule.
 
 use std::collections::{HashMap, HashSet};
 
@@ -25,6 +27,7 @@ use utoipa::ToSchema;
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_app::listing::IssueSummary;
 use crate::github_identity::GithubUser;
+use crate::models::RepoRef;
 use crate::reconcile::automerge::linked_issue_number;
 use crate::reconcile::desired::PodLiveness;
 use crate::reconcile::registry::parse_registration;
@@ -137,6 +140,62 @@ pub(super) fn validate_repo_segment(value: &str, which: &str) -> Result<(), AppE
     }
 }
 
+/// Resolve one requested repository through the appropriate visibility boundary.
+/// Ordinary callers use only their user-token installation list; verified global
+/// admins use the App-wide installation inventory. The returned repository always
+/// carries GitHub's canonical owner/name casing.
+pub(super) async fn resolve_visible_repo(
+    state: &AppState,
+    gh: &DashboardGithub,
+    user: &GithubUser,
+    user_token: &secrecy::SecretString,
+    owner: &str,
+    name: &str,
+) -> Result<Option<(i64, RepoRef)>, AppError> {
+    if state.config.access.is_global_admin(user.id, &user.login) {
+        let app = state.github_app.as_ref().ok_or_else(|| {
+            AppError::Unavailable("the github app is not configured on this deployment".to_string())
+        })?;
+        let app_jwt = app.app_jwt()?;
+        let installations = gh.app_installations(&app_jwt).await?;
+        let Some(installation) = installations
+            .into_iter()
+            .find(|candidate| candidate.account.eq_ignore_ascii_case(owner))
+        else {
+            return Ok(None);
+        };
+        let installation_token = app.installation_wide_token(installation.id).await?;
+        let repo = gh
+            .installation_repos(&installation_token)
+            .await?
+            .into_iter()
+            .find(|repo| {
+                repo.owner.eq_ignore_ascii_case(owner) && repo.name.eq_ignore_ascii_case(name)
+            })
+            .map(|repo| RepoRef {
+                owner: repo.owner,
+                name: repo.name,
+            });
+        return Ok(repo.map(|repo| (installation.id, repo)));
+    }
+
+    let installations = gh.user_installations(user_token).await?;
+    let Some(installation) = installations
+        .iter()
+        .find(|candidate| candidate.account.eq_ignore_ascii_case(owner))
+    else {
+        return Ok(None);
+    };
+    let repo = gh
+        .user_installation_repos(user_token, installation.id)
+        .await?
+        .into_iter()
+        .find(|repo| {
+            repo.owner.eq_ignore_ascii_case(owner) && repo.name.eq_ignore_ascii_case(name)
+        });
+    Ok(repo.map(|repo| (installation.id, repo)))
+}
+
 /// Project a runtime liveness into the canvas' three visible phases. `Absent`
 /// and `Terminal` (finished, awaiting GC) both render null — the canvas only
 /// blinks for something actually running or on its way in/out.
@@ -237,7 +296,7 @@ fn invalid_session_detail(
 pub(super) async fn repo_sessions(
     State(state): State<AppState>,
     Path((owner, name)): Path<(String, String)>,
-    _user: GithubUser,
+    user: GithubUser,
     headers: HeaderMap,
 ) -> Result<Json<RepoSessionsResponse>, AppError> {
     validate_repo_segment(&owner, "owner")?;
@@ -245,28 +304,12 @@ pub(super) async fn repo_sessions(
     let token = bearer_token(&headers)?;
     let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
 
-    // Caller-scoped installation check: the user token only ever sees THIS
-    // App's installations, so membership here is both the `installed` flag and
-    // the access gate on another user's session data. The path segments match
-    // case-insensitively (GitHub treats owner/name that way), but the MATCHED
-    // installation repo carries GitHub's canonical casing — session ids, log
-    // URLs, and pod annotations are all derived case-sensitively from that
-    // casing, so the caller's variant must never leak into them.
-    let installations = gh.user_installations(&token).await?;
-    let installation = installations
-        .iter()
-        .find(|inst| inst.account.eq_ignore_ascii_case(&owner));
-    let canonical = match installation {
-        Some(inst) => gh
-            .user_installation_repos(&token, inst.id)
-            .await?
-            .into_iter()
-            .find(|repo| {
-                repo.owner.eq_ignore_ascii_case(&owner) && repo.name.eq_ignore_ascii_case(&name)
-            }),
-        None => None,
-    };
-    let (Some(installation), Some(repo_ref)) = (installation, canonical) else {
+    // The matched repo carries GitHub's canonical casing — session ids, log URLs,
+    // and runtime annotations are derived case-sensitively, so the request's case
+    // variant must never leak into them.
+    let Some((installation_id, repo_ref)) =
+        resolve_visible_repo(&state, &gh, &user, &token, &owner, &name).await?
+    else {
         tracing::debug!(owner = %owner, name = %name, "canvas sessions: repo not in the caller's installations");
         return Ok(Json(RepoSessionsResponse {
             owner,
@@ -296,7 +339,7 @@ pub(super) async fn repo_sessions(
     let mut registrations = Vec::new();
     let mut parse_errors = HashMap::new();
     for trigger in &triggers {
-        match parse_registration(installation.id, &repo_ref, &trigger.summary) {
+        match parse_registration(installation_id, &repo_ref, &trigger.summary) {
             Ok(reg) => registrations.push(reg),
             Err((issue, reason)) => {
                 parse_errors.insert(issue, reason);

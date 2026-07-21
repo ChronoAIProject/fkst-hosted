@@ -12,7 +12,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use super::*;
 use crate::reconcile::desired::LivePod;
 use crate::routes::canvas::test_support::{
-    auth_headers, mount_app_token, test_app, test_state, viewer_user,
+    auth_headers, grant_global_admin, mount_app_token, test_app, test_state, viewer_user,
 };
 use crate::session_backend::test_support::FakeSessionBackend;
 use crate::session_spec::derive_session_id;
@@ -476,6 +476,69 @@ async fn repo_sessions_outside_the_callers_installations_is_not_installed() {
     .expect("200 with installed=false");
     assert!(!view.installed);
     assert!(view.sessions.is_empty());
+}
+
+#[tokio::test]
+async fn global_admin_can_read_a_repo_outside_user_installations() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/app/installations"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                "id": 77,
+                "account": { "login": "acme", "type": "Organization" },
+                "repository_selection": "all"
+            }])),
+        )
+        .mount(&server)
+        .await;
+    mount_app_token(&server, "acme", "site", 77).await;
+    Mock::given(method("GET"))
+        .and(path("/installation/repositories"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 1,
+            "repositories": [{
+                "id": 2,
+                "name": "site",
+                "owner": { "login": "acme", "type": "Organization" },
+                "private": true
+            }]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/issues"))
+        .and(query_param("labels", "fkst-substrate-trigger"))
+        .and(query_param("state", "all"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/pulls"))
+        .and(query_param("state", "all"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(&server)
+        .await;
+
+    let mut state = test_state(&server.uri(), Some(test_app(&server.uri())));
+    grant_global_admin(&mut state, "shining");
+    let Json(view) = repo_sessions(
+        State(state),
+        Path(("ACME".to_string(), "Site".to_string())),
+        viewer_user(),
+        auth_headers(),
+    )
+    .await
+    .expect("global admin reads the App-covered repo");
+
+    assert!(view.installed);
+    assert_eq!(view.owner, "acme");
+    assert_eq!(view.name, "site");
+    assert!(view.sessions.is_empty());
+    let requests = server.received_requests().await.expect("recorded requests");
+    assert!(requests
+        .iter()
+        .all(|request| !request.url.path().starts_with("/user/")));
 }
 
 #[tokio::test]

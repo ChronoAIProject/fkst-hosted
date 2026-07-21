@@ -11,9 +11,11 @@
 //!   extension; over [`MAX_BLOB_BYTES`] answers 413.
 //!
 //! Access scoping mirrors [`super::sessions`]: identity via the [`GithubUser`]
-//! extractor, then the CALLER's own App installations must cover the repo (a repo
-//! the caller cannot see renders 404, never another user's data). PR-file fetches
-//! run under [`OUTCOME_FILE_CONCURRENCY`] bounded concurrency.
+//! extractor, then ordinary callers are limited to their own App installations
+//! (a repo the caller cannot see renders 404, never another user's data). A
+//! verified `FKST_GLOBAL_ADMINS` caller may read outcomes through the App-wide
+//! installation inventory. PR-file fetches run under
+//! [`OUTCOME_FILE_CONCURRENCY`] bounded concurrency.
 
 use std::collections::HashSet;
 
@@ -22,16 +24,14 @@ use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use futures::stream::{self, StreamExt};
-use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_app::GithubAppError;
 use crate::github_identity::GithubUser;
-use crate::models::RepoRef;
 use crate::reconcile::registry::parse_registration;
-use crate::routes::canvas::sessions::{devloop_prs, validate_repo_segment};
+use crate::routes::canvas::sessions::{devloop_prs, resolve_visible_repo, validate_repo_segment};
 use crate::routes::canvas::work_projection::work_issues_by_session;
 use crate::routes::dashboard::{bearer_token, DashboardGithub};
 use crate::state::AppState;
@@ -130,7 +130,7 @@ pub struct BlobQuery {
 pub(super) async fn session_outcomes(
     State(state): State<AppState>,
     Path((owner, name, issue_number)): Path<(String, String, i64)>,
-    _user: GithubUser,
+    user: GithubUser,
     headers: HeaderMap,
 ) -> Result<Json<SessionOutcomes>, AppError> {
     validate_repo_segment(&owner, "owner")?;
@@ -138,9 +138,10 @@ pub(super) async fn session_outcomes(
     let token = bearer_token(&headers)?;
     let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
 
-    let (installation_id, repo_ref) = resolve_installed_repo(&gh, &token, &owner, &name)
-        .await?
-        .ok_or_else(|| AppError::NotFound(format!("{owner}/{name}: not found")))?;
+    let (installation_id, repo_ref) =
+        resolve_visible_repo(&state, &gh, &user, &token, &owner, &name)
+            .await?
+            .ok_or_else(|| AppError::NotFound(format!("{owner}/{name}: not found")))?;
     let owner = repo_ref.owner.clone();
     let name = repo_ref.name.clone();
 
@@ -265,10 +266,10 @@ pub(super) async fn outcome_blob(
     State(state): State<AppState>,
     Path((owner, name, sha)): Path<(String, String, String)>,
     Query(query): Query<BlobQuery>,
-    _user: GithubUser,
+    user: GithubUser,
     headers: HeaderMap,
 ) -> Response {
-    match blob_bytes(&state, &owner, &name, &sha, &headers).await {
+    match blob_bytes(&state, &user, &owner, &name, &sha, &headers).await {
         Ok(bytes) => blob_response(bytes, query),
         Err(BlobError::TooLarge) => (
             StatusCode::PAYLOAD_TOO_LARGE,
@@ -296,6 +297,7 @@ impl From<AppError> for BlobError {
 /// Validate + scope + fetch the blob bytes (shared by [`outcome_blob`]).
 async fn blob_bytes(
     state: &AppState,
+    user: &GithubUser,
     owner: &str,
     name: &str,
     sha: &str,
@@ -307,7 +309,7 @@ async fn blob_bytes(
     let token = bearer_token(headers).map_err(BlobError::App)?;
     let gh = DashboardGithub::new(&state.config.github_api_base_url).map_err(BlobError::App)?;
 
-    let (_installation_id, repo_ref) = resolve_installed_repo(&gh, &token, owner, name)
+    let (_installation_id, repo_ref) = resolve_visible_repo(state, &gh, user, &token, owner, name)
         .await?
         .ok_or_else(|| AppError::NotFound(format!("{owner}/{name}: not found")))?;
 
@@ -335,32 +337,6 @@ fn blob_response(bytes: Vec<u8>, query: BlobQuery) -> Response {
         headers.insert(header::CONTENT_DISPOSITION, value);
     }
     response
-}
-
-/// Resolve the caller-visible installation + canonical repo casing. `Ok(None)`
-/// when the caller's App installations do not cover `owner/name` (the access
-/// gate on another user's data).
-async fn resolve_installed_repo(
-    gh: &DashboardGithub,
-    token: &SecretString,
-    owner: &str,
-    name: &str,
-) -> Result<Option<(i64, RepoRef)>, AppError> {
-    let installations = gh.user_installations(token).await?;
-    let Some(installation) = installations
-        .iter()
-        .find(|inst| inst.account.eq_ignore_ascii_case(owner))
-    else {
-        return Ok(None);
-    };
-    let canonical = gh
-        .user_installation_repos(token, installation.id)
-        .await?
-        .into_iter()
-        .find(|repo| {
-            repo.owner.eq_ignore_ascii_case(owner) && repo.name.eq_ignore_ascii_case(name)
-        });
-    Ok(canonical.map(|repo| (installation.id, repo)))
 }
 
 #[path = "outcomes_media.rs"]
