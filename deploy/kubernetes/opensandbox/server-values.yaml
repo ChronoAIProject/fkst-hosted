@@ -1,0 +1,75 @@
+# Canonical FKST tenant integration for the vendored OpenSandbox lifecycle
+# server chart described in CLAUDE.md. Credential bytes come from the
+# opensandbox-api-key ExternalSecret; this file contains no key material.
+fullnameOverride: opensandbox-server
+
+server:
+  image:
+    repository: opensandbox/server
+    tag: latest
+    digest: sha256:4b386f107a4222320928b0b4dd38df8dc5154250ea4c90b4d36767a62f69ce7c
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: "1"
+      memory: 2Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
+  command:
+    - /bin/sh
+    - -c
+    - |
+      cat > /tmp/tenants.toml <<EOF
+      [[tenants]]
+      name = "fkst"
+      namespace = "chronoai-fkst"
+      api_keys = ["$(cat /var/secrets/opensandbox-fkst-api-key)"]
+      EOF
+      export SANDBOX_TENANTS_CONFIG_PATH=/tmp/tenants.toml
+      exec opensandbox-server --config /etc/opensandbox/config.toml
+  volumeMounts:
+    - name: api-key
+      mountPath: /var/secrets
+      readOnly: true
+    - name: batchsandbox-template
+      mountPath: /etc/opensandbox/batchsandbox-template.yaml
+      subPath: batchsandbox-template.yaml
+      readOnly: true
+  volumes:
+    - name: api-key
+      secret:
+        secretName: opensandbox-api-key
+    - name: batchsandbox-template
+      configMap:
+        name: opensandbox-batchsandbox-template
+
+configToml: |
+  [server]
+  host = "0.0.0.0"
+  port = 80
+  max_sandbox_timeout_seconds = 3600
+
+  [log]
+  level = "INFO"
+
+  [runtime]
+  type = "kubernetes"
+  execd_image = "opensandbox/execd:v1.0.20"
+
+  [tenants]
+  provider = "file"
+
+  [kubernetes]
+  namespace = "chronoai-fkst"
+  service_account = "sandbox-runner"
+  workload_provider = "batchsandbox"
+  batchsandbox_template_file = "/etc/opensandbox/batchsandbox-template.yaml"
+  sandbox_create_timeout_seconds = 300
+  informer_enabled = true
+  informer_resync_seconds = 300
+  informer_watch_timeout_seconds = 60
+
+  [secure_runtime]
+  type = "gvisor"
+  k8s_runtime_class = "gvisor"

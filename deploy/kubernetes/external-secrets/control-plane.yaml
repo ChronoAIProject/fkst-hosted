@@ -1,0 +1,20 @@
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: fkst-control-plane
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/name: fkst-control-plane
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  refreshInterval: 5m
+  secretStoreRef:
+    kind: SecretStore
+    name: fkst-external-secrets
+  target:
+    name: fkst-control-plane-secret
+    creationPolicy: Orphan
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: fkst-control-plane

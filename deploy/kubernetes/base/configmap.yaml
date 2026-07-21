@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fkst-control-plane-config
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/name: fkst-control-plane
+    app.kubernetes.io/part-of: fkst-hosted
+data:
+  FKST_HOSTED_LOG_LEVEL: info,fkst_control_plane=debug,tower_http=info
+  FKST_HOSTED_REQUEST_TIMEOUT_SECS: "30"
+  FKST_POD_DISPATCH: "true"
+  FKST_POD_MODE: opensandbox
+  FKST_POD_IMAGE: fkst-control-plane:local
+  FKST_OSB_BASE_URL: http://opensandbox-server.opensandbox-system.svc.cluster.local
+  FKST_OSB_API_KEY_FILE: /var/secrets/opensandbox-fkst-api-key
+  FKST_OSB_ENTRYPOINT: /usr/local/bin/fkst-control-plane
+  FKST_OSB_SESSION_CPU: "2"
+  FKST_OSB_SESSION_MEMORY: 4Gi
+  FKST_STARTUP_RESYNC_RETRY_INITIAL_SECS: "5"
+  FKST_STARTUP_RESYNC_RETRY_MAX_SECS: "60"
+  FKST_STARTUP_RESYNC_RETRY_JITTER_PERCENT: "20"
+  FKST_LLM_BASE_URL: https://llm.example.invalid/v1
+  FKST_LLM_MODEL: gpt-5.5
+  FKST_LLM_WIRE_API: responses
+  FKST_GITHUB_BOT_LOGIN: fkst-local[bot]
+  FKST_PUBLIC_BASE_URL: https://api.chronoai-fkst.local
+  FKST_FRONTEND_URL: https://app.chronoai-fkst.local
