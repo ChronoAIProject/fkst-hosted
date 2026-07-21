@@ -61,6 +61,18 @@ mod defaults {
         600
     }
 
+    pub(super) fn startup_resync_retry_initial_secs() -> u64 {
+        5
+    }
+
+    pub(super) fn startup_resync_retry_max_secs() -> u64 {
+        60
+    }
+
+    pub(super) fn startup_resync_retry_jitter_percent() -> u64 {
+        20
+    }
+
     pub(super) fn session_idle_grace_secs() -> u64 {
         // How long a live pod may sit non-pending before it is idle-killed.
         300
@@ -134,6 +146,12 @@ struct ReconcileVars {
     reconcile_interval_secs: u64,
     #[serde(default = "defaults::pod_full_resync_interval_secs")]
     pod_full_resync_interval_secs: u64,
+    #[serde(default = "defaults::startup_resync_retry_initial_secs")]
+    startup_resync_retry_initial_secs: u64,
+    #[serde(default = "defaults::startup_resync_retry_max_secs")]
+    startup_resync_retry_max_secs: u64,
+    #[serde(default = "defaults::startup_resync_retry_jitter_percent")]
+    startup_resync_retry_jitter_percent: u64,
     #[serde(default = "defaults::session_idle_grace_secs")]
     session_idle_grace_secs: u64,
     #[serde(default = "defaults::pod_min_lifetime_secs")]
@@ -180,6 +198,16 @@ pub struct ReconcileConfig {
     /// Full pod-resync cadence, seconds. Env: `FKST_POD_FULL_RESYNC_INTERVAL_SECS`.
     /// Default 600; must be >= 1.
     pub pod_full_resync_interval_secs: u64,
+    /// Initial retry delay after an incomplete full resync. Env:
+    /// `FKST_STARTUP_RESYNC_RETRY_INITIAL_SECS`. Default 5; must be >= 1.
+    pub startup_resync_retry_initial_secs: u64,
+    /// Maximum retry delay after an incomplete full resync. Env:
+    /// `FKST_STARTUP_RESYNC_RETRY_MAX_SECS`. Default 60; must be at least the
+    /// configured initial delay.
+    pub startup_resync_retry_max_secs: u64,
+    /// Symmetric jitter around each retry delay, as a percentage. Env:
+    /// `FKST_STARTUP_RESYNC_RETRY_JITTER_PERCENT`. Default 20; range 0..=100.
+    pub startup_resync_retry_jitter_percent: u64,
     /// Idle grace before a non-pending live pod is killed, seconds. Env:
     /// `FKST_SESSION_IDLE_GRACE_SECS`. Default 300; must be >= 1.
     pub session_idle_grace_secs: u64,
@@ -249,6 +277,9 @@ impl Default for ReconcileConfig {
             default_manifest: defaults::default_manifest(),
             reconcile_interval_secs: defaults::reconcile_interval_secs(),
             pod_full_resync_interval_secs: defaults::pod_full_resync_interval_secs(),
+            startup_resync_retry_initial_secs: defaults::startup_resync_retry_initial_secs(),
+            startup_resync_retry_max_secs: defaults::startup_resync_retry_max_secs(),
+            startup_resync_retry_jitter_percent: defaults::startup_resync_retry_jitter_percent(),
             session_idle_grace_secs: defaults::session_idle_grace_secs(),
             pod_min_lifetime_secs: defaults::pod_min_lifetime_secs(),
             pod_termination_grace_secs: defaults::pod_termination_grace_secs(),
@@ -284,6 +315,23 @@ impl ReconcileConfig {
         if env.pod_full_resync_interval_secs == 0 {
             return Err(AppError::Config(
                 "FKST_POD_FULL_RESYNC_INTERVAL_SECS must be at least 1".to_string(),
+            ));
+        }
+        if env.startup_resync_retry_initial_secs == 0 {
+            return Err(AppError::Config(
+                "FKST_STARTUP_RESYNC_RETRY_INITIAL_SECS must be at least 1".to_string(),
+            ));
+        }
+        if env.startup_resync_retry_max_secs < env.startup_resync_retry_initial_secs {
+            return Err(AppError::Config(
+                "FKST_STARTUP_RESYNC_RETRY_MAX_SECS must be greater than or equal to \
+                 FKST_STARTUP_RESYNC_RETRY_INITIAL_SECS"
+                    .to_string(),
+            ));
+        }
+        if env.startup_resync_retry_jitter_percent > 100 {
+            return Err(AppError::Config(
+                "FKST_STARTUP_RESYNC_RETRY_JITTER_PERCENT must be between 0 and 100".to_string(),
             ));
         }
         if env.session_idle_grace_secs == 0 {
@@ -347,6 +395,9 @@ impl ReconcileConfig {
             github_bot_login,
             reconcile_interval_secs: env.reconcile_interval_secs,
             pod_full_resync_interval_secs: env.pod_full_resync_interval_secs,
+            startup_resync_retry_initial_secs: env.startup_resync_retry_initial_secs,
+            startup_resync_retry_max_secs: env.startup_resync_retry_max_secs,
+            startup_resync_retry_jitter_percent: env.startup_resync_retry_jitter_percent,
             session_idle_grace_secs: env.session_idle_grace_secs,
             pod_min_lifetime_secs: env.pod_min_lifetime_secs,
             pod_termination_grace_secs: env.pod_termination_grace_secs,
