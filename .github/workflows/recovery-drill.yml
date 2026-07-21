@@ -1,0 +1,66 @@
+name: Recovery drill
+
+on:
+  schedule:
+    - cron: "17 3 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fkst-disposable-recovery-drill
+  cancel-in-progress: false
+
+jobs:
+  recovery-drill:
+    name: disposable namespace recovery drill
+    runs-on: [self-hosted, fkst-recovery-drill]
+    environment: fkst-disposable-recovery-drill
+    timeout-minutes: 45
+    env:
+      FKST_DRILL_CONTEXT: ${{ vars.FKST_DRILL_CONTEXT }}
+      FKST_DRILL_TARGET_NAMESPACE: ${{ vars.FKST_DRILL_TARGET_NAMESPACE }}
+      FKST_DRILL_DURABLE_NAMESPACE: ${{ vars.FKST_DRILL_DURABLE_NAMESPACE }}
+      FKST_DRILL_REPOSITORY: ${{ vars.FKST_DRILL_REPOSITORY }}
+      FKST_DRILL_SENTINEL_USER_ID: ${{ vars.FKST_DRILL_SENTINEL_USER_ID }}
+      FKST_DRILL_SENTINEL_NAME: ${{ vars.FKST_DRILL_SENTINEL_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate protected drill configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${FKST_DRILL_CONTEXT:?protected environment must set FKST_DRILL_CONTEXT}"
+          : "${FKST_DRILL_TARGET_NAMESPACE:?protected environment must set FKST_DRILL_TARGET_NAMESPACE}"
+          : "${FKST_DRILL_DURABLE_NAMESPACE:?protected environment must set FKST_DRILL_DURABLE_NAMESPACE}"
+          : "${FKST_DRILL_REPOSITORY:?protected environment must set FKST_DRILL_REPOSITORY}"
+          : "${FKST_DRILL_SENTINEL_USER_ID:?protected environment must set FKST_DRILL_SENTINEL_USER_ID}"
+          : "${FKST_DRILL_SENTINEL_NAME:?protected environment must set FKST_DRILL_SENTINEL_NAME}"
+
+      - name: Run checked-in recovery drill
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy/kubernetes/run-disaster-drill.sh \
+            --context "$FKST_DRILL_CONTEXT" \
+            --target-namespace "$FKST_DRILL_TARGET_NAMESPACE" \
+            --confirm-delete "$FKST_DRILL_TARGET_NAMESPACE" \
+            --durable-namespace "$FKST_DRILL_DURABLE_NAMESPACE" \
+            --repository "$FKST_DRILL_REPOSITORY" \
+            --sentinel-user-id "$FKST_DRILL_SENTINEL_USER_ID" \
+            --sentinel-name "$FKST_DRILL_SENTINEL_NAME" \
+            --evidence-dir "$RUNNER_TEMP/fkst-recovery-evidence" \
+            --timeout-seconds 1800
+
+      - name: Upload redacted recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fkst-recovery-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/fkst-recovery-evidence
+          if-no-files-found: warn
+          retention-days: 90
