@@ -2,7 +2,7 @@
 //! replace (tmp upload + native `/files/mv` rename), the container-restart
 //! full-bundle re-push (every file + the sentinel LAST), the benign session-gone
 //! no-op, the surfaced upload/rename failures, and the both-restarted cache-miss
-//! single-file fallback.
+//! fail-loud path that forbids partial recovery.
 
 use std::collections::BTreeMap;
 
@@ -317,7 +317,7 @@ async fn deliver_credential_surfaces_an_upload_failure() {
 }
 
 #[tokio::test]
-async fn deliver_credential_delivers_only_the_single_file_when_the_cache_is_empty() {
+async fn deliver_credential_refuses_partial_delivery_when_the_cache_is_empty() {
     let server = MockServer::start().await;
     mount_resolve(&server).await;
     // Creds wiped (404) AND the cache is empty (control plane also restarted).
@@ -329,23 +329,23 @@ async fn deliver_credential_delivers_only_the_single_file_when_the_cache_is_empt
     Mock::given(method("POST"))
         .and(path(UPLOAD_PATH))
         .respond_with(ResponseTemplate::new(200))
+        .expect(0)
         .mount(&server)
         .await;
 
-    let outcome = backend(&server.uri(), osb_config())
+    let error = backend(&server.uri(), osb_config())
         .deliver_credential_impl(
             SESSION_ID,
             "github-token",
             SecretString::from("ghs_new".to_string()),
         )
         .await
-        .expect("delivered");
-    assert_eq!(outcome, DeliveryOutcome::Delivered);
+        .expect_err("a complete bundle is required");
+    assert!(matches!(error, BackendError::Other(_)));
 
     let uploads = upload_bodies(&server).await;
-    // Only the single rotated file — no full bundle (empty cache), no sentinel.
-    assert_eq!(uploads.len(), 1);
-    assert!(uploads[0].contains("/var/lib/fkst/creds/github-token"));
-    assert!(uploads[0].contains(r#""mode":600"#));
-    assert!(!uploads[0].contains(".creds-complete"));
+    assert!(
+        uploads.is_empty(),
+        "partial credentials must never be published"
+    );
 }

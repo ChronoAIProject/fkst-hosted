@@ -128,6 +128,12 @@ impl SessionBackend for K8sBackend {
         self.ensure_session_impl(spec, creds).await
     }
 
+    async fn credential_recovery_needed(&self, _session_id: &str) -> Result<bool, BackendError> {
+        // The complete bundle lives in a Kubernetes Secret and is projected by
+        // kubelet; it does not depend on control-plane process memory.
+        Ok(false)
+    }
+
     async fn observe_repo(&self, repo: &RepoRef) -> Result<Vec<LivePod>, BackendError> {
         self.observe_repo_impl(repo).await
     }

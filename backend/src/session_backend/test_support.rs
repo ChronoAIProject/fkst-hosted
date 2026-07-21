@@ -96,6 +96,10 @@ impl SessionBackend for FakeSessionBackend {
         Ok(EnsureOutcome::Created)
     }
 
+    async fn credential_recovery_needed(&self, _session_id: &str) -> Result<bool, BackendError> {
+        Ok(true)
+    }
+
     async fn observe_repo(&self, _repo: &RepoRef) -> Result<Vec<LivePod>, BackendError> {
         Ok(self.observed.clone())
     }

@@ -119,8 +119,9 @@ pub struct OsbBackend {
     /// Latest full credential bundle per live session, for the full re-push heal path
     /// (see [`rotation`]): when a container restart wipes the creds dir, the rotation
     /// verb re-pushes THIS whole bundle rather than only the rotated file. A
-    /// control-plane restart empties this map — the next reconcile tick repopulates it
-    /// via `ensure_session`. `SecretString` is non-`Clone`, so bundles are MOVED in and
+    /// control-plane restart empties this map — the live-session credential recovery
+    /// action rebuilds the bundle from authoritative sources and routes it through
+    /// `ensure_session`. `SecretString` is non-`Clone`, so bundles are MOVED in and
     /// BORROWED out for upload, never cloned.
     creds: Mutex<HashMap<String, BTreeMap<String, SecretString>>>,
 }
@@ -242,6 +243,11 @@ impl SessionBackend for OsbBackend {
         creds: BTreeMap<String, SecretString>,
     ) -> Result<EnsureOutcome, BackendError> {
         self.ensure_session_impl(spec, creds).await
+    }
+
+    async fn credential_recovery_needed(&self, session_id: &str) -> Result<bool, BackendError> {
+        let guard = self.creds.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(!guard.contains_key(session_id))
     }
 
     async fn observe_repo(&self, repo: &RepoRef) -> Result<Vec<LivePod>, BackendError> {

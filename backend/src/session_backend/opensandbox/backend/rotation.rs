@@ -17,8 +17,10 @@
 //! - the creds were WIPED (container restart) → re-push the WHOLE cached bundle through
 //!   the same per-file + sentinel-LAST upload `ensure_session` uses, so the in-pod
 //!   engine-start gate can pass again;
-//! - the bundle cache is ALSO empty (the control plane restarted too) → deliver only
-//!   the rotated file and let the next `ensure_session` repopulate + fully heal.
+//! - the bundle cache is ALSO empty (the control plane restarted too) → fail the
+//!   delivery without publishing a partial credential set. The live-session
+//!   reconcile action rebuilds the full bundle from authoritative sources and routes
+//!   it through `ensure_session`, which restores every file and the sentinel.
 //!
 //! A gone session is the benign [`DeliveryOutcome::SessionGone`] the rotation loop
 //! no-ops on; any other failure surfaces so the loop retries next tick (no internal
@@ -85,8 +87,9 @@ impl OsbBackend {
 
     /// Re-push the whole cached credential bundle (with the freshly-rotated `file`
     /// overlaid) through the SAME per-file + sentinel-LAST upload `ensure_session` uses.
-    /// On a cache MISS (both control plane AND container restarted) deliver only the
-    /// single rotated file and self-heal next reconcile once the cache repopulates.
+    /// On a cache MISS (both control plane AND container restarted), fail visibly
+    /// without uploading a partial set. The reconcile-side recovery path must supply
+    /// the full authoritative bundle before the runtime can be complete again.
     async fn repush_full_bundle(
         &self,
         sandbox_id: &str,
@@ -120,21 +123,14 @@ impl OsbBackend {
                 Ok(DeliveryOutcome::Delivered)
             }
             None => {
-                // Both restarted: no bundle to re-push. Deliver only the rotated file;
-                // the full set self-heals on the next `ensure_session`.
-                let execd = (self.execd_factory)(sandbox_id, session_id);
-                let layout = CredsLayout::new(OSB_CREDS_DIR);
-                let path = path_str(&layout.base().join(file));
-                execd
-                    .upload_file(&path, contents.expose_secret().as_bytes(), CREDS_FILE_MODE)
-                    .await?;
                 tracing::warn!(
                     session_id = %session_id,
                     "opensandbox deliver_credential: container creds wiped AND bundle cache empty \
-                     (control plane also restarted); delivered only the rotated file, full bundle \
-                     heals next reconcile"
+                     (control plane also restarted); refusing partial delivery until full-bundle recovery"
                 );
-                Ok(DeliveryOutcome::Delivered)
+                Err(BackendError::Other(anyhow::anyhow!(
+                    "complete credential bundle unavailable for session recovery"
+                )))
             }
         }
     }
