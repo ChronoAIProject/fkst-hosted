@@ -1374,6 +1374,13 @@ data:
   FKST_OSB_SESSION_CPU: "2"
   FKST_OSB_SESSION_MEMORY: 4Gi
 
+  # ---- startup recovery ----
+  # A partial or failed installation/repository discovery pass retries at
+  # 5s, 10s, 20s, 40s, then 60s-capped delays (with symmetric jitter).
+  FKST_STARTUP_RESYNC_RETRY_INITIAL_SECS: "5"
+  FKST_STARTUP_RESYNC_RETRY_MAX_SECS: "60"
+  FKST_STARTUP_RESYNC_RETRY_JITTER_PERCENT: "20"
+
   # ---- LLM (external prerequisite, §14.1) ----
   FKST_LLM_BASE_URL: <your OpenAI-compatible endpoint, e.g. https://api.openai.com/v1>
   FKST_LLM_MODEL: <model id served by your LLM endpoint>
@@ -1557,7 +1564,7 @@ spec:
             timeoutSeconds: 7
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: http
             periodSeconds: 10
             failureThreshold: 3
@@ -1854,10 +1861,11 @@ rejecting the certificate.
 
 #### 16.4 Verify
 
-**1. Backend healthy and configured:**
+**1. Backend live, recovery-ready, and configured:**
 
 ```bash
 curl -s https://api.chronoai-fkst.local/health; echo
+curl -s https://api.chronoai-fkst.local/ready; echo
 kubectl -n chronoai-fkst logs deploy/fkst-control-plane --tail=30   # startup lines, no fail-closed config errors;
                                                                     # with the §14.7 webhook secret set, includes
                                                                     # "github app webhook endpoint mounted"
@@ -2016,7 +2024,7 @@ When you add or change a **public** HTTP endpoint, the spec does **not** auto-re
 Scope and constraints:
 
 - **Wire types** are plain modules in the crate and derive `ToSchema` directly (the backend is one crate — there is no separate shared/worker crate, so no off-by-default `schema` feature to gate). A new request/response DTO needs `#[derive(ToSchema)]`, or it won't appear in the spec.
-- **Scope is the public surface only**: `/api/v1/*`, `/health`, `/metrics`, and the GitHub App webhook (only when a webhook secret is configured — the spec tracks live config).
+- **Scope is the public surface only**: `/api/v1/*`, `/health`, `/ready`, `/metrics`, and the GitHub App webhook (only when a webhook secret is configured — the spec tracks live config).
 - **Component names** are derived from the Rust type identifier, so duplicate idents collide in the spec — give colliding types distinct names or consolidate them into one type.
 - **Version pins**: `utoipa = "5"`, `utoipa-axum = "0.1"` (the axum-0.7 line; `utoipa-axum` 0.2+ targets axum 0.8 — do not bump it until axum itself is upgraded).
 - **Keep `tests/openapi.rs` green**: it drives the real `build_router` and asserts the spec's paths/schemas/security.
