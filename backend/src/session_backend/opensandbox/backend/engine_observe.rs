@@ -11,11 +11,11 @@
 
 use std::time::Duration;
 
-use crate::k8s::session_launcher::DURABLE_ROOT_DIR;
 use crate::session_backend::k8s::classify_observe_failure;
 use crate::session_backend::{BackendError, ObserveError};
 use crate::session_pod::supervise::FRAMEWORK_BIN;
 
+use super::spawn::OSB_DURABLE_ROOT;
 use super::OsbBackend;
 
 /// execd-side command timeout: the observe snapshot is a fast read-model dump;
@@ -29,7 +29,7 @@ const POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// every substituted token is a validated integer or a compile-time constant,
 /// so no shell-quoting is needed.
 fn observe_command(limit: u32) -> String {
-    format!("{FRAMEWORK_BIN} observe --durable-root {DURABLE_ROOT_DIR} --json --limit {limit}")
+    format!("{FRAMEWORK_BIN} observe --durable-root {OSB_DURABLE_ROOT} --json --limit {limit}")
 }
 
 impl OsbBackend {
@@ -110,7 +110,7 @@ mod tests {
     fn observe_command_uses_the_shared_constants_verbatim() {
         assert_eq!(
             observe_command(500),
-            "/usr/local/bin/fkst-framework observe --durable-root /var/run/fkst/durable --json --limit 500"
+            "/usr/local/bin/fkst-framework observe --durable-root /var/lib/fkst/durable --json --limit 500"
         );
     }
 

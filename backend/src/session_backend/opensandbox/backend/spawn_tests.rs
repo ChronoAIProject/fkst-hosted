@@ -99,6 +99,10 @@ async fn ensure_session_creates_with_null_timeout_stamped_metadata_and_execd_tok
             },
             "env": {
                 "EXECD_ACCESS_TOKEN": expected_execd_token(),
+                "FKST_DURABLE_ROOT": "/var/lib/fkst/durable",
+                "FKST_RUNTIME_ROOT": "/var/lib/fkst/runtime",
+                "FKST_SESSION_CREDS_DIR": "/var/lib/fkst/creds",
+                "CODEX_HOME": "/var/lib/fkst/codex",
                 // The shared `session_env_pairs` source must reach the sandbox
                 // create env too — proven here via the engine HostFact pair.
                 "FKST_CANDIDATE_PREFIX": "fkst-cand",
@@ -144,7 +148,7 @@ async fn ensure_session_renders_operator_rate_pools_on_the_create_env() {
         .and(body_partial_json(json!({
             "env": {
                 "FKST_RATE_POOL_GH": "50,50",
-                "FKST_RATE_POOL_ROOT": "/var/run/fkst/rate-pools",
+                "FKST_RATE_POOL_ROOT": "/var/lib/fkst/rate-pools",
             },
         })))
         .respond_with(ResponseTemplate::new(202).set_body_json(sandbox_json(
@@ -218,17 +222,19 @@ async fn ensure_session_uploads_the_completeness_sentinel_last() {
         .collect();
     assert_eq!(uploads.len(), 2, "one credential file + the sentinel");
     assert!(
-        uploads[0].contains("github-token"),
-        "first upload is the cred"
+        uploads[0].contains("/var/lib/fkst/creds/github-token"),
+        "first upload targets the OpenSandbox credential root"
     );
+    assert!(uploads[0].contains(r#""mode":400"#));
     assert!(
         !uploads[0].contains(".creds-complete"),
         "the sentinel must not be first"
     );
     assert!(
-        uploads[1].contains(".creds-complete"),
+        uploads[1].contains("/var/lib/fkst/creds/.creds-complete"),
         "the sentinel is uploaded LAST"
     );
+    assert!(uploads[1].contains(r#""mode":400"#));
 }
 
 #[tokio::test]
@@ -249,10 +255,16 @@ async fn ensure_session_rolls_back_the_sandbox_on_a_credential_upload_failure() 
         )))
         .mount(&server)
         .await;
-    // The first credential upload fails hard.
+    // A semantic 500 is permanent: fail on the first upload rather than burning the
+    // execd-startup retry budget.
     Mock::given(method("POST"))
         .and(path(UPLOAD_PATH))
-        .respond_with(ResponseTemplate::new(500))
+        .respond_with(
+            ResponseTemplate::new(500).set_body_string(
+                r#"{"code":"RUNTIME_ERROR","message":"mkdir: permission denied"}"#,
+            ),
+        )
+        .expect(1)
         .mount(&server)
         .await;
     // The rollback DELETE of the half-provisioned sandbox is REQUIRED (expect 1).
