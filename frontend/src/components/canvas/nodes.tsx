@@ -3,8 +3,14 @@ import { cn } from '@/lib/utils';
 import { useContent } from '@/i18n';
 import { Chip } from '@/components/ui/chip';
 import { FadeSwap, staggerStyle } from '@/components/ui/motion';
-import { accountStatus, repoDetailStatus, repoStatus, sessionActive } from '@/lib/api/derive';
-import type { CanvasStatus } from '@/lib/api/derive';
+import {
+  accountStatus,
+  decodeSessionStatus,
+  repoDetailStatus,
+  repoStatus,
+  sessionActive,
+} from '@/lib/api/derive';
+import type { CanvasStatus, SessionPhase } from '@/lib/api/derive';
 import type { AccountOverview, RepoOverview, RepoSessionsResponse } from '@/lib/api/types';
 import { ACCOUNT_NODE, DETAIL_NODE, REPO_NODE } from './layout';
 
@@ -82,7 +88,12 @@ function StatusBadge({ status, activeCount }: { status: CanvasStatus; activeCoun
     );
   }
   return (
-    <span className={cn('font-mono text-[10.5px]', status === 'installed' ? 'text-amber' : 'text-ghost')}>
+    <span
+      className={cn(
+        'font-mono text-[10.5px]',
+        status === 'installed' ? 'text-amber' : 'text-ghost'
+      )}
+    >
       {status === 'installed' ? cc.statusInstalled : cc.statusNone}
     </span>
   );
@@ -101,6 +112,22 @@ function RepoDot({ status }: { status: CanvasStatus }) {
         status === 'none' && 'bg-line-2',
         status === 'installed' && 'bg-amber',
         status === 'active' && 'bg-amber anim-dot-blink'
+      )}
+    />
+  );
+}
+
+function SessionDot({ phase }: { phase: SessionPhase }) {
+  return (
+    <span
+      data-session-phase={phase}
+      aria-hidden="true"
+      className={cn(
+        'w-2 h-2 rounded-full flex-none',
+        phase === 'active' && 'bg-green anim-dot-blink',
+        (phase === 'recovering' || phase === 'picked-up' || phase === 'registered') && 'bg-amber',
+        (phase === 'degraded' || phase === 'invalid') && 'bg-red',
+        (phase === 'idle' || phase === 'retired') && 'bg-line-2'
       )}
     />
   );
@@ -125,7 +152,11 @@ export function AccountNode({ data }: NodeProps<AccountFlowNode>) {
       // carries React Flow's positioning `transform`, so its enter cue must stay
       // opacity-only (`anim-overlay-in`); the body is an independent box, so
       // `anim-row-in`'s translateY animates safely here without fighting layout.
-      style={{ width: ACCOUNT_NODE.width, height: ACCOUNT_NODE.height, ...staggerStyle(index ?? 0) }}
+      style={{
+        width: ACCOUNT_NODE.width,
+        height: ACCOUNT_NODE.height,
+        ...staggerStyle(index ?? 0),
+      }}
       className={cn(
         'anim-row-in text-left border rounded-card p-4 flex flex-col gap-2 cursor-pointer',
         // Surface (bg/border/shadow/glow) is owned by statusCardClasses; here we
@@ -145,7 +176,10 @@ export function AccountNode({ data }: NodeProps<AccountFlowNode>) {
       </span>
       <span className="flex items-center gap-2">
         <StatusBadge status={status} activeCount={activeCount} />
-        <span className="font-mono text-[10.5px] text-ghost" title={!account.counts_complete ? cc.countsIncomplete : undefined}>
+        <span
+          className="font-mono text-[10.5px] text-ghost"
+          title={!account.counts_complete ? cc.countsIncomplete : undefined}
+        >
           {cc.repoCount.replace('{n}', String(account.repos.length))}
           {!account.counts_complete && ' ±'}
         </span>
@@ -250,18 +284,29 @@ function RepoDetailBody({
             </span>
           </div>
           <div className="flex flex-col gap-1">
-            {list.slice(0, 6).map((s) => (
-              // BUG B2: key is the stable session id, falling back to the trigger
-              // NUMBER alone — the old `-${i}` positional suffix churned the key on
-              // every reorder, forcing needless remounts of otherwise-stable rows.
-              <span key={s.session_id ?? `t-${s.trigger.number}`} className="flex items-center gap-2">
-                <RepoDot status={sessionActive(s) ? 'active' : 'none'} />
-                <span className="font-mono text-[11.5px] text-dim truncate">
-                  {s.name ?? c.invalidTrigger}
+            {list.slice(0, 6).map((s) => {
+              const phase = decodeSessionStatus(s).phase;
+              return (
+                // BUG B2: key is the stable session id, falling back to the trigger
+                // NUMBER alone — the old `-${i}` positional suffix churned the key on
+                // every reorder, forcing needless remounts of otherwise-stable rows.
+                <span
+                  key={s.session_id ?? `t-${s.trigger.number}`}
+                  className="flex items-center gap-2 min-w-0"
+                >
+                  <SessionDot phase={phase} />
+                  <span className="font-mono text-[11.5px] text-dim truncate min-w-0 flex-1">
+                    {s.name ?? c.invalidTrigger}
+                  </span>
+                  <span className="font-mono text-[10.5px] text-ghost flex-none">
+                    #{s.trigger.number}
+                  </span>
+                  <span className="font-mono text-[10px] text-ghost flex-none">
+                    {c.detail.phase[phase]}
+                  </span>
                 </span>
-                <span className="font-mono text-[10.5px] text-ghost">#{s.trigger.number}</span>
-              </span>
-            ))}
+              );
+            })}
           </div>
         </div>
       );

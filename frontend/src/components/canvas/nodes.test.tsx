@@ -199,12 +199,21 @@ describe('RepoDetailNode', () => {
         name: 'lab',
         installed: true,
         sessions: [
-          session({ session_id: 'a', name: 'nightly', trigger: { ...session().trigger, number: 7 } }),
+          session({
+            session_id: 'a',
+            name: 'nightly',
+            trigger: { ...session().trigger, number: 7 },
+          }),
           // A closed trigger is not "active" → summary counts 1 of 2 active.
           session({
             session_id: 'b',
             name: 'weekly',
-            trigger: { ...session().trigger, number: 8, state: 'closed', closed_at: '2026-07-03T00:00:00Z' },
+            trigger: {
+              ...session().trigger,
+              number: 8,
+              state: 'closed',
+              closed_at: '2026-07-03T00:00:00Z',
+            },
           }),
         ],
       },
@@ -220,6 +229,46 @@ describe('RepoDetailNode', () => {
     expect(screen.getByText('#8')).toBeInTheDocument();
   });
 
+  it('renders recovery-aware phase dots and labels in the repository node', () => {
+    renderDetail({
+      owner: 'shining',
+      name: 'lab',
+      installed: true,
+      sessions: {
+        owner: 'shining',
+        name: 'lab',
+        installed: true,
+        sessions: [
+          session({
+            session_id: 'recovering',
+            name: 'recovering-session',
+            recovery: {
+              state: 'recovering',
+              reason: 'runtime_absent',
+              open_work_items: 1,
+              runtime: 'absent',
+            },
+          }),
+          session({
+            session_id: 'degraded',
+            name: 'degraded-session',
+            recovery: {
+              state: 'degraded',
+              reason: 'runtime_health_degraded',
+              open_work_items: 1,
+              runtime: 'live',
+            },
+          }),
+        ],
+      },
+    });
+
+    expect(screen.getByText('Recovering')).toBeInTheDocument();
+    expect(screen.getByText('Degraded')).toBeInTheDocument();
+    expect(document.querySelector('[data-session-phase="recovering"]')).not.toBeNull();
+    expect(document.querySelector('[data-session-phase="degraded"]')).not.toBeNull();
+  });
+
   it('falls back to the trigger name and renders sessions lacking a session_id (B2 key)', () => {
     // A session with no session_id exercises the `t-${number}` fallback key —
     // which, post-B2, no longer carries the positional `-${i}` churn suffix.
@@ -231,7 +280,9 @@ describe('RepoDetailNode', () => {
         owner: 'shining',
         name: 'lab',
         installed: true,
-        sessions: [session({ session_id: null, name: null, trigger: { ...session().trigger, number: 9 } })],
+        sessions: [
+          session({ session_id: null, name: null, trigger: { ...session().trigger, number: 9 } }),
+        ],
       },
     });
     // Null name → the invalid-trigger placeholder still renders.

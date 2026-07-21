@@ -2,7 +2,12 @@ import type { CSSProperties, ReactNode } from 'react';
 import { useContent } from '@/i18n';
 import { Chip } from '@/components/ui/chip';
 import { FadeSwap } from '@/components/ui/motion';
-import type { IssueDetail, SessionDetail } from '@/lib/api/types';
+import type {
+  IssueDetail,
+  SessionDetail,
+  SessionRecoveryProjection,
+  SessionRecoveryState,
+} from '@/lib/api/types';
 import {
   decodeSessionStatus,
   decodeWorkItemStatus,
@@ -36,6 +41,7 @@ function stageReached(stage: SessionPhase, phase: SessionPhase, liveness: string
   const advanced =
     phase === 'active' ||
     phase === 'picked-up' ||
+    phase === 'recovering' ||
     phase === 'degraded' ||
     phase === 'retired' ||
     phase === 'idle' ||
@@ -90,7 +96,15 @@ function LifecycleCard({ session }: { session: SessionDetail }) {
         </span>
         <span className="font-mono text-[10.5px] text-ghost">
           {t.healthLabel}:{' '}
-          <span className={status.health === 'degraded' ? 'text-red' : 'text-dim'}>
+          <span
+            className={
+              status.health === 'degraded'
+                ? 'text-red'
+                : status.health === 'recovering'
+                  ? 'text-amber'
+                  : 'text-dim'
+            }
+          >
             {t.health[status.health]}
           </span>
         </span>
@@ -147,6 +161,98 @@ function LifecycleCard({ session }: { session: SessionDetail }) {
   );
 }
 
+const RECOVERY_TONE: Record<SessionRecoveryState, 'neutral' | 'amber' | 'green' | 'red'> = {
+  normal: 'green',
+  idle: 'neutral',
+  recovering: 'amber',
+  degraded: 'red',
+  unknown: 'neutral',
+  retired: 'neutral',
+  invalid: 'red',
+};
+
+function fallbackRecovery(session: SessionDetail): SessionRecoveryProjection {
+  const openWork = session.work_issues.filter((issue) => issue.state === 'open').length;
+  const status = decodeSessionStatus(session);
+  const runtime = session.liveness ?? 'unknown';
+
+  switch (status.phase) {
+    case 'invalid':
+      return {
+        state: 'invalid',
+        reason: session.status_labels.includes('fkst-config-rejected')
+          ? 'configuration_rejected'
+          : 'registration_invalid',
+        open_work_items: 0,
+        runtime,
+      };
+    case 'retired':
+      return { state: 'retired', reason: 'trigger_closed', open_work_items: 0, runtime };
+    case 'degraded':
+      return {
+        state: 'degraded',
+        reason: 'runtime_health_degraded',
+        open_work_items: openWork,
+        runtime,
+      };
+    case 'idle':
+      return { state: 'idle', reason: 'no_pending_work', open_work_items: 0, runtime };
+    case 'active':
+      return { state: 'normal', reason: 'runtime_live', open_work_items: openWork, runtime };
+    default:
+      if (openWork > 0 && session.liveness === 'starting') {
+        return {
+          state: 'recovering',
+          reason: 'runtime_starting',
+          open_work_items: openWork,
+          runtime,
+        };
+      }
+      if (openWork > 0 && session.liveness === 'terminating') {
+        return {
+          state: 'recovering',
+          reason: 'runtime_terminating',
+          open_work_items: openWork,
+          runtime,
+        };
+      }
+      return {
+        state: 'unknown',
+        reason: 'runtime_observation_unavailable',
+        open_work_items: openWork,
+        runtime,
+      };
+  }
+}
+
+/** Bounded operator read model. It deliberately renders enum-backed labels only:
+ * provider errors and private issue content never enter this surface. */
+function RecoveryCard({ recovery }: { recovery: SessionRecoveryProjection }) {
+  const t = useContent().dashboard.detail;
+  return (
+    <StatusCard label={t.recoveryDiagnostics} aria-label={t.recoveryDiagnostics}>
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="anim-chip-in inline-flex flex-none">
+          <Chip tone={RECOVERY_TONE[recovery.state]}>{t.recoveryState[recovery.state]}</Chip>
+        </span>
+        <p className="text-[11.5px] text-dim leading-relaxed min-w-0">
+          {t.recoveryReason[recovery.reason]}
+        </p>
+      </div>
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-1 font-mono text-[10.5px]">
+        <div className="min-w-0">
+          <dt className="text-ghost">{t.recoveryOpenWork}</dt>
+          <dd className="text-fg tabular-nums">{recovery.open_work_items}</dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-ghost">{t.recoveryRuntime}</dt>
+          <dd className="text-fg truncate">{t.runtimeState[recovery.runtime]}</dd>
+        </div>
+      </dl>
+    </StatusCard>
+  );
+}
+
 /** Status tab: an at-a-glance overview grid (progress meter, work-item
  *  distribution donut, lifecycle), a chronological session timeline, the
  *  promoted per-work-item list, and an on-demand "Live engine details" fetch —
@@ -165,10 +271,14 @@ export function TabStatus({
 }) {
   const t = useContent().dashboard.detail;
   const counts = countWorkItems(session.work_issues);
+  const recovery = session.recovery ?? fallbackRecovery(session);
   // The live-engine observe fetch pod-execs INTO the running pod, so it is only
-  // meaningful — and only permitted — while the pod is live. A latched active
-  // label whose pod has been reaped is NOT live (see decodeSessionStatus).
-  const isLive = session.liveness === 'live';
+  // meaningful — and only permitted — while the runtime is positively live.
+  // Prefer the typed projection when present so stale legacy liveness cannot
+  // enable a pod exec after an authoritative absent/terminal observation.
+  const isLive = session.recovery
+    ? session.recovery.runtime === 'live'
+    : session.liveness === 'live';
 
   // Hard gate: never let the observe fetch fire unless the pod is live, even if
   // a stray caller reaches the handler.
@@ -189,6 +299,7 @@ export function TabStatus({
         <ProgressCard counts={counts} />
         <WorkDonut counts={counts} />
         <LifecycleCard session={session} />
+        <RecoveryCard recovery={recovery} />
       </section>
 
       <SessionTimeline session={session} />
@@ -221,7 +332,13 @@ export function TabStatus({
         ) : (
           // Paused/idle: the pod is gone, so there is nothing to observe. Explain
           // it calmly instead of offering a fetch that would only error.
-          <Note>{t.liveEnginePaused}</Note>
+          <Note>
+            {recovery.state === 'recovering'
+              ? t.liveEngineRecovering
+              : recovery.state === 'idle'
+                ? t.liveEnginePaused
+                : t.liveEngineNotLive}
+          </Note>
         )}
       </section>
     </div>

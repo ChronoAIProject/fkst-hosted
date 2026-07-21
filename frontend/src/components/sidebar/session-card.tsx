@@ -7,6 +7,7 @@ import type { IssueDetail, SessionDetail } from '@/lib/api/types';
 import { Chip } from '@/components/ui/chip';
 import { CopyButton } from '@/components/ui/copy-button';
 import { SessionDetailDrawer } from '@/components/session-detail/session-detail-drawer';
+import { decodeSessionStatus } from '@/lib/api/derive';
 
 /** One "created/updated/closed" timestamp: viewer-local RELATIVE text ("2 min
  *  ago") for at-a-glance recency, with the full, zone-qualified absolute value
@@ -54,7 +55,19 @@ function LivenessChip({ liveness }: { liveness: NonNullable<SessionDetail['liven
     live: cc.livenessLive,
     terminating: cc.livenessTerminating,
   }[liveness];
-  return <Chip tone={liveness === 'live' ? 'green' : liveness === 'starting' ? 'amber' : 'neutral'}>{label}</Chip>;
+  return (
+    <Chip tone={liveness === 'live' ? 'green' : liveness === 'starting' ? 'amber' : 'neutral'}>
+      {label}
+    </Chip>
+  );
+}
+
+function RecoveryChip({ session }: { session: SessionDetail }) {
+  const state = session.recovery?.state;
+  const t = useContent().dashboard.detail;
+  if (state !== 'recovering' && state !== 'degraded' && state !== 'unknown') return null;
+  const tone = state === 'degraded' ? 'red' : state === 'recovering' ? 'amber' : 'neutral';
+  return <Chip tone={tone}>{t.recoveryState[state]}</Chip>;
 }
 
 /** One session (trigger issue). Two rendering modes:
@@ -95,19 +108,31 @@ export function SessionCard({
   const { lang } = useLang();
   const [showDetail, setShowDetail] = useState(false);
   const invalid = !!session.invalid_reason;
+  const liveness = decodeSessionStatus(session).liveness;
+  const recoveryState = session.recovery?.state;
+  const showRecovery =
+    recoveryState === 'recovering' || recoveryState === 'degraded' || recoveryState === 'unknown';
+  const statusLabels = session.status_labels.filter(
+    (label) => !(session.recovery && label === 'fkst-degraded')
+  );
 
   // Resting depth + a soft status-matched glow (red = invalid, green = live,
   // amber = starting, none otherwise) so a session's health reads at a glance
   // without relying on the chip alone. `.hover-lift` swaps in the raised shadow
   // + amber bloom on hover; this card runs no entrance keyframe on its root, so
   // the hover transform is unencumbered.
-  const statusGlow = invalid
-    ? 'shadow-[var(--shadow-2),var(--glow-red)]'
-    : session.liveness === 'live'
-      ? 'shadow-[var(--shadow-2),var(--glow-green)]'
-      : session.liveness === 'starting'
-        ? 'shadow-[var(--shadow-2),var(--glow-amber)]'
-        : 'shadow-2';
+  const statusGlow =
+    invalid || recoveryState === 'invalid'
+      ? 'shadow-[var(--shadow-2),var(--glow-red)]'
+      : recoveryState === 'degraded'
+        ? 'shadow-[var(--shadow-2),var(--glow-red)]'
+        : recoveryState === 'recovering'
+          ? 'shadow-[var(--shadow-2),var(--glow-amber)]'
+          : liveness === 'live'
+            ? 'shadow-[var(--shadow-2),var(--glow-green)]'
+            : liveness === 'starting'
+              ? 'shadow-[var(--shadow-2),var(--glow-amber)]'
+              : 'shadow-2';
 
   // Select mode (rail): a compact whole-card button. A stretched `absolute
   // inset-0` button captures the click for selection while the CopyButton floats
@@ -127,7 +152,10 @@ export function SessionCard({
         <button
           type="button"
           onClick={onSelect}
-          aria-label={c.detail.openAria.replace('{name}', session.name ?? `#${session.trigger.number}`)}
+          aria-label={c.detail.openAria.replace(
+            '{name}',
+            session.name ?? `#${session.trigger.number}`
+          )}
           aria-current={selected ? 'true' : undefined}
           className="absolute inset-0 z-[1] rounded-card cursor-pointer"
         />
@@ -139,9 +167,14 @@ export function SessionCard({
             {invalid ? c.invalidTrigger : (session.name ?? '—')}
           </span>
           <div className="flex items-center gap-1 flex-wrap">
-            {session.liveness && (
-              <span key={session.liveness} className="anim-chip-in inline-flex">
-                <LivenessChip liveness={session.liveness} />
+            {liveness && (
+              <span key={liveness} className="anim-chip-in inline-flex">
+                <LivenessChip liveness={liveness} />
+              </span>
+            )}
+            {showRecovery && (
+              <span className="anim-chip-in inline-flex">
+                <RecoveryChip session={session} />
               </span>
             )}
             {session.auto_merge && (
@@ -149,7 +182,7 @@ export function SessionCard({
                 <Chip tone="green">{c.autoMerge}</Chip>
               </span>
             )}
-            {session.status_labels.map((label) => (
+            {statusLabels.map((label) => (
               <span key={label} className="anim-chip-in inline-flex">
                 <Chip tone="amber">{label}</Chip>
               </span>
@@ -207,9 +240,14 @@ export function SessionCard({
               surfacing on the 15 s poll reads as motion, not a silent swap. The
               CSS animation replays whenever the element mounts — keying the
               liveness wrapper on its value remounts it on a transition. */}
-          {session.liveness && (
-            <span key={session.liveness} className="anim-chip-in inline-flex">
-              <LivenessChip liveness={session.liveness} />
+          {liveness && (
+            <span key={liveness} className="anim-chip-in inline-flex">
+              <LivenessChip liveness={liveness} />
+            </span>
+          )}
+          {showRecovery && (
+            <span className="anim-chip-in inline-flex">
+              <RecoveryChip session={session} />
             </span>
           )}
           {session.auto_merge && (
@@ -217,7 +255,7 @@ export function SessionCard({
               <Chip tone="green">{c.autoMerge}</Chip>
             </span>
           )}
-          {session.status_labels.map((label) => (
+          {statusLabels.map((label) => (
             <span key={label} className="anim-chip-in inline-flex">
               <Chip tone="amber">{label}</Chip>
             </span>
@@ -225,7 +263,10 @@ export function SessionCard({
           <button
             type="button"
             onClick={() => setShowDetail(true)}
-            aria-label={c.detail.openAria.replace('{name}', session.name ?? `#${session.trigger.number}`)}
+            aria-label={c.detail.openAria.replace(
+              '{name}',
+              session.name ?? `#${session.trigger.number}`
+            )}
             className="font-ui font-semibold text-[11px] border border-line rounded-control px-2.5 py-1 text-dim transition-[color,border-color,box-shadow] duration-150 hover:text-fg hover:border-line-2 hover:shadow-glow-amber cursor-pointer"
           >
             {c.detail.open}
@@ -234,7 +275,10 @@ export function SessionCard({
             <button
               type="button"
               onClick={() => onStop(session)}
-              aria-label={cc.stopAria.replace('{name}', session.name ?? `#${session.trigger.number}`)}
+              aria-label={cc.stopAria.replace(
+                '{name}',
+                session.name ?? `#${session.trigger.number}`
+              )}
               className="font-ui font-semibold text-[11px] border border-line rounded-control px-2.5 py-1 text-red transition-[color,border-color,box-shadow] duration-150 hover:border-[color-mix(in_oklab,var(--red)_45%,var(--line))] hover:shadow-glow-red cursor-pointer"
             >
               {cc.stop}
@@ -313,7 +357,10 @@ export function SessionCard({
             </span>
             <div className="flex flex-col divide-y divide-[color-mix(in_oklab,var(--line)_55%,transparent)]">
               {session.prs.map((pr) => (
-                <div key={pr.number} className="flex items-center gap-2 py-1.5 text-[12.5px] min-w-0">
+                <div
+                  key={pr.number}
+                  className="flex items-center gap-2 py-1.5 text-[12.5px] min-w-0"
+                >
                   <a
                     href={pr.html_url}
                     target="_blank"
