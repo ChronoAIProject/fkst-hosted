@@ -161,7 +161,7 @@ printf '%s\n' "$ready" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ready"'
 printf '%s\n' "$ready" | grep -Eq \
   '"startup_resync_complete"[[:space:]]*:[[:space:]]*true'
 kubectl --context "$context" --namespace "$namespace" exec \
-  deployment/fkst-frontend -- wget -qO- http://127.0.0.1/ >/dev/null
+  deployment/fkst-frontend -- wget -qO- http://127.0.0.1:8080/ >/dev/null
 
 if [ "$sentinel_fields" -eq 4 ]; then
   sentinel="fkst-env-${sentinel_user_id}-${sentinel_name}"

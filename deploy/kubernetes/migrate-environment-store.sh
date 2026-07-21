@@ -72,13 +72,16 @@ if [ -n "$remaining_config_maps" ] || [ -n "$remaining_secrets" ]; then
 fi
 
 kubectl --context "$context" apply -k "$steady_overlay"
+kubectl --context "$context" --namespace chronoai-fkst patch \
+  configmap fkst-control-plane-config --type=merge \
+  --patch='{"data":{"FKST_ENV_STORE_LEGACY_NAMESPACE":null}}' >/dev/null
 kubectl --context "$context" --namespace chronoai-fkst rollout restart \
   deployment/fkst-control-plane
 kubectl --context "$context" --namespace chronoai-fkst rollout status \
   deployment/fkst-control-plane --timeout="$timeout"
 legacy_namespace=$(kubectl --context "$context" --namespace chronoai-fkst get \
   configmap fkst-control-plane-config \
-  --output go-template='{{index .data "FKST_ENV_STORE_LEGACY_NAMESPACE"}}')
+  --output jsonpath='{.data.FKST_ENV_STORE_LEGACY_NAMESPACE}')
 [ -z "$legacy_namespace" ] || {
   echo "steady-state ConfigMap still enables legacy migration" >&2
   exit 1
