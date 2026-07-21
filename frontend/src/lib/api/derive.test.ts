@@ -16,7 +16,13 @@ import {
   sessionsByAccount,
   sessionsByRepo,
 } from './derive';
-import type { AccountOverview, IssueDetail, RepoOverview, SessionDetail } from './types';
+import type {
+  AccountOverview,
+  IssueDetail,
+  RepoOverview,
+  SessionDetail,
+  SessionRecoveryProjection,
+} from './types';
 
 let nextId = 1;
 const repo = (over: Partial<RepoOverview> & Pick<RepoOverview, 'name'>): RepoOverview => ({
@@ -108,9 +114,9 @@ describe('status derivation', () => {
 
   it('counts a session as active only while its trigger is open and parsed OK', () => {
     expect(sessionActive(session({}))).toBe(true);
-    expect(
-      sessionActive(session({ trigger: { ...session({}).trigger, state: 'closed' } }))
-    ).toBe(false);
+    expect(sessionActive(session({ trigger: { ...session({}).trigger, state: 'closed' } }))).toBe(
+      false
+    );
     expect(sessionActive(session({ invalid_reason: 'Packages: unreachable.' }))).toBe(false);
   });
 
@@ -178,7 +184,13 @@ describe('chart row builders', () => {
       kind: 'org',
       installed: true,
       repos: [
-        repo({ owner: 'acme', name: 'widgets', installed: true, active_sessions: 1, packages: [pkgA, pkgB] }),
+        repo({
+          owner: 'acme',
+          name: 'widgets',
+          installed: true,
+          active_sessions: 1,
+          packages: [pkgA, pkgB],
+        }),
       ],
     }),
   ];
@@ -191,9 +203,7 @@ describe('chart row builders', () => {
   });
 
   it('scopes the account chart to a single login', () => {
-    expect(sessionsByAccount(accounts, 'acme')).toEqual([
-      { key: 'acme', label: 'acme', value: 1 },
-    ]);
+    expect(sessionsByAccount(accounts, 'acme')).toEqual([{ key: 'acme', label: 'acme', value: 1 }]);
   });
 
   it('lists sessions per repo of one account, zero rows included', () => {
@@ -251,9 +261,7 @@ describe('chart row builders', () => {
 
 // ---- Session-detail decoders ------------------------------------------------
 
-const issueFixture = (
-  over: Partial<IssueDetail> & Pick<IssueDetail, 'number'>
-): IssueDetail => ({
+const issueFixture = (over: Partial<IssueDetail> & Pick<IssueDetail, 'number'>): IssueDetail => ({
   title: `issue ${over.number}`,
   state: 'open',
   author: 'shining',
@@ -279,6 +287,16 @@ const sessionFixture = (over: Partial<SessionDetail> = {}): SessionDetail => ({
   log_url: null,
   liveness: null,
   prs: [],
+  ...over,
+});
+
+const recoveryFixture = (
+  over: Partial<SessionRecoveryProjection> = {}
+): SessionRecoveryProjection => ({
+  state: 'normal',
+  reason: 'runtime_live',
+  open_work_items: 1,
+  runtime: 'live',
   ...over,
 });
 
@@ -312,10 +330,105 @@ describe('decodeSessionStatus', () => {
 
   it('reports degraded phase + health from the degraded label', () => {
     const d = decodeSessionStatus(
-      sessionFixture({ status_labels: ['fkst-substrate-active', 'fkst-degraded'], liveness: 'live' })
+      sessionFixture({
+        status_labels: ['fkst-substrate-active', 'fkst-degraded'],
+        liveness: 'live',
+      })
     );
     expect(d.phase).toBe('degraded');
     expect(d.health).toBe('degraded');
+  });
+
+  it('uses the backend recovery projection ahead of stale legacy labels and liveness', () => {
+    const normal = decodeSessionStatus(
+      sessionFixture({
+        status_labels: ['fkst-substrate-invalid', 'fkst-degraded'],
+        liveness: null,
+        recovery: recoveryFixture(),
+      })
+    );
+    expect(normal).toEqual({ phase: 'active', health: 'ok', liveness: 'live' });
+
+    const recovering = decodeSessionStatus(
+      sessionFixture({
+        status_labels: ['fkst-substrate-active'],
+        liveness: 'live',
+        recovery: recoveryFixture({
+          state: 'recovering',
+          reason: 'runtime_absent',
+          runtime: 'absent',
+        }),
+      })
+    );
+    expect(recovering).toEqual({
+      phase: 'recovering',
+      health: 'recovering',
+      liveness: null,
+    });
+  });
+
+  it('maps every terminal and non-running projected state without legacy inference', () => {
+    expect(
+      decodeSessionStatus(
+        sessionFixture({
+          liveness: 'live',
+          recovery: recoveryFixture({
+            state: 'idle',
+            reason: 'no_pending_work',
+            open_work_items: 0,
+            runtime: 'absent',
+          }),
+        })
+      )
+    ).toEqual({ phase: 'idle', health: 'unknown', liveness: null });
+
+    expect(
+      decodeSessionStatus(
+        sessionFixture({
+          recovery: recoveryFixture({
+            state: 'degraded',
+            reason: 'runtime_health_degraded',
+          }),
+        })
+      ).phase
+    ).toBe('degraded');
+    expect(
+      decodeSessionStatus(
+        sessionFixture({
+          recovery: recoveryFixture({
+            state: 'retired',
+            reason: 'trigger_closed',
+            open_work_items: 0,
+            runtime: 'terminal',
+          }),
+        })
+      ).phase
+    ).toBe('retired');
+    expect(
+      decodeSessionStatus(
+        sessionFixture({
+          recovery: recoveryFixture({
+            state: 'invalid',
+            reason: 'registration_invalid',
+            open_work_items: 0,
+            runtime: 'unknown',
+          }),
+        })
+      ).phase
+    ).toBe('invalid');
+  });
+
+  it('keeps observation-unknown distinct while presenting pending work as picked up', () => {
+    const status = decodeSessionStatus(
+      sessionFixture({
+        recovery: recoveryFixture({
+          state: 'unknown',
+          reason: 'runtime_observation_unavailable',
+          runtime: 'unknown',
+        }),
+      })
+    );
+    expect(status).toEqual({ phase: 'picked-up', health: 'unknown', liveness: null });
   });
 
   it('is active ONLY with a live pod — a latched active label alone is not active', () => {
@@ -334,7 +447,11 @@ describe('decodeSessionStatus', () => {
     // Core new case: trigger OPEN, announced before, no live pod, no OPEN work.
     expect(
       decodeSessionStatus(
-        sessionFixture({ status_labels: ['fkst-substrate-active'], liveness: null, work_issues: [] })
+        sessionFixture({
+          status_labels: ['fkst-substrate-active'],
+          liveness: null,
+          work_issues: [],
+        })
       ).phase
     ).toBe('idle');
     // A non-live liveness (starting/terminating) with no open work is still idle.
@@ -365,7 +482,11 @@ describe('decodeSessionStatus', () => {
     // Live pod → active, never idle, even with an empty work queue.
     expect(
       decodeSessionStatus(
-        sessionFixture({ status_labels: ['fkst-substrate-active'], liveness: 'live', work_issues: [] })
+        sessionFixture({
+          status_labels: ['fkst-substrate-active'],
+          liveness: 'live',
+          work_issues: [],
+        })
       ).phase
     ).toBe('active');
     // Announced with an OPEN work item but no live pod → reviving (picked-up).
@@ -382,21 +503,20 @@ describe('decodeSessionStatus', () => {
 
   it('reads a never-activated open trigger as registered, not idle', () => {
     // No announce label, no live pod, open trigger → registered (never ran yet).
-    expect(
-      decodeSessionStatus(sessionFixture({ status_labels: [], liveness: null })).phase
-    ).toBe('registered');
+    expect(decodeSessionStatus(sessionFixture({ status_labels: [], liveness: null })).phase).toBe(
+      'registered'
+    );
   });
 
   it('falls back to registered (open trigger, no markers) then picked-up/idle', () => {
     expect(decodeSessionStatus(sessionFixture({})).phase).toBe('registered');
-    expect(
-      decodeSessionStatus(sessionFixture({ status_labels: ['fkst-picked-up'] })).phase
-    ).toBe('picked-up');
+    expect(decodeSessionStatus(sessionFixture({ status_labels: ['fkst-picked-up'] })).phase).toBe(
+      'picked-up'
+    );
     // Closed trigger with no retired label still resolves to retired (terminal).
     expect(
-      decodeSessionStatus(
-        sessionFixture({ trigger: issueFixture({ number: 1, state: 'closed' }) })
-      ).phase
+      decodeSessionStatus(sessionFixture({ trigger: issueFixture({ number: 1, state: 'closed' }) }))
+        .phase
     ).toBe('retired');
   });
 
@@ -428,7 +548,10 @@ describe('decodeWorkItemStatus', () => {
   it('decodes each fkst-dev:* label to its state and tone', () => {
     expect(withLabels(['fkst-dev:impl-failed'])).toEqual({ state: 'failed', tone: 'bad' });
     expect(withLabels(['fkst-dev:ready'])).toEqual({ state: 'ready', tone: 'good' });
-    expect(withLabels(['fkst-dev:implementing'])).toEqual({ state: 'implementing', tone: 'progress' });
+    expect(withLabels(['fkst-dev:implementing'])).toEqual({
+      state: 'implementing',
+      tone: 'progress',
+    });
     expect(withLabels(['fkst-dev:thinking'])).toEqual({ state: 'thinking', tone: 'progress' });
     expect(withLabels(['fkst-dev:claimed'])).toEqual({ state: 'claimed', tone: 'progress' });
     expect(withLabels(['fkst-dev:enabled'])).toEqual({ state: 'queued', tone: 'neutral' });
@@ -456,12 +579,18 @@ describe('decodeWorkItemStatus', () => {
 
 describe('packageRole', () => {
   it('names the known roles from the path tail', () => {
-    expect(packageRole('o/r@ref:workflow-dev')).toEqual({ short: 'workflow-dev', role: 'Dev workflow' });
+    expect(packageRole('o/r@ref:workflow-dev')).toEqual({
+      short: 'workflow-dev',
+      role: 'Dev workflow',
+    });
     expect(packageRole('o/r@ref:github-devloop-v2')).toEqual({
       short: 'github-devloop-v2',
       role: 'Devloop',
     });
-    expect(packageRole('o/r@ref:codex/consensus')).toEqual({ short: 'consensus', role: 'Consensus' });
+    expect(packageRole('o/r@ref:codex/consensus')).toEqual({
+      short: 'consensus',
+      role: 'Consensus',
+    });
     expect(packageRole('o/r@ref:codex/triage')).toEqual({ short: 'triage', role: 'Triage' });
     expect(packageRole('o/r@ref:codex/base')).toEqual({ short: 'base', role: 'Base' });
   });

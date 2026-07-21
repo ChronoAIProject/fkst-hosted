@@ -8,6 +8,7 @@ export const PHASE_TONE: Record<SessionPhase, ChipTone> = {
   registered: 'amber',
   active: 'green',
   'picked-up': 'amber',
+  recovering: 'amber',
   degraded: 'red',
   retired: 'neutral',
   invalid: 'red',

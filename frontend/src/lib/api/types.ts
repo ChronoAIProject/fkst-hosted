@@ -83,6 +83,43 @@ export interface PrDetail {
 
 export type SessionLiveness = 'starting' | 'live' | 'terminating';
 
+export type SessionRecoveryState =
+  | 'normal'
+  | 'idle'
+  | 'recovering'
+  | 'degraded'
+  | 'unknown'
+  | 'retired'
+  | 'invalid';
+
+export type SessionRecoveryReason =
+  | 'runtime_live'
+  | 'no_pending_work'
+  | 'runtime_starting'
+  | 'runtime_terminating'
+  | 'runtime_absent'
+  | 'runtime_terminal'
+  | 'runtime_observation_unavailable'
+  | 'runtime_health_degraded'
+  | 'trigger_closed'
+  | 'registration_invalid'
+  | 'configuration_rejected';
+
+export type SessionRuntimeState =
+  | 'absent'
+  | 'starting'
+  | 'live'
+  | 'terminating'
+  | 'terminal'
+  | 'unknown';
+
+export interface SessionRecoveryProjection {
+  state: SessionRecoveryState;
+  reason: SessionRecoveryReason;
+  open_work_items: number;
+  runtime: SessionRuntimeState;
+}
+
 export interface SessionDetail {
   session_id: string | null;
   name: string | null;
@@ -96,8 +133,12 @@ export interface SessionDetail {
   work_issues: IssueDetail[];
   /** Identity-gated log download URL; null when unavailable. */
   log_url: string | null;
-  /** Pod liveness from the session backend; null when backend absent/error. */
+  /** Transitional/live pod phase. Null also covers observed absent/terminal
+   *  runtimes; use `recovery.runtime` to distinguish those states. */
   liveness: SessionLiveness | null;
+  /** Typed backend recovery projection. Optional only for compatibility while
+   *  an older control plane is still serving during a rolling upgrade. */
+  recovery?: SessionRecoveryProjection | null;
   prs: PrDetail[];
   /** GitHub logins allowed to download this session's logs. Optional: a later
    *  backend/UI item populates it, so it is harmless/undefined until then. */
