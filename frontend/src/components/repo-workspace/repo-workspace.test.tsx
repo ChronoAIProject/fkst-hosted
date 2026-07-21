@@ -80,7 +80,10 @@ describe('RepoWorkspace', () => {
     window.localStorage.setItem('fkst-gh-access', 'ghu_x');
     // The detail's default (status) tab issues no network on mount; stub fetch
     // anyway so any incidental call never hits the real network.
-    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise<Response>(() => {}))
+    );
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -88,6 +91,13 @@ describe('RepoWorkspace', () => {
 
   it('renders the rail plus the first session detail by default', () => {
     renderWorkspace();
+
+    expect(screen.getByTestId('repo-workspace')).toHaveClass(
+      'flex-col',
+      'md:flex-row',
+      'overflow-x-hidden'
+    );
+    expect(screen.getByTestId('session-rail')).toHaveClass('w-full', 'md:w-[300px]');
 
     // Rail: both sessions are selectable rows (the compact card is a button
     // named "Open details for session <name>").

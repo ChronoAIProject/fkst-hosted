@@ -54,11 +54,17 @@ export function RepoWorkspace({
       : (sessions.find((s) => sessionKey(s) === selectedKey) ?? sessions[0]!);
 
   return (
-    <div className="h-full flex min-h-0 gap-4">
-      {/* Left: the session rail — a fixed-width column with its own bounded
-          scroll region so a long session list scrolls independently of the
-          detail pane. */}
-      <div data-testid="session-rail" className="w-[300px] flex-none flex flex-col min-h-0">
+    <div
+      data-testid="repo-workspace"
+      className="h-full flex flex-col md:flex-row min-h-0 gap-4 overflow-y-auto overflow-x-hidden md:overflow-hidden"
+    >
+      {/* Desktop: a fixed-width rail with independent scrolling. Narrow screens
+          stack a bounded rail above the detail so the two panes never force a
+          horizontal page overflow; this workspace owns the vertical scroll. */}
+      <div
+        data-testid="session-rail"
+        className="w-full h-[240px] md:w-[300px] md:h-auto flex-none flex flex-col min-h-0"
+      >
         <ScrollArea className="pr-1">
           <SessionRail
             owner={owner}
@@ -76,10 +82,10 @@ export function RepoWorkspace({
       </div>
 
       {/* Right: the selected session's inline detail, or a placeholder when the
-          repo has no sessions. The elevated panel clips its rounded corners; the
-          inner ScrollArea is the scroll parent the detail's sticky header pins
-          against. */}
-      <div className="flex-1 min-w-0 flex flex-col min-h-0">
+          repo has no sessions. It gets a stable narrow-screen height so its own
+          ScrollArea remains usable inside the stacked workspace; desktop lets
+          flex sizing fill the available row as before. */}
+      <div className="w-full h-[560px] md:w-auto md:h-auto md:flex-1 flex-none min-w-0 flex flex-col min-h-0">
         {selected ? (
           <div
             data-testid="session-detail"
