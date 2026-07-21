@@ -24,9 +24,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use crate::env_config::EnvConfig;
 use crate::error::AppError;
+use crate::k8s::durable_env_store::DurableEnvStore;
 use crate::k8s::env_store::{EnvRecord, EnvStore, EnvSummary};
-use crate::k8s::KubeError;
 
 /// The pluggable storage backend for environment profiles. All methods are keyed
 /// by the owner's immutable numeric GitHub id (`id`) plus the profile `name`.
@@ -81,8 +82,49 @@ pub trait EnvironmentProfileStore: Send + Sync {
     ) -> Result<Option<(Vec<String>, BTreeMap<String, String>, Vec<String>)>, AppError>;
 }
 
-/// Build the legacy environment-profile store bound to `namespace`. The durable
-/// implementation is selected by the startup wiring in a subsequent unit.
-pub async fn default_store(namespace: &str) -> Result<Arc<dyn EnvironmentProfileStore>, KubeError> {
-    Ok(Arc::new(EnvStore::from_inferred(namespace).await?))
+/// Build the configured environment-profile store. REST calls use this helper;
+/// startup separately initializes and migrates the same durable configuration
+/// before the router begins serving.
+pub async fn default_store(
+    config: &EnvConfig,
+    legacy_namespace: &str,
+) -> Result<Arc<dyn EnvironmentProfileStore>, AppError> {
+    match (&config.store_namespace, &config.store_encryption_key) {
+        (Some(namespace), Some(key)) => Ok(Arc::new(
+            DurableEnvStore::from_inferred(namespace, key).await?,
+        )),
+        (None, None) => EnvStore::from_inferred(legacy_namespace)
+            .await
+            .map(|store| Arc::new(store) as Arc<dyn EnvironmentProfileStore>)
+            .map_err(|error| {
+                tracing::error!(error = %error, "env store: kubernetes client unavailable");
+                AppError::Unavailable("environment store backend unavailable".to_string())
+            }),
+        _ => Err(AppError::Config(
+            "durable environment store configuration is incomplete".to_string(),
+        )),
+    }
+}
+
+/// Build and initialize the durable store before reconciliation or HTTP serving.
+/// `None` preserves the legacy lazy store when the durable backend is unconfigured.
+pub async fn initialize_configured_store(
+    config: &EnvConfig,
+) -> Result<Option<Arc<dyn EnvironmentProfileStore>>, AppError> {
+    let (Some(namespace), Some(key)) = (
+        config.store_namespace.as_deref(),
+        config.store_encryption_key.as_ref(),
+    ) else {
+        if config.store_namespace.is_some() || config.store_encryption_key.is_some() {
+            return Err(AppError::Config(
+                "durable environment store configuration is incomplete".to_string(),
+            ));
+        }
+        return Ok(None);
+    };
+    let store = DurableEnvStore::from_inferred(namespace, key).await?;
+    store
+        .initialize(config.store_legacy_namespace.as_deref())
+        .await?;
+    Ok(Some(Arc::new(store)))
 }

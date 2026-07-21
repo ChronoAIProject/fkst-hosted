@@ -248,12 +248,7 @@ fn summary_from_record(summary: EnvSummary) -> EnvironmentProfileSummary {
 /// environment objects live in. An unreachable cluster surfaces as `503`, never a
 /// leaked client detail.
 async fn env_store(state: &AppState) -> Result<Arc<dyn EnvironmentProfileStore>, AppError> {
-    default_store(&state.config.pod.namespace)
-        .await
-        .map_err(|error| {
-            tracing::error!(error = %error, "env store: kubernetes client unavailable");
-            AppError::Unavailable("environment store backend unavailable".to_string())
-        })
+    default_store(&state.config.env, &state.config.pod.namespace).await
 }
 
 /// `PUT /api/v1/users/me/environment-profiles/{name}` — validate the install commands in
