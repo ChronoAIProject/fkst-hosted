@@ -20,6 +20,7 @@ use fkst_control_plane::reconcile::{
     reconcile_channel, run_full_resync_loop, run_reconcile_loop, run_sweep_loop, ReconcileCtx,
     ReconcileHandle,
 };
+use fkst_control_plane::recovery::RecoveryMonitor;
 use fkst_control_plane::router::build_router;
 use fkst_control_plane::state::AppState;
 use tracing_subscriber::EnvFilter;
@@ -229,10 +230,18 @@ async fn main() -> ExitCode {
         }
     };
 
+    let recovery = RecoveryMonitor::new(pod_dispatch);
     let reconciler = if pod_dispatch {
         match session_backend.clone() {
             Some(backend) => {
-                spawn_reconciler(&config, github_app.clone(), log_registry.clone(), backend).await
+                spawn_reconciler(
+                    &config,
+                    github_app.clone(),
+                    log_registry.clone(),
+                    backend,
+                    recovery.clone(),
+                )
+                .await
             }
             None => {
                 tracing::warn!(
@@ -244,6 +253,9 @@ async fn main() -> ExitCode {
     } else {
         None
     };
+    if pod_dispatch && reconciler.is_none() {
+        recovery.mark_unavailable();
+    }
 
     // Clone the backend for the GC sweep (spawned after the router build consumes it).
     let sweep_backend = session_backend.clone();
@@ -460,6 +472,7 @@ async fn spawn_reconciler(
     github_app: Option<fkst_control_plane::github_app::GithubAppTokens>,
     log_registry: fkst_control_plane::log_access::LogAccessRegistry,
     backend: Arc<dyn fkst_control_plane::session_backend::SessionBackend>,
+    recovery: RecoveryMonitor,
 ) -> Option<ReconcileHandle> {
     let Some(github) = github_app else {
         tracing::warn!("pod dispatch on but github app not configured; reconciler not started");
@@ -521,7 +534,7 @@ async fn spawn_reconciler(
     // Producer 2: the periodic full resync (installations -> repos).
     let resync_ctx = ctx.clone();
     let resync_handle = handle.clone();
-    tokio::spawn(async move { run_full_resync_loop(resync_ctx, resync_handle).await });
+    tokio::spawn(async move { run_full_resync_loop(resync_ctx, resync_handle, recovery).await });
     // The in-place per-session token rotation loop (drives the fleet through the backend).
     let rot_backend = ctx.backend.clone();
     let rot_github = ctx.github.clone();
