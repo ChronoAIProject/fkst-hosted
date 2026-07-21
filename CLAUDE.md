@@ -1347,10 +1347,13 @@ install commands in a throwaway, hard-isolated **validation Pod** the backend
 creates directly (`backend/src/k8s/env_validator.rs` →
 `backend/src/session_backend/k8s/validation.rs`) — this is independent of
 `FKST_POD_MODE`, so it happens even in opensandbox mode. The application
-namespace Role therefore contains only `pods`, `pods/log`, and `pods/status`
-permissions for validation and its crash-recovery GC sweep. A second Role in the
-durable namespace grants only Secret create/get/list/update/delete. ConfigMaps,
-watch, patch, and durable-namespace Pods remain denied. Session pods remain the
+namespace env-store Role therefore contains only `pods`, `pods/log`, and
+`pods/status` permissions for validation and its crash-recovery GC sweep. The
+separate leader-election Role grants exact Lease create/get/list/watch/update/patch
+plus Pod get/list/patch for publishing the elected Service-routing label; Lease
+delete, Pod update/watch, and every workload-controller verb remain denied. A
+Role in the durable namespace grants only Secret create/get/list/update/delete.
+ConfigMaps and durable-namespace Pods remain denied. Session pods remain the
 opensandbox server's job, but the env-validation pod is the one exception where
 the control plane touches Pods directly. **Without the pod rules, the first
 `PUT /environment-profiles` (i.e. any "New environment" from the UI) fails with
@@ -1416,6 +1419,15 @@ data:
   FKST_STARTUP_RESYNC_RETRY_INITIAL_SECS: "5"
   FKST_STARTUP_RESYNC_RETRY_MAX_SECS: "60"
   FKST_STARTUP_RESYNC_RETRY_JITTER_PERCENT: "20"
+
+  # ---- high-availability reconcile ownership ----
+  # Every acquisition runs an immediate full resync. The retry, renew, and
+  # Lease durations must remain strictly ordered.
+  FKST_LEADER_ELECTION_ENABLED: "true"
+  FKST_LEADER_LEASE_NAME: fkst-control-plane-reconciler
+  FKST_LEADER_LEASE_DURATION_SECS: "30"
+  FKST_LEADER_RENEW_DEADLINE_SECS: "20"
+  FKST_LEADER_RETRY_PERIOD_SECS: "5"
 
   # ---- durable named environments ----
   # Must differ from chronoai-fkst. The stable encryption key is delivered by
@@ -1541,8 +1553,9 @@ The canonical Deployment, Service, and disruption policy are in
 `deploy/kubernetes/base/control-plane.yaml`. The inline copy is explanatory for
 the manual path.
 
-Notable hardening baked into the spec: `strategy: Recreate` (the control plane
-is single-writer — a rollout must never run two instances),
+Notable hardening baked into the spec: two rolling replicas with one
+`coordination.k8s.io/v1` Lease holder, leader-only Service routing published
+only after acquisition resync, unique downward-API holder identities,
 `readOnlyRootFilesystem` with dedicated `emptyDir`s for `/tmp` and the runtime
 root, a non-root 10001 uid/gid, and the same `/var/secrets` key-file contract
 the opensandbox server uses:
@@ -1559,19 +1572,22 @@ metadata:
     app.kubernetes.io/name: fkst-control-plane
     app.kubernetes.io/part-of: fkst-hosted
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: fkst-control-plane
-  # single-writer control plane: never two instances alive during a rollout
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
   template:
     metadata:
       labels:
         app.kubernetes.io/component: control-plane
         app.kubernetes.io/name: fkst-control-plane
         app.kubernetes.io/part-of: fkst-hosted
+        fkst.chronoai.io/leader-serving: "false"
     spec:
       # the env-store needs the k8s API (§14.5) — overrides the SA-level default
       automountServiceAccountToken: true
@@ -1594,6 +1610,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: FKST_LEADER_IDENTITY
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           envFrom:
             - configMapRef:
                 name: fkst-control-plane-config
@@ -1615,10 +1635,12 @@ spec:
             timeoutSeconds: 7
           readinessProbe:
             httpGet:
-              path: /ready
+              # Both replicas remain rollout-ready; the Service label below is
+              # the leader/resync readiness boundary.
+              path: /health
               port: http
-            periodSeconds: 10
-            failureThreshold: 3
+            periodSeconds: 5
+            failureThreshold: 2
             timeoutSeconds: 7
           livenessProbe:
             tcpSocket:
@@ -1674,10 +1696,22 @@ spec:
       targetPort: http
   selector:
     app.kubernetes.io/name: fkst-control-plane
+    fkst.chronoai.io/leader-serving: "true"
 EOF
-kubectl apply -f "$OSB_LOCAL/manifests/fkst-control-plane.yaml"
-kubectl -n chronoai-fkst rollout status deploy/fkst-control-plane --timeout=180s
+kubectl --context kind-opensandbox-local apply \
+  -f "$OSB_LOCAL/manifests/fkst-control-plane.yaml"
+kubectl --context kind-opensandbox-local --namespace chronoai-fkst rollout status \
+  deploy/fkst-control-plane --timeout=180s
 ```
+
+The Pods use `/health` for Deployment readiness, but the Service also selects
+`fkst.chronoai.io/leader-serving=true`. Only the Lease holder publishes that
+label, and only after its immediate acquisition resync succeeds; followers and
+recovering holders return `503` from `/ready`. Confirmed Lease loss withdraws
+the label and cancels reconcile, sweep, full-resync, runtime mutation, token
+rotation, health mutation, and validation-GC tasks as one generation. The Lease
+is retained on shutdown so its holder, renewal time, and transition count remain
+failover evidence.
 
 #### 14.9 Alternative: run the backend on your laptop instead
 
@@ -1943,9 +1977,16 @@ rejecting the certificate.
 ```bash
 curl -s https://api.chronoai-fkst.local/health; echo
 curl -s https://api.chronoai-fkst.local/ready; echo
-kubectl -n chronoai-fkst logs deploy/fkst-control-plane --tail=30   # startup lines, no fail-closed config errors;
-                                                                    # with the §14.7 webhook secret set, includes
-                                                                    # "github app webhook endpoint mounted"
+kubectl --context kind-opensandbox-local --namespace chronoai-fkst get \
+  lease fkst-control-plane-reconciler \
+  -o custom-columns=HOLDER:.spec.holderIdentity,TRANSITIONS:.spec.leaseTransitions
+kubectl --context kind-opensandbox-local --namespace chronoai-fkst get pods \
+  -l app.kubernetes.io/name=fkst-control-plane \
+  -L fkst.chronoai.io/leader-serving
+kubectl --context kind-opensandbox-local --namespace chronoai-fkst logs \
+  deploy/fkst-control-plane --tail=30   # startup lines, no fail-closed config errors;
+                                      # with the §14.7 webhook secret set, includes
+                                      # "github app webhook endpoint mounted"
 ```
 
 **2. Frontend serves the SPA:**

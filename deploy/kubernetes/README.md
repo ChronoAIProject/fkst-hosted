@@ -24,10 +24,22 @@ context, deletes a resource, or contacts a production cluster implicitly.
 | `verify-namespace.sh` | Redacted live verification of security, RBAC, ExternalSecret, rollout, route, and recovery-readiness contracts. |
 | `validate-manifests.sh` | Deterministic render and structural/security policy checks; also runs shellcheck and kubeconform when installed. |
 
-The base uses one control-plane replica and `Recreate` rollout semantics. Do not
-increase the replica count until the I8 Lease implementation is enabled and its
-failover test passes. The Lease Role is provisioned ahead of that switch so a
-namespace restore does not require an out-of-band RBAC edit.
+The base runs two control-plane replicas with rolling updates and Kubernetes
+Lease election enabled. The stable Lease is
+`chronoai-fkst/fkst-control-plane-reconciler`; each Pod injects its unique name
+as `FKST_LEADER_IDENTITY`. Exactly one holder owns reconciliation, sweeps,
+full resync, runtime mutation, token rotation, health mutation, and validation
+cleanup. Every acquisition creates a fresh worker generation and must complete
+an immediate full resync.
+
+Both replicas use `/health` for Pod readiness so Deployment convergence is not
+blocked by the intentionally idle follower. Public Service routing is a separate
+fail-closed contract: the Service selects
+`fkst.chronoai.io/leader-serving=true`, which the resync-complete Lease holder
+publishes and withdraws through narrow Pod-label RBAC. `/ready` remains `503` on
+followers and while acquisition resync or routing publication is incomplete.
+Never scale above one with `FKST_LEADER_ELECTION_ENABLED=false`; the render
+validator rejects that combination.
 
 ## External state contract
 
@@ -129,9 +141,11 @@ render without changing live resources.
 
 The script applies namespace/security policy, the external durable namespace
 and RBAC, identity/RBAC/ExternalSecrets, waits for materialized credentials,
-applies services and routes, waits for both rollouts, and finally requires
-`/ready` to report a completed startup resync. It never creates plaintext
-Secrets, changes kube context, or performs deletion.
+applies services and routes, waits for both rollouts, and finally requires two
+healthy control-plane replicas, one durable Lease holder, exactly one matching
+Service-selected Pod, and `/ready` from that holder to report a completed
+startup resync. It never creates plaintext Secrets, changes kube context, or
+performs deletion.
 
 For a pre-I7 installation, run the temporary migration exactly once after the
 external encryption key and durable namespace exist:
@@ -190,6 +204,13 @@ than copy their objects. It must patch, at minimum:
 - provider-specific Workload Identity annotations;
 - runtime class, placement, resources, and replica policy appropriate to the
   environment.
+
+Any overlay changing leader timings must preserve
+`retry period < renew deadline < lease duration`. The holder cancels its worker
+generation after the renew deadline without a confirmed write; another replica
+may take over only after the last recorded Lease term expires. Do not grant
+Lease `delete`: retained holder, renewal, and transition fields are recovery and
+failover evidence.
 
 Keep provider credentials, Secret resources, encryption keys, private keys,
 bearer tokens, and encoded secret values outside Git. A production overlay must
