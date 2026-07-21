@@ -816,6 +816,10 @@ function C.hidden_state_conformance_errors(M, rows, allowlist)
   return messages
 end
 
+function C.hidden_state_row_recovery_errors(M, row)
+  return behavioral_errors(M, { row }, {})
+end
+
 function C.hidden_state_behavior_fixture(M, row, declared, include_fact)
   local core = M
   return build_fixture(core, row, declared, include_fact)

@@ -109,6 +109,7 @@ M.restart_consumer_sources = {
   "packages/github-devloop-pr/departments/merge_queue/main.lua",
 }
 require("devloop.restart").install(M, wiring.restart(M))
+M.restart_recovery_evidence_inventory = require("core.restart.recovery_evidence")
 local restart_liveness_resolved = require("devloop.liveness").with_restart_policy({
   runtime_provenance = {
     proposal_id = "github-devloop/issue/provenance/repo/1",

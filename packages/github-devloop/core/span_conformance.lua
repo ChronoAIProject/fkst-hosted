@@ -1,5 +1,6 @@
 local S = {}
 local hidden_state_conformance = require("devloop.hidden_state_conformance")
+local recovery_evidence = require("devloop.recovery_evidence")
 local issue_observation_conformance = require("devloop.restart.issue_observation_conformance")
 local m_rrc = require("devloop.restart_responsibility_contract")
 local owner_pending_projection = require("devloop.restart_owner_pending_projection")
@@ -738,6 +739,9 @@ local function span_declaration_errors(core)
   end
   for _, message in ipairs(hidden_state_conformance.hidden_state_conformance_errors(core)) do
     table.insert(out, record("gspan.hidden-state", tostring(message)))
+  end
+  for _, message in ipairs(recovery_evidence.errors(core, core.restart_transition_table(), core.restart_recovery_evidence_inventory)) do
+    table.insert(out, record("gspan.recovery-evidence", tostring(message)))
   end
   local owner = core.restart_package_name
   local rows = core.restart_transition_table()

@@ -5,6 +5,7 @@ local opts = h.opts
 local ready = h.ready
 local run_implement = h.run_implement
 local mock_issue_implement = h.mock_issue_implement
+local mock_issue_implement_raw = h.mock_issue_implement_raw
 local mock_existing_empty_implement_worktree = h.mock_existing_empty_implement_worktree
 local mock_existing_implement_branch = h.mock_existing_implement_branch
 local mock_git_push = h.mock_git_push
@@ -15,6 +16,7 @@ local mock_bot_env = h.mock_bot_env
 local mock_write_env = h.mock_write_env
 local deterministic_branch_for = h.deterministic_branch_for
 local find_raise = h.find_raise
+local count_calls = h.count_calls
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local m_builders = require("devloop.markers.builders")
 
@@ -186,5 +188,92 @@ return {
     t.is_true(find_raise(redriven.raises, "github-proxy.github_issue_label_request", function(payload)
       return payload.add_labels[1] == "fkst-dev:awaiting-pr"
     end) ~= nil)
+  end,
+
+  test_implementation_publication_crash_windows_adopt_one_branch_and_pr = function()
+    local event = ready()
+    local branch = deterministic_branch_for(event)
+    local attempt = core.implement_attempt_marker(
+      event.proposal_id,
+      event.dedup_key,
+      1,
+      tostring(now() - 7201)
+    )
+    local branch_only = {
+      core.state_marker(event.proposal_id, "implementing", event.dedup_key),
+      attempt,
+    }
+
+    mock_issue_implement_raw({ "fkst-dev:implementing" }, branch_only, {
+      title = "Implement decision recorder",
+    })
+    mock_remote_implementation_branch(branch)
+    t.mock_command(core.gh_pr_list_head_base_cmd("owner/repo", branch, "dev"), {
+      stdout = "[]\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh pr create", {
+      stdout = "https://github.example/owner/repo/pull/7\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    mock_pr_child_adoptable(branch)
+    mock_bot_env()
+    mock_real_write_mode()
+
+    local branch_cut = run_implement(event, opts("recovery-matrix-branch-published", {
+      FKST_GITHUB_WRITE = "1",
+    }), "github-devloop.devloop_ready")
+
+    t.eq(branch_cut.exit_code, 0)
+    t.eq(count_calls("codex exec"), 0)
+    t.eq(count_calls("push origin HEAD:refs/heads/" .. branch), 0)
+    t.eq(count_calls("gh pr create"), 1)
+    t.is_true(find_body_raise(branch_cut.raises, "github-proxy.github_pr_comment_request", 'state="pr-open"') ~= nil)
+
+    mock_issue_implement_raw({ "fkst-dev:implementing" }, branch_only, {
+      title = "Implement decision recorder",
+    })
+    mock_remote_implementation_branch(branch)
+    mock_pr_child_adoptable(branch)
+    mock_bot_env()
+    mock_real_write_mode()
+
+    local pr_cut = run_implement(event, opts("recovery-matrix-pr-created-link-missing", {
+      FKST_GITHUB_WRITE = "1",
+    }), "github-devloop.devloop_ready")
+
+    t.eq(pr_cut.exit_code, 0)
+    t.eq(count_calls("codex exec"), 0)
+    t.eq(count_calls("push origin HEAD:refs/heads/" .. branch), 0)
+    t.eq(count_calls("gh pr create"), 1)
+    t.is_true(find_body_raise(pr_cut.raises, "github-proxy.github_pr_comment_request", 'state="pr-open"') ~= nil)
+    t.is_true(find_body_raise(pr_cut.raises, "github-proxy.github_issue_comment_request", "fkst:github-devloop:pr-delegation:v1") ~= nil)
+    t.eq(find_body_raise(pr_cut.raises, "github-proxy.github_issue_comment_request", 'state="awaiting-pr"'), nil)
+
+    local delegated = {
+      core.state_marker(event.proposal_id, "implementing", event.dedup_key),
+      attempt,
+      m_builders.pr_delegation_marker(event.proposal_id, pr_proposal_id, 7, event.dedup_key, "g1"),
+    }
+    mock_issue_implement_raw({ "fkst-dev:implementing" }, delegated, {
+      title = "Implement decision recorder",
+    })
+    mock_remote_implementation_branch(branch)
+    mock_linked_pr_view(visible_child_comments(event, branch), branch)
+    mock_bot_env()
+    mock_real_write_mode()
+
+    local child_cut = run_implement(event, opts("recovery-matrix-child-visible-parent-missing", {
+      FKST_GITHUB_WRITE = "1",
+    }), "github-devloop.devloop_ready")
+
+    t.eq(child_cut.exit_code, 0)
+    t.is_true(find_body_raise(child_cut.raises, "github-proxy.github_issue_comment_request", 'state="awaiting-pr"') ~= nil)
+    t.eq(find_raise(child_cut.raises, "github-proxy.github_pr_comment_request"), nil)
+    t.eq(count_calls("codex exec"), 0)
+    t.eq(count_calls("push origin HEAD:refs/heads/" .. branch), 0)
+    t.eq(count_calls("gh pr create"), 1)
   end,
 }

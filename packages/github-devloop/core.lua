@@ -108,6 +108,7 @@ M.restart_consumer_sources = {
   "libraries/devloop/decompose.lua",
 }
 require("devloop.restart").install(M, wiring.restart(M))
+M.restart_recovery_evidence_inventory = require("core.restart.recovery_evidence")
 require("devloop.restart.issue.pr_partition_contract").install(M)
 local restart_liveness_resolved = require("devloop.liveness").with_restart_policy({
   runtime_provenance = {

@@ -90,6 +90,7 @@ public = [
   "devloop.prompts",
   "devloop.queue",
   "devloop.queue_starvation",
+  "devloop.recovery_evidence",
   "devloop.replay_fields",
   "devloop.replay_required_facts",
   "devloop.replay_thinking_convergence",
