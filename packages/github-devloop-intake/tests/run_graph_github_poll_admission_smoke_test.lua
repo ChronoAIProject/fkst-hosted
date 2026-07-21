@@ -18,8 +18,13 @@ local function mock_env()
     t.mock_command(devloop_base.read_env_command("FKST_GITHUB_REPO"), { stdout = repo, stderr = "", exit_code = 0 })
     t.mock_command(devloop_base.read_env_command("FKST_GITHUB_BOT_LOGIN"), { stdout = "fkst-test-bot", stderr = "", exit_code = 0 })
     t.mock_command(devloop_base.read_env_command("FKST_GITHUB_WRITE"), { stdout = "", stderr = "", exit_code = 0 })
-    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_CLAIM_MODE"), { stdout = "", stderr = "", exit_code = 0 })
-    t.mock_command('printf %s "$FKST_GITHUB_PROXY_POLL_LABEL_PREFIX"', { stdout = "fkst-dev:,fkst-class:", stderr = "", exit_code = 0 })
+    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_CLAIM_MODE"), { stdout = "label", stderr = "", exit_code = 0 })
+    t.mock_command(devloop_base.read_env_command("FKST_SESSION_WORK_LABEL"), { stdout = "fkst-dev", stderr = "", exit_code = 0 })
+    t.mock_command('printf %s "$FKST_GITHUB_PROXY_POLL_LABEL_PREFIX"', {
+      stdout = "fkst-dev:,fkst-class:,fkst-security:,fkst-workflow:,fkst-dashboard",
+      stderr = "",
+      exit_code = 0,
+    })
     t.mock_command('printf %s "$FKST_GITHUB_PROXY_REPLAY_BUDGET"', { stdout = "1", stderr = "", exit_code = 0 })
   end
   for _ = 1, 3 do
@@ -29,7 +34,7 @@ end
 
 local function mock_proxy_poll_lists()
   t.mock_command("gh api --paginate --slurp 'repos/owner/repo/issues?state=open&per_page=100'", {
-    stdout = '[[{"number":42,"title":"Fresh unmanaged issue","html_url":"https://github.example/owner/repo/issues/42","updated_at":"2026-06-03T01:02:03Z","state":"open","labels":[{"name":"bug"}]}]]\n',
+    stdout = '[[{"number":42,"title":"Fresh unmanaged issue","html_url":"https://github.example/owner/repo/issues/42","updated_at":"2026-06-03T01:02:03Z","state":"open","labels":[{"name":"fkst-dev"}]}]]\n',
     stderr = "",
     exit_code = 0,
   })
@@ -48,7 +53,7 @@ local function mock_admission_issue_view()
     body = "",
     updated_at = "2026-06-03T01:02:03Z",
     state = "OPEN",
-    labels = { "bug" },
+    labels = { "fkst-dev", "fkst-dev:claimed" },
     comments = {},
     assignees = { "fkst-test-bot" },
     author_login = "fkst-test-bot",
@@ -56,7 +61,7 @@ local function mock_admission_issue_view()
 end
 
 return {
-  test_run_graph_github_poll_reaches_intake_admission_candidate_without_intake_poll = function()
+  test_run_graph_hosted_exact_work_label_reaches_admission_with_lifecycle_prefix_suppression = function()
     mock_env()
     mock_proxy_poll_lists()
     mock_admission_issue_view()

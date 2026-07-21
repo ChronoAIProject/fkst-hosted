@@ -12,6 +12,7 @@ local devloop_commands = require("devloop.commands")
 local entity_lib = require("devloop.entity")
 local admission_core = require("core.admission")
 local replay_authorization = require("core.replay_authorization")
+local config = require("devloop.config")
 
 local spec = {
   consumes = { "github-proxy.github_entity_changed", "github-proxy.github_issue_observed" },
@@ -108,6 +109,26 @@ local function issue_from_current(issue_number, current)
   }
 end
 
+local function session_work_scope_allows(current, proposal_id, transition)
+  if config.claim_mode() ~= "label" then
+    return true
+  end
+  local allowed, reason = config.matches_session_work_label(current.labels)
+  if allowed then
+    return true
+  end
+  devloop_logging.log_cas_decision(
+    "admission",
+    proposal_id,
+    { state = nil, version = nil },
+    transition,
+    "candidate",
+    "skip-work-label-scope",
+    reason
+  )
+  return false
+end
+
 local function admit_issue_event(event, entity)
   entity = entity or event.payload or {}
   devloop_logging.log_entry("admission", event, "github-devloop/intake", devloop_logging.payload_field(entity, "dedup_key"))
@@ -123,6 +144,10 @@ local function admit_issue_event(event, entity)
 
   devloop_logging.log_forged_markers("admission", proposal_id, current.comments)
   local issue = issue_from_current(issue_number, current)
+
+  if not session_work_scope_allows(current, proposal_id, "entity") then
+    return
+  end
 
   if handle_pending_reintake(repo, issue, current, proposal_id, entity.source_ref) then
     return
@@ -174,6 +199,9 @@ local function act_issue_observed(event)
 
     local _, _, current = current_issue_from_source_ref(entity.source_ref, entity.updated_at)
     devloop_logging.log_forged_markers("admission", proposal_id, current.comments)
+    if not session_work_scope_allows(current, proposal_id, "observed") then
+      return
+    end
     local progress_visible = has_trusted_progress(current, proposal_id)
     local authorization, reason = replay_authorization.authorize(current, proposal_id, entity.source_ref, {
       has_trusted_progress = progress_visible,
