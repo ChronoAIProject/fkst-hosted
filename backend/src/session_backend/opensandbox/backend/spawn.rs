@@ -26,9 +26,14 @@ use super::{correlate, managed_session_filter, OsbBackend};
 
 /// The mode every credential file (and the sentinel) is uploaded with. OpenSandbox's
 /// bootstrap and workload both inherit the image's non-root `fkst` user, so execd writes
-/// the files as the same uid that reads them. Keep credentials owner-readable only,
-/// matching the Kubernetes Secret mount. `pub(super)` keeps rotation on the same mode.
-pub(super) const CREDS_FILE_MODE: u32 = 0o400;
+/// the files as the same uid that reads them. Owner read+WRITE (no group/other access):
+/// unlike the Kubernetes Secret mount (which kubelet rewrites externally, so `0o400`
+/// works there), rotation here rewrites the file in place through execd, and POSIX
+/// denies `open(O_WRONLY)` on an owner-read-only file even for the owner — `0o400`
+/// broke every rotation delivery (issue #774) while adding no protection (everything
+/// in the sandbox runs as the owning uid, which can always chmod the file back).
+/// `pub(super)` keeps rotation on the same mode.
+pub(super) const CREDS_FILE_MODE: u32 = 0o600;
 
 /// OpenSandbox does not provide the writable `/var/run/fkst/*` mounts installed by the
 /// Kubernetes backend. Every mutable session path must therefore live under the

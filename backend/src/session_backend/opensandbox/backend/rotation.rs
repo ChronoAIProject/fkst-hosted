@@ -5,8 +5,15 @@
 //! files were PUSHED into the container through execd at spawn. So delivery here
 //! probes the container first and heals accordingly:
 //!
-//! - the creds are intact → rewrite JUST the rotated file in place (and keep the cached
-//!   bundle's copy fresh for any later full re-push);
+//! - the creds are intact → replace JUST the rotated file ATOMICALLY: upload to a
+//!   sibling `.tmp` path, then swap it over the destination with execd's native
+//!   `POST /files/mv` (Go `os.Rename`, i.e. `rename(2)`) — and keep the cached
+//!   bundle's copy fresh for any later full re-push. Rename means (a) in-sandbox
+//!   readers — the git credential helper re-reads the token file on every
+//!   operation — can never observe a truncated half-written token, and (b) the
+//!   destination file's own mode is irrelevant, so this also heals sandboxes
+//!   spawned while `CREDS_FILE_MODE` was still the unrewritable `0o400`
+//!   (issue #774) and migrates them to `0o600`;
 //! - the creds were WIPED (container restart) → re-push the WHOLE cached bundle through
 //!   the same per-file + sentinel-LAST upload `ensure_session` uses, so the in-pod
 //!   engine-start gate can pass again;
@@ -20,6 +27,7 @@
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::session_backend::opensandbox::dto::OsbError;
+use crate::session_backend::opensandbox::ExecdClient;
 use crate::session_backend::{BackendError, DeliveryOutcome};
 use crate::session_spec::creds::CredsLayout;
 
@@ -48,13 +56,11 @@ impl OsbBackend {
         // bundle) to detect a container restart that wiped the mounted creds dir.
         let probe_path = path_str(&layout.github_token());
         match execd.file_info(&probe_path).await {
-            // Files intact → rewrite JUST this file in place (truncate-rewrite) and keep
-            // the cached bundle's copy fresh for any later full re-push.
+            // Files intact → replace JUST this file atomically (tmp upload + rename)
+            // and keep the cached bundle's copy fresh for any later full re-push.
             Ok(_) => {
                 let path = path_str(&layout.base().join(file));
-                execd
-                    .upload_file(&path, contents.expose_secret().as_bytes(), CREDS_FILE_MODE)
-                    .await?;
+                replace_file_atomically(&execd, &path, &contents).await?;
                 self.update_cached_file(session_id, file, contents);
                 Ok(DeliveryOutcome::Delivered)
             }
@@ -142,6 +148,37 @@ impl OsbBackend {
             bundle.insert(file.to_string(), contents);
         }
     }
+}
+
+/// Replace `path` with `contents` ATOMICALLY: upload to a sibling `.tmp` path, then
+/// swap it over the destination with execd's native `POST /files/mv` (Go
+/// `os.Rename`, i.e. a same-filesystem `rename(2)`).
+///
+/// Why not rewrite the destination in place: (a) in-sandbox readers — the git
+/// credential helper re-reads the token file on every operation — could observe a
+/// truncated half-written token during an in-place truncate-rewrite; a rename swaps
+/// the complete file in one step. (b) An in-place `open(O_WRONLY)` fails EACCES on a
+/// legacy owner-read-only file from a pre-`0o600` spawn (issue #774), while a rename
+/// needs only DIRECTORY permission — the destination's own mode is irrelevant, so
+/// this heals legacy sandboxes and migrates their files to `0o600` as a side effect.
+///
+/// Every failure surfaces to the rotation loop for its next tick: a rename whose
+/// SOURCE vanished (a container restart wiped the creds dir mid-delivery) is the
+/// daemon's 404 → [`OsbError::NotFound`], and the next tick's canary probe routes
+/// that restart to the full-bundle re-push. A leftover tmp from a failed rename is
+/// harmless — the next tick's upload overwrites it (`0o600` is owner-writable).
+/// NEVER logs `contents`.
+async fn replace_file_atomically(
+    execd: &ExecdClient,
+    path: &str,
+    contents: &SecretString,
+) -> Result<(), BackendError> {
+    let tmp = format!("{path}.tmp");
+    execd
+        .upload_file(&tmp, contents.expose_secret().as_bytes(), CREDS_FILE_MODE)
+        .await?;
+    execd.move_file(&tmp, path).await?;
+    Ok(())
 }
 
 #[cfg(test)]

@@ -171,6 +171,17 @@ pub(crate) struct ExecdFileMetadata {
     pub mode: u32,
 }
 
+/// One rename operation for `POST /files/mv` (the daemon's `RenameFileItem`; the
+/// request body is an ARRAY of these). The daemon stats `src` (missing → a 404 the
+/// client maps to [`OsbError::NotFound`]), ensures `dest`'s parent directory, then
+/// calls Go's `os.Rename` — a same-filesystem `rename(2)`. Field names are already
+/// the wire's lowercase, so no rename attribute is needed.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub(crate) struct RenameFileItem {
+    pub src: String,
+    pub dest: String,
+}
+
 /// Request body for `POST /command`.
 ///
 /// `timeout` is omitted when `None` (`skip_serializing_if`) — unlike the lifecycle

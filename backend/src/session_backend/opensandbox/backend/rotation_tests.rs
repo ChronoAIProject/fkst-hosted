@@ -1,13 +1,14 @@
-//! Wiremock tests for `deliver_credential`: the intact single-file rewrite, the
-//! container-restart full-bundle re-push (every file + the sentinel LAST), the
-//! benign session-gone no-op, the surfaced upload failure, and the both-restarted
-//! cache-miss single-file fallback.
+//! Wiremock tests for `deliver_credential`: the intact-path atomic single-file
+//! replace (tmp upload + native `/files/mv` rename), the container-restart
+//! full-bundle re-push (every file + the sentinel LAST), the benign session-gone
+//! no-op, the surfaced upload/rename failures, and the both-restarted cache-miss
+//! single-file fallback.
 
 use std::collections::BTreeMap;
 
 use secrecy::{ExposeSecret, SecretString};
 use serde_json::json;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{body_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::session_backend::{BackendError, DeliveryOutcome};
@@ -19,14 +20,21 @@ use super::super::backend_test_support::{
 const RESOLVE_PATH: &str = "/v1/sandboxes";
 const FILE_INFO_PATH: &str = "/v1/sandboxes/sbx-1/proxy/44772/files/info";
 const UPLOAD_PATH: &str = "/v1/sandboxes/sbx-1/proxy/44772/files/upload";
+const MV_PATH: &str = "/v1/sandboxes/sbx-1/proxy/44772/files/mv";
+
+const TOKEN_PATH: &str = "/var/lib/fkst/creds/github-token";
+const TOKEN_TMP_PATH: &str = "/var/lib/fkst/creds/github-token.tmp";
 
 /// The `file_info` 200 body for a present github-token file (a path-keyed map).
 fn token_present_body() -> serde_json::Value {
-    json!({
-        "/var/lib/fkst/creds/github-token": {
-            "path": "/var/lib/fkst/creds/github-token", "size": 10, "mode": 400
-        }
-    })
+    json!({ TOKEN_PATH: { "path": TOKEN_PATH, "size": 10, "mode": 400 } })
+}
+
+/// The exact `/files/mv` body the atomic replace must send: one rename of the
+/// sibling tmp file onto the live destination (and NOTHING else — in particular,
+/// the credential value never rides the rename request).
+fn expected_mv_body() -> serde_json::Value {
+    json!([{ "src": TOKEN_TMP_PATH, "dest": TOKEN_PATH }])
 }
 
 /// Mount the `resolve_one` list response returning one sandbox `sbx-1` for the session.
@@ -68,10 +76,10 @@ fn full_bundle() -> BTreeMap<String, SecretString> {
 }
 
 #[tokio::test]
-async fn deliver_credential_rewrites_a_single_file_when_creds_are_intact() {
+async fn deliver_credential_replaces_a_single_file_atomically_when_creds_are_intact() {
     let server = MockServer::start().await;
     mount_resolve(&server).await;
-    // The canary probe finds the token file present → single-file rewrite.
+    // The canary probe finds the token file present → intact-path atomic replace.
     Mock::given(method("GET"))
         .and(path(FILE_INFO_PATH))
         .respond_with(ResponseTemplate::new(200).set_body_json(token_present_body()))
@@ -80,6 +88,16 @@ async fn deliver_credential_rewrites_a_single_file_when_creds_are_intact() {
     Mock::given(method("POST"))
         .and(path(UPLOAD_PATH))
         .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    // The atomic swap: exactly one rename, with exactly the tmp→destination body
+    // (the exact-body matcher doubles as the "no credential bytes ride the rename"
+    // assertion — any other body would 404 the mock and fail the delivery).
+    Mock::given(method("POST"))
+        .and(path(MV_PATH))
+        .and(body_json(expected_mv_body()))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
         .mount(&server)
         .await;
 
@@ -94,15 +112,87 @@ async fn deliver_credential_rewrites_a_single_file_when_creds_are_intact() {
     assert_eq!(outcome, DeliveryOutcome::Delivered);
 
     let uploads = upload_bodies(&server).await;
-    assert_eq!(uploads.len(), 1, "only the rotated file is rewritten");
+    assert_eq!(uploads.len(), 1, "only the rotated file is uploaded");
     assert!(
-        uploads[0].contains("/var/lib/fkst/creds/github-token") && uploads[0].contains("ghs_new")
+        uploads[0].contains(TOKEN_TMP_PATH) && uploads[0].contains("ghs_new"),
+        "the upload targets the sibling tmp path, never the live destination"
     );
-    assert!(uploads[0].contains(r#""mode":400"#));
+    assert!(uploads[0].contains(r#""mode":600"#));
     assert!(
         !uploads[0].contains(".creds-complete"),
         "no sentinel on the single-file path"
     );
+}
+
+#[tokio::test]
+async fn deliver_credential_surfaces_a_rename_failure() {
+    let server = MockServer::start().await;
+    mount_resolve(&server).await;
+    Mock::given(method("GET"))
+        .and(path(FILE_INFO_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(token_present_body()))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(UPLOAD_PATH))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    // The rename fails → the delivery must fail loudly (the rotation loop retries
+    // next tick) instead of reporting a token that never reached the live path as
+    // delivered. The leftover tmp is overwritten by the next tick's upload.
+    Mock::given(method("POST"))
+        .and(path(MV_PATH))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let err = backend(&server.uri(), osb_config())
+        .deliver_credential_impl(
+            SESSION_ID,
+            "github-token",
+            SecretString::from("ghs_new".to_string()),
+        )
+        .await
+        .expect_err("a failed rename is a failed delivery");
+    assert!(matches!(err, BackendError::Other(_)), "got {err:?}");
+}
+
+#[tokio::test]
+async fn deliver_credential_surfaces_a_rename_whose_source_vanished() {
+    let server = MockServer::start().await;
+    mount_resolve(&server).await;
+    Mock::given(method("GET"))
+        .and(path(FILE_INFO_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(token_present_body()))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(UPLOAD_PATH))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    // A container restart wiped the creds dir between the tmp upload and the
+    // rename: the daemon stats the source and 404s. The delivery must surface
+    // that (NOT report Delivered); the next tick's canary probe routes the
+    // restart to the full-bundle re-push.
+    Mock::given(method("POST"))
+        .and(path(MV_PATH))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let err = backend(&server.uri(), osb_config())
+        .deliver_credential_impl(
+            SESSION_ID,
+            "github-token",
+            SecretString::from("ghs_new".to_string()),
+        )
+        .await
+        .expect_err("a vanished rename source is a failed delivery");
+    assert!(matches!(err, BackendError::NotFound), "got {err:?}");
 }
 
 #[tokio::test]
@@ -201,10 +291,17 @@ async fn deliver_credential_surfaces_an_upload_failure() {
         .respond_with(ResponseTemplate::new(200).set_body_json(token_present_body()))
         .mount(&server)
         .await;
-    // The rewrite upload fails hard → the error is surfaced (the loop retries next tick).
+    // The tmp upload fails hard → the error is surfaced (the loop retries next tick).
     Mock::given(method("POST"))
         .and(path(UPLOAD_PATH))
         .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    // No rename attempt without an uploaded tmp file.
+    Mock::given(method("POST"))
+        .and(path(MV_PATH))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
         .mount(&server)
         .await;
 
@@ -249,6 +346,6 @@ async fn deliver_credential_delivers_only_the_single_file_when_the_cache_is_empt
     // Only the single rotated file — no full bundle (empty cache), no sentinel.
     assert_eq!(uploads.len(), 1);
     assert!(uploads[0].contains("/var/lib/fkst/creds/github-token"));
-    assert!(uploads[0].contains(r#""mode":400"#));
+    assert!(uploads[0].contains(r#""mode":600"#));
     assert!(!uploads[0].contains(".creds-complete"));
 }
