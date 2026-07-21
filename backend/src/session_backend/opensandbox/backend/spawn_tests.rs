@@ -1,7 +1,7 @@
 //! Wiremock tests for the create-side verbs: `check_reachable` and `ensure_session`
 //! (happy path with the literal-null timeout + stamped metadata + create-env execd
 //! token, sentinel-LAST creds ordering, rollback-on-upload-failure, and the
-//! list-guard AlreadyLive short-circuit).
+//! list-guard recovery for an already-live runtime).
 
 use std::collections::BTreeMap;
 
@@ -19,6 +19,9 @@ use super::super::backend_test_support::{
 };
 
 const UPLOAD_PATH: &str = "/v1/sandboxes/sbx-1/proxy/44772/files/upload";
+const EXISTING_FILE_INFO_PATH: &str = "/v1/sandboxes/sbx-existing/proxy/44772/files/info";
+const EXISTING_UPLOAD_PATH: &str = "/v1/sandboxes/sbx-existing/proxy/44772/files/upload";
+const SENTINEL_PATH: &str = "/var/lib/fkst/creds/.creds-complete";
 
 /// The create-env execd token the backend derives for [`SESSION_ID`].
 fn expected_execd_token() -> String {
@@ -32,6 +35,35 @@ fn one_cred() -> BTreeMap<String, SecretString> {
         "github-token".to_string(),
         SecretString::from("ghs_secret_value".to_string()),
     )])
+}
+
+fn complete_creds() -> BTreeMap<String, SecretString> {
+    BTreeMap::from([
+        (
+            "github-token".to_string(),
+            SecretString::from("ghs_current".to_string()),
+        ),
+        (
+            "install".to_string(),
+            SecretString::from(r#"["npm install tool"]"#.to_string()),
+        ),
+        (
+            "llm-api-key".to_string(),
+            SecretString::from("sk-current".to_string()),
+        ),
+        (
+            "secret-keys".to_string(),
+            SecretString::from(r#"["DEPLOY_KEY"]"#.to_string()),
+        ),
+        (
+            "storage-client-secret".to_string(),
+            SecretString::from("storage-current".to_string()),
+        ),
+        (
+            "userenv.DEPLOY_KEY".to_string(),
+            SecretString::from("env-current".to_string()),
+        ),
+    ])
 }
 
 #[tokio::test]
@@ -352,12 +384,140 @@ async fn ensure_session_is_already_live_when_a_sandbox_exists() {
         )
         .mount(&server)
         .await;
-    // No create mock: a create call would 404 (no match) and error, so reaching
-    // AlreadyLive proves the create was short-circuited.
+    // The runtime already has a published completeness sentinel. Reconstruct the
+    // empty control-plane cache without rewriting any credential file.
+    Mock::given(method("GET"))
+        .and(path(EXISTING_FILE_INFO_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            SENTINEL_PATH: { "path": SENTINEL_PATH, "size": 1, "mode": 600 }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(EXISTING_UPLOAD_PATH))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    // No create mock: a create call would 404, so AlreadyLive also proves no
+    // duplicate sandbox was created.
 
-    let outcome = backend(&server.uri(), osb_config())
-        .ensure_session_impl(&spec(), one_cred())
+    let b = backend(&server.uri(), osb_config());
+    let outcome = b
+        .ensure_session_impl(&spec(), complete_creds())
         .await
         .expect("already live");
     assert_eq!(outcome, EnsureOutcome::AlreadyLive);
+    let cached = b.creds.lock().unwrap();
+    assert_eq!(cached.get(SESSION_ID).map(BTreeMap::len), Some(6));
+}
+
+#[tokio::test]
+async fn ensure_existing_session_restores_the_full_bundle_when_runtime_creds_are_missing() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/sandboxes"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(list_page(json!([sandbox_json(
+                "sbx-existing",
+                "Running",
+                "2026-07-09T00:00:00Z",
+                json!({ "fkst-session-id": SESSION_ID }),
+            )]))),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(EXISTING_FILE_INFO_PATH))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(EXISTING_UPLOAD_PATH))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let b = backend(&server.uri(), osb_config());
+    let outcome = b
+        .ensure_session_impl(&spec(), complete_creds())
+        .await
+        .expect("complete recovery");
+    assert_eq!(outcome, EnsureOutcome::AlreadyLive);
+
+    let requests = server.received_requests().await.expect("recorded requests");
+    let uploads: Vec<String> = requests
+        .iter()
+        .filter(|request| request.url.path() == EXISTING_UPLOAD_PATH)
+        .map(|request| String::from_utf8_lossy(&request.body).into_owned())
+        .collect();
+    assert_eq!(uploads.len(), 7, "six credentials plus the sentinel");
+    for file in [
+        "github-token",
+        "llm-api-key",
+        "userenv.DEPLOY_KEY",
+        "install",
+        "secret-keys",
+        "storage-client-secret",
+    ] {
+        assert!(
+            uploads.iter().any(|upload| upload.contains(file)),
+            "recovery omitted {file}"
+        );
+    }
+    assert!(
+        uploads
+            .iter()
+            .any(|upload| upload.contains("github-token") && upload.contains("ghs_current")),
+        "the current GitHub token must overlay the recovered bundle"
+    );
+    assert!(uploads[6].contains(SENTINEL_PATH));
+    assert!(uploads[..6]
+        .iter()
+        .all(|upload| !upload.contains(SENTINEL_PATH)));
+    assert_eq!(
+        b.creds.lock().unwrap().get(SESSION_ID).map(BTreeMap::len),
+        Some(6)
+    );
+}
+
+#[tokio::test]
+async fn ensure_existing_session_does_not_publish_or_cache_a_partial_recovery() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/sandboxes"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(list_page(json!([sandbox_json(
+                "sbx-existing",
+                "Running",
+                "2026-07-09T00:00:00Z",
+                json!({ "fkst-session-id": SESSION_ID }),
+            )]))),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(EXISTING_FILE_INFO_PATH))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(EXISTING_UPLOAD_PATH))
+        .respond_with(
+            ResponseTemplate::new(500)
+                .set_body_string(r#"{"code":"RUNTIME_ERROR","message":"write failed"}"#),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let b = backend(&server.uri(), osb_config());
+    let error = b
+        .ensure_session_impl(&spec(), complete_creds())
+        .await
+        .expect_err("partial recovery must fail visibly");
+    assert!(matches!(error, BackendError::Other(_)));
+    assert!(b.creds.lock().unwrap().get(SESSION_ID).is_none());
 }

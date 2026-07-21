@@ -200,6 +200,16 @@ pub enum ReconcileAction {
     },
     /// Refresh the pod's `last-pending-at` (it is live and reported pending).
     TouchPending { session_id: String },
+    /// Rebuild the complete credential bundle for a live pending runtime from the
+    /// current, configuration-valid registration. The backend adopts the bundle as
+    /// recovery state and restores it when the runtime's credential directory is
+    /// incomplete. Kept separate from [`TouchPending`](Self::TouchPending) so a
+    /// rejected trigger edit can still refresh liveness without letting edited
+    /// configuration influence credential recovery.
+    RecoverCredentials {
+        reg: SessionRegistration,
+        detected_work_labels: Vec<String>,
+    },
     /// Delete the pod for the given reason.
     Kill {
         session_id: String,
@@ -393,6 +403,12 @@ pub fn plan_repo(
                     actions.push(ReconcileAction::TouchPending {
                         session_id: reg.session_id.clone(),
                     });
+                    if !rejected {
+                        actions.push(ReconcileAction::RecoverCredentials {
+                            reg: reg.clone(),
+                            detected_work_labels: detected(&reg.session_id),
+                        });
+                    }
                 } else if idle_kill_due(pod, now, cfg) {
                     actions.push(ReconcileAction::Kill {
                         session_id: reg.session_id.clone(),

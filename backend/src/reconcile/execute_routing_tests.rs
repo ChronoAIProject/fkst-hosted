@@ -49,6 +49,30 @@ async fn spawn_action_routes_to_ensure_session() {
 }
 
 #[tokio::test]
+async fn recover_credentials_action_rebuilds_the_full_bundle_through_ensure_session() {
+    let backend = Arc::new(FakeSessionBackend::default());
+    let ctx = test_ctx(backend.clone());
+    let reg = registration();
+    let repo = reg.repo.clone();
+
+    execute(
+        ReconcileAction::RecoverCredentials {
+            reg,
+            detected_work_labels: vec!["fkst-run".to_string()],
+        },
+        &repo,
+        &ctx,
+    )
+    .await;
+
+    let ensured = backend.ensured.lock().unwrap();
+    assert_eq!(ensured.len(), 1);
+    assert_eq!(ensured[0].0, "sess-abc");
+    assert!(ensured[0].1.contains(&"github-token".to_string()));
+    assert!(ensured[0].1.contains(&"llm-api-key".to_string()));
+}
+
+#[tokio::test]
 async fn kill_action_routes_to_stop_session_with_reason() {
     let backend = Arc::new(FakeSessionBackend::default());
     let ctx = test_ctx(backend.clone());

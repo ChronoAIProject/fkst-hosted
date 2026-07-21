@@ -1,12 +1,14 @@
 //! The create-side lifecycle verbs (issue #418): `check_reachable` + `ensure_session`.
 //!
-//! `ensure_session` is the load-bearing verb. It (a) list-guards so an already-live
-//! session is an idempotent [`EnsureOutcome::AlreadyLive`] no-op; (b) creates the
-//! sandbox with the derived execd token RIDING THE CREATE ENV (execd gates every
-//! `/files/upload` on `X-EXECD-ACCESS-TOKEN`, read from env `EXECD_ACCESS_TOKEN`, so it
-//! must exist before the first push); (c) pushes each credential file THROUGH execd,
-//! writing the completeness sentinel LAST; and (d) ROLLS BACK (best-effort delete) on
-//! any post-create failure so a half-provisioned sandbox never lingers.
+//! `ensure_session` is the load-bearing verb. It (a) list-guards an already-live
+//! session, adopting the current complete credential bundle into an empty
+//! control-plane cache and restoring it sentinel-last when the runtime copy vanished;
+//! (b) creates an absent sandbox with the derived execd token RIDING THE CREATE ENV
+//! (execd gates every `/files/upload` on `X-EXECD-ACCESS-TOKEN`, read from env
+//! `EXECD_ACCESS_TOKEN`, so it must exist before the first push); (c) pushes each
+//! credential file THROUGH execd, writing the completeness sentinel LAST; and (d)
+//! ROLLS BACK (best-effort delete) on any post-create failure so a half-provisioned
+//! sandbox never lingers.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -22,7 +24,7 @@ use crate::session_backend::{BackendError, EnsureOutcome};
 use crate::session_pod::log_stream::{ENV_POD_NAME, ENV_POD_UID};
 use crate::session_spec::creds::CredsLayout;
 
-use super::{correlate, managed_session_filter, OsbBackend};
+use super::{correlate, managed_session_filter, pick_oldest_index, OsbBackend};
 
 /// The mode every credential file (and the sentinel) is uploaded with. OpenSandbox's
 /// bootstrap and workload both inherit the image's non-root `fkst` user, so execd writes
@@ -86,9 +88,12 @@ impl OsbBackend {
             .list_sandboxes(&managed_session_filter(&spec.session_id))
             .await?;
         if !existing.is_empty() {
+            let sandbox_id = existing[pick_oldest_index(&existing)].id.as_str();
+            self.adopt_existing_credentials(sandbox_id, &spec.session_id, creds)
+                .await?;
             tracing::info!(
                 session_id = %spec.session_id,
-                "opensandbox ensure_session: sandbox already exists; already-live no-op"
+                "opensandbox ensure_session: sandbox already exists; credentials adopted"
             );
             return Ok(EnsureOutcome::AlreadyLive);
         }
@@ -137,14 +142,62 @@ impl OsbBackend {
         }
 
         // Cache the full bundle so the rotation heal path can re-push it wholesale if a
-        // container restart later wipes the creds dir. Only on a fresh create — NOT the
-        // AlreadyLive early-return, which IS the documented control-plane-restart empty
-        // state the next reconcile repopulates.
+        // container restart later wipes the creds dir. The existing-runtime path above
+        // performs the same cache adoption after probing/restoring its sentinel.
         self.creds
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(spec.session_id.clone(), creds);
         Ok(EnsureOutcome::Created)
+    }
+
+    /// Adopt `creds` for an already-live sandbox after a reconcile-side rebuild. A
+    /// warm cache only needs its authoritative bundle replaced. An empty cache means
+    /// the control plane restarted, so the runtime's completeness sentinel decides
+    /// whether this is cache-only recovery or a full sentinel-last re-upload.
+    async fn adopt_existing_credentials(
+        &self,
+        sandbox_id: &str,
+        session_id: &str,
+        creds: BTreeMap<String, SecretString>,
+    ) -> Result<(), BackendError> {
+        let cache_present = self
+            .creds
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(session_id);
+        if cache_present {
+            self.creds
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(session_id.to_string(), creds);
+            return Ok(());
+        }
+
+        let execd = (self.execd_factory)(sandbox_id, session_id);
+        let sentinel = path_str(&CredsLayout::new(OSB_CREDS_DIR).creds_complete());
+        match execd.file_info(&sentinel).await {
+            Ok(_) => {
+                tracing::info!(
+                    session_id = %session_id,
+                    "opensandbox ensure_session: rebuilt empty credential bundle cache from authoritative sources"
+                );
+            }
+            Err(OsbError::NotFound) => {
+                self.upload_creds(sandbox_id, session_id, &creds).await?;
+                tracing::warn!(
+                    session_id = %session_id,
+                    "opensandbox ensure_session: restored complete credentials after control-plane and runtime loss"
+                );
+            }
+            Err(error) => return Err(error.into()),
+        }
+
+        self.creds
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(session_id.to_string(), creds);
+        Ok(())
     }
 
     /// Assemble the sandbox create env: the shared [`session_env_pairs`] (identical to

@@ -37,9 +37,15 @@ fn latched_original_equal_to_current_is_not_rejected() {
     );
     assert_eq!(
         actions,
-        vec![ReconcileAction::TouchPending {
-            session_id: "s1".to_string()
-        }],
+        vec![
+            ReconcileAction::TouchPending {
+                session_id: "s1".to_string()
+            },
+            ReconcileAction::RecoverCredentials {
+                reg: regs[0].clone(),
+                detected_work_labels: vec![],
+            },
+        ],
         "an unchanged config plans normally, no RejectConfigChange"
     );
 }
@@ -92,6 +98,12 @@ fn changed_config_is_rejected_once_and_does_not_respawn() {
             } | ReconcileAction::Spawn { .. }
         )),
         "a rejected edit never respawns the pod"
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, ReconcileAction::RecoverCredentials { .. })),
+        "a rejected edit never influences credential recovery"
     );
 }
 

@@ -104,10 +104,16 @@ fn valid_live_pending_touches() {
         );
         assert_eq!(
             actions,
-            vec![ReconcileAction::TouchPending {
-                session_id: "s1".to_string()
-            }],
-            "liveness {liveness:?} + pending must TouchPending"
+            vec![
+                ReconcileAction::TouchPending {
+                    session_id: "s1".to_string()
+                },
+                ReconcileAction::RecoverCredentials {
+                    reg: regs[0].clone(),
+                    detected_work_labels: vec![],
+                },
+            ],
+            "liveness {liveness:?} + pending must refresh liveness and credentials"
         );
     }
 }
@@ -295,9 +301,15 @@ fn unknown_pod_config_hash_is_not_drift() {
     );
     assert_eq!(
         actions,
-        vec![ReconcileAction::TouchPending {
-            session_id: "s1".to_string()
-        }]
+        vec![
+            ReconcileAction::TouchPending {
+                session_id: "s1".to_string()
+            },
+            ReconcileAction::RecoverCredentials {
+                reg: regs[0].clone(),
+                detected_work_labels: vec![],
+            },
+        ]
     );
 }
 

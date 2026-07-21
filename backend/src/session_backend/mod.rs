@@ -29,8 +29,8 @@ pub(crate) mod verdict;
 #[cfg(test)]
 pub(crate) mod test_support;
 
-/// What ensuring a session did: a freshly created runtime, or an idempotent no-op
-/// because the deterministically-named runtime already existed (already live).
+/// What ensuring a session did: a freshly created runtime, or an idempotent reconcile
+/// of the deterministically identified runtime that already existed.
 #[derive(Debug, PartialEq, Eq)]
 pub enum EnsureOutcome {
     Created,
@@ -145,12 +145,20 @@ pub trait SessionBackend: Send + Sync {
     async fn check_reachable(&self) -> Result<String, BackendError>;
 
     /// Ensure a session runtime exists for `spec`, injecting the assembled `creds`.
-    /// Idempotent: an already-live session is an [`EnsureOutcome::AlreadyLive`] no-op.
+    /// Idempotent: an already-live session returns [`EnsureOutcome::AlreadyLive`]; a
+    /// backend whose credential storage is ephemeral may also adopt or restore the
+    /// supplied complete bundle without replacing the runtime.
     async fn ensure_session(
         &self,
         spec: &SessionPodSpec,
         creds: BTreeMap<String, SecretString>,
     ) -> Result<EnsureOutcome, BackendError>;
+
+    /// Whether this process needs the complete authoritative credential bundle for
+    /// `session_id` before the runtime is recoverable. Durable-projection backends
+    /// return false; push-based backends return true while their recovery cache is
+    /// empty. A failed recovery must leave this signal true for the next reconcile.
+    async fn credential_recovery_needed(&self, session_id: &str) -> Result<bool, BackendError>;
 
     /// Observe the live (or terminal) session runtimes belonging to `repo`, projected
     /// into the planner's [`LivePod`] view.

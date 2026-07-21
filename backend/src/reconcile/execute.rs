@@ -93,6 +93,10 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
             detected_work_labels,
         } => spawn_session(reg, detected_work_labels, ctx).await,
         ReconcileAction::TouchPending { session_id } => touch_pending(&session_id, ctx).await,
+        ReconcileAction::RecoverCredentials {
+            reg,
+            detected_work_labels,
+        } => recover_credentials(reg, detected_work_labels, ctx).await,
         ReconcileAction::Kill { session_id, reason } => kill(&session_id, reason, ctx).await,
         ReconcileAction::CleanupTerminal { session_id } => cleanup_terminal(&session_id, ctx).await,
         ReconcileAction::RetireWorkIssues { work_labels } => {
@@ -201,66 +205,20 @@ async fn spawn_session(
         return;
     }
 
-    // 2. Environment: a named environment must exist + be `ready` for the author;
-    //    otherwise post feedback and skip (fail closed, no doomed pod).
-    let (user_env, install_commands, secret_keys) = match resolve_environment(
-        ctx.env_store.as_ref(),
-        reg.trigger_author_id,
-        reg.def.environment.as_deref(),
-    )
-    .await
-    {
-        EnvResolution::Proceed {
-            user_env,
-            install,
-            secret_keys,
-        } => (user_env, install, secret_keys),
-        EnvResolution::Blocked { comment } => {
+    // 2-5. Rebuild the launch spec + complete credential bundle from authoritative
+    // sources. The same resolver drives live-runtime recovery, so spawn and restart
+    // healing cannot drift to different credential layouts.
+    let (spec, creds) = match resolve_session_credentials(&reg, &detected_work_labels, ctx).await {
+        Ok(ready) => ready,
+        Err(CredentialResolutionError::EnvironmentBlocked { comment }) => {
             post_comment_best_effort(&ctx.github, &owner_repo, reg.trigger_issue, &comment).await;
             return;
         }
-    };
-
-    // 3. Mint the least-privilege session token and render the rotating
-    //    `{token, expires_at}` JSON the pod's git/gh read.
-    let (token, expires_at) = match ctx
-        .github
-        .token_with_expiry_for_repo(&owner_repo, Some(session_permissions()))
-        .await
-    {
-        Ok(pair) => pair,
-        Err(error) => {
+        Err(CredentialResolutionError::TokenMintFailed(error)) => {
             tracing::error!(session_id = %reg.session_id, error = %error, "reconcile spawn: token mint failed; not spawning");
             return;
         }
     };
-    let github_token_json = session_github_token_json(&token, expires_at);
-
-    // 4. Assemble the pod spec from the registration + its effective work-label set.
-    let spec = session_pod_spec_from(
-        &reg,
-        &detected_work_labels,
-        ctx.config.reconcile.github_bot_login.clone(),
-    );
-
-    // 5. Assemble the per-session credential map (the executor now owns the credential
-    //    layout, threading it through the backend as `SecretString`s). Always inject
-    //    the storage SA creds when chrono-storage is configured (log streaming is
-    //    unconditional; the per-session flag was retired). Absent a storage config
-    //    the Secret carries no storage-* keys and the in-pod uploader fails closed —
-    //    no bundle, never a crash.
-    let storage = storage_writer_creds(&ctx.config);
-    let creds: BTreeMap<String, SecretString> = credential_secret_data(
-        &github_token_json,
-        ctx.config.llm_api_key.expose_secret(),
-        user_env.iter().map(|(k, v)| (k.as_str(), v.as_str())),
-        &install_commands,
-        &secret_keys,
-        storage,
-    )
-    .into_iter()
-    .map(|(k, v)| (k, SecretString::from(v)))
-    .collect();
 
     // 6. Ensure the session runtime exists (409 = already-live no-op). The backend
     //    builds + creates the pod and its owner-referenced creds Secret; on failure it
@@ -274,6 +232,126 @@ async fn spawn_session(
         }
         Err(_) => {}
     }
+}
+
+/// Rebuild and adopt the complete credential bundle for a live pending runtime.
+/// `ensure_session` remains the single idempotent backend boundary: Kubernetes keeps
+/// its already-live no-op, while OpenSandbox uses the supplied bundle to reconstruct
+/// its process-local cache and restore a missing sentinel without replacing the
+/// deterministically identified runtime.
+async fn recover_credentials(
+    reg: SessionRegistration,
+    detected_work_labels: Vec<String>,
+    ctx: &ReconcileCtx,
+) {
+    let session_id = reg.session_id.clone();
+    match ctx.backend.credential_recovery_needed(&session_id).await {
+        Ok(false) => return,
+        Ok(true) => {}
+        Err(error) => {
+            tracing::warn!(
+                session_id = %session_id,
+                error = %error,
+                "reconcile credential recovery: need probe failed; retrying next reconcile"
+            );
+            return;
+        }
+    }
+    let (spec, creds) = match resolve_session_credentials(&reg, &detected_work_labels, ctx).await {
+        Ok(ready) => ready,
+        Err(CredentialResolutionError::EnvironmentBlocked { .. }) => {
+            tracing::warn!(
+                session_id = %session_id,
+                "reconcile credential recovery: environment unavailable; retrying next reconcile"
+            );
+            return;
+        }
+        Err(CredentialResolutionError::TokenMintFailed(error)) => {
+            tracing::warn!(
+                session_id = %session_id,
+                error = %error,
+                "reconcile credential recovery: token mint failed; retrying next reconcile"
+            );
+            return;
+        }
+    };
+
+    match ctx.backend.ensure_session(&spec, creds).await {
+        Ok(EnsureOutcome::Created) => tracing::warn!(
+            session_id = %session_id,
+            "reconcile credential recovery: runtime vanished after observation; recreated with complete credentials"
+        ),
+        Ok(EnsureOutcome::AlreadyLive) => tracing::debug!(
+            session_id = %session_id,
+            "reconcile credential recovery: complete credential bundle adopted"
+        ),
+        Err(error) => tracing::warn!(
+            session_id = %session_id,
+            error = %error,
+            "reconcile credential recovery: backend ensure failed; retrying next reconcile"
+        ),
+    }
+}
+
+enum CredentialResolutionError {
+    EnvironmentBlocked { comment: String },
+    TokenMintFailed(GithubAppError),
+}
+
+/// Resolve the current full session credential bundle from durable/control-plane
+/// sources: the registration, environment store, static service configuration, and a
+/// repository-scoped GitHub token. No bundle is persisted in GitHub or logs.
+async fn resolve_session_credentials(
+    reg: &SessionRegistration,
+    detected_work_labels: &[String],
+    ctx: &ReconcileCtx,
+) -> Result<(SessionPodSpec, BTreeMap<String, SecretString>), CredentialResolutionError> {
+    let (user_env, install_commands, secret_keys) = match resolve_environment(
+        ctx.env_store.as_ref(),
+        reg.trigger_author_id,
+        reg.def.environment.as_deref(),
+    )
+    .await
+    {
+        EnvResolution::Proceed {
+            user_env,
+            install,
+            secret_keys,
+        } => (user_env, install, secret_keys),
+        EnvResolution::Blocked { comment } => {
+            return Err(CredentialResolutionError::EnvironmentBlocked { comment });
+        }
+    };
+
+    let owner_repo = format!("{}/{}", reg.repo.owner, reg.repo.name);
+    let (token, expires_at) = match ctx
+        .github
+        .token_with_expiry_for_repo(&owner_repo, Some(session_permissions()))
+        .await
+    {
+        Ok(pair) => pair,
+        Err(error) => return Err(CredentialResolutionError::TokenMintFailed(error)),
+    };
+    let github_token_json = session_github_token_json(&token, expires_at);
+    let spec = session_pod_spec_from(
+        reg,
+        detected_work_labels,
+        ctx.config.reconcile.github_bot_login.clone(),
+    );
+    let storage = storage_writer_creds(&ctx.config);
+    let creds = credential_secret_data(
+        &github_token_json,
+        ctx.config.llm_api_key.expose_secret(),
+        user_env.iter().map(|(k, v)| (k.as_str(), v.as_str())),
+        &install_commands,
+        &secret_keys,
+        storage,
+    )
+    .into_iter()
+    .map(|(key, value)| (key, SecretString::from(value)))
+    .collect();
+
+    Ok((spec, creds))
 }
 
 /// Build the launch spec from a registration + its effective work-label set (pure;
