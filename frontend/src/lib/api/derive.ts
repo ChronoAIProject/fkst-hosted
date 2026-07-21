@@ -182,6 +182,7 @@ export type SessionPhase =
   | 'registered'
   | 'active'
   | 'picked-up'
+  | 'recovering'
   | 'degraded'
   | 'retired'
   | 'invalid'
@@ -190,7 +191,7 @@ export type SessionPhase =
 /** A coarse health signal separate from the phase: `ok` needs positive
  *  liveness, `degraded` is latched by the reconciler, everything else is
  *  `unknown` (we have no positive signal, not necessarily bad). */
-export type SessionHealth = 'ok' | 'degraded' | 'unknown';
+export type SessionHealth = 'ok' | 'recovering' | 'degraded' | 'unknown';
 
 export interface DecodedSessionStatus {
   phase: SessionPhase;
@@ -224,8 +225,17 @@ const SESSION_LABELS = {
 export function decodeSessionStatus(session: SessionDetail): DecodedSessionStatus {
   const labels = new Set(session.status_labels);
   const has = (label: string) => labels.has(label);
-  const degraded = has(SESSION_LABELS.degraded);
-  const liveness = session.liveness ?? null;
+  const recovery = session.recovery ?? null;
+  const projectedLiveness =
+    recovery?.runtime === 'starting' ||
+    recovery?.runtime === 'live' ||
+    recovery?.runtime === 'terminating'
+      ? recovery.runtime
+      : null;
+  // Once present, the backend projection is authoritative. This prevents a
+  // stale legacy `liveness` value from turning an observed-absent runtime into
+  // a live one during a rolling UI update.
+  const liveness = recovery ? projectedLiveness : (session.liveness ?? null);
   const live = liveness === 'live';
   // The announce latch records that the session ran at least once — it is the
   // signal that separates a paused (idle) session from a never-activated
@@ -236,31 +246,74 @@ export function decodeSessionStatus(session: SessionDetail): DecodedSessionStatu
   const hasOpenWork = session.work_issues.some((issue) => issue.state === 'open');
 
   let phase: SessionPhase;
-  if (session.invalid_reason != null || has(SESSION_LABELS.invalid) || has(SESSION_LABELS.configRejected)) {
-    phase = 'invalid';
-  } else if (has(SESSION_LABELS.retired) || session.trigger.state === 'closed') {
-    phase = 'retired';
-  } else if (degraded) {
-    phase = 'degraded';
-  } else if (live) {
-    // A live pod is the ONLY signal that reads as "active"; a latched announce
-    // label whose pod has since been reaped resolves to idle (below), not active.
-    phase = 'active';
-  } else if (announced && !hasOpenWork) {
-    // Announced before, no live pod, nothing queued: paused to save resources.
-    // A new work issue auto-revives it.
-    phase = 'idle';
-  } else if (has(SESSION_LABELS.pickedUp) || (announced && hasOpenWork)) {
-    // Claimed / reviving: picked up, or announced with pending work, but the pod
-    // is not live yet (e.g. `liveness === 'starting'`).
-    phase = 'picked-up';
-  } else if (session.trigger.state === 'open') {
-    phase = 'registered';
+  let health: SessionHealth;
+  if (recovery) {
+    // The backend has already applied validity/retirement/degraded precedence
+    // and counted exact-label actionable work. Legacy labels are deliberately
+    // ignored in this branch so they cannot contradict the read model.
+    switch (recovery.state) {
+      case 'invalid':
+        phase = 'invalid';
+        health = 'unknown';
+        break;
+      case 'retired':
+        phase = 'retired';
+        health = 'unknown';
+        break;
+      case 'degraded':
+        phase = 'degraded';
+        health = 'degraded';
+        break;
+      case 'recovering':
+        phase = 'recovering';
+        health = 'recovering';
+        break;
+      case 'normal':
+        phase = 'active';
+        health = live ? 'ok' : 'unknown';
+        break;
+      case 'idle':
+        phase = 'idle';
+        health = 'unknown';
+        break;
+      case 'unknown':
+        // There is intentionally no lifecycle "unknown" phase. Pending work
+        // with an unobservable runtime reads as picked up while the separate
+        // health/recovery chip reports the observation gap.
+        phase = recovery.open_work_items > 0 ? 'picked-up' : 'registered';
+        health = 'unknown';
+        break;
+    }
   } else {
-    phase = 'idle';
+    // Compatibility path for older control planes that do not yet emit the
+    // projection. Preserve the established label/liveness decoder verbatim.
+    const degraded = has(SESSION_LABELS.degraded);
+    if (
+      session.invalid_reason != null ||
+      has(SESSION_LABELS.invalid) ||
+      has(SESSION_LABELS.configRejected)
+    ) {
+      phase = 'invalid';
+    } else if (has(SESSION_LABELS.retired) || session.trigger.state === 'closed') {
+      phase = 'retired';
+    } else if (degraded) {
+      phase = 'degraded';
+    } else if (live) {
+      // A live pod is the ONLY legacy signal that reads as "active"; a latched
+      // announce label whose pod was reaped resolves to idle below.
+      phase = 'active';
+    } else if (announced && !hasOpenWork) {
+      phase = 'idle';
+    } else if (has(SESSION_LABELS.pickedUp) || (announced && hasOpenWork)) {
+      phase = 'picked-up';
+    } else if (session.trigger.state === 'open') {
+      phase = 'registered';
+    } else {
+      phase = 'idle';
+    }
+    health = degraded ? 'degraded' : live ? 'ok' : 'unknown';
   }
 
-  const health: SessionHealth = degraded ? 'degraded' : live ? 'ok' : 'unknown';
   return { phase, health, liveness };
 }
 

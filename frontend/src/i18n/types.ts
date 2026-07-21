@@ -1,5 +1,10 @@
 import type { FieldKey, GrammarKey, SignalKey, StepId } from './literals';
 import type { SessionHealth, SessionPhase, WorkItemState } from '@/lib/api/derive';
+import type {
+  SessionRecoveryReason,
+  SessionRecoveryState,
+  SessionRuntimeState,
+} from '@/lib/api/types';
 
 export type Lang = 'en' | 'zh';
 
@@ -355,6 +360,12 @@ export interface SiteContent {
       healthLabel: string;
       /** Decoded health labels — one per `SessionHealth`. */
       health: Record<SessionHealth, string>;
+      recoveryDiagnostics: string;
+      recoveryState: Record<SessionRecoveryState, string>;
+      recoveryReason: Record<SessionRecoveryReason, string>;
+      recoveryOpenWork: string;
+      recoveryRuntime: string;
+      runtimeState: Record<SessionRuntimeState, string>;
       workItems: string;
       noWorkItems: string;
       /** Decoded work-item state labels — one per `WorkItemState`. */
@@ -397,6 +408,8 @@ export interface SiteContent {
       /** Calm note shown in place of the observe fetch when the pod is NOT live
        *  (the Status tab gates the live-engine fetch on `liveness === 'live'`). */
       liveEnginePaused: string;
+      /** Runtime-specific note while durable work is waiting for recovery. */
+      liveEngineRecovering: string;
       /** Defensive observe-error fallback (non-409): the live-engine read is
        *  only available while the pod runs. */
       liveEngineNotLive: string;

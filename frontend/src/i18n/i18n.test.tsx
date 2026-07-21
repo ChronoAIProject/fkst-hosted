@@ -21,9 +21,7 @@ function keyPaths(value: unknown, prefix = ''): string[] {
     return value.flatMap((item, i) => keyPaths(item, `${prefix}[${i}]`));
   }
   if (value !== null && typeof value === 'object') {
-    return Object.entries(value).flatMap(([k, v]) =>
-      keyPaths(v, prefix ? `${prefix}.${k}` : k)
-    );
+    return Object.entries(value).flatMap(([k, v]) => keyPaths(v, prefix ? `${prefix}.${k}` : k));
   }
   return [prefix];
 }
@@ -72,6 +70,30 @@ describe('i18n key parity (per-domain split)', () => {
     expect(keyPaths({ a: 1, b: { c: 2 } }).sort()).toEqual(['a', 'b.c']);
     expect(keyPaths({ a: ['x', 'y'] })).toEqual(['a[0]', 'a[1]']);
     expect(keyPaths({ a: 1 })).not.toEqual(keyPaths({ a: 1, b: 2 }));
+  });
+
+  it('covers every recovery enum in both English and Chinese', () => {
+    const states = ['normal', 'idle', 'recovering', 'degraded', 'unknown', 'retired', 'invalid'];
+    const reasons = [
+      'runtime_live',
+      'no_pending_work',
+      'runtime_starting',
+      'runtime_terminating',
+      'runtime_absent',
+      'runtime_terminal',
+      'runtime_observation_unavailable',
+      'runtime_health_degraded',
+      'trigger_closed',
+      'registration_invalid',
+      'configuration_rejected',
+    ];
+    const runtimes = ['absent', 'starting', 'live', 'terminating', 'terminal', 'unknown'];
+
+    for (const catalog of [en, zh]) {
+      expect(Object.keys(catalog.dashboard.detail.recoveryState)).toEqual(states);
+      expect(Object.keys(catalog.dashboard.detail.recoveryReason)).toEqual(reasons);
+      expect(Object.keys(catalog.dashboard.detail.runtimeState)).toEqual(runtimes);
+    }
   });
 });
 

@@ -1,8 +1,8 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import type { ReactNode } from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { IssueDetail, SessionDetail } from '@/lib/api/types';
+import type { IssueDetail, SessionDetail, SessionRecoveryProjection } from '@/lib/api/types';
 import { TabStatus } from './tab-status';
 import type { ObserveState } from './observe-state';
 
@@ -47,6 +47,14 @@ const session = (over: Partial<SessionDetail> = {}): SessionDetail => ({
   log_url: null,
   liveness: 'live',
   prs: [],
+  ...over,
+});
+
+const recovery = (over: Partial<SessionRecoveryProjection> = {}): SessionRecoveryProjection => ({
+  state: 'normal',
+  reason: 'runtime_live',
+  open_work_items: 1,
+  runtime: 'live',
   ...over,
 });
 
@@ -103,6 +111,95 @@ describe('TabStatus', () => {
     expect(screen.getAllByText('In progress')).toHaveLength(2);
   });
 
+  it('renders bounded recovery diagnostics with count and observed runtime', () => {
+    render(
+      <TabStatus
+        session={session({
+          liveness: null,
+          recovery: recovery({
+            state: 'recovering',
+            reason: 'runtime_absent',
+            open_work_items: 2,
+            runtime: 'absent',
+          }),
+        })}
+        observe={idle}
+        onLoadObserve={() => {}}
+      />
+    );
+
+    const diagnostics = screen.getByRole('region', { name: 'Recovery' });
+    expect(within(diagnostics).getByText('Recovering')).toBeInTheDocument();
+    expect(
+      within(diagnostics).getByText('Open work is waiting for a runtime.')
+    ).toBeInTheDocument();
+    expect(within(diagnostics).getByText('Open work')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('2')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('Absent')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Live engine details will be available after the recovering runtime is live.'
+      )
+    ).toBeInTheDocument();
+  });
+
+  it('uses projected runtime, not stale legacy liveness, for the live-engine gate', async () => {
+    const user = userEvent.setup();
+    const onLoad = vi.fn();
+    const { rerender } = render(
+      <TabStatus
+        session={session({
+          liveness: 'live',
+          recovery: recovery({
+            state: 'recovering',
+            reason: 'runtime_absent',
+            runtime: 'absent',
+          }),
+        })}
+        observe={idle}
+        onLoadObserve={onLoad}
+      />
+    );
+    expect(screen.queryByRole('button', { name: 'Live engine details' })).not.toBeInTheDocument();
+
+    rerender(
+      <TabStatus
+        session={session({ liveness: null, recovery: recovery() })}
+        observe={idle}
+        onLoadObserve={onLoad}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: 'Live engine details' }));
+    expect(onLoad).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps useful recovery diagnostics for older responses without a projection', () => {
+    render(<TabStatus session={session()} observe={idle} onLoadObserve={() => {}} />);
+    const diagnostics = screen.getByRole('region', { name: 'Recovery' });
+    expect(within(diagnostics).getByText('Normal')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('The runtime is live.')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('Live')).toBeInTheDocument();
+  });
+
+  it('preserves a legacy configuration-rejected reason in fallback diagnostics', () => {
+    render(
+      <TabStatus
+        session={session({
+          invalid_reason: 'frozen configuration changed',
+          status_labels: ['fkst-config-rejected'],
+          liveness: null,
+        })}
+        observe={idle}
+        onLoadObserve={() => {}}
+      />
+    );
+
+    const diagnostics = screen.getByRole('region', { name: 'Recovery' });
+    expect(
+      within(diagnostics).getByText('A frozen configuration change was rejected.')
+    ).toBeInTheDocument();
+  });
+
   it('offers the Live engine details button and fires the callback', async () => {
     const user = userEvent.setup();
     const onLoad = vi.fn();
@@ -120,7 +217,11 @@ describe('TabStatus', () => {
   it('gates the live engine on a live pod: paused note, no fetch button when idle', () => {
     // A latched active label whose pod was reaped (no live liveness) with no open
     // work is idle/paused — the observe fetch must NOT be offered.
-    const paused = session({ liveness: null, status_labels: ['fkst-substrate-active'], work_issues: [] });
+    const paused = session({
+      liveness: null,
+      status_labels: ['fkst-substrate-active'],
+      work_issues: [],
+    });
     const onLoad = vi.fn();
     render(<TabStatus session={paused} observe={idle} onLoadObserve={onLoad} />);
     expect(
@@ -135,7 +236,11 @@ describe('TabStatus', () => {
 
   it('does not reveal an observe snapshot once the pod is no longer live', () => {
     // Even a previously-fetched snapshot is withheld while paused — the gate wins.
-    const paused = session({ liveness: null, status_labels: ['fkst-substrate-active'], work_issues: [] });
+    const paused = session({
+      liveness: null,
+      status_labels: ['fkst-substrate-active'],
+      work_issues: [],
+    });
     render(
       <TabStatus
         session={paused}

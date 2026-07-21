@@ -5,6 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Page, Route } from '@playwright/test';
+import type { RepoSessionsResponse, SessionDetail } from '../src/lib/api/types';
 import type { EnvStore } from './env-fixtures';
 import { LOG_CONTENT, observeSnapshot, TEXT_BLOBS } from './payloads';
 
@@ -23,6 +24,7 @@ export const REPO = 'web-app';
 export const LIVE_SESSION_ID = 'a1b2c3d4e5f6a7b8';
 // Session B: degraded — its observe route returns an error on purpose.
 export const DEGRADED_SESSION_ID = 'degraded99887766';
+export const RECOVERING_SESSION_ID = 'recovering112233';
 
 const iso = (d: string) => new Date(d).toISOString();
 
@@ -146,7 +148,7 @@ export const overview = {
 
 // ---- GET /api/v1/repos/{owner}/{name}/sessions ------------------------------
 
-const liveSession = {
+const liveSession: SessionDetail = {
   session_id: LIVE_SESSION_ID,
   name: 'feature-auth',
   work_label: 'fkst-work',
@@ -167,6 +169,12 @@ const liveSession = {
   ],
   log_url: 'https://api.chronoai-fkst.local/api/v1/logs/' + LIVE_SESSION_ID,
   liveness: 'live',
+  recovery: {
+    state: 'normal',
+    reason: 'runtime_live',
+    open_work_items: 3,
+    runtime: 'live',
+  },
   // Frozen config the ConfigPanel (Packages tab) surfaces: the log-access
   // allowlist (extra GitHub logins) and the output locale.
   log_access: [PERSONAL, 'collab-bob'],
@@ -191,7 +199,7 @@ const liveSession = {
   ],
 };
 
-const degradedSession = {
+const degradedSession: SessionDetail = {
   session_id: DEGRADED_SESSION_ID,
   name: 'refactor-core',
   work_label: 'fkst-refactor',
@@ -201,20 +209,49 @@ const degradedSession = {
   invalid_reason: null,
   status_labels: ['fkst-degraded'],
   trigger: issue(202, 'refactor-core session', 'open', ['fkst-substrate-trigger']),
-  work_issues: [issue(211, 'Split the monolith module', 'open', ['fkst-refactor', 'fkst-dev:impl-failed'])],
+  work_issues: [
+    issue(211, 'Split the monolith module', 'open', ['fkst-refactor', 'fkst-dev:impl-failed']),
+  ],
   log_url: null,
   liveness: null,
+  recovery: {
+    state: 'degraded',
+    reason: 'runtime_health_degraded',
+    open_work_items: 1,
+    runtime: 'absent',
+  },
   prs: [],
+};
+
+const recoveringSession: SessionDetail = {
+  ...degradedSession,
+  session_id: RECOVERING_SESSION_ID,
+  name: 'recovering-billing',
+  work_label: 'fkst-billing',
+  status_labels: ['fkst-substrate-active'],
+  trigger: issue(303, 'recovering-billing session', 'open', ['fkst-substrate-trigger']),
+  work_issues: [issue(311, 'Resume billing migration', 'open', ['fkst-billing'])],
+  recovery: {
+    state: 'recovering',
+    reason: 'runtime_absent',
+    open_work_items: 1,
+    runtime: 'absent',
+  },
 };
 
 export const TRIGGER_LIVE = liveSession.trigger.number; // 101
 export const TRIGGER_DEGRADED = degradedSession.trigger.number; // 202
 
-export const repoSessions = {
+export const repoSessions: RepoSessionsResponse = {
   owner: PERSONAL,
   name: REPO,
   installed: true,
   sessions: [liveSession, degradedSession],
+};
+
+export const recoveryRepoSessions: RepoSessionsResponse = {
+  ...repoSessions,
+  sessions: [...repoSessions.sessions, recoveringSession],
 };
 
 /** A repo with many sessions so the level-2 sidebar panel overflows its fixed
@@ -361,6 +398,8 @@ export interface RouteOptions {
   globalAdmin?: boolean;
   /** Serve a large session list at level 2 so the sidebar panel overflows. */
   manySessions?: boolean;
+  /** Override the repository-session fixture for a focused projection case. */
+  repoSessions?: RepoSessionsResponse;
   /** A stateful environment-profile store; when present its handler serves every
    *  `/environment-profiles` path (list/get/put/delete) with real mutations. */
   envStore?: EnvStore;
@@ -395,7 +434,11 @@ export async function installApiRoutes(page: Page, opts: RouteOptions = {}) {
     if (p.endsWith('/api/v1/overview')) {
       if (opts.failOverview) return json(route, { error: 'internal', message: 'boom' }, 500);
       if (opts.overviewStatus) {
-        return json(route, { error: 'unauthorized', message: 'token expired' }, opts.overviewStatus);
+        return json(
+          route,
+          { error: 'unauthorized', message: 'token expired' },
+          opts.overviewStatus
+        );
       }
       if (opts.malformedOverview) return json(route, malformedOverviewBody);
       return json(route, opts.globalAdmin ? globalAdminOverviewBody : overview);
@@ -426,7 +469,10 @@ export async function installApiRoutes(page: Page, opts: RouteOptions = {}) {
         // CreateSessionResponse: the created trigger issue.
         return json(route, { issue_number: 999, html_url: 'https://github.com/x/y/issues/999' });
       }
-      return json(route, opts.manySessions ? manyRepoSessions() : repoSessions);
+      return json(
+        route,
+        opts.repoSessions ?? (opts.manySessions ? manyRepoSessions() : repoSessions)
+      );
     }
 
     // blob: /repos/{o}/{n}/blob/{sha}

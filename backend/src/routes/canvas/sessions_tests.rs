@@ -10,6 +10,7 @@ use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
+use crate::github_app::listing::IssueSummary;
 use crate::reconcile::desired::LivePod;
 use crate::routes::canvas::test_support::{
     auth_headers, grant_global_admin, mount_app_token, test_app, test_state, viewer_user,
@@ -58,6 +59,25 @@ fn pull_json(
         "user": { "login": author },
         "head": { "ref": head_ref }
     })
+}
+
+fn work_meta(number: i64, state: &str, labels: &[&str]) -> IssueWithMeta {
+    IssueWithMeta {
+        summary: IssueSummary {
+            number,
+            title: format!("work-{number}"),
+            body: String::new(),
+            labels: labels.iter().map(|label| (*label).to_string()).collect(),
+            state: state.to_string(),
+            assignees: Vec::new(),
+            user_login: "worker".to_string(),
+            user_id: 9,
+        },
+        html_url: format!("https://github.com/acme/site/issues/{number}"),
+        created_at: "2026-07-01T00:00:00Z".to_string(),
+        updated_at: "2026-07-02T00:00:00Z".to_string(),
+        closed_at: (state == "closed").then(|| "2026-07-03T00:00:00Z".to_string()),
+    }
 }
 
 async fn mount_installation_covering_site(server: &MockServer) {
@@ -248,6 +268,15 @@ async fn repo_sessions_assembles_the_full_detail() {
     );
     assert_eq!(session.liveness.as_deref(), Some("live"));
     assert_eq!(
+        session.recovery,
+        SessionRecoveryProjection {
+            state: SessionRecoveryState::Normal,
+            reason: SessionRecoveryReason::RuntimeLive,
+            open_work_items: 1,
+            runtime: SessionRuntimeState::Live,
+        }
+    );
+    assert_eq!(
         session.prs.len(),
         1,
         "only the bot devloop PR for #8 belongs"
@@ -266,6 +295,12 @@ async fn repo_sessions_assembles_the_full_detail() {
     assert!(invalid.work_issues.is_empty());
     assert!(invalid.prs.is_empty());
     assert!(invalid.liveness.is_none());
+    assert_eq!(invalid.recovery.state, SessionRecoveryState::Invalid);
+    assert_eq!(
+        invalid.recovery.reason,
+        SessionRecoveryReason::RegistrationInvalid
+    );
+    assert_eq!(invalid.recovery.runtime, SessionRuntimeState::Unknown);
     assert!(invalid.log_url.is_none());
     assert!(
         invalid.log_access.is_empty(),
@@ -606,6 +641,199 @@ fn liveness_label_maps_only_the_three_visible_phases() {
     );
     assert_eq!(liveness_label(PodLiveness::Absent), None);
     assert_eq!(liveness_label(PodLiveness::Terminal), None);
+}
+
+#[test]
+fn recovery_projection_covers_runtime_convergence_and_observation_gaps() {
+    let labels = vec!["fkst-substrate-active".to_string()];
+    let cases = [
+        (
+            Some(PodLiveness::Live),
+            SessionRecoveryState::Normal,
+            SessionRecoveryReason::RuntimeLive,
+            SessionRuntimeState::Live,
+        ),
+        (
+            Some(PodLiveness::Starting),
+            SessionRecoveryState::Recovering,
+            SessionRecoveryReason::RuntimeStarting,
+            SessionRuntimeState::Starting,
+        ),
+        (
+            Some(PodLiveness::Terminating),
+            SessionRecoveryState::Recovering,
+            SessionRecoveryReason::RuntimeTerminating,
+            SessionRuntimeState::Terminating,
+        ),
+        (
+            Some(PodLiveness::Absent),
+            SessionRecoveryState::Recovering,
+            SessionRecoveryReason::RuntimeAbsent,
+            SessionRuntimeState::Absent,
+        ),
+        (
+            Some(PodLiveness::Terminal),
+            SessionRecoveryState::Recovering,
+            SessionRecoveryReason::RuntimeTerminal,
+            SessionRuntimeState::Terminal,
+        ),
+        (
+            None,
+            SessionRecoveryState::Unknown,
+            SessionRecoveryReason::RuntimeObservationUnavailable,
+            SessionRuntimeState::Unknown,
+        ),
+    ];
+
+    for (liveness, state, reason, runtime) in cases {
+        assert_eq!(
+            project_session_recovery("open", &labels, 2, liveness),
+            SessionRecoveryProjection {
+                state,
+                reason,
+                open_work_items: 2,
+                runtime,
+            }
+        );
+    }
+}
+
+#[test]
+fn observed_session_liveness_distinguishes_absence_from_unavailable_observation() {
+    let session_id = "session-1";
+    let empty = HashMap::new();
+    assert_eq!(
+        observed_session_liveness(true, &empty, session_id),
+        Some(PodLiveness::Absent),
+        "a successful repository observation makes a missing runtime authoritative"
+    );
+    assert_eq!(
+        observed_session_liveness(false, &empty, session_id),
+        None,
+        "a failed or unavailable observation must not claim the runtime is absent"
+    );
+
+    let observed = HashMap::from([(session_id.to_string(), PodLiveness::Terminal)]);
+    assert_eq!(
+        observed_session_liveness(true, &observed, session_id),
+        Some(PodLiveness::Terminal)
+    );
+}
+
+#[test]
+fn recovery_projection_counts_only_open_actionable_work() {
+    let work = vec![
+        work_meta(1, "open", &["fkst-dev"]),
+        work_meta(2, "closed", &["fkst-dev"]),
+        work_meta(3, "open", &["fkst-dev", WORK_UNAUTHORIZED_LABEL]),
+        work_meta(4, "open", &["fkst-dev", SUBSTRATE_RETIRED_LABEL]),
+    ];
+
+    assert_eq!(open_actionable_work_items(&work), 1);
+}
+
+#[test]
+fn invalid_session_projection_preserves_configuration_rejection_reason() {
+    let trigger = work_meta(
+        7,
+        "open",
+        &["fkst-substrate-trigger", SUBSTRATE_CONFIG_REJECTED_LABEL],
+    );
+
+    let detail = invalid_session_detail(
+        &trigger,
+        "invalid registration".to_string(),
+        "fkst-substrate-trigger",
+    );
+
+    assert_eq!(detail.recovery.state, SessionRecoveryState::Invalid);
+    assert_eq!(
+        detail.recovery.reason,
+        SessionRecoveryReason::ConfigurationRejected
+    );
+    assert_eq!(detail.recovery.runtime, SessionRuntimeState::Unknown);
+}
+
+#[test]
+fn recovery_projection_serializes_as_a_bounded_enum_contract() {
+    let projection = project_session_recovery(
+        "open",
+        &["fkst-substrate-active".to_string()],
+        3,
+        Some(PodLiveness::Absent),
+    );
+    let json = serde_json::to_value(projection).expect("serialize recovery projection");
+
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "state": "recovering",
+            "reason": "runtime_absent",
+            "open_work_items": 3,
+            "runtime": "absent"
+        })
+    );
+}
+
+#[test]
+fn recovery_projection_applies_terminal_and_degraded_precedence() {
+    let case = |state: &str, labels: &[&str], open_work_items, liveness| {
+        project_session_recovery(
+            state,
+            &labels
+                .iter()
+                .map(|label| label.to_string())
+                .collect::<Vec<_>>(),
+            open_work_items,
+            liveness,
+        )
+    };
+
+    let idle = case("open", &[], 0, None);
+    assert_eq!(idle.state, SessionRecoveryState::Idle);
+    assert_eq!(idle.reason, SessionRecoveryReason::NoPendingWork);
+
+    let degraded = case(
+        "open",
+        &[SUBSTRATE_DEGRADED_LABEL],
+        1,
+        Some(PodLiveness::Live),
+    );
+    assert_eq!(degraded.state, SessionRecoveryState::Degraded);
+    assert_eq!(
+        degraded.reason,
+        SessionRecoveryReason::RuntimeHealthDegraded
+    );
+
+    let retired = case(
+        "closed",
+        &[SUBSTRATE_DEGRADED_LABEL],
+        1,
+        Some(PodLiveness::Live),
+    );
+    assert_eq!(retired.state, SessionRecoveryState::Retired);
+    assert_eq!(retired.reason, SessionRecoveryReason::TriggerClosed);
+
+    let invalid = case(
+        "open",
+        &[SUBSTRATE_INVALID_LABEL, SUBSTRATE_DEGRADED_LABEL],
+        1,
+        Some(PodLiveness::Live),
+    );
+    assert_eq!(invalid.state, SessionRecoveryState::Invalid);
+    assert_eq!(invalid.reason, SessionRecoveryReason::RegistrationInvalid);
+
+    let rejected = case(
+        "open",
+        &[SUBSTRATE_CONFIG_REJECTED_LABEL, SUBSTRATE_INVALID_LABEL],
+        1,
+        Some(PodLiveness::Live),
+    );
+    assert_eq!(rejected.state, SessionRecoveryState::Invalid);
+    assert_eq!(
+        rejected.reason,
+        SessionRecoveryReason::ConfigurationRejected
+    );
 }
 
 #[test]

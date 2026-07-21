@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { installApiRoutes, seedAuth, PERSONAL, ORG, REPO } from './fixtures';
+import { installApiRoutes, seedAuth, PERSONAL, ORG, REPO, recoveryRepoSessions } from './fixtures';
 import { drawerTab, openAccount, openRepo, settle, shot, sidebar } from './harness';
 
 // The dashboard's full UI journey against the refactored, fixed-viewport shell:
@@ -172,6 +172,76 @@ test.describe('dashboard full UI journey', () => {
     const after = await legend.getAttribute('aria-expanded');
     expect(before).not.toBe(after);
     await shot(page, '12-legend-toggled');
+  });
+
+  test('recovering diagnostics remain contained at desktop and mobile widths', async ({ page }) => {
+    await page.unroute('**/api/v1/**');
+    await installApiRoutes(page, { repoSessions: recoveryRepoSessions });
+    await page.goto('/dashboard');
+    await openAccount(page, PERSONAL);
+    await openRepo(page, PERSONAL, REPO);
+
+    const recoveryButton = page.getByRole('button', {
+      name: 'Open details for session recovering-billing',
+    });
+    await expect(recoveryButton.locator('..')).toContainText('Recovering');
+    await recoveryButton.click();
+
+    const detail = page.getByTestId('session-detail');
+    const diagnostics = detail.getByRole('region', { name: 'Recovery' });
+    await expect(diagnostics.getByText('Recovering')).toBeVisible();
+    await expect(diagnostics.getByText('Open work is waiting for a runtime.')).toBeVisible();
+    await expect(diagnostics.getByText('Open work', { exact: true })).toBeVisible();
+    await expect(diagnostics.getByText('1', { exact: true })).toBeVisible();
+    await expect(diagnostics.getByText('Absent')).toBeVisible();
+    await expect(
+      detail.getByText(
+        'Live engine details will be available after the recovering runtime is live.'
+      )
+    ).toBeVisible();
+    await expect(detail.getByRole('button', { name: 'Live engine details' })).toHaveCount(0);
+
+    for (const width of [1440, 480]) {
+      await page.setViewportSize({ width, height: 900 });
+      await diagnostics.scrollIntoViewIfNeeded();
+      await settle(page);
+      const bounds = await diagnostics.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+          bottom: rect.bottom,
+          scrollWidth: element.scrollWidth,
+          clientWidth: element.clientWidth,
+          pageScrollWidth: document.documentElement.scrollWidth,
+          viewportWidth: window.innerWidth,
+        };
+      });
+      expect(bounds.left, `recovery card starts inside ${width}px viewport`).toBeGreaterThanOrEqual(
+        0
+      );
+      expect(bounds.right, `recovery card ends inside ${width}px viewport`).toBeLessThanOrEqual(
+        width
+      );
+      expect(
+        bounds.top,
+        `recovery card starts inside ${width}px viewport height`
+      ).toBeGreaterThanOrEqual(0);
+      expect(
+        bounds.bottom,
+        `recovery card ends inside ${width}px viewport height`
+      ).toBeLessThanOrEqual(900);
+      expect(
+        bounds.scrollWidth,
+        `recovery card has no internal overflow at ${width}px`
+      ).toBeLessThanOrEqual(bounds.clientWidth);
+      expect(
+        bounds.pageScrollWidth,
+        `page has no horizontal overflow at ${width}px`
+      ).toBeLessThanOrEqual(bounds.viewportWidth);
+      await shot(page, `14-recovery-${width}`);
+    }
   });
 
   test('overview load failure shows the error screen', async ({ page }) => {

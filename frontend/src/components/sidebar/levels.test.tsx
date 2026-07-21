@@ -150,7 +150,10 @@ describe('Level0Sidebar', () => {
         <Level0Sidebar
           // Accounts are reachable but none is installed — the viewer still
           // needs the prominent primary path, not just per-row Connect links.
-          overview={overview([account({ login: 'shining' }), account({ login: 'acme', kind: 'org' })])}
+          overview={overview([
+            account({ login: 'shining' }),
+            account({ login: 'acme', kind: 'org' }),
+          ])}
           query=""
           onQueryChange={() => {}}
           onOpenAccount={() => {}}
@@ -214,7 +217,9 @@ describe('Level0Sidebar', () => {
     // No app_slug → no install URL to point at → no callout, muted line only.
     expect(screen.queryByText('Get started with fkst')).not.toBeInTheDocument();
     expect(screen.getByText('No accounts found.')).toBeInTheDocument();
-    expect(screen.getByText(/The GitHub App is not configured for this deployment/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/The GitHub App is not configured for this deployment/)
+    ).toBeInTheDocument();
   });
 
   it('filters account rows by the query and shows the empty-filter note', async () => {
@@ -517,5 +522,58 @@ describe('SessionCard', () => {
     // (the CSS animation replays on mount when the chip newly appears).
     expect(screen.getByText('live').closest('.anim-chip-in')).not.toBeNull();
     expect(screen.getByText('degraded').closest('.anim-chip-in')).not.toBeNull();
+  });
+
+  it('surfaces projected recovery in the rail card without duplicating stale labels', () => {
+    render(
+      wrap(
+        <SessionCard
+          owner="acme"
+          name="lab"
+          session={session({
+            liveness: 'live',
+            status_labels: ['fkst-substrate-active', 'fkst-degraded'],
+            recovery: {
+              state: 'recovering',
+              reason: 'runtime_absent',
+              open_work_items: 1,
+              runtime: 'absent',
+            },
+          })}
+          onStop={() => {}}
+          onSelect={() => {}}
+        />
+      )
+    );
+
+    const chip = screen.getByText('Recovering');
+    expect(chip.closest('.anim-chip-in')).not.toBeNull();
+    expect(chip.closest('[data-tour="session-card"]')?.className).toContain('var(--glow-amber)');
+    expect(screen.queryByText('fkst-degraded')).not.toBeInTheDocument();
+    expect(screen.queryByText('live')).not.toBeInTheDocument();
+    expect(chip.closest('[data-tour="session-card"]')).toHaveClass('min-w-0');
+  });
+
+  it('uses the red degraded treatment from the typed projection', () => {
+    render(
+      wrap(
+        <SessionCard
+          owner="acme"
+          name="lab"
+          session={session({
+            recovery: {
+              state: 'degraded',
+              reason: 'runtime_health_degraded',
+              open_work_items: 1,
+              runtime: 'live',
+            },
+          })}
+          onStop={() => {}}
+        />
+      )
+    );
+
+    const chip = screen.getByText('Degraded');
+    expect(chip.closest('[data-tour="session-card"]')?.className).toContain('var(--glow-red)');
   });
 });
