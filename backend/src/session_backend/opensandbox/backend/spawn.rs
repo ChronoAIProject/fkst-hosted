@@ -20,28 +20,24 @@ use crate::session_backend::opensandbox::derive_execd_token;
 use crate::session_backend::opensandbox::dto::{CreateSandboxRequest, OsbError};
 use crate::session_backend::{BackendError, EnsureOutcome};
 use crate::session_pod::log_stream::{ENV_POD_NAME, ENV_POD_UID};
-use crate::session_spec::creds::{CredsLayout, DEFAULT_CREDS_DIR};
+use crate::session_spec::creds::CredsLayout;
 
 use super::{correlate, managed_session_filter, OsbBackend};
 
-/// The mode every credential file (and the sentinel) is uploaded with. execd
-/// runs as ROOT inside the sandbox (it creates `/var/run/fkst` — which the
-/// non-root `fkst` workload cannot), so it writes these files owned by root;
-/// the workload runs as `fkst` and must READ them, hence world-readable `0o444`
-/// (owner-read-only `0o400`, as the K8s Secret mount uses, would be unreadable
-/// by a different uid). Safe: the sandbox is single-session and gVisor-isolated,
-/// so "other" is only the session's own processes. `pub(super)` so the rotation
-/// heal path ([`super::rotation`]) rewrites a single file with the SAME mode.
-pub(super) const CREDS_FILE_MODE: u32 = 0o444;
+/// The mode every credential file (and the sentinel) is uploaded with. OpenSandbox's
+/// bootstrap and workload both inherit the image's non-root `fkst` user, so execd writes
+/// the files as the same uid that reads them. Keep credentials owner-readable only,
+/// matching the Kubernetes Secret mount. `pub(super)` keeps rotation on the same mode.
+pub(super) const CREDS_FILE_MODE: u32 = 0o400;
 
-/// The writable session-root base for opensandbox sandboxes. The K8s backend
-/// mounts writable emptyDir volumes at `/var/run/fkst/*`; an opensandbox sandbox
-/// gets no such mounts and runs the image as its non-root `fkst` user, so the
-/// engine's durable / runtime / codex roots must live under the image's
-/// fkst-owned, writable `/var/lib/fkst` (the tree the runtime image pre-creates
-/// and chowns). Credentials stay at `/var/run/fkst/creds` — execd (root) creates
-/// that dir and `fkst` reads the files via [`CREDS_FILE_MODE`].
-const OSB_SESSION_ROOT: &str = "/var/lib/fkst";
+/// OpenSandbox does not provide the writable `/var/run/fkst/*` mounts installed by the
+/// Kubernetes backend. Every mutable session path must therefore live under the
+/// image's pre-created, `fkst`-owned `/var/lib/fkst` tree.
+pub(super) const OSB_DURABLE_ROOT: &str = "/var/lib/fkst/durable";
+const OSB_RUNTIME_ROOT: &str = "/var/lib/fkst/runtime";
+pub(super) const OSB_CREDS_DIR: &str = "/var/lib/fkst/creds";
+const OSB_CODEX_HOME: &str = "/var/lib/fkst/codex";
+const OSB_RATE_POOL_ROOT: &str = "/var/lib/fkst/rate-pools";
 
 /// How many times the initial credential upload is retried while execd finishes
 /// starting up (see [`OsbBackend::upload_creds`]).
@@ -154,22 +150,25 @@ impl OsbBackend {
         let mut env: BTreeMap<String, String> = session_env_pairs(spec, &self.pod_config)
             .into_iter()
             .collect();
-        // Relocate the engine's writable roots off the K8s-backend's volume-mount
-        // convention (/var/run/fkst/*, unwritable by the non-root sandbox user)
-        // onto the image's fkst-owned /var/lib/fkst. Creds stay put (execd, root,
-        // owns that dir; see OSB_SESSION_ROOT / CREDS_FILE_MODE).
+        // Relocate every writable root off the Kubernetes backend's volume-mount
+        // convention onto the image's `fkst`-owned tree. Keep the credential env and
+        // upload destination in lockstep; the in-sandbox reader gates on this value.
         env.insert(
             "FKST_DURABLE_ROOT".to_string(),
-            format!("{OSB_SESSION_ROOT}/durable"),
+            OSB_DURABLE_ROOT.to_string(),
         );
         env.insert(
             "FKST_RUNTIME_ROOT".to_string(),
-            format!("{OSB_SESSION_ROOT}/runtime"),
+            OSB_RUNTIME_ROOT.to_string(),
         );
         env.insert(
-            "CODEX_HOME".to_string(),
-            format!("{OSB_SESSION_ROOT}/codex"),
+            "FKST_SESSION_CREDS_DIR".to_string(),
+            OSB_CREDS_DIR.to_string(),
         );
+        env.insert("CODEX_HOME".to_string(), OSB_CODEX_HOME.to_string());
+        if let Some(rate_pool_root) = env.get_mut("FKST_RATE_POOL_ROOT") {
+            *rate_pool_root = OSB_RATE_POOL_ROOT.to_string();
+        }
         env.insert(ENV_POD_NAME.to_string(), spec.session_id.clone());
         env.insert(ENV_POD_UID.to_string(), spec.session_id.clone());
         let token = derive_execd_token(&self.config.execd_seed, &spec.session_id);
@@ -229,7 +228,7 @@ impl OsbBackend {
         creds: &BTreeMap<String, SecretString>,
     ) -> Result<(), OsbError> {
         let execd = (self.execd_factory)(sandbox_id, session_id);
-        let layout = CredsLayout::new(DEFAULT_CREDS_DIR);
+        let layout = CredsLayout::new(OSB_CREDS_DIR);
         for (file, secret) in creds {
             let path = path_str(&layout.base().join(file));
             execd
@@ -243,16 +242,16 @@ impl OsbBackend {
 }
 
 /// Whether a credential-upload failure is the transient "execd not ready yet"
-/// race right after sandbox create (retryable) rather than a real fault. The
-/// server proxy surfaces an unreachable execd as a 5xx, and a torn connection as
-/// a transport error; any 4xx (auth/validation) or NotFound is NOT retried.
+/// race right after sandbox create rather than a real fault. Retry only gateway /
+/// availability statuses emitted by the server proxy and torn transports. A semantic
+/// 500 such as a filesystem permission error is permanent and must fail immediately.
 fn execd_not_ready(error: &OsbError) -> bool {
-    matches!(error, OsbError::Api { status, .. } if *status >= 500)
+    matches!(error, OsbError::Api { status, .. } if matches!(*status, 502..=504))
         || matches!(error, OsbError::Transport(_))
 }
 
 /// Render a credential path as the string execd's `/files/upload` expects. Credential
-/// paths are ASCII under [`DEFAULT_CREDS_DIR`]; the lossy fallback never triggers.
+/// paths are ASCII under [`OSB_CREDS_DIR`]; the lossy fallback never triggers.
 /// `pub(super)` so the rotation heal path composes single-file paths the same way.
 pub(super) fn path_str(path: &Path) -> String {
     path.to_string_lossy().into_owned()

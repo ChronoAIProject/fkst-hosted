@@ -21,9 +21,9 @@ use secrecy::{ExposeSecret, SecretString};
 
 use crate::session_backend::opensandbox::dto::OsbError;
 use crate::session_backend::{BackendError, DeliveryOutcome};
-use crate::session_spec::creds::{CredsLayout, DEFAULT_CREDS_DIR};
+use crate::session_spec::creds::CredsLayout;
 
-use super::spawn::{path_str, CREDS_FILE_MODE};
+use super::spawn::{path_str, CREDS_FILE_MODE, OSB_CREDS_DIR};
 use super::OsbBackend;
 
 impl OsbBackend {
@@ -43,7 +43,7 @@ impl OsbBackend {
         };
 
         let execd = (self.execd_factory)(&sandbox_id, session_id);
-        let layout = CredsLayout::new(DEFAULT_CREDS_DIR);
+        let layout = CredsLayout::new(OSB_CREDS_DIR);
         // Probe a canary credential file (the github token, always present in a healthy
         // bundle) to detect a container restart that wiped the mounted creds dir.
         let probe_path = path_str(&layout.github_token());
@@ -117,7 +117,7 @@ impl OsbBackend {
                 // Both restarted: no bundle to re-push. Deliver only the rotated file;
                 // the full set self-heals on the next `ensure_session`.
                 let execd = (self.execd_factory)(sandbox_id, session_id);
-                let layout = CredsLayout::new(DEFAULT_CREDS_DIR);
+                let layout = CredsLayout::new(OSB_CREDS_DIR);
                 let path = path_str(&layout.base().join(file));
                 execd
                     .upload_file(&path, contents.expose_secret().as_bytes(), CREDS_FILE_MODE)

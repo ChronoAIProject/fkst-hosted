@@ -23,8 +23,8 @@ const UPLOAD_PATH: &str = "/v1/sandboxes/sbx-1/proxy/44772/files/upload";
 /// The `file_info` 200 body for a present github-token file (a path-keyed map).
 fn token_present_body() -> serde_json::Value {
     json!({
-        "/var/run/fkst/creds/github-token": {
-            "path": "/var/run/fkst/creds/github-token", "size": 10, "mode": 400
+        "/var/lib/fkst/creds/github-token": {
+            "path": "/var/lib/fkst/creds/github-token", "size": 10, "mode": 400
         }
     })
 }
@@ -95,7 +95,10 @@ async fn deliver_credential_rewrites_a_single_file_when_creds_are_intact() {
 
     let uploads = upload_bodies(&server).await;
     assert_eq!(uploads.len(), 1, "only the rotated file is rewritten");
-    assert!(uploads[0].contains("github-token") && uploads[0].contains("ghs_new"));
+    assert!(
+        uploads[0].contains("/var/lib/fkst/creds/github-token") && uploads[0].contains("ghs_new")
+    );
+    assert!(uploads[0].contains(r#""mode":400"#));
     assert!(
         !uploads[0].contains(".creds-complete"),
         "no sentinel on the single-file path"
@@ -141,15 +144,17 @@ async fn deliver_credential_repushes_the_full_bundle_when_creds_were_wiped() {
     assert!(
         uploads
             .iter()
-            .any(|u| u.contains("github-token") && u.contains("ghs_new")),
+            .any(|u| u.contains("/var/lib/fkst/creds/github-token") && u.contains("ghs_new")),
         "the rotated token is overlaid onto the re-pushed bundle"
     );
     assert!(
-        uploads.iter().any(|u| u.contains("llm-api-key")),
+        uploads
+            .iter()
+            .any(|u| u.contains("/var/lib/fkst/creds/llm-api-key")),
         "the other cred is re-pushed too"
     );
     assert!(
-        uploads[2].contains(".creds-complete"),
+        uploads[2].contains("/var/lib/fkst/creds/.creds-complete"),
         "the sentinel is uploaded LAST"
     );
     assert!(
@@ -243,6 +248,7 @@ async fn deliver_credential_delivers_only_the_single_file_when_the_cache_is_empt
     let uploads = upload_bodies(&server).await;
     // Only the single rotated file — no full bundle (empty cache), no sentinel.
     assert_eq!(uploads.len(), 1);
-    assert!(uploads[0].contains("github-token"));
+    assert!(uploads[0].contains("/var/lib/fkst/creds/github-token"));
+    assert!(uploads[0].contains(r#""mode":400"#));
     assert!(!uploads[0].contains(".creds-complete"));
 }
