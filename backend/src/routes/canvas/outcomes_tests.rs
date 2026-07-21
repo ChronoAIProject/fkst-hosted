@@ -10,7 +10,7 @@ use super::media::{
 };
 use super::*;
 use crate::routes::canvas::test_support::{
-    auth_headers, mount_app_token, test_app, test_state, viewer_user,
+    auth_headers, grant_global_admin, mount_app_token, test_app, test_state, viewer_user,
 };
 
 const VALID_TRIGGER_BODY: &str = "### Session Name\nsite\n\n### Packages\n\
@@ -145,6 +145,89 @@ async fn session_outcomes_groups_files_by_pr() {
         .unwrap();
     assert_eq!(png.kind, "image");
     assert_eq!(png.size_hint, None);
+}
+
+#[tokio::test]
+async fn global_admin_can_read_outcomes_and_blobs_outside_user_installations() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/app/installations"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                "id": 77,
+                "account": { "login": "acme", "type": "Organization" },
+                "repository_selection": "all"
+            }])),
+        )
+        .mount(&server)
+        .await;
+    mount_app_token(&server, "acme", "site", 77).await;
+    Mock::given(method("GET"))
+        .and(path("/installation/repositories"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 1,
+            "repositories": [{
+                "id": 2,
+                "name": "site",
+                "owner": { "login": "acme", "type": "Organization" },
+                "private": true
+            }]
+        })))
+        .mount(&server)
+        .await;
+    mount_trigger_and_work(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/pulls/12/files"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                "filename": "report.txt",
+                "status": "added",
+                "additions": 1,
+                "deletions": 0,
+                "changes": 1,
+                "sha": "abc123"
+            }])),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/git/blobs/abc123"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"result\n".to_vec()))
+        .mount(&server)
+        .await;
+
+    let mut state = test_state(&server.uri(), Some(test_app(&server.uri())));
+    grant_global_admin(&mut state, "shining");
+    state.config.reconcile.github_bot_login = Some("fkst-test[bot]".to_string());
+
+    let Json(view) = session_outcomes(
+        State(state.clone()),
+        Path(("acme".to_string(), "site".to_string(), 5)),
+        viewer_user(),
+        auth_headers(),
+    )
+    .await
+    .expect("global admin reads outcomes");
+    assert_eq!(view.prs.len(), 1);
+    assert_eq!(view.prs[0].files[0].sha, "abc123");
+
+    let response = outcome_blob(
+        State(state),
+        Path(("acme".to_string(), "site".to_string(), "abc123".to_string())),
+        Query(BlobQuery {
+            name: Some("report.txt".to_string()),
+            download: None,
+        }),
+        viewer_user(),
+        auth_headers(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let requests = server.received_requests().await.expect("recorded requests");
+    assert!(requests
+        .iter()
+        .all(|request| !request.url.path().starts_with("/user/")));
 }
 
 #[tokio::test]

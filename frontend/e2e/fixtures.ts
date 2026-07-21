@@ -51,6 +51,7 @@ function issue(
 export const overview = {
   app_slug: 'fkst-hosted-app',
   viewer: { login: PERSONAL },
+  global_admin: false,
   accounts: [
     {
       login: PERSONAL,
@@ -356,6 +357,8 @@ export interface RouteOptions {
   /** Return an overview whose account carries a malformed (null) `repos`, so a
    *  render-time throw escapes into the ErrorBoundary/route error fallback. */
   malformedOverview?: boolean;
+  /** Serve the same installation canvas in global-administrator mode. */
+  globalAdmin?: boolean;
   /** Serve a large session list at level 2 so the sidebar panel overflows. */
   manySessions?: boolean;
   /** A stateful environment-profile store; when present its handler serves every
@@ -368,6 +371,16 @@ export interface RouteOptions {
 const malformedOverviewBody = {
   ...overview,
   accounts: [{ ...overview.accounts[0], repos: null }],
+};
+
+const globalAdminOverviewBody = {
+  ...overview,
+  global_admin: true,
+  accounts: overview.accounts.map((account) => ({
+    ...account,
+    owner: false,
+    repos: account.repos.map((repo) => ({ ...repo, admin: false })),
+  })),
 };
 
 /** Register one handler for every /api/v1/* call the SPA makes. */
@@ -385,7 +398,7 @@ export async function installApiRoutes(page: Page, opts: RouteOptions = {}) {
         return json(route, { error: 'unauthorized', message: 'token expired' }, opts.overviewStatus);
       }
       if (opts.malformedOverview) return json(route, malformedOverviewBody);
-      return json(route, overview);
+      return json(route, opts.globalAdmin ? globalAdminOverviewBody : overview);
     }
 
     // auth refresh (never hit in the happy path, but answer defensively)

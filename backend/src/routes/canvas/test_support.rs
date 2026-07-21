@@ -63,6 +63,17 @@ pub(crate) fn test_state(server_uri: &str, github_app: Option<GithubAppTokens>) 
     }
 }
 
+/// Grant the fixture viewer deployment-wide administrator access without
+/// weakening the ordinary access policy. Handler tests use this instead of
+/// constructing the otherwise-private policy fields directly.
+pub(crate) fn grant_global_admin(state: &mut AppState, entry: &str) {
+    state.config.access = crate::access_policy::AccessPolicy::from_vars(&[(
+        "FKST_GLOBAL_ADMINS".to_string(),
+        entry.to_string(),
+    )])
+    .expect("valid global-admin fixture");
+}
+
 /// Mount `GET /repos/{owner}/{name}` (user token) returning the caller's repo
 /// permissions — programs the request-time repo-admin / org-owner authority tier
 /// the R5 gates read. `admin == true` reads as "the caller administers this repo"

@@ -1,8 +1,8 @@
 //! Deployment-wide GitHub-identity access policy (issue #463).
 //!
-//! `FKST_ACCESS_ALLOWED_USERS` — a comma-separated list of GitHub numeric user
-//! ids and/or logins (the same entry format as `FKST_LOG_ADMINS`) — restricts who
-//! may use the service. **Unset/blank = open** (today's behavior, the dev/test
+//! `FKST_ACCESS_ALLOWED_USERS` — a comma-separated list of GitHub logins and/or
+//! numeric user ids (the same entry format as `FKST_GLOBAL_ADMINS`) — restricts
+//! who may use the service. **Unset/blank = open** (today's behavior, the dev/test
 //! default). **Set = enforced** at the two choke points:
 //!
 //! 1. The [`crate::github_identity::GithubUser`] extractor: a VERIFIED GitHub
@@ -20,11 +20,17 @@
 //! a mangled list must never silently fall open. Startup logs the mode + entry
 //! count (never the entries themselves).
 //!
-//! Numeric ids are preferred (stable across login renames) and are the ONLY key
-//! matched everywhere; logins additionally match on the token-authenticated
-//! routes and the trigger gate (both have the login in hand). Matching is
+//! Logins are the operator-friendly form (`chronoai-shining` or
+//! `@chronoai-shining`, case-insensitive); numeric ids remain supported as the
+//! immutable rename-safe form. Matching is
 //! delegated to [`entry_matches`] — one source of truth shared with the
 //! log-download authz tiers ([`crate::reconcile::log_authz`]).
+//!
+//! `FKST_GLOBAL_ADMINS` uses the same entry grammar. A verified global admin is
+//! always admitted by this deployment access gate, including when
+//! `FKST_AUTH_MODEL=allowlist` and the ordinary allowlist does not repeat the
+//! identity. The role is consumed by the App-wide canvas and session/log observe
+//! surfaces; the configured entries themselves are never exposed or logged.
 //!
 //! `FKST_AUTH_MODEL` (issue #594) makes the auth model an explicit choice that
 //! overrides the entries-derived default, without changing any gate: it is
@@ -46,6 +52,9 @@ use crate::error::AppError;
 
 /// The env var holding the allowlist.
 const ACCESS_ALLOWED_USERS_VAR: &str = "FKST_ACCESS_ALLOWED_USERS";
+
+/// The env var holding the deployment-wide global administrator list.
+const GLOBAL_ADMINS_VAR: &str = "FKST_GLOBAL_ADMINS";
 
 /// The env var selecting the auth model (see [`AuthModel`]).
 const AUTH_MODEL_VAR: &str = "FKST_AUTH_MODEL";
@@ -73,6 +82,7 @@ pub enum AuthModel {
 pub struct AccessPolicy {
     entries: Option<Vec<String>>,
     mode: Option<AuthModel>,
+    global_admins: Vec<String>,
 }
 
 impl AccessPolicy {
@@ -97,6 +107,17 @@ impl AccessPolicy {
                 .collect::<Vec<_>>()
         });
 
+        let global_admins = vars
+            .iter()
+            .find(|(key, _)| key == GLOBAL_ADMINS_VAR)
+            .map(|(_, value)| value.as_str())
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+            .map(str::to_string)
+            .collect();
+
         // Explicit auth-model override. Case-insensitive; blank/unset defers to
         // the entries-derived default. A non-empty unrecognized value fails
         // closed, naming the var + the offending value (matching FKST_POD_MODE).
@@ -118,7 +139,11 @@ impl AccessPolicy {
             },
         };
 
-        Ok(Self { entries, mode })
+        Ok(Self {
+            entries,
+            mode,
+            global_admins,
+        })
     }
 
     /// The explicit `FKST_AUTH_MODEL` override, or `None` when the model is
@@ -144,6 +169,22 @@ impl AccessPolicy {
         self.entries.as_ref().map(Vec::len).unwrap_or(0)
     }
 
+    /// Number of configured global-admin entries. Used only for startup
+    /// diagnostics; entries themselves must never be logged.
+    pub fn global_admin_count(&self) -> usize {
+        self.global_admins.len()
+    }
+
+    /// Whether the VERIFIED GitHub identity is a deployment-wide global admin.
+    /// Login matching is ASCII case-insensitive and accepts an optional leading
+    /// `@`; all-digit entries match only the immutable numeric id.
+    pub fn is_global_admin(&self, id: i64, login: &str) -> bool {
+        let id_str = id.to_string();
+        self.global_admins
+            .iter()
+            .any(|entry| entry_matches(entry, &id_str, login))
+    }
+
     /// Whether the VERIFIED GitHub identity `(id, login)` may use the service.
     ///
     /// - `mode = All` → allowed unconditionally (open even with a stale list).
@@ -152,6 +193,9 @@ impl AccessPolicy {
     /// - `mode` unset → legacy behavior: open when no list is present, else only
     ///   a matching entry.
     pub fn allows(&self, id: i64, login: &str) -> bool {
+        if self.is_global_admin(id, login) {
+            return true;
+        }
         match self.mode {
             Some(AuthModel::All) => true,
             Some(AuthModel::Allowlist) => self.matches_entries(id, login),
@@ -286,6 +330,33 @@ mod tests {
         // "@" normalizes to empty → never matches, even an empty login.
         assert!(!policy.allows(7, ""));
         assert!(policy.allows(7, "alice"));
+    }
+
+    #[test]
+    fn global_admin_login_is_first_class_and_bypasses_the_user_allowlist() {
+        let policy = policy(&vars(&[
+            ("FKST_AUTH_MODEL", "allowlist"),
+            ("FKST_ACCESS_ALLOWED_USERS", "someone-else"),
+            ("FKST_GLOBAL_ADMINS", " @ChronoAI-Shining, 583231 "),
+        ]));
+
+        assert_eq!(policy.global_admin_count(), 2);
+        assert!(policy.is_global_admin(999, "chronoai-shining"));
+        assert!(policy.allows(999, "CHRONOAI-SHINING"));
+        assert!(policy.is_global_admin(583231, "renamed-login"));
+        assert!(policy.allows(583231, "renamed-login"));
+        assert!(!policy.is_global_admin(999, "someone-else"));
+        assert!(policy.allows(999, "someone-else"));
+        assert!(!policy.allows(999, "mallory"));
+    }
+
+    #[test]
+    fn blank_global_admin_list_grants_nothing() {
+        let policy = policy(&vars(&[("FKST_GLOBAL_ADMINS", " , ")]));
+        assert_eq!(policy.global_admin_count(), 0);
+        assert!(!policy.is_global_admin(1, "anyone"));
+        // A global-admin list alone does not close an otherwise-open deployment.
+        assert!(policy.allows(1, "anyone"));
     }
 
     #[test]

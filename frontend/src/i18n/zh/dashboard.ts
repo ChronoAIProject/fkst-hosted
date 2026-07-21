@@ -11,6 +11,7 @@ export const dashboardScalars: DashboardScalars = {
   eyebrow: '仪表盘',
   title: '你的 fkst 会话',
   lede: '在所有安装了 fkst-hosted App 的仓库中，查看每一个触发 issue 及其工作 issue —— 按会话逐个分组。',
+  globalAdmin: '全局管理员',
   signInTitle: '登录以查看你的仪表盘',
   signInBody: '连接你的 GitHub 账户以加载你的 fkst 会话和 issue。你会保持登录状态 —— token 会自动刷新。',
   notConfigured: '此部署尚未配置仪表盘后端。',

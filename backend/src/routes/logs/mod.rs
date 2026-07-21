@@ -19,11 +19,12 @@
 //!   user token, resolves `/user`, and — on authorization — STREAMS the bundle back as
 //!   an attachment (the download starts).
 //!
-//! Authorization (both modes) is the pure three-tier
-//! [`crate::reconcile::log_authz::is_authorized`] over the session's trigger context,
-//! looked up in the reconciler-maintained [`crate::log_access`] registry (session_id
-//! is a one-way hash, so this reverse map is how the endpoint recovers the author id
-//! + `### Log Access Allowlist` allow-list). Deny → 403. Unknown session / missing object → 404.
+//! Authorization (both modes) applies
+//! [`crate::reconcile::log_authz::is_authorized`] to the session's trigger context,
+//! looked up in the reconciler-maintained [`crate::log_access`] registry. The
+//! session id is a one-way hash, so this reverse map recovers the author id and
+//! `### Log Access Allowlist`; the route also grants the deployment-wide
+//! `FKST_GLOBAL_ADMINS` role. Deny → 403. Unknown session / missing object → 404.
 //!
 //! Secret hygiene: the caller's token and the OAuth client secret are NEVER logged, and
 //! NO presigned S3 URL is ever exposed to the caller — the control plane fetches the
@@ -295,13 +296,15 @@ pub(crate) fn authorize(
             "no logs available for this session".to_string(),
         ));
     };
-    if log_authz::is_authorized(
-        user.id,
-        &user.login,
-        context.author_id,
-        &context.log_access,
-        &state.config.log.admins,
-    ) {
+    if state.config.access.is_global_admin(user.id, &user.login)
+        || log_authz::is_authorized(
+            user.id,
+            &user.login,
+            context.author_id,
+            &context.log_access,
+            &state.config.log.admins,
+        )
+    {
         tracing::info!(
             session_id = %session_id,
             requester_id = user.id,

@@ -371,4 +371,37 @@ mod tests {
             .await
             .expect("login-listed identity passes");
     }
+
+    #[tokio::test]
+    async fn extractor_passes_a_global_admin_not_repeated_in_the_allowlist() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/user"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "login": "ChronoAI-Shining",
+                "id": 9
+            })))
+            .mount(&server)
+            .await;
+
+        let mut state = state_with_allowlist(&server.uri(), "someone-else");
+        state.config.access = crate::access_policy::AccessPolicy::from_vars(&[
+            ("FKST_AUTH_MODEL".to_string(), "allowlist".to_string()),
+            (
+                "FKST_ACCESS_ALLOWED_USERS".to_string(),
+                "someone-else".to_string(),
+            ),
+            (
+                "FKST_GLOBAL_ADMINS".to_string(),
+                "chronoai-shining".to_string(),
+            ),
+        ])
+        .expect("global-admin policy parses");
+
+        let mut parts = parts_with_auth(Some("Bearer gho_valid"));
+        let user = GithubUser::from_request_parts(&mut parts, &state)
+            .await
+            .expect("global admin bypasses the ordinary allowlist");
+        assert_eq!(user.login, "ChronoAI-Shining");
+    }
 }

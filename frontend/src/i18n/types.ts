@@ -71,6 +71,8 @@ export interface SiteContent {
     eyebrow: string;
     title: string;
     lede: string;
+    /** Compact authenticated-mode marker shown for deployment-wide admins. */
+    globalAdmin: string;
     signInTitle: string;
     signInBody: string;
     notConfigured: string;

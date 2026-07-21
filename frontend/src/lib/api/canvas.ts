@@ -58,6 +58,7 @@ export async function getOverview(
   const body = (await res.json()) as OverviewResponse;
   assertShape(Array.isArray(body?.accounts), 'overview');
   assertShape(typeof body?.viewer?.login === 'string', 'overview');
+  assertShape(typeof body?.global_admin === 'boolean', 'overview');
   return body;
 }
 

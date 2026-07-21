@@ -52,6 +52,7 @@ export function SessionRail({
   onChanged,
   selectedKey,
   onSelect,
+  readOnly = false,
 }: {
   owner: string;
   name: string;
@@ -64,6 +65,8 @@ export function SessionRail({
   selectedKey: string | null;
   /** Report the user's session choice by key. */
   onSelect: (key: string) => void;
+  /** App-wide cross-account views expose inspection and refresh only. */
+  readOnly?: boolean;
 }) {
   const c = useContent().dashboard;
   const cc = c.canvas;
@@ -155,14 +158,16 @@ export function SessionRail({
             <span className="font-mono text-[11px] text-ghost ml-2">· {data.sessions.length}</span>
           )}
         </h3>
-        <button
-          type="button"
-          onClick={() => setShowCreate(true)}
-          data-tour="new-session"
-          className="anim-sheen font-ui font-semibold text-[12px] bg-grad-accent text-amber-ink rounded-control px-3 py-1.5 shadow-[var(--shadow-1),var(--glow-amber)] transition-[filter,box-shadow] hover:brightness-110 cursor-pointer"
-        >
-          {cc.newTrigger}
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={() => setShowCreate(true)}
+            data-tour="new-session"
+            className="anim-sheen font-ui font-semibold text-[12px] bg-grad-accent text-amber-ink rounded-control px-3 py-1.5 shadow-[var(--shadow-1),var(--glow-amber)] transition-[filter,box-shadow] hover:brightness-110 cursor-pointer"
+          >
+            {cc.newTrigger}
+          </button>
+        )}
       </div>
 
       {/* Live freshness: "updated 2 min ago", advancing on every successful
@@ -221,7 +226,7 @@ export function SessionRail({
                     onSelect={() => onSelect(key)}
                     selected={key === selectedKey}
                   />
-                  {(canQueueWork(session) || session.trigger.state === 'open') && (
+                  {!readOnly && (canQueueWork(session) || session.trigger.state === 'open') && (
                     <div className="flex items-center gap-2 flex-wrap">
                       {canQueueWork(session) && (
                         <button
@@ -252,7 +257,7 @@ export function SessionRail({
         </div>
       ) : null}
 
-      {showCreate && (
+      {showCreate && !readOnly && (
         <CreateTriggerModal
           owner={owner}
           name={name}
@@ -265,7 +270,7 @@ export function SessionRail({
         />
       )}
 
-      {workItemTarget != null && workItemTarget.work_label != null && (
+      {!readOnly && workItemTarget != null && workItemTarget.work_label != null && (
         <CreateWorkItemModal
           owner={owner}
           name={name}
@@ -279,7 +284,7 @@ export function SessionRail({
         />
       )}
 
-      {stopTarget != null && (
+      {!readOnly && stopTarget != null && (
         <ConfirmDialog
           title={cc.stopConfirmTitle.replace(
             '{name}',

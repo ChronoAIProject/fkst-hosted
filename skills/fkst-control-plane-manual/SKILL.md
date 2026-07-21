@@ -157,6 +157,12 @@ Logs are the latest flush (refreshed every ~20 s / 256 KB and on pod exit) and a
 **redacted** (secrets masked) — safe to share with an authorized user, but treat them as
 session-sensitive.
 
+Deployments may configure `FKST_GLOBAL_ADMINS` with comma-separated GitHub logins
+(or rename-safe numeric IDs). A verified global admin's dashboard spans every account
+and repository where the deployment's GitHub App is installed, and the admin may read
+the associated session details, outcomes, logs, and observe snapshots. The legacy
+`FKST_LOG_ADMINS` list remains log/observe-only and does not widen the dashboard.
+
 ## Rules of thumb (learned the hard way)
 
 - **One Work Label per open trigger, per repo.** Two open triggers sharing a label spawn
@@ -174,9 +180,9 @@ session-sensitive.
 
 ## Observe a session's engine state
 
-`GET /api/v1/sessions/{session_id}/observe?limit=N` (same identity + three-tier
-authorization as the log download: trigger author / `### Log Access Allowlist` /
-global admins; GitHub Bearer token) returns the engine's live observe snapshot as
+`GET /api/v1/sessions/{session_id}/observe?limit=N` (same identity authorization as
+the log download: trigger author / `### Log Access Allowlist` / deployment global
+admins / legacy log admins; GitHub Bearer token) returns the engine's live observe snapshot as
 raw JSON — per-queue depth / pending / in-flight / retrying, oldest-pending age,
 subscriber status, DLQ tombstones, and codex-run records. It never contains
 payload bodies. `limit` is clamped to 1..=10000 (default 500). A `409` means the

@@ -178,7 +178,7 @@ async fn api_mode_per_issue_login_grants() {
 }
 
 #[tokio::test]
-async fn api_mode_global_admin_grants() {
+async fn api_mode_legacy_log_admin_grants() {
     let gh = github_user_ok("ops", 3003).await;
     let (storage, _s) = storage_server(true).await;
     let st = state(
@@ -187,6 +187,26 @@ async fn api_mode_global_admin_grants() {
         log_config(&["ops"], false),
         registry(&[]),
     );
+
+    let response = get(st, &format!("/api/v1/logs/{SESSION_ID}"), Some("gho_ops")).await;
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn api_mode_deployment_global_admin_grants() {
+    let gh = github_user_ok("ops", 3003).await;
+    let (storage, _s) = storage_server(true).await;
+    let mut st = state(
+        gh.uri(),
+        Some(storage),
+        log_config(&[], false),
+        registry(&[]),
+    );
+    st.config.access = crate::access_policy::AccessPolicy::from_vars(&[(
+        "FKST_GLOBAL_ADMINS".to_string(),
+        "@OPS".to_string(),
+    )])
+    .expect("valid global-admin fixture");
 
     let response = get(st, &format!("/api/v1/logs/{SESSION_ID}"), Some("gho_ops")).await;
     assert_eq!(response.status(), StatusCode::OK);

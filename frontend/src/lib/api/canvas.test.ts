@@ -20,6 +20,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 const overviewBody = {
   app_slug: 'chronoai-fkst',
   viewer: { login: 'shining' },
+  global_admin: false,
   accounts: [],
   totals: { sessions: 0, packages: [] },
   broader_oauth_available: false,
@@ -57,6 +58,13 @@ describe('getOverview', () => {
 
   it('throws loudly on a malformed payload', async () => {
     const apiFetch = vi.fn(async () => jsonResponse({ nope: true })) as ApiFetch;
+    await expect(getOverview(apiFetch)).rejects.toThrow('malformed overview');
+  });
+
+  it('rejects an overview missing the role discriminator', async () => {
+    const legacyBody: Partial<typeof overviewBody> = { ...overviewBody };
+    delete legacyBody.global_admin;
+    const apiFetch = vi.fn(async () => jsonResponse(legacyBody)) as ApiFetch;
     await expect(getOverview(apiFetch)).rejects.toThrow('malformed overview');
   });
 });

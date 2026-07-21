@@ -53,6 +53,9 @@ pub(crate) struct DashboardGithub {
 #[derive(Deserialize)]
 struct RawLogin {
     login: String,
+    /// `User` or `Organization` when GitHub includes account type.
+    #[serde(rename = "type", default)]
+    kind: String,
 }
 #[derive(Deserialize)]
 struct RawInstallation {
@@ -69,8 +72,12 @@ struct InstallationsPage {
 }
 #[derive(Deserialize)]
 struct RawRepo {
+    #[serde(default)]
+    id: i64,
     name: String,
     owner: RawLogin,
+    #[serde(default)]
+    private: bool,
 }
 #[derive(Deserialize)]
 struct ReposPage {
@@ -102,7 +109,7 @@ struct RawUserRepo {
 }
 
 /// A repo the user can access, as the repo-listing endpoint consumes it.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct UserRepo {
     pub id: i64,
     pub owner: String,
@@ -174,12 +181,25 @@ where
 }
 
 /// One installation the user can access (this app only).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct InstallationRef {
     pub id: i64,
     pub account: String,
+    /// `personal` or `org` (empty/unknown values fail closed to `personal`).
+    pub account_kind: String,
     /// `"all"` or `"selected"` (empty when GitHub omits it).
     pub repository_selection: String,
+}
+
+/// Normalize GitHub's account discriminator into the canvas wire contract.
+/// Unknown/omitted values are treated as personal: only an explicit
+/// `Organization` may claim the organization presentation.
+fn github_account_kind(kind: &str) -> &'static str {
+    if kind.eq_ignore_ascii_case("organization") {
+        "org"
+    } else {
+        "personal"
+    }
 }
 
 impl DashboardGithub {
@@ -445,10 +465,14 @@ impl DashboardGithub {
             let (page, next): (InstallationsPage, _) = self
                 .get_page(&url, user_token, query.as_deref(), "user_installations")
                 .await?;
-            out.extend(page.installations.into_iter().map(|raw| InstallationRef {
-                id: raw.id,
-                account: raw.account.login,
-                repository_selection: raw.repository_selection,
+            out.extend(page.installations.into_iter().map(|raw| {
+                let account_kind = github_account_kind(&raw.account.kind).to_string();
+                InstallationRef {
+                    id: raw.id,
+                    account: raw.account.login,
+                    account_kind,
+                    repository_selection: raw.repository_selection,
+                }
             }));
             match next {
                 Some(n) => {
@@ -459,6 +483,40 @@ impl DashboardGithub {
             }
         }
         Ok(out)
+    }
+
+    /// `GET /app/installations` (App JWT) — every installation belonging to
+    /// this deployment's GitHub App. This is intentionally used only after the
+    /// caller has matched `FKST_GLOBAL_ADMINS`; ordinary dashboard callers stay
+    /// on [`Self::user_installations`].
+    pub(crate) async fn app_installations(
+        &self,
+        app_jwt: &SecretString,
+    ) -> Result<Vec<InstallationRef>, AppError> {
+        let mut url = format!("{}/app/installations", self.api_base);
+        let mut query: Option<Vec<(&str, &str)>> = Some(vec![("per_page", "100")]);
+        let mut out = Vec::new();
+        loop {
+            let (page, next): (Vec<RawInstallation>, _) = self
+                .get_page(&url, app_jwt, query.as_deref(), "app_installations")
+                .await?;
+            out.extend(page.into_iter().map(|raw| {
+                let account_kind = github_account_kind(&raw.account.kind).to_string();
+                InstallationRef {
+                    id: raw.id,
+                    account: raw.account.login,
+                    account_kind,
+                    repository_selection: raw.repository_selection,
+                }
+            }));
+            match next {
+                Some(n) => {
+                    url = n;
+                    query = None;
+                }
+                None => return Ok(out),
+            }
+        }
     }
 
     /// `GET /user/installations/{id}/repositories` (user token) — repos in the
@@ -496,6 +554,48 @@ impl DashboardGithub {
             }
         }
         Ok(out)
+    }
+
+    /// `GET /installation/repositories` (installation token) — every repository
+    /// covered by one App installation, including repositories outside the
+    /// global admin's own user-token visibility. Returned repos are read-only in
+    /// the admin projection (`admin=false`); GitHub still enforces any mutation
+    /// attempted with the caller's user token on the separate write endpoints.
+    pub(crate) async fn installation_repos(
+        &self,
+        installation_token: &SecretString,
+    ) -> Result<Vec<UserRepo>, AppError> {
+        let mut url = format!("{}/installation/repositories", self.api_base);
+        let mut query: Option<Vec<(&str, &str)>> = Some(vec![("per_page", "100")]);
+        let mut out = Vec::new();
+        loop {
+            let (page, next): (ReposPage, _) = self
+                .get_page(
+                    &url,
+                    installation_token,
+                    query.as_deref(),
+                    "installation_repositories",
+                )
+                .await?;
+            out.extend(page.repositories.into_iter().map(|raw| {
+                let org = github_account_kind(&raw.owner.kind) == "org";
+                UserRepo {
+                    id: raw.id,
+                    owner: raw.owner.login,
+                    name: raw.name,
+                    private: raw.private,
+                    org,
+                    admin: false,
+                }
+            }));
+            match next {
+                Some(n) => {
+                    url = n;
+                    query = None;
+                }
+                None => return Ok(out),
+            }
+        }
     }
 
     /// `GET /repos/{owner}/{repo}/issues?labels=<label>&state=all` (installation

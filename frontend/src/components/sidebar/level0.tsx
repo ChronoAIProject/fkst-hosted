@@ -85,14 +85,16 @@ export function Level0Sidebar({
           aria-label={cc.filterAccountsPlaceholder}
           className={FIELD_INPUT}
         />
-        <button
-          type="button"
-          onClick={() => setShowCreate(true)}
-          data-tour="new-repo"
-          className="anim-sheen font-ui font-semibold text-[12px] bg-grad-accent text-amber-ink rounded-control px-3 py-1.5 shadow-[var(--shadow-1),var(--glow-amber)] transition-[filter,box-shadow] hover:brightness-110 cursor-pointer flex-none"
-        >
-          {rc.newRepo}
-        </button>
+        {!overview.global_admin && (
+          <button
+            type="button"
+            onClick={() => setShowCreate(true)}
+            data-tour="new-repo"
+            className="anim-sheen font-ui font-semibold text-[12px] bg-grad-accent text-amber-ink rounded-control px-3 py-1.5 shadow-[var(--shadow-1),var(--glow-amber)] transition-[filter,box-shadow] hover:brightness-110 cursor-pointer flex-none"
+          >
+            {rc.newRepo}
+          </button>
+        )}
       </div>
 
       {showFirstRun && overview.app_slug != null && (
@@ -139,6 +141,7 @@ export function Level0Sidebar({
         <AccountList
           accounts={shown}
           appSlug={overview.app_slug}
+          globalAdmin={overview.global_admin}
           onOpenAccount={onOpenAccount}
           onUninstall={onUninstall}
         />
@@ -165,7 +168,7 @@ export function Level0Sidebar({
         />
       </div>
 
-      {showCreate && (
+      {showCreate && !overview.global_admin && (
         <CreateRepoModal
           viewerLogin={overview.viewer.login}
           orgs={orgs}

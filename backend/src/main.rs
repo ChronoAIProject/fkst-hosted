@@ -103,6 +103,10 @@ async fn main() -> ExitCode {
             );
         }
     }
+    tracing::info!(
+        global_admins = config.access.global_admin_count(),
+        "global admin policy loaded"
+    );
 
     // 2b. Pod-per-session dispatch (milestone #9): when enabled IN K8S MODE, prove
     //     the Kubernetes API is reachable at startup so a misconfigured cluster

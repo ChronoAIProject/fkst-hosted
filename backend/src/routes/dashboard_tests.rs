@@ -60,6 +60,65 @@ async fn user_installation_repos_maps_owner_and_name() {
 }
 
 #[tokio::test]
+async fn app_installations_maps_every_account_and_kind() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/app/installations"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "id": 41,
+                "account": { "login": "shining", "type": "User" },
+                "repository_selection": "all"
+            },
+            {
+                "id": 42,
+                "account": { "login": "acme", "type": "Organization" },
+                "repository_selection": "selected"
+            }
+        ])))
+        .mount(&server)
+        .await;
+
+    let gh = DashboardGithub::new(&server.uri()).unwrap();
+    let installs = gh.app_installations(&tok()).await.expect("ok");
+    assert_eq!(installs.len(), 2);
+    assert_eq!(installs[0].account, "shining");
+    assert_eq!(installs[0].account_kind, "personal");
+    assert_eq!(installs[1].account, "acme");
+    assert_eq!(installs[1].account_kind, "org");
+    assert_eq!(installs[1].repository_selection, "selected");
+}
+
+#[tokio::test]
+async fn installation_repos_preserves_admin_visible_repo_metadata_as_read_only() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/installation/repositories"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 1,
+            "repositories": [{
+                "id": 9001,
+                "name": "vault",
+                "owner": { "login": "acme", "type": "Organization" },
+                "private": true
+            }]
+        })))
+        .mount(&server)
+        .await;
+
+    let gh = DashboardGithub::new(&server.uri()).unwrap();
+    let repos = gh.installation_repos(&tok()).await.expect("ok");
+    assert_eq!(repos.len(), 1);
+    let repo = &repos[0];
+    assert_eq!(repo.id, 9001);
+    assert_eq!(repo.owner, "acme");
+    assert_eq!(repo.name, "vault");
+    assert!(repo.private);
+    assert!(repo.org);
+    assert!(!repo.admin, "the App-wide projection must stay read-only");
+}
+
+#[tokio::test]
 async fn issues_by_label_all_uses_state_all_and_filters_prs() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

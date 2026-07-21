@@ -34,6 +34,7 @@ const accounts: AccountOverview[] = [
 const overviewBody: OverviewResponse = {
   app_slug: 'chronoai-fkst',
   viewer: { login: 'shining' },
+  global_admin: false,
   accounts,
   totals: { sessions: 1, packages: [{ package: 'o/p@main:pkg/base', count: 1 }] },
   broader_oauth_available: false,
@@ -96,6 +97,26 @@ describe('Dashboard — canvas levels and loading', () => {
     expect(screen.getByTestId('sidebar-skeleton')).toBeInTheDocument();
     expect(screen.getByLabelText('Loading canvas…')).toBeInTheDocument();
     expect(screen.getByLabelText('Loading details…')).toBeInTheDocument();
+  });
+
+  it('marks the App-wide global-administrator view in the dashboard header', async () => {
+    const adminBody: OverviewResponse = {
+      ...overviewBody,
+      global_admin: true,
+      broader_oauth_available: false,
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('/api/v1/overview')) return jsonResponse(adminBody);
+        throw new Error(`unexpected fetch: ${String(input)}`);
+      })
+    );
+
+    renderDashboard();
+
+    expect(await screen.findByText('Global admin')).toBeInTheDocument();
+    expect(screen.queryByText('See all your repositories')).not.toBeInTheDocument();
   });
 
   it('drills root → account → repo, fetching level-2 sessions, and Escape walks back up', async () => {
@@ -268,6 +289,7 @@ describe('Dashboard — canvas levels and loading', () => {
     const emptyBody: OverviewResponse = {
       app_slug: 'chronoai-fkst',
       viewer: { login: 'shining' },
+      global_admin: false,
       accounts: [],
       totals: { sessions: 0, packages: [] },
       broader_oauth_available: false,

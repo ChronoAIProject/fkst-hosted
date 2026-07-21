@@ -266,6 +266,23 @@ async fn components_include_the_named_environment_schemas_and_not_the_removed_on
 }
 
 #[tokio::test]
+async fn overview_schema_exposes_the_required_global_admin_mode() {
+    let spec = fetch_spec(app(false)).await;
+    let overview = &spec["components"]["schemas"]["OverviewResponse"];
+    assert_eq!(
+        overview["properties"]["global_admin"]["type"], "boolean",
+        "the admin projection discriminator must be a boolean"
+    );
+    let required = overview["required"]
+        .as_array()
+        .expect("OverviewResponse.required array");
+    assert!(
+        required.iter().any(|field| field == "global_admin"),
+        "global_admin must not be optional in the public contract: {required:?}"
+    );
+}
+
+#[tokio::test]
 async fn no_operation_requires_security_the_whole_surface_is_open() {
     let spec = fetch_spec(app(true)).await;
     let paths = &spec["paths"];

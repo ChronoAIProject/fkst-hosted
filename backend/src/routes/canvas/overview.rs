@@ -3,13 +3,16 @@
 //! status, and — for installed repos — the live registration-level active
 //! session count plus the union of their package references.
 //!
-//! Computed live on every call (stateless): the USER token drives the
-//! account/repo/installation enumeration; per installed repo an APP
-//! installation token reads the OPEN trigger issues, each parsed with the SAME
-//! reconciler parser the control plane registers sessions with — so "active"
-//! here means exactly "would register" (a malformed trigger counts as invalid,
-//! not active). A repo whose trigger read fails NEVER fails the whole call: the
-//! account is marked `counts_complete: false` and the canvas renders what it has.
+//! Computed live on every call (stateless). For an ordinary caller the USER token
+//! drives account/repo/installation enumeration. For a verified
+//! `FKST_GLOBAL_ADMINS` caller, the APP JWT enumerates every installation and an
+//! installation-wide token enumerates every covered repo, including private repos
+//! outside the caller's personal visibility. Per installed repo an APP installation
+//! token reads the OPEN trigger issues, each parsed with the SAME reconciler parser
+//! the control plane registers sessions with — so "active" here means exactly
+//! "would register" (a malformed trigger counts as invalid, not active). A repo
+//! whose trigger read fails NEVER fails the whole call: the account is marked
+//! `counts_complete: false` and the canvas renders what it has.
 //!
 //! The per-repo scans are bounded in BOTH dimensions: at most
 //! [`REPO_SCAN_CONCURRENCY`] scans run at once (never one sequential GitHub
@@ -34,7 +37,7 @@ use crate::models::RepoRef;
 use crate::reconcile::registry::parse_registration;
 use crate::routes::canvas::overview_broader::resolve_enumeration_token;
 use crate::routes::canvas::types::render_package_ref;
-use crate::routes::dashboard::{bearer_token, DashboardGithub, UserRepo};
+use crate::routes::dashboard::{bearer_token, DashboardGithub, InstallationRef, UserRepo};
 use crate::routes::repos::Viewer;
 use crate::state::AppState;
 
@@ -45,6 +48,9 @@ pub struct OverviewResponse {
     pub app_slug: Option<String>,
     /// The signed-in user.
     pub viewer: Viewer,
+    /// True when the verified viewer matched `FKST_GLOBAL_ADMINS` and this
+    /// response therefore spans every installation of the configured GitHub App.
+    pub global_admin: bool,
     /// The personal account first, then every org the user belongs to, sorted.
     pub accounts: Vec<AccountOverview>,
     /// Sums across all accounts.
@@ -122,6 +128,10 @@ pub struct PackageCount {
 /// At most this many per-repo trigger scans run concurrently within one call.
 const REPO_SCAN_CONCURRENCY: usize = 8;
 
+/// At most this many installation-wide repository enumerations run concurrently
+/// for a global-admin overview.
+const INSTALLATION_SCAN_CONCURRENCY: usize = 4;
+
 /// Per-repo scan deadline. Generous enough for a token mint plus a paginated
 /// issue listing, small enough that a hung repo degrades (account flagged
 /// incomplete) instead of holding the canvas for the transport timeout.
@@ -149,6 +159,25 @@ enum ScanOutcome {
     Incomplete,
 }
 
+/// Internal enumeration result for one repository. `installed` stays explicit
+/// because an ordinary caller's overview also includes repos where the App is not
+/// installed, while a global-admin overview contains installed repos only.
+struct RepoInput {
+    repo: UserRepo,
+    installed: bool,
+}
+
+/// Internal enumeration result for one account, independent of whether it came
+/// from the caller's user token or the App-wide global-admin path.
+struct AccountInput {
+    login: String,
+    kind: String,
+    owner: bool,
+    installation: Option<InstallationRef>,
+    repos: Vec<RepoInput>,
+    counts_complete: bool,
+}
+
 /// Scan one installed repo's OPEN trigger issues with an App token and return
 /// one entry per PARSED-OK trigger: that session's rendered package refs.
 /// Malformed triggers are skipped (invalid, not active) — the level-2 sessions
@@ -174,59 +203,34 @@ async fn scan_repo_sessions_packages(
     Ok(sessions)
 }
 
-/// `GET /api/v1/overview` — the whole-account canvas, computed live.
-#[utoipa::path(
-    get,
-    path = "/overview",
-    tag = "canvas",
-    operation_id = "canvas_overview",
-    params(
-        ("X-Github-Broader-Token" = Option<String>, Header, description = "Optional broader-visibility OAuth token (issue #572); when it verifies to the same GitHub id as the Bearer identity it drives repo/org enumeration so repos/orgs where the App is not installed still appear. Ignored on mismatch/verify failure."),
-    ),
-    responses(
-        (status = 200, description = "Every account with its repos, installation status, and live session/package counts", body = OverviewResponse),
-        (status = 401, description = "Missing or invalid GitHub token", body = ErrorEnvelope),
-        (status = 403, description = "Verified GitHub identity not allowlisted (FKST_ACCESS_ALLOWED_USERS)", body = ErrorEnvelope),
-        (status = 502, description = "GitHub API error", body = ErrorEnvelope),
-        (status = 503, description = "GitHub API unreachable", body = ErrorEnvelope),
-    )
-)]
-pub(super) async fn overview(
-    State(state): State<AppState>,
-    user: GithubUser,
-    headers: HeaderMap,
-) -> Result<Json<OverviewResponse>, AppError> {
-    let token = bearer_token(&headers)?;
-    let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
-
-    // The ENUMERATION token: the broader-visibility OAuth token when the caller
-    // supplies one that verifies to the same id, else the App user token (see
-    // `resolve_enumeration_token`). It drives the repo/org enumeration ONLY; the
-    // App token below still reads installations (the installed flags) and the
-    // reconciler-parity trigger scans.
-    let enum_token = resolve_enumeration_token(&state, &user, &token, &headers).await;
-
-    // User-scoped enumeration (these failing fails the call — there is nothing
-    // to render without them). Uses the broader token when supplied so repos/orgs
-    // where the App is NOT installed still appear.
+/// Enumerate the accounts/repositories visible to an ordinary caller. This is
+/// the pre-global-admin behavior: the optional broader OAuth token widens only
+/// the caller's own GitHub visibility, and the App user token determines which
+/// of those repositories are installed.
+async fn user_account_inputs(
+    state: &AppState,
+    gh: &DashboardGithub,
+    user: &GithubUser,
+    user_token: &secrecy::SecretString,
+    headers: &HeaderMap,
+) -> Result<Vec<AccountInput>, AppError> {
+    let enum_token = resolve_enumeration_token(state, user, user_token, headers).await;
     let all_repos = gh.user_all_repos(&enum_token).await?;
-    // Org account cards come from the caller's ACTIVE org MEMBERSHIPS.
-    // `GET /user/orgs` returns an EMPTY list for GitHub App user-to-server
-    // tokens (the fine-grained token this dashboard's login issues), so it can
-    // never enumerate the caller's orgs here; `/user/memberships/orgs` does
-    // return them. `/user/orgs` is still unioned in so any token type that
-    // populates it (e.g. the broader classic OAuth token) loses nothing.
+
+    // GitHub App user-to-server tokens leave `/user/orgs` empty, while active
+    // membership reads remain populated. Union both so classic broader tokens
+    // retain their full organization visibility too.
     let memberships = gh.user_org_memberships(&enum_token).await?;
     let admin_orgs: HashSet<String> = memberships
         .iter()
-        .filter(|m| m.role == "admin")
-        .map(|m| m.org.to_ascii_lowercase())
+        .filter(|membership| membership.role == "admin")
+        .map(|membership| membership.org.to_ascii_lowercase())
         .collect();
-    let mut seen_orgs: HashSet<String> = HashSet::new();
-    let mut orgs: Vec<String> = Vec::new();
+    let mut seen_orgs = HashSet::new();
+    let mut orgs = Vec::new();
     for org in memberships
         .into_iter()
-        .map(|m| m.org)
+        .map(|membership| membership.org)
         .chain(gh.user_orgs(&enum_token).await?)
     {
         if seen_orgs.insert(org.to_ascii_lowercase()) {
@@ -234,18 +238,18 @@ pub(super) async fn overview(
         }
     }
     orgs.sort();
-    let installations = gh.user_installations(&token).await?;
-    let mut installed_repos: HashSet<String> = HashSet::new();
-    for inst in &installations {
-        for repo in gh.user_installation_repos(&token, inst.id).await? {
+
+    let installations = gh.user_installations(user_token).await?;
+    let mut installed_repos = HashSet::new();
+    for installation in &installations {
+        for repo in gh
+            .user_installation_repos(user_token, installation.id)
+            .await?
+        {
             installed_repos.insert(format!("{}/{}", repo.owner, repo.name).to_ascii_lowercase());
         }
     }
 
-    // Group the accessible repos by owner login (case-insensitive). Repos whose
-    // owner is neither the viewer nor one of the viewer's orgs (e.g. a
-    // collaborator repo on someone else's personal account) have no account
-    // card on the canvas and are deliberately not listed.
     let mut by_owner: HashMap<String, Vec<UserRepo>> = HashMap::new();
     for repo in all_repos {
         by_owner
@@ -254,51 +258,142 @@ pub(super) async fn overview(
             .push(repo);
     }
 
+    let account_list = std::iter::once((user.login.clone(), "personal".to_string(), true)).chain(
+        orgs.into_iter().map(|org| {
+            let owner = admin_orgs.contains(&org.to_ascii_lowercase());
+            (org, "org".to_string(), owner)
+        }),
+    );
+
+    Ok(account_list
+        .map(|(login, kind, owner)| {
+            let installation = installations
+                .iter()
+                .find(|candidate| candidate.account.eq_ignore_ascii_case(&login))
+                .cloned();
+            let mut repos = by_owner
+                .remove(&login.to_ascii_lowercase())
+                .unwrap_or_default();
+            repos.sort_by(|a, b| a.name.cmp(&b.name));
+            let repos = repos
+                .into_iter()
+                .map(|repo| {
+                    let installed = installed_repos
+                        .contains(&format!("{}/{}", repo.owner, repo.name).to_ascii_lowercase());
+                    RepoInput { repo, installed }
+                })
+                .collect();
+            AccountInput {
+                login,
+                kind,
+                owner,
+                installation,
+                repos,
+                counts_complete: true,
+            }
+        })
+        .collect())
+}
+
+/// Enumerate every installation and covered repository of the configured App.
+/// The top-level installation list is authoritative; a failure within one
+/// installation degrades that account instead of hiding every other account.
+async fn global_admin_account_inputs(
+    state: &AppState,
+    gh: &DashboardGithub,
+    user: &GithubUser,
+) -> Result<Vec<AccountInput>, AppError> {
+    let app = state.github_app.as_ref().ok_or_else(|| {
+        AppError::Unavailable("the github app is not configured on this deployment".to_string())
+    })?;
+    let app_jwt = app.app_jwt()?;
+    let installations = gh.app_installations(&app_jwt).await?;
+
+    let mut accounts: Vec<AccountInput> =
+        stream::iter(installations.into_iter().map(|installation| async move {
+            let login = installation.account.clone();
+            let kind = installation.account_kind.clone();
+            let owner = kind == "personal" && login.eq_ignore_ascii_case(&user.login);
+            let repos_result = match app.installation_wide_token(installation.id).await {
+                Ok(token) => gh.installation_repos(&token).await,
+                Err(error) => Err(AppError::from(error)),
+            };
+            let (mut repos, counts_complete) = match repos_result {
+                Ok(repos) => (repos, true),
+                Err(error) => {
+                    tracing::warn!(
+                        installation_id = installation.id,
+                        account = %login,
+                        error = %error,
+                        "global-admin overview: installation repo enumeration failed"
+                    );
+                    (Vec::new(), false)
+                }
+            };
+            repos.sort_by(|a, b| a.name.cmp(&b.name));
+            AccountInput {
+                login,
+                kind,
+                owner,
+                installation: Some(installation),
+                repos: repos
+                    .into_iter()
+                    .map(|repo| RepoInput {
+                        repo,
+                        installed: true,
+                    })
+                    .collect(),
+                counts_complete,
+            }
+        }))
+        .buffer_unordered(INSTALLATION_SCAN_CONCURRENCY)
+        .collect()
+        .await;
+
+    // Stable presentation independent of request completion order: personal
+    // installations first, then organization installations, each by login.
+    accounts.sort_by(|a, b| {
+        let a_org = a.kind == "org";
+        let b_org = b.kind == "org";
+        a_org.cmp(&b_org).then_with(|| {
+            a.login
+                .to_ascii_lowercase()
+                .cmp(&b.login.to_ascii_lowercase())
+        })
+    });
+    Ok(accounts)
+}
+
+/// Resolve registration/package counts for already-enumerated accounts and
+/// render the public response. Both user-scoped and App-wide paths share this
+/// function, so session parsing, timeouts, totals, and partial-failure behavior
+/// cannot drift between roles.
+async fn assemble_overview(
+    state: &AppState,
+    gh: &DashboardGithub,
+    user: GithubUser,
+    global_admin: bool,
+    account_inputs: Vec<AccountInput>,
+) -> OverviewResponse {
     let app = state.github_app.as_ref();
     let trigger_label = &state.config.reconcile.substrate_trigger_label;
-
-    let mut accounts = Vec::with_capacity(1 + orgs.len());
+    let mut accounts = Vec::with_capacity(account_inputs.len());
     let mut total_sessions = 0usize;
     let mut package_counts: BTreeMap<String, usize> = BTreeMap::new();
 
-    // The personal account first, then every org sorted.
-    let account_list: Vec<(String, &'static str, bool)> =
-        std::iter::once((user.login.clone(), "personal", true))
-            .chain(orgs.into_iter().map(|org| {
-                let owner = admin_orgs.contains(&org.to_ascii_lowercase());
-                (org, "org", owner)
-            }))
-            .collect();
-
-    for (login, kind, owner) in account_list {
-        let installation = installations
-            .iter()
-            .find(|i| i.account.eq_ignore_ascii_case(&login));
-        let mut repos = by_owner
-            .remove(&login.to_ascii_lowercase())
-            .unwrap_or_default();
-        repos.sort_by(|a, b| a.name.cmp(&b.name));
-
-        // Disposition first, reads second: decide synchronously what each repo
-        // needs, then run the actual GitHub scans through a bounded stream so
-        // one call never becomes an unbounded sequential crawl, and one hung
-        // repo only times itself out.
-        let mut outcomes: Vec<ScanOutcome> = repos
+    for input in account_inputs {
+        let installation = input.installation.as_ref();
+        let mut outcomes: Vec<ScanOutcome> = input
+            .repos
             .iter()
             .map(|repo| {
-                let installed = installed_repos
-                    .contains(&format!("{}/{}", repo.owner, repo.name).to_ascii_lowercase());
-                if !installed {
+                if !repo.installed {
                     ScanOutcome::NotScanned
                 } else if app.is_none() || installation.is_none() {
-                    // Installed repo but no App creds (or no visible
-                    // installation) to read triggers with — the count is
-                    // unknowable, not zero.
                     tracing::debug!(
-                        owner = %repo.owner,
-                        name = %repo.name,
-                        "canvas overview: repo installed but the GitHub App is not usable; \
-                         marking counts incomplete"
+                        owner = %repo.repo.owner,
+                        name = %repo.repo.name,
+                        "canvas overview: installed repo cannot be scanned; marking counts incomplete"
                     );
                     ScanOutcome::Incomplete
                 } else {
@@ -307,29 +402,31 @@ pub(super) async fn overview(
             })
             .collect();
 
-        if let (Some(app), Some(inst)) = (app, installation) {
-            let gh = &gh;
+        if let (Some(app), Some(installation)) = (app, installation) {
             let mut scans = Vec::new();
-            for (idx, repo) in repos.iter().enumerate() {
+            for (idx, repo) in input.repos.iter().enumerate() {
                 if !matches!(outcomes[idx], ScanOutcome::Pending) {
                     continue;
                 }
                 let repo_ref = RepoRef {
-                    owner: repo.owner.clone(),
-                    name: repo.name.clone(),
+                    owner: repo.repo.owner.clone(),
+                    name: repo.repo.name.clone(),
                 };
                 scans.push(async move {
                     let scanned = tokio::time::timeout(
                         REPO_SCAN_TIMEOUT,
-                        scan_repo_sessions_packages(gh, app, inst.id, &repo_ref, trigger_label),
+                        scan_repo_sessions_packages(
+                            gh,
+                            app,
+                            installation.id,
+                            &repo_ref,
+                            trigger_label,
+                        ),
                     )
                     .await;
                     let outcome = match scanned {
                         Ok(Ok(sessions)) => ScanOutcome::Sessions(sessions),
                         Ok(Err(error)) => {
-                            // Degrade, never fail the whole canvas: the repo
-                            // renders with zero counts and the account is
-                            // flagged incomplete.
                             tracing::warn!(
                                 owner = %repo_ref.owner,
                                 name = %repo_ref.name,
@@ -360,23 +457,22 @@ pub(super) async fn overview(
             }
         }
 
-        let mut counts_complete = true;
-        let mut repo_views = Vec::with_capacity(repos.len());
-        for (repo, outcome) in repos.into_iter().zip(outcomes) {
-            let installed = !matches!(outcome, ScanOutcome::NotScanned);
+        let mut counts_complete = input.counts_complete;
+        let mut repo_views = Vec::with_capacity(input.repos.len());
+        for (repo_input, outcome) in input.repos.into_iter().zip(outcomes) {
+            let installed = repo_input.installed;
+            let repo = repo_input.repo;
             let mut active_sessions = 0usize;
-            let mut packages: Vec<String> = Vec::new();
+            let mut packages = Vec::new();
             match outcome {
                 ScanOutcome::NotScanned => {}
                 ScanOutcome::Sessions(sessions) => {
                     active_sessions = sessions.len();
                     total_sessions += sessions.len();
                     for session_packages in sessions {
-                        // Count each package ONCE per session, and union into
-                        // the repo's list in first-appearance order.
-                        let mut seen_in_session: HashSet<&str> = HashSet::new();
+                        let mut seen_in_session = HashSet::new();
                         for package in &session_packages {
-                            if seen_in_session.insert(package) {
+                            if seen_in_session.insert(package.as_str()) {
                                 *package_counts.entry(package.clone()).or_default() += 1;
                             }
                             if !packages.contains(package) {
@@ -385,9 +481,7 @@ pub(super) async fn overview(
                         }
                     }
                 }
-                ScanOutcome::Incomplete | ScanOutcome::Pending => {
-                    counts_complete = false;
-                }
+                ScanOutcome::Incomplete | ScanOutcome::Pending => counts_complete = false,
             }
             repo_views.push(RepoOverview {
                 id: repo.id,
@@ -402,24 +496,20 @@ pub(super) async fn overview(
         }
 
         accounts.push(AccountOverview {
-            login,
-            kind: kind.to_string(),
-            owner,
+            login: input.login,
+            kind: input.kind,
+            owner: input.owner,
             installed: installation.is_some(),
-            installation_id: installation.map(|i| i.id),
-            // The raw DTO defaults an omitted field to "" — collapse that to
-            // null so the wire value stays within the contract's union.
-            repository_selection: installation.and_then(|i| {
-                let value = i.repository_selection.clone();
-                (!value.is_empty()).then_some(value)
+            installation_id: installation.map(|value| value.id),
+            repository_selection: installation.and_then(|value| {
+                let selection = value.repository_selection.clone();
+                (!selection.is_empty()).then_some(selection)
             }),
             counts_complete,
             repos: repo_views,
         });
     }
 
-    // Per-package totals sorted by count (desc) then package name (asc) so the
-    // canvas chart renders deterministically.
     let mut packages: Vec<PackageCount> = package_counts
         .into_iter()
         .map(|(package, count)| PackageCount { package, count })
@@ -432,23 +522,62 @@ pub(super) async fn overview(
 
     tracing::debug!(
         user_id = user.id,
+        global_admin,
         accounts = accounts.len(),
         sessions = total_sessions,
         "canvas overview assembled"
     );
-    Ok(Json(OverviewResponse {
+    OverviewResponse {
         app_slug: state
             .github_app
             .as_ref()
-            .and_then(|g| g.app_slug().map(str::to_string)),
+            .and_then(|github| github.app_slug().map(str::to_string)),
         viewer: Viewer { login: user.login },
+        global_admin,
         accounts,
         totals: OverviewTotals {
             sessions: total_sessions,
             packages,
         },
-        broader_oauth_available: state.config.log.broader_oauth().is_some(),
-    }))
+        // Connecting a broader user token cannot widen an already App-wide
+        // administrator view, so suppress the inert connect affordance.
+        broader_oauth_available: !global_admin && state.config.log.broader_oauth().is_some(),
+    }
+}
+
+/// `GET /api/v1/overview` — the whole-account canvas, computed live.
+#[utoipa::path(
+    get,
+    path = "/overview",
+    tag = "canvas",
+    operation_id = "canvas_overview",
+    params(
+        ("X-Github-Broader-Token" = Option<String>, Header, description = "Optional broader-visibility OAuth token (issue #572); when it verifies to the same GitHub id as the Bearer identity it drives repo/org enumeration so repos/orgs where the App is not installed still appear. Ignored on mismatch/verify failure."),
+    ),
+    responses(
+        (status = 200, description = "Every account with its repos, installation status, and live session/package counts", body = OverviewResponse),
+        (status = 401, description = "Missing or invalid GitHub token", body = ErrorEnvelope),
+        (status = 403, description = "Verified GitHub identity not allowlisted (FKST_ACCESS_ALLOWED_USERS)", body = ErrorEnvelope),
+        (status = 502, description = "GitHub API error", body = ErrorEnvelope),
+        (status = 503, description = "GitHub API unreachable", body = ErrorEnvelope),
+    )
+)]
+pub(super) async fn overview(
+    State(state): State<AppState>,
+    user: GithubUser,
+    headers: HeaderMap,
+) -> Result<Json<OverviewResponse>, AppError> {
+    let token = bearer_token(&headers)?;
+    let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
+    let global_admin = state.config.access.is_global_admin(user.id, &user.login);
+    let accounts = if global_admin {
+        global_admin_account_inputs(&state, &gh, &user).await?
+    } else {
+        user_account_inputs(&state, &gh, &user, &token, &headers).await?
+    };
+    Ok(Json(
+        assemble_overview(&state, &gh, user, global_admin, accounts).await,
+    ))
 }
 
 #[cfg(test)]

@@ -235,7 +235,14 @@ export function Dashboard() {
 
   const header = (
     <header className="flex-none">
-      <Eyebrow>{d.eyebrow}</Eyebrow>
+      <div className="flex items-center gap-3 flex-wrap">
+        <Eyebrow>{d.eyebrow}</Eyebrow>
+        {overview?.global_admin && (
+          <span className="border border-amber/45 rounded-control bg-amber/10 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-amber">
+            {d.globalAdmin}
+          </span>
+        )}
+      </div>
       {/* Page headline as a bright fg->dim gradient sweep (legible low end). */}
       <h1 className="grad-text grad-text-fg mt-5 font-display font-bold text-[clamp(28px,4vw,40px)] leading-[1.1] tracking-[-0.02em]">
         {d.title}
@@ -488,6 +495,7 @@ export function Dashboard() {
                     data={sessions}
                     loadFailed={sessionsFailed}
                     onChanged={onSessionsChanged}
+                    readOnly={overview?.global_admin === true && selectedAccount?.owner === false}
                   />
                 )}
               </FadeSwap>

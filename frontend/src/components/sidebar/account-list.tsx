@@ -15,11 +15,14 @@ export function manageUrl(login: string, personal: boolean, installationId: numb
 export function AccountList({
   accounts,
   appSlug,
+  globalAdmin = false,
   onOpenAccount,
   onUninstall,
 }: {
   accounts: AccountOverview[];
   appSlug: string | null;
+  /** App-wide mode is read-only for accounts the viewer does not own. */
+  globalAdmin?: boolean;
   onOpenAccount: (login: string) => void;
   onUninstall: (login: string) => void;
 }) {
@@ -32,6 +35,7 @@ export function AccountList({
       {accounts.map((account, i) => {
         const installedCount = account.repos.filter((r) => r.installed).length;
         const hasActive = account.repos.some((r) => r.active_sessions > 0);
+        const canManage = !globalAdmin || account.owner;
         // Resting depth + a status-matched glow so a connected/active account
         // reads at a glance: amber bloom when sessions are running, plain card
         // depth when connected, the quietest depth when not yet installed.
@@ -72,7 +76,7 @@ export function AccountList({
                     .replace('{installed}', String(installedCount))
                     .replace('{total}', String(account.repos.length))}
                 </span>
-                {account.installation_id != null ? (
+                {account.installation_id != null && canManage ? (
                   <span className="flex items-center gap-1.5">
                     <a
                       href={manageUrl(
@@ -94,8 +98,8 @@ export function AccountList({
                       {rc.uninstall}
                     </button>
                   </span>
-                ) : (
-                  appSlug != null && (
+                ) : account.installation_id == null ? (
+                  appSlug != null && canManage && (
                     <span className="flex items-center gap-2">
                       <span className="font-ui text-[11px] text-ghost">{rc.connectHint}</span>
                       <a
@@ -108,7 +112,7 @@ export function AccountList({
                       </a>
                     </span>
                   )
-                )}
+                ) : null}
               </div>
               {account.repos.length === 0 && (
                 <p className="font-mono text-[12px] text-ghost italic py-1">{rc.groupEmpty}</p>
