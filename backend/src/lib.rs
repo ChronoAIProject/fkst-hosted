@@ -49,6 +49,9 @@ pub mod reconcile_config;
 // action executor, per-repo driver, queue + sweep/full-resync loops). Gated on
 // `FKST_POD_DISPATCH`; Model A is untouched until the PR6 flip.
 pub mod reconcile;
+// Shared startup/full-resync recovery projection. The serialized reconciler is
+// the sole writer; readiness and metrics consume snapshots.
+pub mod recovery;
 // Reserved-env "keep-module" (Model B PR0, issue #359 §7/§9): holds
 // `is_reserved_env_key` + `LLM_ENV_KEY` so they survive the later deletion of
 // `engine/` and `sessions/codex_provider/`, which originally defined them.

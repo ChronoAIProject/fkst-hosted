@@ -19,6 +19,9 @@ fn defaults_apply_when_nothing_is_set() {
     assert_eq!(config.github_bot_login, None);
     assert_eq!(config.reconcile_interval_secs, 30);
     assert_eq!(config.pod_full_resync_interval_secs, 600);
+    assert_eq!(config.startup_resync_retry_initial_secs, 5);
+    assert_eq!(config.startup_resync_retry_max_secs, 60);
+    assert_eq!(config.startup_resync_retry_jitter_percent, 20);
     assert_eq!(config.session_idle_grace_secs, 300);
     assert_eq!(config.pod_min_lifetime_secs, 120);
     assert_eq!(config.pod_termination_grace_secs, 60);
@@ -98,6 +101,18 @@ fn default_impl_matches_env_defaults() {
         from_env.pod_full_resync_interval_secs
     );
     assert_eq!(
+        from_default.startup_resync_retry_initial_secs,
+        from_env.startup_resync_retry_initial_secs
+    );
+    assert_eq!(
+        from_default.startup_resync_retry_max_secs,
+        from_env.startup_resync_retry_max_secs
+    );
+    assert_eq!(
+        from_default.startup_resync_retry_jitter_percent,
+        from_env.startup_resync_retry_jitter_percent
+    );
+    assert_eq!(
         from_default.session_idle_grace_secs,
         from_env.session_idle_grace_secs
     );
@@ -137,6 +152,9 @@ fn every_knob_is_overridable() {
         ("FKST_GITHUB_BOT_LOGIN", "fkst-bot"),
         ("FKST_RECONCILE_INTERVAL_SECS", "15"),
         ("FKST_POD_FULL_RESYNC_INTERVAL_SECS", "1200"),
+        ("FKST_STARTUP_RESYNC_RETRY_INITIAL_SECS", "7"),
+        ("FKST_STARTUP_RESYNC_RETRY_MAX_SECS", "70"),
+        ("FKST_STARTUP_RESYNC_RETRY_JITTER_PERCENT", "15"),
         ("FKST_SESSION_IDLE_GRACE_SECS", "600"),
         ("FKST_POD_MIN_LIFETIME_SECS", "240"),
         ("FKST_POD_TERMINATION_GRACE_SECS", "90"),
@@ -149,6 +167,9 @@ fn every_knob_is_overridable() {
     assert_eq!(config.github_bot_login.as_deref(), Some("fkst-bot"));
     assert_eq!(config.reconcile_interval_secs, 15);
     assert_eq!(config.pod_full_resync_interval_secs, 1200);
+    assert_eq!(config.startup_resync_retry_initial_secs, 7);
+    assert_eq!(config.startup_resync_retry_max_secs, 70);
+    assert_eq!(config.startup_resync_retry_jitter_percent, 15);
     assert_eq!(config.session_idle_grace_secs, 600);
     assert_eq!(config.pod_min_lifetime_secs, 240);
     assert_eq!(config.pod_termination_grace_secs, 90);
@@ -169,6 +190,7 @@ fn zero_cadence_bounds_are_config_errors_naming_the_var() {
     for var in [
         "FKST_RECONCILE_INTERVAL_SECS",
         "FKST_POD_FULL_RESYNC_INTERVAL_SECS",
+        "FKST_STARTUP_RESYNC_RETRY_INITIAL_SECS",
         "FKST_SESSION_IDLE_GRACE_SECS",
         "FKST_POD_TOKEN_REFRESH_SECS",
         "FKST_HEALTH_SCRAPE_SECS",
@@ -177,6 +199,27 @@ fn zero_cadence_bounds_are_config_errors_naming_the_var() {
         assert!(matches!(err, AppError::Config(_)));
         assert!(err.to_string().contains(var), "error must name {var}");
     }
+}
+
+#[test]
+fn startup_resync_retry_bounds_fail_closed() {
+    let max_below_initial = ReconcileConfig::from_vars(&vars(&[
+        ("FKST_STARTUP_RESYNC_RETRY_INITIAL_SECS", "10"),
+        ("FKST_STARTUP_RESYNC_RETRY_MAX_SECS", "9"),
+    ]))
+    .expect_err("max below initial must fail");
+    assert!(max_below_initial
+        .to_string()
+        .contains("FKST_STARTUP_RESYNC_RETRY_MAX_SECS"));
+
+    let jitter = ReconcileConfig::from_vars(&vars(&[(
+        "FKST_STARTUP_RESYNC_RETRY_JITTER_PERCENT",
+        "101",
+    )]))
+    .expect_err("jitter above 100 must fail");
+    assert!(jitter
+        .to_string()
+        .contains("FKST_STARTUP_RESYNC_RETRY_JITTER_PERCENT"));
 }
 
 #[test]

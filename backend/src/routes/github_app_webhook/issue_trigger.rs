@@ -115,6 +115,7 @@ mod tests {
     fn state(reconciler: Option<ReconcileHandle>) -> AppState {
         AppState {
             config: Config::default(),
+            recovery: Default::default(),
             github_app: None,
             github_app_webhook_secret: None,
             reconciler,

@@ -22,6 +22,7 @@ fn broader_state(oauth_base: &str) -> AppState {
     config.log.frontend_url = Some("https://app.fkst.example".to_string());
     AppState {
         config,
+        recovery: Default::default(),
         github_app: None,
         github_app_webhook_secret: None,
         reconciler: None,
@@ -36,6 +37,7 @@ fn broader_state(oauth_base: &str) -> AppState {
 fn unconfigured_state() -> AppState {
     AppState {
         config: Config::default(),
+        recovery: Default::default(),
         github_app: None,
         github_app_webhook_secret: None,
         reconciler: None,

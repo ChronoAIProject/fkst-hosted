@@ -97,6 +97,7 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
     // actually served).
     let mut top = OpenApiRouter::with_openapi(openapi::api_doc())
         .routes(routes!(routes::health::health))
+        .routes(routes!(routes::health::readiness))
         // `/metrics` (#144) is TOP-level like `/health`: it carries only counts
         // (no secret) and is served on the ClusterIP-only surface, so Prometheus
         // scrapes it directly.

@@ -7,6 +7,7 @@ use crate::github_app::GithubAppTokens;
 use crate::log_access::LogAccessRegistry;
 use crate::log_bundle_cache::LogBundleCache;
 use crate::reconcile::ReconcileHandle;
+use crate::recovery::RecoveryMonitor;
 use crate::session_backend::SessionBackend;
 use crate::storage::ChronoStorageClient;
 
@@ -20,6 +21,9 @@ use crate::storage::ChronoStorageClient;
 #[derive(Clone)]
 pub struct AppState {
     pub config: Config,
+    /// Startup/full-resync recovery projection. `/ready` and `/metrics` only read
+    /// snapshots; the serialized full-resync coordinator is its sole writer.
+    pub recovery: RecoveryMonitor,
     /// GitHub App token service: `None` when `FKST_GITHUB_APP_ID` is unset
     /// (module disabled). Mints installation tokens for the webhook trigger, the
     /// reconciler's GitHub operations, and session-pod token rotation.

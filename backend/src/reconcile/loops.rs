@@ -5,18 +5,21 @@
 //! serially (deduping a burst of enqueues for the same repo into one pass); two
 //! PRODUCERS keep the queue fed — `run_sweep_loop` re-enqueues every repo with a
 //! live pod (so drift on an existing session is caught) and `run_full_resync_loop`
-//! enumerates the App's installations + repos (so a repo with a pending trigger
-//! but no pod yet is discovered). Both producers FAIL OPEN: an enumeration error is
-//! logged and the loop keeps running.
+//! serially enumerates the App's installations + repos (so a repo with a pending
+//! trigger but no pod yet is discovered). An incomplete full resync retries with
+//! bounded backoff before returning to the ordinary periodic cadence.
 
 use std::collections::HashSet;
-use std::time::Duration;
+use std::future::Future;
+use std::time::{Duration, Instant};
 
+use rand::Rng;
 use tokio::sync::mpsc;
 
 use crate::error::AppError;
 use crate::reconcile::execute::ReconcileCtx;
 use crate::reconcile::repo::reconcile_repo;
+use crate::recovery::{RecoveryMonitor, ResyncResult};
 
 use super::{ReconcileHandle, RepoKey};
 
@@ -110,47 +113,191 @@ async fn sweep_once(ctx: &ReconcileCtx, handle: &ReconcileHandle) -> Result<usiz
     Ok(enqueued)
 }
 
-/// The periodic full resync: at startup + every `full_resync_interval_secs`,
-/// enumerate the App's installations + their repos and enqueue every one, so a repo
-/// with a pending trigger issue but no pod yet is discovered. Fails open (a bad
-/// installation is skipped; an enumeration error is logged, never fatal).
-pub async fn run_full_resync_loop(ctx: ReconcileCtx, handle: ReconcileHandle) {
-    let interval = Duration::from_secs(ctx.config.reconcile.pod_full_resync_interval_secs.max(1));
+/// One serialized full-resync coordinator. It attempts immediately, retries global
+/// and partial failures with bounded exponential backoff, and waits for the ordinary
+/// full-resync interval only after a complete pass. There is exactly one call to
+/// [`full_resync_once`] in flight, so enumeration never overlaps within a process.
+pub async fn run_full_resync_loop(
+    ctx: ReconcileCtx,
+    handle: ReconcileHandle,
+    recovery: RecoveryMonitor,
+) {
+    let periodic_interval =
+        Duration::from_secs(ctx.config.reconcile.pod_full_resync_interval_secs.max(1));
+    let retry_initial_secs = ctx.config.reconcile.startup_resync_retry_initial_secs;
+    let retry_max_secs = ctx.config.reconcile.startup_resync_retry_max_secs;
+    let jitter_percent = ctx.config.reconcile.startup_resync_retry_jitter_percent;
     tracing::info!(
-        ?interval,
-        "reconcile full-resync: started (startup + each interval)"
+        ?periodic_interval,
+        retry_initial_secs,
+        retry_max_secs,
+        jitter_percent,
+        "reconcile full-resync: serialized coordinator started"
     );
-    // tokio's interval fires immediately on the first tick -> the startup resync.
-    let mut ticker = tokio::time::interval(interval);
+
+    run_resync_coordinator(
+        periodic_interval,
+        retry_initial_secs,
+        retry_max_secs,
+        jitter_percent,
+        recovery,
+        move || {
+            let ctx = ctx.clone();
+            let handle = handle.clone();
+            async move { full_resync_once(&ctx, &handle).await }
+        },
+    )
+    .await;
+}
+
+/// Drive one full-resync attempt at a time. The attempt future must finish before
+/// any delay begins, and the next attempt is not constructed until that delay ends;
+/// this ordering is the process-local non-overlap guarantee.
+async fn run_resync_coordinator<F, Fut>(
+    periodic_interval: Duration,
+    retry_initial_secs: u64,
+    retry_max_secs: u64,
+    jitter_percent: u64,
+    recovery: RecoveryMonitor,
+    mut attempt: F,
+) where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<FullResyncSummary, AppError>>,
+{
+    let mut retry = RetryBackoff::new(retry_initial_secs, retry_max_secs);
     loop {
-        ticker.tick().await;
-        match full_resync_once(&ctx, &handle).await {
-            Ok(n) => {
+        let started = Instant::now();
+        match attempt().await {
+            Ok(summary) if summary.is_complete() => {
+                let duration = started.elapsed();
+                recovery.record_attempt(
+                    ResyncResult::Success,
+                    duration,
+                    summary.repositories_enqueued,
+                );
+                retry.reset();
                 tracing::info!(
-                    enqueued = n,
-                    "reconcile full-resync: enumerated installations + repos"
-                )
+                    installations = summary.installations_total,
+                    enqueued = summary.repositories_enqueued,
+                    duration_ms = duration.as_millis(),
+                    next_delay_secs = periodic_interval.as_secs(),
+                    "reconcile full-resync: complete"
+                );
+                tokio::time::sleep(periodic_interval).await;
+            }
+            Ok(summary) => {
+                let duration = started.elapsed();
+                recovery.record_attempt(
+                    ResyncResult::Partial,
+                    duration,
+                    summary.repositories_enqueued,
+                );
+                let base_delay = retry.next_delay();
+                let delay = jittered_delay(base_delay, jitter_percent);
+                tracing::warn!(
+                    installations = summary.installations_total,
+                    failed_installations = summary.installations_failed,
+                    enqueued = summary.repositories_enqueued,
+                    duration_ms = duration.as_millis(),
+                    retry_base_secs = base_delay.as_secs(),
+                    retry_delay_ms = delay.as_millis(),
+                    "reconcile full-resync: partial pass; retrying"
+                );
+                tokio::time::sleep(delay).await;
             }
             Err(error) => {
-                tracing::warn!(error = %error, "reconcile full-resync: failed (fails open; will retry)")
+                let duration = started.elapsed();
+                recovery.record_attempt(ResyncResult::Failure, duration, 0);
+                let base_delay = retry.next_delay();
+                let delay = jittered_delay(base_delay, jitter_percent);
+                tracing::warn!(
+                    error = %error,
+                    duration_ms = duration.as_millis(),
+                    retry_base_secs = base_delay.as_secs(),
+                    retry_delay_ms = delay.as_millis(),
+                    "reconcile full-resync: failed; retrying"
+                );
+                tokio::time::sleep(delay).await;
             }
         }
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RetryBackoff {
+    initial_secs: u64,
+    max_secs: u64,
+    next_secs: u64,
+}
+
+impl RetryBackoff {
+    fn new(initial_secs: u64, max_secs: u64) -> Self {
+        let initial_secs = initial_secs.max(1);
+        let max_secs = max_secs.max(initial_secs);
+        Self {
+            initial_secs,
+            max_secs,
+            next_secs: initial_secs,
+        }
+    }
+
+    fn next_delay(&mut self) -> Duration {
+        let delay = self.next_secs;
+        self.next_secs = self.next_secs.saturating_mul(2).min(self.max_secs);
+        Duration::from_secs(delay)
+    }
+
+    fn reset(&mut self) {
+        self.next_secs = self.initial_secs;
+    }
+}
+
+fn jittered_delay(base: Duration, jitter_percent: u64) -> Duration {
+    if jitter_percent == 0 || base.is_zero() {
+        return base;
+    }
+    let base_ms = u64::try_from(base.as_millis()).unwrap_or(u64::MAX);
+    let spread_ms = base_ms.saturating_mul(jitter_percent.min(100)) / 100;
+    let lower = base_ms.saturating_sub(spread_ms);
+    let upper = base_ms.saturating_add(spread_ms);
+    Duration::from_millis(rand::thread_rng().gen_range(lower..=upper))
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct FullResyncSummary {
+    installations_total: usize,
+    installations_failed: usize,
+    repositories_enqueued: usize,
+}
+
+impl FullResyncSummary {
+    fn is_complete(&self) -> bool {
+        self.installations_failed == 0
+    }
+}
+
 /// Enumerate installations (App-JWT) and each installation's repos
 /// (installation-wide token), enqueuing every repo. A per-installation failure is
-/// logged and skipped; only a failure to mint the App JWT or list installations
-/// surfaces as `Err` (which the loop logs + continues on). Returns the enqueue count.
-async fn full_resync_once(ctx: &ReconcileCtx, handle: &ReconcileHandle) -> Result<usize, AppError> {
+/// logged and counted; only a failure to mint the App JWT or list installations
+/// surfaces as `Err`. The summary makes a per-installation failure an incomplete
+/// pass, so the coordinator retries promptly instead of waiting for the periodic
+/// interval.
+async fn full_resync_once(
+    ctx: &ReconcileCtx,
+    handle: &ReconcileHandle,
+) -> Result<FullResyncSummary, AppError> {
     let app_jwt = ctx.github.app_jwt()?;
     let installations = ctx.listing.list_installations(&app_jwt).await?;
 
-    let mut enqueued = 0usize;
+    let mut summary = FullResyncSummary {
+        installations_total: installations.len(),
+        ..FullResyncSummary::default()
+    };
     for inst in installations {
         let token = match ctx.github.installation_wide_token(inst.id).await {
             Ok(token) => token,
             Err(error) => {
+                summary.installations_failed += 1;
                 tracing::warn!(installation = inst.id, error = %error, "full-resync: installation token mint failed; skipping");
                 continue;
             }
@@ -159,15 +306,16 @@ async fn full_resync_once(ctx: &ReconcileCtx, handle: &ReconcileHandle) -> Resul
             Ok(repos) => {
                 for repo in repos {
                     handle.enqueue((inst.id, repo));
-                    enqueued += 1;
+                    summary.repositories_enqueued += 1;
                 }
             }
             Err(error) => {
+                summary.installations_failed += 1;
                 tracing::warn!(installation = inst.id, error = %error, "full-resync: list repos failed; skipping installation")
             }
         }
     }
-    Ok(enqueued)
+    Ok(summary)
 }
 
 #[cfg(test)]
@@ -250,3 +398,7 @@ mod tests {
         assert!(batch.contains(&key(9, "solo")));
     }
 }
+
+#[cfg(test)]
+#[path = "loops_recovery_tests.rs"]
+mod recovery_tests;

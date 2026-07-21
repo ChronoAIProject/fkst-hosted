@@ -24,6 +24,7 @@ fn app(webhook_secret: bool) -> axum::Router {
         .then(|| secrecy::SecretString::new("dummy-webhook-secret".to_string().into()));
     build_router(AppState {
         config: Config::default(),
+        recovery: Default::default(),
         github_app: None,
         github_app_webhook_secret,
         reconciler: None,
@@ -113,6 +114,7 @@ async fn paths_are_the_trimmed_v1_surface() {
         // Per-run (per-pod-incarnation) log separation: the run listing.
         "/api/v1/logs/{session_id}/runs",
         "/health",
+        "/ready",
         "/metrics",
     ] {
         assert!(
@@ -224,6 +226,9 @@ async fn components_include_the_named_environment_schemas_and_not_the_removed_on
         "LogFileContent",
         // The per-run (per-pod-incarnation) log-separation DTO (issue #568).
         "LogRun",
+        // Recovery readiness is distinct from the unchanged liveness body.
+        "ReadinessResponse",
+        "ReadinessStatus",
     ] {
         assert!(
             schemas.get(expected).is_some(),
@@ -303,6 +308,10 @@ async fn no_operation_requires_security_the_whole_surface_is_open() {
     assert!(
         paths["/health"]["get"].get("security").is_none(),
         "/health must not require security"
+    );
+    assert!(
+        paths["/ready"]["get"].get("security").is_none(),
+        "/ready must not require security"
     );
     assert!(
         paths["/metrics"]["get"].get("security").is_none(),
