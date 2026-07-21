@@ -28,6 +28,7 @@ local spec = {
   },
   fanout = { "devloop_liveness_tick" },
   stall_window = "30s",
+  retry = { max_attempts = 6, base = "5s", cap = "60s" },
 }
 
 local function should_reinject_issue(repo, issue, limits, deadline)
