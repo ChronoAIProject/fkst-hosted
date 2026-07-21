@@ -8,18 +8,22 @@ metadata:
     app.kubernetes.io/name: fkst-control-plane
     app.kubernetes.io/part-of: fkst-hosted
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: fkst-control-plane
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
   template:
     metadata:
       labels:
         app.kubernetes.io/component: control-plane
         app.kubernetes.io/name: fkst-control-plane
         app.kubernetes.io/part-of: fkst-hosted
+        fkst.chronoai.io/leader-serving: "false"
     spec:
       automountServiceAccountToken: true
       serviceAccountName: fkst-ksa
@@ -41,6 +45,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: FKST_LEADER_IDENTITY
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           envFrom:
             - configMapRef:
                 name: fkst-control-plane-config
@@ -62,10 +70,10 @@ spec:
             timeoutSeconds: 7
           readinessProbe:
             httpGet:
-              path: /ready
+              path: /health
               port: http
-            periodSeconds: 10
-            failureThreshold: 3
+            periodSeconds: 5
+            failureThreshold: 2
             timeoutSeconds: 7
           livenessProbe:
             tcpSocket:
@@ -119,6 +127,7 @@ spec:
       targetPort: http
   selector:
     app.kubernetes.io/name: fkst-control-plane
+    fkst.chronoai.io/leader-serving: "true"
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

@@ -149,11 +149,61 @@ actual=$(kubectl --context "$context" auth can-i delete leases.coordination.k8s.
   echo "expected no: delete leases.coordination.k8s.io (got $actual)" >&2
   exit 1
 }
+actual=$(kubectl --context "$context" auth can-i patch pods \
+  --as="$subject" --namespace "$namespace" || true)
+[ "$actual" = "yes" ] || {
+  echo "expected yes: patch pods for leader Service routing (got $actual)" >&2
+  exit 1
+}
 
 kubectl --context "$context" --namespace "$namespace" rollout status \
   deployment/fkst-control-plane --timeout="$timeout" >/dev/null
 kubectl --context "$context" --namespace "$namespace" rollout status \
   deployment/fkst-frontend --timeout="$timeout" >/dev/null
+
+replicas=$(kubectl --context "$context" --namespace "$namespace" get \
+  deployment fkst-control-plane --output jsonpath='{.spec.replicas}')
+available=$(kubectl --context "$context" --namespace "$namespace" get \
+  deployment fkst-control-plane --output jsonpath='{.status.availableReplicas}')
+[ "$replicas" = "2" ] && [ "$available" = "2" ] || {
+  echo "control plane must have two healthy replicas (desired=$replicas available=$available)" >&2
+  exit 1
+}
+
+# The Pods are health-ready for Deployment convergence, while exactly one
+# resync-complete Lease holder publishes the additional Service selector label.
+attempt=0
+leader_count=0
+while [ "$attempt" -lt 60 ]; do
+  leader_count=$(kubectl --context "$context" --namespace "$namespace" get pods \
+    --selector='app.kubernetes.io/name=fkst-control-plane,fkst.chronoai.io/leader-serving=true' \
+    --output name | wc -l | tr -d ' ')
+  [ "$leader_count" = "1" ] && break
+  attempt=$((attempt + 1))
+  sleep 1
+done
+[ "$leader_count" = "1" ] || {
+  echo "expected exactly one Service-published leader, got $leader_count" >&2
+  exit 1
+}
+
+selected_pod=$(kubectl --context "$context" --namespace "$namespace" get pods \
+  --selector='app.kubernetes.io/name=fkst-control-plane,fkst.chronoai.io/leader-serving=true' \
+  --output jsonpath='{.items[0].metadata.name}')
+lease_holder=$(kubectl --context "$context" --namespace "$namespace" get \
+  lease.coordination.k8s.io fkst-control-plane-reconciler \
+  --output jsonpath='{.spec.holderIdentity}')
+[ "$selected_pod" = "$lease_holder" ] || {
+  echo "Service-selected pod does not match Lease holder" >&2
+  exit 1
+}
+lease_transitions=$(kubectl --context "$context" --namespace "$namespace" get \
+  lease.coordination.k8s.io fkst-control-plane-reconciler \
+  --output jsonpath='{.spec.leaseTransitions}')
+case "$lease_transitions" in
+  ''|*[!0-9]*) echo "Lease transition history is missing or invalid" >&2; exit 1 ;;
+esac
+echo "leader   $lease_holder (one Service endpoint; Lease transitions=$lease_transitions)"
 
 ready=$(kubectl --context "$context" --namespace "$namespace" exec \
   deployment/fkst-frontend -- wget -qO- http://fkst-control-plane/ready)
