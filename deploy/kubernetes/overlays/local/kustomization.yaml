@@ -7,6 +7,14 @@ resources:
 patches:
   - target:
       version: v1
+      kind: Namespace
+      name: chronoai-fkst
+    patch: |-
+      - op: add
+        path: /metadata/labels/fkst.chronoai.io~1disposable
+        value: "true"
+  - target:
+      version: v1
       kind: ConfigMap
       name: fkst-control-plane-config
       namespace: chronoai-fkst

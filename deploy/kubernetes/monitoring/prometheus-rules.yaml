@@ -1,0 +1,104 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: fkst-recovery
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/component: recovery-monitoring
+    app.kubernetes.io/name: fkst-recovery
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  groups:
+    - name: fkst.recovery
+      interval: 30s
+      rules:
+        - alert: FKSTControlPlaneScrapeMissing
+          expr: absent(fkst_up{namespace="chronoai-fkst",service="fkst-control-plane-metrics"})
+          for: 2m
+          labels:
+            component: control-plane
+            severity: critical
+          annotations:
+            summary: FKST recovery telemetry is unavailable
+            description: Both control-plane contenders have been absent from recovery telemetry for two minutes.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/RECOVERY-RUNBOOK.md#scrape-missing
+        - alert: FKSTStartupResyncIncomplete
+          expr: max(fkst_startup_resync_complete{namespace="chronoai-fkst",service="fkst-control-plane-metrics"}) < 1
+          for: 5m
+          labels:
+            component: control-plane
+            severity: critical
+          annotations:
+            summary: FKST startup discovery has not completed
+            description: No contender has completed startup discovery within the recovery objective.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/RECOVERY-RUNBOOK.md#startup-resync-incomplete
+        - alert: FKSTRecoveryDegraded
+          expr: max(fkst_leader_state{namespace="chronoai-fkst",service="fkst-control-plane-metrics",state="degraded"}) > 0
+          for: 2m
+          labels:
+            component: control-plane
+            severity: critical
+          annotations:
+            summary: FKST recovery is degraded
+            description: A control-plane contender reports a bounded degraded recovery state.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/RECOVERY-RUNBOOK.md#recovery-degraded-or-stale
+        - alert: FKSTRecoveryStale
+          expr: max(fkst_startup_resync_last_success_timestamp_seconds{namespace="chronoai-fkst",service="fkst-control-plane-metrics"}) > 0 and time() - max(fkst_startup_resync_last_success_timestamp_seconds{namespace="chronoai-fkst",service="fkst-control-plane-metrics"}) > 600
+          for: 1m
+          labels:
+            component: control-plane
+            severity: warning
+          annotations:
+            summary: FKST recovery discovery is stale
+            description: The latest successful discovery pass is older than the combined recovery objective.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/RECOVERY-RUNBOOK.md#recovery-degraded-or-stale
+        - alert: FKSTNoReadyLeader
+          expr: max(fkst_leader_election_enabled{namespace="chronoai-fkst",service="fkst-control-plane-metrics"}) == 1 and sum(fkst_leader_ready{namespace="chronoai-fkst",service="fkst-control-plane-metrics"}) < 1
+          for: 2m
+          labels:
+            component: control-plane
+            severity: critical
+          annotations:
+            summary: FKST has no recovery-ready leader
+            description: Lease election is enabled but no contender has completed acquisition recovery.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/RECOVERY-RUNBOOK.md#no-ready-leader
+        - alert: FKSTLeaderRoutingUnavailable
+          expr: max(fkst_leader_election_enabled{namespace="chronoai-fkst",service="fkst-control-plane-metrics"}) == 1 and sum(fkst_leader_routing_ready{namespace="chronoai-fkst",service="fkst-control-plane-metrics"}) < 1
+          for: 2m
+          labels:
+            component: control-plane
+            severity: critical
+          annotations:
+            summary: FKST leader routing is unavailable
+            description: No recovery-ready contender is published through the control-plane Service.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/RECOVERY-RUNBOOK.md#leader-routing-unavailable
+        - alert: FKSTLeaderLeaseFailures
+          expr: sum(increase(fkst_leader_lease_failures_total{namespace="chronoai-fkst",service="fkst-control-plane-metrics"}[5m])) > 0
+          for: 1m
+          labels:
+            component: control-plane
+            severity: warning
+          annotations:
+            summary: FKST Lease operations are failing
+            description: A contender could not acquire or renew the recovery Lease during the last five minutes.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/RECOVERY-RUNBOOK.md#lease-or-routing-failures
+        - alert: FKSTLeaderRoutingFailures
+          expr: sum(increase(fkst_leader_routing_failures_total{namespace="chronoai-fkst",service="fkst-control-plane-metrics"}[5m])) > 0
+          for: 1m
+          labels:
+            component: control-plane
+            severity: warning
+          annotations:
+            summary: FKST leader publication is failing
+            description: A contender could not update the fixed leader-serving route during the last five minutes.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/RECOVERY-RUNBOOK.md#lease-or-routing-failures
+        - alert: FKSTExcessiveLeaderChurn
+          expr: sum(increase(fkst_leader_transitions_total{namespace="chronoai-fkst",service="fkst-control-plane-metrics",transition="acquired"}[30m])) > 3
+          for: 2m
+          labels:
+            component: control-plane
+            severity: warning
+          annotations:
+            summary: FKST leadership is changing too often
+            description: More than three leadership acquisitions occurred in thirty minutes.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/RECOVERY-RUNBOOK.md#excessive-leader-churn
