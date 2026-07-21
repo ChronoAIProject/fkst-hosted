@@ -1,0 +1,26 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: fkst-control-plane
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/component: recovery-monitoring
+    app.kubernetes.io/name: fkst-control-plane
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  namespaceSelector:
+    matchNames:
+      - chronoai-fkst
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fkst-control-plane-metrics
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      honorLabels: false
+      metricRelabelings:
+        - sourceLabels: [__name__]
+          regex: fkst_leader_identity_info|fkst_leader_observed_holder_info
+          action: drop

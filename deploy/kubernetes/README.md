@@ -15,6 +15,7 @@ context, deletes a resource, or contacts a production cluster implicitly.
 | `base/` | Namespace, Pod Security labels, service accounts, quota/limits, sandbox NetworkPolicy, env-store and Lease RBAC, configuration, workloads, Services, PDBs, Ingress, and the OpenSandbox base template. |
 | `external-secrets/` | Provider-neutral External Secrets Operator bindings. It contains remote record names and target key names, never credential values. |
 | `overlays/local/` | Disposable local-cluster overlay. Its Kubernetes provider reads source Secrets from `fkst-recovery-source`, outside the namespace being reconstructed. |
+| `monitoring/` | Optional Prometheus Operator Service, ServiceMonitor, and fixed-label recovery alerts. It is intentionally separate from the base overlay. |
 | `overlays/local/durable-store/` | Cross-namespace, Secret-only Role and RoleBinding for the encrypted environment store. |
 | `overlays/local-migration/` | Temporary local overlay that enables one-time migration from legacy namespace-local profile pairs. |
 | `migrations/` | Temporary legacy ConfigMap/Secret read/delete RBAC; never part of the steady overlay. |
@@ -22,6 +23,8 @@ context, deletes a resource, or contacts a production cluster implicitly.
 | `migrate-environment-store.sh` | Convergent legacy migration followed by removal and denial verification of temporary permissions. |
 | `restore-namespace.sh` | Ordered, non-destructive namespace convergence. It requires an explicit context and waits for secret materialization before workloads. |
 | `verify-namespace.sh` | Redacted live verification of security, RBAC, ExternalSecret, rollout, route, and recovery-readiness contracts. |
+| `run-disaster-drill.sh` | Fail-closed kind-only namespace-loss drill with deterministic runtime reconstruction and redacted evidence. |
+| `RECOVERY-RUNBOOK.md` | Alert response, escalation, rollback boundaries, recovery objectives, and disaster-drill procedure. |
 | `validate-manifests.sh` | Deterministic render and structural/security policy checks; also runs shellcheck and kubeconform when installed. |
 
 The base runs two control-plane replicas with rolling updates and Kubernetes
@@ -48,6 +51,11 @@ must patch it to the reviewed provider and bind provider workload identity to
 the service account used by that provider. The checked-in local overlay is only
 a same-cluster stand-in for disaster testing; it is not a production secret
 manager.
+
+The local overlay is also the only overlay that marks `chronoai-fkst` with
+`fkst.chronoai.io/disposable=true`. The base namespace deliberately omits that
+label. Validation fails if the marker leaks into `base/` or appears on the
+durable source namespace.
 
 The provider exposes three logical records:
 
@@ -187,6 +195,60 @@ denials:
 ```bash
 deploy/kubernetes/verify-envstore-rbac.sh --context kind-opensandbox-local
 ```
+
+## Recovery monitoring
+
+The optional monitoring overlay requires the Prometheus Operator CRDs. It adds
+a metrics-only Service that selects both control-plane contenders, a
+ServiceMonitor, and a PrometheusRule:
+
+```bash
+kubectl --context kind-opensandbox-local get customresourcedefinition \
+  servicemonitors.monitoring.coreos.com prometheusrules.monitoring.coreos.com
+kubectl --context kind-opensandbox-local apply \
+  -k deploy/kubernetes/monitoring
+```
+
+The ServiceMonitor drops the two identity-bearing info metrics before ingestion.
+Alerts use only fixed namespace/service selectors and bounded recovery series;
+their labels and annotations contain no dynamic repository, issue, user,
+installation, session, proposal, holder, identity, or credential values. Keep
+the overlay optional in clusters without the Operator.
+
+See [RECOVERY-RUNBOOK.md](RECOVERY-RUNBOOK.md) for the alert-to-response map,
+escalation windows, rollback limits, and recovery objectives.
+
+## Disposable recovery drill
+
+The checked-in drill is destructive by design and fail-closed by construction.
+It accepts only a non-production `kind-*` context, only the canonical target
+namespace with an exact confirmation, and only a target carrying the local
+disposable label. The separately labelled durable namespace, one exact test
+repository with a prepared live runtime, an encrypted environment sentinel, and
+a server-side restore preflight must all pass before the single namespace
+delete.
+
+```bash
+deploy/kubernetes/run-disaster-drill.sh \
+  --context kind-opensandbox-local \
+  --target-namespace chronoai-fkst \
+  --confirm-delete chronoai-fkst \
+  --durable-namespace fkst-recovery-source \
+  --repository '<owner>/<test-repository>' \
+  --sentinel-user-id '<numeric-user-id>' \
+  --sentinel-name '<normalized-profile-name>' \
+  --evidence-dir '<artifact-directory>' \
+  --timeout-seconds 1800
+```
+
+The runner invokes `restore-namespace.sh`, waits for the same sorted
+deterministic session set, verifies the environment content hash and secret-key
+inventory, and records the achieved RTO. JSON and Markdown evidence contain only
+bounded state, counts, timestamps, and SHA-256 projections. They never contain
+raw context, repository, session, user, issue, Secret value, token, or command
+log data. The monthly `.github/workflows/recovery-drill.yml` job runs this exact
+script on the protected `fkst-recovery-drill` self-hosted runner and uploads the
+redacted artifact even on failure.
 
 ## Environment overlays
 
