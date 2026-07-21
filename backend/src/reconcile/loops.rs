@@ -398,3 +398,7 @@ mod tests {
         assert!(batch.contains(&key(9, "solo")));
     }
 }
+
+#[cfg(test)]
+#[path = "loops_recovery_tests.rs"]
+mod recovery_tests;
