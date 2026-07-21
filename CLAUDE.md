@@ -1429,13 +1429,20 @@ data:
   FKST_FRONTEND_URL: https://app.chronoai-fkst.local
 
   # ---- optional ----
-  # Auth model: "all" = any GitHub user; "allowlist" = only FKST_ACCESS_ALLOWED_USERS
-  # (empty list => deny all). Unset = today's behavior (allowlist if the list is set,
-  # else open). A bad value fails closed at startup.
+  # Auth model: "all" = any GitHub user; "allowlist" = only
+  # FKST_ACCESS_ALLOWED_USERS plus FKST_GLOBAL_ADMINS (empty ordinary list =>
+  # deny everyone except global admins). Unset = today's behavior (allowlist if
+  # the ordinary list is set, else open). A bad value fails closed at startup.
   # FKST_AUTH_MODEL: allowlist
-  # Allow-list of numeric GitHub user IDs (consulted under the allowlist model, or
-  # when the model is unset and this is set); unset = any authenticated user.
-  # FKST_ACCESS_ALLOWED_USERS: "<your numeric github user id>"
+  # Comma-separated GitHub logins (case-insensitive; optional leading @). Numeric
+  # user IDs remain supported as a rename-safe alternative; they are not required.
+  # FKST_ACCESS_ALLOWED_USERS: "<your-github-login>"
+  # Deployment-wide administrators. They always pass the service gate and the
+  # dashboard spans every account/repository where this GitHub App is installed,
+  # with cross-installation session, outcome, log, and observe read access.
+  # Cross-account GitHub mutations still use the caller's user token and remain
+  # subject to GitHub's own permissions.
+  # FKST_GLOBAL_ADMINS: "<your-github-login>"
   # Work-issue authority gate (default OFF = legacy permissive). "true" => only a
   # session's trigger author, its ### Session Collaborators, and the repo's admins /
   # org owners may raise work issues; anyone else's work-label issue is rejected
