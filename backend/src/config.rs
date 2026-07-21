@@ -17,6 +17,7 @@ use serde::Deserialize;
 
 use crate::env_config::EnvConfig;
 use crate::error::AppError;
+use crate::leader_config::LeaderElectionConfig;
 use crate::log_config::LogConfig;
 use crate::osb_config::OpensandboxConfig;
 use crate::reconcile_config::ReconcileConfig;
@@ -399,6 +400,8 @@ pub struct Config {
     /// Model B reconciler knobs (`FKST_*`, issue #359 §4). Config surface only —
     /// no behaviour reads these yet (PR5b wires the loop; PR6 flips Model B on).
     pub reconcile: ReconcileConfig,
+    /// Optional Kubernetes Lease ownership for the reconciler task group.
+    pub leader: LeaderElectionConfig,
     /// Optional chrono-storage log-streaming config (`FKST_STORAGE_*` /
     /// `FKST_NYXID_*`). `None` when the feature is unset (log streaming
     /// disabled); a partial config fails closed at startup (see
@@ -428,6 +431,7 @@ impl Default for Config {
             opensandbox: None,
             env: EnvConfig::default(),
             reconcile: ReconcileConfig::default(),
+            leader: LeaderElectionConfig::default(),
             storage: None,
             log: LogConfig::default(),
         }
@@ -510,6 +514,7 @@ impl Config {
         // PR6 flip) can read it. Shares the same `vars` snapshot; fails closed on
         // its own cadence / token-refresh bounds internally.
         let reconcile = ReconcileConfig::from_vars(&vars)?;
+        let leader = LeaderElectionConfig::from_vars(&vars)?;
 
         // Pod-per-session dispatch settings (FKST_POD_*). Off by default; when
         // an operator turns it on, the image + namespace must be real and the
@@ -603,6 +608,11 @@ impl Config {
             // closed at startup even with dispatch off.
             rate_pools: parse_rate_pools(pod.rate_pools.as_deref().unwrap_or(""))?,
         };
+        if leader.enabled && !pod.dispatch {
+            return Err(AppError::Config(
+                "FKST_LEADER_ELECTION_ENABLED=true requires FKST_POD_DISPATCH=true".to_string(),
+            ));
+        }
 
         // OpenSandbox session-backend config (FKST_OSB_*). Validated ONLY when pod
         // dispatch is on AND the selected backend is opensandbox; otherwise skipped
@@ -672,6 +682,7 @@ impl Config {
             opensandbox,
             env,
             reconcile,
+            leader,
             storage,
             log,
         })
@@ -709,6 +720,18 @@ mod tests {
         assert_eq!(config.pod.service_account, "fkst-session-runner");
         assert!(config.pod.image.is_none());
         assert_eq!(config.request_timeout_secs, 30);
+        assert!(!config.leader.enabled);
+    }
+
+    #[test]
+    fn leader_election_requires_dispatch() {
+        let err = Config::from_vars(vars(&[
+            ("FKST_LEADER_ELECTION_ENABLED", "true"),
+            ("FKST_LEADER_IDENTITY", "pod-a"),
+        ]))
+        .expect_err("election without reconcile work must fail closed");
+        assert!(err.to_string().contains("FKST_LEADER_ELECTION_ENABLED"));
+        assert!(err.to_string().contains("FKST_POD_DISPATCH"));
     }
 
     #[test]

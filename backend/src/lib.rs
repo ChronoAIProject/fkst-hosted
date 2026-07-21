@@ -35,6 +35,8 @@ pub mod log_config;
 // machine-readable verdict frame. Reused by the env-validation pod (wired here)
 // and, later, the session's pre-agent install step.
 pub mod install;
+// Fail-closed configuration for optional Kubernetes Lease ownership.
+pub mod leader_config;
 pub mod models;
 // OpenSandbox session-backend config knobs (`FKST_OSB_*`, issue #420). Validated
 // only when pod dispatch is on AND `FKST_POD_MODE=opensandbox`; `main.rs` maps the
