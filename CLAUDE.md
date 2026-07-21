@@ -1252,6 +1252,13 @@ repo/org list appears.
 > which is a **different entity** from your GitHub App: *GitHub → Settings →
 > Developer settings → **OAuth Apps*** (NOT *GitHub Apps*).
 
+> ⚠️ **One OAuth App per environment.** A classic OAuth App accepts only a
+> **single** authorization callback URL (unlike a GitHub App, which allows up to
+> 10), and the callback must be the deployment's own origin — so production and
+> local (different origins) each need their **own** OAuth App, exactly as the
+> GitHub App does (§14.3). Separate registrations also isolate the client secrets
+> (a leaked local dev secret can't touch prod).
+
 **Register the classic OAuth App** (*Settings → Developer settings → OAuth Apps →
 New OAuth App*; for an org:
 `https://github.com/organizations/<org>/settings/applications/new`):
