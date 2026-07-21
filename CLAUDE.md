@@ -1230,6 +1230,68 @@ authorizing users"**:
 - Never commit any secret output (private key PEM, client secret, webhook
   secret) — deliver them as k8s Secrets (§14.7).
 
+#### 14.3.1 Optional — broader repo/org visibility (a separate **classic OAuth App**)
+
+By default the dashboard lists only the repos/orgs where the fkst App is
+**installed**: the login token is a GitHub **App** user-to-server token, and
+GitHub scopes those to the App's installations. To let a signed-in user see
+**every** repo/org they can access — including ones the App is *not* installed
+on yet (e.g. to find a repo to install it on) — the control plane supports a
+**second, broader-scoped credential**: a **classic OAuth App** carrying `repo` +
+`read:org`, used ONLY to enumerate the caller's repos/orgs. The App token still
+drives installations, the reconciler, and the bot.
+
+This is **entirely optional and additive**: leave `FKST_GITHUB_BROADER_OAUTH_*`
+unset and the dashboard behaves exactly as today (installed repos only, no
+connect action). When configured, the SPA shows a **"See all your repositories ·
+Connect"** action; each user authorizes the OAuth App once and their full
+repo/org list appears.
+
+> ⚠️ A GitHub **App** *cannot* do this — its user tokens are installation-scoped
+> and ignore classic OAuth scopes. You must register a **classic OAuth App**,
+> which is a **different entity** from your GitHub App: *GitHub → Settings →
+> Developer settings → **OAuth Apps*** (NOT *GitHub Apps*).
+
+**Register the classic OAuth App** (*Settings → Developer settings → OAuth Apps →
+New OAuth App*; for an org:
+`https://github.com/organizations/<org>/settings/applications/new`):
+
+| Setting | Value |
+|---|---|
+| Application name | your choice (e.g. `fkst broader visibility`) |
+| Homepage URL | anything reachable (the repo URL is fine) |
+| Authorization callback URL | **`<FKST_PUBLIC_BASE_URL>/api/v1/auth/github/broader/callback`** — locally `https://api.chronoai-fkst.local:8443/api/v1/auth/github/broader/callback`. It MUST equal `FKST_PUBLIC_BASE_URL` (§14.6) + that exact path, or the OAuth return 400s. |
+
+Then **Register application**, copy the **Client ID**, and **Generate a new
+client secret** (shown once — save it). Classic OAuth Apps declare no scopes at
+registration; the control plane requests `repo` + `read:org` per authorization,
+and each user grants them on the consent screen. (Every OAuth-App setting,
+including the callback URL, stays editable after creation.)
+
+**Wire the credentials — all-or-nothing** (set BOTH or neither; a lone half is a
+fail-closed startup error, mirroring the App OAuth pair):
+
+| Output | Goes to |
+|---|---|
+| **Client ID** | `FKST_GITHUB_BROADER_OAUTH_CLIENT_ID` — the §14.6 ConfigMap (public) |
+| **Client secret** | `FKST_GITHUB_BROADER_OAUTH_CLIENT_SECRET` — the §14.7 Secret (never committed) |
+
+**Post-registration** — nothing else server-side: the `/api/v1/auth/github/broader`
++ `/api/v1/auth/github/broader/callback` endpoints mount automatically once the
+pair is set; restart the control plane to pick up the new env (§17). Then in the
+dashboard, click **"See all your repositories · Connect"** → authorize the OAuth
+App (`repo` + `read:org`) → non-installed repos/orgs appear.
+
+- The broader token is a **classic** token (no expiry, no refresh — each user
+  authorizes once), delivered to the SPA in the URL **fragment**
+  (`#broader_token=`), **same-user-verified** server-side before use, and NEVER
+  logged. A wrong/foreign token is ignored (falls back to installed-only) — never
+  an error.
+- **Security note:** a `repo`+`read:org` token can read all of that user's
+  private repos; it lives in the browser and is sent only on the `/overview`
+  call. Keep the callback origin HTTPS and treat the client secret like any App
+  secret.
+
 #### 14.4 Build the image and load it into kind
 
 The build context is the repo checkout (`$FKST_REPO`, from §3); the engine
@@ -1360,12 +1422,32 @@ data:
   FKST_FRONTEND_URL: https://app.chronoai-fkst.local
 
   # ---- optional ----
-  # Allow-list of numeric GitHub user IDs; unset = any authenticated user.
+  # Auth model: "all" = any GitHub user; "allowlist" = only FKST_ACCESS_ALLOWED_USERS
+  # (empty list => deny all). Unset = today's behavior (allowlist if the list is set,
+  # else open). A bad value fails closed at startup.
+  # FKST_AUTH_MODEL: allowlist
+  # Allow-list of numeric GitHub user IDs (consulted under the allowlist model, or
+  # when the model is unset and this is set); unset = any authenticated user.
   # FKST_ACCESS_ALLOWED_USERS: "<your numeric github user id>"
-  # Seed-issue packages (whitespace-separated owner/repo@ref:path entries);
-  # unset = the built-in default package root.
+  # Work-issue authority gate (default OFF = legacy permissive). "true" => only a
+  # session's trigger author, its ### Session Collaborators, and the repo's admins /
+  # org owners may raise work issues; anyone else's work-label issue is rejected
+  # (fkst-unauthorized) and not picked up. Fails safe on a lookup error.
+  # FKST_ENFORCE_WORK_ISSUE_AUTHZ: "true"
+  # Broader repo/org visibility (§14.3.1): the classic OAuth App's Client ID (its
+  # secret goes in the §14.7 Secret). Unset = installed repos only.
+  # FKST_GITHUB_BROADER_OAUTH_CLIENT_ID: <your OAuth App's Client ID>
+  # Default fkst-manifest the install-seeder references (see the auto-seed line
+  # below). Default: ChronoAIProject/fkst-packages@fkst-hosted:manifests/default-workflows.json
+  # Set blank to disable the manifest-driven seed body (falls back to FKST_SEED_PACKAGES).
+  # FKST_DEFAULT_MANIFEST: <owner>/<repo>@<ref>:manifests/<name>.json
+  # Auto-seed a trigger on a NEW App install. DEFAULT IS NOW "true": a successful
+  # install auto-creates one ### Manifest trigger (FKST_DEFAULT_MANIFEST, driven by
+  # the packages' auto-detected work labels). Set "false" to disable.
+  # FKST_SEED_TRIGGER_ISSUE_ON_INSTALL: "false"
+  # Legacy seed packages (used only when FKST_DEFAULT_MANIFEST is blank);
+  # whitespace-separated owner/repo@ref:path.
   # FKST_SEED_PACKAGES: "<owner>/<repo>@<ref>:<path>"
-  # FKST_SEED_TRIGGER_ISSUE_ON_INSTALL: "true"
   # Log streaming to an object store (off when unset; needs
   # FKST_NYXID_CLIENT_SECRET in the Secret below when enabled):
   # FKST_STORAGE_BASE_URL: <storage proxy base url>
@@ -1405,6 +1487,12 @@ kubectl -n chronoai-fkst create secret generic fkst-control-plane-secret \
   --from-literal=FKST_GITHUB_APP_WEBHOOK_SECRET='<the webhook secret from the §14.3 App form>' \
   --from-literal=FKST_GITHUB_OAUTH_CLIENT_SECRET='<your App client secret>'
 ```
+
+> **Optional — broader visibility (§14.3.1):** if you registered the classic
+> OAuth App, add
+> `--from-literal=FKST_GITHUB_BROADER_OAUTH_CLIENT_SECRET='<your OAuth App client secret>'`
+> to the command above (paired with `FKST_GITHUB_BROADER_OAUTH_CLIENT_ID` in the
+> §14.6 ConfigMap). Omit both to keep broader visibility off.
 
 The webhook secret must be the **exact string you entered in the §14.3
 registration form** — the endpoint verifies every delivery's HMAC against it,
