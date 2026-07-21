@@ -94,11 +94,10 @@ deploy/kubernetes/verify-namespace.sh --context kind-opensandbox-local
 ```
 
 The restore script is non-destructive, never changes kube context, materializes
-credentials from outside `chronoai-fkst`, and waits for `/ready` after startup
-resync. See `deploy/kubernetes/README.md` for the secret-record contract and
-environment-overlay boundary. Named environment profiles remain namespace-local
-until the durable `EnvironmentProfileStore` work in recovery epic #625 lands;
-do not claim full namespace-loss recovery before that dependency is verified.
+credentials from outside `chronoai-fkst`, restores access to the encrypted
+environment-profile store outside that namespace, and waits for `/ready` after
+startup resync. See `deploy/kubernetes/README.md` for the secret-record,
+durable-store, migration, and environment-overlay contracts.
 
 > **Time budget:** ~30–45 minutes on a fast connection. **Machine:** macOS or Linux,
 > 8+ CPU cores and 12 GB+ RAM allocated to Docker. Apple Silicon works — every
@@ -1341,31 +1340,37 @@ node).
 
 #### 14.5 Env-store RBAC
 
-The backend persists each user's named environments as paired
-`fkst-env-<id>-<name>` ConfigMap + Secret in its own namespace
-(`backend/src/k8s/env_store.rs`), and **validates** every profile by running its
+The backend persists each user's named environment as one encrypted
+`fkst-env-<id>-<name>` Secret in an overlay-selected namespace outside
+`chronoai-fkst` (`backend/src/k8s/durable_env_store/`). It **validates** every profile by running its
 install commands in a throwaway, hard-isolated **validation Pod** the backend
 creates directly (`backend/src/k8s/env_validator.rs` →
 `backend/src/session_backend/k8s/validation.rs`) — this is independent of
-`FKST_POD_MODE`, so it happens even in opensandbox mode. So `fkst-ksa` needs this
-Role — least-privilege verbs on secrets + configmaps (the store) **plus `pods`,
-`pods/log`, and `pods/status`** (validation-pod create/status/logs/delete + the
-crash-recovery GC sweep). Session pods remain the opensandbox server's job — the
-backend never creates *those* — but the env-validation pod is the one exception
-where the control plane touches Pods directly. **Without the pod rules, the first
+`FKST_POD_MODE`, so it happens even in opensandbox mode. The application
+namespace Role therefore contains only `pods`, `pods/log`, and `pods/status`
+permissions for validation and its crash-recovery GC sweep. A second Role in the
+durable namespace grants only Secret create/get/list/update/delete. ConfigMaps,
+watch, patch, and durable-namespace Pods remain denied. Session pods remain the
+opensandbox server's job, but the env-validation pod is the one exception where
+the control plane touches Pods directly. **Without the pod rules, the first
 `PUT /environment-profiles` (i.e. any "New environment" from the UI) fails with
 `pods is forbidden`:**
 
 ```bash
 kubectl --context kind-opensandbox-local apply \
   -f "$FKST_REPO/deploy/kubernetes/base/env-store-rbac.yaml"
+kubectl --context kind-opensandbox-local apply \
+  -k "$FKST_REPO/deploy/kubernetes/overlays/local/durable-store"
 "$FKST_REPO/deploy/kubernetes/verify-envstore-rbac.sh" \
   --context kind-opensandbox-local
 ```
 
 The checked-in manifest is the canonical RBAC source. The verifier requires an
 explicit context, checks every required grant, and also proves representative
-write/escalation verbs stay denied.
+write/escalation verbs stay denied. Legacy ConfigMap/Secret pairs use the
+temporary `local-migration` overlay and
+`deploy/kubernetes/migrate-environment-store.sh`; steady deployments must never
+retain that migration Role.
 
 #### 14.6 ConfigMap
 
@@ -1411,6 +1416,11 @@ data:
   FKST_STARTUP_RESYNC_RETRY_INITIAL_SECS: "5"
   FKST_STARTUP_RESYNC_RETRY_MAX_SECS: "60"
   FKST_STARTUP_RESYNC_RETRY_JITTER_PERCENT: "20"
+
+  # ---- durable named environments ----
+  # Must differ from chronoai-fkst. The stable encryption key is delivered by
+  # the external §14.7 Secret and must be backed up with the durable records.
+  FKST_ENV_STORE_NAMESPACE: fkst-recovery-source
 
   # ---- LLM (external prerequisite, §14.1) ----
   FKST_LLM_BASE_URL: <your OpenAI-compatible endpoint, e.g. https://api.openai.com/v1>
@@ -1504,7 +1514,8 @@ kubectl -n chronoai-fkst create secret generic fkst-control-plane-secret \
   --from-file=FKST_GITHUB_APP_PRIVATE_KEY_PEM='<path/to/downloaded.private-key.pem>' \
   --from-literal=FKST_GITHUB_APP_SLUG='<your-app-slug>' \
   --from-literal=FKST_GITHUB_APP_WEBHOOK_SECRET='<the webhook secret from the §14.3 App form>' \
-  --from-literal=FKST_GITHUB_OAUTH_CLIENT_SECRET='<your App client secret>'
+  --from-literal=FKST_GITHUB_OAUTH_CLIENT_SECRET='<your App client secret>' \
+  --from-literal=FKST_ENV_STORE_ENCRYPTION_KEY='<standard-base64 32-byte key>'
 ```
 
 > **Optional — broader visibility (§14.3.1):** if you registered the classic
@@ -1953,7 +1964,8 @@ warning — that's the §16.2 mkcert CA at work). With the GitHub App configured
 ```bash
 "$FKST_REPO/deploy/kubernetes/verify-envstore-rbac.sh" \
   --context kind-opensandbox-local
-# Includes: create secrets = yes; create validation pods = yes;
+# Includes: durable-namespace Secret CRUD = yes; application-namespace
+# ConfigMap/Secret access = no; create validation pods = yes;
 # pods/status get = yes; pod update/patch/watch = no.
 ```
 
@@ -2070,7 +2082,8 @@ hostnames.)
 | Webhook deliveries respond `202` but nothing ever happens | The backend ACKed a payload it could not parse (deliberate — a `4xx`/`5xx` would make GitHub hammer redeliveries): usually the App's webhook content type is not `application/json` (§14.3). The parse failure is in the backend logs. |
 | Trigger issue ignored for minutes (session does start eventually) | The webhook path is down — smee client not running, the §16 ingress unreachable, or the App's webhook inactive / pointing at the wrong channel (§14.2/§14.3). The reconciler's full resync (default 600 s) is the fallback that eventually catches up; check the smee client output and the App's Recent Deliveries. |
 | Session sandbox pod stuck `Pending` (untainted nodes full) | Each session requests 2 CPU / 4 Gi (`FKST_OSB_SESSION_CPU`/`MEMORY`) on the gVisor node — enlarge the Docker VM or lower those values (§16 sizing note). |
-| Named-environment API calls fail with `Forbidden` | The env-store RBAC (§14.5) wasn't applied — the backend needs the `fkst-control-plane-envstore` Role bound to `fkst-ksa`. |
+| Named-environment API calls fail with `Forbidden` | The env-store RBAC (§14.5) is incomplete: `fkst-ksa` needs validation-Pod access in `chronoai-fkst` and Secret CRUD through `fkst-control-plane-durable-envstore` in the namespace selected by `FKST_ENV_STORE_NAMESPACE`. |
+| Backend fails startup with an environment-store key/decryption error | Supply exactly one stable standard-base64 32-byte key through the external control-plane record. Do not replace a lost key or delete the durable records; follow the provider's backup/recovery procedure. |
 
 ---
 
