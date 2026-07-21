@@ -225,7 +225,7 @@ async fn ensure_session_uploads_the_completeness_sentinel_last() {
         uploads[0].contains("/var/lib/fkst/creds/github-token"),
         "first upload targets the OpenSandbox credential root"
     );
-    assert!(uploads[0].contains(r#""mode":400"#));
+    assert!(uploads[0].contains(r#""mode":600"#));
     assert!(
         !uploads[0].contains(".creds-complete"),
         "the sentinel must not be first"
@@ -234,7 +234,7 @@ async fn ensure_session_uploads_the_completeness_sentinel_last() {
         uploads[1].contains("/var/lib/fkst/creds/.creds-complete"),
         "the sentinel is uploaded LAST"
     );
-    assert!(uploads[1].contains(r#""mode":400"#));
+    assert!(uploads[1].contains(r#""mode":600"#));
 }
 
 #[tokio::test]

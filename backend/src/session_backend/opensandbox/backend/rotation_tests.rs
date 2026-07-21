@@ -98,7 +98,7 @@ async fn deliver_credential_rewrites_a_single_file_when_creds_are_intact() {
     assert!(
         uploads[0].contains("/var/lib/fkst/creds/github-token") && uploads[0].contains("ghs_new")
     );
-    assert!(uploads[0].contains(r#""mode":400"#));
+    assert!(uploads[0].contains(r#""mode":600"#));
     assert!(
         !uploads[0].contains(".creds-complete"),
         "no sentinel on the single-file path"
@@ -249,6 +249,6 @@ async fn deliver_credential_delivers_only_the_single_file_when_the_cache_is_empt
     // Only the single rotated file — no full bundle (empty cache), no sentinel.
     assert_eq!(uploads.len(), 1);
     assert!(uploads[0].contains("/var/lib/fkst/creds/github-token"));
-    assert!(uploads[0].contains(r#""mode":400"#));
+    assert!(uploads[0].contains(r#""mode":600"#));
     assert!(!uploads[0].contains(".creds-complete"));
 }
