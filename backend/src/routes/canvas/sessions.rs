@@ -30,6 +30,7 @@ use crate::reconcile::desired::PodLiveness;
 use crate::reconcile::registry::parse_registration;
 use crate::routes::canvas::github::RepoPull;
 use crate::routes::canvas::types::{render_package_ref, IssueDetail};
+use crate::routes::canvas::work_projection::work_issues_by_session;
 use crate::routes::dashboard::{bearer_token, status_labels, DashboardGithub, IssueWithMeta};
 use crate::state::AppState;
 
@@ -289,6 +290,26 @@ pub(super) async fn repo_sessions(
         .issues_by_label_all(&inst_token, &owner, &name, trigger_label)
         .await?;
 
+    // Parse first, then resolve all sessions' manifest-expanded label sets in one
+    // batch. This mirrors the reconciler and bounds shared manifest/package reads
+    // within one dashboard request.
+    let mut registrations = Vec::new();
+    let mut parse_errors = HashMap::new();
+    for trigger in &triggers {
+        match parse_registration(installation.id, &repo_ref, &trigger.summary) {
+            Ok(reg) => registrations.push(reg),
+            Err((issue, reason)) => {
+                parse_errors.insert(issue, reason);
+            }
+        }
+    }
+    let mut work_by_session =
+        work_issues_by_session(&gh, &inst_token, &owner, &name, &mut registrations).await?;
+    let mut registrations_by_issue: HashMap<_, _> = registrations
+        .into_iter()
+        .map(|reg| (reg.trigger_issue, reg))
+        .collect();
+
     // Live runtime phases, keyed by session id. Best-effort: a missing backend
     // or an observe failure renders liveness null, never fails the scan.
     let liveness_by_session: HashMap<String, PodLiveness> = match state.session_backend.as_ref() {
@@ -310,15 +331,9 @@ pub(super) async fn repo_sessions(
 
     let mut sessions = Vec::with_capacity(triggers.len());
     for trigger in &triggers {
-        match parse_registration(installation.id, &repo_ref, &trigger.summary) {
-            Ok(reg) => {
-                let work: Vec<IssueWithMeta> = match reg.def.work_label.as_deref() {
-                    Some(work_label) => {
-                        gh.issues_by_label_all(&inst_token, &owner, &name, work_label)
-                            .await?
-                    }
-                    None => Vec::new(),
-                };
+        match registrations_by_issue.remove(&trigger.summary.number) {
+            Some(reg) => {
+                let work = work_by_session.remove(&reg.session_id).unwrap_or_default();
                 let work_numbers: HashSet<i64> =
                     work.iter().map(|issue| issue.summary.number).collect();
                 let prs: Vec<PrDetail> = all_devloop_prs
@@ -362,7 +377,10 @@ pub(super) async fn repo_sessions(
                     prs,
                 });
             }
-            Err((_, reason)) => {
+            None => {
+                let reason = parse_errors
+                    .remove(&trigger.summary.number)
+                    .unwrap_or_else(|| "trigger registration could not be resolved".to_string());
                 sessions.push(invalid_session_detail(trigger, reason, trigger_label))
             }
         }

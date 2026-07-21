@@ -30,6 +30,7 @@ pub(crate) mod test_support;
 mod trigger_body;
 mod types;
 mod work_item;
+mod work_projection;
 
 pub use types::IssueDetail;
 

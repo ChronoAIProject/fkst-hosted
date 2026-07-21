@@ -148,6 +148,100 @@ async fn session_outcomes_groups_files_by_pr() {
 }
 
 #[tokio::test]
+async fn session_outcomes_projects_manifest_discovered_work_labels() {
+    let server = MockServer::start().await;
+    mount_installation_covering_site(&server).await;
+    mount_app_token(&server, "acme", "site", 77).await;
+    let trigger_body = "### Session Name\ndefault-workflows\n\n### Manifest\n\
+acme/manifests@main:bundles/default.json\n";
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/issues"))
+        .and(query_param("labels", "fkst-substrate-trigger"))
+        .and(query_param("state", "all"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([issue_json(
+                2,
+                trigger_body,
+                &["fkst-substrate-trigger"],
+                "open"
+            )])),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/manifests/contents/bundles/default.json"))
+        .and(query_param("ref", "main"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaVersion": 1,
+            "name": "default-workflows",
+            "packages": ["acme/pkgs@main:packages/workflow-dev"]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/repos/acme/pkgs/contents/packages/workflow-dev/fkst.toml",
+        ))
+        .and(query_param("ref", "main"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string("[github]\nwork_labels = [\"fkst-dev\"]\n"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/issues"))
+        .and(query_param("labels", "fkst-dev"))
+        .and(query_param("state", "all"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([issue_json(
+                3,
+                "implemented work",
+                &["fkst-dev"],
+                "closed"
+            )])),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/pulls"))
+        .and(query_param("state", "all"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                "number": 6,
+                "title": "devloop implementation for #3",
+                "html_url": "https://github.com/acme/site/pull/6",
+                "state": "closed",
+                "merged_at": "2026-07-04T00:00:00Z",
+                "user": { "login": "fkst-test[bot]" },
+                "head": { "ref": "devloop/issue/acme/site/3/ready-1" }
+            }])),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/pulls/6/files"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(&server)
+        .await;
+
+    let mut state = test_state(&server.uri(), Some(test_app(&server.uri())));
+    state.config.reconcile.github_bot_login = Some("fkst-test[bot]".to_string());
+    let Json(view) = session_outcomes(
+        State(state),
+        Path(("acme".to_string(), "site".to_string(), 2)),
+        viewer_user(),
+        auth_headers(),
+    )
+    .await
+    .expect("manifest-only session projects outcomes");
+
+    assert_eq!(view.prs.len(), 1);
+    assert_eq!(view.prs[0].number, 6);
+    assert_eq!(view.prs[0].work_issue, Some(3));
+    assert!(view.prs[0].merged);
+}
+
+#[tokio::test]
 async fn session_outcomes_flags_files_error_but_keeps_the_pr() {
     let server = MockServer::start().await;
     mount_installation_covering_site(&server).await;

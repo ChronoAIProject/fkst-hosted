@@ -32,6 +32,7 @@ use crate::github_identity::GithubUser;
 use crate::models::RepoRef;
 use crate::reconcile::registry::parse_registration;
 use crate::routes::canvas::sessions::{devloop_prs, validate_repo_segment};
+use crate::routes::canvas::work_projection::work_issues_by_session;
 use crate::routes::dashboard::{bearer_token, DashboardGithub};
 use crate::state::AppState;
 
@@ -163,17 +164,19 @@ pub(super) async fn session_outcomes(
         })?;
 
     // Resolve this session's devloop PRs the same way the sessions endpoint does:
-    // work-label issues → work-issue numbers → bot devloop PRs linked to them. A
-    // malformed trigger (no parseable work label) simply has no outcomes.
+    // effective work-label issues → work-issue numbers → bot devloop PRs linked
+    // to them. A malformed trigger simply has no outcomes.
     let session_prs = match parse_registration(installation_id, &repo_ref, &trigger.summary) {
-        Ok(reg) => {
-            let work = match reg.def.work_label.as_deref() {
-                Some(label) => {
-                    gh.issues_by_label_all(&inst_token, &owner, &name, label)
-                        .await?
-                }
-                None => Vec::new(),
-            };
+        Ok(mut reg) => {
+            let mut projected = work_issues_by_session(
+                &gh,
+                &inst_token,
+                &owner,
+                &name,
+                std::slice::from_mut(&mut reg),
+            )
+            .await?;
+            let work = projected.remove(&reg.session_id).unwrap_or_default();
             let work_numbers: HashSet<i64> =
                 work.iter().map(|issue| issue.summary.number).collect();
             let pulls = gh.list_pulls_all(&inst_token, &owner, &name).await?;

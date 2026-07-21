@@ -16,12 +16,13 @@
 //! without a `[github]` section simply contributes nothing. Everything is a plain
 //! authenticated `contents` fetch + a lenient TOML parse — no engine, no Lua.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 
 use crate::goals::trigger_parse::PackageRef;
+use crate::reconcile::desired::SessionRegistration;
 
 /// The slice of a package `fkst.toml` this module reads. `#[serde(default)]` +
 /// no `deny_unknown_fields`: every other manifest section (`[code]`, `[lib_deps]`,
@@ -105,6 +106,40 @@ pub async fn resolve_work_labels(
         }
     }
     labels
+}
+
+/// Resolve every registration's complete work-label set: its explicit
+/// `### Work Label` plus every label auto-discovered from its effective package
+/// set. Results are keyed by session id and sorted/deduplicated by label.
+///
+/// Registrations must already carry their manifest-expanded
+/// [`SessionRegistration::effective_packages`]. Discovery is cached per config
+/// hash for the duration of this call so sessions with identical immutable
+/// package configuration do not repeat the same GitHub contents reads.
+pub async fn resolve_work_label_sets(
+    http: &reqwest::Client,
+    api_base: &str,
+    token: &SecretString,
+    regs: &[SessionRegistration],
+) -> HashMap<String, Vec<String>> {
+    let mut discovered_cache: HashMap<String, BTreeSet<String>> = HashMap::new();
+    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    for reg in regs {
+        let discovered = match discovered_cache.get(&reg.config_hash) {
+            Some(set) => set.clone(),
+            None => {
+                let set = resolve_work_labels(http, api_base, token, &reg.effective_packages).await;
+                discovered_cache.insert(reg.config_hash.clone(), set.clone());
+                set
+            }
+        };
+        let mut labels = discovered;
+        if let Some(work_label) = &reg.def.work_label {
+            labels.insert(work_label.clone());
+        }
+        out.insert(reg.session_id.clone(), labels.into_iter().collect());
+    }
+    out
 }
 
 /// Fetch + parse one package's `fkst.toml` via the GitHub raw contents API.
