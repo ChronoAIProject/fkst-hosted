@@ -135,6 +135,8 @@ export type CanvasModalsSlice = Pick<
   | 'createPackagePlaceholder'
   | 'addPackage'
   | 'removePackageAria'
+  | 'createManifestsLabel'
+  | 'createManifestsHint'
   | 'createWorkLabelLabel'
   | 'createAutoMergeLabel'
   | 'createLogAccessLabel'

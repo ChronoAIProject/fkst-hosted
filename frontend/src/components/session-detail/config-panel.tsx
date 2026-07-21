@@ -16,8 +16,9 @@ function ConfigRow({ label, children }: { label: string; children: ReactNode }) 
 }
 
 /** ConfigPanel: the FULL session configuration that is frozen at registration
- *  (work label, environment, auto-merge, output language, the log-access
- *  allowlist, and the work-item collaborators). None of these are surfaced
+ *  (work label, environment, auto-merge, output language, the fkst-manifest
+ *  references, the log-access allowlist, and the work-item collaborators). None
+ *  of these are surfaced
  *  anywhere else in the UI today, so the detail drawer is the one place a viewer
  *  can confirm what a session was actually registered with. A scalar the session
  *  did not carry renders as a muted em-dash rather than a blank cell, and an
@@ -64,6 +65,10 @@ export function ConfigPanel({ session }: { session: SessionDetail }) {
   // download); same optional/nullable wire shape, same empty-as-none handling.
   const collaborators = session.collaborators ?? [];
 
+  // manifests is the frozen fkst-manifest package source; same optional/nullable
+  // wire shape, same empty-as-none handling as the other lists.
+  const manifests = session.manifests ?? [];
+
   return (
     <section className="flex flex-col gap-2.5">
       <SectionLabel>{t.configLabel}</SectionLabel>
@@ -77,6 +82,17 @@ export function ConfigPanel({ session }: { session: SessionDetail }) {
           <ConfigRow label={t.configEnvironment}>{environment}</ConfigRow>
           <ConfigRow label={t.configAutoMerge}>{autoMerge}</ConfigRow>
           <ConfigRow label={t.configOutputLang}>{outputLang}</ConfigRow>
+          <ConfigRow label={t.configManifest}>
+            {manifests.length === 0 ? (
+              <span className="text-ghost">{t.configManifestNone}</span>
+            ) : (
+              <span className="flex flex-wrap gap-1.5">
+                {manifests.map((ref) => (
+                  <Chip key={ref}>{ref}</Chip>
+                ))}
+              </span>
+            )}
+          </ConfigRow>
           <ConfigRow label={t.configLogAccess}>
             {logAccess.length === 0 ? (
               <span className="text-ghost">{t.configLogAccessNone}</span>

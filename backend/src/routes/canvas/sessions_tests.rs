@@ -18,7 +18,8 @@ use crate::session_backend::test_support::FakeSessionBackend;
 use crate::session_spec::derive_session_id;
 
 const VALID_TRIGGER_BODY: &str = "### Session Name\nsite\n\n### Packages\n\
-acme/pkgs@main:packages/devloop\n\n### Work Label\nsite-build\n\n\
+acme/pkgs@main:packages/devloop\n\n### Manifest\nacme/manifests@main:bundles/site\n\n\
+### Work Label\nsite-build\n\n\
 ### Log Access Allowlist\nalice\n\n### Session Collaborators\nworker\n\n\
 ### Output Language\nzh-CN\n";
 
@@ -194,6 +195,11 @@ async fn repo_sessions_assembles_the_full_detail() {
         vec!["acme/pkgs@main:packages/devloop".to_string()]
     );
     assert_eq!(
+        session.manifests,
+        vec!["acme/manifests@main:bundles/site".to_string()],
+        "the `### Manifest` references round-trip onto the detail"
+    );
+    assert_eq!(
         session.log_access,
         vec!["alice".to_string()],
         "the `### Log Access Allowlist` grantees round-trip onto the detail"
@@ -258,6 +264,10 @@ async fn repo_sessions_assembles_the_full_detail() {
     assert!(
         invalid.collaborators.is_empty(),
         "an unparseable trigger exposes no collaborators"
+    );
+    assert!(
+        invalid.manifests.is_empty(),
+        "an unparseable trigger exposes no manifests"
     );
     assert!(
         invalid.output_lang.is_none(),

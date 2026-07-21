@@ -66,6 +66,10 @@ pub struct SessionDetail {
     pub environment: Option<String>,
     /// The `### Packages`, rendered as `owner/repo@ref:path`.
     pub packages: Vec<String>,
+    /// The `### Manifest` fkst-manifest references, rendered as
+    /// `owner/repo@ref:path` (each names a JSON bundle the server expands into a
+    /// package list); empty when invalid or none were specified.
+    pub manifests: Vec<String>,
     /// The `### Log Access Allowlist` grantees (extra log-download logins/ids,
     /// beyond the trigger author + global admins); empty when invalid or none
     /// were specified. Frozen by config-immutability after registration.
@@ -196,6 +200,7 @@ fn invalid_session_detail(
         auto_merge: None,
         environment: None,
         packages: Vec::new(),
+        manifests: Vec::new(),
         log_access: Vec::new(),
         collaborators: Vec::new(),
         output_lang: None,
@@ -339,6 +344,12 @@ pub(super) async fn repo_sessions(
                     auto_merge: Some(reg.auto_merge),
                     environment: reg.def.environment.clone(),
                     packages: reg.def.packages.iter().map(render_package_ref).collect(),
+                    manifests: reg
+                        .def
+                        .manifest_refs
+                        .iter()
+                        .map(render_package_ref)
+                        .collect(),
                     log_access: reg.log_access.clone(),
                     collaborators: reg.collaborators.clone(),
                     output_lang: reg.def.output_lang.clone(),

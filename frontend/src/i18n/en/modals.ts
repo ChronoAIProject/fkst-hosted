@@ -22,6 +22,9 @@ export const canvasModals: CanvasModalsSlice = {
   createPackagePlaceholder: 'owner/repo@ref:path',
   addPackage: 'Add package',
   removePackageAria: 'Remove package {n}',
+  createManifestsLabel: 'Manifests (optional)',
+  createManifestsHint:
+    'fkst-manifest references, one owner/repo@ref:path per line. A manifest is a bundle the server expands into packages — enough on its own, so a session can reference only a manifest.',
   createWorkLabelLabel: 'Work label (optional)',
   createAutoMergeLabel: 'Auto-merge',
   createLogAccessLabel: 'Log access allowlist (optional)',

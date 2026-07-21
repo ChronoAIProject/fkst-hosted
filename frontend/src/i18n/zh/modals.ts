@@ -21,6 +21,9 @@ export const canvasModals: CanvasModalsSlice = {
   createPackagePlaceholder: 'owner/repo@ref:path',
   addPackage: '添加 package',
   removePackageAria: '移除第 {n} 个 package',
+  createManifestsLabel: 'Manifest（可选）',
+  createManifestsHint:
+    'fkst-manifest 引用，每行一个 owner/repo@ref:path。manifest 是服务端展开成 package 列表的清单 —— 单独即可使用，因此会话可以只引用一个 manifest。',
   createWorkLabelLabel: '工作标签（可选）',
   createAutoMergeLabel: '自动合并',
   createLogAccessLabel: '日志访问允许列表（可选）',

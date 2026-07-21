@@ -24,11 +24,22 @@ function parseAllowlist(raw: string): string[] {
     .filter(Boolean);
 }
 
+/** Split a free-text manifest textarea into references — one per line, trimmed,
+ *  blanks dropped. Each surviving line is sent as its own `### Manifest` entry
+ *  (a line carrying more than one ref fails the backend's round-trip check). */
+function parseLines(raw: string): string[] {
+  return raw
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 /** Build the POST body from the form state — optional sections are omitted
  *  entirely when blank, mirroring how the backend renders the trigger body. */
 export function buildCreateRequest(form: {
   name: string;
   packages: string[];
+  manifests: string;
   workLabel: string;
   environment: string;
   autoMerge: boolean;
@@ -40,6 +51,8 @@ export function buildCreateRequest(form: {
     name: form.name.trim(),
     packages: form.packages.map((p) => p.trim()).filter(Boolean),
   };
+  const manifests = parseLines(form.manifests);
+  if (manifests.length > 0) request.manifests = manifests;
   const workLabel = form.workLabel.trim();
   if (workLabel) request.work_label = workLabel;
   const environment = form.environment.trim();
@@ -151,6 +164,7 @@ export function CreateTriggerModal({
   const toast = useToast();
   const [sessionName, setSessionName] = useState('');
   const [packages, setPackages] = useState<string[]>(['']);
+  const [manifests, setManifests] = useState('');
   const [workLabel, setWorkLabel] = useState('');
   const [environment, setEnvironment] = useState('');
   const [autoMerge, setAutoMerge] = useState(false);
@@ -177,7 +191,12 @@ export function CreateTriggerModal({
     };
   }, [apiFetch]);
 
-  const valid = sessionName.trim() !== '' && packages.some((p) => p.trim() !== '');
+  // A session needs SOME package source: at least one explicit package OR a
+  // manifest reference (a manifest supplies the packages — epic #594 I7). The
+  // work label stays optional and never gates submit.
+  const hasPackageSource =
+    packages.some((p) => p.trim() !== '') || parseLines(manifests).length > 0;
+  const valid = sessionName.trim() !== '' && hasPackageSource;
 
   // Early collision advisory: the trimmed work label exactly matches one an open
   // session on this repo already claims. This blocks submit client-side, but the
@@ -206,6 +225,7 @@ export function CreateTriggerModal({
         buildCreateRequest({
           name: sessionName,
           packages,
+          manifests,
           workLabel,
           environment,
           autoMerge,
@@ -313,6 +333,23 @@ export function CreateTriggerModal({
             {cc.addPackage}
           </button>
         </fieldset>
+
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="trigger-manifests" className={FIELD_LABEL}>
+            {cc.createManifestsLabel}
+          </label>
+          <textarea
+            id="trigger-manifests"
+            value={manifests}
+            onChange={(e) => setManifests(e.target.value)}
+            placeholder={cc.createPackagePlaceholder}
+            spellCheck={false}
+            autoComplete="off"
+            rows={2}
+            className={cn(FIELD_INPUT, 'font-mono resize-y')}
+          />
+          <p className="font-mono text-[11px] text-ghost">{cc.createManifestsHint}</p>
+        </div>
 
         <div className="flex flex-col gap-1.5">
           <label htmlFor="trigger-work-label" className={FIELD_LABEL}>

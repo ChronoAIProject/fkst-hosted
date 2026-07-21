@@ -32,6 +32,7 @@ const session = (over: Partial<SessionDetail> = {}): SessionDetail => ({
   prs: [],
   log_access: null,
   collaborators: null,
+  manifests: null,
   output_lang: null,
   ...over,
 });
@@ -91,6 +92,7 @@ describe('TabPackages', () => {
           environment: 'video-studio',
           auto_merge: true,
           output_lang: 'zh',
+          manifests: ['acme/manifests@main:bundles/site'],
           log_access: ['alice', 'bob'],
           collaborators: ['worker', 'helper'],
         })}
@@ -118,6 +120,26 @@ describe('TabPackages', () => {
     expect(screen.getByText('Collaborators')).toBeInTheDocument();
     expect(screen.getByText('worker')).toBeInTheDocument();
     expect(screen.getByText('helper')).toBeInTheDocument();
+
+    // Manifests (the frozen fkst-manifest source) rendered as its own row, one
+    // chip per reference.
+    expect(screen.getByText('Manifests')).toBeInTheDocument();
+    expect(screen.getByText('acme/manifests@main:bundles/site')).toBeInTheDocument();
+  });
+
+  it('renders an explicit "None" for an empty manifests list', () => {
+    // Empty list, null, and undefined must all read as "no manifests" — an unset
+    // manifest list is a real, frozen state (a package-only session).
+    for (const manifests of [[] as string[], null, undefined]) {
+      const { unmount } = render(
+        <TabPackages session={session({ manifests })} observe={idle} />
+      );
+      expect(screen.getByText('Manifests')).toBeInTheDocument();
+      // The manifest row (and the default-null log-access/collaborators rows)
+      // read "None" here.
+      expect(screen.getAllByText('None').length).toBeGreaterThanOrEqual(1);
+      unmount();
+    }
   });
 
   it('renders "No" when auto-merge is disabled', () => {

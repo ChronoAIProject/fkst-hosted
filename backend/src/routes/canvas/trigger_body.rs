@@ -22,8 +22,15 @@ use crate::routes::canvas::types::render_package_ref;
 pub struct CreateSessionRequest {
     /// The session name (`### Session Name`; also the issue title).
     pub name: String,
-    /// Fully-qualified package references (`owner/repo@ref:path`), at least one.
+    /// Fully-qualified package references (`owner/repo@ref:path`). Optional since
+    /// a `### Manifest` reference can supply the packages (epic #594 I7), but at
+    /// least one of `packages` / `manifests` must be non-empty.
     pub packages: Vec<String>,
+    /// Optional fully-qualified fkst-manifest references (`owner/repo@ref:path`,
+    /// the SAME grammar as `packages`): each names a JSON bundle the server
+    /// expands into a package list (`### Manifest`). Empty renders no section.
+    #[serde(default)]
+    pub manifests: Vec<String>,
     /// The optional explicit work label (`### Work Label`).
     pub work_label: Option<String>,
     /// The optional named environment (`### Environment`).
@@ -85,14 +92,31 @@ fn trimmed(value: Option<&str>) -> Option<&str> {
 fn render_trigger_body(req: &CreateSessionRequest) -> Result<String, AppError> {
     let name = req.name.trim();
     require_inline(name, "name")?;
-    if req.packages.is_empty() {
+    // A session needs SOME package source. Since I7 a `### Manifest` reference can
+    // supply the packages, so the hard `### Packages`-required rule is relaxed to
+    // "≥1 of packages / manifests" — mirroring the trigger parser's own rule.
+    let packages: Vec<&str> = req
+        .packages
+        .iter()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .collect();
+    let manifests: Vec<&str> = req
+        .manifests
+        .iter()
+        .map(|m| m.trim())
+        .filter(|m| !m.is_empty())
+        .collect();
+    if packages.is_empty() && manifests.is_empty() {
         return Err(AppError::Validation(
-            "at least one package is required".to_string(),
+            "at least one package or manifest is required".to_string(),
         ));
     }
-    let packages: Vec<&str> = req.packages.iter().map(|p| p.trim()).collect();
     for package in &packages {
         require_inline(package, "packages entry")?;
+    }
+    for manifest in &manifests {
+        require_inline(manifest, "manifests entry")?;
     }
     let work_label = trimmed(req.work_label.as_deref());
     if let Some(value) = work_label {
@@ -127,7 +151,14 @@ fn render_trigger_body(req: &CreateSessionRequest) -> Result<String, AppError> {
 
     let mut body = String::new();
     push_section(&mut body, "### Session Name", &[name]);
-    push_section(&mut body, "### Packages", &packages);
+    // `### Packages` is omitted when empty (a manifest-only session); `### Manifest`
+    // follows it, matching the template's section order.
+    if !packages.is_empty() {
+        push_section(&mut body, "### Packages", &packages);
+    }
+    if !manifests.is_empty() {
+        push_section(&mut body, "### Manifest", &manifests);
+    }
     if let Some(value) = work_label {
         push_section(&mut body, "### Work Label", &[value]);
     }
@@ -164,8 +195,23 @@ pub(super) fn validated_trigger_body(req: &CreateSessionRequest) -> Result<Strin
     };
 
     let rendered_packages: Vec<String> = spec.packages.iter().map(render_package_ref).collect();
-    let requested_packages: Vec<String> =
-        req.packages.iter().map(|p| p.trim().to_string()).collect();
+    let requested_packages: Vec<String> = req
+        .packages
+        .iter()
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .collect();
+    // Manifests parse with the SAME grammar as packages, so — like packages — a
+    // rendered `### Manifest` line that parses back to a different reference (or an
+    // entry that fans out) fails closed. Compare the parsed refs entry-for-entry.
+    let rendered_manifests: Vec<String> =
+        spec.manifest_refs.iter().map(render_package_ref).collect();
+    let requested_manifests: Vec<String> = req
+        .manifests
+        .iter()
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty())
+        .collect();
     // The parser splits a log-access line on ANY whitespace/comma (and strips a
     // leading '@'), so one requested entry can silently become several
     // grantees — and that list doubles as the session's authorized-logins
@@ -189,6 +235,7 @@ pub(super) fn validated_trigger_body(req: &CreateSessionRequest) -> Result<Strin
         .collect();
     let round_trips = spec.name == req.name.trim()
         && rendered_packages == requested_packages
+        && rendered_manifests == requested_manifests
         && spec.work_label.as_deref() == trimmed(req.work_label.as_deref())
         && spec.environment.as_deref() == trimmed(req.environment.as_deref())
         && spec.output_lang.as_deref() == trimmed(req.output_lang.as_deref())

@@ -46,6 +46,7 @@ describe('buildCreateRequest', () => {
     const req = buildCreateRequest({
       name: '  nightly  ',
       packages: ['  a/b@main:pkg  ', ''],
+      manifests: '   \n  ',
       workLabel: '   ',
       environment: '   ',
       autoMerge: false,
@@ -60,6 +61,7 @@ describe('buildCreateRequest', () => {
     const req = buildCreateRequest({
       name: 'n',
       packages: ['p'],
+      manifests: 'o/m@main:bundle-a\n  o/m@main:bundle-b  ',
       workLabel: 'ready',
       environment: 'staging',
       autoMerge: true,
@@ -70,12 +72,34 @@ describe('buildCreateRequest', () => {
     expect(req).toEqual({
       name: 'n',
       packages: ['p'],
+      manifests: ['o/m@main:bundle-a', 'o/m@main:bundle-b'],
       work_label: 'ready',
       environment: 'staging',
       auto_merge: true,
       log_access: ['alice', 'bob'],
       collaborators: ['worker', 'helper'],
       output_lang: 'English',
+    });
+  });
+
+  it('parses the manifest textarea one reference per line, dropping blanks', () => {
+    const req = buildCreateRequest({
+      name: 'n',
+      packages: [],
+      manifests: 'o/m@main:a\n\n  o/m@main:b  \n',
+      workLabel: '',
+      environment: '',
+      autoMerge: false,
+      logAccess: '',
+      collaborators: '',
+      outputLang: '',
+    });
+    // A manifest-only request omits packages entirely (empty array) and carries
+    // exactly the two non-blank lines.
+    expect(req).toEqual({
+      name: 'n',
+      packages: [],
+      manifests: ['o/m@main:a', 'o/m@main:b'],
     });
   });
 });
@@ -210,6 +234,76 @@ describe('CreateTriggerModal', () => {
     });
     // Nothing was typed into log access, so it must be absent (distinct field).
     expect((sentBody as Record<string, unknown>).log_access).toBeUndefined();
+  });
+
+  it('sends the manifest textarea as its own request field, one ref per line', async () => {
+    const user = userEvent.setup();
+    let sentBody: unknown;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes(ENV_PATH)) return jsonResponse({ environment_profiles: [] });
+        if (url.includes(SESSIONS_PATH)) {
+          sentBody = JSON.parse(String(init?.body));
+          return jsonResponse({ issue_number: 8, html_url: 'https://github.com/acme/app/issues/8' });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+    renderModal();
+
+    await user.type(await screen.findByLabelText('Session name'), 'nightly');
+    await user.type(screen.getByLabelText('Packages 1'), 'a/b@main:pkg');
+    // The manifest field is present and labelled as its own input; two lines
+    // become two request entries.
+    await user.type(
+      screen.getByLabelText('Manifests (optional)'),
+      'o/m@main:bundle-a\no/m@main:bundle-b'
+    );
+    await user.click(screen.getByRole('button', { name: 'Create trigger issue' }));
+
+    await waitFor(() => expect(sentBody).toBeDefined());
+    expect(sentBody).toMatchObject({
+      name: 'nightly',
+      packages: ['a/b@main:pkg'],
+      manifests: ['o/m@main:bundle-a', 'o/m@main:bundle-b'],
+    });
+  });
+
+  it('allows a manifest-only submit with no packages and no work label', async () => {
+    const user = userEvent.setup();
+    let sentBody: unknown;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes(ENV_PATH)) return jsonResponse({ environment_profiles: [] });
+        if (url.includes(SESSIONS_PATH)) {
+          sentBody = JSON.parse(String(init?.body));
+          return jsonResponse({ issue_number: 9, html_url: 'https://github.com/acme/app/issues/9' });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+    renderModal();
+
+    await user.type(await screen.findByLabelText('Session name'), 'nightly');
+    const submit = screen.getByRole('button', { name: 'Create trigger issue' });
+    // With no package source yet, submit is blocked.
+    expect(submit).toBeDisabled();
+
+    // A manifest reference alone is a valid package source — submit unblocks.
+    await user.type(screen.getByLabelText('Manifests (optional)'), 'o/m@main:bundle');
+    expect(submit).toBeEnabled();
+    await user.click(submit);
+
+    await waitFor(() => expect(sentBody).toBeDefined());
+    expect(sentBody).toMatchObject({ name: 'nightly', manifests: ['o/m@main:bundle'] });
+    // No packages typed and none defaulted: the empty array is sent, work label absent.
+    const body = sentBody as Record<string, unknown>;
+    expect(body.packages).toEqual([]);
+    expect(body.work_label).toBeUndefined();
   });
 
   it('surfaces a server error and raises no toast when create fails', async () => {
