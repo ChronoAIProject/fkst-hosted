@@ -14,6 +14,7 @@ fn create_request() -> CreateSessionRequest {
     CreateSessionRequest {
         name: "site".to_string(),
         packages: vec!["acme/pkgs@main:packages/devloop".to_string()],
+        manifests: Vec::new(),
         work_label: Some("site-build".to_string()),
         environment: None,
         auto_merge: Some(true),
@@ -270,6 +271,46 @@ async fn create_session_allows_when_no_existing_sessions() {
     .expect("201");
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(created.issue_number, 23);
+}
+
+#[tokio::test]
+async fn create_session_from_a_manifest_with_no_work_label_succeeds() {
+    let server = MockServer::start().await;
+    // A manifest-only request (no explicit packages) with no work label: the
+    // pre-flight is skipped (no explicit label) and the create must proceed —
+    // the `### Manifest` reference is a valid package source on its own (I7).
+    Mock::given(method("POST"))
+        .and(path("/repos/acme/site/issues"))
+        .and(header("authorization", "Bearer user-token"))
+        .and(body_partial_json(serde_json::json!({
+            "title": "site",
+            "labels": ["fkst-substrate-trigger"]
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+            "number": 25,
+            "html_url": "https://github.com/acme/site/issues/25"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let state = test_state(&server.uri(), None);
+    let (status, Json(created)) = create_session(
+        State(state),
+        Path(("acme".to_string(), "site".to_string())),
+        viewer_user(),
+        auth_headers(),
+        Json(CreateSessionRequest {
+            packages: Vec::new(),
+            manifests: vec!["acme/manifests@main:bundles/site".to_string()],
+            work_label: None,
+            ..create_request()
+        }),
+    )
+    .await
+    .expect("201");
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(created.issue_number, 25);
 }
 
 #[tokio::test]

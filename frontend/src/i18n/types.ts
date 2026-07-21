@@ -235,6 +235,10 @@ export interface SiteContent {
       addPackage: string;
       /** `{n}` placeholder (1-based row index). */
       removePackageAria: string;
+      /** Manifest textarea (one `owner/repo@ref:path` per line) — a fkst-manifest
+       *  the server expands into packages (`### Manifest`). */
+      createManifestsLabel: string;
+      createManifestsHint: string;
       createWorkLabelLabel: string;
       createEnvironmentLabel: string;
       createAutoMergeLabel: string;
@@ -434,6 +438,10 @@ export interface SiteContent {
       configEnvironment: string;
       configAutoMerge: string;
       configOutputLang: string;
+      /** fkst-manifest references (`### Manifest`) frozen at registration. */
+      configManifest: string;
+      /** Rendered when the manifest list is empty. */
+      configManifestNone: string;
       configLogAccess: string;
       /** Work-item authority list (`### Session Collaborators`); distinct from
        *  the log-access allowlist. */

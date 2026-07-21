@@ -104,6 +104,10 @@ export interface SessionDetail {
    *  {@link log_access} (log-download access). Optional: undefined until the
    *  backend populates it. */
   collaborators?: string[] | null;
+  /** `### Manifest` fkst-manifest references (`owner/repo@ref:path`), each a JSON
+   *  bundle the server expands into a package list. Optional/nullable on the wire
+   *  (mirrors {@link collaborators}): treat every empty shape as "no manifests". */
+  manifests?: string[] | null;
   /** Preferred natural-language for the session's output. Optional: populated
    *  by a later item, undefined until then. */
   output_lang?: string | null;
@@ -120,8 +124,12 @@ export interface RepoSessionsResponse {
 
 export interface CreateSessionRequest {
   name: string;
-  /** At least one `owner/repo@ref:path` reference. */
+  /** `owner/repo@ref:path` references. Optional when `manifests` supplies the
+   *  packages, but at least one of `packages` / `manifests` must be non-empty. */
   packages: string[];
+  /** Optional fkst-manifest references (`owner/repo@ref:path`, same grammar as
+   *  `packages`) the server expands into a package list (`### Manifest`). */
+  manifests?: string[];
   work_label?: string;
   environment?: string;
   auto_merge?: boolean;
