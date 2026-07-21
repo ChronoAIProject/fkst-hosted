@@ -53,6 +53,7 @@ pub(crate) fn test_state(server_uri: &str, github_app: Option<GithubAppTokens>) 
     };
     AppState {
         config,
+        recovery: Default::default(),
         github_app,
         github_app_webhook_secret: None,
         reconciler: None,

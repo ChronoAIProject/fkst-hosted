@@ -262,6 +262,7 @@ async fn main() -> ExitCode {
 
     let app = match build_router(AppState {
         config,
+        recovery,
         github_app,
         github_app_webhook_secret,
         reconciler,

@@ -705,6 +705,7 @@ mod tests {
         let (handle, rx) = reconcile_channel(16);
         let state = AppState {
             config: Config::default(),
+            recovery: Default::default(),
             github_app: None,
             github_app_webhook_secret: None,
             reconciler: Some(handle),
@@ -787,6 +788,7 @@ mod tests {
         }"#;
         let state = AppState {
             config: Config::default(),
+            recovery: Default::default(),
             github_app: None,
             github_app_webhook_secret: None,
             reconciler: None,
