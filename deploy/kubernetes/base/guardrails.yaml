@@ -1,0 +1,74 @@
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: sandbox-limits
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 100m
+        memory: 256Mi
+      default:
+        cpu: "1"
+        memory: 1Gi
+      max:
+        cpu: "4"
+        memory: 8Gi
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: sandbox-quota
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  hard:
+    requests.cpu: "20"
+    requests.memory: 40Gi
+    limits.cpu: "40"
+    limits.memory: 80Gi
+    pods: "50"
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox-lockdown
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  podSelector:
+    matchLabels:
+      opensandbox.io/workload: sandbox
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: opensandbox-system
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.169.254/32
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16

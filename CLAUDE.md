@@ -55,10 +55,12 @@ fkst-hosted integrates with the following ChronoAI platform services. When doing
 
 ## FKST Local Deployment Guide
 
-> The complete local deployment guide, embedded in full below. **This is the
-> single source of truth** — there is no standalone copy (the former
-> `opensandbox-developer-guide.md` was deleted; the READMEs and code comments
-> link here). The guide must stay safe for public distribution: no
+> The complete local deployment guide is embedded below. Its platform setup,
+> safety rules, and operating procedure are authoritative; the canonical
+> namespace-scoped Kubernetes objects live under `deploy/kubernetes/` so they
+> can be rendered and restored rather than copied from an operator laptop. The
+> former `opensandbox-developer-guide.md` was deleted. Both this guide and the
+> checked-in deployment sources must stay safe for public distribution: no
 > internal/production identifiers (private repo URLs, real domains, registry
 > paths, cluster/project names, real App/user IDs) — only `<placeholders>`,
 > `127.0.0.1` addresses, and the `*.chronoai-fkst.local` hosts-file hostnames.
@@ -72,10 +74,31 @@ services themselves** — the backend control plane and the frontend SPA, built
 from this repository and deployed into the tenant namespace — everything needed
 to develop and test the whole system end to end.
 
-The guide is **self-contained**: every values file and manifest you need is
-included inline. The only external inputs are public container images and Helm
-charts from the upstream [OpenSandbox](https://github.com/opensandbox-group/OpenSandbox)
-project (plus one vendored chart — see §3).
+The guide is **self-contained**: platform bootstrap examples remain inline, and
+the FKST namespace manifests, ExternalSecret bindings, restore automation, and
+live verifier are checked in under `deploy/kubernetes/`. Inline namespace YAML
+explains the contract but must not become a second maintained deployment copy;
+update the checked-in source first. The only external inputs are public
+container images, Helm charts from the upstream
+[OpenSandbox](https://github.com/opensandbox-group/OpenSandbox) project (plus
+one vendored chart — see §3), and deployment-owned non-secret configuration and
+external credential records.
+
+For an existing local cluster with OpenSandbox and External Secrets Operator
+installed, the canonical namespace path is:
+
+```bash
+deploy/kubernetes/validate-manifests.sh --context kind-opensandbox-local
+deploy/kubernetes/restore-namespace.sh --context kind-opensandbox-local
+deploy/kubernetes/verify-namespace.sh --context kind-opensandbox-local
+```
+
+The restore script is non-destructive, never changes kube context, materializes
+credentials from outside `chronoai-fkst`, and waits for `/ready` after startup
+resync. See `deploy/kubernetes/README.md` for the secret-record contract and
+environment-overlay boundary. Named environment profiles remain namespace-local
+until the durable `EnvironmentProfileStore` work in recovery epic #625 lands;
+do not claim full namespace-loss recovery before that dependency is verified.
 
 > **Time budget:** ~30–45 minutes on a fast connection. **Machine:** macOS or Linux,
 > 8+ CPU cores and 12 GB+ RAM allocated to Docker. Apple Silicon works — every
@@ -500,7 +523,10 @@ kubectl create namespace opensandbox-system
 ### 8. Platform manifests
 
 Two manifests: the BatchSandbox base template the server stamps sandboxes from,
-and the tenant-namespace guardrails. Write both, then apply.
+and the tenant-namespace guardrails. Their canonical forms are
+`deploy/kubernetes/base/opensandbox-template.yaml`, `namespace.yaml`,
+`service-accounts.yaml`, and `guardrails.yaml`. The inline copies below explain
+the manual bootstrap path; keep them aligned with those checked-in sources.
 
 **Guardrails are non-negotiable.** They are namespace-scoped and do NOT inherit;
 a tenant namespace without them runs untrusted code with kube-API and network
@@ -1343,6 +1369,11 @@ write/escalation verbs stay denied.
 
 #### 14.6 ConfigMap
 
+`deploy/kubernetes/base/configmap.yaml` is the canonical common configuration.
+An environment overlay must patch its App login/client ID, access policy,
+provider endpoints, images, and public origins without copying the object.
+The imperative file below is retained for the from-scratch manual path.
+
 Fill in the four `<…>` placeholders (LLM endpoint/model and your GitHub App's
 slug + Client ID). Optional features stay commented out:
 
@@ -1460,6 +1491,11 @@ the downward API.)
 
 #### 14.7 Secret
 
+Canonical deployments use `deploy/kubernetes/external-secrets/`; the provider
+record and target key contract is documented in `deploy/kubernetes/README.md`.
+The imperative Secret below is a local bootstrap fallback only and is not a
+namespace-reconstruction source.
+
 ```bash
 kubectl -n chronoai-fkst create secret generic fkst-control-plane-secret \
   --from-literal=FKST_LLM_API_KEY='<your LLM api key>' \
@@ -1489,6 +1525,10 @@ keeping `FKST_GITHUB_BOT_LOGIN` set to any placeholder (required while
 (the webhook endpoint is not mounted while the webhook secret is unset).
 
 #### 14.8 Deployment + Service
+
+The canonical Deployment, Service, and disruption policy are in
+`deploy/kubernetes/base/control-plane.yaml`. The inline copy is explanatory for
+the manual path.
 
 Notable hardening baked into the spec: `strategy: Recreate` (the control plane
 is single-writer — a rollout must never run two instances),
@@ -1655,6 +1695,9 @@ opensandbox mode (the BatchSandbox template owns them).
 
 ### 15. Deploy the fkst frontend
 
+The canonical frontend Deployment, Service, and disruption policy are in
+`deploy/kubernetes/base/frontend.yaml`.
+
 The frontend is a static SPA served by nginx. `VITE_` vars bake into the
 bundle at build time, so the backend origin must be set **at build**: our local
 topology is cross-origin (two §16 hostnames, `app.` and
@@ -1690,12 +1733,19 @@ spec:
     spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
+      securityContext:
+        fsGroup: 101
+        runAsGroup: 101
+        runAsNonRoot: true
+        runAsUser: 101
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: frontend
           image: fkst-frontend:local
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 80
+            - containerPort: 8080
               name: http
           livenessProbe:
             httpGet:
@@ -1719,8 +1769,21 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-              # nginx master: bind :80, drop to worker uid, chown temp dirs
-              add: ["CHOWN", "SETGID", "SETUID", "NET_BIND_SERVICE"]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - mountPath: /var/cache/nginx
+              name: cache
+            - mountPath: /var/run
+              name: run
+            - mountPath: /tmp
+              name: tmp
+      volumes:
+        - name: cache
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -1805,6 +1868,9 @@ echo '127.0.0.1 app.chronoai-fkst.local api.chronoai-fkst.local' | sudo tee -a /
 ```
 
 #### 16.3 Route the hostnames
+
+The canonical route is `deploy/kubernetes/base/ingress.yaml`; environment
+overlays patch hosts and TLS bindings.
 
 ```bash
 cat > "$OSB_LOCAL/manifests/fkst-ingress.yaml" <<'EOF'
@@ -1940,7 +2006,9 @@ docker rmi fkst-control-plane:local fkst-frontend:local   # optional
 
 ### Appendix A — file inventory
 
-Everything this guide creates lives under `$OSB_LOCAL`:
+The canonical FKST namespace sources live under `deploy/kubernetes/` in this
+repository. The manual bootstrap path additionally creates these disposable
+local files under `$OSB_LOCAL`:
 
 ```
 opensandbox-local/

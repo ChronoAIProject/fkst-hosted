@@ -1,0 +1,41 @@
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: opensandbox-fkst-api-key
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/component: sandbox
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  refreshInterval: 5m
+  secretStoreRef:
+    kind: SecretStore
+    name: fkst-external-secrets
+  target:
+    name: opensandbox-fkst-api-key
+    creationPolicy: Orphan
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: fkst-opensandbox-tenant
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: opensandbox-api-key
+  namespace: opensandbox-system
+  labels:
+    app.kubernetes.io/component: sandbox-lifecycle
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  refreshInterval: 5m
+  secretStoreRef:
+    kind: SecretStore
+    name: fkst-external-secrets
+  target:
+    name: opensandbox-api-key
+    creationPolicy: Orphan
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: fkst-opensandbox-tenant

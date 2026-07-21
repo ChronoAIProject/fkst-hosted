@@ -1,0 +1,35 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fkst
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - app.chronoai-fkst.local
+        - api.chronoai-fkst.local
+      secretName: fkst-ingress-tls
+  rules:
+    - host: api.chronoai-fkst.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: fkst-control-plane
+                port:
+                  name: http
+    - host: app.chronoai-fkst.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: fkst-frontend
+                port:
+                  name: http

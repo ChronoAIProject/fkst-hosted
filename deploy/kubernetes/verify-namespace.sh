@@ -1,0 +1,126 @@
+#!/bin/sh
+set -eu
+
+usage() {
+  echo "usage: $0 --context CONTEXT [--timeout DURATION]" >&2
+  exit 2
+}
+
+context=""
+timeout="5m"
+namespace="chronoai-fkst"
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --context)
+      [ "$#" -ge 2 ] || usage
+      context=$2
+      shift 2
+      ;;
+    --timeout)
+      [ "$#" -ge 2 ] || usage
+      timeout=$2
+      shift 2
+      ;;
+    *) usage ;;
+  esac
+done
+
+[ -n "$context" ] || usage
+kubectl --context "$context" config view --minify --output name >/dev/null
+
+assert_resource() {
+  resource=$1
+  name=$2
+  resource_namespace=${3:-$namespace}
+  kubectl --context "$context" --namespace "$resource_namespace" get \
+    "$resource" "$name" --output name >/dev/null
+  echo "present  $resource_namespace/$resource/$name"
+}
+
+assert_secret_keys() {
+  secret=$1
+  secret_namespace=$2
+  shift 2
+  # shellcheck disable=SC2016
+  keys=$(kubectl --context "$context" --namespace "$secret_namespace" get \
+    secret "$secret" --output go-template='{{range $key, $_ := .data}}{{$key}}{{"\n"}}{{end}}')
+  for required_key in "$@"; do
+    if ! printf '%s\n' "$keys" | grep -Fqx "$required_key"; then
+      echo "missing key $required_key in $secret_namespace/secret/$secret" >&2
+      exit 1
+    fi
+  done
+  echo "keys     $secret_namespace/secret/$secret ($# required names present; values redacted)"
+}
+
+enforce=$(kubectl --context "$context" get namespace "$namespace" \
+  --output jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}')
+[ "$enforce" = "baseline" ] || {
+  echo "namespace Pod Security enforce label is $enforce, expected baseline" >&2
+  exit 1
+}
+
+for service_account in sandbox-runner fkst-ksa; do
+  assert_resource serviceaccount "$service_account"
+done
+assert_resource limitrange sandbox-limits
+assert_resource resourcequota sandbox-quota
+assert_resource networkpolicy.networking.k8s.io sandbox-lockdown
+assert_resource role.rbac.authorization.k8s.io fkst-control-plane-envstore
+assert_resource role.rbac.authorization.k8s.io fkst-control-plane-leader-election
+assert_resource rolebinding.rbac.authorization.k8s.io fkst-control-plane-envstore
+assert_resource rolebinding.rbac.authorization.k8s.io fkst-control-plane-leader-election
+assert_resource configmap fkst-control-plane-config
+assert_resource configmap opensandbox-batchsandbox-template opensandbox-system
+assert_resource ingress.networking.k8s.io fkst
+assert_resource poddisruptionbudget.policy fkst-control-plane
+assert_resource poddisruptionbudget.policy fkst-frontend
+
+for external_secret in fkst-control-plane opensandbox-fkst-api-key fkst-ingress-tls; do
+  kubectl --context "$context" --namespace "$namespace" wait \
+    --for=condition=Ready "externalsecret/$external_secret" --timeout="$timeout" >/dev/null
+done
+kubectl --context "$context" --namespace opensandbox-system wait \
+  --for=condition=Ready externalsecret/opensandbox-api-key --timeout="$timeout" >/dev/null
+
+assert_secret_keys fkst-control-plane-secret "$namespace" \
+  FKST_LLM_API_KEY FKST_OSB_EXECD_TOKEN_SEED FKST_GITHUB_APP_ID \
+  FKST_GITHUB_APP_PRIVATE_KEY_PEM FKST_GITHUB_APP_SLUG \
+  FKST_GITHUB_APP_WEBHOOK_SECRET FKST_GITHUB_OAUTH_CLIENT_SECRET
+assert_secret_keys opensandbox-fkst-api-key "$namespace" opensandbox-fkst-api-key
+assert_secret_keys opensandbox-api-key opensandbox-system opensandbox-fkst-api-key
+assert_secret_keys fkst-ingress-tls "$namespace" tls.crt tls.key
+
+"$script_dir/verify-envstore-rbac.sh" --context "$context"
+subject="system:serviceaccount:${namespace}:fkst-ksa"
+for verb in create get list watch update patch; do
+  actual=$(kubectl --context "$context" auth can-i "$verb" leases.coordination.k8s.io \
+    --as="$subject" --namespace "$namespace" || true)
+  [ "$actual" = "yes" ] || {
+    echo "expected yes: $verb leases.coordination.k8s.io (got $actual)" >&2
+    exit 1
+  }
+done
+actual=$(kubectl --context "$context" auth can-i delete leases.coordination.k8s.io \
+  --as="$subject" --namespace "$namespace" || true)
+[ "$actual" = "no" ] || {
+  echo "expected no: delete leases.coordination.k8s.io (got $actual)" >&2
+  exit 1
+}
+
+kubectl --context "$context" --namespace "$namespace" rollout status \
+  deployment/fkst-control-plane --timeout="$timeout" >/dev/null
+kubectl --context "$context" --namespace "$namespace" rollout status \
+  deployment/fkst-frontend --timeout="$timeout" >/dev/null
+
+ready=$(kubectl --context "$context" --namespace "$namespace" exec \
+  deployment/fkst-frontend -- wget -qO- http://fkst-control-plane/ready)
+printf '%s\n' "$ready" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ready"'
+printf '%s\n' "$ready" | grep -Eq \
+  '"startup_resync_complete"[[:space:]]*:[[:space:]]*true'
+kubectl --context "$context" --namespace "$namespace" exec \
+  deployment/fkst-frontend -- wget -qO- http://127.0.0.1/ >/dev/null
+
+echo "namespace contract and recovery readiness verified on context $context"

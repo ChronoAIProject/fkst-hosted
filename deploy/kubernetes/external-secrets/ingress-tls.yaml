@@ -1,0 +1,27 @@
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: fkst-ingress-tls
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: fkst-external-secrets
+  target:
+    name: fkst-ingress-tls
+    creationPolicy: Orphan
+    deletionPolicy: Retain
+    template:
+      type: kubernetes.io/tls
+  data:
+    - secretKey: tls.crt
+      remoteRef:
+        key: fkst-ingress-tls
+        property: tls.crt
+    - secretKey: tls.key
+      remoteRef:
+        key: fkst-ingress-tls
+        property: tls.key
