@@ -8,16 +8,20 @@ const ACCESS_KEY = 'fkst-gh-access';
 
 /** Render the shell. `authenticated` seeds the token the AuthProvider reads at
  *  init so the signed-in topbar (Environments + Sign out) is exercised. */
-function renderShell({ authenticated = false }: { authenticated?: boolean } = {}) {
+function renderShell({
+  authenticated = false,
+  initialEntry = '/',
+}: { authenticated?: boolean; initialEntry?: string } = {}) {
   if (authenticated) {
     window.localStorage.setItem(ACCESS_KEY, 'test-token');
   }
   return render(
     <AuthProvider>
-      <MemoryRouter initialEntries={['/']}>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
           <Route element={<Shell />}>
             <Route index element={<div>home content</div>} />
+            <Route path="get-started" element={<div>doc content</div>} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -33,9 +37,11 @@ afterEach(() => {
 describe('Shell', () => {
   it('exposes the two primary nav tabs and renders the outlet', () => {
     renderShell();
-    expect(screen.getByRole('link', { name: 'Introduction' })).toBeInTheDocument();
-    // "Get Started" appears as the nav tab, the header CTA, and the footer link.
-    expect(screen.getAllByRole('link', { name: /get started/i }).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Dashboard' })).toBeInTheDocument();
+    // v2 chrome: no Get Started nav tab, header CTA, or footer link — the
+    // landing hero owns the get-started entry point.
+    expect(screen.queryByRole('link', { name: /get started/i })).not.toBeInTheDocument();
     expect(screen.getByText('home content')).toBeInTheDocument();
   });
 
@@ -45,18 +51,28 @@ describe('Shell', () => {
     expect(screen.queryByRole('link', { name: 'Packages' })).not.toBeInTheDocument();
   });
 
-  it('houses both the routed outlet and the footer inside the single <main> scroll region', () => {
-    renderShell();
+  it('houses the outlet and the footer inside the single <main> on doc routes', () => {
+    renderShell({ initialEntry: '/get-started' });
     const main = screen.getByRole('main');
-    // The one scroll container must own the whole document body: content first,
-    // footer last — so scrolling reveals everything and the footer keeps its
-    // end-of-document semantics.
-    expect(main).toContainElement(screen.getByText('home content'));
+    // The one scroll container owns the whole document body on scrolling doc
+    // routes: content first, footer last — so scrolling reveals everything and
+    // the footer keeps its end-of-document semantics.
+    expect(main).toContainElement(screen.getByText('doc content'));
     // A <footer> nested in <main> is role-generic (not contentinfo), so query
     // the element directly and assert it is the last child of the scroll region.
     const footer = main.querySelector('footer');
     expect(footer).not.toBeNull();
     expect(main.lastElementChild).toBe(footer);
+  });
+
+  it('pins the footer after <main> on the full-height landing route', () => {
+    renderShell();
+    const main = screen.getByRole('main');
+    expect(main).toContainElement(screen.getByText('home content'));
+    // The landing is a single-viewport page: the footer sits OUTSIDE the
+    // scroll region, pinned as main's next sibling at the viewport bottom.
+    expect(main.querySelector('footer')).toBeNull();
+    expect(main.nextElementSibling?.tagName).toBe('FOOTER');
   });
 
   it('drives the condensed topbar off the <main> scrollTop, not the window', () => {
@@ -90,16 +106,16 @@ describe('Shell', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
 
-  it('surfaces Sign in + GitHub + CTA in the overflow menu when signed out', () => {
+  it('surfaces Sign in + GitHub in the overflow menu when signed out', () => {
     renderShell();
     fireEvent.click(screen.getByRole('button', { name: 'More' }));
     const menu = screen.getByRole('menu');
-    // Signed-out: the menu carries a Sign in entry (the topbar previously had
-    // none at any width) and never a Sign out.
+    // Signed-out: the menu carries a Sign in entry and never a Sign out. The
+    // v2 chrome has no Get Started CTA, so the menu carries none either.
     expect(within(menu).getByRole('menuitem', { name: /sign in with github/i })).toBeInTheDocument();
     expect(within(menu).queryByRole('menuitem', { name: /sign out/i })).not.toBeInTheDocument();
     expect(within(menu).getByRole('menuitem', { name: 'GitHub ↗' })).toBeInTheDocument();
-    expect(within(menu).getByRole('menuitem', { name: /get started/i })).toBeInTheDocument();
+    expect(within(menu).queryByRole('menuitem', { name: /get started/i })).not.toBeInTheDocument();
   });
 
   it('closes the overflow menu on Escape', () => {

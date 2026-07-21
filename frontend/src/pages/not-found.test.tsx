@@ -20,9 +20,9 @@ describe('NotFound', () => {
     ).toBeInTheDocument();
   });
 
-  it('links back to the introduction (home)', () => {
+  it('links back home', () => {
     renderAt('/missing');
-    expect(screen.getByRole('link', { name: /introduction/i })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('link', { name: /home/i })).toHaveAttribute('href', '/');
   });
 
   it('sets the document title so the tab reflects the 404', () => {

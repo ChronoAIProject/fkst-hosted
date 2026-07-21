@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { Introduction } from './introduction';
+import { MANUAL_URL } from '@/i18n/literals';
 
 function renderIntro() {
   return render(
@@ -12,24 +13,37 @@ function renderIntro() {
 }
 
 describe('Introduction', () => {
-  it('renders the hero headline about GitHub-issue-driven sessions', () => {
+  it('renders the two-line v2 hero headline', () => {
+    renderIntro();
+    const h1 = screen.getByRole('heading', { level: 1 });
+    expect(h1).toHaveTextContent('Open an issue.');
+    expect(h1).toHaveTextContent('Get a pull request.');
+  });
+
+  it('states the one-line lede', () => {
     renderIntro();
     expect(
-      screen.getByRole('heading', { level: 1, name: /driven entirely by GitHub issues/i })
+      screen.getByText(/No infrastructure, nothing to learn/i)
     ).toBeInTheDocument();
   });
 
-  it('lists what the hosted service provides', () => {
+  it('links the primary CTA to Get Started and the secondary to the manual', () => {
     renderIntro();
-    expect(screen.getByText('Managed engine on Kubernetes')).toBeInTheDocument();
-    expect(screen.getByText('A pull request per task')).toBeInTheDocument();
-    expect(screen.getByText('Redacted logs, identity-gated')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Get started' })).toHaveAttribute(
+      'href',
+      '/get-started'
+    );
+    expect(screen.getByRole('link', { name: /operator manual/i })).toHaveAttribute(
+      'href',
+      MANUAL_URL
+    );
   });
 
-  it('links to Get Started', () => {
+  it('keeps the flow-line decorative (hidden from the accessibility tree)', () => {
     renderIntro();
-    const links = screen.getAllByRole('link', { name: /get started/i });
-    expect(links.length).toBeGreaterThan(0);
-    expect(links[0]).toHaveAttribute('href', '/get-started');
+    // The pipe repeats the lede's story visually; it must not add noise for
+    // screen readers.
+    expect(screen.queryByText('trigger issue')).not.toBeNull();
+    expect(screen.getByText('trigger issue').closest('[aria-hidden="true"]')).not.toBeNull();
   });
 });

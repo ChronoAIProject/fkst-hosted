@@ -41,10 +41,10 @@ test.describe('static site smoke', () => {
     expect(consoleErrors).toEqual([]);
   });
 
-  test('landing page is the Introduction', async ({ page }) => {
+  test('landing page is the v2 hero', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('GitHub issues');
-    await expect(page.getByText('Managed engine on Kubernetes')).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Get a pull request.');
+    await expect(page.getByText('No infrastructure, nothing to learn.')).toBeVisible();
     await expectNoHorizontalOverflow(page);
   });
 
@@ -56,11 +56,11 @@ test.describe('static site smoke', () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test('top nav moves between the two tabs', async ({ page }) => {
+  test('hero CTA reaches Get Started; nav returns Home', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('link', { name: 'Get Started' }).first().click();
+    await page.getByRole('link', { name: 'Get started' }).click();
     await expect(page).toHaveURL(/\/get-started$/);
-    await page.getByRole('link', { name: 'Introduction' }).click();
+    await page.getByRole('link', { name: 'Home' }).click();
     await expect(page).toHaveURL(/\/$/);
   });
 
@@ -76,11 +76,11 @@ test.describe('static site smoke', () => {
   test('language toggle switches to 中文 and persists', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: '中文' }).click();
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('自主编码会话');
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('得到一个拉取请求');
     await expect(page.locator('html')).toHaveAttribute('lang', 'zh');
     // persists across reload
     await page.reload();
     await expect(page.locator('html')).toHaveAttribute('lang', 'zh');
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('自主编码会话');
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('得到一个拉取请求');
   });
 });
