@@ -2,7 +2,10 @@
 
 use std::time::Duration;
 
+use axum::extract::{Request, State};
 use axum::http::{Method, StatusCode};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
 use axum::Router;
 use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
@@ -14,6 +17,7 @@ use utoipa_axum::routes;
 
 use crate::error::AppError;
 use crate::openapi;
+use crate::recovery::RecoveryMonitor;
 use crate::routes;
 use crate::state::AppState;
 
@@ -22,6 +26,27 @@ use crate::state::AppState;
 /// (`deadline + WAIT_BUFFER(30)`) plus pod-setup and log-read overhead, so the
 /// descriptive `422` (a timed-out verdict) wins the race over a bare `408`.
 const ENV_PUT_TIMEOUT_BUFFER_SECS: u64 = 60;
+
+#[derive(Clone)]
+struct LeadershipGate {
+    enabled: bool,
+    recovery: RecoveryMonitor,
+}
+
+/// Reject side-effect-capable traffic unless this election-enabled replica is
+/// the resync-complete, Service-published leader. The Service selector is the
+/// normal routing boundary; this gate remains fail-closed if a former leader
+/// cannot withdraw its Pod label after losing Kubernetes API access.
+async fn require_ready_leader(
+    State(gate): State<LeadershipGate>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if gate.enabled && !gate.recovery.snapshot().ready {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    next.run(request).await
+}
 
 /// Permissive CORS for v1 local development only.
 // TODO(frontend issue): tighten CORS to the real origin.
@@ -54,6 +79,10 @@ fn cors_layer() -> CorsLayer {
 /// GitHub App webhook (which lives outside the `/api/v1` nest, like `/health`).
 pub fn build_router(state: AppState) -> Result<Router, AppError> {
     let short_timeout = Duration::from_secs(state.config.request_timeout_secs);
+    let leadership_gate = LeadershipGate {
+        enabled: state.config.leader.enabled,
+        recovery: state.recovery.clone(),
+    };
     // The named-environment PUT runs the isolated install-validation pod for up to
     // `env.validate_deadline_secs` — far beyond the short global timeout. So the
     // environments surface carries its OWN, much longer timeout; every OTHER route
@@ -85,7 +114,11 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
         .merge(routes::canvas::router())
         // The identity-gated engine observe read-model (issue #473); authorizes
         // in-handler with the SAME three-tier check as the log download.
-        .merge(routes::observe::router());
+        .merge(routes::observe::router())
+        .layer(middleware::from_fn_with_state(
+            leadership_gate.clone(),
+            require_ready_leader,
+        ));
 
     // The GitHub App webhook (issue #108) is UNAUTHENTICATED at the app layer
     // but signature-verified inside the handler over the raw body. It lives at
@@ -103,7 +136,9 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
         // scrapes it directly.
         .merge(routes::metrics::router());
     if state.github_app_webhook_secret.is_some() {
-        top = top.merge(routes::github_app_webhook::router());
+        top = top.merge(routes::github_app_webhook::router().layer(
+            middleware::from_fn_with_state(leadership_gate, require_ready_leader),
+        ));
         tracing::info!("github app webhook endpoint mounted (signature-verified, unauthenticated)");
     } else {
         tracing::warn!(

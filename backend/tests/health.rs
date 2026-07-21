@@ -10,11 +10,14 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fkst_control_plane::config::Config;
+use fkst_control_plane::reconcile::{reconcile_channel, ReconcileDispatcher};
 use fkst_control_plane::recovery::{RecoveryMonitor, ResyncResult};
 use fkst_control_plane::router::build_router;
 use fkst_control_plane::state::AppState;
+use hmac::{Hmac, Mac};
 use http_body_util::BodyExt;
 use serde_json::Value;
+use sha2::Sha256;
 use tower::ServiceExt;
 
 fn test_router(recovery: RecoveryMonitor) -> axum::Router {
@@ -164,6 +167,92 @@ async fn elected_replica_is_ready_only_after_resync_and_service_publication() {
     let body = json_body(follower).await;
     assert_eq!(body["leader"], false);
     assert_eq!(body["startup_resync_complete"], false);
+}
+
+#[tokio::test]
+async fn follower_rejects_api_and_signed_webhook_before_side_effects() {
+    let secret = "follower-gate-test-secret";
+    let recovery = RecoveryMonitor::new(true);
+    recovery.enable_leader_election("pod-follower".to_string());
+    let (handle, mut rx) = reconcile_channel(4);
+    let dispatcher = ReconcileDispatcher::new();
+    dispatcher.activate(&handle);
+    let mut config = Config::default();
+    config.leader.enabled = true;
+    config.leader.identity = Some("pod-follower".to_string());
+    let router = build_router(AppState {
+        config,
+        recovery: recovery.clone(),
+        github_app: None,
+        github_app_webhook_secret: Some(secrecy::SecretString::from(secret.to_string())),
+        reconciler: Some(dispatcher),
+        session_backend: None,
+        storage: None,
+        log_registry: Default::default(),
+        log_bundle_cache: Default::default(),
+    })
+    .expect("router");
+
+    let api_response = router
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/repos/acme/site/sessions")
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .expect("request builds"),
+        )
+        .await
+        .expect("router responds");
+    assert_eq!(api_response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let webhook_body = br#"{
+        "action":"opened",
+        "issue":{"number":7},
+        "repository":{"owner":{"login":"acme"},"name":"site"},
+        "installation":{"id":42}
+    }"#;
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC key");
+    mac.update(webhook_body);
+    let signature = mac
+        .finalize()
+        .into_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let webhook_response = router
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/github/app/webhook")
+                .header("content-type", "application/json")
+                .header("x-github-event", "issues")
+                .header("x-hub-signature-256", format!("sha256={signature}"))
+                .body(Body::from(webhook_body.as_slice()))
+                .expect("request builds"),
+        )
+        .await
+        .expect("router responds");
+    assert_eq!(webhook_response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        rx.try_recv().is_err(),
+        "a follower must not emit a reconcile hint from a valid webhook"
+    );
+
+    for path in ["/health", "/metrics", "/openapi.json"] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::get(path)
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("system route responds");
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+    }
+    assert_eq!(
+        get(recovery, "/ready").await.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
 }
 
 #[tokio::test]
