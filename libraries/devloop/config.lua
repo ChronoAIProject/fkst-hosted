@@ -12,6 +12,7 @@ local allowed_env = {
   FKST_GITHUB_AUTHORIZED_LOGINS = true,
   FKST_GITHUB_CLAIM_MODE = true,
   FKST_GITHUB_REPO = true,
+  FKST_SESSION_WORK_LABEL = true,
   FKST_GITHUB_WRITE = true,
   FKST_DEVLOOP_UPSTREAM_BRANCH = true,
   FKST_DEVLOOP_INTEGRATION_BRANCH = true,
@@ -91,6 +92,42 @@ function C.claim_mode(exec)
     return "label"
   end
   return "assignee"
+end
+
+function C.parse_session_work_labels(value)
+  local labels = {}
+  local seen = {}
+  for raw in tostring(value or ""):gmatch("[^,]+") do
+    local label = strings.trim(raw)
+    if label ~= "" and not seen[label] then
+      seen[label] = true
+      table.insert(labels, label)
+    end
+  end
+  return labels
+end
+
+function C.session_work_labels(exec)
+  return C.parse_session_work_labels(C.read_env("FKST_SESSION_WORK_LABEL", exec))
+end
+
+function C.matches_session_work_label(issue_labels, exec)
+  local configured = C.session_work_labels(exec)
+  if #configured == 0 then
+    return false, "FKST_SESSION_WORK_LABEL is empty"
+  end
+
+  local allowed = {}
+  for _, label in ipairs(configured) do
+    allowed[label] = true
+  end
+  for _, label in ipairs(issue_labels or {}) do
+    local name = type(label) == "table" and label.name or label
+    if allowed[tostring(name or "")] then
+      return true, nil
+    end
+  end
+  return false, "issue has no exact configured session work label"
 end
 
 -- Rollup auto-fix is opt-in and additive: default (unset/anything-but-"1") is
