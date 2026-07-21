@@ -369,10 +369,11 @@ pub struct Config {
     /// `id` (never a client-supplied value) keys the user's `fkst-user-<id>`
     /// objects. Env: `FKST_GITHUB_API_BASE_URL`. Default `https://api.github.com`.
     pub github_api_base_url: String,
-    /// Deployment-wide GitHub-identity access policy (`FKST_ACCESS_ALLOWED_USERS`,
-    /// comma-separated numeric ids and/or logins). Unset = open; set = only the
-    /// listed identities pass the token-authenticated routes and only their
-    /// trigger issues spawn sessions. See [`crate::access_policy`].
+    /// Deployment-wide GitHub-identity access policy (`FKST_ACCESS_ALLOWED_USERS`
+    /// and `FKST_GLOBAL_ADMINS`, comma-separated logins and/or numeric ids).
+    /// Unset access list = open; a set list admits listed identities, while global
+    /// admins are always admitted and receive App-wide read visibility. See
+    /// [`crate::access_policy`].
     pub access: crate::access_policy::AccessPolicy,
     /// Max bytes for a single inline vault value (#138). Env:
     /// `FKST_HOSTED_VAULT_VALUE_BYTE_CAP`. Default 65536, zero rejected.
@@ -642,7 +643,7 @@ impl Config {
         let log = LogConfig::from_vars(&vars)?;
 
         // Deployment-wide access policy (FKST_ACCESS_ALLOWED_USERS +
-        // FKST_AUTH_MODEL). Legacy default: unset = open, set = enforced
+        // FKST_GLOBAL_ADMINS + FKST_AUTH_MODEL). Legacy default: unset = open, set = enforced
         // (set-but-empty = enforced deny-all). Fails closed only on an
         // unrecognized FKST_AUTH_MODEL value (naming the var).
         let access = crate::access_policy::AccessPolicy::from_vars(&vars)?;
@@ -1004,6 +1005,20 @@ mod tests {
         assert!(config.access.allows(583231, "x"));
         assert!(config.access.allows(2, "Alice"));
         assert!(!config.access.allows(2, "mallory"));
+    }
+
+    #[test]
+    fn global_admin_configuration_is_wired_into_the_access_policy() {
+        let config = Config::from_vars(vars(&[
+            ("FKST_AUTH_MODEL", "allowlist"),
+            ("FKST_ACCESS_ALLOWED_USERS", "someone-else"),
+            ("FKST_GLOBAL_ADMINS", "@ChronoAI-Shining"),
+        ]))
+        .expect("config with global admin loads");
+        assert!(config.access.enforced());
+        assert!(config.access.is_global_admin(9, "chronoai-shining"));
+        assert!(config.access.allows(9, "CHRONOAI-SHINING"));
+        assert_eq!(config.access.global_admin_count(), 1);
     }
 
     #[test]

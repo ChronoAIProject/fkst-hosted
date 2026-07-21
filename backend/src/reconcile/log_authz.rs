@@ -1,4 +1,4 @@
-//! Pure three-tier authorization for on-demand session-log downloads.
+//! Pure session-scoped authorization for on-demand session-log downloads.
 //!
 //! A session's redacted log bundle at chrono-storage key `logs/<session_id>/latest.tar.gz`
 //! may be pulled only by someone the session's trigger issue authorizes. This module
@@ -13,8 +13,10 @@
 //!    numeric id, never by a renamable login).
 //! 2. **Per-issue allow-list** — the caller matches an entry the author listed in the
 //!    trigger issue's `### Log Access Allowlist` section (frozen by config-immutability).
-//! 3. **Global admins** — the caller matches an operator-configured entry
-//!    (`FKST_LOG_ADMINS`) that may pull ANY session's logs.
+//! 3. **Legacy log admins** — the caller matches an operator-configured entry
+//!    (`FKST_LOG_ADMINS`) that may pull ANY session's logs. Deployment-wide
+//!    `FKST_GLOBAL_ADMINS` are checked by the route-level policy before this
+//!    compatibility function is called.
 //!
 //! A list entry (tiers 2 and 3) is matched against BOTH the caller's numeric id (as a
 //! decimal string) AND the caller's login (case-insensitively), so an operator or
@@ -24,7 +26,7 @@
 /// Decide whether the verified caller `(requester_id, requester_login)` may download
 /// the logs of a session whose trigger issue was opened by `issue_author_id` and
 /// whose `### Log Access Allowlist` allow-list is `per_issue_allow`, given the operator's
-/// `global_admins`.
+/// `legacy_log_admins`.
 ///
 /// Returns `true` iff the caller satisfies AT LEAST ONE of the three tiers described
 /// in the module docs; `false` (deny) otherwise. Purely a function of its inputs.
@@ -33,7 +35,7 @@ pub fn is_authorized(
     requester_login: &str,
     issue_author_id: i64,
     per_issue_allow: &[String],
-    global_admins: &[String],
+    legacy_log_admins: &[String],
 ) -> bool {
     // Tier 1: the issue author, matched by IMMUTABLE numeric id (a login is
     // renamable, so it must never be the identity key for the author check).
@@ -45,7 +47,7 @@ pub fn is_authorized(
     let requester_id_str = requester_id.to_string();
     per_issue_allow
         .iter()
-        .chain(global_admins.iter())
+        .chain(legacy_log_admins.iter())
         .any(|entry| entry_matches(entry, &requester_id_str, requester_login))
 }
 

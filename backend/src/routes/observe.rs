@@ -9,9 +9,9 @@
 //! payload bodies (only schema/digest/byte counts), so the snapshot is safe to
 //! serve to an authorized viewer.
 //!
-//! AUTHZ is byte-identical to the log-download endpoint: the same three-tier
-//! check (trigger author / per-issue `### Log Access Allowlist` / global
-//! `FKST_LOG_ADMINS`) via [`crate::routes::logs::authorize`] over the
+//! AUTHZ is byte-identical to the log-download endpoint: trigger author,
+//! per-issue `### Log Access Allowlist`, deployment `FKST_GLOBAL_ADMINS`, or the
+//! legacy log-only `FKST_LOG_ADMINS` list via [`crate::routes::logs::authorize`] over the
 //! reconciler-maintained registry. Someone allowed to read a session's logs is
 //! allowed to read its queue state — one grant, two read-only views.
 //!
@@ -69,7 +69,7 @@ async fn observe_session(
     Query(query): Query<ObserveQuery>,
     user: GithubUser,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    // Same deny-by-default three-tier gate as the log download (404 for an
+    // Same deny-by-default gate as the log download (404 for an
     // unknown session, 403 for an unauthorized caller).
     crate::routes::logs::authorize(&state, &session_id, &user)?;
 

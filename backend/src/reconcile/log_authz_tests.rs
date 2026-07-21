@@ -58,15 +58,15 @@ fn per_issue_non_member_is_denied() {
     ));
 }
 
-// ---- Tier 3: the global admins -----------------------------------------------
+// ---- Tier 3: the legacy log admins -------------------------------------------
 
 #[test]
-fn global_admin_login_grants_for_any_session() {
+fn legacy_log_admin_login_grants_for_any_session() {
     assert!(is_authorized(3003, "Ops", AUTHOR_ID, &[], &s(&["ops"])));
 }
 
 #[test]
-fn global_admin_numeric_id_grants() {
+fn legacy_log_admin_numeric_id_grants() {
     assert!(is_authorized(3003, "ops", AUTHOR_ID, &[], &s(&["3003"])));
 }
 

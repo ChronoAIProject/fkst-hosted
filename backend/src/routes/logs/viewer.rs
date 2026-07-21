@@ -9,8 +9,9 @@
 //!
 //! Both authorize IDENTICALLY to the whole-bundle download: the [`GithubUser`]
 //! extractor establishes identity, then [`super::authorize`] runs the same
-//! deny-by-default three-tier check (trigger author / per-issue allow-list /
-//! global admins). An unknown session → 404; an unauthorized caller → 403.
+//! deny-by-default authorization check (trigger author / per-issue allow-list /
+//! legacy log admins / deployment global admins). An unknown session → 404; an
+//! unauthorized caller → 403.
 //!
 //! The bundle is fetched server-side (via [`super::fetch_bundle`]) and decompressed
 //! in memory. Bundle files are ALREADY redacted, so they are served verbatim. The
