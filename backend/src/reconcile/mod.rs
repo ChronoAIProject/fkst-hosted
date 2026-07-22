@@ -86,10 +86,11 @@ pub use trigger_authz::{check_trigger_creator, TriggerAuthzCache, TriggerGateDec
 /// removal ([`ReconcileAction::ClearInvalid`]) is how a fixed issue is un-flagged.
 pub const SUBSTRATE_INVALID_LABEL: &str = "fkst-substrate-invalid";
 
-/// The clearable rejection latch for a trigger whose effective creator lacks
-/// deployment-admin or repository admin/maintain authority. The gate runs from
-/// issue metadata before the body parser, so this label also records that the
-/// rejected trigger's body was not read.
+/// The clearable DURABLE rejection latch for a trigger whose effective creator is
+/// unattributable or lacks deployment-global-admin / repository admin-or-maintain
+/// authority. The gate runs from issue metadata before the body parser, so this
+/// label also records that the rejected trigger's body was not read. It self-heals
+/// once the creator is attributable and authorized.
 pub const TRIGGER_UNAUTHORIZED_LABEL: &str = "fkst-trigger-unauthorized";
 
 /// The DURABLE label the reconciler latches onto a trigger issue once it has posted
@@ -113,7 +114,8 @@ pub const WORK_PICKED_UP_LABEL: &str = "fkst-picked-up";
 /// The clearable DURABLE latch added to a routed WORK issue whose author is not the
 /// session creator, a listed Session Collaborator, or a deployment global admin.
 /// Label-first ordering makes the rejection comment exactly-once across restarts;
-/// the latch is removed when the issue author later becomes authorized.
+/// the latch is removed as soon as the issue author becomes authorized, allowing
+/// the issue to be picked up without recreating it.
 pub const WORK_UNAUTHORIZED_LABEL: &str = "fkst-unauthorized";
 
 /// The clearable DURABLE latch added to an open issue carrying an active session's

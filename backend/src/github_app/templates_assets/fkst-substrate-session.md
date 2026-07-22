@@ -16,12 +16,23 @@ EVERYTHING in this issue body is FROZEN. Edits after that are rejected with an
 `fkst-config-rejected` label and change nothing. To change any setting, close
 this issue and open a new trigger.
 
+CREATOR AND AUTHORITY: For a human-authored trigger, the session creator is the
+issue author. For an App-authored trigger, the trigger's sole assignee is the creator.
+The creator must be a deployment global admin or have admin or maintain permission
+on this repository; the deployment access allowlist also applies.
+
+LABEL ISOLATION AND ROUTING: One creator's open triggers must have pairwise-disjoint
+effective work-label sets; different creators may reuse the same labels. Every work
+issue needs exactly one assignee: this session's creator. Its author must be the
+creator, a login under `### Session Collaborators`, or a deployment global admin.
+
 BRANCHES: To override branch topology, add an optional `### Source Branch`
 section with exactly one existing branch (default: the repository default), and/or
 an optional `### Target Branch` section with exactly one branch (default:
 `fkst-hosted-default`). fkst creates a missing target at the source head before
 the session starts, retries provisioning failures reported in operator logs, and
-never resets an existing target. Source and target may be the same branch.
+never resets an existing target. Work branches start from the target branch and
+pull requests merge into the target. Source and target may be the same branch.
 -->
 
 ### Session Name
@@ -33,7 +44,9 @@ my-first-session
 
 <!--
 One package reference per line, each as `owner/repo@ref:path/to/package`, pointing
-at a PUBLIC repo that has an `fkst.toml` at that path. At least one is required.
+at a PUBLIC repo that has an `fkst.toml` at that path. At least one package source is
+required across `### Packages` and `### Manifest`; this section may be empty or deleted
+when a manifest supplies the packages.
 -->
 ChronoAIProject/fkst-packages@main:packages/example
 
@@ -52,7 +65,10 @@ Optional. Delete this whole section to auto-detect the work label(s) from your
 packages' `[github].work_labels` — a session with no explicit label is driven by
 every label its packages declare. Otherwise name ONE GitHub label whose OPEN issues
 are this session's work queue: max 50 characters, no commas. Create work items as
-separate issues carrying this label (see the "fkst work item" template).
+separate issues carrying this label (see the "fkst work item" template). Your open
+sessions' effective label sets must not overlap each other, but a different creator's
+sessions may use the same labels. Give every work issue exactly one assignee equal to
+this session's creator; zero, multiple, or another assignee is `fkst-unrouted`.
 -->
 
 ### Environment
@@ -77,16 +93,14 @@ false
 ### FKST Contributors
 
 <!--
-Optional TRUSTED-USERS list, doing two things at once. List extra GitHub logins
-— one per line, or comma/space separated; a leading `@` is fine — that you trust
-on this session IN ADDITION to you (the issue author), who is always included:
-1. The session ONLY acts on issues/comments written by its contributors (you,
-   these users, and the bot). Anyone else's input is ignored by the substrate.
-2. These users may also DOWNLOAD the session's redacted logs (log streaming is
-   always on; global admins can always download).
-Numeric user ids are also accepted, but only for log download — the substrate
-matches contributors by LOGIN. Delete this whole section to trust only yourself.
-(The old heading `### Log Access Allowlist` is still accepted as an alias.)
+Optional LOG-DOWNLOAD list. Add GitHub logins or numeric user ids — one per line,
+or comma/space separated; a leading `@` is fine — that may download this session's
+redacted logs. A human-authored trigger's creator is its author and already has log
+access; an App-seeded trigger lists its assigned creator here. Deployment global
+admins can always download. These entries do NOT grant work-item or package-content
+authority; use `### Session Collaborators` for that. Delete this whole section when
+no additional log viewers are needed. (The old heading `### Log Access Allowlist`
+is still accepted as an alias.)
 -->
 
 ### Session Collaborators
@@ -94,9 +108,11 @@ matches contributors by LOGIN. Delete this whole section to trust only yourself.
 <!--
 Optional WORK-ITEM AUTHORITY list. List extra GitHub logins — one per line, or
 comma/space separated; a leading `@` is fine — granted authority over THIS
-session's work issues IN ADDITION to you (the issue author), who always has it.
-These users may raise, label, and comment on the session's work issues (its work
-queue). Delete this whole section to grant authority to only yourself. (Frozen at
+session's work issues in addition to its creator and deployment global admins.
+These users may raise, label, and comment on the session's work issues and their
+logins are admitted by the package-side author policy. Repository admins do not gain
+this authority unless they are also the creator, listed here, or a deployment global
+admin. Delete this whole section to grant no additional authority. (Frozen at
 registration like every other setting in this issue.)
 -->
 

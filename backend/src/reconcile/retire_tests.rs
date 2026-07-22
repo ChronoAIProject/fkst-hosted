@@ -258,10 +258,9 @@ fn token() -> SecretString {
 
 #[test]
 fn renders_work_label_and_retired_notice() {
-    let body = retire_notice_comment("fkst-run");
-    // Names the work label verbatim in backticks (twice: the notice + the resume hint).
-    assert!(body.contains("work label `fkst-run`"));
-    assert!(body.contains("with work label `fkst-run`"));
+    let body = retire_notice_comment(&["fkst-run".to_string(), "fkst-security".to_string()]);
+    // Names the full effective label set in its canonical multi-label wire form.
+    assert!(body.contains("effective work labels `fkst-run,fkst-security`"));
     // The headline + the "left OPEN, no longer worked" wording (the string-literal
     // line continuations collapse to single spaces, so this is one flat sentence).
     assert!(body.contains("Session retired."));
@@ -269,6 +268,7 @@ fn renders_work_label_and_retired_notice() {
     assert!(body.contains("no longer being worked"));
     // The resume hint names the trigger label.
     assert!(body.contains("fkst-substrate-trigger"));
+    assert!(body.contains("exactly one assignee: that new session's creator"));
 }
 
 // ---- step -------------------------------------------------------------------
@@ -286,6 +286,7 @@ async fn retires_an_unretired_open_work_issue() {
         &token(),
         &repo(),
         "fkst-run",
+        &["fkst-run".to_string()],
         &mut std::collections::HashSet::new(),
     )
     .await;
@@ -295,6 +296,7 @@ async fn retires_an_unretired_open_work_issue() {
     assert_eq!(comments.len(), 1, "exactly one comment");
     assert_eq!(comments[0].2, 5);
     assert!(comments[0].3.contains("Session retired."));
+    assert!(comments[0].3.contains("effective work labels `fkst-run`"));
 
     // The durable retired latch is added to that issue.
     let added = api.labels_added.lock().unwrap();
@@ -335,6 +337,9 @@ async fn retire_work_issues_lists_every_label_and_dedups_a_shared_issue() {
         1,
         "a shared issue is retired once across labels"
     );
+    assert!(api.comments.lock().unwrap()[0]
+        .3
+        .contains("effective work labels `alpha,beta`"));
     assert_eq!(api.labels_added.lock().unwrap().len(), 1);
     assert_eq!(api.labels_removed.lock().unwrap().len(), 1);
 }
@@ -352,6 +357,7 @@ async fn skips_an_already_retired_issue() {
         &token(),
         &repo(),
         "fkst-run",
+        &["fkst-run".to_string()],
         &mut std::collections::HashSet::new(),
     )
     .await;
@@ -382,6 +388,7 @@ async fn no_op_when_the_list_is_empty() {
         &token(),
         &repo(),
         "fkst-run",
+        &["fkst-run".to_string()],
         &mut std::collections::HashSet::new(),
     )
     .await;
@@ -405,6 +412,7 @@ async fn swallows_a_listing_failure() {
         &token(),
         &repo(),
         "fkst-run",
+        &["fkst-run".to_string()],
         &mut std::collections::HashSet::new(),
     )
     .await;
@@ -433,6 +441,7 @@ async fn swallows_a_comment_failure_but_still_latches_and_unlatches() {
         &token(),
         &repo(),
         "fkst-run",
+        &["fkst-run".to_string()],
         &mut std::collections::HashSet::new(),
     )
     .await;
