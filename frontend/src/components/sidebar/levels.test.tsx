@@ -494,9 +494,12 @@ describe('SessionCard', () => {
   const session = (over: Partial<SessionDetail> = {}): SessionDetail => ({
     session_id: 'abcdef1234567890',
     name: 'my-session',
+    creator: 'shining',
     work_label: 'sa:demo',
     auto_merge: false,
     environment: null,
+    source_branch: null,
+    target_branch: 'fkst-hosted-default',
     packages: [],
     invalid_reason: null,
     status_labels: [],

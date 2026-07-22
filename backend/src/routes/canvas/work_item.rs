@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::error::{AppError, ErrorEnvelope};
+use crate::github_app::listing::IssueMetadata;
 use crate::github_identity::GithubUser;
 use crate::goals::trigger_parse::{parse_trigger_issue_body, TriggerSpec};
 use crate::models::RepoRef;
@@ -28,6 +29,7 @@ use crate::reconcile::desired::{config_hash, SessionDef, SessionRegistration};
 use crate::reconcile::effective_packages::resolve_effective_packages;
 use crate::reconcile::work_authz::is_work_author_allowed;
 use crate::reconcile::work_labels::resolve_work_label_sets;
+use crate::reconcile::{effective_creator, CreatorResolution, SessionCreator};
 use crate::routes::canvas::sessions::validate_repo_segment;
 use crate::routes::dashboard::{bearer_token, DashboardGithub};
 use crate::state::AppState;
@@ -58,16 +60,20 @@ pub struct CreateWorkItemResponse {
 /// The trigger issue as this endpoint reads it: the body (to parse the session's
 /// work label + collaborators out of), the label names (to prove it really is a
 /// trigger), whether the "issue" is actually a pull request (GitHub's issues API
-/// serves PRs too), and the trigger AUTHOR's immutable numeric id (the
-/// request-time work-item gate authorizes the author by id).
+/// serves PRs too), and the author/assignee metadata used to resolve the same
+/// effective creator as the reconciler.
 struct FetchedTrigger {
     body: String,
     labels: Vec<String>,
     state: String,
     is_pull_request: bool,
-    /// The trigger author's immutable numeric GitHub id (`0` if GitHub omits the
-    /// `user` block — a fail-safe: id 0 matches no real caller).
+    /// The trigger author's immutable numeric GitHub id.
     author_id: i64,
+    /// The trigger author's login (the App bot for seeded triggers).
+    author_login: String,
+    /// Trigger assignee logins. Exactly one identifies the creator when the App
+    /// bot authored the trigger.
+    assignees: Vec<String>,
 }
 
 /// Pull GitHub's own `message` out of an error body without leaking anything
@@ -132,8 +138,12 @@ impl DashboardGithub {
             }
             #[derive(Deserialize)]
             struct RawUser {
-                #[serde(default)]
                 id: i64,
+                login: String,
+            }
+            #[derive(Deserialize)]
+            struct RawAssignee {
+                login: String,
             }
             #[derive(Deserialize)]
             struct RawIssue {
@@ -146,8 +156,10 @@ impl DashboardGithub {
                 state: String,
                 /// Present only when this "issue" is actually a PR.
                 pull_request: Option<serde_json::Value>,
-                /// The trigger author; `None` only on a malformed response.
-                user: Option<RawUser>,
+                /// The trigger author; required on GitHub issue responses.
+                user: RawUser,
+                #[serde(default)]
+                assignees: Vec<RawAssignee>,
             }
             let raw: RawIssue = response.json().await.map_err(|e| {
                 tracing::warn!(error = %e, "github get-trigger response did not parse");
@@ -158,7 +170,13 @@ impl DashboardGithub {
                 labels: raw.labels.into_iter().map(|label| label.name).collect(),
                 state: raw.state,
                 is_pull_request: raw.pull_request.is_some(),
-                author_id: raw.user.map(|user| user.id).unwrap_or_default(),
+                author_id: raw.user.id,
+                author_login: raw.user.login,
+                assignees: raw
+                    .assignees
+                    .into_iter()
+                    .map(|assignee| assignee.login)
+                    .collect(),
             });
         }
         Err(trigger_read_error(status, github_message(response).await))
@@ -183,7 +201,7 @@ impl DashboardGithub {
         (status = 201, description = "The work issue was created", body = CreateWorkItemResponse),
         (status = 400, description = "Malformed owner/name/issue number, a blank title, or GitHub rejected the issue", body = ErrorEnvelope),
         (status = 401, description = "Missing or invalid GitHub token", body = ErrorEnvelope),
-        (status = 403, description = "Not allowlisted, the caller lacks work-item authority on this session (not the trigger author, a listed Session Collaborator, nor a repo admin / org owner), or GitHub refused the write for this caller", body = ErrorEnvelope),
+        (status = 403, description = "Not allowlisted, the caller lacks work-item authority on this session (not the creator, a listed Session Collaborator, nor a deployment global administrator), or GitHub refused the write for this caller", body = ErrorEnvelope),
         (status = 404, description = "No such trigger issue (or the caller cannot see the repo)", body = ErrorEnvelope),
         (status = 409, description = "The session trigger is closed", body = ErrorEnvelope),
         (status = 422, description = "The trigger issue or its package sources are malformed, the session has no applicable work labels, or the selected label is not applicable", body = ErrorEnvelope),
@@ -249,10 +267,40 @@ pub(super) async fn create_work_item(
         )));
     }
 
+    // Resolve creator attribution before parsing, exactly as reconciliation does.
+    // This is what makes #1902's composer path route both human-authored and
+    // App-authored seeded sessions to their actual owner.
+    let creator = match effective_creator(
+        &IssueMetadata {
+            number: issue_number as i64,
+            labels: trigger.labels.clone(),
+            state: trigger.state.clone(),
+            assignees: trigger.assignees.clone(),
+            user_login: trigger.author_login.clone(),
+            user_id: trigger.author_id,
+        },
+        state.config.reconcile.github_bot_login.as_deref(),
+    ) {
+        CreatorResolution::Resolved(creator) => creator,
+        CreatorResolution::Unattributable { assignee_count, .. } => {
+            return Err(AppError::Unprocessable(format!(
+                "this session cannot accept work because its App-authored trigger must have exactly one assignee (found {assignee_count})"
+            )))
+        }
+    };
+
     // Parse with the reconciler's own grammar: a malformed trigger surfaces the
     // parser's section-naming 422 rather than silently mislabeling the work item.
     let spec = parse_trigger_issue_body(&trigger.body)?;
-    let mut reg = work_registration(&owner, &name, issue_number, trigger.author_id, spec);
+    let mut reg = work_registration(
+        &owner,
+        &name,
+        issue_number,
+        trigger.author_id,
+        trigger.author_login,
+        creator,
+        spec,
+    );
 
     // Request-time authorization uses the same creator/global-admin/collaborator
     // predicate as reconciliation. It runs before package/label discovery so a
@@ -304,8 +352,9 @@ pub(super) async fn create_work_item(
         })?;
 
     let labels = vec![work_label.clone()];
+    let assignees = vec![reg.creator_login.clone()];
     let created = gh
-        .create_issue(&token, &owner, &name, title, body, &labels)
+        .create_issue(&token, &owner, &name, title, body, &labels, &assignees)
         .await?;
     tracing::info!(
         owner = %owner,
@@ -333,6 +382,8 @@ fn work_registration(
     name: &str,
     trigger_issue: u64,
     trigger_author_id: i64,
+    trigger_author_login: String,
+    creator: SessionCreator,
     spec: TriggerSpec,
 ) -> SessionRegistration {
     let hash = config_hash(
@@ -342,8 +393,8 @@ fn work_registration(
         spec.output_lang.as_deref(),
         &spec.engine_config,
         &spec.manifest_refs,
-        None,
-        None,
+        spec.source_branch.as_deref(),
+        spec.target_branch.as_deref(),
     );
     let effective_packages = spec.packages.clone();
     SessionRegistration {
@@ -354,9 +405,9 @@ fn work_registration(
         },
         trigger_issue: trigger_issue as i64,
         trigger_author_id,
-        trigger_author_login: String::new(),
-        creator_login: String::new(),
-        creator_id: Some(trigger_author_id),
+        trigger_author_login,
+        creator_login: creator.login,
+        creator_id: creator.id,
         def: SessionDef {
             name: spec.name,
             packages: spec.packages,
@@ -365,8 +416,8 @@ fn work_registration(
             environment: spec.environment,
             output_lang: spec.output_lang,
             engine_config: spec.engine_config,
-            source_branch: None,
-            target_branch: None,
+            source_branch: spec.source_branch,
+            target_branch: spec.target_branch,
         },
         effective_packages,
         session_id: format!("canvas-work-item-{trigger_issue}"),

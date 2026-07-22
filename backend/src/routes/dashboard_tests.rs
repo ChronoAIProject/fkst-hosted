@@ -130,6 +130,7 @@ async fn issues_by_label_all_uses_state_all_and_filters_prs() {
                 "number": 1, "title": "trigger", "body": "b", "state": "closed",
                 "labels": [{ "name": "fkst-substrate-trigger" }],
                 "user": { "login": "a", "id": 9 },
+                "assignees": [{ "login": "Creator-One" }],
                 "html_url": "https://github.com/acme/site/issues/1",
                 "created_at": "2026-07-01T00:00:00Z",
                 "updated_at": "2026-07-02T00:00:00Z",
@@ -150,6 +151,11 @@ async fn issues_by_label_all_uses_state_all_and_filters_prs() {
     assert_eq!(issues.len(), 1, "the pull request must be filtered out");
     assert_eq!(issues[0].summary.number, 1);
     assert_eq!(issues[0].summary.state, "closed");
+    assert_eq!(
+        issues[0].summary.assignees,
+        vec!["Creator-One".to_string()],
+        "wire assignees must survive into effective-creator metadata"
+    );
     assert_eq!(issues[0].html_url, "https://github.com/acme/site/issues/1");
     assert_eq!(issues[0].created_at, "2026-07-01T00:00:00Z");
     assert_eq!(issues[0].updated_at, "2026-07-02T00:00:00Z");

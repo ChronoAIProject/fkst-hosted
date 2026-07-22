@@ -15,6 +15,7 @@ use utoipa::ToSchema;
 
 use crate::error::AppError;
 use crate::goals::trigger_parse::parse_trigger_issue_body;
+use crate::reconcile::branches::validate_branch_name;
 use crate::routes::canvas::types::render_package_ref;
 
 /// Request body for creating a session (a trigger issue) on a repo.
@@ -35,6 +36,14 @@ pub struct CreateSessionRequest {
     pub work_label: Option<String>,
     /// The optional named environment (`### Environment`).
     pub environment: Option<String>,
+    /// The optional source branch (`### Source Branch`). When omitted, the
+    /// repository default branch seeds a missing target branch.
+    #[serde(default)]
+    pub source_branch: Option<String>,
+    /// The optional target branch (`### Target Branch`). When omitted, the
+    /// reconciler uses `fkst-hosted-default`.
+    #[serde(default)]
+    pub target_branch: Option<String>,
     /// The optional auto-merge opt-in (`### Auto-merge`); only an explicit
     /// `true` renders the section (absent and `false` mean the same thing to
     /// the parser).
@@ -126,6 +135,24 @@ fn render_trigger_body(req: &CreateSessionRequest) -> Result<String, AppError> {
     if let Some(value) = environment {
         require_inline(value, "environment")?;
     }
+    let source_branch = trimmed(req.source_branch.as_deref());
+    if let Some(value) = source_branch {
+        require_inline(value, "source_branch")?;
+        validate_branch_name(value).map_err(|rule| {
+            AppError::Unprocessable(format!(
+                "the `### Source Branch` section names an invalid branch {value:?}: {rule}"
+            ))
+        })?;
+    }
+    let target_branch = trimmed(req.target_branch.as_deref());
+    if let Some(value) = target_branch {
+        require_inline(value, "target_branch")?;
+        validate_branch_name(value).map_err(|rule| {
+            AppError::Unprocessable(format!(
+                "the `### Target Branch` section names an invalid branch {value:?}: {rule}"
+            ))
+        })?;
+    }
     let output_lang = trimmed(req.output_lang.as_deref());
     if let Some(value) = output_lang {
         require_inline(value, "output_lang")?;
@@ -164,6 +191,12 @@ fn render_trigger_body(req: &CreateSessionRequest) -> Result<String, AppError> {
     }
     if let Some(value) = environment {
         push_section(&mut body, "### Environment", &[value]);
+    }
+    if let Some(value) = source_branch {
+        push_section(&mut body, "### Source Branch", &[value]);
+    }
+    if let Some(value) = target_branch {
+        push_section(&mut body, "### Target Branch", &[value]);
     }
     if req.auto_merge == Some(true) {
         push_section(&mut body, "### Auto-merge", &["true"]);
@@ -238,6 +271,8 @@ pub(super) fn validated_trigger_body(req: &CreateSessionRequest) -> Result<Strin
         && rendered_manifests == requested_manifests
         && spec.work_label.as_deref() == trimmed(req.work_label.as_deref())
         && spec.environment.as_deref() == trimmed(req.environment.as_deref())
+        && spec.source_branch.as_deref() == trimmed(req.source_branch.as_deref())
+        && spec.target_branch.as_deref() == trimmed(req.target_branch.as_deref())
         && spec.output_lang.as_deref() == trimmed(req.output_lang.as_deref())
         && spec.auto_merge == (req.auto_merge == Some(true))
         && spec.log_access == requested_log_access

@@ -192,9 +192,12 @@ describe('CanvasFlow', () => {
           {
             session_id: 'abc',
             name: 'nightly',
+            creator: 'shining',
             work_label: 'fkst-work',
             auto_merge: true,
             environment: null,
+            source_branch: null,
+            target_branch: 'fkst-hosted-default',
             packages: [],
             invalid_reason: null,
             status_labels: [],

@@ -346,6 +346,44 @@ async fn session_schema_exposes_typed_recovery_diagnostics() {
 }
 
 #[tokio::test]
+async fn session_detail_schema_exposes_creator_and_branch_topology() {
+    let spec = fetch_spec(app(false)).await;
+    let detail = &spec["components"]["schemas"]["SessionDetail"];
+    let properties = &detail["properties"];
+    assert_eq!(properties["creator"]["type"], "string");
+    assert_eq!(properties["target_branch"]["type"], "string");
+
+    let required = detail["required"]
+        .as_array()
+        .expect("SessionDetail.required array");
+    assert!(
+        required.iter().any(|field| field == "creator"),
+        "{required:?}"
+    );
+    assert!(
+        required.iter().any(|field| field == "target_branch"),
+        "{required:?}"
+    );
+    assert!(
+        !required.iter().any(|field| field == "source_branch"),
+        "source_branch must remain optional: {required:?}"
+    );
+
+    let source = &properties["source_branch"];
+    let nullable_string = source["type"].as_array().is_some_and(|types| {
+        types.iter().any(|kind| kind == "string") && types.iter().any(|kind| kind == "null")
+    }) || (source["type"] == "string" && source["nullable"] == true)
+        || source["oneOf"].as_array().is_some_and(|variants| {
+            variants.iter().any(|variant| variant["type"] == "string")
+                && variants.iter().any(|variant| variant["type"] == "null")
+        });
+    assert!(
+        nullable_string,
+        "source_branch must be a nullable string: {source}"
+    );
+}
+
+#[tokio::test]
 async fn no_operation_requires_security_the_whole_surface_is_open() {
     let spec = fetch_spec(app(true)).await;
     let paths = &spec["paths"];

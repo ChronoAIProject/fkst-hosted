@@ -20,8 +20,10 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::error::{AppError, ErrorEnvelope};
+use crate::github_app::{GithubListing, HttpGithubListing};
 use crate::github_identity::GithubUser;
 use crate::goals::trigger_parse::parse_trigger_issue_body;
+use crate::reconcile::{effective_creator, CreatorResolution};
 use crate::routes::canvas::sessions::validate_repo_segment;
 use crate::routes::canvas::trigger_body::{validated_trigger_body, CreateSessionRequest};
 use crate::routes::dashboard::{bearer_token, DashboardGithub};
@@ -52,17 +54,17 @@ pub struct CreateSessionResponse {
         (status = 201, description = "The trigger issue was created", body = CreateSessionResponse),
         (status = 400, description = "Invalid session fields (the message names the offending trigger section), or GitHub rejected the issue", body = ErrorEnvelope),
         (status = 401, description = "Missing or invalid GitHub token", body = ErrorEnvelope),
-        (status = 403, description = "Not allowlisted, or GitHub refused the write for this caller", body = ErrorEnvelope),
+        (status = 403, description = "Not allowlisted, the caller lacks admin/maintain permission on the repository, or GitHub refused the write for this caller", body = ErrorEnvelope),
         (status = 404, description = "Repo not found (or the caller cannot see it)", body = ErrorEnvelope),
         (status = 409, description = "The requested explicit work label collides with an existing open session on this repo (the message names the conflicting issue)", body = ErrorEnvelope),
-        (status = 422, description = "Issues are disabled on the repo", body = ErrorEnvelope),
+        (status = 422, description = "A source/target branch is invalid, issues are disabled, or another semantic precondition failed", body = ErrorEnvelope),
         (status = 503, description = "GitHub API unreachable", body = ErrorEnvelope),
     )
 )]
 pub(super) async fn create_session(
     State(state): State<AppState>,
     Path((owner, name)): Path<(String, String)>,
-    _user: GithubUser,
+    user: GithubUser,
     headers: HeaderMap,
     Json(req): Json<CreateSessionRequest>,
 ) -> Result<(StatusCode, Json<CreateSessionResponse>), AppError> {
@@ -71,6 +73,8 @@ pub(super) async fn create_session(
     // Validate BEFORE any GitHub write: the rendered body must round-trip
     // through the reconciler's own parser, or the 400 carries its message.
     let body = validated_trigger_body(&req)?;
+
+    ensure_session_creator_authorized(&state, &user, &owner, &name).await?;
 
     let token = bearer_token(&headers)?;
     let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
@@ -87,13 +91,21 @@ pub(super) async fn create_session(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        ensure_no_work_label_collision(&gh, &token, &owner, &name, &trigger_label, requested_label)
-            .await?;
+        ensure_no_work_label_collision(
+            &gh,
+            &token,
+            (&owner, &name),
+            &trigger_label,
+            requested_label,
+            &user.login,
+            state.config.reconcile.github_bot_login.as_deref(),
+        )
+        .await?;
     }
 
     let labels = vec![trigger_label];
     let created = gh
-        .create_issue(&token, &owner, &name, req.name.trim(), &body, &labels)
+        .create_issue(&token, &owner, &name, req.name.trim(), &body, &labels, &[])
         .await?;
     tracing::info!(
         owner = %owner,
@@ -110,8 +122,54 @@ pub(super) async fn create_session(
     ))
 }
 
+/// Apply the reconciler's creator gate synchronously so a caller cannot create
+/// a trigger that will be rejected one reconcile pass later. Global admins
+/// short-circuit; everyone else must hold GitHub's `admin` or `maintain` role,
+/// read with the App installation token (the same source of truth as reconcile).
+async fn ensure_session_creator_authorized(
+    state: &AppState,
+    user: &GithubUser,
+    owner: &str,
+    name: &str,
+) -> Result<(), AppError> {
+    if state.config.access.is_global_admin(user.id, &user.login) {
+        return Ok(());
+    }
+
+    let app = state.github_app.as_ref().ok_or_else(|| {
+        AppError::Unavailable("the github app is not configured on this deployment".to_string())
+    })?;
+    let owner_repo = format!("{owner}/{name}");
+    let installation_token = app.token_for_repo(&owner_repo, None).await?;
+    let listing = HttpGithubListing::new(&state.config.github_api_base_url).map_err(|error| {
+        tracing::warn!(error = %error, "canvas: creator-role client could not be initialized");
+        AppError::Unavailable("github collaborator-role lookup is unavailable".to_string())
+    })?;
+    let role = listing
+        .get_collaborator_role(&installation_token, owner, name, &user.login)
+        .await
+        .map_err(|error| {
+            tracing::warn!(
+                owner,
+                name,
+                creator = %user.login,
+                error = %error,
+                "canvas: creator-role lookup failed"
+            );
+            AppError::Unavailable("github collaborator-role lookup failed".to_string())
+        })?;
+    if matches!(role.as_deref(), Some("admin" | "maintain")) {
+        return Ok(());
+    }
+
+    Err(AppError::Forbidden(format!(
+        "@{} must have admin or maintain permission on {owner}/{name} to create a session",
+        user.login
+    )))
+}
+
 /// Reject a canvas create that would collide with an existing OPEN session's
-/// work label on the same repo — the immediate-UX pre-flight fronting the
+/// work label for the same creator on the same repo — the immediate-UX pre-flight fronting the
 /// reconciler's authoritative R4a collision backstop.
 ///
 /// Contract: the caller invokes this ONLY when the new request names an explicit
@@ -122,23 +180,34 @@ pub(super) async fn create_session(
 ///
 /// It adds exactly ONE GitHub read: the repo's OPEN trigger issues, via the
 /// caller's own user token (the same token that opens the issue). Each open
-/// trigger is parsed with the shared trigger parser and compared on its EXPLICIT
-/// work label; a malformed trigger body has no comparable label and is skipped.
+/// trigger is first attributed with the shared effective-creator rule, then
+/// parsed and compared on its EXPLICIT work label; another creator's session,
+/// an unattributable trigger, or a malformed body is skipped.
 /// Existing sessions that rely solely on package-discovered labels are likewise
 /// left to R4a — resolving those would fan out a manifest read per package,
 /// which this single-read fast path deliberately avoids.
 async fn ensure_no_work_label_collision(
     gh: &DashboardGithub,
     token: &SecretString,
-    owner: &str,
-    name: &str,
+    repo: (&str, &str),
     trigger_label: &str,
     requested_label: &str,
+    creator_login: &str,
+    bot_login: Option<&str>,
 ) -> Result<(), AppError> {
+    let (owner, name) = repo;
     let open_triggers = gh
         .issues_by_label(token, owner, name, trigger_label, "open")
         .await?;
     for trigger in &open_triggers {
+        let CreatorResolution::Resolved(existing_creator) =
+            effective_creator(&trigger.summary.metadata(), bot_login)
+        else {
+            continue;
+        };
+        if !existing_creator.login.eq_ignore_ascii_case(creator_login) {
+            continue;
+        }
         // Tolerant parse: a trigger whose body no longer parses contributes no
         // comparable label (the reconciler flags it invalid on its own pass).
         let Ok(spec) = parse_trigger_issue_body(&trigger.summary.body) else {

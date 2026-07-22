@@ -38,6 +38,7 @@ export function SessionRail({
   data,
   loadFailed,
   onChanged,
+  viewerLogin,
   selectedKey,
   onSelect,
   readOnly = false,
@@ -49,6 +50,8 @@ export function SessionRail({
   loadFailed: boolean;
   /** A trigger was created or stopped — the page re-fetches immediately. */
   onChanged: () => void;
+  /** Verified viewer: only this creator's open sessions can collide. */
+  viewerLogin: string;
   /** The effective selected key (first session by default) — highlights its row. */
   selectedKey: string | null;
   /** Report the user's session choice by key. */
@@ -114,14 +117,20 @@ export function SessionRail({
     []
   );
 
-  // Work labels already claimed by an OPEN session on this repo. Handed to the
+  // Work labels already claimed by one of the VIEWER's OPEN sessions. Handed to the
   // create-trigger modal so a typed label that collides is flagged BEFORE submit
   // — the backend create pre-flight (409) and the reconciler remain the
   // authoritative gate; this is an early advisory only.
   const inUseWorkLabels = useMemo(
     () =>
-      (data?.sessions ?? []).filter((s) => s.trigger.state === 'open').flatMap(sessionWorkLabels),
-    [data]
+      (data?.sessions ?? [])
+        .filter(
+          (session) =>
+            session.trigger.state === 'open' &&
+            session.creator.toLowerCase() === viewerLogin.toLowerCase()
+        )
+        .flatMap(sessionWorkLabels),
+    [data, viewerLogin]
   );
 
   const requestRefresh = useCallback(() => {

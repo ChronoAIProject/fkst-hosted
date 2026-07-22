@@ -14,6 +14,8 @@ fn full_request() -> CreateSessionRequest {
         manifests: vec!["acme/manifests@main:bundles/site".to_string()],
         work_label: Some("site-build".to_string()),
         environment: Some("prod-env".to_string()),
+        source_branch: Some("release/v1.2".to_string()),
+        target_branch: Some("feature/site".to_string()),
         auto_merge: Some(true),
         log_access: vec!["reviewer".to_string(), "12345".to_string()],
         collaborators: vec!["worker".to_string(), "helper".to_string()],
@@ -49,6 +51,10 @@ fn full_request_round_trips_through_the_trigger_parser() {
     );
     assert_eq!(spec.work_label.as_deref(), Some("site-build"));
     assert_eq!(spec.environment.as_deref(), Some("prod-env"));
+    assert_eq!(spec.source_branch.as_deref(), Some("release/v1.2"));
+    assert_eq!(spec.target_branch.as_deref(), Some("feature/site"));
+    assert!(body.contains("### Source Branch\n\nrelease/v1.2\n"));
+    assert!(body.contains("### Target Branch\n\nfeature/site\n"));
     assert!(spec.auto_merge);
     assert_eq!(
         spec.log_access,
@@ -71,6 +77,8 @@ fn minimal_request_omits_every_optional_section() {
         manifests: Vec::new(),
         work_label: None,
         environment: None,
+        source_branch: None,
+        target_branch: None,
         auto_merge: None,
         log_access: Vec::new(),
         collaborators: Vec::new(),
@@ -80,15 +88,35 @@ fn minimal_request_omits_every_optional_section() {
     assert!(!body.contains("### Manifest"));
     assert!(!body.contains("### Work Label"));
     assert!(!body.contains("### Environment"));
+    assert!(!body.contains("### Source Branch"));
+    assert!(!body.contains("### Target Branch"));
     assert!(!body.contains("### Auto-merge"));
     assert!(!body.contains("### Log Access Allowlist"));
     assert!(!body.contains("### Session Collaborators"));
     assert!(!body.contains("### Output Language"));
     let spec = parse_trigger_issue_body(&body).expect("parses");
     assert_eq!(spec.work_label, None);
+    assert_eq!(spec.source_branch, None);
+    assert_eq!(spec.target_branch, None);
     assert!(!spec.auto_merge);
     assert!(spec.log_access.is_empty());
     assert!(spec.collaborators.is_empty());
+}
+
+#[test]
+fn invalid_branch_name_is_a_422_naming_the_section_and_rule() {
+    let req = CreateSessionRequest {
+        target_branch: Some("bad branch".to_string()),
+        ..full_request()
+    };
+    let err = validated_trigger_body(&req).expect_err("must reject");
+    match err {
+        AppError::Unprocessable(message) => {
+            assert!(message.contains("### Target Branch"), "{message}");
+            assert!(message.contains("[A-Za-z0-9._/-]"), "{message}");
+        }
+        other => panic!("expected Unprocessable, got {other:?}"),
+    }
 }
 
 #[test]
@@ -99,6 +127,8 @@ fn auto_merge_false_and_blank_optionals_render_like_absent() {
         manifests: vec!["  ".to_string()],
         work_label: Some("   ".to_string()),
         environment: Some(String::new()),
+        source_branch: Some("  ".to_string()),
+        target_branch: None,
         auto_merge: Some(false),
         log_access: vec!["  ".to_string()],
         collaborators: vec!["  ".to_string()],

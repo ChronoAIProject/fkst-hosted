@@ -7,6 +7,7 @@ import { useContent } from '@/i18n';
 import { createTrigger } from '@/lib/api/canvas';
 import { listEnvironmentProfiles } from '@/lib/api/environments';
 import type { CreateSessionRequest, CreateSessionResponse } from '@/lib/api/types';
+import { validateOptionalBranchName } from '@/lib/branch';
 import { ModalShell } from './modal-shell';
 import { ErrorNote } from '@/components/ui/error-note';
 import { FIELD_INPUT, FIELD_LABEL } from '@/components/ui/field';
@@ -42,6 +43,8 @@ export function buildCreateRequest(form: {
   manifests: string;
   workLabel: string;
   environment: string;
+  sourceBranch: string;
+  targetBranch: string;
   autoMerge: boolean;
   logAccess: string;
   collaborators: string;
@@ -57,6 +60,10 @@ export function buildCreateRequest(form: {
   if (workLabel) request.work_label = workLabel;
   const environment = form.environment.trim();
   if (environment) request.environment = environment;
+  const sourceBranch = form.sourceBranch.trim();
+  if (sourceBranch) request.source_branch = sourceBranch;
+  const targetBranch = form.targetBranch.trim();
+  if (targetBranch) request.target_branch = targetBranch;
   if (form.autoMerge) request.auto_merge = true;
   const logAccess = parseAllowlist(form.logAccess);
   if (logAccess.length > 0) request.log_access = logAccess;
@@ -167,6 +174,8 @@ export function CreateTriggerModal({
   const [manifests, setManifests] = useState('');
   const [workLabel, setWorkLabel] = useState('');
   const [environment, setEnvironment] = useState('');
+  const [sourceBranch, setSourceBranch] = useState('');
+  const [targetBranch, setTargetBranch] = useState('');
   const [autoMerge, setAutoMerge] = useState(false);
   const [logAccess, setLogAccess] = useState('');
   const [collaborators, setCollaborators] = useState('');
@@ -205,7 +214,10 @@ export function CreateTriggerModal({
   const trimmedWorkLabel = workLabel.trim();
   const workLabelCollision =
     trimmedWorkLabel !== '' && inUseWorkLabels.includes(trimmedWorkLabel);
-  const submitBlocked = !valid || pending || workLabelCollision;
+  const sourceBranchError = validateOptionalBranchName(sourceBranch);
+  const targetBranchError = validateOptionalBranchName(targetBranch);
+  const submitBlocked =
+    !valid || pending || workLabelCollision || sourceBranchError != null || targetBranchError != null;
 
   const setPackageAt = (i: number, value: string) =>
     setPackages((rows) => rows.map((row, j) => (j === i ? value : row)));
@@ -228,6 +240,8 @@ export function CreateTriggerModal({
           manifests,
           workLabel,
           environment,
+          sourceBranch,
+          targetBranch,
           autoMerge,
           logAccess,
           collaborators,
@@ -393,6 +407,66 @@ export function CreateTriggerModal({
         </div>
 
         <EnvironmentField cc={cc} value={environment} onChange={setEnvironment} load={envLoad} />
+
+        <fieldset className="flex flex-col gap-3 border-0 border-t border-line pt-4 p-0 m-0">
+          <legend className="font-ui font-semibold text-[12px] text-dim pr-2">
+            {cc.createAdvancedLabel}
+          </legend>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5 min-w-0">
+              <label htmlFor="trigger-source-branch" className={FIELD_LABEL}>
+                {cc.createSourceBranchLabel}
+              </label>
+              <input
+                id="trigger-source-branch"
+                type="text"
+                value={sourceBranch}
+                onChange={(e) => setSourceBranch(e.target.value)}
+                placeholder={cc.createSourceBranchPlaceholder}
+                spellCheck={false}
+                autoComplete="off"
+                aria-invalid={sourceBranchError != null}
+                aria-describedby={sourceBranchError ? 'trigger-source-branch-error' : undefined}
+                className={cn(FIELD_INPUT, 'font-mono')}
+              />
+              {sourceBranchError && (
+                <p
+                  id="trigger-source-branch-error"
+                  role="alert"
+                  className="font-mono text-[11px] text-red"
+                >
+                  {cc.createBranchInvalid}
+                </p>
+              )}
+            </div>
+            <div className="flex flex-col gap-1.5 min-w-0">
+              <label htmlFor="trigger-target-branch" className={FIELD_LABEL}>
+                {cc.createTargetBranchLabel}
+              </label>
+              <input
+                id="trigger-target-branch"
+                type="text"
+                value={targetBranch}
+                onChange={(e) => setTargetBranch(e.target.value)}
+                placeholder={cc.createTargetBranchPlaceholder}
+                spellCheck={false}
+                autoComplete="off"
+                aria-invalid={targetBranchError != null}
+                aria-describedby={targetBranchError ? 'trigger-target-branch-error' : undefined}
+                className={cn(FIELD_INPUT, 'font-mono')}
+              />
+              {targetBranchError && (
+                <p
+                  id="trigger-target-branch-error"
+                  role="alert"
+                  className="font-mono text-[11px] text-red"
+                >
+                  {cc.createBranchInvalid}
+                </p>
+              )}
+            </div>
+          </div>
+        </fieldset>
 
         <label className="flex items-center gap-2 text-[13px] text-fg cursor-pointer select-none">
           <input

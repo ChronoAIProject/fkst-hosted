@@ -2,7 +2,7 @@
 //! success AND failure paths each (mirrors `repos_tests.rs`).
 
 use secrecy::SecretString;
-use wiremock::matchers::{method, path, query_param};
+use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::error::AppError;
@@ -10,6 +10,72 @@ use crate::routes::dashboard::DashboardGithub;
 
 fn tok() -> SecretString {
     SecretString::from("user-token".to_string())
+}
+
+#[tokio::test]
+async fn create_issue_omits_assignees_when_empty() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/repos/acme/site/issues"))
+        .and(header("authorization", "Bearer user-token"))
+        .and(body_json(serde_json::json!({
+            "title": "session",
+            "body": "body",
+            "labels": ["fkst-substrate-trigger"]
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+            "number": 21,
+            "html_url": "https://github.com/acme/site/issues/21"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let gh = DashboardGithub::new(&server.uri()).unwrap();
+    gh.create_issue(
+        &tok(),
+        "acme",
+        "site",
+        "session",
+        "body",
+        &["fkst-substrate-trigger".to_string()],
+        &[],
+    )
+    .await
+    .expect("created");
+}
+
+#[tokio::test]
+async fn create_issue_includes_nonempty_assignees_exactly() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/repos/acme/site/issues"))
+        .and(body_json(serde_json::json!({
+            "title": "work",
+            "body": "details",
+            "labels": ["site-build"],
+            "assignees": ["session-owner"]
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+            "number": 22,
+            "html_url": "https://github.com/acme/site/issues/22"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let gh = DashboardGithub::new(&server.uri()).unwrap();
+    gh.create_issue(
+        &tok(),
+        "acme",
+        "site",
+        "work",
+        "details",
+        &["site-build".to_string()],
+        &["session-owner".to_string()],
+    )
+    .await
+    .expect("created");
 }
 
 #[tokio::test]

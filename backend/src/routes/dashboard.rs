@@ -139,6 +139,8 @@ struct RawIssue {
     labels: Vec<RawLabel>,
     #[serde(default)]
     state: String,
+    #[serde(default)]
+    assignees: Vec<RawLogin>,
     user: RawUser,
     /// Present only when this "issue" is actually a PR (filtered out).
     pull_request: Option<serde_json::Value>,
@@ -643,7 +645,11 @@ impl DashboardGithub {
                             body: r.body,
                             labels: r.labels.into_iter().map(|l| l.name).collect(),
                             state: r.state,
-                            assignees: Vec::new(),
+                            assignees: r
+                                .assignees
+                                .into_iter()
+                                .map(|assignee| assignee.login)
+                                .collect(),
                             user_login: r.user.login,
                             user_id: r.user.id,
                         },
