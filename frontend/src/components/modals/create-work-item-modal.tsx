@@ -8,6 +8,7 @@ import type { CreateWorkItemRequest, CreateWorkItemResponse } from '@/lib/api/ca
 import { ModalShell } from './modal-shell';
 import { ErrorNote } from '@/components/ui/error-note';
 import { FIELD_INPUT, FIELD_LABEL } from '@/components/ui/field';
+import { MarkdownPreview } from '@/components/ui/markdown-preview';
 import { useToast } from '@/components/ui/toast';
 
 /** The `<form>` element id, referenced by the sticky-footer submit button so it
@@ -23,7 +24,7 @@ export function buildWorkItemRequest(form: {
 }): CreateWorkItemRequest {
   const request: CreateWorkItemRequest = {
     title: form.title.trim(),
-    work_label: form.workLabel,
+    label: form.workLabel,
   };
   // Preserve populated Markdown verbatim: leading indentation and trailing
   // newlines can be meaningful. Whitespace-only content is still omitted.
@@ -59,6 +60,7 @@ export function CreateWorkItemModal({
   const toast = useToast();
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  const [bodyMode, setBodyMode] = useState<'write' | 'preview'>('write');
   const [workLabel, setWorkLabel] = useState(workLabels[0] ?? '');
   const [pending, setPending] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
@@ -143,21 +145,30 @@ export function CreateWorkItemModal({
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <label htmlFor="work-item-label" className={FIELD_LABEL}>
-            {cc.workItemLabelLabel}
-          </label>
-          <select
-            id="work-item-label"
-            value={workLabel}
-            onChange={(e) => setWorkLabel(e.target.value)}
-            className={cn(FIELD_INPUT, 'font-mono cursor-pointer')}
-          >
-            {workLabels.map((label) => (
-              <option key={label} value={label}>
-                {label}
-              </option>
-            ))}
-          </select>
+          {workLabels.length > 1 ? (
+            <>
+              <label htmlFor="work-item-label" className={FIELD_LABEL}>
+                {cc.workItemLabelLabel}
+              </label>
+              <select
+                id="work-item-label"
+                value={workLabel}
+                onChange={(e) => setWorkLabel(e.target.value)}
+                className={cn(FIELD_INPUT, 'font-mono cursor-pointer')}
+              >
+                {workLabels.map((label) => (
+                  <option key={label} value={label}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </>
+          ) : (
+            <>
+              <span className={FIELD_LABEL}>{cc.workItemLabelLabel}</span>
+              <p className="font-mono text-[12px] text-fg break-all">{workLabel}</p>
+            </>
+          )}
           <p className="font-mono text-[11px] text-ghost">
             {cc.workItemLabelNote
               .replace('{label}', workLabel)
@@ -166,17 +177,57 @@ export function CreateWorkItemModal({
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <label htmlFor="work-item-body" className={FIELD_LABEL}>
-            {cc.workItemBodyLabel}
-          </label>
-          <textarea
-            id="work-item-body"
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            spellCheck={false}
-            rows={5}
-            className={cn(FIELD_INPUT, 'font-mono resize-y')}
-          />
+          <div className="flex items-center justify-between gap-3">
+            <span id="work-item-body-label" className={FIELD_LABEL}>
+              {cc.workItemBodyLabel}
+            </span>
+            <div
+              role="group"
+              aria-label={cc.workItemBodyModeAria}
+              className="glass inline-flex flex-none items-center gap-1 rounded-control border border-line p-1"
+            >
+              {(['write', 'preview'] as const).map((mode) => {
+                const active = bodyMode === mode;
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setBodyMode(mode)}
+                    className={cn(
+                      'min-w-16 rounded-control px-2.5 py-1 font-ui text-[11px] font-semibold transition-[color,background-color,box-shadow] cursor-pointer',
+                      active
+                        ? 'bg-glass-2 text-amber shadow-[var(--shadow-1)]'
+                        : 'text-ghost hover:text-fg'
+                    )}
+                  >
+                    {mode === 'write' ? cc.workItemWrite : cc.workItemPreview}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          {bodyMode === 'write' ? (
+            <textarea
+              id="work-item-body"
+              aria-labelledby="work-item-body-label"
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              spellCheck={false}
+              rows={5}
+              className={cn(FIELD_INPUT, 'font-mono resize-y')}
+            />
+          ) : body.trim() ? (
+            <MarkdownPreview markdown={body} ariaLabel={cc.workItemPreviewAria} />
+          ) : (
+            <div
+              role="region"
+              aria-label={cc.workItemPreviewAria}
+              className="min-h-[132px] rounded-control border border-line bg-glass px-3 py-2.5 font-mono text-[12px] text-ghost"
+            >
+              {cc.workItemPreviewEmpty}
+            </div>
+          )}
           <p className="font-mono text-[11px] text-ghost">{cc.workItemBodyHint}</p>
         </div>
 

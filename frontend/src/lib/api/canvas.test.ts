@@ -166,7 +166,7 @@ describe('createWorkItem', () => {
     ) as ApiFetch;
     const result = await createWorkItem(apiFetch, 'o', 'r', 7, {
       title: 'task',
-      work_label: 'fkst-security',
+      label: 'fkst-security',
       body: '## Details\n',
     });
     expect(result).toEqual({
@@ -180,7 +180,7 @@ describe('createWorkItem', () => {
     expect(path).toBe('/api/v1/repos/o/r/sessions/7/work-items');
     expect(JSON.parse(String(init.body))).toEqual({
       title: 'task',
-      work_label: 'fkst-security',
+      label: 'fkst-security',
       body: '## Details\n',
     });
   });

@@ -60,6 +60,11 @@ export const canvasModals: CanvasModalsSlice = {
   workItemLabelLabel: 'Work label',
   workItemBodyLabel: 'Details (optional)',
   workItemBodyHint: 'Markdown is supported.',
+  workItemBodyModeAria: 'Work item body mode',
+  workItemWrite: 'Write',
+  workItemPreview: 'Preview',
+  workItemPreviewAria: 'Markdown preview',
+  workItemPreviewEmpty: 'Nothing to preview yet.',
   workItemLabelNote:
     'Opens an issue labeled `{label}` and assigned to `@{creator}`, which this session claims and works.',
   workItemSubmit: 'Queue work item',

@@ -56,6 +56,11 @@ export const canvasModals: CanvasModalsSlice = {
   workItemLabelLabel: '工作标签',
   workItemBodyLabel: '详情（可选）',
   workItemBodyHint: '支持 Markdown。',
+  workItemBodyModeAria: '任务正文模式',
+  workItemWrite: '编写',
+  workItemPreview: '预览',
+  workItemPreviewAria: 'Markdown 预览',
+  workItemPreviewEmpty: '暂无可预览的内容。',
   workItemLabelNote:
     '将新建一个带 `{label}` 标签并分配给 `@{creator}` 的 issue，该会话会认领并处理它。',
   workItemSubmit: '排入任务',
