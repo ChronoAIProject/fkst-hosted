@@ -384,6 +384,32 @@ async fn session_detail_schema_exposes_creator_and_branch_topology() {
 }
 
 #[tokio::test]
+async fn create_work_item_schema_keeps_the_label_optional() {
+    let spec = fetch_spec(app(false)).await;
+    let request = &spec["components"]["schemas"]["CreateWorkItemRequest"];
+    let properties = request["properties"]
+        .as_object()
+        .expect("CreateWorkItemRequest.properties object");
+    assert!(properties.contains_key("label"), "{properties:?}");
+    assert!(
+        !properties.contains_key("work_label"),
+        "the legacy deserialize alias must not leak into OpenAPI: {properties:?}"
+    );
+
+    let required = request["required"]
+        .as_array()
+        .expect("CreateWorkItemRequest.required array");
+    assert!(
+        required.iter().any(|field| field == "title"),
+        "{required:?}"
+    );
+    assert!(
+        !required.iter().any(|field| field == "label"),
+        "omitting label must retain the explicit-trigger-label fallback: {required:?}"
+    );
+}
+
+#[tokio::test]
 async fn no_operation_requires_security_the_whole_surface_is_open() {
     let spec = fetch_spec(app(true)).await;
     let paths = &spec["paths"];

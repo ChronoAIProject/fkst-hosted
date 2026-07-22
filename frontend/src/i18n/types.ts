@@ -271,8 +271,13 @@ export interface SiteContent {
       workItemLabelLabel: string;
       workItemBodyLabel: string;
       workItemBodyHint: string;
+      workItemBodyModeAria: string;
+      workItemWrite: string;
+      workItemPreview: string;
+      workItemPreviewAria: string;
+      workItemPreviewEmpty: string;
       /** Note naming the session's work label the issue is stamped with;
-       *  `{label}` placeholder. */
+       *  `{label}` and `{creator}` placeholders. */
       workItemLabelNote: string;
       workItemSubmit: string;
       workItemPending: string;

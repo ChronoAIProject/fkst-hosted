@@ -16,9 +16,20 @@ use crate::routes::canvas::test_support::{
 fn work_item_request() -> CreateWorkItemRequest {
     CreateWorkItemRequest {
         title: "  build the landing page  ".to_string(),
-        work_label: "site-build".to_string(),
+        label: None,
         body: Some("## Details\n\n  keep this indentation".to_string()),
     }
+}
+
+#[test]
+fn create_work_item_request_accepts_the_legacy_work_label_alias() {
+    let request: CreateWorkItemRequest = serde_json::from_value(serde_json::json!({
+        "title": "task",
+        "work_label": "site-build"
+    }))
+    .expect("legacy request remains readable during a rolling deploy");
+
+    assert_eq!(request.label.as_deref(), Some("site-build"));
 }
 
 /// A minimal, valid trigger issue body carrying the given explicit work label.
@@ -239,12 +250,32 @@ async fn create_work_item_rejects_a_blank_title_before_any_github_call() {
         auth_headers(),
         Json(CreateWorkItemRequest {
             title: "   ".to_string(),
-            work_label: "site-build".to_string(),
+            label: None,
             body: None,
         }),
     )
     .await
     .expect_err("a blank title is a 400");
+    assert!(matches!(err, AppError::Validation(_)), "got {err:?}");
+}
+
+#[tokio::test]
+async fn create_work_item_rejects_a_populated_but_blank_label_before_github() {
+    let server = MockServer::start().await;
+    let state = test_state(&server.uri(), None);
+    let err = create_work_item(
+        State(state),
+        Path(("acme".to_string(), "site".to_string(), 21)),
+        viewer_user(),
+        auth_headers(),
+        Json(CreateWorkItemRequest {
+            title: "task".to_string(),
+            label: Some("   ".to_string()),
+            body: None,
+        }),
+    )
+    .await
+    .expect_err("a present label must not be blank");
     assert!(matches!(err, AppError::Validation(_)), "got {err:?}");
 }
 
@@ -371,7 +402,7 @@ async fn create_work_item_accepts_a_package_discovered_label() {
 
     let state = test_state(&server.uri(), None);
     let mut request = work_item_request();
-    request.work_label = "fkst-security".to_string();
+    request.label = Some("fkst-security".to_string());
     let (status, Json(created)) = create_work_item(
         State(state),
         Path(("acme".to_string(), "site".to_string(), 21)),
@@ -383,6 +414,54 @@ async fn create_work_item_accepts_a_package_discovered_label() {
     .expect("a discovered work label is applicable");
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(created.issue_number, 80);
+}
+
+#[tokio::test]
+async fn create_work_item_requires_a_choice_for_discovered_only_labels() {
+    let server = MockServer::start().await;
+    let body = "### Session Name\n\nsite\n\n### Packages\n\nacme/pkgs@main:packages/devloop\n";
+    mount_trigger(
+        &server,
+        21,
+        viewer_user().id,
+        body,
+        &["fkst-substrate-trigger"],
+        false,
+    )
+    .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/pkgs/contents/packages/devloop/fkst.toml"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("[github]\nwork_labels = [\"fkst-dev\", \"fkst-security\"]\n"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/repos/acme/site/issues"))
+        .respond_with(ResponseTemplate::new(201))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let state = test_state(&server.uri(), None);
+    let err = create_work_item(
+        State(state),
+        Path(("acme".to_string(), "site".to_string(), 21)),
+        viewer_user(),
+        auth_headers(),
+        Json(work_item_request()),
+    )
+    .await
+    .expect_err("discovered-only sessions require an explicit request choice");
+    match err {
+        AppError::Unprocessable(message) => {
+            assert!(message.contains("no explicit work label"), "{message}");
+            assert!(message.contains("fkst-dev"), "{message}");
+            assert!(message.contains("fkst-security"), "{message}");
+        }
+        other => panic!("expected Unprocessable, got {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -406,7 +485,7 @@ async fn create_work_item_rejects_a_label_outside_the_sessions_resolved_set() {
 
     let state = test_state(&server.uri(), None);
     let mut request = work_item_request();
-    request.work_label = "unrelated".to_string();
+    request.label = Some("unrelated".to_string());
     let err = create_work_item(
         State(state),
         Path(("acme".to_string(), "site".to_string(), 21)),

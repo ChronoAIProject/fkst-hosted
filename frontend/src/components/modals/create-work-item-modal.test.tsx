@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AuthProvider } from '@/lib/auth/github-auth';
 import { ToastProvider, Toaster } from '@/components/ui/toast';
@@ -46,7 +46,7 @@ describe('buildWorkItemRequest', () => {
       buildWorkItemRequest({ title: '  do the thing  ', body: '   ', workLabel: 'site-build' })
     ).toEqual({
       title: 'do the thing',
-      work_label: 'site-build',
+      label: 'site-build',
     });
   });
 
@@ -55,7 +55,7 @@ describe('buildWorkItemRequest', () => {
       buildWorkItemRequest({ title: 't', body: '  details\n', workLabel: 'fkst-security' })
     ).toEqual({
       title: 't',
-      work_label: 'fkst-security',
+      label: 'fkst-security',
       body: '  details\n',
     });
   });
@@ -75,6 +75,40 @@ describe('CreateWorkItemModal', () => {
     expect(screen.getByText(/Opens an issue labeled `site-build`/)).toBeInTheDocument();
     expect(screen.getByText(/assigned to `@session-owner`/)).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'fkst-security' })).toBeInTheDocument();
+  });
+
+  it('renders one applicable label as a fixed value instead of a picker', () => {
+    vi.stubGlobal('fetch', vi.fn());
+    renderModal({ workLabels: ['site-build'] });
+
+    expect(screen.queryByRole('combobox', { name: 'Work label' })).not.toBeInTheDocument();
+    expect(screen.getByText('site-build')).toBeInTheDocument();
+    expect(screen.getByText(/Opens an issue labeled `site-build`/)).toBeInTheDocument();
+  });
+
+  it('previews Markdown safely and preserves the raw body when returning to Write', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal('fetch', vi.fn());
+    renderModal();
+    const raw = '# Plan\n\n- verify **routing**\n\nRead [the docs](https://example.com/docs).';
+
+    fireEvent.change(screen.getByLabelText('Details (optional)'), { target: { value: raw } });
+    await user.click(screen.getByRole('button', { name: 'Preview' }));
+
+    expect(screen.getByRole('button', { name: 'Preview' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+    const preview = screen.getByRole('region', { name: 'Markdown preview' });
+    expect(within(preview).getByRole('heading', { level: 1, name: 'Plan' })).toBeInTheDocument();
+    expect(within(preview).getByText('routing').tagName).toBe('STRONG');
+    expect(within(preview).getByRole('link', { name: 'the docs' })).toHaveAttribute(
+      'href',
+      'https://example.com/docs'
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Write' }));
+    expect(screen.getByLabelText('Details (optional)')).toHaveValue(raw);
   });
 
   it('posts the right request, shows a success toast, and hands back the issue', async () => {
@@ -114,7 +148,7 @@ describe('CreateWorkItemModal', () => {
     expect(call?.init?.method).toBe('POST');
     expect(JSON.parse(String(call?.init?.body))).toEqual({
       title: 'build the landing page',
-      work_label: 'fkst-security',
+      label: 'fkst-security',
       body: 'do it well',
     });
   });

@@ -39,9 +39,11 @@ use crate::state::AppState;
 pub struct CreateWorkItemRequest {
     /// The work-issue title (also the GitHub issue title); required, non-blank.
     pub title: String,
-    /// One of the session's resolved applicable work labels. The server
-    /// re-resolves the session and rejects labels outside that set.
-    pub work_label: String,
+    /// An optional label selected from the session's resolved applicable set.
+    /// When omitted, the trigger's explicit `### Work Label` is used; sessions
+    /// whose labels are discovered from packages or manifests must name one.
+    #[serde(default, alias = "work_label")]
+    pub label: Option<String>,
     /// The optional work-issue body (Markdown); an omitted or blank value opens
     /// a body-less issue.
     #[serde(default)]
@@ -199,7 +201,7 @@ impl DashboardGithub {
     request_body = CreateWorkItemRequest,
     responses(
         (status = 201, description = "The work issue was created", body = CreateWorkItemResponse),
-        (status = 400, description = "Malformed owner/name/issue number, a blank title, or GitHub rejected the issue", body = ErrorEnvelope),
+        (status = 400, description = "Malformed owner/name/issue number, a blank title/selected label, or GitHub rejected the issue", body = ErrorEnvelope),
         (status = 401, description = "Missing or invalid GitHub token", body = ErrorEnvelope),
         (status = 403, description = "Not allowlisted, the caller lacks work-item authority on this session (not the creator, a listed Session Collaborator, nor a deployment global administrator), or GitHub refused the write for this caller", body = ErrorEnvelope),
         (status = 404, description = "No such trigger issue (or the caller cannot see the repo)", body = ErrorEnvelope),
@@ -226,11 +228,9 @@ pub(super) async fn create_work_item(
     if title.is_empty() {
         return Err(AppError::Validation("title must not be blank".to_string()));
     }
-    let requested_work_label = req.work_label.trim();
-    if requested_work_label.is_empty() {
-        return Err(AppError::Validation(
-            "work_label must not be blank".to_string(),
-        ));
+    let requested_label = req.label.as_deref().map(str::trim).map(str::to_string);
+    if requested_label.as_deref().is_some_and(str::is_empty) {
+        return Err(AppError::Validation("label must not be blank".to_string()));
     }
     // An omitted or blank body opens a body-less issue. Preserve a populated
     // body's original whitespace because indentation is meaningful Markdown.
@@ -339,6 +339,15 @@ pub(super) async fn create_work_item(
             "this session has no applicable work labels".to_string(),
         ));
     }
+    let requested_work_label = requested_label
+        .as_deref()
+        .or(reg.def.work_label.as_deref())
+        .ok_or_else(|| {
+            AppError::Unprocessable(format!(
+                "this session has no explicit work label; choose one of: {}",
+                applicable.join(", ")
+            ))
+        })?;
     let work_label = applicable
         .iter()
         .find(|label| label.eq_ignore_ascii_case(requested_work_label))

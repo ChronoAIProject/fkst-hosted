@@ -111,7 +111,7 @@ export async function createTrigger(
 export interface CreateWorkItemRequest {
   title: string;
   /** One of the session's server-resolved applicable labels. */
-  work_label: string;
+  label?: string;
   body?: string;
 }
 
