@@ -157,6 +157,19 @@ function C.parse_issue_view_intake_judge(M, stdout)
   }
 end
 
+-- This projection intentionally has no title/body/comments keys. Creator-
+-- scoped admission uses it before any untrusted issue content is fetched.
+function C.parse_issue_view_admission_metadata(M, stdout)
+  local decoded = json.decode(stdout or "{}")
+  return {
+    number = tonumber(decoded.number),
+    state = decoded.state,
+    labels = shared.label_names(decoded.labels),
+    assignees = m_claims.assignee_logins(decoded.assignees),
+    author_login = m_claims.issue_author_login(decoded),
+  }
+end
+
 function C.parse_issue_view_meta(M, stdout)
   local decoded = json.decode(stdout or "{}")
   local result = C.parse_issue_view_result(M, stdout)

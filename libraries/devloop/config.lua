@@ -12,6 +12,7 @@ local allowed_env = {
   FKST_GITHUB_AUTHORIZED_LOGINS = true,
   FKST_GITHUB_CLAIM_MODE = true,
   FKST_GITHUB_REPO = true,
+  FKST_SESSION_CREATOR = true,
   FKST_SESSION_WORK_LABEL = true,
   FKST_GITHUB_WRITE = true,
   FKST_DEVLOOP_UPSTREAM_BRANCH = true,
@@ -109,6 +110,16 @@ end
 
 function C.session_work_labels(exec)
   return C.parse_session_work_labels(C.read_env("FKST_SESSION_WORK_LABEL", exec))
+end
+
+-- Set by fkst-hosted for creator-routed sessions. Nil preserves the legacy
+-- single-operator contract used by standalone package deployments.
+function C.session_creator(exec)
+  local creator = strings.trim(C.read_env("FKST_SESSION_CREATOR", exec) or "")
+  if creator == "" then
+    return nil
+  end
+  return creator
 end
 
 function C.matches_session_work_label(issue_labels, exec)

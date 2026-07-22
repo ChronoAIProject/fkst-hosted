@@ -43,6 +43,12 @@ end
 function t.run_department(...)
   local _, _, run_opts = ...
   author_policy.mock_env(t, run_opts)
+  local run_env = type(run_opts) == "table" and run_opts.env or nil
+  t.mock_command('printf %s "$FKST_SESSION_CREATOR"', {
+    stdout = type(run_env) == "table" and tostring(run_env.FKST_SESSION_CREATOR or "") or "",
+    stderr = "",
+    exit_code = 0,
+  })
   return raw_run_department(...)
 end
 

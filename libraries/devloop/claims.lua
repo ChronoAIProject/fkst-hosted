@@ -86,6 +86,21 @@ function C.assignee_logins(value)
   return logins
 end
 
+-- Creator routing is deliberately stricter than ordinary claim ownership: a
+-- work issue belongs to this session only when exactly one assignee matches the
+-- configured creator. GitHub logins are case-insensitive.
+function C.is_routed_to_session(snapshot_assignees, creator)
+  local expected = strings.trim(tostring(creator or ""))
+  if expected == "" or type(snapshot_assignees) ~= "table" or #snapshot_assignees ~= 1 then
+    return false
+  end
+  local actual = assignee_login(snapshot_assignees[1])
+  if actual == nil then
+    return false
+  end
+  return strings.trim(actual):lower() == expected:lower()
+end
+
 -- Single source for the claim owner: normalize the configured bot login so all
 -- downstream comparisons get the bare slug regardless of whether the deployment
 -- configured "<slug>" or "<slug>[bot]". No-op for ordinary user logins.
@@ -170,13 +185,17 @@ local function issue_labels(decoded)
   return github_view.label_names(decoded and decoded.labels)
 end
 
-function C.read_current_issue_ownership(repo, issue_number)
+function C.read_current_issue_ownership(repo, issue_number, session_creator)
   if issue_number == nil then
     return nil
   end
   local fields = "assignees,author"
   if config.claim_mode() == "label" then
-    fields = "assignees,author,labels"
+    if session_creator ~= nil then
+      fields = "number,state,labels,assignees,author"
+    else
+      fields = "assignees,author,labels"
+    end
   end
   local view = github().issue_view(repo, issue_number, fields, 30)
   local decoded = json.decode(view.stdout or "{}")
@@ -184,12 +203,34 @@ function C.read_current_issue_ownership(repo, issue_number)
     assignees = C.assignee_logins(decoded.assignees),
     author_login = C.issue_author_login(decoded),
     labels = issue_labels(decoded),
+    number = tonumber(decoded.number),
+    state = decoded.state,
   }
 end
 
-function C.verify_issue_claim(repo, issue_number, owner)
-  local ownership = C.read_current_issue_ownership(repo, issue_number)
-  return C.issue_claim_state(ownership and ownership.assignees, owner, ownership and ownership.labels) == "self"
+function C.verify_issue_claim(repo, issue_number, owner, session_creator)
+  local ownership = C.read_current_issue_ownership(repo, issue_number, session_creator)
+  if C.issue_claim_state(ownership and ownership.assignees, owner, ownership and ownership.labels) ~= "self" then
+    return false
+  end
+  if session_creator == nil then
+    return true
+  end
+  if ownership.state ~= "OPEN" then
+    return false
+  end
+  local in_scope = config.matches_session_work_label(ownership.labels)
+  if not in_scope then
+    return false
+  end
+  local admission = C.claim_admission_precheck(ownership, {
+    owner = owner,
+    status = "self",
+    claim_mode = "label",
+    creator = session_creator,
+    trusted_author_policy = github_author_policy.from_env(),
+  })
+  return admission == "held"
 end
 
 local function log_claim(dept, proposal_id, action, reason)
@@ -296,13 +337,19 @@ function C.claim_admission_inputs(current)
   end
 
   local claim_mode = config.claim_mode()
+  local creator = nil
+  if claim_mode == "label" then
+    creator = config.session_creator()
+  end
   local author = C.issue_author_login(current)
   if author ~= nil and author ~= "" then
     author = devloop_base.strip_bot_login_suffix(author)
   end
   local managed = nil
   local trusted_author_policy = nil
-  if claim_mode ~= "label" and author ~= nil and author ~= "" and author ~= owner then
+  if creator ~= nil then
+    trusted_author_policy = github_author_policy.from_env()
+  elseif claim_mode ~= "label" and author ~= nil and author ~= "" and author ~= owner then
     managed = C.managed_bot_logins()
     if not C.is_managed_bot_login(author, managed) then
       trusted_author_policy = github_author_policy.from_env()
@@ -312,6 +359,7 @@ function C.claim_admission_inputs(current)
     owner = owner,
     status = status,
     claim_mode = claim_mode,
+    creator = creator,
     managed = managed,
     trusted_author_policy = trusted_author_policy,
   }
@@ -328,6 +376,7 @@ function C.claim_admission_precheck(current, inputs)
     claim_mode = inputs.claim_mode,
     author = author,
     managed = inputs.managed,
+    creator = inputs.creator,
   }
   if inputs.status == "other" then
     return "other", {
@@ -336,7 +385,28 @@ function C.claim_admission_precheck(current, inputs)
     }
   end
 
-  if inputs.claim_mode ~= "label" then
+  if inputs.claim_mode == "label" and inputs.creator ~= nil
+    and not C.is_routed_to_session(current and current.assignees, inputs.creator) then
+    return "denied", {
+      action = "intake-skip-not-routed",
+      reason = "issue is not assigned exactly to the configured session creator",
+    }
+  end
+
+  if inputs.claim_mode == "label" and inputs.creator ~= nil then
+    if author == nil or author == "" then
+      return "denied", {
+        action = "skip-fork-author-unknown",
+        reason = "issue author is missing or unknown",
+      }
+    end
+    if not github_author_policy.is_authorized(inputs.trusted_author_policy, author) then
+      return "denied", {
+        action = "skip-non-whitelisted-author",
+        reason = "issue author is not authorized for GitHub content",
+      }
+    end
+  elseif inputs.claim_mode ~= "label" then
     if author == nil or author == "" then
       return "denied", {
         action = "skip-fork-author-unknown",
@@ -380,6 +450,14 @@ end
 function C.claim_issue_for_management(M, dept, repo, issue_number, current, proposal_id)
   local admission, detail = C.claim_admission_precheck(current, C.claim_admission_inputs(current))
   if admission == "held" then
+    if detail.creator ~= nil then
+      if C.verify_issue_claim(repo, issue_number, detail.owner, detail.creator) then
+        log_claim(dept, proposal_id, "claim-held", "creator-routed label claim verified")
+        return true
+      end
+      log_claim(dept, proposal_id, "claim-lost", "creator-routed label claim failed fresh verification")
+      return false
+    end
     return true
   end
   if admission == "other" or admission == "denied" then
@@ -438,7 +516,7 @@ function C.claim_issue_for_management(M, dept, repo, issue_number, current, prop
   if config.claim_mode() == "label" then
     github().issue_add_label(repo, issue_number, claimed_label, 30)
     M.invalidate_entity_after_write(repo, "issue", issue_number)
-    if C.verify_issue_claim(repo, issue_number, owner) then
+    if C.verify_issue_claim(repo, issue_number, owner, detail.creator) then
       log_claim(dept, proposal_id, "claim-won", "label claim verified after add-label")
       return true
     end

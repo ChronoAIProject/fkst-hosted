@@ -25,6 +25,10 @@ local spec = {
   stall_window = "30s",
 }
 
+local function claim_issue_for_management(repo, issue_number, current, proposal_id)
+  return m_claims.claim_issue_for_management(core, "admission", repo, issue_number, current, proposal_id)
+end
+
 local function raise_reintake_refusal(repo, issue_number, proposal_id, command, reason, source_ref)
   local request = operator_commands.build_operator_issue_command_refusal_request(repo,
     tostring(issue_number),
@@ -36,7 +40,7 @@ local function raise_reintake_refusal(repo, issue_number, proposal_id, command, 
   devloop_logging.log_raise("admission", proposal_id, "github-proxy.github_issue_comment_request", request)
 end
 
-local function handle_pending_reintake(repo, issue, current, proposal_id, source_ref)
+local function handle_pending_reintake(repo, issue, current, proposal_id, source_ref, claim_verified)
   local command = core.pending_reintake_command(current.comments)
   if command == nil then
     return false
@@ -57,7 +61,8 @@ local function handle_pending_reintake(repo, issue, current, proposal_id, source
     raise_reintake_refusal(repo, issue.number, proposal_id, command, "reintake requires terminal blocked or no active devloop state; use rereview, reready, or reimplement for recoverable active states", source_ref)
     return true
   end
-  if not m_claims.claim_issue_for_management(core, "admission", repo, issue.number, current, proposal_id) then
+  if not claim_verified
+    and not claim_issue_for_management(repo, issue.number, current, proposal_id) then
     return true
   end
   local payload = core.build_intake_admission_candidate(repo, issue, command, now(), current.comments)
@@ -84,6 +89,21 @@ local function current_issue_from_source_ref(source_ref, updated_at)
   local current = parsers_issue.parse_issue_view_intake_judge(core, view.stdout)
   current.updated_at = current.updated_at or updated_at
   current.number = issue_number
+  return repo, issue_number, current, nil
+end
+
+local function current_issue_metadata_from_source_ref(source_ref, updated_at)
+  local repo, issue_number = devloop_base.parse_issue_source_ref(source_ref)
+  if repo == nil or issue_number == nil then
+    return nil, nil, nil, "invalid issue source_ref"
+  end
+  local view = devloop_commands.gh_issue_view(repo, issue_number, "number,state,labels,assignees,author", 30)
+  if view.exit_code ~= 0 then
+    error("github-devloop-intake: gh-issue-admission-metadata-view-failed: gh issue admission metadata view failed: " .. tostring(view.stderr))
+  end
+  local current = parsers_issue.parse_issue_view_admission_metadata(core, view.stdout)
+  current.updated_at = updated_at
+  current.number = current.number or issue_number
   return repo, issue_number, current, nil
 end
 
@@ -129,6 +149,80 @@ local function session_work_scope_allows(current, proposal_id, transition)
   return false
 end
 
+local function log_closed_skip(proposal_id, transition)
+  devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, transition, "candidate", "skip-closed", "fresh issue is not open")
+end
+
+local function log_known_state_skip(proposal_id, transition)
+  devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, transition, "candidate", "skip-known-state", "fresh issue labels show an active devloop state")
+end
+
+local function creator_scoped_metadata_allows(current, proposal_id, transition)
+  if not session_work_scope_allows(current, proposal_id, transition) then
+    return false
+  end
+  if current.state ~= "OPEN" then
+    log_closed_skip(proposal_id, transition)
+    return false
+  end
+  if core.should_skip_known_intake_issue(current.labels) then
+    log_known_state_skip(proposal_id, transition)
+    return false
+  end
+  local admission, detail = m_claims.claim_admission_precheck(current, m_claims.claim_admission_inputs(current))
+  if admission == "other" or admission == "denied" then
+    m_claims.log_claim_admission_skip("admission", proposal_id, detail)
+    return false
+  end
+  return admission == "held" or admission == "needs-claim"
+end
+
+local function admit_creator_scoped_issue(entity, repo, issue_number, proposal_id)
+  local _, _, metadata = current_issue_metadata_from_source_ref(entity.source_ref, entity.updated_at)
+  if not session_work_scope_allows(metadata, proposal_id, "entity") then
+    return
+  end
+  if metadata.state ~= "OPEN" then
+    log_closed_skip(proposal_id, "entity")
+    return
+  end
+  if core.should_skip_known_intake_issue(metadata.labels) then
+    log_known_state_skip(proposal_id, "entity")
+    return
+  end
+  if not claim_issue_for_management(repo, issue_number, metadata, proposal_id) then
+    return
+  end
+
+  local _, _, current = current_issue_from_source_ref(entity.source_ref, entity.updated_at)
+  devloop_logging.log_forged_markers("admission", proposal_id, current.comments)
+  if not session_work_scope_allows(current, proposal_id, "entity-post-claim") then
+    return
+  end
+  local issue = issue_from_current(issue_number, current)
+  if handle_pending_reintake(repo, issue, current, proposal_id, entity.source_ref, true) then
+    return
+  end
+  if current.state ~= "OPEN" then
+    log_closed_skip(proposal_id, "entity-post-claim")
+    return
+  end
+  if core.should_skip_known_intake_issue(current.labels) then
+    log_known_state_skip(proposal_id, "entity-post-claim")
+    return
+  end
+  if m_facts.has_intake_decision_marker(current.comments, proposal_id) then
+    devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "entity-post-claim", "candidate", "skip-intake-decision", "trusted intake decision marker is already visible")
+    return
+  end
+
+  local payload = core.build_intake_admission_candidate(repo, issue, nil, now())
+  devloop_logging.log_apply("admission", proposal_id, nil, nil, { add = {}, remove = {} }, {
+    "devloop_intake_candidate",
+  })
+  devloop_logging.log_raise("admission", proposal_id, "devloop_intake_candidate", payload)
+end
+
 local function admit_issue_event(event, entity)
   entity = entity or event.payload or {}
   devloop_logging.log_entry("admission", event, "github-devloop/intake", devloop_logging.payload_field(entity, "dedup_key"))
@@ -139,6 +233,12 @@ local function admit_issue_event(event, entity)
   end
   local proposal_id = base_ids.proposal_id(repo, issue_number)
   devloop_base.assert_trusted_bot_configured()
+
+  local session_creator = config.session_creator()
+  if session_creator ~= nil and config.claim_mode() == "label" then
+    admit_creator_scoped_issue(entity, repo, issue_number, proposal_id)
+    return
+  end
 
   local _, _, current = current_issue_from_source_ref(entity.source_ref, entity.updated_at)
 
@@ -153,18 +253,18 @@ local function admit_issue_event(event, entity)
     return
   end
   if current.state ~= "OPEN" then
-    devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "entity", "candidate", "skip-closed", "fresh issue is not open")
+    log_closed_skip(proposal_id, "entity")
     return
   end
   if core.should_skip_known_intake_issue(current.labels) then
-    devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "entity", "candidate", "skip-known-state", "fresh issue labels show an active devloop state")
+    log_known_state_skip(proposal_id, "entity")
     return
   end
   if m_facts.has_intake_decision_marker(current.comments, proposal_id) then
     devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "entity", "candidate", "skip-intake-decision", "trusted intake decision marker is already visible")
     return
   end
-  if not m_claims.claim_issue_for_management(core, "admission", repo, issue_number, current, proposal_id) then
+  if not claim_issue_for_management(repo, issue_number, current, proposal_id) then
     return
   end
 
@@ -194,6 +294,25 @@ local function act_issue_observed(event)
     local terminal, precondition_reason, observe_snapshot = replay_authorization.terminal_precondition(entity.source_ref)
     if terminal == nil then
       devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "observed", "replay-candidate", "skip-" .. tostring(precondition_reason or "not-authorized"), "intake replay terminal precondition failed")
+      return
+    end
+
+    local session_creator = config.session_creator()
+    if session_creator ~= nil and config.claim_mode() == "label" then
+      local _, _, metadata = current_issue_metadata_from_source_ref(entity.source_ref, entity.updated_at)
+      if not creator_scoped_metadata_allows(metadata, proposal_id, "observed") then
+        return
+      end
+      local authorization, reason = replay_authorization.authorize(metadata, proposal_id, entity.source_ref, {
+        has_trusted_progress = false,
+        observe_snapshot = observe_snapshot,
+        terminal = terminal,
+      })
+      if authorization == nil then
+        devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "observed", "replay-candidate", "skip-" .. tostring(reason or "not-authorized"), "intake replay precondition failed")
+      end
+      -- Hosted label-mode idleness is governed by the control-plane pending
+      -- gate. The assignee-only idle-detector signal remains out of scope.
       return
     end
 

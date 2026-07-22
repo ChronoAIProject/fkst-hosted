@@ -256,6 +256,7 @@ end
 
 local issue_view_selectors = {
   "number,title,author",
+  "number,state,labels,assignees,author",
   "title,body,comments,labels,state,updatedAt,assignees",
   "title,body,comments,labels,state,createdAt,updatedAt,assignees,author",
   "title,body,updatedAt,labels,comments,state",

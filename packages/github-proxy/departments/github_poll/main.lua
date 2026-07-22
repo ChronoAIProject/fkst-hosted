@@ -1,4 +1,6 @@
 local core = require("github-proxy-effects.core")
+local config = require("devloop.config")
+local claims = require("devloop.claims")
 local saga = require("workflow.saga")
 
 local spec = {
@@ -43,22 +45,29 @@ local function has_configured_label_prefix(labels, prefixes)
   return false
 end
 
-local function is_intake_candidate_snapshot(entity_type, entity, poll_label_prefixes)
-  return entity_type == "issue"
+local function is_intake_candidate_snapshot(entity_type, entity, poll_label_prefixes, session_creator)
+  local candidate = entity_type == "issue"
     and tostring(entity.state or ""):upper() == "OPEN"
     and not has_configured_label_prefix(entity.labels, poll_label_prefixes)
+  if not candidate or session_creator == nil then
+    return candidate
+  end
+  return claims.is_routed_to_session(entity.assignees, session_creator)
 end
 
-local function is_unassigned_intake_candidate_snapshot(entity_type, entity, poll_label_prefixes)
-  return is_intake_candidate_snapshot(entity_type, entity, poll_label_prefixes)
+local function is_level_replay_candidate_snapshot(entity_type, entity, poll_label_prefixes, session_creator)
+  if session_creator ~= nil then
+    return is_intake_candidate_snapshot(entity_type, entity, poll_label_prefixes, session_creator)
+  end
+  return is_intake_candidate_snapshot(entity_type, entity, poll_label_prefixes, nil)
     and #(entity.assignees or {}) == 0
 end
 
-local function collect_changed(repo, entity_type, entities, fresh_changes, replay_candidates, observed_issues, poll_label_prefixes)
+local function collect_changed(repo, entity_type, entities, fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator)
   for _, entity in ipairs(entities) do
     local key = core.entity_cache_key(repo, entity_type, entity.number)
     local cached_updated_at = cache_get(key)
-    local level_replay = is_unassigned_intake_candidate_snapshot(entity_type, entity, poll_label_prefixes)
+    local level_replay = is_level_replay_candidate_snapshot(entity_type, entity, poll_label_prefixes, session_creator)
     if level_replay or cached_updated_at ~= entity.updated_at then
       local item = {
         entity_type = entity_type,
@@ -177,7 +186,7 @@ local function raise_changed(repo, fresh_changes, replay_changes, observed_issue
   end
 end
 
-local function poll_entities(repo, event, fresh_changes, replay_candidates, observed_issues, poll_label_prefixes)
+local function poll_entities(repo, event, fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator)
   for _, entity_type in ipairs(entity_types) do
     local ok, result_or_err = core.gh_exec_result(function(timeout)
       return entity_type.read(repo, timeout)
@@ -192,7 +201,7 @@ local function poll_entities(repo, event, fresh_changes, replay_candidates, obse
         error(result_or_err.message)
       end
     else
-      collect_changed(repo, entity_type.type, core.parse_entity_list(result_or_err.stdout, entity_type.type), fresh_changes, replay_candidates, observed_issues, poll_label_prefixes)
+      collect_changed(repo, entity_type.type, core.parse_entity_list(result_or_err.stdout, entity_type.type), fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator)
     end
   end
 end
@@ -206,10 +215,11 @@ local function act(event)
 
   local replay_budget = core.github_proxy_replay_budget()
   local poll_label_prefixes = core.github_proxy_poll_label_prefixes()
+  local session_creator = config.session_creator()
   local fresh_changes = {}
   local replay_candidates = {}
   local observed_issues = {}
-  poll_entities(repo, event, fresh_changes, replay_candidates, observed_issues, poll_label_prefixes)
+  poll_entities(repo, event, fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator)
   raise_changed(repo, fresh_changes, replay_allowance(replay_candidates, replay_budget), observed_issues, event and event.ts)
 end
 

@@ -5,6 +5,7 @@ local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
 local config = require("devloop.config")
+local github_author_policy = require("devloop.github_author_policy")
 
 -- Mock the env reads a claim flow consults. Each mock_command registration is
 -- consumed by one matching read (queued FIFO), mirroring claim_contract_test.lua's
@@ -167,6 +168,50 @@ return {
     -- Claimed label present => self.
     t.eq(m_claims.issue_claim_state({}, "fkst-test-bot", { claimed_label }), "self")
     t.eq(m_claims.issue_claim_state({}, "fkst-test-bot", { "fkst-dev:enabled", claimed_label }), "self")
+  end,
+
+  test_creator_routing_is_case_insensitive_and_requires_exactly_one_assignee = function()
+    t.eq(m_claims.is_routed_to_session({ { login = "Creator-Login" } }, "creator-login"), true)
+    t.eq(m_claims.is_routed_to_session({ "CREATOR-LOGIN" }, "creator-login"), true)
+    t.eq(m_claims.is_routed_to_session({}, "creator-login"), false)
+    t.eq(m_claims.is_routed_to_session({ "other-login" }, "creator-login"), false)
+    t.eq(m_claims.is_routed_to_session({ "creator-login", "other-login" }, "creator-login"), false)
+    t.eq(m_claims.is_routed_to_session({ "creator-login" }, nil), false)
+  end,
+
+  test_creator_scoped_label_precheck_surfaces_routing_and_author_denials_only_when_configured = function()
+    local current = {
+      assignees = { "other-login" },
+      labels = {},
+      author_login = "untrusted-author",
+    }
+    local admission, detail = m_claims.claim_admission_precheck(current, {
+      owner = "fkst-test-bot",
+      status = "unassigned",
+      claim_mode = "label",
+      creator = "creator-login",
+      trusted_author_policy = github_author_policy.from_logins({ "trusted-author" }),
+    })
+    t.eq(admission, "denied")
+    t.eq(detail.action, "intake-skip-not-routed")
+
+    current.assignees = { "CREATOR-LOGIN" }
+    admission, detail = m_claims.claim_admission_precheck(current, {
+      owner = "fkst-test-bot",
+      status = "unassigned",
+      claim_mode = "label",
+      creator = "creator-login",
+      trusted_author_policy = github_author_policy.from_logins({ "trusted-author" }),
+    })
+    t.eq(admission, "denied")
+    t.eq(detail.action, "skip-non-whitelisted-author")
+
+    admission = m_claims.claim_admission_precheck(current, {
+      owner = "fkst-test-bot",
+      status = "unassigned",
+      claim_mode = "label",
+    })
+    t.eq(admission, "needs-claim")
   end,
 
   test_label_mode_is_self_owned_uses_label_presence = function()

@@ -12,6 +12,24 @@ local issue = h.issue
 local config = require("devloop.config")
 
 return {
+  test_session_creator_env_is_trimmed_optional_and_allowlisted = function()
+    local value = "  Creator-Login  "
+    local function exec(cmd)
+      if cmd == 'printf %s "$FKST_SESSION_CREATOR"' then
+        return { stdout = value, stderr = "", exit_code = 0 }
+      end
+      return { stdout = "", stderr = "unexpected command", exit_code = 1 }
+    end
+
+    t.eq(config.read_env_command("FKST_SESSION_CREATOR"), 'printf %s "$FKST_SESSION_CREATOR"')
+    t.eq(config.session_creator(exec), "Creator-Login")
+    value = "  "
+    t.eq(config.session_creator(exec), nil)
+    t.raises(function()
+      config.read_env_command("FKST_SESSION_CREATOR_UNTRUSTED")
+    end)
+  end,
+
   test_devloop_config_defaults_and_validation = function()
     local responses = {
       ['printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"'] = { stdout = "", exit_code = 0 },
