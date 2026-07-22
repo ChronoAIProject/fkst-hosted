@@ -49,7 +49,9 @@ pub use contents::{ContentsEntry, ContentsListing, ContentsReader};
 /// Re-export the Model B listing transport (#359 PR1): the injectable
 /// `GithubListing` abstraction + its HTTP impl and result shapes the reconciler
 /// enumerates work with.
-pub use listing::{GithubListing, HttpGithubListing, InstallationSummary, IssueSummary};
+pub use listing::{
+    GithubListing, HttpGithubListing, InstallationSummary, IssueMetadata, IssueSummary,
+};
 
 /// Re-export the issue-template reconcile surface: the compile-time version
 /// constant + the injectable `IssueTemplateGithub` abstraction its ensure uses.
@@ -453,7 +455,8 @@ impl GithubAppTokens {
     }
 
     /// Create a new issue on `owner/repo` as the App: mint an installation token,
-    /// then `POST /issues` with the title/body/labels. Returns the new number.
+    /// then `POST /issues` with the title/body/labels and optional assignees.
+    /// Returns the new number.
     /// Used by the install-time trigger-issue seeder.
     pub async fn create_issue(
         &self,
@@ -461,6 +464,7 @@ impl GithubAppTokens {
         title: &str,
         body: &str,
         labels: &[String],
+        assignees: &[String],
     ) -> Result<u64, GithubAppError> {
         let (owner, repo) = owner_repo
             .split_once('/')
@@ -468,7 +472,24 @@ impl GithubAppTokens {
         let token = self.token_for_repo(owner_repo, None).await?;
         self.inner
             .api
-            .create_issue(&token, owner, repo, title, body, labels)
+            .create_issue(&token, owner, repo, title, body, labels, assignees)
+            .await
+    }
+
+    /// Add assignees to `owner/repo`'s issue `number` as the App.
+    pub async fn add_issue_assignees(
+        &self,
+        owner_repo: &str,
+        number: u64,
+        assignees: &[String],
+    ) -> Result<(), GithubAppError> {
+        let (owner, repo) = owner_repo
+            .split_once('/')
+            .ok_or(GithubAppError::InvalidRepoRef)?;
+        let token = self.token_for_repo(owner_repo, None).await?;
+        self.inner
+            .api
+            .add_issue_assignees(&token, owner, repo, number, assignees)
             .await
     }
 

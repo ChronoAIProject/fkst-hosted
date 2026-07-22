@@ -153,9 +153,10 @@ pub trait GithubApi: Send + Sync {
         unimplemented!("create_issue_comment is only implemented by the HTTP transport")
     }
 
-    /// Create a new issue (`POST /repos/{o}/{r}/issues`) with `title`, `body`, and
-    /// `labels`; returns its number. Default panics (only the HTTP transport
-    /// implements it).
+    /// Create a new issue (`POST /repos/{o}/{r}/issues`) with `title`, `body`,
+    /// `labels`, and optional `assignees`; returns its number. Default panics
+    /// (only the HTTP transport implements it).
+    #[allow(clippy::too_many_arguments)] // Thin transport mirrors GitHub's issue fields.
     async fn create_issue(
         &self,
         token: &SecretString,
@@ -164,9 +165,24 @@ pub trait GithubApi: Send + Sync {
         title: &str,
         body: &str,
         labels: &[String],
+        assignees: &[String],
     ) -> Result<u64, GithubAppError> {
-        let _ = (token, owner, repo, title, body, labels);
+        let _ = (token, owner, repo, title, body, labels, assignees);
         unimplemented!("create_issue is only implemented by the HTTP transport")
+    }
+
+    /// Add assignees to an issue. Default panics (only the HTTP transport
+    /// implements it).
+    async fn add_issue_assignees(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        assignees: &[String],
+    ) -> Result<(), GithubAppError> {
+        let _ = (token, owner, repo, number, assignees);
+        unimplemented!("add_issue_assignees is only implemented by the HTTP transport")
     }
 
     /// The numbers of OPEN issues carrying `label` (the seed-issue idempotency
@@ -686,6 +702,7 @@ impl GithubApi for HttpGithubApi {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)] // Thin transport mirrors GitHub's issue fields.
     async fn create_issue(
         &self,
         token: &SecretString,
@@ -694,15 +711,20 @@ impl GithubApi for HttpGithubApi {
         title: &str,
         body: &str,
         labels: &[String],
+        assignees: &[String],
     ) -> Result<u64, GithubAppError> {
         let url = format!("{}/repos/{owner}/{repo}/issues", self.api_base);
+        let mut payload = serde_json::json!({ "title": title, "body": body, "labels": labels });
+        if !assignees.is_empty() {
+            payload["assignees"] = serde_json::json!(assignees);
+        }
         let response = self
             .client
             .post(&url)
             .header("accept", "application/vnd.github+json")
             .header("user-agent", "fkst-hosted")
             .bearer_auth(token.expose_secret())
-            .json(&serde_json::json!({ "title": title, "body": body, "labels": labels }))
+            .json(&payload)
             .send()
             .await
             .map_err(|e| GithubAppError::Http(format!("create_issue: {e}")))?;
@@ -720,6 +742,41 @@ impl GithubApi for HttpGithubApi {
         value.get("number").and_then(|n| n.as_u64()).ok_or_else(|| {
             GithubAppError::Http("create_issue: response missing number".to_string())
         })
+    }
+
+    async fn add_issue_assignees(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        assignees: &[String],
+    ) -> Result<(), GithubAppError> {
+        let url = format!(
+            "{}/repos/{owner}/{repo}/issues/{number}/assignees",
+            self.api_base
+        );
+        let response = self
+            .client
+            .post(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .json(&serde_json::json!({ "assignees": assignees }))
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("add_issue_assignees: {e}")))?;
+        let status = response.status();
+        if let Some(error) = classify_auth_status(status, response.headers()) {
+            return Err(error);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "add_issue_assignees status {status}: {body}"
+            )));
+        }
+        Ok(())
     }
 
     async fn open_issues_with_label(
@@ -1500,3 +1557,7 @@ impl GithubApi for HttpGithubApi {
 #[cfg(test)]
 #[path = "api_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "api_issue_primitives_tests.rs"]
+mod issue_primitives_tests;
