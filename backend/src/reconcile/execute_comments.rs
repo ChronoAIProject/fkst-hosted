@@ -42,15 +42,15 @@ pub(super) fn config_rejected_comment() -> String {
 }
 
 pub(super) fn flag_invalid_comment(detail: &str) -> String {
-    // Covers BOTH a parse failure and a work-label collision demotion (R4a): the lead
-    // is phrased so either reason reads correctly, and the guidance names both the
-    // required body shape and the one-active-session-per-work-label rule.
+    // Covers both a parse failure and a work-label collision demotion. The lead is
+    // phrased so either reason reads correctly, while the guidance describes the
+    // current optional sections and creator-scoped collision rule.
     format!(
-        "⚠️ fkst can't run this trigger issue as a session: {detail}\n\nA valid \
-         `fkst-substrate-trigger` needs a body with `### Session Name`, `### Packages` (one \
-         `owner/repo@ref:path` per line), `### Work Label`, and an optional `### Environment`, \
-         and its work label must not already be claimed by another active session on this repo. \
-         Fix the issue and the reconciler will retry."
+        "⚠️ fkst can't run this trigger issue as a session: {detail}\n\nA valid trigger needs \
+         `### Session Name` plus at least one package source (`### Packages` lines or a \
+         `### Manifest` reference); `### Work Label`, `### Source Branch`, `### Target Branch`, \
+         and `### Environment` are optional. Its effective work labels must not overlap another \
+         of **your** active sessions on this repo. Fix the issue and the reconciler will retry."
     )
 }
 
@@ -62,4 +62,21 @@ pub(super) fn trigger_unauthorized_comment(detail: &str) -> String {
          granted (or a deployment admin adds the creator to `FKST_GLOBAL_ADMINS`), the \
          reconciler will pick this trigger up automatically."
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::flag_invalid_comment;
+
+    #[test]
+    fn invalid_trigger_guidance_describes_the_current_contract() {
+        assert_eq!(
+            flag_invalid_comment("the effective labels overlap"),
+            "⚠️ fkst can't run this trigger issue as a session: the effective labels overlap\n\n\
+             A valid trigger needs `### Session Name` plus at least one package source (`### Packages` \
+             lines or a `### Manifest` reference); `### Work Label`, `### Source Branch`, `### Target \
+             Branch`, and `### Environment` are optional. Its effective work labels must not overlap \
+             another of **your** active sessions on this repo. Fix the issue and the reconciler will retry."
+        );
+    }
 }

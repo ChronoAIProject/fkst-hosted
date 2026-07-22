@@ -1459,17 +1459,15 @@ data:
   # Comma-separated GitHub logins (case-insensitive; optional leading @). Numeric
   # user IDs remain supported as a rename-safe alternative; they are not required.
   # FKST_ACCESS_ALLOWED_USERS: "<your-github-login>"
-  # Deployment-wide administrators. They always pass the service gate and the
-  # dashboard spans every account/repository where this GitHub App is installed,
-  # with cross-installation session, outcome, log, and observe read access.
-  # Cross-account GitHub mutations still use the caller's user token and remain
-  # subject to GitHub's own permissions.
+  # Deployment-wide administrators. They always pass the service and trigger gates,
+  # and are an authority tier for every session's work issues. Work-issue authority
+  # is always enforced: only the session creator, its ### Session Collaborators, and
+  # these global admins may author work (there is no opt-out flag). The dashboard
+  # spans every account/repository where this GitHub App is installed, with
+  # cross-installation session, outcome, log, and observe read access. Cross-account
+  # GitHub mutations still use the caller's user token and remain subject to GitHub's
+  # own permissions.
   # FKST_GLOBAL_ADMINS: "<your-github-login>"
-  # Work-issue authority gate (default OFF = legacy permissive). "true" => only a
-  # session's trigger author, its ### Session Collaborators, and the repo's admins /
-  # org owners may raise work issues; anyone else's work-label issue is rejected
-  # (fkst-unauthorized) and not picked up. Fails safe on a lookup error.
-  # FKST_ENFORCE_WORK_ISSUE_AUTHZ: "true"
   # Broader repo/org visibility (§14.3.1): the classic OAuth App's Client ID (its
   # secret goes in the §14.7 Secret). Unset = installed repos only.
   # FKST_GITHUB_BROADER_OAUTH_CLIENT_ID: <your OAuth App's Client ID>
@@ -2038,6 +2036,7 @@ lifecycle API → BatchSandbox → controller → caged gVisor pod.
 | **Rebuild the backend after code changes** | `docker build -f "$FKST_REPO/backend/Dockerfile" -t fkst-control-plane:local "$FKST_REPO" && kind load docker-image fkst-control-plane:local --name opensandbox-local && kubectl -n chronoai-fkst rollout restart deploy/fkst-control-plane` (`kind load` replaces the image on the nodes; the restart picks it up) |
 | **Rebuild the frontend** | same pattern with the §15 build command (`$FKST_REPO/frontend` + the `VITE_FKST_API_BASE` build-arg) and `deploy/fkst-frontend` |
 | **Recover a session runtime created before the exact work-label fix (#626)** | Deploy the corrected control-plane image and `fkst-packages@fkst-hosted` package revision first. Then delete only the affected runtime through its backend's supported delete operation: OpenSandbox `DELETE /v1/sandboxes/<sandbox-id>` with the tenant API key, or Kubernetes `kubectl --context kind-opensandbox-local -n chronoai-fkst delete pod fkst-sess-<session-id>`. Do **not** edit the trigger/work issue or add claim labels manually. Level-triggered reconciliation recreates the same deterministic session and redrives pending durable work. Confirm the trigger and dashboard issues remain unclaimed and the open issue carrying an exact effective work label resumes. |
+| **Re-attribute an App-seeded trigger** | A bot-authored trigger's effective creator is its sole assignee. Remove any existing assignees and assign **exactly the intended creator**; zero or multiple assignees are rejected with `fkst-trigger-unauthorized`. Ensure that creator is a deployment global admin or has repository admin/maintain permission. Keep the same creator in `### FKST Contributors` when they need seeded-session log access. |
 | Change backend config | edit + `kubectl apply -f "$OSB_LOCAL/manifests/fkst-control-plane-config.yaml"`, then `kubectl -n chronoai-fkst rollout restart deploy/fkst-control-plane` (env is read at startup) |
 | Restart the webhook relay | re-run the §14.2 `npx smee-client …` command (it is a long-lived process, like the §12 port-forward); deliveries missed while it was down can be replayed from the App's **Advanced → Recent Deliveries** page |
 | Renew the local TLS cert (mkcert leaf certs expire after ~2 years) | re-run the §16.2 `mkcert` cert command, then `kubectl -n chronoai-fkst create secret tls fkst-local-tls --cert=… --key=… --dry-run=client -o yaml \| kubectl apply -f -` — ingress-nginx reloads on Secret change, no restart needed |
@@ -2122,6 +2121,8 @@ hostnames.)
 | Webhook deliveries respond `401` | Secret mismatch: the §14.3 form value and `FKST_GITHUB_APP_WEBHOOK_SECRET` (§14.7) must be the same string. A delivery whose bytes were altered in transit fails the same way — the HMAC is verified over the exact signed bytes (this is why the §14.3 content type must be `application/json`: the smee client re-serializes the JSON body, which round-trips, while a form-encoded body does not). |
 | Webhook deliveries respond `202` but nothing ever happens | The backend ACKed a payload it could not parse (deliberate — a `4xx`/`5xx` would make GitHub hammer redeliveries): usually the App's webhook content type is not `application/json` (§14.3). The parse failure is in the backend logs. |
 | Trigger issue ignored for minutes (session does start eventually) | The webhook path is down — smee client not running, the §16 ingress unreachable, or the App's webhook inactive / pointing at the wrong channel (§14.2/§14.3). The reconciler's full resync (default 600 s) is the fallback that eventually catches up; check the smee client output and the App's Recent Deliveries. |
+| Trigger rejected with `fkst-trigger-unauthorized` | The effective creator is not attributable or lacks trigger authority. A human-authored trigger uses its author; a bot-authored trigger needs exactly one assignee. Assign exactly one intended creator for a seeded trigger, then grant that creator repository admin/maintain permission or list them in `FKST_GLOBAL_ADMINS`. The metadata-first gate retries and clears the latch after the fix without parsing rejected issue content first. |
+| Work issue commented with `fkst-unrouted` | An issue carrying an active work label must have exactly one assignee equal to the creator of an active session watching that label. Remove extra/wrong assignees or assign the matching creator; the reconciler clears the latch and routes the issue automatically once the metadata is correct. |
 | Session sandbox pod stuck `Pending` (untainted nodes full) | Each session requests 2 CPU / 4 Gi (`FKST_OSB_SESSION_CPU`/`MEMORY`) on the gVisor node — enlarge the Docker VM or lower those values (§16 sizing note). |
 | Named-environment API calls fail with `Forbidden` | The env-store RBAC (§14.5) is incomplete: `fkst-ksa` needs validation-Pod access in `chronoai-fkst` and Secret CRUD through `fkst-control-plane-durable-envstore` in the namespace selected by `FKST_ENV_STORE_NAMESPACE`. |
 | Backend fails startup with an environment-store key/decryption error | Supply exactly one stable standard-base64 32-byte key through the external control-plane record. Do not replace a lost key or delete the durable records; follow the provider's backup/recovery procedure. |
@@ -2238,12 +2239,28 @@ Keep this set minimal — do not add new PR gates without good reason.
 
 ## Authoring work issues for a substrate session
 
-A running session's devloop works the repo's open work-label issues **in parallel, each as an independent PR branched off `main`** — so an issue that depends on shared scaffolding another issue produces is coded against a `main` that does **not** yet contain it. Shape the backlog accordingly:
+A session is owned by an **effective creator**: the author for a human-authored trigger, or the sole assignee for an App-authored trigger. The creator must pass the deployment access allowlist and either be listed in `FKST_GLOBAL_ADMINS` or hold repository **admin or maintain** permission. A bot-authored trigger with zero or multiple assignees is not attributable and is rejected before its body is parsed.
+
+A running session works its open work-label issues **in parallel, each as an independent PR based on the target branch**. `### Source Branch` defaults to the repository default and seeds a missing target; `### Target Branch` defaults to `fkst-hosted-default`, is auto-created from the source head when absent, and is never reset when it already exists. Work branches start from the target and pull requests merge back into that target. Shape the backlog and routes accordingly:
 
 - **Wave the backlog by dependency.** Land the foundational issues first (shared config, base modules, scaffolding), **merge them**, and only then file the issues that build on them. Do **not** file a large set of interdependent issues at once: a dependent issue worked before its foundation is merged can yield an empty diff (codex returns `no-changes`) or reference files not yet on `main`. In live testing, content clarity was never the failure mode — **dependency ordering** was.
 - **One feature/page per issue**, named in the title, with exact files + real content + checkable acceptance criteria. Each issue is coded in isolation (codex sees that one issue + the repo, not the sibling backlog), so cross-referencing every other issue in each body does not help — correct per-issue scoping does.
+- **Keep each creator's effective label sets disjoint.** The explicit `### Work Label` plus package/manifest-discovered `[github].work_labels` form a session's effective set. Two open triggers owned by the same creator may not overlap; the collision detail names the label and the lower-numbered active trigger that owns it. Different creators may deliberately use overlapping labels because assignees route their work independently.
+- **Route every work issue to one creator.** A work issue is eligible only when it has exactly one assignee equal to the creator of an active session watching one of its labels. Its author must be that creator, a login frozen under the session's `### Session Collaborators`, or a deployment global admin. Repository admin/maintain status alone is not work authority. Authorization is always enforced.
 - **An open work issue keeps its session's pod alive until it is closed or its PR merges.** A created-but-unmerged PR does NOT idle the session — the reconciler's pending gate counts open work-label issues, not un-PR'd ones. Merge/close finished work to let a session idle down.
-- **Never give two open trigger issues in one repo the same work label** — each spawns a competing pod over the same work queue (double-claim / duplicate PRs). One session = one distinct work label.
+
+The durable status labels explain what happened and prevent duplicate comments across reconciler restarts:
+
+| Label | Meaning and recovery |
+|---|---|
+| `fkst-trigger-unauthorized` | The trigger creator is unattributable or lacks global-admin/repository admin-or-maintain authority. Fix the assignee or authority; the clearable latch self-heals before body parsing resumes. |
+| `fkst-substrate-invalid` | The accepted trigger cannot parse or resolve, has no effective work label, or overlaps another active trigger owned by the same creator. Collision feedback names the overlapping label and winning trigger. Fix the issue; the clearable latch self-heals. |
+| `fkst-unrouted` | A labeled work issue has zero/multiple assignees or its sole assignee is not the creator of a matching active session. Correct the assignee; the clearable latch self-heals. |
+| `fkst-unauthorized` | The routed work issue's author is not its session creator, a Session Collaborator, or a global admin. It remains unworked until the author becomes authorized; the clearable latch then self-heals. |
+| `fkst-substrate-active` / `fkst-picked-up` | One-time durable acknowledgements that the trigger registered or the work issue was claimed. Retirement removes the stale picked-up latch. |
+| `fkst-degraded` | The session pod or framework health is degraded; it clears when health recovers. |
+| `fkst-config-rejected` | A registered trigger's frozen configuration was edited and ignored. Close it and open a new trigger to change configuration. |
+| `fkst-session-retired` | The trigger closed, its pod was cleaned up, and the still-open work issue is no longer worked. Start a replacement session and assign the issue to that session's creator. |
 
 ## Quick Rules Summary
 
@@ -2252,7 +2269,7 @@ A running session's devloop works the repo's open work-label issues **in paralle
 - The fkst deployables run exclusively on Kubernetes — the full local setup is embedded above in **FKST Local Deployment Guide** (the single source of truth; there is no standalone copy); `docker-compose` is not used in this repo.
 - Each deployment needs its own GitHub App registration — permissions, OAuth callbacks, and env-var mapping are in the deployment guide's **§14.3 Register your GitHub App** (local webhook delivery needs the **§14.2 smee relay** — GitHub cannot POST to `127.0.0.1`); never set `FKST_GITHUB_OAUTH_CLIENT_ID` without its client secret, never commit App secrets.
 - Treat the upstream engine and packages repos as read-only references; all fkst-hosted packages reside on the `fkst-hosted` branch of `fkst-packages` (reference form `ChronoAIProject/fkst-packages@fkst-hosted:<path>`).
-- When filing work issues for a substrate session, **wave the backlog by dependency** (merge foundation before dependent issues), one feature per issue; an open work issue keeps the session's pod alive until closed/merged; never share a work label between two trigger issues in one repo. See **Authoring work issues for a substrate session**.
+- When filing work issues for a substrate session, **wave the backlog by dependency** (merge foundation before dependent issues), use one feature per issue, keep each creator's trigger-label sets disjoint, and assign every work issue to exactly one matching session creator; different creators may reuse labels. Work authors are limited to the creator, Session Collaborators, and global admins. See **Authoring work issues for a substrate session**.
 - Keep commits small and self-contained.
 - Never add `Co-Authored-By`; always act under the user's own GitHub identity (never a bot/AI identity).
 - All work goes through a pull request — no direct commits to shared branches.

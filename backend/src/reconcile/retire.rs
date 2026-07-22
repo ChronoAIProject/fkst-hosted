@@ -16,7 +16,7 @@
 //! from the pure planner (the orphan-pod branch, alongside the kill) and executed
 //! best-effort so a list/post/label failure is logged and skipped — NEVER propagated,
 //! so one bad issue never stalls the rest of the reconcile. The comment carries only
-//! PUBLIC metadata (the work label) — never the minted token or any environment
+//! PUBLIC metadata (the effective work-label set) — never the minted token or any environment
 //! secret. The retired latch, read back from GitHub each reconcile, makes it
 //! idempotent: an already-retired issue is skipped, so the ~60s the orphan pod lingers
 //! before deletion never re-notifies.
@@ -27,18 +27,22 @@ use secrecy::SecretString;
 
 use crate::github_app::listing::GithubListing;
 use crate::github_app::{GithubAppError, GithubAppTokens};
+use crate::k8s::work_label_wire::join_work_labels;
 use crate::models::RepoRef;
 
 use super::{SUBSTRATE_RETIRED_LABEL, WORK_PICKED_UP_LABEL};
 
 /// Render the "session retired" notice for a work issue (pure; unit-tested).
-/// `work_label` is public metadata safe to display verbatim in backticks.
-pub fn retire_notice_comment(work_label: &str) -> String {
+/// `work_labels` is the retired session's full effective label set and is public
+/// metadata safe to display verbatim in backticks.
+pub fn retire_notice_comment(work_labels: &[String]) -> String {
+    let joined_labels = join_work_labels(work_labels);
     format!(
-        "⚠️ **Session retired.** The trigger issue for work label `{work_label}` was \
-         closed, so this session was retired and its pod cleaned up. This issue is left \
-         OPEN but is no longer being worked. To resume, open a new trigger issue (label \
-         `fkst-substrate-trigger`) with work label `{work_label}`."
+        "⚠️ **Session retired.** The trigger issue for effective work labels \
+         `{joined_labels}` was closed, so this session was retired and its pod cleaned up. \
+         This issue is left OPEN but is no longer being worked. To resume, open a new trigger \
+         issue (label `fkst-substrate-trigger`) whose effective labels cover this issue, then \
+         give this issue exactly one assignee: that new session's creator."
     )
 }
 
@@ -68,7 +72,16 @@ pub async fn retire_work_issues(
     // once per pass, independent of GitHub's list read-after-write timing.
     let mut retired: HashSet<i64> = HashSet::new();
     for work_label in work_labels {
-        retire_open_work_issues(github, listing, &token, repo, work_label, &mut retired).await;
+        retire_open_work_issues(
+            github,
+            listing,
+            &token,
+            repo,
+            work_label,
+            work_labels,
+            &mut retired,
+        )
+        .await;
     }
 }
 
@@ -80,15 +93,18 @@ pub async fn retire_work_issues(
 /// handled this pass, post the retire notice, latch the retired label, then remove the
 /// now-stale [`WORK_PICKED_UP_LABEL`]. The issue number is inserted into `retired` so a
 /// sibling label in the same pass never re-notifies it (epic #594 I4). The issue is LEFT
-/// OPEN. Reuses the repo-scoped installation `token` the executor minted. Every GitHub
-/// call is best-effort: a failure is logged and skipped, never propagated, so one bad
-/// issue never stalls the rest of the reconcile.
+/// OPEN. The notice receives the full `effective_work_labels` set even though this step
+/// queries one `work_label` at a time, so a shared issue never gets misleading single-label
+/// restart guidance. Reuses the repo-scoped installation `token` the executor minted.
+/// Every GitHub call is best-effort: a failure is logged and skipped, never propagated,
+/// so one bad issue never stalls the rest of the reconcile.
 pub async fn retire_open_work_issues(
     github: &GithubAppTokens,
     listing: &dyn GithubListing,
     token: &SecretString,
     repo: &RepoRef,
     work_label: &str,
+    effective_work_labels: &[String],
     retired: &mut HashSet<i64>,
 ) {
     let issues = match listing
@@ -120,7 +136,7 @@ pub async fn retire_open_work_issues(
         if issue.labels.iter().any(|l| l == SUBSTRATE_RETIRED_LABEL) {
             continue;
         }
-        retire_issue(github, repo, issue.number, work_label).await;
+        retire_issue(github, repo, issue.number, effective_work_labels).await;
         retired.insert(issue.number);
     }
 }
@@ -130,9 +146,14 @@ pub async fn retire_open_work_issues(
 /// comment is best-effort (a failure is logged, never propagated), the label add is
 /// additive/idempotent, and the label remove is 404-tolerant (the label may already
 /// be gone), reusing the same tolerance the invalid-flag clear uses.
-async fn retire_issue(github: &GithubAppTokens, repo: &RepoRef, number: i64, work_label: &str) {
+async fn retire_issue(
+    github: &GithubAppTokens,
+    repo: &RepoRef,
+    number: i64,
+    effective_work_labels: &[String],
+) {
     let owner_repo = format!("{}/{}", repo.owner, repo.name);
-    let comment = retire_notice_comment(work_label);
+    let comment = retire_notice_comment(effective_work_labels);
 
     if let Err(error) = github
         .post_issue_comment(&owner_repo, number as u64, &comment)

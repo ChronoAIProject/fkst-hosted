@@ -375,8 +375,10 @@ impl GithubApi for GithubLedger {
         _path: &str,
         _git_ref: Option<&str>,
     ) -> Result<Option<RemoteFile>, GithubAppError> {
-        let content =
-            base64::engine::general_purpose::STANDARD.encode("# fkst-issue-templates-version: 8\n");
+        let content = base64::engine::general_purpose::STANDARD.encode(format!(
+            "# fkst-issue-templates-version: {}\n",
+            crate::github_app::FKST_ISSUE_TEMPLATES_VERSION
+        ));
         Ok(Some(RemoteFile {
             sha: "template-fixture".to_string(),
             content_base64: content,

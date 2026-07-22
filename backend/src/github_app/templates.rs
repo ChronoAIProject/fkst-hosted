@@ -24,7 +24,7 @@ use super::{issue_templates_permissions, GithubAppError, GithubAppTokens};
 /// change to the bundled files below; the bundled `config.yml` marker MUST equal
 /// this (enforced by a unit test). Repos whose installed version is below this
 /// get a merged PR to catch up.
-pub const FKST_ISSUE_TEMPLATES_VERSION: u32 = 8;
+pub const FKST_ISSUE_TEMPLATES_VERSION: u32 = 9;
 
 /// Repo-relative directory the templates live under.
 const TEMPLATE_DIR: &str = ".github/ISSUE_TEMPLATE";
@@ -284,5 +284,32 @@ mod tests {
             SESSION_TEMPLATE.contains("title: \"[session] \""),
             "session template must carry the [session] title prefix"
         );
+    }
+
+    #[test]
+    fn session_template_documents_multi_user_contract_and_round_trips_parser() {
+        for required in [
+            "creator must be a deployment global admin",
+            "admin or maintain",
+            "different creators may reuse the same labels",
+            "exactly one assignee: this session's creator",
+            "Work branches start from the target branch",
+            "required across `### Packages` and `### Manifest`",
+        ] {
+            assert!(
+                SESSION_TEMPLATE.contains(required),
+                "session template is missing contract text: {required}"
+            );
+        }
+
+        let spec = crate::goals::trigger_parse::parse_trigger_issue_body(SESSION_TEMPLATE)
+            .expect("the bundled session template must parse");
+        assert_eq!(spec.name, "my-first-session");
+        assert_eq!(spec.packages.len(), 1);
+        assert!(spec.manifest_refs.is_empty());
+        assert_eq!(spec.work_label, None);
+        assert_eq!(spec.source_branch, None);
+        assert_eq!(spec.target_branch, None);
+        assert!(spec.collaborators.is_empty());
     }
 }
