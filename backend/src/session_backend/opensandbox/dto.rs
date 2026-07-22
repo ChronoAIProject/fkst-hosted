@@ -173,9 +173,9 @@ pub(crate) struct ExecdFileMetadata {
 
 /// One rename operation for `POST /files/mv` (the daemon's `RenameFileItem`; the
 /// request body is an ARRAY of these). The daemon stats `src` (missing → a 404 the
-/// client maps to [`OsbError::NotFound`]), ensures `dest`'s parent directory, then
-/// calls Go's `os.Rename` — a same-filesystem `rename(2)`. Field names are already
-/// the wire's lowercase, so no rename attribute is needed.
+/// client maps to [`OsbError::NotFound`]) and rejects the request when `dest` already
+/// exists. Field names are already the wire's lowercase, so no rename attribute is
+/// needed.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub(crate) struct RenameFileItem {
     pub src: String,
