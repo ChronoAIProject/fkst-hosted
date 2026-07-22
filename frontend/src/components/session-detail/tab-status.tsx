@@ -73,7 +73,14 @@ function WorkItemRow({ issue }: { issue: IssueDetail }) {
       >
         #{issue.number}
       </a>
-      <span className="text-fg text-[12.5px] truncate min-w-0 flex-1">{issue.title}</span>
+      <a
+        href={issue.html_url}
+        target="_blank"
+        rel="noreferrer"
+        className="hover-underline text-fg text-[12.5px] truncate min-w-0 flex-1 hover:text-amber transition-colors"
+      >
+        {issue.title}
+      </a>
       <Chip tone={WORK_TONE[decoded.tone]}>{t.work[decoded.state]}</Chip>
     </div>
   );

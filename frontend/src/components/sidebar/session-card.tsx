@@ -40,7 +40,14 @@ function IssueLine({ issue }: { issue: IssueDetail }) {
       >
         #{issue.number}
       </a>
-      <span className="text-fg truncate min-w-0 flex-1">{issue.title}</span>
+      <a
+        href={issue.html_url}
+        target="_blank"
+        rel="noreferrer"
+        className="hover-underline text-fg truncate min-w-0 flex-1 hover:text-amber transition-colors"
+      >
+        {issue.title}
+      </a>
       <span className="font-mono text-[10.5px] text-ghost flex-none">
         {closed ? d.closed : d.open}
       </span>
@@ -369,7 +376,14 @@ export function SessionCard({
                   >
                     #{pr.number}
                   </a>
-                  <span className="text-fg truncate min-w-0 flex-1">{pr.title}</span>
+                  <a
+                    href={pr.html_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="hover-underline text-fg truncate min-w-0 flex-1 hover:text-amber transition-colors"
+                  >
+                    {pr.title}
+                  </a>
                   {pr.work_issue != null && (
                     <span className="font-mono text-[10.5px] text-ghost flex-none">
                       {cc.prForIssue.replace('{n}', String(pr.work_issue))}
