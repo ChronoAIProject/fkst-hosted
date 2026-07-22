@@ -69,6 +69,14 @@ export function Dashboard() {
   // Monotonic id per sessions request: an out-of-order response for the SAME
   // level key (slow poll racing a post-mutation refetch) must not win either.
   const sessionsRequestRef = useRef(0);
+  // A repo projection can legitimately take longer than the 15-second poll
+  // interval (for example when many historical triggers require package
+  // resolution). Keep background polls single-flight so they cannot continually
+  // supersede the only response that could remove the loading skeleton.
+  const sessionsInFlightRef = useRef<{ key: string; requestId: number } | null>(null);
+  // User/mutation refreshes are stronger than background polls: when one lands
+  // during an in-flight request, coalesce them into one follow-up request.
+  const sessionsRefreshPendingRef = useRef(false);
 
   // The OAuth error banner is locally dismissable. The context has no clearError
   // (a fresh sign-in clears it), so a per-slug local flag hides the banner until
@@ -123,31 +131,57 @@ export function Dashboard() {
 
   // Level-2 sessions: re-fetch keeping the current frame (used by the poll
   // and after mutations); the level-change effect below handles the reset.
-  const refreshSessions = useCallback(() => {
+  const refreshSessions = useCallback((queueIfBusy = false) => {
     if (level.kind !== 'repo') return;
     const requestedFor = levelKey(level);
-    const requestId = ++sessionsRequestRef.current;
-    // A response only lands when it is BOTH for the current level key and the
-    // latest request issued — otherwise a stale slow response could overwrite
-    // fresher data (e.g. resurrect a just-stopped session).
-    const isCurrent = () =>
-      levelRef.current === requestedFor && sessionsRequestRef.current === requestId;
-    getRepoSessions(apiFetch, level.owner, level.name)
-      .then((body) => {
-        if (!isCurrent()) return;
-        setSessions(body);
-        setSessionsFailed(false);
-      })
-      .catch(() => {
-        if (!isCurrent()) return;
-        setSessionsFailed(true);
-      });
+    if (sessionsInFlightRef.current?.key === requestedFor) {
+      if (queueIfBusy) sessionsRefreshPendingRef.current = true;
+      return;
+    }
+
+    const startRequest = () => {
+      const requestId = ++sessionsRequestRef.current;
+      sessionsInFlightRef.current = { key: requestedFor, requestId };
+      // A response only lands when it is BOTH for the current level key and the
+      // latest request issued — otherwise a stale slow response could overwrite
+      // fresher data (e.g. resurrect a just-stopped session).
+      const isCurrent = () =>
+        levelRef.current === requestedFor && sessionsRequestRef.current === requestId;
+      getRepoSessions(apiFetch, level.owner, level.name)
+        .then((body) => {
+          if (!isCurrent()) return;
+          setSessions(body);
+          setSessionsFailed(false);
+        })
+        .catch(() => {
+          if (!isCurrent()) return;
+          setSessionsFailed(true);
+        })
+        .finally(() => {
+          if (sessionsInFlightRef.current?.requestId !== requestId) return;
+          sessionsInFlightRef.current = null;
+          if (
+            sessionsRefreshPendingRef.current &&
+            levelRef.current === requestedFor
+          ) {
+            sessionsRefreshPendingRef.current = false;
+            startRequest();
+          }
+        });
+    };
+
+    startRequest();
   }, [level, apiFetch]);
 
   // Entering (or switching) a repo clears the old repo's data → skeleton,
   // then fetches. Leaving level 2 just drops the data.
   const currentLevelKey = levelKey(level);
   useEffect(() => {
+    // Invalidate the single-flight slot even when a user leaves and re-enters
+    // the same repository before its old request finishes. The request id still
+    // prevents that abandoned response from landing over the new selection.
+    sessionsInFlightRef.current = null;
+    sessionsRefreshPendingRef.current = false;
     setSessions(null);
     setSessionsFailed(false);
     if (level.kind === 'repo') refreshSessions();
@@ -199,7 +233,7 @@ export function Dashboard() {
   // counts behind it. (refetchOverview keeps the last-good data on screen.)
   const onRefreshClick = useCallback(() => {
     refetchOverview();
-    if (level.kind === 'repo') refreshSessions();
+    if (level.kind === 'repo') refreshSessions(true);
   }, [refetchOverview, level.kind, refreshSessions]);
 
   // A repo was created: clear filters so it is visible, re-fetch, and zoom
@@ -216,7 +250,7 @@ export function Dashboard() {
   // A trigger was created/stopped: refresh the session list now and the
   // overview counts quietly behind it.
   const onSessionsChanged = useCallback(() => {
-    refreshSessions();
+    refreshSessions(true);
     setTick((t) => t + 1);
   }, [refreshSessions]);
 
