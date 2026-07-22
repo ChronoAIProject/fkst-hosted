@@ -1,17 +1,12 @@
-//! Shared test harness for the work-issue ack/reject steps, split out so the ack
-//! tests ([`super::tests`]) and the R3 authority reject tests
-//! ([`super::authz_tests`]) each stay under the 500-line limit. `pub(super)` so both
-//! sibling test modules can reuse the recording transport, the fake listing, and the
-//! fixtures.
-
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use secrecy::SecretString;
 
+use crate::access_policy::AccessPolicy;
 use crate::github_app::api::{
     GithubApi, InstallationId, InstallationToken, InstallationTokenRequest,
 };
@@ -21,25 +16,16 @@ use crate::github_app::{GithubAppError, GithubAppTokens};
 use crate::models::{GithubActor, RepoRef};
 use crate::reconcile::desired::{SessionDef, SessionRegistration};
 
-// ---- recording fake GitHub transport (mirrors execute_tests) ----------------
-
-/// A recorded issue call: `(owner, repo, issue_number, payload)`.
-pub(super) type Call = (String, String, u64, String);
-/// A recorded label-add call: `(owner, repo, issue_number, labels)`.
-pub(super) type LabelCall = (String, String, u64, Vec<String>);
-/// A recorded label-remove call: `(owner, repo, issue_number, label)`.
-pub(super) type LabelRemoveCall = (String, String, u64, String);
+pub(super) type Call = (String, String, i64, String);
+pub(super) type LabelCall = (String, String, i64, Vec<String>);
 
 #[derive(Default)]
 pub(super) struct RecordingApi {
     pub(super) comments: Mutex<Vec<Call>>,
     pub(super) labels_added: Mutex<Vec<LabelCall>>,
-    pub(super) labels_removed: Mutex<Vec<LabelRemoveCall>>,
-    /// When set, `create_issue_comment` fails — exercising the best-effort comment
-    /// arm (the latch label must still be added, mirroring the announce arm).
+    pub(super) labels_removed: Mutex<Vec<Call>>,
+    pub(super) events: Mutex<Vec<&'static str>>,
     fail_comment: bool,
-    /// When set, `add_issue_labels` fails — exercising the reject latch-first arm
-    /// (the reject comment must be SKIPPED so it is never double-posted).
     fail_label: bool,
 }
 
@@ -93,10 +79,11 @@ impl GithubApi for RecordingApi {
         if self.fail_comment {
             return Err(GithubAppError::Http("boom".to_string()));
         }
+        self.events.lock().unwrap().push("comment");
         self.comments.lock().unwrap().push((
             owner.to_string(),
             repo.to_string(),
-            number,
+            number as i64,
             body.to_string(),
         ));
         Ok(())
@@ -113,10 +100,11 @@ impl GithubApi for RecordingApi {
         if self.fail_label {
             return Err(GithubAppError::Http("boom".to_string()));
         }
+        self.events.lock().unwrap().push("label");
         self.labels_added.lock().unwrap().push((
             owner.to_string(),
             repo.to_string(),
-            number,
+            number as i64,
             labels.to_vec(),
         ));
         Ok(())
@@ -130,46 +118,41 @@ impl GithubApi for RecordingApi {
         number: u64,
         label: &str,
     ) -> Result<(), GithubAppError> {
+        self.events.lock().unwrap().push("remove");
         self.labels_removed.lock().unwrap().push((
             owner.to_string(),
             repo.to_string(),
-            number,
+            number as i64,
             label.to_string(),
         ));
         Ok(())
     }
 }
 
-fn test_config() -> GithubAppConfig {
+pub(super) fn tokens(api: Arc<RecordingApi>) -> GithubAppTokens {
     use rand::rngs::OsRng;
     use rsa::pkcs8::{EncodePrivateKey, LineEnding};
     use rsa::RsaPrivateKey;
-    let mut rng = OsRng;
-    let private = RsaPrivateKey::new(&mut rng, 2048).expect("key");
-    let pem = private.to_pkcs8_pem(LineEnding::LF).expect("pem");
-    GithubAppConfig {
+
+    let private = RsaPrivateKey::new(&mut OsRng, 2048).expect("key");
+    let config = GithubAppConfig {
         app_id: 42,
-        private_key_pem: SecretString::from(pem.to_string()),
+        private_key_pem: SecretString::from(
+            private
+                .to_pkcs8_pem(LineEnding::LF)
+                .expect("pem")
+                .to_string(),
+        ),
         app_slug: Some("fkst-test".to_string()),
         webhook_secret: None,
         api_base: "https://api.github.com".to_string(),
-    }
+    };
+    GithubAppTokens::with_api(&config, api).expect("tokens")
 }
 
-pub(super) fn tokens(api: std::sync::Arc<RecordingApi>) -> GithubAppTokens {
-    GithubAppTokens::with_api(&test_config(), api).expect("tokens")
-}
-
-// ---- fake listing -----------------------------------------------------------
-
-/// A fake listing whose `list_issues_by_label` result (or error) is fixed per
-/// construction, recording how many times it was called. `repo_admins` is the
-/// programmable hook (F2) — work_ack itself never calls `list_repo_admins` (the
-/// admin set is passed to `ack_open_work_issues` directly), so it defaults empty.
 pub(super) struct FakeListing {
     issues: Result<Vec<IssueSummary>, GithubAppError>,
     list_calls: AtomicUsize,
-    repo_admins: Vec<GithubActor>,
 }
 
 impl FakeListing {
@@ -177,16 +160,16 @@ impl FakeListing {
         Self {
             issues: Ok(issues),
             list_calls: AtomicUsize::new(0),
-            repo_admins: Vec::new(),
         }
     }
+
     pub(super) fn err() -> Self {
         Self {
             issues: Err(GithubAppError::RateLimited(30)),
             list_calls: AtomicUsize::new(0),
-            repo_admins: Vec::new(),
         }
     }
+
     pub(super) fn list_calls(&self) -> usize {
         self.list_calls.load(Ordering::SeqCst)
     }
@@ -235,11 +218,9 @@ impl GithubListing for FakeListing {
         _owner: &str,
         _repo: &str,
     ) -> Result<Vec<GithubActor>, GithubAppError> {
-        Ok(self.repo_admins.clone())
+        Ok(Vec::new())
     }
 }
-
-// ---- fixtures ---------------------------------------------------------------
 
 pub(super) fn repo() -> RepoRef {
     RepoRef {
@@ -248,49 +229,48 @@ pub(super) fn repo() -> RepoRef {
     }
 }
 
-/// A work issue with the default author (id 7) == the [`registration`] fixture's
-/// trigger author, so it is AUTHORIZED under enforcement unless a test overrides the
-/// author via [`issue_by`].
 pub(super) fn issue(number: i64, labels: &[&str]) -> IssueSummary {
-    issue_by(number, labels, 7, "alice")
+    issue_by(number, labels, 7, "alice", &["alice"])
 }
 
-/// A work issue authored by `(user_id, user_login)` — used by the R3 reject tests to
-/// stand up an issue raised by someone other than the session's trigger author.
 pub(super) fn issue_by(
     number: i64,
     labels: &[&str],
     user_id: i64,
     user_login: &str,
+    assignees: &[&str],
 ) -> IssueSummary {
     IssueSummary {
         number,
         title: "work item".to_string(),
-        body: String::new(),
-        labels: labels.iter().map(|s| s.to_string()).collect(),
+        body: "content is intentionally ignored".to_string(),
+        labels: labels.iter().map(|value| value.to_string()).collect(),
         state: "open".to_string(),
-        assignees: Vec::new(),
+        assignees: assignees.iter().map(|value| value.to_string()).collect(),
         user_login: user_login.to_string(),
         user_id,
     }
 }
 
-pub(super) fn admin(id: i64, login: &str) -> GithubActor {
-    GithubActor {
-        id,
-        login: login.to_string(),
-    }
+pub(super) fn registration(name: &str, work_label: &str) -> SessionRegistration {
+    registration_for(name, work_label, "alice", Some(7), "sess-1")
 }
 
-pub(super) fn registration(name: &str, work_label: &str) -> SessionRegistration {
+pub(super) fn registration_for(
+    name: &str,
+    work_label: &str,
+    creator_login: &str,
+    creator_id: Option<i64>,
+    session_id: &str,
+) -> SessionRegistration {
     SessionRegistration {
         installation_id: 42,
         repo: repo(),
         trigger_issue: 1,
-        trigger_author_id: 7,
-        trigger_author_login: "author-login".to_string(),
-        creator_login: "author-login".to_string(),
-        creator_id: Some(7),
+        trigger_author_id: creator_id.unwrap_or(9000),
+        trigger_author_login: creator_login.to_string(),
+        creator_login: creator_login.to_string(),
+        creator_id,
         def: SessionDef {
             name: name.to_string(),
             packages: Vec::new(),
@@ -303,7 +283,7 @@ pub(super) fn registration(name: &str, work_label: &str) -> SessionRegistration 
             target_branch: None,
         },
         effective_packages: Vec::new(),
-        session_id: "sess-1".to_string(),
+        session_id: session_id.to_string(),
         config_hash: "hash".to_string(),
         auto_merge: false,
         log_access: vec![],
@@ -315,14 +295,23 @@ pub(super) fn token() -> SecretString {
     SecretString::from("ghs_x".to_string())
 }
 
-/// The `session_id -> full work-label set` map the driver threads into
-/// `ack_open_work_issues`. Keyed by the [`registration`] fixture's session id
-/// (`sess-1`); `labels` is that session's full set for these single-session tests.
-pub(super) fn label_map(labels: &[&str]) -> HashMap<String, Vec<String>> {
-    let mut map = HashMap::new();
-    map.insert(
-        "sess-1".to_string(),
-        labels.iter().map(|s| s.to_string()).collect(),
-    );
-    map
+pub(super) fn label_map(entries: &[(&str, &[&str])]) -> HashMap<String, Vec<String>> {
+    entries
+        .iter()
+        .map(|(session, labels)| {
+            (
+                (*session).to_string(),
+                labels.iter().map(|value| (*value).to_string()).collect(),
+            )
+        })
+        .collect()
+}
+
+pub(super) fn one_label_map(labels: &[&str]) -> HashMap<String, Vec<String>> {
+    label_map(&[("sess-1", labels)])
+}
+
+pub(super) fn access(global_admins: &str) -> AccessPolicy {
+    AccessPolicy::from_vars(&[("FKST_GLOBAL_ADMINS".to_string(), global_admins.to_string())])
+        .expect("access")
 }

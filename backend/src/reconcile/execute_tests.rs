@@ -234,6 +234,7 @@ fn session_pod_spec_is_built_from_the_registration() {
         &reg,
         &["fkst-run".to_string()],
         Some("fkst-bot".to_string()),
+        &crate::access_policy::AccessPolicy::default(),
     );
 
     assert_eq!(spec.session_id, "sess-abc");
@@ -242,6 +243,7 @@ fn session_pod_spec_is_built_from_the_registration() {
     assert_eq!(spec.trigger_issue_number, 7);
     assert_eq!(spec.work_label, "fkst-run");
     assert_eq!(spec.bot_login, "fkst-bot");
+    assert_eq!(spec.creator_login, "author-login");
     assert_eq!(spec.config_hash, "hash123");
     assert_eq!(spec.target_branch, "fkst-hosted-default");
     // package_roots are the refs rendered back to `owner/repo@ref:path`, in order.
@@ -268,7 +270,12 @@ fn package_roots_come_from_the_effective_set_not_just_explicit_packages() {
             git_ref: "main".to_string(),
             path: "packages/from-manifest".to_string(),
         });
-    let spec = session_pod_spec_from(&reg, &["fkst-run".to_string()], None);
+    let spec = session_pod_spec_from(
+        &reg,
+        &["fkst-run".to_string()],
+        None,
+        &crate::access_policy::AccessPolicy::default(),
+    );
     assert_eq!(
         spec.package_roots,
         vec![
@@ -292,6 +299,7 @@ fn spec_work_label_is_the_comma_joined_detected_set() {
         &reg,
         &["pkg-a".to_string(), "pkg-b".to_string()],
         Some("fkst-bot".to_string()),
+        &crate::access_policy::AccessPolicy::default(),
     );
     assert_eq!(discovered_only.work_label, "pkg-a,pkg-b");
 
@@ -304,13 +312,19 @@ fn spec_work_label_is_the_comma_joined_detected_set() {
             "fkst-run".to_string(),
         ],
         Some("fkst-bot".to_string()),
+        &crate::access_policy::AccessPolicy::default(),
     );
     assert_eq!(union.work_label, "fkst-run,pkg-a");
 }
 
 #[test]
 fn missing_bot_login_defaults_to_empty() {
-    let spec = session_pod_spec_from(&registration(), &["fkst-run".to_string()], None);
+    let spec = session_pod_spec_from(
+        &registration(),
+        &["fkst-run".to_string()],
+        None,
+        &crate::access_policy::AccessPolicy::default(),
+    );
     assert_eq!(spec.bot_login, "", "an unset bot login renders as empty");
 }
 
@@ -320,10 +334,20 @@ fn session_contributors_starts_with_effective_creator_not_app_author() {
     reg.trigger_author_login = "fkst-app[bot]".to_string();
     reg.creator_login = "Seed-Owner".to_string();
     reg.creator_id = None;
-    reg.log_access = vec!["seed-owner".to_string(), "reviewer".to_string()];
+    reg.log_access = vec!["log-viewer".to_string()];
+    reg.collaborators = vec!["seed-owner".to_string(), "reviewer".to_string()];
+    let access = crate::access_policy::AccessPolicy::from_vars(&[(
+        "FKST_GLOBAL_ADMINS".to_string(),
+        "Deploy-Admin,4242,REVIEWER".to_string(),
+    )])
+    .expect("access");
     assert_eq!(
-        session_contributors(&reg),
-        vec!["Seed-Owner".to_string(), "reviewer".to_string()]
+        session_contributors(&reg, &access),
+        vec![
+            "Seed-Owner".to_string(),
+            "reviewer".to_string(),
+            "Deploy-Admin".to_string(),
+        ]
     );
 }
 

@@ -168,10 +168,6 @@ struct ReconcileVars {
     /// Default TRUE (I9): a fresh install auto-writes a manifest-driven trigger.
     #[serde(default = "defaults::seed_trigger_issue_on_install")]
     seed_trigger_issue_on_install: bool,
-    /// Operator opt-in for the R3 work-issue authority gate. Default false =
-    /// today's permissive behavior (any author may raise work).
-    #[serde(default)]
-    enforce_work_issue_authz: bool,
     /// Whitespace-separated `owner/repo@ref:path` package refs the seeded trigger
     /// issue loads. Unset → the github-devloop-workflow default.
     #[serde(default)]
@@ -239,16 +235,6 @@ pub struct ReconcileConfig {
     /// wake labels auto-discover). Set the env to `false` to disable the auto-seed
     /// entirely.
     pub seed_trigger_issue_on_install: bool,
-    /// Operator opt-in for the R3 work-issue AUTHORITY gate (epic #572). Env:
-    /// `FKST_ENFORCE_WORK_ISSUE_AUTHZ`. Default false = today's permissive behavior:
-    /// any GitHub user who opens a work-label issue has it picked up. When true, the
-    /// reconciler fetches the repo's admin/org-owner set and only a session's
-    /// **author ∪ Session Collaborators ∪ repo admins/org owners** may raise work for
-    /// it — anyone else is visibly rejected (comment + `fkst-unauthorized` latch) and
-    /// never picked up. Enforcement FAILS OPEN on any admin-lookup error (a lookup
-    /// blip must never lock out work). The flag being off is byte-identical to
-    /// pre-R3 behavior (no admin fetch, no author filtering, no reject).
-    pub enforce_work_issue_authz: bool,
     /// The `### Packages` refs an auto-seeded trigger issue lists (one per line).
     /// Env: `FKST_SEED_PACKAGES` (whitespace-separated). Default: the
     /// github-devloop-workflow root. Never empty (a blank env value falls back to
@@ -272,7 +258,6 @@ impl Default for ReconcileConfig {
             substrate_trigger_label: defaults::substrate_trigger_label(),
             github_bot_login: None,
             seed_trigger_issue_on_install: defaults::seed_trigger_issue_on_install(),
-            enforce_work_issue_authz: false,
             seed_packages: defaults::seed_packages(),
             default_manifest: defaults::default_manifest(),
             reconcile_interval_secs: defaults::reconcile_interval_secs(),
@@ -405,7 +390,6 @@ impl ReconcileConfig {
             pod_session_max_lifetime_secs: env.pod_session_max_lifetime_secs,
             health_scrape_secs: env.health_scrape_secs,
             seed_trigger_issue_on_install: env.seed_trigger_issue_on_install,
-            enforce_work_issue_authz: env.enforce_work_issue_authz,
             seed_packages,
             default_manifest,
         })

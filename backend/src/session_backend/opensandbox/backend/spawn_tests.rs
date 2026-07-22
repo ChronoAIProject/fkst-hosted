@@ -143,6 +143,7 @@ async fn ensure_session_creates_with_null_timeout_stamped_metadata_and_execd_tok
                 "FKST_GITHUB_PROXY_POLL_LABEL_PREFIX":
                     "fkst-dev:,fkst-class:,fkst-security:,fkst-workflow:,fkst-dashboard",
                 "FKST_SESSION_WORK_LABEL": "fkst-work",
+                "FKST_SESSION_CREATOR": "author-login",
                 "FKST_DEVLOOP_UPSTREAM_BRANCH": "fkst-hosted-default",
                 "FKST_DEVLOOP_INTEGRATION_BRANCH": "fkst-hosted-default",
             },

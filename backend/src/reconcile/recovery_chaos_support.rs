@@ -129,6 +129,16 @@ impl GithubLedger {
             .body = body;
     }
 
+    pub fn set_assignees(&self, number: i64, assignees: &[&str]) {
+        self.state
+            .lock()
+            .unwrap()
+            .issues
+            .get_mut(&number)
+            .unwrap()
+            .assignees = assignees.iter().map(|login| login.to_string()).collect();
+    }
+
     pub fn labels(&self, number: i64) -> Vec<String> {
         self.state.lock().unwrap().issues[&number].labels.clone()
     }
@@ -170,6 +180,18 @@ impl GithubLedger {
             .cloned()
             .collect()
     }
+
+    fn matching_open_issues_assignee(&self, label: &str, assignee: &str) -> Vec<IssueSummary> {
+        self.matching_open_issues(label)
+            .into_iter()
+            .filter(|issue| {
+                issue
+                    .assignees
+                    .iter()
+                    .any(|login| login.eq_ignore_ascii_case(assignee))
+            })
+            .collect()
+    }
 }
 
 #[async_trait]
@@ -192,6 +214,28 @@ impl GithubListing for GithubLedger {
         label: &str,
     ) -> Result<u64, GithubAppError> {
         Ok(self.matching_open_issues(label).len() as u64)
+    }
+
+    async fn list_issues_by_label_assignee(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+        label: &str,
+        assignee: &str,
+    ) -> Result<Vec<IssueSummary>, GithubAppError> {
+        Ok(self.matching_open_issues_assignee(label, assignee))
+    }
+
+    async fn count_open_issues_with_label_assignee(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+        label: &str,
+        assignee: &str,
+    ) -> Result<u64, GithubAppError> {
+        Ok(self.matching_open_issues_assignee(label, assignee).len() as u64)
     }
 
     async fn get_collaborator_role(
@@ -383,7 +427,6 @@ impl ChaosHarness {
         profile: BackendProfile,
         github_api_base: &str,
         allowed_users: Option<&str>,
-        enforce_work_authz: bool,
     ) -> Self {
         let mut vars = vec![
             ("FKST_LLM_API_KEY", "fixture-llm-value"),
@@ -402,8 +445,6 @@ impl ChaosHarness {
         )
         .expect("fixture config");
         config.github_api_base_url = github_api_base.to_string();
-        config.reconcile.enforce_work_issue_authz = enforce_work_authz;
-
         let ledger = Arc::new(GithubLedger::new());
         let runtimes = Arc::new(Mutex::new(HashMap::new()));
         let events = Arc::new(Mutex::new(BackendEvents::default()));

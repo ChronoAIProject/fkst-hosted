@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use secrecy::{ExposeSecret, SecretString};
 
+use crate::access_policy::AccessPolicy;
 use crate::config::Config;
 use crate::environment_profile::EnvironmentProfileStore;
 use crate::github_app::listing::GithubListing;
@@ -448,6 +449,7 @@ async fn resolve_session_credentials(
         reg,
         detected_work_labels,
         ctx.config.reconcile.github_bot_login.clone(),
+        &ctx.config.access,
     );
     let storage = storage_writer_creds(&ctx.config);
     let creds = credential_secret_data(
@@ -477,6 +479,7 @@ fn session_pod_spec_from(
     reg: &SessionRegistration,
     detected_work_labels: &[String],
     bot_login: Option<String>,
+    access: &AccessPolicy,
 ) -> SessionPodSpec {
     SessionPodSpec {
         session_id: reg.session_id.clone(),
@@ -493,7 +496,8 @@ fn session_pod_spec_from(
         config_hash: reg.config_hash.clone(),
         output_lang: reg.def.output_lang.clone(),
         engine_config: reg.def.engine_config.clone(),
-        contributors: session_contributors(reg),
+        creator_login: reg.creator_login.clone(),
+        contributors: session_contributors(reg, access),
         target_branch: reg
             .def
             .target_branch
@@ -502,17 +506,27 @@ fn session_pod_spec_from(
     }
 }
 
-/// The session's trusted-users list for `FKST_GITHUB_AUTHORIZED_LOGINS`: the
-/// effective creator's login FIRST (always trusted, skipped only if GitHub gave us
-/// a blank login), then the `### FKST Contributors` tokens, deduped
-/// case-insensitively (GitHub logins are case-insensitive). Numeric-id tokens
-/// ride along harmlessly — the packages' author policy matches logins, so an id
-/// token never matches anything (same never-matching leniency as log authz).
-fn session_contributors(reg: &SessionRegistration) -> Vec<String> {
+/// Package-side work authors: creator first, then Session Collaborators, then
+/// login-shaped deployment admins. Log-access/FKST-Contributor entries are not
+/// work authority and deliberately do not feed this environment contract.
+fn session_contributors(reg: &SessionRegistration, access: &AccessPolicy) -> Vec<String> {
     let mut contributors: Vec<String> = Vec::new();
     let mut seen: Vec<String> = Vec::new();
     let creator = reg.creator_login.trim();
-    for token in std::iter::once(creator).chain(reg.log_access.iter().map(String::as_str)) {
+    let admin_logins: Vec<&str> = access.global_admin_login_entries().collect();
+    let excluded_admins = access
+        .global_admin_count()
+        .saturating_sub(admin_logins.len());
+    if excluded_admins > 0 {
+        tracing::debug!(
+            excluded_global_admin_entries = excluded_admins,
+            "session env: numeric global-admin entries omitted from login-only author policy"
+        );
+    }
+    for token in std::iter::once(creator)
+        .chain(reg.collaborators.iter().map(String::as_str))
+        .chain(admin_logins)
+    {
         if token.is_empty() {
             continue;
         }

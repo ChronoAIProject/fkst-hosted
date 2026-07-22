@@ -28,8 +28,6 @@ fn defaults_apply_when_nothing_is_set() {
     assert_eq!(config.pod_token_refresh_secs, 2700);
     assert_eq!(config.pod_session_max_lifetime_secs, 0);
     assert_eq!(config.health_scrape_secs, 150);
-    // R3 authority gate is OFF by default (today's permissive behavior).
-    assert!(!config.enforce_work_issue_authz);
     // I9: install-time seeding is ON by default (behaviour change) and points
     // at the default-workflows manifest.
     assert!(config.seed_trigger_issue_on_install);
@@ -73,14 +71,13 @@ fn default_manifest_overrides_and_blank_coerces_to_none() {
 }
 
 #[test]
-fn enforce_work_issue_authz_is_opt_in() {
-    // Unset → false (permissive), the only value that preserves pre-R3 behavior.
-    let off = ReconcileConfig::from_vars(&vars(&[])).expect("defaults");
-    assert!(!off.enforce_work_issue_authz);
-    // Explicitly opted in.
-    let on = ReconcileConfig::from_vars(&vars(&[("FKST_ENFORCE_WORK_ISSUE_AUTHZ", "true")]))
-        .expect("override");
-    assert!(on.enforce_work_issue_authz);
+fn retired_work_authz_flag_is_harmlessly_ignored() {
+    let baseline = ReconcileConfig::from_vars(&vars(&[])).expect("defaults");
+    let with_retired_var =
+        ReconcileConfig::from_vars(&vars(&[("FKST_ENFORCE_WORK_ISSUE_AUTHZ", "false")]))
+            .expect("unknown reconcile vars are ignored");
+    assert_eq!(with_retired_var.seed_packages, baseline.seed_packages);
+    assert_eq!(with_retired_var.default_manifest, baseline.default_manifest);
 }
 
 #[test]
@@ -133,10 +130,6 @@ fn default_impl_matches_env_defaults() {
         from_env.pod_session_max_lifetime_secs
     );
     assert_eq!(from_default.health_scrape_secs, from_env.health_scrape_secs);
-    assert_eq!(
-        from_default.enforce_work_issue_authz,
-        from_env.enforce_work_issue_authz
-    );
     assert_eq!(
         from_default.seed_trigger_issue_on_install,
         from_env.seed_trigger_issue_on_install
