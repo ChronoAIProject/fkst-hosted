@@ -36,6 +36,32 @@ export function sessionActive(session: SessionDetail): boolean {
   return session.trigger.state === 'open' && session.invalid_reason == null;
 }
 
+/** The labels a work-item composer may offer. New control planes project the
+ * complete effective set; the explicit-label fallback keeps the action usable
+ * during a rolling deployment against an older response shape. */
+export function sessionWorkLabels(session: SessionDetail): string[] {
+  const source = Array.isArray(session.work_labels)
+    ? session.work_labels
+    : session.work_label
+      ? [session.work_label]
+      : [];
+  const seen = new Set<string>();
+  const labels: string[] = [];
+  for (const label of source) {
+    const value = label.trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    labels.push(value);
+  }
+  return labels;
+}
+
+/** Queueing is meaningful for a parsed, open trigger with at least one label.
+ * Idle sessions qualify: adding the issue is what wakes them. */
+export function canQueueSessionWork(session: SessionDetail): boolean {
+  return sessionActive(session) && sessionWorkLabels(session).length > 0;
+}
+
 /** Level-2 card status from the live sessions payload — same contract as
  *  `repoStatus`: blinking `active` requires the App installed, so a repo the
  *  App was removed from reads grey even while a trigger issue is still open. */

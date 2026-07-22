@@ -1,7 +1,7 @@
 //! Wiremock tests for `deliver_credential`: the intact-path atomic single-file
-//! replace (tmp upload + native `/files/mv` rename), the container-restart
+//! replace (tmp upload + checked `mv -f` command), the container-restart
 //! full-bundle re-push (every file + the sentinel LAST), the benign session-gone
-//! no-op, the surfaced upload/rename failures, and the both-restarted cache-miss
+//! no-op, the surfaced upload/swap failures, and the both-restarted cache-miss
 //! fail-loud path that forbids partial recovery.
 
 use std::collections::BTreeMap;
@@ -20,6 +20,8 @@ use super::super::backend_test_support::{
 const RESOLVE_PATH: &str = "/v1/sandboxes";
 const FILE_INFO_PATH: &str = "/v1/sandboxes/sbx-1/proxy/44772/files/info";
 const UPLOAD_PATH: &str = "/v1/sandboxes/sbx-1/proxy/44772/files/upload";
+const COMMAND_PATH: &str = "/v1/sandboxes/sbx-1/proxy/44772/command";
+const COMMAND_STATUS_PATH: &str = "/v1/sandboxes/sbx-1/proxy/44772/command/status/cmd-replace";
 const MV_PATH: &str = "/v1/sandboxes/sbx-1/proxy/44772/files/mv";
 
 const TOKEN_PATH: &str = "/var/lib/fkst/creds/github-token";
@@ -30,11 +32,37 @@ fn token_present_body() -> serde_json::Value {
     json!({ TOKEN_PATH: { "path": TOKEN_PATH, "size": 10, "mode": 400 } })
 }
 
-/// The exact `/files/mv` body the atomic replace must send: one rename of the
-/// sibling tmp file onto the live destination (and NOTHING else — in particular,
-/// the credential value never rides the rename request).
-fn expected_mv_body() -> serde_json::Value {
-    json!([{ "src": TOKEN_TMP_PATH, "dest": TOKEN_PATH }])
+/// The exact checked command body for the overwrite-capable atomic swap. It carries
+/// file paths only; the credential bytes remain confined to the multipart upload.
+fn expected_replace_command_body() -> serde_json::Value {
+    json!({
+        "command": format!("mv -f -- '{TOKEN_TMP_PATH}' '{TOKEN_PATH}'"),
+        "timeout": 10_000,
+        "background": false,
+    })
+}
+
+async fn mount_replace_command(server: &MockServer, exit_code: i32) {
+    Mock::given(method("POST"))
+        .and(path(COMMAND_PATH))
+        .and(body_json(expected_replace_command_body()))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("data: {\"type\":\"init\",\"text\":\"cmd-replace\"}\n\n"),
+        )
+        .expect(1)
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(COMMAND_STATUS_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "cmd-replace",
+            "running": false,
+            "exit_code": exit_code,
+        })))
+        .expect(1)
+        .mount(server)
+        .await;
 }
 
 /// Mount the `resolve_one` list response returning one sandbox `sbx-1` for the session.
@@ -90,14 +118,13 @@ async fn deliver_credential_replaces_a_single_file_atomically_when_creds_are_int
         .respond_with(ResponseTemplate::new(200))
         .mount(&server)
         .await;
-    // The atomic swap: exactly one rename, with exactly the tmp→destination body
-    // (the exact-body matcher doubles as the "no credential bytes ride the rename"
-    // assertion — any other body would 404 the mock and fail the delivery).
+    // The atomic swap goes through the checked command channel because native
+    // `/files/mv` rejects an existing destination (the production 401 regression).
+    mount_replace_command(&server, 0).await;
     Mock::given(method("POST"))
         .and(path(MV_PATH))
-        .and(body_json(expected_mv_body()))
         .respond_with(ResponseTemplate::new(200))
-        .expect(1)
+        .expect(0)
         .mount(&server)
         .await;
 
@@ -125,7 +152,7 @@ async fn deliver_credential_replaces_a_single_file_atomically_when_creds_are_int
 }
 
 #[tokio::test]
-async fn deliver_credential_surfaces_a_rename_failure() {
+async fn deliver_credential_surfaces_an_atomic_replace_command_failure() {
     let server = MockServer::start().await;
     mount_resolve(&server).await;
     Mock::given(method("GET"))
@@ -138,11 +165,10 @@ async fn deliver_credential_surfaces_a_rename_failure() {
         .respond_with(ResponseTemplate::new(200))
         .mount(&server)
         .await;
-    // The rename fails → the delivery must fail loudly (the rotation loop retries
-    // next tick) instead of reporting a token that never reached the live path as
-    // delivered. The leftover tmp is overwritten by the next tick's upload.
+    // A command-channel failure must fail the delivery loudly; the rotation loop
+    // retries next tick and overwrites the leftover tmp.
     Mock::given(method("POST"))
-        .and(path(MV_PATH))
+        .and(path(COMMAND_PATH))
         .respond_with(ResponseTemplate::new(500))
         .expect(1)
         .mount(&server)
@@ -155,12 +181,12 @@ async fn deliver_credential_surfaces_a_rename_failure() {
             SecretString::from("ghs_new".to_string()),
         )
         .await
-        .expect_err("a failed rename is a failed delivery");
+        .expect_err("a failed atomic-replace command is a failed delivery");
     assert!(matches!(err, BackendError::Other(_)), "got {err:?}");
 }
 
 #[tokio::test]
-async fn deliver_credential_surfaces_a_rename_whose_source_vanished() {
+async fn deliver_credential_surfaces_a_nonzero_atomic_replace_exit() {
     let server = MockServer::start().await;
     mount_resolve(&server).await;
     Mock::given(method("GET"))
@@ -173,16 +199,10 @@ async fn deliver_credential_surfaces_a_rename_whose_source_vanished() {
         .respond_with(ResponseTemplate::new(200))
         .mount(&server)
         .await;
-    // A container restart wiped the creds dir between the tmp upload and the
-    // rename: the daemon stats the source and 404s. The delivery must surface
-    // that (NOT report Delivered); the next tick's canary probe routes the
-    // restart to the full-bundle re-push.
-    Mock::given(method("POST"))
-        .and(path(MV_PATH))
-        .respond_with(ResponseTemplate::new(404))
-        .expect(1)
-        .mount(&server)
-        .await;
+    // A missing source (for example, a restart between upload and swap) makes `mv`
+    // exit nonzero. The delivery must surface that rather than report Delivered;
+    // the next tick's canary probe then routes to the full-bundle re-push.
+    mount_replace_command(&server, 1).await;
 
     let err = backend(&server.uri(), osb_config())
         .deliver_credential_impl(
@@ -191,8 +211,8 @@ async fn deliver_credential_surfaces_a_rename_whose_source_vanished() {
             SecretString::from("ghs_new".to_string()),
         )
         .await
-        .expect_err("a vanished rename source is a failed delivery");
-    assert!(matches!(err, BackendError::NotFound), "got {err:?}");
+        .expect_err("a nonzero atomic-replace exit is a failed delivery");
+    assert!(matches!(err, BackendError::Other(_)), "got {err:?}");
 }
 
 #[tokio::test]
@@ -297,9 +317,9 @@ async fn deliver_credential_surfaces_an_upload_failure() {
         .respond_with(ResponseTemplate::new(500))
         .mount(&server)
         .await;
-    // No rename attempt without an uploaded tmp file.
+    // No swap command without an uploaded tmp file.
     Mock::given(method("POST"))
-        .and(path(MV_PATH))
+        .and(path(COMMAND_PATH))
         .respond_with(ResponseTemplate::new(200))
         .expect(0)
         .mount(&server)
@@ -314,6 +334,11 @@ async fn deliver_credential_surfaces_an_upload_failure() {
         .await
         .expect_err("upload failed");
     assert!(matches!(err, BackendError::Other(_)), "got {err:?}");
+}
+
+#[test]
+fn atomic_replace_shell_quotes_paths() {
+    assert_eq!(super::shell_quote("/tmp/a'b"), "'/tmp/a'\"'\"'b'");
 }
 
 #[tokio::test]

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   accountStatus,
+  canQueueSessionWork,
   decodeSessionStatus,
   decodeWorkItemStatus,
   filterAccounts,
@@ -13,6 +14,7 @@ import {
   repoDetailStatus,
   repoStatus,
   sessionActive,
+  sessionWorkLabels,
   sessionsByAccount,
   sessionsByRepo,
 } from './derive';
@@ -31,6 +33,7 @@ const repo = (over: Partial<RepoOverview> & Pick<RepoOverview, 'name'>): RepoOve
   private: false,
   admin: true,
   installed: false,
+  viewer_visible: true,
   active_sessions: 0,
   packages: [],
   ...over,
@@ -118,6 +121,25 @@ describe('status derivation', () => {
       false
     );
     expect(sessionActive(session({ invalid_reason: 'Packages: unreachable.' }))).toBe(false);
+  });
+
+  it('resolves queue labels with a legacy fallback and gates queueing to open sessions', () => {
+    const current = session({
+      work_label: 'explicit',
+      work_labels: [' explicit ', 'fkst-security', 'fkst-security', ''],
+    });
+    expect(sessionWorkLabels(current)).toEqual(['explicit', 'fkst-security']);
+    expect(canQueueSessionWork(current)).toBe(true);
+
+    expect(sessionWorkLabels(session({ work_label: 'legacy', work_labels: undefined }))).toEqual([
+      'legacy',
+    ]);
+    expect(
+      canQueueSessionWork(
+        session({ trigger: { ...current.trigger, state: 'closed' }, work_labels: ['explicit'] })
+      )
+    ).toBe(false);
+    expect(canQueueSessionWork(session({ work_label: null, work_labels: [] }))).toBe(false);
   });
 
   it('derives the level-2 card status with active gated on installed', () => {

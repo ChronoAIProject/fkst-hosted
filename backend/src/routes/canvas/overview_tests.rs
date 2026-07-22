@@ -114,6 +114,7 @@ async fn overview_assembles_accounts_counts_and_totals() {
     assert_eq!(personal.repos.len(), 1);
     assert_eq!(personal.repos[0].name, "notes");
     assert!(!personal.repos[0].installed);
+    assert!(personal.repos[0].viewer_visible);
     assert_eq!(personal.repos[0].active_sessions, 0);
 
     let org = &view.accounts[1];
@@ -127,6 +128,7 @@ async fn overview_assembles_accounts_counts_and_totals() {
     assert_eq!(org.repos.len(), 1);
     let site = &org.repos[0];
     assert!(site.installed);
+    assert!(site.viewer_visible);
     assert_eq!(
         site.active_sessions, 1,
         "only the parsing trigger counts as active"
@@ -148,8 +150,80 @@ async fn overview_assembles_accounts_counts_and_totals() {
 }
 
 #[tokio::test]
-async fn global_admin_overview_uses_app_wide_installations_and_is_read_only() {
+async fn global_admin_overview_adds_app_wide_repos_to_normal_user_visibility() {
     let server = MockServer::start().await;
+
+    // A same-user broader token drives the normal user side of the additive
+    // overview, revealing uninstalled owned and collaborator repositories.
+    Mock::given(method("GET"))
+        .and(path("/user"))
+        .and(header("authorization", "Bearer broader-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "login": "shining", "id": 9
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/user/repos"))
+        .and(header("authorization", "Bearer broader-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            repo_json("shining", "User", "notes", 1),
+            repo_json("acme", "Organization", "shared", 2),
+            {
+                "id": 3,
+                "name": "project",
+                "owner": { "login": "partner", "type": "Organization" },
+                "private": true,
+                "permissions": { "admin": false }
+            }
+        ])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/user/orgs"))
+        .and(header("authorization", "Bearer broader-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/user/memberships/orgs"))
+        .and(header("authorization", "Bearer broader-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "role": "member", "organization": { "login": "acme" } }
+        ])))
+        .mount(&server)
+        .await;
+    // Installation flags always come from the App user-to-server token, not
+    // the broader classic-OAuth token.
+    Mock::given(method("GET"))
+        .and(path("/user/installations"))
+        .and(header("authorization", "Bearer user-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 1,
+            "installations": [{
+                "id": 77,
+                "account": { "login": "acme", "type": "Organization" },
+                "repository_selection": "selected"
+            }]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/user/installations/77/repositories"))
+        .and(header("authorization", "Bearer user-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 1,
+            "repositories": [{
+                "id": 2,
+                "name": "shared",
+                "owner": { "login": "acme", "type": "Organization" }
+            }]
+        })))
+        .mount(&server)
+        .await;
+
+    // The App-wide side includes one overlapping repo plus one private repo the
+    // signed-in user cannot otherwise see.
     Mock::given(method("GET"))
         .and(path("/app/installations"))
         .respond_with(
@@ -161,64 +235,126 @@ async fn global_admin_overview_uses_app_wide_installations_and_is_read_only() {
         )
         .mount(&server)
         .await;
+    mount_app_token(&server, "acme", "shared", 77).await;
     mount_app_token(&server, "acme", "vault", 77).await;
     Mock::given(method("GET"))
         .and(path("/installation/repositories"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "total_count": 1,
-            "repositories": [{
-                "id": 9001,
-                "name": "vault",
-                "owner": { "login": "acme", "type": "Organization" },
-                "private": true
-            }]
+            "total_count": 2,
+            "repositories": [
+                {
+                    "id": 2,
+                    "name": "shared",
+                    "owner": { "login": "acme", "type": "Organization" },
+                    "private": false
+                },
+                {
+                    "id": 9001,
+                    "name": "vault",
+                    "owner": { "login": "acme", "type": "Organization" },
+                    "private": true
+                }
+            ]
         })))
         .mount(&server)
         .await;
-    Mock::given(method("GET"))
-        .and(path("/repos/acme/vault/issues"))
-        .and(query_param("labels", "fkst-substrate-trigger"))
-        .and(query_param("state", "open"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
-        .mount(&server)
-        .await;
+    for repo in ["shared", "vault"] {
+        Mock::given(method("GET"))
+            .and(path(format!("/repos/acme/{repo}/issues")))
+            .and(query_param("labels", "fkst-substrate-trigger"))
+            .and(query_param("state", "open"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+    }
 
     let mut state = test_state(&server.uri(), Some(test_app(&server.uri())));
     grant_global_admin(&mut state, "@SHINING");
-    // Even if broader OAuth is configured, it cannot widen an App-wide view.
     state.config.log.broader_oauth_client_id = Some("client".to_string());
     state.config.log.broader_oauth_client_secret = Some(SecretString::from("secret".to_string()));
 
-    let Json(view) = overview(State(state), viewer_user(), auth_headers())
-        .await
-        .expect("global admin overview");
+    let Json(view) = overview(
+        State(state),
+        viewer_user(),
+        auth_headers_with_broader("broader-token"),
+    )
+    .await
+    .expect("additive global admin overview");
 
     assert!(view.global_admin);
-    assert!(!view.broader_oauth_available);
-    assert_eq!(view.accounts.len(), 1);
-    let account = &view.accounts[0];
-    assert_eq!(account.login, "acme");
-    assert_eq!(account.kind, "org");
-    assert!(!account.owner);
-    assert!(account.installed);
-    assert_eq!(account.installation_id, Some(77));
-    assert_eq!(account.repository_selection.as_deref(), Some("all"));
-    assert_eq!(account.repos.len(), 1);
-    let repo = &account.repos[0];
-    assert_eq!(repo.id, 9001);
-    assert!(repo.private);
-    assert!(repo.installed);
     assert!(
-        !repo.admin,
-        "cross-account App reads must not imply user admin"
+        view.broader_oauth_available,
+        "global admins still need broader OAuth for their normal user visibility"
     );
+    assert_eq!(view.accounts.len(), 3);
+
+    let personal = &view.accounts[0];
+    assert_eq!(personal.login, "shining");
+    assert_eq!(personal.repos.len(), 1);
+    assert!(!personal.repos[0].installed);
+    assert!(personal.repos[0].viewer_visible);
+
+    let acme = &view.accounts[1];
+    assert_eq!(acme.login, "acme");
+    assert!(!acme.owner, "ordinary org membership is not ownership");
+    assert!(acme.installed);
+    assert_eq!(acme.installation_id, Some(77));
+    assert_eq!(
+        acme.repository_selection.as_deref(),
+        Some("all"),
+        "App-wide installation metadata wins over the narrower user projection"
+    );
+    assert_eq!(acme.repos.len(), 2, "the overlapping repo is deduplicated");
+    let shared = acme
+        .repos
+        .iter()
+        .find(|repo| repo.name == "shared")
+        .expect("overlapping repo");
+    assert!(shared.installed);
+    assert!(shared.viewer_visible);
+    assert!(
+        shared.admin,
+        "the user-scoped permission bit is preserved on overlap"
+    );
+    let vault = acme
+        .repos
+        .iter()
+        .find(|repo| repo.name == "vault")
+        .expect("App-only repo");
+    assert!(vault.private);
+    assert!(vault.installed);
+    assert!(!vault.viewer_visible);
+    assert!(
+        !vault.admin,
+        "App-only visibility must not imply user admin"
+    );
+
+    let partner = &view.accounts[2];
+    assert_eq!(partner.login, "partner");
+    assert_eq!(partner.kind, "org");
+    assert!(!partner.owner);
+    assert_eq!(partner.repos.len(), 1);
+    assert_eq!(partner.repos[0].name, "project");
+    assert!(!partner.repos[0].installed);
+    assert!(
+        partner.repos[0].viewer_visible,
+        "a direct collaborator repo survives even when its owner is absent from /user/orgs"
+    );
+    assert!(!partner.repos[0].admin);
+    assert_eq!(view.totals.sessions, 0, "overlap is not double-counted");
 
     let requests = server.received_requests().await.expect("recorded requests");
     assert!(
         requests
             .iter()
-            .all(|request| !request.url.path().starts_with("/user/")),
-        "a global-admin overview must not collapse back to user-token visibility"
+            .any(|request| request.url.path() == "/user/repos"),
+        "the signed-in user's normal repository enumeration must still run"
+    );
+    assert!(
+        requests
+            .iter()
+            .any(|request| request.url.path() == "/app/installations"),
+        "the App-wide installation enumeration must also run"
     );
 }
 

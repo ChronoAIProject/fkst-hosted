@@ -6,9 +6,9 @@
 //! probes the container first and heals accordingly:
 //!
 //! - the creds are intact → replace JUST the rotated file ATOMICALLY: upload to a
-//!   sibling `.tmp` path, then swap it over the destination with execd's native
-//!   `POST /files/mv` (Go `os.Rename`, i.e. `rename(2)`) — and keep the cached
-//!   bundle's copy fresh for any later full re-push. Rename means (a) in-sandbox
+//!   sibling `.tmp` path, then swap it over the destination with `mv -f` through
+//!   execd's authenticated command channel — and keep the cached bundle's copy fresh
+//!   for any later full re-push. Rename means (a) in-sandbox
 //!   readers — the git credential helper re-reads the token file on every
 //!   operation — can never observe a truncated half-written token, and (b) the
 //!   destination file's own mode is irrelevant, so this also heals sandboxes
@@ -35,6 +35,10 @@ use crate::session_spec::creds::CredsLayout;
 
 use super::spawn::{path_str, CREDS_FILE_MODE, OSB_CREDS_DIR};
 use super::OsbBackend;
+
+/// `mv` only renames two tiny local files, so this is a failure bound rather than an
+/// expected runtime. [`ExecdClient::run_command`] adds its transport slack on top.
+const ATOMIC_REPLACE_TIMEOUT_MS: u64 = 10_000;
 
 impl OsbBackend {
     pub(super) async fn deliver_credential_impl(
@@ -147,8 +151,8 @@ impl OsbBackend {
 }
 
 /// Replace `path` with `contents` ATOMICALLY: upload to a sibling `.tmp` path, then
-/// swap it over the destination with execd's native `POST /files/mv` (Go
-/// `os.Rename`, i.e. a same-filesystem `rename(2)`).
+/// swap it over the destination with `mv -f` through execd's authenticated command
+/// channel. GNU `mv` performs the same-filesystem swap with `rename(2)`.
 ///
 /// Why not rewrite the destination in place: (a) in-sandbox readers — the git
 /// credential helper re-reads the token file on every operation — could observe a
@@ -158,11 +162,13 @@ impl OsbBackend {
 /// needs only DIRECTORY permission — the destination's own mode is irrelevant, so
 /// this heals legacy sandboxes and migrates their files to `0o600` as a side effect.
 ///
-/// Every failure surfaces to the rotation loop for its next tick: a rename whose
-/// SOURCE vanished (a container restart wiped the creds dir mid-delivery) is the
-/// daemon's 404 → [`OsbError::NotFound`], and the next tick's canary probe routes
-/// that restart to the full-bundle re-push. A leftover tmp from a failed rename is
-/// harmless — the next tick's upload overwrites it (`0o600` is owner-writable).
+/// Execd's native `/files/mv` endpoint deliberately REFUSES an existing destination,
+/// so it cannot rotate a live credential. The authenticated command contains paths
+/// only — never `contents` — and its exit status is checked explicitly. Every failure
+/// surfaces to the rotation loop for its next tick. If a container restart wipes the
+/// source mid-delivery, the command fails and the next tick's canary probe routes the
+/// restart to the full-bundle re-push. A leftover tmp from any failed swap is harmless:
+/// the next tick's upload overwrites it (`0o600` is owner-writable).
 /// NEVER logs `contents`.
 async fn replace_file_atomically(
     execd: &ExecdClient,
@@ -173,8 +179,27 @@ async fn replace_file_atomically(
     execd
         .upload_file(&tmp, contents.expose_secret().as_bytes(), CREDS_FILE_MODE)
         .await?;
-    execd.move_file(&tmp, path).await?;
+
+    let command = format!("mv -f -- {} {}", shell_quote(&tmp), shell_quote(path));
+    let command_ref = execd
+        .run_command(&command, Some(ATOMIC_REPLACE_TIMEOUT_MS), false)
+        .await?;
+    let status = execd.command_status(&command_ref.id).await?;
+    if status.running || status.exit_code != Some(0) {
+        return Err(BackendError::Other(anyhow::anyhow!(
+            "opensandbox execd: atomic credential replacement did not complete successfully \
+             (running={}, exit_code={:?})",
+            status.running,
+            status.exit_code
+        )));
+    }
     Ok(())
+}
+
+/// POSIX-shell single-quote one command argument. Paths are control-plane generated,
+/// but quoting here keeps the execd command safe if the credential layout ever changes.
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 #[cfg(test)]

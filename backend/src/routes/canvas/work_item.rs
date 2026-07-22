@@ -1,12 +1,12 @@
 //! Queue work for an existing session from the canvas:
 //! `POST /api/v1/repos/{owner}/{name}/sessions/{issue_number}/work-items`.
 //!
-//! Opens a plain GitHub issue in the repo pre-stamped with the SESSION's work
-//! label — looked up by parsing the trigger issue `{issue_number}`'s body with
-//! the reconciler's own trigger parser ([`parse_trigger_issue_body`]). The
-//! reconciler then claims the new issue on its next sweep (any open issue
-//! carrying a session's work label wakes that session), so a user never has to
-//! leave the dashboard for GitHub just to add a task.
+//! Opens a plain GitHub issue in the repo pre-stamped with one label selected
+//! from the SESSION's full applicable set: its explicit `### Work Label` plus
+//! labels discovered from the manifest-expanded package graph. The handler
+//! re-resolves that set with the reconciler's own resolvers before writing, so
+//! a client cannot stamp an unrelated label. Any applicable label wakes the
+//! session on the next sweep.
 //!
 //! Acts WITH THE USER TOKEN (like create/stop session): the signed-in human is
 //! the issue author, and GitHub natively enforces whether they may write here.
@@ -22,10 +22,12 @@ use utoipa::ToSchema;
 
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
-use crate::goals::trigger_parse::parse_trigger_issue_body;
+use crate::goals::trigger_parse::{parse_trigger_issue_body, TriggerSpec};
 use crate::models::{GithubActor, RepoRef};
-use crate::reconcile::desired::{SessionDef, SessionRegistration};
+use crate::reconcile::desired::{config_hash, SessionDef, SessionRegistration};
+use crate::reconcile::effective_packages::resolve_effective_packages;
 use crate::reconcile::work_authz::is_work_author_allowed;
+use crate::reconcile::work_labels::resolve_work_label_sets;
 use crate::routes::canvas::sessions::validate_repo_segment;
 use crate::routes::dashboard::{bearer_token, DashboardGithub};
 use crate::state::AppState;
@@ -35,6 +37,9 @@ use crate::state::AppState;
 pub struct CreateWorkItemRequest {
     /// The work-issue title (also the GitHub issue title); required, non-blank.
     pub title: String,
+    /// One of the session's resolved applicable work labels. The server
+    /// re-resolves the session and rejects labels outside that set.
+    pub work_label: String,
     /// The optional work-issue body (Markdown); an omitted or blank value opens
     /// a body-less issue.
     #[serde(default)]
@@ -58,6 +63,7 @@ pub struct CreateWorkItemResponse {
 struct FetchedTrigger {
     body: String,
     labels: Vec<String>,
+    state: String,
     is_pull_request: bool,
     /// The trigger author's immutable numeric GitHub id (`0` if GitHub omits the
     /// `user` block — a fail-safe: id 0 matches no real caller).
@@ -136,6 +142,8 @@ impl DashboardGithub {
                 body: Option<String>,
                 #[serde(default)]
                 labels: Vec<RawLabel>,
+                #[serde(default)]
+                state: String,
                 /// Present only when this "issue" is actually a PR.
                 pull_request: Option<serde_json::Value>,
                 /// The trigger author; `None` only on a malformed response.
@@ -148,6 +156,7 @@ impl DashboardGithub {
             return Ok(FetchedTrigger {
                 body: raw.body.unwrap_or_default(),
                 labels: raw.labels.into_iter().map(|label| label.name).collect(),
+                state: raw.state,
                 is_pull_request: raw.pull_request.is_some(),
                 author_id: raw.user.map(|user| user.id).unwrap_or_default(),
             });
@@ -157,8 +166,8 @@ impl DashboardGithub {
 }
 
 /// `POST /api/v1/repos/{owner}/{name}/sessions/{issue_number}/work-items` —
-/// open a work issue AS the signed-in user, stamped with the session's work
-/// label so the reconciler claims it for that session.
+/// open a work issue AS the signed-in user, stamped with the selected applicable
+/// session label so the reconciler claims it for that session.
 #[utoipa::path(
     post,
     path = "/repos/{owner}/{name}/sessions/{issue_number}/work-items",
@@ -176,7 +185,8 @@ impl DashboardGithub {
         (status = 401, description = "Missing or invalid GitHub token", body = ErrorEnvelope),
         (status = 403, description = "Not allowlisted, the caller lacks work-item authority on this session (not the trigger author, a listed Session Collaborator, nor a repo admin / org owner), or GitHub refused the write for this caller", body = ErrorEnvelope),
         (status = 404, description = "No such trigger issue (or the caller cannot see the repo)", body = ErrorEnvelope),
-        (status = 422, description = "The trigger issue is malformed, or the session has no explicit work label to queue against", body = ErrorEnvelope),
+        (status = 409, description = "The session trigger is closed", body = ErrorEnvelope),
+        (status = 422, description = "The trigger issue or its package sources are malformed, the session has no applicable work labels, or the selected label is not applicable", body = ErrorEnvelope),
         (status = 503, description = "GitHub API unreachable", body = ErrorEnvelope),
     )
 )]
@@ -198,8 +208,19 @@ pub(super) async fn create_work_item(
     if title.is_empty() {
         return Err(AppError::Validation("title must not be blank".to_string()));
     }
-    // An omitted or blank body opens a body-less issue.
-    let body = req.body.as_deref().map(str::trim).unwrap_or_default();
+    let requested_work_label = req.work_label.trim();
+    if requested_work_label.is_empty() {
+        return Err(AppError::Validation(
+            "work_label must not be blank".to_string(),
+        ));
+    }
+    // An omitted or blank body opens a body-less issue. Preserve a populated
+    // body's original whitespace because indentation is meaningful Markdown.
+    let body = req
+        .body
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_default();
 
     let token = bearer_token(&headers)?;
     let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
@@ -222,10 +243,16 @@ pub(super) async fn create_work_item(
             "#{issue_number} is not a session trigger issue (missing the {trigger_label} label)"
         )));
     }
+    if trigger.state != "open" {
+        return Err(AppError::Conflict(format!(
+            "the session at #{issue_number} is not running because its trigger issue is closed"
+        )));
+    }
 
     // Parse with the reconciler's own grammar: a malformed trigger surfaces the
     // parser's section-naming 422 rather than silently mislabeling the work item.
     let spec = parse_trigger_issue_body(&trigger.body)?;
+    let mut reg = work_registration(&owner, &name, issue_number, trigger.author_id, spec);
 
     // Request-time WORK-ITEM authorization (R5, epic #572): only the session's
     // trigger AUTHOR, a listed Session Collaborator, or a repo admin / org owner
@@ -245,13 +272,6 @@ pub(super) async fn create_work_item(
     } else {
         Vec::new()
     };
-    let reg = authz_registration(
-        &owner,
-        &name,
-        issue_number,
-        trigger.author_id,
-        &spec.collaborators,
-    );
     if !is_work_author_allowed(&reg, &admins, user.id, &user.login) {
         return Err(AppError::Forbidden(format!(
             "your GitHub account lacks work-item authority on the session at \
@@ -260,16 +280,43 @@ pub(super) async fn create_work_item(
         )));
     }
 
-    let work_label = spec.work_label.ok_or_else(|| {
-        // Auto-discovered sessions resolve their wake labels from package
-        // manifests, which this endpoint deliberately does not fetch; without an
-        // explicit label there is no single one to stamp, so ask for one.
-        AppError::Unprocessable(
-            "this session has no explicit `### Work Label`; add one to its trigger issue \
-             to queue work items from the dashboard"
-                .to_string(),
-        )
-    })?;
+    // Resolve the same effective package + label graph as the reconcile
+    // wake-gate. The signed-in user's token can read the public package sources
+    // and keeps this mutation independent of any client-supplied label list.
+    let effective =
+        resolve_effective_packages(&gh.client, &gh.api_base, &token, std::slice::from_ref(&reg))
+            .await;
+    let Some(packages) = effective.by_session.get(&reg.session_id) else {
+        let reason = effective
+            .demotions
+            .iter()
+            .find(|(issue, _)| *issue == reg.trigger_issue)
+            .map(|(_, reason)| reason.as_str())
+            .unwrap_or("the effective package set could not be resolved");
+        return Err(AppError::Unprocessable(format!(
+            "this session cannot accept work because {reason}"
+        )));
+    };
+    reg.effective_packages = packages.clone();
+    let mut label_sets =
+        resolve_work_label_sets(&gh.client, &gh.api_base, &token, std::slice::from_ref(&reg)).await;
+    let applicable = label_sets.remove(&reg.session_id).unwrap_or_default();
+    if applicable.is_empty() {
+        return Err(AppError::Unprocessable(
+            "this session has no applicable work labels".to_string(),
+        ));
+    }
+    let work_label = applicable
+        .iter()
+        .find(|label| label.eq_ignore_ascii_case(requested_work_label))
+        .cloned()
+        .ok_or_else(|| {
+            AppError::Unprocessable(format!(
+                "work label `{requested_work_label}` is not applicable to this session; \
+                 refresh the dashboard and choose one of: {}",
+                applicable.join(", ")
+            ))
+        })?;
 
     let labels = vec![work_label.clone()];
     let created = gh
@@ -292,20 +339,26 @@ pub(super) async fn create_work_item(
     ))
 }
 
-/// Build the minimal [`SessionRegistration`] the R3 work-authority predicate
-/// reads. [`is_work_author_allowed`] consults ONLY `trigger_author_id` and
-/// `collaborators` (plus the caller-side `admins` argument), so every other field
-/// is an inert placeholder here — this endpoint reconstructs just enough of a
-/// registration to reuse the reconciler's exact predicate rather than
-/// re-implementing the tiering, keeping the request-time and reconciler-side gates
-/// byte-identical.
-fn authz_registration(
+/// Reconstruct the trigger registration needed by both the request-time R3
+/// authority gate and the reconciler's effective-package/work-label resolvers.
+/// Identity fields that do not affect either operation remain inert, while the
+/// complete parsed session definition is preserved for exact label discovery.
+fn work_registration(
     owner: &str,
     name: &str,
     trigger_issue: u64,
     trigger_author_id: i64,
-    collaborators: &[String],
+    spec: TriggerSpec,
 ) -> SessionRegistration {
+    let hash = config_hash(
+        &spec.packages,
+        spec.work_label.as_deref(),
+        spec.environment.as_deref(),
+        spec.output_lang.as_deref(),
+        &spec.engine_config,
+        &spec.manifest_refs,
+    );
+    let effective_packages = spec.packages.clone();
     SessionRegistration {
         installation_id: 0,
         repo: RepoRef {
@@ -316,20 +369,20 @@ fn authz_registration(
         trigger_author_id,
         trigger_author_login: String::new(),
         def: SessionDef {
-            name: String::new(),
-            packages: Vec::new(),
-            manifest_refs: Vec::new(),
-            work_label: None,
-            environment: None,
-            output_lang: None,
-            engine_config: std::collections::BTreeMap::new(),
+            name: spec.name,
+            packages: spec.packages,
+            manifest_refs: spec.manifest_refs,
+            work_label: spec.work_label,
+            environment: spec.environment,
+            output_lang: spec.output_lang,
+            engine_config: spec.engine_config,
         },
-        effective_packages: Vec::new(),
-        session_id: String::new(),
-        config_hash: String::new(),
-        auto_merge: false,
-        log_access: Vec::new(),
-        collaborators: collaborators.to_vec(),
+        effective_packages,
+        session_id: format!("canvas-work-item-{trigger_issue}"),
+        config_hash: hash,
+        auto_merge: spec.auto_merge,
+        log_access: spec.log_access,
+        collaborators: spec.collaborators,
     }
 }
 

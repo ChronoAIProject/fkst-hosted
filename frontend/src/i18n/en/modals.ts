@@ -38,9 +38,11 @@ export const canvasModals: CanvasModalsSlice = {
   createPending: 'Creating…',
   createFailed: 'Could not create the trigger issue. Please try again.',
   createEnvironmentNone: 'None',
-  createEnvironmentNote: 'Only a saved environment can be referenced. Create one in the Environments manager in the top bar.',
+  createEnvironmentNote:
+    'Only a saved environment can be referenced. Create one in the Environments manager in the top bar.',
   createEnvironmentLoadFailed: 'Could not load your environments — enter a name manually.',
-  createWorkLabelHint: 'One work label per trigger — the session claims every issue that carries it.',
+  createWorkLabelHint:
+    'One work label per trigger — the session claims every issue that carries it.',
   createWorkLabelHintLink: 'Learn more in Get started.',
   createWorkLabelCollision:
     'A session on this repo already uses this work label — it will be rejected. Choose a different label.',
@@ -48,6 +50,7 @@ export const canvasModals: CanvasModalsSlice = {
   workItemTitle: 'Queue work',
   workItemTitleLabel: 'Title',
   workItemTitleHint: 'A short summary of the task, like a GitHub issue title.',
+  workItemLabelLabel: 'Work label',
   workItemBodyLabel: 'Details (optional)',
   workItemBodyHint: 'Markdown is supported.',
   workItemLabelNote: 'Opens an issue labeled `{label}`, which this session claims and works.',

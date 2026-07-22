@@ -274,12 +274,10 @@ impl ExecdClient {
         Ok(())
     }
 
-    /// `POST /files/mv` — atomically rename `source` onto `destination` inside the
-    /// sandbox. The daemon stats the source (missing → 404 → [`OsbError::NotFound`]),
-    /// ensures the destination's parent directory, then calls Go's `os.Rename` — a
-    /// same-filesystem `rename(2)`, so concurrent readers observe either the old or
-    /// the new COMPLETE file (never a partial one) and the destination's own
-    /// permission bits are irrelevant to the swap. The wire body is the daemon's
+    /// `POST /files/mv` — rename `source` to a destination that does not already
+    /// exist. The daemon rejects an existing destination before calling `os.Rename`,
+    /// so this verb cannot replace a live file (credential rotation uses the
+    /// authenticated command channel for that). The wire body is the daemon's
     /// `[]RenameFileItem` array; this sends exactly one item.
     pub async fn move_file(&self, source: &str, destination: &str) -> Result<(), OsbError> {
         let body = [RenameFileItem {

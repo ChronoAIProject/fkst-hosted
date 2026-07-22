@@ -1,11 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { jsonResponse, renderDashboard } from './canvas-test-kit';
-import type {
-  AccountOverview,
-  OverviewResponse,
-  RepoSessionsResponse,
-} from '@/lib/api/types';
+import type { AccountOverview, OverviewResponse, RepoSessionsResponse } from '@/lib/api/types';
 
 const accounts: AccountOverview[] = [
   {
@@ -24,6 +20,7 @@ const accounts: AccountOverview[] = [
         private: false,
         admin: true,
         installed: true,
+        viewer_visible: true,
         active_sessions: 1,
         packages: ['o/p@main:pkg/base'],
       },
@@ -117,6 +114,62 @@ describe('Dashboard — canvas levels and loading', () => {
 
     expect(await screen.findByText('Global admin')).toBeInTheDocument();
     expect(screen.queryByText('See all your repositories')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['a viewer-visible collaborator repository mutable', true],
+    ['an App-only repository read-only', false],
+  ])('keeps %s for a global administrator', async (_case, viewerVisible) => {
+    const adminAccount: AccountOverview = {
+      ...accounts[0]!,
+      login: 'acme',
+      kind: 'org',
+      owner: false,
+      repos: [
+        {
+          ...accounts[0]!.repos[0]!,
+          owner: 'acme',
+          viewer_visible: viewerVisible,
+        },
+      ],
+    };
+    const adminBody: OverviewResponse = {
+      ...overviewBody,
+      global_admin: true,
+      accounts: [adminAccount],
+    };
+    const adminSessions: RepoSessionsResponse = {
+      ...sessionsBody,
+      owner: 'acme',
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/api/v1/overview')) return jsonResponse(adminBody);
+        if (url.endsWith('/api/v1/repos/acme/lab/sessions')) return jsonResponse(adminSessions);
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+
+    renderDashboard();
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Open account acme' }))[0]!);
+    fireEvent.click(
+      (await screen.findAllByRole('button', { name: 'Open repository acme/lab' }))[0]!
+    );
+    await screen.findAllByText('nightly');
+
+    if (viewerVisible) {
+      expect(screen.getByRole('button', { name: 'New session' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Add work item' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Stop session nightly' })).toBeInTheDocument();
+    } else {
+      expect(screen.queryByRole('button', { name: 'New session' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Add work item' })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Stop session nightly' })
+      ).not.toBeInTheDocument();
+    }
   });
 
   it('drills root → account → repo, fetching level-2 sessions, and Escape walks back up', async () => {
@@ -277,7 +330,9 @@ describe('Dashboard — canvas levels and loading', () => {
     const { container } = renderDashboard();
 
     await screen.findAllByRole('button', { name: 'Open account shining' });
-    const section = container.querySelector('section[aria-label="Accounts and repositories canvas"]');
+    const section = container.querySelector(
+      'section[aria-label="Accounts and repositories canvas"]'
+    );
     expect(section).not.toBeNull();
     expect(section!.className).toContain('h-full');
     // The former viewport-overflowing magic heights are gone.
