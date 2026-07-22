@@ -289,6 +289,8 @@ pub(super) fn registration(name: &str, work_label: &str) -> SessionRegistration 
         trigger_issue: 1,
         trigger_author_id: 7,
         trigger_author_login: "author-login".to_string(),
+        creator_login: "author-login".to_string(),
+        creator_id: Some(7),
         def: SessionDef {
             name: name.to_string(),
             packages: Vec::new(),

@@ -68,14 +68,23 @@ pub struct SessionRegistration {
     pub repo: RepoRef,
     /// The issue number that triggered the session (progress reports go back here).
     pub trigger_issue: i64,
-    /// The numeric GitHub id of the issue author (the control-path authz subject).
+    /// The numeric GitHub id of the issue author (audit/source metadata).
     pub trigger_author_id: i64,
     /// The issue author's GitHub LOGIN. Identity metadata like
     /// [`trigger_author_id`](Self::trigger_author_id) — EXCLUDED from both config
-    /// hashes. Injected (author-first) into `FKST_GITHUB_AUTHORIZED_LOGINS` so the
-    /// packages' github author policy always trusts the person who opened the
-    /// trigger.
+    /// hashes. This remains the source attribution even when an App-authored
+    /// trigger's effective creator is its sole human assignee.
     pub trigger_author_login: String,
+    /// The effective human creator's GitHub login. For a human-authored trigger
+    /// this equals `trigger_author_login`; for an App-authored trigger it is the
+    /// sole assignee. This identity metadata is EXCLUDED from both `config_hash`
+    /// and `full_config_hash`, like the trigger-author fields. Injected first into
+    /// `FKST_GITHUB_AUTHORIZED_LOGINS` for the packages' author policy.
+    pub creator_login: String,
+    /// The effective creator's immutable GitHub id when available. Assignee
+    /// metadata exposes only a login, so App-authored triggers carry `None`.
+    /// EXCLUDED from both config hashes.
+    pub creator_id: Option<i64>,
     /// The launch inputs.
     pub def: SessionDef,
     /// The session's EFFECTIVE package set (epic #594 I7): the explicit `### Packages`
@@ -104,14 +113,14 @@ pub struct SessionRegistration {
     pub auto_merge: bool,
     /// Per-session log-download allow-list (from the trigger issue's `### Log
     /// Access`): the GitHub logins/ids permitted to pull this session's redacted
-    /// logs, IN ADDITION to the issue author + the global admins. Like the two
+    /// logs, IN ADDITION to the effective creator + the global admins. Like the two
     /// opt-ins it is NOT part of `config_hash` (a pod runs identically regardless),
     /// but it IS part of [`full_config_hash`] so config-immutability FREEZES it — the
     /// allow-list cannot be edited after registration to grant access retroactively.
     pub log_access: Vec<String>,
     /// Per-session work-item COLLABORATORS (from the trigger issue's `### Session
     /// Collaborators`): the GitHub logins granted authority over this session's
-    /// work issues, IN ADDITION to the trigger author. Like [`log_access`](Self::log_access)
+    /// work issues, IN ADDITION to the effective creator. Like [`log_access`](Self::log_access)
     /// it is NOT part of `config_hash` (a pod runs identically regardless) but IS
     /// part of [`full_config_hash`], so config-immutability FREEZES it — the list
     /// cannot be edited after registration to grant authority retroactively. F3
@@ -229,6 +238,10 @@ pub enum ReconcileAction {
     FlagInvalid { trigger_issue: i64, detail: String },
     /// Clear the invalid flag from an issue that now parses.
     ClearInvalid { trigger_issue: i64 },
+    /// Flag a trigger whose effective creator lacks session-creation authority.
+    FlagTriggerUnauthorized { trigger_issue: i64, detail: String },
+    /// Clear the creator-authorization rejection after authority is granted.
+    ClearTriggerUnauthorized { trigger_issue: i64 },
     /// Announce a freshly-registered VALID session on its trigger issue (comment +
     /// durable latch label), first observation only. Carries the pre-rendered public
     /// metadata the comment shows so the executor renders a pure body. Independent of
@@ -531,6 +544,42 @@ pub fn plan_repo(
     actions
 }
 
+/// Plan the clearable trigger-creator authorization feedback for one repository.
+///
+/// Kept as a focused companion to [`plan_repo`] because creator authorization is
+/// resolved asynchronously before body parsing, whereas `plan_repo` consumes the
+/// already-parsed desired/runtime snapshot. The driver concatenates both pure plans
+/// before execution. Unauthorized markers preserve discovery order; clear actions
+/// are sorted so `HashSet` iteration never affects output.
+pub fn plan_trigger_authorization(
+    unauthorized: &[(i64, String)],
+    authorized_issues: &HashSet<i64>,
+    latched_unauthorized: &HashSet<i64>,
+) -> Vec<ReconcileAction> {
+    let mut actions = Vec::new();
+    for (issue, detail) in unauthorized {
+        if !latched_unauthorized.contains(issue) {
+            actions.push(ReconcileAction::FlagTriggerUnauthorized {
+                trigger_issue: *issue,
+                detail: detail.clone(),
+            });
+        }
+    }
+
+    let mut cleared: Vec<i64> = latched_unauthorized
+        .iter()
+        .copied()
+        .filter(|issue| authorized_issues.contains(issue))
+        .collect();
+    cleared.sort_unstable();
+    actions.extend(
+        cleared
+            .into_iter()
+            .map(|trigger_issue| ReconcileAction::ClearTriggerUnauthorized { trigger_issue }),
+    );
+    actions
+}
+
 // Tests are split across files to keep each under the 500-line limit: shared
 // fixtures, the `plan_repo` matrix, the session-announcement + determinism cases,
 // and the `config_hash` cases.
@@ -561,3 +610,6 @@ mod desired_retire_tests;
 #[cfg(test)]
 #[path = "desired_test_fixtures.rs"]
 mod desired_test_fixtures;
+#[cfg(test)]
+#[path = "desired_trigger_authz_tests.rs"]
+mod desired_trigger_authz_tests;

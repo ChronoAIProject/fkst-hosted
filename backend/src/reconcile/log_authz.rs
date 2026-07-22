@@ -9,8 +9,8 @@
 //!
 //! The three tiers, ANY of which grants access (deny by default otherwise):
 //!
-//! 1. **Author** — the caller is the trigger issue's author (matched by immutable
-//!    numeric id, never by a renamable login).
+//! 1. **Creator** — the caller is the session's effective creator (matched by
+//!    immutable id when available, otherwise by assignee-derived login).
 //! 2. **Per-issue allow-list** — the caller matches an entry the author listed in the
 //!    trigger issue's `### Log Access Allowlist` section (frozen by config-immutability).
 //! 3. **Legacy log admins** — the caller matches an operator-configured entry
@@ -24,7 +24,7 @@
 //! `alice` are equivalent. An empty/whitespace entry never matches anything.
 
 /// Decide whether the verified caller `(requester_id, requester_login)` may download
-/// the logs of a session whose trigger issue was opened by `issue_author_id` and
+/// the logs of a session owned by `creator` and
 /// whose `### Log Access Allowlist` allow-list is `per_issue_allow`, given the operator's
 /// `legacy_log_admins`.
 ///
@@ -33,13 +33,19 @@
 pub fn is_authorized(
     requester_id: i64,
     requester_login: &str,
-    issue_author_id: i64,
+    creator: &crate::reconcile::creator::SessionCreator,
     per_issue_allow: &[String],
     legacy_log_admins: &[String],
 ) -> bool {
-    // Tier 1: the issue author, matched by IMMUTABLE numeric id (a login is
-    // renamable, so it must never be the identity key for the author check).
-    if requester_id == issue_author_id {
+    // Tier 1: the effective creator. Prefer the immutable id for human-authored
+    // triggers; App-authored triggers have only the assignee login available.
+    let creator_matches = match creator.id {
+        Some(creator_id) => requester_id == creator_id,
+        None => {
+            !creator.login.trim().is_empty() && requester_login.eq_ignore_ascii_case(&creator.login)
+        }
+    };
+    if creator_matches {
         return true;
     }
     // Tiers 2 + 3: any per-issue OR any global-admin entry that matches the caller by

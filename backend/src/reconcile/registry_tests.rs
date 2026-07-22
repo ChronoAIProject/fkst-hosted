@@ -4,6 +4,7 @@
 use super::*;
 use crate::github_app::listing::IssueSummary;
 use crate::goals::trigger_parse::PackageRef;
+use crate::reconcile::creator::SessionCreator;
 use crate::reconcile::desired::config_hash;
 use crate::session_spec::derive_session_id;
 
@@ -40,15 +41,29 @@ fn issue(number: i64, body: &str, user_id: i64) -> IssueSummary {
     }
 }
 
+fn parse(issue: &IssueSummary) -> Result<SessionRegistration, (i64, String)> {
+    parse_registration(
+        INSTALLATION_ID,
+        &repo(),
+        issue,
+        SessionCreator {
+            login: "session-owner".to_string(),
+            id: Some(9001),
+        },
+    )
+}
+
 #[test]
 fn valid_body_yields_a_registration() {
     let issue = issue(7, &valid_body(), 4242);
-    let reg = parse_registration(INSTALLATION_ID, &repo(), &issue).expect("valid body parses");
+    let reg = parse(&issue).expect("valid body parses");
 
     assert_eq!(reg.installation_id, INSTALLATION_ID);
     assert_eq!(reg.repo, repo());
     assert_eq!(reg.trigger_issue, 7);
     assert_eq!(reg.trigger_author_id, 4242);
+    assert_eq!(reg.creator_login, "session-owner");
+    assert_eq!(reg.creator_id, Some(9001));
     assert_eq!(reg.def.name, "demo-session");
     assert_eq!(
         reg.def.packages,
@@ -92,8 +107,8 @@ fn valid_body_yields_a_registration() {
 #[test]
 fn registration_derivations_are_stable_across_calls() {
     let issue = issue(7, &valid_body(), 4242);
-    let a = parse_registration(INSTALLATION_ID, &repo(), &issue).expect("parses");
-    let b = parse_registration(INSTALLATION_ID, &repo(), &issue).expect("parses");
+    let a = parse(&issue).expect("parses");
+    let b = parse(&issue).expect("parses");
     assert_eq!(
         a.session_id, b.session_id,
         "session id must be deterministic"
@@ -112,7 +127,7 @@ fn environment_section_is_captured() {
                 fkst-demo\n\n\
                 ### Environment\n\
                 staging\n";
-    let reg = parse_registration(INSTALLATION_ID, &repo(), &issue(9, body, 1)).expect("parses");
+    let reg = parse(&issue(9, body, 1)).expect("parses");
     assert_eq!(reg.def.environment.as_deref(), Some("staging"));
     // The environment participates in the config hash.
     assert_eq!(
@@ -138,7 +153,7 @@ fn collaborators_section_round_trips_onto_the_registration() {
                 fkst-demo\n\n\
                 ### Session Collaborators\n\
                 @alice, bob\n";
-    let reg = parse_registration(INSTALLATION_ID, &repo(), &issue(15, body, 1)).expect("parses");
+    let reg = parse(&issue(15, body, 1)).expect("parses");
     assert_eq!(
         reg.collaborators,
         vec!["alice".to_string(), "bob".to_string()],
@@ -170,7 +185,7 @@ fn manifest_section_round_trips_onto_the_registration() {
                 acme/manifests@main:manifests/team.json\n\n\
                 ### Work Label\n\
                 fkst-demo\n";
-    let reg = parse_registration(INSTALLATION_ID, &repo(), &issue(17, body, 1)).expect("parses");
+    let reg = parse(&issue(17, body, 1)).expect("parses");
     assert_eq!(
         reg.def.manifest_refs,
         vec![PackageRef {
@@ -219,7 +234,7 @@ fn auto_merge_section_is_threaded() {
                 fkst-demo\n\n\
                 ### Auto-merge\n\
                 true\n";
-    let reg = parse_registration(INSTALLATION_ID, &repo(), &issue(13, body, 1)).expect("parses");
+    let reg = parse(&issue(13, body, 1)).expect("parses");
     assert!(
         reg.auto_merge,
         "the `### Auto-merge` opt-in threads onto the registration"
@@ -234,8 +249,7 @@ fn invalid_body_returns_issue_number_and_detail() {
                 demo\n\n\
                 ### Work Label\n\
                 fkst-demo\n";
-    let err = parse_registration(INSTALLATION_ID, &repo(), &issue(11, body, 1))
-        .expect_err("missing Packages must fail");
+    let err = parse(&issue(11, body, 1)).expect_err("missing Packages must fail");
     assert_eq!(err.0, 11, "the invalid marker carries the issue number");
     assert!(
         err.1.contains("### Packages"),
@@ -246,8 +260,7 @@ fn invalid_body_returns_issue_number_and_detail() {
 
 #[test]
 fn empty_body_returns_an_invalid_marker() {
-    let err = parse_registration(INSTALLATION_ID, &repo(), &issue(12, "", 1))
-        .expect_err("an empty body cannot parse");
+    let err = parse(&issue(12, "", 1)).expect_err("an empty body cannot parse");
     assert_eq!(err.0, 12);
     assert!(!err.1.is_empty(), "an explanatory detail is present");
 }

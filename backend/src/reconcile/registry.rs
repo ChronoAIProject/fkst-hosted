@@ -13,6 +13,7 @@
 use crate::github_app::listing::IssueSummary;
 use crate::goals::trigger_parse::parse_trigger_issue_body;
 use crate::models::RepoRef;
+use crate::reconcile::creator::SessionCreator;
 use crate::reconcile::desired::{config_hash, SessionDef, SessionRegistration};
 use crate::session_spec::derive_session_id;
 
@@ -21,8 +22,8 @@ use crate::session_spec::derive_session_id;
 /// On a well-formed body: builds the registration — the launch [`SessionDef`] from
 /// the parsed [`crate::goals::trigger_parse::TriggerSpec`], the deterministic
 /// `session_id` from `(installation_id, repo.owner, repo.name, issue.number)`, the
-/// `config_hash` over the launch inputs, and `trigger_author_id` from the issue
-/// author's numeric GitHub id.
+/// `config_hash` over the launch inputs, the trigger-author audit identity, and
+/// the already-resolved effective `creator` used by downstream authority tiers.
 ///
 /// On a malformed body: returns `Err((issue.number, detail))` — the 422 message
 /// from the shared parser, which names the offending section. The planner turns
@@ -31,6 +32,7 @@ pub fn parse_registration(
     installation_id: i64,
     repo: &RepoRef,
     issue: &IssueSummary,
+    creator: SessionCreator,
 ) -> Result<SessionRegistration, (i64, String)> {
     let spec =
         parse_trigger_issue_body(&issue.body).map_err(|err| (issue.number, err.to_string()))?;
@@ -59,6 +61,8 @@ pub fn parse_registration(
         trigger_issue: issue.number,
         trigger_author_id: issue.user_id,
         trigger_author_login: issue.user_login.clone(),
+        creator_login: creator.login,
+        creator_id: creator.id,
         def: SessionDef {
             name: spec.name,
             packages: spec.packages,

@@ -30,7 +30,7 @@ use utoipa::{IntoParams, ToSchema};
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_app::GithubAppError;
 use crate::github_identity::GithubUser;
-use crate::reconcile::registry::parse_registration;
+use crate::routes::canvas::parse_trigger_registration;
 use crate::routes::canvas::sessions::{devloop_prs, resolve_visible_repo, validate_repo_segment};
 use crate::routes::canvas::work_projection::work_issues_by_session;
 use crate::routes::dashboard::{bearer_token, DashboardGithub};
@@ -167,7 +167,12 @@ pub(super) async fn session_outcomes(
     // Resolve this session's devloop PRs the same way the sessions endpoint does:
     // effective work-label issues → work-issue numbers → bot devloop PRs linked
     // to them. A malformed trigger simply has no outcomes.
-    let session_prs = match parse_registration(installation_id, &repo_ref, &trigger.summary) {
+    let session_prs = match parse_trigger_registration(
+        installation_id,
+        &repo_ref,
+        &trigger.summary,
+        state.config.reconcile.github_bot_login.as_deref(),
+    ) {
         Ok(mut reg) => {
             let mut projected = work_issues_by_session(
                 &gh,

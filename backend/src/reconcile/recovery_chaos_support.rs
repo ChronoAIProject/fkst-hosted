@@ -179,6 +179,19 @@ impl GithubListing for GithubLedger {
         Ok(self.matching_open_issues(label).len() as u64)
     }
 
+    async fn get_collaborator_role(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+        _username: &str,
+    ) -> Result<Option<String>, GithubAppError> {
+        // Harness trigger authors model established repo maintainers. Tests that
+        // exercise rejection by the deployment allowlist are skipped before this
+        // role gate, preserving that intentionally silent behavior.
+        Ok(Some("maintain".to_string()))
+    }
+
     async fn list_installations(
         &self,
         _app_jwt: &SecretString,

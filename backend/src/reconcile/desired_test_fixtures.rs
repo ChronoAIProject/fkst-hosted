@@ -40,6 +40,8 @@ pub(super) fn reg(session_id: &str, trigger_issue: i64, config_hash: &str) -> Se
         trigger_issue,
         trigger_author_id: 7,
         trigger_author_login: "author-login".to_string(),
+        creator_login: "author-login".to_string(),
+        creator_id: Some(7),
         def: SessionDef {
             name: "demo".to_string(),
             packages: vec![],

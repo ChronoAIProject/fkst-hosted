@@ -368,6 +368,8 @@ fn work_registration(
         trigger_issue: trigger_issue as i64,
         trigger_author_id,
         trigger_author_login: String::new(),
+        creator_login: String::new(),
+        creator_id: Some(trigger_author_id),
         def: SessionDef {
             name: spec.name,
             packages: spec.packages,

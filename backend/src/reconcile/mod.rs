@@ -20,6 +20,7 @@ pub mod automerge;
 // Pure work-label collision backstop (R4a): demotes the lower-priority of two active
 // sessions that would compete over the same work-label queue on one repo.
 pub mod collision;
+pub mod creator;
 pub mod desired;
 // Resolve each session's EFFECTIVE package set for one pass (I7): explicit `### Packages`
 // ∪ every `### Manifest` reference expanded via `manifest_expand`, deduped explicit-first.
@@ -46,6 +47,7 @@ pub mod repo;
 pub mod retire;
 pub mod seed_issue;
 pub mod templates;
+pub mod trigger_authz;
 pub mod work_ack;
 // Pure work-issue AUTHORITY predicate (R3): which GitHub user may raise work for a
 // session (author ∪ Session Collaborators ∪ repo admins/org owners). Consumed by the
@@ -64,21 +66,29 @@ use tokio::sync::mpsc;
 use crate::models::RepoRef;
 
 pub use collision::detect_work_label_collisions;
+pub use creator::{effective_creator, CreatorResolution, SessionCreator};
 pub use desired::{
-    config_hash, plan_repo, KillReason, LivePod, PodLiveness, ReconcileAction, SessionDef,
-    SessionRegistration,
+    config_hash, plan_repo, plan_trigger_authorization, KillReason, LivePod, PodLiveness,
+    ReconcileAction, SessionDef, SessionRegistration,
 };
 pub use execute::{execute, ReconcileCtx};
 pub use loops::{run_full_resync_loop, run_reconcile_loop, run_sweep_loop};
 pub use registry::parse_registration;
 pub use repo::reconcile_repo;
 pub use templates::ensure_issue_templates;
+pub use trigger_authz::{check_trigger_creator, TriggerAuthzCache, TriggerGateDecision};
 
 /// The label the reconciler latches onto a trigger issue whose body fails to parse
 /// (or whose package refs are unreachable). The presence of this label on an issue
 /// is the "already flagged" signal the planner reads to avoid re-commenting; its
 /// removal ([`ReconcileAction::ClearInvalid`]) is how a fixed issue is un-flagged.
 pub const SUBSTRATE_INVALID_LABEL: &str = "fkst-substrate-invalid";
+
+/// The clearable rejection latch for a trigger whose effective creator lacks
+/// deployment-admin or repository admin/maintain authority. The gate runs from
+/// issue metadata before the body parser, so this label also records that the
+/// rejected trigger's body was not read.
+pub const TRIGGER_UNAUTHORIZED_LABEL: &str = "fkst-trigger-unauthorized";
 
 /// The DURABLE label the reconciler latches onto a trigger issue once it has posted
 /// the one-time session-registration announcement ([`ReconcileAction::AnnounceSession`]).

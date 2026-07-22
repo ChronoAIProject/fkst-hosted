@@ -53,3 +53,13 @@ pub(super) fn flag_invalid_comment(detail: &str) -> String {
          Fix the issue and the reconciler will retry."
     )
 }
+
+pub(super) fn trigger_unauthorized_comment(detail: &str) -> String {
+    format!(
+        "🚫 **This trigger issue was not accepted: {detail}.**\n\nOnly an fkst deployment \
+         administrator or a user with **admin or maintain** permission on this repository can \
+         start an fkst session. The issue body has not been read. If the required role is \
+         granted (or a deployment admin adds the creator to `FKST_GLOBAL_ADMINS`), the \
+         reconciler will pick this trigger up automatically."
+    )
+}
