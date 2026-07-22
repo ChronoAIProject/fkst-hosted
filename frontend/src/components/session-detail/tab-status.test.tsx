@@ -75,6 +75,15 @@ describe('TabStatus', () => {
     expect(screen.getByText('Implementing')).toBeInTheDocument();
   });
 
+  it('links both the work-item number and its title to the GitHub issue', () => {
+    render(<TabStatus session={session()} observe={idle} onLoadObserve={() => {}} />);
+    const number = screen.getByRole('link', { name: '#9' });
+    const title = screen.getByRole('link', { name: 'do the thing' });
+    expect(number).toHaveAttribute('href', 'https://github.com/o/r/issues/9');
+    expect(title).toHaveAttribute('href', 'https://github.com/o/r/issues/9');
+    expect(title).toHaveAttribute('target', '_blank');
+  });
+
   it('shows the empty work-item note when there are none', () => {
     render(
       <TabStatus session={session({ work_issues: [] })} observe={idle} onLoadObserve={() => {}} />

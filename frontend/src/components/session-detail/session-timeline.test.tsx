@@ -120,8 +120,16 @@ describe('SessionTimeline', () => {
     expect(screen.getByText('Work item queued')).toBeInTheDocument();
     expect(screen.getByText('Work item finished')).toBeInTheDocument();
     expect(screen.getByText('Pull request merged')).toBeInTheDocument();
-    // Work / PR references render as plain (non-link) text.
-    expect(screen.getByText('#20')).toBeInTheDocument();
+    // Work / PR references link out to GitHub (issue vs PR URL by node kind).
+    // Issue #11 appears twice: once on its queued node, once on its finished node.
+    const workRefs = screen.getAllByRole('link', { name: /#11/ });
+    expect(workRefs).toHaveLength(2);
+    for (const ref of workRefs) {
+      expect(ref).toHaveAttribute('href', 'https://github.com/o/r/issues/11');
+    }
+    const prRef = screen.getByRole('link', { name: /#20/ });
+    expect(prRef).toHaveAttribute('href', 'https://github.com/o/r/pull/20');
+    expect(prRef).toHaveAttribute('target', '_blank');
     // Terminal "now" node names the derived state (live → active).
     expect(
       screen.getByText((text) => text.startsWith('Now') && text.includes('Active'))

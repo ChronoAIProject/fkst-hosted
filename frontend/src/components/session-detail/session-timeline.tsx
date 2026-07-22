@@ -42,7 +42,7 @@ export interface TimelineNode {
   key: string;
   kind: TimelineKind;
   /** Issue / PR reference for a work or PR node (absent for started / now). */
-  ref?: { number: number; title: string };
+  ref?: { number: number; title: string; html_url: string };
   /** Raw ISO timestamp for a timestamped node; null when the source carries
    *  none (PR nodes, the "now" node). */
   iso: string | null;
@@ -85,7 +85,7 @@ export function buildTimeline(session: SessionDetail): TimelineNode[] {
   // 2. Each work item: a queued moment (creation) and, if closed, a finished
   //    moment (its close) — interleaved chronologically with everything else.
   for (const issue of session.work_issues) {
-    const ref = { number: issue.number, title: issue.title };
+    const ref = { number: issue.number, title: issue.title, html_url: issue.html_url };
     nodes.push({
       key: `work-${issue.number}-queued`,
       kind: 'work-queued',
@@ -113,7 +113,7 @@ export function buildTimeline(session: SessionDetail): TimelineNode[] {
     nodes.push({
       key: `pr-${pr.number}`,
       kind,
-      ref: { number: pr.number, title: pr.title },
+      ref: { number: pr.number, title: pr.title, html_url: pr.html_url },
       iso: null,
       tone: pr.merged ? 'good' : pr.state === 'open' ? 'progress' : 'neutral',
       sortMs: PR_TIER + i,
@@ -221,9 +221,14 @@ export function SessionTimeline({ session }: { session: SessionDetail }) {
               <div className="flex flex-col gap-0.5 min-w-0 pb-3.5">
                 <span className="text-fg text-[12.5px] font-medium leading-tight">{label(node)}</span>
                 {node.ref && (
-                  <span className="text-dim text-[11.5px] truncate min-w-0">
+                  <a
+                    href={node.ref.html_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="hover-underline text-dim text-[11.5px] truncate min-w-0 hover:text-amber transition-colors"
+                  >
                     <span className="font-mono text-ghost">#{node.ref.number}</span> {node.ref.title}
-                  </span>
+                  </a>
                 )}
                 {time && <span className="font-mono text-[10.5px] text-ghost">{time}</span>}
               </div>

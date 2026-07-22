@@ -136,7 +136,14 @@ function PrBlock({
         >
           #{pr.number}
         </a>
-        <span className="text-fg text-[12.5px] truncate min-w-0 flex-1">{pr.title}</span>
+        <a
+          href={pr.html_url}
+          target="_blank"
+          rel="noreferrer"
+          className="hover-underline text-fg text-[12.5px] truncate min-w-0 flex-1 hover:text-amber transition-colors"
+        >
+          {pr.title}
+        </a>
         {pr.work_issue != null && (
           <span className="font-mono text-[10.5px] text-ghost flex-none">
             {cc.prForIssue.replace('{n}', String(pr.work_issue))}
