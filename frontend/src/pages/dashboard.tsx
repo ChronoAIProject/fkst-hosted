@@ -165,7 +165,10 @@ export function Dashboard() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]')) {
+      if (
+        e.target instanceof Element &&
+        e.target.closest('input, textarea, select, [contenteditable]')
+      ) {
         return;
       }
       if (document.querySelector('[role="dialog"]')) return;
@@ -285,7 +288,9 @@ export function Dashboard() {
       )}
       {/* Hero-accent sign-in card: amber->gold hairline + card depth & amber bloom. */}
       <section className="anim-row-in grad-border grad-border-accent rounded-panel p-8 max-[600px]:p-5 flex flex-col items-start gap-4 shadow-glow shadow-highlight-top">
-        <h2 className="grad-text grad-text-fg font-display font-semibold text-[20px]">{d.signInTitle}</h2>
+        <h2 className="grad-text grad-text-fg font-display font-semibold text-[20px]">
+          {d.signInTitle}
+        </h2>
         <p className="text-[14px] leading-relaxed text-dim max-w-[56ch]">{d.signInBody}</p>
         {configured ? (
           <button
@@ -313,12 +318,20 @@ export function Dashboard() {
   );
 
   const filteredAccounts = overview != null ? filterAccounts(overview.accounts, accountQuery) : [];
-  const filteredRepos = selectedAccount != null ? filterRepos(selectedAccount.repos, repoQuery) : [];
+  const filteredRepos =
+    selectedAccount != null ? filterRepos(selectedAccount.repos, repoQuery) : [];
+  const selectedRepo =
+    level.kind === 'repo'
+      ? (selectedAccount?.repos.find(
+          (repo) => repo.name.toLowerCase() === level.name.toLowerCase()
+        ) ?? null)
+      : null;
   const repoInstalled =
-    sessions?.installed ??
-    (level.kind === 'repo'
-      ? (selectedAccount?.repos.find((r) => r.name === level.name)?.installed ?? false)
-      : false);
+    sessions?.installed ?? (level.kind === 'repo' ? (selectedRepo?.installed ?? false) : false);
+  // A global administrator can inspect every App installation. Mutations are
+  // restored only when this repo also came from the signed-in user's normal
+  // GitHub visibility; GitHub remains authoritative for actual write access.
+  const repoReadOnly = overview?.global_admin === true && selectedRepo?.viewer_visible !== true;
 
   // The initial overview load failed with nothing to show → an in-panel error
   // (with Retry) replaces the whole canvas/sidebar row, rather than a blank
@@ -495,7 +508,7 @@ export function Dashboard() {
                     data={sessions}
                     loadFailed={sessionsFailed}
                     onChanged={onSessionsChanged}
-                    readOnly={overview?.global_admin === true && selectedAccount?.owner === false}
+                    readOnly={repoReadOnly}
                   />
                 )}
               </FadeSwap>

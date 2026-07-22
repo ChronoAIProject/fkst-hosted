@@ -43,7 +43,9 @@ export function Level0Sidebar({
 
   const accounts = overview.accounts;
   const shown = filterAccounts(accounts, query);
-  const orgs = accounts.filter((a) => a.kind === 'org').map((a) => a.login);
+  // App-wide global-admin accounts are inspectable but must never leak into the
+  // create-owner picker. Only orgs this signed-in user administers are offered.
+  const orgs = accounts.filter((a) => a.kind === 'org' && a.owner).map((a) => a.login);
 
   // First-run guidance: a brand-new viewer has connected the App nowhere, so a
   // muted "no accounts" line gives them nothing to act on. Show the prominent
@@ -85,16 +87,14 @@ export function Level0Sidebar({
           aria-label={cc.filterAccountsPlaceholder}
           className={FIELD_INPUT}
         />
-        {!overview.global_admin && (
-          <button
-            type="button"
-            onClick={() => setShowCreate(true)}
-            data-tour="new-repo"
-            className="anim-sheen font-ui font-semibold text-[12px] bg-grad-accent text-amber-ink rounded-control px-3 py-1.5 shadow-[var(--shadow-1),var(--glow-amber)] transition-[filter,box-shadow] hover:brightness-110 cursor-pointer flex-none"
-          >
-            {rc.newRepo}
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => setShowCreate(true)}
+          data-tour="new-repo"
+          className="anim-sheen font-ui font-semibold text-[12px] bg-grad-accent text-amber-ink rounded-control px-3 py-1.5 shadow-[var(--shadow-1),var(--glow-amber)] transition-[filter,box-shadow] hover:brightness-110 cursor-pointer flex-none"
+        >
+          {rc.newRepo}
+        </button>
       </div>
 
       {showFirstRun && overview.app_slug != null && (
@@ -168,7 +168,7 @@ export function Level0Sidebar({
         />
       </div>
 
-      {showCreate && !overview.global_admin && (
+      {showCreate && (
         <CreateRepoModal
           viewerLogin={overview.viewer.login}
           orgs={orgs}

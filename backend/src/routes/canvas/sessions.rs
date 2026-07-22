@@ -68,6 +68,11 @@ pub struct SessionDetail {
     pub name: Option<String>,
     /// The `### Work Label`; null when invalid or auto-discovered.
     pub work_label: Option<String>,
+    /// Every label that can wake this session: the explicit `### Work Label`
+    /// plus labels discovered from the manifest-expanded package set. Sorted
+    /// and deduplicated; empty when the trigger or package sources cannot be
+    /// resolved.
+    pub work_labels: Vec<String>,
     /// The `### Auto-merge` opt-in; null when invalid.
     pub auto_merge: Option<bool>,
     /// The `### Environment` selection, if any.
@@ -440,6 +445,7 @@ fn invalid_session_detail(
         session_id: None,
         name: None,
         work_label: None,
+        work_labels: Vec::new(),
         auto_merge: None,
         environment: None,
         packages: Vec::new(),
@@ -535,7 +541,7 @@ pub(super) async fn repo_sessions(
             }
         }
     }
-    let mut work_by_session =
+    let mut work_projection =
         work_issues_by_session(&gh, &inst_token, &owner, &name, &mut registrations).await?;
     let mut registrations_by_issue: HashMap<_, _> = registrations
         .into_iter()
@@ -570,7 +576,14 @@ pub(super) async fn repo_sessions(
     for trigger in &triggers {
         match registrations_by_issue.remove(&trigger.summary.number) {
             Some(reg) => {
-                let work = work_by_session.remove(&reg.session_id).unwrap_or_default();
+                let work = work_projection
+                    .issues_by_session
+                    .remove(&reg.session_id)
+                    .unwrap_or_default();
+                let work_labels = work_projection
+                    .labels_by_session
+                    .remove(&reg.session_id)
+                    .unwrap_or_default();
                 let work_numbers: HashSet<i64> =
                     work.iter().map(|issue| issue.summary.number).collect();
                 let prs: Vec<PrDetail> = all_devloop_prs
@@ -605,6 +618,7 @@ pub(super) async fn repo_sessions(
                     session_id: Some(reg.session_id.clone()),
                     name: Some(reg.def.name.clone()),
                     work_label: reg.def.work_label.clone(),
+                    work_labels,
                     auto_merge: Some(reg.auto_merge),
                     environment: reg.def.environment.clone(),
                     packages: reg.def.packages.iter().map(render_package_ref).collect(),

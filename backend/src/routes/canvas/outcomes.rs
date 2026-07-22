@@ -177,7 +177,10 @@ pub(super) async fn session_outcomes(
                 std::slice::from_mut(&mut reg),
             )
             .await?;
-            let work = projected.remove(&reg.session_id).unwrap_or_default();
+            let work = projected
+                .issues_by_session
+                .remove(&reg.session_id)
+                .unwrap_or_default();
             let work_numbers: HashSet<i64> =
                 work.iter().map(|issue| issue.summary.number).collect();
             let pulls = gh.list_pulls_all(&inst_token, &owner, &name).await?;

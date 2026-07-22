@@ -262,6 +262,7 @@ export interface SiteContent {
       workItemTitle: string;
       workItemTitleLabel: string;
       workItemTitleHint: string;
+      workItemLabelLabel: string;
       workItemBodyLabel: string;
       workItemBodyHint: string;
       /** Note naming the session's work label the issue is stamped with;

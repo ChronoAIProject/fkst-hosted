@@ -25,6 +25,7 @@ export const repo = (
   private: false,
   admin: true,
   installed: false,
+  viewer_visible: true,
   active_sessions: 0,
   packages: [],
   ...over,

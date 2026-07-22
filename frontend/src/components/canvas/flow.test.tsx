@@ -13,6 +13,7 @@ const repo = (over: Partial<RepoOverview> & Pick<RepoOverview, 'name'>): RepoOve
   private: false,
   admin: true,
   installed: false,
+  viewer_visible: true,
   active_sessions: 0,
   packages: [],
   ...over,

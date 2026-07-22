@@ -158,6 +158,7 @@ export type CanvasModalsSlice = Pick<
   | 'workItemTitle'
   | 'workItemTitleLabel'
   | 'workItemTitleHint'
+  | 'workItemLabelLabel'
   | 'workItemBodyLabel'
   | 'workItemBodyHint'
   | 'workItemLabelNote'

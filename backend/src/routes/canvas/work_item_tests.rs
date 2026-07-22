@@ -16,7 +16,8 @@ use crate::routes::canvas::test_support::{
 fn work_item_request() -> CreateWorkItemRequest {
     CreateWorkItemRequest {
         title: "  build the landing page  ".to_string(),
-        body: Some("  do it well  ".to_string()),
+        work_label: "site-build".to_string(),
+        body: Some("## Details\n\n  keep this indentation".to_string()),
     }
 }
 
@@ -50,6 +51,7 @@ async fn mount_trigger(
     let mut payload = serde_json::json!({
         "number": number,
         "body": body,
+        "state": "open",
         "labels": labels.iter().map(|l| serde_json::json!({ "name": l })).collect::<Vec<_>>(),
         "user": { "id": author_id },
     });
@@ -86,7 +88,7 @@ async fn create_work_item_stamps_the_sessions_work_label_as_the_user() {
         .and(header("authorization", "Bearer user-token"))
         .and(body_partial_json(serde_json::json!({
             "title": "build the landing page",
-            "body": "do it well",
+            "body": "## Details\n\n  keep this indentation",
             "labels": ["site-build"]
         })))
         .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
@@ -124,6 +126,7 @@ async fn create_work_item_rejects_a_blank_title_before_any_github_call() {
         auth_headers(),
         Json(CreateWorkItemRequest {
             title: "   ".to_string(),
+            work_label: "site-build".to_string(),
             body: None,
         }),
     )
@@ -184,11 +187,11 @@ async fn create_work_item_refuses_a_non_trigger_issue() {
 }
 
 #[tokio::test]
-async fn create_work_item_refuses_a_session_without_an_explicit_work_label() {
+async fn create_work_item_refuses_a_session_without_any_resolved_work_label() {
     let server = MockServer::start().await;
-    // A valid trigger, but with no `### Work Label` section — the wake labels
-    // are auto-discovered, so there is no single label to stamp. The viewer (id 9)
-    // is the author, so authz passes and the handler reaches the work-label check.
+    // A valid trigger with no explicit label whose package contributes no
+    // discoverable labels. The viewer is the author, so authz passes and the
+    // handler reaches the effective-label check.
     let body = "### Session Name\n\nsite\n\n### Packages\n\nacme/pkgs@main:packages/devloop\n";
     mount_trigger(
         &server,
@@ -216,8 +219,135 @@ async fn create_work_item_refuses_a_session_without_an_explicit_work_label() {
         Json(work_item_request()),
     )
     .await
-    .expect_err("no explicit work label");
+    .expect_err("no resolved work label");
     assert!(matches!(err, AppError::Unprocessable(_)), "got {err:?}");
+}
+
+#[tokio::test]
+async fn create_work_item_accepts_a_package_discovered_label() {
+    let server = MockServer::start().await;
+    let body = "### Session Name\n\nsite\n\n### Packages\n\nacme/pkgs@main:packages/devloop\n";
+    mount_trigger(
+        &server,
+        21,
+        viewer_user().id,
+        body,
+        &["fkst-substrate-trigger"],
+        false,
+    )
+    .await;
+    mount_repo_admin(&server, "acme", "site", false).await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/pkgs/contents/packages/devloop/fkst.toml"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("[github]\nwork_labels = [\"fkst-dev\", \"fkst-security\"]\n"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/repos/acme/site/issues"))
+        .and(body_partial_json(
+            serde_json::json!({ "labels": ["fkst-security"] }),
+        ))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+            "number": 80,
+            "html_url": "https://github.com/acme/site/issues/80"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let state = test_state(&server.uri(), None);
+    let mut request = work_item_request();
+    request.work_label = "fkst-security".to_string();
+    let (status, Json(created)) = create_work_item(
+        State(state),
+        Path(("acme".to_string(), "site".to_string(), 21)),
+        viewer_user(),
+        auth_headers(),
+        Json(request),
+    )
+    .await
+    .expect("a discovered work label is applicable");
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(created.issue_number, 80);
+}
+
+#[tokio::test]
+async fn create_work_item_rejects_a_label_outside_the_sessions_resolved_set() {
+    let server = MockServer::start().await;
+    mount_trigger(
+        &server,
+        21,
+        viewer_user().id,
+        &trigger_body("site-build"),
+        &["fkst-substrate-trigger"],
+        false,
+    )
+    .await;
+    mount_repo_admin(&server, "acme", "site", false).await;
+    Mock::given(method("POST"))
+        .and(path("/repos/acme/site/issues"))
+        .respond_with(ResponseTemplate::new(201))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let state = test_state(&server.uri(), None);
+    let mut request = work_item_request();
+    request.work_label = "unrelated".to_string();
+    let err = create_work_item(
+        State(state),
+        Path(("acme".to_string(), "site".to_string(), 21)),
+        viewer_user(),
+        auth_headers(),
+        Json(request),
+    )
+    .await
+    .expect_err("an unrelated label is rejected before the write");
+    match err {
+        AppError::Unprocessable(message) => {
+            assert!(message.contains("not applicable"), "got {message}");
+            assert!(message.contains("site-build"), "got {message}");
+        }
+        other => panic!("expected unprocessable, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn create_work_item_refuses_a_closed_session() {
+    let server = MockServer::start().await;
+    let payload = serde_json::json!({
+        "number": 21,
+        "body": trigger_body("site-build"),
+        "state": "closed",
+        "labels": [{ "name": "fkst-substrate-trigger" }],
+        "user": { "id": viewer_user().id },
+    });
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/issues/21"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(payload))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/repos/acme/site/issues"))
+        .respond_with(ResponseTemplate::new(201))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let state = test_state(&server.uri(), None);
+    let err = create_work_item(
+        State(state),
+        Path(("acme".to_string(), "site".to_string(), 21)),
+        viewer_user(),
+        auth_headers(),
+        Json(work_item_request()),
+    )
+    .await
+    .expect_err("closed triggers cannot accept work");
+    assert!(matches!(err, AppError::Conflict(_)), "got {err:?}");
 }
 
 #[tokio::test]

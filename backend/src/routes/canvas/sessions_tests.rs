@@ -219,6 +219,7 @@ async fn repo_sessions_assembles_the_full_detail() {
     assert_eq!(session.session_id.as_deref(), Some(session_id.as_str()));
     assert_eq!(session.name.as_deref(), Some("site"));
     assert_eq!(session.work_label.as_deref(), Some("site-build"));
+    assert_eq!(session.work_labels, vec!["site-build".to_string()]);
     assert_eq!(session.auto_merge, Some(false));
     assert_eq!(
         session.packages,
@@ -422,6 +423,11 @@ acme/manifests@main:bundles/default.json\n";
     assert!(
         session.work_label.is_none(),
         "the trigger remains manifest-only"
+    );
+    assert_eq!(
+        session.work_labels,
+        vec!["fkst-dev".to_string(), "fkst-security".to_string()],
+        "the detail exposes every manifest/package-discovered queue label"
     );
     let mut work_numbers = session
         .work_issues

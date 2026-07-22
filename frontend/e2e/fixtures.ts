@@ -71,6 +71,7 @@ export const overview = {
           private: false,
           admin: true,
           installed: true,
+          viewer_visible: true,
           active_sessions: 2,
           packages: [
             'ChronoAIProject/fkst-packages@fkst-hosted:workflow-dev',
@@ -84,6 +85,7 @@ export const overview = {
           private: true,
           admin: true,
           installed: true,
+          viewer_visible: true,
           active_sessions: 1,
           packages: ['ChronoAIProject/fkst-packages@fkst-hosted:github-devloop'],
         },
@@ -94,6 +96,7 @@ export const overview = {
           private: false,
           admin: true,
           installed: false,
+          viewer_visible: true,
           active_sessions: 0,
           packages: [],
         },
@@ -116,6 +119,7 @@ export const overview = {
           private: true,
           admin: true,
           installed: true,
+          viewer_visible: true,
           active_sessions: 3,
           packages: [
             'ChronoAIProject/fkst-packages@fkst-hosted:consensus-triage',
@@ -129,6 +133,7 @@ export const overview = {
           private: true,
           admin: false,
           installed: true,
+          viewer_visible: true,
           active_sessions: 0,
           packages: [],
         },
@@ -144,6 +149,7 @@ export const overview = {
       { package: 'ChronoAIProject/fkst-packages@fkst-hosted:code-review', count: 1 },
     ],
   },
+  broader_oauth_available: false,
 };
 
 // ---- GET /api/v1/repos/{owner}/{name}/sessions ------------------------------
@@ -152,6 +158,7 @@ const liveSession: SessionDetail = {
   session_id: LIVE_SESSION_ID,
   name: 'feature-auth',
   work_label: 'fkst-work',
+  work_labels: ['fkst-security', 'fkst-work'],
   auto_merge: true,
   environment: 'video-studio',
   packages: [
@@ -203,6 +210,7 @@ const degradedSession: SessionDetail = {
   session_id: DEGRADED_SESSION_ID,
   name: 'refactor-core',
   work_label: 'fkst-refactor',
+  work_labels: ['fkst-refactor'],
   auto_merge: false,
   environment: null,
   packages: ['ChronoAIProject/fkst-packages@fkst-hosted:code-review'],
@@ -228,6 +236,7 @@ const recoveringSession: SessionDetail = {
   session_id: RECOVERING_SESSION_ID,
   name: 'recovering-billing',
   work_label: 'fkst-billing',
+  work_labels: ['fkst-billing'],
   status_labels: ['fkst-substrate-active'],
   trigger: issue(303, 'recovering-billing session', 'open', ['fkst-substrate-trigger']),
   work_issues: [issue(311, 'Resume billing migration', 'open', ['fkst-billing'])],
@@ -391,8 +400,8 @@ export interface RouteOptions {
   /** Force GET /overview to a given status (401 → reactive refresh → with no
    *  refresh token, an involuntary session expiry / re-auth prompt). */
   overviewStatus?: number;
-  /** Return an overview whose account carries a malformed (null) `repos`, so a
-   *  render-time throw escapes into the ErrorBoundary/route error fallback. */
+  /** Return an overview whose repository carries malformed (null) `packages`,
+   *  so a render-time throw escapes into the ErrorBoundary/route fallback. */
   malformedOverview?: boolean;
   /** Serve the same installation canvas in global-administrator mode. */
   globalAdmin?: boolean;
@@ -405,21 +414,48 @@ export interface RouteOptions {
   envStore?: EnvStore;
 }
 
-/** An overview whose first account has `repos: null` — passes the client's
- *  array/login shape checks but throws when a level renders its repos. */
+/** An overview whose first repository has `packages: null` — it passes the
+ * response-boundary fields the client validates, then throws when level 0
+ * derives its package chart. */
 const malformedOverviewBody = {
   ...overview,
-  accounts: [{ ...overview.accounts[0], repos: null }],
+  accounts: [
+    {
+      ...overview.accounts[0],
+      repos: [{ ...overview.accounts[0].repos[0], packages: null }],
+    },
+  ],
 };
 
 const globalAdminOverviewBody = {
   ...overview,
   global_admin: true,
-  accounts: overview.accounts.map((account) => ({
-    ...account,
-    owner: false,
-    repos: account.repos.map((repo) => ({ ...repo, admin: false })),
-  })),
+  broader_oauth_available: true,
+  accounts: [
+    ...overview.accounts,
+    {
+      login: 'external-app-owner',
+      kind: 'org',
+      owner: false,
+      installed: true,
+      installation_id: 9009,
+      repository_selection: 'all',
+      counts_complete: true,
+      repos: [
+        {
+          id: 9009,
+          owner: 'external-app-owner',
+          name: 'private-service',
+          private: true,
+          admin: false,
+          installed: true,
+          viewer_visible: false,
+          active_sessions: 1,
+          packages: ['ChronoAIProject/fkst-packages@fkst-hosted:code-review'],
+        },
+      ],
+    },
+  ],
 };
 
 /** Register one handler for every /api/v1/* call the SPA makes. */
@@ -456,6 +492,14 @@ export async function installApiRoutes(page: Page, opts: RouteOptions = {}) {
       if (trigger === TRIGGER_LIVE) return json(route, outcomes);
       // degraded session has no PRs → drives the "no PRs yet" empty state
       return json(route, { owner: PERSONAL, name: REPO, trigger_issue: trigger, prs: [] });
+    }
+
+    // queue work: POST /repos/{o}/{n}/sessions/{issueNumber}/work-items
+    if (/\/repos\/[^/]+\/[^/]+\/sessions\/\d+\/work-items$/.test(p)) {
+      return json(route, {
+        issue_number: 999,
+        html_url: 'https://github.com/octo-dev/web-app/issues/999',
+      });
     }
 
     // stop a session: DELETE /repos/{o}/{n}/sessions/{issueNumber}

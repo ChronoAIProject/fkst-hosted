@@ -3,8 +3,9 @@ import { useContent } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
 import { cn } from '@/lib/utils';
 import { getObserve, ObserveError } from '@/lib/api/observe';
-import { decodeSessionStatus } from '@/lib/api/derive';
+import { canQueueSessionWork, decodeSessionStatus, sessionWorkLabels } from '@/lib/api/derive';
 import type { SessionDetail } from '@/lib/api/types';
+import { CreateWorkItemModal } from '@/components/modals/create-work-item-modal';
 import { Chip } from '@/components/ui/chip';
 import { CopyButton } from '@/components/ui/copy-button';
 import { FadeSwap } from '@/components/ui/motion';
@@ -37,12 +38,19 @@ export function SessionDetailView({
   owner,
   name,
   session,
+  onChanged,
+  readOnly = false,
   onClose,
   titleId: titleIdProp,
 }: {
   owner: string;
   name: string;
   session: SessionDetail;
+  /** Refresh the repository projection after a successful work-item mutation.
+   *  When omitted, this host is inspection-only. */
+  onChanged?: () => void;
+  /** Suppress mutations for App-wide cross-account inspection. */
+  readOnly?: boolean;
   onClose?: () => void;
   titleId?: string;
 }) {
@@ -59,12 +67,15 @@ export function SessionDetailView({
 
   const [tab, setTab] = useState<TabKey>('status');
   const [observe, setObserve] = useState<ObserveState>({ status: 'idle' });
+  const [showWorkItem, setShowWorkItem] = useState(false);
 
   // Live refs to each tab button so the arrow-key handler can move focus onto
   // the newly-selected tab (roving tabindex requires focus follow selection).
   const tabRefs = useRef<Partial<Record<TabKey, HTMLButtonElement | null>>>({});
 
   const status = decodeSessionStatus(session);
+  const workLabels = sessionWorkLabels(session);
+  const canQueue = onChanged != null && !readOnly && canQueueSessionWork(session);
 
   const loadObserve = useCallback(() => {
     const sessionId = session.session_id;
@@ -120,7 +131,10 @@ export function SessionDetailView({
           <div className="min-w-0 flex flex-col gap-1.5">
             {/* Bright fg→dim display sweep on the session name for a premium
                 heading; truncation and font are preserved. */}
-            <h2 id={titleId} className="font-display font-semibold text-[17px] grad-text grad-text-fg truncate">
+            <h2
+              id={titleId}
+              className="font-display font-semibold text-[17px] grad-text grad-text-fg truncate"
+            >
               {session.name ?? c.invalidTrigger}
             </h2>
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -149,17 +163,29 @@ export function SessionDetailView({
               </div>
             )}
           </div>
-          {/* Close button is drawer-only: inline/workspace hosts omit onClose. */}
-          {onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label={t.closeAria}
-              className="font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim transition-[color,border-color,box-shadow] duration-150 hover:text-fg hover:border-line-2 hover:shadow-glow-amber cursor-pointer flex-none"
-            >
-              {t.close}
-            </button>
-          )}
+          <div className="flex items-center gap-2 flex-none">
+            {canQueue && (
+              <button
+                type="button"
+                onClick={() => setShowWorkItem(true)}
+                data-tour="new-work-item"
+                className="anim-sheen font-ui font-semibold text-[12px] bg-grad-accent text-amber-ink rounded-control px-3 py-1.5 shadow-[var(--shadow-1),var(--glow-amber)] transition-[filter,box-shadow] hover:brightness-110 cursor-pointer"
+              >
+                {c.canvas.addWorkItem}
+              </button>
+            )}
+            {/* Close button is drawer-only: inline/workspace hosts omit onClose. */}
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label={t.closeAria}
+                className="font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim transition-[color,border-color,box-shadow] duration-150 hover:text-fg hover:border-line-2 hover:shadow-glow-amber cursor-pointer"
+              >
+                {t.close}
+              </button>
+            )}
+          </div>
         </div>
 
         <div
@@ -225,6 +251,20 @@ export function SessionDetailView({
           )}
         </FadeSwap>
       </div>
+
+      {showWorkItem && (
+        <CreateWorkItemModal
+          owner={owner}
+          name={name}
+          triggerIssue={session.trigger.number}
+          workLabels={workLabels}
+          onClose={() => setShowWorkItem(false)}
+          onCreated={() => {
+            setShowWorkItem(false);
+            onChanged?.();
+          }}
+        />
+      )}
     </>
   );
 }

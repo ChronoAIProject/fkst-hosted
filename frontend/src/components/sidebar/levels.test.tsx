@@ -11,6 +11,7 @@ import type {
   SessionDetail,
 } from '@/lib/api/types';
 import { formatAbsolute } from '@/lib/format';
+import { ToastProvider } from '@/components/ui/toast';
 import { Level0Sidebar } from './level0';
 import { Level1Sidebar } from './level1';
 import { SessionCard } from './session-card';
@@ -19,7 +20,11 @@ import { SessionCard } from './session-card';
 // a plain anchor), matching the dashboard test harness that mounts them without
 // a Router — so the auth store is the only provider needed.
 function wrap(ui: ReactNode) {
-  return <AuthProvider>{ui}</AuthProvider>;
+  return (
+    <AuthProvider>
+      <ToastProvider>{ui}</ToastProvider>
+    </AuthProvider>
+  );
 }
 
 let nextId = 1;
@@ -29,6 +34,7 @@ const repo = (over: Partial<RepoOverview> & Pick<RepoOverview, 'name'>): RepoOve
   private: false,
   admin: true,
   installed: false,
+  viewer_visible: true,
   active_sessions: 0,
   packages: [],
   ...over,
@@ -111,7 +117,7 @@ describe('Level0Sidebar', () => {
     expect(screen.queryByText('Get started with fkst')).not.toBeInTheDocument();
   });
 
-  it('keeps cross-account global-administrator rows read-only', () => {
+  it('keeps App-only account controls read-only without removing normal user actions', () => {
     const adminOverview: OverviewResponse = {
       ...overview([
         account({
@@ -138,10 +144,17 @@ describe('Level0Sidebar', () => {
       )
     );
 
-    expect(screen.queryByRole('button', { name: 'New repository' })).not.toBeInTheDocument();
+    const create = screen.getByRole('button', { name: 'New repository' });
+    expect(create).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Uninstall' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Manage' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open account acme' })).toBeInTheDocument();
+
+    fireEvent.click(create);
+    const owner = screen.getByLabelText('Owner');
+    expect(Array.from(owner.querySelectorAll('option'), (option) => option.value)).toEqual([
+      'shining',
+    ]);
   });
 
   it('shows the first-run Install CTA when no installation exists anywhere', () => {
@@ -390,6 +403,38 @@ describe('Level1Sidebar', () => {
     );
 
     // With no app_slug there is no install path, so the badge is suppressed.
+    expect(screen.queryByText('Needs install')).not.toBeInTheDocument();
+  });
+
+  it('does not offer installation controls for an App-only global-admin repo', () => {
+    render(
+      wrap(
+        <Level1Sidebar
+          account={account({
+            login: 'external',
+            kind: 'org',
+            owner: false,
+            repos: [
+              repo({
+                owner: 'external',
+                name: 'app-only',
+                installed: false,
+                viewer_visible: false,
+                admin: false,
+              }),
+            ],
+          })}
+          appSlug="chronoai-fkst"
+          query=""
+          onQueryChange={() => {}}
+          createdKey={null}
+          onOpenRepo={() => {}}
+        />
+      )
+    );
+
+    expect(screen.getByRole('link', { name: 'external/app-only' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Install' })).not.toBeInTheDocument();
     expect(screen.queryByText('Needs install')).not.toBeInTheDocument();
   });
 

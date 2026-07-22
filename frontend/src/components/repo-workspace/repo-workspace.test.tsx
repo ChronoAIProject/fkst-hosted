@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { AuthProvider } from '@/lib/auth/github-auth';
@@ -124,6 +124,29 @@ describe('RepoWorkspace', () => {
     expect(screen.queryByRole('button', { name: 'New session' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add work item' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Stop alpha' })).not.toBeInTheDocument();
+  });
+
+  it('places the work composer on the selected session detail and offers its resolved labels', async () => {
+    const user = userEvent.setup();
+    renderWorkspace({
+      data: body([
+        session({
+          session_id: 'labels-session',
+          name: 'labelled',
+          work_labels: ['fkst-dev', 'fkst-security'],
+        }),
+      ]),
+    });
+
+    const rail = screen.getByTestId('session-rail');
+    const detail = screen.getByTestId('session-detail');
+    expect(within(rail).queryByRole('button', { name: 'Add work item' })).not.toBeInTheDocument();
+    await user.click(within(detail).getByRole('button', { name: 'Add work item' }));
+
+    const picker = await screen.findByRole('combobox', { name: 'Work label' });
+    expect(picker).toHaveValue('fkst-dev');
+    expect(screen.getByRole('option', { name: 'fkst-security' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Details (optional)')).toBeInstanceOf(HTMLTextAreaElement);
   });
 
   it('swaps the inline detail when another session is selected', async () => {

@@ -16,10 +16,18 @@ const FORM_ID = 'create-work-item-form';
 
 /** Build the POST body from the form state — a blank body is omitted entirely,
  *  mirroring how the backend treats an absent `body`. Exported for unit tests. */
-export function buildWorkItemRequest(form: { title: string; body: string }): CreateWorkItemRequest {
-  const request: CreateWorkItemRequest = { title: form.title.trim() };
-  const body = form.body.trim();
-  if (body) request.body = body;
+export function buildWorkItemRequest(form: {
+  title: string;
+  body: string;
+  workLabel: string;
+}): CreateWorkItemRequest {
+  const request: CreateWorkItemRequest = {
+    title: form.title.trim(),
+    work_label: form.workLabel,
+  };
+  // Preserve populated Markdown verbatim: leading indentation and trailing
+  // newlines can be meaningful. Whitespace-only content is still omitted.
+  if (form.body.trim()) request.body = form.body;
   return request;
 }
 
@@ -30,16 +38,15 @@ export function CreateWorkItemModal({
   owner,
   name,
   triggerIssue,
-  workLabel,
+  workLabels,
   onClose,
   onCreated,
 }: {
   owner: string;
   name: string;
   triggerIssue: number;
-  /** The session's work label — shown in the note so the user knows which queue
-   *  the item joins. */
-  workLabel: string;
+  /** Every label that can wake this session. */
+  workLabels: readonly string[];
   onClose: () => void;
   onCreated: (created: CreateWorkItemResponse) => void;
 }) {
@@ -49,10 +56,11 @@ export function CreateWorkItemModal({
   const toast = useToast();
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  const [workLabel, setWorkLabel] = useState(workLabels[0] ?? '');
   const [pending, setPending] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
 
-  const valid = title.trim() !== '';
+  const valid = title.trim() !== '' && workLabel !== '';
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,7 +73,7 @@ export function CreateWorkItemModal({
         owner,
         name,
         triggerIssue,
-        buildWorkItemRequest({ title, body })
+        buildWorkItemRequest({ title, body, workLabel })
       );
       if (result.ok) {
         toast.show({ kind: 'success', message: cc.workItemCreatedToast });
@@ -115,10 +123,6 @@ export function CreateWorkItemModal({
       footer={footer}
     >
       <form id={FORM_ID} onSubmit={onSubmit} className="flex flex-col gap-4">
-        <p className="font-mono text-[11px] text-ghost">
-          {cc.workItemLabelNote.replace('{label}', workLabel)}
-        </p>
-
         <div className="flex flex-col gap-1.5">
           <label htmlFor="work-item-title" className={FIELD_LABEL}>
             {cc.workItemTitleLabel}
@@ -133,6 +137,27 @@ export function CreateWorkItemModal({
             className={cn(FIELD_INPUT, 'font-mono')}
           />
           <p className="font-mono text-[11px] text-ghost">{cc.workItemTitleHint}</p>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="work-item-label" className={FIELD_LABEL}>
+            {cc.workItemLabelLabel}
+          </label>
+          <select
+            id="work-item-label"
+            value={workLabel}
+            onChange={(e) => setWorkLabel(e.target.value)}
+            className={cn(FIELD_INPUT, 'font-mono cursor-pointer')}
+          >
+            {workLabels.map((label) => (
+              <option key={label} value={label}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <p className="font-mono text-[11px] text-ghost">
+            {cc.workItemLabelNote.replace('{label}', workLabel)}
+          </p>
         </div>
 
         <div className="flex flex-col gap-1.5">

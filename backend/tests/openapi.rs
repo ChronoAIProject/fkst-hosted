@@ -285,6 +285,19 @@ async fn overview_schema_exposes_the_required_global_admin_mode() {
         required.iter().any(|field| field == "global_admin"),
         "global_admin must not be optional in the public contract: {required:?}"
     );
+
+    let repo = &spec["components"]["schemas"]["RepoOverview"];
+    assert_eq!(
+        repo["properties"]["viewer_visible"]["type"], "boolean",
+        "the per-repository viewer-scope discriminator must be a boolean"
+    );
+    let repo_required = repo["required"]
+        .as_array()
+        .expect("RepoOverview.required array");
+    assert!(
+        repo_required.iter().any(|field| field == "viewer_visible"),
+        "viewer_visible must not be optional in the public contract: {repo_required:?}"
+    );
 }
 
 #[tokio::test]
