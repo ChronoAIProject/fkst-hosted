@@ -387,6 +387,10 @@ return {
       "github-proxy.github_issue_create_request -> github-proxy.github_issue_create",
     })
     local create = graph.require_raise(materialized_trace, "github-proxy.github_issue_create_request")
+    t.eq(#create.payload.labels, 1)
+    t.eq(create.payload.labels[1], "fkst-dev")
+    t.is_true(create.payload.labels[1] ~= "fkst-workflow")
+    t.is_true(create.payload.labels[1]:find("fkst-dev:", 1, true) == nil)
     t.eq(create.payload.title, "Workflow child")
     t.is_true(create.payload.body:find("Materialized workflow child fixture.", 1, true) ~= nil)
 

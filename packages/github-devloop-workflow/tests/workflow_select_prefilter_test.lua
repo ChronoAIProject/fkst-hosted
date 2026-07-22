@@ -133,7 +133,7 @@ return {
     t.eq(workflow_select.workflow_prefilter(ctx_with_comments({})), false)
   end,
 
-  test_trusted_lineage_header_in_body_fast_paths_before_catalog = function()
+  test_admitted_materialized_child_fast_paths_before_catalog = function()
     local payload = candidate()
     local lineage, err = core.marker.build_lineage_header("github-devloop/issue/owner/repo/7", "d-1234567890", "slot-one")
     t.is_nil(err)
@@ -148,6 +148,7 @@ return {
           candidate = payload,
           current = {
             body = lineage .. "\n\nChild issue body.",
+            labels = { "fkst-dev" },
             comments = {},
             author_login = "fkst-test-bot",
           },
@@ -155,6 +156,9 @@ return {
         t.eq(#raised, 2)
         t.eq(raised[1].queue, "github-proxy.github_issue_label_request")
         t.eq(raised[2].queue, "github-devloop.devloop_execute_request")
+        t.eq(#raised[1].payload.add_labels, 2)
+        t.eq(raised[1].payload.add_labels[1], "fkst-dev:enabled")
+        t.eq(raised[1].payload.add_labels[2], "fkst-class:standard")
       end)
     end)
   end,

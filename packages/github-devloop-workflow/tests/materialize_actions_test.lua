@@ -116,10 +116,18 @@ return {
   end,
 
   test_issue_create_keeps_origin_parent_comment_target = function()
-    local req = actions.issue_create_request(repo, 42, origin, "d-3588118930", "implement", entry(), {
+    local e = entry()
+    local req = actions.issue_create_request(repo, 42, origin, "d-3588118930", "implement", e, {
       title = "Implement the website feature",
       body = "Implement the requested page.",
     })
+    t.eq(#req.labels, 1)
+    t.eq(req.labels[1], "fkst-dev")
+    t.is_true(req.labels[1] ~= "fkst-workflow")
+    t.is_true(req.labels[1]:find("fkst-dev:", 1, true) == nil)
+    t.eq(req.dedup_key, e.child_dedup)
+    t.eq(req.source_ref.kind, "external")
+    t.eq(req.source_ref.ref, repo .. "#workflow-step/42/implement")
     t.eq(req.parent, 42)
     t.eq(req.parent_comment_target.repo, repo)
     t.eq(req.parent_comment_target.issue_number, 42)

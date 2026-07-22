@@ -215,6 +215,7 @@ function M.issue_create_request(repo, issue_number, origin, blueprint_digest, sl
     repo = repo,
     title = generated_spec.title,
     body = lineage .. "\n\n" .. generated_spec.body,
+    labels = { "fkst-dev" },
     dedup_key = entry.child_dedup,
     source_ref = workflow_step_source_ref(repo, issue_number, slot_id),
     parent = tonumber(issue_number),

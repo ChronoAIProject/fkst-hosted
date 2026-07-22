@@ -76,12 +76,12 @@ return {
     t.eq(labels[3], "fkst-workflow")
   end,
 
-  test_label_mode_admits_when_any_exact_session_work_label_matches = function()
+  test_materialized_child_fkst_dev_label_passes_exact_session_scope = function()
     mock_repo_env()
     mock_scope(" fkst-dev, fkst-security, fkst-dev, fkst-workflow ", 3)
-    mock_issue(42, { "bug", "fkst-security", "fkst-dev:claimed" })
+    mock_issue(42, { "fkst-dev" })
 
-    local result = run_admission(42, "session-work-label-exact")
+    local result = run_admission(42, "materialized-child-work-label-exact")
 
     t.eq(result.exit_code, 0)
     t.is_true(candidate(result) ~= nil)
