@@ -133,7 +133,7 @@ test.describe('accessibility, feedback, and error surfaces', () => {
   });
 
   test('a render throw lands on the ErrorBoundary fallback', async ({ page }) => {
-    // A malformed overview (account.repos = null) throws while a level renders,
+    // A malformed overview (repo.packages = null) throws while a level renders,
     // which the route error boundary catches and replaces with the fallback.
     await seedAuth(page);
     await installApiRoutes(page, { malformedOverview: true });

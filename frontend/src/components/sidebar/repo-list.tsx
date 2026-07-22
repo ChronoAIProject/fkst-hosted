@@ -68,7 +68,7 @@ function RepoRow({
           repo carries the badge on every visit until the App is actually
           installed — unlike the transient freshly-created callout below, which
           only appears the one time you drill in right after creating it. */}
-      {!repo.installed && appSlug != null && (
+      {!repo.installed && repo.viewer_visible && appSlug != null && (
         <span className="flex-none" title={cc.needsInstallHint}>
           <Chip tone="amber">{cc.needsInstall}</Chip>
         </span>
@@ -79,6 +79,7 @@ function RepoRow({
           title={installedViaInstallation ? rc.manageRepoHint : undefined}
         >{`✓ ${rc.installed}`}</span>
       ) : (
+        repo.viewer_visible &&
         appSlug != null && (
           <a
             href={`https://github.com/apps/${appSlug}/installations/new`}
@@ -129,7 +130,7 @@ export function RepoList({
               highlight={isNew}
               onOpenRepo={onOpenRepo}
             />
-            {isNew && !repo.installed && appSlug != null && (
+            {isNew && !repo.installed && repo.viewer_visible && appSlug != null && (
               <div className="anim-notice-in grad-border grad-border-accent mb-2 flex items-center gap-3 flex-wrap rounded-card px-3 py-2 text-[12.5px] text-dim shadow-[var(--shadow-2),var(--glow-amber)]">
                 <span>{rc.createdNextStep}</span>
                 <a

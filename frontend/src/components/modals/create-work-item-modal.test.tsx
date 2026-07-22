@@ -13,7 +13,10 @@ function jsonResponse(body: unknown, status = 200): Response {
 const WORK_ITEMS_PATH = '/work-items';
 
 function renderModal(
-  over: { onCreated?: (r: { issue_number: number; html_url: string }) => void } = {}
+  over: {
+    onCreated?: (r: { issue_number: number; html_url: string }) => void;
+    workLabels?: string[];
+  } = {}
 ) {
   const onCreated = over.onCreated ?? vi.fn();
   const onClose = vi.fn();
@@ -24,7 +27,7 @@ function renderModal(
           owner="acme"
           name="site"
           triggerIssue={21}
-          workLabel="site-build"
+          workLabels={over.workLabels ?? ['site-build', 'fkst-security']}
           onClose={onClose}
           onCreated={onCreated}
         />
@@ -37,15 +40,21 @@ function renderModal(
 
 describe('buildWorkItemRequest', () => {
   it('trims the title and omits a blank body', () => {
-    expect(buildWorkItemRequest({ title: '  do the thing  ', body: '   ' })).toEqual({
+    expect(
+      buildWorkItemRequest({ title: '  do the thing  ', body: '   ', workLabel: 'site-build' })
+    ).toEqual({
       title: 'do the thing',
+      work_label: 'site-build',
     });
   });
 
-  it('includes the body once populated', () => {
-    expect(buildWorkItemRequest({ title: 't', body: '  details  ' })).toEqual({
+  it('includes populated Markdown without changing its whitespace', () => {
+    expect(
+      buildWorkItemRequest({ title: 't', body: '  details\n', workLabel: 'fkst-security' })
+    ).toEqual({
       title: 't',
-      body: 'details',
+      work_label: 'fkst-security',
+      body: '  details\n',
     });
   });
 });
@@ -57,10 +66,12 @@ describe('CreateWorkItemModal', () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it('names the session work label the issue joins', () => {
+  it('offers every applicable session work label', () => {
     vi.stubGlobal('fetch', vi.fn());
     renderModal();
-    expect(screen.getByText(/site-build/)).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Work label' })).toHaveValue('site-build');
+    expect(screen.getByText(/Opens an issue labeled `site-build`/)).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'fkst-security' })).toBeInTheDocument();
   });
 
   it('posts the right request, shows a success toast, and hands back the issue', async () => {
@@ -83,6 +94,7 @@ describe('CreateWorkItemModal', () => {
     const { onCreated } = renderModal();
 
     await user.type(screen.getByLabelText('Title'), 'build the landing page');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Work label' }), 'fkst-security');
     await user.type(screen.getByLabelText('Details (optional)'), 'do it well');
     await user.click(screen.getByRole('button', { name: 'Queue work item' }));
 
@@ -99,6 +111,7 @@ describe('CreateWorkItemModal', () => {
     expect(call?.init?.method).toBe('POST');
     expect(JSON.parse(String(call?.init?.body))).toEqual({
       title: 'build the landing page',
+      work_label: 'fkst-security',
       body: 'do it well',
     });
   });

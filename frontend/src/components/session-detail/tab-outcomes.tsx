@@ -39,7 +39,8 @@ function FileRow({
   // `size_hint` is the payload's only size signal (changed-line count for text,
   // null for binary/media). Surface it so a row's weight is visible before the
   // preview is ever fetched.
-  const sizeLabel = file.size_hint != null ? t.sizeLines.replace('{n}', String(file.size_hint)) : null;
+  const sizeLabel =
+    file.size_hint != null ? t.sizeLines.replace('{n}', String(file.size_hint)) : null;
 
   return (
     <div className="flex flex-col">
@@ -51,7 +52,10 @@ function FileRow({
       >
         <span
           aria-hidden="true"
-          className={cn('font-mono text-[10px] text-ghost flex-none transition-transform', expanded && 'rotate-90')}
+          className={cn(
+            'font-mono text-[10px] text-ghost flex-none transition-transform',
+            expanded && 'rotate-90'
+          )}
         >
           ▸
         </span>
@@ -74,7 +78,11 @@ function FileRow({
             -{file.deletions}
           </span>
         )}
-        {sizeLabel && <span className="font-mono text-[10px] text-ghost flex-none tabular-nums">{sizeLabel}</span>}
+        {sizeLabel && (
+          <span className="font-mono text-[10px] text-ghost flex-none tabular-nums">
+            {sizeLabel}
+          </span>
+        )}
         <Chip tone={STATUS_TONE[file.status] ?? 'neutral'}>{statusLabel}</Chip>
       </button>
       {file.previous_filename && (
@@ -136,7 +144,14 @@ function PrBlock({
         >
           #{pr.number}
         </a>
-        <span className="text-fg text-[12.5px] truncate min-w-0 flex-1">{pr.title}</span>
+        <a
+          href={pr.html_url}
+          target="_blank"
+          rel="noreferrer"
+          className="hover-underline text-fg text-[12.5px] truncate min-w-0 flex-1 hover:text-amber transition-colors"
+        >
+          {pr.title}
+        </a>
         {pr.work_issue != null && (
           <span className="font-mono text-[10.5px] text-ghost flex-none">
             {cc.prForIssue.replace('{n}', String(pr.work_issue))}

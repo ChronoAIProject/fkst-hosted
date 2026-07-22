@@ -100,6 +100,8 @@ export function RepoWorkspace({
                 owner={owner}
                 name={name}
                 session={selected}
+                onChanged={onChanged}
+                readOnly={readOnly}
               />
             </ScrollArea>
           </div>

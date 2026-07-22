@@ -4,9 +4,9 @@ import { useAuth } from '@/lib/auth/github-auth';
 import { stopTrigger } from '@/lib/api/canvas';
 import { formatRelative } from '@/lib/format';
 import type { RepoSessionsResponse, SessionDetail } from '@/lib/api/types';
+import { sessionWorkLabels } from '@/lib/api/derive';
 import { ConfirmDialog } from '@/components/modals/confirm-dialog';
 import { CreateTriggerModal } from '@/components/modals/create-trigger-modal';
-import { CreateWorkItemModal } from '@/components/modals/create-work-item-modal';
 import { Spinner } from '@/components/session-detail/parts';
 import { StaggerItem } from '@/components/ui/motion';
 import { SessionCard } from '@/components/sidebar/session-card';
@@ -23,24 +23,12 @@ const FRESHNESS_TICK_MS = 30_000;
  *  this timeout force-clears the spinner in that one case. */
 const REFRESH_SPINNER_MAX_MS = 20_000;
 
-/** A work item can be queued only against a registered, still-open session that
- *  carries an EXPLICIT work label: the backend resolves the queue from that
- *  label (an invalid body, a closed/retired trigger, or an auto-discovered
- *  session with no explicit label all have nothing to stamp), so the affordance
- *  is shown exactly when the queue will succeed. */
-function canQueueWork(session: SessionDetail): boolean {
-  return (
-    session.invalid_reason == null &&
-    session.work_label != null &&
-    session.trigger.state === 'open'
-  );
-}
-
 /** The workspace's left rail: the repo's sessions as a header (Sessions · N +
  *  the New-session button), a live freshness line, and a vertical list of
  *  COMPACT, selectable session rows. It owns everything the former Level2Sidebar
- *  owned except the detail surface: session creation, per-session stop, work-item
- *  queuing, and the freshness/retry state machine. Selection itself is lifted to
+ *  owned except the detail surface: session creation, per-session stop, and the
+ *  freshness/retry state machine. Work-item queuing belongs to the selected
+ *  session's detail header. Selection itself is lifted to
  *  {@link RepoWorkspace} (which renders the chosen session's inline detail);
  *  this component only reports the choice via `onSelect` and highlights the row
  *  matching `selectedKey`. */
@@ -74,7 +62,6 @@ export function SessionRail({
   const { apiFetch } = useAuth();
   const [showCreate, setShowCreate] = useState(false);
   const [stopTarget, setStopTarget] = useState<SessionDetail | null>(null);
-  const [workItemTarget, setWorkItemTarget] = useState<SessionDetail | null>(null);
 
   // Freshness bookkeeping. `lastUpdated` is the wall-clock of the most recent
   // SUCCESSFUL poll (data present, no failure) — seeded on mount when the first
@@ -133,9 +120,7 @@ export function SessionRail({
   // authoritative gate; this is an early advisory only.
   const inUseWorkLabels = useMemo(
     () =>
-      (data?.sessions ?? [])
-        .filter((s) => s.trigger.state === 'open' && s.work_label != null)
-        .map((s) => s.work_label as string),
+      (data?.sessions ?? []).filter((s) => s.trigger.state === 'open').flatMap(sessionWorkLabels),
     [data]
   );
 
@@ -226,28 +211,19 @@ export function SessionRail({
                     onSelect={() => onSelect(key)}
                     selected={key === selectedKey}
                   />
-                  {!readOnly && (canQueueWork(session) || session.trigger.state === 'open') && (
+                  {!readOnly && session.trigger.state === 'open' && (
                     <div className="flex items-center gap-2 flex-wrap">
-                      {canQueueWork(session) && (
-                        <button
-                          type="button"
-                          onClick={() => setWorkItemTarget(session)}
-                          data-tour="new-work-item"
-                          className="font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim transition-[color,border-color,box-shadow] hover:text-fg hover:border-line-2 hover:shadow-glow-amber cursor-pointer"
-                        >
-                          {cc.addWorkItem}
-                        </button>
-                      )}
-                      {session.trigger.state === 'open' && (
-                        <button
-                          type="button"
-                          onClick={() => setStopTarget(session)}
-                          aria-label={cc.stopAria.replace('{name}', session.name ?? `#${session.trigger.number}`)}
-                          className="font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-red transition-[color,border-color,box-shadow] hover:border-[color-mix(in_oklab,var(--red)_45%,var(--line))] hover:shadow-glow-red cursor-pointer"
-                        >
-                          {cc.stop}
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => setStopTarget(session)}
+                        aria-label={cc.stopAria.replace(
+                          '{name}',
+                          session.name ?? `#${session.trigger.number}`
+                        )}
+                        className="font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-red transition-[color,border-color,box-shadow] hover:border-[color-mix(in_oklab,var(--red)_45%,var(--line))] hover:shadow-glow-red cursor-pointer"
+                      >
+                        {cc.stop}
+                      </button>
                     </div>
                   )}
                 </div>
@@ -265,20 +241,6 @@ export function SessionRail({
           onClose={() => setShowCreate(false)}
           onCreated={() => {
             setShowCreate(false);
-            onChanged();
-          }}
-        />
-      )}
-
-      {!readOnly && workItemTarget != null && workItemTarget.work_label != null && (
-        <CreateWorkItemModal
-          owner={owner}
-          name={name}
-          triggerIssue={workItemTarget.trigger.number}
-          workLabel={workItemTarget.work_label}
-          onClose={() => setWorkItemTarget(null)}
-          onCreated={() => {
-            setWorkItemTarget(null);
             onChanged();
           }}
         />

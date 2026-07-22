@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
+  createWorkItem,
   createTrigger,
   getOverview,
   getRepoSessions,
@@ -67,6 +68,38 @@ describe('getOverview', () => {
     const apiFetch = vi.fn(async () => jsonResponse(legacyBody)) as ApiFetch;
     await expect(getOverview(apiFetch)).rejects.toThrow('malformed overview');
   });
+
+  it('rejects a repository missing its viewer-scope discriminator', async () => {
+    const apiFetch = vi.fn(async () =>
+      jsonResponse({
+        ...overviewBody,
+        accounts: [
+          {
+            login: 'external',
+            kind: 'org',
+            owner: false,
+            installed: true,
+            installation_id: 77,
+            repository_selection: 'all',
+            counts_complete: true,
+            repos: [
+              {
+                id: 1,
+                owner: 'external',
+                name: 'private',
+                private: true,
+                admin: false,
+                installed: true,
+                active_sessions: 0,
+                packages: [],
+              },
+            ],
+          },
+        ],
+      })
+    ) as ApiFetch;
+    await expect(getOverview(apiFetch)).rejects.toThrow('malformed overview');
+  });
 });
 
 describe('getRepoSessions', () => {
@@ -126,6 +159,33 @@ describe('createTrigger', () => {
   });
 });
 
+describe('createWorkItem', () => {
+  it('POSTs the selected applicable label and Markdown body', async () => {
+    const apiFetch = vi.fn(async () =>
+      jsonResponse({ issue_number: 8, html_url: 'https://github.com/o/r/issues/8' }, 201)
+    ) as ApiFetch;
+    const result = await createWorkItem(apiFetch, 'o', 'r', 7, {
+      title: 'task',
+      work_label: 'fkst-security',
+      body: '## Details\n',
+    });
+    expect(result).toEqual({
+      ok: true,
+      data: { issue_number: 8, html_url: 'https://github.com/o/r/issues/8' },
+    });
+    const [path, init] = (apiFetch as ReturnType<typeof vi.fn>).mock.calls[0]! as [
+      string,
+      RequestInit,
+    ];
+    expect(path).toBe('/api/v1/repos/o/r/sessions/7/work-items');
+    expect(JSON.parse(String(init.body))).toEqual({
+      title: 'task',
+      work_label: 'fkst-security',
+      body: '## Details\n',
+    });
+  });
+});
+
 describe('stopTrigger', () => {
   it('DELETEs the trigger issue path', async () => {
     const apiFetch = vi.fn(async () => jsonResponse(null, 204)) as ApiFetch;
@@ -152,7 +212,10 @@ describe('uninstallApp', () => {
 
   it('returns the envelope message on failure', async () => {
     const apiFetch = (async () =>
-      jsonResponse({ error: 'not_found', message: 'No installation for this account.' }, 404)) as ApiFetch;
+      jsonResponse(
+        { error: 'not_found', message: 'No installation for this account.' },
+        404
+      )) as ApiFetch;
     expect(await uninstallApp(apiFetch, 'shining')).toEqual({
       ok: false,
       message: 'No installation for this account.',

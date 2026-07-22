@@ -3,11 +3,11 @@
 //! status, and — for installed repos — the live registration-level active
 //! session count plus the union of their package references.
 //!
-//! Computed live on every call (stateless). For an ordinary caller the USER token
-//! drives account/repo/installation enumeration. For a verified
-//! `FKST_GLOBAL_ADMINS` caller, the APP JWT enumerates every installation and an
-//! installation-wide token enumerates every covered repo, including private repos
-//! outside the caller's personal visibility. Per installed repo an APP installation
+//! Computed live on every call (stateless). The USER token drives the caller's
+//! account/repo/installation enumeration. For a verified `FKST_GLOBAL_ADMINS`
+//! caller, that normal user view is augmented with every installation enumerated
+//! by the APP JWT and every covered repo enumerated by an installation-wide token,
+//! including private repos outside the caller's personal visibility. Per installed repo an APP installation
 //! token reads the OPEN trigger issues, each parsed with the SAME reconciler parser
 //! the control plane registers sessions with — so "active" here means exactly
 //! "would register" (a malformed trigger counts as invalid, not active). A repo
@@ -49,7 +49,8 @@ pub struct OverviewResponse {
     /// The signed-in user.
     pub viewer: Viewer,
     /// True when the verified viewer matched `FKST_GLOBAL_ADMINS` and this
-    /// response therefore spans every installation of the configured GitHub App.
+    /// response therefore augments their normal user-visible repositories with
+    /// every installation of the configured GitHub App.
     pub global_admin: bool,
     /// The personal account first, then every org the user belongs to, sorted.
     pub accounts: Vec<AccountOverview>,
@@ -83,7 +84,8 @@ pub struct AccountOverview {
     /// False when any of this account's repo trigger reads failed (the counts
     /// below may undercount; the call itself still succeeds).
     pub counts_complete: bool,
-    /// The account's repos the caller can access, sorted by name.
+    /// Repositories visible either to the caller or, for a global admin, through
+    /// the App-wide installation inventory, sorted by name.
     pub repos: Vec<RepoOverview>,
 }
 
@@ -99,6 +101,10 @@ pub struct RepoOverview {
     pub admin: bool,
     /// This App is installed on the repo.
     pub installed: bool,
+    /// The repository is visible through the signed-in user's own GitHub
+    /// credentials. False means it is present only because the viewer is a
+    /// global admin inspecting the App-wide installation inventory.
+    pub viewer_visible: bool,
     /// Open trigger issues whose body parses (registration-level active).
     pub active_sessions: usize,
     /// The union of package references (`owner/repo@ref:path`) across this
@@ -160,11 +166,13 @@ enum ScanOutcome {
 }
 
 /// Internal enumeration result for one repository. `installed` stays explicit
-/// because an ordinary caller's overview also includes repos where the App is not
-/// installed, while a global-admin overview contains installed repos only.
+/// because the user-scoped overview also includes repos where the App is not
+/// installed. `viewer_visible` distinguishes those user-visible repositories
+/// from App-only repositories added to a global administrator's view.
 struct RepoInput {
     repo: UserRepo,
     installed: bool,
+    viewer_visible: bool,
 }
 
 /// Internal enumeration result for one account, independent of whether it came
@@ -258,14 +266,38 @@ async fn user_account_inputs(
             .push(repo);
     }
 
-    let account_list = std::iter::once((user.login.clone(), "personal".to_string(), true)).chain(
-        orgs.into_iter().map(|org| {
-            let owner = admin_orgs.contains(&org.to_ascii_lowercase());
-            (org, "org".to_string(), owner)
-        }),
-    );
+    let mut account_list: Vec<(String, String, bool)> =
+        std::iter::once((user.login.clone(), "personal".to_string(), true))
+            .chain(orgs.into_iter().map(|org| {
+                let owner = admin_orgs.contains(&org.to_ascii_lowercase());
+                (org, "org".to_string(), owner)
+            }))
+            .collect();
 
-    Ok(account_list
+    // `/user/repos` explicitly includes collaborator repositories. Their owner
+    // need not appear in `/user/orgs` (for example, a repository owned by
+    // another personal account, or a direct org-repo collaboration), so retain
+    // every remaining repository owner as a non-owned account instead of
+    // silently dropping repositories the viewer can use.
+    let mut known_accounts: HashSet<String> = account_list
+        .iter()
+        .map(|(login, _, _)| login.to_ascii_lowercase())
+        .collect();
+    for repos in by_owner.values() {
+        let Some(repo) = repos.first() else {
+            continue;
+        };
+        if known_accounts.insert(repo.owner.to_ascii_lowercase()) {
+            account_list.push((
+                repo.owner.clone(),
+                if repo.org { "org" } else { "personal" }.to_string(),
+                false,
+            ));
+        }
+    }
+
+    let mut accounts: Vec<AccountInput> = account_list
+        .into_iter()
         .map(|(login, kind, owner)| {
             let installation = installations
                 .iter()
@@ -280,7 +312,11 @@ async fn user_account_inputs(
                 .map(|repo| {
                     let installed = installed_repos
                         .contains(&format!("{}/{}", repo.owner, repo.name).to_ascii_lowercase());
-                    RepoInput { repo, installed }
+                    RepoInput {
+                        repo,
+                        installed,
+                        viewer_visible: true,
+                    }
                 })
                 .collect();
             AccountInput {
@@ -292,7 +328,9 @@ async fn user_account_inputs(
                 counts_complete: true,
             }
         })
-        .collect())
+        .collect();
+    sort_account_inputs(&mut accounts);
+    Ok(accounts)
 }
 
 /// Enumerate every installation and covered repository of the configured App.
@@ -341,6 +379,7 @@ async fn global_admin_account_inputs(
                     .map(|repo| RepoInput {
                         repo,
                         installed: true,
+                        viewer_visible: false,
                     })
                     .collect(),
                 counts_complete,
@@ -350,8 +389,86 @@ async fn global_admin_account_inputs(
         .collect()
         .await;
 
+    sort_account_inputs(&mut accounts);
+    Ok(accounts)
+}
+
+/// Merge the signed-in user's normal repository view with the App-wide view a
+/// global administrator may inspect. Accounts and repositories are matched
+/// case-insensitively (or by immutable repo id), so overlapping installed repos
+/// are scanned and counted exactly once.
+fn merge_global_admin_inputs(
+    app_accounts: Vec<AccountInput>,
+    user_accounts: Vec<AccountInput>,
+) -> Vec<AccountInput> {
+    let mut merged: Vec<AccountInput> = Vec::new();
+    let mut account_indexes: HashMap<String, usize> = HashMap::new();
+
+    for account in app_accounts.into_iter().chain(user_accounts) {
+        let key = account.login.to_ascii_lowercase();
+        let Some(index) = account_indexes.get(&key).copied() else {
+            account_indexes.insert(key, merged.len());
+            merged.push(account);
+            continue;
+        };
+
+        let existing = &mut merged[index];
+        existing.owner |= account.owner;
+        existing.counts_complete &= account.counts_complete;
+        if existing.installation.is_none() {
+            existing.installation = account.installation;
+        }
+        if existing.kind != "org" && account.kind == "org" {
+            existing.kind = account.kind;
+        }
+
+        for repo_input in account.repos {
+            let overlap = existing.repos.iter_mut().find(|candidate| {
+                candidate.repo.id == repo_input.repo.id
+                    || (candidate
+                        .repo
+                        .owner
+                        .eq_ignore_ascii_case(&repo_input.repo.owner)
+                        && candidate
+                            .repo
+                            .name
+                            .eq_ignore_ascii_case(&repo_input.repo.name))
+            });
+            if let Some(candidate) = overlap {
+                candidate.installed |= repo_input.installed;
+                candidate.viewer_visible |= repo_input.viewer_visible;
+                // The user-scoped response carries this viewer's real admin
+                // bit. App-wide enumeration deliberately defaults it false.
+                if repo_input.viewer_visible {
+                    candidate.repo = repo_input.repo;
+                }
+            } else {
+                existing.repos.push(repo_input);
+            }
+        }
+        sort_repo_inputs(&mut existing.repos);
+    }
+
+    sort_account_inputs(&mut merged);
+    merged
+}
+
+fn sort_repo_inputs(repos: &mut [RepoInput]) {
+    repos.sort_by(|a, b| {
+        a.repo
+            .name
+            .to_ascii_lowercase()
+            .cmp(&b.repo.name.to_ascii_lowercase())
+            .then_with(|| a.repo.id.cmp(&b.repo.id))
+    });
+}
+
+fn sort_account_inputs(accounts: &mut [AccountInput]) {
+    for account in accounts.iter_mut() {
+        sort_repo_inputs(&mut account.repos);
+    }
     // Stable presentation independent of request completion order: personal
-    // installations first, then organization installations, each by login.
+    // accounts first, then organization accounts, each by login.
     accounts.sort_by(|a, b| {
         let a_org = a.kind == "org";
         let b_org = b.kind == "org";
@@ -361,7 +478,6 @@ async fn global_admin_account_inputs(
                 .cmp(&b.login.to_ascii_lowercase())
         })
     });
-    Ok(accounts)
 }
 
 /// Resolve registration/package counts for already-enumerated accounts and
@@ -490,6 +606,7 @@ async fn assemble_overview(
                 private: repo.private,
                 admin: repo.admin,
                 installed,
+                viewer_visible: repo_input.viewer_visible,
                 active_sessions,
                 packages,
             });
@@ -539,9 +656,9 @@ async fn assemble_overview(
             sessions: total_sessions,
             packages,
         },
-        // Connecting a broader user token cannot widen an already App-wide
-        // administrator view, so suppress the inert connect affordance.
-        broader_oauth_available: !global_admin && state.config.log.broader_oauth().is_some(),
+        // Global-admin visibility is additive. The broader user token can still
+        // reveal this viewer's uninstalled owned/collaborator repositories.
+        broader_oauth_available: state.config.log.broader_oauth().is_some(),
     }
 }
 
@@ -555,7 +672,7 @@ async fn assemble_overview(
         ("X-Github-Broader-Token" = Option<String>, Header, description = "Optional broader-visibility OAuth token (issue #572); when it verifies to the same GitHub id as the Bearer identity it drives repo/org enumeration so repos/orgs where the App is not installed still appear. Ignored on mismatch/verify failure."),
     ),
     responses(
-        (status = 200, description = "Every account with its repos, installation status, and live session/package counts", body = OverviewResponse),
+        (status = 200, description = "Every user-visible account/repository plus, for global admins, every App installation; includes installation status and live session/package counts", body = OverviewResponse),
         (status = 401, description = "Missing or invalid GitHub token", body = ErrorEnvelope),
         (status = 403, description = "Verified GitHub identity not allowlisted (FKST_ACCESS_ALLOWED_USERS)", body = ErrorEnvelope),
         (status = 502, description = "GitHub API error", body = ErrorEnvelope),
@@ -571,7 +688,11 @@ pub(super) async fn overview(
     let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
     let global_admin = state.config.access.is_global_admin(user.id, &user.login);
     let accounts = if global_admin {
-        global_admin_account_inputs(&state, &gh, &user).await?
+        let (user_accounts, app_accounts) = tokio::try_join!(
+            user_account_inputs(&state, &gh, &user, &token, &headers),
+            global_admin_account_inputs(&state, &gh, &user),
+        )?;
+        merge_global_admin_inputs(app_accounts, user_accounts)
     } else {
         user_account_inputs(&state, &gh, &user, &token, &headers).await?
     };

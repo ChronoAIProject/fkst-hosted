@@ -15,15 +15,27 @@ use crate::reconcile::effective_packages::resolve_effective_packages;
 use crate::reconcile::work_labels::resolve_work_label_sets;
 use crate::routes::dashboard::{DashboardGithub, IssueWithMeta};
 
+/// The work projection for a repo's sessions: each session's issues plus the
+/// resolved applicable-label set the issues were fetched by (explicit
+/// `### Work Label` ∪ package/manifest-discovered labels, sorted/deduplicated).
+pub(super) struct WorkProjection {
+    /// Deduplicated newest-first work issues keyed by session id.
+    pub issues_by_session: HashMap<String, Vec<IssueWithMeta>>,
+    /// Each session's full applicable work-label set, keyed by session id —
+    /// the same set the reconciler's wake-gate honors, so the canvas can offer
+    /// exactly the labels that will actually wake the session.
+    pub labels_by_session: HashMap<String, Vec<String>>,
+}
+
 /// Resolve every registration's effective labels, fetch each distinct label's issues
-/// once, and return a deduplicated newest-first issue list keyed by session id.
+/// once, and return the per-session issues plus the resolved label sets.
 pub(super) async fn work_issues_by_session(
     gh: &DashboardGithub,
     token: &SecretString,
     owner: &str,
     repo: &str,
     regs: &mut [SessionRegistration],
-) -> Result<HashMap<String, Vec<IssueWithMeta>>, AppError> {
+) -> Result<WorkProjection, AppError> {
     let effective = resolve_effective_packages(&gh.client, &gh.api_base, token, regs).await;
     let mut resolved_regs = Vec::with_capacity(regs.len());
     for reg in regs {
@@ -82,5 +94,8 @@ pub(super) async fn work_issues_by_session(
         issues.sort_by(|left, right| right.created_at.cmp(&left.created_at));
         projected.insert(reg.session_id, issues);
     }
-    Ok(projected)
+    Ok(WorkProjection {
+        issues_by_session: projected,
+        labels_by_session,
+    })
 }

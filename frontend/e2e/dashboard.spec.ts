@@ -55,7 +55,50 @@ test.describe('dashboard full UI journey', () => {
     await openRepo(page, PERSONAL, REPO);
     await expect(page.getByText('feature-auth').first()).toBeVisible();
     await expect(page.getByText('refactor-core').first()).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Add login form', exact: true })).toHaveAttribute(
+      'href',
+      `https://github.com/${PERSONAL}/${REPO}/issues/111`
+    );
     await shot(page, '03-level2-sessions', true);
+
+    // Queue work from the selected session's detail header. The selector carries
+    // the complete effective label set, including a package-discovered label,
+    // and the details field accepts Markdown verbatim.
+    await page.getByRole('button', { name: 'Add work item' }).click();
+    const workDialog = page.getByRole('dialog', { name: 'Queue work' });
+    await expect(workDialog).toBeVisible();
+    await expect(workDialog.getByLabel('Work label').locator('option')).toHaveText([
+      'fkst-security',
+      'fkst-work',
+    ]);
+    await workDialog.getByLabel('Title').fill('Audit callback validation');
+    await workDialog
+      .getByLabel('Details (optional)')
+      .fill('## Acceptance criteria\n\n- [ ] Cover expired states');
+
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await settle(page);
+      const bounds = await workDialog.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          left: rect.left,
+          right: rect.right,
+          scrollWidth: element.scrollWidth,
+          clientWidth: element.clientWidth,
+          pageScrollWidth: document.documentElement.scrollWidth,
+          viewportWidth: window.innerWidth,
+        };
+      });
+      expect(bounds.left).toBeGreaterThanOrEqual(0);
+      expect(bounds.right).toBeLessThanOrEqual(width);
+      expect(bounds.scrollWidth).toBeLessThanOrEqual(bounds.clientWidth);
+      expect(bounds.pageScrollWidth).toBeLessThanOrEqual(bounds.viewportWidth);
+      await shot(page, `03-work-composer-${width}`);
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await workDialog.getByRole('button', { name: 'Queue work' }).click();
+    await expect(workDialog).toHaveCount(0);
 
     // ---- Open the live session's detail drawer ------------------------------
     await page.getByRole('button', { name: 'Open details for session feature-auth' }).click();
@@ -261,9 +304,29 @@ test.describe('dashboard full UI journey', () => {
 
     await expect(page.getByRole('heading', { name: 'Your fkst sessions' })).toBeVisible();
     await expect(page.getByText('Global admin')).toBeVisible();
-    await expect(page.getByText('See all your repositories')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'New repository' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Uninstall' })).toHaveCount(0);
+    await expect(page.getByText('See all your repositories')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'New repository' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Uninstall' })).toHaveCount(2);
+
+    // App-only accounts remain excluded from user mutations and repository
+    // creation, while the global administrator may still inspect them.
+    await page.getByRole('button', { name: 'New repository' }).click();
+    const createDialog = page.getByRole('dialog', { name: 'Create a repository' });
+    await expect(createDialog.getByLabel('Owner').locator('option')).toHaveText([
+      `Personal (${PERSONAL})`,
+      ORG,
+    ]);
+    await createDialog.getByRole('button', { name: 'Cancel' }).click();
+
+    await openAccount(page, 'external-app-owner');
+    await expect(
+      sidebar(page).getByRole('button', {
+        name: 'Open repository external-app-owner/private-service',
+      })
+    ).toBeVisible();
+    await openRepo(page, 'external-app-owner', 'private-service');
+    await expect(page.getByRole('button', { name: 'New session' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Add work item' })).toHaveCount(0);
     await shot(page, '13-global-admin-mode', true);
   });
 });

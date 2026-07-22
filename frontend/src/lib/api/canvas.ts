@@ -59,6 +59,14 @@ export async function getOverview(
   assertShape(Array.isArray(body?.accounts), 'overview');
   assertShape(typeof body?.viewer?.login === 'string', 'overview');
   assertShape(typeof body?.global_admin === 'boolean', 'overview');
+  assertShape(
+    body.accounts.every(
+      (account) =>
+        Array.isArray(account.repos) &&
+        account.repos.every((repo) => typeof repo.viewer_visible === 'boolean')
+    ),
+    'overview'
+  );
   return body;
 }
 
@@ -102,6 +110,8 @@ export async function createTrigger(
  *  work-item cluster owns its own wire shape. */
 export interface CreateWorkItemRequest {
   title: string;
+  /** One of the session's server-resolved applicable labels. */
+  work_label: string;
   body?: string;
 }
 

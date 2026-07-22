@@ -22,6 +22,9 @@ export interface RepoOverview {
   private: boolean;
   admin: boolean;
   installed: boolean;
+  /** True when the signed-in user's own GitHub credentials can see this repo.
+   * False is reserved for App-only global-admin inspection. */
+  viewer_visible: boolean;
   /** Open trigger issues that parse OK (registration-level active). */
   active_sessions: number;
   /** Union of package refs across this repo's active sessions. */
@@ -124,6 +127,9 @@ export interface SessionDetail {
   session_id: string | null;
   name: string | null;
   work_label: string | null;
+  /** Full resolved queue-label set: explicit plus package/manifest-discovered.
+   *  Optional only for compatibility with an older control plane during deploy. */
+  work_labels?: string[] | null;
   auto_merge: boolean | null;
   environment: string | null;
   packages: string[];
