@@ -16,8 +16,8 @@ local function label_colors_for(add_labels)
   return has_color and colors or nil
 end
 
-function C.build_label_request(repo, issue_number, add_labels, remove_labels, dedup_key, source_ref)
-  return m_claims.attach_issue_claim({
+local function build_label_request_payload(repo, issue_number, add_labels, remove_labels, dedup_key, source_ref)
+  return {
     schema = "github-proxy.label.v1",
     repo = repo,
     target_kind = "issue",
@@ -28,7 +28,21 @@ function C.build_label_request(repo, issue_number, add_labels, remove_labels, de
     label_colors = label_colors_for(add_labels),
     dedup_key = dedup_key,
     source_ref = base_ids.normalize_source_ref(source_ref),
-  }, source_ref)
+  }
+end
+
+function C.build_label_request(repo, issue_number, add_labels, remove_labels, dedup_key, source_ref)
+  return m_claims.attach_issue_claim(
+    build_label_request_payload(repo, issue_number, add_labels, remove_labels, dedup_key, source_ref),
+    source_ref
+  )
+end
+
+-- Pre-claim routing repairs derive authority from a separately verified parent
+-- ledger. The target issue cannot hold a claim until the routing label admits it,
+-- so this narrow builder intentionally leaves github-proxy's optional claim absent.
+function C.build_preclaim_label_request(repo, issue_number, add_labels, remove_labels, dedup_key, source_ref)
+  return build_label_request_payload(repo, issue_number, add_labels, remove_labels, dedup_key, source_ref)
 end
 
 function C.build_state_label_request(repo, issue_number, to_state, dedup_key_value, source_ref)

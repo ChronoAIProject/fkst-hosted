@@ -233,13 +233,17 @@ local function mock_materialization_cycle(origin_comments, revived_state, pr_sta
   t.mock_command("gh issue view " .. tostring(origin_issue) .. " --repo " .. repo .. " --json 'assignees,author'", {
     stdout = ownership_json(), stderr = "", exit_code = 0,
   })
-  t.mock_command("gh issue view " .. tostring(first_child_issue) .. " --repo " .. repo .. " --json '" .. full_fields .. "'", {
-    stdout = child_history(first_child, first_child_issue, first_pr, true), stderr = "", exit_code = 0,
-  })
-  if revived_state ~= nil then
-    t.mock_command("gh issue view " .. tostring(revived_child_issue) .. " --repo " .. repo .. " --json '" .. full_fields .. "'", {
-      stdout = revived_child_history(revived_state), stderr = "", exit_code = 0,
+  for _ = 1, 2 do
+    t.mock_command("gh issue view " .. tostring(first_child_issue) .. " --repo " .. repo .. " --json '" .. full_fields .. "'", {
+      stdout = child_history(first_child, first_child_issue, first_pr, true), stderr = "", exit_code = 0,
     })
+  end
+  if revived_state ~= nil then
+    for _ = 1, 2 do
+      t.mock_command("gh issue view " .. tostring(revived_child_issue) .. " --repo " .. repo .. " --json '" .. full_fields .. "'", {
+        stdout = revived_child_history(revived_state), stderr = "", exit_code = 0,
+      })
+    end
     mock_pr_view(pr_state or "OPEN")
   end
   if releases_claim then
@@ -263,6 +267,11 @@ local function mock_env()
     })
     t.mock_command('printf %s "$FKST_WORKFLOW_CATALOG_ROOT"', {
       stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL"', {
+      stdout = "fkst-dev,fkst-security,fkst-workflow",
       stderr = "",
       exit_code = 0,
     })

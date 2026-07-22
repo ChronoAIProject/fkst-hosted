@@ -3,15 +3,27 @@ local devloop_base = require("devloop.base")
 local devloop_claims = require("devloop.claims")
 local devloop_entity = require("devloop.entity")
 local devloop_logging = require("devloop.logging")
+local devloop_state = require("devloop.state")
+local requests_labels = require("devloop.requests.labels")
 local marker = require("core.marker")
 local materialization = require("core.materialization")
 local parsers_misc = require("devloop.parsers.misc")
+local parsers_issue = require("devloop.parsers.issue")
 local strings = require("contract.strings")
 local github_factory = require("devloop.github_factory")
+local github_view = require("forge.github_view")
 
 local M = {}
 
 M.DEPT = "workflow_materialize_next"
+M.MATERIALIZED_CHILD_WORK_LABEL = "fkst-dev"
+
+local terminal_child_labels = {
+  ["fkst-dev:merged"] = true,
+  ["fkst-dev:blocked"] = true,
+  ["fkst-dev:declined"] = true,
+  ["fkst-dev:impl-failed"] = true,
+}
 
 local function safe_source_ref(repo, issue_number)
   return devloop_entity.issue_source_ref(repo, issue_number)
@@ -337,7 +349,7 @@ function M.read_created_issue_by_number(repo, issue_number, deps)
   local result = github_factory.production_handle().issue_view(
     repo,
     number,
-    "number,title,state,author,body,url",
+    "title,body,updatedAt,labels,comments,state,assignees,author",
     30
   )
   if type(result) ~= "table" or result.exit_code ~= 0 then
@@ -347,14 +359,9 @@ function M.read_created_issue_by_number(repo, issue_number, deps)
   if not ok or type(decoded) ~= "table" then
     error("github-devloop-workflow: materialization-child-view-malformed: child issue view returned malformed JSON")
   end
-  return {
-    number = searched_issue_number(decoded) or number,
-    title = decoded.title,
-    body = decoded.body,
-    state = decoded.state,
-    author_login = issue_author_login(decoded),
-    url = decoded.url,
-  }
+  local current = parsers_issue.parse_issue_view_intake_judge(nil, result.stdout or "{}")
+  current.number = number
+  return current
 end
 
 function M.created_entry_from_issue(origin, blueprint_digest, slot, predecessor_ref_digest, child_dedup, issue)
@@ -367,6 +374,166 @@ function M.created_entry_from_issue(origin, blueprint_digest, slot, predecessor_
     return nil
   end
   return entry
+end
+
+local function repair_decision(action, outcome, reason)
+  return {
+    action = action,
+    outcome = outcome,
+    reason = reason,
+  }
+end
+
+local function materialization_entries_match(expected, actual)
+  for _, field in ipairs({
+    "origin",
+    "blueprint_digest",
+    "slot",
+    "predecessor_ref_digest",
+    "gen_contract_digest",
+    "gen_spec_digest",
+    "child_dedup",
+    "child_issue",
+    "state",
+  }) do
+    if tostring(expected and expected[field] or "") ~= tostring(actual and actual[field] or "") then
+      return false, field
+    end
+  end
+  return true, nil
+end
+
+local function label_set(labels)
+  local set = {}
+  for _, name in ipairs(github_view.label_names(labels)) do
+    set[name] = true
+  end
+  return set
+end
+
+local function terminal_child_reason(repo, child)
+  local labels = label_set(child and child.labels)
+  for label, _ in pairs(terminal_child_labels) do
+    if labels[label] then
+      return "terminal lifecycle label " .. label .. " is present"
+    end
+  end
+  local proposal_id = base_ids.proposal_id(repo, child and child.number)
+  if devloop_state.reached(child and child.comments or {}, proposal_id, "impl-failed", {
+    domain = "github-devloop",
+  }) then
+    return "trusted terminal child milestone at or after impl-failed is visible"
+  end
+  return nil
+end
+
+function M.current_created_entries(facts)
+  local entries = {}
+  local by_slot = marker.latest_materialization_by_slot(facts)
+  local slots = {}
+  for slot, entry in pairs(by_slot) do
+    if type(entry) == "table" and entry.state == "created" then
+      slots[#slots + 1] = tostring(slot)
+    end
+  end
+  table.sort(slots)
+  for _, slot in ipairs(slots) do
+    entries[#entries + 1] = by_slot[slot]
+  end
+  return entries
+end
+
+function M.materialized_child_label_repair_decision(repo, origin, blueprint_digest, blueprint, entry, child, session_work_labels)
+  if type(entry) ~= "table" or entry.state ~= "created" then
+    return repair_decision("skip", "skip-ledger-not-created", "current ledger entry is not created")
+  end
+  if tostring(entry.origin or "") ~= tostring(origin)
+    or tostring(entry.blueprint_digest or "") ~= tostring(blueprint_digest) then
+    return repair_decision("skip", "skip-ledger-stale", "ledger origin or blueprint digest is not current")
+  end
+
+  local slot = M.find_step(blueprint, entry.slot)
+  if slot == nil then
+    return repair_decision("skip", "skip-ledger-slot-missing", "ledger slot is absent from the current blueprint")
+  end
+  local child_number = issue_number_or_nil(entry.child_issue)
+  local expected_dedup = materialization.child_dedup_key(origin, slot.id, entry.predecessor_ref_digest)
+  local expected_contract = materialization.generator_contract_digest(slot)
+  if child_number == nil
+    or tostring(entry.child_dedup or "") ~= tostring(expected_dedup)
+    or tostring(entry.gen_contract_digest or "") ~= tostring(expected_contract) then
+    return repair_decision("skip", "skip-ledger-identity-mismatch", "ledger child number, dedup, or generator contract is not current")
+  end
+  if type(child) ~= "table" then
+    return repair_decision("skip", "skip-child-unreadable", "ledger-backed child issue is not readable")
+  end
+  if issue_number_or_nil(child.number) ~= child_number then
+    return repair_decision("skip", "skip-child-number-mismatch", "read child number does not match the parent ledger")
+  end
+  if devloop_base.strip_bot_login_suffix(issue_author_login(child)) ~= devloop_base.trusted_bot_login() then
+    return repair_decision("skip", "skip-child-author-untrusted", "child author is not the configured FKST bot")
+  end
+  if tostring(child.state or ""):upper() ~= "OPEN" then
+    return repair_decision("skip", "skip-child-closed", "child issue is not open")
+  end
+
+  local recomputed = M.created_entry_from_issue(
+    origin,
+    blueprint_digest,
+    slot,
+    entry.predecessor_ref_digest,
+    entry.child_dedup,
+    child
+  )
+  if recomputed == nil then
+    return repair_decision("skip", "skip-child-lineage-untrusted", "canonical child lineage and create marker do not match the ledger")
+  end
+  local matches, mismatched_field = materialization_entries_match(entry, recomputed)
+  if not matches then
+    return repair_decision("skip", "skip-child-ledger-mismatch", "recomputed child ledger field differs: " .. tostring(mismatched_field))
+  end
+
+  local terminal_reason = terminal_child_reason(repo, child)
+  if terminal_reason ~= nil then
+    return repair_decision("skip", "skip-child-terminal", terminal_reason)
+  end
+
+  local configured = label_set(session_work_labels)
+  if not configured[M.MATERIALIZED_CHILD_WORK_LABEL] then
+    return repair_decision("skip", "skip-target-work-label-unconfigured", "fkst-dev is not an exact configured session work label")
+  end
+  local child_labels = label_set(child.labels)
+  for label, _ in pairs(configured) do
+    if label ~= M.MATERIALIZED_CHILD_WORK_LABEL and child_labels[label] then
+      return repair_decision("skip", "skip-conflicting-work-label", "child already carries a different exact configured session work label: " .. label)
+    end
+  end
+  if child_labels[M.MATERIALIZED_CHILD_WORK_LABEL] then
+    return repair_decision("noop", "skip-idempotent(work-label-present)", "fkst-dev is already present")
+  end
+  return repair_decision("repair", "applied(repaired-missing-work-label)", "trusted ledger-backed child is open and execution-eligible")
+end
+
+function M.materialized_child_work_label_request(repo, origin, entry)
+  local issue_number = tonumber(entry and entry.child_issue)
+  local source_ref = safe_source_ref(repo, issue_number)
+  return requests_labels.build_preclaim_label_request(
+    repo,
+    issue_number,
+    { M.MATERIALIZED_CHILD_WORK_LABEL },
+    {},
+    base_ids.dedup_key({
+      "workflow",
+      "materialization",
+      "repair-work-label",
+      tostring(origin),
+      tostring(entry and entry.blueprint_digest or ""),
+      tostring(entry and entry.slot or ""),
+      tostring(entry and entry.child_dedup or ""),
+      tostring(entry and entry.child_issue or ""),
+    }),
+    source_ref
+  )
 end
 
 local function generated_fact_for_child(facts, child_dedup)

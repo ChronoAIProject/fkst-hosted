@@ -2,6 +2,7 @@ local base_ids = require("devloop.base_ids")
 local context_bundle = require("devloop.context_bundle")
 local devloop_base = require("devloop.base")
 local devloop_claims = require("devloop.claims")
+local devloop_config = require("devloop.config")
 local devloop_entity = require("devloop.entity")
 local devloop_logging = require("devloop.logging")
 local digest = require("core.digest")
@@ -224,6 +225,54 @@ local function perform_materialize(core, deps, repo, issue_number, origin, bluep
   return ok
 end
 
+local function repair_materialized_child_labels(deps, repo, origin, blueprint_digest, record, facts)
+  local repaired = false
+  local configured_work_labels = nil
+  for _, entry in ipairs(actions.current_created_entries(facts)) do
+    local child = actions.read_created_issue_by_number(repo, entry.child_issue, deps)
+    if child ~= nil and configured_work_labels == nil then
+      configured_work_labels = type(deps.session_work_labels) == "function"
+        and deps.session_work_labels()
+        or devloop_config.session_work_labels()
+    end
+    local decision = actions.materialized_child_label_repair_decision(
+      repo,
+      origin,
+      blueprint_digest,
+      record.blueprint,
+      entry,
+      child,
+      configured_work_labels or {}
+    )
+    local child_proposal_id = entry.child_issue ~= nil
+      and base_ids.proposal_id(repo, entry.child_issue)
+      or origin
+    log_decision(
+      child_proposal_id,
+      "materialized-child-label",
+      "work-label",
+      decision.outcome,
+      decision.reason
+    )
+    if decision.action == "repair" then
+      local request = actions.materialized_child_work_label_request(repo, origin, entry)
+      devloop_logging.log_apply(M.DEPT, child_proposal_id, "work-label", request.dedup_key, {
+        add = request.add_labels,
+        remove = request.remove_labels,
+      }, {
+        "github-proxy.github_issue_label_request",
+      })
+      actions.raise_request(
+        child_proposal_id,
+        "github-proxy.github_issue_label_request",
+        request
+      )
+      repaired = true
+    end
+  end
+  return repaired
+end
+
 local function process_origin(core, deps, repo, issue_number, event)
   local origin = base_ids.proposal_id(repo, issue_number)
   return with_lock(devloop_entity.observe_lock_key(repo, issue_number), function()
@@ -273,6 +322,10 @@ local function process_origin(core, deps, repo, issue_number, event)
     end
     if created_marker then
       return "created-marker"
+    end
+
+    if repair_materialized_child_labels(deps, repo, origin, current_digest, record, facts) then
+      return "repaired-child-label"
     end
 
     local decision = frontier.compute_frontier(

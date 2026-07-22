@@ -7,6 +7,7 @@ local spec = {
   produces = {
     "github-proxy.github_issue_create_request",
     "github-proxy.github_issue_comment_request",
+    "github-proxy.github_issue_label_request",
   },
   stall_window = "2m",
 }

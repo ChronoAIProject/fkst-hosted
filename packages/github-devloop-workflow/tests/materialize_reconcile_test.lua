@@ -172,6 +172,7 @@ local function run_with(fakes)
     produces = {
       "github-proxy.github_issue_create_request",
       "github-proxy.github_issue_comment_request",
+      "github-proxy.github_issue_label_request",
     },
     stall_window = "2m",
   }, materialize_reconcile.handlers(core, {
@@ -213,7 +214,9 @@ local function run_with(fakes)
       release_done_claim = fake.release_done_claim or function()
         return true
       end,
-      read_created_issue = fake.read_created_issue,
+      read_created_issue = fake.read_created_issue or function()
+        return nil
+      end,
       search_created_issue = fake.search_created_issue or function()
         return nil
       end,

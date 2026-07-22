@@ -163,6 +163,39 @@ return {
     end)
   end,
 
+  test_repeated_admitted_child_delivery_keeps_one_logical_execution_key = function()
+    local payload = candidate()
+    local lineage, err = core.marker.build_lineage_header("github-devloop/issue/owner/repo/7", "d-1234567890", "slot-one")
+    t.is_nil(err)
+    local execution_keys = {}
+
+    with_catalog_loader(function()
+      error("catalog should not load for workflow descendants")
+    end, function()
+      for _ = 1, 2 do
+        with_raise_capture(function(raised)
+          t.eq(workflow_select.workflow_prefilter({
+            repo = "owner/repo",
+            issue_number = 42,
+            candidate = payload,
+            current = {
+              body = lineage .. "\n\nChild issue body.",
+              labels = { "fkst-dev" },
+              comments = {},
+              author_login = "fkst-test-bot",
+            },
+          }), true)
+          t.eq(#raised, 2)
+          t.eq(raised[2].queue, "github-devloop.devloop_execute_request")
+          execution_keys[#execution_keys + 1] = raised[2].payload.dedup_key
+        end)
+      end
+    end)
+
+    t.eq(#execution_keys, 2)
+    t.eq(execution_keys[1], execution_keys[2])
+  end,
+
   test_lineage_header_in_trusted_comment_fast_paths_before_catalog = function()
     local payload = candidate()
     local lineage, err = core.marker.build_lineage_header("github-devloop/issue/owner/repo/7", "d-1234567890", "slot-one")
