@@ -3,9 +3,29 @@
 
 use std::collections::BTreeMap;
 
-use super::config_hash;
+use super::config_hash as config_hash_with_branches;
 use super::desired_test_fixtures::pkg;
 use crate::goals::trigger_parse::PackageRef;
+
+fn config_hash(
+    packages: &[PackageRef],
+    work_label: Option<&str>,
+    environment: Option<&str>,
+    output_lang: Option<&str>,
+    engine_config: &BTreeMap<String, String>,
+    manifest_refs: &[PackageRef],
+) -> String {
+    config_hash_with_branches(
+        packages,
+        work_label,
+        environment,
+        output_lang,
+        engine_config,
+        manifest_refs,
+        None,
+        None,
+    )
+}
 
 /// The no-`### Engine Config` case shared by most tests.
 fn no_engine_config() -> BTreeMap<String, String> {
@@ -293,5 +313,58 @@ fn config_hash_moves_with_the_engine_config() {
         empty,
         config_hash(&pkgs, Some("wl"), None, None, &cfg, &no_manifest()),
         "engine_config is pod-affecting config"
+    );
+}
+
+#[test]
+fn source_and_target_branches_each_move_the_config_hash() {
+    let pkgs = vec![pkg("acme", "tools", "main", "pkg/a")];
+    let legacy = config_hash(
+        &pkgs,
+        Some("wl"),
+        Some("env"),
+        None,
+        &no_engine_config(),
+        &no_manifest(),
+    );
+    assert_eq!(
+        legacy,
+        config_hash_with_branches(
+            &pkgs,
+            Some("wl"),
+            Some("env"),
+            None,
+            &no_engine_config(),
+            &no_manifest(),
+            None,
+            None,
+        ),
+        "unset trailing branch fields preserve the historical digest"
+    );
+    assert_ne!(
+        legacy,
+        config_hash_with_branches(
+            &pkgs,
+            Some("wl"),
+            Some("env"),
+            None,
+            &no_engine_config(),
+            &no_manifest(),
+            Some("main"),
+            None,
+        )
+    );
+    assert_ne!(
+        legacy,
+        config_hash_with_branches(
+            &pkgs,
+            Some("wl"),
+            Some("env"),
+            None,
+            &no_engine_config(),
+            &no_manifest(),
+            None,
+            Some("feature-x"),
+        )
     );
 }

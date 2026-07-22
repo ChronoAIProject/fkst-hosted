@@ -56,6 +56,8 @@ const HEADING_FKST_CONTRIBUTORS: &str = "### FKST Contributors";
 const HEADING_SESSION_COLLABORATORS: &str = "### Session Collaborators";
 const HEADING_OUTPUT_LANGUAGE: &str = "### Output Language";
 const HEADING_ENGINE_CONFIG: &str = "### Engine Config";
+const HEADING_SOURCE_BRANCH: &str = "### Source Branch";
+const HEADING_TARGET_BRANCH: &str = "### Target Branch";
 
 /// GitHub caps a label name at 50 characters; the Work Label must fit so the
 /// launcher can apply it verbatim.
@@ -170,6 +172,12 @@ pub struct TriggerSpec {
     /// launcher injects as session env. Empty when the section is absent/blank.
     /// Every key/value is bounded at parse time; part of BOTH config hashes.
     pub engine_config: std::collections::BTreeMap<String, String>,
+    /// Optional branch whose head seeds a missing target branch. When absent,
+    /// the repository default branch is resolved during reconciliation.
+    pub source_branch: Option<String>,
+    /// Optional branch all session work and pull requests target. When absent,
+    /// the reconciler uses `fkst-hosted-default`.
+    pub target_branch: Option<String>,
 }
 
 /// Parse the `fkst-substrate-trigger` issue body into a [`TriggerSpec`].
@@ -225,6 +233,8 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
         Some((_, content)) => crate::goals::engine_config::parse_engine_config(content)?,
         None => std::collections::BTreeMap::new(),
     };
+    let source_branch = parse_branch(&sections, HEADING_SOURCE_BRANCH)?;
+    let target_branch = parse_branch(&sections, HEADING_TARGET_BRANCH)?;
 
     Ok(TriggerSpec {
         name,
@@ -237,7 +247,30 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
         collaborators,
         output_lang,
         engine_config,
+        source_branch,
+        target_branch,
     })
+}
+
+/// Parse one optional branch section. Presence is strict: after stripping HTML
+/// comments it must contain exactly one non-empty, valid branch name.
+fn parse_branch(sections: &[(String, String)], heading: &str) -> Result<Option<String>, AppError> {
+    let Some((_, content)) = sections.iter().find(|(candidate, _)| candidate == heading) else {
+        return Ok(None);
+    };
+    let block = strip_html_comments(content);
+    let lines = non_empty_lines(&block);
+    let [name] = lines.as_slice() else {
+        return Err(AppError::Unprocessable(format!(
+            "the `{heading}` section must contain exactly one non-empty line"
+        )));
+    };
+    crate::reconcile::branches::validate_branch_name(name).map_err(|rule| {
+        AppError::Unprocessable(format!(
+            "the `{heading}` section names an invalid branch {name:?}: {rule}"
+        ))
+    })?;
+    Ok(Some(name.clone()))
 }
 
 /// `### Output Language` — OPTIONAL but STRICT (mirrors `### Environment`):

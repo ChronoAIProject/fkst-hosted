@@ -4,6 +4,7 @@
 //! session-backend fake lives in [`crate::session_backend::test_support`] and is
 //! re-exported here.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -38,6 +39,11 @@ pub(super) struct RecordingApi {
     pub(super) labels_added: Mutex<Vec<LabelCall>>,
     pub(super) labels_removed: Mutex<Vec<Call>>,
     pub(super) events: Mutex<Vec<&'static str>>,
+    /// `None` means every branch exists (the compatibility default). `Some(map)`
+    /// makes branch lookup explicit so provisioning tests can model absence.
+    pub(super) branch_heads: Mutex<Option<HashMap<String, String>>>,
+    pub(super) create_refs: Mutex<Vec<(String, String)>>,
+    pub(super) create_ref_error: Mutex<Option<GithubAppError>>,
 }
 
 #[async_trait]
@@ -115,6 +121,46 @@ impl GithubApi for RecordingApi {
             label.to_string(),
         ));
         Ok(())
+    }
+
+    async fn repo_default_branch(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+    ) -> Result<String, GithubAppError> {
+        Ok("main".to_string())
+    }
+
+    async fn branch_head_sha(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+        branch: &str,
+    ) -> Result<Option<String>, GithubAppError> {
+        match &*self.branch_heads.lock().unwrap() {
+            Some(heads) => Ok(heads.get(branch).cloned()),
+            None => Ok(Some("head-sha".to_string())),
+        }
+    }
+
+    async fn create_ref(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+        branch: &str,
+        sha: &str,
+    ) -> Result<(), GithubAppError> {
+        self.create_refs
+            .lock()
+            .unwrap()
+            .push((branch.to_string(), sha.to_string()));
+        match self.create_ref_error.lock().unwrap().take() {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 }
 
@@ -253,6 +299,8 @@ pub(super) fn registration() -> SessionRegistration {
             environment: None,
             output_lang: None,
             engine_config: std::collections::BTreeMap::new(),
+            source_branch: None,
+            target_branch: None,
         },
         // A manifest-free registration: the effective set equals the explicit packages, so
         // `package_roots` + reachability read exactly these two refs.

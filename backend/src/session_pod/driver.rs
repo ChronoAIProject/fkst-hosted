@@ -12,6 +12,7 @@
 //! are read (into `SecretString` / a plaintext map) and never logged.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsString;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{ExitCode, Stdio};
@@ -166,7 +167,8 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     install_gh_shim(&shim_dir)?;
 
     // 4. Fetch: the one workspace repo (all refs share it in v1) into
-    //    <runtime>/platform at its ref, and the target repo (default branch) into
+    //    <runtime>/platform at its ref, and the target repo at its provisioned
+    //    integration branch into
     //    <runtime>/project. Both authenticate via the credential helper (public
     //    repos succeed regardless; a private target uses the App token).
     let plan = plan_clones(&env.package_refs)?;
@@ -185,7 +187,14 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     )
     .await?;
     let target_url = format!("https://github.com/{}.git", env.repo);
-    git_clone(&target_url, None, &project_root, &git_entries, &token_file).await?;
+    git_clone(
+        &target_url,
+        env.target_branch.as_deref(),
+        &project_root,
+        &git_entries,
+        &token_file,
+    )
+    .await?;
 
     // 4b. The framework's host-root workspace discovery walks UP from --project-root
     //     for a `fkst.workspace.toml` and fails CLOSED without one. The target repo
@@ -462,15 +471,8 @@ async fn git_clone(
         return Ok(());
     }
     let mut command = Command::new("git");
-    command.arg("clone").arg("--depth").arg("1");
-    if let Some(git_ref) = git_ref {
-        // --branch accepts a branch OR a tag. // verify live: an arbitrary commit
-        // SHA needs init+fetch+checkout (see backend/Dockerfile); branch/tag covered.
-        command.arg("--single-branch").arg("--branch").arg(git_ref);
-    }
     command
-        .arg(url)
-        .arg(dest)
+        .args(git_clone_args(url, git_ref, dest))
         // The helper resolves the token from the mounted file at credential time.
         .env(TOKEN_FILE_ENV, token_file)
         // Never let git drop into an interactive prompt that would hang the pod.
@@ -500,6 +502,28 @@ async fn git_clone(
     }
     tracing::info!(url = %url, dest = %dest.display(), "run-substrate: cloned");
     Ok(())
+}
+
+/// Build the non-secret `git clone` argv. Factored out so branch selection is
+/// covered without spawning a process or exposing credential environment.
+fn git_clone_args(url: &str, git_ref: Option<&str>, dest: &Path) -> Vec<OsString> {
+    let mut args = vec![
+        OsString::from("clone"),
+        OsString::from("--depth"),
+        OsString::from("1"),
+    ];
+    if let Some(git_ref) = git_ref {
+        // --branch accepts a branch or tag. Arbitrary commit SHAs still require
+        // init+fetch+checkout; hosted target refs are always branches.
+        args.extend([
+            OsString::from("--single-branch"),
+            OsString::from("--branch"),
+            OsString::from(git_ref),
+        ]);
+    }
+    args.push(OsString::from(url));
+    args.push(dest.as_os_str().to_owned());
+    args
 }
 
 /// Insert-or-replace `key` in the ordered env vec.
@@ -611,6 +635,39 @@ fn prepend_path(env: &mut Vec<(String, String)>, dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clone_args_select_one_branch_when_present() {
+        assert_eq!(
+            git_clone_args(
+                "https://github.com/acme/site.git",
+                Some("feature-x"),
+                Path::new("/runtime/project"),
+            ),
+            [
+                "clone",
+                "--depth",
+                "1",
+                "--single-branch",
+                "--branch",
+                "feature-x",
+                "https://github.com/acme/site.git",
+                "/runtime/project",
+            ]
+            .map(OsString::from)
+        );
+    }
+
+    #[test]
+    fn clone_args_preserve_default_branch_behavior_when_absent() {
+        let args = git_clone_args(
+            "https://github.com/acme/site.git",
+            None,
+            Path::new("/runtime/project"),
+        );
+        assert!(!args.contains(&OsString::from("--single-branch")));
+        assert!(!args.contains(&OsString::from("--branch")));
+    }
 
     #[test]
     fn workflow_catalog_root_defaults_to_repo_local_fkst_packages() {

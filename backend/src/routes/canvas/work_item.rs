@@ -357,6 +357,8 @@ fn work_registration(
         spec.output_lang.as_deref(),
         &spec.engine_config,
         &spec.manifest_refs,
+        None,
+        None,
     );
     let effective_packages = spec.packages.clone();
     SessionRegistration {
@@ -378,6 +380,8 @@ fn work_registration(
             environment: spec.environment,
             output_lang: spec.output_lang,
             engine_config: spec.engine_config,
+            source_branch: None,
+            target_branch: None,
         },
         effective_packages,
         session_id: format!("canvas-work-item-{trigger_issue}"),

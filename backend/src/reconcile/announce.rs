@@ -47,12 +47,41 @@ use regex::Regex;
 // Each parameter is a distinct piece of PUBLIC announcement metadata rendered into the
 // comment; they are not a cohesive struct worth introducing for a single call site.
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
+pub(crate) fn announce_session_comment_with_defaults(
+    session_name: &str,
+    work_label: Option<&str>,
+    detected_work_labels: &[String],
+    packages: &[String],
+    environment: Option<&str>,
+    auto_merge: bool,
+    log_url: Option<&str>,
+    full_config_hash: &str,
+) -> String {
+    announce_session_comment(
+        session_name,
+        work_label,
+        detected_work_labels,
+        packages,
+        environment,
+        None,
+        crate::reconcile::branches::DEFAULT_TARGET_BRANCH,
+        auto_merge,
+        log_url,
+        full_config_hash,
+    )
+}
+
+/// Branch-aware announcement renderer used by the reconciler.
+#[allow(clippy::too_many_arguments)]
 pub fn announce_session_comment(
     session_name: &str,
     work_label: Option<&str>,
     detected_work_labels: &[String],
     packages: &[String],
     environment: Option<&str>,
+    source_branch: Option<&str>,
+    target_branch: &str,
     auto_merge: bool,
     log_url: Option<&str>,
     full_config_hash: &str,
@@ -102,9 +131,17 @@ pub fn announce_session_comment(
         None => body.push_str("**Environment:** none\n\n"),
     }
 
+    body.push_str(&format!(
+        "**Source branch:** `{}`\n\n",
+        source_branch.unwrap_or("(repo default)")
+    ));
+    body.push_str(&format!(
+        "**Target branch:** `{target_branch}` — all of this session's pull requests merge here.\n\n"
+    ));
+
     if auto_merge {
         body.push_str(
-            "**Auto-merge:** `on` — the App bot's PRs will be auto-merged to the default \
+            "**Auto-merge:** `on` — the App bot's PRs will be auto-merged to the target \
              branch when mergeable.\n\n",
         );
     } else {
@@ -169,7 +206,7 @@ mod tests {
             "ChronoAIProject/fkst-packages@dev:packages/github-devloop".to_string(),
             "acme/pkgs@main:packages/proxy".to_string(),
         ];
-        let body = announce_session_comment(
+        let body = announce_session_comment_with_defaults(
             "mysession",
             Some("fkst-run"),
             &["fkst-run".to_string()],
@@ -193,7 +230,7 @@ mod tests {
         assert!(body.contains("**Environment:** `prod`"));
         // Auto-merge ON carries the explanatory note.
         assert!(body.contains("**Auto-merge:** `on`"));
-        assert!(body.contains("auto-merged to the default"));
+        assert!(body.contains("auto-merged to the target"));
         // The identity-gated log link is rendered with the passed URL.
         assert!(body.contains("📥 **Logs:** https://fkst.example/api/v1/logs/sess-abc"));
         assert!(body.contains("authorized users only"));
@@ -206,7 +243,7 @@ mod tests {
 
     #[test]
     fn renders_zero_packages_no_environment_and_auto_merge_off() {
-        let body = announce_session_comment(
+        let body = announce_session_comment_with_defaults(
             "solo",
             Some("run"),
             &["run".to_string()],
@@ -232,7 +269,7 @@ mod tests {
     fn the_rendered_marker_round_trips_through_the_parser() {
         // The marker the renderer writes is exactly what the parser reads back — the
         // load-bearing contract for the immutability check.
-        let body = announce_session_comment(
+        let body = announce_session_comment_with_defaults(
             "s",
             Some("wl"),
             &["wl".to_string()],
@@ -292,7 +329,7 @@ mod tests {
     fn omits_the_log_line_when_no_url_is_configured() {
         // No public base URL => `None` => the log line is absent entirely (no bare
         // "Logs:" label, no dangling link).
-        let body = announce_session_comment(
+        let body = announce_session_comment_with_defaults(
             "solo",
             Some("run"),
             &["run".to_string()],
@@ -311,7 +348,7 @@ mod tests {
 
 #[cfg(test)]
 mod work_label_set_tests {
-    use super::announce_session_comment;
+    use super::{announce_session_comment, announce_session_comment_with_defaults};
 
     // Convenience: a `Vec<String>` from string literals for the detected-set arg.
     fn labels(items: &[&str]) -> Vec<String> {
@@ -322,7 +359,7 @@ mod work_label_set_tests {
     fn explicit_label_lists_that_single_label_with_guidance() {
         // An explicit `### Work Label` session: its detected set is exactly that one
         // label, so the announce lists it plus the labeling instruction.
-        let body = announce_session_comment(
+        let body = announce_session_comment_with_defaults(
             "s",
             Some("fkst-x"),
             &labels(&["fkst-x"]),
@@ -345,7 +382,7 @@ mod work_label_set_tests {
         // so `work_label` is None) whose wake labels are auto-discovered from its
         // packages. The old rendering omitted the block entirely — leaving no labeling
         // guidance; now the discovered labels + the instruction are shown.
-        let body = announce_session_comment(
+        let body = announce_session_comment_with_defaults(
             "auto",
             None,
             &labels(&["pkg-alpha", "pkg-beta"]),
@@ -371,7 +408,7 @@ mod work_label_set_tests {
     fn multi_label_session_lists_the_full_effective_set() {
         // Explicit `### Work Label` ∪ package-discovered: every label in the effective
         // set is listed, in the order the set carries.
-        let body = announce_session_comment(
+        let body = announce_session_comment_with_defaults(
             "multi",
             Some("explicit"),
             &labels(&["explicit", "disc-one", "disc-two"]),
@@ -391,7 +428,7 @@ mod work_label_set_tests {
     fn blank_and_duplicate_labels_are_dropped_and_deduped() {
         // Defensive: blank tokens are dropped and duplicates collapsed, first-occurrence
         // order preserved — the rendered list never carries an empty `` `` `` entry.
-        let body = announce_session_comment(
+        let body = announce_session_comment_with_defaults(
             "s",
             None,
             &labels(&["a", "", "  ", "a", "b"]),
@@ -409,7 +446,16 @@ mod work_label_set_tests {
     fn empty_detected_set_falls_back_to_the_single_explicit_label() {
         // A zero-label detected set shouldn't happen (rejected upstream), but if it does
         // the renderer falls back to the pre-multi-label single-`work_label` rendering.
-        let body = announce_session_comment("s", Some("only"), &[], &[], None, false, None, "h");
+        let body = announce_session_comment_with_defaults(
+            "s",
+            Some("only"),
+            &[],
+            &[],
+            None,
+            false,
+            None,
+            "h",
+        );
         assert!(body.contains("**Work label:** `only`"), "{body}");
     }
 
@@ -417,8 +463,29 @@ mod work_label_set_tests {
     fn no_labels_at_all_omits_the_work_label_line() {
         // Empty detected set AND no explicit label: nothing to advertise — the block is
         // omitted, exactly as before. The rest of the announce still renders.
-        let body = announce_session_comment("s", None, &[], &[], None, false, None, "h");
+        let body =
+            announce_session_comment_with_defaults("s", None, &[], &[], None, false, None, "h");
         assert!(!body.contains("**Work label"), "{body}");
         assert!(body.contains("fkst session `s` registered"), "{body}");
+    }
+
+    #[test]
+    fn renders_explicit_source_and_resolved_target_branches() {
+        let body = announce_session_comment(
+            "s",
+            None,
+            &[],
+            &[],
+            None,
+            Some("release/v1"),
+            "feature-x",
+            true,
+            None,
+            "h",
+        );
+        assert!(body.contains("**Source branch:** `release/v1`"));
+        assert!(body.contains("**Target branch:** `feature-x`"));
+        assert!(body.contains("auto-merged to the target branch"));
+        assert!(body.ends_with("<!-- fkst-config-hash: h -->"));
     }
 }

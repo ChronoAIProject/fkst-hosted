@@ -10,6 +10,7 @@ use k8s_openapi::chrono::DateTime;
 
 use super::*;
 use crate::k8s::session_github_token_json;
+use crate::reconcile::announce::announce_session_comment_with_defaults;
 use crate::reconcile::execute_test_support::*;
 
 // ---- GitHub issue effects ---------------------------------------------------
@@ -39,7 +40,7 @@ async fn announce_session_posts_a_comment_and_latches_the_announced_label() {
     let api = Arc::new(RecordingApi::default());
     let github = tokens(api.clone());
 
-    let body = announce_session_comment(
+    let body = announce_session_comment_with_defaults(
         "demo",
         Some("fkst-run"),
         &["fkst-run".to_string()],
@@ -156,6 +157,72 @@ async fn clear_trigger_unauthorized_removes_the_latch() {
     );
 }
 
+fn target_branch_ctx(api: Arc<RecordingApi>) -> ReconcileCtx {
+    let backend = Arc::new(FakeSessionBackend::default());
+    let mut ctx = test_ctx(backend);
+    ctx.github = tokens(api);
+    ctx
+}
+
+#[tokio::test]
+async fn missing_target_is_created_at_the_current_source_head() {
+    let api = Arc::new(RecordingApi::default());
+    *api.branch_heads.lock().unwrap() = Some(std::collections::HashMap::from([(
+        "main".to_string(),
+        "source-head".to_string(),
+    )]));
+    let ctx = target_branch_ctx(api.clone());
+
+    assert!(ensure_target_branch(&registration(), &ctx).await);
+    assert_eq!(
+        *api.create_refs.lock().unwrap(),
+        [("fkst-hosted-default".to_string(), "source-head".to_string())]
+    );
+}
+
+#[tokio::test]
+async fn target_create_lost_race_is_successful() {
+    let api = Arc::new(RecordingApi::default());
+    *api.branch_heads.lock().unwrap() = Some(std::collections::HashMap::from([(
+        "main".to_string(),
+        "source-head".to_string(),
+    )]));
+    *api.create_ref_error.lock().unwrap() = Some(GithubAppError::RefExists);
+    let ctx = target_branch_ctx(api);
+
+    assert!(ensure_target_branch(&registration(), &ctx).await);
+}
+
+#[tokio::test]
+async fn existing_target_is_never_reset_or_recreated() {
+    let api = Arc::new(RecordingApi::default());
+    *api.branch_heads.lock().unwrap() = Some(std::collections::HashMap::from([(
+        "fkst-hosted-default".to_string(),
+        "existing-head".to_string(),
+    )]));
+    let ctx = target_branch_ctx(api.clone());
+
+    assert!(ensure_target_branch(&registration(), &ctx).await);
+    assert!(api.create_refs.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn target_create_failure_skips_spawn_without_issue_feedback() {
+    let api = Arc::new(RecordingApi::default());
+    *api.branch_heads.lock().unwrap() = Some(std::collections::HashMap::from([(
+        "main".to_string(),
+        "source-head".to_string(),
+    )]));
+    *api.create_ref_error.lock().unwrap() = Some(GithubAppError::Http(
+        "branch protection denied creation".to_string(),
+    ));
+    let ctx = target_branch_ctx(api.clone());
+
+    assert!(!ensure_target_branch(&registration(), &ctx).await);
+    assert!(api.comments.lock().unwrap().is_empty());
+    assert!(api.labels_added.lock().unwrap().is_empty());
+}
+
 // ---- pure argument assembly -------------------------------------------------
 
 #[test]
@@ -176,6 +243,7 @@ fn session_pod_spec_is_built_from_the_registration() {
     assert_eq!(spec.work_label, "fkst-run");
     assert_eq!(spec.bot_login, "fkst-bot");
     assert_eq!(spec.config_hash, "hash123");
+    assert_eq!(spec.target_branch, "fkst-hosted-default");
     // package_roots are the refs rendered back to `owner/repo@ref:path`, in order.
     assert_eq!(
         spec.package_roots,

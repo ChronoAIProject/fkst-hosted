@@ -299,6 +299,8 @@ pub(super) fn registration(name: &str, work_label: &str) -> SessionRegistration 
             environment: None,
             output_lang: None,
             engine_config: std::collections::BTreeMap::new(),
+            source_branch: None,
+            target_branch: None,
         },
         effective_packages: Vec::new(),
         session_id: "sess-1".to_string(),

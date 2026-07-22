@@ -1,6 +1,6 @@
 //! Durable fakes for the composed recovery-chaos tests.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -84,6 +84,8 @@ struct LedgerState {
     issues: BTreeMap<i64, IssueSummary>,
     comments: BTreeMap<i64, Vec<String>>,
     effects: GithubEffects,
+    missing_branches: HashSet<String>,
+    branch_transport_error: bool,
 }
 
 /// GitHub state is intentionally independent of a controller context. Labels and
@@ -143,6 +145,19 @@ impl GithubLedger {
 
     pub fn effects(&self) -> GithubEffects {
         self.state.lock().unwrap().effects
+    }
+
+    pub fn set_branch_exists(&self, branch: &str, exists: bool) {
+        let mut state = self.state.lock().unwrap();
+        if exists {
+            state.missing_branches.remove(branch);
+        } else {
+            state.missing_branches.insert(branch.to_string());
+        }
+    }
+
+    pub fn set_branch_transport_error(&self, enabled: bool) {
+        self.state.lock().unwrap().branch_transport_error = enabled;
     }
 
     fn matching_open_issues(&self, label: &str) -> Vec<IssueSummary> {
@@ -317,11 +332,40 @@ impl GithubApi for GithubLedger {
         _git_ref: Option<&str>,
     ) -> Result<Option<RemoteFile>, GithubAppError> {
         let content =
-            base64::engine::general_purpose::STANDARD.encode("# fkst-issue-templates-version: 7\n");
+            base64::engine::general_purpose::STANDARD.encode("# fkst-issue-templates-version: 8\n");
         Ok(Some(RemoteFile {
             sha: "template-fixture".to_string(),
             content_base64: content,
         }))
+    }
+
+    async fn repo_default_branch(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+    ) -> Result<String, GithubAppError> {
+        Ok("main".to_string())
+    }
+
+    async fn branch_head_sha(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+        branch: &str,
+    ) -> Result<Option<String>, GithubAppError> {
+        let state = self.state.lock().unwrap();
+        if state.branch_transport_error {
+            return Err(GithubAppError::Http(
+                "fixture branch lookup transport failure".to_string(),
+            ));
+        }
+        if state.missing_branches.contains(branch) {
+            Ok(None)
+        } else {
+            Ok(Some(format!("head-sha-{branch}")))
+        }
     }
 }
 
@@ -447,5 +491,9 @@ impl ChaosHarness {
                 .await
                 .expect("repository reconcile");
         }
+    }
+
+    pub async fn reconcile_repo_result(&self) -> Result<(), crate::error::AppError> {
+        reconcile_repo(INSTALLATION_ID, &repo(), &self.ctx).await
     }
 }

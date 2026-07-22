@@ -24,7 +24,7 @@ use super::{issue_templates_permissions, GithubAppError, GithubAppTokens};
 /// change to the bundled files below; the bundled `config.yml` marker MUST equal
 /// this (enforced by a unit test). Repos whose installed version is below this
 /// get a merged PR to catch up.
-pub const FKST_ISSUE_TEMPLATES_VERSION: u32 = 7;
+pub const FKST_ISSUE_TEMPLATES_VERSION: u32 = 8;
 
 /// Repo-relative directory the templates live under.
 const TEMPLATE_DIR: &str = ".github/ISSUE_TEMPLATE";
@@ -147,7 +147,12 @@ impl IssueTemplateGithub for GithubAppTokens {
         let api = self.api();
 
         let base = api.repo_default_branch(&token, owner, repo).await?;
-        let head_sha = api.branch_head_sha(&token, owner, repo, &base).await?;
+        let head_sha = api
+            .branch_head_sha(&token, owner, repo, &base)
+            .await?
+            .ok_or_else(|| {
+                GithubAppError::Http(format!("repository default branch {base:?} has no Git ref"))
+            })?;
         let branch = format!("fkst/issue-templates-v{target_version}");
 
         // Create the working branch. If a stale one lingers from a prior failed

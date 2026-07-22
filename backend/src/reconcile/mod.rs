@@ -17,6 +17,7 @@
 
 pub mod announce;
 pub mod automerge;
+pub mod branches;
 // Pure work-label collision backstop (R4a): demotes the lower-priority of two active
 // sessions that would compete over the same work-label queue on one repo.
 pub mod collision;
