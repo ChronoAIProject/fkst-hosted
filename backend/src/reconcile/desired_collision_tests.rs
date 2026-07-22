@@ -24,6 +24,16 @@ fn reg_no_explicit_label(session_id: &str, trigger_issue: i64) -> super::Session
     r
 }
 
+fn reg_for_creator(
+    session_id: &str,
+    trigger_issue: i64,
+    creator_login: &str,
+) -> super::SessionRegistration {
+    let mut r = reg(session_id, trigger_issue, "h");
+    r.creator_login = creator_login.to_string();
+    r
+}
+
 /// Fold the detector's output the way `reconcile::repo` does: drop the losers from
 /// `regs` and append their markers to `invalid`.
 fn demote(
@@ -39,16 +49,66 @@ fn demote(
 // ---- the pure detector -----------------------------------------------------
 
 #[test]
-fn two_sessions_sharing_a_label_demote_the_higher_issue() {
-    let regs = vec![reg("s1", 1, "h"), reg("s2", 2, "h")];
+fn same_creator_overlap_demotes_the_higher_issue() {
+    let regs = vec![
+        reg_for_creator("s1", 1, "alice"),
+        reg_for_creator("s2", 2, "alice"),
+    ];
     let work = work_labels(&[("s1", &["wl"]), ("s2", &["wl"])]);
     assert_eq!(
         detect_work_label_collisions(&regs, &work),
         vec![(
             2,
-            "work label 'wl' collides with active session #1".to_string()
+            "work label 'wl' collides with your active session #1".to_string()
         )],
         "the lower trigger issue wins; only the higher is demoted",
+    );
+}
+
+#[test]
+fn different_creators_sharing_a_label_never_collide() {
+    let regs = vec![
+        reg_for_creator("s1", 1, "alice"),
+        reg_for_creator("s2", 2, "bob"),
+    ];
+    let work = work_labels(&[("s1", &["y"]), ("s2", &["y"])]);
+    assert!(detect_work_label_collisions(&regs, &work).is_empty());
+}
+
+#[test]
+fn creator_login_match_is_ascii_case_insensitive() {
+    let regs = vec![
+        reg_for_creator("s1", 1, "Alice"),
+        reg_for_creator("s2", 2, "alice"),
+    ];
+    let work = work_labels(&[("s1", &["wl"]), ("s2", &["wl"])]);
+    assert_eq!(
+        detect_work_label_collisions(&regs, &work),
+        vec![(
+            2,
+            "work label 'wl' collides with your active session #1".to_string()
+        )],
+    );
+}
+
+#[test]
+fn epic_scenario_a_xy_then_a_yz_rejected_b_yz_registers() {
+    let regs = vec![
+        reg_for_creator("a-xy", 1, "alice"),
+        reg_for_creator("a-yz", 2, "alice"),
+        reg_for_creator("b-yz", 3, "bob"),
+    ];
+    let work = work_labels(&[
+        ("a-xy", &["X", "Y"]),
+        ("a-yz", &["Y", "Z"]),
+        ("b-yz", &["Y", "Z"]),
+    ]);
+    assert_eq!(
+        detect_work_label_collisions(&regs, &work),
+        vec![(
+            2,
+            "work label 'Y' collides with your active session #1".to_string()
+        )],
     );
 }
 
@@ -76,7 +136,7 @@ fn discovered_label_only_overlap_still_collides() {
         detect_work_label_collisions(&regs, &work),
         vec![(
             2,
-            "work label 'discovered' collides with active session #1".to_string()
+            "work label 'discovered' collides with your active session #1".to_string()
         )],
     );
 }
@@ -108,7 +168,7 @@ fn winner_is_the_lowest_issue_regardless_of_registration_order() {
         detect_work_label_collisions(&regs, &work),
         vec![(
             2,
-            "work label 'wl' collides with active session #1".to_string()
+            "work label 'wl' collides with your active session #1".to_string()
         )],
     );
 }
@@ -133,33 +193,37 @@ fn multiple_disjoint_groups_resolve_independently() {
         vec![
             (
                 2,
-                "work label 'a' collides with active session #1".to_string()
+                "work label 'a' collides with your active session #1".to_string()
             ),
             (
                 4,
-                "work label 'b' collides with active session #3".to_string()
+                "work label 'b' collides with your active session #3".to_string()
             ),
         ],
     );
 }
 
 #[test]
-fn pairwise_overlap_chain_demotes_every_non_owner() {
-    // A{x}#1, B{x,y}#2, C{y}#3 — a chain where A∩C is empty. Per the documented rule
-    // (per-label lowest-issue-wins, lose-on-any → demoted): A owns x, B owns y, so B
-    // loses x and C loses y; both B and C are demoted and only A survives.
-    let regs = vec![reg("s1", 1, "h"), reg("s2", 2, "h"), reg("s3", 3, "h")];
+fn same_creator_pairwise_overlap_chain_demotes_every_non_owner() {
+    // Alice{x}#1, Alice{x,y}#2, Alice{y}#3 — a chain where #1∩#3 is empty. Per the
+    // documented rule (per-creator/per-label lowest-issue-wins, lose-on-any → demoted):
+    // #1 owns x and #2 owns y, so #2 loses x and #3 loses y; only #1 survives.
+    let regs = vec![
+        reg_for_creator("s1", 1, "alice"),
+        reg_for_creator("s2", 2, "alice"),
+        reg_for_creator("s3", 3, "alice"),
+    ];
     let work = work_labels(&[("s1", &["x"]), ("s2", &["x", "y"]), ("s3", &["y"])]);
     assert_eq!(
         detect_work_label_collisions(&regs, &work),
         vec![
             (
                 2,
-                "work label 'x' collides with active session #1".to_string()
+                "work label 'x' collides with your active session #1".to_string()
             ),
             (
                 3,
-                "work label 'y' collides with active session #2".to_string()
+                "work label 'y' collides with your active session #2".to_string()
             ),
         ],
     );
@@ -168,11 +232,32 @@ fn pairwise_overlap_chain_demotes_every_non_owner() {
 #[test]
 fn detection_is_order_independent() {
     // The same logical input built with different registration + label-slice orders
-    // must yield byte-identical output (no map/set iteration order leaks in).
-    let regs_a = vec![reg("s1", 1, "h"), reg("s2", 2, "h"), reg("s3", 3, "h")];
-    let regs_b = vec![reg("s3", 3, "h"), reg("s1", 1, "h"), reg("s2", 2, "h")];
-    let work_a = work_labels(&[("s1", &["x"]), ("s2", &["x", "y"]), ("s3", &["y"])]);
-    let work_b = work_labels(&[("s2", &["y", "x"]), ("s3", &["y"]), ("s1", &["x"])]);
+    // must yield byte-identical output (no map/set iteration order leaks in). Bob's
+    // overlapping registration is never a loser in Alice's collision group.
+    let regs_a = vec![
+        reg_for_creator("s1", 1, "alice"),
+        reg_for_creator("s2", 2, "alice"),
+        reg_for_creator("s3", 3, "alice"),
+        reg_for_creator("s4", 4, "bob"),
+    ];
+    let regs_b = vec![
+        reg_for_creator("s4", 4, "bob"),
+        reg_for_creator("s3", 3, "alice"),
+        reg_for_creator("s1", 1, "alice"),
+        reg_for_creator("s2", 2, "alice"),
+    ];
+    let work_a = work_labels(&[
+        ("s1", &["x"]),
+        ("s2", &["x", "y"]),
+        ("s3", &["y"]),
+        ("s4", &["x", "y"]),
+    ]);
+    let work_b = work_labels(&[
+        ("s4", &["y", "x"]),
+        ("s2", &["y", "x"]),
+        ("s3", &["y"]),
+        ("s1", &["x"]),
+    ]);
     let a = detect_work_label_collisions(&regs_a, &work_a);
     let b = detect_work_label_collisions(&regs_b, &work_b);
     assert_eq!(a, b, "detection must not depend on iteration order");
@@ -181,11 +266,11 @@ fn detection_is_order_independent() {
         vec![
             (
                 2,
-                "work label 'x' collides with active session #1".to_string()
+                "work label 'x' collides with your active session #1".to_string()
             ),
             (
                 3,
-                "work label 'y' collides with active session #2".to_string()
+                "work label 'y' collides with your active session #2".to_string()
             ),
         ],
     );
@@ -227,39 +312,48 @@ fn loser_folded_into_invalid_is_flagged_and_winner_stays_valid() {
         actions,
         vec![ReconcileAction::FlagInvalid {
             trigger_issue: 2,
-            detail: "work label 'wl' collides with active session #1".to_string(),
+            detail: "work label 'wl' collides with your active session #1".to_string(),
         }]
     );
 }
 
 #[test]
 fn demoted_loser_never_spawns_a_competing_pod() {
-    // Even though the loser (#2) reports pending, it is out of `regs` after demotion,
-    // so the planner emits NO Spawn for it — the backstop's core guarantee. The winner
-    // (#1), also pending, spawns as normal.
+    // Alice's loser (#2) is out of `regs` after demotion, so it cannot spawn even when
+    // pending. Alice's winner (#1) and Bob's overlapping session (#3) both remain and
+    // spawn, proving that collision ownership is scoped to the creator through planning.
     let (regs, invalid) = demote(
-        vec![reg("s1", 1, "h"), reg("s2", 2, "h")],
-        &work_labels(&[("s1", &["wl"]), ("s2", &["wl"])]),
+        vec![
+            reg_for_creator("s1", 1, "alice"),
+            reg_for_creator("s2", 2, "alice"),
+            reg_for_creator("s3", 3, "bob"),
+        ],
+        &work_labels(&[("s1", &["wl"]), ("s2", &["wl"]), ("s3", &["wl"])]),
     );
     let actions = plan_repo(
         &regs,
         &work_labels(&[]),
         &invalid,
         &[],
-        &pending(&[("s1", true), ("s2", true)]),
+        &pending(&[("s1", true), ("s2", true), ("s3", true)]),
         &latched(&[]),
-        &latched(&[1]), // suppress #1 announce for a focused assertion
+        &latched(&[1, 3]), // suppress winner/other-creator announces for focused assertions
         &config_hashes(&[]),
         &latched(&[]),
         now(),
         &cfg(300, 120),
     );
-    assert!(
-        actions.contains(&ReconcileAction::Spawn {
-            reg: regs[0].clone(),
-            detected_work_labels: vec![],
-        }),
-        "the winner spawns",
+    let spawned_issues: Vec<i64> = actions
+        .iter()
+        .filter_map(|action| match action {
+            ReconcileAction::Spawn { reg, .. } => Some(reg.trigger_issue),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        spawned_issues,
+        vec![1, 3],
+        "Alice's winner and Bob's overlapping session both spawn",
     );
     assert!(
         !actions
@@ -270,7 +364,7 @@ fn demoted_loser_never_spawns_a_competing_pod() {
     assert!(
         actions.contains(&ReconcileAction::FlagInvalid {
             trigger_issue: 2,
-            detail: "work label 'wl' collides with active session #1".to_string(),
+            detail: "work label 'wl' collides with your active session #1".to_string(),
         }),
         "and it is flagged invalid instead",
     );
@@ -369,11 +463,11 @@ fn folded_losers_flag_in_deterministic_issue_order() {
         vec![
             ReconcileAction::FlagInvalid {
                 trigger_issue: 2,
-                detail: "work label 'a' collides with active session #1".to_string(),
+                detail: "work label 'a' collides with your active session #1".to_string(),
             },
             ReconcileAction::FlagInvalid {
                 trigger_issue: 4,
-                detail: "work label 'b' collides with active session #3".to_string(),
+                detail: "work label 'b' collides with your active session #3".to_string(),
             },
         ]
     );
