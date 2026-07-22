@@ -46,6 +46,8 @@ pub fn parse_registration(
         spec.output_lang.as_deref(),
         &spec.engine_config,
         &spec.manifest_refs,
+        spec.source_branch.as_deref(),
+        spec.target_branch.as_deref(),
     );
 
     // Manifest-free default for `effective_packages`: the explicit packages. The
@@ -71,6 +73,8 @@ pub fn parse_registration(
             environment: spec.environment,
             output_lang: spec.output_lang,
             engine_config: spec.engine_config,
+            source_branch: spec.source_branch,
+            target_branch: spec.target_branch,
         },
         effective_packages,
         session_id,

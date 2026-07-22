@@ -115,6 +115,8 @@ const SESSION_PACKAGE_ROOTS_ENV: &str = "FKST_SESSION_PACKAGE_ROOTS";
 /// The claim/poll work label (also carried in the env so the entrypoint can
 /// build the supervise command without re-reading the pod annotation).
 const SESSION_WORK_LABEL_ENV: &str = "FKST_SESSION_WORK_LABEL";
+const DEVLOOP_UPSTREAM_BRANCH_ENV: &str = "FKST_DEVLOOP_UPSTREAM_BRANCH";
+const DEVLOOP_INTEGRATION_BRANCH_ENV: &str = "FKST_DEVLOOP_INTEGRATION_BRANCH";
 /// The engine's required HostFact pair (its config registry declares them with
 /// NO default and fails closed), consumed by the `setup_worktree()` Lua SDK to
 /// compose candidate branch names as `{prefix}-{date}-{slug}-{ulid}{sep}{parent}`.
@@ -188,6 +190,9 @@ pub struct SessionPodSpec {
     /// `### FKST Contributors` list, case-insensitively deduped) — rendered as
     /// `FKST_GITHUB_AUTHORIZED_LOGINS` for the packages' github author policy.
     pub contributors: Vec<String>,
+    /// Resolved branch the target repository is cloned from and every session PR
+    /// targets. Always concrete (`fkst-hosted-default` when omitted by the author).
+    pub target_branch: String,
 }
 
 /// The deterministic Pod/Secret name for a session (`fkst-sess-<session_id>`).
@@ -281,6 +286,8 @@ pub(crate) fn session_env_pairs(
         (GIT_COMMITTER_NAME_ENV, spec.bot_login.clone()),
         (SESSION_PACKAGE_ROOTS_ENV, spec.package_roots.join(" ")),
         (SESSION_WORK_LABEL_ENV, spec.work_label.clone()),
+        (DEVLOOP_UPSTREAM_BRANCH_ENV, spec.target_branch.clone()),
+        (DEVLOOP_INTEGRATION_BRANCH_ENV, spec.target_branch.clone()),
         // The engine's required HostFacts — without them any package calling
         // `setup_worktree()` fails at runtime with a HostFact-missing error.
         (CANDIDATE_PREFIX_ENV, CANDIDATE_PREFIX_VALUE.to_string()),

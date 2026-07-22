@@ -578,7 +578,24 @@ async fn branch_head_sha_reads_object_sha() {
         .branch_head_sha(&tok(), "acme", "site", "main")
         .await
         .expect("ok");
-    assert_eq!(sha, "headsha999");
+    assert_eq!(sha.as_deref(), Some("headsha999"));
+}
+
+#[tokio::test]
+async fn branch_head_sha_404_is_none() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/git/ref/heads/missing"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    assert_eq!(
+        api(&server.uri())
+            .branch_head_sha(&tok(), "acme", "site", "missing")
+            .await
+            .expect("404 is typed absence"),
+        None
+    );
 }
 
 #[tokio::test]

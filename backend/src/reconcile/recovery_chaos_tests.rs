@@ -244,6 +244,63 @@ async fn invalid_trigger_feedback_is_durable_and_never_spawns() {
 }
 
 #[tokio::test]
+async fn missing_source_is_flagged_once_and_recovers_when_the_branch_appears() {
+    for profile in BackendProfile::ALL {
+        let (_server, harness) = new_harness(profile, None, false).await;
+        let body = format!(
+            "{}\n### Source Branch\nfeature-source\n",
+            trigger_body("branch-session", WORK_LABEL)
+        );
+        harness
+            .ledger
+            .put(issue(TRIGGER, body, &[TRIGGER_LABEL], "alice", AUTHOR_ID));
+        harness
+            .ledger
+            .put(issue(WORK, "work", &[WORK_LABEL], "alice", AUTHOR_ID));
+        harness.ledger.set_branch_exists("feature-source", false);
+
+        for _ in 0..3 {
+            harness.full_resync().await;
+        }
+        assert!(harness.runtime_ids().is_empty(), "{profile:?}");
+        assert!(harness
+            .ledger
+            .labels(TRIGGER)
+            .contains(&SUBSTRATE_INVALID_LABEL.to_string()));
+        let missing_comments = harness
+            .ledger
+            .comments(TRIGGER)
+            .into_iter()
+            .filter(|body| body.contains("source branch 'feature-source' was not found"))
+            .count();
+        assert_eq!(missing_comments, 1, "durable invalid latch ({profile:?})");
+
+        harness.ledger.set_branch_exists("feature-source", true);
+        harness.full_resync().await;
+        assert!(!harness
+            .ledger
+            .labels(TRIGGER)
+            .contains(&SUBSTRATE_INVALID_LABEL.to_string()));
+        assert_eq!(harness.runtime_ids(), vec![session_id(TRIGGER)]);
+    }
+}
+
+#[tokio::test]
+async fn source_lookup_transport_error_aborts_before_any_plan_executes() {
+    let (_server, harness) = new_harness(BackendProfile::Kubernetes, None, false).await;
+    seed_valid(&harness, ("alice", AUTHOR_ID));
+    harness.ledger.set_branch_transport_error(true);
+
+    let error = harness
+        .reconcile_repo_result()
+        .await
+        .expect_err("transport failure aborts the repository pass");
+    assert!(error.to_string().contains("fixture branch lookup"));
+    assert!(harness.runtime_ids().is_empty());
+    assert_eq!(harness.ledger.effects(), GithubEffects::default());
+}
+
+#[tokio::test]
 async fn unauthorized_trigger_and_work_are_blocked_across_reconstruction() {
     for profile in BackendProfile::ALL {
         // Trigger intake is gated by the deployment login allowlist.

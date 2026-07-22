@@ -296,14 +296,14 @@ pub trait GithubApi: Send + Sync {
     }
 
     /// `GET {base}/repos/{owner}/{repo}/git/ref/heads/{branch}` -> the branch
-    /// head commit SHA. Default panics.
+    /// head commit SHA, or `None` on 404. Default panics.
     async fn branch_head_sha(
         &self,
         token: &SecretString,
         owner: &str,
         repo: &str,
         branch: &str,
-    ) -> Result<String, GithubAppError> {
+    ) -> Result<Option<String>, GithubAppError> {
         let _ = (token, owner, repo, branch);
         unimplemented!("branch_head_sha is only implemented by the HTTP transport")
     }
@@ -1113,7 +1113,7 @@ impl GithubApi for HttpGithubApi {
         owner: &str,
         repo: &str,
         branch: &str,
-    ) -> Result<String, GithubAppError> {
+    ) -> Result<Option<String>, GithubAppError> {
         let url = format!(
             "{}/repos/{owner}/{repo}/git/ref/heads/{branch}",
             self.api_base
@@ -1128,6 +1128,9 @@ impl GithubApi for HttpGithubApi {
             .await
             .map_err(|e| GithubAppError::Http(format!("branch_head_sha: {e}")))?;
         let status = response.status();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
         if let Some(err) = classify_auth_status(status, response.headers()) {
             return Err(err);
         }
@@ -1143,7 +1146,7 @@ impl GithubApi for HttpGithubApi {
             .map_err(|e| GithubAppError::Http(format!("branch_head_sha body: {e}")))?;
         body["object"]["sha"]
             .as_str()
-            .map(str::to_string)
+            .map(|sha| Some(sha.to_string()))
             .ok_or_else(|| GithubAppError::Http("branch_head_sha: missing object.sha".to_string()))
     }
 

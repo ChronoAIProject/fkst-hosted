@@ -699,6 +699,54 @@ impl GithubAppTokens {
             .await
     }
 
+    /// Resolve a repository's configured default branch through an installation
+    /// token minted for that repository.
+    pub async fn repo_default_branch(&self, owner_repo: &str) -> Result<String, GithubAppError> {
+        let (owner, repo) = owner_repo
+            .split_once('/')
+            .ok_or(GithubAppError::InvalidRepoRef)?;
+        let token = self.token_for_repo(owner_repo, None).await?;
+        self.inner
+            .api
+            .repo_default_branch(&token, owner, repo)
+            .await
+    }
+
+    /// Resolve a branch head, returning `None` when GitHub reports the ref is
+    /// absent.
+    pub async fn branch_head_sha(
+        &self,
+        owner_repo: &str,
+        branch: &str,
+    ) -> Result<Option<String>, GithubAppError> {
+        let (owner, repo) = owner_repo
+            .split_once('/')
+            .ok_or(GithubAppError::InvalidRepoRef)?;
+        let token = self.token_for_repo(owner_repo, None).await?;
+        self.inner
+            .api
+            .branch_head_sha(&token, owner, repo, branch)
+            .await
+    }
+
+    /// Create `refs/heads/{branch}` at `sha` through a repository installation
+    /// token. A concurrent creator is surfaced as [`GithubAppError::RefExists`].
+    pub async fn create_ref(
+        &self,
+        owner_repo: &str,
+        branch: &str,
+        sha: &str,
+    ) -> Result<(), GithubAppError> {
+        let (owner, repo) = owner_repo
+            .split_once('/')
+            .ok_or(GithubAppError::InvalidRepoRef)?;
+        let token = self.token_for_repo(owner_repo, None).await?;
+        self.inner
+            .api
+            .create_ref(&token, owner, repo, branch, sha)
+            .await
+    }
+
     /// Mint (or return cached) installation token for `owner/repo`, returning the
     /// token AND its `expires_at` (issue #107). The expiry is what the goal-token
     /// file writer records as RFC3339 so the credential helper can decide whether

@@ -31,6 +31,10 @@ fn full_env() -> BTreeMap<String, String> {
             "/var/run/fkst/creds".to_string(),
         ),
         ("CODEX_HOME".to_string(), "/var/run/fkst/codex".to_string()),
+        (
+            "FKST_DEVLOOP_INTEGRATION_BRANCH".to_string(),
+            "feature-x".to_string(),
+        ),
     ])
 }
 
@@ -55,6 +59,29 @@ fn read_substrate_env_maps_a_full_env() {
     assert_eq!(env.runtime_root, "/var/run/fkst/runtime");
     assert_eq!(env.creds_dir, "/var/run/fkst/creds");
     assert_eq!(env.codex_home, "/var/run/fkst/codex");
+    assert_eq!(env.target_branch.as_deref(), Some("feature-x"));
+}
+
+#[test]
+fn target_branch_is_optional_and_blank_is_unset() {
+    let mut map = full_env();
+    map.remove("FKST_DEVLOOP_INTEGRATION_BRANCH");
+    assert_eq!(
+        read_substrate_env_from(lookup(&map))
+            .expect("unset target remains compatible")
+            .target_branch,
+        None
+    );
+    map.insert(
+        "FKST_DEVLOOP_INTEGRATION_BRANCH".to_string(),
+        "   ".to_string(),
+    );
+    assert_eq!(
+        read_substrate_env_from(lookup(&map))
+            .expect("blank target remains compatible")
+            .target_branch,
+        None
+    );
 }
 
 #[test]

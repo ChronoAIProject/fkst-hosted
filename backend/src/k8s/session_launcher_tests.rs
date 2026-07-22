@@ -38,6 +38,7 @@ fn spec() -> SessionPodSpec {
         output_lang: None,
         engine_config: BTreeMap::new(),
         contributors: vec!["author-login".to_string()],
+        target_branch: "fkst-hosted-default".to_string(),
     }
 }
 
@@ -169,6 +170,14 @@ fn build_session_pod_injects_the_section_5_2_env() {
         Some("web api")
     );
     assert_eq!(env_value(env, "FKST_SESSION_WORK_LABEL"), Some("fkst"));
+    assert_eq!(
+        env_value(env, "FKST_DEVLOOP_UPSTREAM_BRANCH"),
+        Some("fkst-hosted-default")
+    );
+    assert_eq!(
+        env_value(env, "FKST_DEVLOOP_INTEGRATION_BRANCH"),
+        Some("fkst-hosted-default")
+    );
     // The engine's required HostFact pair (no engine default — a session without
     // them fails any `setup_worktree()` call). Platform constants, not knobs.
     assert_eq!(env_value(env, "FKST_CANDIDATE_PREFIX"), Some("fkst-cand"));

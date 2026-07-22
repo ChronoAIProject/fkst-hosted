@@ -5,8 +5,31 @@
 //! [`super::desired_test_fixtures`].
 
 use super::desired_test_fixtures::pkg;
-use super::{config_hash, full_config_hash, SessionDef, SessionRegistration};
+use super::{
+    config_hash as config_hash_with_branches, full_config_hash, SessionDef, SessionRegistration,
+};
+use crate::goals::trigger_parse::PackageRef;
 use crate::models::RepoRef;
+
+fn config_hash(
+    packages: &[PackageRef],
+    work_label: Option<&str>,
+    environment: Option<&str>,
+    output_lang: Option<&str>,
+    engine_config: &std::collections::BTreeMap<String, String>,
+    manifest_refs: &[PackageRef],
+) -> String {
+    config_hash_with_branches(
+        packages,
+        work_label,
+        environment,
+        output_lang,
+        engine_config,
+        manifest_refs,
+        None,
+        None,
+    )
+}
 
 /// A fully-populated registration whose every config field is set to a non-default
 /// value, so a test can flip exactly one field and observe the hash change.
@@ -30,6 +53,8 @@ fn base_reg() -> SessionRegistration {
             environment: Some("env".to_string()),
             output_lang: None,
             engine_config: std::collections::BTreeMap::new(),
+            source_branch: None,
+            target_branch: None,
         },
         effective_packages: vec![pkg("acme", "tools", "main", "pkg/a")],
         session_id: "sid".to_string(),
@@ -118,6 +143,22 @@ fn full_config_hash_changes_with_each_config_field() {
         base,
         full_config_hash(&reg),
         "collaborators must move the full hash (it is frozen by config-immutability)"
+    );
+
+    let mut reg = base_reg();
+    reg.def.source_branch = Some("release/v1".to_string());
+    assert_ne!(
+        base,
+        full_config_hash(&reg),
+        "source branch must move the hash"
+    );
+
+    let mut reg = base_reg();
+    reg.def.target_branch = Some("feature-x".to_string());
+    assert_ne!(
+        base,
+        full_config_hash(&reg),
+        "target branch must move the hash"
     );
 }
 

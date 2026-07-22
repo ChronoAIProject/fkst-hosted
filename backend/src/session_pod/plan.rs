@@ -27,6 +27,7 @@ const DURABLE_ROOT_ENV: &str = "FKST_DURABLE_ROOT";
 const RUNTIME_ROOT_ENV: &str = "FKST_RUNTIME_ROOT";
 const CREDS_DIR_ENV: &str = "FKST_SESSION_CREDS_DIR";
 const CODEX_HOME_ENV: &str = "CODEX_HOME";
+const DEVLOOP_INTEGRATION_BRANCH_ENV: &str = "FKST_DEVLOOP_INTEGRATION_BRANCH";
 
 /// `git config` count key + the LLM env key the child reads its API key from.
 const GIT_CONFIG_COUNT_ENV: &str = "GIT_CONFIG_COUNT";
@@ -69,6 +70,9 @@ pub struct SubstrateEnv {
     pub creds_dir: String,
     /// Codex config/home dir.
     pub codex_home: String,
+    /// Target branch to clone. `None` preserves the legacy default-branch clone
+    /// for callers outside the hosted session launcher.
+    pub target_branch: Option<String>,
 }
 
 /// Read the injected env into a [`SubstrateEnv`] from the process environment.
@@ -94,6 +98,10 @@ pub(crate) fn read_substrate_env_from(
             Some(value) if !value.trim().is_empty() => value,
             _ => default.to_string(),
         }
+    };
+    let optional = |key: &str| match get(key) {
+        Some(value) if !value.trim().is_empty() => Some(value),
+        _ => None,
     };
 
     let repo = required(GITHUB_REPO_ENV)?;
@@ -126,6 +134,7 @@ pub(crate) fn read_substrate_env_from(
         runtime_root: required(RUNTIME_ROOT_ENV)?,
         creds_dir: required(CREDS_DIR_ENV)?,
         codex_home: required(CODEX_HOME_ENV)?,
+        target_branch: optional(DEVLOOP_INTEGRATION_BRANCH_ENV),
     })
 }
 

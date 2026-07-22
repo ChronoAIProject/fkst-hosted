@@ -5,10 +5,30 @@ use super::*;
 use crate::github_app::listing::IssueSummary;
 use crate::goals::trigger_parse::PackageRef;
 use crate::reconcile::creator::SessionCreator;
-use crate::reconcile::desired::config_hash;
+use crate::reconcile::desired::config_hash as config_hash_with_branches;
 use crate::session_spec::derive_session_id;
 
 const INSTALLATION_ID: i64 = 42;
+
+fn config_hash(
+    packages: &[PackageRef],
+    work_label: Option<&str>,
+    environment: Option<&str>,
+    output_lang: Option<&str>,
+    engine_config: &std::collections::BTreeMap<String, String>,
+    manifest_refs: &[PackageRef],
+) -> String {
+    config_hash_with_branches(
+        packages,
+        work_label,
+        environment,
+        output_lang,
+        engine_config,
+        manifest_refs,
+        None,
+        None,
+    )
+}
 
 fn repo() -> RepoRef {
     RepoRef {
@@ -76,6 +96,8 @@ fn valid_body_yields_a_registration() {
     );
     assert_eq!(reg.def.work_label.as_deref(), Some("fkst-demo"));
     assert_eq!(reg.def.environment, None);
+    assert_eq!(reg.def.source_branch, None);
+    assert_eq!(reg.def.target_branch, None);
     assert!(!reg.auto_merge, "a body with no Auto-merge section is off");
     assert!(
         reg.log_access.is_empty(),
@@ -102,6 +124,30 @@ fn valid_body_yields_a_registration() {
         &reg.def.manifest_refs,
     );
     assert_eq!(reg.config_hash, want_hash);
+}
+
+#[test]
+fn branch_sections_round_trip_into_the_registration_and_config_hash() {
+    let body = format!(
+        "{}\n### Source Branch\nrelease/v1\n### Target Branch\nfeature-x\n",
+        valid_body()
+    );
+    let reg = parse(&issue(8, &body, 4242)).expect("branches parse");
+    assert_eq!(reg.def.source_branch.as_deref(), Some("release/v1"));
+    assert_eq!(reg.def.target_branch.as_deref(), Some("feature-x"));
+    assert_eq!(
+        reg.config_hash,
+        config_hash_with_branches(
+            &reg.def.packages,
+            reg.def.work_label.as_deref(),
+            reg.def.environment.as_deref(),
+            reg.def.output_lang.as_deref(),
+            &reg.def.engine_config,
+            &reg.def.manifest_refs,
+            Some("release/v1"),
+            Some("feature-x"),
+        )
+    );
 }
 
 #[test]

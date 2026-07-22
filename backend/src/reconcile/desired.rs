@@ -55,6 +55,12 @@ pub struct SessionDef {
     /// launcher injects as session env). Part of BOTH hashes: it changes the
     /// pod env, so editing it after registration is a rejected config change.
     pub engine_config: std::collections::BTreeMap<String, String>,
+    /// Optional source branch from the trigger. `None` means the repository's
+    /// default branch, resolved against GitHub at reconcile/spawn time.
+    pub source_branch: Option<String>,
+    /// Optional target branch from the trigger. `None` resolves to
+    /// `fkst-hosted-default`.
+    pub target_branch: Option<String>,
 }
 
 /// One valid trigger issue resolved to everything the reconciler needs to spawn
@@ -267,6 +273,10 @@ pub enum ReconcileAction {
         packages: Vec<String>,
         /// The named environment, or `None` for a no-environment session.
         environment: Option<String>,
+        /// Explicit source branch, or `None` when the repository default applies.
+        source_branch: Option<String>,
+        /// Resolved target branch displayed to the trigger author.
+        target_branch: String,
         /// Whether this trigger opted into reconcile-side PR auto-merge.
         auto_merge: bool,
         /// The registration's [`full_config_hash`], latched as a hidden marker in the
@@ -460,6 +470,10 @@ pub fn plan_repo(
                     .map(reachability::render_ref)
                     .collect(),
                 environment: reg.def.environment.clone(),
+                source_branch: reg.def.source_branch.clone(),
+                target_branch: reg.def.target_branch.clone().unwrap_or_else(|| {
+                    crate::reconcile::branches::DEFAULT_TARGET_BRANCH.to_string()
+                }),
                 auto_merge: reg.auto_merge,
                 full_config_hash: full_config_hash(reg),
             });

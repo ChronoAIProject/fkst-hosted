@@ -15,6 +15,13 @@ your environment and are never read from issue text.
 EVERYTHING in this issue body is FROZEN. Edits after that are rejected with an
 `fkst-config-rejected` label and change nothing. To change any setting, close
 this issue and open a new trigger.
+
+BRANCHES: To override branch topology, add an optional `### Source Branch`
+section with exactly one existing branch (default: the repository default), and/or
+an optional `### Target Branch` section with exactly one branch (default:
+`fkst-hosted-default`). fkst creates a missing target at the source head before
+the session starts, retries provisioning failures reported in operator logs, and
+never resets an existing target. Source and target may be the same branch.
 -->
 
 ### Session Name
@@ -60,7 +67,7 @@ no environment.
 
 <!--
 Optional. Set to `true` to have fkst automatically merge THIS session's pull
-requests into the default branch as soon as GitHub reports them mergeable. This
+requests into the target branch as soon as GitHub reports them mergeable. This
 BYPASSES review and status checks — use it only on trusted repos. Accepted truthy
 values: true / yes / on / enabled / 1 (case-insensitive). Anything else, or
 deleting this section, leaves auto-merge OFF (the default).

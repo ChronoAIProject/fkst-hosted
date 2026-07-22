@@ -58,6 +58,8 @@ fn reg(
             environment: None,
             output_lang: None,
             engine_config: BTreeMap::new(),
+            source_branch: None,
+            target_branch: None,
         },
         effective_packages: Vec::new(),
         session_id: session_id.to_string(),

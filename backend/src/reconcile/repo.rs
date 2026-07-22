@@ -385,6 +385,50 @@ pub async fn reconcile_repo(
         invalid.extend(collisions);
     }
 
+    // Validate each source branch in the snapshot phase so a missing ref uses
+    // the durable invalid latch (one comment, then automatic recovery). Any
+    // transport error aborts the whole repo pass; planning from a partial branch
+    // snapshot could otherwise spawn a session with unverified inputs.
+    let mut default_branch: Option<String> = None;
+    let mut missing_sources: Vec<(i64, String)> = Vec::new();
+    for reg in &regs {
+        let source = match &reg.def.source_branch {
+            Some(source) => source.clone(),
+            None => match &default_branch {
+                Some(source) => source.clone(),
+                None => {
+                    let source = ctx.github.repo_default_branch(&owner_repo).await?;
+                    default_branch = Some(source.clone());
+                    source
+                }
+            },
+        };
+        if ctx
+            .github
+            .branch_head_sha(&owner_repo, &source)
+            .await?
+            .is_none()
+        {
+            missing_sources.push((
+                reg.trigger_issue,
+                format!(
+                    "source branch '{source}' was not found on {}/{}",
+                    repo.owner, repo.name
+                ),
+            ));
+        }
+    }
+    if !missing_sources.is_empty() {
+        let losers: HashSet<i64> = missing_sources.iter().map(|(issue, _)| *issue).collect();
+        tracing::info!(
+            owner_repo = %owner_repo,
+            demoted = missing_sources.len(),
+            "reconcile: missing source branch(es); demoting trigger(s) to invalid"
+        );
+        regs.retain(|reg| !losers.contains(&reg.trigger_issue));
+        invalid.extend(missing_sources);
+    }
+
     // Best-effort, non-failing: if ANY registered session on this repo opted into
     // auto-merge (`### Auto-merge`), merge the App bot's mergeable open PRs. Mirrors
     // the ensure_issue_templates hook — a failure here never aborts the reconcile.

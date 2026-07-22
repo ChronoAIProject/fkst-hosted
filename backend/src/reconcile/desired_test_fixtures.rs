@@ -50,6 +50,8 @@ pub(super) fn reg(session_id: &str, trigger_issue: i64, config_hash: &str) -> Se
             environment: None,
             output_lang: None,
             engine_config: std::collections::BTreeMap::new(),
+            source_branch: None,
+            target_branch: None,
         },
         effective_packages: vec![],
         session_id: session_id.to_string(),

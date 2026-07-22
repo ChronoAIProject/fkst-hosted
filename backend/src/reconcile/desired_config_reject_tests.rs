@@ -134,6 +134,32 @@ fn changed_config_suppresses_spawn_when_pod_absent() {
 }
 
 #[test]
+fn editing_a_branch_after_announcement_is_rejected() {
+    let mut registration = reg("s1", 1, "h");
+    let original = full_config_hash(&registration);
+    registration.def.target_branch = Some("feature-x".to_string());
+    let regs = vec![registration];
+
+    let actions = plan_repo(
+        &regs,
+        &work_labels(&[]),
+        &[],
+        &[],
+        &pending(&[("s1", true)]),
+        &latched(&[]),
+        &latched(&[1]),
+        &config_hashes(&[(1, &original)]),
+        &latched(&[]),
+        now(),
+        &cfg(300, 120),
+    );
+    assert_eq!(
+        actions,
+        vec![ReconcileAction::RejectConfigChange { trigger_issue: 1 }]
+    );
+}
+
+#[test]
 fn changed_config_already_rejected_is_not_re_emitted() {
     // The trigger already carries the rejected latch -> the rejection is deduped (still
     // no respawn), leaving only the normal live-pod action.

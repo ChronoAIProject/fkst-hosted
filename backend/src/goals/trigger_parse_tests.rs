@@ -80,6 +80,8 @@ prod-env
             collaborators: vec![],
             output_lang: None,
             engine_config: std::collections::BTreeMap::new(),
+            source_branch: None,
+            target_branch: None,
         }
     );
 }
@@ -756,6 +758,57 @@ fn engine_config_violations_are_422_from_the_whole_body_parse() {
     let msg = err_message(&body);
     assert!(msg.contains("Engine Config"), "names the section: {msg}");
     assert!(msg.contains("FKST_RUNTIME_ROOT"), "names the key: {msg}");
+}
+
+#[test]
+fn branch_sections_are_optional_and_parse_single_values() {
+    let absent = parse_trigger_issue_body(&body_with_package(VALID_PKG)).expect("parses");
+    assert_eq!(absent.source_branch, None);
+    assert_eq!(absent.target_branch, None);
+
+    let body = format!(
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n\
+         ### Source Branch\nrelease/v1.2\n### Target Branch\nfeature-x\n"
+    );
+    let spec = parse_trigger_issue_body(&body).expect("branches parse");
+    assert_eq!(spec.source_branch.as_deref(), Some("release/v1.2"));
+    assert_eq!(spec.target_branch.as_deref(), Some("feature-x"));
+}
+
+#[test]
+fn explicit_equal_source_and_target_is_allowed() {
+    let body = format!(
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n\
+         ### Source Branch\nmain\n### Target Branch\nmain\n"
+    );
+    let spec = parse_trigger_issue_body(&body).expect("equal branches are valid");
+    assert_eq!(spec.source_branch, spec.target_branch);
+}
+
+#[test]
+fn branch_sections_reject_empty_or_multiple_values() {
+    for (heading, value) in [
+        ("Source Branch", ""),
+        ("Target Branch", "<!-- no value -->"),
+        ("Source Branch", "main\nnext"),
+        ("Target Branch", "main\nnext"),
+    ] {
+        let body =
+            format!("### Session Name\nsess\n### Packages\n{VALID_PKG}\n### {heading}\n{value}\n");
+        let message = err_message(&body);
+        assert!(message.contains(heading), "{heading}: {message}");
+        assert!(message.contains("exactly one"), "{heading}: {message}");
+    }
+}
+
+#[test]
+fn invalid_branch_name_reports_the_section_and_rule() {
+    let body = format!(
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Target Branch\nbad branch\n"
+    );
+    let message = err_message(&body);
+    assert!(message.contains("Target Branch"), "{message}");
+    assert!(message.contains("[A-Za-z0-9._/-]"), "{message}");
 }
 
 #[test]

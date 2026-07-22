@@ -49,6 +49,7 @@ pub(crate) fn spec() -> SessionPodSpec {
         output_lang: None,
         engine_config: BTreeMap::new(),
         contributors: vec!["author-login".to_string()],
+        target_branch: "fkst-hosted-default".to_string(),
     }
 }
 

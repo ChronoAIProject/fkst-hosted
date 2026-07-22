@@ -55,7 +55,8 @@ fn hex_digest<T: Serialize>(value: &T, what: &str) -> String {
 
 /// A stable content hash over a session's launch inputs: its ordered package
 /// references, its work label, its optional environment, its optional output
-/// language, its engine config, and its ordered fkst-manifest references. Mirrors
+/// language, its engine config, its ordered fkst-manifest references, and its
+/// optional source/target branches. Mirrors
 /// [`crate::k8s::env_store_meta::content_hash`] (canonical JSON → SHA-256 hex) so a
 /// live pod's recorded hash can be compared for drift. Stable and, for a fixed
 /// package ORDER, deterministic (packages are author-ordered, so order is part of the
@@ -74,6 +75,7 @@ fn hex_digest<T: Serialize>(value: &T, what: &str) -> String {
 /// session's recomputed hash would differ from the one latched at announce —
 /// tripping the immutability check fleet-wide (false `fkst-config-rejected` +
 /// spawn suppression). Guarded by `config_hash_is_digest_stable_for_old_configs`.
+#[allow(clippy::too_many_arguments)]
 pub fn config_hash(
     packages: &[PackageRef],
     work_label: Option<&str>,
@@ -81,6 +83,8 @@ pub fn config_hash(
     output_lang: Option<&str>,
     engine_config: &BTreeMap<String, String>,
     manifest_refs: &[PackageRef],
+    source_branch: Option<&str>,
+    target_branch: Option<&str>,
 ) -> String {
     #[derive(Serialize)]
     struct Canonical<'a> {
@@ -102,6 +106,10 @@ pub fn config_hash(
         // manifest's contents — see the hash-by-reference invariant above.
         #[serde(skip_serializing_if = "Vec::is_empty")]
         manifest_refs: Vec<CanonPackage<'a>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_branch: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        target_branch: Option<&'a str>,
     }
     let canonical = Canonical {
         packages: canon_packages(packages),
@@ -110,6 +118,8 @@ pub fn config_hash(
         output_lang,
         engine_config,
         manifest_refs: canon_packages(manifest_refs),
+        source_branch,
+        target_branch,
     };
     hex_digest(&canonical, "config-hash")
 }
@@ -125,7 +135,8 @@ pub fn config_hash(
 ///
 /// Canonical form: SHA-256 over the canonical JSON of
 /// `{packages, work_label, environment, name, auto_merge, log_access, output_lang,
-/// engine_config, collaborators, manifest_refs}` (the optional trailing fields
+/// engine_config, collaborators, manifest_refs, source_branch, target_branch}`
+/// (the optional trailing fields
 /// serialize only when set — see the digest-stability invariant on [`config_hash`]).
 /// The field order below IS part of the canonical form (serde serialises in
 /// declaration order), so identical inputs always hash identically and any changed
@@ -166,6 +177,10 @@ pub fn full_config_hash(reg: &SessionRegistration) -> String {
         // references under config-immutability.
         #[serde(skip_serializing_if = "Vec::is_empty")]
         manifest_refs: Vec<CanonPackage<'a>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_branch: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        target_branch: Option<&'a str>,
     }
     let canonical = Canonical {
         packages: canon_packages(&reg.def.packages),
@@ -178,6 +193,8 @@ pub fn full_config_hash(reg: &SessionRegistration) -> String {
         engine_config: &reg.def.engine_config,
         collaborators: &reg.collaborators,
         manifest_refs: canon_packages(&reg.def.manifest_refs),
+        source_branch: reg.def.source_branch.as_deref(),
+        target_branch: reg.def.target_branch.as_deref(),
     };
     hex_digest(&canonical, "full-config-hash")
 }

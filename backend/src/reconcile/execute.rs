@@ -24,6 +24,7 @@ use crate::github_app::{session_permissions, GithubAppError, GithubAppTokens};
 use crate::k8s::{session_github_token_json, SessionPodSpec};
 use crate::models::RepoRef;
 use crate::reconcile::announce::announce_session_comment;
+use crate::reconcile::branches::DEFAULT_TARGET_BRANCH;
 use crate::reconcile::desired::{KillReason, ReconcileAction, SessionRegistration};
 use crate::reconcile::execute_comments::{
     config_rejected_comment, env_not_ready_comment, env_verify_failed_comment,
@@ -151,6 +152,8 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
             detected_work_labels,
             packages,
             environment,
+            source_branch,
+            target_branch,
             auto_merge,
             full_config_hash,
         } => {
@@ -167,6 +170,8 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
                 &detected_work_labels,
                 &packages,
                 environment.as_deref(),
+                source_branch.as_deref(),
+                &target_branch,
                 auto_merge,
                 log_url.as_deref(),
                 &full_config_hash,
@@ -223,6 +228,13 @@ async fn spawn_session(
         return;
     }
 
+    // Provision the target ref before constructing a runtime. This is retried on
+    // every spawn pass, never resets an existing target, and deliberately emits
+    // logs only: the spawn path has no durable comment-dedupe latch.
+    if !ensure_target_branch(&reg, ctx).await {
+        return;
+    }
+
     // 2-5. Rebuild the launch spec + complete credential bundle from authoritative
     // sources. The same resolver drives live-runtime recovery, so spawn and restart
     // healing cannot drift to different credential layouts.
@@ -252,6 +264,80 @@ async fn spawn_session(
     }
 }
 
+async fn ensure_target_branch(reg: &SessionRegistration, ctx: &ReconcileCtx) -> bool {
+    let owner_repo = format!("{}/{}", reg.repo.owner, reg.repo.name);
+    let target = reg
+        .def
+        .target_branch
+        .as_deref()
+        .unwrap_or(DEFAULT_TARGET_BRANCH);
+    match ctx.github.branch_head_sha(&owner_repo, target).await {
+        Ok(Some(_)) => return true,
+        Ok(None) => {}
+        Err(error) => {
+            tracing::warn!(
+                session_id = %reg.session_id,
+                target_branch = %target,
+                error = %error,
+                "reconcile spawn: target branch lookup failed; retrying next pass"
+            );
+            return false;
+        }
+    }
+
+    let source = match &reg.def.source_branch {
+        Some(source) => source.clone(),
+        None => match ctx.github.repo_default_branch(&owner_repo).await {
+            Ok(source) => source,
+            Err(error) => {
+                tracing::warn!(
+                    session_id = %reg.session_id,
+                    error = %error,
+                    "reconcile spawn: default source branch lookup failed; retrying next pass"
+                );
+                return false;
+            }
+        },
+    };
+    let source_sha = match ctx.github.branch_head_sha(&owner_repo, &source).await {
+        Ok(Some(sha)) => sha,
+        Ok(None) => {
+            tracing::warn!(
+                session_id = %reg.session_id,
+                source_branch = %source,
+                "reconcile spawn: source branch disappeared before target provisioning; retrying next pass"
+            );
+            return false;
+        }
+        Err(error) => {
+            tracing::warn!(
+                session_id = %reg.session_id,
+                source_branch = %source,
+                error = %error,
+                "reconcile spawn: source branch lookup failed; retrying next pass"
+            );
+            return false;
+        }
+    };
+    match ctx
+        .github
+        .create_ref(&owner_repo, target, &source_sha)
+        .await
+    {
+        Ok(()) | Err(GithubAppError::RefExists) => true,
+        Err(error) => {
+            tracing::warn!(
+                session_id = %reg.session_id,
+                source_branch = %source,
+                target_branch = %target,
+                error = %error,
+                "reconcile spawn: target branch creation failed; retrying next pass"
+            );
+            false
+        }
+    }
+}
+
 /// Rebuild and adopt the complete credential bundle for a live pending runtime.
 /// `ensure_session` remains the single idempotent backend boundary: Kubernetes keeps
 /// its already-live no-op, while OpenSandbox uses the supplied bundle to reconstruct
@@ -274,6 +360,12 @@ async fn recover_credentials(
             );
             return;
         }
+    }
+    // A backend may report recovery needed and then discover the runtime vanished
+    // at `ensure_session`. Apply the same branch precondition as the ordinary
+    // spawn path before that race can recreate a runtime.
+    if !ensure_target_branch(&reg, ctx).await {
+        return;
     }
     let (spec, creds) = match resolve_session_credentials(&reg, &detected_work_labels, ctx).await {
         Ok(ready) => ready,
@@ -402,6 +494,11 @@ fn session_pod_spec_from(
         output_lang: reg.def.output_lang.clone(),
         engine_config: reg.def.engine_config.clone(),
         contributors: session_contributors(reg),
+        target_branch: reg
+            .def
+            .target_branch
+            .clone()
+            .unwrap_or_else(|| DEFAULT_TARGET_BRANCH.to_string()),
     }
 }
 
