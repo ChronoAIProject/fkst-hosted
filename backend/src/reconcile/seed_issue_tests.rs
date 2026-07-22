@@ -98,7 +98,7 @@ fn manifest_seed_body_round_trips_with_manifest_and_no_packages_or_work_label() 
     // The I9 default: a `### Manifest` reference supplies the packages and the wake
     // labels auto-discover, so the body carries NEITHER `### Packages` NOR
     // `### Work Label`. It must still parse as a valid trigger issue.
-    let body = build_seed_body(&[], Some(DEFAULT_MANIFEST), "octo-owner");
+    let body = build_seed_body(&[], Some(DEFAULT_MANIFEST), "installing-user", "octo-owner");
     // Shape assertions: manifest present, packages/work-label absent.
     assert!(body.contains("### Manifest"), "carries a manifest section");
     assert!(
@@ -129,7 +129,10 @@ fn manifest_seed_body_round_trips_with_manifest_and_no_packages_or_work_label() 
     assert_eq!(m.git_ref, "fkst-hosted");
     assert_eq!(m.path, "manifests/default-workflows.json");
     assert!(spec.auto_merge, "seed sets auto-merge on");
-    assert_eq!(spec.log_access, vec!["octo-owner".to_string()]);
+    assert_eq!(
+        spec.log_access,
+        vec!["installing-user".to_string(), "octo-owner".to_string()]
+    );
     assert!(spec.environment.is_none());
 }
 
@@ -140,8 +143,13 @@ fn legacy_seed_body_round_trips_through_the_real_trigger_parser() {
     // parser so the two can never drift.
     let default_pkgs =
         vec!["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()];
-    let spec = parse_trigger_issue_body(&build_seed_body(&default_pkgs, None, "octo-owner"))
-        .expect("legacy seed body is a valid trigger issue");
+    let spec = parse_trigger_issue_body(&build_seed_body(
+        &default_pkgs,
+        None,
+        "installing-user",
+        "octo-owner",
+    ))
+    .expect("legacy seed body is a valid trigger issue");
     assert_eq!(spec.name, "evolve");
     assert_eq!(spec.work_label.as_deref(), Some("fkst-evolve"));
     assert!(
@@ -149,7 +157,10 @@ fn legacy_seed_body_round_trips_through_the_real_trigger_parser() {
         "legacy body has no ### Manifest"
     );
     assert!(spec.auto_merge, "seed sets auto-merge on");
-    assert_eq!(spec.log_access, vec!["octo-owner".to_string()]);
+    assert_eq!(
+        spec.log_access,
+        vec!["installing-user".to_string(), "octo-owner".to_string()]
+    );
     assert_eq!(spec.packages.len(), 1);
     let p = &spec.packages[0];
     assert_eq!(p.owner, "ChronoAIProject");
@@ -160,7 +171,7 @@ fn legacy_seed_body_round_trips_through_the_real_trigger_parser() {
 }
 
 #[tokio::test]
-async fn seeds_a_repo_with_no_open_trigger_issue() {
+async fn installation_created_with_sender_seeds_with_assignee() {
     // The default (manifest-driven) path: verify the created issue's title, labels,
     // and that the recorded body is the manifest-driven trigger body.
     let api = std::sync::Arc::new(SeedFake::default()); // existing = empty
@@ -171,6 +182,7 @@ async fn seeds_a_repo_with_no_open_trigger_issue() {
         &[],
         Some(DEFAULT_MANIFEST),
         "octo-owner",
+        "installing-user",
         &["octo-owner/repo-a".to_string()],
     )
     .await;
@@ -182,15 +194,20 @@ async fn seeds_a_repo_with_no_open_trigger_issue() {
     assert_eq!(repo, "repo-a");
     assert_eq!(title, "[session] default-workflows (auto-seeded)");
     assert_eq!(labels, &vec!["fkst-substrate-trigger".to_string()]);
-    assert!(
-        assignees.is_empty(),
-        "#2275 does not change seed attribution"
+    assert_eq!(
+        assignees,
+        &vec!["installing-user".to_string()],
+        "the installer is the trigger's sole effective-creator assignee"
     );
     // The recorded body is the manifest-driven trigger body (parses; carries a
     // manifest ref; no explicit work label).
     let spec = parse_trigger_issue_body(body).expect("recorded body parses");
     assert_eq!(spec.manifest_refs.len(), 1);
     assert!(spec.work_label.is_none());
+    assert_eq!(
+        spec.log_access,
+        vec!["installing-user".to_string(), "octo-owner".to_string()]
+    );
 }
 
 #[tokio::test]
@@ -206,6 +223,7 @@ async fn skips_a_repo_that_already_has_an_open_trigger_issue() {
         &[],
         Some(DEFAULT_MANIFEST),
         "octo-owner",
+        "installing-user",
         &["octo-owner/repo-a".to_string()],
     )
     .await;
@@ -228,14 +246,16 @@ async fn legacy_seed_used_when_no_default_manifest_is_configured() {
         &["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()],
         None,
         "octo-owner",
+        "installing-user",
         &["octo-owner/repo-a".to_string()],
     )
     .await;
 
     assert_eq!(api.create_calls.load(Ordering::SeqCst), 1);
     let created = api.created.lock().unwrap();
-    let (_owner, _repo, title, body, _labels, _assignees) = &created[0];
+    let (_owner, _repo, title, body, _labels, assignees) = &created[0];
     assert_eq!(title, "[session] evolve (auto-seeded)");
+    assert_eq!(assignees, &vec!["installing-user".to_string()]);
     let spec = parse_trigger_issue_body(body).expect("recorded body parses");
     assert_eq!(spec.work_label.as_deref(), Some("fkst-evolve"));
     assert_eq!(spec.packages.len(), 1);
@@ -253,8 +273,13 @@ fn legacy_seed_body_with_multiple_packages_round_trips_in_order() {
             .to_string(),
         "chronoai-shining/fkst-packages@feat/workflow-engine:packages/workflow-writer".to_string(),
     ];
-    let spec = parse_trigger_issue_body(&build_seed_body(&pkgs, None, "octo-owner"))
-        .expect("multi-package seed body is valid");
+    let spec = parse_trigger_issue_body(&build_seed_body(
+        &pkgs,
+        None,
+        "installing-user",
+        "octo-owner",
+    ))
+    .expect("multi-package seed body is valid");
     assert_eq!(spec.packages.len(), 3);
     let paths: Vec<&str> = spec.packages.iter().map(|p| p.path.as_str()).collect();
     assert_eq!(
@@ -269,5 +294,30 @@ fn legacy_seed_body_with_multiple_packages_round_trips_in_order() {
         assert_eq!(p.owner, "chronoai-shining");
         assert_eq!(p.repo, "fkst-packages");
         assert_eq!(p.git_ref, "feat/workflow-engine");
+    }
+}
+
+#[test]
+fn seed_body_lists_installer_then_account_in_contributors_and_dedupes() {
+    assert_eq!(
+        seed_contributors("installing-user", "octo-owner"),
+        "installing-user\nocto-owner"
+    );
+    assert_eq!(
+        seed_contributors("Octo-Owner", "octo-owner"),
+        "Octo-Owner",
+        "the same installer/account login is emitted once case-insensitively"
+    );
+
+    let manifest = build_seed_body(&[], Some(DEFAULT_MANIFEST), "Octo-Owner", "octo-owner");
+    let legacy = build_seed_body(
+        &["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()],
+        None,
+        "Octo-Owner",
+        "octo-owner",
+    );
+    for body in [manifest, legacy] {
+        let spec = parse_trigger_issue_body(&body).expect("deduped seed body parses");
+        assert_eq!(spec.log_access, vec!["Octo-Owner".to_string()]);
     }
 }

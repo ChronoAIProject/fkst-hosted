@@ -18,6 +18,12 @@
 //!   `FKST_DEFAULT_MANIFEST` override), the body falls back to the original explicit
 //!   `### Packages` + `### Work Label` shape.
 //!
+//! Every seed is attributed to the installation event's human sender: the issue is
+//! created with that login as its sole assignee and the login is listed first in
+//! `### FKST Contributors`. The webhook skips seeding entirely when no sender is
+//! available, so it never creates a bot-authored trigger the creator gate cannot
+//! attribute.
+//!
 //! Idempotency: it creates NOTHING if the repo already has an open issue with the
 //! trigger label, so a webhook redelivery — or a repo that already has a trigger —
 //! never gets a duplicate. Every step is best-effort: a failure is logged and the
@@ -42,10 +48,11 @@ const SEED_WORK_LABEL: &str = "fkst-evolve";
 /// The legacy issue title.
 const SEED_TITLE: &str = "[session] evolve (auto-seeded)";
 
-/// Render the seed trigger-issue body. `log_access_owner` is the repo owner login
-/// placed in `### FKST Contributors` (auto-merge is on). The leading marker comment
-/// is intro text the parser ignores (parsing starts at the first `### ` heading) and
-/// marks the issue as auto-seeded for humans.
+/// Render the seed trigger-issue body. `installer` is listed first in `### FKST
+/// Contributors`, followed by `owner_login` unless both identify the same account
+/// case-insensitively (auto-merge is on). The leading marker comment is intro text
+/// the parser ignores (parsing starts at the first `### ` heading) and marks the
+/// issue as auto-seeded for humans.
 ///
 /// When `default_manifest` is `Some`, the body is the manifest-driven shape (I9): a
 /// `### Manifest` reference and NO `### Packages`/`### Work Label`, so the manifest
@@ -55,15 +62,17 @@ const SEED_TITLE: &str = "[session] evolve (auto-seeded)";
 fn build_seed_body(
     packages: &[String],
     default_manifest: Option<&str>,
-    log_access_owner: &str,
+    installer: &str,
+    owner_login: &str,
 ) -> String {
+    let contributors = seed_contributors(installer, owner_login);
     match default_manifest {
         Some(manifest_ref) => format!(
             "<!-- fkst auto-seeded trigger (v1) -->\n\n\
              ### Session Name\n{SEED_MANIFEST_SESSION_NAME}\n\n\
              ### Manifest\n{manifest_ref}\n\n\
              ### Auto-merge\ntrue\n\n\
-             ### FKST Contributors\n{log_access_owner}\n"
+             ### FKST Contributors\n{contributors}\n"
         ),
         None => {
             let package_lines = packages.join("\n");
@@ -73,15 +82,24 @@ fn build_seed_body(
                  ### Packages\n{package_lines}\n\n\
                  ### Work Label\n{SEED_WORK_LABEL}\n\n\
                  ### Auto-merge\ntrue\n\n\
-                 ### FKST Contributors\n{log_access_owner}\n"
+                 ### FKST Contributors\n{contributors}\n"
             )
         }
     }
 }
 
+fn seed_contributors(installer: &str, owner_login: &str) -> String {
+    if installer.eq_ignore_ascii_case(owner_login) {
+        installer.to_string()
+    } else {
+        format!("{installer}\n{owner_login}")
+    }
+}
+
 /// Best-effort: seed a trigger issue on each of `repos` (`owner/name`) that does
 /// not already have an open `trigger_label` issue. `owner_login` is the
-/// installation account the repos belong to (it fills the log-access allowlist).
+/// installation account the repos belong to; `installer` is the human sender who
+/// becomes the issue's sole assignee and first log-access principal.
 /// `default_manifest` selects the body shape: `Some(ref)` renders the manifest-driven
 /// default (I9); `None` renders the legacy `packages` + work-label body.
 ///
@@ -93,10 +111,12 @@ pub async fn seed_trigger_issues(
     packages: &[String],
     default_manifest: Option<&str>,
     owner_login: &str,
+    installer: &str,
     repos: &[String],
 ) {
     let labels = [trigger_label.to_string()];
-    let body = build_seed_body(packages, default_manifest, owner_login);
+    let assignees = [installer.to_string()];
+    let body = build_seed_body(packages, default_manifest, installer, owner_login);
     // The title names the seed session, which differs between the two body shapes.
     let title = if default_manifest.is_some() {
         SEED_MANIFEST_TITLE
@@ -124,7 +144,7 @@ pub async fn seed_trigger_issues(
             }
         }
         match github
-            .create_issue(owner_repo, title, &body, &labels, &[])
+            .create_issue(owner_repo, title, &body, &labels, &assignees)
             .await
         {
             Ok(number) => {

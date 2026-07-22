@@ -13,18 +13,19 @@
 //! 3. Only then parse `X-GitHub-Event` and dispatch.
 //!
 //! Stateless cache-bust hint (#141). The handler keeps signature verification,
-//! parses the event ONLY to derive the affected `owner/name` set, then evicts
-//! the token service's in-memory caches and fails any active session that
-//! depended on an affected repo. There is no durable installation record to
-//! read or write: the App layer resolves installations on demand and a stale
-//! mapping self-corrects at the next mint (the `InstallationGone` backstop). The
-//! in-memory eviction is also broadcast cluster-wide via the controller→worker
-//! seam on [`crate::github_app::GithubAppTokens::evict_repo`] (a no-op until the
-//! channel is wired, #134/#151). The handler is idempotent (GitHub redelivers)
-//! and returns `2xx` quickly.
+//! parses the event to derive the affected `owner/name` set and installer login,
+//! then evicts the token service's in-memory caches, fails any active session that
+//! depended on an affected repo, and optionally launches best-effort trigger
+//! seeding. There is no durable installation record to read or write: the App
+//! layer resolves installations on demand and a stale mapping self-corrects at the
+//! next mint (the `InstallationGone` backstop). The in-memory eviction is also
+//! broadcast cluster-wide via the controller→worker seam on
+//! [`crate::github_app::GithubAppTokens::evict_repo`] (a no-op until the channel is
+//! wired, #134/#151). The handler is idempotent (GitHub redelivers) and returns
+//! `2xx` quickly.
 //!
 //! Secret discipline: the webhook secret is never logged; the payload is parsed
-//! only for the non-secret installation/repository fields used below.
+//! only for the non-secret installation, repository, and sender fields used below.
 
 mod issue_trigger;
 mod verify;
@@ -49,27 +50,33 @@ const UNINSTALL_REASON_PREFIX: &str = "GitHub App was uninstalled from or lost a
 
 // ---- Webhook payload shapes (only the fields we consume) -------------------
 
-/// `installation` event body. Parsed ONLY to derive the affected set (#141): no
-/// durable record is written, so `repository_selection` / account type are not
-/// consumed — when concrete `repositories` are enumerated we evict those, else
-/// we evict account-wide by `account.login`.
+/// `installation` event body. Parsed to derive the affected set (#141) and the
+/// human sender used for install-time trigger attribution. No durable record is
+/// written, so `repository_selection` / account type are not consumed — when
+/// concrete `repositories` are enumerated we evict those, else we evict
+/// account-wide by `account.login`.
 #[derive(Debug, Deserialize)]
 struct InstallationEvent {
     action: String,
     installation: InstallationObject,
+    /// Human who initiated the installation action. Optional for compatibility
+    /// with old fixtures and defensive handling of incomplete deliveries.
+    #[serde(default)]
+    sender: Option<SenderObject>,
     /// Present on the `created` event (and `installation_repositories`); the
     /// concrete repos the installation covers when the selection is `selected`.
     #[serde(default)]
     repositories: Vec<RepoObject>,
 }
 
-/// `installation_repositories` event body. The `action` (`added`/`removed`) is
-/// informational only — we evict the `repositories_removed` set directly, so the
-/// outcome is correct whichever action GitHub sends.
+/// `installation_repositories` event body. `added` launches best-effort seeding;
+/// cache eviction consumes `repositories_removed` directly.
 #[derive(Debug, Deserialize)]
 struct InstallationReposEvent {
     action: String,
     installation: InstallationObject,
+    #[serde(default)]
+    sender: Option<SenderObject>,
     #[serde(default)]
     repositories_added: Vec<RepoObject>,
     #[serde(default)]
@@ -87,6 +94,13 @@ struct InstallationObject {
 /// The account (user or org) the App is installed on.
 #[derive(Debug, Deserialize)]
 struct AccountObject {
+    login: String,
+}
+
+/// The human who initiated an installation event. Only the login is needed: a
+/// bot-authored trigger's effective creator is derived from its sole assignee.
+#[derive(Debug, Deserialize)]
+struct SenderObject {
     login: String,
 }
 
@@ -289,33 +303,42 @@ impl CacheBust for AppState {
     }
 }
 
-/// Handle an `installation` event (#141, cache-bust only): `created` /
-/// `unsuspend` need no action (the next on-demand resolve picks the install up);
-/// `deleted` / `suspend` evict caches + fail sessions for the affected repos —
-/// the enumerated `repositories` when present, else account-wide by login (an
-/// `all` install / a bare `deleted` never enumerates concrete repos). Never
-/// mints a token.
-/// Best-effort install-time trigger-issue seeding (issue #467), behind the
-/// `FKST_SEED_TRIGGER_ISSUE_ON_INSTALL` flag. Spawned so the webhook answers
-/// immediately; every failure is logged inside the seeder and never surfaces here
-/// (the webhook always returns 2xx). Idempotency (skip a repo that already has an
-/// open trigger issue) lives in the seeder.
-fn maybe_seed_trigger_issues(state: &AppState, owner_login: &str, repos: &[RepoObject]) {
+/// Handle an `installation` event. `deleted` / `suspend` evict caches and fail
+/// sessions for the enumerated repositories, or account-wide when none are named.
+/// `created` optionally spawns best-effort sender-attributed trigger seeding behind
+/// `FKST_SEED_TRIGGER_ISSUE_ON_INSTALL`; `unsuspend` has nothing to cache-bust.
+/// Seeding runs asynchronously so the webhook returns immediately, and its
+/// idempotency probe and failures never affect the webhook's 2xx response.
+fn maybe_seed_trigger_issues(
+    state: &AppState,
+    owner_login: &str,
+    installer: Option<&str>,
+    repos: &[RepoObject],
+) {
     if !state.config.reconcile.seed_trigger_issue_on_install {
         return;
     }
-    let Some(github) = state.github_app.clone() else {
-        tracing::warn!("seed-on-install enabled but the github app is not configured; skipping");
-        return;
-    };
     let owner_repos: Vec<String> = repos.iter().map(|r| canonical(&r.full_name)).collect();
     if owner_repos.is_empty() {
         return;
     }
+    let Some(installer) = installer.map(str::trim).filter(|login| !login.is_empty()) else {
+        tracing::warn!(
+            owner = %owner_login,
+            repos = owner_repos.len(),
+            "seed: no sender on installation event; skipping seeding (unattributable trigger)"
+        );
+        return;
+    };
+    let Some(github) = state.github_app.clone() else {
+        tracing::warn!("seed-on-install enabled but the github app is not configured; skipping");
+        return;
+    };
     let label = state.config.reconcile.substrate_trigger_label.clone();
     let packages = state.config.reconcile.seed_packages.clone();
     let default_manifest = state.config.reconcile.default_manifest.clone();
     let owner = owner_login.to_string();
+    let installer = installer.to_string();
     tokio::spawn(async move {
         crate::reconcile::seed_issue::seed_trigger_issues(
             &github,
@@ -323,6 +346,7 @@ fn maybe_seed_trigger_issues(state: &AppState, owner_login: &str, repos: &[RepoO
             &packages,
             default_manifest.as_deref(),
             &owner,
+            &installer,
             &owner_repos,
         )
         .await;
@@ -341,6 +365,7 @@ async fn handle_installation(state: &AppState, body: &[u8]) -> Result<Handled, S
         maybe_seed_trigger_issues(
             state,
             &event.installation.account.login,
+            event.sender.as_ref().map(|sender| sender.login.as_str()),
             &event.repositories,
         );
     }
@@ -387,9 +412,9 @@ async fn dispatch_installation<E: CacheBust + ?Sized>(
     }
 }
 
-/// Handle an `installation_repositories` event (#141, cache-bust only): the
-/// `repositories_removed` set is evicted + its sessions failed; `added` needs no
-/// action (the next on-demand resolve picks it up). Never mints a token.
+/// Handle an `installation_repositories` event: removed repositories are evicted
+/// and their sessions failed, while `added` optionally launches asynchronous,
+/// sender-attributed trigger seeding.
 async fn handle_installation_repositories(
     state: &AppState,
     body: &[u8],
@@ -405,6 +430,7 @@ async fn handle_installation_repositories(
         maybe_seed_trigger_issues(
             state,
             &event.installation.account.login,
+            event.sender.as_ref().map(|sender| sender.login.as_str()),
             &event.repositories_added,
         );
     }
@@ -476,7 +502,7 @@ mod tests {
     // these cover the payload parsing + the cache-bust dispatch (#141) over the
     // [`CacheBust`] seam with a recording fake — no `AppState`, no Mongo.
     use super::*;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     // ---- recording fake -------------------------------------------------------
 
@@ -528,12 +554,17 @@ mod tests {
                 "id": 99,
                 "account": { "login": "Acme", "type": "Organization" }
             },
+            "sender": { "login": "installing-user", "id": 1234 },
             "repositories": [{ "full_name": "Acme/Site" }]
         }"#;
         let event: InstallationEvent = serde_json::from_slice(body).expect("parse");
         assert_eq!(event.action, "created");
         assert_eq!(event.installation.id, 99);
         assert_eq!(event.installation.account.login, "Acme");
+        assert_eq!(
+            event.sender.as_ref().map(|sender| sender.login.as_str()),
+            Some("installing-user")
+        );
         let repos: Vec<String> = event
             .repositories
             .iter()
@@ -573,11 +604,16 @@ mod tests {
         let body = br#"{
             "action": "removed",
             "installation": { "id": 5, "account": { "login": "acme" } },
+            "sender": { "login": "repo-manager" },
             "repositories_added": [],
             "repositories_removed": [{ "full_name": "acme/old" }]
         }"#;
         let event: InstallationReposEvent = serde_json::from_slice(body).expect("parse");
         assert_eq!(event.action, "removed");
+        assert_eq!(
+            event.sender.as_ref().map(|sender| sender.login.as_str()),
+            Some("repo-manager")
+        );
         assert_eq!(event.repositories_removed.len(), 1);
         assert_eq!(
             canonical(&event.repositories_removed[0].full_name),
@@ -690,6 +726,72 @@ mod tests {
         let bad = br#"{ "action": "deleted", "installation": "not-an-object" }"#;
         let parsed: Result<InstallationEvent, _> = serde_json::from_slice(bad);
         assert!(parsed.is_err(), "malformed body must fail to parse");
+    }
+
+    #[derive(Clone)]
+    struct BufWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for BufWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for BufWriter {
+        type Writer = BufWriter;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_sender_skips_seeding_warns_and_still_returns_success() {
+        use crate::routes::canvas::test_support::{test_app, test_state};
+        use wiremock::MockServer;
+
+        let server = MockServer::start().await;
+        let state = test_state(&server.uri(), Some(test_app(&server.uri())));
+        assert!(state.config.reconcile.seed_trigger_issue_on_install);
+        let body = br#"{
+            "action": "created",
+            "installation": { "id": 99, "account": { "login": "acme" } },
+            "repositories": [{ "full_name": "acme/site" }]
+        }"#;
+
+        let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(BufWriter(buf.clone()))
+            .with_max_level(tracing::Level::TRACE)
+            .finish();
+        let handled = {
+            let _guard = tracing::subscriber::set_default(subscriber);
+            handle_installation(&state, body)
+                .await
+                .expect("2xx dispatch")
+        };
+
+        assert_eq!(handled.as_str(), "ignored");
+        assert!(
+            server
+                .received_requests()
+                .await
+                .expect("recorded requests")
+                .is_empty(),
+            "an unattributable installation must not make any seed API call"
+        );
+        let logs = String::from_utf8(buf.lock().unwrap().clone()).expect("utf8 logs");
+        assert!(
+            logs.contains(
+                "seed: no sender on installation event; skipping seeding (unattributable trigger)"
+            ),
+            "the skip must be visible to operators: {logs}"
+        );
     }
 
     // ---- Model B reconcile nudge (PR6) ---------------------------------------
