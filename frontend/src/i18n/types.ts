@@ -234,6 +234,12 @@ export interface SiteContent {
       createManifestsHint: string;
       createWorkLabelLabel: string;
       createEnvironmentLabel: string;
+      createAdvancedLabel: string;
+      createSourceBranchLabel: string;
+      createSourceBranchPlaceholder: string;
+      createTargetBranchLabel: string;
+      createTargetBranchPlaceholder: string;
+      createBranchInvalid: string;
       createAutoMergeLabel: string;
       createLogAccessLabel: string;
       createLogAccessHint: string;
@@ -351,6 +357,10 @@ export interface SiteContent {
       tabOutcomes: string;
       /** Copy-affordance label on the full session id in the drawer header. */
       sessionIdCopy: string;
+      creatorLabel: string;
+      sourceBranchLabel: string;
+      targetBranchLabel: string;
+      repoDefault: string;
       // ---- Status tab ----
       lifecycle: string;
       /** Decoded lifecycle phase labels — one per `SessionPhase`. */

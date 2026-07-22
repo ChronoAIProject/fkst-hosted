@@ -16,6 +16,7 @@ function renderModal(
   over: {
     onCreated?: (r: { issue_number: number; html_url: string }) => void;
     workLabels?: string[];
+    creator?: string;
   } = {}
 ) {
   const onCreated = over.onCreated ?? vi.fn();
@@ -27,6 +28,7 @@ function renderModal(
           owner="acme"
           name="site"
           triggerIssue={21}
+          creator={over.creator ?? 'session-owner'}
           workLabels={over.workLabels ?? ['site-build', 'fkst-security']}
           onClose={onClose}
           onCreated={onCreated}
@@ -71,6 +73,7 @@ describe('CreateWorkItemModal', () => {
     renderModal();
     expect(screen.getByRole('combobox', { name: 'Work label' })).toHaveValue('site-build');
     expect(screen.getByText(/Opens an issue labeled `site-build`/)).toBeInTheDocument();
+    expect(screen.getByText(/assigned to `@session-owner`/)).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'fkst-security' })).toBeInTheDocument();
   });
 

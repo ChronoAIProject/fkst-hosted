@@ -48,12 +48,42 @@ async fn mount_trigger(
     labels: &[&str],
     is_pr: bool,
 ) {
+    let author_login = if author_id == viewer_user().id {
+        viewer_user().login
+    } else {
+        "session-owner".to_string()
+    };
+    mount_trigger_with_identity(
+        server,
+        number,
+        author_id,
+        &author_login,
+        &[],
+        body,
+        labels,
+        is_pr,
+    )
+    .await;
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn mount_trigger_with_identity(
+    server: &MockServer,
+    number: i64,
+    author_id: i64,
+    author_login: &str,
+    assignees: &[&str],
+    body: &str,
+    labels: &[&str],
+    is_pr: bool,
+) {
     let mut payload = serde_json::json!({
         "number": number,
         "body": body,
         "state": "open",
         "labels": labels.iter().map(|l| serde_json::json!({ "name": l })).collect::<Vec<_>>(),
-        "user": { "id": author_id },
+        "user": { "id": author_id, "login": author_login },
+        "assignees": assignees.iter().map(|login| serde_json::json!({ "login": login })).collect::<Vec<_>>(),
     });
     if is_pr {
         payload["pull_request"] = serde_json::json!({ "url": "https://example.test/pull" });
@@ -88,7 +118,8 @@ async fn create_work_item_stamps_the_sessions_work_label_as_the_user() {
         .and(body_partial_json(serde_json::json!({
             "title": "build the landing page",
             "body": "## Details\n\n  keep this indentation",
-            "labels": ["site-build"]
+            "labels": ["site-build"],
+            "assignees": ["shining"]
         })))
         .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
             "number": 77,
@@ -111,6 +142,89 @@ async fn create_work_item_stamps_the_sessions_work_label_as_the_user() {
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(created.issue_number, 77);
     assert_eq!(created.html_url, "https://github.com/acme/site/issues/77");
+}
+
+#[tokio::test]
+async fn create_work_item_routes_a_bot_authored_trigger_to_its_sole_assignee() {
+    let server = MockServer::start().await;
+    mount_trigger_with_identity(
+        &server,
+        21,
+        700,
+        "fkst-test[bot]",
+        &["ShInInG"],
+        &trigger_body("site-build"),
+        &["fkst-substrate-trigger"],
+        false,
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/repos/acme/site/issues"))
+        .and(header("authorization", "Bearer user-token"))
+        .and(body_partial_json(serde_json::json!({
+            "labels": ["site-build"],
+            "assignees": ["ShInInG"]
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+            "number": 81,
+            "html_url": "https://github.com/acme/site/issues/81"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let mut state = test_state(&server.uri(), None);
+    state.config.reconcile.github_bot_login = Some("fkst-test".to_string());
+
+    let (status, Json(created)) = create_work_item(
+        State(state),
+        Path(("acme".to_string(), "site".to_string(), 21)),
+        viewer_user(),
+        auth_headers(),
+        Json(work_item_request()),
+    )
+    .await
+    .expect("the sole assignee is the effective creator");
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(created.issue_number, 81);
+}
+
+#[test]
+fn work_registration_preserves_creator_and_authored_branches_in_the_hash() {
+    let spec = parse_trigger_issue_body(
+        "### Session Name\n\nsite\n\n### Packages\n\nacme/pkgs@main:packages/devloop\n\n\
+         ### Work Label\n\nsite-build\n\n### Source Branch\n\nrelease/v1\n\n\
+         ### Target Branch\n\nfeature/site\n",
+    )
+    .expect("valid trigger");
+    let expected_hash = config_hash(
+        &spec.packages,
+        spec.work_label.as_deref(),
+        spec.environment.as_deref(),
+        spec.output_lang.as_deref(),
+        &spec.engine_config,
+        &spec.manifest_refs,
+        spec.source_branch.as_deref(),
+        spec.target_branch.as_deref(),
+    );
+    let reg = work_registration(
+        "acme",
+        "site",
+        21,
+        700,
+        "fkst-test[bot]".to_string(),
+        SessionCreator {
+            login: "seed-owner".to_string(),
+            id: None,
+        },
+        spec,
+    );
+
+    assert_eq!(reg.trigger_author_login, "fkst-test[bot]");
+    assert_eq!(reg.creator_login, "seed-owner");
+    assert_eq!(reg.creator_id, None);
+    assert_eq!(reg.def.source_branch.as_deref(), Some("release/v1"));
+    assert_eq!(reg.def.target_branch.as_deref(), Some("feature/site"));
+    assert_eq!(reg.config_hash, expected_hash);
 }
 
 #[tokio::test]
@@ -319,7 +433,8 @@ async fn create_work_item_refuses_a_closed_session() {
         "body": trigger_body("site-build"),
         "state": "closed",
         "labels": [{ "name": "fkst-substrate-trigger" }],
-        "user": { "id": viewer_user().id },
+        "user": { "id": viewer_user().id, "login": viewer_user().login },
+        "assignees": [],
     });
     Mock::given(method("GET"))
         .and(path("/repos/acme/site/issues/21"))

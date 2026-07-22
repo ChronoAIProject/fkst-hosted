@@ -29,10 +29,12 @@ use crate::github_app::listing::IssueSummary;
 use crate::github_identity::GithubUser;
 use crate::models::RepoRef;
 use crate::reconcile::automerge::linked_issue_number;
+use crate::reconcile::branches::DEFAULT_TARGET_BRANCH;
 use crate::reconcile::desired::PodLiveness;
 use crate::reconcile::{
-    SUBSTRATE_CONFIG_REJECTED_LABEL, SUBSTRATE_DEGRADED_LABEL, SUBSTRATE_INVALID_LABEL,
-    SUBSTRATE_RETIRED_LABEL, WORK_UNAUTHORIZED_LABEL,
+    effective_creator, CreatorResolution, SUBSTRATE_CONFIG_REJECTED_LABEL,
+    SUBSTRATE_DEGRADED_LABEL, SUBSTRATE_INVALID_LABEL, SUBSTRATE_RETIRED_LABEL,
+    WORK_UNAUTHORIZED_LABEL,
 };
 use crate::routes::canvas::github::RepoPull;
 use crate::routes::canvas::parse_trigger_registration;
@@ -66,6 +68,9 @@ pub struct SessionDetail {
     pub session_id: Option<String>,
     /// The `### Session Name`; null when invalid.
     pub name: Option<String>,
+    /// The effective human creator. For App-authored seeded triggers this is
+    /// the sole assignee; empty only when an invalid trigger is unattributable.
+    pub creator: String,
     /// The `### Work Label`; null when invalid or auto-discovered.
     pub work_label: Option<String>,
     /// Every label that can wake this session: the explicit `### Work Label`
@@ -77,6 +82,11 @@ pub struct SessionDetail {
     pub auto_merge: Option<bool>,
     /// The `### Environment` selection, if any.
     pub environment: Option<String>,
+    /// The authored source branch; null means the repository default branch.
+    pub source_branch: Option<String>,
+    /// The resolved target branch, including `fkst-hosted-default` when the
+    /// trigger omits `### Target Branch`.
+    pub target_branch: String,
     /// The `### Packages`, rendered as `owner/repo@ref:path`.
     pub packages: Vec<String>,
     /// The `### Manifest` fkst-manifest references, rendered as
@@ -430,6 +440,7 @@ fn invalid_session_detail(
     trigger: &IssueWithMeta,
     reason: String,
     trigger_label: &str,
+    bot_login: Option<&str>,
 ) -> SessionDetail {
     let status_labels = canvas_status_labels(&trigger.summary, trigger_label);
     let recovery_reason = if status_labels
@@ -441,13 +452,21 @@ fn invalid_session_detail(
         SessionRecoveryReason::RegistrationInvalid
     };
 
+    let creator = match effective_creator(&trigger.summary.metadata(), bot_login) {
+        CreatorResolution::Resolved(creator) => creator.login,
+        CreatorResolution::Unattributable { .. } => String::new(),
+    };
+
     SessionDetail {
         session_id: None,
         name: None,
+        creator,
         work_label: None,
         work_labels: Vec::new(),
         auto_merge: None,
         environment: None,
+        source_branch: None,
+        target_branch: DEFAULT_TARGET_BRANCH.to_string(),
         packages: Vec::new(),
         manifests: Vec::new(),
         log_access: Vec::new(),
@@ -622,10 +641,17 @@ pub(super) async fn repo_sessions(
                 sessions.push(SessionDetail {
                     session_id: Some(reg.session_id.clone()),
                     name: Some(reg.def.name.clone()),
+                    creator: reg.creator_login.clone(),
                     work_label: reg.def.work_label.clone(),
                     work_labels,
                     auto_merge: Some(reg.auto_merge),
                     environment: reg.def.environment.clone(),
+                    source_branch: reg.def.source_branch.clone(),
+                    target_branch: reg
+                        .def
+                        .target_branch
+                        .clone()
+                        .unwrap_or_else(|| DEFAULT_TARGET_BRANCH.to_string()),
                     packages: reg.def.packages.iter().map(render_package_ref).collect(),
                     manifests: reg
                         .def
@@ -650,7 +676,12 @@ pub(super) async fn repo_sessions(
                 let reason = parse_errors
                     .remove(&trigger.summary.number)
                     .unwrap_or_else(|| "trigger registration could not be resolved".to_string());
-                sessions.push(invalid_session_detail(trigger, reason, trigger_label))
+                sessions.push(invalid_session_detail(
+                    trigger,
+                    reason,
+                    trigger_label,
+                    state.config.reconcile.github_bot_login.as_deref(),
+                ))
             }
         }
     }

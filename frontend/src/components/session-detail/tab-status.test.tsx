@@ -36,9 +36,12 @@ const issue = (over: Partial<IssueDetail> & Pick<IssueDetail, 'number'>): IssueD
 const session = (over: Partial<SessionDetail> = {}): SessionDetail => ({
   session_id: 'sess-1',
   name: 'nightly',
+  creator: 'shining',
   work_label: 'fkst-work',
   auto_merge: true,
   environment: null,
+  source_branch: null,
+  target_branch: 'fkst-hosted-default',
   packages: [],
   invalid_reason: null,
   status_labels: ['fkst-substrate-active'],

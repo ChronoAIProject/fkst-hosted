@@ -26,6 +26,13 @@ export const canvasModals: CanvasModalsSlice = {
   createManifestsHint:
     'fkst-manifest references, one owner/repo@ref:path per line. A manifest is a bundle the server expands into packages — enough on its own, so a session can reference only a manifest.',
   createWorkLabelLabel: 'Work label (optional)',
+  createAdvancedLabel: 'Advanced',
+  createSourceBranchLabel: 'Source branch (optional)',
+  createSourceBranchPlaceholder: 'Repository default branch',
+  createTargetBranchLabel: 'Target branch (optional)',
+  createTargetBranchPlaceholder: 'fkst-hosted-default · created from source if missing',
+  createBranchInvalid:
+    'Use 1–200 letters, digits, dots, underscores, slashes or dashes; Git ref edge cases are not allowed.',
   createAutoMergeLabel: 'Auto-merge',
   createLogAccessLabel: 'Log access allowlist (optional)',
   createLogAccessHint: 'Extra GitHub logins or ids, comma or space separated.',
@@ -53,7 +60,8 @@ export const canvasModals: CanvasModalsSlice = {
   workItemLabelLabel: 'Work label',
   workItemBodyLabel: 'Details (optional)',
   workItemBodyHint: 'Markdown is supported.',
-  workItemLabelNote: 'Opens an issue labeled `{label}`, which this session claims and works.',
+  workItemLabelNote:
+    'Opens an issue labeled `{label}` and assigned to `@{creator}`, which this session claims and works.',
   workItemSubmit: 'Queue work item',
   workItemPending: 'Queuing…',
   workItemFailed: 'Could not queue the work item. Please try again.',

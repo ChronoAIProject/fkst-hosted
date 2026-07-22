@@ -21,6 +21,7 @@ use crate::session_spec::derive_session_id;
 const VALID_TRIGGER_BODY: &str = "### Session Name\nsite\n\n### Packages\n\
 acme/pkgs@main:packages/devloop\n\n### Manifest\nacme/manifests@main:bundles/site\n\n\
 ### Work Label\nsite-build\n\n\
+### Source Branch\nrelease/v1.2\n\n### Target Branch\nfeature/site\n\n\
 ### Log Access Allowlist\nalice\n\n### Session Collaborators\nworker\n\n\
 ### Output Language\nzh-CN\n";
 
@@ -218,6 +219,9 @@ async fn repo_sessions_assembles_the_full_detail() {
     let session = &view.sessions[0];
     assert_eq!(session.session_id.as_deref(), Some(session_id.as_str()));
     assert_eq!(session.name.as_deref(), Some("site"));
+    assert_eq!(session.creator, "shining");
+    assert_eq!(session.source_branch.as_deref(), Some("release/v1.2"));
+    assert_eq!(session.target_branch, "feature/site");
     assert_eq!(session.work_label.as_deref(), Some("site-build"));
     assert_eq!(session.work_labels, vec!["site-build".to_string()]);
     assert_eq!(session.auto_merge, Some(false));
@@ -288,6 +292,9 @@ async fn repo_sessions_assembles_the_full_detail() {
 
     let invalid = &view.sessions[1];
     assert!(invalid.session_id.is_none());
+    assert_eq!(invalid.creator, "shining");
+    assert_eq!(invalid.source_branch, None);
+    assert_eq!(invalid.target_branch, DEFAULT_TARGET_BRANCH);
     assert!(invalid.invalid_reason.is_some());
     assert!(
         invalid.status_labels.is_empty(),
@@ -750,6 +757,7 @@ fn invalid_session_projection_preserves_configuration_rejection_reason() {
         &trigger,
         "invalid registration".to_string(),
         "fkst-substrate-trigger",
+        None,
     );
 
     assert_eq!(detail.recovery.state, SessionRecoveryState::Invalid);
@@ -758,6 +766,25 @@ fn invalid_session_projection_preserves_configuration_rejection_reason() {
         SessionRecoveryReason::ConfigurationRejected
     );
     assert_eq!(detail.recovery.runtime, SessionRuntimeState::Unknown);
+}
+
+#[test]
+fn invalid_bot_authored_session_still_projects_its_effective_creator() {
+    let mut trigger = work_meta(7, "open", &["fkst-substrate-trigger"]);
+    trigger.summary.user_login = "fkst-test[bot]".to_string();
+    trigger.summary.user_id = 700;
+    trigger.summary.assignees = vec!["seed-owner".to_string()];
+
+    let detail = invalid_session_detail(
+        &trigger,
+        "invalid registration".to_string(),
+        "fkst-substrate-trigger",
+        Some("fkst-test"),
+    );
+
+    assert_eq!(detail.creator, "seed-owner");
+    assert_eq!(detail.source_branch, None);
+    assert_eq!(detail.target_branch, DEFAULT_TARGET_BRANCH);
 }
 
 #[test]

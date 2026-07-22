@@ -38,6 +38,7 @@ export function CreateWorkItemModal({
   owner,
   name,
   triggerIssue,
+  creator,
   workLabels,
   onClose,
   onCreated,
@@ -45,6 +46,8 @@ export function CreateWorkItemModal({
   owner: string;
   name: string;
   triggerIssue: number;
+  /** Effective session creator; the backend assigns the new issue to this login. */
+  creator: string;
   /** Every label that can wake this session. */
   workLabels: readonly string[];
   onClose: () => void;
@@ -156,7 +159,9 @@ export function CreateWorkItemModal({
             ))}
           </select>
           <p className="font-mono text-[11px] text-ghost">
-            {cc.workItemLabelNote.replace('{label}', workLabel)}
+            {cc.workItemLabelNote
+              .replace('{label}', workLabel)
+              .replace('{creator}', creator)}
           </p>
         </div>
 

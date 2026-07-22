@@ -14,6 +14,10 @@ export const detail: DetailSlice = {
   tabLogs: '日志',
   tabOutcomes: '成果',
   sessionIdCopy: '复制会话 ID',
+  creatorLabel: '创建者',
+  sourceBranchLabel: '源分支',
+  targetBranchLabel: '目标分支',
+  repoDefault: '仓库默认分支',
   lifecycle: '生命周期',
   phase: {
     registered: '已注册',

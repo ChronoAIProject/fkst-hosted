@@ -25,6 +25,13 @@ export const canvasModals: CanvasModalsSlice = {
   createManifestsHint:
     'fkst-manifest 引用，每行一个 owner/repo@ref:path。manifest 是服务端展开成 package 列表的清单 —— 单独即可使用，因此会话可以只引用一个 manifest。',
   createWorkLabelLabel: '工作标签（可选）',
+  createAdvancedLabel: '高级',
+  createSourceBranchLabel: '源分支（可选）',
+  createSourceBranchPlaceholder: '仓库默认分支',
+  createTargetBranchLabel: '目标分支（可选）',
+  createTargetBranchPlaceholder: 'fkst-hosted-default · 不存在时从源分支创建',
+  createBranchInvalid:
+    '请使用 1–200 个字母、数字、点、下划线、斜杠或连字符；不允许 Git ref 的特殊边界形式。',
   createAutoMergeLabel: '自动合并',
   createLogAccessLabel: '日志访问允许列表（可选）',
   createLogAccessHint: '额外的 GitHub 登录名或 id，以逗号或空格分隔。',
@@ -49,7 +56,8 @@ export const canvasModals: CanvasModalsSlice = {
   workItemLabelLabel: '工作标签',
   workItemBodyLabel: '详情（可选）',
   workItemBodyHint: '支持 Markdown。',
-  workItemLabelNote: '将新建一个带 `{label}` 标签的 issue，该会话会认领并处理它。',
+  workItemLabelNote:
+    '将新建一个带 `{label}` 标签并分配给 `@{creator}` 的 issue，该会话会认领并处理它。',
   workItemSubmit: '排入任务',
   workItemPending: '正在排入…',
   workItemFailed: '无法排入任务，请重试。',

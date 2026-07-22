@@ -8,7 +8,9 @@ use wiremock::matchers::{body_partial_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
-use crate::routes::canvas::test_support::{auth_headers, test_state, viewer_user};
+use crate::routes::canvas::test_support::{
+    auth_headers, grant_global_admin, mount_app_token, test_app, test_state, viewer_user,
+};
 
 fn create_request() -> CreateSessionRequest {
     CreateSessionRequest {
@@ -17,11 +19,42 @@ fn create_request() -> CreateSessionRequest {
         manifests: Vec::new(),
         work_label: Some("site-build".to_string()),
         environment: None,
+        source_branch: None,
+        target_branch: None,
         auto_merge: Some(true),
         log_access: Vec::new(),
         collaborators: Vec::new(),
         output_lang: None,
     }
+}
+
+async fn state_with_creator_role(
+    server: &MockServer,
+    owner: &str,
+    name: &str,
+    status: u16,
+    role: Option<&str>,
+) -> AppState {
+    mount_app_token(server, owner, name, 42).await;
+    let response = match role {
+        Some(role) => {
+            ResponseTemplate::new(status).set_body_json(serde_json::json!({ "role_name": role }))
+        }
+        None => ResponseTemplate::new(status)
+            .set_body_json(serde_json::json!({ "message": "role lookup failed" })),
+    };
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/repos/{owner}/{name}/collaborators/shining/permission"
+        )))
+        .and(header(
+            "authorization",
+            "Bearer ghs_test_installation_token",
+        ))
+        .respond_with(response)
+        .mount(server)
+        .await;
+    test_state(&server.uri(), Some(test_app(&server.uri())))
 }
 
 /// Mount the create-session pre-flight read: `GET /repos/{owner}/{name}/issues`
@@ -32,11 +65,11 @@ async fn mount_open_triggers(
     server: &MockServer,
     owner: &str,
     name: &str,
-    sessions: &[(i64, &str)],
+    sessions: &[(i64, &str, &str)],
 ) {
     let issues: Vec<serde_json::Value> = sessions
         .iter()
-        .map(|(number, label)| {
+        .map(|(number, label, creator)| {
             serde_json::json!({
                 "number": number,
                 "title": format!("session-{number}"),
@@ -45,7 +78,7 @@ async fn mount_open_triggers(
                 ),
                 "labels": [{ "name": "fkst-substrate-trigger" }],
                 "state": "open",
-                "user": { "login": "someone", "id": 7 },
+                "user": { "login": creator, "id": number + 1000 },
                 "html_url": format!("https://github.com/{owner}/{name}/issues/{number}"),
                 "created_at": "",
                 "updated_at": "",
@@ -64,7 +97,7 @@ async fn mount_open_triggers(
 async fn create_session_opens_the_trigger_issue_as_the_user() {
     let server = MockServer::start().await;
     // Pre-flight sees a distinct existing session — no collision, create proceeds.
-    mount_open_triggers(&server, "acme", "site", &[(7, "other-build")]).await;
+    mount_open_triggers(&server, "acme", "site", &[(7, "other-build", "shining")]).await;
     Mock::given(method("POST"))
         .and(path("/repos/acme/site/issues"))
         // The USER token (never an App token) must authenticate the write, the
@@ -82,7 +115,7 @@ async fn create_session_opens_the_trigger_issue_as_the_user() {
         .mount(&server)
         .await;
 
-    let state = test_state(&server.uri(), None);
+    let state = state_with_creator_role(&server, "acme", "site", 200, Some("maintain")).await;
     let (status, Json(created)) = create_session(
         State(state),
         Path(("acme".to_string(), "site".to_string())),
@@ -138,7 +171,7 @@ async fn create_session_maps_a_github_403_to_forbidden() {
         .mount(&server)
         .await;
 
-    let state = test_state(&server.uri(), None);
+    let state = state_with_creator_role(&server, "acme", "site", 200, Some("maintain")).await;
     let err = create_session(
         State(state),
         Path(("acme".to_string(), "site".to_string())),
@@ -169,7 +202,7 @@ async fn create_session_maps_a_github_404_to_not_found() {
         .mount(&server)
         .await;
 
-    let state = test_state(&server.uri(), None);
+    let state = state_with_creator_role(&server, "acme", "gone", 200, Some("maintain")).await;
     let err = create_session(
         State(state),
         Path(("acme".to_string(), "gone".to_string())),
@@ -186,7 +219,7 @@ async fn create_session_maps_a_github_404_to_not_found() {
 async fn create_session_rejects_a_colliding_work_label_before_creating() {
     let server = MockServer::start().await;
     // An existing OPEN session already owns the requested "site-build" label.
-    mount_open_triggers(&server, "acme", "site", &[(19, "site-build")]).await;
+    mount_open_triggers(&server, "acme", "site", &[(19, "site-build", "ShInInG")]).await;
     // The create write must never fire once the collision is detected.
     Mock::given(method("POST"))
         .and(path("/repos/acme/site/issues"))
@@ -195,7 +228,7 @@ async fn create_session_rejects_a_colliding_work_label_before_creating() {
         .mount(&server)
         .await;
 
-    let state = test_state(&server.uri(), None);
+    let state = state_with_creator_role(&server, "acme", "site", 200, Some("maintain")).await;
     let err = create_session(
         State(state),
         Path(("acme".to_string(), "site".to_string())),
@@ -218,7 +251,7 @@ async fn create_session_rejects_a_colliding_work_label_before_creating() {
 async fn create_session_allows_a_distinct_work_label() {
     let server = MockServer::start().await;
     // The open session uses a different label — no collision, create proceeds.
-    mount_open_triggers(&server, "acme", "site", &[(19, "other-build")]).await;
+    mount_open_triggers(&server, "acme", "site", &[(19, "other-build", "shining")]).await;
     Mock::given(method("POST"))
         .and(path("/repos/acme/site/issues"))
         .and(header("authorization", "Bearer user-token"))
@@ -230,7 +263,7 @@ async fn create_session_allows_a_distinct_work_label() {
         .mount(&server)
         .await;
 
-    let state = test_state(&server.uri(), None);
+    let state = state_with_creator_role(&server, "acme", "site", 200, Some("maintain")).await;
     let (status, Json(created)) = create_session(
         State(state),
         Path(("acme".to_string(), "site".to_string())),
@@ -259,7 +292,7 @@ async fn create_session_allows_when_no_existing_sessions() {
         .mount(&server)
         .await;
 
-    let state = test_state(&server.uri(), None);
+    let state = state_with_creator_role(&server, "acme", "site", 200, Some("admin")).await;
     let (status, Json(created)) = create_session(
         State(state),
         Path(("acme".to_string(), "site".to_string())),
@@ -294,7 +327,7 @@ async fn create_session_from_a_manifest_with_no_work_label_succeeds() {
         .mount(&server)
         .await;
 
-    let state = test_state(&server.uri(), None);
+    let state = state_with_creator_role(&server, "acme", "site", 200, Some("maintain")).await;
     let (status, Json(created)) = create_session(
         State(state),
         Path(("acme".to_string(), "site".to_string())),
@@ -330,7 +363,7 @@ async fn create_session_without_explicit_work_label_skips_the_preflight() {
         .mount(&server)
         .await;
 
-    let state = test_state(&server.uri(), None);
+    let state = state_with_creator_role(&server, "acme", "site", 200, Some("maintain")).await;
     let (status, Json(created)) = create_session(
         State(state),
         Path(("acme".to_string(), "site".to_string())),
@@ -345,4 +378,145 @@ async fn create_session_without_explicit_work_label_skips_the_preflight() {
     .expect("201");
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(created.issue_number, 24);
+}
+
+#[tokio::test]
+async fn create_session_rejects_a_write_only_creator() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/repos/acme/site/issues"))
+        .respond_with(ResponseTemplate::new(201))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let state = state_with_creator_role(&server, "acme", "site", 200, Some("write")).await;
+    let err = create_session(
+        State(state),
+        Path(("acme".to_string(), "site".to_string())),
+        viewer_user(),
+        auth_headers(),
+        Json(create_request()),
+    )
+    .await
+    .expect_err("write is below the creator threshold");
+    match err {
+        AppError::Forbidden(message) => {
+            assert!(message.contains("admin or maintain"), "{message}");
+        }
+        other => panic!("expected Forbidden, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn create_session_fails_closed_when_role_lookup_is_unavailable() {
+    let server = MockServer::start().await;
+    let state = state_with_creator_role(&server, "acme", "site", 500, None).await;
+    let err = create_session(
+        State(state),
+        Path(("acme".to_string(), "site".to_string())),
+        viewer_user(),
+        auth_headers(),
+        Json(create_request()),
+    )
+    .await
+    .expect_err("role lookup failure must be retryable");
+    assert!(matches!(err, AppError::Unavailable(_)), "got {err:?}");
+}
+
+#[tokio::test]
+async fn create_session_requires_the_github_app_for_a_non_admin_creator() {
+    let server = MockServer::start().await;
+    let state = test_state(&server.uri(), None);
+    let err = create_session(
+        State(state),
+        Path(("acme".to_string(), "site".to_string())),
+        viewer_user(),
+        auth_headers(),
+        Json(create_request()),
+    )
+    .await
+    .expect_err("missing App cannot establish the repo role");
+    assert!(matches!(err, AppError::Unavailable(_)), "got {err:?}");
+}
+
+#[tokio::test]
+async fn create_session_global_admin_short_circuits_the_repo_role_lookup() {
+    let server = MockServer::start().await;
+    mount_open_triggers(&server, "acme", "site", &[]).await;
+    Mock::given(method("POST"))
+        .and(path("/repos/acme/site/issues"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+            "number": 26,
+            "html_url": "https://github.com/acme/site/issues/26"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let mut state = test_state(&server.uri(), None);
+    grant_global_admin(&mut state, "@Shining");
+
+    let (status, _) = create_session(
+        State(state),
+        Path(("acme".to_string(), "site".to_string())),
+        viewer_user(),
+        auth_headers(),
+        Json(create_request()),
+    )
+    .await
+    .expect("global admin does not require an App role read");
+    assert_eq!(status, StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn create_session_allows_another_creators_overlapping_label() {
+    let server = MockServer::start().await;
+    mount_open_triggers(
+        &server,
+        "acme",
+        "site",
+        &[(19, "site-build", "another-creator")],
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/repos/acme/site/issues"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+            "number": 27,
+            "html_url": "https://github.com/acme/site/issues/27"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let state = state_with_creator_role(&server, "acme", "site", 200, Some("maintain")).await;
+
+    let (status, Json(created)) = create_session(
+        State(state),
+        Path(("acme".to_string(), "site".to_string())),
+        viewer_user(),
+        auth_headers(),
+        Json(create_request()),
+    )
+    .await
+    .expect("collision keys include creator");
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(created.issue_number, 27);
+}
+
+#[tokio::test]
+async fn create_session_rejects_an_invalid_branch_with_422_before_github() {
+    let server = MockServer::start().await;
+    let state = test_state(&server.uri(), None);
+    let err = create_session(
+        State(state),
+        Path(("acme".to_string(), "site".to_string())),
+        viewer_user(),
+        auth_headers(),
+        Json(CreateSessionRequest {
+            source_branch: Some("bad branch".to_string()),
+            ..create_request()
+        }),
+    )
+    .await
+    .expect_err("invalid branch");
+    assert!(matches!(err, AppError::Unprocessable(_)), "got {err:?}");
 }

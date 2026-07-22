@@ -14,6 +14,10 @@ export const detail: DetailSlice = {
   tabLogs: 'Logs',
   tabOutcomes: 'Outcomes',
   sessionIdCopy: 'Copy session ID',
+  creatorLabel: 'Creator',
+  sourceBranchLabel: 'Source',
+  targetBranchLabel: 'Target',
+  repoDefault: 'repo default',
   lifecycle: 'Lifecycle',
   phase: {
     registered: 'Registered',

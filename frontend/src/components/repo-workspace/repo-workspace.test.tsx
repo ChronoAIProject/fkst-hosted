@@ -23,9 +23,12 @@ const issue = (
 const session = (over: Partial<SessionDetail>): SessionDetail => ({
   session_id: 'f00dfeed-1111-2222-3333-444455556666',
   name: 'nightly',
+  creator: 'shining',
   work_label: 'fkst-work',
   auto_merge: true,
   environment: 'staging',
+  source_branch: null,
+  target_branch: 'fkst-hosted-default',
   packages: ['ChronoAIProject/fkst-packages@fkst-hosted:codex/base'],
   invalid_reason: null,
   status_labels: ['fkst-substrate-active'],
@@ -66,6 +69,7 @@ function renderWorkspace(props: Partial<Parameters<typeof RepoWorkspace>[0]> = {
             data={body([alpha, beta])}
             loadFailed={false}
             onChanged={() => {}}
+            viewerLogin="shining"
             {...props}
           />
         </AuthProvider>
@@ -146,6 +150,7 @@ describe('RepoWorkspace', () => {
     const picker = await screen.findByRole('combobox', { name: 'Work label' });
     expect(picker).toHaveValue('fkst-dev');
     expect(screen.getByRole('option', { name: 'fkst-security' })).toBeInTheDocument();
+    expect(screen.getByText(/assigned to `@shining`/)).toBeInTheDocument();
     expect(screen.getByLabelText('Details (optional)')).toBeInstanceOf(HTMLTextAreaElement);
   });
 
@@ -202,6 +207,29 @@ describe('RepoWorkspace', () => {
     await user.clear(labelInput);
     await user.type(labelInput, 'open-label');
     expect(screen.getByText(/already uses this work label/)).toBeInTheDocument();
+  });
+
+  it("does not warn for another creator's overlapping open-session label", async () => {
+    const user = userEvent.setup();
+    renderWorkspace({
+      data: body([
+        session({
+          session_id: 'other-creator-session',
+          name: 'other',
+          creator: 'another-user',
+          work_label: 'shared-label',
+          trigger: issue({ number: 5, title: 'other trigger', state: 'open' }),
+        }),
+      ]),
+    });
+
+    await user.click(screen.getByRole('button', { name: 'New session' }));
+    await user.type(await screen.findByLabelText('Session name'), 'mine');
+    await user.type(screen.getByLabelText('Packages 1'), 'a/b@main:pkg');
+    await user.type(screen.getByLabelText('Work label (optional)'), 'shared-label');
+
+    expect(screen.queryByText(/already uses this work label/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create trigger issue' })).toBeEnabled();
   });
 
   it('offers a Retry on a no-data load failure', async () => {

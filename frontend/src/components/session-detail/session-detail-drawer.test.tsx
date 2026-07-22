@@ -25,9 +25,12 @@ const trigger: IssueDetail = {
 const session = (over: Partial<SessionDetail> = {}): SessionDetail => ({
   session_id: 'sess-1',
   name: 'nightly',
+  creator: 'shining',
   work_label: 'fkst-work',
   auto_merge: true,
   environment: null,
+  source_branch: null,
+  target_branch: 'fkst-hosted-default',
   packages: ['ChronoAIProject/fkst-packages@fkst-hosted:codex/base'],
   invalid_reason: null,
   status_labels: ['fkst-substrate-active'],
@@ -65,6 +68,27 @@ describe('SessionDetailDrawer', () => {
     expect(screen.getByRole('tab', { name: 'Packages' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Logs' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Outcomes' })).toBeInTheDocument();
+  });
+
+  it('renders the effective creator and authored/resolved branch facts', () => {
+    render(
+      <AuthProvider>
+        <SessionDetailDrawer
+          owner="shining"
+          name="lab"
+          session={session({
+            creator: 'Seed-Owner',
+            source_branch: null,
+            target_branch: 'feature/site',
+          })}
+          onClose={() => {}}
+        />
+      </AuthProvider>
+    );
+
+    expect(screen.getByText('@Seed-Owner')).toBeInTheDocument();
+    expect(screen.getByText('repo default')).toBeInTheDocument();
+    expect(screen.getByText('feature/site')).toBeInTheDocument();
   });
 
   it('switches to the Packages tab and renders package roles', async () => {

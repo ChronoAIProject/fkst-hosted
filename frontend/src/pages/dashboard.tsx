@@ -508,6 +508,7 @@ export function Dashboard() {
                     data={sessions}
                     loadFailed={sessionsFailed}
                     onChanged={onSessionsChanged}
+                    viewerLogin={overview?.viewer.login ?? ''}
                     readOnly={repoReadOnly}
                   />
                 )}

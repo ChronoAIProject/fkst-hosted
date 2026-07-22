@@ -7,7 +7,7 @@
 //! own file so neither module grows past the file-size budget.
 
 use secrecy::{ExposeSecret, SecretString};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 use crate::routes::dashboard::DashboardGithub;
@@ -260,6 +260,7 @@ impl DashboardGithub {
     /// session's authz owner (the reconciler trusts the issue author). The
     /// body/labels are the caller's responsibility (rendered + round-trip
     /// validated before this is ever called).
+    #[allow(clippy::too_many_arguments)] // Mirrors GitHub's issue-create fields at the wire boundary.
     pub(crate) async fn create_issue(
         &self,
         user_token: &SecretString,
@@ -268,14 +269,29 @@ impl DashboardGithub {
         title: &str,
         body: &str,
         labels: &[String],
+        assignees: &[String],
     ) -> Result<CreatedIssue, AppError> {
+        #[derive(Serialize)]
+        struct CreateIssueBody<'a> {
+            title: &'a str,
+            body: &'a str,
+            labels: &'a [String],
+            #[serde(skip_serializing_if = "<[String]>::is_empty")]
+            assignees: &'a [String],
+        }
+
         let url = format!("{}/repos/{owner}/{repo}/issues", self.api_base);
         let response = self
             .client
             .post(&url)
             .bearer_auth(user_token.expose_secret())
             .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-            .json(&serde_json::json!({ "title": title, "body": body, "labels": labels }))
+            .json(&CreateIssueBody {
+                title,
+                body,
+                labels,
+                assignees,
+            })
             .send()
             .await
             .map_err(|e| {

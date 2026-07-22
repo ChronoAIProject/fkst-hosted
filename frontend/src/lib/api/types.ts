@@ -126,12 +126,18 @@ export interface SessionRecoveryProjection {
 export interface SessionDetail {
   session_id: string | null;
   name: string | null;
+  /** Effective human creator, including the sole assignee for App-authored triggers. */
+  creator: string;
   work_label: string | null;
   /** Full resolved queue-label set: explicit plus package/manifest-discovered.
    *  Optional only for compatibility with an older control plane during deploy. */
   work_labels?: string[] | null;
   auto_merge: boolean | null;
   environment: string | null;
+  /** Authored source branch; null means the repository default branch. */
+  source_branch: string | null;
+  /** Resolved target branch, including the control-plane default. */
+  target_branch: string;
   packages: string[];
   invalid_reason: string | null;
   status_labels: string[];
@@ -182,6 +188,8 @@ export interface CreateSessionRequest {
   manifests?: string[];
   work_label?: string;
   environment?: string;
+  source_branch?: string;
+  target_branch?: string;
   auto_merge?: boolean;
   log_access?: string[];
   /** GitHub logins granted work-item authority (`### Session Collaborators`);

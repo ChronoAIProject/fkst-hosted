@@ -188,6 +188,23 @@ export function SessionDetailView({
           </div>
         </div>
 
+        <dl className="flex items-start gap-x-5 gap-y-1.5 flex-wrap font-mono text-[10.5px]">
+          <div className="flex items-baseline gap-1.5 min-w-0">
+            <dt className="text-ghost">{t.creatorLabel}</dt>
+            <dd className="text-dim break-all">
+              {session.creator ? `@${session.creator}` : t.configUnset}
+            </dd>
+          </div>
+          <div className="flex items-baseline gap-1.5 min-w-0">
+            <dt className="text-ghost">{t.sourceBranchLabel}</dt>
+            <dd className="text-dim break-all">{session.source_branch ?? t.repoDefault}</dd>
+          </div>
+          <div className="flex items-baseline gap-1.5 min-w-0">
+            <dt className="text-ghost">{t.targetBranchLabel}</dt>
+            <dd className="text-dim break-all">{session.target_branch}</dd>
+          </div>
+        </dl>
+
         <div
           role="tablist"
           aria-label={t.tabsAria}
@@ -257,6 +274,7 @@ export function SessionDetailView({
           owner={owner}
           name={name}
           triggerIssue={session.trigger.number}
+          creator={session.creator}
           workLabels={workLabels}
           onClose={() => setShowWorkItem(false)}
           onCreated={() => {

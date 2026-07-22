@@ -19,9 +19,12 @@ const trigger: IssueDetail = {
 const session = (over: Partial<SessionDetail> = {}): SessionDetail => ({
   session_id: 'sess-1',
   name: 'nightly',
+  creator: 'shining',
   work_label: null,
   auto_merge: null,
   environment: null,
+  source_branch: null,
+  target_branch: 'fkst-hosted-default',
   packages: ['ChronoAIProject/fkst-packages@fkst-hosted:codex/triage'],
   invalid_reason: null,
   status_labels: [],

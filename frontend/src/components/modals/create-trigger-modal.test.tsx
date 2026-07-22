@@ -49,6 +49,8 @@ describe('buildCreateRequest', () => {
       manifests: '   \n  ',
       workLabel: '   ',
       environment: '   ',
+      sourceBranch: '   ',
+      targetBranch: '   ',
       autoMerge: false,
       logAccess: '   ',
       collaborators: '   ',
@@ -64,6 +66,8 @@ describe('buildCreateRequest', () => {
       manifests: 'o/m@main:bundle-a\n  o/m@main:bundle-b  ',
       workLabel: 'ready',
       environment: 'staging',
+      sourceBranch: ' release/v1.2 ',
+      targetBranch: ' feature/site ',
       autoMerge: true,
       logAccess: 'alice, bob',
       collaborators: 'worker helper',
@@ -75,6 +79,8 @@ describe('buildCreateRequest', () => {
       manifests: ['o/m@main:bundle-a', 'o/m@main:bundle-b'],
       work_label: 'ready',
       environment: 'staging',
+      source_branch: 'release/v1.2',
+      target_branch: 'feature/site',
       auto_merge: true,
       log_access: ['alice', 'bob'],
       collaborators: ['worker', 'helper'],
@@ -89,6 +95,8 @@ describe('buildCreateRequest', () => {
       manifests: 'o/m@main:a\n\n  o/m@main:b  \n',
       workLabel: '',
       environment: '',
+      sourceBranch: '',
+      targetBranch: '',
       autoMerge: false,
       logAccess: '',
       collaborators: '',
@@ -271,6 +279,60 @@ describe('CreateTriggerModal', () => {
     });
   });
 
+  it('shows branch defaults and sends trimmed source and target branches', async () => {
+    const user = userEvent.setup();
+    let sentBody: Record<string, unknown> | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes(ENV_PATH)) return jsonResponse({ environment_profiles: [] });
+        if (url.includes(SESSIONS_PATH)) {
+          sentBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          return jsonResponse({ issue_number: 10, html_url: 'https://github.com/acme/app/issues/10' });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+    renderModal();
+
+    expect(await screen.findByText('Advanced')).toBeInTheDocument();
+    expect(screen.getByLabelText('Source branch (optional)')).toHaveAttribute(
+      'placeholder',
+      'Repository default branch'
+    );
+    expect(screen.getByLabelText('Target branch (optional)')).toHaveAttribute(
+      'placeholder',
+      expect.stringContaining('fkst-hosted-default')
+    );
+    await user.type(screen.getByLabelText('Session name'), 'nightly');
+    await user.type(screen.getByLabelText('Packages 1'), 'a/b@main:pkg');
+    await user.type(screen.getByLabelText('Source branch (optional)'), ' release/v1.2 ');
+    await user.type(screen.getByLabelText('Target branch (optional)'), ' feature/site ');
+    await user.click(screen.getByRole('button', { name: 'Create trigger issue' }));
+
+    await waitFor(() => expect(sentBody).toBeDefined());
+    expect(sentBody).toMatchObject({
+      source_branch: 'release/v1.2',
+      target_branch: 'feature/site',
+    });
+  });
+
+  it('blocks an invalid branch name with localized client validation', async () => {
+    const user = userEvent.setup();
+    const fetch = vi.fn(async () => jsonResponse({ environment_profiles: [] }));
+    vi.stubGlobal('fetch', fetch);
+    renderModal();
+
+    await user.type(await screen.findByLabelText('Session name'), 'nightly');
+    await user.type(screen.getByLabelText('Packages 1'), 'a/b@main:pkg');
+    await user.type(screen.getByLabelText('Target branch (optional)'), 'bad branch');
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/Use 1–200 letters/);
+    expect(screen.getByRole('button', { name: 'Create trigger issue' })).toBeDisabled();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('allows a manifest-only submit with no packages and no work label', async () => {
     const user = userEvent.setup();
     let sentBody: unknown;
@@ -328,6 +390,29 @@ describe('CreateTriggerModal', () => {
     expect(await screen.findByText('bad work label')).toBeInTheDocument();
     expect(onCreated).not.toHaveBeenCalled();
     expect(screen.queryByText('Session created')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [403, '@shining must have admin or maintain permission on acme/app to create a session'],
+    [409, 'work label "site-build" is already in use by the open session #19'],
+  ])('renders the backend %s message verbatim', async (status, message) => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(ENV_PATH)) return jsonResponse({ environment_profiles: [] });
+        if (url.includes(SESSIONS_PATH)) return jsonResponse({ error: 'rejected', message }, status);
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+    renderModal();
+
+    await user.type(await screen.findByLabelText('Session name'), 'nightly');
+    await user.type(screen.getByLabelText('Packages 1'), 'a/b@main:pkg');
+    await user.click(screen.getByRole('button', { name: 'Create trigger issue' }));
+
+    expect(await screen.findByText(message)).toBeInTheDocument();
   });
 });
 

@@ -26,6 +26,7 @@ export function RepoWorkspace({
   data,
   loadFailed,
   onChanged,
+  viewerLogin,
   readOnly = false,
 }: {
   owner: string;
@@ -35,6 +36,8 @@ export function RepoWorkspace({
   loadFailed: boolean;
   /** A trigger was created or stopped — the page re-fetches immediately. */
   onChanged: () => void;
+  /** Verified viewer login used to scope same-creator collision advice. */
+  viewerLogin: string;
   /** Hide user-token mutations for an App-wide cross-account projection. */
   readOnly?: boolean;
 }) {
@@ -72,6 +75,7 @@ export function RepoWorkspace({
             data={data}
             loadFailed={loadFailed}
             onChanged={onChanged}
+            viewerLogin={viewerLogin}
             readOnly={readOnly}
             // Always the EFFECTIVE selection (first by default) so the matching
             // row highlights even before the user has clicked anything.

@@ -45,9 +45,12 @@ const sessionsBody: RepoSessionsResponse = {
     {
       session_id: 'aaaa1111-2222-3333-4444-555566667777',
       name: 'nightly',
+      creator: 'shining',
       work_label: 'lab-work',
       auto_merge: null,
       environment: null,
+      source_branch: null,
+      target_branch: 'fkst-hosted-default',
       packages: ['o/p@main:pkg/base'],
       invalid_reason: null,
       status_labels: [],
