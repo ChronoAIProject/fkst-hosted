@@ -16,8 +16,8 @@ use crate::github_app::{GithubAppError, GithubAppTokens};
 use crate::goals::trigger_parse::parse_trigger_issue_body;
 use crate::reconcile::execute_test_support::test_config;
 
-/// A recorded `create_issue` call: `(owner, repo, title, body, labels)`.
-type CreatedIssue = (String, String, String, String, Vec<String>);
+/// A recorded `create_issue` call: `(owner, repo, title, body, labels, assignees)`.
+type CreatedIssue = (String, String, String, String, Vec<String>, Vec<String>);
 
 /// A minimal GitHub transport for the seeder: token mint is stubbed; the
 /// idempotency probe returns `existing`; `create_issue` is recorded.
@@ -69,6 +69,7 @@ impl GithubApi for SeedFake {
         title: &str,
         body: &str,
         labels: &[String],
+        assignees: &[String],
     ) -> Result<u64, GithubAppError> {
         self.create_calls.fetch_add(1, Ordering::SeqCst);
         self.created.lock().unwrap().push((
@@ -77,6 +78,7 @@ impl GithubApi for SeedFake {
             title.to_string(),
             body.to_string(),
             labels.to_vec(),
+            assignees.to_vec(),
         ));
         Ok(4242)
     }
@@ -175,11 +177,15 @@ async fn seeds_a_repo_with_no_open_trigger_issue() {
 
     assert_eq!(api.create_calls.load(Ordering::SeqCst), 1);
     let created = api.created.lock().unwrap();
-    let (owner, repo, title, body, labels) = &created[0];
+    let (owner, repo, title, body, labels, assignees) = &created[0];
     assert_eq!(owner, "octo-owner");
     assert_eq!(repo, "repo-a");
     assert_eq!(title, "[session] default-workflows (auto-seeded)");
     assert_eq!(labels, &vec!["fkst-substrate-trigger".to_string()]);
+    assert!(
+        assignees.is_empty(),
+        "#2275 does not change seed attribution"
+    );
     // The recorded body is the manifest-driven trigger body (parses; carries a
     // manifest ref; no explicit work label).
     let spec = parse_trigger_issue_body(body).expect("recorded body parses");
@@ -228,7 +234,7 @@ async fn legacy_seed_used_when_no_default_manifest_is_configured() {
 
     assert_eq!(api.create_calls.load(Ordering::SeqCst), 1);
     let created = api.created.lock().unwrap();
-    let (_owner, _repo, title, body, _labels) = &created[0];
+    let (_owner, _repo, title, body, _labels, _assignees) = &created[0];
     assert_eq!(title, "[session] evolve (auto-seeded)");
     let spec = parse_trigger_issue_body(body).expect("recorded body parses");
     assert_eq!(spec.work_label.as_deref(), Some("fkst-evolve"));

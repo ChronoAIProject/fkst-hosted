@@ -47,6 +47,35 @@ pub struct IssueSummary {
     pub user_id: i64,
 }
 
+/// Content-free projection of an issue for authorization decisions.
+///
+/// Deliberately has no title or body: predicates that accept only
+/// `IssueMetadata` cannot read issue content. GitHub's REST issue-list response
+/// still carries content over the wire; this type enforces that authorization
+/// code never reads or parses it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IssueMetadata {
+    pub number: i64,
+    pub labels: Vec<String>,
+    pub state: String,
+    pub assignees: Vec<String>,
+    pub user_login: String,
+    pub user_id: i64,
+}
+
+impl IssueSummary {
+    pub fn metadata(&self) -> IssueMetadata {
+        IssueMetadata {
+            number: self.number,
+            labels: self.labels.clone(),
+            state: self.state.clone(),
+            assignees: self.assignees.clone(),
+            user_login: self.user_login.clone(),
+            user_id: self.user_id,
+        }
+    }
+}
+
 /// One GitHub App installation, trimmed to the id + account login the reconciler
 /// enumerates.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,6 +185,11 @@ struct SearchCount {
     total_count: u64,
 }
 
+#[derive(Deserialize)]
+struct RawPermission {
+    role_name: String,
+}
+
 // ---------------------------------------------------------------------------
 // Transport trait + HTTP implementation
 // ---------------------------------------------------------------------------
@@ -190,6 +224,57 @@ pub trait GithubListing: Send + Sync {
         repo: &str,
         label: &str,
     ) -> Result<u64, GithubAppError>;
+
+    /// The assignee-filtered form of [`Self::list_issues_by_label`]. GitHub
+    /// matches issues where `assignee` is among the assignees; callers that
+    /// require exactly one assignee must post-filter the returned metadata.
+    ///
+    /// This and the other additive methods below have defaults so existing
+    /// test fakes need not implement methods their tests never exercise.
+    async fn list_issues_by_label_assignee(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        label: &str,
+        assignee: &str,
+    ) -> Result<Vec<IssueSummary>, GithubAppError> {
+        let _ = (token, owner, repo, label, assignee);
+        unimplemented!("list_issues_by_label_assignee is only implemented by the HTTP transport")
+    }
+
+    /// Count open issues carrying `label` and assigned to `assignee` via the
+    /// Search API. This has the same Search-API rate-limit caveat as
+    /// [`Self::count_open_issues_with_label`].
+    async fn count_open_issues_with_label_assignee(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        label: &str,
+        assignee: &str,
+    ) -> Result<u64, GithubAppError> {
+        let _ = (token, owner, repo, label, assignee);
+        unimplemented!(
+            "count_open_issues_with_label_assignee is only implemented by the HTTP transport"
+        )
+    }
+
+    /// `GET /repos/{owner}/{repo}/collaborators/{username}/permission`.
+    ///
+    /// The caller must use `role_name` (`admin|maintain|write|triage|read`), not
+    /// the legacy `permission` field, which collapses `maintain` into `write`.
+    /// `Ok(None)` means GitHub returned 404. Installation-token auth.
+    async fn get_collaborator_role(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        username: &str,
+    ) -> Result<Option<String>, GithubAppError> {
+        let _ = (token, owner, repo, username);
+        unimplemented!("get_collaborator_role is only implemented by the HTTP transport")
+    }
 
     /// `GET /app/installations?per_page=100` with App-JWT auth, following `Link`
     /// pagination to exhaustion.
@@ -289,6 +374,67 @@ impl HttpGithubListing {
             .map_err(|e| GithubAppError::Http(format!("{resource} body: {e}")))?;
         Ok((page, next))
     }
+
+    async fn list_issues_by_label_query(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        label: &str,
+        assignee: Option<&str>,
+        resource: &str,
+    ) -> Result<Vec<IssueSummary>, GithubAppError> {
+        let mut url = format!("{}/repos/{owner}/{repo}/issues", self.api_base);
+        let mut first_page_query = vec![("labels", label), ("state", "open"), ("per_page", "100")];
+        if let Some(assignee) = assignee {
+            first_page_query.push(("assignee", assignee));
+        }
+        let mut query = Some(first_page_query);
+        let mut out = Vec::new();
+        loop {
+            let (page, next): (Vec<RawIssue>, _) = self
+                .get_page(&url, token, query.as_deref(), resource)
+                .await?;
+            out.extend(
+                page.into_iter()
+                    .filter(|raw| raw.pull_request.is_none())
+                    .map(RawIssue::into_summary),
+            );
+            match next {
+                Some(next_url) => {
+                    url = next_url;
+                    query = None;
+                }
+                None => break,
+            }
+        }
+        Ok(out)
+    }
+
+    async fn count_open_issues_with_label_query(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        label: &str,
+        assignee: Option<&str>,
+        resource: &str,
+    ) -> Result<u64, GithubAppError> {
+        let mut q = format!("repo:{owner}/{repo} type:issue state:open label:\"{label}\"");
+        if let Some(assignee) = assignee {
+            q.push_str(&format!(" assignee:{assignee}"));
+        }
+        let url = format!("{}/search/issues", self.api_base);
+        let (page, _next): (SearchCount, _) = self
+            .get_page(
+                &url,
+                token,
+                Some(&[("q", q.as_str()), ("per_page", "1")]),
+                resource,
+            )
+            .await?;
+        Ok(page.total_count)
+    }
 }
 
 #[async_trait]
@@ -300,34 +446,8 @@ impl GithubListing for HttpGithubListing {
         repo: &str,
         label: &str,
     ) -> Result<Vec<IssueSummary>, GithubAppError> {
-        let mut url = format!("{}/repos/{owner}/{repo}/issues", self.api_base);
-        // Applied to the first page only; followed `next` URLs carry it already.
-        let mut query: Option<Vec<(&str, &str)>> = Some(vec![
-            ("labels", label),
-            ("state", "open"),
-            ("per_page", "100"),
-        ]);
-        let resource = "list_issues_by_label";
-        let mut out = Vec::new();
-        loop {
-            let (page, next): (Vec<RawIssue>, _) = self
-                .get_page(&url, token, query.as_deref(), resource)
-                .await?;
-            // Skip PRs (the issues endpoint returns them with a `pull_request`).
-            out.extend(
-                page.into_iter()
-                    .filter(|raw| raw.pull_request.is_none())
-                    .map(RawIssue::into_summary),
-            );
-            match next {
-                Some(n) => {
-                    url = n;
-                    query = None;
-                }
-                None => break,
-            }
-        }
-        Ok(out)
+        self.list_issues_by_label_query(token, owner, repo, label, None, "list_issues_by_label")
+            .await
     }
 
     async fn count_open_issues_with_label(
@@ -337,19 +457,81 @@ impl GithubListing for HttpGithubListing {
         repo: &str,
         label: &str,
     ) -> Result<u64, GithubAppError> {
-        // The label is embedded in the search qualifier and URL-encoded by
-        // reqwest's query serializer (spaces/quotes → percent/`+` escapes).
-        let q = format!("repo:{owner}/{repo} type:issue state:open label:\"{label}\"");
-        let url = format!("{}/search/issues", self.api_base);
-        let (page, _next): (SearchCount, _) = self
-            .get_page(
-                &url,
-                token,
-                Some(&[("q", q.as_str()), ("per_page", "1")]),
-                "count_open_issues_with_label",
-            )
-            .await?;
-        Ok(page.total_count)
+        self.count_open_issues_with_label_query(
+            token,
+            owner,
+            repo,
+            label,
+            None,
+            "count_open_issues_with_label",
+        )
+        .await
+    }
+
+    async fn list_issues_by_label_assignee(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        label: &str,
+        assignee: &str,
+    ) -> Result<Vec<IssueSummary>, GithubAppError> {
+        self.list_issues_by_label_query(
+            token,
+            owner,
+            repo,
+            label,
+            Some(assignee),
+            "list_issues_by_label_assignee",
+        )
+        .await
+    }
+
+    async fn count_open_issues_with_label_assignee(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        label: &str,
+        assignee: &str,
+    ) -> Result<u64, GithubAppError> {
+        self.count_open_issues_with_label_query(
+            token,
+            owner,
+            repo,
+            label,
+            Some(assignee),
+            "count_open_issues_with_label_assignee",
+        )
+        .await
+    }
+
+    async fn get_collaborator_role(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        username: &str,
+    ) -> Result<Option<String>, GithubAppError> {
+        debug_assert!(
+            !username.is_empty()
+                && username
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'),
+            "GitHub login should contain only ASCII alphanumerics and hyphens"
+        );
+        let url = format!(
+            "{}/repos/{owner}/{repo}/collaborators/{username}/permission",
+            self.api_base
+        );
+        match self
+            .get_page::<RawPermission>(&url, token, None, "get_collaborator_role")
+            .await
+        {
+            Ok((permission, _)) => Ok(Some(permission.role_name)),
+            Err(GithubAppError::NotFound { .. }) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     async fn list_installations(

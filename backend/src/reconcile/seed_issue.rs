@@ -123,7 +123,10 @@ pub async fn seed_trigger_issues(
                 continue;
             }
         }
-        match github.create_issue(owner_repo, title, &body, &labels).await {
+        match github
+            .create_issue(owner_repo, title, &body, &labels, &[])
+            .await
+        {
             Ok(number) => {
                 tracing::info!(repo = %owner_repo, issue = number, "seed: created trigger issue")
             }

@@ -23,6 +23,32 @@ fn jwt() -> SecretString {
     SecretString::from(APP_JWT.to_string())
 }
 
+#[test]
+fn issue_metadata_projection_copies_only_authorization_fields() {
+    let issue = IssueSummary {
+        number: 7,
+        title: "attacker-controlled title".to_string(),
+        body: "attacker-controlled body".to_string(),
+        labels: vec!["fkst-dev".to_string()],
+        state: "open".to_string(),
+        assignees: vec!["alice".to_string()],
+        user_login: "carol".to_string(),
+        user_id: 42,
+    };
+
+    assert_eq!(
+        issue.metadata(),
+        IssueMetadata {
+            number: 7,
+            labels: vec!["fkst-dev".to_string()],
+            state: "open".to_string(),
+            assignees: vec!["alice".to_string()],
+            user_login: "carol".to_string(),
+            user_id: 42,
+        }
+    );
+}
+
 // ---- list_issues_by_label -------------------------------------------------
 
 #[tokio::test]
@@ -224,6 +250,140 @@ async fn count_parses_total_count_and_url_encodes_the_label() {
         .await
         .expect("ok");
     assert_eq!(count, 42);
+}
+
+// ---- assignee-filtered reads ---------------------------------------------
+
+#[tokio::test]
+async fn list_issues_by_label_assignee_sends_filter_paginates_and_excludes_prs() {
+    let server = MockServer::start().await;
+    let next_link = format!(
+        "<{}/repos/acme/site/issues?labels=fkst-dev&state=open&per_page=100&assignee=Alice&page=2>; rel=\"next\"",
+        server.uri()
+    );
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/issues"))
+        .and(query_param("labels", "fkst-dev"))
+        .and(query_param("assignee", "Alice"))
+        .and(query_param_is_missing("page"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("link", next_link.as_str())
+                .set_body_json(serde_json::json!([{
+                    "number": 1,
+                    "title": "first",
+                    "body": "body",
+                    "labels": [{ "name": "fkst-dev" }],
+                    "state": "open",
+                    "assignees": [{ "login": "Alice" }],
+                    "user": { "login": "carol", "id": 9 }
+                }])),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/issues"))
+        .and(query_param("assignee", "Alice"))
+        .and(query_param("page", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "number": 2,
+                "title": "pull request",
+                "labels": [{ "name": "fkst-dev" }],
+                "state": "open",
+                "assignees": [{ "login": "Alice" }],
+                "user": { "login": "carol", "id": 9 },
+                "pull_request": { "url": "https://example/pulls/2" }
+            },
+            {
+                "number": 3,
+                "title": "third",
+                "labels": [{ "name": "fkst-dev" }],
+                "state": "open",
+                "assignees": [{ "login": "Alice" }],
+                "user": { "login": "carol", "id": 9 }
+            }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let issues = listing(&server.uri())
+        .list_issues_by_label_assignee(&tok(), "acme", "site", "fkst-dev", "Alice")
+        .await
+        .expect("ok");
+    assert_eq!(
+        issues.iter().map(|issue| issue.number).collect::<Vec<_>>(),
+        vec![1, 3]
+    );
+}
+
+#[tokio::test]
+async fn count_with_assignee_builds_the_exact_search_qualifier() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/search/issues"))
+        .and(query_param(
+            "q",
+            "repo:acme/site type:issue state:open label:\"needs triage\" assignee:Alice",
+        ))
+        .and(query_param("per_page", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 2,
+            "incomplete_results": false,
+            "items": []
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let count = listing(&server.uri())
+        .count_open_issues_with_label_assignee(&tok(), "acme", "site", "needs triage", "Alice")
+        .await
+        .expect("ok");
+    assert_eq!(count, 2);
+}
+
+// ---- get_collaborator_role -----------------------------------------------
+
+#[tokio::test]
+async fn get_collaborator_role_reads_role_name_not_permission() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/collaborators/Alice/permission"))
+        .and(header("authorization", format!("Bearer {TOKEN}").as_str()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "permission": "write",
+            "role_name": "maintain",
+            "user": { "login": "Alice", "id": 1 }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let role = listing(&server.uri())
+        .get_collaborator_role(&tok(), "acme", "site", "Alice")
+        .await
+        .expect("ok");
+    assert_eq!(role.as_deref(), Some("maintain"));
+}
+
+#[tokio::test]
+async fn get_collaborator_role_maps_404_to_none() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/collaborators/Alice/permission"))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let role = listing(&server.uri())
+        .get_collaborator_role(&tok(), "acme", "site", "Alice")
+        .await
+        .expect("404 is absence");
+    assert_eq!(role, None);
 }
 
 #[tokio::test]
