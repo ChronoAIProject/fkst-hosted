@@ -17,7 +17,6 @@ const TRIGGER_LABEL: &str = "fkst-substrate-trigger";
 async fn new_harness(
     profile: BackendProfile,
     allowed_users: Option<&str>,
-    enforce_work_authz: bool,
 ) -> (MockServer, ChaosHarness) {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -28,7 +27,7 @@ async fn new_harness(
         )
         .mount(&server)
         .await;
-    let harness = ChaosHarness::new(profile, &server.uri(), allowed_users, enforce_work_authz);
+    let harness = ChaosHarness::new(profile, &server.uri(), allowed_users);
     (server, harness)
 }
 
@@ -47,6 +46,7 @@ fn seed_valid(harness: &ChaosHarness, work_author: (&str, i64)) {
         work_author.0,
         work_author.1,
     ));
+    harness.ledger.set_assignees(WORK, &["alice"]);
 }
 
 fn session_id(trigger: i64) -> String {
@@ -75,7 +75,7 @@ fn complete_credential_keys() -> Vec<String> {
 #[tokio::test]
 async fn converges_after_controller_runtime_and_combined_loss_for_both_backends() {
     for profile in BackendProfile::ALL {
-        let (_server, mut harness) = new_harness(profile, None, false).await;
+        let (_server, mut harness) = new_harness(profile, None).await;
         seed_valid(&harness, ("alice", AUTHOR_ID));
         let expected_id = session_id(TRIGGER);
 
@@ -142,7 +142,7 @@ async fn converges_after_controller_runtime_and_combined_loss_for_both_backends(
 #[tokio::test]
 async fn open_trigger_without_work_stays_registered_and_idle_after_restart() {
     for profile in BackendProfile::ALL {
-        let (_server, mut harness) = new_harness(profile, None, false).await;
+        let (_server, mut harness) = new_harness(profile, None).await;
         harness.ledger.put(issue(
             TRIGGER,
             trigger_body("idle-session", WORK_LABEL),
@@ -170,7 +170,7 @@ async fn open_trigger_without_work_stays_registered_and_idle_after_restart() {
 #[tokio::test]
 async fn closed_work_and_closed_trigger_never_resurrect_a_runtime() {
     for profile in BackendProfile::ALL {
-        let (_server, mut harness) = new_harness(profile, None, false).await;
+        let (_server, mut harness) = new_harness(profile, None).await;
         seed_valid(&harness, ("alice", AUTHOR_ID));
         let expected_id = session_id(TRIGGER);
         harness.full_resync().await;
@@ -218,7 +218,7 @@ async fn closed_work_and_closed_trigger_never_resurrect_a_runtime() {
 #[tokio::test]
 async fn invalid_trigger_feedback_is_durable_and_never_spawns() {
     for profile in BackendProfile::ALL {
-        let (_server, mut harness) = new_harness(profile, None, false).await;
+        let (_server, mut harness) = new_harness(profile, None).await;
         harness.ledger.put(issue(
             TRIGGER,
             "### Session Name\nmissing-everything-else\n",
@@ -246,7 +246,7 @@ async fn invalid_trigger_feedback_is_durable_and_never_spawns() {
 #[tokio::test]
 async fn missing_source_is_flagged_once_and_recovers_when_the_branch_appears() {
     for profile in BackendProfile::ALL {
-        let (_server, harness) = new_harness(profile, None, false).await;
+        let (_server, harness) = new_harness(profile, None).await;
         let body = format!(
             "{}\n### Source Branch\nfeature-source\n",
             trigger_body("branch-session", WORK_LABEL)
@@ -257,6 +257,7 @@ async fn missing_source_is_flagged_once_and_recovers_when_the_branch_appears() {
         harness
             .ledger
             .put(issue(WORK, "work", &[WORK_LABEL], "alice", AUTHOR_ID));
+        harness.ledger.set_assignees(WORK, &["alice"]);
         harness.ledger.set_branch_exists("feature-source", false);
 
         for _ in 0..3 {
@@ -287,7 +288,7 @@ async fn missing_source_is_flagged_once_and_recovers_when_the_branch_appears() {
 
 #[tokio::test]
 async fn source_lookup_transport_error_aborts_before_any_plan_executes() {
-    let (_server, harness) = new_harness(BackendProfile::Kubernetes, None, false).await;
+    let (_server, harness) = new_harness(BackendProfile::Kubernetes, None).await;
     seed_valid(&harness, ("alice", AUTHOR_ID));
     harness.ledger.set_branch_transport_error(true);
 
@@ -304,7 +305,7 @@ async fn source_lookup_transport_error_aborts_before_any_plan_executes() {
 async fn unauthorized_trigger_and_work_are_blocked_across_reconstruction() {
     for profile in BackendProfile::ALL {
         // Trigger intake is gated by the deployment login allowlist.
-        let (_server, mut harness) = new_harness(profile, Some("alice"), false).await;
+        let (_server, mut harness) = new_harness(profile, Some("alice")).await;
         harness.ledger.put(issue(
             TRIGGER,
             trigger_body("denied-trigger", WORK_LABEL),
@@ -315,6 +316,7 @@ async fn unauthorized_trigger_and_work_are_blocked_across_reconstruction() {
         harness
             .ledger
             .put(issue(WORK, "work", &[WORK_LABEL], "alice", AUTHOR_ID));
+        harness.ledger.set_assignees(WORK, &["alice"]);
         harness.full_resync().await;
         harness.restart_controller();
         harness.full_resync().await;
@@ -326,7 +328,7 @@ async fn unauthorized_trigger_and_work_are_blocked_across_reconstruction() {
         );
 
         // An admitted trigger still rejects work raised outside author/collaborator/admin.
-        let (_server, mut harness) = new_harness(profile, Some("alice"), true).await;
+        let (_server, mut harness) = new_harness(profile, Some("alice")).await;
         seed_valid(&harness, ("mallory", 909));
         harness.full_resync().await;
         assert!(harness.runtime_ids().is_empty(), "{profile:?}");
@@ -346,7 +348,7 @@ async fn unauthorized_trigger_and_work_are_blocked_across_reconstruction() {
 #[tokio::test]
 async fn colliding_registrations_create_only_the_canonical_runtime() {
     for profile in BackendProfile::ALL {
-        let (_server, mut harness) = new_harness(profile, None, false).await;
+        let (_server, mut harness) = new_harness(profile, None).await;
         seed_valid(&harness, ("alice", AUTHOR_ID));
         harness.ledger.put(issue(
             TRIGGER + 1,
@@ -379,7 +381,7 @@ async fn colliding_registrations_create_only_the_canonical_runtime() {
 #[tokio::test]
 async fn announced_trigger_edit_cannot_reconfigure_a_recreated_runtime() {
     for profile in BackendProfile::ALL {
-        let (_server, mut harness) = new_harness(profile, None, false).await;
+        let (_server, mut harness) = new_harness(profile, None).await;
         seed_valid(&harness, ("alice", AUTHOR_ID));
         let expected_id = session_id(TRIGGER);
         harness.full_resync().await;

@@ -10,7 +10,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
 use crate::routes::canvas::test_support::{
-    auth_headers, mount_repo_admin, test_state, viewer_user,
+    auth_headers, grant_global_admin, test_state, viewer_user,
 };
 
 fn work_item_request() -> CreateWorkItemRequest {
@@ -70,7 +70,7 @@ async fn mount_trigger(
 async fn create_work_item_stamps_the_sessions_work_label_as_the_user() {
     let server = MockServer::start().await;
     // The viewer (id 9) is the trigger author, so the author tier authorizes the
-    // work item (the repo-admin read still runs and returns non-admin).
+    // work item.
     mount_trigger(
         &server,
         21,
@@ -80,7 +80,6 @@ async fn create_work_item_stamps_the_sessions_work_label_as_the_user() {
         false,
     )
     .await;
-    mount_repo_admin(&server, "acme", "site", false).await;
     // The new work issue must carry the SESSION's resolved work label, the
     // trimmed title, and be created with the USER token (never an App token).
     Mock::given(method("POST"))
@@ -202,7 +201,6 @@ async fn create_work_item_refuses_a_session_without_any_resolved_work_label() {
         false,
     )
     .await;
-    mount_repo_admin(&server, "acme", "site", false).await;
     Mock::given(method("POST"))
         .and(path("/repos/acme/site/issues"))
         .respond_with(ResponseTemplate::new(201))
@@ -236,7 +234,6 @@ async fn create_work_item_accepts_a_package_discovered_label() {
         false,
     )
     .await;
-    mount_repo_admin(&server, "acme", "site", false).await;
     Mock::given(method("GET"))
         .and(path("/repos/acme/pkgs/contents/packages/devloop/fkst.toml"))
         .respond_with(
@@ -286,7 +283,6 @@ async fn create_work_item_rejects_a_label_outside_the_sessions_resolved_set() {
         false,
     )
     .await;
-    mount_repo_admin(&server, "acme", "site", false).await;
     Mock::given(method("POST"))
         .and(path("/repos/acme/site/issues"))
         .respond_with(ResponseTemplate::new(201))
@@ -351,10 +347,10 @@ async fn create_work_item_refuses_a_closed_session() {
 }
 
 #[tokio::test]
-async fn create_work_item_allows_a_repo_admin_or_org_owner() {
+async fn create_work_item_rejects_repo_admin_without_an_explicit_authority_tier() {
     let server = MockServer::start().await;
-    // Authored by someone else (id 100), no collaborators — but the viewer (id 9)
-    // holds admin on the repo, so the admin / org-owner tier authorizes the queue.
+    // Authored by someone else (id 100), with no explicit authority tier. Repo
+    // administrator status is deliberately no longer sufficient.
     mount_trigger(
         &server,
         21,
@@ -364,7 +360,38 @@ async fn create_work_item_allows_a_repo_admin_or_org_owner() {
         false,
     )
     .await;
-    mount_repo_admin(&server, "acme", "site", true).await;
+    Mock::given(method("POST"))
+        .and(path("/repos/acme/site/issues"))
+        .respond_with(ResponseTemplate::new(201))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let state = test_state(&server.uri(), None);
+    let error = create_work_item(
+        State(state),
+        Path(("acme".to_string(), "site".to_string(), 21)),
+        viewer_user(),
+        auth_headers(),
+        Json(work_item_request()),
+    )
+    .await
+    .expect_err("repo role alone does not grant work authority");
+    assert!(matches!(error, AppError::Forbidden(_)));
+}
+
+#[tokio::test]
+async fn create_work_item_allows_a_deployment_global_admin() {
+    let server = MockServer::start().await;
+    mount_trigger(
+        &server,
+        21,
+        100,
+        &trigger_body("site-build"),
+        &["fkst-substrate-trigger"],
+        false,
+    )
+    .await;
     Mock::given(method("POST"))
         .and(path("/repos/acme/site/issues"))
         .and(header("authorization", "Bearer user-token"))
@@ -379,7 +406,8 @@ async fn create_work_item_allows_a_repo_admin_or_org_owner() {
         .mount(&server)
         .await;
 
-    let state = test_state(&server.uri(), None);
+    let mut state = test_state(&server.uri(), None);
+    grant_global_admin(&mut state, "Shining");
     let (status, Json(created)) = create_work_item(
         State(state),
         Path(("acme".to_string(), "site".to_string(), 21)),
@@ -388,7 +416,7 @@ async fn create_work_item_allows_a_repo_admin_or_org_owner() {
         Json(work_item_request()),
     )
     .await
-    .expect("an admin may queue work items");
+    .expect("a deployment global admin may queue work items");
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(created.issue_number, 78);
 }
@@ -408,7 +436,6 @@ async fn create_work_item_allows_a_listed_session_collaborator() {
         false,
     )
     .await;
-    mount_repo_admin(&server, "acme", "site", false).await;
     Mock::given(method("POST"))
         .and(path("/repos/acme/site/issues"))
         .and(header("authorization", "Bearer user-token"))
@@ -441,7 +468,7 @@ async fn create_work_item_allows_a_listed_session_collaborator() {
 async fn create_work_item_forbids_a_stranger() {
     let server = MockServer::start().await;
     // Authored by someone else (id 100), no collaborators, and the viewer is not
-    // a repo admin — a stranger with mere write access has no work-item authority.
+    // a global admin — a stranger with mere write access has no work-item authority.
     mount_trigger(
         &server,
         21,
@@ -451,7 +478,6 @@ async fn create_work_item_forbids_a_stranger() {
         false,
     )
     .await;
-    mount_repo_admin(&server, "acme", "site", false).await;
     // The work issue must NEVER be created for an unauthorized caller.
     Mock::given(method("POST"))
         .and(path("/repos/acme/site/issues"))

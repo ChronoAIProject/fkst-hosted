@@ -175,6 +175,21 @@ impl AccessPolicy {
         self.global_admins.len()
     }
 
+    /// Configured global-admin LOGIN entries, normalized for the session runtime.
+    /// Numeric-id entries are intentionally omitted: they remain valid for
+    /// server-side authorization, but the packages' GitHub policy can match only
+    /// issue/comment author logins. A leading `@` is stripped from login entries.
+    pub fn global_admin_login_entries(&self) -> impl Iterator<Item = &str> {
+        self.global_admins.iter().filter_map(|entry| {
+            let normalized = entry.trim().trim_start_matches('@');
+            if normalized.is_empty() || normalized.bytes().all(|byte| byte.is_ascii_digit()) {
+                None
+            } else {
+                Some(normalized)
+            }
+        })
+    }
+
     /// Whether the VERIFIED GitHub identity is a deployment-wide global admin.
     /// Login matching is ASCII case-insensitive and accepts an optional leading
     /// `@`; all-digit entries match only the immutable numeric id.
@@ -357,6 +372,19 @@ mod tests {
         assert!(!policy.is_global_admin(1, "anyone"));
         // A global-admin list alone does not close an otherwise-open deployment.
         assert!(policy.allows(1, "anyone"));
+    }
+
+    #[test]
+    fn global_admin_login_entries_normalize_logins_and_exclude_numeric_ids() {
+        let policy = policy(&vars(&[(
+            "FKST_GLOBAL_ADMINS",
+            " @Deploy-Admin, 583231, reviewer ",
+        )]));
+        assert_eq!(
+            policy.global_admin_login_entries().collect::<Vec<_>>(),
+            vec!["Deploy-Admin", "reviewer"]
+        );
+        assert_eq!(policy.global_admin_count(), 3);
     }
 
     #[test]

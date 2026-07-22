@@ -154,12 +154,12 @@ pub struct TriggerSpec {
     /// be edited AFTER the session registers to grant access retroactively.
     pub log_access: Vec<String>,
     /// The OPTIONAL `### Session Collaborators`: the GitHub logins granted
-    /// WORK-ITEM AUTHORITY on this session (beyond the trigger author) — they may
-    /// later raise/label/comment on the session's work issues. A
+    /// WORK-ITEM AUTHORITY on this session (beyond the effective creator) — they
+    /// may raise/label/comment on the session's work issues and are injected into
+    /// the package-side author policy. A
     /// whitespace/comma/newline-separated list; lenient; default empty. FROZEN by
     /// config-immutability (it is part of `full_config_hash`) so it cannot be
-    /// edited AFTER the session registers to grant authority retroactively. F3
-    /// parses + freezes this list only; the authority gate lands in a later PR.
+    /// edited AFTER the session registers to grant authority retroactively.
     pub collaborators: Vec<String>,
     /// The OPTIONAL `### Output Language`: the locale the session's packages emit
     /// user-visible prose in (`FKST_OUTPUT_LANG` → the engine's `t()` i18n SDK,
@@ -326,17 +326,16 @@ fn parse_auto_merge(sections: &[(String, String)]) -> bool {
 }
 
 /// `### FKST Contributors` (legacy alias: `### Log Access Allowlist`) — OPTIONAL,
-/// lenient. The session's trusted-users list, serving BOTH purposes: (a) extra
-/// GitHub logins/ids (beyond the issue author + the global admins) allowed to
-/// download the session's redacted logs, and (b) the logins injected into the
-/// session as `FKST_GITHUB_AUTHORIZED_LOGINS`, which the packages' github author
-/// policy uses to decide whose issues/comments the session acts on. Tokens are
+/// lenient. Extra GitHub logins/ids (beyond the effective creator + global admins)
+/// allowed to download the session's redacted logs. These entries are log viewers,
+/// not work authors, and are never injected into the package-side author policy.
+/// Tokens are
 /// separated by ANY whitespace, comma, or newline; a leading `@` is stripped;
 /// empty tokens dropped. Both headings may appear — tokens merge (current heading
 /// first), deduped case-insensitively. Absent/blank → empty. Never errors. Tokens
 /// are NOT resolved to real accounts: log authz matches by numeric id AND
-/// case-insensitive login, and the author policy matches logins, so a token that
-/// names no real account simply never matches anything.
+/// case-insensitive login, so a token that names no real account simply never
+/// matches anything.
 fn parse_log_access(sections: &[(String, String)]) -> Vec<String> {
     let mut tokens: Vec<String> = Vec::new();
     let mut seen: Vec<String> = Vec::new();

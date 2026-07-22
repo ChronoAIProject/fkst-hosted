@@ -1,6 +1,4 @@
-//! Unit tests for the [`LabelCountPending`] spawn/idle gate, driven against a fake
-//! [`GithubListing`] so no network is touched: a positive count is pending, a zero
-//! count is not, and a transport error propagates.
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use secrecy::SecretString;
@@ -9,37 +7,31 @@ use super::*;
 use crate::github_app::listing::{InstallationSummary, IssueSummary};
 use crate::github_app::GithubAppError;
 use crate::goals::trigger_parse::PackageRef;
-use crate::models::GithubActor;
+use crate::models::{GithubActor, RepoRef};
 use crate::reconcile::desired::{SessionDef, SessionRegistration};
 
-/// A fake listing whose open-issue count AND enumerated issues (or error) are fixed
-/// per construction. The count feeds the blind [`has_pending`]; the issue list feeds
-/// the author-filtered [`has_pending_authorized`].
 struct FakeListing {
     count: Result<u64, GithubAppError>,
     issues: Result<Vec<IssueSummary>, GithubAppError>,
+    count_calls: AtomicUsize,
+    list_calls: AtomicUsize,
 }
 
 impl FakeListing {
-    fn ok(count: u64) -> Self {
+    fn new(
+        count: Result<u64, GithubAppError>,
+        issues: Result<Vec<IssueSummary>, GithubAppError>,
+    ) -> Self {
         Self {
-            count: Ok(count),
-            issues: Ok(Vec::new()),
+            count,
+            issues,
+            count_calls: AtomicUsize::new(0),
+            list_calls: AtomicUsize::new(0),
         }
     }
-    fn err() -> Self {
-        Self {
-            count: Err(GithubAppError::RateLimited(30)),
-            issues: Err(GithubAppError::RateLimited(30)),
-        }
-    }
-    /// A listing that enumerates the given open work issues (used by the
-    /// author-filtered gate); the blind count is irrelevant here so it stays 0.
-    fn with_issues(issues: Vec<IssueSummary>) -> Self {
-        Self {
-            count: Ok(0),
-            issues: Ok(issues),
-        }
+
+    fn ok(count: u64, issues: Vec<IssueSummary>) -> Self {
+        Self::new(Ok(count), Ok(issues))
     }
 }
 
@@ -62,6 +54,30 @@ impl GithubListing for FakeListing {
         _repo: &str,
         _label: &str,
     ) -> Result<u64, GithubAppError> {
+        self.count.clone()
+    }
+
+    async fn list_issues_by_label_assignee(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+        _label: &str,
+        _assignee: &str,
+    ) -> Result<Vec<IssueSummary>, GithubAppError> {
+        self.list_calls.fetch_add(1, Ordering::SeqCst);
+        self.issues.clone()
+    }
+
+    async fn count_open_issues_with_label_assignee(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+        _label: &str,
+        _assignee: &str,
+    ) -> Result<u64, GithubAppError> {
+        self.count_calls.fetch_add(1, Ordering::SeqCst);
         self.count.clone()
     }
 
@@ -96,31 +112,28 @@ fn repo() -> RepoRef {
     }
 }
 
-/// A work issue authored by `(user_id, user_login)` carrying `label`.
-fn issue(number: i64, user_id: i64, user_login: &str, label: &str) -> IssueSummary {
+fn issue(author_id: i64, author_login: &str, assignees: &[&str]) -> IssueSummary {
     IssueSummary {
-        number,
+        number: 5,
         title: "work item".to_string(),
-        body: String::new(),
-        labels: vec![label.to_string()],
+        body: "content must never be consulted".to_string(),
+        labels: vec!["fkst-run".to_string()],
         state: "open".to_string(),
-        assignees: Vec::new(),
-        user_login: user_login.to_string(),
-        user_id,
+        assignees: assignees.iter().map(|value| value.to_string()).collect(),
+        user_login: author_login.to_string(),
+        user_id: author_id,
     }
 }
 
-/// A registration whose trigger author is `trigger_author_id` and whose Session
-/// Collaborators are `collaborators`.
-fn registration(trigger_author_id: i64, collaborators: &[&str]) -> SessionRegistration {
+fn registration() -> SessionRegistration {
     SessionRegistration {
         installation_id: 42,
         repo: repo(),
         trigger_issue: 1,
-        trigger_author_id,
-        trigger_author_login: "author-login".to_string(),
-        creator_login: "author-login".to_string(),
-        creator_id: Some(trigger_author_id),
+        trigger_author_id: 7,
+        trigger_author_login: "alice".to_string(),
+        creator_login: "alice".to_string(),
+        creator_id: Some(7),
         def: SessionDef {
             name: "demo".to_string(),
             packages: Vec::<PackageRef>::new(),
@@ -137,166 +150,104 @@ fn registration(trigger_author_id: i64, collaborators: &[&str]) -> SessionRegist
         config_hash: "hash".to_string(),
         auto_merge: false,
         log_access: vec![],
-        collaborators: collaborators.iter().map(|s| s.to_string()).collect(),
+        collaborators: vec!["bob".to_string()],
     }
 }
 
-fn admin(id: i64, login: &str) -> GithubActor {
-    GithubActor {
-        id,
-        login: login.to_string(),
-    }
+fn access(global_admins: &str) -> AccessPolicy {
+    AccessPolicy::from_vars(&[("FKST_GLOBAL_ADMINS".to_string(), global_admins.to_string())])
+        .expect("access")
 }
 
-#[tokio::test]
-async fn positive_count_is_pending() {
-    let listing = FakeListing::ok(3);
+async fn pending(
+    listing: &FakeListing,
+    reg: &SessionRegistration,
+    policy: &AccessPolicy,
+) -> Result<bool, AppError> {
     let token = SecretString::from("ghs_x".to_string());
-    let gate = LabelCountPending::new(&listing, &token);
-    assert!(gate
-        .has_pending(42, &repo(), &["fkst-run".to_string()])
+    LabelCountPending::new(listing, &token)
+        .has_pending(42, &repo(), &["fkst-run".to_string()], reg, policy)
         .await
-        .expect("ok"));
 }
 
 #[tokio::test]
-async fn zero_count_is_not_pending() {
-    let listing = FakeListing::ok(0);
-    let token = SecretString::from("ghs_x".to_string());
-    let gate = LabelCountPending::new(&listing, &token);
-    assert!(!gate
-        .has_pending(42, &repo(), &["fkst-run".to_string()])
+async fn zero_count_short_circuits_without_listing() {
+    let listing = FakeListing::ok(0, vec![issue(7, "alice", &["alice"])]);
+    assert!(!pending(&listing, &registration(), &access(""))
         .await
-        .expect("ok"));
+        .unwrap());
+    assert_eq!(listing.count_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(listing.list_calls.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
-async fn transport_error_propagates() {
-    let listing = FakeListing::err();
-    let token = SecretString::from("ghs_x".to_string());
-    let gate = LabelCountPending::new(&listing, &token);
-    let err = gate
-        .has_pending(42, &repo(), &["fkst-run".to_string()])
+async fn positive_count_with_only_wrong_or_ambiguous_assignees_is_not_pending() {
+    let listing = FakeListing::ok(
+        2,
+        vec![
+            issue(7, "alice", &["bob"]),
+            issue(7, "alice", &["alice", "bob"]),
+        ],
+    );
+    assert!(!pending(&listing, &registration(), &access(""))
         .await
-        .expect_err("must propagate");
-    // The rate-limit GithubAppError maps onto AppError::Unavailable (503).
-    assert!(matches!(err, AppError::Unavailable(_)));
+        .unwrap());
+    assert_eq!(listing.list_calls.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
-async fn empty_label_set_is_never_pending() {
-    let listing = FakeListing::ok(5);
-    let token = SecretString::from("ghs_x".to_string());
-    let gate = LabelCountPending::new(&listing, &token);
-    assert!(!gate.has_pending(42, &repo(), &[]).await.expect("ok"));
-}
-
-#[tokio::test]
-async fn or_across_labels_short_circuits_on_first_hit() {
-    // FakeListing::ok(n) returns n for every label, so any non-empty set with a
-    // positive count is pending; the empty-set case is covered above.
-    let listing = FakeListing::ok(1);
-    let token = SecretString::from("ghs_x".to_string());
-    let gate = LabelCountPending::new(&listing, &token);
-    let labels = vec!["fkst-a".to_string(), "fkst-b".to_string()];
-    assert!(gate.has_pending(42, &repo(), &labels).await.expect("ok"));
-}
-
-// ---- author-filtered gate (R3 authority) ------------------------------------
-
-#[tokio::test]
-async fn authorized_author_is_pending() {
-    // One open work issue raised by the session's own trigger author (id 7).
-    let listing = FakeListing::with_issues(vec![issue(5, 7, "author-login", "fkst-run")]);
-    let token = SecretString::from("ghs_x".to_string());
-    let gate = LabelCountPending::new(&listing, &token);
-    let reg = registration(7, &[]);
-    assert!(gate
-        .has_pending_authorized(42, &repo(), &["fkst-run".to_string()], &reg, &[])
+async fn routed_authorized_issue_is_pending() {
+    let listing = FakeListing::ok(1, vec![issue(7, "alice", &["ALICE"])]);
+    assert!(pending(&listing, &registration(), &access(""))
         .await
-        .expect("ok"));
+        .unwrap());
 }
 
 #[tokio::test]
-async fn admin_author_is_pending() {
-    // Issue raised by a repo admin (id 500), not the session author.
-    let listing = FakeListing::with_issues(vec![issue(5, 500, "octo-admin", "fkst-run")]);
-    let token = SecretString::from("ghs_x".to_string());
-    let gate = LabelCountPending::new(&listing, &token);
-    let reg = registration(7, &[]);
-    let admins = [admin(500, "octo-admin")];
-    assert!(gate
-        .has_pending_authorized(42, &repo(), &["fkst-run".to_string()], &reg, &admins)
+async fn routed_collaborator_or_global_admin_issue_is_pending() {
+    let collaborator = FakeListing::ok(1, vec![issue(88, "BOB", &["alice"])]);
+    assert!(pending(&collaborator, &registration(), &access(""))
         .await
-        .expect("ok"));
+        .unwrap());
+
+    let admin = FakeListing::ok(1, vec![issue(99, "deploy-admin", &["alice"])]);
+    assert!(pending(&admin, &registration(), &access("Deploy-Admin"))
+        .await
+        .unwrap());
 }
 
 #[tokio::test]
-async fn collaborator_author_is_pending() {
-    // Issue raised by a listed Session Collaborator (by login).
-    let listing = FakeListing::with_issues(vec![issue(5, 999, "bob", "fkst-run")]);
-    let token = SecretString::from("ghs_x".to_string());
-    let gate = LabelCountPending::new(&listing, &token);
-    let reg = registration(7, &["bob"]);
-    assert!(gate
-        .has_pending_authorized(42, &repo(), &["fkst-run".to_string()], &reg, &[])
+async fn routed_unauthorized_issue_is_not_pending() {
+    let listing = FakeListing::ok(1, vec![issue(99, "mallory", &["alice"])]);
+    assert!(!pending(&listing, &registration(), &access(""))
         .await
-        .expect("ok"));
+        .unwrap());
 }
 
 #[tokio::test]
-async fn only_unauthorized_authors_is_not_pending() {
-    // The single open issue is raised by a stranger: not the author, not an admin,
-    // not a collaborator — so the session has NO authorized pending work.
-    let listing = FakeListing::with_issues(vec![issue(5, 999, "mallory", "fkst-run")]);
+async fn empty_label_set_never_calls_github() {
+    let listing = FakeListing::ok(1, vec![issue(7, "alice", &["alice"])]);
     let token = SecretString::from("ghs_x".to_string());
-    let gate = LabelCountPending::new(&listing, &token);
-    let reg = registration(7, &["bob"]);
-    let admins = [admin(500, "octo-admin")];
-    assert!(!gate
-        .has_pending_authorized(42, &repo(), &["fkst-run".to_string()], &reg, &admins)
+    let result = LabelCountPending::new(&listing, &token)
+        .has_pending(42, &repo(), &[], &registration(), &access(""))
         .await
-        .expect("ok"));
+        .unwrap();
+    assert!(!result);
+    assert_eq!(listing.count_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(listing.list_calls.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
-async fn mixed_authors_counts_only_the_authorized_one() {
-    // Two issues: one from a stranger, one from the author. Pending because ≥1 is
-    // authorized (order-independent — `any` short-circuits on the author).
-    let listing = FakeListing::with_issues(vec![
-        issue(5, 999, "mallory", "fkst-run"),
-        issue(6, 7, "author-login", "fkst-run"),
-    ]);
-    let token = SecretString::from("ghs_x".to_string());
-    let gate = LabelCountPending::new(&listing, &token);
-    let reg = registration(7, &[]);
-    assert!(gate
-        .has_pending_authorized(42, &repo(), &["fkst-run".to_string()], &reg, &[])
-        .await
-        .expect("ok"));
-}
+async fn count_and_listing_transport_errors_propagate() {
+    let count_error = FakeListing::new(Err(GithubAppError::RateLimited(30)), Ok(Vec::new()));
+    assert!(matches!(
+        pending(&count_error, &registration(), &access("")).await,
+        Err(AppError::Unavailable(_))
+    ));
 
-#[tokio::test]
-async fn filtered_empty_label_set_is_never_pending() {
-    let listing = FakeListing::with_issues(vec![issue(5, 7, "author-login", "fkst-run")]);
-    let token = SecretString::from("ghs_x".to_string());
-    let gate = LabelCountPending::new(&listing, &token);
-    let reg = registration(7, &[]);
-    assert!(!gate
-        .has_pending_authorized(42, &repo(), &[], &reg, &[])
-        .await
-        .expect("ok"));
-}
-
-#[tokio::test]
-async fn filtered_transport_error_propagates() {
-    let listing = FakeListing::err();
-    let token = SecretString::from("ghs_x".to_string());
-    let gate = LabelCountPending::new(&listing, &token);
-    let reg = registration(7, &[]);
-    let err = gate
-        .has_pending_authorized(42, &repo(), &["fkst-run".to_string()], &reg, &[])
-        .await
-        .expect_err("must propagate");
-    assert!(matches!(err, AppError::Unavailable(_)));
+    let list_error = FakeListing::new(Ok(1), Err(GithubAppError::RateLimited(30)));
+    assert!(matches!(
+        pending(&list_error, &registration(), &access("")).await,
+        Err(AppError::Unavailable(_))
+    ));
 }

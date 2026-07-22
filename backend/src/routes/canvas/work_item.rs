@@ -23,7 +23,7 @@ use utoipa::ToSchema;
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
 use crate::goals::trigger_parse::{parse_trigger_issue_body, TriggerSpec};
-use crate::models::{GithubActor, RepoRef};
+use crate::models::RepoRef;
 use crate::reconcile::desired::{config_hash, SessionDef, SessionRegistration};
 use crate::reconcile::effective_packages::resolve_effective_packages;
 use crate::reconcile::work_authz::is_work_author_allowed;
@@ -254,29 +254,14 @@ pub(super) async fn create_work_item(
     let spec = parse_trigger_issue_body(&trigger.body)?;
     let mut reg = work_registration(&owner, &name, issue_number, trigger.author_id, spec);
 
-    // Request-time WORK-ITEM authorization (R5, epic #572): only the session's
-    // trigger AUTHOR, a listed Session Collaborator, or a repo admin / org owner
-    // may queue work — the exact author ∪ collaborators ∪ admins predicate the
-    // reconciler enforces (R3, [`is_work_author_allowed`]), reused verbatim so the
-    // request-time and reconciler-side gates can never diverge. Enforced ALWAYS
-    // (not the reconciler's opt-in flag) so the canvas can never bypass R3. Runs
-    // BEFORE the work-label resolution so an unauthorized caller learns nothing
-    // about the session's config. The admin argument reflects THIS caller: one
-    // user-token repo read decides their repo-admin / org-owner tier.
-    let caller_is_admin = gh.caller_is_repo_admin(&token, &owner, &name).await?;
-    let admins = if caller_is_admin {
-        vec![GithubActor {
-            id: user.id,
-            login: user.login.clone(),
-        }]
-    } else {
-        Vec::new()
-    };
-    if !is_work_author_allowed(&reg, &admins, user.id, &user.login) {
+    // Request-time authorization uses the same creator/global-admin/collaborator
+    // predicate as reconciliation. It runs before package/label discovery so a
+    // rejected caller learns nothing about the session's effective config.
+    if !is_work_author_allowed(&reg, &state.config.access, user.id, &user.login) {
         return Err(AppError::Forbidden(format!(
             "your GitHub account lacks work-item authority on the session at \
-             #{issue_number}: only its trigger author, a listed Session Collaborator, \
-             or a repo admin / org owner may queue work items"
+             #{issue_number}: only its creator, a listed Session Collaborator, or a \
+             deployment fkst administrator may queue work items"
         )));
     }
 

@@ -34,7 +34,6 @@ use crate::reconcile::registry::parse_registration;
 use crate::reconcile::trigger_authz::{
     check_trigger_creator, TriggerAuthzCache, TriggerGateDecision,
 };
-use crate::reconcile::work_authz::WorkAuthz;
 use crate::reconcile::work_labels::resolve_work_label_sets;
 
 use super::{
@@ -266,37 +265,6 @@ pub async fn reconcile_repo(
     // upsert; carries only public metadata (ids + the allow-list), never a token.
     record_log_contexts(ctx, &regs);
 
-    // R3 work-issue AUTHORITY gate (epic #572). THREE states, resolved once per pass
-    // and shared by the reject surface + the pending gate:
-    //   - flag OFF                        -> WorkAuthz::off()      (byte-identical pre-R3)
-    //   - flag ON + admin lookup OK       -> enforce w/ the admin set
-    //   - flag ON + admin lookup FAILED   -> enforce w/ an EMPTY admin set: author ∪
-    //     collaborators (which need no API) are STILL enforced, so strangers are
-    //     still rejected during a transient blip; only the admin tier is unavailable
-    //     that pass (it recovers next sweep). Never a full fail-open.
-    // The admin fetch is skipped entirely (and stays off) when the flag is off or the
-    // repo has no registrations — one fetch per repo per pass, mirroring the
-    // per-config-hash work-label cache.
-    let authz = if cfg.enforce_work_issue_authz && !regs.is_empty() {
-        match ctx
-            .listing
-            .list_repo_admins(&token, &repo.owner, &repo.name)
-            .await
-        {
-            Ok(admins) => WorkAuthz::enforcing(admins),
-            Err(error) => {
-                tracing::warn!(
-                    owner_repo = %owner_repo,
-                    error = %error,
-                    "reconcile: repo-admin lookup failed; enforcing author+collaborators only this pass (admin tier unavailable)"
-                );
-                WorkAuthz::enforcing(Vec::new())
-            }
-        }
-    } else {
-        WorkAuthz::off()
-    };
-
     // I7 manifest expand pass (epic #594). Resolve each session's EFFECTIVE package set —
     // its explicit `### Packages` followed by every `### Manifest` reference expanded into
     // packages (deduped, explicit-first) — using the repo installation token minted above.
@@ -453,7 +421,7 @@ pub async fn reconcile_repo(
         repo,
         &regs,
         &work_labels_by_session,
-        &authz,
+        &ctx.config.access,
     )
     .await;
 
@@ -476,15 +444,9 @@ pub async fn reconcile_repo(
             .get(&reg.session_id)
             .cloned()
             .unwrap_or_default();
-        // When enforcing, a session is pending only while it has an OPEN work-label
-        // issue raised by an AUTHORIZED author; otherwise the cheap author-blind
-        // Search count (byte-identical pre-R3 behavior).
-        let is_pending = if authz.enforce {
-            gate.has_pending_authorized(installation_id, repo, &labels, reg, &authz.admins)
-                .await?
-        } else {
-            gate.has_pending(installation_id, repo, &labels).await?
-        };
+        let is_pending = gate
+            .has_pending(installation_id, repo, &labels, reg, &ctx.config.access)
+            .await?;
         pending.insert(reg.session_id.clone(), is_pending);
     }
 

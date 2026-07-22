@@ -37,6 +37,7 @@ fn spec() -> SessionPodSpec {
         config_hash: "cfg-deadbeef".to_string(),
         output_lang: None,
         engine_config: BTreeMap::new(),
+        creator_login: "author-login".to_string(),
         contributors: vec!["author-login".to_string()],
         target_branch: "fkst-hosted-default".to_string(),
     }
@@ -170,6 +171,7 @@ fn build_session_pod_injects_the_section_5_2_env() {
         Some("web api")
     );
     assert_eq!(env_value(env, "FKST_SESSION_WORK_LABEL"), Some("fkst"));
+    assert_eq!(env_value(env, "FKST_SESSION_CREATOR"), Some("author-login"));
     assert_eq!(
         env_value(env, "FKST_DEVLOOP_UPSTREAM_BRANCH"),
         Some("fkst-hosted-default")

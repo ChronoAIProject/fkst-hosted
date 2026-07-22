@@ -100,6 +100,7 @@ const GITHUB_PROXY_POLL_LABEL_PREFIX_VALUE: &str =
 /// (issues/comments from anyone else are ignored by the session). The bot's own
 /// login is implicitly authorized package-side via `FKST_GITHUB_BOT_LOGIN`.
 const GITHUB_AUTHORIZED_LOGINS_ENV: &str = "FKST_GITHUB_AUTHORIZED_LOGINS";
+const SESSION_CREATOR_ENV: &str = "FKST_SESSION_CREATOR";
 const LLM_MODEL_ENV: &str = "FKST_LLM_MODEL";
 const LLM_BASE_URL_ENV: &str = "FKST_LLM_BASE_URL";
 const LLM_WIRE_API_ENV: &str = "FKST_LLM_WIRE_API";
@@ -186,9 +187,10 @@ pub struct SessionPodSpec {
     /// Tighten-merged with the operator rate-pool defaults at render time —
     /// see [`crate::k8s::engine_env::engine_tunables_env`].
     pub engine_config: BTreeMap<String, String>,
-    /// The session's trusted users (trigger author first, then the
-    /// `### FKST Contributors` list, case-insensitively deduped) — rendered as
-    /// `FKST_GITHUB_AUTHORIZED_LOGINS` for the packages' github author policy.
+    /// Effective session creator, used by package-side assignee routing.
+    pub creator_login: String,
+    /// The session's allowed work authors (creator, Session Collaborators, and
+    /// login-shaped deployment admins), case-insensitively deduped.
     pub contributors: Vec<String>,
     /// Resolved branch the target repository is cloned from and every session PR
     /// targets. Always concrete (`fkst-hosted-default` when omitted by the author).
@@ -286,6 +288,7 @@ pub(crate) fn session_env_pairs(
         (GIT_COMMITTER_NAME_ENV, spec.bot_login.clone()),
         (SESSION_PACKAGE_ROOTS_ENV, spec.package_roots.join(" ")),
         (SESSION_WORK_LABEL_ENV, spec.work_label.clone()),
+        (SESSION_CREATOR_ENV, spec.creator_login.clone()),
         (DEVLOOP_UPSTREAM_BRANCH_ENV, spec.target_branch.clone()),
         (DEVLOOP_INTEGRATION_BRANCH_ENV, spec.target_branch.clone()),
         // The engine's required HostFacts — without them any package calling
