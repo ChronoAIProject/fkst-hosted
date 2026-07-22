@@ -1,8 +1,9 @@
 //! The per-repo reconcile driver (issue #359 §4.2, PR5b).
 //!
 //! Gathers the desired + observed state for ONE repository and drives it to
-//! agreement: enumerate the open trigger issues → parse each into a registration
-//! (or an invalid marker), observe the live substrate-session pods (through the
+//! agreement: enumerate the open trigger issues → authorize each effective creator
+//! from metadata → parse accepted issues into registrations (or invalid markers),
+//! observe the live substrate-session pods (through the
 //! session backend, projected to the planner's
 //! [`LivePod`](crate::reconcile::desired::LivePod) view), gate each registration on
 //! its work label's open count, then run the pure planner and execute the actions.
@@ -15,21 +16,132 @@
 use std::collections::{HashMap, HashSet};
 
 use k8s_openapi::chrono::Utc;
+use secrecy::SecretString;
 
+use crate::access_policy::AccessPolicy;
 use crate::error::AppError;
+use crate::github_app::listing::{GithubListing, IssueSummary};
 use crate::log_access::LogSessionContext;
 use crate::models::RepoRef;
 use crate::reconcile::announce::parse_config_hash_marker;
 use crate::reconcile::collision::{detect_missing_work_labels, detect_work_label_collisions};
-use crate::reconcile::desired::{plan_repo, SessionRegistration};
+use crate::reconcile::creator::{effective_creator, CreatorResolution, SessionCreator};
+use crate::reconcile::desired::{plan_repo, plan_trigger_authorization, SessionRegistration};
 use crate::reconcile::effective_packages::EffectivePackages;
 use crate::reconcile::execute::{execute, ReconcileCtx};
 use crate::reconcile::pending::{LabelCountPending, PendingWork};
 use crate::reconcile::registry::parse_registration;
+use crate::reconcile::trigger_authz::{
+    check_trigger_creator, TriggerAuthzCache, TriggerGateDecision,
+};
 use crate::reconcile::work_authz::WorkAuthz;
 use crate::reconcile::work_labels::resolve_work_label_sets;
 
-use super::{SUBSTRATE_ANNOUNCED_LABEL, SUBSTRATE_CONFIG_REJECTED_LABEL, SUBSTRATE_INVALID_LABEL};
+use super::{
+    SUBSTRATE_ANNOUNCED_LABEL, SUBSTRATE_CONFIG_REJECTED_LABEL, SUBSTRATE_INVALID_LABEL,
+    TRIGGER_UNAUTHORIZED_LABEL,
+};
+
+#[derive(Default)]
+struct ClassifiedTriggers {
+    registrations: Vec<SessionRegistration>,
+    invalid: Vec<(i64, String)>,
+    unauthorized: Vec<(i64, String)>,
+    /// Issues that definitively passed the creator gate this pass. Kept separate
+    /// from registrations because a passed trigger may later be demoted by parsing,
+    /// manifest, label, or collision validation and must still clear an old auth latch.
+    authorized_issues: HashSet<i64>,
+}
+
+/// Apply the deployment allowlist and metadata-only creator gate before parsing.
+/// A transport-deferred, previously announced trigger is parsed to preserve its
+/// live desired state; an unlatched deferred trigger is skipped without feedback.
+#[allow(clippy::too_many_arguments)]
+async fn classify_triggers(
+    installation_id: i64,
+    repo: &RepoRef,
+    issues: &[IssueSummary],
+    listing: &dyn GithubListing,
+    token: &SecretString,
+    access: &AccessPolicy,
+    bot_login: Option<&str>,
+    latched_announced: &HashSet<i64>,
+) -> ClassifiedTriggers {
+    let mut classified = ClassifiedTriggers::default();
+    let mut authz_cache = TriggerAuthzCache::default();
+
+    for issue in issues {
+        // The legacy deployment-wide policy stays first and deliberately silent.
+        if !access.allows(issue.user_id, &issue.user_login) {
+            tracing::info!(
+                repo = %format!("{}/{}", repo.owner, repo.name),
+                issue = issue.number,
+                author_id = issue.user_id,
+                "access policy: trigger issue author not allowlisted; ignoring"
+            );
+            continue;
+        }
+
+        let creator = match effective_creator(&issue.metadata(), bot_login) {
+            CreatorResolution::Resolved(creator) => creator,
+            CreatorResolution::Unattributable { assignee_count, .. } => {
+                classified.unauthorized.push((
+                    issue.number,
+                    format!(
+                        "a bot-authored trigger must have exactly one assignee (found {assignee_count}) to attribute a session creator"
+                    ),
+                ));
+                continue;
+            }
+        };
+
+        match check_trigger_creator(listing, token, repo, access, &creator, &mut authz_cache).await
+        {
+            TriggerGateDecision::Authorized => {
+                classified.authorized_issues.insert(issue.number);
+                parse_classified_registration(
+                    installation_id,
+                    repo,
+                    issue,
+                    creator,
+                    &mut classified,
+                );
+            }
+            TriggerGateDecision::Unauthorized { reason } => {
+                classified.unauthorized.push((issue.number, reason));
+            }
+            TriggerGateDecision::Deferred if latched_announced.contains(&issue.number) => {
+                tracing::warn!(
+                    repo = %format!("{}/{}", repo.owner, repo.name),
+                    issue = issue.number,
+                    "trigger creator authorization deferred; preserving announced registration this pass"
+                );
+                parse_classified_registration(
+                    installation_id,
+                    repo,
+                    issue,
+                    creator,
+                    &mut classified,
+                );
+            }
+            TriggerGateDecision::Deferred => {}
+        }
+    }
+    classified
+}
+
+fn parse_classified_registration(
+    installation_id: i64,
+    repo: &RepoRef,
+    issue: &IssueSummary,
+    creator: SessionCreator,
+    classified: &mut ClassifiedTriggers,
+) {
+    match parse_registration(installation_id, repo, issue, creator) {
+        Ok(registration) => classified.registrations.push(registration),
+        Err(marker) => classified.invalid.push(marker),
+    }
+}
 
 /// Reconcile ONE repository against its open trigger issues + live pods.
 pub async fn reconcile_repo(
@@ -56,8 +168,8 @@ pub async fn reconcile_repo(
     // 1. One repo-scoped installation token drives every GitHub read below.
     let token = ctx.github.token_for_repo(&owner_repo, None).await?;
 
-    // 2. Enumerate the open trigger issues, splitting valid registrations from
-    //    invalid markers and recording which issues already carry the invalid flag.
+    // 2. Enumerate open triggers and read their durable latch state before the
+    //    metadata-only creator gate. Trigger bodies are parsed only after that gate.
     let issues = ctx
         .listing
         .list_issues_by_label(
@@ -67,11 +179,10 @@ pub async fn reconcile_repo(
             &cfg.substrate_trigger_label,
         )
         .await?;
-    let mut regs = Vec::new();
-    let mut invalid: Vec<(i64, String)> = Vec::new();
     let mut latched_invalid: HashSet<i64> = HashSet::new();
     let mut latched_announced: HashSet<i64> = HashSet::new();
     let mut latched_config_rejected: HashSet<i64> = HashSet::new();
+    let mut latched_trigger_unauthorized: HashSet<i64> = HashSet::new();
     for issue in &issues {
         if issue.labels.iter().any(|l| l == SUBSTRATE_INVALID_LABEL) {
             latched_invalid.insert(issue.number);
@@ -86,26 +197,30 @@ pub async fn reconcile_repo(
         {
             latched_config_rejected.insert(issue.number);
         }
-        // Deployment-wide access policy: a trigger issue authored by a user who
-        // is not allowlisted is IGNORED before parsing — no registration (so no
-        // spawn, on ANY path: webhook nudge or full resync), and no invalid-config
-        // marker either (an unauthorized author gets zero service interaction).
-        // Removing an author from the list de-desires their sessions: the live pod
-        // becomes an orphan the planner tears down on the next reconcile.
-        if !ctx.config.access.allows(issue.user_id, &issue.user_login) {
-            tracing::info!(
-                repo = %format!("{}/{}", repo.owner, repo.name),
-                issue = issue.number,
-                author_id = issue.user_id,
-                "access policy: trigger issue author not allowlisted; ignoring"
-            );
-            continue;
-        }
-        match parse_registration(installation_id, repo, issue) {
-            Ok(reg) => regs.push(reg),
-            Err(marker) => invalid.push(marker),
+        if issue
+            .labels
+            .iter()
+            .any(|label| label == TRIGGER_UNAUTHORIZED_LABEL)
+        {
+            latched_trigger_unauthorized.insert(issue.number);
         }
     }
+    let ClassifiedTriggers {
+        registrations: mut regs,
+        mut invalid,
+        unauthorized: trigger_unauthorized,
+        authorized_issues,
+    } = classify_triggers(
+        installation_id,
+        repo,
+        &issues,
+        ctx.listing.as_ref(),
+        &token,
+        &ctx.config.access,
+        cfg.github_bot_login.as_deref(),
+        &latched_announced,
+    )
+    .await;
 
     // Config immutability: for each ANNOUNCED trigger, recover the ORIGINAL
     // full_config_hash latched (as a hidden marker) in its announcement comment so the
@@ -330,7 +445,7 @@ pub async fn reconcile_repo(
     }
 
     // 5. Plan (pure), then execute each action best-effort.
-    let actions = plan_repo(
+    let mut actions = plan_repo(
         &regs,
         &work_labels_by_session,
         &invalid,
@@ -343,10 +458,16 @@ pub async fn reconcile_repo(
         Utc::now(),
         cfg,
     );
+    actions.extend(plan_trigger_authorization(
+        &trigger_unauthorized,
+        &authorized_issues,
+        &latched_trigger_unauthorized,
+    ));
     tracing::info!(
         owner_repo = %owner_repo,
         registrations = regs.len(),
         invalid = invalid.len(),
+        trigger_unauthorized = trigger_unauthorized.len(),
         live_pods = live.len(),
         actions = actions.len(),
         "reconcile repo: planned"
@@ -369,7 +490,10 @@ fn record_log_contexts(ctx: &ReconcileCtx, regs: &[SessionRegistration]) {
                 installation_id: reg.installation_id,
                 repo: reg.repo.clone(),
                 trigger_issue: reg.trigger_issue,
-                author_id: reg.trigger_author_id,
+                creator: SessionCreator {
+                    login: reg.creator_login.clone(),
+                    id: reg.creator_id,
+                },
                 log_access: reg.log_access.clone(),
             },
         );
@@ -388,3 +512,7 @@ fn set_active(ctx: &ReconcileCtx, installation_id: i64, repo: &RepoRef, active: 
         set.remove(&key);
     }
 }
+
+#[cfg(test)]
+#[path = "repo_tests.rs"]
+mod tests;

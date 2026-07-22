@@ -21,6 +21,7 @@ use crate::config::Config;
 use crate::log_access::{LogAccessRegistry, LogSessionContext};
 use crate::log_config::LogConfig;
 use crate::models::RepoRef;
+use crate::reconcile::creator::SessionCreator;
 use crate::router::build_router;
 use crate::state::AppState;
 use crate::storage::{ChronoStorageClient, ChronoStorageConfig};
@@ -47,7 +48,10 @@ pub(crate) fn registry(allow: &[&str]) -> LogAccessRegistry {
             installation_id: 1,
             repo: repo(),
             trigger_issue: 7,
-            author_id: AUTHOR_ID,
+            creator: SessionCreator {
+                login: "author".to_string(),
+                id: Some(AUTHOR_ID),
+            },
             log_access: allow.iter().map(|s| s.to_string()).collect(),
         },
     );

@@ -30,12 +30,12 @@ use crate::github_identity::GithubUser;
 use crate::models::RepoRef;
 use crate::reconcile::automerge::linked_issue_number;
 use crate::reconcile::desired::PodLiveness;
-use crate::reconcile::registry::parse_registration;
 use crate::reconcile::{
     SUBSTRATE_CONFIG_REJECTED_LABEL, SUBSTRATE_DEGRADED_LABEL, SUBSTRATE_INVALID_LABEL,
     SUBSTRATE_RETIRED_LABEL, WORK_UNAUTHORIZED_LABEL,
 };
 use crate::routes::canvas::github::RepoPull;
+use crate::routes::canvas::parse_trigger_registration;
 use crate::routes::canvas::types::{render_package_ref, IssueDetail};
 use crate::routes::canvas::work_projection::work_issues_by_session;
 use crate::routes::dashboard::{bearer_token, status_labels, DashboardGithub, IssueWithMeta};
@@ -534,7 +534,12 @@ pub(super) async fn repo_sessions(
     let mut registrations = Vec::new();
     let mut parse_errors = HashMap::new();
     for trigger in &triggers {
-        match parse_registration(installation_id, &repo_ref, &trigger.summary) {
+        match parse_trigger_registration(
+            installation_id,
+            &repo_ref,
+            &trigger.summary,
+            state.config.reconcile.github_bot_login.as_deref(),
+        ) {
             Ok(reg) => registrations.push(reg),
             Err((issue, reason)) => {
                 parse_errors.insert(issue, reason);

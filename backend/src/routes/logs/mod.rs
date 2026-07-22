@@ -300,7 +300,7 @@ pub(crate) fn authorize(
         || log_authz::is_authorized(
             user.id,
             &user.login,
-            context.author_id,
+            &context.creator,
             &context.log_access,
             &state.config.log.admins,
         )

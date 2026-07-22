@@ -119,6 +119,8 @@ fn registration(trigger_author_id: i64, collaborators: &[&str]) -> SessionRegist
         trigger_issue: 1,
         trigger_author_id,
         trigger_author_login: "author-login".to_string(),
+        creator_login: "author-login".to_string(),
+        creator_id: Some(trigger_author_id),
         def: SessionDef {
             name: "demo".to_string(),
             packages: Vec::<PackageRef>::new(),

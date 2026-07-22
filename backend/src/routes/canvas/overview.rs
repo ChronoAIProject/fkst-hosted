@@ -34,8 +34,8 @@ use crate::error::{AppError, ErrorEnvelope};
 use crate::github_app::GithubAppTokens;
 use crate::github_identity::GithubUser;
 use crate::models::RepoRef;
-use crate::reconcile::registry::parse_registration;
 use crate::routes::canvas::overview_broader::resolve_enumeration_token;
+use crate::routes::canvas::parse_trigger_registration;
 use crate::routes::canvas::types::render_package_ref;
 use crate::routes::dashboard::{bearer_token, DashboardGithub, InstallationRef, UserRepo};
 use crate::routes::repos::Viewer;
@@ -196,6 +196,7 @@ async fn scan_repo_sessions_packages(
     installation_id: i64,
     repo: &RepoRef,
     trigger_label: &str,
+    bot_login: Option<&str>,
 ) -> Result<Vec<Vec<String>>, AppError> {
     let owner_repo = format!("{}/{}", repo.owner, repo.name);
     let inst_token = app.token_for_repo(&owner_repo, None).await?;
@@ -204,7 +205,9 @@ async fn scan_repo_sessions_packages(
         .await?;
     let mut sessions = Vec::new();
     for trigger in &triggers {
-        if let Ok(reg) = parse_registration(installation_id, repo, &trigger.summary) {
+        if let Ok(reg) =
+            parse_trigger_registration(installation_id, repo, &trigger.summary, bot_login)
+        {
             sessions.push(reg.def.packages.iter().map(render_package_ref).collect());
         }
     }
@@ -493,6 +496,7 @@ async fn assemble_overview(
 ) -> OverviewResponse {
     let app = state.github_app.as_ref();
     let trigger_label = &state.config.reconcile.substrate_trigger_label;
+    let bot_login = state.config.reconcile.github_bot_login.as_deref();
     let mut accounts = Vec::with_capacity(account_inputs.len());
     let mut total_sessions = 0usize;
     let mut package_counts: BTreeMap<String, usize> = BTreeMap::new();
@@ -537,6 +541,7 @@ async fn assemble_overview(
                             installation.id,
                             &repo_ref,
                             trigger_label,
+                            bot_login,
                         ),
                     )
                     .await;

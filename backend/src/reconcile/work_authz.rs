@@ -2,7 +2,7 @@
 //!
 //! SECURITY-CRITICAL core of the work-issue authority gate: it decides which
 //! GitHub user may raise work for a given session. Only the session's
-//! **author ∪ Session Collaborators ∪ repo admins / org owners** may open an issue
+//! **creator ∪ Session Collaborators ∪ repo admins / org owners** may open an issue
 //! carrying the session's work label; anyone else is rejected (the effectful reject
 //! surface lives in [`crate::reconcile::work_ack`], and the pending gate in
 //! [`crate::reconcile::pending`] counts only authorized authors).
@@ -14,14 +14,12 @@
 //! with admins / enforcing with an empty admin set) — all the driver's concern, not
 //! this predicate's.
 //!
-//! Identity keys, in preference order: an IMMUTABLE numeric GitHub id wherever it
-//! is in hand (the trigger author and the admin set both carry ids — a login is
-//! renamable and must never be the sole key there). Session Collaborators are
-//! stored as the raw `### Session Collaborators` entries (logins, or ids), so they
-//! are matched through the shared [`entry_matches`] matcher, which accepts EITHER a
-//! numeric id OR a case-insensitive login (a leading `@` tolerated). Consequence: a
-//! collaborator listed only by login who later RENAMES their GitHub account is no
-//! longer matched — list a collaborator by numeric id to survive a rename.
+//! Identity keys, in preference order: an IMMUTABLE numeric GitHub id for a
+//! human-authored creator and for the admin set. GitHub's issue metadata exposes no
+//! assignee id, so an App-authored session's sole-assignee creator is the deliberate
+//! login-only exception. Session Collaborators are stored as raw entries (logins or
+//! ids) and matched through [`entry_matches`]. A collaborator listed only by login
+//! stops matching after a rename; list a numeric id to survive one.
 
 use crate::access_policy::entry_matches;
 use crate::models::GithubActor;
@@ -32,7 +30,8 @@ use crate::reconcile::desired::SessionRegistration;
 /// admin/org-owner set `admins`.
 ///
 /// Returns `true` iff the author satisfies AT LEAST ONE tier:
-/// 1. **Author** — the session's own trigger author (matched by immutable id).
+/// 1. **Creator** — the session's effective creator (matched by immutable id
+///    when known, otherwise by assignee-derived login case-insensitively).
 /// 2. **Repo admin / org owner** — a member of `admins` (matched by immutable id).
 /// 3. **Session Collaborator** — a `reg.collaborators` entry matching the author by
 ///    numeric id (as a decimal string) OR case-insensitive login ([`entry_matches`]).
@@ -44,9 +43,17 @@ pub fn is_work_author_allowed(
     author_id: i64,
     author_login: &str,
 ) -> bool {
-    // Tier 1: the session's own trigger author, by IMMUTABLE numeric id (never the
-    // renamable login — the id is the control-path authz subject everywhere).
-    if author_id == reg.trigger_author_id {
+    // Tier 1: the effective session creator. Human-authored triggers carry an
+    // immutable id; App-authored triggers can only be attributed through the sole
+    // assignee login because GitHub's issue metadata does not expose assignee ids.
+    let creator_matches = match reg.creator_id {
+        Some(creator_id) => author_id == creator_id,
+        None => {
+            !reg.creator_login.trim().is_empty()
+                && author_login.eq_ignore_ascii_case(&reg.creator_login)
+        }
+    };
+    if creator_matches {
         return true;
     }
     // Tier 2: a repo admin / org owner, also by immutable id (the admin set carries
@@ -132,6 +139,8 @@ mod tests {
             trigger_issue: 7,
             trigger_author_id,
             trigger_author_login: "author-login".to_string(),
+            creator_login: "author-login".to_string(),
+            creator_id: Some(trigger_author_id),
             def: SessionDef {
                 name: "site".to_string(),
                 packages: Vec::<PackageRef>::new(),
@@ -162,6 +171,15 @@ mod tests {
         let reg = reg(583231, &[]);
         // The author's login could be anything — the id is what authorizes.
         assert!(is_work_author_allowed(&reg, &[], 583231, "renamed-since"));
+    }
+
+    #[test]
+    fn assignee_derived_creator_is_allowed_by_login_case_insensitively() {
+        let mut reg = reg(7, &[]);
+        reg.creator_id = None;
+        reg.creator_login = "Seed-Owner".to_string();
+        assert!(is_work_author_allowed(&reg, &[], 999, "seed-owner"));
+        assert!(!is_work_author_allowed(&reg, &[], 7, "app-bot"));
     }
 
     #[test]

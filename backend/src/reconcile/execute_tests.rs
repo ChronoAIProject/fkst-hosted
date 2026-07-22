@@ -115,6 +115,47 @@ async fn clear_invalid_removes_the_label() {
     );
 }
 
+#[tokio::test]
+async fn trigger_unauthorized_latches_before_posting_the_comment() {
+    let api = Arc::new(RecordingApi::default());
+    let github = tokens(api.clone());
+
+    flag_trigger_unauthorized(
+        &github,
+        "acme/site",
+        17,
+        &trigger_unauthorized_comment("@alice lacks maintain permission"),
+    )
+    .await;
+
+    assert_eq!(*api.events.lock().unwrap(), ["label-add", "comment"]);
+    assert_eq!(
+        api.labels_added.lock().unwrap()[0].3,
+        vec![TRIGGER_UNAUTHORIZED_LABEL.to_string()]
+    );
+    assert!(api.comments.lock().unwrap()[0]
+        .3
+        .contains("The issue body has not been read"));
+}
+
+#[tokio::test]
+async fn clear_trigger_unauthorized_removes_the_latch() {
+    let api = Arc::new(RecordingApi::default());
+    let github = tokens(api.clone());
+
+    clear_trigger_unauthorized(&github, "acme/site", 19).await;
+
+    assert_eq!(
+        api.labels_removed.lock().unwrap()[0],
+        (
+            "acme".into(),
+            "site".into(),
+            19,
+            TRIGGER_UNAUTHORIZED_LABEL.into()
+        )
+    );
+}
+
 // ---- pure argument assembly -------------------------------------------------
 
 #[test]
@@ -203,6 +244,38 @@ fn spec_work_label_is_the_comma_joined_detected_set() {
 fn missing_bot_login_defaults_to_empty() {
     let spec = session_pod_spec_from(&registration(), &["fkst-run".to_string()], None);
     assert_eq!(spec.bot_login, "", "an unset bot login renders as empty");
+}
+
+#[test]
+fn session_contributors_starts_with_effective_creator_not_app_author() {
+    let mut reg = registration();
+    reg.trigger_author_login = "fkst-app[bot]".to_string();
+    reg.creator_login = "Seed-Owner".to_string();
+    reg.creator_id = None;
+    reg.log_access = vec!["seed-owner".to_string(), "reviewer".to_string()];
+    assert_eq!(
+        session_contributors(&reg),
+        vec!["Seed-Owner".to_string(), "reviewer".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn assignee_derived_creator_resolves_no_environment_without_an_id() {
+    let store = crate::k8s::env_store::EnvStore::fake();
+    match resolve_environment(&store, None, "seed-owner", Some("ignored-selection")).await {
+        EnvResolution::Proceed {
+            user_env,
+            install,
+            secret_keys,
+        } => {
+            assert!(user_env.is_empty());
+            assert!(install.is_empty());
+            assert!(secret_keys.is_empty());
+        }
+        EnvResolution::Blocked { comment } => {
+            panic!("no-id creator must proceed without an environment: {comment}")
+        }
+    }
 }
 
 #[test]

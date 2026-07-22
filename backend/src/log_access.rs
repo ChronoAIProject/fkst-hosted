@@ -4,8 +4,8 @@
 //! with only a `session_id` in the path (that is all the announce-comment link
 //! carries). But `session_id` is a one-way UUIDv5 over `(installation, owner, repo,
 //! issue)` (see [`crate::session_spec::derive_session_id`]) — it cannot be reversed
-//! to recover the trigger context the authorization check needs (the issue author's
-//! id + the `### Log Access Allowlist` allow-list).
+//! to recover the trigger context the authorization check needs (the effective
+//! creator identity + the `### Log Access Allowlist` allow-list).
 //!
 //! This registry is that reverse map. The reconciler already resolves EVERY open
 //! trigger issue into a [`crate::reconcile::desired::SessionRegistration`] on each
@@ -29,6 +29,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use crate::models::RepoRef;
+use crate::reconcile::creator::SessionCreator;
 
 /// The trigger context one session's log-download authorization needs, keyed in the
 /// registry by the session's deterministic `session_id`.
@@ -40,10 +41,11 @@ pub struct LogSessionContext {
     pub repo: RepoRef,
     /// The trigger issue number the session was launched from (traceability).
     pub trigger_issue: i64,
-    /// The numeric GitHub id of the trigger issue's author (authz tier 1).
-    pub author_id: i64,
+    /// The effective human creator (authz tier 1). Human-authored sessions carry
+    /// an immutable id; App-authored sessions fall back to the sole assignee login.
+    pub creator: SessionCreator,
     /// The frozen `### Log Access Allowlist` allow-list — logins/ids permitted to download the
-    /// logs beyond the author + the global admins (authz tier 2).
+    /// logs beyond the creator + the global admins (authz tier 2).
     pub log_access: Vec<String>,
 }
 
@@ -103,7 +105,7 @@ impl std::fmt::Debug for LogAccessRegistry {
 mod tests {
     use super::*;
 
-    fn ctx(author_id: i64, allow: &[&str]) -> LogSessionContext {
+    fn ctx(creator_id: i64, allow: &[&str]) -> LogSessionContext {
         LogSessionContext {
             installation_id: 1,
             repo: RepoRef {
@@ -111,7 +113,10 @@ mod tests {
                 name: "site".to_string(),
             },
             trigger_issue: 7,
-            author_id,
+            creator: SessionCreator {
+                login: "creator".to_string(),
+                id: Some(creator_id),
+            },
             log_access: allow.iter().map(|s| s.to_string()).collect(),
         }
     }
@@ -122,7 +127,7 @@ mod tests {
         assert!(reg.is_empty());
         reg.upsert("sess-1".to_string(), ctx(42, &["alice"]));
         let got = reg.get("sess-1").expect("present after upsert");
-        assert_eq!(got.author_id, 42);
+        assert_eq!(got.creator.id, Some(42));
         assert_eq!(got.log_access, vec!["alice".to_string()]);
         assert_eq!(reg.len(), 1);
     }

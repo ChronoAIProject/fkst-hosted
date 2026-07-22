@@ -27,14 +27,17 @@ use crate::reconcile::announce::announce_session_comment;
 use crate::reconcile::desired::{KillReason, ReconcileAction, SessionRegistration};
 use crate::reconcile::execute_comments::{
     config_rejected_comment, env_not_ready_comment, env_verify_failed_comment,
-    flag_invalid_comment, invalid_refs_comment,
+    flag_invalid_comment, invalid_refs_comment, trigger_unauthorized_comment,
 };
 use crate::reconcile::reachability;
 use crate::reconcile::retire::retire_work_issues;
 use crate::session_backend::{BackendError, EnsureOutcome, SessionBackend};
 use crate::session_spec::creds::{credential_secret_data, StorageWriterCreds};
 
-use super::{SUBSTRATE_ANNOUNCED_LABEL, SUBSTRATE_CONFIG_REJECTED_LABEL, SUBSTRATE_INVALID_LABEL};
+use super::{
+    SUBSTRATE_ANNOUNCED_LABEL, SUBSTRATE_CONFIG_REJECTED_LABEL, SUBSTRATE_INVALID_LABEL,
+    TRIGGER_UNAUTHORIZED_LABEL,
+};
 
 /// The `validation-status` annotation value a fully-written environment carries;
 /// only a `ready` environment is injected into a session (mirrors Model A).
@@ -121,6 +124,21 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
         }
         ReconcileAction::ClearInvalid { trigger_issue } => {
             clear_invalid(&ctx.github, &owner_repo, trigger_issue).await
+        }
+        ReconcileAction::FlagTriggerUnauthorized {
+            trigger_issue,
+            detail,
+        } => {
+            flag_trigger_unauthorized(
+                &ctx.github,
+                &owner_repo,
+                trigger_issue,
+                &trigger_unauthorized_comment(&detail),
+            )
+            .await
+        }
+        ReconcileAction::ClearTriggerUnauthorized { trigger_issue } => {
+            clear_trigger_unauthorized(&ctx.github, &owner_repo, trigger_issue).await
         }
         ReconcileAction::AnnounceSession {
             trigger_issue,
@@ -308,7 +326,8 @@ async fn resolve_session_credentials(
 ) -> Result<(SessionPodSpec, BTreeMap<String, SecretString>), CredentialResolutionError> {
     let (user_env, install_commands, secret_keys) = match resolve_environment(
         ctx.env_store.as_ref(),
-        reg.trigger_author_id,
+        reg.creator_id,
+        &reg.creator_login,
         reg.def.environment.as_deref(),
     )
     .await
@@ -387,7 +406,7 @@ fn session_pod_spec_from(
 }
 
 /// The session's trusted-users list for `FKST_GITHUB_AUTHORIZED_LOGINS`: the
-/// trigger author's login FIRST (always trusted, skipped only if GitHub gave us
+/// effective creator's login FIRST (always trusted, skipped only if GitHub gave us
 /// a blank login), then the `### FKST Contributors` tokens, deduped
 /// case-insensitively (GitHub logins are case-insensitive). Numeric-id tokens
 /// ride along harmlessly — the packages' author policy matches logins, so an id
@@ -395,8 +414,8 @@ fn session_pod_spec_from(
 fn session_contributors(reg: &SessionRegistration) -> Vec<String> {
     let mut contributors: Vec<String> = Vec::new();
     let mut seen: Vec<String> = Vec::new();
-    let author = reg.trigger_author_login.trim();
-    for token in std::iter::once(author).chain(reg.log_access.iter().map(String::as_str)) {
+    let creator = reg.creator_login.trim();
+    for token in std::iter::once(creator).chain(reg.log_access.iter().map(String::as_str)) {
         if token.is_empty() {
             continue;
         }
@@ -540,6 +559,45 @@ async fn clear_invalid(github: &GithubAppTokens, owner_repo: &str, issue: i64) {
     }
 }
 
+/// Reject an unauthorized trigger with a durable once-only latch. The label is
+/// written before the comment: it is the dedupe gate, so a failed label write must
+/// not risk an unlatched duplicate comment on the next reconcile.
+async fn flag_trigger_unauthorized(
+    github: &GithubAppTokens,
+    owner_repo: &str,
+    issue: i64,
+    comment: &str,
+) {
+    if let Err(error) = github
+        .add_issue_labels(
+            owner_repo,
+            issue as u64,
+            &[TRIGGER_UNAUTHORIZED_LABEL.to_string()],
+        )
+        .await
+    {
+        tracing::warn!(owner_repo = %owner_repo, issue, error = %error, "reconcile: latch trigger-unauthorized label failed");
+        return;
+    }
+    post_comment_best_effort(github, owner_repo, issue, comment).await;
+}
+
+/// Clear the creator-authorization latch after authority is definitively granted.
+async fn clear_trigger_unauthorized(github: &GithubAppTokens, owner_repo: &str, issue: i64) {
+    match github
+        .remove_issue_label(owner_repo, issue as u64, TRIGGER_UNAUTHORIZED_LABEL)
+        .await
+    {
+        Ok(()) => {
+            tracing::info!(owner_repo = %owner_repo, issue, "reconcile: cleared trigger-unauthorized flag")
+        }
+        Err(GithubAppError::NotFound { .. }) => {}
+        Err(error) => {
+            tracing::warn!(owner_repo = %owner_repo, issue, error = %error, "reconcile: clear trigger-unauthorized flag failed")
+        }
+    }
+}
+
 /// Post a comment, logging (never propagating) any failure.
 async fn post_comment_best_effort(
     github: &GithubAppTokens,
@@ -572,15 +630,31 @@ enum EnvResolution {
     Blocked { comment: String },
 }
 
-/// Pre-flight the issue's named environment against the AUTHOR's store (keyed by
-/// the signed numeric GitHub id). `None` → an empty (no-environment) session. A
-/// named selection must EXIST and be `ready`; otherwise (missing, not ready, or a
-/// store-read error) the launch is blocked with a feedback comment — fail closed.
+/// Pre-flight the issue's named environment against the CREATOR's store (keyed by
+/// the signed numeric GitHub id). An assignee-derived creator has no id in issue
+/// metadata, so environment resolution is unavailable and the session proceeds
+/// without an environment (auto-seeded triggers never select one). `None` → an
+/// empty session. A named selection for an id-bearing creator must exist and be
+/// `ready`; otherwise the launch is blocked with feedback — fail closed.
 async fn resolve_environment(
     env_store: &dyn EnvironmentProfileStore,
-    author_id: i64,
+    creator_id: Option<i64>,
+    creator_login: &str,
     environment: Option<&str>,
 ) -> EnvResolution {
+    let Some(creator_id) = creator_id else {
+        tracing::info!(
+            creator = %creator_login,
+            requested_environment = environment.unwrap_or_default(),
+            "reconcile spawn: creator has no numeric id; resolving no environment"
+        );
+        return EnvResolution::Proceed {
+            user_env: BTreeMap::new(),
+            install: Vec::new(),
+            secret_keys: Vec::new(),
+        };
+    };
+
     let name = match environment {
         None => {
             return EnvResolution::Proceed {
@@ -592,15 +666,15 @@ async fn resolve_environment(
         Some(name) => name,
     };
 
-    match env_store.get_environment(author_id, name).await {
+    match env_store.get_environment(creator_id, name).await {
         Ok(Some(record)) if record.status == ENV_STATUS_READY => {
             match env_store
-                .load_environment_for_session(author_id, name)
+                .load_environment_for_session(creator_id, name)
                 .await
             {
                 Ok(Some((install, user_env, secret_keys))) => {
                     tracing::info!(
-                        github_user_id = author_id,
+                        github_user_id = creator_id,
                         environment = %name,
                         install_commands = install.len(),
                         env_vars = user_env.len(),

@@ -38,6 +38,33 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::state::AppState;
+use crate::{
+    github_app::listing::IssueSummary,
+    models::RepoRef,
+    reconcile::{effective_creator, parse_registration, CreatorResolution, SessionRegistration},
+};
+
+/// Parse a canvas-visible trigger with the same effective-creator attribution as
+/// the reconciler. The canvas remains a read surface (the reconcile gate owns the
+/// role decision), but registrations it projects must carry the same owner identity.
+pub(super) fn parse_trigger_registration(
+    installation_id: i64,
+    repo: &RepoRef,
+    issue: &IssueSummary,
+    bot_login: Option<&str>,
+) -> Result<SessionRegistration, (i64, String)> {
+    match effective_creator(&issue.metadata(), bot_login) {
+        CreatorResolution::Resolved(creator) => {
+            parse_registration(installation_id, repo, issue, creator)
+        }
+        CreatorResolution::Unattributable { assignee_count, .. } => Err((
+            issue.number,
+            format!(
+                "a bot-authored trigger must have exactly one assignee (found {assignee_count}) to attribute a session creator"
+            ),
+        )),
+    }
+}
 
 /// The canvas router (nested under `/api/v1`). GitHub-token authenticated via
 /// the `GithubUser` extractor (like the dashboard), so no documented security

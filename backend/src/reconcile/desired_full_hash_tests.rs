@@ -20,6 +20,8 @@ fn base_reg() -> SessionRegistration {
         trigger_issue: 5,
         trigger_author_id: 9,
         trigger_author_login: "author-login".to_string(),
+        creator_login: "author-login".to_string(),
+        creator_id: Some(9),
         def: SessionDef {
             name: "sess".to_string(),
             packages: vec![pkg("acme", "tools", "main", "pkg/a")],
@@ -143,6 +145,9 @@ fn full_config_hash_ignores_identity_fields() {
     };
     reg.trigger_issue = 4242;
     reg.trigger_author_id = 4242;
+    reg.trigger_author_login = "other-author".to_string();
+    reg.creator_id = None;
+    reg.creator_login = "assignee-owner".to_string();
     reg.session_id = "different".to_string();
     reg.config_hash = "different".to_string();
     assert_eq!(

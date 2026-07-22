@@ -37,6 +37,7 @@ pub(super) struct RecordingApi {
     pub(super) comments: Mutex<Vec<Call>>,
     pub(super) labels_added: Mutex<Vec<LabelCall>>,
     pub(super) labels_removed: Mutex<Vec<Call>>,
+    pub(super) events: Mutex<Vec<&'static str>>,
 }
 
 #[async_trait]
@@ -70,6 +71,7 @@ impl GithubApi for RecordingApi {
         number: u64,
         body: &str,
     ) -> Result<(), GithubAppError> {
+        self.events.lock().unwrap().push("comment");
         self.comments.lock().unwrap().push((
             owner.to_string(),
             repo.to_string(),
@@ -87,6 +89,7 @@ impl GithubApi for RecordingApi {
         number: u64,
         labels: &[String],
     ) -> Result<(), GithubAppError> {
+        self.events.lock().unwrap().push("label-add");
         self.labels_added.lock().unwrap().push((
             owner.to_string(),
             repo.to_string(),
@@ -104,6 +107,7 @@ impl GithubApi for RecordingApi {
         number: u64,
         label: &str,
     ) -> Result<(), GithubAppError> {
+        self.events.lock().unwrap().push("label-remove");
         self.labels_removed.lock().unwrap().push((
             owner.to_string(),
             repo.to_string(),
@@ -226,6 +230,8 @@ pub(super) fn registration() -> SessionRegistration {
         trigger_issue: 7,
         trigger_author_id: 583231,
         trigger_author_login: "author-login".to_string(),
+        creator_login: "author-login".to_string(),
+        creator_id: Some(583231),
         def: SessionDef {
             name: "site".to_string(),
             packages: vec![

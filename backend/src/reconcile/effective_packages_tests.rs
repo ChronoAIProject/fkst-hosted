@@ -48,6 +48,8 @@ fn reg(
         trigger_issue,
         trigger_author_id: 7,
         trigger_author_login: "author".to_string(),
+        creator_login: "author".to_string(),
+        creator_id: Some(7),
         def: SessionDef {
             name: "sess".to_string(),
             packages,
