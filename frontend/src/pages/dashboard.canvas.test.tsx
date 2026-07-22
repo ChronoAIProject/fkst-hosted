@@ -275,6 +275,45 @@ describe('Dashboard — canvas levels and loading', () => {
     expect(screen.getAllByText('nightly').length).toBeGreaterThan(0);
   });
 
+  it('coalesces refreshes while a slow sessions request is in flight', async () => {
+    const pending: ((r: Response) => void)[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/v1/overview')) return jsonResponse(overviewBody);
+      if (url.endsWith('/api/v1/repos/shining/lab/sessions')) {
+        return new Promise<Response>((resolve) => {
+          pending.push(resolve);
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderDashboard();
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Open account shining' }))[0]!);
+    fireEvent.click(
+      (await screen.findAllByRole('button', { name: 'Open repository shining/lab' }))[0]!
+    );
+    await waitFor(() => expect(pending).toHaveLength(1));
+
+    // A user refresh while the initial request is still slow must not start a
+    // competing request that makes the first response stale. It queues one
+    // follow-up instead, allowing this response to remove the loading skeleton.
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(pending).toHaveLength(1);
+    pending[0]!(jsonResponse(sessionsBody));
+    expect((await screen.findAllByText('nightly')).length).toBeGreaterThan(0);
+
+    await waitFor(() => expect(pending).toHaveLength(2));
+    pending[1]!(
+      jsonResponse({
+        ...sessionsBody,
+        sessions: [{ ...sessionsBody.sessions[0]!, name: 'nightly-refreshed' }],
+      })
+    );
+    expect((await screen.findAllByText('nightly-refreshed')).length).toBeGreaterThan(0);
+  });
+
   it('ignores Escape pressed inside an editable field (filter inputs)', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
