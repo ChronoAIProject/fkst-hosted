@@ -6,10 +6,11 @@
 //! 1. **Collision** (epic #572, R4a — [`detect_work_label_collisions`]): a
 //!    `fkst-substrate-trigger` issue can be created directly on GitHub, so the
 //!    one-work-label-per-trigger authoring rule cannot be enforced at authoring time
-//!    alone. This is the AUTHORITATIVE guard that stops two active sessions on the same
-//!    repo from competing over one work-label queue: among the OPEN registrations it
-//!    finds every group whose effective sets intersect and demotes the losers so only
-//!    one session ever claims a given queue.
+//!    alone. This is the AUTHORITATIVE guard that stops one creator from running two
+//!    active sessions over the same work-label queue: among that creator's OPEN
+//!    registrations it finds every group whose effective sets intersect and demotes
+//!    the losers. Different creators may share a label because work issues are routed
+//!    to session creators by sole assignee.
 //! 2. **Missing label** (epic #594, I4 — [`detect_missing_work_labels`]): a session
 //!    whose effective set is EMPTY (no explicit `### Work Label` AND no package-declared
 //!    `[github].work_labels`) can never be woken by anything, so it is demoted — this is
@@ -72,41 +73,47 @@ pub fn detect_missing_work_labels(
 ///
 /// ## Collision rule (per-label, lowest-issue-wins)
 ///
-/// Two sessions collide when their effective label sets share at least one label —
-/// they would otherwise spawn competing pods over the same work queue. Grouping is per
-/// INDIVIDUAL label: for each label the registration with the LOWEST trigger issue
-/// number OWNS the queue; every other holder LOSES on that label. A registration that
-/// loses on ANY of its labels is demoted.
+/// Two sessions collide when they have the same creator (ASCII case-insensitive) and
+/// their effective label sets share at least one label — they would otherwise spawn
+/// competing pods over the same creator's work queue. Grouping is per CREATOR and
+/// INDIVIDUAL label: for each `(creator, label)` pair the registration with the LOWEST
+/// trigger issue number OWNS the queue; every other holder LOSES on that label. A
+/// registration that loses on ANY of its labels is demoted. Creator identity is keyed
+/// by login because assignee-derived creators do not always have a numeric user ID. A
+/// GitHub login rename can therefore stop a creator's open pre-rename and post-rename
+/// triggers from colliding, matching the existing caveat for login-listed collaborators.
 ///
-/// This stays simple and order-free even for a pairwise-overlap chain: with `A{x}#1`,
-/// `B{x,y}#2`, `C{y}#3`, label `x` is owned by A and label `y` by B, so B loses `x`
-/// and C loses `y` — both B and C are demoted and only A survives. (A demoted owner
-/// still owns its other labels for citation purposes, so C's reason cites #2 even
-/// though #2 is itself demoted.)
+/// This stays simple and order-free even for one creator's pairwise-overlap chain:
+/// with `A{x}#1`, `A{x,y}#2`, `A{y}#3`, label `x` is owned by #1 and label `y` by #2,
+/// so #2 loses `x` and #3 loses `y` — both are demoted and only #1 survives. (A
+/// demoted owner still owns its other labels for citation purposes, so #3's reason
+/// cites #2 even though #2 is itself demoted.)
 ///
 /// A session with an EMPTY effective label set shares no queue and never collides.
 ///
 /// ## Determinism
 ///
-/// The output depends only on the `(session, label-set, issue-number)` facts, never on
-/// the iteration order of `work_labels_by_session` or `regs`: label ownership is a
-/// `min()` reduction, each loser cites its lexicographically-lowest losing label, and
-/// the markers are returned sorted ascending by trigger issue.
+/// The output depends only on the `(session, creator-login, label-set, issue-number)`
+/// facts, never on the iteration order of `work_labels_by_session` or `regs`: ownership
+/// is a `min()` reduction per `(creator, label)`, each loser cites its
+/// lexicographically-lowest losing label, and the markers are returned sorted ascending
+/// by trigger issue.
 pub fn detect_work_label_collisions(
     regs: &[SessionRegistration],
     work_labels_by_session: &HashMap<String, Vec<String>>,
 ) -> Vec<(i64, String)> {
-    // 1. Owner of each label = the lowest trigger-issue number that holds it. Both the
-    //    BTreeMap and the min() reduction are order-independent, so ownership never
-    //    depends on the iteration order of `regs` or `work_labels_by_session`.
-    let mut owner_by_label: BTreeMap<&str, i64> = BTreeMap::new();
+    // 1. Owner of each (creator, label) = the lowest trigger-issue number that holds it.
+    //    Both the BTreeMap and the min() reduction are order-independent, so ownership
+    //    never depends on the iteration order of `regs` or `work_labels_by_session`.
+    let mut owner_by_label: BTreeMap<(String, &str), i64> = BTreeMap::new();
     for reg in regs {
         let Some(labels) = work_labels_by_session.get(&reg.session_id) else {
             continue;
         };
+        let creator_key = reg.creator_login.to_ascii_lowercase();
         for label in labels {
             owner_by_label
-                .entry(label.as_str())
+                .entry((creator_key.clone(), label.as_str()))
                 .and_modify(|owner| *owner = (*owner).min(reg.trigger_issue))
                 .or_insert(reg.trigger_issue);
         }
@@ -121,13 +128,14 @@ pub fn detect_work_label_collisions(
         let Some(labels) = work_labels_by_session.get(&reg.session_id) else {
             continue;
         };
+        let creator_key = reg.creator_login.to_ascii_lowercase();
         let sorted: BTreeSet<&str> = labels.iter().map(String::as_str).collect();
         for label in sorted {
-            match owner_by_label.get(label) {
+            match owner_by_label.get(&(creator_key.clone(), label)) {
                 Some(&owner) if owner != reg.trigger_issue => {
                     losers.push((
                         reg.trigger_issue,
-                        format!("work label '{label}' collides with active session #{owner}"),
+                        format!("work label '{label}' collides with your active session #{owner}"),
                     ));
                     break;
                 }
