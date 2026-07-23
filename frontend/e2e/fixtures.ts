@@ -157,10 +157,13 @@ export const overview = {
 const liveSession: SessionDetail = {
   session_id: LIVE_SESSION_ID,
   name: 'feature-auth',
+  creator: PERSONAL,
   work_label: 'fkst-work',
   work_labels: ['fkst-security', 'fkst-work'],
   auto_merge: true,
   environment: 'video-studio',
+  source_branch: 'feature/auth',
+  target_branch: 'main',
   packages: [
     'ChronoAIProject/fkst-packages@fkst-hosted:workflow-dev',
     'ChronoAIProject/fkst-packages@fkst-hosted:github-devloop',
@@ -209,10 +212,13 @@ const liveSession: SessionDetail = {
 const degradedSession: SessionDetail = {
   session_id: DEGRADED_SESSION_ID,
   name: 'refactor-core',
+  creator: PERSONAL,
   work_label: 'fkst-refactor',
   work_labels: ['fkst-refactor'],
   auto_merge: false,
   environment: null,
+  source_branch: null,
+  target_branch: 'main',
   packages: ['ChronoAIProject/fkst-packages@fkst-hosted:code-review'],
   invalid_reason: null,
   status_labels: ['fkst-degraded'],
