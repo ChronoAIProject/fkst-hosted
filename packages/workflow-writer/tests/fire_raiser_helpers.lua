@@ -1,6 +1,6 @@
 -- Fire-raiser fixture harness for workflow-writer. Mirrors the workflow-security
 -- fixture: it stages an isolated workspace (this package + its libs + a minimal
--- github-proxy stub whose departments consume the request queues this package produces),
+-- effect-package stub whose department consumes the request queue this package produces),
 -- writes a child test that fires the cron raiser through the real framework, and asserts
 -- the producer-liveness trace. Runs only in CI, where BIN points at the framework binary.
 local H = {}
@@ -36,8 +36,8 @@ local function copy_dir(src, dst)
   run_command("cp -R " .. shell_quote(src) .. "/. " .. shell_quote(dst) .. "/")
 end
 
-local function write_stub_department(root, name, queue)
-  local dir = root .. "/packages/github-proxy/departments/" .. name
+local function write_stub_department(root, package_name, name, queue)
+  local dir = root .. "/packages/" .. package_name .. "/departments/" .. name
   run_command("mkdir -p " .. shell_quote(dir))
   file.write(dir .. "/main.lua", table.concat({
     "local M = {}",
@@ -52,17 +52,29 @@ local function write_stub_department(root, name, queue)
   }, "\n") .. "\n")
 end
 
+local function write_stub_package(root, package_name)
+  local dir = root .. "/packages/" .. package_name
+  run_command("mkdir -p " .. shell_quote(dir))
+  file.write(dir .. "/fkst.toml", table.concat({
+    'kind = "package"',
+    "name = " .. string.format("%q", package_name),
+    "",
+    "[code]",
+    'root = "."',
+  }, "\n") .. "\n")
+end
+
 function H.setup_workspace(name, child_test)
   local root = temp_root(name)
   local source = repo_root()
   file.write(root .. "/fkst.workspace.toml", '[workspace]\nunits = ["packages/*", "libraries/*"]\n')
-  for _, lib in ipairs({ "contract", "workflow", "testkit", "forge", "devloop" }) do
+  for _, lib in ipairs({ "contract", "workflow", "testkit", "forge", "devloop", "github-issue" }) do
     copy_dir(source .. "/libraries/" .. lib, root .. "/libraries/" .. lib)
   end
   copy_dir(source .. "/packages/workflow-writer", root .. "/packages/workflow-writer")
   run_command("rm -rf " .. shell_quote(root .. "/packages/workflow-writer/tests"))
-  file.write(root .. "/packages/github-proxy/fkst.toml", "kind = \"package\"\nname = \"github-proxy\"\n\n[code]\nroot = \".\"\n")
-  write_stub_department(root, "github_issue_comment", "github_issue_comment_request")
+  write_stub_package(root, "github-comment-effect")
+  write_stub_department(root, "github-comment-effect", "github_comment", "github_issue_comment_request")
   run_command("mkdir -p " .. shell_quote(root .. "/packages/workflow-writer/tests"))
   file.write(root .. "/packages/workflow-writer/tests/fire_raiser_child_test.lua", child_test)
   return root
@@ -89,7 +101,7 @@ function H.run_child(root)
     "--package-root",
     shell_quote(root .. "/packages/workflow-writer"),
     "--package-root",
-    shell_quote(root .. "/packages/github-proxy"),
+    shell_quote(root .. "/packages/github-comment-effect"),
   }, " ")
   return read_command(command)
 end

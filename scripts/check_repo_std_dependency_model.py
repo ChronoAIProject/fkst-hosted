@@ -40,6 +40,9 @@ DEVLOOP_FAMILY = {
     "github-devloop-ops",
     "github-devloop-pr",
     "github-proxy",
+    "github-proxy-effects",
+    "workflow-security",
+    "workflow-writer",
 }
 
 

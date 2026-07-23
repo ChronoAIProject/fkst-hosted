@@ -2,6 +2,7 @@ local strings = require("contract.strings")
 local t = fkst.test
 
 local package_root = "packages/github-external-pr-intake"
+local github_proxy_effects_root = "libraries/github-proxy-effects"
 
 local function load_department()
   local old_pipeline = pipeline
@@ -409,7 +410,7 @@ return {
     local proxy_raiser = read_disk_file(sibling_package_root("github-proxy") .. "/raisers/github_poll.lua")
     local proxy_poll = read_disk_file(sibling_package_root("github-proxy") .. "/departments/github_poll/main.lua")
     local proxy_issue_create = read_disk_file(sibling_package_root("github-proxy") .. "/departments/github_issue_create/main.lua")
-    local proxy_issue_create_core = read_disk_file(sibling_package_root("github-proxy") .. "/core/issue_create.lua")
+    local proxy_issue_create_core = read_disk_file(github_proxy_effects_root .. "/core/issue_create.lua")
     local devloop_admission = read_disk_file(sibling_package_root("github-devloop-intake") .. "/departments/admission/main.lua")
     local external_scan_raiser = read_disk_file(package_root .. "/raisers/external_pr_scan.lua")
     local external_intake = read_disk_file(package_root .. "/departments/external_pr_intake/main.lua")

@@ -4,7 +4,7 @@
 -- graph goes quiescent with no downstream raise -- the honest "nothing to author" trace.
 --
 -- The adapter's productive outbound edge (github-comment-effect.github_issue_comment_request ->
--- github-proxy.github_comment) shares its edge_id with the already-covered github-devloop
+-- github-comment-effect.github_comment) shares its edge_id with the already-covered github-devloop
 -- edge, so the cross-package integration ratchet is satisfied without re-asserting it;
 -- this smoke proves the writer's own tick -> materializer wiring drives cleanly.
 local helper = require("tests.fire_raiser_helpers")
@@ -13,9 +13,8 @@ local t = fkst.test
 return {
   test_run_graph_materialization_tick_reaches_materializer_and_quiesces = function()
     local root = helper.setup_workspace("graph", helper.fire_raiser_child([[
-  local graph = require("testkit.graph")
-
   test_writer_materialization_tick_quiesces = function()
+    local graph = require("testkit.graph")
     mock_env()
 
     local trace = graph.require_quiescent(graph.run({
@@ -24,8 +23,12 @@ return {
       source_ref = { kind = "cron", reference = "workflow-writer.writer_poll/materialize" },
     }, { max_steps = 4 }))
 
-    t.eq(trace.routed_to[1], "workflow-writer.workflow_writer_materialize_next")
-    t.eq(#trace.raised, 0)
+    local delivery = graph.require_delivery(trace, {
+      queue = "workflow-writer.workflow_writer_materialization_tick",
+      consumer = "workflow-writer.workflow_writer_materialize_next",
+    })
+    t.eq(delivery.exit_code, 0)
+    t.eq(#(delivery.raises or {}), 0)
     graph.assert_covers(trace, {})
   end,
 ]]))

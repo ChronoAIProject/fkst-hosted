@@ -1,6 +1,6 @@
 kind = "package.composed"
 name = "workflow-dev"
-persistence_class = "saga"
+persistence_class = "stateless_adapter"
 
 [code]
 root = "."

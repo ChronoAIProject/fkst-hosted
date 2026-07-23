@@ -3,6 +3,7 @@ local S = {}
 local context_bundle = require("devloop.context_bundle")
 local config = require("devloop.config")
 local git_commands = require("devloop.commands.git_ops")
+local git_mechanics = require("devloop.git_mechanics")
 local pr_commands = require("devloop.commands.prs")
 
 function S.with(core, opts, fn)
@@ -16,6 +17,7 @@ function S.with(core, opts, fn)
   local previous_git_remote_branch_head = core.git.remote_branch_head
   local previous_git_fetch_pr_head_ref = git_commands.git_fetch_pr_head_ref
   local previous_git_fetch_head_commit_command = git_commands.git_fetch_head_commit
+  local previous_with_repo_ref_store_lock = git_mechanics.with_repo_ref_store_lock
   local previous_pr_list_promotions = pr_commands.gh_pr_list_promotions
   local previous_context_fetch_ref_from_bundle = context_bundle.context_fetch_ref_from_bundle
   local previous_context_fetch_from_bundle = context_bundle.context_fetch_from_bundle
@@ -49,6 +51,9 @@ function S.with(core, opts, fn)
   git_commands.git_fetch_head_commit = function()
     return { exit_code = 0, stdout = head_sha, stderr = "" }
   end
+  git_mechanics.with_repo_ref_store_lock = function(_repo, callback)
+    return callback()
+  end
   pr_commands.gh_pr_list_promotions = function(repo, integration, upstream)
     return {
       exit_code = 0,
@@ -80,6 +85,7 @@ function S.with(core, opts, fn)
   core.git.remote_branch_head = previous_git_remote_branch_head
   git_commands.git_fetch_pr_head_ref = previous_git_fetch_pr_head_ref
   git_commands.git_fetch_head_commit = previous_git_fetch_head_commit_command
+  git_mechanics.with_repo_ref_store_lock = previous_with_repo_ref_store_lock
   pr_commands.gh_pr_list_promotions = previous_pr_list_promotions
   context_bundle.context_fetch_ref_from_bundle = previous_context_fetch_ref_from_bundle
   context_bundle.context_fetch_from_bundle = previous_context_fetch_from_bundle
