@@ -100,6 +100,56 @@ test.describe('the window/body never scrolls', () => {
   }
 });
 
+test.describe('responsive shell controls', () => {
+  test('authenticated mobile actions remain visible or reachable from More', async ({ page }) => {
+    await page.setViewportSize(MOBILE);
+    await prepareDashboard(page);
+    await page.goto('/dashboard');
+    await expect(page.getByRole('heading', { name: 'Your fkst sessions' })).toBeVisible();
+
+    const alwaysVisible = [
+      page.getByRole('link', { name: 'FKST — home' }),
+      page.getByRole('link', { name: 'Home', exact: true }),
+      page.getByRole('link', { name: 'Dashboard', exact: true }),
+      page.getByRole('button', { name: 'Take the product tour' }),
+      page.getByRole('button', { name: 'More' }),
+    ];
+    for (const control of alwaysVisible) {
+      await expect(control).toBeVisible();
+      await expect(control).toBeInViewport();
+    }
+
+    await page.getByRole('button', { name: 'More' }).click();
+    const menu = page.getByRole('menu');
+    const popover = menu.locator('..');
+    const narrowActions = [
+      menu.getByRole('menuitem', { name: 'Environments' }),
+      menu.getByRole('menuitem', { name: 'Sign out' }),
+      menu.getByRole('menuitem', { name: 'GitHub ↗' }),
+      popover.getByRole('group', { name: 'Language' }),
+    ];
+    for (const control of narrowActions) {
+      await expect(control).toBeVisible();
+      await expect(control).toBeInViewport();
+    }
+
+    const clipped = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('header a, header button'))
+        .filter((element) => {
+          const rect = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden';
+        })
+        .filter((element) => {
+          const rect = element.getBoundingClientRect();
+          return rect.left < -1 || rect.right > innerWidth + 1;
+        })
+        .map((element) => element.getAttribute('aria-label') || element.textContent?.trim())
+    );
+    expect(clipped, 'no visible topbar control is clipped').toEqual([]);
+  });
+});
+
 test.describe('the intended inner container scrolls', () => {
   test('the v2 landing fits one viewport — nothing scrolls', async ({ page }) => {
     await page.setViewportSize(MOBILE);
@@ -190,7 +240,8 @@ test.describe('the intended inner container scrolls', () => {
     await page.goto('/dashboard');
     await expect(page.getByRole('heading', { name: 'Your fkst sessions' })).toBeVisible();
     // Environments drawer → New environment gives a tall (overflowing) body.
-    await page.getByRole('button', { name: 'Environments' }).click();
+    await page.getByRole('button', { name: 'More' }).click();
+    await page.getByRole('menuitem', { name: 'Environments' }).click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
     await dialog.getByRole('button', { name: 'New environment' }).click();

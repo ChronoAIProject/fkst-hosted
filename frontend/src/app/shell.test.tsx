@@ -136,6 +136,22 @@ describe('Shell', () => {
     expect(within(menu).queryByRole('menuitem', { name: /sign in/i })).not.toBeInTheDocument();
   });
 
+  it('keeps narrow-screen environment and language actions in the overflow popover', () => {
+    renderShell({ authenticated: true });
+    const inlineEnvironment = screen.getByRole('button', { name: 'Environments' });
+    expect(inlineEnvironment.className).toContain('max-[600px]:hidden');
+    expect(screen.getByRole('group', { name: 'Language' }).className).toContain(
+      'max-[600px]:hidden'
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    const menu = screen.getByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: 'Environments' })).toBeInTheDocument();
+    const popover = menu.parentElement;
+    expect(popover).not.toBeNull();
+    expect(within(popover!).getByRole('group', { name: 'Language' })).toBeInTheDocument();
+  });
+
   it('hides the Environments topbar entry when signed out', () => {
     renderShell();
     expect(screen.queryByRole('button', { name: 'Environments' })).not.toBeInTheDocument();

@@ -148,14 +148,15 @@ export function Shell() {
             </nav>
 
             <div className="flex items-center gap-2 ml-auto">
-              {/* Environments manager entry — authenticated users only. Kept
-                  visible at every width (short label); toggles the drawer. */}
+              {/* Environments manager entry — authenticated users only. At
+                  narrow widths the full English label moves into the overflow
+                  menu so the primary nav and utility controls cannot collide. */}
               {isAuthenticated && (
                 <button
                   type="button"
                   onClick={() => setEnvOpen(true)}
                   data-tour="environments"
-                  className={`${inlineActionClass} flex-none`}
+                  className={`${inlineActionClass} flex-none max-[600px]:hidden`}
                 >
                   {c.nav.environments}
                 </button>
@@ -186,7 +187,7 @@ export function Shell() {
                 GitHub ↗
               </a>
 
-              <LanguageToggle />
+              <LanguageToggle className="max-[600px]:hidden" />
 
               {/* Hairline divider separating utilities from the auth action
                   (v2 nav grammar). Decorative. */}
@@ -219,9 +220,9 @@ export function Shell() {
               )}
 
               {/* Responsive overflow menu — shown once the first inline item
-                  (GitHub, ≤720px) starts collapsing, so the auth action, the
-                  GitHub link, and the CTA are never unreachable on a narrow
-                  viewport. Hidden at ≥721px where every inline item shows. */}
+                  (GitHub, ≤720px) starts collapsing. Below 600px it also owns
+                  Environments and the language segmented control, keeping all
+                  actions reachable without squeezing the primary navigation. */}
               <div ref={menuRef} className="relative flex-none min-[721px]:hidden">
                 <button
                   type="button"
@@ -238,45 +239,60 @@ export function Shell() {
                 </button>
 
                 {menuOpen && (
-                  <div
-                    role="menu"
-                    className="anim-notice-in absolute right-0 top-[calc(100%+6px)] z-50 min-w-[168px] rounded-control border border-line bg-glass backdrop-blur-glass shadow-modal-seat flex flex-col p-1"
-                  >
-                    {isAuthenticated ? (
-                      <button
-                        type="button"
+                  <div className="anim-notice-in absolute right-0 top-[calc(100%+6px)] z-50 min-w-[168px] rounded-control border border-line bg-glass backdrop-blur-glass shadow-modal-seat flex flex-col p-1">
+                    <div role="menu" className="flex flex-col">
+                      {isAuthenticated && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            setEnvOpen(true);
+                          }}
+                          className={`${menuItemClass} min-[601px]:hidden`}
+                        >
+                          {c.nav.environments}
+                        </button>
+                      )}
+                      {isAuthenticated ? (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            signOut();
+                          }}
+                          className={menuItemClass}
+                        >
+                          {c.auth.signOut}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            signIn();
+                          }}
+                          className={menuItemClass}
+                        >
+                          {c.auth.signIn}
+                        </button>
+                      )}
+                      <a
                         role="menuitem"
-                        onClick={() => {
-                          setMenuOpen(false);
-                          signOut();
-                        }}
+                        href={REPO}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={() => setMenuOpen(false)}
                         className={menuItemClass}
                       >
-                        {c.auth.signOut}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setMenuOpen(false);
-                          signIn();
-                        }}
-                        className={menuItemClass}
-                      >
-                        {c.auth.signIn}
-                      </button>
-                    )}
-                    <a
-                      role="menuitem"
-                      href={REPO}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={() => setMenuOpen(false)}
-                      className={menuItemClass}
-                    >
-                      GitHub ↗
-                    </a>
+                        GitHub ↗
+                      </a>
+                    </div>
+                    <div className="border-t border-line mt-1 pt-1 min-[601px]:hidden">
+                      <LanguageToggle className="w-full justify-center" />
+                    </div>
                   </div>
                 )}
               </div>
