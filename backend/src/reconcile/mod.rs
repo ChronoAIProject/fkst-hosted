@@ -52,8 +52,9 @@ pub mod templates;
 pub mod trigger_authz;
 pub mod work_ack;
 // Pure work-issue AUTHORITY predicate: which GitHub user may raise work for a
-// session (creator ∪ Session Collaborators ∪ deployment global admins). Consumed
-// unconditionally by the pending gate + the work-ack reject surface.
+// session (creator ∪ Session Collaborators ∪ deployment global admins), plus the
+// configured GitHub App as a system principal. Consumed unconditionally by the
+// pending gate + the work-ack reject surface.
 pub mod work_authz;
 pub mod work_labels;
 
@@ -111,8 +112,9 @@ pub const SUBSTRATE_ANNOUNCED_LABEL: &str = "fkst-substrate-active";
 /// latch) — an acknowledged work issue stays acknowledged for its lifetime.
 pub const WORK_PICKED_UP_LABEL: &str = "fkst-picked-up";
 
-/// The clearable DURABLE latch added to a routed WORK issue whose author is not the
-/// session creator, a listed Session Collaborator, or a deployment global admin.
+/// The clearable DURABLE latch added to a routed WORK issue whose author is neither
+/// the configured FKST App nor the session creator, a listed Session Collaborator,
+/// or a deployment global admin.
 /// Label-first ordering makes the rejection comment exactly-once across restarts;
 /// the latch is removed as soon as the issue author becomes authorized, allowing
 /// the issue to be picked up without recreating it.

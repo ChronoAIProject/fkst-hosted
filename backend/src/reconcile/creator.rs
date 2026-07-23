@@ -41,11 +41,19 @@ fn normalize_login(login: &str) -> String {
         .to_string()
 }
 
+/// Whether `login` is the configured FKST GitHub App identity.
+///
+/// Keep trigger attribution and system-authored work authorization on the same
+/// normalization contract so REST, GraphQL, and `gh` actor forms cannot diverge.
+pub(crate) fn is_expected_bot_login(login: &str, bot_login: Option<&str>) -> bool {
+    bot_login
+        .map(|bot| normalize_login(login) == normalize_login(bot))
+        .unwrap_or(false)
+}
+
 /// Resolve the effective creator using issue metadata only.
 pub fn effective_creator(meta: &IssueMetadata, bot_login: Option<&str>) -> CreatorResolution {
-    let bot_authored = bot_login
-        .map(|bot| normalize_login(&meta.user_login) == normalize_login(bot))
-        .unwrap_or(false);
+    let bot_authored = is_expected_bot_login(&meta.user_login, bot_login);
 
     if !bot_authored {
         return CreatorResolution::Resolved(SessionCreator {

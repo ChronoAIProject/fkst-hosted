@@ -414,7 +414,7 @@ pub async fn reconcile_repo(
     // claimed. Mirrors the announce latch (comment + durable label), reuses the token
     // minted above, and gates on ≥1 registration; a failure here never aborts the
     // reconcile.
-    crate::reconcile::work_ack::ack_open_work_issues(
+    crate::reconcile::work_ack::ack_open_work_issues_with_bot(
         &ctx.github,
         ctx.listing.as_ref(),
         &token,
@@ -422,6 +422,7 @@ pub async fn reconcile_repo(
         &regs,
         &work_labels_by_session,
         &ctx.config.access,
+        cfg.github_bot_login.as_deref(),
     )
     .await;
 
@@ -437,7 +438,11 @@ pub async fn reconcile_repo(
     //    every label its packages auto-declare (`[github].work_labels`, resolved
     //    transitively over `[event_deps]`). So a session wakes on any of its packages'
     //    own labels without the operator restating them in the trigger issue.
-    let gate = LabelCountPending::new(ctx.listing.as_ref(), &token);
+    let gate = LabelCountPending::new_with_bot_login(
+        ctx.listing.as_ref(),
+        &token,
+        cfg.github_bot_login.as_deref(),
+    );
     let mut pending: HashMap<String, bool> = HashMap::new();
     for reg in &regs {
         let labels = work_labels_by_session

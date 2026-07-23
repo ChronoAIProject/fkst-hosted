@@ -13,7 +13,7 @@ use crate::github_app::listing::GithubListing;
 use crate::models::RepoRef;
 use crate::reconcile::desired::SessionRegistration;
 use crate::reconcile::routing::{route_work_issue, WorkRouting};
-use crate::reconcile::work_authz::is_work_author_allowed;
+use crate::reconcile::work_authz::is_work_author_allowed_with_bot;
 
 #[async_trait]
 pub trait PendingWork: Send + Sync {
@@ -33,11 +33,28 @@ pub trait PendingWork: Send + Sync {
 pub struct LabelCountPending<'a> {
     listing: &'a dyn GithubListing,
     token: &'a SecretString,
+    github_bot_login: Option<&'a str>,
 }
 
 impl<'a> LabelCountPending<'a> {
     pub fn new(listing: &'a dyn GithubListing, token: &'a SecretString) -> Self {
-        Self { listing, token }
+        Self {
+            listing,
+            token,
+            github_bot_login: None,
+        }
+    }
+
+    pub fn new_with_bot_login(
+        listing: &'a dyn GithubListing,
+        token: &'a SecretString,
+        github_bot_login: Option<&'a str>,
+    ) -> Self {
+        Self {
+            listing,
+            token,
+            github_bot_login,
+        }
     }
 }
 
@@ -78,7 +95,13 @@ impl PendingWork for LabelCountPending<'_> {
                 .await?;
             if issues.iter().map(|issue| issue.metadata()).any(|meta| {
                 route_work_issue(&meta, &reg.creator_login) == WorkRouting::Routed
-                    && is_work_author_allowed(reg, global_admins, meta.user_id, &meta.user_login)
+                    && is_work_author_allowed_with_bot(
+                        reg,
+                        global_admins,
+                        meta.user_id,
+                        &meta.user_login,
+                        self.github_bot_login,
+                    )
             }) {
                 return Ok(true);
             }

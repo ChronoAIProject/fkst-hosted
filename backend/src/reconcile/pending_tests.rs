@@ -225,6 +225,27 @@ async fn routed_unauthorized_issue_is_not_pending() {
 }
 
 #[tokio::test]
+async fn configured_app_child_is_pending_but_an_unconfigured_bot_is_not() {
+    let listing = FakeListing::ok(1, vec![issue(9000, "fkst-app[bot]", &["alice"])]);
+    let token = SecretString::from("ghs_x".to_string());
+    let reg = registration();
+    let policy = access("");
+
+    let configured = LabelCountPending::new_with_bot_login(&listing, &token, Some("app/FKST-App"))
+        .has_pending(42, &repo(), &["fkst-run".to_string()], &reg, &policy)
+        .await
+        .unwrap();
+    assert!(configured);
+
+    let mismatched =
+        LabelCountPending::new_with_bot_login(&listing, &token, Some("other-app[bot]"))
+            .has_pending(42, &repo(), &["fkst-run".to_string()], &reg, &policy)
+            .await
+            .unwrap();
+    assert!(!mismatched);
+}
+
+#[tokio::test]
 async fn empty_label_set_never_calls_github() {
     let listing = FakeListing::ok(1, vec![issue(7, "alice", &["alice"])]);
     let token = SecretString::from("ghs_x".to_string());
