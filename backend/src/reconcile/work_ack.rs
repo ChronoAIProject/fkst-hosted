@@ -14,7 +14,7 @@ use crate::github_app::GithubAppTokens;
 use crate::models::RepoRef;
 use crate::reconcile::desired::SessionRegistration;
 use crate::reconcile::routing::{route_work_issue, WorkRouting};
-use crate::reconcile::work_authz::is_work_author_allowed;
+use crate::reconcile::work_authz::is_work_author_allowed_with_bot;
 
 use super::{WORK_PICKED_UP_LABEL, WORK_UNAUTHORIZED_LABEL, WORK_UNROUTED_LABEL};
 
@@ -61,6 +61,33 @@ pub async fn ack_open_work_issues(
     regs: &[SessionRegistration],
     work_labels_by_session: &HashMap<String, Vec<String>>,
     global_admins: &AccessPolicy,
+) {
+    ack_open_work_issues_with_bot(
+        github,
+        listing,
+        token,
+        repo,
+        regs,
+        work_labels_by_session,
+        global_admins,
+        None,
+    )
+    .await;
+}
+
+/// Production work feedback with the configured App identity admitted as a
+/// system-authored work principal. The public wrapper above retains the strict
+/// human-only behavior for callers that do not provide an App identity.
+#[allow(clippy::too_many_arguments)]
+pub async fn ack_open_work_issues_with_bot(
+    github: &GithubAppTokens,
+    listing: &dyn GithubListing,
+    token: &SecretString,
+    repo: &RepoRef,
+    regs: &[SessionRegistration],
+    work_labels_by_session: &HashMap<String, Vec<String>>,
+    global_admins: &AccessPolicy,
+    github_bot_login: Option<&str>,
 ) {
     if regs.is_empty() {
         return;
@@ -129,7 +156,13 @@ pub async fn ack_open_work_issues(
             }
 
             let carries_unauthorized = carries_label(issue, WORK_UNAUTHORIZED_LABEL);
-            if !is_work_author_allowed(reg, global_admins, issue.user_id, &issue.user_login) {
+            if !is_work_author_allowed_with_bot(
+                reg,
+                global_admins,
+                issue.user_id,
+                &issue.user_login,
+                github_bot_login,
+            ) {
                 if !carries_unauthorized {
                     reject_issue(github, repo, issue, reg).await;
                 }

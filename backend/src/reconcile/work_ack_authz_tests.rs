@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use super::work_ack_test_support::*;
 use super::{
-    ack_open_work_issues, work_unauthorized_comment, WORK_PICKED_UP_LABEL, WORK_UNAUTHORIZED_LABEL,
+    ack_open_work_issues, ack_open_work_issues_with_bot, work_unauthorized_comment,
+    WORK_PICKED_UP_LABEL, WORK_UNAUTHORIZED_LABEL,
 };
 
 #[test]
@@ -164,6 +165,38 @@ async fn stale_unauthorized_latch_clears_before_authorized_ack() {
         &access(""),
     )
     .await;
+    assert_eq!(
+        api.labels_removed.lock().unwrap()[0].3,
+        WORK_UNAUTHORIZED_LABEL
+    );
+    assert_eq!(
+        api.labels_added.lock().unwrap()[0].3,
+        vec![WORK_PICKED_UP_LABEL.to_string()]
+    );
+}
+
+#[tokio::test]
+async fn configured_app_child_clears_unauthorized_latch_and_is_acked() {
+    let api = Arc::new(RecordingApi::default());
+    let listing = FakeListing::ok(vec![issue_by(
+        5,
+        &["fkst-run", WORK_UNAUTHORIZED_LABEL],
+        9000,
+        "app/FKST-App",
+        &["alice"],
+    )]);
+    ack_open_work_issues_with_bot(
+        &tokens(api.clone()),
+        &listing,
+        &token(),
+        &repo(),
+        &[registration("demo", "fkst-run")],
+        &one_label_map(&["fkst-run"]),
+        &access(""),
+        Some("fkst-app[bot]"),
+    )
+    .await;
+
     assert_eq!(
         api.labels_removed.lock().unwrap()[0].3,
         WORK_UNAUTHORIZED_LABEL

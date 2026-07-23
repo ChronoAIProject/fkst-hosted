@@ -1462,7 +1462,9 @@ data:
   # Deployment-wide administrators. They always pass the service and trigger gates,
   # and are an authority tier for every session's work issues. Work-issue authority
   # is always enforced: only the session creator, its ### Session Collaborators, and
-  # these global admins may author work (there is no opt-out flag). The dashboard
+  # these global admins may author human work (there is no opt-out flag). The
+  # configured GitHub App remains a system principal for workflow-generated child
+  # issues. The dashboard
   # spans every account/repository where this GitHub App is installed, with
   # cross-installation session, outcome, log, and observe read access. Cross-account
   # GitHub mutations still use the caller's user token and remain subject to GitHub's
@@ -2246,7 +2248,7 @@ A running session works its open work-label issues **in parallel, each as an ind
 - **Wave the backlog by dependency.** Land the foundational issues first (shared config, base modules, scaffolding), **merge them**, and only then file the issues that build on them. Do **not** file a large set of interdependent issues at once: a dependent issue worked before its foundation is merged can yield an empty diff (codex returns `no-changes`) or reference files not yet on `main`. In live testing, content clarity was never the failure mode — **dependency ordering** was.
 - **One feature/page per issue**, named in the title, with exact files + real content + checkable acceptance criteria. Each issue is coded in isolation (codex sees that one issue + the repo, not the sibling backlog), so cross-referencing every other issue in each body does not help — correct per-issue scoping does.
 - **Keep each creator's effective label sets disjoint.** The explicit `### Work Label` plus package/manifest-discovered `[github].work_labels` form a session's effective set. Two open triggers owned by the same creator may not overlap; the collision detail names the label and the lower-numbered active trigger that owns it. Different creators may deliberately use overlapping labels because assignees route their work independently.
-- **Route every work issue to one creator.** A work issue is eligible only when it has exactly one assignee equal to the creator of an active session watching one of its labels. Its author must be that creator, a login frozen under the session's `### Session Collaborators`, or a deployment global admin. Repository admin/maintain status alone is not work authority. Authorization is always enforced.
+- **Route every work issue to one creator.** A work issue is eligible only when it has exactly one assignee equal to the creator of an active session watching one of its labels. A human author must be that creator, a login frozen under the session's `### Session Collaborators`, or a deployment global admin; the configured FKST GitHub App is separately accepted as the system author of workflow-generated children. Repository admin/maintain status alone is not work authority. Authorization is always enforced.
 - **An open work issue keeps its session's pod alive until it is closed or its PR merges.** A created-but-unmerged PR does NOT idle the session — the reconciler's pending gate counts open work-label issues, not un-PR'd ones. Merge/close finished work to let a session idle down.
 
 The durable status labels explain what happened and prevent duplicate comments across reconciler restarts:
@@ -2256,7 +2258,7 @@ The durable status labels explain what happened and prevent duplicate comments a
 | `fkst-trigger-unauthorized` | The trigger creator is unattributable or lacks global-admin/repository admin-or-maintain authority. Fix the assignee or authority; the clearable latch self-heals before body parsing resumes. |
 | `fkst-substrate-invalid` | The accepted trigger cannot parse or resolve, has no effective work label, or overlaps another active trigger owned by the same creator. Collision feedback names the overlapping label and winning trigger. Fix the issue; the clearable latch self-heals. |
 | `fkst-unrouted` | A labeled work issue has zero/multiple assignees or its sole assignee is not the creator of a matching active session. Correct the assignee; the clearable latch self-heals. |
-| `fkst-unauthorized` | The routed work issue's author is not its session creator, a Session Collaborator, or a global admin. It remains unworked until the author becomes authorized; the clearable latch then self-heals. |
+| `fkst-unauthorized` | The routed work issue's author is neither the configured FKST App nor its session creator, a Session Collaborator, or a global admin. It remains unworked until the author becomes authorized; the clearable latch then self-heals. |
 | `fkst-substrate-active` / `fkst-picked-up` | One-time durable acknowledgements that the trigger registered or the work issue was claimed. Retirement removes the stale picked-up latch. |
 | `fkst-degraded` | The session pod or framework health is degraded; it clears when health recovers. |
 | `fkst-config-rejected` | A registered trigger's frozen configuration was edited and ignored. Close it and open a new trigger to change configuration. |

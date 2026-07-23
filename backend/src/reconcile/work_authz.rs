@@ -2,9 +2,12 @@
 //!
 //! A routed issue may raise work only for its session creator, a deployment-wide
 //! global administrator, or a principal explicitly listed under `### Session
-//! Collaborators`. Repository administrator status is intentionally not a tier.
+//! Collaborators`. The configured FKST GitHub App is separately trusted as a
+//! system principal so workflow materialization can create routed child issues.
+//! Repository administrator status is intentionally not a human authority tier.
 
 use crate::access_policy::{entry_matches, AccessPolicy};
+use crate::reconcile::creator::is_expected_bot_login;
 use crate::reconcile::desired::SessionRegistration;
 
 /// Whether the verified work-issue author may raise work for `reg`.
@@ -32,6 +35,22 @@ pub fn is_work_author_allowed(
     reg.collaborators
         .iter()
         .any(|entry| entry_matches(entry, &author_id, author_login))
+}
+
+/// Apply the human authority tiers plus the configured FKST App system principal.
+///
+/// Routing remains a separate mandatory predicate at every caller, so trusting the
+/// App author never permits an unassigned, multiply assigned, or foreign-routed
+/// issue to wake or receive acknowledgment from a session.
+pub fn is_work_author_allowed_with_bot(
+    reg: &SessionRegistration,
+    global_admins: &AccessPolicy,
+    author_id: i64,
+    author_login: &str,
+    github_bot_login: Option<&str>,
+) -> bool {
+    is_expected_bot_login(author_login, github_bot_login)
+        || is_work_author_allowed(reg, global_admins, author_id, author_login)
 }
 
 #[cfg(test)]
@@ -153,5 +172,33 @@ mod tests {
     fn blank_collaborator_entries_never_grant() {
         let reg = reg(Some(7), "alice", &["@", "  "]);
         assert!(!is_work_author_allowed(&reg, &access(""), 999, ""));
+    }
+
+    #[test]
+    fn only_the_configured_app_identity_is_allowed_as_a_system_principal() {
+        let reg = reg(Some(7), "alice", &[]);
+        for login in ["fkst-app[bot]", "app/FKST-App", "fkst-app"] {
+            assert!(is_work_author_allowed_with_bot(
+                &reg,
+                &access(""),
+                9000,
+                login,
+                Some("fkst-app[bot]")
+            ));
+        }
+        assert!(!is_work_author_allowed_with_bot(
+            &reg,
+            &access(""),
+            9000,
+            "fkst-app[bot]",
+            None
+        ));
+        assert!(!is_work_author_allowed_with_bot(
+            &reg,
+            &access(""),
+            9000,
+            "other-app[bot]",
+            Some("fkst-app[bot]")
+        ));
     }
 }
