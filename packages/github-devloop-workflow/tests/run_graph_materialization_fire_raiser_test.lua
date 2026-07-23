@@ -275,6 +275,11 @@ local function mock_env()
       stderr = "",
       exit_code = 0,
     })
+    t.mock_command(devloop_base.read_env_command("FKST_SESSION_CREATOR"), {
+      stdout = "fkst-test-bot",
+      stderr = "",
+      exit_code = 0,
+    })
   end
 end
 
@@ -398,6 +403,8 @@ return {
     local create = graph.require_raise(materialized_trace, "github-proxy.github_issue_create_request")
     t.eq(#create.payload.labels, 1)
     t.eq(create.payload.labels[1], "fkst-dev")
+    t.eq(#create.payload.assignees, 1)
+    t.eq(create.payload.assignees[1], "fkst-test-bot")
     t.is_true(create.payload.labels[1] ~= "fkst-workflow")
     t.is_true(create.payload.labels[1]:find("fkst-dev:", 1, true) == nil)
     t.eq(create.payload.title, "Workflow child")

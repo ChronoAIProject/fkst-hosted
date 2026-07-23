@@ -116,6 +116,13 @@ local function generator_worktree(deps, slot, identity)
   return slot.content and slot.content.kind == "generated" and make_worktree(identity) or nil
 end
 
+local function session_creator(deps)
+  if type(deps.session_creator) == "function" then
+    return deps.session_creator()
+  end
+  return devloop_config.session_creator()
+end
+
 local function perform_materialize(core, deps, repo, issue_number, origin, blueprint_fact, record, blueprint_digest, facts, current, decision, event)
   local slot = actions.find_step(record.blueprint, decision.slot)
   if slot == nil then
@@ -214,7 +221,8 @@ local function perform_materialize(core, deps, repo, issue_number, origin, bluep
     slot,
     predecessor_ref_digest,
     generated_spec,
-    log_decision
+    log_decision,
+    session_creator(deps)
   )
   if not ok then
     return terminal(core, deps, repo, issue_number, origin, "error", reason or "invalid-materialization-entry")

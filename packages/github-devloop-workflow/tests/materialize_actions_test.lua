@@ -123,6 +123,7 @@ return {
     })
     t.eq(#req.labels, 1)
     t.eq(req.labels[1], "fkst-dev")
+    t.is_nil(req.assignees)
     t.is_true(req.labels[1] ~= "fkst-workflow")
     t.is_true(req.labels[1]:find("fkst-dev:", 1, true) == nil)
     t.eq(req.dedup_key, e.child_dedup)
@@ -133,6 +134,19 @@ return {
     t.eq(req.parent_comment_target.issue_number, 42)
     t.is_true(has(req.body, "fkst:github-devloop-workflow:lineage:v1"))
     t.is_true(has(req.body, "Implement the requested page."))
+  end,
+
+  test_issue_create_assigns_only_the_session_creator_when_configured = function()
+    local req = actions.issue_create_request(repo, 42, origin, "d-3588118930", "implement", entry(), {
+      title = "Implement the website feature",
+      body = "Implement the requested page.",
+    }, "session-owner")
+    t.eq(#req.assignees, 1)
+    t.eq(req.assignees[1], "session-owner")
+    t.eq(#req.labels, 1)
+    t.eq(req.labels[1], "fkst-dev")
+    t.eq(req.parent, 42)
+    t.eq(req.parent_comment_target.issue_number, 42)
   end,
 
   test_spec_from_created_issue_strips_lineage_and_proxy_marker = function()

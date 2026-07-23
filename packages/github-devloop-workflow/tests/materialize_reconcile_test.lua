@@ -220,6 +220,9 @@ local function run_with(fakes)
       search_created_issue = fake.search_created_issue or function()
         return nil
       end,
+      session_creator = function()
+        return fake.session_creator
+      end,
     },
   }))
   local result = raise_capture(function()
@@ -246,9 +249,22 @@ local tests = {
     t.eq(raised[1].payload.parent, origin_issue)
     t.eq(raised[1].payload.parent_comment_target.repo, repo)
     t.eq(raised[1].payload.parent_comment_target.issue_number, origin_issue)
+    t.is_nil(raised[1].payload.assignees)
     t.is_true(raised[1].payload.body:find("fkst:github-devloop-workflow:lineage:v1", 1, true) ~= nil)
     t.is_true(raised[1].payload.body:find("Implement the first static step.", 1, true) ~= nil)
     t.is_true(raised[1].payload.body:find("fkst:github-devloop-workflow:materialization:v1", 1, true) == nil)
+  end,
+
+  test_static_frontier_assigns_only_the_session_creator_when_configured = function()
+    local raised = run_with({ session_creator = "session-owner" })
+    t.eq(#raised, 1)
+    t.eq(raised[1].queue, "github-proxy.github_issue_create_request")
+    t.eq(#raised[1].payload.assignees, 1)
+    t.eq(raised[1].payload.assignees[1], "session-owner")
+    t.eq(#raised[1].payload.labels, 1)
+    t.eq(raised[1].payload.labels[1], "fkst-dev")
+    t.eq(raised[1].payload.parent, origin_issue)
+    t.eq(raised[1].payload.parent_comment_target.issue_number, origin_issue)
   end,
 
   -- Regression (found by real dogfood): a GENERATED first slot has no prior

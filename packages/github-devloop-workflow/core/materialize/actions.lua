@@ -217,12 +217,12 @@ local function workflow_step_source_ref(repo, origin_issue_number, slot_id)
   }
 end
 
-function M.issue_create_request(repo, issue_number, origin, blueprint_digest, slot_id, entry, generated_spec)
+function M.issue_create_request(repo, issue_number, origin, blueprint_digest, slot_id, entry, generated_spec, session_creator)
   local lineage, err = marker.build_lineage_header(origin, blueprint_digest, slot_id)
   if lineage == nil then
     error("github-devloop-workflow: lineage-marker-build-failed: lineage marker build failed: " .. tostring(err and err.code or "unknown"))
   end
-  return {
+  local request = {
     schema = "github-proxy.issue-create.v1",
     repo = repo,
     title = generated_spec.title,
@@ -236,6 +236,10 @@ function M.issue_create_request(repo, issue_number, origin, blueprint_digest, sl
       issue_number = tonumber(issue_number),
     },
   }
+  if session_creator ~= nil then
+    request.assignees = { session_creator }
+  end
+  return request
 end
 
 function M.raise_request(proposal_id, queue, request)
@@ -651,7 +655,7 @@ function M.maybe_write_created_from_existing_child(core, deps, repo, issue_numbe
   return false
 end
 
-function M.record_created_or_raise_create(core, deps, repo, issue_number, origin, blueprint_fact, current, trusted_comments, facts, blueprint_digest, slot, predecessor_ref_digest, generated_spec, log_decision)
+function M.record_created_or_raise_create(core, deps, repo, issue_number, origin, blueprint_fact, current, trusted_comments, facts, blueprint_digest, slot, predecessor_ref_digest, generated_spec, log_decision, session_creator)
   local entry = materialization.write_generated_entry(origin, blueprint_digest, slot, predecessor_ref_digest, generated_spec)
   if entry == nil then
     return nil, "invalid-materialization-entry"
@@ -684,7 +688,7 @@ function M.record_created_or_raise_create(core, deps, repo, issue_number, origin
   M.raise_request(
     origin,
     "github-proxy.github_issue_create_request",
-    M.issue_create_request(repo, issue_number, origin, blueprint_digest, slot.id, entry, generated_spec)
+    M.issue_create_request(repo, issue_number, origin, blueprint_digest, slot.id, entry, generated_spec, session_creator)
   )
   return true, nil
 end
