@@ -25,6 +25,7 @@ local config = require("devloop.config")
 local fork_gate = require("departments.implement.fork_gate")
 local m_mq = require("devloop.merge_queue")
 local operator_commands = require("devloop.operator_commands")
+local external_pr_bridge = require("departments.implement.external_pr_bridge")
 
 local dispatch_liveness = {
   restart_transition_table = function(...)
@@ -205,9 +206,13 @@ local function merge_integration_for_implementation(worktree, integration_branch
   return false
 end
 
-local function prepare_attempt(repo, issue_number, ready, branches, branch, base_head, attempt)
-  local worktree = worktree_lifecycle.prepare_worktree(repo, issue_number, ready, branch, base_head)
-  substrate_pin.refresh(worktree, branch, base_head, merge_integration_for_implementation(worktree, branches.integration, base_head))
+local function prepare_attempt(repo, issue_number, ready, branches, branch, base_head, attempt, bridge_marker)
+  local worktree = bridge_marker ~= nil
+    and worktree_lifecycle.prepare_worktree_from_base(repo, issue_number, ready, branch, base_head)
+    or worktree_lifecycle.prepare_worktree(repo, issue_number, ready, branch, base_head)
+  local merge_clean = merge_integration_for_implementation(worktree, branches.integration, base_head)
+  merge_clean = external_pr_bridge.provision(worktree, bridge_marker, ready.proposal_id) and merge_clean
+  substrate_pin.refresh(worktree, branch, base_head, merge_clean)
 
   local codex_started_at = now()
   local exec_ref = core.implement_exec_ref(ready.proposal_id, ready.dedup_key)
@@ -704,6 +709,7 @@ local function process_ready_event(event)
         base_head = base_head,
         attempt = attempts + 1,
         expected_from_states = { "implementing" },
+        bridge_marker = external_pr_bridge.detect(current, repo, managed),
       }
       return
     end
@@ -782,6 +788,7 @@ local function process_ready_event(event)
       attempt = ready.impl_retry_attempt or 1,
       expected_from_states = expected_states,
       accepted_ready_hand_off = accepted_ready_hand_off,
+      bridge_marker = external_pr_bridge.detect(current, repo, managed),
     }
   end)
   if attempt_plan == nil then
@@ -825,7 +832,8 @@ local function process_ready_event(event)
         attempt_plan.branches,
         attempt_plan.branch,
         attempt_plan.base_head,
-        attempt_plan.attempt
+        attempt_plan.attempt,
+        attempt_plan.bridge_marker
       )
     end
   end)

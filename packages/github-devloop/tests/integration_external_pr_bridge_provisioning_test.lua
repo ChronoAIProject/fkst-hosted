@@ -216,7 +216,7 @@ return {
       FKST_GITHUB_WRITE = "1",
     }))
 
-    t.eq(result.exit_code, 0)
+    t.eq(result.exit_code, 0, tostring(result.error or result.stderr or "external PR bridge clean provisioning failed"))
     t.eq(count_calls("git fetch 'origin' 'refs/pull/7/head'"), 1)
     t.eq(count_calls("merge --no-edit '" .. external_head .. "'"), 1)
     assert_no_impl_failed(result)
@@ -247,7 +247,7 @@ return {
       FKST_GITHUB_WRITE = "1",
     }))
 
-    t.eq(result.exit_code, 0)
+    t.eq(result.exit_code, 0, tostring(result.error or result.stderr or "external PR bridge conflicted provisioning failed"))
     t.eq(count_calls("git fetch 'origin' 'refs/pull/7/head'"), 1)
     t.eq(count_calls("merge --no-edit '" .. external_head .. "'"), 1)
     t.eq(count_calls("ls-files -u"), 1)

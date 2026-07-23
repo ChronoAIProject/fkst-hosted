@@ -25,7 +25,7 @@ local function mock_command(command, response)
   end
 end
 
-local package_root = "packages/github-proxy"
+local core_root = "libraries/github-proxy-effects"
 
 local function read_file(path)
   local handle = assert(io.open(path, "r"))
@@ -285,8 +285,7 @@ return {
   end,
 
   test_core_shared_helper_surface_is_the_narrowest_owner_boundary = function()
-    local root = package_root
-    local source = read_file(root .. "/core.lua")
+    local source = read_file(core_root .. "/core.lua")
 
     t.eq(count_literal(source, "M.strip_bot_login_suffix = forge_strings.strip_bot_login_suffix"), 1)
     t.eq(count_literal(source, "function M.is_positive_integer("), 1)

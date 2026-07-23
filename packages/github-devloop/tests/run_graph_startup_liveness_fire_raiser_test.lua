@@ -30,10 +30,16 @@ local function composed_project_root()
   )
   local roots = {}
   for manifest in manifests:gmatch("[^\n]+") do
-    table.insert(roots, (manifest:gsub("/fkst%.workspace%.toml$", "")))
+    local root = manifest:gsub("/fkst%.workspace%.toml$", "")
+    local test_path = root .. "/packages/github-devloop/tests/run_graph_startup_liveness_fire_raiser_test.lua"
+    local handle = io.open(test_path, "r")
+    if handle ~= nil then
+      handle:close()
+      table.insert(roots, root)
+    end
   end
   if #roots ~= 1 then
-    error("expected one composed test project root, found " .. tostring(#roots))
+    error("expected one composed graph test project root, found " .. tostring(#roots))
   end
   return roots[1]
 end

@@ -20,6 +20,18 @@ class ProducerLivenessAdversarialFixtureTest(unittest.TestCase):
 
         self.assertEqual(p.covered_raiser_tests_in_source(source)["busy_overdue"], {"audit_poll"})
 
+    def test_fire_raiser_options_are_accepted(self) -> None:
+        source = (
+            "function test_startup_file_watch()\n"
+            ' local trace = t.fire_raiser("liveness_startup", {\n'
+            '   fixture = project_root .. "/.git/HEAD",\n'
+            " })\n"
+            ' t.eq(trace.consumer_result.status, "accepted")\n'
+            "end\n"
+        )
+
+        self.assertEqual(p.covered_raisers_in_source(source), {"liveness_startup"})
+
     def test_mock_idle_only_gated_producer_fails_busy_liveness_requirement(self) -> None:
         raiser = p.ProducerRaiser("archaudit", "audit_poll", "packages/archaudit/raisers/audit_poll.lua", ("archaudit_tick",))
         contract = p.ProducerLivenessContract(

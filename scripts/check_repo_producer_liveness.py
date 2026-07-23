@@ -23,7 +23,7 @@ TEST_START_RE = re.compile(
 FIRE_RAISER_RE = re.compile(
     r"(?:(?:local\s+)?(?P<var>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*)?"
     r"\bt\s*\.\s*fire_raiser\s*\(\s*"
-    r"(?P<quote>[\"'])(?P<raiser>[A-Za-z0-9_.-]+)(?P=quote)\s*\)"
+    r"(?P<quote>[\"'])(?P<raiser>[A-Za-z0-9_.-]+)(?P=quote)"
 )
 FIRE_RAISER_HEAD_RE = re.compile(r"\bt\s*\.\s*fire_raiser\b")
 ASSERTION_CALL_RE = re.compile(r"\b(?:t\s*\.\s*(?:eq|is_true|assert)|assert|error|fail)\s*\(")
@@ -274,11 +274,15 @@ def call_asserts_trace(block: str, match: re.Match[str]) -> bool:
     var = match.group("var")
     if var is not None:
         return assertion_contains_trace(source, masked, trace_field_spans(source, masked, var))
-    tail = source[match.end() : match.end() + 240]
+    open_index = masked.find("(", match.start(), match.end())
+    if open_index == -1:
+        return False
+    call_end = matching_paren_end(masked, open_index)
+    tail = source[call_end : call_end + 240]
     tail_match = re.search(r"^\s*\.\s*(?:" + "|".join(TRACE_FIELDS) + r")\b", tail)
     if tail_match is None:
         return False
-    ref = (match.start(), match.end() + tail_match.end())
+    ref = (match.start(), call_end + tail_match.end())
     return assertion_contains_trace(source, masked, [ref])
 
 
