@@ -31,6 +31,7 @@ fn test_router(recovery: RecoveryMonitor) -> axum::Router {
         storage: None,
         log_registry: Default::default(),
         log_bundle_cache: Default::default(),
+        disposable_environments: Default::default(),
     })
     .expect("router")
 }
@@ -190,6 +191,7 @@ async fn follower_rejects_api_and_signed_webhook_before_side_effects() {
         storage: None,
         log_registry: Default::default(),
         log_bundle_cache: Default::default(),
+        disposable_environments: Default::default(),
     })
     .expect("router");
 

@@ -72,6 +72,129 @@ async fn recover_credentials_action_rebuilds_the_full_bundle_through_ensure_sess
     assert!(ensured[0].1.contains(&"llm-api-key".to_string()));
 }
 
+fn disposable_registration_and_request() -> (
+    crate::reconcile::desired::SessionRegistration,
+    crate::disposable_environment::DisposableEnvironmentRequest,
+) {
+    let mut reg = registration();
+    reg.def.packages.clear();
+    reg.effective_packages.clear();
+    reg.def.environment =
+        Some(crate::disposable_environment::DISPOSABLE_ENVIRONMENT_MARKER.to_string());
+    let request = crate::disposable_environment::DisposableEnvironmentRequest {
+        install: vec!["install tool".to_string()],
+        variables: std::collections::BTreeMap::from([("APP_MODE".to_string(), "test".to_string())]),
+        secrets: std::collections::BTreeMap::from([(
+            "DEPLOY_TOKEN".to_string(),
+            "secret".to_string(),
+        )]),
+    };
+    (reg, request)
+}
+
+#[tokio::test]
+async fn successful_disposable_spawn_consumes_the_private_handoff() {
+    use crate::disposable_environment::DisposableEnvironmentLookup;
+
+    let backend = Arc::new(FakeSessionBackend::default());
+    let ctx = test_ctx(backend.clone());
+    let (reg, request) = disposable_registration_and_request();
+    ctx.disposable_environments.insert(
+        &reg.repo.owner,
+        &reg.repo.name,
+        reg.trigger_issue,
+        reg.creator_id.unwrap(),
+        &request,
+    );
+    let repo = reg.repo.clone();
+
+    execute(
+        ReconcileAction::Spawn {
+            reg,
+            detected_work_labels: vec![],
+        },
+        &repo,
+        &ctx,
+    )
+    .await;
+
+    let ensured = backend.ensured.lock().unwrap();
+    assert_eq!(ensured.len(), 1);
+    for key in [
+        "install",
+        "secret-keys",
+        "userenv.APP_MODE",
+        "userenv.DEPLOY_TOKEN",
+    ] {
+        assert!(
+            ensured[0].1.iter().any(|actual| actual == key),
+            "missing {key}"
+        );
+    }
+    assert!(matches!(
+        ctx.disposable_environments
+            .resolve("acme", "site", 7, 583231),
+        DisposableEnvironmentLookup::Missing
+    ));
+}
+
+#[tokio::test]
+async fn failed_disposable_spawn_retains_the_private_handoff_for_retry() {
+    use crate::disposable_environment::DisposableEnvironmentLookup;
+
+    let backend = Arc::new(FakeSessionBackend::with_ensure_error());
+    let ctx = test_ctx(backend.clone());
+    let (reg, request) = disposable_registration_and_request();
+    ctx.disposable_environments.insert(
+        &reg.repo.owner,
+        &reg.repo.name,
+        reg.trigger_issue,
+        reg.creator_id.unwrap(),
+        &request,
+    );
+    let repo = reg.repo.clone();
+
+    execute(
+        ReconcileAction::Spawn {
+            reg,
+            detected_work_labels: vec![],
+        },
+        &repo,
+        &ctx,
+    )
+    .await;
+
+    assert_eq!(backend.ensured.lock().unwrap().len(), 1);
+    assert!(matches!(
+        ctx.disposable_environments
+            .resolve("acme", "site", 7, 583231),
+        DisposableEnvironmentLookup::Found(_)
+    ));
+}
+
+#[tokio::test]
+async fn missing_disposable_handoff_blocks_launch_instead_of_using_an_empty_environment() {
+    let backend = Arc::new(FakeSessionBackend::default());
+    let ctx = test_ctx(backend.clone());
+    let (reg, _request) = disposable_registration_and_request();
+    let repo = reg.repo.clone();
+
+    execute(
+        ReconcileAction::Spawn {
+            reg,
+            detected_work_labels: vec![],
+        },
+        &repo,
+        &ctx,
+    )
+    .await;
+
+    assert!(
+        backend.ensured.lock().unwrap().is_empty(),
+        "a missing private payload must never launch an empty sandbox"
+    );
+}
+
 #[tokio::test]
 async fn kill_action_routes_to_stop_session_with_reason() {
     let backend = Arc::new(FakeSessionBackend::default());

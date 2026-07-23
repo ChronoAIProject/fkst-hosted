@@ -89,6 +89,96 @@ test.describe('accessibility, feedback, and error surfaces', () => {
     await shot(page, 'ix-03-create-toast');
   });
 
+  test('a disposable environment stays private through confirmation and fits mobile', async ({
+    page,
+  }) => {
+    const requests: unknown[] = [];
+    page.on('request', (request) => {
+      if (
+        request.method() === 'POST' &&
+        new URL(request.url()).pathname.endsWith('/repos/octo-dev/web-app/sessions')
+      ) {
+        const body = request.postData();
+        if (body) requests.push(JSON.parse(body));
+      }
+    });
+
+    await seedAuth(page);
+    await installApiRoutes(page);
+    await page.goto('/dashboard');
+    await openAccount(page, 'octo-dev');
+    await openRepo(page, 'octo-dev', 'web-app');
+    await page.getByRole('button', { name: 'New session' }).click();
+
+    const editor = page.getByRole('dialog', { name: 'Start a new session' });
+    await editor.getByLabel('Session name').fill('private-run');
+    await editor.getByLabel('Packages 1').fill('owner/repo@main:pkg');
+    await editor.getByRole('button', { name: 'Disposable' }).click();
+    await editor.getByLabel('Software installation commands 1').fill('npm ci');
+    await editor.getByLabel('Environment variables 1 NAME').fill('APP_MODE');
+    await editor.getByLabel('Environment variables 1 value').fill('test');
+    await editor.getByLabel('Secrets 1 NAME').fill('DEPLOY_TOKEN');
+    const secret = editor.getByLabel('Secrets 1 secret value');
+    await secret.fill('super-secret-value');
+    await expect(secret).toHaveAttribute('type', 'password');
+
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      const bounds = await editor.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          left: rect.left,
+          right: rect.right,
+          scrollWidth: element.scrollWidth,
+          clientWidth: element.clientWidth,
+          pageScrollWidth: document.documentElement.scrollWidth,
+          viewportWidth: window.innerWidth,
+        };
+      });
+      expect(bounds.left).toBeGreaterThanOrEqual(0);
+      expect(bounds.right).toBeLessThanOrEqual(width);
+      expect(bounds.scrollWidth).toBeLessThanOrEqual(bounds.clientWidth);
+      expect(bounds.pageScrollWidth).toBeLessThanOrEqual(bounds.viewportWidth);
+      await shot(page, `ix-03-disposable-editor-${width}`);
+    }
+
+    await editor.getByRole('button', { name: 'Create trigger issue' }).click();
+    expect(requests).toHaveLength(0);
+
+    const confirmation = page.getByRole('dialog', { name: 'Confirm disposable environment' });
+    await expect(confirmation).toBeVisible();
+    await expect(confirmation.locator('dd')).toHaveText(['1', '1', '1']);
+    for (const privateValue of [
+      'npm ci',
+      'APP_MODE',
+      'test',
+      'DEPLOY_TOKEN',
+      'super-secret-value',
+    ]) {
+      await expect(confirmation).not.toContainText(privateValue);
+    }
+    await shot(page, 'ix-03-disposable-confirm-390');
+
+    await confirmation.getByRole('button', { name: 'Back to edit' }).click();
+    await expect(page.getByLabel('Software installation commands 1')).toHaveValue('npm ci');
+    await expect(page.getByLabel('Secrets 1 secret value')).toHaveValue('super-secret-value');
+
+    await page.getByRole('button', { name: 'Create trigger issue' }).click();
+    await page.getByRole('button', { name: 'Confirm and create' }).click();
+    await expect(page.getByText('Session created')).toBeVisible();
+    expect(requests).toEqual([
+      {
+        name: 'private-run',
+        packages: ['owner/repo@main:pkg'],
+        disposable_environment: {
+          install: ['npm ci'],
+          variables: { APP_MODE: 'test' },
+          secrets: { DEPLOY_TOKEN: 'super-secret-value' },
+        },
+      },
+    ]);
+  });
+
   test('stopping a session confirms through the ConfirmDialog and closes it', async ({ page }) => {
     await seedAuth(page);
     await installApiRoutes(page);

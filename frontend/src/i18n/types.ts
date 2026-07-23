@@ -255,8 +255,39 @@ export interface SiteContent {
       /** Modals-cluster additions for the create-trigger environment picker +
        *  work-label hint (owned by the create-trigger modal item). */
       createEnvironmentNone: string;
+      createEnvironmentSaved: string;
+      createEnvironmentDisposable: string;
+      createSavedEnvironmentLabel: string;
       createEnvironmentNote: string;
       createEnvironmentLoadFailed: string;
+      createDisposablePrivateNote: string;
+      createDisposableInstallLabel: string;
+      createDisposableInstallPlaceholder: string;
+      createDisposableAddInstall: string;
+      /** `{n}` placeholder (1-based row index). */
+      createDisposableRemoveInstall: string;
+      createDisposableVariablesLabel: string;
+      createDisposableSecretsLabel: string;
+      createDisposableNamePlaceholder: string;
+      createDisposableValuePlaceholder: string;
+      createDisposableSecretPlaceholder: string;
+      createDisposableAddVariable: string;
+      createDisposableAddSecret: string;
+      /** `{n}` placeholder (1-based row index). */
+      createDisposableRemoveVariable: string;
+      /** `{n}` placeholder (1-based row index). */
+      createDisposableRemoveSecret: string;
+      createDisposableImmutableNote: string;
+      createDisposableEmpty: string;
+      createDisposableConfirmTitle: string;
+      createDisposableConfirmBody: string;
+      createDisposableConfirmInstall: string;
+      createDisposableConfirmVariables: string;
+      createDisposableConfirmSecrets: string;
+      createDisposableConfirmWarning: string;
+      createDisposableConfirmBack: string;
+      createDisposableConfirmSubmit: string;
+      createDisposableConfirmPending: string;
       createWorkLabelHint: string;
       createWorkLabelHintLink: string;
       /** Inline collision warning: the typed work label is already claimed by an

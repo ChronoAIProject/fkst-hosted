@@ -187,7 +187,13 @@ export interface CreateSessionRequest {
    *  `packages`) the server expands into a package list (`### Manifest`). */
   manifests?: string[];
   work_label?: string;
+  /** Selects a reusable saved profile. Mutually exclusive with
+   *  `disposable_environment`. */
   environment?: string;
+  /** Private, write-only environment material for this session only. The
+   *  backend injects it into the sandbox and never writes it to GitHub or
+   *  returns it from an API. */
+  disposable_environment?: DisposableEnvironmentSpec;
   source_branch?: string;
   target_branch?: string;
   auto_merge?: boolean;
@@ -196,6 +202,15 @@ export interface CreateSessionRequest {
    *  distinct from `log_access`. */
   collaborators?: string[];
   output_lang?: string;
+}
+
+export interface DisposableEnvironmentSpec {
+  /** Ordered commands run in the session sandbox before the engine starts. */
+  install: string[];
+  /** Non-secret process environment variables. */
+  variables: Record<string, string>;
+  /** Write-only secret process environment variables. */
+  secrets: Record<string, string>;
 }
 
 export interface CreateSessionResponse {

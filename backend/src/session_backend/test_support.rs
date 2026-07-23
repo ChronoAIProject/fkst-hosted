@@ -32,6 +32,7 @@ pub(crate) struct FakeSessionBackend {
     /// Each `deliver_credential` call as `(session_id, file)` (never the value).
     pub(crate) delivered: Mutex<Vec<(String, String)>>,
     mark_pending_not_found: bool,
+    ensure_error: bool,
     /// The fleet `list_fleet` returns.
     fleet: Vec<SessionHandle>,
     /// The pods `observe_repo` returns (regardless of repo).
@@ -46,6 +47,13 @@ impl FakeSessionBackend {
     pub(crate) fn with_mark_pending_not_found() -> Self {
         Self {
             mark_pending_not_found: true,
+            ..Default::default()
+        }
+    }
+
+    pub(crate) fn with_ensure_error() -> Self {
+        Self {
+            ensure_error: true,
             ..Default::default()
         }
     }
@@ -93,7 +101,13 @@ impl SessionBackend for FakeSessionBackend {
             .lock()
             .unwrap()
             .push((spec.session_id.clone(), keys));
-        Ok(EnsureOutcome::Created)
+        if self.ensure_error {
+            Err(BackendError::Other(anyhow::anyhow!(
+                "scripted ensure failure"
+            )))
+        } else {
+            Ok(EnsureOutcome::Created)
+        }
     }
 
     async fn credential_recovery_needed(&self, _session_id: &str) -> Result<bool, BackendError> {

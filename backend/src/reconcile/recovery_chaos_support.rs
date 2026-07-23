@@ -491,6 +491,7 @@ impl ChaosHarness {
             active_repos: new_active_repos(),
             ensured_templates: new_ensured_templates(),
             log_registry: LogAccessRegistry::new(),
+            disposable_environments: Default::default(),
         }
     }
 

@@ -663,6 +663,28 @@ fn environment_with_two_lines_is_422_naming_the_section() {
     );
 }
 
+#[test]
+fn exact_disposable_environment_marker_is_accepted_but_other_prose_is_not() {
+    let body = format!(
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\nlabel\n### Environment\n{}\n",
+        crate::disposable_environment::DISPOSABLE_ENVIRONMENT_MARKER
+    );
+    let spec = parse_trigger_issue_body(&body).expect("fixed marker parses");
+    assert_eq!(
+        spec.environment.as_deref(),
+        Some(crate::disposable_environment::DISPOSABLE_ENVIRONMENT_MARKER)
+    );
+
+    let prose = body.replace(
+        crate::disposable_environment::DISPOSABLE_ENVIRONMENT_MARKER,
+        "Disposable environment with TOKEN=secret",
+    );
+    assert!(matches!(
+        parse_trigger_issue_body(&prose),
+        Err(AppError::Unprocessable(_))
+    ));
+}
+
 // ---- Output Language (optional but STRICT; comment-tolerant) ----
 
 /// Build a body with the three required sections held valid plus a

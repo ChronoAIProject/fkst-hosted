@@ -23,6 +23,7 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
+use crate::disposable_environment::DISPOSABLE_ENVIRONMENT_MARKER;
 use crate::error::AppError;
 use crate::goals::section_parse::{
     env_name_regex, is_valid_env_name, non_empty_lines, parse_environment_name, split_sections,
@@ -208,16 +209,7 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
     }
     let work_label = parse_work_label(&sections)?;
 
-    // `### Environment` — OPTIONAL, reusing the shared rule verbatim: absent or
-    // blank → `None`; one valid name → `Some`; two or more or an invalid name → a
-    // 422 naming the section.
-    let environment = match sections
-        .iter()
-        .find(|(heading, _)| heading == HEADING_ENVIRONMENT)
-    {
-        Some((_, content)) => parse_environment_name(&strip_html_comments(content))?,
-        None => None,
-    };
+    let environment = parse_trigger_environment(&sections)?;
 
     let auto_merge = parse_auto_merge(&sections);
     let log_access = parse_log_access(&sections);
@@ -250,6 +242,26 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
         source_branch,
         target_branch,
     })
+}
+
+/// `### Environment` ordinarily names a saved profile. The create-session API
+/// may instead render one exact, value-free disposable marker. No other prose is
+/// accepted, so a hand-authored issue cannot smuggle private material through
+/// this exception; without the corresponding process-local handoff it will fail
+/// closed during reconciliation.
+fn parse_trigger_environment(sections: &[(String, String)]) -> Result<Option<String>, AppError> {
+    let Some((_, content)) = sections
+        .iter()
+        .find(|(heading, _)| heading == HEADING_ENVIRONMENT)
+    else {
+        return Ok(None);
+    };
+    let stripped = strip_html_comments(content);
+    if matches!(non_empty_lines(&stripped).as_slice(), [line] if line == DISPOSABLE_ENVIRONMENT_MARKER)
+    {
+        return Ok(Some(DISPOSABLE_ENVIRONMENT_MARKER.to_string()));
+    }
+    parse_environment_name(&stripped)
 }
 
 /// Parse one optional branch section. Presence is strict: after stripping HTML

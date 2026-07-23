@@ -186,6 +186,7 @@ mod tests {
             storage: None,
             log_registry: Default::default(),
             log_bundle_cache: Default::default(),
+            disposable_environments: Default::default(),
         }
     }
 

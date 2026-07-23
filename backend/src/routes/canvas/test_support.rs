@@ -61,6 +61,7 @@ pub(crate) fn test_state(server_uri: &str, github_app: Option<GithubAppTokens>) 
         storage: None,
         log_registry: Default::default(),
         log_bundle_cache: Default::default(),
+        disposable_environments: Default::default(),
     }
 }
 

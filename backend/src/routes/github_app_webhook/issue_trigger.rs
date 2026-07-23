@@ -70,6 +70,14 @@ pub(super) async fn classify_and_enqueue(state: &AppState, body: &[u8]) -> Resul
     let event: IssuesEvent =
         serde_json::from_slice(body).map_err(|e| format!("parse issues event: {e}"))?;
 
+    if event.action == "closed" {
+        state.disposable_environments.remove_issue(
+            &event.repository.owner.login,
+            &event.repository.name,
+            event.issue.number,
+        );
+    }
+
     // No reconciler => Model B is not live (FKST_POD_DISPATCH off / loop not
     // spawned): there is nothing to nudge, so acknowledge and ignore.
     let Some(reconciler) = &state.reconciler else {
@@ -123,6 +131,7 @@ mod tests {
             storage: None,
             log_registry: Default::default(),
             log_bundle_cache: Default::default(),
+            disposable_environments: Default::default(),
         }
     }
 
@@ -181,6 +190,41 @@ mod tests {
             .await
             .expect("ok");
         assert_eq!(handled.as_str(), "ignored");
+    }
+
+    #[tokio::test]
+    async fn a_closed_issue_forgets_an_unconsumed_disposable_environment() {
+        use crate::disposable_environment::{
+            DisposableEnvironmentLookup, DisposableEnvironmentRequest,
+        };
+
+        let (handle, mut rx) = reconcile_channel(8);
+        let st = state(Some(handle));
+        st.disposable_environments.insert(
+            "acme",
+            "site",
+            7,
+            9,
+            &DisposableEnvironmentRequest {
+                install: vec!["install private-tool".to_string()],
+                variables: Default::default(),
+                secrets: Default::default(),
+            },
+        );
+
+        let handled = classify_and_enqueue(&st, &issues_body("closed"))
+            .await
+            .expect("ok");
+
+        assert_eq!(handled.as_str(), "reconciled");
+        assert!(
+            rx.try_recv().is_ok(),
+            "close must still enqueue reconciliation"
+        );
+        assert!(matches!(
+            st.disposable_environments.resolve("acme", "site", 7, 9),
+            DisposableEnvironmentLookup::Missing
+        ));
     }
 
     #[tokio::test]

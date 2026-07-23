@@ -19,6 +19,7 @@ fn create_request() -> CreateSessionRequest {
         manifests: Vec::new(),
         work_label: Some("site-build".to_string()),
         environment: None,
+        disposable_environment: None,
         source_branch: None,
         target_branch: None,
         auto_merge: Some(true),
@@ -519,4 +520,115 @@ async fn create_session_rejects_an_invalid_branch_with_422_before_github() {
     .await
     .expect_err("invalid branch");
     assert!(matches!(err, AppError::Unprocessable(_)), "got {err:?}");
+}
+
+#[tokio::test]
+async fn disposable_environment_is_handed_off_without_leaking_into_github() {
+    use crate::disposable_environment::{
+        DisposableEnvironmentLookup, DisposableEnvironmentRequest, DISPOSABLE_ENVIRONMENT_MARKER,
+    };
+    use crate::reconcile::ReconcileDispatcher;
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/repos/acme/site/issues"))
+        .and(header("authorization", "Bearer user-token"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+            "number": 31,
+            "html_url": "https://github.com/acme/site/issues/31"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let mut state = state_with_creator_role(&server, "acme", "site", 200, Some("maintain")).await;
+    state.reconciler = Some(ReconcileDispatcher::new());
+    let registry = state.disposable_environments.clone();
+    let request = CreateSessionRequest {
+        work_label: None,
+        disposable_environment: Some(DisposableEnvironmentRequest {
+            install: vec!["install private-tool".to_string()],
+            variables: std::collections::BTreeMap::from([(
+                "PRIVATE_MODE".to_string(),
+                "private-value".to_string(),
+            )]),
+            secrets: std::collections::BTreeMap::from([(
+                "PRIVATE_TOKEN".to_string(),
+                "secret-value".to_string(),
+            )]),
+        }),
+        ..create_request()
+    };
+
+    let (status, Json(created)) = create_session(
+        State(state),
+        Path(("acme".to_string(), "site".to_string())),
+        viewer_user(),
+        auth_headers(),
+        Json(request),
+    )
+    .await
+    .expect("created");
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(created.issue_number, 31);
+
+    let DisposableEnvironmentLookup::Found(material) = registry.resolve("acme", "site", 31, 9)
+    else {
+        panic!("verified creator should own the private handoff")
+    };
+    assert_eq!(material.install.len(), 1);
+    assert_eq!(material.user_env.len(), 2);
+
+    let requests = server.received_requests().await.expect("request journal");
+    let github_write = requests
+        .iter()
+        .find(|request| {
+            request.method.as_str() == "POST" && request.url.path() == "/repos/acme/site/issues"
+        })
+        .expect("GitHub issue write");
+    let payload: serde_json::Value =
+        serde_json::from_slice(&github_write.body).expect("GitHub request JSON");
+    let body = payload["body"].as_str().expect("issue body");
+    assert!(body.contains(DISPOSABLE_ENVIRONMENT_MARKER));
+    for private in [
+        "install private-tool",
+        "PRIVATE_MODE",
+        "private-value",
+        "PRIVATE_TOKEN",
+        "secret-value",
+    ] {
+        assert!(!body.contains(private), "GitHub request leaked {private:?}");
+    }
+}
+
+#[tokio::test]
+async fn disposable_environment_requires_a_local_reconciler_before_github_write() {
+    use crate::disposable_environment::DisposableEnvironmentRequest;
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/repos/acme/site/issues"))
+        .respond_with(ResponseTemplate::new(201))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let request = CreateSessionRequest {
+        environment: None,
+        disposable_environment: Some(DisposableEnvironmentRequest {
+            install: vec!["true".to_string()],
+            variables: Default::default(),
+            secrets: Default::default(),
+        }),
+        ..create_request()
+    };
+    let state = test_state(&server.uri(), None);
+    let err = create_session(
+        State(state),
+        Path(("acme".to_string(), "site".to_string())),
+        viewer_user(),
+        auth_headers(),
+        Json(request),
+    )
+    .await
+    .expect_err("no private consumer");
+    assert!(matches!(err, AppError::Unavailable(_)), "got {err:?}");
 }

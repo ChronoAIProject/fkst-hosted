@@ -211,6 +211,8 @@ async fn main() -> ExitCode {
     // each sweep and the log-download endpoint reads. Built here so ONE registry is
     // shared between the background loops and the API router.
     let log_registry = fkst_control_plane::log_access::LogAccessRegistry::new();
+    let disposable_environments =
+        fkst_control_plane::disposable_environment::DisposableEnvironmentRegistry::new();
 
     // The chrono-storage client the log-download endpoint mints presigned GET URLs
     // with. Built from the already-parsed + validated `config.storage` (None when
@@ -254,6 +256,7 @@ async fn main() -> ExitCode {
                     backend,
                     recovery.clone(),
                     initialized_env_store.clone(),
+                    disposable_environments.clone(),
                 )
                 .await
             }
@@ -281,6 +284,7 @@ async fn main() -> ExitCode {
         storage,
         log_registry,
         log_bundle_cache: fkst_control_plane::log_bundle_cache::LogBundleCache::new(),
+        disposable_environments,
     }) {
         Ok(router) => router,
         Err(error) => {
@@ -466,6 +470,7 @@ async fn spawn_reconciler(
     initialized_env_store: Option<
         Arc<dyn fkst_control_plane::environment_profile::EnvironmentProfileStore>,
     >,
+    disposable_environments: fkst_control_plane::disposable_environment::DisposableEnvironmentRegistry,
 ) -> Option<ReconcileDispatcher> {
     let Some(github) = github_app else {
         tracing::warn!("pod dispatch on but github app not configured; reconciler not started");
@@ -521,6 +526,7 @@ async fn spawn_reconciler(
         http,
         config: config.clone(),
         log_registry,
+        disposable_environments,
         routing: None,
     };
     let dispatcher = ReconcileDispatcher::new();
@@ -604,6 +610,8 @@ struct ReconcileWorkerFactory {
     http: reqwest::Client,
     config: Config,
     log_registry: fkst_control_plane::log_access::LogAccessRegistry,
+    disposable_environments:
+        fkst_control_plane::disposable_environment::DisposableEnvironmentRegistry,
     routing: Option<fkst_control_plane::leader_routing::LeaderServiceRouter>,
 }
 
@@ -619,6 +627,7 @@ impl ReconcileWorkerFactory {
             active_repos: fkst_control_plane::reconcile::new_active_repos(),
             ensured_templates: fkst_control_plane::reconcile::new_ensured_templates(),
             log_registry: self.log_registry.clone(),
+            disposable_environments: self.disposable_environments.clone(),
         }
     }
 }

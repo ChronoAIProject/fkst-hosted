@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type React from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -6,16 +6,30 @@ import { useAuth } from '@/lib/auth/github-auth';
 import { useContent } from '@/i18n';
 import { createTrigger } from '@/lib/api/canvas';
 import { listEnvironmentProfiles } from '@/lib/api/environments';
-import type { CreateSessionRequest, CreateSessionResponse } from '@/lib/api/types';
+import type {
+  CreateSessionRequest,
+  CreateSessionResponse,
+  DisposableEnvironmentSpec,
+} from '@/lib/api/types';
 import { validateOptionalBranchName } from '@/lib/branch';
 import { ModalShell } from './modal-shell';
 import { ErrorNote } from '@/components/ui/error-note';
 import { FIELD_INPUT, FIELD_LABEL } from '@/components/ui/field';
 import { useToast } from '@/components/ui/toast';
+import {
+  DisposableEnvironmentFields,
+  disposableEnvironmentCounts,
+  disposableSpecFromDraft,
+  emptyDisposableEnvironmentDraft,
+  hasDisposableEnvironmentContents,
+} from './disposable-environment-fields';
+import { DisposableEnvironmentConfirm } from './disposable-environment-confirm';
 
 /** The `<form>` element id, referenced by the sticky-footer submit button so it
  *  can live outside the form subtree yet still submit it. */
 const FORM_ID = 'create-trigger-form';
+
+type EnvironmentMode = 'none' | 'saved' | 'disposable';
 
 /** Split a free-text allowlist into entries (whitespace/comma separated). */
 function parseAllowlist(raw: string): string[] {
@@ -43,6 +57,7 @@ export function buildCreateRequest(form: {
   manifests: string;
   workLabel: string;
   environment: string;
+  disposableEnvironment?: DisposableEnvironmentSpec;
   sourceBranch: string;
   targetBranch: string;
   autoMerge: boolean;
@@ -58,8 +73,12 @@ export function buildCreateRequest(form: {
   if (manifests.length > 0) request.manifests = manifests;
   const workLabel = form.workLabel.trim();
   if (workLabel) request.work_label = workLabel;
-  const environment = form.environment.trim();
-  if (environment) request.environment = environment;
+  if (form.disposableEnvironment) {
+    request.disposable_environment = form.disposableEnvironment;
+  } else {
+    const environment = form.environment.trim();
+    if (environment) request.environment = environment;
+  }
   const sourceBranch = form.sourceBranch.trim();
   if (sourceBranch) request.source_branch = sourceBranch;
   const targetBranch = form.targetBranch.trim();
@@ -99,7 +118,7 @@ function EnvironmentField({
 }) {
   const label = (
     <label htmlFor="trigger-environment" className={FIELD_LABEL}>
-      {cc.createEnvironmentLabel}
+      {cc.createSavedEnvironmentLabel}
     </label>
   );
 
@@ -146,6 +165,90 @@ function EnvironmentField({
   );
 }
 
+function EnvironmentSection({
+  cc,
+  mode,
+  onModeChange,
+  savedEnvironment,
+  onSavedEnvironmentChange,
+  load,
+  disposableDraft,
+  onDisposableDraftChange,
+  disposableHasContents,
+}: {
+  cc: ReturnType<typeof useContent>['dashboard']['canvas'];
+  mode: EnvironmentMode;
+  onModeChange: (mode: EnvironmentMode) => void;
+  savedEnvironment: string;
+  onSavedEnvironmentChange: (value: string) => void;
+  load: EnvLoad;
+  disposableDraft: ReturnType<typeof emptyDisposableEnvironmentDraft>;
+  onDisposableDraftChange: (draft: ReturnType<typeof emptyDisposableEnvironmentDraft>) => void;
+  disposableHasContents: boolean;
+}) {
+  const modes: Array<[EnvironmentMode, string]> = [
+    ['none', cc.createEnvironmentNone],
+    ['saved', cc.createEnvironmentSaved],
+    ['disposable', cc.createEnvironmentDisposable],
+  ];
+
+  return (
+    <section className="flex flex-col gap-3" aria-labelledby="trigger-environment-mode-label">
+      <span id="trigger-environment-mode-label" className={FIELD_LABEL}>
+        {cc.createEnvironmentLabel}
+      </span>
+      <div
+        role="group"
+        aria-label={cc.createEnvironmentLabel}
+        className="grid grid-cols-3 border border-line rounded-control overflow-hidden"
+      >
+        {modes.map(([value, label]) => {
+          const selected = mode === value;
+          return (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onModeChange(value)}
+              className={cn(
+                'min-h-9 px-2 py-1.5 font-ui font-semibold text-[11.5px] border-r border-line last:border-r-0 transition-[color,background,border-color]',
+                selected
+                  ? 'bg-amber text-amber-ink'
+                  : 'bg-glass text-dim hover:text-fg hover:bg-glass-2'
+              )}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
+      {mode === 'saved' && (
+        <EnvironmentField
+          cc={cc}
+          value={savedEnvironment}
+          onChange={onSavedEnvironmentChange}
+          load={load}
+        />
+      )}
+      {mode === 'disposable' && (
+        <>
+          <DisposableEnvironmentFields
+            t={cc}
+            draft={disposableDraft}
+            onChange={onDisposableDraftChange}
+          />
+          {!disposableHasContents && (
+            <p className="font-mono text-[11px] text-amber" role="status">
+              {cc.createDisposableEmpty}
+            </p>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 /** Create-trigger form: session name + ≥1 package rows + the optional knobs.
  *  Server-side validation failures (the trigger parser's 400) are surfaced
  *  verbatim inside the dialog. */
@@ -173,7 +276,9 @@ export function CreateTriggerModal({
   const [packages, setPackages] = useState<string[]>(['']);
   const [manifests, setManifests] = useState('');
   const [workLabel, setWorkLabel] = useState('');
+  const [environmentMode, setEnvironmentMode] = useState<EnvironmentMode>('none');
   const [environment, setEnvironment] = useState('');
+  const [disposableDraft, setDisposableDraft] = useState(emptyDisposableEnvironmentDraft);
   const [sourceBranch, setSourceBranch] = useState('');
   const [targetBranch, setTargetBranch] = useState('');
   const [autoMerge, setAutoMerge] = useState(false);
@@ -183,6 +288,8 @@ export function CreateTriggerModal({
   const [pending, setPending] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [envLoad, setEnvLoad] = useState<EnvLoad>({ profiles: null, error: false });
+  const [confirmationRequest, setConfirmationRequest] = useState<CreateSessionRequest | null>(null);
+  const requestInFlight = useRef(false);
 
   // Populate the environment picker once on open. A failed fetch is NOT fatal:
   // it flips the field to a free-text fallback rather than blocking the dialog.
@@ -205,50 +312,50 @@ export function CreateTriggerModal({
   // work label stays optional and never gates submit.
   const hasPackageSource =
     packages.some((p) => p.trim() !== '') || parseLines(manifests).length > 0;
-  const valid = sessionName.trim() !== '' && hasPackageSource;
+  const disposableSpec = disposableSpecFromDraft(disposableDraft);
+  const disposableHasContents = hasDisposableEnvironmentContents(disposableSpec);
+  const environmentValid = environmentMode !== 'disposable' || disposableHasContents;
+  const valid = sessionName.trim() !== '' && hasPackageSource && environmentValid;
 
   // Early collision advisory: the trimmed work label exactly matches one an open
   // session on this repo already claims. This blocks submit client-side, but the
   // backend pre-flight (409) stays authoritative — a label freed between poll
   // and submit is still caught server-side, and the server error is shown below.
   const trimmedWorkLabel = workLabel.trim();
-  const workLabelCollision =
-    trimmedWorkLabel !== '' && inUseWorkLabels.includes(trimmedWorkLabel);
+  const workLabelCollision = trimmedWorkLabel !== '' && inUseWorkLabels.includes(trimmedWorkLabel);
   const sourceBranchError = validateOptionalBranchName(sourceBranch);
   const targetBranchError = validateOptionalBranchName(targetBranch);
   const submitBlocked =
-    !valid || pending || workLabelCollision || sourceBranchError != null || targetBranchError != null;
+    !valid ||
+    pending ||
+    workLabelCollision ||
+    sourceBranchError != null ||
+    targetBranchError != null;
 
   const setPackageAt = (i: number, value: string) =>
     setPackages((rows) => rows.map((row, j) => (j === i ? value : row)));
   const removePackageAt = (i: number) =>
     setPackages((rows) => (rows.length > 1 ? rows.filter((_, j) => j !== i) : rows));
 
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (submitBlocked) return;
+  const clearDisposableState = () => {
+    setDisposableDraft(emptyDisposableEnvironmentDraft());
+    setConfirmationRequest(null);
+  };
+
+  const closeAndClear = () => {
+    clearDisposableState();
+    onClose();
+  };
+
+  const createSession = async (request: CreateSessionRequest) => {
+    if (requestInFlight.current) return;
+    requestInFlight.current = true;
     setPending(true);
     setServerError(null);
     try {
-      const result = await createTrigger(
-        apiFetch,
-        owner,
-        name,
-        buildCreateRequest({
-          name: sessionName,
-          packages,
-          manifests,
-          workLabel,
-          environment,
-          sourceBranch,
-          targetBranch,
-          autoMerge,
-          logAccess,
-          collaborators,
-          outputLang,
-        })
-      );
+      const result = await createTrigger(apiFetch, owner, name, request);
       if (result.ok) {
+        clearDisposableState();
         toast.show({ kind: 'success', message: cc.createdToast });
         onCreated(result.data);
         return;
@@ -257,15 +364,57 @@ export function CreateTriggerModal({
     } catch {
       setServerError(cc.createFailed);
     } finally {
+      requestInFlight.current = false;
       setPending(false);
     }
   };
+
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (submitBlocked) return;
+    const request = buildCreateRequest({
+      name: sessionName,
+      packages,
+      manifests,
+      workLabel,
+      environment: environmentMode === 'saved' ? environment : '',
+      disposableEnvironment: environmentMode === 'disposable' ? disposableSpec : undefined,
+      sourceBranch,
+      targetBranch,
+      autoMerge,
+      logAccess,
+      collaborators,
+      outputLang,
+    });
+    setServerError(null);
+    if (environmentMode === 'disposable') {
+      setConfirmationRequest(request);
+      return;
+    }
+    void createSession(request);
+  };
+
+  if (confirmationRequest?.disposable_environment) {
+    return (
+      <DisposableEnvironmentConfirm
+        t={cc}
+        counts={disposableEnvironmentCounts(confirmationRequest.disposable_environment)}
+        pending={pending}
+        serverError={serverError}
+        onBack={() => {
+          setServerError(null);
+          setConfirmationRequest(null);
+        }}
+        onConfirm={() => void createSession(confirmationRequest)}
+      />
+    );
+  }
 
   const footer = (
     <div className="flex items-center justify-end gap-2">
       <button
         type="button"
-        onClick={onClose}
+        onClick={closeAndClear}
         className="font-ui font-semibold text-[12.5px] bg-glass border border-line rounded-control px-4 py-2 text-dim transition-[color,border-color,box-shadow,background] hover:text-fg hover:border-line-2 hover:bg-glass-2 hover:shadow-glow-amber cursor-pointer"
       >
         {c.repos.cancel}
@@ -292,7 +441,7 @@ export function CreateTriggerModal({
     <ModalShell
       titleId="create-trigger-title"
       title={cc.createTitle}
-      onClose={onClose}
+      onClose={closeAndClear}
       footer={footer}
     >
       <form id={FORM_ID} onSubmit={onSubmit} className="flex flex-col gap-4">
@@ -406,7 +555,17 @@ export function CreateTriggerModal({
           </p>
         </div>
 
-        <EnvironmentField cc={cc} value={environment} onChange={setEnvironment} load={envLoad} />
+        <EnvironmentSection
+          cc={cc}
+          mode={environmentMode}
+          onModeChange={setEnvironmentMode}
+          savedEnvironment={environment}
+          onSavedEnvironmentChange={setEnvironment}
+          load={envLoad}
+          disposableDraft={disposableDraft}
+          onDisposableDraftChange={setDisposableDraft}
+          disposableHasContents={disposableHasContents}
+        />
 
         <fieldset className="flex flex-col gap-3 border-0 border-t border-line pt-4 p-0 m-0">
           <legend className="font-ui font-semibold text-[12px] text-dim pr-2">

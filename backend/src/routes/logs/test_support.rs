@@ -95,6 +95,7 @@ pub(crate) fn state(
         storage,
         log_registry: registry,
         log_bundle_cache: Default::default(),
+        disposable_environments: Default::default(),
     }
 }
 
