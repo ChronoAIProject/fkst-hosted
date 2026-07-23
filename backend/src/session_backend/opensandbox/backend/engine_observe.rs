@@ -4,12 +4,15 @@
 //! Execd retrieval is POLL-AND-ASSEMBLE, not streaming: `run_command`
 //! deliberately discards the SSE output frames after the init frame, so the
 //! output is recovered via `command_status` (until finished) + `command_logs`
-//! (from cursor 0). The tail is COMBINED stdout+stderr raw text; the engine's
-//! `--json` snapshot is one serde-compact line, so the LAST line that starts
-//! with `{` is the snapshot (any interleaved tracing lines are their own
-//! lines) — extraction, not parsing heuristics on partial fragments.
+//! (from cursor 0). The tail is COMBINED stdout+stderr raw text, while the
+//! engine's `--json` snapshot is a pretty-printed, multi-line document. The
+//! adapter therefore asks serde_json to find the largest COMPLETE JSON object
+//! in the tail. This keeps surrounding tracing out without assuming the JSON is
+//! compact or trying to balance braces by hand.
 
 use std::time::Duration;
+
+use serde_json::Value;
 
 use crate::session_backend::k8s::classify_observe_failure;
 use crate::session_backend::{BackendError, ObserveError};
@@ -24,12 +27,35 @@ const OBSERVE_TIMEOUT_MS: u64 = 30_000;
 /// Overall wall-clock bound on the status poll (timeout + slack).
 const OVERALL_DEADLINE: Duration = Duration::from_secs(45);
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
+/// Match the Kubernetes adapter's output bound. Observe contains counts and
+/// digests, never payload bodies, so anything larger is anomalous.
+const OUTPUT_BYTE_CAP: usize = 4 * 1024 * 1024;
 
 /// The shell command line execd runs. `limit` arrives pre-clamped (1..=10000);
 /// every substituted token is a validated integer or a compile-time constant,
 /// so no shell-quoting is needed.
 fn observe_command(limit: u32) -> String {
     format!("{FRAMEWORK_BIN} observe --durable-root {OSB_DURABLE_ROOT} --json --limit {limit}")
+}
+
+/// Extract the engine snapshot from execd's combined stdout/stderr tail.
+///
+/// Every `{` is only a candidate start; serde_json decides whether a complete
+/// object begins there and reports the exact consumed byte count. Selecting the
+/// largest complete object picks the outer snapshot rather than one of its
+/// nested queue/source objects. It also ignores compact JSON trace records that
+/// may surround the snapshot.
+fn extract_json_document(tail: &str) -> Option<&str> {
+    tail.match_indices('{')
+        .filter_map(|(start, _)| {
+            let candidate = &tail[start..];
+            let mut values = serde_json::Deserializer::from_str(candidate).into_iter::<Value>();
+            match values.next() {
+                Some(Ok(Value::Object(_))) => Some(&candidate[..values.byte_offset()]),
+                _ => None,
+            }
+        })
+        .max_by_key(|document| document.len())
 }
 
 impl OsbBackend {
@@ -75,20 +101,20 @@ impl OsbBackend {
             .await
             .map_err(|e| failed(format!("observe command_logs: {e}")))?;
 
+        if tail.len() > OUTPUT_BYTE_CAP {
+            return Err(failed(format!(
+                "observe output exceeded the {OUTPUT_BYTE_CAP}-byte limit"
+            )));
+        }
+
         if finished.exit_code == Some(0) {
-            // The snapshot is the LAST `{`-prefixed line of the combined tail.
-            match tail
-                .lines()
-                .rev()
-                .map(str::trim)
-                .find(|line| line.starts_with('{'))
-            {
+            match extract_json_document(&tail) {
                 Some(json) => {
                     tracing::info!(session_id = %session_id, limit, "engine observe: snapshot served");
                     Ok(json.to_string())
                 }
                 None => Err(failed(
-                    "observe exited 0 but produced no JSON line".to_string(),
+                    "observe exited 0 but produced no complete JSON object".to_string(),
                 )),
             }
         } else {
@@ -115,10 +141,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn engine_observe_assembles_the_json_line_from_the_execd_tail() {
+    async fn engine_observe_assembles_pretty_json_from_the_execd_tail() {
         // Full poll-and-assemble flow against execd doubles: resolve the
         // sandbox, launch the command (SSE init frame), poll to finished, read
-        // the combined tail, and extract the LAST `{`-prefixed line.
+        // the combined tail, and extract the complete multi-line snapshot.
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/v1/sandboxes"))
@@ -147,11 +173,18 @@ mod tests {
             .await;
         Mock::given(method("GET"))
             .and(path("/v1/sandboxes/sbx-1/proxy/44772/command/cmd-9/logs"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_string(
-                    "2026-07-13T00:00:00Z INFO observe: serving\n{\"queues\":[]}\n",
-                ),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_string(concat!(
+                "{\"level\":\"info\",\"message\":\"observe: serving\"}\n",
+                "{\n",
+                "  \"schema_version\": 1,\n",
+                "  \"source\": {\n",
+                "    \"database\": \"/var/lib/fkst/durable/delivery.redb\"\n",
+                "  },\n",
+                "  \"queues\": [{ \"queue\": \"work.ready\", \"depth\": 0 }],\n",
+                "  \"deliveries\": [],\n",
+                "  \"dead_letters\": []\n",
+                "}\n",
+            )))
             .mount(&server)
             .await;
 
@@ -159,7 +192,32 @@ mod tests {
             .engine_observe_impl("11111111-2222-3333-4444-555555555555", 500)
             .await
             .expect("snapshot assembles");
-        assert_eq!(snapshot, "{\"queues\":[]}");
+        let parsed: Value = serde_json::from_str(&snapshot).expect("snapshot is valid JSON");
+        assert_eq!(parsed["schema_version"], 1);
+        assert_eq!(
+            parsed["source"]["database"],
+            "/var/lib/fkst/durable/delivery.redb"
+        );
+        assert_eq!(parsed["queues"][0]["queue"], "work.ready");
+        assert_eq!(parsed["deliveries"], json!([]));
+        assert_eq!(parsed["dead_letters"], json!([]));
+    }
+
+    #[test]
+    fn extraction_prefers_the_outer_document_over_nested_objects_and_trace_json() {
+        let tail = concat!(
+            "{\"level\":\"info\",\"message\":\"before\"}\n",
+            "{\n",
+            "  \"source\": {\"database\": \"delivery.redb\"},\n",
+            "  \"queues\": [{\"queue\": \"q\"}],\n",
+            "  \"deliveries\": [],\n",
+            "  \"dead_letters\": []\n",
+            "}\n",
+        );
+        let document = extract_json_document(tail).expect("complete document");
+        let parsed: Value = serde_json::from_str(document).expect("valid JSON");
+        assert_eq!(parsed["source"]["database"], "delivery.redb");
+        assert_eq!(parsed["queues"][0]["queue"], "q");
     }
 
     #[tokio::test]
