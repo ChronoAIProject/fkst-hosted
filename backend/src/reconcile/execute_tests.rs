@@ -354,15 +354,11 @@ fn session_contributors_starts_with_effective_creator_not_app_author() {
 #[tokio::test]
 async fn assignee_derived_creator_resolves_no_environment_without_an_id() {
     let store = crate::k8s::env_store::EnvStore::fake();
-    match resolve_environment(&store, None, "seed-owner", Some("ignored-selection")).await {
-        EnvResolution::Proceed {
-            user_env,
-            install,
-            secret_keys,
-        } => {
-            assert!(user_env.is_empty());
-            assert!(install.is_empty());
-            assert!(secret_keys.is_empty());
+    match resolve_named_environment(&store, None, "seed-owner", Some("ignored-selection")).await {
+        EnvResolution::Proceed(environment) => {
+            assert!(environment.user_env.is_empty());
+            assert!(environment.install.is_empty());
+            assert!(environment.secret_keys.is_empty());
         }
         EnvResolution::Blocked { comment } => {
             panic!("no-id creator must proceed without an environment: {comment}")

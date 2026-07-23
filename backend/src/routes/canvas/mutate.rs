@@ -58,7 +58,7 @@ pub struct CreateSessionResponse {
         (status = 404, description = "Repo not found (or the caller cannot see it)", body = ErrorEnvelope),
         (status = 409, description = "The requested explicit work label collides with an existing open session on this repo (the message names the conflicting issue)", body = ErrorEnvelope),
         (status = 422, description = "A source/target branch is invalid, issues are disabled, or another semantic precondition failed", body = ErrorEnvelope),
-        (status = 503, description = "GitHub API unreachable", body = ErrorEnvelope),
+        (status = 503, description = "GitHub API unreachable, or disposable-environment handoff unavailable on this control-plane process", body = ErrorEnvelope),
     )
 )]
 pub(super) async fn create_session(
@@ -70,9 +70,18 @@ pub(super) async fn create_session(
 ) -> Result<(StatusCode, Json<CreateSessionResponse>), AppError> {
     validate_repo_segment(&owner, "owner")?;
     validate_repo_segment(&name, "name")?;
+    if let Some(disposable) = &req.disposable_environment {
+        disposable.validate(&state.config)?;
+    }
     // Validate BEFORE any GitHub write: the rendered body must round-trip
     // through the reconciler's own parser, or the 400 carries its message.
     let body = validated_trigger_body(&req)?;
+    if req.disposable_environment.is_some() && state.reconciler.is_none() {
+        return Err(AppError::Unavailable(
+            "disposable environment handoff is unavailable because the session reconciler is not running"
+                .to_string(),
+        ));
+    }
 
     ensure_session_creator_authorized(&state, &user, &owner, &name).await?;
 
@@ -107,10 +116,16 @@ pub(super) async fn create_session(
     let created = gh
         .create_issue(&token, &owner, &name, req.name.trim(), &body, &labels, &[])
         .await?;
+    if let Some(disposable) = &req.disposable_environment {
+        state
+            .disposable_environments
+            .insert(&owner, &name, created.number, user.id, disposable);
+    }
     tracing::info!(
         owner = %owner,
         name = %name,
         issue = created.number,
+        disposable_environment = req.disposable_environment.is_some(),
         "canvas: trigger issue created as the signed-in user"
     );
     Ok((
@@ -296,6 +311,11 @@ pub(super) async fn stop_session(
     }
 
     gh.close_issue(&token, &owner, &name, issue_number).await?;
+    if let Ok(issue_number) = i64::try_from(issue_number) {
+        state
+            .disposable_environments
+            .remove_issue(&owner, &name, issue_number);
+    }
     tracing::info!(
         owner = %owner,
         name = %name,

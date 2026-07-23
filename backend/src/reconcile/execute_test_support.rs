@@ -254,6 +254,7 @@ pub(crate) fn test_ctx(backend: Arc<dyn SessionBackend>) -> ReconcileCtx {
         active_repos: crate::reconcile::new_active_repos(),
         ensured_templates: crate::reconcile::new_ensured_templates(),
         log_registry: LogAccessRegistry::new(),
+        disposable_environments: Default::default(),
     }
 }
 

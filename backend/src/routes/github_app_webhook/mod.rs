@@ -815,6 +815,7 @@ mod tests {
             storage: None,
             log_registry: Default::default(),
             log_bundle_cache: Default::default(),
+            disposable_environments: Default::default(),
         };
         (state, rx)
     }
@@ -898,6 +899,7 @@ mod tests {
             storage: None,
             log_registry: Default::default(),
             log_bundle_cache: Default::default(),
+            disposable_environments: Default::default(),
         };
         let handled = handle_installation(&state, body).await.expect("dispatch");
         assert_eq!(handled.as_str(), "cache_busted");

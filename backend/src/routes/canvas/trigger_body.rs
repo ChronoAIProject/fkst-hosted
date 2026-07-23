@@ -10,16 +10,19 @@
 //! compared back against the request so any renderer/parse divergence fails
 //! closed as a 400 instead of creating a trigger that means something else.
 
-use serde::{Deserialize, Serialize};
+use std::fmt;
+
+use serde::Deserialize;
 use utoipa::ToSchema;
 
+use crate::disposable_environment::{DisposableEnvironmentRequest, DISPOSABLE_ENVIRONMENT_MARKER};
 use crate::error::AppError;
 use crate::goals::trigger_parse::parse_trigger_issue_body;
 use crate::reconcile::branches::validate_branch_name;
 use crate::routes::canvas::types::render_package_ref;
 
 /// Request body for creating a session (a trigger issue) on a repo.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Deserialize, ToSchema)]
 pub struct CreateSessionRequest {
     /// The session name (`### Session Name`; also the issue title).
     pub name: String,
@@ -36,6 +39,11 @@ pub struct CreateSessionRequest {
     pub work_label: Option<String>,
     /// The optional named environment (`### Environment`).
     pub environment: Option<String>,
+    /// A private, one-time environment injected directly into this session's
+    /// sandbox. Mutually exclusive with `environment`; its contents never enter
+    /// the trigger issue and are never returned by the API.
+    #[serde(default)]
+    pub disposable_environment: Option<DisposableEnvironmentRequest>,
     /// The optional source branch (`### Source Branch`). When omitted, the
     /// repository default branch seeds a missing target branch.
     #[serde(default)]
@@ -59,6 +67,28 @@ pub struct CreateSessionRequest {
     pub collaborators: Vec<String>,
     /// The optional session output locale (`### Output Language`).
     pub output_lang: Option<String>,
+}
+
+impl fmt::Debug for CreateSessionRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CreateSessionRequest")
+            .field("name", &self.name)
+            .field("packages", &self.packages)
+            .field("manifests", &self.manifests)
+            .field("work_label", &self.work_label)
+            .field("environment", &self.environment)
+            .field(
+                "disposable_environment",
+                &self.disposable_environment.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("source_branch", &self.source_branch)
+            .field("target_branch", &self.target_branch)
+            .field("auto_merge", &self.auto_merge)
+            .field("log_access", &self.log_access)
+            .field("collaborators", &self.collaborators)
+            .field("output_lang", &self.output_lang)
+            .finish()
+    }
 }
 
 /// Reject a field value that could break out of its section: anything
@@ -131,7 +161,17 @@ fn render_trigger_body(req: &CreateSessionRequest) -> Result<String, AppError> {
     if let Some(value) = work_label {
         require_inline(value, "work_label")?;
     }
-    let environment = trimmed(req.environment.as_deref());
+    let named_environment = trimmed(req.environment.as_deref());
+    if named_environment.is_some() && req.disposable_environment.is_some() {
+        return Err(AppError::Validation(
+            "environment and disposable_environment are mutually exclusive".to_string(),
+        ));
+    }
+    let environment = if req.disposable_environment.is_some() {
+        Some(DISPOSABLE_ENVIRONMENT_MARKER)
+    } else {
+        named_environment
+    };
     if let Some(value) = environment {
         require_inline(value, "environment")?;
     }
@@ -266,11 +306,16 @@ pub(super) fn validated_trigger_body(req: &CreateSessionRequest) -> Result<Strin
         .map(|entry| entry.trim().to_string())
         .filter(|entry| !entry.is_empty())
         .collect();
+    let requested_environment = if req.disposable_environment.is_some() {
+        Some(DISPOSABLE_ENVIRONMENT_MARKER)
+    } else {
+        trimmed(req.environment.as_deref())
+    };
     let round_trips = spec.name == req.name.trim()
         && rendered_packages == requested_packages
         && rendered_manifests == requested_manifests
         && spec.work_label.as_deref() == trimmed(req.work_label.as_deref())
-        && spec.environment.as_deref() == trimmed(req.environment.as_deref())
+        && spec.environment.as_deref() == requested_environment
         && spec.source_branch.as_deref() == trimmed(req.source_branch.as_deref())
         && spec.target_branch.as_deref() == trimmed(req.target_branch.as_deref())
         && spec.output_lang.as_deref() == trimmed(req.output_lang.as_deref())

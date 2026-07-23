@@ -88,6 +88,33 @@ describe('buildCreateRequest', () => {
     });
   });
 
+  it('sends a disposable environment instead of a saved profile', () => {
+    const req = buildCreateRequest({
+      name: 'n',
+      packages: ['p'],
+      manifests: '',
+      workLabel: '',
+      environment: 'must-not-be-sent',
+      disposableEnvironment: {
+        install: ['apt-get install -y jq'],
+        variables: { APP_MODE: 'test' },
+        secrets: { DEPLOY_TOKEN: 'secret' },
+      },
+      sourceBranch: '',
+      targetBranch: '',
+      autoMerge: false,
+      logAccess: '',
+      collaborators: '',
+      outputLang: '',
+    });
+    expect(req.disposable_environment).toEqual({
+      install: ['apt-get install -y jq'],
+      variables: { APP_MODE: 'test' },
+      secrets: { DEPLOY_TOKEN: 'secret' },
+    });
+    expect(req.environment).toBeUndefined();
+  });
+
   it('parses the manifest textarea one reference per line, dropping blanks', () => {
     const req = buildCreateRequest({
       name: 'n',
@@ -120,6 +147,7 @@ describe('CreateTriggerModal', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('populates the environment <select> from the profile list', async () => {
+    const user = userEvent.setup();
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
@@ -127,8 +155,22 @@ describe('CreateTriggerModal', () => {
         if (url.includes(ENV_PATH)) {
           return jsonResponse({
             environment_profiles: [
-              { name: 'staging', status: 'ready', validated_at: '', install_command_count: 0, variable_count: 0, secret_count: 0 },
-              { name: 'prod', status: 'ready', validated_at: '', install_command_count: 0, variable_count: 0, secret_count: 0 },
+              {
+                name: 'staging',
+                status: 'ready',
+                validated_at: '',
+                install_command_count: 0,
+                variable_count: 0,
+                secret_count: 0,
+              },
+              {
+                name: 'prod',
+                status: 'ready',
+                validated_at: '',
+                install_command_count: 0,
+                variable_count: 0,
+                secret_count: 0,
+              },
             ],
           });
         }
@@ -137,8 +179,11 @@ describe('CreateTriggerModal', () => {
     );
     renderModal();
 
+    expect(screen.getByRole('button', { name: 'None' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'Saved profile' }));
+
     // The field is a <select> (not a free-text input) once the list loads.
-    const select = (await screen.findByLabelText('Environment (optional)')) as HTMLSelectElement;
+    const select = (await screen.findByLabelText('Saved profile')) as HTMLSelectElement;
     expect(select.tagName).toBe('SELECT');
     // Blank "none" option + one per profile.
     expect(screen.getByRole('option', { name: 'None' })).toBeInTheDocument();
@@ -163,6 +208,7 @@ describe('CreateTriggerModal', () => {
   });
 
   it('falls back to a free-text environment input when the profile fetch fails', async () => {
+    const user = userEvent.setup();
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
@@ -172,13 +218,132 @@ describe('CreateTriggerModal', () => {
       })
     );
     renderModal();
+    await user.click(screen.getByRole('button', { name: 'Saved profile' }));
 
     // Degrades to an <input>, never blocking the dialog, plus the failure note.
     // Wait on the note (only rendered in the error branch) before reading the
     // field, so we don't sample the initial disabled <select>.
     expect(await screen.findByText(/Could not load your environments/)).toBeInTheDocument();
-    const field = screen.getByLabelText('Environment (optional)') as HTMLElement;
+    const field = screen.getByLabelText('Saved profile') as HTMLElement;
     expect(field.tagName).toBe('INPUT');
+  });
+
+  it('shows the disposable editor with a masked secret field', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse({ environment_profiles: [] }))
+    );
+    renderModal();
+
+    expect(screen.queryByLabelText('Software installation commands 1')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Disposable' }));
+
+    expect(screen.getByLabelText('Software installation commands 1')).toBeInTheDocument();
+    expect(screen.getByLabelText('Secrets 1 secret value')).toHaveAttribute('type', 'password');
+    expect(screen.getByText(/Add at least one command, variable, or secret/)).toBeInTheDocument();
+  });
+
+  it('opens a value-free confirmation and returns to the populated form on back', async () => {
+    const user = userEvent.setup();
+    let sessionWrites = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(ENV_PATH)) return jsonResponse({ environment_profiles: [] });
+        if (url.includes(SESSIONS_PATH)) {
+          sessionWrites += 1;
+          return jsonResponse({
+            issue_number: 51,
+            html_url: 'https://github.com/acme/app/issues/51',
+          });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+    renderModal();
+
+    await user.type(await screen.findByLabelText('Session name'), 'private-run');
+    await user.type(screen.getByLabelText('Packages 1'), 'a/b@main:pkg');
+    await user.click(screen.getByRole('button', { name: 'Disposable' }));
+    await user.type(
+      screen.getByLabelText('Software installation commands 1'),
+      'install-private-tool'
+    );
+    await user.type(screen.getByLabelText('Environment variables 1 NAME'), 'APP_MODE');
+    await user.type(screen.getByLabelText('Environment variables 1 value'), 'private-mode');
+    await user.type(screen.getByLabelText('Secrets 1 NAME'), 'DEPLOY_TOKEN');
+    await user.type(screen.getByLabelText('Secrets 1 secret value'), 'super-secret-value');
+    await user.click(screen.getByRole('button', { name: 'Create trigger issue' }));
+
+    expect(await screen.findByText('Confirm disposable environment')).toBeInTheDocument();
+    expect(sessionWrites).toBe(0);
+    expect(screen.queryByText('install-private-tool')).not.toBeInTheDocument();
+    expect(screen.queryByText('APP_MODE')).not.toBeInTheDocument();
+    expect(screen.queryByText('private-mode')).not.toBeInTheDocument();
+    expect(screen.queryByText('DEPLOY_TOKEN')).not.toBeInTheDocument();
+    expect(screen.queryByText('super-secret-value')).not.toBeInTheDocument();
+    expect(screen.getByText('Installation commands').parentElement).toHaveTextContent('1');
+    expect(screen.getByText('Variables').parentElement).toHaveTextContent('1');
+    expect(screen.getByText('Secrets').parentElement).toHaveTextContent('1');
+
+    await user.click(screen.getByRole('button', { name: 'Back to edit' }));
+    expect(await screen.findByLabelText('Session name')).toHaveValue('private-run');
+    expect(screen.getByLabelText('Software installation commands 1')).toHaveValue(
+      'install-private-tool'
+    );
+    expect(screen.getByLabelText('Secrets 1 secret value')).toHaveValue('super-secret-value');
+    expect(sessionWrites).toBe(0);
+  });
+
+  it('confirms one disposable request with no saved environment field', async () => {
+    const user = userEvent.setup();
+    const sentBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes(ENV_PATH)) return jsonResponse({ environment_profiles: [] });
+        if (url.includes(SESSIONS_PATH)) {
+          sentBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          return jsonResponse({
+            issue_number: 52,
+            html_url: 'https://github.com/acme/app/issues/52',
+          });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+    const { onCreated } = renderModal();
+
+    await user.type(await screen.findByLabelText('Session name'), 'private-run');
+    await user.type(screen.getByLabelText('Packages 1'), 'a/b@main:pkg');
+    await user.click(screen.getByRole('button', { name: 'Disposable' }));
+    await user.type(screen.getByLabelText('Software installation commands 1'), 'npm ci');
+    await user.type(screen.getByLabelText('Environment variables 1 NAME'), 'APP_MODE');
+    await user.type(screen.getByLabelText('Environment variables 1 value'), 'test');
+    await user.type(screen.getByLabelText('Secrets 1 NAME'), 'DEPLOY_TOKEN');
+    await user.type(screen.getByLabelText('Secrets 1 secret value'), 'secret-value');
+    await user.click(screen.getByRole('button', { name: 'Create trigger issue' }));
+
+    expect(sentBodies).toHaveLength(0);
+    await user.click(await screen.findByRole('button', { name: 'Confirm and create' }));
+    await waitFor(() => expect(sentBodies).toHaveLength(1));
+    const [sentBody] = sentBodies;
+    expect(sentBody).toBeDefined();
+    if (!sentBody) throw new Error('expected one session request');
+    expect(sentBody).toMatchObject({
+      name: 'private-run',
+      packages: ['a/b@main:pkg'],
+      disposable_environment: {
+        install: ['npm ci'],
+        variables: { APP_MODE: 'test' },
+        secrets: { DEPLOY_TOKEN: 'secret-value' },
+      },
+    });
+    expect(sentBody.environment).toBeUndefined();
+    await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
   });
 
   it('shows a success toast and hands back the created session on submit', async () => {
@@ -189,7 +354,10 @@ describe('CreateTriggerModal', () => {
         const url = String(input);
         if (url.includes(ENV_PATH)) return jsonResponse({ environment_profiles: [] });
         if (url.includes(SESSIONS_PATH)) {
-          return jsonResponse({ issue_number: 42, html_url: 'https://github.com/acme/app/issues/42' });
+          return jsonResponse({
+            issue_number: 42,
+            html_url: 'https://github.com/acme/app/issues/42',
+          });
         }
         throw new Error(`unexpected fetch: ${url}`);
       })
@@ -219,7 +387,10 @@ describe('CreateTriggerModal', () => {
         if (url.includes(ENV_PATH)) return jsonResponse({ environment_profiles: [] });
         if (url.includes(SESSIONS_PATH)) {
           sentBody = JSON.parse(String(init?.body));
-          return jsonResponse({ issue_number: 7, html_url: 'https://github.com/acme/app/issues/7' });
+          return jsonResponse({
+            issue_number: 7,
+            html_url: 'https://github.com/acme/app/issues/7',
+          });
         }
         throw new Error(`unexpected fetch: ${url}`);
       })
@@ -254,7 +425,10 @@ describe('CreateTriggerModal', () => {
         if (url.includes(ENV_PATH)) return jsonResponse({ environment_profiles: [] });
         if (url.includes(SESSIONS_PATH)) {
           sentBody = JSON.parse(String(init?.body));
-          return jsonResponse({ issue_number: 8, html_url: 'https://github.com/acme/app/issues/8' });
+          return jsonResponse({
+            issue_number: 8,
+            html_url: 'https://github.com/acme/app/issues/8',
+          });
         }
         throw new Error(`unexpected fetch: ${url}`);
       })
@@ -289,7 +463,10 @@ describe('CreateTriggerModal', () => {
         if (url.includes(ENV_PATH)) return jsonResponse({ environment_profiles: [] });
         if (url.includes(SESSIONS_PATH)) {
           sentBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-          return jsonResponse({ issue_number: 10, html_url: 'https://github.com/acme/app/issues/10' });
+          return jsonResponse({
+            issue_number: 10,
+            html_url: 'https://github.com/acme/app/issues/10',
+          });
         }
         throw new Error(`unexpected fetch: ${url}`);
       })
@@ -343,7 +520,10 @@ describe('CreateTriggerModal', () => {
         if (url.includes(ENV_PATH)) return jsonResponse({ environment_profiles: [] });
         if (url.includes(SESSIONS_PATH)) {
           sentBody = JSON.parse(String(init?.body));
-          return jsonResponse({ issue_number: 9, html_url: 'https://github.com/acme/app/issues/9' });
+          return jsonResponse({
+            issue_number: 9,
+            html_url: 'https://github.com/acme/app/issues/9',
+          });
         }
         throw new Error(`unexpected fetch: ${url}`);
       })
@@ -402,7 +582,8 @@ describe('CreateTriggerModal', () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.includes(ENV_PATH)) return jsonResponse({ environment_profiles: [] });
-        if (url.includes(SESSIONS_PATH)) return jsonResponse({ error: 'rejected', message }, status);
+        if (url.includes(SESSIONS_PATH))
+          return jsonResponse({ error: 'rejected', message }, status);
         throw new Error(`unexpected fetch: ${url}`);
       })
     );

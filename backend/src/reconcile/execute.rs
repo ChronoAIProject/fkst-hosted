@@ -16,9 +16,13 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use secrecy::{ExposeSecret, SecretString};
+use zeroize::Zeroize;
 
 use crate::access_policy::AccessPolicy;
 use crate::config::Config;
+use crate::disposable_environment::{
+    DisposableEnvironmentLookup, DisposableEnvironmentRegistry, DISPOSABLE_ENVIRONMENT_MARKER,
+};
 use crate::environment_profile::EnvironmentProfileStore;
 use crate::github_app::listing::GithubListing;
 use crate::github_app::{session_permissions, GithubAppError, GithubAppTokens};
@@ -81,6 +85,10 @@ pub struct ReconcileCtx {
     /// each sweep so the identity-gated log-download endpoint can reverse a
     /// `session_id` to its authorization context. A cheap `Arc`-backed handle.
     pub log_registry: crate::log_access::LogAccessRegistry,
+    /// Private create-request handoff for disposable environments. Resolution is
+    /// creator-bound and entries are removed only after the backend accepts the
+    /// complete sandbox credential bundle.
+    pub disposable_environments: DisposableEnvironmentRegistry,
 }
 
 /// Execute ONE action for the repo it belongs to. Best-effort: logs and swallows
@@ -256,9 +264,11 @@ async fn spawn_session(
     //    has already logged the specific error, so an `Err` here is a swallowed no-op.
     match ctx.backend.ensure_session(&spec, creds).await {
         Ok(EnsureOutcome::Created) => {
+            complete_disposable_handoff(&reg, ctx);
             tracing::info!(session_id = %spec.session_id, owner = %reg.repo.owner, "reconcile spawn: session pod created")
         }
         Ok(EnsureOutcome::AlreadyLive) => {
+            complete_disposable_handoff(&reg, ctx);
             tracing::info!(session_id = %spec.session_id, "reconcile spawn: session pod already live (no-op)")
         }
         Err(_) => {}
@@ -388,14 +398,20 @@ async fn recover_credentials(
     };
 
     match ctx.backend.ensure_session(&spec, creds).await {
-        Ok(EnsureOutcome::Created) => tracing::warn!(
-            session_id = %session_id,
-            "reconcile credential recovery: runtime vanished after observation; recreated with complete credentials"
-        ),
-        Ok(EnsureOutcome::AlreadyLive) => tracing::debug!(
-            session_id = %session_id,
-            "reconcile credential recovery: complete credential bundle adopted"
-        ),
+        Ok(EnsureOutcome::Created) => {
+            complete_disposable_handoff(&reg, ctx);
+            tracing::warn!(
+                session_id = %session_id,
+                "reconcile credential recovery: runtime vanished after observation; recreated with complete credentials"
+            )
+        }
+        Ok(EnsureOutcome::AlreadyLive) => {
+            complete_disposable_handoff(&reg, ctx);
+            tracing::debug!(
+                session_id = %session_id,
+                "reconcile credential recovery: complete credential bundle adopted"
+            )
+        }
         Err(error) => tracing::warn!(
             session_id = %session_id,
             error = %error,
@@ -417,19 +433,8 @@ async fn resolve_session_credentials(
     detected_work_labels: &[String],
     ctx: &ReconcileCtx,
 ) -> Result<(SessionPodSpec, BTreeMap<String, SecretString>), CredentialResolutionError> {
-    let (user_env, install_commands, secret_keys) = match resolve_environment(
-        ctx.env_store.as_ref(),
-        reg.creator_id,
-        &reg.creator_login,
-        reg.def.environment.as_deref(),
-    )
-    .await
-    {
-        EnvResolution::Proceed {
-            user_env,
-            install,
-            secret_keys,
-        } => (user_env, install, secret_keys),
+    let environment = match resolve_environment(reg, ctx).await {
+        EnvResolution::Proceed(environment) => environment,
         EnvResolution::Blocked { comment } => {
             return Err(CredentialResolutionError::EnvironmentBlocked { comment });
         }
@@ -455,9 +460,12 @@ async fn resolve_session_credentials(
     let creds = credential_secret_data(
         &github_token_json,
         ctx.config.llm_api_key.expose_secret(),
-        user_env.iter().map(|(k, v)| (k.as_str(), v.as_str())),
-        &install_commands,
-        &secret_keys,
+        environment
+            .user_env
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str())),
+        &environment.install,
+        &environment.secret_keys,
         storage,
     )
     .into_iter()
@@ -465,6 +473,29 @@ async fn resolve_session_credentials(
     .collect();
 
     Ok((spec, creds))
+}
+
+/// The transient registry is only an API-to-reconciler handoff. Once the
+/// backend confirms it accepted the complete bundle, the sandbox/backend owns
+/// the material and the control plane forgets it.
+fn complete_disposable_handoff(reg: &SessionRegistration, ctx: &ReconcileCtx) {
+    if reg.def.environment.as_deref() != Some(DISPOSABLE_ENVIRONMENT_MARKER) {
+        return;
+    }
+    let Some(creator_id) = reg.creator_id else {
+        return;
+    };
+    if ctx.disposable_environments.remove(
+        &reg.repo.owner,
+        &reg.repo.name,
+        reg.trigger_issue,
+        creator_id,
+    ) {
+        tracing::info!(
+            session_id = %reg.session_id,
+            "reconcile spawn: disposable environment handoff consumed"
+        );
+    }
 }
 
 /// Build the launch spec from a registration + its effective work-label set (pure;
@@ -727,18 +758,103 @@ async fn post_comment_best_effort(
 // --- Environment resolution (mirrors the Model-A webhook pre-flight) ----------
 
 /// The outcome of pre-flighting the issue's named environment.
+struct ResolvedEnvironment {
+    user_env: BTreeMap<String, String>,
+    install: Vec<String>,
+    secret_keys: Vec<String>,
+}
+
+impl Drop for ResolvedEnvironment {
+    fn drop(&mut self) {
+        for command in &mut self.install {
+            command.zeroize();
+        }
+        for key in &mut self.secret_keys {
+            key.zeroize();
+        }
+        for (mut key, mut value) in std::mem::take(&mut self.user_env) {
+            key.zeroize();
+            value.zeroize();
+        }
+    }
+}
+
 enum EnvResolution {
     /// Launch with the merged variables/secret VALUES to inject, the ordered install
     /// commands to run in the pod, and the NAMES of the env vars that are secrets
     /// (so the pod can keep them out of the codex config). All empty when the issue
     /// declared no environment.
-    Proceed {
-        user_env: BTreeMap<String, String>,
-        install: Vec<String>,
-        secret_keys: Vec<String>,
-    },
+    Proceed(ResolvedEnvironment),
     /// Do NOT launch; post `comment` on the trigger issue explaining why.
     Blocked { comment: String },
+}
+
+/// Resolve either the exact disposable marker through the private handoff, or a
+/// normal saved profile through the durable environment store.
+async fn resolve_environment(reg: &SessionRegistration, ctx: &ReconcileCtx) -> EnvResolution {
+    if reg.def.environment.as_deref() != Some(DISPOSABLE_ENVIRONMENT_MARKER) {
+        return resolve_named_environment(
+            ctx.env_store.as_ref(),
+            reg.creator_id,
+            &reg.creator_login,
+            reg.def.environment.as_deref(),
+        )
+        .await;
+    }
+
+    let Some(creator_id) = reg.creator_id else {
+        tracing::warn!(
+            session_id = %reg.session_id,
+            "reconcile spawn: disposable environment has no numeric creator; blocking"
+        );
+        return EnvResolution::Blocked {
+            comment: disposable_environment_unavailable_comment(),
+        };
+    };
+    match ctx.disposable_environments.resolve(
+        &reg.repo.owner,
+        &reg.repo.name,
+        reg.trigger_issue,
+        creator_id,
+    ) {
+        DisposableEnvironmentLookup::Found(material) => {
+            tracing::info!(
+                session_id = %reg.session_id,
+                install_commands = material.install.len(),
+                env_vars = material.user_env.len(),
+                secret_env_vars = material.secret_keys.len(),
+                "reconcile spawn: disposable environment resolved"
+            );
+            EnvResolution::Proceed(ResolvedEnvironment {
+                user_env: material.user_env,
+                install: material.install,
+                secret_keys: material.secret_keys,
+            })
+        }
+        DisposableEnvironmentLookup::Missing => {
+            tracing::warn!(
+                session_id = %reg.session_id,
+                "reconcile spawn: disposable environment handoff missing; blocking"
+            );
+            EnvResolution::Blocked {
+                comment: disposable_environment_unavailable_comment(),
+            }
+        }
+        DisposableEnvironmentLookup::CreatorMismatch => {
+            tracing::warn!(
+                session_id = %reg.session_id,
+                "reconcile spawn: disposable environment creator mismatch; blocking"
+            );
+            EnvResolution::Blocked {
+                comment: disposable_environment_unavailable_comment(),
+            }
+        }
+    }
+}
+
+fn disposable_environment_unavailable_comment() -> String {
+    "This session's disposable one-time environment is unavailable. Close this trigger and create a new session to submit the environment again."
+        .to_string()
 }
 
 /// Pre-flight the issue's named environment against the CREATOR's store (keyed by
@@ -747,7 +863,7 @@ enum EnvResolution {
 /// without an environment (auto-seeded triggers never select one). `None` → an
 /// empty session. A named selection for an id-bearing creator must exist and be
 /// `ready`; otherwise the launch is blocked with feedback — fail closed.
-async fn resolve_environment(
+async fn resolve_named_environment(
     env_store: &dyn EnvironmentProfileStore,
     creator_id: Option<i64>,
     creator_login: &str,
@@ -759,20 +875,20 @@ async fn resolve_environment(
             requested_environment = environment.unwrap_or_default(),
             "reconcile spawn: creator has no numeric id; resolving no environment"
         );
-        return EnvResolution::Proceed {
+        return EnvResolution::Proceed(ResolvedEnvironment {
             user_env: BTreeMap::new(),
             install: Vec::new(),
             secret_keys: Vec::new(),
-        };
+        });
     };
 
     let name = match environment {
         None => {
-            return EnvResolution::Proceed {
+            return EnvResolution::Proceed(ResolvedEnvironment {
                 user_env: BTreeMap::new(),
                 install: Vec::new(),
                 secret_keys: Vec::new(),
-            }
+            })
         }
         Some(name) => name,
     };
@@ -792,11 +908,11 @@ async fn resolve_environment(
                         secret_env_vars = secret_keys.len(),
                         "reconcile spawn: named environment resolved"
                     );
-                    EnvResolution::Proceed {
+                    EnvResolution::Proceed(ResolvedEnvironment {
                         user_env,
                         install,
                         secret_keys,
-                    }
+                    })
                 }
                 Ok(None) => EnvResolution::Blocked {
                     comment: env_not_ready_comment(name),

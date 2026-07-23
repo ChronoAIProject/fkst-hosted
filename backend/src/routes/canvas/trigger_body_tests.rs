@@ -14,6 +14,7 @@ fn full_request() -> CreateSessionRequest {
         manifests: vec!["acme/manifests@main:bundles/site".to_string()],
         work_label: Some("site-build".to_string()),
         environment: Some("prod-env".to_string()),
+        disposable_environment: None,
         source_branch: Some("release/v1.2".to_string()),
         target_branch: Some("feature/site".to_string()),
         auto_merge: Some(true),
@@ -77,6 +78,7 @@ fn minimal_request_omits_every_optional_section() {
         manifests: Vec::new(),
         work_label: None,
         environment: None,
+        disposable_environment: None,
         source_branch: None,
         target_branch: None,
         auto_merge: None,
@@ -127,6 +129,7 @@ fn auto_merge_false_and_blank_optionals_render_like_absent() {
         manifests: vec!["  ".to_string()],
         work_label: Some("   ".to_string()),
         environment: Some(String::new()),
+        disposable_environment: None,
         source_branch: Some("  ".to_string()),
         target_branch: None,
         auto_merge: Some(false),
@@ -352,4 +355,76 @@ fn an_invalid_session_name_is_a_400_naming_the_section() {
         }
         other => panic!("expected Validation, got {other:?}"),
     }
+}
+
+#[test]
+fn disposable_environment_renders_only_the_fixed_marker() {
+    let req = CreateSessionRequest {
+        environment: None,
+        disposable_environment: Some(DisposableEnvironmentRequest {
+            install: vec!["install private-tool".to_string()],
+            variables: std::collections::BTreeMap::from([(
+                "PRIVATE_MODE".to_string(),
+                "private-value".to_string(),
+            )]),
+            secrets: std::collections::BTreeMap::from([(
+                "PRIVATE_TOKEN".to_string(),
+                "secret-value".to_string(),
+            )]),
+        }),
+        ..full_request()
+    };
+
+    let body = validated_trigger_body(&req).expect("valid");
+    assert!(body.contains("### Environment"));
+    assert!(body.contains(DISPOSABLE_ENVIRONMENT_MARKER));
+    for private in [
+        "install private-tool",
+        "PRIVATE_MODE",
+        "private-value",
+        "PRIVATE_TOKEN",
+        "secret-value",
+    ] {
+        assert!(!body.contains(private), "issue body leaked {private:?}");
+    }
+    let parsed = parse_trigger_issue_body(&body).expect("marker parses");
+    assert_eq!(
+        parsed.environment.as_deref(),
+        Some(DISPOSABLE_ENVIRONMENT_MARKER)
+    );
+}
+
+#[test]
+fn named_and_disposable_environments_are_mutually_exclusive() {
+    let req = CreateSessionRequest {
+        disposable_environment: Some(DisposableEnvironmentRequest {
+            install: vec!["true".to_string()],
+            variables: Default::default(),
+            secrets: Default::default(),
+        }),
+        ..full_request()
+    };
+    let err = validated_trigger_body(&req).expect_err("must reject");
+    assert!(matches!(err, AppError::Validation(_)), "got {err:?}");
+}
+
+#[test]
+fn create_request_debug_redacts_disposable_details() {
+    let req = CreateSessionRequest {
+        environment: None,
+        disposable_environment: Some(DisposableEnvironmentRequest {
+            install: vec!["do-not-log-command".to_string()],
+            variables: Default::default(),
+            secrets: std::collections::BTreeMap::from([(
+                "SECRET_NAME".to_string(),
+                "do-not-log-value".to_string(),
+            )]),
+        }),
+        ..full_request()
+    };
+    let rendered = format!("{req:?}");
+    assert!(rendered.contains("[REDACTED]"));
+    assert!(!rendered.contains("do-not-log-command"));
+    assert!(!rendered.contains("SECRET_NAME"));
+    assert!(!rendered.contains("do-not-log-value"));
 }

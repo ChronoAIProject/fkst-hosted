@@ -32,12 +32,14 @@ use utoipa_axum::routes;
 
 use crate::config::Config;
 use crate::environment_profile::{default_store, EnvironmentProfileStore};
+use crate::environment_validation::validate_entries;
+#[cfg(test)]
+use crate::environment_validation::{valid_env_key, validate_key};
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
 use crate::k8s::env_store::meta::private_content_hash;
 use crate::k8s::env_store::{content_hash, env_object_name, EnvRecord, EnvSummary};
 use crate::k8s::env_validator::validate_environment;
-use crate::reserved_env::{is_reserved_env_key, LLM_ENV_KEY};
 use crate::session_backend::ValidationOutcome;
 use crate::state::AppState;
 
@@ -113,63 +115,11 @@ pub struct InstallValidationError {
     pub stderr_tail: String,
 }
 
-/// Anchored env-var-name pattern (also a valid Kubernetes data key). Ported from
-/// the flat user-env store the named-environment API replaces.
-fn env_key_regex() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new("^[A-Za-z_][A-Za-z0-9_]*$").expect("static env key regex"))
-}
-
 /// Anchored environment-NAME pattern: DNS-1123-label-ish, lower-case only, so the
 /// composed object name is a valid Kubernetes object name.
 fn env_name_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$").expect("static env name regex"))
-}
-
-/// True when `key` is a valid env var name.
-fn valid_env_key(key: &str) -> bool {
-    env_key_regex().is_match(key)
-}
-
-/// Reject an invalid or reserved env var name with `422`. A user may not shadow a
-/// platform-owned var (the whole `FKST_*` / git-credential family, via
-/// [`is_reserved_env_key`]) or the engine's `LLM_API_KEY` credential slot.
-fn validate_key(key: &str) -> Result<(), AppError> {
-    if !valid_env_key(key) {
-        return Err(AppError::Unprocessable(format!(
-            "invalid env var name {key:?}: must match ^[A-Za-z_][A-Za-z0-9_]*$"
-        )));
-    }
-    if is_reserved_env_key(key) || key == LLM_ENV_KEY {
-        return Err(AppError::Unprocessable(format!(
-            "env var name {key:?} is reserved and cannot be set"
-        )));
-    }
-    Ok(())
-}
-
-/// Validate a variable/secret map: key shape (+ reserved-key rejection), per-value
-/// byte cap, and per-scope entry count cap. All violations render as `422`.
-fn validate_entries(entries: &BTreeMap<String, String>, config: &Config) -> Result<(), AppError> {
-    if entries.len() > config.vault_entries_per_scope_cap {
-        return Err(AppError::Unprocessable(format!(
-            "too many entries: {} exceeds the per-scope cap of {}",
-            entries.len(),
-            config.vault_entries_per_scope_cap
-        )));
-    }
-    for (key, value) in entries {
-        validate_key(key)?;
-        if value.len() > config.vault_value_byte_cap {
-            return Err(AppError::Unprocessable(format!(
-                "value for {key:?} is {} bytes, exceeding the cap of {}",
-                value.len(),
-                config.vault_value_byte_cap
-            )));
-        }
-    }
-    Ok(())
 }
 
 /// Validate the environment name: shape, length, and the composed-object-name
@@ -194,30 +144,7 @@ fn validate_name(name: &str, id: i64) -> Result<(), AppError> {
 /// Validate the install list: count 1..=cap, each command non-blank-trimmed and
 /// within the per-command byte cap. All violations render as `422`.
 fn validate_install(install: &[String], config: &Config) -> Result<(), AppError> {
-    let count = install.len();
-    if count < 1 || count > config.env.install_max_commands {
-        return Err(AppError::Unprocessable(format!(
-            "install must list between 1 and {} commands (got {count})",
-            config.env.install_max_commands
-        )));
-    }
-    for (i, command) in install.iter().enumerate() {
-        if command.trim().is_empty() {
-            return Err(AppError::Unprocessable(format!(
-                "install command {} must not be blank",
-                i + 1
-            )));
-        }
-        if command.len() > config.env.install_max_command_bytes {
-            return Err(AppError::Unprocessable(format!(
-                "install command {} is {} bytes, exceeding the cap of {}",
-                i + 1,
-                command.len(),
-                config.env.install_max_command_bytes
-            )));
-        }
-    }
-    Ok(())
+    crate::environment_validation::validate_install(install, config, true)
 }
 
 /// Project a stored [`EnvRecord`] into the public view (never a secret value).

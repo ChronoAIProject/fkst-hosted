@@ -40,6 +40,10 @@ async fn mount_get_issue(
 
 #[tokio::test]
 async fn stop_session_closes_the_trigger_issue_as_the_author() {
+    use crate::disposable_environment::{
+        DisposableEnvironmentLookup, DisposableEnvironmentRequest,
+    };
+
     let server = MockServer::start().await;
     // The viewer (id 9) is the trigger author, so the author tier authorizes the
     // stop and no repo-admin lookup is needed (the `||` short-circuits).
@@ -63,6 +67,18 @@ async fn stop_session_closes_the_trigger_issue_as_the_author() {
         .await;
 
     let state = test_state(&server.uri(), None);
+    let registry = state.disposable_environments.clone();
+    registry.insert(
+        "acme",
+        "site",
+        21,
+        viewer_user().id,
+        &DisposableEnvironmentRequest {
+            install: vec!["install private-tool".to_string()],
+            variables: Default::default(),
+            secrets: Default::default(),
+        },
+    );
     let status = stop_session(
         State(state),
         Path(("acme".to_string(), "site".to_string(), 21)),
@@ -72,6 +88,10 @@ async fn stop_session_closes_the_trigger_issue_as_the_author() {
     .await
     .expect("204");
     assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(matches!(
+        registry.resolve("acme", "site", 21, viewer_user().id),
+        DisposableEnvironmentLookup::Missing
+    ));
 }
 
 #[tokio::test]

@@ -81,6 +81,7 @@ test.describe('environment-profile CRUD parity', () => {
     await page.getByRole('button', { name: 'New session' }).click();
     const modal = page.getByRole('dialog');
     await expect(modal).toBeVisible();
+    await modal.getByRole('button', { name: 'Saved profile' }).click();
     const select = modal.locator('#trigger-environment');
     // selectOption throws if the option is absent — proving the profile is there.
     await select.selectOption({ label: 'web-scraper' });

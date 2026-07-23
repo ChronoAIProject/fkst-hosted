@@ -32,6 +32,7 @@ fn app(webhook_secret: bool) -> axum::Router {
         storage: None,
         log_registry: Default::default(),
         log_bundle_cache: Default::default(),
+        disposable_environments: Default::default(),
     })
     .expect("router builds")
 }
@@ -217,6 +218,11 @@ async fn components_include_the_named_environment_schemas_and_not_the_removed_on
         "EnvironmentProfileList",
         "EnvironmentProfileSummary",
         "InstallValidationError",
+        // Direct session-create DTOs, including the write-only disposable
+        // environment request accepted by the existing POST route.
+        "CreateSessionRequest",
+        "DisposableEnvironmentRequest",
+        "CreateSessionResponse",
         // The outcomes + log-viewer DTOs (dashboard surface feature).
         "SessionOutcomes",
         "PrOutcome",
@@ -268,6 +274,51 @@ async fn components_include_the_named_environment_schemas_and_not_the_removed_on
             "removed schema {gone} must be absent"
         );
     }
+}
+
+#[tokio::test]
+async fn create_session_openapi_documents_disposable_input_but_never_echoes_it() {
+    let spec = fetch_spec(app(false)).await;
+    let post = &spec["paths"]["/api/v1/repos/{owner}/{name}/sessions"]["post"];
+    assert_eq!(
+        post["requestBody"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/CreateSessionRequest"
+    );
+
+    let schemas = &spec["components"]["schemas"];
+    let disposable_property =
+        &schemas["CreateSessionRequest"]["properties"]["disposable_environment"];
+    assert!(
+        serde_json::to_string(disposable_property)
+            .expect("schema JSON")
+            .contains("#/components/schemas/DisposableEnvironmentRequest"),
+        "optional property must reference DisposableEnvironmentRequest: {disposable_property:?}"
+    );
+    let disposable = &schemas["DisposableEnvironmentRequest"]["properties"];
+    for field in ["install", "variables", "secrets"] {
+        assert!(
+            disposable.get(field).is_some(),
+            "disposable request must document {field}"
+        );
+    }
+    assert_eq!(
+        disposable["secrets"]["additionalProperties"]["writeOnly"], true,
+        "disposable secret values must be explicitly write-only: {}",
+        disposable["secrets"]
+    );
+    assert_eq!(
+        disposable["secrets"]["propertyNames"]["writeOnly"], true,
+        "disposable secret names must be explicitly write-only: {}",
+        disposable["secrets"]
+    );
+
+    assert_eq!(
+        post["responses"]["201"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/CreateSessionResponse"
+    );
+    let response = &schemas["CreateSessionResponse"]["properties"];
+    assert!(response.get("disposable_environment").is_none());
+    assert!(response.get("secrets").is_none());
 }
 
 #[tokio::test]

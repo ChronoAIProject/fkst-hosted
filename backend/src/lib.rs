@@ -6,10 +6,15 @@
 
 pub mod access_policy;
 pub mod config;
+// Private, process-local handoff for disposable session environments. The
+// create API writes it once and reconciliation consumes it after the sandbox
+// accepts the complete credential bundle; no read route or durable store exists.
+pub mod disposable_environment;
 // Named-environment / install-validation config knobs (`FKST_ENV_*`, issue
 // #338 §6.1). Config surface only — no behaviour is wired to these yet.
 pub mod env_config;
 pub mod environment_profile;
+pub(crate) mod environment_validation;
 pub mod error;
 pub mod github_app;
 // GitHub-token identity verification + the `GithubUser` axum extractor (PR4a):

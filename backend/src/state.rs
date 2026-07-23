@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use crate::config::Config;
+use crate::disposable_environment::DisposableEnvironmentRegistry;
 use crate::github_app::GithubAppTokens;
 use crate::log_access::LogAccessRegistry;
 use crate::log_bundle_cache::LogBundleCache;
@@ -12,10 +13,10 @@ use crate::session_backend::SessionBackend;
 use crate::storage::ChronoStorageClient;
 
 /// Clonable state shared across the router. The control plane is API-only and
-/// datastore-free: a session IS its Kubernetes Pod / OpenSandbox sandbox
+/// durable-datastore-free: a session IS its Kubernetes Pod / OpenSandbox sandbox
 /// (created and retired by the reconciler through the session backend), so
-/// there is no in-memory session/goal/vault store here — only configuration,
-/// the GitHub App token service, and the webhook secret. Identity is the
+/// there is no in-memory session/goal/vault database here. The one exception is
+/// the short-lived disposable-environment handoff documented below. Identity is the
 /// HMAC-verified GitHub webhook actor; there is no application-level auth
 /// layer.
 #[derive(Clone)]
@@ -58,4 +59,8 @@ pub struct AppState {
     /// and the whole-bundle download share one storage fetch per ~30s window instead
     /// of re-downloading + re-gunzipping on every request. A cheap `Arc`-backed handle.
     pub log_bundle_cache: LogBundleCache,
+    /// Private, process-local create-request handoff for disposable session
+    /// environments. Shared with the active reconciler; never exposed by a read
+    /// route or backed by durable storage.
+    pub disposable_environments: DisposableEnvironmentRegistry,
 }
