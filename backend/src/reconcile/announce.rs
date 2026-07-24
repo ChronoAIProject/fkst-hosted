@@ -18,6 +18,14 @@
 //! registered with — with zero new storage. A later reconcile reads it back (via
 //! `list_issue_comments` + [`parse_config_hash_marker`]) to detect, and reject, any
 //! edit to an already-triggered issue.
+//!
+//! ONBOARDING (issue #3379): beyond the metadata block, the comment walks the
+//! author through driving the session — how to queue a work issue (label + the
+//! session creator as the SOLE assignee, the routing invariant), who may author
+//! work, what feedback to expect (`fkst-picked-up`, one PR per issue into the
+//! target branch, keep-alive/idle-down), and the fkst dashboard URL when
+//! `FKST_FRONTEND_URL` is configured. The comment is NOT parsed by the trigger
+//! parser (only issue BODIES are), so its formatting is unconstrained.
 
 use std::sync::OnceLock;
 
@@ -67,12 +75,17 @@ pub(crate) fn announce_session_comment_with_defaults(
         None,
         crate::reconcile::branches::DEFAULT_TARGET_BRANCH,
         auto_merge,
+        "the-creator",
+        None,
         log_url,
         full_config_hash,
     )
 }
 
-/// Branch-aware announcement renderer used by the reconciler.
+/// Branch-aware announcement renderer used by the reconciler. `creator_login` is
+/// the session's effective creator — the login every work issue must carry as its
+/// SOLE assignee to route here; `frontend_url` (the configured
+/// `FKST_FRONTEND_URL`) renders the dashboard block when `Some`.
 #[allow(clippy::too_many_arguments)]
 pub fn announce_session_comment(
     session_name: &str,
@@ -83,6 +96,8 @@ pub fn announce_session_comment(
     source_branch: Option<&str>,
     target_branch: &str,
     auto_merge: bool,
+    creator_login: &str,
+    frontend_url: Option<&str>,
     log_url: Option<&str>,
     full_config_hash: &str,
 ) -> String {
@@ -100,12 +115,21 @@ pub fn announce_session_comment(
         }
         acc
     });
+    // The inline backticked label list, reused by the metadata block and the
+    // queue-work steps below. Empty-set fallback: the single explicit label.
+    let labels_inline = if !effective.is_empty() {
+        Some(
+            effective
+                .iter()
+                .map(|l| format!("`{l}`"))
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
+    } else {
+        work_label.map(|l| format!("`{l}`"))
+    };
     if !effective.is_empty() {
-        let rendered = effective
-            .iter()
-            .map(|l| format!("`{l}`"))
-            .collect::<Vec<_>>()
-            .join(", ");
+        let rendered = labels_inline.as_deref().unwrap_or_default();
         body.push_str(&format!(
             "**Work label(s):** {rendered} — open an issue with any of these labels in this \
              repo to queue work for this session.\n\n"
@@ -128,7 +152,10 @@ pub fn announce_session_comment(
 
     match environment {
         Some(name) => body.push_str(&format!("**Environment:** `{name}`\n\n")),
-        None => body.push_str("**Environment:** none\n\n"),
+        None => body.push_str(
+            "**Environment:** default — no named environment profile, no extra \
+             configuration or software installations.\n\n",
+        ),
     }
 
     body.push_str(&format!(
@@ -146,6 +173,66 @@ pub fn announce_session_comment(
         );
     } else {
         body.push_str("**Auto-merge:** `off`\n\n");
+    }
+
+    // --- Onboarding walkthrough (issue #3379) --------------------------------
+    // How to queue work: the three routing requirements, spelled out. The sole-
+    // assignee rule is the one users most often miss — a work issue routes ONLY
+    // when its single assignee equals this session's effective creator.
+    body.push_str("---\n\n**📋 How to queue work**\n\n");
+    body.push_str(
+        "1. Open a **new issue** in this repository describing one task — what to \
+         change and how to verify it.\n",
+    );
+    match &labels_inline {
+        Some(labels) => body.push_str(&format!(
+            "2. Add one of this session's work labels: {labels}.\n"
+        )),
+        None => body.push_str("2. Add one of this session's work labels.\n"),
+    }
+    body.push_str(&format!(
+        "3. Assign the issue to **@{creator_login}** as its **only assignee** — work \
+         routes by label plus that single assignee. A missing, different, or extra \
+         assignee leaves the issue marked `fkst-unrouted` until corrected, after \
+         which it is picked up automatically.\n\n"
+    ));
+    body.push_str(&format!(
+        "Work issues may be authored by **@{creator_login}**, the logins under this \
+         trigger's `### Session Collaborators`, or a deployment admin; issues from \
+         anyone else stay unworked and are marked `fkst-unauthorized`.\n\n"
+    ));
+
+    // What to expect once a work issue routes.
+    body.push_str("**🔁 What to expect**\n\n");
+    body.push_str(
+        "- The session claims each routed issue and labels it `fkst-picked-up` — \
+         usually within seconds via webhook, otherwise on the next periodic sweep.\n",
+    );
+    body.push_str(&format!(
+        "- Every open work issue is worked in parallel as its own pull request into \
+         `{target_branch}`, with progress reported back on the issue.\n"
+    ));
+    if auto_merge {
+        body.push_str("- Session pull requests auto-merge once they are mergeable.\n");
+    } else {
+        body.push_str(
+            "- Auto-merge is off for this session — review and merge each session \
+             pull request yourself.\n",
+        );
+    }
+    body.push_str(
+        "- Open work issues keep this session's pod running; merge or close them to \
+         let the session idle down.\n\n",
+    );
+
+    // The dashboard block — rendered only when a frontend URL is configured.
+    if let Some(url) = frontend_url {
+        body.push_str(&format!(
+            "**🖥️ Dashboard**\n\n{url} — sign in with GitHub to browse your \
+             repositories and sessions, watch live session activity, review work \
+             items and outcomes, download session logs, and manage named environment \
+             profiles.\n\n"
+        ));
     }
 
     // The identity-gated log-download link. Static + safe to post: the endpoint
@@ -242,6 +329,87 @@ mod tests {
     }
 
     #[test]
+    fn onboarding_names_the_creator_as_sole_assignee_and_lists_the_labels() {
+        // The queue-work steps must spell out the routing invariant: the work
+        // issue's ONLY assignee is the session creator, plus one of the labels.
+        let body = announce_session_comment_with_defaults(
+            "s",
+            Some("fkst-x"),
+            &["fkst-x".to_string(), "fkst-y".to_string()],
+            &[],
+            None,
+            true,
+            None,
+            "h",
+        );
+        assert!(body.contains("**📋 How to queue work**"), "{body}");
+        assert!(
+            body.contains("Add one of this session's work labels: `fkst-x`, `fkst-y`."),
+            "{body}"
+        );
+        // The defaults helper passes creator "the-creator".
+        assert!(
+            body.contains("Assign the issue to **@the-creator** as its **only assignee**"),
+            "{body}"
+        );
+        assert!(body.contains("`fkst-unrouted`"), "{body}");
+        // Authorized-author guidance names the creator, collaborators, and admins.
+        assert!(body.contains("`### Session Collaborators`"), "{body}");
+        assert!(body.contains("`fkst-unauthorized`"), "{body}");
+        // Expectations: claim label, per-issue PRs, keep-alive/idle-down.
+        assert!(body.contains("`fkst-picked-up`"), "{body}");
+        assert!(body.contains("as its own pull request"), "{body}");
+        assert!(body.contains("idle down"), "{body}");
+        // Auto-merge ON renders the auto-merge expectation, not the review-yourself one.
+        assert!(
+            body.contains("Session pull requests auto-merge once they are mergeable."),
+            "{body}"
+        );
+        assert!(!body.contains("review and merge each session"), "{body}");
+    }
+
+    #[test]
+    fn dashboard_block_renders_only_when_a_frontend_url_is_configured() {
+        let with_url = announce_session_comment(
+            "s",
+            Some("wl"),
+            &["wl".to_string()],
+            &[],
+            None,
+            None,
+            "fkst-hosted-default",
+            false,
+            "octocat",
+            Some("https://fkst.chrono-ai.fun"),
+            None,
+            "h",
+        );
+        assert!(with_url.contains("**🖥️ Dashboard**"), "{with_url}");
+        assert!(
+            with_url.contains("https://fkst.chrono-ai.fun"),
+            "{with_url}"
+        );
+        assert!(with_url.contains("environment profiles"), "{with_url}");
+        assert!(
+            with_url.contains("**@octocat**"),
+            "the real creator login is rendered: {with_url}"
+        );
+
+        // No frontend URL configured → the dashboard block is omitted entirely.
+        let without = announce_session_comment_with_defaults(
+            "s",
+            Some("wl"),
+            &["wl".to_string()],
+            &[],
+            None,
+            false,
+            None,
+            "h",
+        );
+        assert!(!without.contains("Dashboard"), "{without}");
+    }
+
+    #[test]
     fn renders_zero_packages_no_environment_and_auto_merge_off() {
         let body = announce_session_comment_with_defaults(
             "solo",
@@ -257,8 +425,15 @@ mod tests {
         assert!(body.contains("**Packages:** 0"));
         // No bullets when there are no packages.
         assert!(!body.contains("\n- `"));
-        assert!(body.contains("**Environment:** none"));
+        // A profile-less session reads as the DEFAULT environment (issue #3379),
+        // spelling out that nothing extra is configured or installed.
+        assert!(body.contains(
+            "**Environment:** default — no named environment profile, no extra \
+             configuration or software installations."
+        ));
         assert!(body.contains("**Auto-merge:** `off`"));
+        // Auto-merge OFF renders the review-it-yourself expectation line.
+        assert!(body.contains("review and merge each session"));
         // The auto-merge note only appears when it is ON.
         assert!(!body.contains("auto-merged to the default"));
         // The marker is always appended, regardless of the visible metadata.
@@ -480,12 +655,16 @@ mod work_label_set_tests {
             Some("release/v1"),
             "feature-x",
             true,
+            "octocat",
+            None,
             None,
             "h",
         );
         assert!(body.contains("**Source branch:** `release/v1`"));
         assert!(body.contains("**Target branch:** `feature-x`"));
         assert!(body.contains("auto-merged to the target branch"));
+        // The what-to-expect PR line names the resolved target branch too.
+        assert!(body.contains("as its own pull request into `feature-x`"));
         assert!(body.ends_with("<!-- fkst-config-hash: h -->"));
     }
 }

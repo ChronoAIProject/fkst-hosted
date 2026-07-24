@@ -164,6 +164,7 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
             source_branch,
             target_branch,
             auto_merge,
+            creator_login,
             full_config_hash,
         } => {
             // Build the identity-gated log-download link from the configured public
@@ -182,6 +183,9 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
                 source_branch.as_deref(),
                 &target_branch,
                 auto_merge,
+                &creator_login,
+                // The dashboard block renders only when a frontend URL is set.
+                ctx.config.log.frontend_url.as_deref(),
                 log_url.as_deref(),
                 &full_config_hash,
             );

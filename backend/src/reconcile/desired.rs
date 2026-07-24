@@ -278,6 +278,10 @@ pub enum ReconcileAction {
         target_branch: String,
         /// Whether this trigger opted into reconcile-side PR auto-merge.
         auto_merge: bool,
+        /// The session's effective creator login — rendered into the announce
+        /// comment's queue-work steps as the required SOLE work-issue assignee
+        /// (issue #3379).
+        creator_login: String,
         /// The registration's [`full_config_hash`], latched as a hidden marker in the
         /// announcement comment so a later config edit can be detected + rejected.
         full_config_hash: String,
@@ -474,6 +478,7 @@ pub fn plan_repo(
                     crate::reconcile::branches::DEFAULT_TARGET_BRANCH.to_string()
                 }),
                 auto_merge: reg.auto_merge,
+                creator_login: reg.creator_login.clone(),
                 full_config_hash: full_config_hash(reg),
             });
         }

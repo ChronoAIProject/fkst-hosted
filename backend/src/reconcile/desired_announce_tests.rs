@@ -41,6 +41,7 @@ fn valid_registration_not_yet_announced_is_announced() {
             source_branch: None,
             target_branch: "fkst-hosted-default".to_string(),
             auto_merge: false,
+            creator_login: "author-login".to_string(),
             full_config_hash: full_config_hash(&regs[0]),
         }]
     );
@@ -82,6 +83,7 @@ fn valid_registration_announces_alongside_spawn() {
                 source_branch: None,
                 target_branch: "fkst-hosted-default".to_string(),
                 auto_merge: false,
+                creator_login: "author-login".to_string(),
                 full_config_hash: full_config_hash(&regs[0]),
             },
         ]
@@ -184,6 +186,7 @@ fn announcement_carries_rendered_packages_and_auto_merge() {
             source_branch: None,
             target_branch: "fkst-hosted-default".to_string(),
             auto_merge: true,
+            creator_login: "author-login".to_string(),
             full_config_hash: full_config_hash(&regs[0]),
         }]
     );
@@ -230,6 +233,7 @@ fn spawn_and_announce_carry_the_detected_work_label_set() {
                 source_branch: None,
                 target_branch: "fkst-hosted-default".to_string(),
                 auto_merge: false,
+                creator_login: "author-login".to_string(),
                 full_config_hash: full_config_hash(&regs[0]),
             },
         ],
