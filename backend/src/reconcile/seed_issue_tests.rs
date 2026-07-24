@@ -98,9 +98,33 @@ fn manifest_seed_body_round_trips_with_manifest_and_no_packages_or_work_label() 
     // The I9 default: a `### Manifest` reference supplies the packages and the wake
     // labels auto-discover, so the body carries NEITHER `### Packages` NOR
     // `### Work Label`. It must still parse as a valid trigger issue.
-    let body = build_seed_body(&[], Some(DEFAULT_MANIFEST), "installing-user", "octo-owner");
+    let body = build_seed_body(
+        &[],
+        Some(DEFAULT_MANIFEST),
+        "installing-user",
+        "octo-owner",
+        Some("https://fkst.example"),
+    );
     // Shape assertions: manifest present, packages/work-label absent.
     assert!(body.contains("### Manifest"), "carries a manifest section");
+    // The onboarding intro (issue #3379): default-environment posture + dashboard
+    // pointer, rendered BEFORE the first parsed section.
+    assert!(
+        body.contains("**Environment profile: default.**"),
+        "states the default-environment posture: {body}"
+    );
+    assert!(
+        body.contains("no extra configuration or software installations"),
+        "{body}"
+    );
+    assert!(
+        body.contains("https://fkst.example"),
+        "renders the configured dashboard URL: {body}"
+    );
+    assert!(
+        body.contains("`fkst-hosted-default`"),
+        "names the default target branch: {body}"
+    );
     assert!(
         !body.contains("### Packages"),
         "manifest seed omits ### Packages"
@@ -143,13 +167,19 @@ fn legacy_seed_body_round_trips_through_the_real_trigger_parser() {
     // parser so the two can never drift.
     let default_pkgs =
         vec!["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()];
-    let spec = parse_trigger_issue_body(&build_seed_body(
-        &default_pkgs,
-        None,
-        "installing-user",
-        "octo-owner",
-    ))
-    .expect("legacy seed body is a valid trigger issue");
+    let legacy_body = build_seed_body(&default_pkgs, None, "installing-user", "octo-owner", None);
+    // The legacy shape carries the same intro; with no frontend URL configured the
+    // dashboard mention stays but no URL is rendered.
+    assert!(
+        legacy_body.contains("**Environment profile: default.**"),
+        "{legacy_body}"
+    );
+    assert!(
+        !legacy_body.contains("https://"),
+        "no dashboard URL when FKST_FRONTEND_URL is unset: {legacy_body}"
+    );
+    let spec =
+        parse_trigger_issue_body(&legacy_body).expect("legacy seed body is a valid trigger issue");
     assert_eq!(spec.name, "evolve");
     assert_eq!(spec.work_label.as_deref(), Some("fkst-evolve"));
     assert!(
@@ -184,6 +214,7 @@ async fn installation_created_with_sender_seeds_with_assignee() {
         "octo-owner",
         "installing-user",
         &["octo-owner/repo-a".to_string()],
+        Some("https://fkst.example"),
     )
     .await;
 
@@ -225,6 +256,7 @@ async fn skips_a_repo_that_already_has_an_open_trigger_issue() {
         "octo-owner",
         "installing-user",
         &["octo-owner/repo-a".to_string()],
+        None,
     )
     .await;
     assert_eq!(
@@ -248,6 +280,7 @@ async fn legacy_seed_used_when_no_default_manifest_is_configured() {
         "octo-owner",
         "installing-user",
         &["octo-owner/repo-a".to_string()],
+        None,
     )
     .await;
 
@@ -278,6 +311,7 @@ fn legacy_seed_body_with_multiple_packages_round_trips_in_order() {
         None,
         "installing-user",
         "octo-owner",
+        None,
     ))
     .expect("multi-package seed body is valid");
     assert_eq!(spec.packages.len(), 3);
@@ -309,12 +343,19 @@ fn seed_body_lists_installer_then_account_in_contributors_and_dedupes() {
         "the same installer/account login is emitted once case-insensitively"
     );
 
-    let manifest = build_seed_body(&[], Some(DEFAULT_MANIFEST), "Octo-Owner", "octo-owner");
+    let manifest = build_seed_body(
+        &[],
+        Some(DEFAULT_MANIFEST),
+        "Octo-Owner",
+        "octo-owner",
+        None,
+    );
     let legacy = build_seed_body(
         &["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()],
         None,
         "Octo-Owner",
         "octo-owner",
+        None,
     );
     for body in [manifest, legacy] {
         let spec = parse_trigger_issue_body(&body).expect("deduped seed body parses");
