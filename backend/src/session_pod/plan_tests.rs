@@ -328,3 +328,25 @@ fn read_substrate_env_defaults_the_reasoning_effort_to_max() {
     let env = read_substrate_env_from(lookup(&map)).expect("override applies");
     assert_eq!(env.llm_reasoning_effort, "low");
 }
+
+#[test]
+fn llm_default_mirrors_match_the_http_config_defaults() {
+    // plan.rs's DEFAULT_LLM_* constants MIRROR `config::defaults` ("never
+    // diverge") — pin the invariant so a future default bump cannot update one
+    // side only and leave env-less in-pod runs on a stale model/effort.
+    let config = crate::config::PodConfig::default();
+    let mut map = full_env();
+    for key in [
+        "FKST_LLM_MODEL",
+        "FKST_LLM_BASE_URL",
+        "FKST_LLM_WIRE_API",
+        "FKST_LLM_REASONING_EFFORT",
+    ] {
+        map.remove(key);
+    }
+    let env = read_substrate_env_from(lookup(&map)).expect("defaults apply");
+    assert_eq!(env.llm_model, config.llm_model);
+    assert_eq!(env.llm_base_url, config.llm_base_url);
+    assert_eq!(env.llm_wire_api, config.llm_wire_api);
+    assert_eq!(env.llm_reasoning_effort, config.llm_reasoning_effort);
+}

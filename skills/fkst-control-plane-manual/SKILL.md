@@ -150,6 +150,8 @@ One `KEY=value` per line, no duplicates:
 
 | Key | Accepted values |
 |---|---|
+| `FKST_LLM_MODEL` | a plain model id served by the deployment's LLM endpoint (letters, digits, `. _ / : -`; ≤ 128 chars) — runs THIS session on that model instead of the deployment default |
+| `FKST_LLM_REASONING_EFFORT` | `minimal` \| `low` \| `medium` \| `high` \| `max` (case-insensitive, stored lowercase; deployment default `max`) |
 | `FKST_CODEX_PERMIT_SLOTS` | integer 1–32 |
 | `FKST_QUEUE_CAPACITY`, `FKST_MAX_IN_FLIGHT_PER_DEPT`, `FKST_DURABLE_ADMISSION_BURST_PER_DEPT` | integer 1–1024 |
 | `FKST_RETRY_DEFAULT_MAX_ATTEMPTS` | integer 1–100 |
