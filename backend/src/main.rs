@@ -84,25 +84,29 @@ async fn main() -> ExitCode {
         log_level = %config.log_level,
         "config loaded"
     );
-    // Log the RESOLVED auth model (FKST_AUTH_MODEL + FKST_ACCESS_ALLOWED_USERS),
-    // never the entries themselves. An explicit `all` reads as open; an explicit
-    // `allowlist` and a legacy set list both read as an enforced allowlist.
-    match config.access.model() {
+    // Log the RESOLVED auth model (FKST_AUTH_MODEL + the FKST_ACCESS_* lists),
+    // never the entries themselves. `effective_model` folds the legacy
+    // list-derived defaults in, so explicit and derived models read the same.
+    match config.access.effective_model() {
         Some(AuthModel::All) => {
             tracing::info!(
                 "auth model: all (FKST_AUTH_MODEL=all; every authenticated user allowed)"
             );
         }
-        _ if config.access.enforced() => {
+        Some(AuthModel::Allowlist) => {
             tracing::info!(
                 allowed_users = config.access.entry_count(),
                 "auth model: allowlist (selected users only)"
             );
         }
-        _ => {
+        Some(AuthModel::Denylist) => {
             tracing::info!(
-                "auth model: open (unset; FKST_AUTH_MODEL / FKST_ACCESS_ALLOWED_USERS not set)"
+                blocked_users = config.access.blocked_entry_count(),
+                "auth model: denylist (every authenticated user except blocked)"
             );
+        }
+        None => {
+            tracing::info!("auth model: open (unset; no FKST_AUTH_MODEL / FKST_ACCESS_* list set)");
         }
     }
     tracing::info!(
