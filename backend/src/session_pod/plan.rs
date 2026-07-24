@@ -23,6 +23,7 @@ const BOT_LOGIN_ENV: &str = "FKST_GITHUB_BOT_LOGIN";
 const LLM_MODEL_ENV: &str = "FKST_LLM_MODEL";
 const LLM_BASE_URL_ENV: &str = "FKST_LLM_BASE_URL";
 const LLM_WIRE_API_ENV: &str = "FKST_LLM_WIRE_API";
+const LLM_REASONING_EFFORT_ENV: &str = "FKST_LLM_REASONING_EFFORT";
 const DURABLE_ROOT_ENV: &str = "FKST_DURABLE_ROOT";
 const RUNTIME_ROOT_ENV: &str = "FKST_RUNTIME_ROOT";
 const CREDS_DIR_ENV: &str = "FKST_SESSION_CREDS_DIR";
@@ -34,12 +35,15 @@ const GIT_CONFIG_COUNT_ENV: &str = "GIT_CONFIG_COUNT";
 
 // --- LLM defaults (mirror `config::defaults` + `runner`'s defaults so the pod and
 // the HTTP config never diverge on the operator-pinned provider) ---------------
-const DEFAULT_LLM_MODEL: &str = "gpt-5.5";
+const DEFAULT_LLM_MODEL: &str = "gpt-5.6-sol";
 const DEFAULT_LLM_BASE_URL: &str = "https://llm.aelf.dev/v1";
 /// Defaults to `responses`: codex 0.139+ rejects `wire_api = "chat"` at config
 /// load, and the LLM backend (verified on llm.aelf.dev) serves the `/responses`
 /// API. Overridden per-deploy via `FKST_LLM_WIRE_API`.
 const DEFAULT_LLM_WIRE_API: &str = "responses";
+/// The codex `model_reasoning_effort` (issue #3393): the platform default is the
+/// deepest tier; the launcher injects the effective (config-or-trigger) value.
+const DEFAULT_LLM_REASONING_EFFORT: &str = "max";
 
 /// The `supervise` subcommand token.
 const SUPERVISE_SUBCOMMAND: &str = "supervise";
@@ -62,6 +66,7 @@ pub struct SubstrateEnv {
     pub llm_model: String,
     pub llm_base_url: String,
     pub llm_wire_api: String,
+    pub llm_reasoning_effort: String,
     /// Durable delivery-state root (fixed; the observe socket derives from it).
     pub durable_root: String,
     /// Per-restart scratch/runtime root.
@@ -130,6 +135,7 @@ pub(crate) fn read_substrate_env_from(
         llm_model: with_default(LLM_MODEL_ENV, DEFAULT_LLM_MODEL),
         llm_base_url: with_default(LLM_BASE_URL_ENV, DEFAULT_LLM_BASE_URL),
         llm_wire_api: with_default(LLM_WIRE_API_ENV, DEFAULT_LLM_WIRE_API),
+        llm_reasoning_effort: with_default(LLM_REASONING_EFFORT_ENV, DEFAULT_LLM_REASONING_EFFORT),
         durable_root: required(DURABLE_ROOT_ENV)?,
         runtime_root: required(RUNTIME_ROOT_ENV)?,
         creds_dir: required(CREDS_DIR_ENV)?,

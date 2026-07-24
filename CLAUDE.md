@@ -1438,6 +1438,11 @@ data:
   FKST_LLM_BASE_URL: <your OpenAI-compatible endpoint, e.g. https://api.openai.com/v1>
   FKST_LLM_MODEL: <model id served by your LLM endpoint>
   FKST_LLM_WIRE_API: responses
+  # codex model_reasoning_effort for every session: minimal|low|medium|high|max.
+  # Unset = "max" (the platform default). A trigger issue's `### Engine Config`
+  # section may override the model and effort per session with
+  # FKST_LLM_MODEL=... / FKST_LLM_REASONING_EFFORT=... lines.
+  # FKST_LLM_REASONING_EFFORT: max
 
   # ---- GitHub App (yours, §14.3) ----
   # Deferring the App? Keep BOT_LOGIN set (any placeholder string works — it

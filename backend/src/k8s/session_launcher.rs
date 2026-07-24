@@ -104,6 +104,7 @@ const SESSION_CREATOR_ENV: &str = "FKST_SESSION_CREATOR";
 const LLM_MODEL_ENV: &str = "FKST_LLM_MODEL";
 const LLM_BASE_URL_ENV: &str = "FKST_LLM_BASE_URL";
 const LLM_WIRE_API_ENV: &str = "FKST_LLM_WIRE_API";
+const LLM_REASONING_EFFORT_ENV: &str = "FKST_LLM_REASONING_EFFORT";
 const DURABLE_ROOT_ENV: &str = "FKST_DURABLE_ROOT";
 const RUNTIME_ROOT_ENV: &str = "FKST_RUNTIME_ROOT";
 const SESSION_CREDS_DIR_ENV: &str = "FKST_SESSION_CREDS_DIR";
@@ -265,6 +266,22 @@ pub(crate) fn session_env_pairs(
     spec: &SessionPodSpec,
     config: &PodConfig,
 ) -> Vec<(String, String)> {
+    // The trigger's validated `### Engine Config` may override the operator's
+    // LLM model / reasoning effort per session (issue #3393). The effective
+    // values render HERE, in the base pairs, and the two keys are stripped from
+    // the engine-tunables tail below — so precedence is explicit (trigger wins)
+    // and env names stay unique by construction, never by kubelet last-wins
+    // accident. Values arrived parser-validated (`goals::engine_config`).
+    let llm_model = spec
+        .engine_config
+        .get(LLM_MODEL_ENV)
+        .cloned()
+        .unwrap_or_else(|| config.llm_model.clone());
+    let llm_reasoning_effort = spec
+        .engine_config
+        .get(LLM_REASONING_EFFORT_ENV)
+        .cloned()
+        .unwrap_or_else(|| config.llm_reasoning_effort.clone());
     let mut pairs: Vec<(&'static str, String)> = vec![
         (
             GITHUB_REPO_ENV,
@@ -277,9 +294,10 @@ pub(crate) fn session_env_pairs(
             GITHUB_PROXY_POLL_LABEL_PREFIX_ENV,
             GITHUB_PROXY_POLL_LABEL_PREFIX_VALUE.to_string(),
         ),
-        (LLM_MODEL_ENV, config.llm_model.clone()),
+        (LLM_MODEL_ENV, llm_model),
         (LLM_BASE_URL_ENV, config.llm_base_url.clone()),
         (LLM_WIRE_API_ENV, config.llm_wire_api.clone()),
+        (LLM_REASONING_EFFORT_ENV, llm_reasoning_effort),
         (DURABLE_ROOT_ENV, DURABLE_ROOT_DIR.to_string()),
         (RUNTIME_ROOT_ENV, RUNTIME_ROOT_DIR.to_string()),
         (SESSION_CREDS_DIR_ENV, CREDS_MOUNT_DIR.to_string()),
@@ -316,10 +334,20 @@ pub(crate) fn session_env_pairs(
     // The engine-tunable tail: output locale + the tighten-merged engine config
     // (operator rate-pool defaults vs the trigger's `### Engine Config`). All
     // map-level merged, so duplicate EnvVar names are impossible; nothing set ⇒
-    // nothing rendered (byte-identical to the pre-feature layout).
+    // nothing rendered (byte-identical to the pre-feature layout). The two LLM
+    // override keys were consumed by the base pairs above — strip them here so
+    // they can never render twice.
+    let engine_tail: std::collections::BTreeMap<String, String> = spec
+        .engine_config
+        .iter()
+        .filter(|(key, _)| {
+            key.as_str() != LLM_MODEL_ENV && key.as_str() != LLM_REASONING_EFFORT_ENV
+        })
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
     env.extend(crate::k8s::engine_env::engine_tunables_env(
         spec.output_lang.as_deref(),
-        &spec.engine_config,
+        &engine_tail,
         &config.rate_pools,
     ));
     env

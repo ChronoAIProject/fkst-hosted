@@ -447,6 +447,7 @@ fn render_codex(
         &env.llm_model,
         &env.llm_base_url,
         &env.llm_wire_api,
+        &env.llm_reasoning_effort,
         LLM_ENV_KEY,
         Some(&shell_env),
     );

@@ -24,7 +24,12 @@
 //!   `FKST_RETRY_DEFAULT_CAP < FKST_RETRY_DEFAULT_BASE` — a base-only raise
 //!   would pass per-key checks and then kill every session at startup;
 //! - rate pools use the same shape as the operator's `FKST_POD_RATE_POOLS`
-//!   (the launcher later tighten-merges user pools against operator defaults).
+//!   (the launcher later tighten-merges user pools against operator defaults);
+//! - the per-session LLM overrides (issue #3393): `FKST_LLM_MODEL` is a
+//!   shape-checked plain model token, and `FKST_LLM_REASONING_EFFORT` must name
+//!   one of [`crate::config::LLM_REASONING_EFFORTS`] (stored normalized
+//!   lowercase). The launcher renders both INTO the base `FKST_LLM_*` env —
+//!   trigger value over operator default — never as duplicate keys.
 //!
 //! Secret hygiene: error messages echo only the offending key/value (engine
 //! config is non-secret by construction); nothing is logged here.
@@ -62,6 +67,18 @@ const KEY_PERMIT_SLOTS: &str = "FKST_CODEX_PERMIT_SLOTS";
 const KEY_RETRY_BASE: &str = "FKST_RETRY_DEFAULT_BASE";
 const KEY_RETRY_CAP: &str = "FKST_RETRY_DEFAULT_CAP";
 const RATE_POOL_PREFIX: &str = "FKST_RATE_POOL_";
+/// Per-session LLM overrides (issue #3393): the model and the codex
+/// `model_reasoning_effort`. The launcher renders these INTO the base
+/// `FKST_LLM_*` env (trigger value wins over the operator default) rather than
+/// appending them, so the session env carries each exactly once.
+const KEY_LLM_MODEL: &str = "FKST_LLM_MODEL";
+const KEY_LLM_REASONING_EFFORT: &str = "FKST_LLM_REASONING_EFFORT";
+
+/// Bound + charset for a `FKST_LLM_MODEL` override: a single conservative model
+/// token (letters, digits, `.`, `_`, `/`, `:`, `-`), capped well beyond any real
+/// model id. Shape-only — whether the LLM backend actually serves the model is
+/// the session's runtime concern, exactly like an unreachable package ref.
+const MAX_LLM_MODEL_LEN: usize = 128;
 
 /// The queue/backpressure trio sharing one integer rule.
 const QUEUE_SHAPE_KEYS: [&str; 3] = [
@@ -97,7 +114,17 @@ pub fn parse_engine_config(block: &str) -> Result<BTreeMap<String, String>, AppE
         })?;
         let (key, value) = (key.trim(), value.trim());
         validate_entry(key, value)?;
-        if config.insert(key.to_string(), value.to_string()).is_some() {
+        // The reasoning effort is stored NORMALIZED (trim + lowercase): the value
+        // flows verbatim into the session env → codex config, and codex accepts
+        // only the lowercase tier names. Deterministic, so the re-parse-every-tick
+        // config hash is stable.
+        let stored = if key == KEY_LLM_REASONING_EFFORT {
+            crate::config::normalize_llm_reasoning_effort(value)
+                .expect("validate_entry accepted the effort")
+        } else {
+            value.to_string()
+        };
+        if config.insert(key.to_string(), stored).is_some() {
             return Err(AppError::Unprocessable(format!(
                 "the `### Engine Config` section sets {key} more than once"
             )));
@@ -112,6 +139,22 @@ pub fn parse_engine_config(block: &str) -> Result<BTreeMap<String, String>, AppE
 /// naming the key — including `FKST_OUTPUT_LANG`, which gets a pointer to its
 /// own dedicated section.
 fn validate_entry(key: &str, value: &str) -> Result<(), AppError> {
+    if key == KEY_LLM_MODEL {
+        return validate_llm_model(value);
+    }
+    if key == KEY_LLM_REASONING_EFFORT {
+        // Accepted values shared with the deployment knob (config.rs) so the
+        // startup validation and the trigger 422 can never drift. Case is
+        // normalized launcher-side by re-normalizing here first.
+        return match crate::config::normalize_llm_reasoning_effort(value) {
+            Some(_) => Ok(()),
+            None => Err(AppError::Unprocessable(format!(
+                "the `### Engine Config` section sets {KEY_LLM_REASONING_EFFORT} to \
+                 {value:?}: must be one of {}",
+                crate::config::LLM_REASONING_EFFORTS.join(" | ")
+            ))),
+        };
+    }
     if key == KEY_PERMIT_SLOTS {
         return validate_u64_in(key, value, 1, MAX_CODEX_PERMIT_SLOTS);
     }
@@ -136,10 +179,37 @@ fn validate_entry(key: &str, value: &str) -> Result<(), AppError> {
     }
     Err(AppError::Unprocessable(format!(
         "the `### Engine Config` section sets an unsupported key {key:?}: allowed keys are \
-         {KEY_PERMIT_SLOTS}, {}, FKST_RETRY_DEFAULT_MAX_ATTEMPTS, {}, and {RATE_POOL_PREFIX}<NAME>",
+         {KEY_LLM_MODEL}, {KEY_LLM_REASONING_EFFORT}, {KEY_PERMIT_SLOTS}, {}, \
+         FKST_RETRY_DEFAULT_MAX_ATTEMPTS, {}, and {RATE_POOL_PREFIX}<NAME>",
         QUEUE_SHAPE_KEYS.join(", "),
         DURATION_KEYS.join(", "),
     )))
+}
+
+/// Shape-validate a `FKST_LLM_MODEL` override: one non-empty conservative token
+/// (letters, digits, `.`, `_`, `/`, `:`, `-`), length-capped. A 422 spells the
+/// rule so the author can self-correct in the issue.
+fn validate_llm_model(value: &str) -> Result<(), AppError> {
+    let err = |detail: &str| {
+        AppError::Unprocessable(format!(
+            "the `### Engine Config` section sets {KEY_LLM_MODEL} to {value:?}: {detail}"
+        ))
+    };
+    if value.is_empty() {
+        return Err(err("must be a non-empty model id"));
+    }
+    if value.len() > MAX_LLM_MODEL_LEN {
+        return Err(err("must be at most 128 characters"));
+    }
+    if !value
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'/' | b':' | b'-'))
+    {
+        return Err(err(
+            "must contain only letters, digits, and . _ / : - (a plain model id)",
+        ));
+    }
+    Ok(())
 }
 
 /// `value` must be a `u64` in `min..=max` (a 422 names the key + bound).

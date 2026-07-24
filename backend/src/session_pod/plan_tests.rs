@@ -314,3 +314,17 @@ fn exit_status_to_code_maps_dispositions() {
     // failure never surfaces as success.
     assert_eq!(exit_status_to_code(Some(256)), 1);
 }
+
+#[test]
+fn read_substrate_env_defaults_the_reasoning_effort_to_max() {
+    // Absent → the platform default (issue #3393); set → the injected value
+    // (already validated launcher-side, read verbatim here).
+    let mut map = full_env();
+    map.remove("FKST_LLM_REASONING_EFFORT");
+    let env = read_substrate_env_from(lookup(&map)).expect("default applies");
+    assert_eq!(env.llm_reasoning_effort, "max");
+
+    map.insert("FKST_LLM_REASONING_EFFORT".to_string(), "low".to_string());
+    let env = read_substrate_env_from(lookup(&map)).expect("override applies");
+    assert_eq!(env.llm_reasoning_effort, "low");
+}

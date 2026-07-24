@@ -146,3 +146,40 @@ fn rate_pools_validate_name_and_shape() {
         assert!(msg.contains(needle), "{bad}: expected {needle} in: {msg}");
     }
 }
+
+#[test]
+fn llm_model_override_accepts_plain_ids_and_rejects_junk() {
+    // A per-session model override (issue #3393) — plain ids pass verbatim.
+    let config = parse_engine_config("FKST_LLM_MODEL=gpt-5.6-sol").expect("plain id ok");
+    assert_eq!(
+        config.get("FKST_LLM_MODEL").map(String::as_str),
+        Some("gpt-5.6-sol")
+    );
+    assert!(parse_engine_config("FKST_LLM_MODEL=org/model:tag_v1").is_ok());
+    for (bad, needle) in [
+        ("FKST_LLM_MODEL=", "non-empty"),
+        ("FKST_LLM_MODEL=has space", "letters, digits"),
+        ("FKST_LLM_MODEL=quo\"te", "letters, digits"),
+    ] {
+        let msg = err_message(bad);
+        assert!(msg.contains("FKST_LLM_MODEL"), "{bad}: {msg}");
+        assert!(msg.contains(needle), "{bad}: expected {needle} in: {msg}");
+    }
+    let long = format!("FKST_LLM_MODEL={}", "m".repeat(129));
+    assert!(err_message(&long).contains("128"));
+}
+
+#[test]
+fn llm_reasoning_effort_override_normalizes_and_rejects_unknown_tiers() {
+    // Stored NORMALIZED (lowercase) — the value flows verbatim into the codex
+    // config, which accepts only the lowercase tier names.
+    let config = parse_engine_config("FKST_LLM_REASONING_EFFORT=High").expect("tier ok");
+    assert_eq!(
+        config.get("FKST_LLM_REASONING_EFFORT").map(String::as_str),
+        Some("high")
+    );
+    assert!(parse_engine_config("FKST_LLM_REASONING_EFFORT=max").is_ok());
+    let msg = err_message("FKST_LLM_REASONING_EFFORT=frobnicate");
+    assert!(msg.contains("FKST_LLM_REASONING_EFFORT"), "{msg}");
+    assert!(msg.contains("max"), "names the accepted tiers: {msg}");
+}

@@ -70,8 +70,16 @@ mod defaults {
     pub(super) fn llm_model() -> String {
         // The model the per-session codex provider serves. The operator pins it
         // to whatever the LLM backend currently serves; this is a sensible
-        // non-empty default, never a literal placeholder.
-        "gpt-5.5".to_string()
+        // non-empty default, never a literal placeholder. (gpt-5.5 → gpt-5.6-sol,
+        // issue #3393.)
+        "gpt-5.6-sol".to_string()
+    }
+
+    pub(super) fn llm_reasoning_effort() -> String {
+        // The codex `model_reasoning_effort` every session runs at unless the
+        // trigger's `### Engine Config` overrides it (issue #3393). Platform
+        // default is the deepest tier.
+        "max".to_string()
     }
 
     pub(super) fn llm_base_url() -> String {
@@ -192,10 +200,32 @@ struct LlmVars {
     base_url: String,
     #[serde(default = "defaults::llm_wire_api")]
     wire_api: String,
+    /// `FKST_LLM_REASONING_EFFORT` — the codex `model_reasoning_effort` for
+    /// every session (default `max`). Normalized + validated in `from_vars`
+    /// against [`LLM_REASONING_EFFORTS`]; a bad value fails closed.
+    #[serde(default = "defaults::llm_reasoning_effort")]
+    reasoning_effort: String,
     /// The static LLM API key. Optional at parse time; REQUIRED non-blank when
     /// `FKST_POD_DISPATCH=true` (an engine with no LLM credential 401s).
     #[serde(default)]
     api_key: Option<String>,
+}
+
+/// The accepted `FKST_LLM_REASONING_EFFORT` / `### Engine Config`
+/// `FKST_LLM_REASONING_EFFORT` values — the codex `model_reasoning_effort`
+/// tiers. ONE list shared by the startup validation here and the trigger-side
+/// 422 ([`crate::goals::engine_config`]) so the two can never drift.
+pub(crate) const LLM_REASONING_EFFORTS: [&str; 5] = ["minimal", "low", "medium", "high", "max"];
+
+/// Normalize a reasoning-effort value (trim + ASCII-lowercase) and accept it
+/// only when it names one of [`LLM_REASONING_EFFORTS`]. `None` = invalid; the
+/// caller renders its own error (startup Config error vs trigger 422). A blank
+/// value is NOT accepted here — blank-means-default is the caller's rule.
+pub(crate) fn normalize_llm_reasoning_effort(value: &str) -> Option<String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    LLM_REASONING_EFFORTS
+        .contains(&normalized.as_str())
+        .then_some(normalized)
 }
 
 /// Which session-execution backend the control plane drives. Selected by
@@ -315,6 +345,12 @@ pub struct PodConfig {
     /// `chat`; see [`defaults::llm_wire_api`]) — operators pin a chat-only
     /// backend explicitly.
     pub llm_wire_api: String,
+    /// codex `model_reasoning_effort` injected into the session pod as
+    /// `FKST_LLM_REASONING_EFFORT`. Env: `FKST_LLM_REASONING_EFFORT`. Default
+    /// `max` (issue #3393); one of [`LLM_REASONING_EFFORTS`], normalized
+    /// lowercase, fail-closed on anything else. A trigger's `### Engine Config`
+    /// may override it per session.
+    pub llm_reasoning_effort: String,
     /// External DNS resolvers for the isolated session/validation pod's
     /// `dnsConfig.nameservers`. Env: `FKST_POD_DNS_NAMESERVERS`, comma-separated.
     /// Default `["1.1.1.1", "8.8.8.8"]`; a session with no DNS cannot resolve
@@ -345,6 +381,7 @@ impl Default for PodConfig {
             llm_base_url: defaults::llm_base_url(),
             llm_model: defaults::llm_model(),
             llm_wire_api: defaults::llm_wire_api(),
+            llm_reasoning_effort: defaults::llm_reasoning_effort(),
             dns_nameservers: defaults::pod_dns_nameservers(),
             runtime_class: None,
             rate_pools: BTreeMap::new(),
@@ -588,6 +625,19 @@ impl Config {
                 "FKST_POD_DNS_NAMESERVERS must list at least one resolver".to_string(),
             ));
         }
+        // Normalize + validate the reasoning effort (unset ⇒ the serde default
+        // `max`). A SET value must name a known tier — an unknown value would
+        // crash codex at session start, and a blanked var is an explicit
+        // operator action — so both fail closed with the accepted list spelled
+        // out, matching the blank-LLM-var convention of the model/URL/wire trio.
+        let llm_reasoning_effort = normalize_llm_reasoning_effort(&llm.reasoning_effort)
+            .ok_or_else(|| {
+                AppError::Config(format!(
+                    "FKST_LLM_REASONING_EFFORT must be one of {} (got {:?})",
+                    LLM_REASONING_EFFORTS.join(" | "),
+                    llm.reasoning_effort.trim()
+                ))
+            })?;
         let pod = PodConfig {
             dispatch: pod.dispatch,
             mode: pod_mode,
@@ -597,6 +647,7 @@ impl Config {
             llm_base_url: llm.base_url,
             llm_model: llm.model,
             llm_wire_api: llm.wire_api,
+            llm_reasoning_effort,
             dns_nameservers,
             // Blank (or an empty ConfigMap value) means the cluster default
             // runtime (runc); only a real name selects a sandboxed RuntimeClass.
@@ -1298,10 +1349,12 @@ mod tests {
     #[test]
     fn llm_defaults_apply_when_unset() {
         let config = Config::from_vars(vars(&[])).expect("defaults");
-        assert_eq!(config.pod.llm_model, "gpt-5.5");
+        assert_eq!(config.pod.llm_model, "gpt-5.6-sol");
         assert_eq!(config.pod.llm_base_url, "https://llm.aelf.dev/v1");
         // The wire_api defaults to `responses` (codex 0.139+ rejects `chat`).
         assert_eq!(config.pod.llm_wire_api, "responses");
+        // The platform-default reasoning effort is the deepest tier (#3393).
+        assert_eq!(config.pod.llm_reasoning_effort, "max");
         // No key configured (dispatch off) => empty, never a placeholder.
         assert_eq!(config.llm_api_key.expose_secret(), "");
     }
@@ -1312,22 +1365,40 @@ mod tests {
             ("FKST_LLM_MODEL", "gpt-4.1"),
             ("FKST_LLM_BASE_URL", "https://proxy.example/s/llm"),
             ("FKST_LLM_WIRE_API", "chat"),
+            ("FKST_LLM_REASONING_EFFORT", " High "),
             ("FKST_LLM_API_KEY", "sk-abc"),
         ]))
         .expect("overrides");
         assert_eq!(config.pod.llm_model, "gpt-4.1");
         assert_eq!(config.pod.llm_base_url, "https://proxy.example/s/llm");
         assert_eq!(config.pod.llm_wire_api, "chat");
+        // Trimmed + lowercased on the way in.
+        assert_eq!(config.pod.llm_reasoning_effort, "high");
         assert_eq!(config.llm_api_key.expose_secret(), "sk-abc");
     }
 
     #[test]
     fn blank_llm_vars_are_config_errors_naming_the_var() {
-        for var in ["FKST_LLM_MODEL", "FKST_LLM_BASE_URL", "FKST_LLM_WIRE_API"] {
+        for var in [
+            "FKST_LLM_MODEL",
+            "FKST_LLM_BASE_URL",
+            "FKST_LLM_WIRE_API",
+            "FKST_LLM_REASONING_EFFORT",
+        ] {
             let err = Config::from_vars(vars(&[(var, "   ")])).expect_err("blank must fail");
             assert!(matches!(err, AppError::Config(_)));
             assert!(err.to_string().contains(var), "error must name {var}");
         }
+    }
+
+    #[test]
+    fn unknown_llm_reasoning_effort_fails_closed_naming_the_tiers() {
+        let err = Config::from_vars(vars(&[("FKST_LLM_REASONING_EFFORT", "frobnicate")]))
+            .expect_err("an unknown effort must fail closed");
+        let msg = err.to_string();
+        assert!(msg.contains("FKST_LLM_REASONING_EFFORT"), "{msg}");
+        assert!(msg.contains("max"), "names the accepted tiers: {msg}");
+        assert!(msg.contains("frobnicate"), "names the bad value: {msg}");
     }
 
     // ---- chrono-storage (FKST_STORAGE_* / FKST_NYXID_*) wiring tests ------------
