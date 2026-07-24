@@ -52,9 +52,11 @@ struct ClassifiedTriggers {
     authorized_issues: HashSet<i64>,
 }
 
-/// Apply the deployment allowlist and metadata-only creator gate before parsing.
-/// A transport-deferred, previously announced trigger is parsed to preserve its
-/// live desired state; an unlatched deferred trigger is skipped without feedback.
+/// Apply the deployment access policy (to the issue AUTHOR and to the resolved
+/// EFFECTIVE creator) and the metadata-only creator-authority gate before
+/// parsing. A transport-deferred, previously announced trigger is parsed to
+/// preserve its live desired state; an unlatched deferred trigger is skipped
+/// without feedback.
 #[allow(clippy::too_many_arguments)]
 async fn classify_triggers(
     installation_id: i64,
@@ -70,13 +72,13 @@ async fn classify_triggers(
     let mut authz_cache = TriggerAuthzCache::default();
 
     for issue in issues {
-        // The legacy deployment-wide policy stays first and deliberately silent.
+        // The deployment-wide access policy stays first and deliberately silent.
         if !access.allows(issue.user_id, &issue.user_login) {
             tracing::info!(
                 repo = %format!("{}/{}", repo.owner, repo.name),
                 issue = issue.number,
                 author_id = issue.user_id,
-                "access policy: trigger issue author not allowlisted; ignoring"
+                "access policy: trigger issue author not admitted; ignoring"
             );
             continue;
         }
@@ -93,6 +95,24 @@ async fn classify_triggers(
                 continue;
             }
         };
+
+        // The access policy applies to the EFFECTIVE creator too: an App-authored
+        // trigger's author is the bot, which a denylist always admits — without
+        // this gate a blocked user could own sessions via seeded triggers, and
+        // blocking a seeded session's creator would never revoke it. Dropping the
+        // registration here makes the planner orphan its pod on the next
+        // reconcile, exactly like the author gate above (silent by design).
+        // Issue metadata carries no assignee id, so an assignee-derived creator
+        // matches by LOGIN only (`-1` can never match an all-digit id entry) —
+        // list blocked users by login to cover seeded creators.
+        if !access.allows(creator.id.unwrap_or(-1), &creator.login) {
+            tracing::info!(
+                repo = %format!("{}/{}", repo.owner, repo.name),
+                issue = issue.number,
+                "access policy: trigger's effective creator not admitted; ignoring"
+            );
+            continue;
+        }
 
         match check_trigger_creator(listing, token, repo, access, &creator, &mut authz_cache).await
         {

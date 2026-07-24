@@ -177,6 +177,62 @@ fn plan_runtime(
 }
 
 #[tokio::test]
+async fn blocked_effective_creator_of_a_bot_authored_trigger_is_silently_dropped() {
+    // Denylist enforcement must reach the EFFECTIVE creator, not just the issue
+    // author: an App-authored (seeded) trigger's author is the bot, which a
+    // denylist always admits — its sole ASSIGNEE is the creator. A blocked
+    // assignee-creator must drop the trigger silently (no registration, no
+    // unauthorized marker, no parse), which also revokes an already-running
+    // seeded session on the next reconcile (issue #3376 review).
+    let denylist = AccessPolicy::from_vars(&[
+        ("FKST_AUTH_MODEL".to_string(), "denylist".to_string()),
+        (
+            "FKST_ACCESS_BLOCKED_USERS".to_string(),
+            "mallory".to_string(),
+        ),
+    ])
+    .expect("denylist policy parses");
+    let bot_trigger = |assignee: &str| IssueSummary {
+        assignees: vec![assignee.to_string()],
+        user_login: "fkst-app[bot]".to_string(),
+        user_id: 302043618,
+        ..issue(&valid_body(), &[])
+    };
+
+    // The repo listing would grant admin — but the access gate runs first.
+    let listing = FakeListing::role(Some("admin"));
+    let classified = classify_triggers(
+        42,
+        &repo(),
+        &[bot_trigger("Mallory")],
+        &listing,
+        &token(),
+        &denylist,
+        Some("fkst-app"),
+        &HashSet::new(),
+    )
+    .await;
+    assert!(classified.registrations.is_empty(), "must not register");
+    assert!(classified.invalid.is_empty(), "must not be parsed");
+    assert!(classified.unauthorized.is_empty(), "silent, not flagged");
+    assert!(classified.authorized_issues.is_empty());
+
+    // A NON-blocked assignee-creator on the same bot-authored trigger registers.
+    let classified = classify_triggers(
+        42,
+        &repo(),
+        &[bot_trigger("alice")],
+        &listing,
+        &token(),
+        &denylist,
+        Some("fkst-app"),
+        &HashSet::new(),
+    )
+    .await;
+    assert_eq!(classified.registrations.len(), 1, "non-blocked registers");
+}
+
+#[tokio::test]
 async fn unauthorized_trigger_is_flagged_once_without_parsing_its_body() {
     // An empty body would enter the invalid-parser path if the authorization gate
     // accidentally ran after parsing. It must appear only in the auth marker set.

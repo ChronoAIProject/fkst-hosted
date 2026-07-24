@@ -84,26 +84,60 @@ async fn main() -> ExitCode {
         log_level = %config.log_level,
         "config loaded"
     );
-    // Log the RESOLVED auth model (FKST_AUTH_MODEL + FKST_ACCESS_ALLOWED_USERS),
-    // never the entries themselves. An explicit `all` reads as open; an explicit
-    // `allowlist` and a legacy set list both read as an enforced allowlist.
-    match config.access.model() {
+    // Log the RESOLVED auth model (FKST_AUTH_MODEL + the FKST_ACCESS_* lists),
+    // never the entries themselves. `effective_model` folds the legacy
+    // list-derived defaults in, so explicit and derived models read the same.
+    match config.access.effective_model() {
         Some(AuthModel::All) => {
             tracing::info!(
                 "auth model: all (FKST_AUTH_MODEL=all; every authenticated user allowed)"
             );
         }
-        _ if config.access.enforced() => {
+        Some(AuthModel::Allowlist) => {
             tracing::info!(
                 allowed_users = config.access.entry_count(),
                 "auth model: allowlist (selected users only)"
             );
         }
-        _ => {
+        Some(AuthModel::Denylist) => {
             tracing::info!(
-                "auth model: open (unset; FKST_AUTH_MODEL / FKST_ACCESS_ALLOWED_USERS not set)"
+                blocked_users = config.access.blocked_entry_count(),
+                "auth model: denylist (every authenticated user except blocked)"
             );
         }
+        None => {
+            tracing::info!("auth model: open (unset; no FKST_AUTH_MODEL / FKST_ACCESS_* list set)");
+        }
+    }
+    // Surface inert lists LOUDLY: an explicit model tolerates the other model's
+    // stale list by design, but an operator who configured a list deserves a
+    // warning that it is not being enforced — e.g. an overlay that kept
+    // FKST_ACCESS_ALLOWED_USERS while inheriting FKST_AUTH_MODEL=denylist from
+    // the base config would otherwise fall open with only an info line as trace.
+    match config.access.effective_model() {
+        Some(AuthModel::Denylist) if config.access.entry_count() > 0 => {
+            tracing::warn!(
+                allowed_users = config.access.entry_count(),
+                "FKST_ACCESS_ALLOWED_USERS is set but IGNORED under the denylist model — \
+                 it does not restrict access; set FKST_AUTH_MODEL=allowlist to enforce it"
+            );
+        }
+        Some(AuthModel::Allowlist) if config.access.blocked_entry_count() > 0 => {
+            tracing::warn!(
+                blocked_users = config.access.blocked_entry_count(),
+                "FKST_ACCESS_BLOCKED_USERS is set but IGNORED under the allowlist model — \
+                 set FKST_AUTH_MODEL=denylist to enforce it"
+            );
+        }
+        Some(AuthModel::All)
+            if config.access.entry_count() > 0 || config.access.blocked_entry_count() > 0 =>
+        {
+            tracing::warn!(
+                "FKST_ACCESS_ALLOWED_USERS / FKST_ACCESS_BLOCKED_USERS entries are set but \
+                 IGNORED under FKST_AUTH_MODEL=all (every authenticated user is admitted)"
+            );
+        }
+        _ => {}
     }
     tracing::info!(
         global_admins = config.access.global_admin_count(),

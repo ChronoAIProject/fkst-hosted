@@ -663,9 +663,12 @@ impl Config {
         let log = LogConfig::from_vars(&vars)?;
 
         // Deployment-wide access policy (FKST_ACCESS_ALLOWED_USERS +
-        // FKST_GLOBAL_ADMINS + FKST_AUTH_MODEL). Legacy default: unset = open, set = enforced
-        // (set-but-empty = enforced deny-all). Fails closed only on an
-        // unrecognized FKST_AUTH_MODEL value (naming the var).
+        // FKST_ACCESS_BLOCKED_USERS + FKST_GLOBAL_ADMINS + FKST_AUTH_MODEL).
+        // Derived default: no list = open, allowed list = enforced allowlist
+        // (set-but-empty = enforced deny-all), blocked list = enforced denylist.
+        // Fails closed (naming the vars) on an unrecognized FKST_AUTH_MODEL,
+        // both lists set without an explicit model, or a denylist whose set
+        // blocklist yields zero valid entries.
         let access = crate::access_policy::AccessPolicy::from_vars(&vars)?;
 
         Ok(Config {
@@ -1064,6 +1067,21 @@ mod tests {
         .expect("config with auth model loads");
         assert!(!config.access.enforced());
         assert!(config.access.allows(999, "mallory"));
+    }
+
+    #[test]
+    fn auth_model_denylist_is_wired_into_the_access_policy() {
+        // FKST_AUTH_MODEL=denylist + FKST_ACCESS_BLOCKED_USERS: everyone but
+        // the blocked users is admitted, end to end through Config::from_vars.
+        let config = Config::from_vars(vars(&[
+            ("FKST_AUTH_MODEL", "denylist"),
+            ("FKST_ACCESS_BLOCKED_USERS", "583231, @Mallory"),
+        ]))
+        .expect("config with denylist loads");
+        assert!(config.access.enforced());
+        assert!(!config.access.allows(583231, "whoever"));
+        assert!(!config.access.allows(2, "mallory"));
+        assert!(config.access.allows(2, "alice"));
     }
 
     #[test]
