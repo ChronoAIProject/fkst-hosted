@@ -1453,12 +1453,21 @@ data:
   # ---- optional ----
   # Auth model: "all" = any GitHub user; "allowlist" = only
   # FKST_ACCESS_ALLOWED_USERS plus FKST_GLOBAL_ADMINS (empty ordinary list =>
-  # deny everyone except global admins). Unset = today's behavior (allowlist if
-  # the ordinary list is set, else open). A bad value fails closed at startup.
-  # FKST_AUTH_MODEL: allowlist
-  # Comma-separated GitHub logins (case-insensitive; optional leading @). Numeric
-  # user IDs remain supported as a rename-safe alternative; they are not required.
+  # deny everyone except global admins); "denylist" (aliases "blocklist" /
+  # "blacklist") = any GitHub user EXCEPT FKST_ACCESS_BLOCKED_USERS (global
+  # admins always pass; the checked-in deploy/kubernetes/base/configmap.yaml
+  # ships this model). Unset = derived: allowed list set => allowlist, blocked
+  # list set => denylist, neither => open; BOTH lists set without an explicit
+  # model fails closed at startup, as does a bad value.
+  # FKST_AUTH_MODEL: denylist
+  # Both lists: comma-separated GitHub logins (case-insensitive; optional leading
+  # @). Numeric user IDs remain supported as a rename-safe alternative; they are
+  # not required.
   # FKST_ACCESS_ALLOWED_USERS: "<your-github-login>"
+  # Blocked users lose every gate: 403 on token-authenticated routes, trigger
+  # issues ignored, running sessions torn down on the next reconcile. Unset =
+  # blocks nobody; set with zero valid entries (e.g. ",") fails closed at startup.
+  # FKST_ACCESS_BLOCKED_USERS: "<blocked-github-login>"
   # Deployment-wide administrators. They always pass the service and trigger gates,
   # and are an authority tier for every session's work issues. Work-issue authority
   # is always enforced: only the session creator, its ### Session Collaborators, and
