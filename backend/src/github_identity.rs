@@ -134,17 +134,20 @@ impl FromRequestParts<AppState> for GithubUser {
     ) -> Result<Self, Self::Rejection> {
         let token = bearer_token(parts)?;
         let user = verify_token(&state.config.github_api_base_url, token).await?;
-        // Deployment-wide access policy (FKST_ACCESS_ALLOWED_USERS): a VERIFIED
-        // identity that is not allowlisted is 403 (authenticated but not allowed)
-        // — enforced HERE so every token-authenticated route, present and future,
-        // is covered by one gate.
+        // Deployment-wide access policy (FKST_AUTH_MODEL + the FKST_ACCESS_*
+        // lists): a VERIFIED identity the policy does not admit — unlisted under
+        // an allowlist, or blocked under a denylist — is 403 (authenticated but
+        // not allowed), enforced HERE so every token-authenticated route,
+        // present and future, is covered by one gate. The wording stays
+        // model-neutral: it must read correctly for both rejection reasons.
         if !state.config.access.allows(user.id, &user.login) {
             tracing::info!(
                 user_id = user.id,
-                "access policy: verified GitHub identity is not allowlisted"
+                "access policy: verified GitHub identity is not admitted"
             );
             return Err(AppError::Forbidden(
-                "this deployment restricts access; your GitHub account is not on the allowlist"
+                "this deployment restricts access; your GitHub account is not permitted by \
+                 the access policy"
                     .to_string(),
             ));
         }
@@ -344,6 +347,57 @@ mod tests {
             matches!(err, AppError::Forbidden(_)),
             "must be 403 Forbidden (authenticated but not allowed), got {err:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn extractor_enforces_the_denylist_model_end_to_end() {
+        // Under FKST_AUTH_MODEL=denylist, a verified identity matching
+        // FKST_ACCESS_BLOCKED_USERS is 403 at the extractor, and any OTHER
+        // GitHub identity passes — asserted through the real from_request_parts
+        // path so the wiring (not just AccessPolicy) is covered.
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/user"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "login": "mallory",
+                "id": 999
+            })))
+            .mount(&server)
+            .await;
+
+        let denylist_state = |blocked: &str| {
+            let mut state = state_with_base(&server.uri());
+            state.config.access = crate::access_policy::AccessPolicy::from_vars(&[
+                ("FKST_AUTH_MODEL".to_string(), "denylist".to_string()),
+                ("FKST_ACCESS_BLOCKED_USERS".to_string(), blocked.to_string()),
+            ])
+            .expect("denylist policy parses");
+            state
+        };
+
+        // Blocked by login (case-insensitive) → 403.
+        let state = denylist_state("@Mallory");
+        let mut parts = parts_with_auth(Some("Bearer gho_valid"));
+        let err = GithubUser::from_request_parts(&mut parts, &state)
+            .await
+            .expect_err("blocked identity must be rejected");
+        assert!(matches!(err, AppError::Forbidden(_)), "got {err:?}");
+
+        // Blocked by numeric id → 403.
+        let state = denylist_state("999");
+        let mut parts = parts_with_auth(Some("Bearer gho_valid"));
+        let err = GithubUser::from_request_parts(&mut parts, &state)
+            .await
+            .expect_err("id-blocked identity must be rejected");
+        assert!(matches!(err, AppError::Forbidden(_)), "got {err:?}");
+
+        // Not blocked → passes without being on any list.
+        let state = denylist_state("someone-else");
+        let mut parts = parts_with_auth(Some("Bearer gho_valid"));
+        let user = GithubUser::from_request_parts(&mut parts, &state)
+            .await
+            .expect("non-blocked identity passes under denylist");
+        assert_eq!(user.login, "mallory");
     }
 
     #[tokio::test]

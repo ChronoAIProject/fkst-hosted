@@ -109,6 +109,36 @@ async fn main() -> ExitCode {
             tracing::info!("auth model: open (unset; no FKST_AUTH_MODEL / FKST_ACCESS_* list set)");
         }
     }
+    // Surface inert lists LOUDLY: an explicit model tolerates the other model's
+    // stale list by design, but an operator who configured a list deserves a
+    // warning that it is not being enforced — e.g. an overlay that kept
+    // FKST_ACCESS_ALLOWED_USERS while inheriting FKST_AUTH_MODEL=denylist from
+    // the base config would otherwise fall open with only an info line as trace.
+    match config.access.effective_model() {
+        Some(AuthModel::Denylist) if config.access.entry_count() > 0 => {
+            tracing::warn!(
+                allowed_users = config.access.entry_count(),
+                "FKST_ACCESS_ALLOWED_USERS is set but IGNORED under the denylist model — \
+                 it does not restrict access; set FKST_AUTH_MODEL=allowlist to enforce it"
+            );
+        }
+        Some(AuthModel::Allowlist) if config.access.blocked_entry_count() > 0 => {
+            tracing::warn!(
+                blocked_users = config.access.blocked_entry_count(),
+                "FKST_ACCESS_BLOCKED_USERS is set but IGNORED under the allowlist model — \
+                 set FKST_AUTH_MODEL=denylist to enforce it"
+            );
+        }
+        Some(AuthModel::All)
+            if config.access.entry_count() > 0 || config.access.blocked_entry_count() > 0 =>
+        {
+            tracing::warn!(
+                "FKST_ACCESS_ALLOWED_USERS / FKST_ACCESS_BLOCKED_USERS entries are set but \
+                 IGNORED under FKST_AUTH_MODEL=all (every authenticated user is admitted)"
+            );
+        }
+        _ => {}
+    }
     tracing::info!(
         global_admins = config.access.global_admin_count(),
         "global admin policy loaded"

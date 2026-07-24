@@ -1465,8 +1465,11 @@ data:
   # not required.
   # FKST_ACCESS_ALLOWED_USERS: "<your-github-login>"
   # Blocked users lose every gate: 403 on token-authenticated routes, trigger
-  # issues ignored, running sessions torn down on the next reconcile. Unset =
-  # blocks nobody; set with zero valid entries (e.g. ",") fails closed at startup.
+  # issues ignored (author OR effective creator), work authorship denied in every
+  # tier, running sessions torn down on the next reconcile. Unset = blocks
+  # nobody; set with no matchable entries (e.g. "," or "@") fails closed at
+  # startup. Prefer LOGIN entries: a seeded trigger's assignee-creator carries
+  # no numeric id.
   # FKST_ACCESS_BLOCKED_USERS: "<blocked-github-login>"
   # Deployment-wide administrators. They always pass the service and trigger gates,
   # and are an authority tier for every session's work issues. Work-issue authority

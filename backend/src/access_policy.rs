@@ -10,10 +10,13 @@
 //!    token-authenticated route (env store, dashboard, and anything added later)
 //!    in one place.
 //! 2. The reconciler's registration intake ([`crate::reconcile::repo`]): a
-//!    trigger issue authored by an unlisted user is IGNORED before parsing —
-//!    it never spawns a session (webhook or full-resync path alike), never gets
-//!    an invalid-config comment, and an already-running session whose author is
-//!    removed from the list is torn down on the next reconcile (revocation).
+//!    trigger issue whose AUTHOR or resolved EFFECTIVE CREATOR (the sole
+//!    assignee of an App-authored trigger) is not admitted is IGNORED before
+//!    parsing — it never spawns a session (webhook or full-resync path alike),
+//!    never gets an invalid-config comment, and an already-running session whose
+//!    author or creator loses admission is torn down on the next reconcile
+//!    (revocation). Work-issue authorship is gated the same way
+//!    ([`crate::reconcile::work_authz`]).
 //!
 //! Fail-closed nuance: a var that is SET but yields no valid entries (e.g. `","`)
 //! is ENFORCED-and-denies-all — the operator explicitly asked for enforcement, so
@@ -56,11 +59,12 @@
 //!   explicitly); neither → open.
 //!
 //! Denylist fail-closed nuances: `FKST_ACCESS_BLOCKED_USERS` that is SET but
-//! yields zero valid entries (e.g. `","`) under an effective denylist model is a
-//! startup config error — a mangled blocklist must never silently admit the
-//! users it meant to block, and (unlike the allowlist) "enforce-and-deny-all"
-//! would contradict the model's purpose, so refusing to boot is the only honest
-//! fail-closed state. `FKST_GLOBAL_ADMINS` always pass, INCLUDING an admin who
+//! contains no MATCHABLE entry — after [`entry_matches`]' normalization (trim +
+//! one leading `@`) every entry is empty, e.g. `","` or `"@"` — under an
+//! effective denylist model is a startup config error — a mangled blocklist must
+//! never silently admit the users it meant to block, and (unlike the allowlist)
+//! "enforce-and-deny-all" would contradict the model's purpose, so refusing to
+//! boot is the only honest fail-closed state. `FKST_GLOBAL_ADMINS` always pass, INCLUDING an admin who
 //! is also named in the blocked list — a conflict between the two operator-owned
 //! lists resolves in the admin's favor (fix the config, not the gate).
 //!
@@ -195,16 +199,27 @@ impl AccessPolicy {
             global_admins,
         };
 
-        // A blocklist the denylist model will consult that is SET but yields no
-        // valid entries (e.g. ",") is mangled config: silently blocking nobody
-        // would admit the users it meant to block, and deny-all would defeat the
-        // model — refusing to boot is the only honest fail-closed state. (Under
+        // A blocklist the denylist model will consult that is SET but contains no
+        // MATCHABLE entry — after the same normalization `entry_matches` applies
+        // (trim + one leading `@`), every entry is empty (e.g. "," or "@") — is
+        // mangled config: silently blocking nobody would admit the users it meant
+        // to block, and deny-all would defeat the model — refusing to boot is the
+        // only honest fail-closed state. Matchability, not mere token presence, is
+        // the test: "@" parses as a token but can never match any identity. (Under
         // `all`/`allowlist` the same list is merely stale and tolerated.)
+        let has_matchable_entry = |list: &[String]| {
+            list.iter()
+                .any(|entry| !entry.trim().trim_start_matches('@').is_empty())
+        };
         if policy.effective_model() == Some(AuthModel::Denylist)
-            && policy.blocked.as_deref().is_some_and(<[String]>::is_empty)
+            && policy
+                .blocked
+                .as_deref()
+                .is_some_and(|blocked| !has_matchable_entry(blocked))
         {
             return Err(AppError::Config(format!(
-                "{ACCESS_BLOCKED_USERS_VAR} is set but contains no valid entries"
+                "{ACCESS_BLOCKED_USERS_VAR} is set but contains no matchable entries \
+                 (each entry must be a GitHub login or numeric user id)"
             )));
         }
 
@@ -560,9 +575,10 @@ mod tests {
     }
 
     #[test]
-    fn denylist_junk_blocked_entries_never_block() {
-        // "@" normalizes to empty at match time → never matches anyone (and is a
-        // present entry at parse time, so no zero-entries error either).
+    fn denylist_junk_blocked_entries_never_block_but_valid_siblings_still_do() {
+        // "@" normalizes to empty at match time → never matches anyone. The list
+        // still boots because "mallory" is a matchable entry, and the junk token
+        // stays inert (never blocks an empty login).
         let policy = policy(&vars(&[
             ("FKST_AUTH_MODEL", "denylist"),
             ("FKST_ACCESS_BLOCKED_USERS", "@,mallory"),
@@ -572,16 +588,27 @@ mod tests {
     }
 
     #[test]
-    fn denylist_set_but_empty_blocked_list_fails_closed_at_startup() {
-        // "," yields zero valid entries: silently blocking nobody would admit
-        // the users the operator meant to block — refuse to boot instead.
+    fn denylist_blocklist_with_no_matchable_entry_fails_closed_at_startup() {
+        // "," and "@" yield tokens that can never match ANY identity: silently
+        // blocking nobody would admit the users the operator meant to block —
+        // refuse to boot instead. Matchability (post-`@`-strip non-empty), not
+        // token presence, is the test: "@" parses as a token but never matches.
         for pairs in [
             vec![
                 ("FKST_AUTH_MODEL", "denylist"),
                 ("FKST_ACCESS_BLOCKED_USERS", " , "),
             ],
+            vec![
+                ("FKST_AUTH_MODEL", "denylist"),
+                ("FKST_ACCESS_BLOCKED_USERS", "@"),
+            ],
+            vec![
+                ("FKST_AUTH_MODEL", "denylist"),
+                ("FKST_ACCESS_BLOCKED_USERS", " @ , @ ,"),
+            ],
             // Same via the derived model (blocked list present, mode unset).
             vec![("FKST_ACCESS_BLOCKED_USERS", " , ")],
+            vec![("FKST_ACCESS_BLOCKED_USERS", "@")],
         ] {
             let err = AccessPolicy::from_vars(&vars(&pairs))
                 .expect_err("a mangled blocklist must fail closed");
@@ -589,6 +616,21 @@ mod tests {
                 err.to_string().contains("FKST_ACCESS_BLOCKED_USERS"),
                 "error names the var: {err}"
             );
+        }
+    }
+
+    #[test]
+    fn stale_mangled_blocklist_under_all_or_allowlist_still_boots() {
+        // The no-matchable-entries boot error is deliberately scoped to an
+        // effective DENYLIST: under an explicit `all`/`allowlist` the blocklist
+        // is stale-and-inert, so even a mangled one must not crash the pod.
+        for model in ["all", "allowlist"] {
+            let p = policy(&vars(&[
+                ("FKST_AUTH_MODEL", model),
+                ("FKST_ACCESS_ALLOWED_USERS", "alice"),
+                ("FKST_ACCESS_BLOCKED_USERS", " , "),
+            ]));
+            assert!(p.allows(1, "alice"), "model {model} still admits alice");
         }
     }
 

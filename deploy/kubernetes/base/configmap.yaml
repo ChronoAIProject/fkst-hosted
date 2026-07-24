@@ -35,6 +35,10 @@ data:
   # case-insensitive; numeric ids remain the rename-safe alternative). Leave
   # the blocklist unset/blank to block nobody; FKST_GLOBAL_ADMINS always pass.
   # Config is read at startup — rollout-restart the control plane after edits.
+  # OVERLAY CAUTION: an explicit model IGNORES the other model's list. An
+  # overlay that sets FKST_ACCESS_ALLOWED_USERS while inheriting this denylist
+  # default gets NO enforcement from it (the pod logs a startup WARN) — such an
+  # overlay must also override FKST_AUTH_MODEL (e.g. to "allowlist").
   FKST_AUTH_MODEL: denylist
   # FKST_ACCESS_BLOCKED_USERS: "<blocked-github-login>, <another-login>"
   FKST_PUBLIC_BASE_URL: https://api.chronoai-fkst.local
