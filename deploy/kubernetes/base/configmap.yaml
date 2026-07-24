@@ -26,8 +26,12 @@ data:
   FKST_LEADER_RENEW_DEADLINE_SECS: "20"
   FKST_LEADER_RETRY_PERIOD_SECS: "5"
   FKST_LLM_BASE_URL: https://llm.example.invalid/v1
-  FKST_LLM_MODEL: gpt-5.5
+  FKST_LLM_MODEL: gpt-5.6-sol
   FKST_LLM_WIRE_API: responses
+  # codex model_reasoning_effort for every session (minimal|low|medium|high|max;
+  # default max). A trigger's `### Engine Config` may override the model and
+  # effort per session (FKST_LLM_MODEL= / FKST_LLM_REASONING_EFFORT= lines).
+  FKST_LLM_REASONING_EFFORT: "max"
   FKST_GITHUB_BOT_LOGIN: fkst-local[bot]
   # Deployment access strategy (issue #3376): denylist — every authenticated
   # GitHub user may use the service EXCEPT those named in

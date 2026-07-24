@@ -37,10 +37,14 @@ pub struct CodexShellEnv<'a> {
 
 /// Render the codex `config.toml` body for the operator-pinned LLM provider.
 ///
-/// `model` / `base_url` / `wire_api` are the config-driven provider values and
-/// `env_key` is the environment variable the codex reads the API key from (the
-/// caller passes [`crate::reserved_env::LLM_ENV_KEY`]). `disable_response_storage
-/// = true` because the provider is stateless for the session.
+/// `model` / `base_url` / `wire_api` / `reasoning_effort` are the config-driven
+/// provider values (`reasoning_effort` — the codex `model_reasoning_effort`,
+/// issue #3393 — arrives pre-validated against
+/// [`crate::config::LLM_REASONING_EFFORTS`] from either the deployment config or
+/// the trigger's `### Engine Config` override) and `env_key` is the environment
+/// variable the codex reads the API key from (the caller passes
+/// [`crate::reserved_env::LLM_ENV_KEY`]). `disable_response_storage = true`
+/// because the provider is stateless for the session.
 ///
 /// When `shell_env` carries an active named environment, a
 /// `[shell_environment_policy]` is appended so the profile's tools/variables reach
@@ -50,12 +54,14 @@ pub fn render_codex_config(
     model: &str,
     base_url: &str,
     wire_api: &str,
+    reasoning_effort: &str,
     env_key: &str,
     shell_env: Option<&CodexShellEnv>,
 ) -> String {
     let mut toml = format!(
         "model_provider = \"{LLM_PROVIDER_ID}\"\n\
          model = \"{model}\"\n\
+         model_reasoning_effort = \"{reasoning_effort}\"\n\
          disable_response_storage = true\n\
          \n\
          [model_providers.{LLM_PROVIDER_ID}]\n\
@@ -112,7 +118,14 @@ mod tests {
 
     #[test]
     fn renders_pinned_model_with_neutral_provider_and_llm_env_key() {
-        let toml = render_codex_config("gpt-5-codex", "https://nyx/p", "chat", LLM_ENV_KEY, None);
+        let toml = render_codex_config(
+            "gpt-5-codex",
+            "https://nyx/p",
+            "chat",
+            "max",
+            LLM_ENV_KEY,
+            None,
+        );
         assert!(toml.contains("model_provider = \"llm\""));
         assert!(toml.contains("[model_providers.llm]"));
         assert!(toml.contains("model = \"gpt-5-codex\""));
@@ -123,16 +136,27 @@ mod tests {
         // The engine reads the LLM credential from the `LLM_API_KEY` env key.
         assert!(toml.contains("env_key = \"LLM_API_KEY\""));
         assert!(toml.contains("disable_response_storage = true"));
+        // The reasoning effort renders in the top-level block (#3393).
+        assert!(toml.contains("model_reasoning_effort = \"max\""));
         // No profile → no shell-environment policy.
         assert!(!toml.contains("shell_environment_policy"));
     }
 
     #[test]
     fn wire_api_is_a_render_parameter() {
-        let toml = render_codex_config("m", "https://b", "responses", LLM_ENV_KEY, None);
+        let toml = render_codex_config("m", "https://b", "responses", "max", LLM_ENV_KEY, None);
         // The renderer honours whatever wire_api the caller passes (the safe
         // default is enforced by the caller / config, not hard-coded here).
         assert!(toml.contains("wire_api = \"responses\""));
+    }
+
+    #[test]
+    fn reasoning_effort_is_a_render_parameter() {
+        // The renderer honours whatever validated effort the caller passes —
+        // e.g. a trigger's `### Engine Config` override of the `max` default.
+        let toml = render_codex_config("m", "https://b", "responses", "low", LLM_ENV_KEY, None);
+        assert!(toml.contains("model_reasoning_effort = \"low\""));
+        assert!(!toml.contains("model_reasoning_effort = \"max\""));
     }
 
     #[test]
@@ -146,7 +170,7 @@ mod tests {
             tool_dir: "/rt/env-bin",
             variables: &vars,
         };
-        let toml = render_codex_config("m", "https://b", "chat", LLM_ENV_KEY, Some(&shell));
+        let toml = render_codex_config("m", "https://b", "chat", "max", LLM_ENV_KEY, Some(&shell));
         assert!(toml.contains("[shell_environment_policy]"));
         // A strict superset of the default — nothing that worked before breaks.
         assert!(toml.contains("inherit = \"all\""));
@@ -165,7 +189,7 @@ mod tests {
             tool_dir: "",
             variables: &vars,
         };
-        let toml = render_codex_config("m", "https://b", "chat", LLM_ENV_KEY, Some(&shell));
+        let toml = render_codex_config("m", "https://b", "chat", "max", LLM_ENV_KEY, Some(&shell));
         assert!(toml.contains("[shell_environment_policy]"));
         assert!(toml.contains("\"REGION\" = \"us\""));
         // No install → no tool dir → PATH/FKST_ENV_BIN are not overridden.
@@ -181,7 +205,7 @@ mod tests {
             tool_dir: "",
             variables: &vars,
         };
-        let toml = render_codex_config("m", "https://b", "chat", LLM_ENV_KEY, Some(&shell));
+        let toml = render_codex_config("m", "https://b", "chat", "max", LLM_ENV_KEY, Some(&shell));
         assert!(!toml.contains("shell_environment_policy"));
     }
 }

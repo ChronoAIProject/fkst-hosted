@@ -53,6 +53,7 @@ fn config() -> PodConfig {
         llm_base_url: "https://llm.example/p".to_string(),
         llm_model: "gpt-5-codex".to_string(),
         llm_wire_api: "chat".to_string(),
+        llm_reasoning_effort: "max".to_string(),
         dns_nameservers: vec!["1.1.1.1".to_string(), "8.8.8.8".to_string()],
         runtime_class: None,
         rate_pools: BTreeMap::new(),
@@ -148,6 +149,7 @@ fn build_session_pod_injects_the_section_5_2_env() {
         Some("https://llm.example/p")
     );
     assert_eq!(env_value(env, "FKST_LLM_WIRE_API"), Some("chat"));
+    assert_eq!(env_value(env, "FKST_LLM_REASONING_EFFORT"), Some("max"));
     // Durable/runtime/creds/codex roots.
     assert_eq!(
         env_value(env, "FKST_DURABLE_ROOT"),
@@ -617,4 +619,58 @@ fn pod_owner_reference_is_none_without_a_uid() {
         ..Default::default()
     };
     assert!(pod_owner_reference(&pod).is_none());
+}
+
+#[test]
+fn engine_config_llm_overrides_replace_the_operator_defaults_exactly_once() {
+    // A trigger's validated `### Engine Config` FKST_LLM_MODEL /
+    // FKST_LLM_REASONING_EFFORT override the operator values IN the base pairs
+    // (issue #3393) — the session env must carry each key exactly once, with
+    // the trigger's value, and the tunables tail must not re-render them.
+    let mut spec = spec();
+    spec.engine_config = BTreeMap::from([
+        ("FKST_LLM_MODEL".to_string(), "gpt-4.1-mini".to_string()),
+        ("FKST_LLM_REASONING_EFFORT".to_string(), "low".to_string()),
+        // A sibling tunable proves the tail still renders non-LLM keys.
+        ("FKST_CODEX_PERMIT_SLOTS".to_string(), "8".to_string()),
+    ]);
+    let pairs = session_env_pairs(&spec, &config());
+    let values: Vec<&str> = pairs
+        .iter()
+        .filter(|(k, _)| k == "FKST_LLM_MODEL")
+        .map(|(_, v)| v.as_str())
+        .collect();
+    assert_eq!(
+        values,
+        vec!["gpt-4.1-mini"],
+        "trigger model wins, exactly once"
+    );
+    let efforts: Vec<&str> = pairs
+        .iter()
+        .filter(|(k, _)| k == "FKST_LLM_REASONING_EFFORT")
+        .map(|(_, v)| v.as_str())
+        .collect();
+    assert_eq!(efforts, vec!["low"], "trigger effort wins, exactly once");
+    assert!(
+        pairs
+            .iter()
+            .any(|(k, v)| k == "FKST_CODEX_PERMIT_SLOTS" && v == "8"),
+        "non-LLM engine-config keys still render in the tunables tail"
+    );
+    // Uniqueness across the WHOLE env — the no-duplicate invariant holds.
+    let mut names: Vec<_> = pairs.iter().map(|(k, _)| k.clone()).collect();
+    names.sort();
+    names.dedup();
+    assert_eq!(names.len(), pairs.len(), "env names must be unique");
+}
+
+#[test]
+fn without_engine_config_overrides_the_operator_llm_values_render() {
+    let pairs = session_env_pairs(&spec(), &config());
+    assert!(pairs
+        .iter()
+        .any(|(k, v)| k == "FKST_LLM_MODEL" && v == "gpt-5-codex"));
+    assert!(pairs
+        .iter()
+        .any(|(k, v)| k == "FKST_LLM_REASONING_EFFORT" && v == "max"));
 }
