@@ -332,6 +332,42 @@ fn legacy_seed_body_with_multiple_packages_round_trips_in_order() {
 }
 
 #[test]
+fn seed_intro_lines_never_open_a_parsed_section() {
+    // seed_intro's documented invariant, pinned: NO line before the first real
+    // section may begin with "### ". split_sections captures ANY "### " line as
+    // a section and silently ignores unknown headings, so a promoted intro line
+    // would pass the round-trip tests while visibly truncating the rendered
+    // intro — this test is what actually catches that wording regression.
+    let manifest = build_seed_body(
+        &[],
+        Some(DEFAULT_MANIFEST),
+        "installing-user",
+        "octo-owner",
+        Some("https://fkst.example"),
+    );
+    let legacy = build_seed_body(
+        &["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()],
+        None,
+        "installing-user",
+        "octo-owner",
+        Some("https://fkst.example"),
+    );
+    for body in [manifest, legacy] {
+        let intro = body
+            .split("### Session Name")
+            .next()
+            .expect("intro precedes the first section");
+        assert!(!intro.trim().is_empty(), "the visible intro exists");
+        for line in intro.lines() {
+            assert!(
+                !line.trim_start().starts_with("### "),
+                "intro line would open a parsed section: {line:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn seed_body_lists_installer_then_account_in_contributors_and_dedupes() {
     assert_eq!(
         seed_contributors("installing-user", "octo-owner"),
