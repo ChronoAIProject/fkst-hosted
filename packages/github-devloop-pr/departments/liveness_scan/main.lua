@@ -13,6 +13,7 @@ local devloop_entity_view = require("devloop.github_proxy_entity_view")
 local devloop_logging = require("devloop.logging")
 local config = require("devloop.config")
 local devloop_state = require("devloop.state")
+local delivery_target = require("devloop.delivery_target")
 
 local LIVENESS_SCAN_CURSOR_PREFIX = "github-devloop-pr/liveness-scan/pr-cursor/"
 
@@ -34,7 +35,7 @@ local spec = {
   stall_window = "30s",
 }
 
-local function should_reinject_pr_base_unmanaged_heal(origin, current, state)
+local function should_reinject_pr_base_unmanaged_heal(origin, current, state, integration_branch)
   if origin == nil or current == nil or state == nil then
     return false
   end
@@ -46,10 +47,10 @@ local function should_reinject_pr_base_unmanaged_heal(origin, current, state)
     or tostring(current.state or ""):lower() ~= "open" then
     return false
   end
-  return tostring(origin.base_branch or "") == tostring(config.branch_config().integration)
+  return tostring(origin.base_branch or "") == tostring(integration_branch)
 end
 
-local function should_reinject_pr(repo, pr, limits, deadline, now_seconds)
+local function should_reinject_pr(lifecycle_repo, repo, pr, limits, deadline, now_seconds, host_branches)
   if not forge_validators.is_positive_pr_number(pr.number) then
     return false
   end
@@ -76,7 +77,22 @@ local function should_reinject_pr(repo, pr, limits, deadline, now_seconds)
     devloop_logging.log_cas_decision("liveness_scan", proposal_id, { state = nil, version = nil }, "tick", "observe", "skip-no-state", "PR has no origin marker")
     return false
   end
-  if not m_claims.verify_pr_review_issue_claim("liveness_scan", origin.repo, origin.issue_number, nil, origin.proposal_id) then
+  local origin_lifecycle_repo = origin.lifecycle_repo or origin.repo
+  local origin_implementation_repo = origin.implementation_repo or origin.repo
+  local origin_is_cross_repo = tostring(origin_lifecycle_repo):lower()
+    ~= tostring(origin_implementation_repo):lower()
+  local target = delivery_target.resolve(origin_lifecycle_repo, origin.issue_number, {
+    implementation_repo = origin_implementation_repo,
+    implementation_branch = origin_is_cross_repo and origin.base_branch or nil,
+    default_branch = host_branches.integration,
+    verify = false,
+  })
+  if tostring(target.lifecycle_repo):lower() ~= tostring(lifecycle_repo):lower()
+    or tostring(target.implementation_repo):lower() ~= tostring(repo):lower() then
+    error("github-devloop: delivery-origin-mismatch: liveness PR origin differs from scan lane")
+  end
+  local integration_branch = target.cross_repo and target.implementation_branch or host_branches.integration
+  if not m_claims.verify_pr_review_issue_claim("liveness_scan", target.lifecycle_repo, origin.issue_number, nil, origin.proposal_id) then
     return false
   end
 
@@ -84,11 +100,11 @@ local function should_reinject_pr(repo, pr, limits, deadline, now_seconds)
   if not liveness_scan.liveness_scan_should_reinject_state(core, proposal_id, state) then
     return false
   end
-  if should_reinject_pr_base_unmanaged_heal(origin, current, state) then
+  if should_reinject_pr_base_unmanaged_heal(origin, current, state, integration_branch) then
     return true
   end
   local source_ref = entity_lib.pr_source_ref(repo, pr.number)
-  local timeout_action = liveness_scan.liveness_scan_maybe_timeout_action(core, liveness_scan.liveness_scan_issue_entity(origin.repo, origin.issue_number), state, {
+  local timeout_action = liveness_scan.liveness_scan_maybe_timeout_action(core, liveness_scan.liveness_scan_issue_entity(target.lifecycle_repo, origin.issue_number), state, {
     proposal_id = origin.proposal_id,
     current = { comments = current.comments or {}, labels = current.labels or {} },
     current_pr = current,
@@ -98,16 +114,18 @@ local function should_reinject_pr(repo, pr, limits, deadline, now_seconds)
       branch = origin.branch,
       impl_version = origin.impl_version,
       base_branch = origin.base_branch,
+      lifecycle_repo = target.lifecycle_repo,
+      implementation_repo = target.implementation_repo,
     },
     snapshot = {
       comments = current.comments or {},
-      prs = { { number = pr.number, current = current } },
+      prs = { { repo = repo, number = pr.number, current = current } },
       state = state,
     },
     source_ref = source_ref,
     head_sha = current.head_sha,
     review_proposal_id = state.state == "reviewing" and forge_validators.is_git_sha(current.head_sha)
-      and devloop_base.pr_review_proposal_id(origin.repo, pr.number, state.version, current.head_sha)
+      and devloop_base.pr_review_proposal_id(repo, pr.number, state.version, current.head_sha)
       or nil,
     fresh_current_state = state,
     now_seconds = now_seconds,
@@ -126,13 +144,17 @@ local function act_liveness_scan(event)
   devloop_logging.log_entry("liveness_scan", event, "github-devloop/liveness-scan", "tick")
   devloop_base.assert_trusted_bot_configured()
 
-  local repo = liveness_scan.liveness_scan_read_repo()
-  if repo == nil then
+  local lifecycle_repo = liveness_scan.liveness_scan_read_repo()
+  if lifecycle_repo == nil then
     devloop_logging.log_cas_decision("liveness_scan", "github-devloop/liveness-scan", { state = nil, version = nil }, "tick", "observe", "skip-invalid-repo", "FKST_GITHUB_REPO is missing or invalid")
     return
   end
 
   local limits = liveness_scan.liveness_scan_limits()
+  local host_branches = config.branch_config()
+  local lanes = delivery_target.implementation_lanes(lifecycle_repo, host_branches.integration, {
+    verify = false,
+  })
   local current_now_seconds = tonumber(event and event.now_seconds) or now()
   local deadline = sweep_bounds.sweep_deadline(now(), limits)
   local timeout = sweep_bounds.sweep_call_timeout(limits, deadline)
@@ -140,8 +162,25 @@ local function act_liveness_scan(event)
     liveness_scan.liveness_scan_log_deferred("deadline", { entity_cap = limits.entity_cap })
     return
   end
-  local prs = liveness_scan.liveness_scan_list_open_prs(core, repo, timeout, entity_list_cache.entity_list_poll_key(event))
-  local activations, deferred_by_cap, cursor_key, cursor, total = liveness_scan.liveness_scan_activation_slice(repo, "pr", prs, LIVENESS_SCAN_CURSOR_PREFIX)
+  local prs = {}
+  for _, lane in ipairs(lanes) do
+    if not sweep_bounds.sweep_has_budget(deadline) then
+      liveness_scan.liveness_scan_log_deferred("deadline", {
+        listed_prs = #prs,
+        processed = 0,
+        deferred = 0,
+        entity_cap = limits.entity_cap,
+      })
+      return
+    end
+    local lane_timeout = sweep_bounds.sweep_call_timeout(limits, deadline)
+    local listed = liveness_scan.liveness_scan_list_open_prs(core, lane.implementation_repo, lane_timeout, entity_list_cache.entity_list_poll_key(event))
+    for _, pr in ipairs(listed) do
+      pr._liveness_repo = lane.implementation_repo
+      table.insert(prs, pr)
+    end
+  end
+  local activations, deferred_by_cap, cursor_key, cursor, total = liveness_scan.liveness_scan_activation_slice(lifecycle_repo, "pr", prs, LIVENESS_SCAN_CURSOR_PREFIX)
   local processed = 0
   local attempted = 0
 
@@ -158,7 +197,8 @@ local function act_liveness_scan(event)
     end
 
     attempted = attempted + 1
-    local should_reinject, defer_reason = should_reinject_pr(repo, activation.entity, limits, deadline, current_now_seconds)
+    local pr_repo = activation.entity._liveness_repo or lifecycle_repo
+    local should_reinject, defer_reason = should_reinject_pr(lifecycle_repo, pr_repo, activation.entity, limits, deadline, current_now_seconds, host_branches)
     if defer_reason == "deadline" then
       liveness_scan.liveness_scan_update_cursor(cursor_key, cursor, total, attempted)
       liveness_scan.liveness_scan_log_deferred("deadline", {
@@ -171,7 +211,7 @@ local function act_liveness_scan(event)
     end
     processed = processed + 1
     if should_reinject then
-      liveness_scan.liveness_scan_reinject(repo, activation.entity, "pr", event and event.ts)
+      liveness_scan.liveness_scan_reinject(pr_repo, activation.entity, "pr", event and event.ts)
     end
   end
 

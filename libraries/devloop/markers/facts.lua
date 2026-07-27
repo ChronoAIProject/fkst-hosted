@@ -17,6 +17,17 @@ local valid_round = shared.valid_round
 local marker_attr = shared.marker_attr
 local decode_marker_attr = shared.decode_marker_attr
 
+local function parsed_implementation_repo(marker, fallback)
+  local value = marker:match('implementation_repo="([^"]+)"')
+  if value == nil then
+    return fallback
+  end
+  if not base_ids.issue_ref_round_trips(value, 1) then
+    return nil
+  end
+  return value
+end
+
 local function review_result_fact_from_marker(marker, comment, issue_proposal_id, issue_version, expected_decision)
   local review_proposal = marker_attr(marker, "proposal")
   local marker_issue = marker_attr(marker, "issue_proposal")
@@ -556,12 +567,16 @@ function C.merge_ready_approval_matches_event(fact, merge_ready)
     return false, "merge-ready-approval-mismatch"
   end
 
-  local entity = entity_lib.parse_entity_proposal_id(merge_ready.proposal_id)
-  local entity_repo = entity and entity.repo or nil
+  local source_repo, source_pr_number = devloop_base.parse_pr_source_ref(merge_ready.source_ref)
+  if source_repo == nil
+    or tostring(source_pr_number or "") ~= tostring(merge_ready.pr_number or "") then
+    return false, "merge-ready-source-ref-mismatch"
+  end
+
   local review_repo, review_pr_number, review_version, review_head_sha = devloop_base.parse_pr_review_proposal_id(fact.review_proposal_id)
-  local expected_review_repo = entity_repo and devloop_base.safe_pr_review_repo_segment(entity_repo) or nil
+  local expected_review_repo = devloop_base.safe_pr_review_repo_segment(source_repo)
   if review_repo == nil
-    or tostring(review_repo) ~= tostring(expected_review_repo or "")
+    or tostring(review_repo) ~= tostring(expected_review_repo)
     or tostring(review_pr_number) ~= tostring(merge_ready.pr_number or "")
     or tostring(review_head_sha) ~= tostring(merge_ready.reviewed_head_sha or "") then
     return false, "merge-ready-review-proposal-mismatch"
@@ -789,17 +804,25 @@ function C.pr_link_fact(comments, proposal_id)
       local marker_branch = marker:match('branch="([^"]+)"')
       local marker_impl_version = marker:match('impl_version="([^"]*)"')
       local marker_base_branch = marker:match('base_branch="([^"]+)"')
+      local lifecycle_repo = select(1, base_ids.parse_proposal_id(marker_proposal))
+      local implementation_repo = parsed_implementation_repo(marker, lifecycle_repo)
       if marker_proposal == proposal_id
         and forge_validators.is_positive_pr_number(marker_pr)
         and forge_validators.is_git_ref_safe(marker_branch)
         and strings.is_bounded_string(marker_impl_version, devloop_base._max_dedup_len)
-        and forge_validators.is_git_ref_safe(marker_base_branch) then
+        and forge_validators.is_git_ref_safe(marker_base_branch)
+        and (marker:match('implementation_repo="') == nil or implementation_repo ~= nil) then
         return {
           proposal_id = marker_proposal,
           pr_number = tonumber(marker_pr),
           branch = marker_branch,
           impl_version = marker_impl_version,
           base_branch = marker_base_branch,
+          repo = lifecycle_repo,
+          lifecycle_repo = lifecycle_repo,
+          implementation_repo = implementation_repo,
+          cross_repo = lifecycle_repo ~= nil and implementation_repo ~= nil
+            and lifecycle_repo:lower() ~= implementation_repo:lower(),
         }
       end
     end
@@ -819,7 +842,10 @@ function C.pr_delegation_fact(comments, proposal_id, version, delegation)
       local marker_pr = marker:match('pr="([^"]+)"')
       local marker_version = marker:match('version="([^"]*)"')
       local marker_delegation = marker:match('delegation="([^"]*)"')
-      local _, pr_number = entity_lib.parse_pr_proposal_id(marker_pr_proposal)
+      local implementation_repo, pr_number = entity_lib.parse_pr_proposal_id(marker_pr_proposal)
+      local lifecycle_repo = select(1, base_ids.parse_proposal_id(marker_proposal))
+      local has_implementation_repo = marker:match('implementation_repo="') ~= nil
+      local marker_implementation_repo = parsed_implementation_repo(marker, implementation_repo)
       if marker_proposal == tostring(proposal_id)
         and (version == nil or marker_version == tostring(version))
         and (delegation == nil or marker_delegation == tostring(delegation))
@@ -827,7 +853,9 @@ function C.pr_delegation_fact(comments, proposal_id, version, delegation)
         and tostring(pr_number) == tostring(marker_pr)
         and forge_validators.is_positive_pr_number(marker_pr)
         and strings.is_bounded_string(marker_version, devloop_base._max_dedup_len)
-        and strings.is_path_safe_key(marker_delegation, devloop_base._max_dedup_len) then
+        and strings.is_path_safe_key(marker_delegation, devloop_base._max_dedup_len)
+        and marker_implementation_repo ~= nil
+        and marker_implementation_repo:lower() == implementation_repo:lower() then
         return {
           proposal_id = marker_proposal,
           pr_proposal_id = marker_pr_proposal,
@@ -835,6 +863,11 @@ function C.pr_delegation_fact(comments, proposal_id, version, delegation)
           pr_number = tonumber(marker_pr),
           version = marker_version,
           delegation = marker_delegation,
+          repo = lifecycle_repo,
+          lifecycle_repo = lifecycle_repo,
+          implementation_repo = implementation_repo,
+          delivery_target_explicit = has_implementation_repo,
+          cross_repo = lifecycle_repo ~= nil and lifecycle_repo:lower() ~= implementation_repo:lower(),
           comment_created_at = parsers_misc._comment_created_at(comment),
         }
       end
@@ -856,14 +889,19 @@ function C.pr_origin_fact(comments)
       local marker_impl_version = marker:match('impl_version="([^"]*)"')
       local marker_base_branch = marker:match('base_branch="([^"]+)"')
       local repo, issue_number = base_ids.parse_proposal_id(marker_proposal)
+      local implementation_repo = parsed_implementation_repo(marker, repo)
       if repo ~= nil
         and marker_issue == issue_number
         and forge_validators.is_git_ref_safe(marker_branch)
         and strings.is_bounded_string(marker_impl_version, devloop_base._max_dedup_len)
-        and forge_validators.is_git_ref_safe(marker_base_branch) then
+        and forge_validators.is_git_ref_safe(marker_base_branch)
+        and implementation_repo ~= nil then
         return {
           proposal_id = marker_proposal,
           repo = repo,
+          lifecycle_repo = repo,
+          implementation_repo = implementation_repo,
+          cross_repo = repo:lower() ~= implementation_repo:lower(),
           issue_number = issue_number,
           branch = marker_branch,
           impl_version = marker_impl_version,
@@ -871,14 +909,19 @@ function C.pr_origin_fact(comments)
         }
       end
       local pr_repo, pr_number = entity_lib.parse_pr_proposal_id(marker_proposal)
+      implementation_repo = parsed_implementation_repo(marker, pr_repo)
       if pr_repo ~= nil
         and marker_issue == tostring(pr_number)
         and forge_validators.is_git_ref_safe(marker_branch)
         and strings.is_bounded_string(marker_impl_version, devloop_base._max_dedup_len)
-        and forge_validators.is_git_ref_safe(marker_base_branch) then
+        and forge_validators.is_git_ref_safe(marker_base_branch)
+        and implementation_repo ~= nil then
         return {
           proposal_id = marker_proposal,
           repo = pr_repo,
+          lifecycle_repo = pr_repo,
+          implementation_repo = implementation_repo,
+          cross_repo = pr_repo:lower() ~= implementation_repo:lower(),
           issue_number = nil,
           pr_number = pr_number,
           branch = marker_branch,

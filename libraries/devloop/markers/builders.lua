@@ -5,10 +5,22 @@ local forge_validators = require("devloop.forge_validators")
 local autonomy_ledger = require("devloop.autonomy_ledger")
 local shared = require("devloop.markers.shared")
 local ci_failure_keys = require("devloop.ci_failure_keys")
+local base_ids = require("devloop.base_ids")
 
 local valid_round = shared.valid_round
 local strings = shared.strings
 local safe_marker_attr = shared.safe_marker_attr
+
+local function implementation_repo_field(implementation_repo)
+  if implementation_repo == nil then
+    return ""
+  end
+  local value = tostring(implementation_repo)
+  if not base_ids.issue_ref_round_trips(value, 1) then
+    error("github-devloop: invalid implementation repo")
+  end
+  return '" implementation_repo="' .. value
+end
 
 function C.review_meta_marker(issue_proposal_id, dedup_key, action, version, blocking_gap, reason)
   local fields = ""
@@ -128,7 +140,7 @@ function C.implementing_marker(proposal_id, dedup_key, branch, head_sha, base_br
     .. '" -->'
 end
 
-function C.pr_link_marker(proposal_id, pr_number, branch, impl_version, base_branch)
+function C.pr_link_marker(proposal_id, pr_number, branch, impl_version, base_branch, implementation_repo)
   if not forge_validators.is_positive_pr_number(pr_number) then
     error("github-devloop: invalid pr number")
   end
@@ -143,10 +155,11 @@ function C.pr_link_marker(proposal_id, pr_number, branch, impl_version, base_bra
     .. '" branch="' .. tostring(branch)
     .. '" impl_version="' .. tostring(impl_version)
     .. '" base_branch="' .. tostring(base_branch)
+    .. implementation_repo_field(implementation_repo)
     .. '" -->'
 end
 
-function C.pr_link_marker_template(proposal_id, branch, impl_version, base_branch)
+function C.pr_link_marker_template(proposal_id, branch, impl_version, base_branch, implementation_repo)
   if not forge_validators.is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")
   end
@@ -158,10 +171,11 @@ function C.pr_link_marker_template(proposal_id, branch, impl_version, base_branc
     .. ' branch="' .. tostring(branch)
     .. '" impl_version="' .. tostring(impl_version)
     .. '" base_branch="' .. tostring(base_branch)
+    .. implementation_repo_field(implementation_repo)
     .. '" -->'
 end
 
-function C.pr_delegation_marker(issue_proposal_id, pr_proposal_id, pr_number, version, delegation)
+function C.pr_delegation_marker(issue_proposal_id, pr_proposal_id, pr_number, version, delegation, implementation_repo)
   if not forge_validators.is_positive_pr_number(pr_number) then
     error("github-devloop: invalid pr-delegation pr number")
   end
@@ -176,10 +190,11 @@ function C.pr_delegation_marker(issue_proposal_id, pr_proposal_id, pr_number, ve
     .. '" pr="' .. tostring(pr_number)
     .. '" version="' .. tostring(version)
     .. '" delegation="' .. tostring(delegation)
+    .. implementation_repo_field(implementation_repo)
     .. '" -->'
 end
 
-function C.pr_origin_marker(proposal_id, issue_number, branch, impl_version, base_branch)
+function C.pr_origin_marker(proposal_id, issue_number, branch, impl_version, base_branch, implementation_repo)
   if not forge_validators.is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")
   end
@@ -191,6 +206,7 @@ function C.pr_origin_marker(proposal_id, issue_number, branch, impl_version, bas
     .. '" branch="' .. tostring(branch)
     .. '" impl_version="' .. tostring(impl_version)
     .. '" base_branch="' .. tostring(base_branch)
+    .. implementation_repo_field(implementation_repo)
     .. '" -->'
 end
 

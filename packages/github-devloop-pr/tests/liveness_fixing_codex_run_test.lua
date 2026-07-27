@@ -303,6 +303,21 @@ local function mock_repo_and_empty_issue_list()
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_DELIVERY_GRANTS"), {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_UPSTREAM_BRANCH"), {
+    stdout = "dev",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_INTEGRATION_BRANCH"), {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command(core.gh_issue_list_observe_cmd(repo), {
     stdout = "[]\n",
     stderr = "",
@@ -494,7 +509,7 @@ return {
       opts("liveness-scan-fixing-backoff-before-due"),
       contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:02:59Z")
     )
-    t.eq(before.exit_code, 0)
+    t.eq(before.exit_code, 0, tostring(before.error or before.stderr or "liveness scan failed"))
     t.eq(h.find_raise(before.raises, "devloop_timeout_reconcile"), nil)
     t.eq(h.find_raise(before.raises, "github-proxy.github_pr_comment_request", function(payload)
       return tostring(payload.body or ""):find("fkst:github-devloop:timeout-attempt", 1, true) ~= nil
@@ -514,7 +529,7 @@ return {
       opts("liveness-scan-fixing-backoff-at-due"),
       contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:03:00Z")
     )
-    t.eq(due.exit_code, 0)
+    t.eq(due.exit_code, 0, tostring(due.error or due.stderr or "liveness scan failed"))
     t.eq(h.find_raise(due.raises, "devloop_timeout_reconcile"), nil)
     t.eq(h.find_raise(due.raises, "github-proxy.github_pr_comment_request", function(payload)
       return tostring(payload.body or ""):find("fkst:github-devloop:timeout-attempt", 1, true) ~= nil
@@ -638,7 +653,7 @@ return {
     mock_pr_state(comments)
 
     local result = run_liveness_scan("liveness-scan-fixing-live-codex", run_opts)
-    t.eq(result.exit_code, 0)
+    t.eq(result.exit_code, 0, tostring(result.error or result.stderr or "liveness scan failed"))
     t.eq(h.find_raise(result.raises, "devloop_fixing"), nil)
     t.eq(h.find_raise(result.raises, "devloop_timeout_reconcile"), nil)
     t.eq(h.find_raise(result.raises, "github-proxy.github_pr_comment_request", function(payload)

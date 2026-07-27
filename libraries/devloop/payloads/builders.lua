@@ -457,7 +457,8 @@ local function apply_high_risk_angles(proposal, high_risk)
   return proposal
 end
 
-function C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch, high_risk)
+function C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch, high_risk, lifecycle_repo)
+  lifecycle_repo = lifecycle_repo or repo
   local review_id = devloop_base.pr_review_proposal_id(repo, pr_number, version, head_sha)
   local title = "Review PR #" .. tostring(pr_number)
   if issue_number ~= nil then
@@ -476,13 +477,13 @@ function C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, h
   end
   issue_title = devloop_base.neutralize_untrusted_prompt_text(devloop_base._neutralize_fkst_markers(issue_title))
   local body = "Review the PR diff and decide whether it should advance to merge-ready."
-    .. "\nEntity proposal: " .. tostring(issue_number ~= nil and base_ids.proposal_id(repo, issue_number) or entity_lib.pr_proposal_id(repo, pr_number))
+    .. "\nEntity proposal: " .. tostring(issue_number ~= nil and base_ids.proposal_id(lifecycle_repo, issue_number) or entity_lib.pr_proposal_id(repo, pr_number))
     .. "\nReviewed PR head: " .. tostring(head_sha)
     .. "\nIssue title: " .. issue_title
     .. "\n" .. M.short_review_observation_boundary_clause()
     .. "\nReview contract: reject only for a stated issue requirement the diff fails; beyond stated bounds is advisory/spec-amendment."
     .. "\nRead the local context bundle before judging."
-  local issue_proposal_id = tostring(issue_number ~= nil and base_ids.proposal_id(repo, issue_number) or entity_lib.pr_proposal_id(repo, pr_number))
+  local issue_proposal_id = tostring(issue_number ~= nil and base_ids.proposal_id(lifecycle_repo, issue_number) or entity_lib.pr_proposal_id(repo, pr_number))
   local ledger = m_facts.review_prior_round_ledger(pr_comments, issue_proposal_id, version)
   if ledger ~= nil and ledger ~= "" then
     body = body
@@ -506,18 +507,18 @@ function C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, h
   }, high_risk)
 end
 
-function C.build_board_pr_review_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, tick, pr_comments, content_fetch, high_risk)
-  return board.append_board_digest_to_proposal(M, C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch, high_risk), repo, tick)
+function C.build_board_pr_review_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, tick, pr_comments, content_fetch, high_risk, lifecycle_repo)
+  return board.append_board_digest_to_proposal(M, C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch, high_risk, lifecycle_repo), lifecycle_repo or repo, tick)
 end
 
-function C.build_pr_review_loop_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch, high_risk, dedup_key)
-  local proposal = C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch, high_risk)
+function C.build_pr_review_loop_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch, high_risk, dedup_key, lifecycle_repo)
+  local proposal = C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch, high_risk, lifecycle_repo)
   proposal.dedup_key = dedup_key or transition_version.loop_at(proposal.dedup_key, n)
   return apply_converge_fields(proposal, n, converge)
 end
 
-function C.build_board_pr_review_loop_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, tick, pr_comments, content_fetch, high_risk, dedup_key)
-  return board.append_board_digest_to_proposal(M, C.build_pr_review_loop_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch, high_risk, dedup_key), repo, tick)
+function C.build_board_pr_review_loop_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, tick, pr_comments, content_fetch, high_risk, dedup_key, lifecycle_repo)
+  return board.append_board_digest_to_proposal(M, C.build_pr_review_loop_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch, high_risk, dedup_key, lifecycle_repo), lifecycle_repo or repo, tick)
 end
 
 function C.implement_commit_subject(issue_number, current)

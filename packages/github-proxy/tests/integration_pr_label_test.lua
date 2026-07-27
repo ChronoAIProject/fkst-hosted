@@ -78,7 +78,7 @@ local function guarded_label_event(extra)
   return label_event(payload)
 end
 
-local function mock_pr_comment_view(comments)
+local function mock_pr_comment_view_for(repo, pr_number, comments)
   local parts = {}
   for index, body in ipairs(comments or {}) do
     table.insert(parts, string.format(
@@ -87,11 +87,15 @@ local function mock_pr_comment_view(comments)
       h.json_string(body)
     ))
   end
-  t.mock_command("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100", {
+  t.mock_command("gh api --paginate --slurp repos/" .. tostring(repo) .. "/issues/" .. tostring(pr_number) .. "/comments?per_page=100", {
     stdout = "[[" .. table.concat(parts, ",") .. "]]\n",
     stderr = "",
     exit_code = 0,
   })
+end
+
+local function mock_pr_comment_view(comments)
+  mock_pr_comment_view_for("owner/x", 7, comments)
 end
 
 return {
@@ -150,6 +154,59 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 1)
     t.eq(count_calls("gh pr edit"), 1)
+  end,
+
+  test_cross_repo_pr_label_verifies_lifecycle_claim_before_implementation_write = function()
+    local lifecycle_repo = "owner/lifecycle"
+    local implementation_repo = "owner/implementation"
+    local proposal_id = "generic-workflow/issue/owner/lifecycle/42"
+    local marker = '<!-- fkst:generic-workflow:state:v1 proposal="' .. proposal_id
+      .. '" state="reviewing" version="v1" stage_rank="675" -->'
+    mock_write_env("1")
+    mock_bot_env()
+    mock_pr_comment_view_for(implementation_repo, 7, { marker })
+    mock_repo_label_list({ added_label, removed_label })
+    t.mock_command("gh pr edit", { stdout = "", stderr = "", exit_code = 0 })
+    t.mock_command("gh api repos/" .. lifecycle_repo .. "/issues/42", {
+      stdout = '{"assignees":[{"login":"fkst-test-bot"}]}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = t.run_department("departments/github_issue_label/main.lua", guarded_label_event({
+      repo = implementation_repo,
+      issue_repo = lifecycle_repo,
+      expected_proposal_id = proposal_id,
+      marker_guard = {
+        namespace = "generic-workflow",
+        marker = "state",
+        version = "v1",
+        match = { proposal = proposal_id },
+        expected = { state = "reviewing", version = "v1" },
+        order_by = { "stage_rank", "version_order_key" },
+      },
+      source_ref = { kind = "external", ref = implementation_repo .. "#pr/7" },
+      claim = {
+        owner = "fkst-test-bot",
+        source_ref = { kind = "external", ref = lifecycle_repo .. "#issue/42" },
+      },
+    }), opts("pr-label-cross-repo-claim", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh api repos/" .. lifecycle_repo .. "/issues/42"), 1)
+    t.eq(count_calls("gh api repos/" .. implementation_repo .. "/issues/42"), 0)
+    t.eq(count_calls("gh pr edit"), 1)
+    local wrote_implementation_repo = false
+    for _, call in ipairs(t.command_calls()) do
+      local rendered = tostring(call.rendered or "")
+      if rendered:find("gh pr edit", 1, true) ~= nil
+        and rendered:find(implementation_repo, 1, true) ~= nil then
+        wrote_implementation_repo = true
+      end
+    end
+    t.is_true(wrote_implementation_repo)
   end,
 
   test_pr_label_request_skips_when_generic_marker_guard_is_superseded = function()

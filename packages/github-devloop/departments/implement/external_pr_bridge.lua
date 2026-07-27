@@ -9,7 +9,10 @@ local pr_safety = require("devloop.pr_safety")
 local M = {}
 local git_handle = nil
 
-local function git()
+local function git(opts)
+  if type(opts) == "table" and opts.git ~= nil then
+    return opts.git
+  end
   if git_handle == nil then
     if type(exec_argv) ~= "function" then
       error("github-devloop: external-pr-bridge-git-adapter-unavailable: exec_argv is required")
@@ -52,15 +55,16 @@ function M.detect(current, repo, managed)
   return marker
 end
 
-function M.provision(worktree, marker, proposal_id)
+function M.provision(worktree, marker, proposal_id, opts)
   if marker == nil then
     return true
   end
-  local fetch = devloop_commands.git_fetch_pr_head_ref("origin", marker.pr_number, 60)
+  local handle = git(opts)
+  local fetch = handle.fetch_ref("origin", "refs/pull/" .. tostring(marker.pr_number) .. "/head", 60)
   if fetch.exit_code ~= 0 then
     error("github-devloop: external-pr-bridge-fetch-failed: git fetch external PR head failed: " .. tostring(fetch.stderr))
   end
-  local head = devloop_commands.git_fetch_head_commit(30)
+  local head = handle.fetch_head_commit(30)
   if head.exit_code ~= 0 then
     error("github-devloop: external-pr-bridge-head-resolve-failed: git FETCH_HEAD resolve failed: " .. tostring(head.stderr))
   end
@@ -68,7 +72,7 @@ function M.provision(worktree, marker, proposal_id)
   if not pr_safety.is_safe_head_sha(head_sha) then
     error("github-devloop: external-pr-bridge-head-unsafe: unsafe external PR head sha")
   end
-  local merge = devloop_commands.git_worktree_merge_no_edit(worktree, head_sha, 120)
+  local merge = handle.merge_no_edit(worktree, head_sha, 120)
   if merge.exit_code == 0 then
     devloop_logging.log_line("info", "implement", proposal_id, "EXTERNAL_PR_BRIDGE", {
       "repo=" .. tostring(marker.repo),
@@ -78,7 +82,7 @@ function M.provision(worktree, marker, proposal_id)
     })
     return true
   end
-  local unmerged = git().unmerged_paths(worktree, 30)
+  local unmerged = handle.unmerged_paths(worktree, 30)
   if unmerged.exit_code ~= 0 then
     error("github-devloop: external-pr-bridge-unmerged-check-failed: git unmerged path check failed: " .. tostring(unmerged.stderr))
   end

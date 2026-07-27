@@ -16,6 +16,8 @@ local t = h.t
 
 local REPO = "owner/repo"
 local INTEGRATION = "integration/dev"
+local IMPLEMENTATION_REPO = "owner/implementation"
+local IMPLEMENTATION_BRANCH = "fkst-hosted"
 
 local function render_comment(body)
   return string.format(
@@ -24,7 +26,7 @@ local function render_comment(body)
   )
 end
 
-local function mock_env(max_inflight)
+local function mock_env(max_inflight, delivery_grants)
   author_policy.mock_env(t, nil, {
     configure_trusted_bot_login = h.mock_author_policy_configure,
   })
@@ -36,6 +38,9 @@ local function mock_env(max_inflight)
   })
   t.mock_command('printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"', {
     stdout = INTEGRATION, stderr = "", exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_DEVLOOP_DELIVERY_GRANTS"', {
+    stdout = delivery_grants or "[]", stderr = "", exit_code = 0,
   })
 end
 
@@ -50,13 +55,20 @@ local function mock_wip_list(numbers)
 end
 
 -- markers may be nil to model an implementing holder with no pr-link yet
-local function mock_wip_state(issue_number, state_name, base_branch)
+local function mock_wip_state(issue_number, state_name, base_branch, implementation_repo)
   local proposal_id = base_ids.proposal_id(REPO, issue_number)
   local version = "ready/consensus-github-devloop/issue/owner/repo/" .. tostring(issue_number) .. "/intake/1/loop/1"
   local comments = { render_comment(core.state_marker(proposal_id, state_name, version)) }
   if base_branch ~= nil then
     local branch = "devloop/issue/owner/repo/" .. tostring(issue_number) .. "/work"
-    table.insert(comments, render_comment(m_builders.pr_link_marker(proposal_id, issue_number + 500, branch, version, base_branch)))
+    table.insert(comments, render_comment(m_builders.pr_link_marker(
+      proposal_id,
+      issue_number + 500,
+      branch,
+      version,
+      base_branch,
+      implementation_repo
+    )))
   end
   t.mock_command(core.gh_issue_view_state_cmd(REPO, issue_number), {
     stdout = string.format(
@@ -67,22 +79,32 @@ local function mock_wip_state(issue_number, state_name, base_branch)
   })
 end
 
-local function mock_pr_merge_view(issue_number, pr_number, head_sha, comments)
+local function mock_pr_merge_view(repo, issue_number, pr_number, head_sha, base_branch, comments)
   local rendered_comments = {}
   for _, body in ipairs(comments or {}) do
     table.insert(rendered_comments, render_comment(body))
   end
-  t.mock_command(core.gh_pr_view_merge_cmd(REPO, pr_number), {
+  t.mock_command(core.gh_pr_view_merge_cmd(repo, pr_number), {
     stdout = string.format(
       '{"headRefName":"devloop/issue/owner/repo/%d/work","headRefOid":"%s","baseRefName":"%s","baseRefOid":"1111111111111111111111111111111111111111","state":"OPEN","updatedAt":"2026-06-03T01:00:00Z","isDraft":false,"mergedAt":null,"comments":[%s],"headRepository":{"nameWithOwner":"owner/repo"},"headRepositoryOwner":{"login":"owner"},"isCrossRepository":false,"mergeable":"UNKNOWN","mergeStateStatus":"UNKNOWN","statusCheckRollup":[]}\n',
       issue_number,
       head_sha,
-      INTEGRATION,
+      base_branch,
       table.concat(rendered_comments, ",")
     ),
     stderr = "",
     exit_code = 0,
   })
+end
+
+local function cross_repo_grant(issue_number)
+  return string.format(
+    '[{"lifecycle_repo":"%s","lifecycle_issue":%d,"implementation_repo":"%s","implementation_branch":"%s","implementation_root":"/tmp/fkst-owner-implementation"}]',
+    REPO,
+    issue_number,
+    IMPLEMENTATION_REPO,
+    IMPLEMENTATION_BRANCH
+  )
 end
 
 return {
@@ -113,7 +135,7 @@ return {
     local head_sha = "abcdef1234567890abcdef1234567890abcdef12"
     mock_wip_list({ issue_number })
     mock_wip_state(issue_number, "merge-ready", INTEGRATION)
-    mock_pr_merge_view(issue_number, pr_number, head_sha, {
+    mock_pr_merge_view(REPO, issue_number, pr_number, head_sha, INTEGRATION, {
       m_mgw.merge_gate_wait_marker(proposal_id, pr_number, version, head_sha, "external-ci-red", "EXTERNAL_CI_RED"),
     })
 
@@ -133,7 +155,7 @@ return {
     local head_sha = "abcdef1234567890abcdef1234567890abcdef12"
     mock_wip_list({ issue_number })
     mock_wip_state(issue_number, "merge-ready", INTEGRATION)
-    mock_pr_merge_view(issue_number, pr_number, head_sha, {})
+    mock_pr_merge_view(REPO, issue_number, pr_number, head_sha, INTEGRATION, {})
 
     local allowed, reason, count, max = m_mq.wip_capacity_allows_start(core, REPO, 42)
     t.eq(allowed, false)
@@ -166,5 +188,28 @@ return {
     t.eq(allowed, false)
     t.eq(reason, "wip-cap-reached")
     t.eq(count, 1)
+  end,
+
+  test_cross_repo_holder_uses_granted_branch_and_pr_repository = function()
+    local issue_number = 51
+    local pr_number = issue_number + 500
+    local head_sha = "abcdef1234567890abcdef1234567890abcdef12"
+    mock_env(1, cross_repo_grant(issue_number))
+    mock_wip_list({ issue_number })
+    mock_wip_state(issue_number, "merge-ready", IMPLEMENTATION_BRANCH, IMPLEMENTATION_REPO)
+    mock_pr_merge_view(
+      IMPLEMENTATION_REPO,
+      issue_number,
+      pr_number,
+      head_sha,
+      IMPLEMENTATION_BRANCH,
+      {}
+    )
+
+    local allowed, reason, count, max = m_mq.wip_capacity_allows_start(core, REPO, 42)
+    t.eq(allowed, false)
+    t.eq(reason, "wip-cap-reached")
+    t.eq(count, 1)
+    t.eq(max, 1)
   end,
 }

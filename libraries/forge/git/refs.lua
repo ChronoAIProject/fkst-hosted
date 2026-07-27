@@ -106,6 +106,14 @@ local function current_branch_argv()
   return { "git", "rev-parse", "--abbrev-ref", "HEAD" }
 end
 
+local function top_level_argv()
+  return { "git", "rev-parse", "--show-toplevel" }
+end
+
+local function remote_url_argv(remote)
+  return { "git", "remote", "get-url", tostring(remote) }
+end
+
 local function branch_head_argv(branch)
   return { "git", "rev-parse", "--verify", "refs/heads/" .. tostring(branch) }
 end
@@ -420,6 +428,14 @@ function M.install(handle)
 
   function handle.current_branch(timeout)
     return exec_result(handle, current_branch_argv(), timeout, "git rev-parse current branch")
+  end
+
+  function handle.top_level(timeout)
+    return exec_result(handle, top_level_argv(), timeout, "git rev-parse --show-toplevel")
+  end
+
+  function handle.remote_url(remote, timeout)
+    return exec_result(handle, remote_url_argv(remote), timeout, "git remote get-url")
   end
 
   function handle.current_branch_worktree(worktree, timeout)

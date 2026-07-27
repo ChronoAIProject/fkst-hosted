@@ -10,6 +10,7 @@ local strings = require("contract.strings")
 local config = require("devloop.config")
 local m_mq = require("devloop.merge_queue")
 local devloop_logging = require("devloop.logging")
+local delivery_target = require("devloop.delivery_target")
 
 local detector = "queue-starvation"
 local merge_recent_threshold_minutes = 360
@@ -247,31 +248,48 @@ local function merge_ready_queue_head(M, entities, now_seconds)
 end
 
 local function merge_queue_head_entity(M, repo, now_seconds)
-  local branches = config.branch_config()
-  local _, entries = m_mq.merge_queue_head(M, repo, branches.integration)
-  local head, age = m_mq.merge_queue_starvation_candidate(entries, m_mq._merge_ready_starvation_threshold_minutes, now_seconds)
-  if head == nil then
+  local host_branches = config.branch_config()
+  local lanes = delivery_target.implementation_lanes(repo, host_branches.integration, {
+    default_git = M.git,
+    verify = false,
+  })
+  local selected, selected_repo, selected_age
+  for _, lane in ipairs(lanes) do
+    local branch = lane.cross_repo and lane.implementation_branch or host_branches.integration
+    local _, entries = m_mq.merge_queue_head(M, lane.implementation_repo, branch)
+    local head, age = m_mq.merge_queue_starvation_candidate(entries, m_mq._merge_ready_starvation_threshold_minutes, now_seconds)
+    if head ~= nil and (selected == nil
+      or tonumber(age or -1) > tonumber(selected_age or -1)
+      or (tonumber(age or -1) == tonumber(selected_age or -1)
+        and tostring(head.proposal_id or "") < tostring(selected.proposal_id or ""))) then
+      selected = head
+      selected_repo = lane.implementation_repo
+      selected_age = age
+    end
+  end
+  if selected == nil then
     return nil
   end
-  local repo_from_proposal, issue_number = base_ids.parse_proposal_id(head.proposal_id)
+  local repo_from_proposal, issue_number = base_ids.parse_proposal_id(selected.proposal_id)
   if repo_from_proposal == nil then
     return nil
   end
   return {
     entity = {
-      proposal_id = head.proposal_id,
+      proposal_id = selected.proposal_id,
       issue_number = tonumber(issue_number) or issue_number,
-      pr_number = head.pr_number,
-      title = "PR #" .. tostring(head.pr_number),
+      pr_number = selected.pr_number,
+      implementation_repo = selected_repo,
+      title = "PR #" .. tostring(selected.pr_number),
       state = {
         state = "merge-ready",
-        version = head.version,
+        version = selected.version,
       },
-      head_sha = head.head_sha,
+      head_sha = selected.head_sha,
       source = "merge-queue",
     },
     state = "merge-ready",
-    age_minutes = age,
+    age_minutes = selected_age,
     threshold_minutes = m_mq._merge_ready_starvation_threshold_minutes,
   }
 end
@@ -344,7 +362,7 @@ function C.queue_starvation_redrive_payload(repo, evidence)
   if type(head) ~= "table" or head.pr_number == nil then
     return nil
   end
-  return m_mq.merge_queue_starvation_tick_payload(repo, evidence.incident_identity, {
+  return m_mq.merge_queue_starvation_tick_payload(head.implementation_repo or repo, evidence.incident_identity, {
     pr_number = head.pr_number,
     proposal_id = head.proposal_id,
     version = head.state and head.state.version or nil,

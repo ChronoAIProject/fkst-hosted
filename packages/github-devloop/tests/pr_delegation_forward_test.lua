@@ -166,6 +166,89 @@ return {
     t.is_true(awaiting_request.body:find("fkst:github-devloop:pr-delegation:v1", 1, true) ~= nil)
   end,
 
+  test_ensure_pr_child_creates_cross_repo_pr_from_verified_granted_checkout = function()
+    local implementation_repo = "owner/implementation"
+    local implementation_branch = "fkst-hosted"
+    local implementation_root = "/runtime/implementation"
+    local grant = '[{"lifecycle_repo":"' .. repo .. '","lifecycle_issue":42,'
+      .. '"implementation_repo":"' .. implementation_repo .. '",'
+      .. '"implementation_branch":"' .. implementation_branch .. '",'
+      .. '"implementation_root":"' .. implementation_root .. '"}]'
+    t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_DELIVERY_GRANTS"), {
+      stdout = grant,
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("git -C '" .. implementation_root .. "' rev-parse --show-toplevel", {
+      stdout = implementation_root .. "\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("git -C '" .. implementation_root .. "' remote get-url origin", {
+      stdout = "https://github.com/" .. implementation_repo .. ".git\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("git -C '" .. implementation_root .. "' rev-parse --abbrev-ref HEAD", {
+      stdout = implementation_branch .. "\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    author_policy.mock_env(t, nil, {
+      configure_trusted_bot_login = h.mock_author_policy_configure,
+    })
+    local list_command = core.gh_pr_list_head_base_cmd(
+      implementation_repo,
+      branch,
+      implementation_branch
+    )
+    t.mock_command(list_command, {
+      stdout = "[[]]\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(list_command, {
+      stdout = '[[{"number":7,"head":{"ref":"' .. branch .. '","sha":"' .. head_sha
+        .. '"},"base":{"ref":"' .. implementation_branch .. '"},"state":"open"}]]\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh pr create", {
+      stdout = "https://github.example/owner/implementation/pull/7\n",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = core.ensure_pr_child(issue({
+      base_branch = implementation_branch,
+      implementation_repo = implementation_repo,
+      implementation_branch = implementation_branch,
+      implementation_root = implementation_root,
+    }), impl_version, 1)
+
+    t.eq(result.pr_proposal_id, "github-devloop/pr/owner/implementation/7")
+    t.eq(result.lifecycle_repo, repo)
+    t.eq(result.implementation_repo, implementation_repo)
+    t.eq(result.base_branch, implementation_branch)
+    local pr_effect = find_effect(result.effects, "github-proxy.github_pr_comment_request")
+    local issue_effect = find_effect(result.effects, "github-proxy.github_issue_comment_request")
+    t.eq(pr_effect.payload.repo, implementation_repo)
+    t.eq(pr_effect.payload.source_ref.ref, implementation_repo .. "#pr/7")
+    t.eq(issue_effect.payload.repo, repo)
+    t.eq(issue_effect.payload.source_ref.ref, repo .. "#issue/42")
+    t.is_true(pr_effect.payload.body:find('implementation_repo="' .. implementation_repo .. '"', 1, true) ~= nil)
+    t.is_true(issue_effect.payload.body:find('implementation_repo="' .. implementation_repo .. '"', 1, true) ~= nil)
+    local created_in_implementation_repo = false
+    for _, call in ipairs(t.command_calls()) do
+      local rendered = tostring(call.rendered or "")
+      if rendered:find("gh pr create", 1, true) ~= nil
+        and rendered:find(implementation_repo, 1, true) ~= nil then
+        created_in_implementation_repo = true
+      end
+    end
+    t.is_true(created_in_implementation_repo)
+  end,
+
   test_ensure_pr_child_rerun_with_visible_facts_is_idempotent = function()
     local pr_proposal = "github-devloop/pr/owner/repo/7"
     local delegated = m_builders.pr_delegation_marker(issue_proposal, pr_proposal, 7, impl_version, "g1")

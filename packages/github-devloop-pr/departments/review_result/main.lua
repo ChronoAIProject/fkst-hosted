@@ -19,6 +19,7 @@ local v_review_result = require("devloop.validators.review_result")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
 local devloop_commands = require("devloop.commands")
+local delivery_target = require("devloop.delivery_target")
 -- Preserve existing body line coordinates for the coverage ratchet.
 
 local spec = {
@@ -80,7 +81,6 @@ return saga.department(spec, { done = function() return false end, act = functio
   end
 
   devloop_base.assert_trusted_bot_configured()
-  local branches = config.branch_config()
   local lock_key = entity_lib.pr_transition_lock_key(repo, pr_number)
   with_lock(lock_key, function()
   local pr_view = devloop_commands.gh_pr_view_origin(repo, pr_number, 30)
@@ -92,7 +92,25 @@ return saga.department(spec, { done = function() return false end, act = functio
   if origin == nil then
     origin = entity_lib.pr_native_origin(repo, pr_number, current_pr)
   end
-  if origin.repo ~= repo then
+  local target
+  local branches
+  if origin.issue_number ~= nil then
+    target = delivery_target.resolve(origin.lifecycle_repo or origin.repo, origin.issue_number, {
+      implementation_repo = origin.implementation_repo or repo,
+      implementation_branch = origin.base_branch,
+      default_git = core.git,
+      git_factory = core.scoped_git,
+    })
+  else
+    branches = config.branch_config()
+    target = { implementation_repo = repo, implementation_branch = branches.integration, cross_repo = false }
+  end
+  if target.cross_repo then
+    branches = { upstream = target.implementation_branch, integration = target.implementation_branch }
+  elseif branches == nil then
+    branches = config.branch_config()
+  end
+  if tostring(origin.implementation_repo or origin.repo):lower() ~= tostring(repo):lower() then
     devloop_logging.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(repo)", "pr-origin repo mismatch")
     return
   end
@@ -118,8 +136,9 @@ return saga.department(spec, { done = function() return false end, act = functio
     devloop_logging.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(version)", "review proposal version is missing")
     return
   end
-    local pr_source_ref = entity_lib.pr_source_ref(origin.repo, pr_number)
-    if not m_claims.verify_pr_review_issue_claim("review_result", origin.repo, origin.issue_number, nil, origin.proposal_id) then
+    local pr_source_ref = entity_lib.pr_source_ref(repo, pr_number)
+    local lifecycle_repo = origin.lifecycle_repo or origin.repo
+    if not m_claims.verify_pr_review_issue_claim("review_result", lifecycle_repo, origin.issue_number, nil, origin.proposal_id) then
       return
     end
     devloop_logging.log_forged_markers("review_result", origin.proposal_id, current_pr.comments)
@@ -131,7 +150,7 @@ return saga.department(spec, { done = function() return false end, act = functio
         return
       end
       local audit_request = requests_review.build_review_result_divergence_comment_request(
-        origin.repo,
+        repo,
         origin.proposal_id,
         reached,
         first_result.decision,
@@ -264,14 +283,17 @@ return saga.department(spec, { done = function() return false end, act = functio
     if effective_decision == "approve" then
       comment_reached.current_head_sha = current_pr.head_sha
     end
-    local comment_request = requests_review.build_review_result_comment_request(core, origin.repo, origin.issue_number, origin.proposal_id, issue_version, comment_reached, pr_source_ref)
+    local comment_request = requests_review.build_review_result_comment_request(core, repo, origin.issue_number, origin.proposal_id, issue_version, comment_reached, pr_source_ref)
     local evidence_request = nil
     if effective_decision == "approve" and #high_risk_paths > 0 then
-      evidence_request = requests_review.build_high_risk_review_evidence_comment_request(origin.repo, origin.proposal_id, issue_version, comment_reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, pr_source_ref)
+      evidence_request = requests_review.build_high_risk_review_evidence_comment_request(repo, origin.proposal_id, issue_version, comment_reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, pr_source_ref)
     end
     local label_request = nil
     if origin.issue_number ~= nil then
-      label_request = requests_labels.build_review_result_label_request(origin.repo, origin.issue_number, origin.proposal_id, comment_reached, entity_lib.issue_source_ref(origin.repo, origin.issue_number))
+      label_request = requests_labels.build_review_result_label_request(
+        lifecycle_repo, origin.issue_number, origin.proposal_id, comment_reached,
+        entity_lib.issue_source_ref(lifecycle_repo, origin.issue_number)
+      )
     end
     local add_labels, remove_labels = devloop_state.state_label_changes(to_state)
     local raised = {

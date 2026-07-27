@@ -15,6 +15,7 @@ local payloads_predicates = require("devloop.payloads.predicates")
 local v_review_meta = require("devloop.validators.review_meta")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
+local delivery_target = require("devloop.delivery_target")
 local spec = {
   consumes = { "github-proxy.github_comment_written" },
   produces = {
@@ -114,19 +115,43 @@ local function valid_review_meta_handoff(handoff)
   return v_review_meta.is_supported_review_meta(review_meta_payload(handoff))
 end
 
-local function issue_claim_ok(payload, handoff)
+local function handoff_target(payload, handoff)
   local entity = entity_lib.parse_entity_proposal_id(handoff.proposal_id)
+  if entity == nil then
+    return nil
+  end
+  local source_repo, source_pr = devloop_base.parse_pr_source_ref(handoff.source_ref)
+  if source_repo == nil or tonumber(source_pr) ~= tonumber(handoff.pr_number) then
+    return nil
+  end
+  local target = delivery_target.for_entity(entity, handoff.source_ref, {
+    verify = false,
+  })
+  if tostring(target.implementation_repo):lower() ~= tostring(source_repo):lower()
+    or (payload.repo ~= nil and tostring(payload.repo):lower() ~= tostring(source_repo):lower()) then
+    return nil
+  end
+  return entity, target
+end
+
+local function issue_claim_ok(payload, handoff)
+  local entity, target = handoff_target(payload, handoff)
   if entity == nil then
     return false
   end
   if entity.kind == "pr" then
-    local repo = payload.repo
-    if repo == nil then
-      repo = select(1, devloop_base.parse_pr_source_ref(handoff.source_ref))
-    end
-    return entity.repo == repo and tostring(entity.pr_number) == tostring(handoff.pr_number)
+    return tostring(entity.repo):lower() == tostring(target.implementation_repo):lower()
+      and tostring(entity.pr_number) == tostring(handoff.pr_number)
   end
   return m_claims.verify_pr_review_issue_claim("comment_handoff", entity.repo, entity.issue_number, nil, handoff.proposal_id)
+end
+
+local function handoff_pr_repo(payload, handoff)
+  local _, target = handoff_target(payload, handoff)
+  if target == nil then
+    error("github-devloop: comment-handoff-delivery-mismatch: PR handoff differs from exact delivery target")
+  end
+  return target.implementation_repo
 end
 
 local function verified_pr_state(repo, handoff, comment_id, state)
@@ -197,13 +222,7 @@ local function emit_claimed_label(payload, handoff)
 end
 
 local function emit_pr_open(payload, handoff)
-  local repo = payload.repo
-  if repo == nil then
-    repo = select(1, devloop_base.parse_pr_source_ref(handoff.source_ref))
-  end
-  if repo == nil then
-    error("comment-handoff: pr-open-missing-repo: PR-open handoff missing repo")
-  end
+  local repo = handoff_pr_repo(payload, handoff)
   local verified_state, reason = verified_pr_state(repo, handoff, payload.comment_id, "pr-open")
   if verified_state == nil then
     if retryable_visibility_reason(reason) then
@@ -329,12 +348,12 @@ local function handoff_state(handoff)
   return strategy.state
 end
 
-local function issue_number_for_label(payload, handoff, repo)
+local function issue_number_for_label(payload, handoff)
   if payload.issue_number ~= nil then
     return payload.issue_number
   end
   local entity = entity_lib.parse_entity_proposal_id(handoff.proposal_id)
-  if entity ~= nil and entity.kind == "issue" and entity.repo == repo then
+  if entity ~= nil and entity.kind == "issue" then
     return entity.issue_number
   end
   return nil
@@ -345,13 +364,7 @@ maybe_raise_pr_label = function(payload, handoff)
   if state == nil then
     return
   end
-  local repo = payload.repo
-  if repo == nil then
-    repo = select(1, devloop_base.parse_pr_source_ref(handoff.source_ref))
-  end
-  if repo == nil then
-    error("github-devloop: pr-label-handoff-missing-repo: PR label handoff missing repo")
-  end
+  local repo = handoff_pr_repo(payload, handoff)
   local verified_state, reason = verified_pr_state(repo, handoff, payload.comment_id, state)
   if verified_state == nil then
     if retryable_visibility_reason(reason) then
@@ -364,7 +377,7 @@ maybe_raise_pr_label = function(payload, handoff)
 
   local label_request = core.build_reconcile_pr_state_label_request(
     repo,
-    issue_number_for_label(payload, handoff, repo),
+    issue_number_for_label(payload, handoff),
     handoff.pr_number,
     handoff.proposal_id,
     verified_state.state,

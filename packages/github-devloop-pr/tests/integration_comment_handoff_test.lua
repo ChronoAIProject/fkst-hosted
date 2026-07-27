@@ -11,6 +11,25 @@ local opts = h.opts
 local find_raise = h.find_raise
 local json_string = h.json_string
 
+local lifecycle_repo = "owner/lifecycle"
+local implementation_repo = "owner/implementation"
+
+local function delivery_grant_json()
+  return '[{"lifecycle_repo":"' .. lifecycle_repo
+    .. '","lifecycle_issue":42,"implementation_repo":"' .. implementation_repo
+    .. '","implementation_branch":"fkst-hosted","implementation_root":"/runtime/implementation"}]'
+end
+
+local function mock_delivery_grants(times)
+  for _ = 1, times or 1 do
+    t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_DELIVERY_GRANTS"), {
+      stdout = delivery_grant_json(),
+      stderr = "",
+      exit_code = 0,
+    })
+  end
+end
+
 local function run_handoff(payload, name)
   return h.run_department("departments/comment_handoff/main.lua", {
     queue = "github-proxy.github_comment_written",
@@ -18,12 +37,16 @@ local function run_handoff(payload, name)
   }, opts(name))
 end
 
-local function mock_marker_comment(comment_id, body, author_login)
-  t.mock_command("gh api --method GET 'repos/owner/repo/issues/comments/" .. tostring(comment_id) .. "'", {
+local function mock_marker_comment_for(repo, comment_id, body, author_login)
+  t.mock_command("gh api --method GET 'repos/" .. tostring(repo) .. "/issues/comments/" .. tostring(comment_id) .. "'", {
     stdout = '{"id":"' .. json_string(comment_id) .. '","body":"' .. json_string(body or "") .. '","user":{"login":"' .. tostring(author_login or "fkst-test-bot") .. '"},"created_at":"2026-06-03T01:00:00Z"}\n',
     stderr = "",
     exit_code = 0,
   })
+end
+
+local function mock_marker_comment(comment_id, body, author_login)
+  mock_marker_comment_for("owner/repo", comment_id, body, author_login)
 end
 
 return {
@@ -101,6 +124,51 @@ return {
     t.eq(label.expected_proposal_id, "github-devloop/issue/owner/repo/42")
     t.eq(label.expected_state, "reviewing")
     t.eq(label.expected_version, version)
+  end,
+
+  test_cross_repo_reviewing_handoff_reads_lifecycle_claim_and_labels_implementation_pr = function()
+    local proposal_id = "github-devloop/issue/" .. lifecycle_repo .. "/42"
+    local source_ref = entity_lib.pr_source_ref(implementation_repo, 7)
+    local version = "ready/consensus-github-devloop/issue/owner/lifecycle/42/2026-06-03T01-02-03Z"
+    mock_delivery_grants(4)
+    t.mock_command(core.gh_issue_view_claim_cmd(lifecycle_repo, 42), {
+      stdout = '{"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    mock_marker_comment_for(
+      implementation_repo,
+      "IC_cross_repo_reviewing_1",
+      core.state_marker(proposal_id, "reviewing", version)
+    )
+
+    local result = run_handoff({
+      schema = "github-proxy.comment-written.v1",
+      repo = implementation_repo,
+      target = "pr",
+      pr_number = 7,
+      comment_id = "IC_cross_repo_reviewing_1",
+      request_dedup_key = "observe-pr/comment/" .. proposal_id .. "/" .. version .. "/7",
+      dedup_key = "observe-pr/comment/" .. proposal_id .. "/" .. version .. "/7/written/IC_cross_repo_reviewing_1",
+      source_ref = source_ref,
+      handoff = {
+        kind = "github-devloop.reviewing",
+        proposal_id = proposal_id,
+        pr_number = 7,
+        version = version,
+        source_ref = source_ref,
+      },
+    }, "comment-handoff-cross-repo-reviewing")
+
+    t.eq(result.exit_code, 0)
+    local reviewing = find_raise(result.raises, "devloop_reviewing").payload
+    t.eq(reviewing.source_ref.ref, implementation_repo .. "#pr/7")
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    t.eq(label.repo, implementation_repo)
+    t.eq(label.issue_repo, lifecycle_repo)
+    t.eq(label.target_kind, "pr")
+    t.eq(label.target_number, 7)
+    t.eq(label.claim.source_ref.ref, lifecycle_repo .. "#issue/42")
   end,
 
   test_comment_written_reviewing_ack_skips_other_owned_issue = function()

@@ -5,8 +5,9 @@ local substrate_pin = require("departments.implement.substrate_pin")
 
 local M = {}
 
-function M.implemented_branch_head(base_head, branch)
-  local ahead_result = devloop_commands.git_branch_ahead_count(base_head, branch, 30)
+function M.implemented_branch_head(base_head, branch, git)
+  local ahead_result = git and git.branch_ahead_count(base_head, branch, 30)
+    or devloop_commands.git_branch_ahead_count(base_head, branch, 30)
   if ahead_result.exit_code ~= 0 then
     error("github-devloop: branch-fact-read-failed: git branch ahead check failed: " .. tostring(ahead_result.stderr))
   end
@@ -15,7 +16,8 @@ function M.implemented_branch_head(base_head, branch)
     return nil
   end
 
-  local head_result = devloop_commands.git_branch_head(branch, 30)
+  local head_result = git and git.branch_head(branch, 30)
+    or devloop_commands.git_branch_head(branch, 30)
   if head_result.exit_code ~= 0 then
     error("github-devloop: git-head-read-failed: git branch head failed: " .. tostring(head_result.stderr))
   end
@@ -27,11 +29,11 @@ function M.implemented_branch_head(base_head, branch)
 end
 
 function M.remote_branch_fact(core_git, branch, base_branch, source_fact)
-  local fetch_result = devloop_commands.git_fetch_branch("origin", branch, 60)
+  local fetch_result = core_git.fetch_branch("origin", branch, 60)
   if fetch_result.exit_code ~= 0 then
     return nil
   end
-  local head_result = devloop_commands.git_remote_branch_head("origin", branch, 30)
+  local head_result = core_git.remote_branch_head("origin", branch, 30)
   if head_result.exit_code ~= 0 then
     if head_result.exit_code == 1 then
       return nil
@@ -58,16 +60,17 @@ function M.remote_branch_fact(core_git, branch, base_branch, source_fact)
   }
 end
 
-function M.local_branch_fact(base_head, branch, base_branch, dedup_key)
-  local branch_ref = devloop_commands.git_show_ref_branch(branch, 30)
+function M.local_branch_fact(base_head, branch, base_branch, dedup_key, git)
+  local branch_ref = git and git.show_ref_branch_quiet(branch, 30)
+    or devloop_commands.git_show_ref_branch(branch, 30)
   if branch_ref.exit_code ~= 0 then
     if branch_ref.exit_code == 1 then
       return nil
     end
     error("github-devloop: branch-ref-check-failed: git branch ref check failed: " .. tostring(branch_ref.stderr))
   end
-  local head_sha = M.implemented_branch_head(base_head, branch)
-  if head_sha == nil or substrate_pin.is_only_pin_delta(base_head, branch) then
+  local head_sha = M.implemented_branch_head(base_head, branch, git)
+  if head_sha == nil or substrate_pin.is_only_pin_delta(base_head, branch, { git = git }) then
     return nil
   end
   return {

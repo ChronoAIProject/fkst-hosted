@@ -20,7 +20,16 @@ local function same_review_result_dedup(left, right)
   return left_canonical ~= nil and left_canonical == right_canonical
 end
 
-local function review_meta_fact_from_converge_marker(M, comments, issue_proposal_id, issue_version)
+local function review_target_repo(issue_proposal_id, implementation_repo, encoded_repo)
+  local lifecycle_repo = base_ids.parse_proposal_id(issue_proposal_id)
+  local repo = implementation_repo or lifecycle_repo
+  if repo == nil or devloop_base.safe_pr_review_repo_segment(repo) ~= tostring(encoded_repo or "") then
+    return nil
+  end
+  return repo
+end
+
+local function review_meta_fact_from_converge_marker(M, comments, issue_proposal_id, issue_version, implementation_repo)
   if type(comments) ~= "table" then
     return nil
   end
@@ -34,12 +43,13 @@ local function review_meta_fact_from_converge_marker(M, comments, issue_proposal
       local review_proposal = marker:match('proposal="([^"]+)"')
       local consensus_dedup = marker:match('dedup="([^"]*)"')
       local round = tonumber(marker:match('round="(%d+)"'))
-      local _, pr_number, review_version = devloop_base.parse_pr_review_proposal_id(review_proposal)
-      local repo = base_ids.parse_proposal_id(issue_proposal_id)
+      local review_repo, pr_number, review_version = devloop_base.parse_pr_review_proposal_id(review_proposal)
+      local repo = review_target_repo(issue_proposal_id, implementation_repo, review_repo)
       if marker_issue == tostring(issue_proposal_id)
         and marker_version == tostring(heartbeat_version)
         and review_version == tostring(heartbeat_version)
         and repo ~= nil
+        and review_repo ~= nil
         and forge_validators.is_positive_pr_number(pr_number)
         and strings.is_path_safe_key(review_proposal, M._max_key_len)
         and strings.is_bounded_string(consensus_dedup, M._max_dedup_len)
@@ -60,7 +70,7 @@ end
 local function build_ops(ctx)
   local ops = {}
 
-  function ops.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue_version, pr_number, head_sha, n)
+  function ops.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue_version, pr_number, head_sha, n, implementation_repo)
     local repo = base_ids.parse_proposal_id(issue_proposal_id)
     if repo == nil
       or not forge_validators.is_positive_pr_number(pr_number)
@@ -74,8 +84,10 @@ local function build_ops(ctx)
         local marker_issue = marker:match('proposal="([^"]+)"')
         local marker_dedup = marker:match('dedup="([^"]*)"')
         local review_proposal = review_proposal_from_dedup(marker_dedup)
-        local _, review_pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
+        local review_repo, review_pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
+        local source_repo = review_target_repo(issue_proposal_id, implementation_repo, review_repo)
         if marker_issue == tostring(issue_proposal_id)
+          and source_repo ~= nil
           and tostring(review_pr_number or "") == tostring(pr_number)
           and review_version == transition_version.safe_version_segment(ctx._strip_latest_fix_version_suffix(issue_version))
           and tostring(reviewed_head_sha or "") == tostring(head_sha)
@@ -83,7 +95,7 @@ local function build_ops(ctx)
           return {
             proposal_id = review_proposal,
             dedup_key = marker_dedup,
-            source_ref = entity_lib.pr_source_ref(repo, pr_number),
+            source_ref = entity_lib.pr_source_ref(source_repo, pr_number),
             pr_number = tonumber(pr_number),
             n = tonumber(n) or 0,
           }
@@ -100,8 +112,10 @@ local function build_ops(ctx)
         local round = tonumber(marker:match('fix_round="(%d+)"'))
         local review_proposal = review_proposal_from_dedup(marker_dedup)
         local canonical_marker_dedup = devloop_base.canonical_pr_review_consensus_dedup_key(marker_dedup)
-        local _, review_pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
+        local review_repo, review_pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
+        local source_repo = review_target_repo(issue_proposal_id, implementation_repo, review_repo)
         if marker_issue == tostring(issue_proposal_id)
+          and source_repo ~= nil
           and verdict == "checkpoint"
           and marker_version == tostring(issue_version)
           and tostring(review_pr_number or "") == tostring(pr_number)
@@ -120,7 +134,7 @@ local function build_ops(ctx)
             proposal_id = review_proposal,
             dedup_key = reflection_dedup,
             review_dedup_key = canonical_marker_dedup,
-            source_ref = entity_lib.pr_source_ref(repo, pr_number),
+            source_ref = entity_lib.pr_source_ref(source_repo, pr_number),
             pr_number = tonumber(pr_number),
             n = tonumber(n) or 0,
             mode = "fix-reflection",
@@ -131,15 +145,17 @@ local function build_ops(ctx)
       end
     end
     local reject_fact = m_facts.review_reject_fact(comments, issue_proposal_id, issue_version)
-    local _, reject_pr_number, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(reject_fact and reject_fact.review_proposal_id)
+    local reject_repo, reject_pr_number, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(reject_fact and reject_fact.review_proposal_id)
+    local source_repo = review_target_repo(issue_proposal_id, implementation_repo, reject_repo)
     if reject_fact ~= nil
+      and source_repo ~= nil
       and tostring(reject_pr_number or "") == tostring(pr_number)
       and tostring(reviewed_head_sha or "") == tostring(head_sha)
       and devloop_base.is_safe_pr_review_result_ref(reject_fact.review_proposal_id, reject_fact.review_dedup_key) then
       return {
         proposal_id = reject_fact.review_proposal_id,
         dedup_key = reject_fact.review_dedup_key,
-        source_ref = entity_lib.pr_source_ref(repo, pr_number),
+        source_ref = entity_lib.pr_source_ref(source_repo, pr_number),
         pr_number = tonumber(pr_number),
         n = tonumber(n) or 0,
       }
@@ -147,12 +163,16 @@ local function build_ops(ctx)
     return nil
   end
 
-  function ops.review_meta_replay_fact(comments, issue_proposal_id, issue_version, pr_number, head_sha)
-    local converge_fact = review_meta_fact_from_converge_marker(ctx, comments, issue_proposal_id, issue_version)
+  function ops.review_meta_replay_fact(comments, issue_proposal_id, issue_version, pr_number, head_sha, implementation_repo)
+    local converge_fact = review_meta_fact_from_converge_marker(
+      ctx, comments, issue_proposal_id, issue_version, implementation_repo
+    )
     if converge_fact ~= nil then
       return converge_fact
     end
-    return ops.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue_version, pr_number, head_sha, 0)
+    return ops.review_meta_replay_fact_from_state(
+      comments, issue_proposal_id, issue_version, pr_number, head_sha, 0, implementation_repo
+    )
   end
 
   function ops.fixing_replay_feedback_fact(comments, issue_proposal_id, issue_version)

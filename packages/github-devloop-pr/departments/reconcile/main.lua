@@ -23,6 +23,7 @@ local ci_verdict = require("core.ci_verdict")
 local fix_rounds = require("core.fix_rounds")
 local with_current_classification = ci_verdict.with_current_classification
 local OWN_CI_RED = ci_verdict.OWN_CI_RED
+local delivery_target = require("devloop.delivery_target")
 local build_fix_reconcile_comment_request = assert(rawget(core, "build_fix_reconcile_comment_request"))
 local build_fix_reconcile_label_request = assert(rawget(core, "build_fix_reconcile_label_request"))
 
@@ -42,6 +43,21 @@ local spec = {
   },
   stall_window = "2m",
 }
+
+local function resolve_reconcile_target(entity, source_ref, expected_pr_number)
+  local target = delivery_target.for_entity(entity, source_ref, {
+    verify = false,
+  })
+  local source_repo, source_pr_number = devloop_base.parse_pr_source_ref(source_ref)
+  if expected_pr_number ~= nil then
+    if source_repo == nil
+      or tonumber(source_pr_number) ~= tonumber(expected_pr_number)
+      or tostring(source_repo):lower() ~= tostring(target.implementation_repo):lower() then
+      error("github-devloop: reconcile-source-invalid: PR source differs from exact delivery target")
+    end
+  end
+  return target
+end
 
 local fix_reconcile_from_states = { "reviewing", "fixing", "merge-ready", "merging" }
 local fix_reconcile_from_state_set = {
@@ -168,13 +184,15 @@ local function pipeline_review(event)
     devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return
   end
-  local repo = entity.repo
+  local lifecycle_repo = entity.repo
   local issue_number = entity.issue_number
   local _, pr_number = devloop_base.parse_pr_source_ref(reconcile.source_ref)
   if pr_number == nil then
     pr_number = entity.pr_number
   end
-  if not m_claims.verify_pr_review_issue_claim("reconcile", repo, issue_number, nil, reconcile.proposal_id) then
+  local target = resolve_reconcile_target(entity, reconcile.source_ref, pr_number)
+  local pr_repo = target.implementation_repo
+  if not m_claims.verify_pr_review_issue_claim("reconcile", lifecycle_repo, issue_number, nil, reconcile.proposal_id) then
     return
   end
 
@@ -187,7 +205,7 @@ local function pipeline_review(event)
   with_lock(lock_key, function()
     devloop_base.assert_trusted_bot_configured()
 
-    local view = devloop_commands.gh_pr_view_origin(repo, pr_number, 30)
+    local view = devloop_commands.gh_pr_view_origin(pr_repo, pr_number, 30)
     if view.exit_code ~= 0 then
       error("github-devloop: gh-pr-review-reconcile-view-failed: gh pr review reconcile view failed: " .. tostring(view.stderr))
     end
@@ -224,8 +242,8 @@ local function pipeline_review(event)
 
     local action = "drop"
     local reason = tostring(reconcile.terminal_cause) .. "-after-" .. tostring(reconcile.round) .. "-review-rounds"
-    local comment_request = core.build_review_reconcile_comment_request(repo, issue_number, reconcile, action, reason, version)
-    local label_request = issue_number ~= nil and core.build_review_reconcile_label_request(repo, issue_number, reconcile) or nil
+    local comment_request = core.build_review_reconcile_comment_request(pr_repo, issue_number, reconcile, action, reason, version)
+    local label_request = issue_number ~= nil and core.build_review_reconcile_label_request(lifecycle_repo, issue_number, reconcile) or nil
     emit_blocked_reconcile("reviewing", reconcile.proposal_id, state, version, action, reason, comment_request, label_request, "github-proxy.github_pr_comment_request")
   end)
 end
@@ -247,13 +265,15 @@ local function pipeline_fix(event)
     devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, fix_reconcile_from_label, "blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return
   end
-  local repo = entity.repo
+  local lifecycle_repo = entity.repo
   local issue_number = entity.issue_number
   local _, pr_number = devloop_base.parse_pr_source_ref(reconcile.source_ref)
   if pr_number == nil then
     pr_number = entity.pr_number
   end
-  if not m_claims.verify_pr_review_issue_claim("reconcile", repo, issue_number, nil, reconcile.proposal_id) then
+  local target = resolve_reconcile_target(entity, reconcile.source_ref, pr_number)
+  local pr_repo = target.implementation_repo
+  if not m_claims.verify_pr_review_issue_claim("reconcile", lifecycle_repo, issue_number, nil, reconcile.proposal_id) then
     return
   end
 
@@ -325,14 +345,14 @@ local function pipeline_fix(event)
     local reason = reconcile.reason_class == fix_rounds.CI_REPAIR_RETRY_POLICY_INVALID
       and fix_rounds.CI_REPAIR_RETRY_POLICY_INVALID
       or "fix-loop-max-rounds-after-" .. tostring(reconcile.round) .. "-rounds"
-    local comment_request = build_fix_reconcile_comment_request(repo, issue_number, reconcile, action, reason)
-    local label_request = issue_number ~= nil and build_fix_reconcile_label_request(repo, issue_number, reconcile) or nil
+    local comment_request = build_fix_reconcile_comment_request(pr_repo, issue_number, reconcile, action, reason)
+    local label_request = issue_number ~= nil and build_fix_reconcile_label_request(lifecycle_repo, issue_number, reconcile) or nil
     emit_blocked_reconcile(state.state, reconcile.proposal_id, state, version, action, reason, comment_request, label_request, "github-proxy.github_pr_comment_request")
     end
 
     if own_ci_terminal then
       local applied, mismatch, observed_pr = with_current_classification(
-        repo, pr_number, reconcile.bound_head_sha,
+        pr_repo, pr_number, reconcile.bound_head_sha,
         function(classification) return apply_current(nil, classification) end,
         {
           dept = "reconcile",
@@ -346,7 +366,7 @@ local function pipeline_fix(event)
       end
       return applied
     end
-    local view = devloop_commands.gh_pr_view_origin(repo, pr_number, 30)
+    local view = devloop_commands.gh_pr_view_origin(pr_repo, pr_number, 30)
     if view.exit_code ~= 0 then
       error("github-devloop: gh-pr-fix-reconcile-view-failed: gh pr fix reconcile view failed: " .. tostring(view.stderr))
     end
@@ -363,8 +383,18 @@ local function pipeline_timeout(event)
   end
 
   devloop_logging.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
-  local repo, issue_number = base_ids.parse_proposal_id(reconcile.proposal_id)
-  local _, pr_number = devloop_base.parse_pr_source_ref(reconcile.source_ref)
+  local lifecycle_repo, issue_number = base_ids.parse_proposal_id(reconcile.proposal_id)
+  local source_repo, pr_number = devloop_base.parse_pr_source_ref(reconcile.source_ref)
+  local entity = entity_lib.parse_entity_proposal_id(reconcile.proposal_id)
+  if entity == nil then
+    devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, reconcile.state, "blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
+    return
+  end
+  local target = resolve_reconcile_target(entity, reconcile.source_ref, pr_number)
+  local pr_repo = target.implementation_repo
+  if pr_number ~= nil and tostring(source_repo):lower() ~= tostring(pr_repo):lower() then
+    error("github-devloop: reconcile-source-invalid: timeout PR source differs from exact delivery target")
+  end
   local lock_key = entity_lib.transition_lock_key(reconcile.proposal_id)
   if lock_key == nil then
     devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, reconcile.state, "blocked", "skip-foreign(proposal_id)", "no transition lock key")
@@ -380,23 +410,23 @@ local function pipeline_timeout(event)
     local snapshot
     local target_pr_number = pr_number
     if pr_number ~= nil then
-      if not m_claims.verify_pr_review_issue_claim("reconcile", repo, issue_number, nil, reconcile.proposal_id) then
+      if not m_claims.verify_pr_review_issue_claim("reconcile", lifecycle_repo, issue_number, nil, reconcile.proposal_id) then
         return
       end
-      local view = devloop_commands.gh_pr_view_origin(repo, pr_number, 30)
+      local view = devloop_commands.gh_pr_view_origin(pr_repo, pr_number, 30)
       if view.exit_code ~= 0 then
         if not command_indicates_not_found(view) then
           error("github-devloop: gh-pr-timeout-reconcile-view-failed: gh pr timeout reconcile view failed: " .. tostring(view.stderr))
         end
         devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, { state = reconcile.state, version = reconcile.issue_version }, reconcile.state, "blocked", "pr-surface-gone-fallback", "PR source disappeared before timeout reconcile; falling back to issue surface")
         target_pr_number = nil
-        current_issue, current_pr, comments, snapshot = load_timeout_issue_surface(repo, issue_number, reconcile.proposal_id, reconcile.state)
+        current_issue, current_pr, comments, snapshot = load_timeout_issue_surface(lifecycle_repo, issue_number, reconcile.proposal_id, reconcile.state)
       else
         current_pr = parsers_pr.parse_pr_view_origin(view.stdout)
         comments = current_pr.comments
       end
     else
-      current_issue, current_pr, comments, snapshot = load_timeout_issue_surface(repo, issue_number, reconcile.proposal_id, reconcile.state)
+      current_issue, current_pr, comments, snapshot = load_timeout_issue_surface(lifecycle_repo, issue_number, reconcile.proposal_id, reconcile.state)
     end
 
     devloop_logging.log_forged_markers("reconcile", reconcile.proposal_id, comments)
@@ -438,7 +468,7 @@ local function pipeline_timeout(event)
     end
     local epoch = row and row.actionable_epoch
     if type(epoch) == "table" and epoch.allows_state_entry_if_never_deferred == true then
-      timeout_facts.dependency_gate = core.dependency_gate(repo, issue_number, {
+      timeout_facts.dependency_gate = core.dependency_gate(lifecycle_repo, issue_number, {
         proposal_id = reconcile.proposal_id,
         version = state.version,
         comments = comments,
@@ -463,8 +493,8 @@ local function pipeline_timeout(event)
         return
       end
       local target = target_pr_number ~= nil
-        and { kind = "pr", repo = repo, number = target_pr_number }
-        or { kind = "issue", repo = repo, number = issue_number }
+        and { kind = "pr", repo = pr_repo, number = target_pr_number }
+        or { kind = "issue", repo = lifecycle_repo, number = issue_number }
       local comment_request = conv_attempts.build_decompose_exhausted_comment_request(target, reconcile.proposal_id, state, reconcile.source_ref, decision.attempt)
       local queue = target_pr_number ~= nil and "github-proxy.github_pr_comment_request" or "github-proxy.github_issue_comment_request"
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "blocked", "devloop_decompose", "applied(decompose-exhausted)", "blocked decompose output obligation exhausted")
@@ -502,9 +532,9 @@ local function pipeline_timeout(event)
       source_ref = base_ids.normalize_source_ref(reconcile.source_ref),
     }
     local comment_request = target_pr_number ~= nil
-      and build_timeout_reconcile_pr_comment_request(repo, target_pr_number, reconcile, action, reason, version, why_fields)
-      or conv_reconcile.build_timeout_reconcile_comment_request(repo, issue_number, reconcile, action, reason, version, why_fields)
-    local label_request = requests_labels.build_state_label_request(repo, issue_number, "blocked", base_ids.dedup_key({
+      and build_timeout_reconcile_pr_comment_request(pr_repo, target_pr_number, reconcile, action, reason, version, why_fields)
+      or conv_reconcile.build_timeout_reconcile_comment_request(lifecycle_repo, issue_number, reconcile, action, reason, version, why_fields)
+    local label_request = requests_labels.build_state_label_request(lifecycle_repo, issue_number, "blocked", base_ids.dedup_key({
       "timeout-reconcile",
       "label",
       tostring(reconcile.dedup_key),

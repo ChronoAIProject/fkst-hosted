@@ -19,6 +19,11 @@ local function issue_from_current(repo, issue_number, ready, current, fact)
     base_branch = fact.base_branch,
     head_sha = fact.head_sha,
     comments = current and current.comments or {},
+    implementation_repo = fact.implementation_repo or (current and current.implementation_repo) or repo,
+    implementation_branch = fact.implementation_branch or (current and current.implementation_branch) or fact.base_branch,
+    implementation_root = fact.implementation_root or (current and current.implementation_root),
+    implementation_git = fact.implementation_git or (current and current.implementation_git),
+    cross_repo = fact.cross_repo == true or (current and current.cross_repo == true),
   }
 end
 
@@ -65,16 +70,33 @@ function H.raise_awaiting_pr_from_fact(dept, repo, issue_number, ready, current,
   end
   local handoff_fact = copy_fact(fact)
   local current_link = m_facts.pr_link_fact(current and current.comments, ready.proposal_id)
+  local implementation_repo = handoff_fact.implementation_repo
+    or (current and current.implementation_repo)
+    or (current_link and current_link.implementation_repo)
+    or repo
   local linked_pr_number = nil
   local existing_delegation = m_facts.pr_delegation_fact(current and current.comments, ready.proposal_id, ready.dedup_key)
+  if existing_delegation ~= nil
+    and existing_delegation.cross_repo
+    and existing_delegation.delivery_target_explicit ~= true then
+    existing_delegation = nil
+  end
   if existing_delegation ~= nil then
+    if tostring(existing_delegation.implementation_repo or ""):lower()
+      ~= tostring(implementation_repo):lower() then
+      error("github-devloop: delivery-grant-mismatch: delegated PR repository differs from exact delivery target")
+    end
     linked_pr_number = existing_delegation.pr_number
   elseif current_link ~= nil then
+    if tostring(current_link.implementation_repo or ""):lower()
+      ~= tostring(implementation_repo):lower() then
+      error("github-devloop: delivery-grant-mismatch: linked PR repository differs from exact delivery target")
+    end
     linked_pr_number = current_link.pr_number
   end
   local current_pr = nil
   if linked_pr_number ~= nil then
-    current_pr = find_linked_pr(repo, linked_pr_number)
+    current_pr = find_linked_pr(implementation_repo, linked_pr_number)
     if current_pr ~= nil then
       handoff_fact.head_sha = handoff_fact.head_sha or current_pr.head_sha
       handoff_fact.branch = handoff_fact.branch or current_pr.head_ref_name

@@ -24,6 +24,12 @@ local ci_verdict = require("core.ci_verdict")
 local with_current_classification = ci_verdict.with_current_classification
 
 function S.install(M)
+local function implementation_repo(issue, link)
+  return (link and link.implementation_repo) or issue.implementation_repo or issue.repo
+end
+local function pr_source_ref(issue, link, pr_number)
+  return entity_lib.pr_source_ref(implementation_repo(issue, link), pr_number or (link and link.pr_number))
+end
 local function raise_fix_reviewing(opts) return requests_review.raise_fix_reviewing(M, opts) end
 local function linked_pr_state(pr)
   return tostring(pr and pr.state or ""):upper()
@@ -94,7 +100,7 @@ end
 
 local function fix_comment_from_feedback(issue, pr_number, version, feedback, source_ref)
   return requests_review.build_merge_gate_fix_comment_request(M,
-    issue.repo,
+    implementation_repo(issue),
     issue.number,
     {
       proposal_id = feedback.proposal_id or feedback.issue_proposal_id or feedback.parent_proposal_id,
@@ -182,13 +188,13 @@ local function replay_review_result(dept, issue, state, facts, tools, link, curr
       review_dedup_key = merge_ready.review_dedup_key,
       reviewed_head_sha = merge_ready.head_sha,
       current_head_sha = current_pr.head_sha,
-    }, entity_lib.pr_source_ref(issue.repo, link.pr_number))
+    }, pr_source_ref(issue, link))
     devloop_logging.log_cas_decision(dept, proposal_id, state, "reviewing", "merge-ready", "applied(replay)", "trusted approve review-result fact is visible")
     return tools.raise_effects(dept, proposal_id, "merge-ready", state.version, { add = {}, remove = {} }, {
       { queue = M.pr_package_queue("devloop_merge_ready"), payload = payload },
     })
   end
-  local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
+  local source_ref = pr_source_ref(issue, link)
   local request = fix_comment_from_feedback(issue, link.pr_number, state.version, {
     proposal_id = proposal_id,
     review_proposal_id = fact.review_proposal_id,
@@ -213,8 +219,8 @@ local function replay_review_result(dept, issue, state, facts, tools, link, curr
 end
 
 local function review_converge_fact(facts, state, link, current_pr)
-  local review_proposal = devloop_base.pr_review_proposal_id(facts.issue.repo, link.pr_number, state.version, current_pr.head_sha)
-  local source_ref = entity_lib.pr_source_ref(facts.issue.repo, link.pr_number)
+  local review_proposal = devloop_base.pr_review_proposal_id(implementation_repo(facts.issue, link), link.pr_number, state.version, current_pr.head_sha)
+  local source_ref = pr_source_ref(facts.issue, link)
   local records = conv_rounds.review_converge_round_facts(M,
     comments_for_pr_facts(facts, current_pr),
     review_proposal,
@@ -273,7 +279,7 @@ local function replay_fixing(dept, issue, state, row, facts, tools)
     return tools.log_skip(dept, proposal_id, state, "fixing", "fixing", "skip-foreign(fix-feedback-binding)", "trusted fix feedback marker lacks review binding")
   end
   if tostring(current_pr.head_sha or "") ~= tostring(feedback.reviewed_head_sha or "") then
-    local intended_head_sha = git_mechanics.current_branch_head_sha(M.git, link.branch)
+    local intended_head_sha = git_mechanics.current_branch_head_sha(issue.git or M.git, link.branch)
     if intended_head_sha ~= nil and tostring(current_pr.head_sha or "") ~= intended_head_sha then
       return tools.log_skip(dept, proposal_id, state, "fixing", "fixing", "skip-stale(head-advanced)", "PR head advanced since rejected review")
     end
@@ -282,13 +288,13 @@ local function replay_fixing(dept, issue, state, row, facts, tools)
   if feedback.ci_failure_key ~= nil then
     local decision = ci_repair_retry.evaluate(M, state, {
       dept = dept,
-      repo = issue.repo,
+      repo = implementation_repo(issue, link),
       proposal_id = proposal_id,
       pr_number = link.pr_number,
       review_proposal_id = feedback.review_proposal_id,
       review_dedup_key = feedback.review_dedup_key,
       reviewed_head_sha = feedback.reviewed_head_sha,
-      source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number),
+      source_ref = pr_source_ref(issue, link),
       comments = comments_for_pr_facts(facts, current_pr),
       now_seconds = facts.now_seconds,
       row = row,
@@ -323,10 +329,10 @@ local function replay_fixing(dept, issue, state, row, facts, tools)
   local payload = payloads_builders.build_replayed_fixing_payload({
     proposal_id = proposal_id,
     impl_version = state.version,
-  }, link.pr_number, feedback, entity_lib.pr_source_ref(issue.repo, link.pr_number))
+  }, link.pr_number, feedback, pr_source_ref(issue, link))
   devloop_logging.log_cas_decision(dept, proposal_id, state, "fixing", "fixing", "applied(replay)", "trusted fix feedback fact is visible")
   if dept == "observe_pr" then
-    local request = fixing_replay_comment_request(issue, link.pr_number, payload, feedback, entity_lib.pr_source_ref(issue.repo, link.pr_number))
+    local request = fixing_replay_comment_request(issue, link.pr_number, payload, feedback, pr_source_ref(issue, link))
     return tools.raise_effects(dept, proposal_id, "fixing", state.version, { add = {}, remove = {} }, {
       { queue = "github-proxy.github_pr_comment_request", payload = request },
     })
@@ -349,7 +355,7 @@ local function replay_review_meta_result(dept, issue, state, row, facts, tools)
     return tools.log_skip(dept, proposal_id, state, "review-meta", "fixing|blocked", "skip-foreign(review-meta)", "trusted review-meta decision marker is not visible")
   end
   if fact.action == "fix" then
-    local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
+    local source_ref = pr_source_ref(issue, link)
     local feedback = {
       proposal_id = proposal_id,
       review_proposal_id = fact.review_proposal_id,
@@ -407,20 +413,21 @@ local function replay_merge_ready_state(dept, issue, state, row, facts, tools)
   end
   if fact == nil then
     local carry, carry_reason = M.approved_lineage_carry_over(
-      issue.repo,
+      implementation_repo(issue, link),
       link.pr_number,
       proposal_id,
       state.version,
       comments,
       link.base_branch,
-      current_pr.head_sha
+      current_pr.head_sha,
+      issue.git
     )
     if carry_reason == "missing-review-result-approve" then
       devloop_logging.log_cas_decision(dept, proposal_id, state, "merge-ready", "blocked", "applied(replay)", "merge-ready marker lacks trusted approve review-result")
       return tools.raise_effects(dept, proposal_id, "blocked", state.version, { add = { "fkst-dev:blocked" }, remove = { "fkst-dev:merge-ready" } }, {})
     end
     if carry ~= nil then
-      local request = requests_review.build_review_carry_over_comment_request(issue.repo, link.pr_number, proposal_id, state.version, carry, entity_lib.pr_source_ref(issue.repo, link.pr_number))
+      local request = requests_review.build_review_carry_over_comment_request(implementation_repo(issue, link), link.pr_number, proposal_id, state.version, carry, pr_source_ref(issue, link))
       devloop_logging.log_cas_decision(dept, proposal_id, state, "merge-ready", "merge-ready", "applied(review-carry-over)", "approved head is ancestor and resolution delta is empty")
       return tools.raise_effects(dept, proposal_id, "merge-ready", state.version, { add = {}, remove = {} }, {
         { queue = "github-proxy.github_pr_comment_request", payload = request },
@@ -446,7 +453,7 @@ local function replay_merge_ready_state(dept, issue, state, row, facts, tools)
     review_dedup_key = fact.review_dedup_key,
     reviewed_head_sha = fact.head_sha,
     current_head_sha = current_pr.head_sha,
-  }, entity_lib.pr_source_ref(issue.repo, link.pr_number))
+  }, pr_source_ref(issue, link))
   devloop_logging.log_cas_decision(dept, proposal_id, state, "merge-ready", "merging", "applied(replay)", "trusted head-bound merge-ready fact is visible")
   return tools.raise_effects(dept, proposal_id, "merging", state.version, { add = { "fkst-dev:merging" }, remove = { "fkst-dev:merge-ready" } }, {
     { queue = M.pr_package_queue("devloop_merge_ready"), payload = payload },
@@ -465,9 +472,9 @@ raise_reviewing_for_current_head = function(dept, issue, state, proposal_id, lin
     return false
   end
   local review_version = state.version
-  local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
+  local source_ref = pr_source_ref(issue, link)
   local request = requests_review.build_merge_head_reviewing_comment_request(M,
-    issue.repo,
+    implementation_repo(issue, link),
     issue.number,
     {
       proposal_id = proposal_id,
@@ -530,7 +537,7 @@ local function replay_merging_state(dept, issue, state, row, facts, tools)
       review_dedup_key = merge_ready.review_dedup_key,
       reviewed_head_sha = merge_ready.head_sha,
       current_head_sha = current_pr.head_sha,
-    }, entity_lib.pr_source_ref(issue.repo, link.pr_number))
+    }, pr_source_ref(issue, link))
     devloop_logging.log_cas_decision(dept, proposal_id, state, "merging", "merging", "applied(replay)", "trusted merge-ready marker is visible and merging receiver needs redrive")
     return tools.raise_effects(dept, proposal_id, "merging", state.version, { add = {}, remove = {} }, {
       { queue = M.pr_package_queue("devloop_merge_ready"), payload = payload },
@@ -538,8 +545,8 @@ local function replay_merging_state(dept, issue, state, row, facts, tools)
   end
   if not mergeable and check_runs.is_not_mergeable_reason(mergeable_reason) then
     local fix_version = devloop_state.fix_version_from_review_version(state.version)
-    local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
-    local request = requests_review.build_merge_gate_fix_comment_request(M, issue.repo, issue.number, merge_ready, fix_version, mergeable_reason, current_pr.base_ref_oid, source_ref)
+    local source_ref = pr_source_ref(issue, link)
+    local request = requests_review.build_merge_gate_fix_comment_request(M, implementation_repo(issue, link), issue.number, merge_ready, fix_version, mergeable_reason, current_pr.base_ref_oid, source_ref)
     local effects = {
       { queue = "github-proxy.github_pr_comment_request", payload = request },
     }
@@ -554,22 +561,22 @@ local function replay_merging_state(dept, issue, state, row, facts, tools)
     devloop_logging.log_cas_decision(dept, proposal_id, state, "merging", "fixing", "applied(replay)", mergeable_reason)
     return tools.raise_effects(dept, proposal_id, "fixing", fix_version, { add = { "fkst-dev:fixing" }, remove = { "fkst-dev:merging" } }, effects)
   end
-  local ci_green, ci_reason = M.evaluate_ci_status_gate(current_pr, { repo = issue.repo, dept = dept, proposal_id = proposal_id })
+  local ci_green, ci_reason = M.evaluate_ci_status_gate(current_pr, { repo = implementation_repo(issue, link), dept = dept, proposal_id = proposal_id })
   if ci_green then
     local payload = payloads_builders.build_devloop_merge_ready_payload(proposal_id, link.pr_number, state.version, {
       review_proposal_id = merge_ready.review_proposal_id,
       review_dedup_key = merge_ready.review_dedup_key,
       reviewed_head_sha = merge_ready.head_sha,
       current_head_sha = current_pr.head_sha,
-    }, entity_lib.pr_source_ref(issue.repo, link.pr_number))
+    }, pr_source_ref(issue, link))
     devloop_logging.log_cas_decision(dept, proposal_id, state, "merging", "merging", "applied(replay)", "trusted merging marker is visible and merge gates are still eligible")
     return tools.raise_effects(dept, proposal_id, "merging", state.version, { add = {}, remove = {} }, {
       { queue = M.pr_package_queue("devloop_merge_ready"), payload = payload },
     })
   end
   if parsers_misc.is_ci_red_reason(ci_reason) then
-    local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
-    local applied, mismatch, observed_pr = with_current_classification(issue.repo, link.pr_number, authorized_head,
+    local source_ref = pr_source_ref(issue, link)
+    local applied, mismatch, observed_pr = with_current_classification(implementation_repo(issue, link), link.pr_number, authorized_head,
       function(classification)
         local admission = fix_rounds.admit_own_ci_continuation(state, classification, {
           dept = dept, from_state = "merging", proposal_id = proposal_id,
@@ -587,7 +594,7 @@ local function replay_merging_state(dept, issue, state, row, facts, tools)
         end
         if admission.kind ~= "admit" then return true end
         local current = admission.current_pr
-        local request = requests_review.build_merge_gate_fix_comment_request(M, issue.repo, issue.number, merge_ready, admission.version, admission.reason, current.base_ref_oid, source_ref, nil, { ci_failure_key = admission.ci_failure_key })
+        local request = requests_review.build_merge_gate_fix_comment_request(M, implementation_repo(issue, link), issue.number, merge_ready, admission.version, admission.reason, current.base_ref_oid, source_ref, nil, { ci_failure_key = admission.ci_failure_key })
         local effects = { { queue = "github-proxy.github_pr_comment_request", payload = request } }
         add_issue_label_effect(issue, proposal_id, "fixing", admission.version, issue_source_ref(issue), effects,
           { "merging", "label", "fixing", tostring(proposal_id), tostring(admission.version), tostring(link.pr_number) })
@@ -605,10 +612,10 @@ end
 mark_child_closed_unmerged = function(dept, issue, state, proposal_id, link, tools, outcome, reason)
   local version = transition_version.strip_suffixes(state and state.version)
   local pr_number = link and link.pr_number
-  local source_ref = pr_number ~= nil and entity_lib.pr_source_ref(issue.repo, pr_number) or issue.source_ref
+  local source_ref = pr_number ~= nil and pr_source_ref(issue, link, pr_number) or issue.source_ref
   local comment_request = entity_lib.build_entity_comment_request({
     kind = "pr",
-    repo = issue.repo,
+    repo = implementation_repo(issue, link),
     number = pr_number,
   }, "github-devloop marked delegated PR child closed without merge"
     .. "\n\nReason: " .. tostring(reason or "closed without merge")
@@ -642,7 +649,7 @@ mark_issue_merged_from_linked_pr = function(dept, issue, state, proposal_id, lin
   local merged_body = comment_strings.comment_string(M, "merged_pr_prefix") .. tostring(link.pr_number)
     .. "\n\n" .. devloop_state.state_marker(proposal_id, "merged", state.version)
     .. "\n" .. m_builders.merged_marker(M, proposal_id, link.pr_number, state.version, head_sha)
-  local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
+  local source_ref = pr_source_ref(issue, link)
   local comment_request = entity_lib.build_entity_comment_request({
     kind = "issue",
     repo = issue.repo,
@@ -721,10 +728,10 @@ local function replay_pr_open(dept, issue, state, row, facts, tools)
       local mergeable, mergeable_reason = check_runs.pr_mergeable(pr)
       if not mergeable and check_runs.is_not_mergeable_reason(mergeable_reason) then
         local fix_version = devloop_state.next_fix_version(state.version)
-        local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
+        local source_ref = pr_source_ref(issue, link)
         local review_fact = {
           proposal_id = proposal_id,
-          review_proposal_id = devloop_base.pr_review_proposal_id(issue.repo, link.pr_number, state.version, pr.head_sha),
+          review_proposal_id = devloop_base.pr_review_proposal_id(implementation_repo(issue, link), link.pr_number, state.version, pr.head_sha),
           review_dedup_key = "observe-pr-conflict/" .. tostring(proposal_id) .. "/" .. tostring(state.version) .. "/" .. tostring(link.pr_number),
           reviewed_head_sha = pr.head_sha,
           blocking_gap = mergeable_reason,
@@ -737,11 +744,11 @@ local function replay_pr_open(dept, issue, state, row, facts, tools)
         })
       end
       local review_version = M.review_redrive_version(state, {
-        repo = issue.repo,
+        repo = implementation_repo(issue, link),
         number = link.pr_number,
         head_sha = pr.head_sha,
       })
-      local review_proposal_id = devloop_base.pr_review_proposal_id(issue.repo, link.pr_number, review_version, pr.head_sha)
+      local review_proposal_id = devloop_base.pr_review_proposal_id(implementation_repo(issue, link), link.pr_number, review_version, pr.head_sha)
       if m_facts.has_any_review_result_marker(facts.snapshot.comments, review_proposal_id, proposal_id) then
         return tools.log_skip(dept, proposal_id, state, "pr-open", "reviewing", "skip-idempotent(review result visible)", "review already produced a result")
       end
@@ -752,7 +759,7 @@ local function replay_pr_open(dept, issue, state, row, facts, tools)
         proposal_id = proposal_id,
       })
       fields.version = review_version
-      local reviewing_comment = requests_review.build_reviewing_comment_request(M, issue.repo, issue.number, {
+      local reviewing_comment = requests_review.build_reviewing_comment_request(M, implementation_repo(issue, link), issue.number, {
         proposal_id = fields.proposal_id,
         impl_version = fields.version,
       }, fields.pr_number, fields.source_ref)
@@ -780,7 +787,7 @@ local function replay_reviewing(dept, issue, state, row, facts, tools)
     return converge_replay
   end
   local review_version = M.review_redrive_version(state, {
-    repo = issue.repo,
+    repo = implementation_repo(issue, link),
     number = link.pr_number,
     head_sha = current_pr.head_sha,
   })
@@ -791,7 +798,7 @@ local function replay_reviewing(dept, issue, state, row, facts, tools)
     proposal_id = proposal_id,
   })
   fields.version = review_version
-  local review_proposal_id = devloop_base.pr_review_proposal_id(issue.repo, fields.pr_number, fields.version, current_pr.head_sha)
+  local review_proposal_id = devloop_base.pr_review_proposal_id(implementation_repo(issue, link), fields.pr_number, fields.version, current_pr.head_sha)
   if m_facts.has_any_review_result_marker(current_pr.comments, review_proposal_id, proposal_id) then
     tools.log_skip(dept, proposal_id, state, "reviewing", "reviewing", "skip-idempotent(review result visible)", "review already produced a result")
     return true
@@ -809,7 +816,7 @@ local function replay_reviewing(dept, issue, state, row, facts, tools)
   if tostring(fields.version or "") ~= tostring(state.version or "") or dept == "observe_pr" then
     table.insert(effects, {
       queue = "github-proxy.github_pr_comment_request",
-      payload = requests_review.build_reviewing_comment_request(M, issue.repo, issue.number, {
+      payload = requests_review.build_reviewing_comment_request(M, implementation_repo(issue, link), issue.number, {
         proposal_id = fields.proposal_id,
         impl_version = fields.version,
       }, fields.pr_number, fields.source_ref, delivery_dedup_key),

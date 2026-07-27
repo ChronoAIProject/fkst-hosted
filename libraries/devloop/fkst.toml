@@ -44,6 +44,7 @@ public = [
   "devloop.convergence.rounds",
   "devloop.convergence.shared",
   "devloop.decompose",
+  "devloop.delivery_target",
   "devloop.di.capdefs",
   "devloop.di.providers",
   "devloop.di.select_caps",

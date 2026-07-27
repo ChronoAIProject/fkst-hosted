@@ -76,7 +76,11 @@ function R.resolve(row, state, facts, pr_source_ref)
           local pr_number = context.pr_number or (context.link and context.link.pr_number)
             or (context.feedback and context.feedback.pr_number) or (context.review_meta and context.review_meta.pr_number)
             or (context.decomposed and context.decomposed.pr_number)
-          resolved[field] = pr_source_ref(context.issue and context.issue.repo or "", pr_number)
+          local pr_repo = context.link and context.link.implementation_repo
+            or context.issue and context.issue.implementation_repo
+            or context.issue and context.issue.repo
+            or ""
+          resolved[field] = pr_source_ref(pr_repo, pr_number)
         end
       end
     end

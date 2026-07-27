@@ -15,6 +15,7 @@ local v_validate_proposal = require("devloop.validators.validate_proposal")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
 local devloop_commands = require("devloop.commands")
+local delivery_target = require("devloop.delivery_target")
 -- Preserve existing body line coordinates for the coverage ratchet.
 
 local spec = {
@@ -66,6 +67,18 @@ return saga.department(spec, { done = function() return false end, act = functio
   end
   local repo = entity.repo
   local issue_number = entity.issue_number
+  local target = delivery_target.for_entity(entity, reviewing.source_ref, {
+    default_git = core.git,
+    git_factory = core.scoped_git,
+  })
+  local pr_repo = target.implementation_repo
+  local source_repo, source_pr_number = devloop_base.parse_pr_source_ref(reviewing.source_ref)
+  if (target.cross_repo and source_repo == nil)
+    or (source_repo ~= nil and tostring(source_repo):lower() ~= tostring(pr_repo):lower())
+    or (source_repo ~= nil and tonumber(source_pr_number) ~= tonumber(reviewing.pr_number))
+  then
+    error("github-devloop: review-source-invalid: review source_ref differs from delivery target")
+  end
 
   local lock_key = entity_lib.review_lock_key(reviewing.proposal_id)
   if lock_key == nil then
@@ -76,12 +89,30 @@ return saga.department(spec, { done = function() return false end, act = functio
   with_lock(lock_key, function()
     devloop_base.assert_trusted_bot_configured()
 
-    local pr_view = devloop_commands.gh_pr_view_origin(repo, reviewing.pr_number, 30)
+    local pr_view = devloop_commands.gh_pr_view_origin(pr_repo, reviewing.pr_number, 30)
     if pr_view.exit_code ~= 0 then
       error("github-devloop: gh-pr-review-head-view-failed: gh pr review head view failed: " .. tostring(pr_view.stderr))
     end
     local current_pr = parsers_pr.parse_pr_view_origin(pr_view.stdout)
     local origin = m_facts.pr_origin_fact(current_pr.comments)
+    if target.cross_repo and origin == nil then
+      error("github-devloop: delivery-origin-missing: cross-repository PR lacks a durable origin marker")
+    end
+    if origin ~= nil and entity.kind == "issue" then
+      delivery_target.resolve(origin.lifecycle_repo or origin.repo, origin.issue_number or issue_number, {
+        implementation_repo = origin.implementation_repo,
+        implementation_branch = origin.base_branch,
+        default_git = core.git,
+        git_factory = core.scoped_git,
+      })
+      if tostring(origin.lifecycle_repo or origin.repo):lower() ~= tostring(repo):lower()
+        or tostring(origin.implementation_repo or origin.repo):lower() ~= tostring(pr_repo):lower() then
+        error("github-devloop: delivery-origin-mismatch: PR origin identities differ from the review event")
+      end
+    end
+    if target.cross_repo and tostring(current_pr.base_ref_name or "") ~= tostring(target.implementation_branch) then
+      error("github-devloop: delivery-pr-base-mismatch: PR base differs from the exact delivery grant")
+    end
     devloop_logging.log_forged_markers("review_pr", reviewing.proposal_id, current_pr.comments)
     local state = require("devloop.entity").current_entity_state(current_pr.comments, reviewing.proposal_id)
     local transition = reviewing_transition_status(state, reviewing.version)
@@ -89,7 +120,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       local verified_state = nil
       local hand_off_reason = "missing"
       if reviewing.reviewing_hand_off ~= nil then
-        verified_state, hand_off_reason = payloads_predicates.verified_hand_off_state(core, repo, reviewing.reviewing_hand_off, {
+        verified_state, hand_off_reason = payloads_predicates.verified_hand_off_state(core, pr_repo, reviewing.reviewing_hand_off, {
           proposal_id = reviewing.proposal_id,
           state = "reviewing",
           marker_version = reviewing.version,
@@ -134,7 +165,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       return
     end
 
-    local pr_source_ref = entity_lib.pr_source_ref(repo, reviewing.pr_number)
+    local pr_source_ref = entity_lib.pr_source_ref(pr_repo, reviewing.pr_number)
     local current_issue = {
       title = "PR #" .. tostring(reviewing.pr_number),
       body = "(PR-only review context; issue backing is absent)",
@@ -150,11 +181,14 @@ return saga.department(spec, { done = function() return false end, act = functio
     if not m_claims.verify_pr_review_issue_claim("review_pr", repo, issue_number, current_issue, reviewing.proposal_id) then
       return
     end
-    local review_id = devloop_base.pr_review_proposal_id(repo, reviewing.pr_number, reviewing.version, current_pr.head_sha)
+    local review_id = devloop_base.pr_review_proposal_id(pr_repo, reviewing.pr_number, reviewing.version, current_pr.head_sha)
     local review_dedup_key = base_ids.dedup_key({ review_id, "review" })
     local context_fetch = { context_bundle.context_fetch_ref_from_bundle(core, {
       dept = "review_pr",
       repo = repo,
+      issue_repo = repo,
+      pr_repo = pr_repo,
+      board_repo = repo,
       issue_number = issue_number,
       pr_number = reviewing.pr_number,
       proposal_id = review_id,
@@ -163,7 +197,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     }) }
     local content_fetch = context_fetch[1]
     local high_risk = context_fetch[2]
-    local proposal = payloads_builders.build_board_pr_review_proposal(core, repo, issue_number, reviewing.pr_number, reviewing.version, current_pr.head_sha, current_issue, pr_source_ref, event.ts, current_pr.comments, content_fetch, high_risk)
+    local proposal = payloads_builders.build_board_pr_review_proposal(core, pr_repo, issue_number, reviewing.pr_number, reviewing.version, current_pr.head_sha, current_issue, pr_source_ref, event.ts, current_pr.comments, content_fetch, high_risk, repo)
     if reviewing.review_delivery_dedup_key ~= nil then
       if devloop_base.pr_review_proposal_id_from_redrive_delivery_dedup_key(
         reviewing.review_delivery_dedup_key
@@ -175,7 +209,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     -- Fall back to the read-only project checkout (".") if the ephemeral impl worktree is gone (restart);
     -- see review_loop -- the review codex reads the PR diff from context, so cwd just needs to be a git repo.
     local worktree = devloop_commands.existing_implementation_worktree(repo, issue_number, origin and origin.impl_version or reviewing.version)
-    proposal.worktree = worktree or "."
+    proposal.worktree = worktree or target.implementation_root or "."
     if not v_validate_proposal.validate_proposal(proposal) then
       log.warn("github-devloop dept=review_pr proposal_id=" .. tostring(reviewing.proposal_id) .. " tag=SKIP reason=cannot-build-valid-review-proposal")
       return

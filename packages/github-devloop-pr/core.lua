@@ -84,6 +84,9 @@ M.invalidate_entity_after_write = github_proxy_entity_view.invalidate_entity_aft
 local git_mechanics = require("devloop.git_mechanics")
 local function dept_exec_argv(...) return exec_argv(...) end
 M.git = require("forge.git").new(dept_exec_argv)
+M.scoped_git = function(root)
+  return require("forge.git").scoped(dept_exec_argv, root)
+end
 require("forge.merge").install(M, {
   github_handle = require("devloop.github_factory").production_handle,
 })

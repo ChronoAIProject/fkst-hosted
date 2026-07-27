@@ -13,6 +13,7 @@ local dispatch_live_run = require("devloop.dispatch_live_run")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
 local devloop_commands = require("devloop.commands")
+local delivery_target = require("devloop.delivery_target")
 
 local dispatch_liveness = {
   restart_transition_table = function(...)
@@ -35,14 +36,17 @@ local spec = {
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
 
-local function load_review_meta_context(repo, issue_number, review_meta, event, current_pr, current_issue, state)
+local function load_review_meta_context(lifecycle_repo, pr_repo, issue_number, review_meta, event, current_pr, current_issue, state)
   local durable_start_marker = "state:v1 review-meta"
   if not devloop_state.has_state_marker(current_pr.comments, review_meta.proposal_id, "review-meta", review_meta.version) then
     error("github-devloop: review-meta-marker-missing: " .. durable_start_marker .. " marker not visible during context load")
   end
   local content_fetch = context_bundle.context_fetch_from_bundle(core, {
     dept = "review_meta",
-    repo = repo,
+    repo = lifecycle_repo,
+    issue_repo = lifecycle_repo,
+    pr_repo = pr_repo,
+    board_repo = lifecycle_repo,
     issue_number = issue_number,
     pr_number = review_meta.pr_number,
     proposal_id = review_meta.proposal_id,
@@ -50,7 +54,8 @@ local function load_review_meta_context(repo, issue_number, review_meta, event, 
     tick = event.ts,
   })
   return {
-    repo = repo,
+    lifecycle_repo = lifecycle_repo,
+    pr_repo = pr_repo,
     issue_number = issue_number,
     review_meta = review_meta,
     current_pr = current_pr,
@@ -127,10 +132,10 @@ local function apply_review_meta_decision(plan, parsed)
   local review_meta = plan.review_meta
   local to_state = (parsed.action == "fix" or parsed.action == "continue") and "fixing" or "blocked"
   local exit_version = devloop_state.next_review_meta_action_version(review_meta.version)
-  local comment_request = core.build_review_meta_comment_request(plan.repo, plan.issue_number, review_meta, parsed.action, parsed.reason, exit_version, parsed.blocking_gap)
+  local comment_request = core.build_review_meta_comment_request(plan.pr_repo, plan.issue_number, review_meta, parsed.action, parsed.reason, exit_version, parsed.blocking_gap)
   local label_request = nil
   if plan.issue_number ~= nil then
-    label_request = core.build_review_meta_label_request(plan.repo, plan.issue_number, review_meta, parsed.action, exit_version)
+    label_request = core.build_review_meta_label_request(plan.lifecycle_repo, plan.issue_number, review_meta, parsed.action, exit_version)
   end
   local add_labels, remove_labels = devloop_state.state_label_changes(to_state)
   local raised = {
@@ -160,9 +165,21 @@ return saga.department(spec, { done = function() return false end, act = functio
     devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, { state = nil, version = nil }, "review-meta", "fixing|blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return
   end
-  local repo = entity.repo
+  local lifecycle_repo = entity.repo
   local issue_number = entity.issue_number
-  if not m_claims.verify_pr_review_issue_claim("review_meta", repo, issue_number, nil, review_meta.proposal_id) then
+  local source_repo, source_pr_number = devloop_base.parse_pr_source_ref(review_meta.source_ref)
+  if source_repo == nil or tonumber(source_pr_number) ~= tonumber(review_meta.pr_number) then
+    error("github-devloop: review-meta-source-invalid: review-meta source_ref does not identify its PR")
+  end
+  local target = delivery_target.for_entity(entity, review_meta.source_ref, {
+    default_git = core.git,
+    git_factory = core.scoped_git,
+  })
+  local pr_repo = target.implementation_repo
+  if tostring(source_repo):lower() ~= tostring(pr_repo):lower() then
+    error("github-devloop: review-meta-source-invalid: review-meta source repository differs from delivery target")
+  end
+  if not m_claims.verify_pr_review_issue_claim("review_meta", lifecycle_repo, issue_number, nil, review_meta.proposal_id) then
     return
   end
 
@@ -175,18 +192,38 @@ return saga.department(spec, { done = function() return false end, act = functio
   with_lock(lock_key, function()
     devloop_base.assert_trusted_bot_configured()
 
-    local view = devloop_commands.gh_pr_view_origin(repo, review_meta.pr_number, 30)
+    local view = devloop_commands.gh_pr_view_origin(pr_repo, review_meta.pr_number, 30)
     if view.exit_code ~= 0 then
       error("github-devloop: gh-pr-review-meta-view-failed: gh pr review-meta view failed: " .. tostring(view.stderr))
     end
     local current_pr = parsers_pr.parse_pr_view_origin(view.stdout)
+    local origin = m_facts.pr_origin_fact(current_pr.comments)
+    if target.cross_repo and origin == nil then
+      error("github-devloop: delivery-origin-missing: cross-repository PR lacks a durable origin marker")
+    end
+    if origin ~= nil and issue_number ~= nil then
+      delivery_target.resolve(origin.lifecycle_repo or origin.repo, origin.issue_number, {
+        implementation_repo = origin.implementation_repo or pr_repo,
+        implementation_branch = origin.base_branch,
+        default_git = core.git,
+        git_factory = core.scoped_git,
+      })
+      if tostring(origin.proposal_id or "") ~= tostring(review_meta.proposal_id)
+        or tostring(origin.lifecycle_repo or origin.repo):lower() ~= tostring(lifecycle_repo):lower()
+        or tostring(origin.implementation_repo or origin.repo):lower() ~= tostring(pr_repo):lower() then
+        error("github-devloop: delivery-origin-mismatch: PR origin identities differ from review-meta event")
+      end
+    end
+    if target.cross_repo and tostring(current_pr.base_ref_name or "") ~= tostring(target.implementation_branch) then
+      error("github-devloop: delivery-pr-base-mismatch: PR base differs from the exact delivery grant")
+    end
     local current_issue = {
       title = "PR #" .. tostring(review_meta.pr_number),
       body = "(PR-only review-meta context; issue backing is absent)",
       comments = current_pr.comments,
     }
     if issue_number ~= nil then
-      local issue_view = devloop_commands.gh_issue_view_fix(repo, issue_number, 30)
+      local issue_view = devloop_commands.gh_issue_view_fix(lifecycle_repo, issue_number, 30)
       if issue_view.exit_code ~= 0 then
         error("github-devloop: gh-issue-review-meta-view-failed: gh issue review-meta view failed: " .. tostring(issue_view.stderr))
       end
@@ -223,7 +260,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "skip-stale(version-mismatch)", "review-meta event version does not match canonical issue marker")
       return
     end
-    local plan = load_review_meta_context(repo, issue_number, review_meta, event, current_pr, current_issue, state)
+    local plan = load_review_meta_context(lifecycle_repo, pr_repo, issue_number, review_meta, event, current_pr, current_issue, state)
     if dispatch_live_run.dispatch_live_run_dedup(dispatch_liveness, "review-meta", review_meta.proposal_id, review_meta.version, {
       state = state,
       current_pr = current_pr,

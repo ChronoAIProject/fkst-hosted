@@ -447,7 +447,7 @@ function C.build_fix_reviewing_comment_request(M, repo, issue_number, fix, old_h
   return C.attach_reviewing_handoff(request, fix.proposal_id, fix.pr_number, new_version or fix.version, fix.source_ref)
 end
 
-function C.raise_fix_review_meta(caps, repo, issue_number, fix, reason, detail)
+function C.raise_fix_review_meta(caps, repo, issue_number, fix, reason, detail, issue_repo)
   local comment_request = caps.build_comment(repo, issue_number, fix, reason, detail)
   C.attach_review_meta_handoff(comment_request, {
     proposal_id = fix.proposal_id,
@@ -459,7 +459,7 @@ function C.raise_fix_review_meta(caps, repo, issue_number, fix, reason, detail)
     dedup_key = fix.dedup_key,
     source_ref = fix.source_ref,
   })
-  local label_request = caps.build_label(repo, issue_number, fix, reason)
+  local label_request = caps.build_label(issue_repo or repo, issue_number, fix, reason)
   local add_labels, remove_labels = devloop_state.state_label_changes("review-meta")
   devloop_logging.log_apply("fix", fix.proposal_id, "review-meta", fix.version, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_pr_comment_request",
@@ -474,7 +474,8 @@ end
 function C.raise_fix_reviewing(M, opts)
   opts = opts or {}
   local dept = tostring(opts.dept or "unknown")
-  local repo = opts.repo
+  local repo = opts.pr_repo or opts.repo
+  local issue_repo = opts.issue_repo or opts.repo
   local issue_number = opts.issue_number
   local fix = opts.fix or {}
   local old_head_sha = opts.old_head_sha
@@ -488,7 +489,7 @@ function C.raise_fix_reviewing(M, opts)
 
   devloop_logging.log_cas_decision(dept, fix.proposal_id, current_state, "fixing", "reviewing", opts.outcome or "applied", reason)
   local comment_request = C.build_fix_reviewing_comment_request(M, repo, issue_number, fix, old_head_sha, new_head_sha, new_version)
-  local label_request = opts.label_request or labels.build_fix_reviewing_label_request(repo, issue_number, fix, new_head_sha, new_version)
+  local label_request = opts.label_request or labels.build_fix_reviewing_label_request(issue_repo, issue_number, fix, new_head_sha, new_version)
   local add_labels, remove_labels
   if opts.label_changes ~= nil then
     add_labels = opts.label_changes.add or {}
@@ -511,7 +512,8 @@ end
 
 function C.raise_fixing_replay_reviewing(raise_reviewing, dept, issue, state, proposal_id, link, current_pr, feedback, reason)
   local new_version = devloop_state.next_fix_version(state.version)
-  local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
+  local pr_repo = link.implementation_repo or issue.implementation_repo or issue.repo
+  local source_ref = entity_lib.pr_source_ref(pr_repo, link.pr_number)
   local fix = {
     proposal_id = proposal_id,
     pr_number = link.pr_number,
@@ -529,7 +531,9 @@ function C.raise_fixing_replay_reviewing(raise_reviewing, dept, issue, state, pr
   ) or nil
   raise_reviewing({
     dept = dept,
-    repo = issue.repo,
+    repo = pr_repo,
+    pr_repo = pr_repo,
+    issue_repo = issue.repo,
     issue_number = issue.number,
     fix = fix,
     old_head_sha = feedback.reviewed_head_sha,

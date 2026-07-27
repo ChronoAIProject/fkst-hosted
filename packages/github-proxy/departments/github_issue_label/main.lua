@@ -143,7 +143,7 @@ local function act(event)
     end
     if kind == "pr" then
       if payload.issue_number ~= nil
-        and not core.verify_issue_claim_before_write(payload, repo, payload.issue_number, "github_issue_label") then
+        and not core.verify_issue_claim_before_write(payload, payload.issue_repo or repo, payload.issue_number, "github_issue_label") then
         return
       end
     end

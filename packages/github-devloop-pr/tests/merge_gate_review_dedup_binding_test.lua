@@ -15,12 +15,12 @@ local function trusted_comment(body)
   }
 end
 
-local function review_identity(version, head_sha)
-  local review_proposal = devloop_base.pr_review_proposal_id("owner/repo", 7, version, head_sha)
+local function review_identity(version, head_sha, repo, pr_number)
+  local review_proposal = devloop_base.pr_review_proposal_id(repo or "owner/repo", pr_number or 7, version, head_sha)
   return review_proposal, devloop_base.pr_review_consensus_dedup_key(review_proposal)
 end
 
-local function merge_ready_for(review_proposal, review_dedup, head_sha)
+local function merge_ready_for(review_proposal, review_dedup, head_sha, source_repo, source_pr_number)
   return {
     proposal_id = issue_proposal,
     pr_number = 7,
@@ -28,6 +28,10 @@ local function merge_ready_for(review_proposal, review_dedup, head_sha)
     review_proposal_id = review_proposal,
     review_dedup_key = review_dedup,
     reviewed_head_sha = head_sha,
+    source_ref = {
+      kind = "external",
+      ref = (source_repo or "owner/repo") .. "#pr/" .. tostring(source_pr_number or 7),
+    },
   }
 end
 
@@ -100,6 +104,56 @@ return {
     t.eq(ready_ok, true)
     local review_ok = m_facts.review_result_approval_matches_event(comments, merge_ready_a)
     t.eq(review_ok, true)
+  end,
+
+  test_cross_repo_review_approval_binds_implementation_pr_source_ref = function()
+    local review, dedup = review_identity(review_version, "def456", "owner/implementation", 7)
+    local merge_ready = merge_ready_for(review, dedup, "def456", "owner/implementation", 7)
+    local approval = {
+      proposal_id = issue_proposal,
+      pr_number = 7,
+      version = review_version,
+      head_sha = "def456",
+      review_proposal_id = review,
+      review_dedup_key = dedup,
+    }
+
+    local ready_ok, reason = m_facts.merge_ready_approval_matches_event(approval, merge_ready)
+    t.eq(ready_ok, true)
+    t.eq(reason, "merge-ready-approval")
+  end,
+
+  test_cross_repo_review_approval_rejects_wrong_or_malformed_pr_source_ref = function()
+    local review, dedup = review_identity(review_version, "def456", "owner/implementation", 7)
+    local approval = {
+      proposal_id = issue_proposal,
+      pr_number = 7,
+      version = review_version,
+      head_sha = "def456",
+      review_proposal_id = review,
+      review_dedup_key = dedup,
+    }
+    local cases = {
+      {
+        merge_ready = merge_ready_for(review, dedup, "def456", "owner/repo", 7),
+        reason = "merge-ready-review-proposal-mismatch",
+      },
+      {
+        merge_ready = merge_ready_for(review, dedup, "def456", "owner/implementation", 8),
+        reason = "merge-ready-source-ref-mismatch",
+      },
+      {
+        merge_ready = merge_ready_for(review, dedup, "def456", "owner/implementation", 7),
+        reason = "merge-ready-source-ref-mismatch",
+      },
+    }
+    cases[3].merge_ready.source_ref = { kind = "external", ref = "not-a-pr-reference" }
+
+    for _, case in ipairs(cases) do
+      local ready_ok, reason = m_facts.merge_ready_approval_matches_event(approval, case.merge_ready)
+      t.eq(ready_ok, false)
+      t.eq(reason, case.reason)
+    end
   end,
 
   test_base_review_dedup_option_matches_without_review_proposal_option = function()

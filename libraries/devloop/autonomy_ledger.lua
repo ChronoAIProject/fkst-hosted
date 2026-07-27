@@ -468,12 +468,12 @@ function C.autonomy_attempt_denominator(comments, repo, issue_number, opts)
   return C.autonomy_attempt_projection(comments, repo, issue_number, opts).total_attempts
 end
 
-function C.autonomy_result_record(M, repo, issue_number, merge_ready, issue, post_merge_pr)
+function C.autonomy_result_record(M, repo, issue_number, merge_ready, issue, post_merge_pr, pr_repo)
   local human_touch_count = 0
   local post_merge_probe = "pending"
   if post_merge_pr ~= nil then
     post_merge_probe = C.autonomy_post_merge_probe_gate(M, post_merge_pr, {
-      repo = repo,
+      repo = pr_repo or repo,
       dept = "merge",
       proposal_id = tostring(merge_ready.proposal_id),
     })

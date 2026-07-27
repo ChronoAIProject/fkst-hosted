@@ -25,6 +25,7 @@ local m_builders = require("devloop.markers.builders")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
+local delivery_target = require("devloop.delivery_target")
 local M = {}
 
 local spec = {
@@ -845,9 +846,19 @@ local function process_pr_event(event)
   current_pr.number = pr.number
   current_pr.force_fresh = true
   local origin = m_facts.pr_origin_fact(current_pr.comments)
-  if origin == nil or origin.pr_native == true or origin.repo ~= pr.repo or tonumber(origin.issue_number) == nil then
+  if origin == nil or origin.pr_native == true or tonumber(origin.issue_number) == nil then
     devloop_logging.log_entry("observe_issue", event, "unknown", devloop_logging.payload_field(pr, "dedup_key"))
     devloop_logging.log_cas_decision("observe_issue", "unknown", { state = nil, version = nil }, "awaiting-pr", "awaiting-pr", "skip-foreign(pr-origin)", "PR entity change has no issue-backed devloop origin")
+    return
+  end
+  local target = delivery_target.resolve(origin.lifecycle_repo or origin.repo, origin.issue_number, {
+    implementation_repo = origin.implementation_repo or origin.repo,
+    implementation_branch = origin.base_branch,
+    verify = false,
+  })
+  if tostring(target.implementation_repo):lower() ~= tostring(pr.repo):lower() then
+    devloop_logging.log_entry("observe_issue", event, origin.proposal_id, devloop_logging.payload_field(pr, "dedup_key"))
+    devloop_logging.log_cas_decision("observe_issue", origin.proposal_id, { state = nil, version = nil }, "awaiting-pr", "awaiting-pr", "skip-foreign(pr-origin)", "PR repository differs from exact delivery target")
     return
   end
   if tostring(origin.branch or "") ~= tostring(current_pr.head_ref_name or "")
@@ -863,13 +874,13 @@ local function process_pr_event(event)
     payload = {
       schema = "github-proxy.v1",
       type = "issue",
-      repo = origin.repo,
+      repo = target.lifecycle_repo,
       number = tonumber(origin.issue_number),
       title = "PR-backed parent issue",
       state = "OPEN",
       updated_at = pr.updated_at,
       dedup_key = tostring(pr.dedup_key or "") .. "/parent-awaiting-pr",
-      source_ref = entity_lib.issue_source_ref(origin.repo, origin.issue_number),
+      source_ref = entity_lib.issue_source_ref(target.lifecycle_repo, origin.issue_number),
       source = "pr-entity-change",
       child_pr = current_pr,
     },

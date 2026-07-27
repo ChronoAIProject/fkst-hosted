@@ -437,6 +437,9 @@ end
 
 function C.build_context_bundle(M, args)
   local repo = args and args.repo
+  local issue_repo = args and args.issue_repo or repo
+  local pr_repo = args and args.pr_repo or repo
+  local board_repo = args and args.board_repo or issue_repo
   local issue_number = args and args.issue_number
   local proposal_id = args and args.proposal_id
   local version = args and args.version
@@ -497,12 +500,12 @@ function C.build_context_bundle(M, args)
   local issue_json = '{"title":"PR-only context","body":"No backing GitHub issue is available for this delivery.","labels":[],"comments":[],"state":"UNKNOWN"}\n'
   if issue_number ~= nil then
     issue_json = fetch_result(function(timeout)
-      return M.gh_issue_view(repo, issue_number, "title,body,updatedAt,labels,comments,state,author", timeout, args.exec, args.exec)
+      return M.gh_issue_view(issue_repo, issue_number, "title,body,updatedAt,labels,comments,state,author", timeout, args.exec, args.exec)
     end, "issue fetch")
     if whitelist ~= nil then
       local issue_redactions = {}
       issue_json = content_filter.filter_gh_content_json(issue_json, "issue", whitelist, issue_redactions)
-      log_content_redactions(args.dept, proposal_id, repo, "issue/" .. tostring(issue_number), issue_redactions)
+      log_content_redactions(args.dept, proposal_id, issue_repo, "issue/" .. tostring(issue_number), issue_redactions)
     end
   end
   issue_json = truncate_if_needed(issue_json, args.dept, proposal_id, "issue.json")
@@ -511,24 +514,24 @@ function C.build_context_bundle(M, args)
 
   if args.pr_number ~= nil then
     local pr_json = fetch_result(function(timeout)
-      return M.gh_pr_view_context(repo, args.pr_number, timeout, args.exec, args.exec)
+      return M.gh_pr_view_context(pr_repo, args.pr_number, timeout, args.exec, args.exec)
     end, "pr fetch")
     if whitelist ~= nil then
       local pr_redactions = {}
       pr_json = content_filter.filter_gh_content_json(pr_json, "pr", whitelist, pr_redactions)
-      log_content_redactions(args.dept, proposal_id, repo, "pr/" .. tostring(args.pr_number), pr_redactions)
+      log_content_redactions(args.dept, proposal_id, pr_repo, "pr/" .. tostring(args.pr_number), pr_redactions)
     end
     pr_json = truncate_if_needed(pr_json, args.dept, proposal_id, "pr.json")
     write_file(tmp_bundle.pr_path, pr_json, args.exec)
     tmp_bundle.pr_bytes = #pr_json
     local diff = fetch_result(function(timeout)
-      return M.gh_pr_diff(repo, args.pr_number, timeout, args.exec)
+      return M.gh_pr_diff(pr_repo, args.pr_number, timeout, args.exec)
     end, "pr diff fetch")
     diff = truncate_if_needed(diff, args.dept, proposal_id, "diff.patch")
     write_file(tmp_bundle.diff_path, diff, args.exec)
     tmp_bundle.diff_bytes = #diff
     local name_result = (function(timeout)
-      return M.gh_pr_diff_name_only(repo, args.pr_number, timeout, args.exec)
+      return M.gh_pr_diff_name_only(pr_repo, args.pr_number, timeout, args.exec)
     end)(60)
     local risk = github_risk.github_diff_name_risk(name_result)
     risk_classification = clone_risk_classification(risk)
@@ -538,7 +541,7 @@ function C.build_context_bundle(M, args)
     tmp_bundle.risk_bytes = #risk_text
   end
 
-  local board = payloads_board.board_digest_block(M, repo, args.tick)
+  local board = payloads_board.board_digest_block(M, board_repo, args.tick)
   board = truncate_if_needed(board, args.dept, proposal_id, "board.txt")
   write_file(tmp_bundle.board_path, board, args.exec)
   tmp_bundle.board_bytes = #board
@@ -577,7 +580,14 @@ function C.context_fetch_ref_from_bundle(M, args)
   -- the strand (unknown collapsed to "known normal"). Absent structured risk = unknown:
   -- re-derive structurally or fail closed to unknown so the producer defers, never strands.
   if risk == nil then
-    risk = args and args.pr_number ~= nil and fetch_risk_from_pr_paths(M, args) or unknown_risk_classification()
+    if args and args.pr_number ~= nil then
+      local risk_args = {}
+      for key, value in pairs(args) do risk_args[key] = value end
+      risk_args.repo = args.pr_repo or args.repo
+      risk = fetch_risk_from_pr_paths(M, risk_args)
+    else
+      risk = unknown_risk_classification()
+    end
   end
   risk = clone_risk_classification(risk)
   return C.context_bundle_manifest_ref(C.context_bundle_manifest_key(args.proposal_id, args.version)), risk.high_risk == true, risk

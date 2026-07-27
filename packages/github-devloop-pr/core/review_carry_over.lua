@@ -36,7 +36,7 @@ local function carry_over_risk_gate(repo, pr_number, issue_proposal_id, version,
   return true, "high-risk-evidence"
 end
 
-function M.approved_lineage_carry_over(repo, pr_number, issue_proposal_id, version, comments, base_branch, current_head_sha)
+function M.approved_lineage_carry_over(repo, pr_number, issue_proposal_id, version, comments, base_branch, current_head_sha, implementation_git)
   if type(comments) ~= "table" or not require("devloop.pr_safety").is_safe_head_sha(current_head_sha) then
     return nil, "invalid-carry-over-input"
   end
@@ -59,15 +59,16 @@ function M.approved_lineage_carry_over(repo, pr_number, issue_proposal_id, versi
   if not approval_ok then
     return nil, "missing-review-result-approve"
   end
-  local ancestry = git_mechanics.git_is_ancestor(M.git, fact.head_sha, current_head_sha, 30)
+  local git = implementation_git or M.git
+  local ancestry = git_mechanics.git_is_ancestor(git, fact.head_sha, current_head_sha, 30)
   if ancestry.exit_code ~= 0 then
     return nil, "approved-head-not-ancestor"
   end
-  local base_head, base_error = git_mechanics.current_base_head(M.git, base_branch)
+  local base_head, base_error = git_mechanics.current_base_head(git, base_branch)
   if base_head == nil then
     return nil, "carry-over-proof-unavailable: " .. tostring(base_error)
   end
-  local empty_delta, delta_reason = git_mechanics.has_empty_resolution_delta(M.git, fact.head_sha, base_head, current_head_sha)
+  local empty_delta, delta_reason = git_mechanics.has_empty_resolution_delta(git, fact.head_sha, base_head, current_head_sha)
   if not empty_delta then
     return nil, "non-empty-resolution-delta: " .. tostring(delta_reason)
   end
@@ -89,7 +90,7 @@ function M.approved_lineage_carry_over(repo, pr_number, issue_proposal_id, versi
   }, "approved-lineage-empty-delta"
 end
 
-function M.raise_review_carry_over(dept, repo, pr_number, issue_proposal_id, version, current_state, current_pr, base_branch)
+function M.raise_review_carry_over(dept, repo, pr_number, issue_proposal_id, version, current_state, current_pr, base_branch, implementation_git)
   local carry, reason = M.approved_lineage_carry_over(
     repo,
     pr_number,
@@ -97,7 +98,8 @@ function M.raise_review_carry_over(dept, repo, pr_number, issue_proposal_id, ver
     version,
     current_pr and current_pr.comments,
     base_branch,
-    current_pr and current_pr.head_sha
+    current_pr and current_pr.head_sha,
+    implementation_git
   )
   if carry == nil then
     return nil, reason

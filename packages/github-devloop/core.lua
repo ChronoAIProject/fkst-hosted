@@ -82,6 +82,9 @@ require("forge.merge").install(M, { github_handle = require("devloop.github_fact
 local git_mechanics = require("devloop.git_mechanics")
 local function dept_exec_argv(...) return exec_argv(...) end
 M.git = require("forge.git").new(dept_exec_argv)
+M.scoped_git = function(root)
+  return require("forge.git").scoped(dept_exec_argv, root)
+end
 require("devloop.logging").install(M)
 require("devloop.state").install(M)
 require("devloop.gate").install({ sources = wiring.gate_sources() })

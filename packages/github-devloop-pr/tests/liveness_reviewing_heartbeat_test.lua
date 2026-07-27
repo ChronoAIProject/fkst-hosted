@@ -102,6 +102,12 @@ local function mock_repo()
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_DELIVERY_GRANTS"), {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  mock_branch_config_env()
 end
 
 local function mock_issue_list()
@@ -251,7 +257,7 @@ return {
       m_builders.pr_origin_marker(proposal_id, "42", "devloop-owner-repo-42-01HY", review_version, "dev"),
       state_comment("reviewing", review_version, "2026-06-03T00:00:00Z"),
     })
-    t.eq(result.exit_code, 0)
+    t.eq(result.exit_code, 0, tostring(result.error or result.stderr or "liveness scan failed"))
     local reviewing = find_raise(result, "devloop_reviewing")
     t.is_true(reviewing ~= nil)
     t.eq(reviewing.payload.review_delivery_dedup_key, reviewing.payload.dedup_key)
@@ -326,7 +332,7 @@ return {
       state_comment("reviewing", version, "2026-06-03T00:00:00Z"),
       review_round_comment(os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 60)),
     })
-    t.eq(result.exit_code, 0)
+    t.eq(result.exit_code, 0, tostring(result.error or result.stderr or "liveness scan failed"))
     t.eq(find_raise(result, "devloop_timeout_reconcile"), nil)
     t.eq(find_raise(result, "devloop_reviewing"), nil)
     t.eq(find_pr_comment_with(result, "fkst:github-devloop:timeout-attempt:v1"), nil)
@@ -341,7 +347,7 @@ return {
       timeout_attempt_comment(version, 2),
       review_round_comment("2026-06-03T00:00:00Z"),
     })
-    t.eq(result.exit_code, 0)
+    t.eq(result.exit_code, 0, tostring(result.error or result.stderr or "liveness scan failed"))
     local reconcile = find_raise(result, "devloop_timeout_reconcile")
     t.is_true(reconcile ~= nil)
     t.eq(reconcile.payload.state, "reviewing")

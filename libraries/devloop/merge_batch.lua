@@ -44,26 +44,26 @@ local function files_disjoint_from_window(M, files, merged_files)
   return true, "disjoint", nil
 end
 
-local function current_base_head(M, branches)
-  local base_head, reason = git_mechanics.current_base_head(M.git, branches.integration)
+local function current_base_head(git, branches)
+  local base_head, reason = git_mechanics.current_base_head(git, branches.integration)
   if base_head == nil then
     return nil, reason
   end
   return base_head, "current-base-ok"
 end
 
-local function head_contains_base(M, base_head, entry)
+local function head_contains_base(git, base_head, entry)
   local head_sha = tostring(entry and entry.head_sha or "")
   if not require("devloop.pr_safety").is_safe_head_sha(base_head)
     or not require("devloop.pr_safety").is_safe_head_sha(head_sha)
     or not require("devloop.pr_safety").is_safe_branch(entry and entry.head_branch) then
     return false, "unsafe-current-base"
   end
-  local fetch_result = M.git_fetch_branch("origin", entry.head_branch, 60)
+  local fetch_result = git.fetch_branch("origin", entry.head_branch, 60)
   if fetch_result.exit_code ~= 0 then
     return false, "candidate-head-fetch-failed"
   end
-  local fetched_head = M.git_fetch_head_commit(30)
+  local fetched_head = git.fetch_head_commit(30)
   if fetched_head.exit_code ~= 0 then
     return false, "candidate-head-underivable"
   end
@@ -71,20 +71,26 @@ local function head_contains_base(M, base_head, entry)
   if fetched_sha ~= head_sha then
     return false, "candidate-head-changed"
   end
-  local result = git_mechanics.git_is_ancestor(M.git, base_head, head_sha, 30)
+  local result = git_mechanics.git_is_ancestor(git, base_head, head_sha, 30)
   if result.exit_code == 0 then
     return true, "current-base-contained"
   end
   return false, "current-base-not-contained"
 end
 
-local function entry_issue_number(M, entry)
+local function entry_entity(entry)
   local entity = entity_lib.parse_entity_proposal_id(entry and entry.proposal_id)
-  return entity and entity.issue_number or nil
+  if entity == nil or entity.kind ~= "issue" then
+    return nil
+  end
+  return entity
 end
 
-local function batch_entry_claim_ok(M, repo, entry)
-  return m_claims.verify_pr_review_issue_claim("merge_batch", repo, entry_issue_number(M, entry), nil, entry and entry.proposal_id)
+local function batch_entry_claim_ok(entry)
+  local entity = entry_entity(entry)
+  return entity ~= nil and m_claims.verify_pr_review_issue_claim(
+    "merge_batch", entity.repo, entity.issue_number, nil, entry and entry.proposal_id
+  )
 end
 
 local function find_queue_entry(entries, merge_ready)
@@ -99,6 +105,7 @@ local function find_queue_entry(entries, merge_ready)
 end
 
 function C.run_merge_batch_window(M, repo, branches, first_merge_ready, queue_entries, options, process_merge_ready)
+  local implementation_git = options and options.git or M.git
   local first_entry, first_index = find_queue_entry(queue_entries, first_merge_ready)
   if first_entry == nil or first_index == nil then
     log_batch_window(M, first_merge_ready.proposal_id, {
@@ -117,7 +124,7 @@ function C.run_merge_batch_window(M, repo, branches, first_merge_ready, queue_en
   local last_merged_pr_number = first_entry.pr_number
 
   local previous_base_head = tostring(first_entry.base_sha or "")
-  local required_base_head, base_reason = current_base_head(M, branches)
+  local required_base_head, base_reason = current_base_head(implementation_git, branches)
   if required_base_head == nil then
     log_batch_window(M, first_merge_ready.proposal_id, {
       "action=stop",
@@ -149,7 +156,7 @@ function C.run_merge_batch_window(M, repo, branches, first_merge_ready, queue_en
       })
       return last_merged_pr_number
     end
-    if not batch_entry_claim_ok(M, repo, entry) then
+    if not batch_entry_claim_ok(entry) then
       log_batch_window(M, entry.proposal_id, {
         "action=stop",
         "pr=" .. tostring(entry.pr_number),
@@ -158,7 +165,7 @@ function C.run_merge_batch_window(M, repo, branches, first_merge_ready, queue_en
       })
       return last_merged_pr_number
     end
-    local base_ok, head_base_reason = head_contains_base(M, required_base_head, entry)
+    local base_ok, head_base_reason = head_contains_base(implementation_git, required_base_head, entry)
     if not base_ok then
       log_batch_window(M, entry.proposal_id, {
         "action=stop",
@@ -213,10 +220,12 @@ function C.run_merge_batch_window(M, repo, branches, first_merge_ready, queue_en
       return last_merged_pr_number
     end
     merge_ready._merge_pass = "poll"
-    local entity = entity_lib.parse_entity_proposal_id(merge_ready.proposal_id)
-    local outcome = process_merge_ready(repo, entity and entity.issue_number or nil, merge_ready, branches, nil, {
+    local entity = entry_entity(entry)
+    local outcome = process_merge_ready(entity and entity.repo or nil, repo,
+      entity and entity.issue_number or nil, merge_ready, branches, nil, {
       enforce_queue = false,
       write_mode = options and options.write_mode or nil,
+      implementation_git = implementation_git,
     })
     if outcome == nil or outcome.status ~= "merged" then
       log_batch_window(M, entry.proposal_id, {
@@ -232,7 +241,7 @@ function C.run_merge_batch_window(M, repo, branches, first_merge_ready, queue_en
     merged_count = merged_count + 1
     last_merged_pr_number = entry.pr_number
     previous_base_head = tostring(files.base_sha or "")
-    required_base_head, base_reason = current_base_head(M, branches)
+    required_base_head, base_reason = current_base_head(implementation_git, branches)
     if required_base_head == nil then
       log_batch_window(M, entry.proposal_id, {
         "action=stop",

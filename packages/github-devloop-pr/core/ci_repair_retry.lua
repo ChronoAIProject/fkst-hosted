@@ -171,7 +171,21 @@ function C.evaluate(M, state, ctx)
   return decision
 end
 
-function C.raise_speculative(M, repo, issue_number, fix, current_state, current_predecessor_set, reason)
+function C.raise_speculative(M, repo, issue_number, fix, current_state, current_predecessor_set, reason, issue_repo)
+  issue_repo = issue_repo or repo
+  local function raise_reviewing_outcome(current_pr, outcome_reason)
+    requests_review.raise_fix_reviewing(M, {
+      dept = "fix",
+      repo = issue_repo,
+      issue_repo = issue_repo,
+      pr_repo = repo,
+      issue_number = issue_number,
+      fix = fix,
+      old_head_sha = fix.reviewed_head_sha,
+      new_head_sha = current_pr.head_sha,
+      reason = outcome_reason,
+    })
+  end
   local function raise_generation(next_version, current_ci_failure_key, current_gate_reason)
     local merge_ready = {
       proposal_id = fix.proposal_id,
@@ -199,11 +213,11 @@ function C.raise_speculative(M, repo, issue_number, fix, current_state, current_
         ci_failure_key = current_ci_failure_key,
       }
     )
-    local label_request = issue_number ~= nil and requests_labels.build_state_label_request(repo,
+    local label_request = issue_number ~= nil and requests_labels.build_state_label_request(issue_repo,
       issue_number,
       "fixing",
       fix.dedup_key .. "/label/refix/" .. tostring(devloop_state.version_fix_round(next_version)),
-      entity_lib.issue_source_ref(repo, issue_number)
+      entity_lib.issue_source_ref(issue_repo, issue_number)
     ) or nil
     local add_labels, remove_labels = devloop_state.state_label_changes("fixing")
     devloop_logging.log_cas_decision("fix", fix.proposal_id, current_state, "fixing", "fixing", "applied", reason)
@@ -242,9 +256,10 @@ function C.raise_speculative(M, repo, issue_number, fix, current_state, current_
         reason = "own-CI-red speculation churn exhausted the fix-round budget",
       })
       if decision.kind == "not-own-ci" then
-        requests_review.raise_fix_reviewing_outcome(M, repo, issue_number, fix,
-          fix.reviewed_head_sha, decision.current_pr.head_sha,
-          "own-CI gate no longer requires speculative repair: " .. tostring(decision.reason))
+        raise_reviewing_outcome(
+          decision.current_pr,
+          "own-CI gate no longer requires speculative repair: " .. tostring(decision.reason)
+        )
         return { kind = "reviewing" }
       end
       if decision.kind ~= "admit" then
@@ -259,9 +274,7 @@ function C.raise_speculative(M, repo, issue_number, fix, current_state, current_
     }
   )
   if mismatch == "head-mismatch" then
-    requests_review.raise_fix_reviewing_outcome(M, repo, issue_number, fix,
-      fix.reviewed_head_sha, current_pr.head_sha,
-      "own-CI gate head changed before speculative repair")
+    raise_reviewing_outcome(current_pr, "own-CI gate head changed before speculative repair")
     return { kind = "reviewing" }
   end
   return result
@@ -331,7 +344,8 @@ end
 
 raise_admitted_round = function(M, dept, issue, state, proposal_id, link, feedback, decision, tools)
   local current_pr = decision.current_pr
-  local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
+  local pr_repo = link.implementation_repo or issue.implementation_repo or issue.repo
+  local source_ref = entity_lib.pr_source_ref(pr_repo, link.pr_number)
   local next_payload = payloads_builders.build_devloop_fixing_payload({
     proposal_id = proposal_id,
     impl_version = decision.version,
@@ -346,7 +360,7 @@ raise_admitted_round = function(M, dept, issue, state, proposal_id, link, feedba
     gate_failure_excerpt = decision.reason,
   }, source_ref)
   local request = requests_review.build_merge_gate_fix_comment_request(M,
-    issue.repo,
+    pr_repo,
     issue.number,
     {
       proposal_id = proposal_id,

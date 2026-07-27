@@ -15,6 +15,7 @@ local contract_time = require("contract.time")
 local transition_version = require("contract.transition_version")
 local support = require("devloop.commands.support")
 local config = require("devloop.config")
+local delivery_target = require("devloop.delivery_target")
 
 local strings = require("contract.strings")
 local devloop_logging = require("devloop.logging")
@@ -311,7 +312,7 @@ local function predecessor_head_sha(predecessor)
   return head_sha
 end
 
-function C.merge_queue_predecessor_set_matches_current_base(M, recorded_set, current_set, base_branch)
+function C.merge_queue_predecessor_set_matches_current_base(M, recorded_set, current_set, base_branch, git)
   local recorded = predecessor_set_entries(recorded_set)
   local current = predecessor_set_entries(current_set)
   if #current > #recorded then
@@ -326,7 +327,8 @@ function C.merge_queue_predecessor_set_matches_current_base(M, recorded_set, cur
   if offset == 0 then
     return true, "predecessor-set-current"
   end
-  local base_head, base_reason = git_mechanics.current_base_head(M.git, base_branch)
+  local implementation_git = git or M.git
+  local base_head, base_reason = git_mechanics.current_base_head(implementation_git, base_branch)
   if base_head == nil then
     return false, base_reason
   end
@@ -335,7 +337,7 @@ function C.merge_queue_predecessor_set_matches_current_base(M, recorded_set, cur
     if head_sha == nil then
       return false, "predecessor-set-mismatch"
     end
-    local result = git_mechanics.git_is_ancestor(M.git, head_sha, base_head, 30)
+    local result = git_mechanics.git_is_ancestor(implementation_git, head_sha, base_head, 30)
     if result.exit_code ~= 0 then
       return false, "predecessor-not-landed"
     end
@@ -508,7 +510,15 @@ function C.wip_capacity_allows_start(M, repo, current_issue_number)
       local current = parsers_issue.parse_issue_view_state(M, view.stdout)
       local proposal_id = base_ids.proposal_id(repo, issue_number)
       local state = M.current_state(current.comments, proposal_id)
-      local classification = C.wip_admission_classification(M, repo, proposal_id, current.comments, state, integration_branch)
+      local classification = C.wip_admission_classification(
+        M,
+        repo,
+        issue_number,
+        proposal_id,
+        current.comments,
+        state,
+        integration_branch
+      )
       if classification.counts then
         count = count + 1
       elseif classification.reason ~= "state-not-active-wip" then
@@ -536,7 +546,7 @@ local merge_gate_wait_wip_states = {
   merging = true,
 }
 
-function C.wip_admission_classification(M, repo, proposal_id, issue_comments, state, integration_branch)
+function C.wip_admission_classification(M, repo, issue_number, proposal_id, issue_comments, state, integration_branch)
   local state_name = tostring(state and state.state or "")
   if not active_wip_states[state_name] then
     return {
@@ -547,19 +557,26 @@ function C.wip_admission_classification(M, repo, proposal_id, issue_comments, st
   end
 
   local link = m_facts.pr_link_fact(issue_comments, proposal_id)
-  if link ~= nil and tostring(link.base_branch or "") ~= tostring(integration_branch or "") then
+  local target = delivery_target.resolve(repo, issue_number, {
+    implementation_repo = link and link.implementation_repo or nil,
+    implementation_branch = link and link.cross_repo and link.base_branch or nil,
+    default_branch = integration_branch,
+    verify = false,
+  })
+  if link ~= nil and tostring(link.base_branch or "") ~= tostring(target.implementation_branch or "") then
     return {
       counts = false,
       reason = "base-unmanaged",
       state = state_name,
       pr_number = link.pr_number,
       pr_base = link.base_branch,
-      integration = integration_branch,
+      implementation_repo = target.implementation_repo,
+      integration = target.implementation_branch,
     }
   end
 
   if link ~= nil and merge_gate_wait_wip_states[state_name] then
-    local current_pr = pr_merge_view_for_wip(M, repo, link.pr_number)
+    local current_pr = pr_merge_view_for_wip(M, target.implementation_repo, link.pr_number)
     local wait = nil
     if type(current_pr) == "table" and forge_validators.is_git_sha(current_pr.head_sha) then
       wait = m_mgw.merge_gate_wait_fact(M, current_pr.comments, proposal_id, state.version, link.pr_number, current_pr.head_sha)
@@ -571,6 +588,7 @@ function C.wip_admission_classification(M, repo, proposal_id, issue_comments, st
         state = state_name,
         pr_number = link.pr_number,
         pr_base = link.base_branch,
+        implementation_repo = target.implementation_repo,
         wait_kind = wait.kind,
         wait_reason = wait.reason,
       }
@@ -583,6 +601,7 @@ function C.wip_admission_classification(M, repo, proposal_id, issue_comments, st
     state = state_name,
     pr_number = link and link.pr_number or nil,
     pr_base = link and link.base_branch or nil,
+    implementation_repo = target.implementation_repo,
   }
 end
 
@@ -596,6 +615,9 @@ function C.log_wip_exclusion(proposal_id, classification)
   end
   if classification.pr_base ~= nil then
     table.insert(fields, "pr_base=" .. tostring(classification.pr_base))
+  end
+  if classification.implementation_repo ~= nil then
+    table.insert(fields, "implementation_repo=" .. tostring(classification.implementation_repo))
   end
   if classification.integration ~= nil then
     table.insert(fields, "integration=" .. tostring(classification.integration))

@@ -38,6 +38,21 @@ local function mock_repo()
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_DELIVERY_GRANTS"), {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_UPSTREAM_BRANCH"), {
+    stdout = "dev",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_INTEGRATION_BRANCH"), {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
 local function mock_branch_config()
@@ -128,7 +143,7 @@ return {
     mock_issue_claim()
     mock_pr_state(comments, h2)
     local scanned = run_liveness_scan("stale-head-liveness-scan")
-    t.eq(scanned.exit_code, 0)
+    t.eq(scanned.exit_code, 0, tostring(scanned.error or scanned.stderr or "liveness scan failed"))
     local observe_raise = h.find_raise(scanned.raises, "devloop_observe_pr")
     t.is_true(observe_raise ~= nil)
     t.eq(observe_raise.payload.source, "liveness-scan")

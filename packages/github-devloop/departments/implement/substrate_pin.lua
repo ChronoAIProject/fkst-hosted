@@ -98,14 +98,14 @@ function M.refresh(worktree, branch, base_head, merge_clean, opts)
   end
 end
 
-function M.is_only_pin_delta(base_head, branch)
+function M.is_only_pin_delta(base_head, branch, opts)
   if not require("devloop.pr_safety").is_safe_head_sha(base_head) then
     error("github-devloop: implement-substrate-pin-base-unsafe: unsafe implementation base head")
   end
   if not forge_validators.is_git_ref_safe(branch) then
     error("github-devloop: implement-substrate-pin-branch-unsafe: unsafe implementation branch")
   end
-  local diff = git().diff_name_only(nil, tostring(base_head) .. "..refs/heads/" .. tostring(branch), 30)
+  local diff = git(opts).diff_name_only(nil, tostring(base_head) .. "..refs/heads/" .. tostring(branch), 30)
   if diff.exit_code ~= 0 then
     error("github-devloop: implement-substrate-pin-diff-failed: " .. tostring(diff.stderr))
   end

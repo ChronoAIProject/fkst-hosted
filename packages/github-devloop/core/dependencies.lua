@@ -13,6 +13,7 @@ local root_ref = nil
 local strings = require("forge.strings")
 local transition_version = require("contract.transition_version")
 local config = require("devloop.config")
+local delivery_target = require("devloop.delivery_target")
 
 local max_dependency_depth = 32
 
@@ -218,7 +219,13 @@ local function blocker_merged(repo, blocker_number)
     return core.delegated_blocker_merged(repo, blocker_number, blocker_proposal_id, current, state)
   end
 
-  local pr_result = devloop_commands.gh_pr_view_observe(repo, link.pr_number, 30)
+  local target = delivery_target.resolve(repo, blocker_number, {
+    implementation_repo = link.implementation_repo,
+    implementation_branch = link.base_branch,
+    default_git = core.git,
+    verify = false,
+  })
+  local pr_result = devloop_commands.gh_pr_view_observe(target.implementation_repo, link.pr_number, 30)
   if type(pr_result) ~= "table" or pr_result.exit_code ~= 0 then
     return nil, "gh-pr-failed"
   end
@@ -231,7 +238,8 @@ local function blocker_merged(repo, blocker_number)
   local origin = m_facts.pr_origin_fact(pr_current.comments)
   if origin == nil
     or tostring(origin.proposal_id or "") ~= blocker_proposal_id
-    or tostring(origin.repo or "") ~= tostring(repo)
+    or tostring(origin.lifecycle_repo or origin.repo or ""):lower() ~= tostring(repo):lower()
+    or tostring(origin.implementation_repo or origin.repo or ""):lower() ~= tostring(target.implementation_repo):lower()
     or tostring(origin.issue_number or "") ~= tostring(blocker_number)
     or tostring(origin.branch or "") ~= tostring(link.branch or "")
     or tostring(origin.impl_version or "") ~= tostring(link.impl_version or "")
@@ -666,13 +674,21 @@ function M.delegated_blocker_merged(repo, blocker_number, blocker_proposal_id, c
   if delegation == nil then
     return false, nil
   end
+  if delegation.cross_repo and delegation.delivery_target_explicit ~= true then
+    return nil, "pr-delegation-mismatch"
+  end
   local pr_repo, pr_number = entity_lib.parse_pr_proposal_id(delegation.pr_proposal_id or delegation.pr_proposal)
-  if tostring(pr_repo or "") ~= tostring(repo)
+  local target = delivery_target.resolve(repo, blocker_number, {
+    implementation_repo = delegation.implementation_repo or pr_repo,
+    default_git = core.git,
+    verify = false,
+  })
+  if tostring(pr_repo or ""):lower() ~= tostring(target.implementation_repo):lower()
     or tostring(pr_number or "") ~= tostring(delegation.pr_number or "") then
     return nil, "pr-delegation-mismatch"
   end
 
-  local pr_result = devloop_commands.gh_pr_view_observe(repo, delegation.pr_number, 30)
+  local pr_result = devloop_commands.gh_pr_view_observe(target.implementation_repo, delegation.pr_number, 30)
   if type(pr_result) ~= "table" or pr_result.exit_code ~= 0 then
     return nil, "gh-pr-failed"
   end
@@ -685,7 +701,8 @@ function M.delegated_blocker_merged(repo, blocker_number, blocker_proposal_id, c
   local origin = m_facts.pr_origin_fact(pr_current.comments)
   if origin == nil
     or tostring(origin.proposal_id or "") ~= blocker_proposal_id
-    or tostring(origin.repo or "") ~= tostring(repo)
+    or tostring(origin.lifecycle_repo or origin.repo or ""):lower() ~= tostring(repo):lower()
+    or tostring(origin.implementation_repo or origin.repo or ""):lower() ~= tostring(target.implementation_repo):lower()
     or tostring(origin.issue_number or "") ~= tostring(blocker_number)
     or tostring(origin.impl_version or "") ~= tostring(delegation.version or "") then
     return nil, "pr-origin-mismatch"

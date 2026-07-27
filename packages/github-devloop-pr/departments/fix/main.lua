@@ -6,7 +6,6 @@ local requests_review = require("devloop.requests.review")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local core = require("core")
-local git_adapter = require("forge.git")
 local saga = require("workflow.saga")
 local convergence_identity = require("contract.convergence_identity")
 local workflow_codex = require("workflow.codex")
@@ -19,6 +18,7 @@ local ci_repair_attempts = require("core.ci_repair_attempts")
 local ci_repair_retry = require("core.ci_repair_retry")
 local ci_verdict = require("core.ci_verdict")
 local fix_write_gate = require("departments.fix.write_gate")
+local delivery_target = require("devloop.delivery_target")
 local with_current_classification = ci_verdict.with_current_classification
 local OWN_CI_RED = ci_verdict.OWN_CI_RED
 local review_meta_caps = {
@@ -65,20 +65,22 @@ local function same_review_result_dedup(left, right)
   return left_canonical ~= nil and left_canonical == right_canonical
 end
 
-local git = git_adapter.production_handle
-
 local function fix_done(_event)
   return false
 end
 
-local function raise_review_meta(...)
-  return requests_review.raise_fix_review_meta(review_meta_caps, ...)
+local function raise_review_meta(pr_repo, lifecycle_repo, issue_number, fix, reason, detail)
+  return requests_review.raise_fix_review_meta(
+    review_meta_caps, pr_repo, issue_number, fix, reason, detail, lifecycle_repo
+  )
 end
 
-local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_sha, reason, summary)
+local function raise_reviewing(lifecycle_repo, pr_repo, issue_number, fix, old_head_sha, new_head_sha, reason, summary)
   requests_review.raise_fix_reviewing(core, {
     dept = "fix",
-    repo = repo,
+    repo = lifecycle_repo,
+    issue_repo = lifecycle_repo,
+    pr_repo = pr_repo,
     issue_number = issue_number,
     fix = fix,
     old_head_sha = old_head_sha,
@@ -119,8 +121,8 @@ local function assert_fix_write_gate(fix, repo, issue_number)
   return false
 end
 
-local function branch_head_if_ahead(base_head_sha, branch)
-  local ahead_result = devloop_commands.git_branch_ahead_count(base_head_sha, branch, 30)
+local function branch_head_if_ahead(base_head_sha, branch, implementation_git)
+  local ahead_result = implementation_git.branch_ahead_count(base_head_sha, branch, 30)
   if ahead_result.exit_code ~= 0 then
     error("github-devloop: git-branch-ahead-check-failed: git branch ahead check failed: " .. tostring(ahead_result.stderr))
   end
@@ -128,7 +130,7 @@ local function branch_head_if_ahead(base_head_sha, branch)
   if ahead_count == nil or ahead_count <= 0 then
     return nil
   end
-  local head_result = devloop_commands.git_branch_head(branch, 30)
+  local head_result = implementation_git.branch_head(branch, 30)
   if head_result.exit_code ~= 0 then
     error("github-devloop: git-branch-head-check-failed: git branch head check failed: " .. tostring(head_result.stderr))
   end
@@ -160,23 +162,27 @@ local function validate_fix_write_gate_snapshot(repo, fix, branch, pr, reason_pr
 end
 
 local function run_fix_attempt(plan)
-  local worktree = branch_worktree(plan.repo, plan.issue_number, plan.fix.version, plan.branch)
+  local worktree = branch_worktree(
+    plan.lifecycle_repo, plan.issue_number, plan.fix.version, plan.branch, plan.implementation_git
+  )
   local merge_context, speculative_reason, speculative_current_set
   if plan.speculative_predecessors ~= nil then
     merge_context, speculative_reason = merge_predecessor_entries_for_fix(
       worktree,
       plan.branches.integration,
       plan.speculative_predecessors,
-      plan.speculative_current_set
+      plan.speculative_current_set,
+      plan.implementation_git
     )
     speculative_current_set = plan.speculative_current_set
   else
     merge_context, speculative_reason, speculative_current_set = merge_speculative_predecessors_for_fix(
       worktree,
-      plan.repo,
+      plan.pr_repo,
       plan.branches.integration,
       plan.fix,
-      plan.current_pr
+      plan.current_pr,
+      plan.implementation_git
     )
   end
   if merge_context == nil and speculative_reason ~= "not-speculative" then
@@ -196,7 +202,8 @@ local function run_fix_attempt(plan)
       plan.fix.pr_number,
       plan.branches.integration,
       plan.merge_gate_fact and plan.merge_gate_fact.gate_baseline_sha or nil,
-      plan.merge_gate_fact and plan.merge_gate_fact.reason or nil
+      plan.merge_gate_fact and plan.merge_gate_fact.reason or nil,
+      plan.implementation_git
     )
   end
   if merge_context.conflicted then
@@ -207,7 +214,10 @@ local function run_fix_attempt(plan)
   devloop_logging.log_codex_start("fix", plan.fix.proposal_id, "fix")
   local content_fetch = context_bundle.context_fetch_from_bundle(core, {
     dept = "fix",
-    repo = plan.repo,
+    repo = plan.lifecycle_repo,
+    issue_repo = plan.lifecycle_repo,
+    pr_repo = plan.pr_repo,
+    board_repo = plan.lifecycle_repo,
     issue_number = plan.issue_number,
     pr_number = plan.fix.pr_number,
     proposal_id = plan.fix.proposal_id,
@@ -243,16 +253,20 @@ local function run_fix_attempt(plan)
     }
   end
   devloop_logging.log_codex_result("fix", plan.fix.proposal_id, "fix", result, "result=completed", nil)
-  assert_no_unmerged_paths(worktree)
+  assert_no_unmerged_paths(worktree, plan.implementation_git)
 
-  local status = devloop_commands.git_status(worktree, 30)
+  local status = plan.implementation_git.status_porcelain(worktree, 30)
   if status.exit_code ~= 0 then
     error("github-devloop: git-status-failed: git status failed: " .. tostring(status.stderr))
   end
   if tostring(status.stdout or "") == "" then
-    local existing_head_sha = branch_head_if_ahead(plan.fix.reviewed_head_sha, plan.branch)
+    local existing_head_sha = branch_head_if_ahead(
+      plan.fix.reviewed_head_sha, plan.branch, plan.implementation_git
+    )
     if existing_head_sha ~= nil then
-      assert_candidate_diff_clean(worktree, plan.fix.reviewed_head_sha, existing_head_sha)
+      assert_candidate_diff_clean(
+        worktree, plan.fix.reviewed_head_sha, existing_head_sha, plan.implementation_git
+      )
       devloop_logging.log_codex_result("fix", plan.fix.proposal_id, "fix", result, "result=reusing-existing-head", nil)
       return {
         kind = "reviewing",
@@ -281,26 +295,26 @@ local function run_fix_attempt(plan)
     }
   end
 
-  local add_result = devloop_commands.git_add_all(worktree, 30)
+  local add_result = plan.implementation_git.add_all(worktree, 30)
   if add_result.exit_code ~= 0 then
     error("github-devloop: git-add-failed: git add failed: " .. tostring(add_result.stderr))
   end
-  assert_staged_diff_clean(worktree)
-  local commit_result = devloop_commands.git_commit(worktree, payloads_builders.fix_commit_subject(
+  assert_staged_diff_clean(worktree, plan.implementation_git)
+  local commit_result = plan.implementation_git.commit_message(worktree, payloads_builders.fix_commit_subject(
       plan.issue_number,
-      require("devloop.github_proxy_entity_view").commit_issue_subject_snapshot(plan.repo, plan.issue_number)
+      require("devloop.github_proxy_entity_view").commit_issue_subject_snapshot(plan.lifecycle_repo, plan.issue_number)
     ), 60)
   if commit_result.exit_code ~= 0 then
     error("github-devloop: git-commit-failed: git commit failed: " .. tostring(commit_result.stderr))
   end
-  local branch_result = devloop_commands.git_current_branch(worktree, 30)
+  local branch_result = plan.implementation_git.current_branch_worktree(worktree, 30)
   if branch_result.exit_code ~= 0 then
     error("github-devloop: git-branch-fact-failed: git branch fact failed: " .. tostring(branch_result.stderr))
   end
   if tostring(branch_result.stdout or ""):gsub("%s+$", "") ~= plan.branch then
     error("github-devloop: fix-branch-mismatch: PR origin fix branch mismatch")
   end
-  local head_result = git("github-devloop").git_head_sha(worktree, 30)
+  local head_result = plan.implementation_git.head_sha(worktree, 30)
   if head_result.exit_code ~= 0 then
     error("github-devloop: git-head-fact-failed: git head fact failed: " .. tostring(head_result.stderr))
   end
@@ -319,7 +333,9 @@ local function run_fix_attempt(plan)
       finished_at = now(),
     }
   end
-  assert_candidate_diff_clean(worktree, plan.fix.reviewed_head_sha, new_head_sha)
+  assert_candidate_diff_clean(
+    worktree, plan.fix.reviewed_head_sha, new_head_sha, plan.implementation_git
+  )
   return {
     kind = "reviewing",
     old_head_sha = plan.fix.reviewed_head_sha,
@@ -335,13 +351,13 @@ local function run_fix_attempt(plan)
     return dispatch()
   end
   local outcome, mismatch, observed_pr = with_current_classification(
-    plan.repo,
+    plan.pr_repo,
     plan.fix.pr_number,
     plan.fix.reviewed_head_sha,
     function(classification)
       local current_pr = classification.current_pr
       local authorized = validate_fix_write_gate_snapshot(
-        plan.repo, plan.fix, plan.branch, current_pr, "pre-dispatch", false
+        plan.pr_repo, plan.fix, plan.branch, current_pr, "pre-dispatch", false
       )
       if authorized == nil then
         return nil
@@ -363,7 +379,7 @@ local function run_fix_attempt(plan)
     }
   )
   if mismatch == "head-mismatch" then
-    validate_fix_write_gate_snapshot(plan.repo, plan.fix, plan.branch, observed_pr, "pre-dispatch", false)
+    validate_fix_write_gate_snapshot(plan.pr_repo, plan.fix, plan.branch, observed_pr, "pre-dispatch", false)
     return nil
   end
   return outcome
@@ -391,17 +407,22 @@ local function precheck_fix_write_gate(repo, fix, branch)
   return prechecked, prechecked_state
 end
 
-local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
+local function git_push_ref_update(implementation_git, remote, sha, ref, force_with_lease, timeout)
+  return implementation_git.push_ref_update(remote, sha, ref, force_with_lease, timeout)
+end
+
+local function apply_fix_outcome(lifecycle_repo, pr_repo, issue_number, fix, branch, implementation_git, outcome)
   if outcome == nil then
     return
   end
-  local rechecked_pr, current_state = recheck_fix_write_gate(repo, fix, branch)
+  local rechecked_pr, current_state = recheck_fix_write_gate(pr_repo, fix, branch)
   if current_state == nil then
     return
   end
   if outcome.kind == "reviewing-current" then
     raise_reviewing(
-      repo,
+      lifecycle_repo,
+      pr_repo,
       issue_number,
       fix,
       fix.reviewed_head_sha,
@@ -412,18 +433,19 @@ local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
   end
   if outcome.kind == "refix" then
     ci_repair_retry.raise_speculative(core,
-      repo,
+      pr_repo,
       issue_number,
       fix,
       { state = "fixing", version = fix.version },
       outcome.current_predecessor_set or "none",
-      outcome.reason or "speculative predecessor set changed"
+      outcome.reason or "speculative predecessor set changed",
+      lifecycle_repo
     )
     return
   end
   if outcome.kind == "review-meta" then
     if fix.repair_input == "ci-failure" then
-      ci_repair_attempts.raise_attempt_record(repo, fix, outcome.reason or "no-repair", outcome.detail)
+      ci_repair_attempts.raise_attempt_record(pr_repo, fix, outcome.reason or "no-repair", outcome.detail)
       return
     end
     if outcome.completed_without_new_head == true then
@@ -443,17 +465,20 @@ local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
         devloop_logging.log_raise("fix", fix.proposal_id, "github-devloop-decompose.devloop_decompose", decompose)
         return
       end
-      raise_review_meta(repo, issue_number, fix_at_next_attempt_version(fix), outcome.reason, outcome.detail)
+      raise_review_meta(
+        pr_repo, lifecycle_repo, issue_number, fix_at_next_attempt_version(fix), outcome.reason, outcome.detail
+      )
       return
     end
-    raise_review_meta(repo, issue_number, fix, outcome.reason, outcome.detail)
+    raise_review_meta(pr_repo, lifecycle_repo, issue_number, fix, outcome.reason, outcome.detail)
     return
   end
   if outcome.kind ~= "reviewing" then
     error("github-devloop: fix-outcome-unknown: unknown fix outcome")
   end
 
-  local push = devloop_commands.git_push_ref_update(
+  local push = git_push_ref_update(
+    implementation_git,
     "origin",
     outcome.new_head_sha,
     "refs/heads/" .. branch,
@@ -463,7 +488,7 @@ local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
   if push.exit_code ~= 0 then
     error("github-devloop: git-push-failed: git push failed: " .. tostring(push.stderr))
   end
-  local pushed_view = devloop_commands.gh_pr_view_fix(repo, fix.pr_number, 30)
+  local pushed_view = devloop_commands.gh_pr_view_fix(pr_repo, fix.pr_number, 30)
   if pushed_view.exit_code ~= 0 then
     error("github-devloop: gh-pr-pushed-head-view-failed: gh pr pushed head view failed: " .. tostring(pushed_view.stderr))
   end
@@ -471,11 +496,14 @@ local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
   if tostring(pushed_pr.state or ""):lower() ~= "open"
     or tostring(pushed_pr.head_ref_name or "") ~= branch
     or tostring(pushed_pr.head_sha or "") ~= outcome.new_head_sha
-    or not require("forge.merge.shared").is_same_repo_pr_head(pushed_pr, repo) then
+    or not require("forge.merge.shared").is_same_repo_pr_head(pushed_pr, pr_repo) then
     error("github-devloop: pushed-pr-head-mismatch: pushed PR head verification failed")
   end
 
-  raise_reviewing(repo, issue_number, fix, outcome.old_head_sha, outcome.new_head_sha, outcome.reason, outcome.summary)
+  raise_reviewing(
+    lifecycle_repo, pr_repo, issue_number, fix,
+    outcome.old_head_sha, outcome.new_head_sha, outcome.reason, outcome.summary
+  )
 end
 
 local function act_fix(event)
@@ -492,9 +520,22 @@ local function act_fix(event)
     devloop_logging.log_cas_decision("fix", fix.proposal_id, { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return
   end
-  local repo = entity.repo
+  local source_repo, source_pr_number = devloop_base.parse_pr_source_ref(fix.source_ref)
+  if source_repo == nil or tonumber(source_pr_number) ~= tonumber(fix.pr_number) then
+    error("github-devloop: fix-source-invalid: fix source_ref does not identify its PR")
+  end
+  local target = delivery_target.for_entity(entity, fix.source_ref, {
+    default_git = core.git,
+    git_factory = core.scoped_git,
+  })
+  local lifecycle_repo = target.lifecycle_repo
+  local pr_repo = target.implementation_repo
   local issue_number = entity.issue_number
-  if entity.kind == "issue" and not m_claims.verify_pr_review_issue_claim("fix", repo, issue_number, nil, fix.proposal_id) then
+  if tostring(source_repo):lower() ~= tostring(pr_repo):lower() then
+    error("github-devloop: fix-source-invalid: fix source repository differs from delivery target")
+  end
+  if entity.kind == "issue"
+    and not m_claims.verify_pr_review_issue_claim("fix", lifecycle_repo, issue_number, nil, fix.proposal_id) then
     return
   end
 
@@ -507,9 +548,11 @@ local function act_fix(event)
   local attempt_plan = nil
   with_lock(lock_key, function()
     devloop_base.assert_trusted_bot_configured()
-    local branches = config.branch_config()
+    local branches = target.cross_repo
+      and { upstream = target.implementation_branch, integration = target.implementation_branch }
+      or config.branch_config()
 
-    local pr_view = devloop_commands.gh_pr_view_fix(repo, fix.pr_number, 30)
+    local pr_view = devloop_commands.gh_pr_view_fix(pr_repo, fix.pr_number, 30)
     if pr_view.exit_code ~= 0 then
       error("github-devloop: gh-pr-fix-view-failed: gh pr fix view failed: " .. tostring(pr_view.stderr))
     end
@@ -591,10 +634,14 @@ local function act_fix(event)
 
     local origin = m_facts.pr_origin_fact(current_pr.comments)
     if origin == nil then
-      origin = entity_lib.pr_native_origin(repo, fix.pr_number, current_pr)
+      if target.cross_repo then
+        error("github-devloop: delivery-origin-missing: cross-repository PR lacks a durable origin marker")
+      end
+      origin = entity_lib.pr_native_origin(pr_repo, fix.pr_number, current_pr)
     end
     if origin.proposal_id ~= fix.proposal_id
-      or origin.repo ~= repo
+      or tostring(origin.lifecycle_repo or origin.repo):lower() ~= tostring(lifecycle_repo):lower()
+      or tostring(origin.implementation_repo or origin.repo):lower() ~= tostring(pr_repo):lower()
       or tostring(origin.base_branch) ~= tostring(branches.integration)
       or tostring(current_pr.base_ref_name or "") ~= tostring(origin.base_branch)
       or tostring(current_pr.head_ref_name or "") ~= tostring(origin.branch) then
@@ -606,12 +653,12 @@ local function act_fix(event)
       devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(pr-closed)", "re-derived PR is not open")
       return
     end
-    if not require("forge.merge.shared").is_same_repo_pr_head(current_pr, repo) then
+    if not require("forge.merge.shared").is_same_repo_pr_head(current_pr, pr_repo) then
       devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "fail-closed(head-repository)", "PR head repository is missing or not the target repository")
       error("github-devloop: pr-head-repository-invalid: PR head repository is missing or not the target repository")
     end
     if tostring(current_pr.head_sha or "") ~= tostring(fix.reviewed_head_sha) then
-      local branch_head = devloop_commands.git_branch_head(branch, 30)
+      local branch_head = target.git.branch_head(branch, 30)
       if branch_head.exit_code ~= 0 then
         devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "retry-pending(head-advanced)", "PR head changed and deterministic branch head is not readable")
         error("github-devloop: pr-head-advanced: PR head changed before fix marker and deterministic branch head is not readable")
@@ -622,7 +669,10 @@ local function act_fix(event)
       end
       if tostring(current_pr.head_sha or "") == intended_head_sha
         and tostring(current_pr.head_sha or "") ~= tostring(fix.reviewed_head_sha) then
-        raise_reviewing(repo, issue_number, fix, fix.reviewed_head_sha, intended_head_sha, "push already visible; self-healing missing reviewing marker")
+        raise_reviewing(
+          lifecycle_repo, pr_repo, issue_number, fix, fix.reviewed_head_sha, intended_head_sha,
+          "push already visible; self-healing missing reviewing marker"
+        )
         return
       end
       devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(head-advanced)", "PR head changed since rejected review")
@@ -634,7 +684,7 @@ local function act_fix(event)
       return
     end
 
-    if not assert_fix_write_gate(fix, repo, issue_number) then
+    if not assert_fix_write_gate(fix, pr_repo, issue_number) then
       return
     end
 
@@ -644,7 +694,7 @@ local function act_fix(event)
       comments = current_pr.comments,
     }
     if issue_number ~= nil then
-      local issue_view = devloop_commands.gh_issue_view_fix(repo, issue_number, 30)
+      local issue_view = devloop_commands.gh_issue_view_fix(lifecycle_repo, issue_number, 30)
       if issue_view.exit_code ~= 0 then
         error("github-devloop: gh-issue-fix-view-failed: gh issue fix view failed: " .. tostring(issue_view.stderr))
       end
@@ -654,22 +704,26 @@ local function act_fix(event)
     local speculative_predecessors = nil
     local speculative_current_set = nil
     if fix.predecessor_set ~= nil then
-      speculative_predecessors, speculative_current_set = current_predecessors_for_fix(repo, branches.integration, fix, current_pr)
+      speculative_predecessors, speculative_current_set = current_predecessors_for_fix(
+        pr_repo, branches.integration, fix, current_pr
+      )
       if speculative_predecessors ~= nil and tostring(speculative_current_set) ~= tostring(fix.predecessor_set) then
         ci_repair_retry.raise_speculative(core,
-          repo,
+          pr_repo,
           issue_number,
           fix,
           state,
           speculative_current_set,
-          "speculative predecessor set changed"
+          "speculative predecessor set changed",
+          lifecycle_repo
         )
         return
       end
     end
 
     attempt_plan = {
-      repo = repo,
+      lifecycle_repo = lifecycle_repo,
+      pr_repo = pr_repo,
       issue_number = issue_number,
       fix = fix,
       branches = branches,
@@ -683,6 +737,7 @@ local function act_fix(event)
       event_queue = event.queue,
       speculative_predecessors = speculative_predecessors,
       speculative_current_set = speculative_current_set,
+      implementation_git = target.git,
     }
   end)
   if attempt_plan == nil then
@@ -690,7 +745,7 @@ local function act_fix(event)
   end
   local pre_spawn_gate_ok = false
   with_lock(lock_key, function()
-    local prechecked_pr, prechecked_state = precheck_fix_write_gate(repo, fix, attempt_plan.branch)
+    local prechecked_pr, prechecked_state = precheck_fix_write_gate(pr_repo, fix, attempt_plan.branch)
     pre_spawn_gate_ok = prechecked_pr ~= nil
     if pre_spawn_gate_ok and dispatch_live_run.dispatch_live_run_dedup(dispatch_liveness, "fix", fix.proposal_id, fix.work_unit_key, {
       state = prechecked_state,
@@ -719,7 +774,9 @@ local function act_fix(event)
     return
   end
   with_lock(lock_key, function()
-    apply_fix_outcome(repo, issue_number, fix, attempt_plan.branch, outcome)
+    apply_fix_outcome(
+      lifecycle_repo, pr_repo, issue_number, fix, attempt_plan.branch, target.git, outcome
+    )
   end)
 end
 

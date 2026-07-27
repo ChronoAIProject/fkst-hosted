@@ -13,13 +13,23 @@ local replay_fields = require("devloop.replay_fields")
 
 local F = {}
 
-local function find_linked_pr(snapshot, pr_number)
+local function find_linked_pr(snapshot, pr_number, implementation_repo)
+  local unscoped = nil
   for _, item in ipairs(snapshot and snapshot.prs or {}) do
     if tostring(item.number or "") == tostring(pr_number or "") then
-      return item.current
+      if implementation_repo == nil
+        or tostring(item.repo or ""):lower() == tostring(implementation_repo):lower() then
+        return item.current
+      end
+      if item.repo == nil then
+        if unscoped ~= nil then
+          return nil
+        end
+        unscoped = item.current
+      end
     end
   end
-  return nil
+  return unscoped
 end
 
 local function snapshot_with_pr_comments(current_pr)
@@ -58,7 +68,7 @@ local function current_pr_fact(facts)
   if link == nil then
     return nil
   end
-  return find_linked_pr(facts.snapshot, link.pr_number)
+  return find_linked_pr(facts.snapshot, link.pr_number, link.implementation_repo)
 end
 
 local function child_pr_delegation_fact(M, facts)
@@ -78,7 +88,27 @@ local function fetch_child_state_fact(M, facts)
   facts.pr_delegation = delegation
   facts["pr-delegation"] = delegation
   if facts.current_pr == nil then
-    local view = M.fetch_pr_view_origin(facts.issue.repo, delegation.pr_number, nil, {
+    local delegated_repo, delegated_pr_number = require("devloop.entity").parse_pr_proposal_id(
+      delegation.pr_proposal_id
+    )
+    local implementation_repo = facts.issue.implementation_repo or facts.issue.repo
+    if delegation.delivery_target_explicit == true then
+      implementation_repo = delegation.implementation_repo
+    end
+    if delegated_repo == nil
+      or tostring(delegated_repo):lower() ~= tostring(implementation_repo):lower()
+      or tonumber(delegated_pr_number) ~= tonumber(delegation.pr_number) then
+      return nil
+    end
+    if delegation.delivery_target_explicit == true
+      and tostring(implementation_repo):lower() ~= tostring(facts.issue.repo):lower() then
+      require("devloop.delivery_target").resolve(facts.issue.repo, facts.issue.issue_number or facts.issue.number, {
+        implementation_repo = implementation_repo,
+        default_git = M.git,
+        verify = false,
+      })
+    end
+    local view = M.fetch_pr_view_origin(implementation_repo, delegation.pr_number, nil, {
       force_fresh = true,
       consumer = "replay_child_state",
     })
@@ -124,7 +154,10 @@ local function require_marker_fact(M, facts, family)
   if family == "review-meta" then
     local current_pr = current_pr_fact(facts)
     if current_pr ~= nil and forge_validators.is_git_sha(current_pr.head_sha) then
-      return M.review_meta_replay_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version, facts.link.pr_number, current_pr.head_sha)
+      return M.review_meta_replay_fact(
+        facts.snapshot.comments, facts.proposal_id, facts.state.version,
+        facts.link.pr_number, current_pr.head_sha, facts.link.implementation_repo
+      )
     end
     return m_facts.review_meta_fix_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
   end
@@ -133,7 +166,10 @@ local function require_marker_fact(M, facts, family)
     if current_pr == nil or not forge_validators.is_git_sha(current_pr.head_sha) then
       return nil
     end
-    return M.review_meta_replay_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version, facts.link.pr_number, current_pr.head_sha)
+    return M.review_meta_replay_fact(
+      facts.snapshot.comments, facts.proposal_id, facts.state.version,
+      facts.link.pr_number, current_pr.head_sha, facts.link.implementation_repo
+    )
   end
   if family == "merge-gate" then
     return m_facts.merge_gate_fix_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
@@ -193,7 +229,11 @@ local function gather_fetch_before_compare_fact(M, facts, entity, family)
     if facts.link ~= nil and facts.current_pr ~= nil then
       facts.snapshot = snapshot_with_pr_comments(facts.current_pr)
       for _, comment in ipairs(facts.current and facts.current.comments or {}) do table.insert(facts.snapshot.comments, comment) end
-      table.insert(facts.snapshot.prs, { number = facts.link.pr_number, current = facts.current_pr })
+      table.insert(facts.snapshot.prs, {
+        repo = facts.link.implementation_repo,
+        number = facts.link.pr_number,
+        current = facts.current_pr,
+      })
       facts.snapshot.state = facts.state
     else
       facts.snapshot = snapshot_from_issue_comments(M, entity.repo, facts.proposal_id, facts.current and facts.current.comments or {})
@@ -273,7 +313,11 @@ local function gather_required_facts(M, row, entity, state, provided)
     if gathered.current_pr.comments ~= gathered.snapshot.comments then
       for _, comment in ipairs(gathered.current_pr.comments or {}) do table.insert(gathered.snapshot.comments, comment) end
     end
-    table.insert(gathered.snapshot.prs, { number = gathered.link.pr_number, current = gathered.current_pr })
+    table.insert(gathered.snapshot.prs, {
+      repo = gathered.link.implementation_repo,
+      number = gathered.link.pr_number,
+      current = gathered.current_pr,
+    })
   end
 
   for _, required in ipairs(row.required_facts or {}) do

@@ -45,7 +45,14 @@ function M.build_pr_state_label_request(repo, issue_number, pr_number, proposal_
   else
     add_labels, remove_labels = devloop_state.state_label_changes(to_state)
   end
-  return m_claims.attach_issue_claim({
+  local issue_repo = repo
+  if issue_number ~= nil then
+    local entity = entity_lib.parse_entity_proposal_id(proposal_id)
+    if entity ~= nil and entity.kind == "issue" then
+      issue_repo = entity.repo
+    end
+  end
+  local payload = {
     schema = "github-proxy.label.v1",
     repo = repo,
     target_kind = "pr",
@@ -62,7 +69,11 @@ function M.build_pr_state_label_request(repo, issue_number, pr_number, proposal_
     label_colors = label_colors_for(add_labels),
     dedup_key = dedup_key_value,
     source_ref = base_ids.normalize_source_ref(source_ref),
-  }, issue_number ~= nil and entity_lib.issue_source_ref(repo, issue_number) or nil)
+  }
+  if issue_number ~= nil and tostring(issue_repo):lower() ~= tostring(repo):lower() then
+    payload.issue_repo = issue_repo
+  end
+  return m_claims.attach_issue_claim(payload, issue_number ~= nil and entity_lib.issue_source_ref(issue_repo, issue_number) or nil)
 end
 
 function M.build_reconcile_pr_state_label_request(repo, issue_number, pr_number, proposal_id, state, version, source_ref, current_labels)

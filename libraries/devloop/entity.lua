@@ -61,9 +61,10 @@ local function command_indicates_not_found(result)
     or stderr:find("not found", 1, true) ~= nil
 end
 
-local function linked_pr_numbers(M, issue_comments, proposal_id)
-  local numbers = {}
+local function linked_pr_targets(M, lifecycle_repo, issue_comments, proposal_id)
+  local targets = {}
   local seen = {}
+  local _, lifecycle_issue = base_ids.parse_proposal_id(proposal_id)
   local marker_pattern = "<!%-%- fkst:github%-devloop:pr%-link:v1.-%-%->"
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(issue_comments)) do
     for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
@@ -72,18 +73,31 @@ local function linked_pr_numbers(M, issue_comments, proposal_id)
       local marker_branch = marker:match('branch="([^"]+)"')
       local marker_impl_version = marker:match('impl_version="([^"]*)"')
       local marker_base_branch = marker:match('base_branch="([^"]+)"')
+      local marker_implementation_repo = marker:match('implementation_repo="([^"]+)"')
       if marker_proposal == proposal_id
         and forge_validators.is_positive_pr_number(marker_pr)
         and forge_validators.is_git_ref_safe(marker_branch)
         and strings.is_bounded_string(marker_impl_version, M._max_dedup_len)
         and forge_validators.is_git_ref_safe(marker_base_branch)
-        and not seen[tostring(marker_pr)] then
-        seen[tostring(marker_pr)] = true
-        table.insert(numbers, tonumber(marker_pr))
+        and (marker_implementation_repo == nil or base_ids.issue_ref_round_trips(marker_implementation_repo, 1)) then
+        local delivery = require("devloop.delivery_target").resolve(lifecycle_repo, lifecycle_issue, {
+          implementation_repo = marker_implementation_repo or lifecycle_repo,
+          implementation_branch = marker_implementation_repo ~= nil and marker_base_branch or nil,
+          default_git = M.git,
+          verify = false,
+        })
+        local identity = delivery.implementation_repo:lower() .. "#" .. tostring(marker_pr)
+        if not seen[identity] then
+          seen[identity] = true
+          table.insert(targets, {
+            number = tonumber(marker_pr),
+            repo = delivery.implementation_repo,
+          })
+        end
       end
     end
   end
-  return numbers
+  return targets
 end
 
 function C.linked_pr_surface_snapshot(M, repo, proposal_id, issue_comments, opts)
@@ -95,17 +109,19 @@ function C.linked_pr_surface_snapshot(M, repo, proposal_id, issue_comments, opts
     deferred = false,
     defer_reason = nil,
   }
-  for _, pr_number in ipairs(linked_pr_numbers(M, issue_comments, proposal_id)) do
+  for _, target in ipairs(linked_pr_targets(M, repo, issue_comments, proposal_id)) do
+    local pr_number = target.number
+    local pr_repo = target.repo
     local pr_view
     if options.cache_only == true then
-      pr_view = M.cached_entity_view(repo, "pr", pr_number)
+      pr_view = M.cached_entity_view(pr_repo, "pr", pr_number)
       if pr_view == nil then
         snapshot.deferred = true
         snapshot.defer_reason = "pr-surface-not-cached"
         return snapshot
       end
     else
-      pr_view = M.gh_pr_view_observe(repo, pr_number, 30)
+      pr_view = M.gh_pr_view_observe(pr_repo, pr_number, 30)
     end
     if pr_view.exit_code ~= 0 then
       if command_indicates_not_found(pr_view) then
@@ -120,6 +136,7 @@ function C.linked_pr_surface_snapshot(M, repo, proposal_id, issue_comments, opts
       end
       table.insert(snapshot.prs, {
         number = pr_number,
+        repo = pr_repo,
         current = current_pr,
       })
     end

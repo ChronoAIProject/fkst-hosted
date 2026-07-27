@@ -170,6 +170,11 @@ end
 
 local function sort_by_number(items)
   table.sort(items, function(left, right)
+    local left_repo = tostring(left._liveness_repo or left.repo or ""):lower()
+    local right_repo = tostring(right._liveness_repo or right.repo or ""):lower()
+    if left_repo ~= right_repo then
+      return left_repo < right_repo
+    end
     return tonumber(left.number or 0) < tonumber(right.number or 0)
   end)
   return items

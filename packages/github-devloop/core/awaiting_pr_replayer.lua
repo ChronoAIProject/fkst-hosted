@@ -39,6 +39,20 @@ function S.fetch_then_scan_rollup_receipts(candidates, fetch_receipt, receipt_co
 end
 
 function S.install(M)
+local function implementation_repo(issue, delegation)
+  if delegation ~= nil and delegation.delivery_target_explicit == true then
+    return delegation.implementation_repo
+  end
+  return issue.implementation_repo or issue.repo
+end
+
+local function marker_implementation_repo(issue, delegation)
+  local repo = implementation_repo(issue, delegation)
+  if tostring(repo):lower() == tostring(issue.repo):lower() then
+    return nil
+  end
+  return repo
+end
 local child_terminal_states = {
   merged = true,
   ["closed-unmerged"] = true,
@@ -102,7 +116,7 @@ local function parent_state_for_child_terminal(state, child_state, generation)
 end
 
 local function read_delegated_child_pr(dept, issue, delegation)
-  local pr_view = devloop_entity_view.fetch_pr_view_origin(issue.repo, delegation.pr_number, nil, {
+  local pr_view = devloop_entity_view.fetch_pr_view_origin(implementation_repo(issue, delegation), delegation.pr_number, nil, {
     force_fresh = true,
     consumer = dept,
   })
@@ -163,7 +177,7 @@ local function resume_terminal_markers(issue, next_state, delegation, current_pr
     version = next_state.version,
     reviewed_head_sha = head_sha,
   }
-  local autonomy_record = autonomy_ledger.autonomy_result_record(M, issue.repo, issue.number, merge_ready, issue, autonomy_post_merge_pr(current_pr))
+  local autonomy_record = autonomy_ledger.autonomy_result_record(M, issue.repo, issue.number, merge_ready, issue, autonomy_post_merge_pr(current_pr), implementation_repo(issue, delegation))
   return "\n" .. m_builders.merged_marker(M, delegation.proposal_id, delegation.pr_number, next_state.version, head_sha, autonomy_record)
     .. "\n" .. autonomy_ledger.autonomy_result_marker(autonomy_record)
 end
@@ -213,7 +227,8 @@ local function build_awaiting_pr_canonicalization_comment_request(issue, state, 
       child_proposal,
       delegation.pr_number,
       state.version,
-      delegation.delegation
+      delegation.delegation,
+      marker_implementation_repo(issue, delegation)
     )
   return entity_lib.build_entity_comment_request({
     kind = "issue",
@@ -249,8 +264,9 @@ function M.canonicalize_implementing_merged_delegated_pr(dept, issue, state, fac
     return log_skip(dept, proposal_id, state, "implementing", "awaiting-pr", "skip-stale(pr-delegation-version)", "pr-delegation proposal or version does not match implementing state")
   end
   local pr_repo, pr_number = entity_lib.parse_pr_proposal_id(delegation.pr_proposal_id or delegation.pr_proposal)
-  if pr_repo ~= issue.repo or tostring(pr_number or "") ~= tostring(delegation.pr_number or "") then
-    return log_skip(dept, proposal_id, state, "implementing", "awaiting-pr", "skip-stale(pr-delegation-child)", "pr-delegation child identity is malformed or cross-repo")
+  if tostring(pr_repo or ""):lower() ~= tostring(implementation_repo(issue, delegation)):lower()
+    or tostring(pr_number or "") ~= tostring(delegation.pr_number or "") then
+    return log_skip(dept, proposal_id, state, "implementing", "awaiting-pr", "skip-stale(pr-delegation-child)", "pr-delegation child identity is malformed or differs from delivery target")
   end
   local current_pr = facts.current_pr
   if type(current_pr) ~= "table" or current_pr.force_fresh ~= true then
@@ -301,8 +317,9 @@ function M.close_canonically_merged_delegated_issue(dept, issue, state, facts)
     return false, nil
   end
   local pr_repo, pr_number = entity_lib.parse_pr_proposal_id(delegation.pr_proposal_id or delegation.pr_proposal)
-  if pr_repo ~= issue.repo or tostring(pr_number or "") ~= tostring(delegation.pr_number or "") then
-    log_skip(dept, proposal_id, state, tostring(state and state.state or "unknown"), "closed", "skip-stale(pr-delegation-child)", "canonical merged issue close requires a same-repository delegated PR")
+  if tostring(pr_repo or ""):lower() ~= tostring(implementation_repo(issue, delegation)):lower()
+    or tostring(pr_number or "") ~= tostring(delegation.pr_number or "") then
+    log_skip(dept, proposal_id, state, tostring(state and state.state or "unknown"), "closed", "skip-stale(pr-delegation-child)", "canonical merged issue close requires the exact delegated PR target")
     return false, nil
   end
   local current_pr = facts.current_pr
@@ -344,8 +361,9 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
     return log_skip(dept, proposal_id, state, "awaiting-pr", "awaiting-pr", "skip-stale(pr-delegation-version)", "pr-delegation proposal or version does not match awaiting-pr state")
   end
   local pr_repo, pr_number = entity_lib.parse_pr_proposal_id(delegation.pr_proposal_id or delegation.pr_proposal)
-  if pr_repo ~= issue.repo or tostring(pr_number or "") ~= tostring(delegation.pr_number or "") then
-    return log_skip(dept, proposal_id, state, "awaiting-pr", "awaiting-pr", "skip-stale(pr-delegation-child)", "pr-delegation child identity is malformed or cross-repo")
+  if tostring(pr_repo or ""):lower() ~= tostring(implementation_repo(issue, delegation)):lower()
+    or tostring(pr_number or "") ~= tostring(delegation.pr_number or "") then
+    return log_skip(dept, proposal_id, state, "awaiting-pr", "awaiting-pr", "skip-stale(pr-delegation-child)", "pr-delegation child identity is malformed or differs from delivery target")
   end
   local current_pr = (facts.current_pr ~= nil and facts.current_pr.force_fresh == true) and facts.current_pr or read_delegated_child_pr(dept, issue, delegation)
   local child_state = facts.child_state or facts["child-state"] or require("devloop.entity").current_entity_state(current_pr.comments, delegation.proposal_id)
@@ -449,6 +467,8 @@ origin_matches_delegation = function(issue, delegation, current_pr, branches)
   if origin == nil
     or origin.pr_native == true
     or tostring(origin.proposal_id or "") ~= tostring(delegation.proposal_id or "")
+    or tostring(origin.lifecycle_repo or origin.repo or ""):lower() ~= tostring(issue.repo or ""):lower()
+    or tostring(origin.implementation_repo or origin.repo or ""):lower() ~= tostring(implementation_repo(issue, delegation)):lower()
     or tostring(origin.issue_number or "") ~= tostring(issue.number or "")
     or transition_version.strip_suffixes(origin.impl_version) ~= transition_version.strip_suffixes(delegation.version)
     or tostring(origin.branch or "") ~= tostring(current_pr and current_pr.head_ref_name or "")
@@ -479,6 +499,12 @@ end
 
 merged_child_landed_on_upstream = function(dept, issue, state, delegation, current_pr)
   local branches = config.branch_config()
+  if tostring(implementation_repo(issue, delegation)):lower() ~= tostring(issue.repo):lower() then
+    branches = {
+      upstream = issue.implementation_branch,
+      integration = issue.implementation_branch,
+    }
+  end
   if not origin_matches_delegation(issue, delegation, current_pr, branches) then
     return false, "skip-stale(pr-origin-rollup-lineage)", "merged child PR lacks current split-topology origin facts"
   end
@@ -490,7 +516,7 @@ merged_child_landed_on_upstream = function(dept, issue, state, delegation, curre
     return false, "skip-pending(merge-commit-missing)", "canonical merged child PR has no GitHub mergeCommit.oid"
   end
   local listed = pr_commands.gh_pr_list_promotions(
-    issue.repo,
+    implementation_repo(issue, delegation),
     branches.integration,
     branches.upstream,
     60
@@ -499,7 +525,7 @@ merged_child_landed_on_upstream = function(dept, issue, state, delegation, curre
     error("github-devloop: awaiting-pr-rollup-receipt-list-failed: " .. tostring(listed.stderr))
   end
   local candidates = parsers_pr.parse_pr_list_promotions(listed.stdout)
-  local landed = git_mechanics.with_repo_ref_store_lock(issue.repo, function()
+  local landed = git_mechanics.with_repo_ref_store_lock(implementation_repo(issue, delegation), function()
     return S.fetch_then_scan_rollup_receipts(candidates, function(candidate)
       local branch_match = tostring(candidate.head_ref_name or "") == tostring(branches.integration or "")
         and tostring(candidate.base_ref_name or "") == tostring(branches.upstream or "")
@@ -510,7 +536,7 @@ merged_child_landed_on_upstream = function(dept, issue, state, delegation, curre
           or tonumber(candidate.number) == nil then
           error("github-devloop: awaiting-pr-rollup-receipt-invalid: merged rollup PR metadata is incomplete")
         end
-        if tostring(candidate.head_repository) == tostring(issue.repo) then
+        if tostring(candidate.head_repository):lower() == tostring(implementation_repo(issue, delegation)):lower() then
           git_mechanics.run_required(
             git_commands.git_fetch_pr_head_ref("origin", candidate.number, 60),
             "awaiting-pr rollup receipt fetch"
@@ -528,7 +554,7 @@ merged_child_landed_on_upstream = function(dept, issue, state, delegation, curre
       end
       return nil
     end, function(receipt_head)
-      return git_mechanics.is_ancestor(M.git, merge_commit_sha, receipt_head, "awaiting-pr rollup receipt ancestry")
+      return git_mechanics.is_ancestor(issue.git or M.git, merge_commit_sha, receipt_head, "awaiting-pr rollup receipt ancestry")
     end)
   end)
   if not landed then
