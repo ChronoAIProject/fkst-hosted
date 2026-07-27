@@ -1,8 +1,8 @@
 # FKST Evolution: GitHub-Native Continuous Product Evolution
 
-Status: Draft for discussion
+Status: Draft for discussion — revision 2
 
-Date: 2026-07-24
+Date: 2026-07-24, revised 2026-07-27
 
 Intended audience: FKST maintainers, package authors, hosted-control-plane
 maintainers, repository owners, product owners, and security reviewers
@@ -10,6 +10,22 @@ maintainers, repository owners, product owners, and security reviewers
 This document is a temporary design specification. It defines a proposed
 system and does not describe functionality that is already implemented unless
 an existing FKST behavior is explicitly identified as such.
+
+### Changes in revision 2
+
+Revision 2 responds to a design review. The substantive changes:
+
+| Change | Sections |
+| ------ | -------- |
+| **Single root.** All Evolution output moved under `.fkst/evolution/`. The write boundary is a control-plane prefix comparison that configuration cannot widen, replacing an owner-supplied managed-path set. | 12.1, 12.1.1, 12.1.2, 12.3, 13.2, 13.3.1, 25.8 |
+| **Split fingerprints.** Six fingerprints replace four. Cycle admission and merge staleness follow a *product-relevant* fingerprint; a *coverage* fingerprint records provenance without launching cycles. Generator inputs split into repo-pinnable and deployment-environment halves. | 17.1, 17.3, 17.4, 17.5, 21.4, 32.3 |
+| **Convergence is re-derived, not read.** A canonical manifest projection now MUST enter the output fingerprint, and convergence conditions 3-4 are re-derived from repository state and a controller-published check run rather than from status fields the generator wrote. | 16.2, 17.6, 17.7 |
+| **The merge gate is a check run.** No native GitHub merge mechanism can satisfy a pre-merge freshness test, so the gate is an Evolution-owned required check plus a `sha`-pinned fallback. Evolution PRs are explicitly excluded from the generic FKST auto-merge hook. | 21.5.1, 21.5.2 |
+| **Token containment restated to what tokens can do.** Installation tokens have no ref scope. The sandbox holds `contents: write` and never `pull_requests: write`; a required branch ruleset bounds the residual reach. | 25.1, 25.2.1, 25.5, 25.5.1 |
+| **Capability identity, owner brake, companion homes.** Opaque IDs with explicit rename/merge/split relations; a suppression latch so closing a sync PR actually stops the loop; an explicit table of which repository hosts which resource. | 12.4.1, 14.2.1, 14.2.2, 26.2.1, 27.3 |
+| **Rollout inverted.** The convergence oracle ships first, alone, writing nothing. | 37 |
+
+Open questions 6 and 7 are answered in the body; 16 through 19 are new.
 
 ## Document map
 
@@ -64,8 +80,8 @@ last converged source revision remains covered. At most one canonical Evolution
 work issue and one canonical Evolution pull request may be open for a source
 repository at a time.
 
-Pull request heads are untrusted. Pre-merge processing is read-only and
-secretless. Canonical documentation, skills, demos, media, and decks are
+Pull request heads are untrusted. Pre-merge processing is read-only and holds
+no GitHub, demo, or publication credential (section 19.2.1). Canonical documentation, skills, demos, media, and decks are
 generated from a commit that has reached the trusted default branch. This
 separation permits useful PR impact feedback without executing contributor code
 under a repository write token or demo credentials.
@@ -379,8 +395,9 @@ untrusted code with privileged credentials.
 | Artifact              | A generated document, skill, image, video, presentation, or release narrative                      |
 | Artifact source       | Editable, diffable files from which an artifact may be rendered                                    |
 | Rendered artifact     | A generated binary such as MP4, PDF, or PPTX                                                       |
-| Input fingerprint     | Hash representing all authoritative inputs and generator revisions                                 |
-| Output fingerprint    | Hash representing all managed repository outputs                                                   |
+| Input fingerprint     | Hash over product-relevant source paths plus repo-pinnable generator inputs (section 17.5)         |
+| Coverage state        | Observed commit range recorded for provenance; does not admit a cycle (section 17.5)               |
+| Output fingerprint    | Hash over everything Evolution wrote, plus a canonical manifest projection (section 17.6)          |
 | Converged             | Input and output fingerprints match the committed manifest and no required verification is pending |
 | Evolution cycle       | One serialized attempt to move a repository from observed state to desired state                   |
 | Sync issue            | The single open GitHub work issue representing a canonical Evolution cycle                         |
@@ -492,34 +509,74 @@ GitHub and live runtime state.
 
 ### 12.1 Default placement
 
-The RECOMMENDED default is to store structured Evolution state and editable
-artifact source in the source repository's default branch. Large rendered
-artifacts are stored as Release assets in that same repository.
+Evolution writes to exactly one root: `.fkst/evolution/` in the artifact
+repository. Structured state, human-owned intent, and every generated artifact
+source live under that root. Large rendered binaries are stored as Release
+assets in the same repository and referenced by `manifest.json`.
 
 ```text
 .fkst/
-  packages/                         existing FKST workflow catalog
+  packages/                         existing FKST workflow catalog (NOT Evolution)
   evolution/
-    config.yaml                     owner-controlled policy
+    config.yaml                     owner-controlled policy            [human]
     intent/
-      product.md                    owner-controlled narrative intent
-      overrides.yaml                owner-controlled protected facts
+      product.md                    owner-controlled narrative intent  [human]
+      overrides.yaml                owner-controlled protected facts   [human]
     observed/
       capabilities.yaml             agent-maintained product observation
       journeys.yaml                 journey metadata and evidence references
     changes/
-      <source-commit-sha>.yaml       semantic product change record
+      <yyyy>/<sha[0:2]>/<sha>.yaml  semantic product change record
     manifest.json                   convergence and artifact provenance
-
-docs/product/                       generated user-facing documentation
-.agents/skills/                     generated product-operation skills
-demo/journeys/                      executable demo specifications
-demo/screenshots/                   small current screenshots
-slides/                             editable presentation source
+    docs/                           generated user-facing documentation
+    skills/                         generated product-operation skills
+    journeys/                       executable demo specifications
+    screenshots/                    small current screenshots
+    slides/                         editable presentation source
 ```
 
 Rendered MP4, PDF, PPTX, and other large binaries SHOULD be stored in GitHub
 Releases and referenced by `manifest.json`.
+
+Change records are sharded by year and commit-SHA prefix. A flat directory
+accumulates one entry per covered commit for the life of the repository and is
+re-enumerated on every reconcile by section 17.6.
+
+#### 12.1.1 Single-root confinement
+
+The single root is a structural safety boundary, not a filing convention. The
+control plane MUST enforce the following independently of any
+repository-supplied configuration:
+
+1. Evolution MUST NOT create, modify, or delete any path outside
+   `.fkst/evolution/`.
+2. Evolution MUST NOT modify `.fkst/evolution/config.yaml` or any path under
+   `.fkst/evolution/intent/` **in a sync PR**. Sections 12.3 and 14.4 permit
+   Evolution to *propose* intent changes; such a proposal MUST be a separate
+   pull request on its own branch, never merged by autonomous policy, and it is
+   never part of the managed-output cycle. The section 25.8 confinement check
+   applies to the sync PR and rejects these paths there unconditionally.
+3. Evolution MUST NOT modify any path under `.fkst/packages/`.
+
+Rule 1 is a fixed prefix comparison. It is not derived from `managedOutputs`,
+and configuration cannot widen it. `config.yaml` selects which subtrees beneath
+the root are produced; it can never extend the root itself. This is what makes
+security objective 25.1(3) true rather than aspirational: repository content
+selects among subtrees inside a boundary it cannot move.
+
+#### 12.1.2 Consumption
+
+Generated artifacts live under a dot-directory, which conventional tooling does
+not discover by name. Consumers SHOULD be pointed at the root through their own
+configuration — a test runner's `testDir`, a documentation site's source path,
+an agent-skill loader root.
+
+Copying generated files out to conventional locations creates a second
+maintained copy and MUST NOT be performed by Evolution. A repository owner MAY
+maintain such a publication step as ordinary human-owned automation outside the
+Evolution lane. Symlinks from conventional paths into the root are permitted
+and are fingerprint-safe under section 17.2, but do not survive Windows
+checkouts.
 
 ### 12.2 What MUST NOT be stored under `.fkst/evolution/`
 
@@ -537,20 +594,24 @@ The directory MUST NOT contain:
 
 ### 12.3 Data ownership classes
 
-Every configured path belongs to exactly one ownership class:
+Ownership is derived from the path prefix, not from configuration:
 
-| Class                | Owner                       | Evolution behavior                                          |
-| -------------------- | --------------------------- | ----------------------------------------------------------- |
-| Authoritative source | Product developers          | Read, never rewrite as part of Evolution                    |
-| Human intent         | Repository or product owner | Read, preserve, request review for conflicts                |
-| Observed model       | Evolution                   | Update through sync PRs                                     |
-| Managed output       | Evolution                   | Regenerate or repair through sync PRs                       |
-| Shared/manual        | Humans                      | Read only unless explicitly migrated into managed ownership |
+| Class                | Path                                        | Owner              | Evolution behavior                    |
+| -------------------- | ------------------------------------------- | ------------------ | ------------------------------------- |
+| Authoritative source | everything outside `.fkst/evolution/`       | Product developers | Read, never write                     |
+| Human intent         | `.fkst/evolution/config.yaml`, `intent/**`  | Repository owner   | Read, never write; may propose in a separate reviewed PR |
+| Observed model       | `.fkst/evolution/{observed,changes}/`, `manifest.json` | Evolution | Update through sync PRs |
+| Managed output       | all other paths under `.fkst/evolution/`    | Evolution          | Regenerate or repair through sync PRs |
 
-A path MUST NOT be both human-owned and Evolution-managed. Mixed ownership
-inside one file SHOULD be avoided. When unavoidable, generated blocks MUST use
-stable machine markers and the implementation MUST preserve all content outside
-those blocks.
+There is no `shared/manual` class and no mixed-ownership file. Because the
+boundary is a prefix comparison (section 12.1.1), the previous draft's rule
+that "a path MUST NOT be both human-owned and Evolution-managed" is now
+structurally guaranteed rather than a validation obligation, and the machine-
+marker mechanism for generated blocks inside human-owned files is no longer
+required for Evolution's own outputs.
+
+An owner who wants generated content to appear at a conventional path uses
+section 12.1.2 consumption, not mixed ownership.
 
 ### 12.4 Companion repository placement
 
@@ -564,13 +625,37 @@ The companion manifest MUST include:
 - source repository full name;
 - source default branch resolved for the run;
 - exact source commit SHA;
-- source input fingerprint;
+- source product-relevant, coverage, and input fingerprints;
 - companion output fingerprint; and
-- generator fingerprint.
+- generator pinned and environment fingerprints.
 
 The Git commit containing the manifest is derived from GitHub when the manifest
 is read. It is deliberately not embedded in the manifest itself, which would
 create a self-referential commit identity.
+
+#### 12.4.1 Which repository hosts which resource
+
+When source and artifact repositories differ, each coordination resource has
+exactly one home. Implementations MUST use this table; leaving it implicit
+produces a split-brain lane.
+
+| Resource                       | Repository | Rationale                                              |
+| ------------------------------ | ---------- | ------------------------------------------------------ |
+| `config.yaml`, enrollment      | Source     | Enrollment is a property of the observed product       |
+| Trigger issue                  | Source     | Follows existing FKST session registration             |
+| Sync issue                     | Source     | Owners watch the product repository                    |
+| Sync PR, sync branch           | Artifact   | It carries the artifact commits                        |
+| `intent/**`, `observed/**`, `changes/**`, `manifest.json` | Artifact | Convergence is decided where the outputs live |
+| Release assets                 | Artifact   | Co-located with the manifest that references them      |
+| Merge gate check run           | Artifact   | Must gate the PR it protects                           |
+
+Section 17.7 condition 6 is evaluated against the artifact repository. The
+singleton tuple of section 20.1 spans the pair: one lane per
+`(source repository, artifact repository, trusted source branch)`, with the
+sync issue in the source repository holding the lane's identity and the sync PR
+in the artifact repository carrying its content. Branch protection honored
+under section 21.5 is the **artifact** repository's, because that is where the
+merge occurs.
 
 ## 13. Enrollment and configuration
 
@@ -586,6 +671,14 @@ An installation-time bootstrap MAY create a draft trigger issue and a baseline
 configuration PR. It MUST NOT silently enable autonomous merging without an
 owner-selected policy.
 
+An App-authored bootstrap trigger is subject to existing FKST trigger
+attribution: a bot-authored trigger's effective creator is its **sole
+assignee**, who must be a deployment global admin or hold repository admin or
+maintain permission. Zero or multiple assignees are not attributable and the
+trigger is rejected with `fkst-trigger-unauthorized` before its body is parsed.
+A bootstrap that does not assign exactly one qualifying creator will therefore
+never enroll the repository.
+
 ### 13.2 Draft configuration schema
 
 The following schema is illustrative and intentionally explicit:
@@ -596,17 +689,38 @@ enabled: true
 
 source:
   branch: "@default"
-  include:
-    - "**"
-  exclude:
-    - ".git/**"
-    - ".fkst/evolution/observed/**"
-    - ".fkst/evolution/changes/**"
-    - ".fkst/evolution/manifest.json"
-    - "docs/product/**"
-    - ".agents/skills/**"
-    - "demo/screenshots/**"
-    - "slides/generated/**"
+
+  # Paths that can plausibly change the PRODUCT SURFACE. This set drives cycle
+  # admission and the meaning of publication.requireCurrentSource (section
+  # 17.5). It is deliberately NOT "**": a comment typo must not launch a cycle.
+  productRelevant:
+    include:
+      - "src/**"
+      - "app/**"
+      - "frontend/**"
+      - "backend/**"
+      - "openapi.json"
+      - "**/*.proto"
+      - "migrations/**"
+    exclude:
+      - "**/*_test.*"
+      - "**/*.test.*"
+      - "**/testdata/**"
+
+  # Everything else reachable on the trusted branch is still COVERED for
+  # provenance (section 17.5) but does not by itself launch a cycle.
+  # ".fkst/evolution/**" and ".fkst/packages/**" are removed unconditionally by
+  # section 17.3 and must NOT be re-added here; "**" below is understood to be
+  # taken after that removal, not before it.
+  coverage:
+    include:
+      - "**"
+    exclude:
+      - ".git/**"
+
+# Paths under .fkst/evolution/ are excluded from both fingerprints by section
+# 17.3 unconditionally. Configuration cannot re-include them and cannot extend
+# the write boundary of section 12.1.1.
 
 artifactRepository: "."
 
@@ -614,31 +728,16 @@ intent:
   product: ".fkst/evolution/intent/product.md"
   overrides: ".fkst/evolution/intent/overrides.yaml"
 
+# Each managed output selects a SUBTREE beneath .fkst/evolution/. There is no
+# free-form path field: the subtree name is fixed by schema, so configuration
+# can enable or disable a class but can never point it at another location.
 managedOutputs:
-  documentation:
-    enabled: true
-    paths:
-      - "docs/product/**"
-  skills:
-    enabled: true
-    paths:
-      - ".agents/skills/**"
-  journeys:
-    enabled: true
-    paths:
-      - "demo/journeys/**"
-  screenshots:
-    enabled: true
-    paths:
-      - "demo/screenshots/**"
-  video:
-    enabled: true
-    storage: "github-release"
-  slides:
-    enabled: true
-    sourcePaths:
-      - "slides/**"
-    renderedStorage: "github-release"
+  documentation: { enabled: true }        # -> .fkst/evolution/docs/
+  skills:        { enabled: true }        # -> .fkst/evolution/skills/
+  journeys:      { enabled: true }        # -> .fkst/evolution/journeys/
+  screenshots:   { enabled: true }        # -> .fkst/evolution/screenshots/
+  slides:        { enabled: true }        # -> .fkst/evolution/slides/
+  video:         { enabled: true, storage: "github-release" }
 
 locales:
   - "en"
@@ -650,14 +749,35 @@ triggers:
   debounceSeconds: 60
 
 publication:
-  mode: "automerge-managed"
-  requireCurrentSource: true
+  mode: "propose"                 # bootstrap default; see section 27.1
+  requireCurrentSource: true      # evaluated against productRelevant only
   requireChecks: true
   allowDirectPush: false
 
+  # Owner brake (section 26.2.1). Closing the sync PR without merging suppresses
+  # regeneration for THAT input fingerprint until an input changes or the
+  # suppression is cleared. "none" restores the previous always-retry behavior.
+  onOwnerClose: "suppress-until-input-changes"   # none | suppress-until-input-changes
+  suppressionLabel: "fkst-evolution-suppressed"
+
+  # Bound on regeneration rounds within one cycle (section 20.2 step 17).
+  # Exhausting either marks the PR BLOCKED rather than looping forever.
+  maxRegenerationRounds: 5
+  cycleDeadlineSeconds: 3600
+
+# What to do when a managed output changed outside the Evolution lane
+# (section 17.8). An integrity mismatch under section 17.7 condition 3 is
+# always treated as "block" regardless of this setting.
+drift:
+  policy: "block"                 # block | repair | adopt
+
+# Deliberate lever for regenerating when nothing in the repository changed but
+# the generator environment did (section 17.4). Bumping it forces one cycle.
+generatorEpoch: 1
+
 retention:
-  renderedSnapshots: 10
-  preserveProductReleases: true
+  renderedSnapshots: 10           # THIS number is the deletion policy required
+  preserveProductReleases: true   # by section 24.5; absent => report only
 
 security:
   runPullRequestCode: false
@@ -672,24 +792,52 @@ Configuration validation MUST fail closed when:
 - `schemaVersion` is unsupported;
 - the configured source branch cannot be resolved;
 - the artifact repository is malformed or inaccessible;
-- managed output patterns overlap human-intent paths;
-- source include/exclude rules omit the configuration itself from the input
-  fingerprint;
-- two artifact classes claim the same path incompatibly;
+- `source.productRelevant` is absent, empty, or matches no path on the trusted
+  branch — an empty product-relevant set silently disables all cycle admission;
+- `source.productRelevant` or `source.coverage` names any path under
+  `.fkst/evolution/` or `.fkst/packages/` in an `include` entry **explicitly**
+  — that is, in a pattern that is not a general wildcard. A broad `"**"` is
+  permitted and is simply narrowed by the unconditional removals of section
+  17.3; an explicit `".fkst/evolution/docs/**"` is a request to re-include and
+  fails closed;
+- a `managedOutputs` entry carries a path, directory, or destination field —
+  destinations are fixed by schema (section 13.2) and are not configurable;
 - direct push is requested;
 - a requested storage mode is not GitHub-native;
-- a requested merge policy cannot honor required checks; or
+- a requested merge policy cannot honor required checks;
+- `publication.mode` is `automerge-managed` while the merge gate of section
+  21.5 is not installable on the artifact repository; or
 - security policy requests privileged execution of an untrusted PR head.
 
 Unknown fields SHOULD be rejected until the schema defines an extension
 mechanism. Silent acceptance would let misspelled safety policy appear active.
 
+#### 13.3.1 Configuration is not the safety boundary
+
+Validation runs on owner-supplied data and is therefore an input check, not a
+control. The write boundary of section 12.1.1 MUST be enforced in the control
+plane at every commit, push, and merge, independently of whether configuration
+validation ran, succeeded, or was bypassed. A configuration file that somehow
+passes validation while requesting a write outside `.fkst/evolution/` MUST
+still be refused at the point of write.
+
+This is the distinction that makes security objective 25.1(3) — "repository
+content cannot expand the agent's permissions or its write boundary" — true.
+`config.yaml` is repository content; if it defined the boundary, that objective
+would be self-contradictory.
+
 ### 13.4 Configuration changes
 
 A configuration change is authoritative input and MUST trigger reconciliation.
-Reducing a managed path set MUST NOT automatically delete previously managed
-files. Evolution SHOULD report them as released from management and require an
-explicit cleanup policy or separate reviewed deletion.
+Disabling a managed output class MUST NOT automatically delete its previously
+generated subtree. Evolution SHOULD report it as released from management and
+require an explicit cleanup policy or separate reviewed deletion.
+
+Enabling a managed output class that was previously disabled is a widening
+operation. The first cycle that writes into a newly enabled subtree MUST run
+under `propose` regardless of the configured `publication.mode`, so the first
+generation at that destination receives its own human merge. Subsequent cycles
+use the configured mode.
 
 Changing `artifactRepository` requires an explicit migration. The old manifest
 remains historical evidence and MUST NOT be silently deleted.
@@ -710,7 +858,7 @@ a new identity. A draft entry is:
 ```yaml
 schemaVersion: 1
 capabilities:
-  - id: "data.csv-import"
+  - id: "cap_7f3a"
     title: "CSV import"
     status: "available"
     summary: "Import structured records from a CSV file."
@@ -724,7 +872,7 @@ capabilities:
     limitations:
       - "Maximum upload size is 25 MiB."
     journeys:
-      - "journey.csv-import-and-validate"
+      - "jny_4c81"
     evidence:
       - kind: "test"
         ref: "frontend/e2e/import.spec.ts"
@@ -747,6 +895,51 @@ Allowed lifecycle states SHOULD include:
 Evolution MUST NOT infer `planned` product commitments from branches, TODOs, or
 unmerged pull requests.
 
+This lifecycle vocabulary describes a **capability**. It is disjoint from the
+artifact status vocabulary of section 16.3 (`current`, `stale`, `blocked`, …),
+which describes a generated file. The two MUST NOT be mixed in one field, and
+section 33.3's fail-on-unknown rule applies to each independently.
+
+#### 14.2.1 Identity allocation
+
+A capability identifier MUST be allocated once and never re-derived. Concretely:
+
+1. Identifiers are opaque and MUST NOT be derived from the title, path, or
+   summary, so that a rename cannot produce a different identifier by
+   construction rather than by instruction.
+2. New identifiers are allocated only when no existing entry in
+   `observed/capabilities.yaml` describes the same product function. The prior
+   model is a REQUIRED input to every generation, including a full rebuild
+   (section 32.3).
+3. When generation cannot match an observed capability to any current product
+   function, it MUST mark that capability `unknown` and raise it for owner
+   adjudication. It MUST NOT delete the entry or reallocate its identifier.
+
+#### 14.2.2 Rename, merge, and split
+
+`added`/`changed`/`deprecated`/`removed` (section 15.3) cannot express identity
+transitions. Merging two capabilities into one can only be encoded as two
+removals plus one addition, which generated release notes and the section 30.2
+timeline then publish as "features removed" — a false public claim about a
+product that lost nothing.
+
+Change records MUST therefore support explicit relations:
+
+```yaml
+capabilities:
+  renamed:
+    - { id: "cap_7f3a", previousTitle: "CSV upload", title: "CSV import" }
+  merged:
+    - { into: "cap_7f3a", from: ["cap_2b91", "cap_5d04"] }
+  split:
+    - { from: "cap_7f3a", into: ["cap_9c17", "cap_1e60"] }
+```
+
+`removed` is reserved for a capability the product genuinely no longer offers.
+Because a false removal is a user-visible product claim, a change record
+containing `capabilities.removed` requires human review under section 27.3 and
+MUST NOT auto-merge.
+
 ### 14.3 Journey schema
 
 Journey metadata links product meaning to executable verification. Executable
@@ -755,14 +948,14 @@ code remains in the configured journey source directory.
 ```yaml
 schemaVersion: 1
 journeys:
-  - id: "journey.csv-import-and-validate"
+  - id: "jny_4c81"
     title: "Import and validate customer records"
     audience: "workspace-admin"
     capabilities:
-      - "data.csv-import"
+      - "cap_7f3a"
     executable:
       framework: "playwright"
-      ref: "demo/journeys/csv-import.spec.ts"
+      ref: ".fkst/evolution/journeys/csv-import.spec.ts"
     prerequisites:
       - "A synthetic workspace with import permission"
     captures:
@@ -811,7 +1004,7 @@ terminology:
     "account owner": "workspace administrator"
 
 artifactRules:
-  - match: "slides/investor/**"
+  - match: ".fkst/evolution/slides/investor/**"
     requiresHumanReview: true
 ```
 
@@ -831,8 +1024,12 @@ without creating a separate database.
 The canonical path is:
 
 ```text
-.fkst/evolution/changes/<trusted-source-commit-sha>.yaml
+.fkst/evolution/changes/<yyyy>/<sha[0:2]>/<full-sha>.yaml
 ```
+
+The path is sharded by year and commit-SHA prefix (section 12.1); the full SHA
+remains the identity, and the shard is derived from it, so the location of a
+record is always computable from its identity alone.
 
 The source commit SHA is the identity. Reprocessing the same commit MUST update
 the same proposed file rather than creating another record. Once merged, a
@@ -861,16 +1058,25 @@ summary: "Workspace administrators can import and validate CSV records."
 
 capabilities:
   added:
-    - "data.csv-import"
+    - "cap_7f3a"      # opaque, allocated once (section 14.2.1)
   changed: []
   deprecated: []
+  # `removed` means the product genuinely no longer offers it. It is NOT how a
+  # rename, merge, or split is expressed — those use the relations below, and a
+  # non-empty `removed` requires human review (sections 14.2.2, 27.3).
   removed: []
+  renamed: []      # [{ id, previousTitle, title }]
+  merged: []       # [{ into, from: [...] }]
+  split: []        # [{ from, into: [...] }]
 
 journeys:
   added:
-    - "journey.csv-import-and-validate"
+    - "jny_4c81"
   changed: []
   removed: []
+  renamed: []
+  merged: []
+  split: []
 
 artifactImpact:
   documentation:
@@ -936,7 +1142,8 @@ replaces the need for a database cursor or hosted artifact registry. It answers:
 
 - which trusted source state was used;
 - which generator revision produced the outputs;
-- which source and output fingerprints were calculated;
+- which product-relevant, coverage, generator-pinned, generator-environment,
+  input, and output fingerprints were calculated;
 - which commit range was covered;
 - which artifacts exist and where;
 - which capabilities and journeys each artifact represents; and
@@ -953,7 +1160,8 @@ replaces the need for a database cursor or hosted artifact registry. It answers:
     "observedHead": "abc123fullsha",
     "previousCoveredHead": "def456fullsha",
     "historyRelation": "fast-forward",
-    "sourceTreeFingerprint": "sha256:...",
+    "productRelevantFingerprint": "sha256:...",
+    "coverageFingerprint": "sha256:...",
     "inputFingerprint": "sha256:..."
   },
   "artifactRepository": {
@@ -966,6 +1174,10 @@ replaces the need for a database cursor or hosted artifact registry. It answers:
       "owner/fkst-packages@resolved-sha:packages/evolution-observer",
       "owner/fkst-packages@resolved-sha:packages/evolution-docs"
     ],
+    "generatorEpoch": 1,
+    "pinnedFingerprint": "sha256:...",
+
+    "_comment": "everything below is provenance only and does NOT gate convergence (section 17.4)",
     "engineVersion": "<version>",
     "model": "<provider-and-model-id>",
     "toolchain": {
@@ -973,7 +1185,7 @@ replaces the need for a database cursor or hosted artifact registry. It answers:
       "ffmpeg": "<version>",
       "slideRenderer": "<name-and-version>"
     },
-    "fingerprint": "sha256:..."
+    "envFingerprint": "sha256:..."
   },
   "outputFingerprint": "sha256:...",
   "verification": {
@@ -981,9 +1193,9 @@ replaces the need for a database cursor or hosted artifact registry. It answers:
     "verifiedAt": "2026-07-24T12:00:00Z",
     "checks": [
       {
-        "id": "journey.csv-import-and-validate",
+        "id": "jny_4c81",
         "status": "passed",
-        "evidence": "demo/journeys/csv-import.spec.ts"
+        "evidence": ".fkst/evolution/journeys/csv-import.spec.ts"
       }
     ]
   },
@@ -993,35 +1205,48 @@ replaces the need for a database cursor or hosted artifact registry. It answers:
       "kind": "documentation",
       "locale": "en",
       "audience": "workspace-admin",
-      "capabilities": ["data.csv-import"],
-      "journeys": ["journey.csv-import-and-validate"],
+      "capabilities": ["cap_7f3a"],
+      "journeys": ["jny_4c81"],
       "sourceCommit": "abc123fullsha",
-      "repositoryPath": "docs/product/csv-import.md",
+      "inputFingerprint": "sha256:...",
+      "generatorPinnedFingerprint": "sha256:...",
+      "repositoryPath": ".fkst/evolution/docs/csv-import.md",
       "contentHash": "sha256:...",
       "status": "current",
-      "verification": "passed"
+      "verification": "passed",
+      "updatedAt": "2026-07-24T12:00:00Z"
     },
     {
       "id": "video.csv-import",
       "kind": "video",
       "locale": "en",
       "audience": "workspace-admin",
-      "capabilities": ["data.csv-import"],
-      "journeys": ["journey.csv-import-and-validate"],
+      "capabilities": ["cap_7f3a"],
+      "journeys": ["jny_4c81"],
       "sourceCommit": "abc123fullsha",
+      "inputFingerprint": "sha256:...",
+      "generatorPinnedFingerprint": "sha256:...",
       "release": {
         "repository": "owner/project",
         "tag": "fkst-evolution/0123456789abcdef",
-        "asset": "csv-import.sha256-abcd1234.mp4",
+        "asset": "csv-import.sha256-abcd1234ef567890.mp4",
         "assetUrl": "https://github.com/owner/project/releases/download/..."
       },
       "contentHash": "sha256:...",
       "status": "current",
-      "verification": "passed"
+      "verification": "passed",
+      "updatedAt": "2026-07-24T12:00:00Z"
     }
   ]
 }
 ```
+
+Every artifact entry carries the input and generator-pinned fingerprints
+required by section 23.1; `sourceCommit` alone does not identify the generator
+revision that produced the bytes. `assetUrl` is a convenience for readers and
+is NOT authoritative: section 17.7 condition 3 re-derives the asset by
+`repository` + `tag` + `asset` and re-hashes it, so a stale or rewritten URL
+cannot make a missing artifact look present.
 
 ### 16.3 Artifact status
 
@@ -1071,8 +1296,22 @@ were defined as `manifest.source.observedHead == currentBranchHead`, Evolution
 would trigger itself indefinitely. A commit SHA also fails to detect a mutable
 generator reference moving while source code remains unchanged.
 
-Evolution therefore uses separate source, generator, input, and output
-fingerprints.
+Evolution therefore uses separate fingerprints. There are six, in two families:
+
+| Fingerprint       | Covers                                        | Governs                          |
+| ----------------- | --------------------------------------------- | -------------------------------- |
+| `productRelevant` | `source.productRelevant` paths                | Cycle admission, merge staleness |
+| `coverage`        | `source.coverage` paths                       | Provenance only                  |
+| `generatorPinned` | Resolved package commits, prompts, schemas    | Cycle admission                  |
+| `generatorEnv`    | Engine version, model id, tool versions       | Provenance only                  |
+| `input`           | `productRelevant` + `generatorPinned` + config | Convergence condition 1         |
+| `output`          | Everything Evolution wrote                    | Convergence condition 2          |
+
+The split exists because the previous draft used a single input fingerprint
+over `include: ["**"]`, which made "any byte of the repository changed" the
+cycle-admission rule while section 21.4 simultaneously required "the source has
+not moved since" as the merge rule. On an active repository those two never
+both hold; on a quiet one they produce a merged Evolution PR per commit.
 
 ### 17.2 Canonical file hashing
 
@@ -1095,83 +1334,234 @@ leaf = SHA256(path_length || path || mode || content_length || content_bytes)
 
 The tree fingerprint is SHA-256 over the ordered length-delimited leaves.
 
-### 17.3 Source tree fingerprint
+### 17.3 Source tree fingerprints
 
-The source tree fingerprint covers files selected by `source.include` minus
-`source.exclude`, with these rules:
+Two source fingerprints are computed over the trusted tree using the section
+17.2 leaf construction.
 
-- `config.yaml` and human-intent files are always included;
-- observed model, change records, manifest, and managed outputs are excluded;
-- generated workflow files MAY be included only when they are authoritative
-  inputs rather than outputs of this same Evolution cycle;
+`productRelevantFingerprint` covers files selected by
+`source.productRelevant.include` minus `source.productRelevant.exclude`, plus
+`config.yaml` and `intent/**`, which are always included.
+
+In a companion setup this is a **two-repository computation**: product-relevant
+paths and `config.yaml` are read from the source repository, and `intent/**`
+from the artifact repository, per the section 12.4.1 homing table. Both
+contribute to the one `productRelevantFingerprint`. Without this rule human
+intent would stop being a convergence input whenever a companion is used —
+an owner could rewrite product positioning and nothing would regenerate.
+
+`coverageFingerprint` covers files selected by `source.coverage.include` minus
+`source.coverage.exclude`.
+
+Both are subject to these rules, which are unconditional and which
+configuration MUST NOT override:
+
+- every path under `.fkst/evolution/` is excluded from both fingerprints,
+  **except** `config.yaml` and `intent/**`, which are included in
+  `productRelevantFingerprint` only;
+- every path under `.fkst/packages/` is excluded from both, because section
+  33.4 classifies it as an independent workflow catalog;
 - submodule identity is the recorded submodule commit, not an implicit clone of
   mutable remote content; and
 - symlinks are hashed as Git symlink blobs and MUST NOT be followed outside the
   checkout.
 
-### 17.4 Generator fingerprint
+The previous draft expressed exclusion twice — once as a prose rule here and
+once as a `source.exclude` list in the configuration example — without saying
+which prevailed. It is this section. The single-root layout of section 12.1
+makes the rule a prefix comparison rather than a pattern set.
 
-The generator fingerprint covers all inputs that may change output without a
-source-tree change:
+### 17.4 Generator fingerprints
+
+The generator inputs are split by who controls them, because they converge
+differently.
+
+`generatorPinnedFingerprint` covers inputs a repository can pin, and
+participates in convergence:
 
 - every FKST manifest and package reference resolved to an immutable commit;
 - package configuration and prompts;
+- template and theme files not already covered by section 17.3;
+- schema versions for capabilities, journeys, changes, and manifest; and
+- `config.yaml`'s `generatorEpoch`.
+
+`generatorEnvFingerprint` covers deployment facts the repository does not
+control, and is recorded as provenance only:
+
 - engine version;
 - declared model provider and model identifier;
-- renderer and media tool versions;
-- template and theme files not already included in the source fingerprint; and
-- schema versions for capabilities, journeys, changes, and manifest.
+- renderer and media tool versions.
 
-Secrets and secret values MUST NOT enter a fingerprint. Non-secret settings
-that affect visible output SHOULD enter it.
+**Why the split.** In this deployment the model identifier is control-plane
+configuration, not repository state. If it entered the convergence-bearing
+fingerprint, a single operator model roll would change the input fingerprint of
+every enrolled repository simultaneously, and section 18.4's startup full
+resync would synchronize the resulting regeneration wave with the deploy. There
+is no fleet-wide in-flight cap that would contain it — section 28.3's
+`max_in_flight = 1` is per work-label lane, not per fleet.
 
-### 17.5 Input fingerprint
+An environment change therefore updates provenance without launching cycles.
+When an operator judges that a generator change genuinely warrants
+regeneration, the deliberate levers are the repository's `generatorEpoch` or an
+explicit full rebuild (section 32.3), both of which are rate-limitable and
+opt-in per repository. An implementation MUST NOT make `generatorEnv` a
+convergence input without also specifying a fleet-wide rollout budget.
 
-The input fingerprint is a versioned composition:
+Secrets and secret values MUST NOT enter any fingerprint. Non-secret settings
+that affect visible output SHOULD enter one of the two.
+
+### 17.5 Input and coverage fingerprints
 
 ```text
 inputFingerprint = SHA256(
-  "fkst-evolution-input-v1" ||
-  sourceTreeFingerprint ||
-  generatorFingerprint ||
+  "fkst-evolution-input-v2" ||
+  productRelevantFingerprint ||
+  generatorPinnedFingerprint ||
   normalizedRelevantConfiguration
 )
+
+coverageState = ( coverageFingerprint, observedHead )
 ```
+
+`inputFingerprint` decides whether a cycle runs and whether a sync PR is stale.
+`coverageState` records what range was observed.
+
+**How `coverageState` advances.** It has no independent write path, by design.
+The manifest advances only when a sync PR merges (section 16.4), so a commit
+that changes only coverage leaves `previousCoveredHead` behind the branch head
+until the next product-relevant cycle. That cycle then walks the whole range
+from `previousCoveredHead` to the current head (section 15.5) and records every
+commit in it, product-relevant or not.
+
+The lag is therefore bounded by the next product-relevant change, not
+unbounded, and it MUST NOT be treated as non-convergence — see section 17.7
+condition 5. A repository that wants coverage flushed without waiting can bump
+`generatorEpoch` or request a full rebuild.
+
+The consequence is the intended one: a commit that touches only comments,
+tests, CI configuration, or unrelated tooling advances `coverageState`,
+appears in provenance and in the covered range of section 15.5, and does **not**
+open a sync issue. A commit that touches the product surface changes
+`inputFingerprint` and does.
 
 The exact canonical serialization MUST be documented and covered by test
 vectors before implementation.
 
 ### 17.6 Output fingerprint
 
-The output fingerprint covers:
+The output fingerprint covers everything Evolution wrote:
 
-- every file in configured managed-output paths;
-- `.fkst/evolution/observed/**`;
-- `.fkst/evolution/changes/**`;
+- every file under `.fkst/evolution/` **except** `config.yaml`, `intent/**`,
+  and `manifest.json`;
 - all referenced Release asset content hashes; and
-- declared artifact metadata other than self-referential manifest fields.
+- a canonical projection of `manifest.json`.
 
-`manifest.json` itself is excluded from repository file hashing to avoid a
-circular hash. A canonical projection of its `artifacts` and `verification`
-sections MAY be included in the output fingerprint.
+`manifest.json` is excluded from repository *file* hashing to avoid a circular
+hash, because the file contains the fingerprint being computed. A canonical
+projection of it MUST nevertheless be included: every field except
+`outputFingerprint` itself, serialized with sorted keys and no insignificant
+whitespace.
+
+This is a **MUST**, not the previous draft's MAY. Under the MAY, the
+`verification` and `artifacts` sections could sit outside the hash while
+section 17.7 conditions 3 and 4 read presence and verification status out of
+them — so editing those strings in the file changed the answer to "is this
+converged?" without changing any fingerprint. The projection closes that.
 
 ### 17.7 Convergence decision
 
-The repository is converged only when:
+The repository is converged only when all of the following hold. Conditions 3
+and 4 MUST be evaluated by re-deriving from repository and GitHub state, never
+by reading a status field out of the manifest alone.
 
 1. the current input fingerprint equals the committed manifest input
    fingerprint;
 2. the current output fingerprint equals the committed manifest output
    fingerprint;
-3. all REQUIRED artifacts are present;
-4. all REQUIRED verification entries have an acceptable status;
-5. no newer authoritative-input change remains uncovered; and
-6. no open canonical sync PR represents a different current input.
+3. every REQUIRED artifact is present, and for each one the manifest's
+   `contentHash` matches a freshly computed hash of the blob at its
+   `repositoryPath`, or of the referenced Release asset;
+4. every REQUIRED verification entry is corroborated per section 17.7.1;
+5. no newer **product-relevant** change remains uncovered; and
+6. no open canonical sync PR in the artifact repository represents a different
+   current input.
+
+Condition 5 deliberately says product-relevant, not authoritative. Under the
+section 17.5 split, `coverageState` advances only when a cycle merges, so after
+any test-only or CI-only commit the manifest's `previousCoveredHead` legitimately
+lags the branch head. Testing condition 5 against *all* authoritative input would
+make every such commit a convergence failure, which would admit a cycle and
+reproduce exactly the behavior the split exists to remove. Coverage lag is not a
+convergence failure; it is reconciled in batch by the next product-relevant
+cycle, which walks the full range from `previousCoveredHead` (section 15.5).
+
+A mismatch in condition 3 is managed-output drift and MUST be handled under
+section 17.8. Because the mismatch means either the file or the manifest was
+edited outside the Evolution lane, it is resolved as `block` regardless of the
+repository's configured drift policy — a `contentHash` disagreeing with its own
+bytes is an integrity failure, not the ordinary manual-edit case that `repair`
+and `adopt` address.
+
+#### 17.7.1 Corroborating verification
+
+"Corroborated" means: the controller re-fetches the check run that recorded the
+verification result and independently confirms it. It is not a status string in
+the manifest, and it is not a claim by the generation sandbox.
+
+The manifest's `verification` block MUST therefore record, for each required
+check, the identity of a GitHub check run:
+
+```json
+"verification": {
+  "status": "passed",
+  "verifiedAt": "2026-07-24T12:00:00Z",
+  "checks": [
+    {
+      "id": "jny_4c81",
+      "status": "passed",
+      "evidence": ".fkst/evolution/journeys/csv-import.spec.ts",
+      "checkRun": {
+        "repository": "owner/project",
+        "headSha": "<sync PR head sha at verification time>",
+        "id": 1234567890,
+        "name": "fkst-evolution/journey.jny_4c81"
+      }
+    }
+  ]
+}
+```
+
+Corroboration succeeds only when all of the following are true:
+
+1. the referenced check run still exists and is retrievable from GitHub;
+2. its `app.id` equals the configured FKST App — a check run published by any
+   other actor is not evidence;
+3. its `conclusion` is `success`; and
+4. its `output` records an input fingerprint equal to the manifest's
+   `inputFingerprint`.
+
+**Why the check run is anchored to the pre-merge head, and why that works
+after merge.** The check run is published on the sync PR's head commit. After
+the PR merges, the trusted branch head is a different SHA — a merge or squash
+commit — that carries no such check run. An earlier draft of this section
+required corroboration "at the recorded input fingerprint" against the *current*
+branch head, which made post-merge convergence unreachable: condition 4 could
+never hold again, the repository would never report converged, and section 22.1's
+post-merge no-op — the property the entire self-trigger design rests on — would
+fail into permanent recursion.
+
+The commit the check run is attached to remains reachable in history after the
+merge, so the check run remains retrievable indefinitely by id. Corroboration is
+therefore a lookup of durable GitHub state, valid before and after merge, and
+requires no post-merge write.
+
+Implementations MUST NOT substitute "a check run exists on the current branch
+head" for this rule.
 
 ### 17.8 Managed-output drift
 
 If input is unchanged but output differs, a human or tool changed a managed
-output outside Evolution. Policy MAY choose:
+output outside Evolution. `drift.policy` (section 13.2) MAY choose:
 
 - `repair`: regenerate and propose restoration;
 - `adopt`: analyze the manual edit and update the model and manifest through a
@@ -1291,6 +1681,23 @@ analysis sandbox, and post the resulting summary through a separate
 controller-owned write operation. The untrusted sandbox never receives the
 write token.
 
+#### 19.2.1 The inference credential
+
+The preview sandbox holds exactly one secret: the inference credential needed
+to reach the configured LLM endpoint. Earlier drafts described preview as
+"read-only and secretless" (section 1, section 25.2, invariant 41.4). Read that
+as **holding no GitHub, demo, publication, or artifact-repository credential**,
+which is the property the threat model actually depends on. It is not literally
+secretless, and an implementation claiming otherwise is describing something it
+did not build. Sections 1 and 41.4 now carry the qualified wording.
+
+This carve-out has a consequence worth stating plainly: in a deployment where
+the inference credential is a single fleet-wide key, exfiltrating it from one
+preview sandbox exposes it for every repository. Deployments SHOULD therefore
+mint a per-cycle, rate-limited, separately revocable inference credential, and
+MUST NOT hand the preview sandbox the same long-lived key used by privileged
+generation.
+
 ### 19.3 Durable preview marker
 
 Evolution SHOULD maintain exactly one bot-owned preview comment per pull
@@ -1303,7 +1710,7 @@ request. The comment includes a visible summary and an HTML comment marker:
 ```
 
 On a `synchronize` event, Evolution queries the current PR head. If the marker
-already represents that head and generator fingerprint, preview is a no-op.
+already represents that head and generator pinned fingerprint, preview is a no-op.
 
 ### 19.4 Preview results are advisory
 
@@ -1337,21 +1744,52 @@ Each canonical reconciliation performs these steps:
 4. Read the committed manifest, observed model, managed output tree, open sync
    issues, open sync PRs, and relevant Release assets.
 5. Resolve all Evolution manifest and package references to immutable commits.
-6. Compute source, generator, input, and output fingerprints.
-7. If converged, repair stale labels or comments, close an empty stale sync
-   issue when safe, and stop.
-8. Otherwise, ensure exactly one coalesced sync issue exists.
-9. Ensure no second live execution or incompatible sync PR exists.
-10. Launch or continue the Evolution package workflow for the exact observed
-    source head.
-11. Analyze all covered changes and update the product model.
-12. Regenerate affected artifacts and perform configured full-surface checks.
-13. Create or update one sync PR and any draft Release assets.
-14. Re-read the trusted source branch head before declaring readiness.
-15. If authoritative input changed, incorporate the new source head and repeat
-    generation in the same canonical lane.
-16. When current and verified, request policy-compliant merge.
-17. After merge, publish eligible draft Release assets, close the sync issue,
+6. Compute the six fingerprints of section 17.1.
+7. If converged (section 17.7, re-deriving conditions 3 and 4), repair stale
+   labels or comments, close an empty stale sync issue when safe, and stop.
+   In a mode that never writes (`disabled`, `observe`, and rollout Phase 1),
+   reconciliation ends here: it reports the convergence result and its reason
+   and performs no further step. Condition 4 is reported as
+   `uncorroborated` when no check run has ever been published, rather than as
+   a failure — a repository that has never run a cycle has nothing to
+   corroborate.
+8. Verify the branch ruleset required by section 25.5.1 and the required-check
+   registration of section 21.5.1(4); fail closed if either is absent. This
+   step gates *writing*, so it is reached only in `propose`,
+   `automerge-managed`, and `release-gated`.
+9. If a suppression latch (section 26.2) covers the current input fingerprint,
+   report and stop.
+10. Otherwise, ensure exactly one coalesced sync issue exists.
+11. Ensure no second live execution or incompatible sync PR exists.
+12. Launch or continue the Evolution package workflow for the exact observed
+    source head, with the sandbox token of section 25.5.
+13. Analyze all covered changes and update the product model.
+14. Regenerate affected artifacts and perform configured full-surface checks.
+15. The sandbox pushes the sync branch under its `contents: write` token. The
+    **controller** then opens or updates the one sync PR and creates the draft
+    Release and its assets — the sandbox holds neither `pull_requests: write`
+    nor Release authority (section 25.5).
+16. Re-read the trusted branch and recompute `inputFingerprint` from the Git
+    tree (section 21.4).
+17. If `inputFingerprint` changed, incorporate the new source head and repeat
+    generation in the same canonical lane. A change to `coverageState` alone
+    does NOT re-enter generation; it is recorded and the cycle proceeds.
+
+    Regeneration rounds MUST be bounded. An implementation MUST enforce a
+    maximum number of rounds and a wall-clock deadline per cycle. On exhausting
+    either, the lane MUST stop re-entering generation, mark the sync PR
+    `BLOCKED` with reason `source-outpaces-cycle`, and report the condition on
+    the sync issue rather than looping. Without a bound, a repository whose
+    product-relevant commit interval is shorter than its cycle time regenerates
+    forever and never merges — the same livelock the section 17.5 split
+    removes for non-product commits, surviving for product ones. Each abandoned
+    round also strands a draft Release (section 24.4), which section 24.5 will
+    not delete without an explicit policy, so an unbounded loop leaks GitHub
+    state as well as compute.
+18. Publish the `fkst-evolution/input-current` check run (section 21.5.1)
+    reflecting the recomputed comparison and the corroborated verification.
+19. When current and verified, request policy-compliant merge.
+20. After merge, publish eligible draft Release assets, close the sync issue,
     and let the resulting push perform a final no-op convergence check.
 
 ### 20.3 Sync issue protocol
@@ -1397,20 +1835,55 @@ issue closure and branch observation.
 ### 20.5 State machine
 
 ```text
-DISABLED
-   |
-   v
-BASELINE_REQUIRED -> PENDING -> RUNNING -> PR_OPEN -> VERIFYING
-                         ^          |          |           |
-                         |          |          |           v
-                         +----------+----------+------- BLOCKED
-                                                    |
-                                                    v
-                              CONVERGED <- MERGING <- READY
+                    DISABLED
+                       |  enabled: true
+                       v
+              BASELINE_REQUIRED
+                       |  baseline merged
+                       v
+   +--------------> PENDING <---------------------+
+   |                   |  input fingerprint differs
+   |                   v                          |
+   |                RUNNING ---------------------->  (generation failed)
+   |                   |  sync PR pushed          |
+   |                   v                          |
+   |                PR_OPEN --------------------->|
+   |                   |  checks requested        |
+   |                   v                          |
+   |               VERIFYING -------------------->|
+   |                   |  verified + current      |
+   |                   v                          |
+   |                 READY  --------------------->|
+   |                   |  merge requested         |
+   |                   v                          v
+   |                MERGING ------------------> BLOCKED
+   |                   |  merged                   |
+   |                   v                           | condition cleared
+   |               CONVERGED                       |
+   |                   |  new product-relevant     |
+   +-------------------+  input, or generatorEpoch +
+                          bump, or full rebuild
 ```
+
+Rules the diagram encodes:
+
+- `BLOCKED` is reachable from every active state and always has a recovery edge
+  back to `PENDING` once its condition clears. It is never terminal.
+- `CONVERGED` is a resting state, not a sink: a new product-relevant input, a
+  `generatorEpoch` bump, or a forced full rebuild returns it to `PENDING`. This
+  is the edge that section 22.1's post-merge no-op depends on.
+- `READY` is entered from `VERIFYING`, not through `BLOCKED`. The previous
+  draft's diagram drew the only path to `READY` through `BLOCKED`, which no
+  implementation should reproduce.
 
 Every durable state is projected from GitHub. The state name itself need not be
 stored in a database.
+
+The cycle-level names above are distinct from the artifact-level statuses of
+section 16.3 and the freshness projection of section 30.3. A repository in
+`VERIFYING` may hold artifacts that are `current`, `stale`, and `failed`
+simultaneously; the projection surfaces both dimensions rather than collapsing
+them into one badge.
 
 ### 20.6 Labels
 
@@ -1444,8 +1917,18 @@ branch." The proposed trigger value is:
 
 Because `@` is not currently accepted as a normal branch name, this is a new
 sentinel rather than an ordinary branch. It MUST be resolved at reconciliation
-and session-launch time. A repository default-branch rename MUST not require a
+and session-launch time. A repository default-branch rename MUST NOT require a
 new Evolution trigger issue.
+
+Two existing behaviors must change to accommodate it. The shared trigger
+branch-name validator permits only `[A-Za-z0-9._/-]` and explicitly rejects
+`@`, so the sentinel is currently unrepresentable. And the existing session
+model defaults `### Target Branch` to an auto-created `fkst-hosted-default`
+branch, with work PRs merging into that target rather than into the
+repository's default branch — Evolution instead targets the resolved default
+branch directly. Both are deliberate departures from current session
+semantics and MUST be implemented as an Evolution-specific target resolution
+rather than by loosening the generic validator for all sessions.
 
 ### 21.2 Sync branch naming
 
@@ -1473,24 +1956,40 @@ The body MUST link the sync issue and contain a machine marker with:
 
 - input fingerprint;
 - observed source head;
-- generator fingerprint;
-- managed path set;
+- generator pinned fingerprint;
 - verification status; and
 - Release asset set, when applicable.
+
+The marker carries no path set: ownership is a fixed prefix (sections 12.1.1
+and 12.3), not per-PR configuration. It is an index key only — section 21.4
+forbids deciding freshness from it.
 
 Reconciliation MUST identify the canonical PR by marker and App identity, not by
 title alone.
 
 ### 21.4 Source-head advancement
 
-Before readiness and again immediately before merge, the system MUST compare the
-current source input fingerprint with the PR marker. If it changed, the PR is
-stale and MUST NOT merge under autonomous policy until regenerated.
+Before readiness and again immediately before merge, the system MUST recompute
+`inputFingerprint` from the trusted Git tree (section 17.5) and compare it with
+the fingerprint recorded in the manifest on the sync branch. If it changed, the
+PR is stale and MUST NOT merge under autonomous policy until regenerated.
 
-It is acceptable for a very busy repository to merge a verified Evolution PR
-for source state A after source state B has landed only when policy explicitly
-allows eventual follow-up. The default `requireCurrentSource: true` forbids
-this behavior.
+The comparison MUST NOT be made against the PR body marker. A PR body is
+editable by any account with write access to the repository while the REST
+payload continues to report the App as `user`, so the marker is an index key,
+not evidence — consistent with Appendix A's own rule that marker text alone
+never grants authority.
+
+Because `inputFingerprint` covers only `source.productRelevant` (section 17.5),
+a commit that lands during generation and touches only tests, comments, or CI
+configuration does **not** make the PR stale. It advances `coverageState`, is
+recorded in the covered range, and the PR merges. This is what makes
+`requireCurrentSource: true` a usable default rather than a livelock: without
+the split, a repository whose commit interval is shorter than its cycle time
+regenerates forever and never merges.
+
+A repository MAY set `requireCurrentSource: false` to permit merging for
+product state A after product state B has landed, with a follow-up cycle.
 
 ### 21.5 Safe automatic merge
 
@@ -1498,17 +1997,89 @@ Existing mergeability-only FKST auto-merge is not sufficient for Evolution.
 Evolution autonomous merge MUST be scoped to its canonical PR and MUST require:
 
 - the PR is authored by the configured FKST App identity;
-- every changed path is currently managed or is an allowed Evolution state
-  path;
-- the PR marker matches the current input fingerprint;
-- required checks and journey verification passed;
-- branch protection and required reviews are honored;
-- no protected product-intent file changed;
+- every changed path lies under `.fkst/evolution/` and is not `config.yaml` or
+  under `intent/**` (section 12.1.1);
+- the recomputed input fingerprint matches the manifest on the sync branch
+  (section 21.4);
+- required checks passed, and journey verification is corroborated by a
+  controller-published check run (section 21.5.1);
+- branch protection and required reviews on the **artifact** repository are
+  honored;
 - no unapproved deletion escaped the managed-path policy; and
 - required Release assets exist with matching hashes.
 
-The RECOMMENDED implementation is GitHub native auto-merge or a merge queue,
-not an immediate REST merge based only on GitHub's `mergeable` field.
+#### 21.5.1 The merge gate is a check run, not a pre-merge callback
+
+The previous draft recommended GitHub native auto-merge or a merge queue while
+simultaneously requiring a fingerprint comparison "immediately before merge"
+(section 21.4). Those are not compatible. Native auto-merge has no pre-merge
+callback: once armed, GitHub merges when required checks turn green, regardless
+of what happened to the base branch in the interim. There is no native
+mechanism that satisfies section 21.4 by configuration alone, which is why
+open question 40.6 is answered here rather than deferred.
+
+The gate is expressed as an artifact GitHub already honors:
+
+1. The control plane publishes a check run named `fkst-evolution/input-current`
+   on the sync PR's head commit.
+2. That check run is `success` only while the recomputed input fingerprint
+   equals the manifest's, every gate above passes, and verification is
+   corroborated per section 17.7.1.
+3. On every reconcile, the control plane **updates that same check run on the
+   unchanged head**, flipping it to `failure` when the trusted branch's
+   product-relevant fingerprint has diverged. Base-branch advancement does not
+   change the PR head, so nothing in GitHub re-evaluates the gate on its own;
+   the level-triggered reconcile is what re-evaluates it.
+4. The artifact repository's ruleset REQUIRES that check. Enrollment MUST verify
+   the requirement is present (section 25.5.1); a gate no ruleset requires is
+   advisory.
+
+This requires `checks: write`, which open question 40.7 previously asked about
+only for reading.
+
+**Which mechanism performs the merge.** Step 3 leaves a race that matters only
+for *armed native auto-merge*: between a product-relevant push and the reconcile
+that flips the check, GitHub may merge autonomously with the controller entirely
+out of the loop. Therefore:
+
+- When `publication.requireCurrentSource: true` (the default), the controller
+  MUST perform the merge itself: recompute `inputFingerprint` from the trusted
+  tree, then `PUT /repos/{owner}/{repo}/pulls/{n}/merge` with the `sha`
+  parameter pinned to the verified head. Native auto-merge MUST NOT be armed in
+  this mode, because it would merge without that final check. The residual race
+  here is bounded and benign — the controller can at worst merge artifacts for
+  product state A microseconds before B lands, which the next cycle corrects.
+- When `requireCurrentSource: false`, native auto-merge or a merge queue MAY be
+  armed, since the repository has accepted eventual follow-up by definition.
+
+The check run remains required in both modes: it is what blocks a *human* from
+merging a stale or unverified sync PR, and what makes the gate visible in the
+GitHub UI. Note also that `allow_auto_merge` is off by default on new
+repositories and the enabling mutation errors when a PR is already mergeable
+with no pending required checks, so native auto-merge is not universally
+available even where policy permits it.
+
+An unpinned REST merge based on GitHub's `mergeable` field alone MUST NOT be
+used in any mode.
+
+#### 21.5.2 Exclusion from the generic FKST auto-merge
+
+The existing repo-level FKST auto-merge hook merges the App bot's mergeable
+open pull requests whenever **any** registered session on the repository opted
+in, filtering only by author login and GitHub's `mergeable` field. Section 21.5
+requires the Evolution sync PR to be App-authored, so it falls squarely inside
+that set.
+
+Left alone, this bypasses every gate in section 21.5: a sync PR whose
+verification failed and whose fingerprint is stale would be merged on the next
+ordinary sweep, in any `publication.mode` including `propose`, violating
+invariants 41.7 and 41.11.
+
+The generic hook MUST therefore skip any pull request whose head branch matches
+`fkst/evolution/*` or whose body carries the `fkst-evolution-pr:v1` marker.
+This exclusion MUST be covered by a regression test. It is not sufficient for
+Appendix D to note that the generic hook "must not be reused"; it must be
+actively excluded.
 
 ### 21.6 Direct push
 
@@ -1542,15 +2113,22 @@ separate reviewed PR, after which a new cycle regenerates outputs.
 
 ### 22.3 Generated workflow code
 
-When Evolution generates product-operation skills or workflow code that later
-acts as input, configuration MUST declare whether it is:
+Generated product-operation skills and workflow code live under
+`.fkst/evolution/skills/`, which section 17.3 excludes from both source
+fingerprints unconditionally. They are therefore always managed output and can
+never be authoritative input to their own cycle. The dual-role hazard the
+earlier draft guarded against with a configuration declaration is removed
+structurally by the single root; no such declaration exists in the section 13.2
+schema, and none is required.
 
-- a managed output excluded from the current input fingerprint; or
-- an authoritative workflow source included in the next cycle.
-
-The same file cannot occupy both roles in one cycle. A two-stage workflow MAY
-first merge generated workflow source, then reconcile dependent artifacts in a
-new cycle.
+The remaining case is a repository that wants generated workflow code to become
+a real input. That requires a human to copy or reference it from outside
+`.fkst/evolution/` in a separate reviewed pull request. Once it lives outside
+the root it is ordinary authoritative source, is covered by
+`source.productRelevant` if the owner selects it, and drives the next cycle
+normally. The two-stage sequence is thus preserved, but it is enforced by the
+directory boundary rather than by a configuration flag that could be
+misdeclared.
 
 ### 22.4 Evolution Release events
 
@@ -1570,7 +2148,7 @@ Every artifact record MUST include:
 - kind;
 - source repository and commit;
 - input fingerprint;
-- generator fingerprint;
+- generator pinned fingerprint;
 - locale and audience when applicable;
 - capability and journey dependencies;
 - repository path or GitHub Release asset identity;
@@ -1713,15 +2291,27 @@ not the sole identity.
 
 ### 24.3 Asset identity
 
-Asset names SHOULD embed a bounded content-hash prefix:
+Asset names MUST embed a content-hash prefix of at least 16 hex characters
+(64 bits):
 
 ```text
-csv-import.sha256-abcd1234.mp4
-release-update.sha256-1234abcd.pdf
+csv-import.sha256-abcd1234ef567890.mp4
+release-update.sha256-1234abcd5678ef90.pdf
 ```
 
 An existing asset name MUST NOT be replaced with different bytes. A changed
 artifact receives a new content-addressed name.
+
+The width matters because the name is the identity. At 8 hex characters
+(32 bits) a collision becomes likely within a few tens of thousands of assets,
+and the collision is unrecoverable by design: the name is taken, the bytes
+differ, and section 26.2's only remedy is "flag inconsistency." 16 hex
+characters removes the failure mode rather than reporting it.
+
+Note that GitHub permits deleting and re-uploading an asset under the same
+name, so immutability here is a protocol obligation the platform does not
+enforce. Section 17.7 condition 3 re-hashes referenced assets on every
+reconcile, which is what actually detects a violation.
 
 ### 24.4 Two-phase publication
 
@@ -1769,25 +2359,62 @@ Evolution MUST preserve these security properties:
    Evolution.
 2. An untrusted pull request cannot obtain demo, production, publication, or
    artifact-repository credentials.
-3. Repository content cannot expand the agent's configured permissions or
-   managed path set.
+3. Repository content cannot expand the agent's permissions or its write
+   boundary. Configuration selects among subtrees inside a fixed root; it
+   cannot move the root (sections 12.1.1, 13.3.1).
 4. Generated artifacts cannot silently disclose secrets or private demo data.
-5. A compromised renderer cannot write outside the owned sync branch and
-   configured GitHub repository.
+5. A compromised renderer cannot **merge** its own output, cannot write to the
+   trusted source branch, and cannot write outside `.fkst/evolution/` in any
+   change that reaches that branch.
 6. A forged webhook cannot trigger repository access.
 7. A malicious repository cannot use prompt content to override package or
    platform policy.
+
+Objective 5 is deliberately narrower than the previous draft's "cannot write
+outside the owned sync branch," which no GitHub App token can deliver: an
+installation token has no ref scope (section 25.5). The property actually
+guaranteed is a conjunction of three enforced mechanisms — the withheld
+`pull_requests: write` (25.5), the required branch ruleset (25.5.1), and the
+merge-time prefix check (25.8) — not a token capability. Stating it as a token
+capability would have made the objective untestable.
 
 ### 25.2 Trust zones
 
 | Zone                       | Trust level                  | Examples                                                  |
 | -------------------------- | ---------------------------- | --------------------------------------------------------- |
 | Control plane              | Privileged                   | Webhook verification, token minting, issue/PR mutation    |
-| Trusted generation sandbox | Restricted but write-capable | Exact default-branch checkout, synthetic demo credentials |
+| Trusted generation sandbox | Executes repository code     | Exact default-branch checkout, synthetic demo credentials |
 | PR preview sandbox         | Untrusted and read-only      | Pull request diff analysis                                |
 | Source repository content  | Data, not instructions       | Code, README, tests, issue text                           |
 | Human intent               | Owner-authoritative data     | Product terminology, protected claims                     |
 | Rendered artifact          | Untrusted until verified     | HTML, PDF, video, slide output                            |
+
+#### 25.2.1 Hardening the trusted generation zone
+
+The generation sandbox is the zone that actually executes repository code —
+build steps, dependency install hooks, browser automation, media renderers —
+automatically on every product-relevant change, with no human filing the work.
+Calling it "trusted" describes the provenance of its input, not the safety of
+its behavior. It therefore requires a hardening profile at least as concrete as
+the untrusted preview zone's (section 25.3):
+
+- `contents: write` and no other GitHub permission (section 25.5);
+- synthetic demo credentials only, minted at runtime and destroyed with the
+  sandbox (section 25.6);
+- no production data, publication credentials, or artifact-repository
+  credentials beyond the single scoped token;
+- egress restricted to an allowlist covering the GitHub API, the configured
+  package sources, and the declared LLM endpoint;
+- bounded CPU, memory, disk, and wall-clock, enforced by the runtime;
+- kernel-level isolation for the sandbox itself; and
+- no path by which sandbox output becomes executable input to the privileged
+  control plane — the controller parses structured results with a schema and
+  never evaluates returned content.
+
+A merged pull request grants its author code execution in this zone on the next
+cycle. Repository owners enabling Evolution SHOULD understand that this raises
+the stakes of ordinary PR review, and section 25.5.1's ruleset is what bounds
+the consequence.
 
 ### 25.3 Pull request threat model
 
@@ -1838,17 +2465,69 @@ decisions MUST NOT be extracted from free-form generated prose.
 
 ### 25.5 Token separation
 
-The design SHOULD use distinct token scopes for:
+A GitHub App installation token is scoped by repository and permission only.
+**There is no ref scope.** Any token carrying `contents: write` can push every
+unprotected branch in the repository and can create and publish Releases. All
+credential design below is bounded by that fact, and no wording in this
+document may imply otherwise.
 
-- repository discovery and contents reads;
-- PR preview result comments;
-- canonical session branch, issue, and PR writes;
-- merge operations; and
-- Release creation and asset upload.
+The generation sandbox is granted `contents: write` and nothing else:
 
-A sandbox receives only the token needed for its current phase. Merge authority
-SHOULD remain in the controller so generated code cannot merge itself by invoking
-the GitHub API directly.
+| Phase                          | Holder     | Permissions                                  |
+| ------------------------------ | ---------- | -------------------------------------------- |
+| Discovery, contents read       | Controller | `contents: read`, `metadata: read`           |
+| PR preview comment             | Controller | `pull_requests: write`                       |
+| Generation, sync branch push   | **Sandbox**| `contents: write` **only**                   |
+| Sync issue and PR mutation     | Controller | `issues: write`, `pull_requests: write`      |
+| Merge gate check run           | Controller | `checks: write`                              |
+| Merge                          | Controller | `pull_requests: write`, `contents: write`    |
+| Release create, upload, publish| Controller | `contents: write`                            |
+
+Withholding `pull_requests: write` from the sandbox is the load-bearing part.
+It is what makes "generated code cannot merge itself" a property rather than a
+convention, and it is a **MUST**, not the previous draft's SHOULD.
+
+This matters concretely in the current implementation, where the session token
+and the auto-merge token are capability-identical (`contents`, `issues`,
+`pull_requests` all `write`) — meaning a session pod can merge its own pull
+request today. Evolution MUST NOT reuse that token shape.
+
+#### 25.5.1 Residual reach and the required ruleset
+
+Because `contents: write` is repository-wide, withholding `pull_requests:
+write` does not confine the sandbox to its own branch. A compromised or
+prompt-injected generator can still push to any unprotected branch.
+
+Enrollment MUST therefore require a branch ruleset, and reconciliation MUST
+re-verify it every cycle and fail closed when it is absent or has been widened.
+
+**Which branches.** A ruleset is required on the trusted source branch *and*, when
+the artifact repository differs, on the artifact repository's target branch —
+that is where the sync branch, the merge, and every generated byte actually
+live (section 12.4.1). Protecting only the source branch in a companion setup
+leaves the repository that holds all the output entirely unprotected.
+
+**Minimum content.** "A ruleset whose bypass list excludes the App" is satisfied
+by an inert ruleset that only blocks force pushes, which would leave ordinary
+direct pushes available. The ruleset MUST therefore:
+
+1. block direct pushes to the protected branch, so all changes arrive by pull
+   request;
+2. block force pushes and branch deletion;
+3. require the `fkst-evolution/input-current` check run (section 21.5.1(4)) on
+   the artifact repository's target branch; and
+4. list no bypass actor that resolves to the Evolution App, including via an
+   organization role or team.
+
+Without all four, section 21.6's "Evolution MUST NOT push directly to the
+trusted source branch" is a policy the credential does not enforce.
+
+Implementations that require containment stronger than a ruleset provides
+SHOULD adopt the stricter variant: the sandbox holds no GitHub token at all and
+returns a proposed tree plus provenance over a controller-mediated channel,
+with the controller performing every commit and push. That variant costs a
+result-transport path for large media and diverges from the standard FKST
+session execution model, and is therefore OPTIONAL in this draft.
 
 ### 25.6 Demo credentials
 
@@ -1869,10 +2548,24 @@ this draft.
 
 ### 25.8 Output confinement
 
-Before opening or updating a sync PR, the controller or trusted verifier MUST
-compare changed paths with configured ownership. A path outside the allowed set
-blocks autonomous merge. Symlink traversal and submodule writes MUST NOT bypass
-the path check.
+Confinement is a fixed prefix comparison, not a configured path set. Before
+opening or updating a sync PR, the controller MUST verify that every changed
+path satisfies section 12.1.1:
+
+```text
+changed_path starts with ".fkst/evolution/"
+  and changed_path != ".fkst/evolution/config.yaml"
+  and changed_path does not start with ".fkst/evolution/intent/"
+```
+
+Any other path blocks the merge. Symlink traversal and submodule writes MUST
+NOT bypass the check: a symlink is compared by its own path, never by its
+target, and a submodule pointer change is a change to the submodule path.
+
+This check is a **merge-time veto, not a write prevention** — section 25.5.1
+explains why the credential cannot prevent the write itself. The ruleset
+required there is what stops a confined-at-merge path set from being bypassed
+by a direct push.
 
 ### 25.9 Generated-content safety
 
@@ -1891,7 +2584,8 @@ Evolution SHOULD check generated artifacts for:
 ### 25.10 Supply-chain integrity
 
 Every package and tool that affects output MUST be pinned or resolved to an
-immutable revision and included in the generator fingerprint. Installation
+immutable revision and included in the generator pinned fingerprint (section
+17.4). Installation
 steps SHOULD verify checksums for downloaded binaries. Mutable `latest` tags
 MUST NOT be sufficient provenance.
 
@@ -1947,8 +2641,45 @@ visible in GitHub when owner action is required.
 | Package ref becomes unreachable                  | Keep prior canonical artifacts and report generator resolution failure                    |
 | GitHub rate limit is reached                     | Respect reset/retry hints and rely on later reconciliation                                |
 | GitHub is unavailable                            | Make no local durability claim; retry after recovery                                      |
-| Owner closes sync PR without merge               | Leave manifest unchanged; next reconciliation follows configured suppression/retry policy |
+| Owner closes sync PR without merge               | Leave manifest unchanged; apply `publication.onOwnerClose` (section 26.2.1)                |
 | Trigger issue is closed                          | Retire Evolution runtime; committed artifacts remain historical state                     |
+
+#### 26.2.1 The owner's brake
+
+Closing the sync PR without merging is the owner's primary way to stop a cycle
+producing bad output. It MUST therefore have a defined effect. The previous
+draft deferred to a "configured suppression/retry policy" that no schema
+defined, which in practice means the level-triggered reconciler reopens the
+same PR immediately and forever, leaving `enabled: false` as the only brake.
+
+With `publication.onOwnerClose: "suppress-until-input-changes"` (the default):
+
+1. The control plane records a suppression latch as a durable label
+   (`publication.suppressionLabel`) on the sync issue, together with the
+   suppressed `inputFingerprint` in the issue's machine marker
+   (`suppressedInput`, Appendix A.2).
+2. While the latch is present and the current `inputFingerprint` equals the
+   suppressed one, reconciliation reports `BLOCKED` with the reason and creates
+   no new sync PR.
+3. Any change to `inputFingerprint`, a `generatorEpoch` bump, or removal of the
+   label clears the latch automatically.
+
+**The latch must survive issue closure.** Section 20.4 permits the sync issue to
+close automatically, and section 20.2 step 7 permits closing an empty stale sync
+issue. If the latch lived only on an open issue, the reconciler would erase the
+owner's brake on the next sweep and immediately reopen the loop it was meant to
+stop. Therefore, while a suppression latch is set:
+
+- the sync issue MUST NOT be auto-closed, and MUST NOT be treated as "empty
+  stale"; and
+- discovery MUST look for the suppression label on **closed as well as open**
+  sync issues, so that a manually closed issue still suppresses.
+
+An owner clearing the label, or any input change, is the only way to resume.
+
+Suppression is scoped to one input, not to the repository: it stops the loop
+the owner objected to without disabling Evolution. `onOwnerClose: "none"`
+restores unconditional retry.
 
 ### 26.3 Partial success
 
@@ -1963,7 +2694,7 @@ Failures SHOULD be classified as:
 
 - transient, such as GitHub timeout or rate limiting;
 - source-dependent, such as a failing journey;
-- configuration-dependent, such as overlapping managed paths;
+- configuration-dependent, such as an empty `source.productRelevant`;
 - authorization-dependent, such as missing companion access;
 - review-dependent, such as a protected-fact contradiction; or
 - terminal for the current input, such as an unsupported schema.
@@ -2031,9 +2762,12 @@ In `automerge-managed`, Evolution SHOULD autonomously:
 Human review remains REQUIRED for:
 
 - changes to product intent or protected facts;
-- managed-path expansion;
+- enabling a managed output class for the first time (section 13.4);
 - a new artifact or companion repository destination;
 - publication policy changes;
+- any change record containing `capabilities.removed` or `journeys.removed` —
+  a false removal is a user-visible product claim that generated release notes
+  and the section 30.2 timeline will publish (section 14.2.2);
 - claims marked regulated, legal, financial, medical, or security-sensitive;
 - destructive retention changes;
 - source-code changes outside managed output; and
@@ -2105,7 +2839,7 @@ next cycle after closure.
 
 Trigger and manifest package references may be authored with a branch or tag,
 but each run MUST resolve them to exact commits and record those commits in the
-generator fingerprint and manifest.
+generator pinned fingerprint and manifest.
 
 ## 29. Required component changes
 
@@ -2114,8 +2848,19 @@ generator fingerprint and manifest.
 The hosted control plane requires:
 
 - `push`, `pull_request`, optional `repository`, and optional `release` webhook
-  classification;
-- corresponding GitHub App event subscription documentation;
+  classification. The webhook router currently dispatches only `installation`,
+  `installation_repositories`, and `issues`; the other events are ignored;
+- a GitHub App **permission** change adding `checks: write` (needed to publish
+  the section 21.5.1 merge gate, not merely to read check results) and a
+  **subscription** change adding Push, Pull request, Repository, and Release.
+  These have different rollout costs: added subscriptions take effect
+  immediately, whereas an added permission places every existing installation
+  in a pending state until an account owner approves it. Enrollment MUST treat
+  an installation that has not accepted `checks: write` as not-yet-enrollable
+  rather than silently degrading the merge gate;
+- branch-name validation that accepts the `@default` sentinel. The current
+  validator permits only `[A-Za-z0-9._/-]` and explicitly rejects `@`, so the
+  sentinel of section 21.1 cannot be expressed until it is extended;
 - current PR base, head, head repository, draft state, merge state, and marker
   comment access;
 - an Evolution enrollment and state projector;
@@ -2123,10 +2868,15 @@ The hosted control plane requires:
 - one-sync-issue and one-sync-PR enforcement;
 - issue update/reopen support;
 - dynamic `@default` branch resolution;
-- separate read-only PR preview and write-capable trusted-generation token
-  paths;
+- separate PR-preview, generation-sandbox, and controller token paths per the
+  section 25.5 table, including a sandbox token that carries `contents: write`
+  without `pull_requests: write`;
+- branch-ruleset verification per section 25.5.1;
+- check-run publication for the section 21.5.1 merge gate, and a `sha`-pinned
+  merge fallback;
+- an explicit exclusion of Evolution sync PRs from the generic repo-level
+  auto-merge hook, with a regression test (section 21.5.2);
 - GitHub Release and asset primitives;
-- per-PR safe auto-merge or merge-queue integration;
 - GitHub-native dashboard projection; and
 - tests proving no database or external artifact dependency.
 
@@ -2178,7 +2928,8 @@ A repository-level Evolution workspace SHOULD expose:
 - current convergence state;
 - current trusted source revision and last covered revision;
 - capability and journey map;
-- product-change timeline;
+- product-change timeline, rendering rename, merge, and split relations as
+  such rather than as removals plus additions (section 14.2.2);
 - artifact freshness matrix;
 - current sync issue and PR;
 - blocked or failed verification;
@@ -2280,11 +3031,25 @@ Examples:
 A full rebuild SHOULD occur when:
 
 - the owner requests it;
+- `config.yaml`'s `generatorEpoch` is incremented;
 - a configured product release is published;
-- generator fingerprint changes incompatibly;
+- `generatorPinnedFingerprint` changes — that is, the repository's own resolved
+  package commits, prompts, templates, or schema versions moved;
 - schema migration requires it;
 - previous manifest ancestry is lost; or
 - dependency integrity cannot establish selective safety.
+
+A change to `generatorEnvFingerprint` alone (engine version, model identifier,
+renderer versions — section 17.4) MUST NOT trigger a full rebuild. It is
+recorded as provenance. The previous draft's condition "generator fingerprint
+changes incompatibly" never defined "incompatibly" and, applied to the
+environment fingerprint, would have made every operator model roll a
+fleet-wide regeneration event.
+
+When an operator does intend a fleet-wide regeneration, it MUST be executed
+under a rollout budget bounding how many repositories may enter a cycle per
+interval, so that section 18.4's startup resync cannot synchronize the entire
+fleet's regeneration with a deploy.
 
 ### 32.4 Media generation
 
@@ -2298,9 +3063,18 @@ Implementations SHOULD:
 
 - use conditional requests and ETags in memory;
 - paginate all lists;
-- avoid fetching blobs when tree identity proves they are unchanged;
+- avoid fetching blobs when tree identity proves they are unchanged. Section
+  17.2 hashes blob **content**, but a Git tree entry already carries a
+  content-addressed blob object id, so an implementation MAY substitute the
+  recorded blob object id for a re-fetched content hash whenever the tree
+  entry is unchanged, and MUST document that substitution in its test vectors;
+- prefer one recursive tree read per revision over per-path contents calls, and
+  MUST treat a truncated recursive tree response as a failure rather than
+  hashing a partial tree — a partial tree produces a stable but wrong
+  fingerprint, which presents as false convergence;
 - cache installation resolution briefly;
-- respect primary and secondary rate limits; and
+- respect primary and secondary rate limits, including the separate and much
+  tighter limit on the issue-search endpoint used for enrollment discovery; and
 - distribute full-resync work with bounded concurrency.
 
 No optimization may replace periodic correctness checks with a durable private
@@ -2328,9 +3102,20 @@ a future schema revision.
 
 ### 33.4 Existing `.fkst/packages/`
 
-Evolution MUST preserve the existing `.fkst/packages/` role. Configuration and
-fingerprint logic MUST explicitly classify any workflow files under that path
-as authoritative source or managed output to avoid accidental recursion.
+Evolution MUST preserve the existing `.fkst/packages/` role, and treats it as
+neither authoritative input nor managed output. It is unconditionally excluded
+from both source fingerprints (section 17.3) and unwritable by Evolution
+(section 12.1.1 rule 3).
+
+Earlier drafts required configuration to classify workflow files under that
+path as source or output. That classification is no longer expressible — the
+section 13.2 schema has no path fields — and is no longer needed: the
+recursion it guarded against is prevented structurally, because Evolution
+cannot write there and changes there cannot enter a fingerprint.
+
+A repository that wants its `.fkst/packages/` catalog to influence Evolution
+does so through the FKST manifest and package references, which are resolved to
+immutable commits and enter `generatorPinnedFingerprint` (section 17.4).
 
 ## 34. Adoption, disablement, and removal
 
@@ -2341,10 +3126,11 @@ Initial adoption SHOULD proceed as follows:
 1. Create a draft Evolution configuration and human-intent template.
 2. Open or seed the Evolution trigger issue.
 3. Run a read-only baseline inventory.
-4. Open a baseline PR containing the observed model, managed-path proposal, and
-   a small representative artifact set.
-5. Have owners approve product intent, capability identity, path ownership, and
-   merge policy.
+4. Open a baseline PR containing the observed model and a small representative
+   artifact set, all under `.fkst/evolution/`.
+5. Have owners approve product intent, capability identity, the
+   `source.productRelevant` set, and merge policy. Path ownership is not
+   negotiable and is not part of this review (section 12.1.1).
 6. Run executable journey verification.
 7. Merge the baseline.
 8. Optionally enable autonomous managed-output merging.
@@ -2373,19 +3159,29 @@ trigger was cleanly retired.
 
 Unit tests MUST cover:
 
-- configuration parsing and overlap rejection;
+- configuration parsing, and rejection of an explicit attempt to re-include
+  `.fkst/evolution/` or to give a managed output a path;
 - branch sentinel resolution;
 - canonical path matching;
-- source, generator, input, and output fingerprint test vectors;
+- product-relevant, coverage, generator-pinned, generator-env, input, and
+  output fingerprint test vectors;
 - manifest parsing and corruption handling;
+- the canonical manifest projection that enters the output fingerprint
+  (section 17.6), including that editing `verification` changes it;
 - change-range ancestry behavior;
-- machine-marker parsing;
+- machine-marker parsing, including that a marker is never accepted as
+  authority for a freshness decision (section 21.4);
 - event classification;
 - singleton selection;
 - self-trigger suppression;
 - artifact status projection;
-- retention candidate classification; and
-- secret and managed-path enforcement.
+- retention candidate classification;
+- the single-root prefix check, including the `config.yaml` and `intent/**`
+  carve-outs and symlink and submodule cases (sections 12.1.1, 25.8);
+- capability identity: rename preserves the identifier, and merge and split
+  produce relations rather than remove-plus-add (sections 14.2.1, 14.2.2);
+- suppression-latch set, match, and auto-clear (section 26.2.1); and
+- secret enforcement.
 
 ### 35.2 Property tests
 
@@ -2396,8 +3192,16 @@ Property tests SHOULD establish:
 - duplicate and reordered event sequences converge to the same plan;
 - reprocessing a converged repository is a no-op;
 - generated-only commits do not change input fingerprint;
-- authoritative changes always change input fingerprint; and
-- no path outside the managed set can pass output validation.
+- product-relevant changes always change `inputFingerprint`, and
+  non-product-relevant changes never do — the two sets are disjoint by
+  construction (section 17.5);
+- a change to `generatorEnvFingerprint` alone never changes `inputFingerprint`
+  (section 17.4);
+- no path outside `.fkst/evolution/` can pass output validation, for any
+  configuration whatsoever — this MUST be tested against adversarial
+  configuration, not only valid configuration; and
+- a truncated recursive tree read fails rather than producing a fingerprint
+  (section 32.5).
 
 ### 35.3 GitHub integration tests
 
@@ -2485,21 +3289,59 @@ demonstrated:
 
 - PR preview cannot access a repository write token or demo credentials.
 - Canonical generation runs only from the trusted branch revision.
-- Changed paths are confined to configured managed output.
+- Changed paths are confined to `.fkst/evolution/`, and no configuration can
+  widen that boundary, demonstrated against adversarial configuration.
+- The generation sandbox cannot merge its own pull request, demonstrated by
+  attempting the merge API call with the sandbox token and observing refusal.
+- A sync PR whose input fingerprint went stale cannot merge, demonstrated
+  against an already-armed GitHub auto-merge.
+- The generic repo-level FKST auto-merge hook does not merge an Evolution sync
+  PR, demonstrated with a session that opted into auto-merge on the same
+  repository.
 - Product intent cannot auto-merge through managed-output policy.
 - Merge honors required checks and branch protection.
 - Secret scanning covers text and captured media metadata or visible output.
 
 ### 36.4 Artifact correctness
 
-- Capabilities and journeys have stable IDs and evidence.
+- Capabilities and journeys have stable opaque IDs and evidence, and a title
+  rename or a full rebuild preserves them.
 - Docs, skills, screenshots, videos, and slides share the same product model.
-- Every artifact records source and generator fingerprints.
-- Failed required verification cannot be represented as current and verified.
+- Every artifact records source, input, and generator-pinned fingerprints.
+- Failed required verification cannot be represented as current and verified,
+  demonstrated by hand-editing `manifest.json` to claim success and observing
+  that the repository does NOT report converged.
 - The previous good artifact remains available when a new generation fails.
-- Large binaries are durable GitHub Release assets with content hashes.
+- Large binaries are durable GitHub Release assets with content hashes, and a
+  manifest referencing a missing or rewritten asset does not report converged.
 
-### 36.5 Recovery
+### 36.5 Mechanisms introduced by revision 2
+
+Each of these is load-bearing for an invariant and MUST be demonstrated, not
+merely implemented:
+
+- The generation sandbox's token carries `contents: write` and not
+  `pull_requests: write` (invariant 41.18).
+- The required branch ruleset is verified every cycle on both the source and
+  artifact target branches, and its absence fails closed (section 25.5.1).
+- A repository in `observe` mode, and rollout Phase 1, evaluate convergence and
+  perform no write at all (section 20.2 step 7).
+- A hand-edited `manifest.json` claiming `passed` does not produce convergence,
+  because corroboration re-fetches the check run (section 17.7.1).
+- A test-only commit advances `coverageState`, admits no cycle, and does not
+  invalidate an open sync PR (sections 17.5, 17.7 condition 5, 21.4).
+- After a sync PR merges, the repository reports converged — the check run
+  referenced by the manifest is still retrievable on the pre-merge head
+  (section 17.7.1).
+- A capability rename produces a `renamed` relation and preserves its
+  identifier; a merge does not appear as a removal (sections 14.2.2, 15.3).
+- Closing a sync PR sets a suppression latch that survives sync-issue closure
+  and blocks regeneration for that input only (section 26.2.1).
+- A cycle whose source keeps advancing terminates as `BLOCKED` with reason
+  `source-outpaces-cycle` rather than regenerating indefinitely (section 20.2
+  step 17).
+
+### 36.6 Recovery
 
 - Source advancement during generation is detected before merge.
 - A push racing issue closure is eventually processed.
@@ -2510,6 +3352,10 @@ demonstrated:
 
 ## 37. Rollout plan
 
+The ordering principle is **riskiest assumption first**. The component whose
+being wrong invalidates everything downstream is the convergence oracle, not
+the generators — so it ships first, alone, writing nothing.
+
 ### Phase 0: specification and schemas
 
 - Review this draft with hosted, substrate, packages, product, and security
@@ -2517,41 +3363,66 @@ demonstrated:
 - Confirm that GitHub issues, comments, labels, PRs, and Releases satisfy the
   repository-only persistence rule.
 - Finalize schema canonicalization and fingerprint test vectors.
-- Decide ownership of any singleton engine primitive.
+- Decide ownership of any singleton engine primitive (open question 40.5).
 
-### Phase 1: package-only manual baseline
+### Phase 1: convergence oracle — zero generation, zero writes
 
-- Build observer, model, documentation, and verifier packages.
-- Trigger one manual sync issue.
-- Commit model, manifest, docs, one skill, and one journey through a PR.
-- Do not yet subscribe to push or PR events.
-- Validate that a second manual run is a no-op.
+- Configuration parsing and section 13.3 validation, including the section
+  12.1.1 write boundary.
+- Section 17.2 canonical hashing with published test vectors.
+- All six fingerprints of section 17.1.
+- Manifest read, parse, validate, and section 17.7 evaluation.
+- Startup, sweep, and periodic full resync.
+- Output is one line per repository: converged, or not converged with the
+  reason. The only permitted write is an optional single sync-issue comment.
+- Run in `observe` mode against three to five real repositories for at least a
+  week.
 
-### Phase 2: stateless canonical automation
+This phase answers questions 40.16, 40.17, and 40.18 with measurement rather
+than argument: how often a cycle would have fired, what an operator model roll
+does to the fleet, and what section 17.8 drift looks like in practice — all at
+zero blast radius.
 
-- Add push webhook classification and periodic Evolution projection.
-- Add singleton issue and dynamic `@default` behavior.
-- Add source/output fingerprints and self-trigger suppression.
-- Produce one automatic sync PR per coalesced cycle.
-- Keep merge mode at `propose`.
+### Phase 2: one artifact class, `propose` only, one pilot repository
 
-### Phase 3: PR preview and safe auto-merge
+- Documentation only. No skills, journeys, media, Releases, or auto-merge.
+- Add push and pull_request webhook classification, singleton issue, and
+  dynamic `@default` resolution.
+- Prove section 22 self-trigger suppression and section 20.2 step 17
+  regeneration against real pushes.
 
-- Add read-only PR preview and marker comments.
-- Add phase-specific credentials.
-- Add per-PR protected auto-merge or merge queue integration.
-- Enable `automerge-managed` only in a disposable pilot repository.
+### Phase 3: the merge gate as a first-class object
 
-### Phase 4: media and Releases
+- The `fkst-evolution/input-current` check run (section 21.5.1).
+- The `sha`-pinned controller merge fallback.
+- Exclusion of sync PRs from the generic auto-merge hook (section 21.5.2),
+  with its regression test.
+- The branch-ruleset enrollment precondition (section 25.5.1) and the section
+  25.5 token split.
+- `automerge-managed` only after all of the above, and only on a disposable
+  repository.
 
-- Add deterministic screenshot verification.
-- Add video and slide renderers.
-- Add draft Release asset protocol and retention projection.
-- Add synthetic demo environment hardening.
+### Phase 4: PR preview
 
-### Phase 5: user-facing Evolution workspace
+- Read-only preview, marker comments, and the scoped inference credential of
+  section 19.2.1.
 
-- Add repository-level capability, timeline, artifact-health, and cycle views.
+Preview is an independent risk surface and is deliberately no longer bundled
+with the merge gate; debugging both at once conflates two failure domains.
+
+### Phase 5: media and Releases
+
+- Deterministic screenshot verification.
+- Video and slide renderers.
+- Draft Release asset protocol and retention projection.
+- Synthetic demo environment hardening.
+
+Sequenced after a settled merge gate because the two-phase Release protocol
+interacts with regeneration rounds, which strand draft Releases.
+
+### Phase 6: user-facing Evolution workspace
+
+- Repository-level capability, timeline, artifact-health, and cycle views.
 - Derive all views live from GitHub.
 - Add manual `Reconcile`, `Full rebuild`, and `Prepare release kit` commands
   without creating new durable backend state.
@@ -2567,8 +3438,8 @@ Assume pull request `#412` adds CSV import and targets `main`.
 3. PR preview confirms the current head and base.
 4. A restricted analyzer reads the diff without repository write credentials.
 5. Evolution updates its single PR comment:
-   - likely new capability `data.csv-import`;
-   - likely new journey `journey.csv-import-and-validate`;
+   - likely a new capability and journey (identifiers are NOT allocated by
+     preview — see step 6 and section 19.4);
    - docs, skill, screenshot, video, and release deck likely affected;
    - upload-size behavior needs evidence.
 6. No canonical product model or artifact changes occur.
@@ -2577,8 +3448,13 @@ Assume pull request `#412` adds CSV import and targets `main`.
 
 1. GitHub sends `pull_request.closed` and `push` hints.
 2. Repository reconciliation reads `main` and confirms the merge commit.
-3. The new input fingerprint differs from the committed manifest.
-4. Evolution ensures one sync issue and starts one trusted generation cycle.
+3. The commit touched `source.productRelevant` paths, so `inputFingerprint`
+   differs from the committed manifest and a cycle is admitted. Had it touched
+   only tests or CI configuration, `coverageState` would have advanced and no
+   cycle would have opened.
+4. Evolution verifies the required branch ruleset (section 25.5.1), ensures one
+   sync issue, and starts one trusted generation cycle. The sandbox receives
+   `contents: write` and no `pull_requests: write`.
 5. The observer processes the commit range and confirms `#412` metadata.
 6. The cartographer adds the capability and journey with evidence.
 7. The documentation maintainer writes the user guide and limits.
@@ -2587,24 +3463,41 @@ Assume pull request `#412` adds CSV import and targets `main`.
    a mapping screenshot, and records a short captioned video.
 10. The narrative producer updates the release deck using the new verified
     screenshot.
-11. The renderer uploads video and PDF to a draft content-addressed GitHub
-    Release.
+11. The renderer produces video and PDF; the **controller** creates the draft
+    content-addressed GitHub Release and uploads them (section 25.5 — the
+    sandbox has no Release authority).
 12. The verifier checks paths, claims, links, skill behavior, screenshot pixels,
     video duration and frames, captions, hashes, and source provenance.
-13. One sync PR updates model, change record, manifest, docs, skill, journey,
-    screenshot, and slide source.
-14. Evolution re-reads `main`. If unchanged, it requests safe merge.
-15. After required checks pass, GitHub merges the PR.
+13. The sandbox pushes the sync branch; the **controller** opens or updates the
+    one sync PR carrying model, change record, manifest, docs, skill, journey,
+    screenshot, and slide source, all under `.fkst/evolution/`.
+14. The control plane recomputes `inputFingerprint` from the Git tree — not
+    from the PR marker — and, finding it unchanged, publishes
+    `fkst-evolution/input-current` as `success`.
+15. That check is required by the artifact repository's ruleset, so GitHub
+    merges the PR once it and the other required checks pass. Where auto-merge
+    cannot be armed, the control plane merges with the `sha` parameter pinned
+    to the head it verified.
 16. The draft Release is published and the issue closes.
-17. The generated merge push triggers reconciliation; input and output now
-    match the manifest, so no new work is created.
+17. The generated merge push triggers reconciliation. It touched only
+    `.fkst/evolution/`, which is excluded from both source fingerprints, so
+    `inputFingerprint` is unchanged and the recomputed output fingerprint now
+    matches the manifest. No new work is created.
 
 ### 38.3 Later source change during generation
 
-If another product commit reaches `main` during step 9, Evolution does not open
-a second sync issue. Before merge it detects the new input fingerprint,
-incorporates the new trusted head into its owned branch, analyzes the additional
-commit, regenerates affected outputs, and updates the same sync PR.
+If another **product-relevant** commit reaches `main` during step 9, Evolution
+does not open a second sync issue. The control plane flips
+`fkst-evolution/input-current` to `failure`, which vetoes any already-armed
+auto-merge. The lane incorporates the new trusted head into its owned branch,
+analyzes the additional commit, regenerates affected outputs, and updates the
+same sync PR.
+
+If the interleaved commit touches only non-product-relevant paths — a test, a
+comment, a CI tweak — `inputFingerprint` is unchanged, the check stays
+`success`, the PR merges, and the commit is recorded in `coverageState`. This
+is the case that made the previous draft livelock on any repository whose
+commit interval was shorter than its cycle time.
 
 ## 39. Rejected alternatives
 
@@ -2678,10 +3571,23 @@ The following decisions remain open for implementation review:
    when at least one large artifact changed?
 5. Can singleton level-triggered behavior be implemented entirely in packages
    and hosted reconciliation, or is an upstream substrate queue mode required?
-6. Which GitHub native merge mechanism best preserves branch protection and
-   required-check behavior for the App installation model?
-7. Which exact permission is required to read all repository checks without
-   granting unnecessary write access?
+   **This one is load-bearing, not deferrable.** It scopes Phases 2-3 (Phase 1
+   runs no work items at all), and it
+   compounds the admission problem: if a running work item cannot observe head
+   advancement, every source advance restarts the cycle from zero. Answer it in
+   Phase 0. Note also that CLAUDE.md forbids kernel-engine changes from this
+   repository, so a substrate requirement is a cross-repository dependency
+   rather than an implementation detail.
+6. ~~Which GitHub native merge mechanism best preserves branch protection?~~
+   **Answered in section 21.5.1: none of them can.** Native auto-merge has no
+   pre-merge callback, so it cannot satisfy section 21.4. The gate is an
+   Evolution-owned required check run plus a `sha`-pinned merge fallback. This
+   was a design defect, not a mechanism selection.
+7. ~~Which permission reads repository checks?~~ **Answered: `checks: read`
+   would suffice for reading, but section 21.5.1 requires `checks: write` to
+   publish the gate.** The open item is not which permission, but the rollout:
+   adding a permission places every existing installation in a pending state
+   until an account owner approves it (section 29.1).
 8. What is the canonical cross-format product-skill schema before rendering to
    Ornn or another adapter?
 9. Which product model fields require explicit owner approval during baseline?
@@ -2696,6 +3602,23 @@ The following decisions remain open for implementation review:
 14. How should localization review and human translation overrides be modeled?
 15. What maximum repository and artifact sizes should trigger companion-repo
     guidance or block generation?
+16. What belongs in `source.productRelevant` by default, per ecosystem? Section
+    13.2's example is illustrative; a wrong default here either floods the lane
+    or silently misses product changes. Phase 1 measures this directly.
+17. Should `generatorEnvFingerprint` ever gate convergence, and if so under
+    what fleet-wide rollout budget (section 32.3)?
+18. What is the observed rate of section 17.8 managed-output drift on real
+    repositories, and does that justify `repair` as a post-bootstrap default?
+19. Does the `.fkst/evolution/` single root create adoption friction severe
+    enough to warrant a supported publication step (section 12.1.2), or is
+    consumer configuration sufficient in practice?
+
+Questions 5, 6, and 7 were load-bearing rather than deferrable. 6 and 7 are now
+answered in the body (sections 21.5.1 and 29.1). Question 4 remains genuinely
+open: section 24.4 describes the two-phase protocol unconditionally, and
+whether a draft Release should be created per input fingerprint or only when a
+large artifact changed is a retention-cost trade-off that section 20.2 step 17's
+round bound now makes measurable rather than speculative.
 
 ## 41. Required invariants
 
@@ -2704,20 +3627,37 @@ invariants:
 
 1. GitHub contains all durable Evolution state.
 2. Webhooks are hints; full resync is authoritative recovery.
-3. One repository has at most one canonical Evolution lane.
-4. PR preview is read-only and secretless.
+3. Each `(source repository, artifact repository, trusted source branch)` tuple
+   has at most one canonical Evolution lane (section 20.1).
+4. PR preview holds no GitHub, demo, publication, or artifact-repository
+   credential. It does hold a scoped inference credential (section 19.2.1);
+   "secretless" in earlier drafts overstated this.
 5. Canonical executable generation uses a trusted source revision.
-6. Evolution never directly pushes the trusted branch.
-7. Autonomous merge is path-scoped, current-head-scoped, and check-gated.
+6. Evolution never directly pushes the trusted branch, enforced by a branch
+   ruleset rather than by token scope (section 25.5.1).
+7. Autonomous merge is path-scoped, current-head-scoped, and check-gated, with
+   the gate expressed as a required check run the control plane owns
+   (section 21.5.1).
 8. Human product intent is not an autonomous managed output.
 9. Input and output fingerprints prevent recursive self-triggering.
 10. Every artifact records exact source and generator provenance.
-11. Required verification failure cannot appear as current success.
+11. Required verification failure cannot appear as current success. This holds
+    only because section 17.7 re-derives conditions 3 and 4 from repository
+    state and a controller-published check run, rather than reading a status
+    field out of the manifest the generator wrote.
 12. A failed run preserves the last known good canonical artifact.
 13. Large durable binaries remain in GitHub, not external storage.
 14. A full restart can reconstruct convergence and pending work from GitHub.
 15. Source refactoring and product artifact synchronization remain separate
     work streams.
+16. Evolution writes only under `.fkst/evolution/`, never to `config.yaml` or
+    `intent/**`, and this boundary is a control-plane prefix comparison that
+    repository configuration cannot widen.
+17. Cycle admission and merge staleness are decided by the product-relevant
+    fingerprint, so a non-product commit neither launches a cycle nor
+    invalidates an open one.
+18. The generation sandbox never holds `pull_requests: write`, so generated
+    output cannot merge itself.
 
 ## 42. Draft decision summary
 
@@ -2725,15 +3665,26 @@ This draft recommends the following initial decisions:
 
 - Use the source repository and its GitHub Releases by default.
 - Support a configured companion GitHub repository as an opt-in.
-- Store only compact control, product-model, semantic-change, and provenance
-  data under `.fkst/evolution/`.
-- Keep user-facing generated files in conventional visible repository paths.
+- Store all Evolution state, human intent, and every generated artifact source
+  under the single root `.fkst/evolution/`, with large rendered binaries as
+  content-addressed Release assets.
+- Point consumers at that root through their own configuration (section
+  12.1.2); Evolution never copies generated files to conventional paths.
+- Make the write boundary a control-plane prefix comparison that repository
+  configuration cannot widen.
 - Detect both pull request changes and default-branch pushes.
 - Treat PR processing as advisory read-only preview.
 - Treat trusted-branch processing as canonical generation.
 - Coalesce all canonical work into one issue and one PR per repository.
 - Resolve the current default branch dynamically through `@default` semantics.
-- Compare source, generator, input, and output fingerprints on every reconcile.
+- Compare the six fingerprints of section 17.1 on every reconcile, admitting
+  cycles on product-relevant change only.
+- Re-derive convergence from repository state and a controller-published check
+  run rather than from status fields the generator wrote.
+- Gate merges on an Evolution-owned required check run, and perform the merge
+  from the controller with a pinned head whenever current source is required.
+- Give the generation sandbox `contents: write` and never `pull_requests:
+  write`, with a branch ruleset bounding the residual reach.
 - Auto-merge only after managed-path, current-source, verification, and branch
   protection gates pass.
 - Generate heavy media selectively and store it as content-addressed GitHub
@@ -2760,9 +3711,12 @@ outside the marker is never interpreted as machine state.
 
 ```html
 <!-- fkst-evolution-sync:v1
-{"source":"owner/project","artifactRepo":"owner/project","branch":"main","desiredHead":"<sha>","generation":7}
+{"source":"owner/project","artifactRepo":"owner/project","branch":"main","desiredHead":"<sha>","generation":7,"suppressedInput":null}
 -->
 ```
+
+`suppressedInput` carries the `inputFingerprint` suppressed by the section
+26.2.1 owner brake, or `null` when no latch is set.
 
 ### A.3 Sync pull request
 
@@ -2794,7 +3748,8 @@ is not stored in a dashboard database.
 
 The smallest proof that exercises the architecture SHOULD contain:
 
-1. `.fkst/evolution/config.yaml` with explicit managed paths;
+1. `.fkst/evolution/config.yaml` with an explicit `source.productRelevant` set
+   (managed destinations are fixed by schema, not configured);
 2. human-authored product intent;
 3. one observed capability;
 4. one executable journey;
