@@ -63,6 +63,9 @@ pub mod reconcile;
 // Shared startup/full-resync recovery projection. The serialized reconciler is
 // the sole writer; readiness and metrics consume snapshots.
 pub mod recovery;
+// Bounded exponential backoff + jitter, shared by every long-lived loop that must
+// retry a failed or partial pass instead of waiting out its periodic cadence.
+mod retry;
 // Reserved-env "keep-module" (Model B PR0, issue #359 §7/§9): holds
 // `is_reserved_env_key` + `LLM_ENV_KEY` so they survive the later deletion of
 // `engine/` and `sessions/codex_provider/`, which originally defined them.
