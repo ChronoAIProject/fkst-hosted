@@ -90,7 +90,101 @@ local function spawn_angle(proposal, angle, runtime_root)
   local worktree = prepare_seat_worktree(proposal,
     judgment_scratch_worktree(runtime_root, "angle-" .. tostring(angle), proposal.dedup_key)
   )
-  return dispatch_codex(proposal, prompt, worktree, "consensus", tostring(angle))
+  return dispatch_codex(proposal, prompt, worktree, "consensus", tostring(angle)), prompt
+end
+
+local function parse_blind_result(angle, result, verdict_mode)
+  local parsed = nil
+  local protocol_violation = nil
+  if type(result) == "table" and result.exit_code == 0 then
+    parsed, protocol_violation = parse_angle_output(result.stdout, verdict_mode)
+  end
+  return {
+    angle = angle,
+    verdict = parsed and parsed.verdict or nil,
+    reply = parsed and parsed.reply or nil,
+    blocking_gap = parsed and parsed.blocking_gap or nil,
+    protocol_violation = parsed == nil and protocol_violation or nil,
+    stdout = type(result) == "table" and result.stdout or nil,
+    stderr = type(result) == "table" and result.stderr or nil,
+    exit_code = type(result) == "table" and result.exit_code or nil,
+  }
+end
+
+local function protocol_failure(result)
+  return type(result) == "table"
+    and result.exit_code == 0
+    and result.verdict == nil
+    and type(result.protocol_violation) == "string"
+end
+
+local function log_protocol_violation(proposal, phase, angle, attempt, violation)
+  log.warn(
+    "consensus dept=decide tag=PROTOCOL_VIOLATION"
+      .. " proposal_id=" .. tostring(proposal.proposal_id)
+      .. " phase=" .. tostring(phase)
+      .. " angle=" .. tostring(angle)
+      .. " repair_attempt=" .. tostring(attempt)
+      .. " violation=" .. tostring(violation or "unknown")
+  )
+end
+
+local function assert_no_worker_failures(results, phase)
+  for _, result in ipairs(results or {}) do
+    if type(result) ~= "table" or result.exit_code ~= 0 then
+      angle_answers.assert_all_valid(results, phase)
+    end
+  end
+end
+
+local function repair_protocol_failures(ctx)
+  for _, result in ipairs(ctx.results) do
+    if protocol_failure(result) then
+      log_protocol_violation(ctx.proposal, ctx.phase, result.angle, 0, result.protocol_violation)
+    end
+  end
+  assert_no_worker_failures(ctx.results, ctx.phase)
+
+  local handles = {}
+  local indexes = {}
+  local first_results = {}
+  for index, result in ipairs(ctx.results) do
+    if protocol_failure(result) then
+      local lane = "repair-" .. ctx.phase .. "-" .. tostring(result.angle)
+      local prompt = core.build_protocol_repair_prompt(
+        ctx.prompts[index],
+        ctx.phase,
+        result.stdout,
+        result.protocol_violation
+      )
+      local worktree = prepare_seat_worktree(ctx.proposal,
+        judgment_scratch_worktree(ctx.runtime_root, lane, ctx.proposal.dedup_key)
+      )
+      table.insert(indexes, index)
+      table.insert(first_results, result)
+      table.insert(handles, dispatch_codex(ctx.proposal, prompt, worktree, "consensus", lane))
+    end
+  end
+
+  if #handles == 0 then
+    angle_answers.assert_all_valid(ctx.results, ctx.phase)
+    return ctx.results
+  end
+
+  local repaired_outputs = await_all(handles)
+  for repair_index, result_index in ipairs(indexes) do
+    local first = first_results[repair_index]
+    local repaired = ctx.parse(result_index, repaired_outputs[repair_index])
+    repaired.repair_attempted = true
+    repaired.first_protocol_violation = first.protocol_violation
+    ctx.results[result_index] = repaired
+    if protocol_failure(repaired) then
+      log_protocol_violation(ctx.proposal, ctx.phase, repaired.angle, 1, repaired.protocol_violation)
+    end
+  end
+
+  angle_answers.assert_all_valid(ctx.results, ctx.phase)
+  return ctx.results
 end
 
 local function raise_converge(proposal, angle_results, narrowed_question, findings_record, essence_stall)
@@ -105,6 +199,7 @@ end
 local function decide(proposal)
   local angle_results = {}
   local handles = {}
+  local angle_prompts = {}
   local angles = core.angles(proposal)
   local verdict_mode = core.verdict_mode(proposal)
   for _, angle in ipairs(angles) do
@@ -115,31 +210,27 @@ local function decide(proposal)
   end
 
   local runtime_root = read_runtime_root()
-  for _, angle in ipairs(angles) do
-    table.insert(handles, spawn_angle(proposal, angle, runtime_root))
+  for index, angle in ipairs(angles) do
+    local handle, prompt = spawn_angle(proposal, angle, runtime_root)
+    handles[index] = handle
+    angle_prompts[index] = prompt
   end
 
   local results = await_all(handles)
   for index, angle in ipairs(angles) do
-    local parsed = nil
-    local protocol_violation = nil
-    local result = results[index]
-    if type(result) == "table" and result.exit_code == 0 then
-      parsed, protocol_violation = parse_angle_output(result.stdout, verdict_mode)
-    end
-    table.insert(angle_results, {
-      angle = angle,
-      verdict = parsed and parsed.verdict or nil,
-      reply = parsed and parsed.reply or nil,
-      blocking_gap = parsed and parsed.blocking_gap or nil,
-      protocol_violation = parsed == nil and protocol_violation or nil,
-      stdout = type(result) == "table" and result.stdout or nil,
-      stderr = type(result) == "table" and result.stderr or nil,
-      exit_code = type(result) == "table" and result.exit_code or nil,
-    })
+    table.insert(angle_results, parse_blind_result(angle, results[index], verdict_mode))
   end
 
-  angle_answers.assert_all_valid(angle_results, "blind")
+  angle_results = repair_protocol_failures({
+    proposal = proposal,
+    phase = "blind",
+    runtime_root = runtime_root,
+    prompts = angle_prompts,
+    results = angle_results,
+    parse = function(index, result)
+      return parse_blind_result(angles[index], result, verdict_mode)
+    end,
+  })
 
   local decision = aggregate(angle_results, verdict_mode)
   if decision ~= nil then
@@ -151,7 +242,7 @@ local function decide(proposal)
 
   local rebuttal_results = angle_results
   if rebuttal.can_run(angle_results) then
-    local rebuttal_handles = rebuttal.spawn_all({
+    local rebuttal_handles, rebuttal_prompts = rebuttal.spawn_all({
       proposal = proposal,
       angle_results = angle_results,
       runtime_root = runtime_root,
@@ -175,7 +266,21 @@ local function decide(proposal)
         return parse_angle_output(stdout, mode)
       end,
     })
-    angle_answers.assert_all_valid(rebuttal_results, "rebuttal")
+    rebuttal_results = repair_protocol_failures({
+      proposal = proposal,
+      phase = "rebuttal",
+      runtime_root = runtime_root,
+      prompts = rebuttal_prompts,
+      results = rebuttal_results,
+      parse = function(index, result)
+        local collected = rebuttal.collect({ angle_results[index] }, { result }, verdict_mode, {
+          parse_angle_output = function(stdout, mode)
+            return parse_angle_output(stdout, mode)
+          end,
+        })
+        return collected[1]
+      end,
+    })
     local rebuttal_reached = rebuttal.post_rebuttal_reached(proposal, angle_results, rebuttal_results, verdict_mode, {
       aggregate = function(items, mode)
         return aggregate(items, mode)

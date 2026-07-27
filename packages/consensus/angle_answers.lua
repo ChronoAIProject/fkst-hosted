@@ -25,12 +25,22 @@ local function counts(results)
     worker_failures = 0,
     protocol_failures = 0,
     protocol_violations = {},
+    first_protocol_violations = {},
+    repair_attempts = 0,
   }
   if type(results) ~= "table" then
     return value
   end
   for _, result in ipairs(results) do
     value.total = value.total + 1
+    if type(result) == "table" and result.repair_attempted == true then
+      value.repair_attempts = value.repair_attempts + 1
+      local first = result.first_protocol_violation
+      if type(first) ~= "string" or #first > 64 or first:match("^[a-z][a-z0-9_]*$") == nil then
+        first = "unknown"
+      end
+      value.first_protocol_violations[first] = (value.first_protocol_violations[first] or 0) + 1
+    end
     if type(result) ~= "table" or result.exit_code ~= 0 then
       value.worker_failures = value.worker_failures + 1
       if value.worker_exit_code == nil and type(result) == "table" then
@@ -56,6 +66,7 @@ local function failure_detail(value, phase)
     .. " valid_answers=" .. tostring(value.valid)
     .. " worker_failures=" .. tostring(value.worker_failures)
     .. " protocol_failures=" .. tostring(value.protocol_failures)
+    .. " repair_attempts=" .. tostring(value.repair_attempts)
   local reasons = {}
   for reason in pairs(value.protocol_violations) do
     table.insert(reasons, reason)
@@ -67,6 +78,18 @@ local function failure_detail(value, phase)
       table.insert(summaries, reason .. ":" .. tostring(value.protocol_violations[reason]))
     end
     detail = detail .. " protocol_violations=" .. table.concat(summaries, ",")
+  end
+  local first_reasons = {}
+  for reason in pairs(value.first_protocol_violations) do
+    table.insert(first_reasons, reason)
+  end
+  table.sort(first_reasons)
+  if #first_reasons > 0 then
+    local summaries = {}
+    for _, reason in ipairs(first_reasons) do
+      table.insert(summaries, reason .. ":" .. tostring(value.first_protocol_violations[reason]))
+    end
+    detail = detail .. " first_protocol_violations=" .. table.concat(summaries, ",")
   end
   if value.worker_exit_code ~= nil then
     detail = detail .. " worker_exit_code=" .. tostring(value.worker_exit_code)

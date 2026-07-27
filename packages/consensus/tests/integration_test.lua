@@ -708,31 +708,6 @@ return {
     t.eq(#codex_calls(), 6)
   end,
 
-  test_partial_malformed_angle_fails_closed_before_synthesis_as_unparseable = function()
-    mock_judgment_runtime()
-    mock_angle("teleology", "approve", "Teleology angle approves.")
-    mock_judgment_dir()
-    t.mock_command("consensus-angle-parsimony", { stdout = "malformed", exit_code = 0 })
-    mock_angle("fidelity", "comment", "Fidelity angle notes a non-blocking concern.")
-
-    local run_opts = opts("gate-partial-malformed-angle")
-    local result = run_decide(proposal({
-      verdict_mode = "gate",
-      dedup_key = "proposal-42-v1/gate-partial-malformed-angle",
-    }), run_opts)
-
-    t.is_true(result.exit_code ~= 0)
-    t.eq(#result.raises, 0)
-    t.is_true(tostring(result.error):find("angle-output-unparseable", 1, true) ~= nil)
-    t.is_true(tostring(result.error):find("phase=blind", 1, true) ~= nil)
-    t.is_true(tostring(result.error):find(
-      "protocol_violations=verdict_marker_missing:1",
-      1,
-      true
-    ) ~= nil)
-    t.eq(#codex_calls(), 3)
-  end,
-
   test_all_valid_disagreement_raises_consensus_converge = function()
     mock_judgment_runtime()
     mock_angle("teleology", "approve", "Teleology angle approves.")
@@ -815,11 +790,16 @@ return {
     t.mock_command("consensus-angle-parsimony", { stdout = "still nothing useful", exit_code = 0 })
     mock_judgment_dir()
     t.mock_command("consensus-angle-fidelity", { stdout = "garbage output", exit_code = 0 })
+    for _, angle in ipairs({ "teleology", "parsimony", "fidelity" }) do
+      mock_judgment_dir()
+      t.mock_command("consensus-repair-blind-" .. angle, { stdout = "still malformed", exit_code = 0 })
+    end
     local result = run_decide(proposal({ dedup_key = "proposal-42-v1/unparseable" }), opts("unparseable"))
     t.is_true(result.exit_code ~= 0)
     t.eq(#result.raises, 0)
     t.is_true(tostring(result.error):find("angle-output-unparseable", 1, true) ~= nil)
-    t.eq(#codex_calls(), 3)
+    t.is_true(tostring(result.error):find("repair_attempts=3", 1, true) ~= nil)
+    t.eq(#codex_calls(), 6)
   end,
 
   test_zero_successful_angle_workers_fail_closed_as_codex_failed = function()

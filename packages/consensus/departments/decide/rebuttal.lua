@@ -103,15 +103,17 @@ end
 
 function M.spawn_all(ctx)
   local handles = {}
+  local prompts = {}
   local angle_results = ctx.angle_results or {}
   for index, result in ipairs(angle_results) do
     local prompt = ctx.build_rebuttal_prompt(ctx.proposal, result, peer_results(angle_results, index))
+    prompts[index] = prompt
     local worktree = ctx.prepare_judgment_worktree(
       ctx.judgment_scratch_worktree(ctx.runtime_root, "rebuttal-" .. tostring(result.angle), ctx.proposal.dedup_key)
     )
     table.insert(handles, ctx.dispatch_codex(ctx.proposal, prompt, worktree, "consensus", "rebuttal-" .. tostring(result.angle)))
   end
-  return handles
+  return handles, prompts
 end
 
 function M.collect(angle_results, results, verdict_mode, caps)

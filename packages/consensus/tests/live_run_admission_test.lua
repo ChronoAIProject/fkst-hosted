@@ -165,6 +165,20 @@ return {
     t.eq(built.dedup_key, "convergence:consensus:proposal-42:g0:r0:parsimony")
   end,
 
+  test_protocol_repair_lane_has_a_distinct_convergence_identity = function()
+    local initial = identity.from_proposal("consensus", proposal(), { angle_lane = "parsimony" })
+    local repair = identity.from_proposal("consensus", proposal(), {
+      angle_lane = "repair-blind-parsimony",
+    })
+
+    t.eq(initial.proposal_id, repair.proposal_id)
+    t.eq(initial.generation, repair.generation)
+    t.eq(initial.round, repair.round)
+    t.eq(repair.angle_lane, "repair-blind-parsimony")
+    t.is_true(initial.dedup_key ~= repair.dedup_key)
+    t.eq(repair.dedup_key, "convergence:consensus:proposal-42:g0:r0:repair-blind-parsimony")
+  end,
+
   test_live_run_active_matches_running_identity_only = function()
     local teleology = identity.from_proposal("consensus", proposal(), { angle_lane = "teleology" })
     local parsimony = identity.from_proposal("consensus", proposal(), { angle_lane = "parsimony" })

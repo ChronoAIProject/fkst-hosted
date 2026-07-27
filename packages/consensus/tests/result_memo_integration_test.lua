@@ -105,6 +105,24 @@ local function mock_unanimous(verdict, prefix)
   end
 end
 
+local function mock_repaired_unanimous()
+  mock_judgment_runtime()
+  mock_angle("teleology", "approve", "Teleology approves.")
+  t.mock_command("mkdir -p", { stdout = "", stderr = "", exit_code = 0 })
+  t.mock_command("consensus-angle-parsimony", {
+    stdout = verdict_label .. " approve\nmissing reply marker\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  mock_angle("fidelity", "approve", "Fidelity approves.")
+  t.mock_command("mkdir -p", { stdout = "", stderr = "", exit_code = 0 })
+  t.mock_command("consensus-repair-blind-parsimony", {
+    stdout = verdict_label .. " approve\n" .. reply_label .. " Parsimony repairs its contract.\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function mock_converge(prefix)
   mock_judgment_runtime()
   for _, angle in ipairs(angles) do
@@ -204,6 +222,24 @@ local function without_live_codex_runs(fn)
 end
 
 return {
+  test_repaired_decision_is_memoized_only_after_valid_terminal_result = function()
+    local run_opts = opts("repaired-memo-replay")
+    local target = proposal({ dedup_key = "proposal-42-v1/repaired-memo" })
+    mock_repaired_unanimous()
+
+    local first = run_namespaced_decide(target, run_opts)
+    t.eq(first.exit_code, 0)
+    t.eq(#first.raises, 1)
+    t.eq(first.raises[1].payload.decision, "approve")
+    local first_payload = result_memo.encode(first.raises[1].payload)
+
+    local second = run_namespaced_decide(target, run_opts)
+    t.eq(second.exit_code, 0)
+    t.eq(#second.raises, 1)
+    t.eq(result_memo.encode(second.raises[1].payload), first_payload)
+    t.eq(#codex_calls(), 4)
+  end,
+
   test_same_dedup_key_replays_identical_result_memo = function()
     local run_opts = opts("memo-replay")
     mock_unanimous("approve", "Winner approves")
