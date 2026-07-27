@@ -1,6 +1,8 @@
 local entity_lib = require("devloop.entity")
+local devloop_base = require("devloop.base")
 local h = require("tests.devloop_helpers")
 local t = h.t
+local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local gh_argv = require("testkit.gh_argv_mock")
 
@@ -44,35 +46,6 @@ local function observed_event(number)
       source_ref = source_ref(number),
     },
     source_ref = source_ref(number),
-  }
-end
-
-local function terminal_observe(number)
-  return {
-    schema_version = 1,
-    generated_at_ms = 1784768523000,
-    source = {
-      durable_root = "/tmp/fkst-durable",
-      database = "/tmp/fkst-durable/delivery.redb",
-      read_semantics = "single read transaction",
-      history_semantics = "delivery queue snapshot only",
-    },
-    limits = { max_deliveries = 10000, max_dead_letters = 10000 },
-    truncated = { deliveries = false, dead_letters = false },
-    queues = json.decode("[]"),
-    deliveries = json.decode("[]"),
-    dead_letters = {
-      {
-        delivery_id = "creator-scoped-terminal-" .. tostring(number),
-        queue = "github-devloop-intake.devloop_intake_candidate",
-        dept = "github-devloop-intake-default.intake_judge",
-        source = { kind = "external", reference = source_ref(number).ref },
-        attempts = 1,
-        permanent = true,
-        replayable = false,
-        dead_at_ms = 1784768523000,
-      },
-    },
   }
 end
 
@@ -165,6 +138,15 @@ local function candidate(result)
   return h.find_raise(result.raises, "devloop_intake_candidate")
 end
 
+local function trusted_reintake_command()
+  return {
+    id = "IC_creator_reintake",
+    body = "fkst: reintake",
+    author_login = devloop_base.trusted_bot_login(),
+    created_at = "2026-07-23T01:03:00Z",
+  }
+end
+
 local function count_calls(needle)
   local count = 0
   for _, call in ipairs(t.command_calls()) do
@@ -203,22 +185,60 @@ return {
     t.eq(#result.raises, 0)
   end,
 
-  test_not_routed_observed_issue_stops_after_metadata_without_content = function()
+  test_label_mode_observed_issue_skips_before_observe_or_github_read = function()
     mock_creator_env("creator-login")
-    t.mock_observe(terminal_observe(48))
-    mock_metadata(48, { assignees = { "other-login" } })
 
     local result = h.run_department(
       "departments/admission/main.lua",
       observed_event(48),
-      opts("creator-observed-skip-not-routed", "creator-login")
+      opts("creator-observed-skip-label-mode", "creator-login")
     )
 
     t.eq(result.exit_code, 0)
     t.eq(candidate(result), nil)
-    t.eq(count_calls("--json " .. metadata_fields), 1)
+    t.eq(count_calls("--json " .. metadata_fields), 0)
     t.eq(count_calls("--json " .. content_fields), 0)
     t.eq(count_calls("--add-label"), 0)
+  end,
+
+  test_creator_scoped_reintake_uses_marker_authority_despite_stale_active_label = function()
+    local proposal_id = "github-devloop/issue/owner/repo/49"
+    local labels = { "shared-work", claimed_label, "fkst-dev:enabled", "fkst-dev:thinking" }
+    local comments = {
+      core.state_marker(proposal_id, "thinking", proposal_id .. "/2026-07-23T01-00-00Z"),
+      core.state_marker(proposal_id, "blocked", proposal_id .. "/2026-07-23T01-00-00Z/timeout-reconcile/thinking/4"),
+      trusted_reintake_command(),
+    }
+    mock_creator_env("creator-login")
+    mock_metadata(49, { labels = labels })
+    mock_content(49, { labels = labels, comments = comments })
+    mock_metadata(49, { labels = labels })
+
+    local result = run(49, opts("creator-marker-authoritative-reintake", "creator-login"))
+
+    t.eq(result.exit_code, 0)
+    t.is_true(candidate(result) ~= nil)
+    t.eq(candidate(result).payload.issue_number, "49")
+    t.eq(candidate(result).payload.reintake_command_created_at, "2026-07-23T01:03:00Z")
+    t.eq(count_calls("--json " .. metadata_fields), 2)
+    t.eq(count_calls("--json " .. content_fields), 1)
+    t.eq(count_calls("--add-label"), 0)
+  end,
+
+  test_creator_scoped_blocked_issue_without_command_does_not_claim_or_raise = function()
+    local labels = { "shared-work", claimed_label, "fkst-dev:enabled", "fkst-dev:blocked" }
+    mock_creator_env("creator-login")
+    mock_metadata(50, { labels = labels })
+    mock_content(50, { labels = labels, comments = {} })
+
+    local result = run(50, opts("creator-blocked-without-reintake", "creator-login"))
+
+    t.eq(result.exit_code, 0)
+    t.eq(candidate(result), nil)
+    t.eq(count_calls("--json " .. metadata_fields), 1)
+    t.eq(count_calls("--json " .. content_fields), 1)
+    t.eq(count_calls("--add-label"), 0)
+    t.eq(#result.raises, 0)
   end,
 
   test_out_of_scope_issue_stops_after_metadata_without_content_or_claim = function()

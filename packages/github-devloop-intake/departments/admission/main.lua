@@ -157,24 +157,26 @@ local function log_known_state_skip(proposal_id, transition)
   devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, transition, "candidate", "skip-known-state", "fresh issue labels show an active devloop state")
 end
 
-local function creator_scoped_metadata_allows(current, proposal_id, transition)
-  if not session_work_scope_allows(current, proposal_id, transition) then
-    return false
+local function handle_creator_scoped_known_issue(entity, repo, issue_number, proposal_id)
+  local _, _, current = current_issue_from_source_ref(entity.source_ref, entity.updated_at)
+  devloop_logging.log_forged_markers("admission", proposal_id, current.comments)
+  if core.pending_reintake_command(current.comments) == nil then
+    log_known_state_skip(proposal_id, "entity")
+    return
   end
+  if not session_work_scope_allows(current, proposal_id, "entity-reintake") then
+    return
+  end
+
+  local issue = issue_from_current(issue_number, current)
   if current.state ~= "OPEN" then
-    log_closed_skip(proposal_id, transition)
-    return false
+    handle_pending_reintake(repo, issue, current, proposal_id, entity.source_ref, false)
+    return
   end
-  if core.should_skip_known_intake_issue(current.labels) then
-    log_known_state_skip(proposal_id, transition)
-    return false
+  if not claim_issue_for_management(repo, issue_number, current, proposal_id) then
+    return
   end
-  local admission, detail = m_claims.claim_admission_precheck(current, m_claims.claim_admission_inputs(current))
-  if admission == "other" or admission == "denied" then
-    m_claims.log_claim_admission_skip("admission", proposal_id, detail)
-    return false
-  end
-  return admission == "held" or admission == "needs-claim"
+  handle_pending_reintake(repo, issue, current, proposal_id, entity.source_ref, true)
 end
 
 local function admit_creator_scoped_issue(entity, repo, issue_number, proposal_id)
@@ -187,7 +189,7 @@ local function admit_creator_scoped_issue(entity, repo, issue_number, proposal_i
     return
   end
   if core.should_skip_known_intake_issue(metadata.labels) then
-    log_known_state_skip(proposal_id, "entity")
+    handle_creator_scoped_known_issue(entity, repo, issue_number, proposal_id)
     return
   end
   if not claim_issue_for_management(repo, issue_number, metadata, proposal_id) then
@@ -288,31 +290,16 @@ local function act_issue_observed(event)
   end
   local proposal_id = base_ids.proposal_id(repo, issue_number)
   devloop_base.assert_trusted_bot_configured()
+  if m_claims.claim_mode_active() ~= "assignee" then
+    devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "observed", "replay-candidate", "skip-claim-mode", "intake DLQ replay requires assignee claim mode")
+    return
+  end
 
   local lock_key = entity_lib.observe_lock_key(repo, issue_number)
   with_lock(lock_key, function()
     local terminal, precondition_reason, observe_snapshot = replay_authorization.terminal_precondition(entity.source_ref)
     if terminal == nil then
       devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "observed", "replay-candidate", "skip-" .. tostring(precondition_reason or "not-authorized"), "intake replay terminal precondition failed")
-      return
-    end
-
-    local session_creator = config.session_creator()
-    if session_creator ~= nil and config.claim_mode() == "label" then
-      local _, _, metadata = current_issue_metadata_from_source_ref(entity.source_ref, entity.updated_at)
-      if not creator_scoped_metadata_allows(metadata, proposal_id, "observed") then
-        return
-      end
-      local authorization, reason = replay_authorization.authorize(metadata, proposal_id, entity.source_ref, {
-        has_trusted_progress = false,
-        observe_snapshot = observe_snapshot,
-        terminal = terminal,
-      })
-      if authorization == nil then
-        devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "observed", "replay-candidate", "skip-" .. tostring(reason or "not-authorized"), "intake replay precondition failed")
-      end
-      -- Hosted label-mode idleness is governed by the control-plane pending
-      -- gate. The assignee-only idle-detector signal remains out of scope.
       return
     end
 
