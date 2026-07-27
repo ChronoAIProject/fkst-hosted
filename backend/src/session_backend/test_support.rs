@@ -41,6 +41,11 @@ pub(crate) struct FakeSessionBackend {
     gone_sessions: HashSet<String>,
     /// Per-session scripted `recent_output` (absent → `None`).
     recent: HashMap<String, Option<String>>,
+    /// How many more `deliver_credential` calls must fail TRANSIENTLY per session
+    /// before it starts succeeding. Drives the token-rotation retry tests.
+    deliver_failures: Mutex<HashMap<String, usize>>,
+    /// How many more `list_fleet` calls must fail before the fleet is served.
+    list_failures: Mutex<usize>,
 }
 
 impl FakeSessionBackend {
@@ -81,6 +86,33 @@ impl FakeSessionBackend {
     pub(crate) fn with_recent(mut self, session_id: &str, output: Option<String>) -> Self {
         self.recent.insert(session_id.to_string(), output);
         self
+    }
+
+    /// Make this session's next `count` credential deliveries fail transiently
+    /// ([`BackendError::Other`], NOT the 404-equivalent `NotFound`), then succeed.
+    /// A caller retrying correctly therefore converges; one that does not, does not.
+    pub(crate) fn with_deliver_failures(self, session_id: &str, count: usize) -> Self {
+        self.deliver_failures
+            .lock()
+            .unwrap()
+            .insert(session_id.to_string(), count);
+        self
+    }
+
+    /// Make the next `count` `list_fleet` calls fail, so a sweep that cannot even
+    /// enumerate the fleet can be exercised.
+    pub(crate) fn with_list_failures(self, count: usize) -> Self {
+        *self.list_failures.lock().unwrap() = count;
+        self
+    }
+
+    /// [`Self::with_deliver_failures`] applied to a fake that is already running, so a
+    /// test can start a session failing PART-WAY through a loop's lifetime.
+    pub(crate) fn fail_next_deliveries(&self, session_id: &str, count: usize) {
+        self.deliver_failures
+            .lock()
+            .unwrap()
+            .insert(session_id.to_string(), count);
     }
 }
 
@@ -147,6 +179,15 @@ impl SessionBackend for FakeSessionBackend {
     }
 
     async fn list_fleet(&self) -> Result<Vec<SessionHandle>, BackendError> {
+        {
+            let mut remaining = self.list_failures.lock().unwrap();
+            if *remaining > 0 {
+                *remaining -= 1;
+                return Err(BackendError::Other(anyhow::anyhow!(
+                    "scripted list_fleet failure"
+                )));
+            }
+        }
         Ok(self.fleet.clone())
     }
 
@@ -160,6 +201,17 @@ impl SessionBackend for FakeSessionBackend {
             .lock()
             .unwrap()
             .push((session_id.to_string(), file.to_string()));
+        {
+            let mut failures = self.deliver_failures.lock().unwrap();
+            if let Some(remaining) = failures.get_mut(session_id) {
+                if *remaining > 0 {
+                    *remaining -= 1;
+                    return Err(BackendError::Other(anyhow::anyhow!(
+                        "scripted delivery failure"
+                    )));
+                }
+            }
+        }
         if self.gone_sessions.contains(session_id) {
             Ok(DeliveryOutcome::SessionGone)
         } else {

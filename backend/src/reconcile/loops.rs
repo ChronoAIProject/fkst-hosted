@@ -13,13 +13,13 @@ use std::collections::HashSet;
 use std::future::Future;
 use std::time::{Duration, Instant};
 
-use rand::Rng;
 use tokio::sync::mpsc;
 
 use crate::error::AppError;
 use crate::reconcile::execute::ReconcileCtx;
 use crate::reconcile::repo::reconcile_repo;
 use crate::recovery::{RecoveryMonitor, ResyncResult};
+use crate::retry::{jittered_delay, RetryBackoff};
 
 use super::{ReconcileHandle, RepoKey};
 
@@ -221,46 +221,6 @@ async fn run_resync_coordinator<F, Fut>(
             }
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct RetryBackoff {
-    initial_secs: u64,
-    max_secs: u64,
-    next_secs: u64,
-}
-
-impl RetryBackoff {
-    fn new(initial_secs: u64, max_secs: u64) -> Self {
-        let initial_secs = initial_secs.max(1);
-        let max_secs = max_secs.max(initial_secs);
-        Self {
-            initial_secs,
-            max_secs,
-            next_secs: initial_secs,
-        }
-    }
-
-    fn next_delay(&mut self) -> Duration {
-        let delay = self.next_secs;
-        self.next_secs = self.next_secs.saturating_mul(2).min(self.max_secs);
-        Duration::from_secs(delay)
-    }
-
-    fn reset(&mut self) {
-        self.next_secs = self.initial_secs;
-    }
-}
-
-fn jittered_delay(base: Duration, jitter_percent: u64) -> Duration {
-    if jitter_percent == 0 || base.is_zero() {
-        return base;
-    }
-    let base_ms = u64::try_from(base.as_millis()).unwrap_or(u64::MAX);
-    let spread_ms = base_ms.saturating_mul(jitter_percent.min(100)) / 100;
-    let lower = base_ms.saturating_sub(spread_ms);
-    let upper = base_ms.saturating_add(spread_ms);
-    Duration::from_millis(rand::thread_rng().gen_range(lower..=upper))
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
