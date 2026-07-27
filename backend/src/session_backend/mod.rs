@@ -157,7 +157,8 @@ pub trait SessionBackend: Send + Sync {
     /// Whether this process needs the complete authoritative credential bundle for
     /// `session_id` before the runtime is recoverable. Durable-projection backends
     /// return false; push-based backends return true while their recovery cache is
-    /// empty. A failed recovery must leave this signal true for the next reconcile.
+    /// empty or their live runtime has lost its pushed credential set. A failed
+    /// recovery must leave this signal true for the next reconcile.
     async fn credential_recovery_needed(&self, session_id: &str) -> Result<bool, BackendError>;
 
     /// Observe the live (or terminal) session runtimes belonging to `repo`, projected

@@ -246,8 +246,7 @@ impl SessionBackend for OsbBackend {
     }
 
     async fn credential_recovery_needed(&self, session_id: &str) -> Result<bool, BackendError> {
-        let guard = self.creds.lock().unwrap_or_else(|e| e.into_inner());
-        Ok(!guard.contains_key(session_id))
+        self.credential_recovery_needed_impl(session_id).await
     }
 
     async fn observe_repo(&self, repo: &RepoRef) -> Result<Vec<LivePod>, BackendError> {
