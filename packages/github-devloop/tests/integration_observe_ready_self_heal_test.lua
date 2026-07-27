@@ -175,7 +175,10 @@ return {
     }
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
       fresh_thinking_marker(original.proposal_id, base_version),
-      conv_rounds.converge_round_marker(original.proposal_id, base_version, sr_digest, 0, base_version, "Narrow the question", angle_digests, "open:\nNarrow the question"),
+      {
+        body = conv_rounds.converge_round_marker(original.proposal_id, base_version, sr_digest, 0, base_version, "Narrow the question", angle_digests, "open:\nNarrow the question"),
+        created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now()),
+      },
     })
 
     local result = run_observe(event, opts("observe-issue-thinking-mid-loop-self-heal"))
@@ -197,9 +200,12 @@ return {
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
       fresh_thinking_marker(original.proposal_id, payloads_builders.build_proposal(event).dedup_key),
-      conv_rounds.converge_round_marker(original.proposal_id, original.dedup_key, sr_digest, 0, original.dedup_key, "Old question", {
-        { angle = "minimal", verdict = "abstain", digest = "old-lineage" },
-      }),
+      {
+        body = conv_rounds.converge_round_marker(original.proposal_id, original.dedup_key, sr_digest, 0, original.dedup_key, "Old question", {
+          { angle = "minimal", verdict = "abstain", digest = "old-lineage" },
+        }),
+        created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now()),
+      },
     })
 
     local result = run_observe(event, opts("observe-issue-thinking-stale-lineage-replay"))

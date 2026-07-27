@@ -4,6 +4,8 @@ local h = require("tests.devloop_helpers")
 local contract_time = require("contract.time")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local conv_attempts = require("devloop.convergence.attempts")
+local conv_rounds = require("devloop.convergence.rounds")
+local convergence_shared = require("devloop.convergence.shared")
 local m_rae = require("devloop.restart_actionable_epoch")
 local t = h.t
 local core = h.core
@@ -92,6 +94,81 @@ return {
     local implementing_result = run_reconcile(event, opts("reconcile-terminal-implementing"))
     t.eq(implementing_result.exit_code, 0)
     t.eq(#implementing_result.raises, 0)
+  end,
+
+  test_thinking_timeout_reconcile_does_not_terminalize_new_convergence_generation = function()
+    local state_version = "github-devloop/issue/owner/repo/42/2026-06-03T00-00-00Z"
+    local source_ref = entity_lib.issue_source_ref(repo, issue_number)
+    local row = restart_transition_row("thinking")
+    local state = {
+      state = "thinking",
+      version = state_version,
+      proposal_id = proposal_id,
+      marker_created_at = "2026-06-03T00:00:00Z",
+    }
+    local original = fkst.codex_runs
+    fkst.codex_runs = function()
+      return { running = {}, recent = {} }
+    end
+    local ok, old_eval = pcall(function()
+      return m_rae.actionable_epoch_resolve(core, row, state, {
+        proposal_id = proposal_id,
+        source_ref = source_ref,
+        current = { comments = {} },
+      }, now_seconds)
+    end)
+    fkst.codex_runs = original
+    if not ok then
+      error(old_eval)
+    end
+
+    local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(
+      row,
+      state,
+      proposal_id,
+      source_ref,
+      3
+    )
+    mock_issue_reconcile({ "fkst-dev:thinking" }, {
+      {
+        body = core.state_marker(proposal_id, "thinking", state_version),
+        author_login = "fkst-test-bot",
+        created_at = "2026-06-03T00:00:00Z",
+      },
+      {
+        body = conv_attempts.timeout_attempt_v2_marker(
+          proposal_id,
+          "thinking",
+          "thinking.active",
+          old_eval.generation_key,
+          2,
+          source_ref
+        ),
+        author_login = "fkst-test-bot",
+        created_at = "2026-06-03T02:40:00Z",
+      },
+      {
+        body = conv_rounds.converge_round_marker(
+          proposal_id,
+          "consensus:" .. state_version,
+          convergence_shared.source_ref_digest(source_ref),
+          0,
+          "consensus:" .. state_version,
+          "Continue from the newly visible evidence",
+          {
+            { angle = "minimal", verdict = "abstain", digest = "new-progress" },
+          }
+        ),
+        author_login = "fkst-test-bot",
+        created_at = "2026-06-03T02:50:00Z",
+      },
+    })
+
+    local result = run_timeout_reconcile(payload, opts("timeout-reconcile-thinking-progress-race", {
+      now = "2026-06-03T03:00:00Z",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
   end,
 
   test_implementing_timeout_reconcile_adopts_open_pr_instead_of_blocking = function()

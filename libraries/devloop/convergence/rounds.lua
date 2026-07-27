@@ -51,6 +51,7 @@ local function converge_record_map(comments, kind, matches)
           verdicts = verdicts,
           dedup = dedup,
           version = version,
+          comment_created_at = parsers_misc._comment_created_at(comment),
           narrowed_question = narrowed_question,
           angle_digests = angle_digests,
           findings_record = findings_record,

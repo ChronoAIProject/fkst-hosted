@@ -1,7 +1,10 @@
 local base_ids = require("devloop.base_ids")
 local parsers_misc = require("devloop.parsers.misc")
 local conv_attempts = require("devloop.convergence.attempts")
+local conv_rounds = require("devloop.convergence.rounds")
 local contract_time = require("contract.time")
+local contract_strings = require("contract.strings")
+local transition_version = require("contract.transition_version")
 local C = {}
 
 local function comment_created_ms(M, comment)
@@ -170,6 +173,41 @@ local function fact_created_ms(fact)
   return seconds * 1000
 end
 
+local function codex_run_progress_epoch(M, row, state, facts)
+  if row == nil
+    or row.from_state ~= "thinking"
+    or row.actionable_epoch == nil
+    or row.actionable_epoch.progress_fact ~= "converge-round:v1" then
+    return nil
+  end
+  local comments = live_defer_comments(row, facts)
+  local proposal_id = (facts and facts.proposal_id) or (state and state.proposal_id)
+  local latest = M.latest_complete_converge_round(
+    comments,
+    proposal_id,
+    transition_version.strip_suffixes(state and state.version),
+    facts and facts.source_ref
+  )
+  local epoch_ms = fact_created_ms(latest)
+  local round = tonumber(latest and latest.round)
+  if epoch_ms == nil or round == nil or round < 0 then
+    return nil
+  end
+  local base_dedup = conv_rounds.converge_proposal_base_dedup(latest.dedup)
+  local next_dedup = transition_version.loop_at(base_dedup, round + 1)
+  if not contract_strings.is_path_safe_key(next_dedup, M._max_dedup_len) then
+    return nil
+  end
+  return {
+    epoch_ms = epoch_ms,
+    dedup_key = next_dedup,
+    opened_by = "converge-round:v1:"
+      .. tostring(latest.version or "")
+      .. ":" .. tostring(round)
+      .. ":" .. tostring(latest.dedup or ""),
+  }
+end
+
 local function resolve_state_entry(M, row, state)
   local epoch_ms = state_entry_ms(state)
   if epoch_ms == nil then
@@ -294,14 +332,23 @@ local function resolve_codex_run(M, row, state, facts, now_seconds)
   if type(M.restart_row_liveness_signal) ~= "function" then
     return invalid("codex run liveness signal resolver is unavailable")
   end
-  local signal = M.restart_row_liveness_signal(row, state, facts, now_seconds)
+  local progress = codex_run_progress_epoch(M, row, state, facts)
+  local signal_state = state
+  if progress ~= nil then
+    signal_state = {}
+    for key, value in pairs(state or {}) do
+      signal_state[key] = value
+    end
+    signal_state.version = progress.dedup_key
+  end
+  local signal = M.restart_row_liveness_signal(row, signal_state, facts, now_seconds)
   if signal.live then
     local eval = deferred("codex run is still running")
     eval.signal = signal
     return eval
   end
   if signal.codex_runs_fallback == true or signal.indeterminate == true then
-    local entry_ms = state_entry_ms(state)
+    local entry_ms = progress and progress.epoch_ms or state_entry_ms(state)
     if entry_ms == nil then
       return invalid("codex run indeterminate epoch is missing state entry")
     end
@@ -312,7 +359,7 @@ local function resolve_codex_run(M, row, state, facts, now_seconds)
     end
     local age = math.floor((now_ms - entry_ms) / 60000)
     if age >= budget then
-      local eval = actionable(M, row, state, entry_ms, "codex-run:indeterminate", "codex run liveness indeterminate over row budget")
+      local eval = actionable(M, row, state, entry_ms, progress and progress.opened_by or "codex-run:indeterminate", "codex run liveness indeterminate over row budget")
       eval.signal = signal
       eval.codex_runs_fallback = signal.codex_runs_fallback == true
       eval.indeterminate = signal.indeterminate == true
@@ -326,11 +373,13 @@ local function resolve_codex_run(M, row, state, facts, now_seconds)
     durable_eval.signal = durable_eval.signal or signal
     return durable_eval
   end
-  local entry_ms = state_entry_ms(state)
+  local entry_ms = progress and progress.epoch_ms or state_entry_ms(state)
   if entry_ms == nil then
     return invalid("codex run fallback epoch is missing state entry")
   end
-  local eval = actionable(M, row, state, entry_ms, tostring(row.defer and row.defer.producer or "codex-run") .. ":" .. tostring(signal.reason or "not-running"), "codex run not positively live")
+  local opened_by = progress and progress.opened_by
+    or tostring(row.defer and row.defer.producer or "codex-run") .. ":" .. tostring(signal.reason or "not-running")
+  local eval = actionable(M, row, state, entry_ms, opened_by, "codex run not positively live")
   eval.signal = signal
   eval.codex_runs_fallback = signal.codex_runs_fallback == true
   eval.indeterminate = signal.indeterminate == true
@@ -464,7 +513,10 @@ function C.actionable_epoch_timeout_attempt(M, row, state, facts)
       M.version_timeout_round(state and state.version, row and row.from_state) or 0
     )
   end
-  if row and row.actionable_epoch and row.actionable_epoch.source == "codex_run:v1" then
+  if row
+    and row.actionable_epoch
+    and row.actionable_epoch.source == "codex_run:v1"
+    and not tostring(eval.generation_opened_by or ""):find("^converge%-round:v1:") then
     return math.max(
       current,
       conv_attempts.timeout_attempt_round(M, comments, proposal_id, state and state.version, row and row.from_state) or 0,

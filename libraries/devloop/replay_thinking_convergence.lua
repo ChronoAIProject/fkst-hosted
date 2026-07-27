@@ -11,12 +11,20 @@ local function latest_converge_round(caps, comments, proposal_id, state_version,
   return caps.latest_complete_converge_round(comments, proposal_id, base_version, source_ref)
 end
 
-function C.build_replay_proposal(caps, issue, proposal_id, state, current, event_ts)
-  local latest = latest_converge_round(caps, current.comments, proposal_id, state.version, issue.source_ref)
+local function replay_position(caps, current, proposal_id, state, source_ref)
+  local latest = latest_converge_round(caps, current.comments, proposal_id, state.version, source_ref)
   if latest ~= nil then
     local base_version = conv_rounds.converge_proposal_base_dedup(latest.dedup)
-    local replay_n = latest.round + 1
-    local replay_dedup = transition_version.loop_at(base_version, replay_n)
+    local replay_round = latest.round + 1
+    return latest, transition_version.loop_at(base_version, replay_round), replay_round
+  end
+  local replay_dedup = transition_version.strip_timeout_suffixes(state.version)
+  return nil, replay_dedup, transition_version.loop_round(replay_dedup)
+end
+
+function C.build_replay_proposal(caps, issue, proposal_id, state, current, event_ts)
+  local latest, replay_dedup, replay_n = replay_position(caps, current, proposal_id, state, issue.source_ref)
+  if latest ~= nil then
     local content_fetch = caps.context_fetch({
       dept = "observe_issue",
       repo = issue.repo,
@@ -40,7 +48,6 @@ function C.build_replay_proposal(caps, issue, proposal_id, state, current, event
   for key, value in pairs(issue) do
     replay_issue[key] = value
   end
-  local replay_dedup = transition_version.strip_timeout_suffixes(state.version)
   replay_issue.content_fetch = caps.context_fetch({
     dept = "observe_issue",
     repo = issue.repo,
@@ -51,9 +58,8 @@ function C.build_replay_proposal(caps, issue, proposal_id, state, current, event
   })
   local proposal = caps.build_board(replay_issue, event_ts)
   proposal.dedup_key = replay_dedup
-  local replay_round = transition_version.loop_round(replay_dedup)
-  if replay_round > 0 then
-    proposal.round = replay_round
+  if replay_n > 0 then
+    proposal.round = replay_n
   end
   return v_validate_proposal.validate_proposal(proposal) and proposal or nil
 end
@@ -122,6 +128,20 @@ function C.replay(caps, dept, issue, state, row, facts, log_skip, log_defer, rai
     return terminal
   end
   devloop_logging.log_cas_decision(dept, proposal_id, state, "unmanaged", "thinking", "skip-idempotent(already at to_state)", "trusted thinking state marker is already visible")
+  local _, replay_dedup = replay_position(caps, facts.current, proposal_id, state, issue.source_ref)
+  if replay_dedup ~= nil and caps.dispatch_live_run("consensus", proposal_id, replay_dedup, {
+    state = {
+      state = "thinking",
+      version = replay_dedup,
+      proposal_id = proposal_id,
+      marker_created_at = state.marker_created_at,
+    },
+    current = facts.current,
+    proposal_id = proposal_id,
+    now_seconds = facts.now_seconds or now(),
+  }) then
+    return log_defer(dept, proposal_id, state, row.from_state, row.driving_queue, "skip-idempotent(live-exec-ref)", "matching consensus codex run is still live")
+  end
   local proposal = C.build_replay_proposal(caps, issue, proposal_id, state, facts.current, facts.event_ts)
   if proposal == nil then
     return log_skip(dept, proposal_id, state, row.from_state, row.driving_queue, "skip-foreign(payload)", "cannot rebuild thinking replay proposal")

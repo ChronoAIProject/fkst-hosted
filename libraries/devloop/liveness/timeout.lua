@@ -295,8 +295,14 @@ function M.maybe_timeout_redrive_from_table(dept, entity, state, table_row, fact
   if replay.kind == "stuck" then
     devloop_logging.log_cas_decision(dept, proposal_id, state, row.from_state, row.driving_queue, "timeout-stuck(" .. tostring(replay.outcome or "replay-declined") .. ")", "state output obligation is unmet and replay did not emit a consumable redrive")
   end
-  if replay.kind == "issued" or replay.kind == "stuck" then
+  local obligation_completed = replay.kind == "issued"
+    and replay.applied_state ~= nil
+    and replay.applied_state ~= row.from_state
+  if (replay.kind == "issued" and not obligation_completed) or replay.kind == "stuck" then
     emit_timeout_attempt_marker(dept, entity, state, row, facts, proposal_id, decision.attempt)
+    return true
+  end
+  if obligation_completed then
     return true
   end
   return false

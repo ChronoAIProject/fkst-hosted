@@ -153,7 +153,7 @@ return {
       lease_expires_at_ms = nil,
     })
     local result = run_observe(event, run_opts)
-    t.eq(result.exit_code, 0)
+    t.eq(result.exit_code, 0, tostring(result.error or result.stderr or "latest convergence live-run recovery failed"))
     t.eq(find_raise(result.raises, "consensus.proposal"), nil)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_comment_request"), nil)
   end,

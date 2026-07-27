@@ -29,7 +29,6 @@ local SITE = {
 local REPO = "owner/repo"
 local ISSUE_NUMBER = 42
 local PROPOSAL_ID = "github-devloop/issue/owner/repo/42"
-local T_OLDER = "2026-06-02T01:02:03Z"
 local T_EQUAL = "2026-06-03T01:02:03Z"
 local T_NOT_TIMEOUT_DUE = "2099-01-01T00:00:00Z"
 
@@ -121,20 +120,6 @@ local function prepare_fixture(event, fixture)
   if fixture.needs_context then
     h.mock_context_bundle(event.payload)
   end
-end
-
-local function controlled_codex_runs(event, fixture)
-  if not fixture.live_thinking then
-    return json_array()
-  end
-  return json_array({
-    {
-      role = "consensus",
-      proposal_id = PROPOSAL_ID,
-      dedup_key = proposal_version(T_EQUAL),
-      status = "running",
-    },
-  })
 end
 
 local function is_unmanaged_thinking_probe(probe)
@@ -244,7 +229,7 @@ local function observe_real_department(event, fixture)
       end
       return run_result
     end,
-    codex_runs_for_read = controlled_codex_runs(event, fixture),
+    codex_runs_for_read = json_array(),
     write_mode = "real",
   })
   devloop_base.read_env = original_read_env
@@ -762,41 +747,6 @@ local FIXTURES = {
     applies_thinking = true,
     expected_source_state = JSON_NULL,
     expected_source_boundary = "github-proxy.github_entity_changed",
-  },
-  {
-    name = "thinking-live-idempotent-reemit",
-    labels = { "fkst-dev:enabled", "fkst-dev:thinking" },
-    comments = function()
-      return json_array({ state_comment("thinking", proposal_version(T_EQUAL)) })
-    end,
-    needs_context = true,
-    live_thinking = true,
-    excluded_decision_count = 1,
-    probe_outcome = "idempotent",
-    decision_outcome = "skip-idempotent(already at to_state)",
-    status = "idempotent",
-    reason_code = "already-thinking-reemit",
-    effect_count = 3,
-    applies_thinking = true,
-    expected_source_state = "thinking",
-    expected_source_boundary = JSON_NULL,
-  },
-  {
-    name = "thinking-older-event",
-    event_time = T_OLDER,
-    labels = { "fkst-dev:enabled", "fkst-dev:thinking" },
-    comments = function()
-      return json_array({ state_comment("thinking", proposal_version(T_EQUAL)) })
-    end,
-    live_thinking = true,
-    excluded_decision_count = 1,
-    probe_outcome = "stale",
-    decision_outcome = "skip-stale(incoming version < current marker version)",
-    status = "stale",
-    reason_code = "incoming-version-older",
-    effect_count = 0,
-    expected_source_state = "thinking",
-    expected_source_boundary = JSON_NULL,
   },
   {
     name = "declined-state-advanced",

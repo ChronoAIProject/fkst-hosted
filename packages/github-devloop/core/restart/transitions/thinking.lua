@@ -23,6 +23,7 @@ return function(M, h)
     actionable_epoch = {
       source = "codex_run:v1",
       generation_source = "same_as_actionable_epoch",
+      progress_fact = "converge-round:v1",
     },
     defer = {
       kind = "codex_run",
@@ -141,7 +142,7 @@ return function(M, h)
     },
     version_identity = "strip_transition_version_suffixes(state.version)",
     effects = effect({ "consensus.proposal" }, "consensus proposal dedup is derived from state.version or next complete converge-round"),
-    marker_facts = "active run uses state:v1 thinking plus fkst.codex_runs real execution; converge-round:v1 remains an audit/progress fact, not a heartbeat",
+    marker_facts = "active run uses state:v1 thinking plus fkst.codex_runs real execution; converge-round:v1 opens the next output-obligation generation and is not a heartbeat",
     kickoff = "consensus.proposal",
     replay = "Initial thinking reuses the state version as proposal dedup; convergence replays the next /loop/N from the latest complete converge-round marker.",
     span_contract = span_contract({

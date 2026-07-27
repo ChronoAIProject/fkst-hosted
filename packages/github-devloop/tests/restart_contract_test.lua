@@ -564,7 +564,7 @@ return {
     t.eq(#raised, 0)
   end,
 
-  test_stale_thinking_converge_round_climbs_to_blocked_reconcile = function()
+  test_stale_terminal_thinking_converge_round_uses_convergence_terminal = function()
     local row = table_by_state().thinking
     local version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local source_ref = entity_lib.issue_source_ref("owner/repo", 42)
@@ -596,9 +596,10 @@ return {
       })
       t.eq(applied, true)
     end)
-    t.eq(#raised, 1)
-    t.eq(raised[1].queue, "devloop_timeout_reconcile")
-    t.eq(raised[1].payload.state, "thinking")
+    t.eq(#raised, 2)
+    t.eq(raised[1].queue, "github-proxy.github_issue_comment_request")
+    t.is_true(tostring(raised[1].payload.body or ""):find("evidence-continuation-budget-exhausted", 1, true) ~= nil)
+    t.eq(raised[2].queue, "github-proxy.github_issue_label_request")
   end,
 
   test_liveness_timeout_escalates_thinking_to_timeout_reconcile_event = function()

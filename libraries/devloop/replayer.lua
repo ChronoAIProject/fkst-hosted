@@ -29,6 +29,10 @@ local function restart_row(M, state_name)
 end
 
 local function raise_effects(M, dept, proposal_id, apply_state, version, label_changes, effects)
+  local capture = replay_capture_by_core[M]
+  if capture ~= nil then
+    capture.applied_state = apply_state
+  end
   return replay_fields.replay_raise_effects(devloop_logging.log_apply, devloop_logging.log_raise, dept, proposal_id, apply_state, version, label_changes, effects)
 end
 
@@ -609,7 +613,11 @@ function C.replay_from_table_classified(M, dept, entity, state, table_row, facts
   replay_capture_by_core[M] = previous
   if not ok then error(issued) end
   if issued then
-    return { kind = "issued", issued = true }
+    return {
+      kind = "issued",
+      issued = true,
+      applied_state = capture.applied_state,
+    }
   end
   return {
     kind = capture.disposition == "deferred" and "deferred" or "stuck",
