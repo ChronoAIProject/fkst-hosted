@@ -20,6 +20,7 @@ use std::process::{ExitCode, Stdio};
 use secrecy::{ExposeSecret, SecretString};
 use tokio::process::Command;
 
+use crate::delivery_grants::{DEVLOOP_DELIVERY_GRANTS_ENV, SESSION_DELIVERY_GRANTS_ENV};
 use crate::reserved_env::{is_reserved_env_key, LLM_ENV_KEY};
 use crate::session_spec::creds::CredsLayout;
 
@@ -30,7 +31,8 @@ use super::creds_gate::{
 use super::creds_helper::{git_config_entries, materialize_helper_script, GitConfigEntry};
 use super::log_stream::collector::{collector_config_from_env, spawn_collector};
 use super::plan::{
-    build_supervise_args, plan_clones, read_substrate_env, substrate_child_env, SubstrateEnv,
+    build_supervise_args, plan_clones, plan_delivery_checkouts, read_substrate_env,
+    substrate_child_env, SubstrateEnv,
 };
 use super::supervise::{exec_supervise, FRAMEWORK_BIN};
 
@@ -186,6 +188,32 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
         &token_file,
     )
     .await?;
+
+    let platform_repo = format!("{}/{}", plan.platform_repo.owner, plan.platform_repo.repo);
+    let delivery_plan = plan_delivery_checkouts(
+        &env.delivery_grants,
+        &env.repo,
+        env.target_branch.as_deref(),
+        &project_root,
+        &platform_repo,
+        &plan.platform_repo.git_ref,
+        &platform_root,
+        runtime_root,
+    );
+    for checkout in &delivery_plan.clones {
+        if let Some(parent) = checkout.root.parent() {
+            create_dir_idempotent(parent)?;
+        }
+        let url = format!("https://github.com/{}.git", checkout.repository);
+        git_clone(
+            &url,
+            Some(&checkout.branch),
+            &checkout.root,
+            &git_entries,
+            &token_file,
+        )
+        .await?;
+    }
     let target_url = format!("https://github.com/{}.git", env.repo);
     git_clone(
         &target_url,
@@ -227,6 +255,10 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
         &env.durable_root,
         &env.runtime_root,
     );
+    // The launcher contract is consumed by this driver only. Packages receive the
+    // resolved contract, which adds exact checkout roots and is absent when there
+    // are no grants.
+    apply_delivery_contract(&mut child_env, &delivery_plan.resolved_grants)?;
     // The helper + shim both read the mounted rotating token from this path.
     upsert_env(
         &mut child_env,
@@ -468,6 +500,7 @@ async fn git_clone(
     token_file: &Path,
 ) -> Result<(), String> {
     if dest.join(".git").is_dir() {
+        validate_existing_clone(url, git_ref, dest).await?;
         tracing::info!(dest = %dest.display(), "run-substrate: clone already present; reusing");
         return Ok(());
     }
@@ -505,6 +538,74 @@ async fn git_clone(
     Ok(())
 }
 
+/// Fail closed before reusing a restart-persistent checkout. The expected URL is
+/// token-free and was constructed by the driver; actual remote text is never
+/// logged because a corrupted checkout could contain credentials in its URL.
+async fn validate_existing_clone(
+    expected_url: &str,
+    git_ref: Option<&str>,
+    dest: &Path,
+) -> Result<(), String> {
+    let origin = git_output(dest, &["remote", "get-url", "origin"])
+        .await
+        .map_err(|_| {
+            format!(
+                "existing checkout {} has no readable origin",
+                dest.display()
+            )
+        })?;
+    if origin.trim() != expected_url {
+        return Err(format!(
+            "existing checkout {} has an unexpected origin",
+            dest.display()
+        ));
+    }
+
+    let Some(git_ref) = git_ref else {
+        return Ok(());
+    };
+    if let Ok(branch) = git_output(dest, &["symbolic-ref", "--quiet", "--short", "HEAD"]).await {
+        if branch.trim() == git_ref {
+            return Ok(());
+        }
+    }
+
+    // A tag checkout is detached. Accept it only when HEAD resolves to the exact
+    // requested tag or remote branch commit.
+    let head = git_output(dest, &["rev-parse", "HEAD^{commit}"])
+        .await
+        .map_err(|_| format!("existing checkout {} has no valid HEAD", dest.display()))?;
+    for candidate in [
+        format!("refs/tags/{git_ref}^{{commit}}"),
+        format!("refs/remotes/origin/{git_ref}^{{commit}}"),
+    ] {
+        if let Ok(expected) = git_output(dest, &["rev-parse", &candidate]).await {
+            if expected.trim() == head.trim() {
+                return Ok(());
+            }
+        }
+    }
+    Err(format!(
+        "existing checkout {} is not on the expected ref",
+        dest.display()
+    ))
+}
+
+async fn git_output(dest: &Path, args: &[&str]) -> Result<String, ()> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dest)
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .map_err(|_| ())?;
+    if !output.status.success() {
+        return Err(());
+    }
+    String::from_utf8(output.stdout).map_err(|_| ())
+}
+
 /// Build the non-secret `git clone` argv. Factored out so branch selection is
 /// covered without spawning a process or exposing credential environment.
 fn git_clone_args(url: &str, git_ref: Option<&str>, dest: &Path) -> Vec<OsString> {
@@ -534,6 +635,20 @@ fn upsert_env(env: &mut Vec<(String, String)>, key: &str, value: &str) {
     } else {
         env.push((key.to_string(), value.to_string()));
     }
+}
+
+fn apply_delivery_contract(
+    env: &mut Vec<(String, String)>,
+    resolved_grants: &[crate::delivery_grants::ResolvedDeliveryGrant],
+) -> Result<(), String> {
+    env.retain(|(key, _)| key != SESSION_DELIVERY_GRANTS_ENV && key != DEVLOOP_DELIVERY_GRANTS_ENV);
+    if resolved_grants.is_empty() {
+        return Ok(());
+    }
+    let resolved = serde_json::to_string(resolved_grants)
+        .map_err(|error| format!("serialize resolved delivery grants: {error}"))?;
+    upsert_env(env, DEVLOOP_DELIVERY_GRANTS_ENV, &resolved);
+    Ok(())
 }
 
 /// Insert `key=value` only when the child env does not already carry `key`, so a
@@ -637,6 +752,24 @@ fn prepend_path(env: &mut Vec<(String, String)>, dir: &Path) {
 mod tests {
     use super::*;
 
+    fn init_checkout(url: &str, branch: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let status = std::process::Command::new("git")
+            .args(["init", "-q", "-b", branch])
+            .arg(dir.path())
+            .status()
+            .expect("git init");
+        assert!(status.success());
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir.path())
+            .args(["remote", "add", "origin", url])
+            .status()
+            .expect("git remote");
+        assert!(status.success());
+        dir
+    }
+
     #[test]
     fn clone_args_select_one_branch_when_present() {
         assert_eq!(
@@ -668,6 +801,75 @@ mod tests {
         );
         assert!(!args.contains(&OsString::from("--single-branch")));
         assert!(!args.contains(&OsString::from("--branch")));
+    }
+
+    #[tokio::test]
+    async fn existing_clone_reuse_requires_the_exact_origin_and_branch() {
+        let checkout = init_checkout("https://github.com/acme/tools.git", "release");
+        validate_existing_clone(
+            "https://github.com/acme/tools.git",
+            Some("release"),
+            checkout.path(),
+        )
+        .await
+        .expect("exact checkout is reusable");
+
+        assert!(validate_existing_clone(
+            "https://github.com/acme/other.git",
+            Some("release"),
+            checkout.path(),
+        )
+        .await
+        .unwrap_err()
+        .contains("unexpected origin"));
+        assert!(
+            validate_existing_clone(
+                "https://github.com/acme/tools.git",
+                Some("main"),
+                checkout.path(),
+            )
+            .await
+            .is_err(),
+            "a checkout on the wrong branch must not be reused"
+        );
+    }
+
+    #[test]
+    fn resolved_delivery_contract_replaces_raw_input_and_is_omitted_when_empty() {
+        let mut env = vec![
+            (
+                SESSION_DELIVERY_GRANTS_ENV.to_string(),
+                "raw-launcher-contract".to_string(),
+            ),
+            (
+                DEVLOOP_DELIVERY_GRANTS_ENV.to_string(),
+                "untrusted-preexisting-value".to_string(),
+            ),
+        ];
+        let resolved = [crate::delivery_grants::ResolvedDeliveryGrant {
+            lifecycle_repo: "acme/site".to_string(),
+            lifecycle_issue: 41,
+            implementation_repo: "acme/tools".to_string(),
+            implementation_branch: "main".to_string(),
+            implementation_root: "/runtime/delivery/1234".to_string(),
+        }];
+        apply_delivery_contract(&mut env, &resolved).expect("render");
+        assert!(env
+            .iter()
+            .all(|(key, _)| key != SESSION_DELIVERY_GRANTS_ENV));
+        let value = env
+            .iter()
+            .find(|(key, _)| key == DEVLOOP_DELIVERY_GRANTS_ENV)
+            .map(|(_, value)| value)
+            .expect("resolved contract");
+        let decoded: Vec<crate::delivery_grants::ResolvedDeliveryGrant> =
+            serde_json::from_str(value).expect("resolved json");
+        assert_eq!(decoded, resolved);
+
+        apply_delivery_contract(&mut env, &[]).expect("empty render");
+        assert!(env.iter().all(|(key, _)| {
+            key != SESSION_DELIVERY_GRANTS_ENV && key != DEVLOOP_DELIVERY_GRANTS_ENV
+        }));
     }
 
     #[test]

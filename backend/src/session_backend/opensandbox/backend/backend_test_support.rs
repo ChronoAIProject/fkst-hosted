@@ -51,6 +51,7 @@ pub(crate) fn spec() -> SessionPodSpec {
         creator_login: "author-login".to_string(),
         contributors: vec!["author-login".to_string()],
         target_branch: "fkst-hosted-default".to_string(),
+        delivery_grants_json: None,
     }
 }
 

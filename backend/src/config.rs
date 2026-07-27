@@ -413,6 +413,9 @@ pub struct Config {
     /// admins are always admitted and receive App-wide read visibility. See
     /// [`crate::access_policy`].
     pub access: crate::access_policy::AccessPolicy,
+    /// Exact operator-owned cross-repository delivery routes. Empty by default;
+    /// see [`crate::delivery_grants::DeliveryGrantPolicy`].
+    pub delivery_grants: crate::delivery_grants::DeliveryGrantPolicy,
     /// Max bytes for a single inline vault value (#138). Env:
     /// `FKST_HOSTED_VAULT_VALUE_BYTE_CAP`. Default 65536, zero rejected.
     pub vault_value_byte_cap: usize,
@@ -461,6 +464,7 @@ impl Default for Config {
             request_timeout_secs: defaults::request_timeout_secs(),
             github_api_base_url: defaults::github_api_base_url(),
             access: crate::access_policy::AccessPolicy::default(),
+            delivery_grants: crate::delivery_grants::DeliveryGrantPolicy::default(),
             vault_value_byte_cap: defaults::vault_value_byte_cap(),
             vault_entries_per_scope_cap: defaults::vault_entries_per_scope_cap(),
             llm_api_key: SecretString::from(String::new()),
@@ -721,6 +725,7 @@ impl Config {
         // both lists set without an explicit model, or a denylist whose set
         // blocklist yields zero valid entries.
         let access = crate::access_policy::AccessPolicy::from_vars(&vars)?;
+        let delivery_grants = crate::delivery_grants::DeliveryGrantPolicy::from_vars(&vars)?;
 
         Ok(Config {
             port: http.port,
@@ -732,6 +737,7 @@ impl Config {
             llm_api_key: SecretString::from(llm_api_key.unwrap_or_default()),
             github_api_base_url: webhook.github_api_base_url.trim().to_string(),
             access,
+            delivery_grants,
             pod,
             opensandbox,
             env,
@@ -775,6 +781,35 @@ mod tests {
         assert!(config.pod.image.is_none());
         assert_eq!(config.request_timeout_secs, 30);
         assert!(!config.leader.enabled);
+        assert!(config.delivery_grants.is_empty());
+    }
+
+    #[test]
+    fn cross_repo_delivery_grants_are_startup_validated_and_wired() {
+        let config = Config::from_vars(vars(&[(
+            "FKST_CROSS_REPO_DELIVERY_GRANTS",
+            r#"[{"lifecycle_repo":"acme/site","lifecycle_issue":41,"implementation_repo":"acme/tools","implementation_branch":"main"}]"#,
+        )]))
+        .expect("valid exact grant");
+        assert!(config
+            .delivery_grants
+            .find(
+                &crate::models::RepoRef {
+                    owner: "acme".to_string(),
+                    name: "site".to_string(),
+                },
+                41,
+            )
+            .is_some());
+
+        let error = Config::from_vars(vars(&[(
+            "FKST_CROSS_REPO_DELIVERY_GRANTS",
+            r#"[{"lifecycle_repo":"acme/site","lifecycle_issue":41,"implementation_repo":"acme/tools","implementation_branch":"bad branch"}]"#,
+        )]))
+        .expect_err("unsafe branch must fail at startup");
+        assert!(error
+            .to_string()
+            .contains("FKST_CROSS_REPO_DELIVERY_GRANTS"));
     }
 
     #[test]

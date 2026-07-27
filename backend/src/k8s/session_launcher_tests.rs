@@ -40,6 +40,7 @@ fn spec() -> SessionPodSpec {
         creator_login: "author-login".to_string(),
         contributors: vec!["author-login".to_string()],
         target_branch: "fkst-hosted-default".to_string(),
+        delivery_grants_json: None,
     }
 }
 
@@ -186,6 +187,32 @@ fn build_session_pod_injects_the_section_5_2_env() {
     // them fails any `setup_worktree()` call). Platform constants, not knobs.
     assert_eq!(env_value(env, "FKST_CANDIDATE_PREFIX"), Some("fkst-cand"));
     assert_eq!(env_value(env, "FKST_CANDIDATE_FROM_SEP"), Some("--from--"));
+    assert_eq!(
+        env_value(env, "FKST_SESSION_DELIVERY_GRANTS"),
+        None,
+        "an ungranted session preserves the historical environment"
+    );
+}
+
+#[test]
+fn session_env_pairs_render_only_a_present_scoped_grant_contract() {
+    let mut granted = spec();
+    granted.delivery_grants_json = Some(
+        r#"[{"lifecycle_repo":"acme/site","lifecycle_issue":41,"implementation_repo":"acme/tools","implementation_branch":"main"}]"#.to_string(),
+    );
+    let pairs = session_env_pairs(&granted, &config());
+    assert_eq!(
+        pairs
+            .iter()
+            .find(|(key, _)| key == "FKST_SESSION_DELIVERY_GRANTS")
+            .map(|(_, value)| value.as_str()),
+        granted.delivery_grants_json.as_deref()
+    );
+
+    let ungranted = session_env_pairs(&spec(), &config());
+    assert!(ungranted
+        .iter()
+        .all(|(key, _)| key != "FKST_SESSION_DELIVERY_GRANTS"));
 }
 
 #[test]

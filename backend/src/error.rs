@@ -79,7 +79,8 @@ pub struct ErrorEnvelope {
 }
 
 /// Map GitHub-App-domain errors onto the unified type:
-/// - NotInstalled / InstallationGone / TokenRequestRejected -> 422 Unprocessable
+/// - NotInstalled / InstallationGone / InstallationMismatch /
+///   TokenRequestRejected -> 422 Unprocessable
 /// - AppAuth / InvalidKey -> 500 Internal
 /// - RateLimited -> 503 Unavailable
 /// - InvalidRepoRef -> 400 Validation
@@ -102,6 +103,16 @@ impl From<crate::github_app::GithubAppError> for AppError {
             GithubAppError::InstallationGone { owner_repo } => AppError::Unprocessable(format!(
                 "github app installation vanished for {owner_repo}"
             )),
+            GithubAppError::InstallationMismatch { repositories } => {
+                tracing::error!(
+                    repositories = ?repositories,
+                    "cross-repository token scope spans multiple github app installations"
+                );
+                AppError::Unprocessable(
+                    "cross-repository delivery repositories must share one github app installation"
+                        .to_string(),
+                )
+            }
             GithubAppError::NotFound { owner_repo, path } => {
                 AppError::NotFound(format!("{owner_repo}: contents path not found: {path}"))
             }
@@ -446,6 +457,25 @@ mod tests {
             "rejected detail must not leak: {}",
             body
         );
+    }
+
+    #[tokio::test]
+    async fn github_app_installation_mismatch_renders_422_without_repository_details() {
+        let err: AppError = crate::github_app::GithubAppError::InstallationMismatch {
+            repositories: vec![
+                "private-owner/lifecycle".to_string(),
+                "private-owner/implementation".to_string(),
+            ],
+        }
+        .into();
+        let (status, body, _headers) = render(err).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["error"], "unprocessable");
+        assert_eq!(
+            body["message"],
+            "cross-repository delivery repositories must share one github app installation"
+        );
+        assert!(!body.to_string().contains("private-owner"));
     }
 
     #[tokio::test]

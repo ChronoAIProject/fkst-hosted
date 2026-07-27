@@ -28,6 +28,7 @@ use kube::api::{Api, PostParams};
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::config::PodConfig;
+use crate::delivery_grants::SESSION_DELIVERY_GRANTS_ENV;
 use crate::models::RepoRef;
 use crate::session_pod::log_stream::{
     ENV_CONFIG_HASH, ENV_POD_NAME, ENV_POD_UID, ENV_SESSION_ID, ENV_TRIGGER_ISSUE,
@@ -196,6 +197,9 @@ pub struct SessionPodSpec {
     /// Resolved branch the target repository is cloned from and every session PR
     /// targets. Always concrete (`fkst-hosted-default` when omitted by the author).
     pub target_branch: String,
+    /// Validated grants scoped to this lifecycle repository. `None` is load-bearing:
+    /// sessions without an operator grant do not receive a new environment key.
+    pub delivery_grants_json: Option<String>,
 }
 
 /// The deterministic Pod/Secret name for a session (`fkst-sess-<session_id>`).
@@ -330,6 +334,9 @@ pub(crate) fn session_env_pairs(
             GITHUB_AUTHORIZED_LOGINS_ENV.to_string(),
             spec.contributors.join(","),
         ));
+    }
+    if let Some(grants) = &spec.delivery_grants_json {
+        env.push((SESSION_DELIVERY_GRANTS_ENV.to_string(), grants.clone()));
     }
     // The engine-tunable tail: output locale + the tighten-merged engine config
     // (operator rate-pool defaults vs the trigger's `### Engine Config`). All

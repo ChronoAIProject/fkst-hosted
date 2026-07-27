@@ -98,6 +98,32 @@ static REPO_REF_RE: once_cell::sync::Lazy<Regex> = once_cell::sync::Lazy::new(||
     Regex::new(r"^[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+$").expect("valid regex")
 });
 
+fn canonical_repository_scope(
+    owner_repo: &str,
+    additional_repositories: &[String],
+) -> Result<Vec<String>, GithubAppError> {
+    let mut repositories = Vec::with_capacity(additional_repositories.len() + 1);
+    for repository in std::iter::once(owner_repo).chain(
+        additional_repositories
+            .iter()
+            .map(std::string::String::as_str),
+    ) {
+        if !REPO_REF_RE.is_match(repository) {
+            return Err(GithubAppError::InvalidRepoRef);
+        }
+        if !repositories
+            .iter()
+            .any(|existing: &String| existing.eq_ignore_ascii_case(repository))
+        {
+            repositories.push(repository.to_string());
+        }
+    }
+    // Keep the lifecycle repository first for byte-compatible one-repo requests;
+    // sort only the additional scope so equivalent policies share one cache key.
+    repositories[1..].sort_by_key(|repository| repository.to_ascii_lowercase());
+    Ok(repositories)
+}
+
 /// GitHub App errors, mapped by `error.rs` to HTTP status codes.
 #[derive(Clone, thiserror::Error)]
 pub enum GithubAppError {
@@ -108,6 +134,8 @@ pub enum GithubAppError {
     },
     #[error("github app installation vanished for {owner_repo}")]
     InstallationGone { owner_repo: String },
+    #[error("cross-repository token scope spans multiple github app installations")]
+    InstallationMismatch { repositories: Vec<String> },
     #[error("github contents path not found: {owner_repo}/{path}")]
     NotFound { owner_repo: String, path: String },
     #[error("github app auth failed (key or app id rejected)")]
@@ -142,6 +170,10 @@ impl std::fmt::Debug for GithubAppError {
             Self::InstallationGone { owner_repo } => f
                 .debug_struct("InstallationGone")
                 .field("owner_repo", owner_repo)
+                .finish(),
+            Self::InstallationMismatch { repositories } => f
+                .debug_struct("InstallationMismatch")
+                .field("repositories", repositories)
                 .finish(),
             Self::NotFound { owner_repo, path } => f
                 .debug_struct("NotFound")
@@ -315,10 +347,12 @@ impl InstallationEvictionBroadcaster for NoopEvictionBroadcaster {
 // Cache types
 // ---------------------------------------------------------------------------
 
-/// Cache key: `(owner_repo, permissions_hash)`.
+/// Cache key: `(exact repository set, permissions_hash)`. A single-repository
+/// request therefore retains the historical key cardinality, while a granted
+/// session can never reuse a token minted for a narrower scope.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct TokenKey {
-    owner_repo: String,
+    repositories: Vec<String>,
     perms: TokenPermissions,
 }
 
@@ -767,7 +801,8 @@ impl GithubAppTokens {
         owner_repo: &str,
         perms: Option<TokenPermissions>,
     ) -> Result<(SecretString, SystemTime), GithubAppError> {
-        self.token_with_expiry_inner(owner_repo, perms, false).await
+        self.token_with_expiry_inner(owner_repo, &[], perms, false)
+            .await
     }
 
     /// Like [`Self::token_with_expiry_for_repo`] but ALWAYS re-mints, bypassing the
@@ -793,7 +828,33 @@ impl GithubAppTokens {
         owner_repo: &str,
         perms: Option<TokenPermissions>,
     ) -> Result<(SecretString, SystemTime), GithubAppError> {
-        self.token_with_expiry_inner(owner_repo, perms, true).await
+        self.token_with_expiry_inner(owner_repo, &[], perms, true)
+            .await
+    }
+
+    /// Mint or reuse one token scoped to `owner_repo` plus the exact additional
+    /// repositories. Every repository is resolved through the App and all must
+    /// belong to one installation. Session delivery uses the forced variant.
+    pub async fn token_with_expiry_for_repositories(
+        &self,
+        owner_repo: &str,
+        additional_repositories: &[String],
+        perms: Option<TokenPermissions>,
+    ) -> Result<(SecretString, SystemTime), GithubAppError> {
+        self.token_with_expiry_inner(owner_repo, additional_repositories, perms, false)
+            .await
+    }
+
+    /// Full-TTL session token for one lifecycle repository plus its explicitly
+    /// granted implementation repositories.
+    pub async fn token_with_expiry_for_repositories_forced(
+        &self,
+        owner_repo: &str,
+        additional_repositories: &[String],
+        perms: Option<TokenPermissions>,
+    ) -> Result<(SecretString, SystemTime), GithubAppError> {
+        self.token_with_expiry_inner(owner_repo, additional_repositories, perms, true)
+            .await
     }
 
     /// Shared implementation: mint (or, unless `force_refresh`, return a still-valid
@@ -801,16 +862,18 @@ impl GithubAppTokens {
     async fn token_with_expiry_inner(
         &self,
         owner_repo: &str,
+        additional_repositories: &[String],
         perms: Option<TokenPermissions>,
         force_refresh: bool,
     ) -> Result<(SecretString, SystemTime), GithubAppError> {
-        if !REPO_REF_RE.is_match(owner_repo) {
-            return Err(GithubAppError::InvalidRepoRef);
-        }
+        let repositories = canonical_repository_scope(owner_repo, additional_repositories)?;
 
         let perms = perms.unwrap_or_else(default_permissions);
         let key = TokenKey {
-            owner_repo: owner_repo.to_string(),
+            repositories: repositories
+                .iter()
+                .map(|repository| repository.to_ascii_lowercase())
+                .collect(),
             perms: perms.clone(),
         };
 
@@ -830,13 +893,22 @@ impl GithubAppTokens {
             }
         }
 
-        // 2. Resolve installation ID (from cache or API).
-        let install_id = self.resolve_installation(owner_repo).await?;
+        // 2. Resolve every repository through the App. GitHub accepts a
+        //    repository-set token only within one installation.
+        let install_id = self.resolve_shared_installation(&repositories).await?;
 
         // 3. Mint token outside the lock.
-        let (_, bare_repo_name) = owner_repo.split_once('/').expect("validated by regex");
         let req = InstallationTokenRequest {
-            repositories: vec![bare_repo_name.to_string()],
+            repositories: repositories
+                .iter()
+                .map(|repository| {
+                    repository
+                        .split_once('/')
+                        .expect("validated repository scope")
+                        .1
+                        .to_string()
+                })
+                .collect(),
             permissions: Some(perms.clone()),
         };
 
@@ -857,8 +929,10 @@ impl GithubAppTokens {
                     owner_repo = %owner_repo,
                     "installation gone; invalidating caches and retrying"
                 );
-                self.invalidate_caches_for_repo(owner_repo);
-                let install_id = self.resolve_installation(owner_repo).await?;
+                for repository in &repositories {
+                    self.invalidate_caches_for_repo(repository);
+                }
+                let install_id = self.resolve_shared_installation(&repositories).await?;
                 let app_jwt = mint_app_jwt(self.inner.app_id, &self.inner.encoding_key)
                     .map_err(|e| GithubAppError::Http(format!("jwt mint retry: {e}")))?;
                 self.inner
@@ -1019,7 +1093,7 @@ impl GithubAppTokens {
                 .installation_cache
                 .lock()
                 .expect("installation cache lock");
-            if let Some(cached) = cache.get(owner_repo) {
+            if let Some(cached) = cache.get(&owner_repo.to_ascii_lowercase()) {
                 if cached.expires_at > SystemTime::now() {
                     return Ok(cached.id);
                 }
@@ -1050,6 +1124,29 @@ impl GithubAppTokens {
         Ok(install_id)
     }
 
+    /// Resolve an exact repository set and require one shared App installation.
+    /// Installation ids are globally unique, so equality is the authoritative
+    /// same-installation proof even when repository owner spelling differs.
+    async fn resolve_shared_installation(
+        &self,
+        repositories: &[String],
+    ) -> Result<InstallationId, GithubAppError> {
+        let mut resolved = None;
+        for repository in repositories {
+            let installation = self.resolve_installation(repository).await?;
+            match resolved {
+                None => resolved = Some(installation),
+                Some(expected) if expected == installation => {}
+                Some(_) => {
+                    return Err(GithubAppError::InstallationMismatch {
+                        repositories: repositories.to_vec(),
+                    })
+                }
+            }
+        }
+        resolved.ok_or(GithubAppError::InvalidRepoRef)
+    }
+
     /// Insert/refresh the in-memory installation cache entry for a repo. The
     /// entry's `expires_at` is `now + INSTALLATION_TTL_BASE + rand_jitter()`, so
     /// each entry carries its own jittered lifetime (#141).
@@ -1061,7 +1158,7 @@ impl GithubAppTokens {
             .lock()
             .expect("installation cache lock");
         cache.insert(
-            owner_repo.to_string(),
+            owner_repo.to_ascii_lowercase(),
             CachedInstallation { id, expires_at },
         );
     }
@@ -1093,10 +1190,14 @@ impl GithubAppTokens {
     /// self-corrects at its next mint via the `InstallationGone` backstop.
     #[allow(clippy::unused_async)] // kept async to mirror evict_repo and stay await-compatible for callers
     pub async fn evict_owner(&self, owner: &str) {
-        let prefix = format!("{owner}/");
+        let prefix = format!("{}/", owner.to_ascii_lowercase());
         {
             let mut cache = self.inner.token_cache.lock().expect("token cache lock");
-            cache.retain(|k, _| !k.owner_repo.starts_with(&prefix));
+            cache.retain(|key, _| {
+                !key.repositories
+                    .iter()
+                    .any(|repository| repository.to_ascii_lowercase().starts_with(&prefix))
+            });
         }
         {
             let mut cache = self
@@ -1104,7 +1205,7 @@ impl GithubAppTokens {
                 .installation_cache
                 .lock()
                 .expect("installation cache lock");
-            cache.retain(|k, _| !k.starts_with(&prefix));
+            cache.retain(|k, _| !k.to_ascii_lowercase().starts_with(&prefix));
         }
         tracing::info!(owner = %owner, "evicted installation caches for owner (account-wide)");
     }
@@ -1113,7 +1214,11 @@ impl GithubAppTokens {
     fn invalidate_caches_for_repo(&self, owner_repo: &str) {
         {
             let mut cache = self.inner.token_cache.lock().expect("token cache lock");
-            cache.retain(|k, _| k.owner_repo != owner_repo);
+            cache.retain(|key, _| {
+                !key.repositories
+                    .iter()
+                    .any(|repository| repository.eq_ignore_ascii_case(owner_repo))
+            });
         }
         {
             let mut cache = self
@@ -1121,7 +1226,7 @@ impl GithubAppTokens {
                 .installation_cache
                 .lock()
                 .expect("installation cache lock");
-            cache.remove(owner_repo);
+            cache.remove(&owner_repo.to_ascii_lowercase());
         }
     }
 }
@@ -1163,6 +1268,7 @@ mod tests {
     #[derive(Debug, Default)]
     struct FakeApi {
         installation_id: InstallationId,
+        installation_ids: std::sync::Mutex<std::collections::HashMap<String, InstallationId>>,
         mint_count: AtomicUsize,
         installation_calls: AtomicUsize,
         /// If set, the next token mint returns Gone.
@@ -1194,6 +1300,13 @@ mod tests {
             self.last_mint_repos.lock().unwrap().clone()
         }
 
+        fn set_installation_id(&self, owner_repo: &str, id: u64) {
+            self.installation_ids
+                .lock()
+                .unwrap()
+                .insert(owner_repo.to_ascii_lowercase(), InstallationId(id));
+        }
+
         fn set_next_mint_gone(&self, gone: bool) {
             *self.next_mint_gone.lock().unwrap() = gone;
         }
@@ -1218,7 +1331,13 @@ mod tests {
                     install_url: None,
                 });
             }
-            Ok(self.installation_id)
+            Ok(self
+                .installation_ids
+                .lock()
+                .unwrap()
+                .get(&format!("{owner}/{repo}").to_ascii_lowercase())
+                .copied()
+                .unwrap_or(self.installation_id))
         }
 
         async fn create_installation_token(
@@ -1301,6 +1420,90 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn multi_repo_mint_requires_one_installation_and_requests_exact_repositories() {
+        let api = Arc::new(FakeApi::new(5));
+        let svc = service(api.clone());
+        let additional = vec!["acme/tools".to_string(), "acme/api".to_string()];
+
+        svc.token_with_expiry_for_repositories("acme/site", &additional, None)
+            .await
+            .expect("repositories share one installation");
+
+        assert_eq!(api.installation_calls(), 3);
+        assert_eq!(
+            api.last_mint_repos(),
+            vec!["site".to_string(), "api".to_string(), "tools".to_string()],
+            "the lifecycle repo stays first and the exact additional scope is stable"
+        );
+    }
+
+    #[tokio::test]
+    async fn multi_repo_mint_rejects_installation_mismatch_before_minting() {
+        let api = Arc::new(FakeApi::new(5));
+        api.set_installation_id("acme/tools", 9);
+        let svc = service(api.clone());
+
+        let error = svc
+            .token_with_expiry_for_repositories("acme/site", &["acme/tools".to_string()], None)
+            .await
+            .expect_err("different installations must fail closed");
+
+        assert!(matches!(error, GithubAppError::InstallationMismatch { .. }));
+        assert_eq!(
+            api.mint_count(),
+            0,
+            "no over-broad token request is attempted"
+        );
+    }
+
+    #[tokio::test]
+    async fn repository_set_is_part_of_the_token_cache_key() {
+        let api = Arc::new(FakeApi::new(5));
+        let svc = service(api.clone());
+
+        svc.token_with_expiry_for_repo("acme/site", None)
+            .await
+            .expect("single repo");
+        svc.token_with_expiry_for_repositories(
+            "acme/site",
+            &["acme/tools".to_string(), "acme/api".to_string()],
+            None,
+        )
+        .await
+        .expect("multi repo");
+        svc.token_with_expiry_for_repositories(
+            "ACME/SITE",
+            &["ACME/API".to_string(), "ACME/TOOLS".to_string()],
+            None,
+        )
+        .await
+        .expect("equivalent scope is a cache hit");
+
+        assert_eq!(
+            api.mint_count(),
+            2,
+            "a wider repository set never reuses the single-repo token, while case and order do not split equivalent scopes"
+        );
+    }
+
+    #[tokio::test]
+    async fn evicting_any_scoped_repo_invalidates_a_multi_repo_token() {
+        let api = Arc::new(FakeApi::new(5));
+        let svc = service(api.clone());
+        let additional = vec!["acme/tools".to_string()];
+
+        svc.token_with_expiry_for_repositories("acme/site", &additional, None)
+            .await
+            .expect("prime");
+        svc.evict_repo("ACME", "TOOLS").await;
+        svc.token_with_expiry_for_repositories("acme/site", &additional, None)
+            .await
+            .expect("re-mint after eviction");
+
+        assert_eq!(api.mint_count(), 2);
+    }
+
+    #[tokio::test]
     async fn re_mint_inside_buffer() {
         let api = Arc::new(FakeApi::new(1));
         let config = test_config();
@@ -1308,7 +1511,7 @@ mod tests {
 
         // Inject an about-to-expire token directly into the cache.
         let key = TokenKey {
-            owner_repo: "acme/site".to_string(),
+            repositories: vec!["acme/site".to_string()],
             perms: default_permissions(),
         };
         {
@@ -1435,7 +1638,7 @@ mod tests {
         {
             let mut cache = svc.inner.token_cache.lock().unwrap();
             let key = TokenKey {
-                owner_repo: "acme/site".to_string(),
+                repositories: vec!["acme/site".to_string()],
                 perms: default_permissions(),
             };
             if let Some(cached) = cache.get_mut(&key) {
