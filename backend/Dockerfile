@@ -270,7 +270,8 @@ ENV FKST_ROLE=control-plane \
     PATH=/usr/local/bin:$PATH \
     FKST_HOSTED_PORT=8080 \
     FKST_HOSTED_BIND_ADDR=0.0.0.0
-RUN mkdir -p "$FKST_RUNTIME_ROOT" && chown -R fkst:fkst /var/lib/fkst
+RUN mkdir -p "$FKST_RUNTIME_ROOT" /var/lib/execd/isolation \
+    && chown -R fkst:fkst /var/lib/fkst /var/lib/execd
 LABEL org.opencontainers.image.title="fkst-control-plane" \
       org.opencontainers.image.version="${PRODUCT_VERSION}" \
       org.opencontainers.image.source="https://github.com/ChronoAIProject/fkst-hosted" \
