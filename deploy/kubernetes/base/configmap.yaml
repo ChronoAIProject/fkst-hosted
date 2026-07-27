@@ -33,6 +33,10 @@ data:
   # effort per session (FKST_LLM_MODEL= / FKST_LLM_REASONING_EFFORT= lines).
   FKST_LLM_REASONING_EFFORT: "max"
   FKST_GITHUB_BOT_LOGIN: fkst-local[bot]
+  # Exact issue-scoped cross-repository delivery exceptions. Production
+  # overlays may replace this with a JSON array; the empty policy preserves the
+  # default single-repository token and checkout scope.
+  FKST_CROSS_REPO_DELIVERY_GRANTS: "[]"
   # Deployment access strategy (issue #3376): denylist — every authenticated
   # GitHub user may use the service EXCEPT those named in
   # FKST_ACCESS_BLOCKED_USERS (comma-separated logins; @ tolerated,
