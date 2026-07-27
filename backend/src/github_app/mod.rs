@@ -3,7 +3,11 @@
 //!
 //! The module mints short-lived, repo-scoped GitHub installation tokens on
 //! demand. Tokens are cached per `(repo, permissions)` pair and re-minted
-//! 5 minutes before expiry. Installation IDs are cached in memory only (#141):
+//! 5 minutes before expiry — so a cache hit may legally carry as little as
+//! `EXPIRY_BUFFER` of life. That is fine for the reconciler's own millisecond
+//! read calls and wrong for anything handed to a long-lived consumer, which is
+//! why every SESSION-bound mint goes through the `_forced` variant (#3410).
+//! Installation IDs are cached in memory only (#141):
 //! the durable installation store was removed, so resolution is stateless —
 //! cache hit -> on-demand `GET …/installation` probe -> cache. Each cache entry
 //! carries a jittered ~15-minute expiry (`INSTALLATION_TTL_BASE` ± up to
@@ -748,10 +752,16 @@ impl GithubAppTokens {
     }
 
     /// Mint (or return cached) installation token for `owner/repo`, returning the
-    /// token AND its `expires_at` (issue #107). The expiry is what the goal-token
-    /// file writer records as RFC3339 so the credential helper can decide whether
-    /// to force a just-in-time re-mint. Same caching / `InstallationGone`
-    /// semantics as [`Self::token_for_repo`].
+    /// token AND its `expires_at`. Same caching / `InstallationGone` semantics as
+    /// [`Self::token_for_repo`], which means the returned token may have as little
+    /// as [`EXPIRY_BUFFER`] of life left.
+    ///
+    /// That makes this the WRONG variant for anything that hands the token to a
+    /// long-lived consumer — use [`Self::token_with_expiry_for_repo_forced`] there.
+    /// The `expires_at` a session's credential file carries is recorded for
+    /// observability only: no in-pod reader acts on it (the git credential helper
+    /// and the `gh` shim read the `token` field and cannot mint), so freshness is
+    /// purely a control-plane-side invariant enforced at mint time (#3410).
     pub async fn token_with_expiry_for_repo(
         &self,
         owner_repo: &str,
@@ -761,11 +771,23 @@ impl GithubAppTokens {
     }
 
     /// Like [`Self::token_with_expiry_for_repo`] but ALWAYS re-mints, bypassing the
-    /// cache-hit. The token-rotation loop uses this so a long-lived session's mounted
-    /// token is extended a FULL TTL every interval: the cached path only re-mints in
-    /// the last [`EXPIRY_BUFFER`] before expiry, so a rotation interval longer than
-    /// that buffer would otherwise leave the Secret holding an expired token between
-    /// the rotation that ran too early and the next one.
+    /// cache-hit.
+    ///
+    /// Every SESSION-bound token goes through here, because a session is a long-lived
+    /// consumer of a token the control plane only revisits once per rotation interval:
+    ///
+    /// - the token-rotation loop, so a live session's mounted token is extended a FULL
+    ///   TTL every interval — the cached path only re-mints in the last
+    ///   [`EXPIRY_BUFFER`] before expiry, so a rotation interval longer than that
+    ///   buffer would otherwise leave the credential file holding an expired token
+    ///   between the rotation that ran too early and the next one;
+    /// - session credential DELIVERY (spawn + crash-recovery, #3410), so a session can
+    ///   never start life on a cached token that has only [`EXPIRY_BUFFER`] left and
+    ///   then 401 long before the first rotation tick reaches it.
+    ///
+    /// The cache is not wrong for the reconciler's own millisecond read calls — it is
+    /// wrong only for these long-lived consumers, so the distinction stays at the call
+    /// site rather than in [`EXPIRY_BUFFER`].
     pub async fn token_with_expiry_for_repo_forced(
         &self,
         owner_repo: &str,
@@ -1323,6 +1345,43 @@ mod tests {
         assert_eq!(t1.expose_secret(), t2.expose_secret());
         assert_eq!(exp1, exp2, "cached expiry must be stable");
         assert_eq!(api.mint_count(), 1, "only one mint across both calls");
+    }
+
+    #[tokio::test]
+    async fn forced_variant_re_mints_over_a_live_cache_entry() {
+        // The primitive every SESSION-bound token goes through (#384 rotation, #3410
+        // delivery): it must ignore an entry the cached variant would happily serve,
+        // and it must leave the fresh token behind as the new cache entry.
+        let api = Arc::new(FakeApi::new(9));
+        let svc = service(api.clone());
+
+        let (cached, _) = svc
+            .token_with_expiry_for_repo("acme/site", None)
+            .await
+            .expect("prime");
+        let (forced, forced_exp) = svc
+            .token_with_expiry_for_repo_forced("acme/site", None)
+            .await
+            .expect("forced");
+        assert_ne!(
+            cached.expose_secret(),
+            forced.expose_secret(),
+            "forced must re-mint even though the cached entry is still servable"
+        );
+        assert!(
+            forced_exp > SystemTime::now() + Duration::from_secs(3000),
+            "the forced call returns a full-TTL expiry"
+        );
+        assert_eq!(api.mint_count(), 2, "exactly one extra mint");
+
+        // The forced mint replaced the cache entry, so ordinary readers pick it up.
+        let (after, after_exp) = svc
+            .token_with_expiry_for_repo("acme/site", None)
+            .await
+            .expect("after");
+        assert_eq!(after.expose_secret(), forced.expose_secret());
+        assert_eq!(after_exp, forced_exp);
+        assert_eq!(api.mint_count(), 2, "the follow-up read is a cache hit");
     }
 
     #[tokio::test]

@@ -228,6 +228,27 @@ fn token_refresh_at_or_over_the_ttl_is_a_config_error() {
 }
 
 #[test]
+fn every_accepted_refresh_cadence_is_outlived_by_a_full_ttl_token() {
+    // #3410, the config half of the invariant. A session-bound token is minted at
+    // FULL TTL — at delivery and at every rotation — so `delivered_ttl >
+    // refresh_interval` holds for EVERY accepted cadence, not just the default. The
+    // at/over-TTL rejections live in the test above; this pins the positive side, so
+    // widening the accepted range can never silently reopen the dead window.
+    for secs in ["1", "300", "1800", "2700", "3599"] {
+        let config = ReconcileConfig::from_vars(&vars(&[("FKST_POD_TOKEN_REFRESH_SECS", secs)]))
+            .expect("cadence inside the TTL is accepted");
+        assert!(
+            config.pod_token_refresh_secs < INSTALLATION_TOKEN_TTL_SECS,
+            "a full-TTL delivered token must outlive the wait for the next sweep ({secs}s)"
+        );
+    }
+    assert!(
+        ReconcileConfig::default().pod_token_refresh_secs < INSTALLATION_TOKEN_TTL_SECS,
+        "the default cadence satisfies the invariant"
+    );
+}
+
+#[test]
 fn zero_valued_shield_and_lifetime_knobs_are_allowed() {
     // A zero min-lifetime / termination-grace / max-lifetime are all valid
     // (no shield / no drain / unbounded) — they must NOT fail closed.

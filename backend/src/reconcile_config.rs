@@ -31,6 +31,18 @@ const RECONCILE_ENV_PREFIX: &str = "FKST_";
 /// An installation token lives one hour; a refresh that never fires inside that
 /// window would let a long-lived session pod run on an expired credential. The
 /// refresh cadence must sit strictly below it.
+///
+/// The bound is only half the invariant (#3410). It guarantees "the next rotation
+/// tick lands before the token TTL elapses"; it says nothing about how much life the
+/// token a session was HANDED actually had. Both halves are required:
+///
+/// 1. every session-bound token is minted at full TTL — delivery and rotation both go
+///    through `GithubAppTokens::token_with_expiry_for_repo_forced`, never the shared
+///    cache, which may serve a token with only its 5-minute expiry buffer left; and
+/// 2. `pod_token_refresh_secs < INSTALLATION_TOKEN_TTL_SECS`, enforced below.
+///
+/// Together they give `delivered_ttl > pod_token_refresh_secs`: a session's token
+/// always outlives the wait for the sweep that replaces it.
 const INSTALLATION_TOKEN_TTL_SECS: u64 = 3600;
 
 /// The default fkst-manifest an auto-seeded trigger references (epic #594 I9): the
@@ -331,7 +343,9 @@ impl ReconcileConfig {
         }
         // The token refresh must fire strictly inside the 1-hour installation-token
         // TTL, or a long-lived pod would carry an expired credential. Reject both a
-        // zero cadence and one at/over the TTL.
+        // zero cadence and one at/over the TTL. This bound is load-bearing only
+        // BECAUSE session tokens are delivered at full TTL (#3410) — see the
+        // INSTALLATION_TOKEN_TTL_SECS docs for the full two-part invariant.
         if env.pod_token_refresh_secs == 0 {
             return Err(AppError::Config(
                 "FKST_POD_TOKEN_REFRESH_SECS must be at least 1".to_string(),
