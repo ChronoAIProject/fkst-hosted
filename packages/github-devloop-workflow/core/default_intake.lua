@@ -103,14 +103,14 @@ function M.read_current_for_candidate(package_core, dept, repo, issue_number, ca
 
   local reintake_command = operator_commands.operator_command_fact(current.comments, "reintake")
   local has_pending_reintake = reintake_command ~= nil and not operator_commands.has_operator_command_response(current.comments, reintake_command)
-  if has_pending_reintake and not m_facts.has_intake_decision_marker(current.comments, candidate.proposal_id) then
+  if has_pending_reintake and not m_facts.has_intake_history_marker(current.comments, candidate.proposal_id) then
     local refusal = operator_commands.build_operator_issue_command_refusal_request(repo,
       issue_number,
       reintake_command,
-      "reintake requires an existing intake decision",
+      "reintake requires trusted prior intake or lifecycle state",
       candidate.source_ref
     )
-    devloop_logging.log_cas_decision(dept, candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "refused(reintake-no-intake-decision)", "operator reintake requires an existing intake decision")
+    devloop_logging.log_cas_decision(dept, candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "refused(reintake-no-intake-history)", "operator reintake requires trusted prior intake or lifecycle state")
     devloop_logging.log_raise(dept, candidate.proposal_id, "github-proxy.github_issue_comment_request", refusal)
     return nil
   end

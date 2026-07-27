@@ -84,10 +84,10 @@ end
 function M.github_proxy_replay_budget(exec)
   local ok, value = pcall(M.read_env, "FKST_GITHUB_PROXY_REPLAY_BUDGET", exec)
   if not ok then
-    return 10
+    return 100
   end
   if value == nil then
-    return 10
+    return 100
   end
   value = tostring(value):gsub("^%s+", ""):gsub("%s+$", "")
   local parsed = tonumber(value)

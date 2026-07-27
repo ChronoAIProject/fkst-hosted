@@ -154,9 +154,9 @@ return {
       "comment",
       command_fact.key,
       "refused",
-      "reintake requires an existing intake decision",
+      "reintake requires trusted prior intake or lifecycle state",
     }))
-    t.is_true(request.body:find("github-devloop operator command refused: reintake requires an existing intake decision", 1, true) ~= nil)
+    t.is_true(request.body:find("github-devloop operator command refused: reintake requires trusted prior intake or lifecycle state", 1, true) ~= nil)
     t.is_true(request.body:find('command="reintake"', 1, true) ~= nil)
     t.is_true(request.body:find('outcome="refused"', 1, true) ~= nil)
   end,

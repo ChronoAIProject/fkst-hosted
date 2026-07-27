@@ -174,11 +174,11 @@ return {
     t.eq(logged[1].write_env, "1")
   end,
 
-  test_github_proxy_replay_budget_defaults_to_ten = function()
+  test_github_proxy_replay_budget_defaults_to_supported_maximum = function()
     local value = core.github_proxy_replay_budget(function(_cmd)
       return { stdout = "", stderr = "", exit_code = 0 }
     end)
-    t.eq(value, 10)
+    t.eq(value, 100)
   end,
 
   test_github_proxy_replay_budget_parses_bounded_positive_integer = function()

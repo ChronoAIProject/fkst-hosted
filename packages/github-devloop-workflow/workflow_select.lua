@@ -11,6 +11,7 @@ local execution_start = require("devloop.execution_start")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
 local digest = require("core.digest")
+local operator_commands = require("devloop.operator_commands")
 local parsers_misc = require("devloop.parsers.misc")
 local requests_labels = require("devloop.requests.labels")
 local select_request = require("core.select_request")
@@ -483,6 +484,15 @@ local function raise_workflow_child_execution(ctx, lineage)
     return false
   end
   local label_request = workflow_child_label_request(ctx, lineage)
+  local command_comment_request = ctx.has_pending_reintake
+    and operator_commands.build_operator_issue_reintake_comment_request(
+      ctx.repo,
+      ctx.issue_number,
+      ctx.reintake_command,
+      ctx.candidate,
+      ctx.candidate and ctx.candidate.source_ref
+    )
+    or nil
   local class_add, class_remove = core.intake_service_class_label_changes(ctx.candidate and ctx.candidate.service_class)
   devloop_logging.log_cas_decision(
     "workflow_select",
@@ -493,13 +503,20 @@ local function raise_workflow_child_execution(ctx, lineage)
     "applied(committed-child)",
     "trusted workflow lineage routes directly to execute_start"
   )
+  local raised = {
+    "github-proxy.github_issue_label_request",
+    "github-devloop.devloop_execute_request",
+  }
+  if command_comment_request ~= nil then
+    table.insert(raised, 1, "github-proxy.github_issue_comment_request")
+  end
   devloop_logging.log_apply("workflow_select", ctx.candidate and ctx.candidate.proposal_id or "unknown", "workflow-child", execution_request.dedup_key, {
     add = { core._enabled_label, class_add[1] },
     remove = class_remove,
-  }, {
-    "github-proxy.github_issue_label_request",
-    "github-devloop.devloop_execute_request",
-  })
+  }, raised)
+  if command_comment_request ~= nil then
+    devloop_logging.log_raise("workflow_select", ctx.candidate and ctx.candidate.proposal_id or "unknown", "github-proxy.github_issue_comment_request", command_comment_request)
+  end
   devloop_logging.log_raise("workflow_select", ctx.candidate and ctx.candidate.proposal_id or "unknown", "github-proxy.github_issue_label_request", label_request)
   devloop_logging.log_raise("workflow_select", ctx.candidate and ctx.candidate.proposal_id or "unknown", "github-devloop.devloop_execute_request", execution_request)
   return true

@@ -112,6 +112,11 @@ function C.has_state_marker(comments, issue_proposal_id)
   return false
 end
 
+function C.has_intake_history_marker(comments, issue_proposal_id)
+  return C.has_intake_decision_marker(comments, issue_proposal_id)
+    or C.has_state_marker(comments, issue_proposal_id)
+end
+
 function C.review_reject_fact(comments, issue_proposal_id, issue_version)
   if type(comments) ~= "table" then
     return nil

@@ -278,11 +278,11 @@ return {
     t.eq(#observed_issue_raises(second.raises), 1)
   end,
 
-  test_inbound_poll_defaults_cold_replay_budget_to_ten = function()
+  test_inbound_poll_defaults_cold_replay_budget_to_supported_maximum = function()
     local event = { queue = "github_poll_tick", payload = {} }
     local items = {}
-    for number = 1, 11 do
-      table.insert(items, issue_json(number, string.format("2026-06-03T01:%02d:00Z", number)))
+    for number = 1, 101 do
+      table.insert(items, issue_json(number, "2026-06-03T01:02:00Z"))
     end
 
     mock_poll_env("")
@@ -290,9 +290,9 @@ return {
     mock_pr_list("[]\n")
     local result = t.run_department("departments/github_poll/main.lua", event, opts("default-replay-budget"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 10)
+    t.eq(#result.raises, 100)
     t.eq(result.raises[1].payload.number, 1)
-    t.eq(result.raises[10].payload.number, 10)
+    t.eq(result.raises[100].payload.number, 100)
   end,
 
   test_inbound_poll_prioritizes_cached_fresh_changes_over_replay_budget = function()

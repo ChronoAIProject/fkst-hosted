@@ -123,12 +123,12 @@ local function candidate()
   return payloads_builders.build_devloop_intake_candidate_payload("owner/repo", 42, "2026-06-03T01:02:03Z")
 end
 
-local function decision_key_for_current(payload, current)
+local function decision_key_for_current(payload, current, reintake_command, effective_updated_at)
   local c = current or {}
   return devloop_base.intake_decision_dedup_key(payload.proposal_id, {
     title = c.title or "Run the release workflow",
     body = c.body or "Please run the release workflow for this repository.",
-  })
+  }, reintake_command, effective_updated_at)
 end
 
 local function event(payload)
@@ -420,6 +420,65 @@ local tests = {
       "implementing",
       stale_workflow_child_version
     ), "stale")
+  end,
+
+  test_trusted_terminal_workflow_child_reintake_records_command_and_restarts_execution = function()
+    local origin = "github-devloop/issue/owner/repo/7"
+    local body = lineage_header(origin, "d-1234567890", "slot-one") .. "\n\nGenerated child spec body."
+    local command = {
+      id = "IC_reintake_generated_workflow_child",
+      body = "fkst: reintake",
+      author_login = "fkst-test-bot",
+      created_at = "2026-06-04T03:00:00Z",
+    }
+    local current = {
+      title = "Run the release workflow",
+      body = body,
+      author_login = "fkst-test-bot",
+      labels = { "fkst-dev:enabled", "fkst-dev:blocked" },
+      comments = {},
+    }
+    local payload = candidate()
+    local base_version = "github-devloop/issue/owner/repo/42/2026-06-04T01-00-00Z"
+    current.comments = {
+      {
+        body = devloop_state.state_marker(payload.proposal_id, "thinking", base_version),
+        author_login = "fkst-test-bot",
+        created_at = "2026-06-04T01:00:00Z",
+      },
+      {
+        body = devloop_state.state_marker(payload.proposal_id, "blocked", base_version .. "/timeout-reconcile/thinking/4"),
+        author_login = "fkst-test-bot",
+        created_at = "2026-06-04T02:00:00Z",
+      },
+      command,
+    }
+    local effect_id = decision_key_for_current(payload, current, command, command.created_at)
+    payload = payloads_builders.build_devloop_intake_candidate_payload("owner/repo", 42, command.created_at, {
+      effect_id = effect_id,
+      delivery_version = command.created_at,
+      reintake_command_created_at = command.created_at,
+      reintake_effect_updated_at = command.created_at,
+    })
+
+    mock_env("/tmp/fkst-packages-test/github-devloop-workflow/no-extra-catalog")
+    mock_issue_view(current, 1)
+
+    local result = run_workflow_select(payload)
+
+    t.eq(#codex_calls(), 0)
+    t.eq(#raises_to_queue(result.raises, "github-proxy.github_issue_comment_request"), 1)
+    t.eq(#raises_to_queue(result.raises, "github-proxy.github_issue_label_request"), 1)
+    t.eq(#raises_to_queue(result.raises, "github-devloop.devloop_execute_request"), 1)
+    local response = first_raise_payload(result, "github-proxy.github_issue_comment_request")
+    t.is_true(response.body:find("operator command accepted: reintake", 1, true) ~= nil)
+    t.is_true(response.body:find('command="reintake"', 1, true) ~= nil)
+    t.is_true(response.body:find('outcome="applied"', 1, true) ~= nil)
+    local request = first_raise_payload(result, "github-devloop.devloop_execute_request")
+    t.eq(request.dedup_key, effect_id)
+    t.eq(request.origin.package, "github-devloop-workflow")
+    t.eq(request.origin.route, "workflow-child")
+    t.eq(request.origin.decision, "committed-child")
   end,
 
   test_origin_issue_with_no_lineage_still_runs_selection_and_default_intake = function()

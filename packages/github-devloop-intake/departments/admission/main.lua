@@ -49,8 +49,8 @@ local function handle_pending_reintake(repo, issue, current, proposal_id, source
     raise_reintake_refusal(repo, issue.number, proposal_id, command, "reintake requires an open issue", source_ref)
     return true
   end
-  if not m_facts.has_intake_decision_marker(current.comments, proposal_id) then
-    raise_reintake_refusal(repo, issue.number, proposal_id, command, "reintake requires an existing intake decision", source_ref)
+  if not m_facts.has_intake_history_marker(current.comments, proposal_id) then
+    raise_reintake_refusal(repo, issue.number, proposal_id, command, "reintake requires trusted prior intake or lifecycle state", source_ref)
     return true
   end
   if devloop_base.is_intake_held(current.labels) then

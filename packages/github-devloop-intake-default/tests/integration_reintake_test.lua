@@ -299,6 +299,28 @@ return {
     t.eq(count_calls("codex exec"), 1)
   end,
 
+  test_judge_reintake_rejudges_generated_terminal_issue_with_only_lifecycle_history = function()
+    local command = trusted_reintake_command("IC_reintake_generated_blocked_judge")
+    local payload = reintake_candidate(command)
+    local base_version = "github-devloop/issue/owner/repo/42/2026-06-04T01-00-00Z"
+    mock_bot_env()
+    mock_intake_judge_view({ "fkst-dev:enabled", "fkst-dev:blocked" }, {
+      core.state_marker(payload.proposal_id, "thinking", base_version),
+      core.state_marker(payload.proposal_id, "blocked", base_version .. "/timeout-reconcile/thinking/4"),
+      command,
+    })
+    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Trusted terminal lifecycle history permits a fresh intake generation.")
+
+    local result = run_judge(payload, opts("intake-reintake-generated-terminal"))
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 4)
+    t.is_true(find_comment_body(result.raises, "operator command accepted: reintake") ~= nil)
+    t.is_true(find_comment_body(result.raises, 'decision="enable"') ~= nil)
+    assert_execution_request_chain(result.raises, payload, command)
+    t.eq(count_calls("codex exec"), 1)
+  end,
+
   test_judge_reintake_refuses_after_blocked_then_newer_active_marker_with_stale_labels = function()
     local command = trusted_reintake_command("IC_reintake_current_active")
     local payload = reintake_candidate(command)
