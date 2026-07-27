@@ -8,9 +8,9 @@ Read your own locked Phase B output and both peer Phase B outputs. Attack the ro
 Response contract:
 - Emit exactly one stance line: ⟦FKST:STANCE⟧ update|defend.
 - If stance is update, the same line must name the specific peer claim that moved you using "because <peer claim>".
-- Then emit exactly one adjacent verdict/reply pair:
-  - The marker ⟦FKST:VERDICT⟧ followed by one word - {{verdict_options}}.
-  - The marker ⟦FKST:REPLY⟧ followed, on the same single line, by one concise paragraph of at most {{reply_budget}} characters.
+- Then emit exactly one verdict/reply pair on two separate physical lines:
+  - Line 1 contains only the marker ⟦FKST:VERDICT⟧ followed by one word - {{verdict_options}}.
+  - Line 2 begins with the marker ⟦FKST:REPLY⟧ followed, on that same physical line, by one concise paragraph of at most {{reply_budget}} characters.
 {{readiness_instruction}}
 
 Proposal:

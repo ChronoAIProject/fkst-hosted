@@ -24,6 +24,7 @@ local function counts(results)
     valid = 0,
     worker_failures = 0,
     protocol_failures = 0,
+    protocol_violations = {},
   }
   if type(results) ~= "table" then
     return value
@@ -40,6 +41,11 @@ local function counts(results)
       value.valid = value.valid + 1
     else
       value.protocol_failures = value.protocol_failures + 1
+      local reason = type(result.protocol_violation) == "string" and result.protocol_violation or "unknown"
+      if #reason > 64 or reason:match("^[a-z][a-z0-9_]*$") == nil then
+        reason = "unknown"
+      end
+      value.protocol_violations[reason] = (value.protocol_violations[reason] or 0) + 1
     end
   end
   return value
@@ -50,6 +56,18 @@ local function failure_detail(value, phase)
     .. " valid_answers=" .. tostring(value.valid)
     .. " worker_failures=" .. tostring(value.worker_failures)
     .. " protocol_failures=" .. tostring(value.protocol_failures)
+  local reasons = {}
+  for reason in pairs(value.protocol_violations) do
+    table.insert(reasons, reason)
+  end
+  table.sort(reasons)
+  if #reasons > 0 then
+    local summaries = {}
+    for _, reason in ipairs(reasons) do
+      table.insert(summaries, reason .. ":" .. tostring(value.protocol_violations[reason]))
+    end
+    detail = detail .. " protocol_violations=" .. table.concat(summaries, ",")
+  end
   if value.worker_exit_code ~= nil then
     detail = detail .. " worker_exit_code=" .. tostring(value.worker_exit_code)
   end

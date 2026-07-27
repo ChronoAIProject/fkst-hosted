@@ -413,22 +413,17 @@ function M.checkout_root_exists_cmd(path)
   return "test -d " .. quoted .. " && test -e " .. quoted .. "/.git"
 end
 
--- Fail-closed parse. A genuine answer is an ADJACENT pair: exactly one clean verdict line
--- immediately followed by exactly one reply line (the prompt asks for line one = verdict,
--- line two = reply). The verdict sentinel must be followed by one whitelist word on its
--- own line (rejects the prompt echo "approve|abstain", "approve/reject",
--- "approve-ish"); the reply sentinel must be anchored at line start. A proposal body/context
--- is untrusted and may be echoed into stdout, so requiring a UNIQUE ADJACENT pair closes both
--- duplicate injection (a second clean sentinel pair) and orphan pairing (a lone echoed reply
--- attached to a verdict that lacked its own reply). Uniqueness/adjacency is decided over the
--- FULL untrusted text before the winning reply is bounded below, so bounding can never smuggle
--- a second pair past the injection defense. The winning reply is then bounded to max_reply_len
--- at this ingest boundary -- the same bound every downstream consumer (angle_digests, the
--- reached/converge payload bodies) already re-applies -- so a compliant-but-verbose model
--- (observed with gpt-5.5 emitting a single-line reply over the cap) parses instead of failing
--- the entire decide as angle-output-unparseable and looping forever. aggregate()/is_valid keep
--- the strict length invariant as defence-in-depth for any result that reaches them by a path
--- other than this parser.
+local function contains_protocol_component(value)
+  local text = tostring(value or "")
+  return text:find(verdict_label, 1, true) ~= nil
+    or text:find(reply_label, 1, true) ~= nil
+    or text:find(gap_label, 1, true) ~= nil
+    or text:find(stance_label, 1, true) ~= nil
+end
+
+-- Fail closed over the full untrusted output before bounding the reply. The canonical
+-- contract is two adjacent physical lines, but production models also collapse that pair
+-- onto one line. Both forms retain the same exact-one-component and adjacency defenses.
 function M.parse_angle_output(stdout, verdict_mode)
   local text = tostring(stdout or "")
   local mode = verdict_mode == "gate" and "gate" or "converge"
@@ -442,55 +437,94 @@ function M.parse_angle_output(stdout, verdict_mode)
   local gap = nil
   local gap_count = 0
   local gap_index = nil
+  local embedded_component = false
   local index = 0
   for line in (text .. "\n"):gmatch("(.-)\n") do
     index = index + 1
 
-    local token = line:match("^%s*" .. verdict_label .. "%s*(%a+)%s*$")
-    if token ~= nil then
-      local lowered = token:lower()
-      if lowered == "approve"
-        or lowered == "abstain"
-        or (mode == "gate" and (lowered == "comment" or lowered == "reject")) then
-        verdict = lowered
-        verdict_count = verdict_count + 1
-        verdict_index = index
+    local verdict_rest = line:match("^%s*" .. verdict_label .. "%s*(.*)$")
+    if verdict_rest ~= nil then
+      verdict_count = verdict_count + 1
+      verdict_index = index
+
+      local token = verdict_rest:match("^(%a+)%s*$")
+      local inline_token, inline_reply = verdict_rest:match(
+        "^(%a+)%s+" .. reply_label .. "%s*(.*)$"
+      )
+      if inline_token ~= nil then
+        token = inline_token
+        reply_count = reply_count + 1
+        reply_index = index
+        inline_reply = trim(inline_reply)
+        if inline_reply ~= "" then
+          reply = inline_reply
+          if contains_protocol_component(inline_reply) then
+            embedded_component = true
+          end
+        end
+      end
+
+      if token ~= nil then
+        local lowered = token:lower()
+        if lowered == "approve"
+          or lowered == "abstain"
+          or (mode == "gate" and (lowered == "comment" or lowered == "reject")) then
+          verdict = lowered
+        end
       end
     end
 
-    local captured = line:match("^%s*" .. reply_label .. "%s*(.+)$")
+    local captured = line:match("^%s*" .. reply_label .. "%s*(.*)$")
     if captured ~= nil then
+      reply_count = reply_count + 1
+      reply_index = index
       captured = trim(captured)
       if captured ~= "" then
         reply = captured
-        reply_count = reply_count + 1
-        reply_index = index
+        if contains_protocol_component(captured) then
+          embedded_component = true
+        end
       end
     end
 
-    local captured_gap = line:match("^%s*" .. gap_label .. "%s*(.+)$")
+    local captured_gap = line:match("^%s*" .. gap_label .. "%s*(.*)$")
     if captured_gap ~= nil then
+      gap_count = gap_count + 1
+      gap_index = index
       captured_gap = trim(captured_gap)
       if captured_gap ~= "" then
         gap = captured_gap
-        gap_count = gap_count + 1
-        gap_index = index
+        if contains_protocol_component(captured_gap) then
+          embedded_component = true
+        end
       end
     end
   end
 
-  if verdict_count ~= 1 or reply_count ~= 1 then
-    return nil
+  if verdict_count == 0 then
+    return nil, "verdict_marker_missing"
   end
-  if reply_index ~= verdict_index + 1 then
-    return nil
+  if verdict_count > 1 or reply_count > 1 or embedded_component then
+    return nil, "duplicate_component"
+  end
+  if verdict == nil then
+    return nil, "verdict_word_invalid"
+  end
+  if reply_count == 0 then
+    return nil, "reply_marker_missing"
+  end
+  if reply == nil then
+    return nil, "reply_empty"
+  end
+  if reply_index ~= verdict_index and reply_index ~= verdict_index + 1 then
+    return nil, "reply_not_adjacent"
   end
   if verdict == "reject" then
     if gap_count ~= 1 or gap_index ~= reply_index + 1 or not is_bounded_string(gap, max_gap_len) then
-      return nil
+      return nil, "gap_rules_violated"
     end
   elseif gap_count ~= 0 then
-    return nil
+    return nil, "gap_rules_violated"
   end
 
   return {

@@ -1,6 +1,18 @@
 local M = {}
 local provenance = require("departments.decide.provenance")
 
+local verdict_label = "⟦FKST:VERDICT⟧"
+local reply_label = "⟦FKST:REPLY⟧"
+local gap_label = "⟦FKST:GAP⟧"
+
+local function contains_protocol_component(value, stance_label)
+  local text = tostring(value or "")
+  return text:find(stance_label, 1, true) ~= nil
+    or text:find(verdict_label, 1, true) ~= nil
+    or text:find(reply_label, 1, true) ~= nil
+    or text:find(gap_label, 1, true) ~= nil
+end
+
 local function unanimous_verdict(results)
   local first = nil
   for _, item in ipairs(results or {}) do
@@ -22,13 +34,20 @@ function M.parse_stance(stdout, stance_label)
   local count = 0
   local label = stance_label or "⟦FKST:STANCE⟧"
   for line in (text .. "\n"):gmatch("(.-)\n") do
-    local stance, rest = line:match("^%s*" .. label .. "%s*(%a+)%s*(.-)%s*$")
-    if stance ~= nil then
+    local stance_rest = line:match("^%s*" .. label .. "%s*(.*)$")
+    if stance_rest ~= nil then
+      count = count + 1
+      if contains_protocol_component(stance_rest, label) then
+        return nil
+      end
+      local stance, rest = stance_rest:match("^(%a+)%s*(.-)%s*$")
+      if stance == nil then
+        return nil
+      end
       stance = stance:lower()
       if stance ~= "update" and stance ~= "defend" then
         return nil
       end
-      count = count + 1
       if stance == "update" then
         local peer_claim = tostring(rest:match("[Bb][Ee][Cc][Aa][Uu][Ss][Ee]%s+(.+)$") or ""):match("^%s*(.-)%s*$")
         if peer_claim == "" then
@@ -54,11 +73,11 @@ end
 function M.parse_output(stdout, verdict_mode, caps)
   local stance = M.parse_stance(stdout, caps and caps.stance_label)
   if stance == nil then
-    return nil
+    return nil, "stance_invalid"
   end
-  local verdict = caps.parse_angle_output(stdout, verdict_mode)
+  local verdict, protocol_violation = caps.parse_angle_output(stdout, verdict_mode)
   if verdict == nil then
-    return nil
+    return nil, protocol_violation or "angle_protocol_invalid"
   end
   verdict.stance = stance.stance
   verdict.peer_claim = stance.peer_claim
@@ -100,8 +119,9 @@ function M.collect(angle_results, results, verdict_mode, caps)
   for index, angle_result in ipairs(angle_results or {}) do
     local result = results[index]
     local parsed = nil
+    local protocol_violation = nil
     if type(result) == "table" and result.exit_code == 0 then
-      parsed = M.parse_output(result.stdout, verdict_mode, caps)
+      parsed, protocol_violation = M.parse_output(result.stdout, verdict_mode, caps)
     end
     table.insert(rebuttal_results, {
       angle = angle_result.angle,
@@ -110,6 +130,7 @@ function M.collect(angle_results, results, verdict_mode, caps)
       blocking_gap = parsed and parsed.blocking_gap or nil,
       stance = parsed and parsed.stance or nil,
       peer_claim = parsed and parsed.peer_claim or nil,
+      protocol_violation = parsed == nil and protocol_violation or nil,
       stdout = type(result) == "table" and result.stdout or nil,
       stderr = type(result) == "table" and result.stderr or nil,
       exit_code = type(result) == "table" and result.exit_code or nil,

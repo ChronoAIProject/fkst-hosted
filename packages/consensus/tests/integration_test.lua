@@ -185,6 +185,16 @@ local function mock_rebuttal(angle, stance, verdict, reply, peer_claim, exit_cod
   })
 end
 
+local function mock_inline_rebuttal(angle, verdict, reply)
+  mock_judgment_dir()
+  t.mock_command(rebuttal_mock_pattern(angle), {
+    stdout = stance_label .. " defend\n"
+      .. verdict_label .. " " .. verdict .. " " .. reply_label .. " " .. reply .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function mock_rebuttal_defend(angle, verdict, reply)
   mock_rebuttal(angle, "defend", verdict, reply)
 end
@@ -676,6 +686,28 @@ return {
     t.eq(#codex_calls(), 7)
   end,
 
+  test_inline_rebuttal_pairs_reach_decision_without_repair_retry = function()
+    mock_judgment_runtime()
+    mock_angle("teleology", "approve", "Teleology angle approves.")
+    mock_angle("parsimony", "abstain", "Parsimony angle initially abstains.")
+    mock_angle("fidelity", "approve", "Fidelity angle approves.")
+    mock_inline_rebuttal("teleology", "approve", "Teleology still approves.")
+    mock_inline_rebuttal("parsimony", "approve", "Peer evidence resolves the concern.")
+    mock_inline_rebuttal("fidelity", "approve", "Fidelity still approves.")
+
+    local result = run_decide(
+      proposal({ dedup_key = "proposal-42-v1/inline-rebuttal" }),
+      opts("inline-rebuttal")
+    )
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "consensus_reached")
+    t.eq(result.raises[1].payload.decision, "approve")
+    t.eq(result.raises[1].payload.verdict_path, "post-rebuttal-unanimity")
+    t.eq(#codex_calls(), 6)
+  end,
+
   test_partial_malformed_angle_fails_closed_before_synthesis_as_unparseable = function()
     mock_judgment_runtime()
     mock_angle("teleology", "approve", "Teleology angle approves.")
@@ -693,6 +725,11 @@ return {
     t.eq(#result.raises, 0)
     t.is_true(tostring(result.error):find("angle-output-unparseable", 1, true) ~= nil)
     t.is_true(tostring(result.error):find("phase=blind", 1, true) ~= nil)
+    t.is_true(tostring(result.error):find(
+      "protocol_violations=verdict_marker_missing:1",
+      1,
+      true
+    ) ~= nil)
     t.eq(#codex_calls(), 3)
   end,
 

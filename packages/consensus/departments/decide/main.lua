@@ -122,15 +122,17 @@ local function decide(proposal)
   local results = await_all(handles)
   for index, angle in ipairs(angles) do
     local parsed = nil
+    local protocol_violation = nil
     local result = results[index]
     if type(result) == "table" and result.exit_code == 0 then
-      parsed = parse_angle_output(result.stdout, verdict_mode)
+      parsed, protocol_violation = parse_angle_output(result.stdout, verdict_mode)
     end
     table.insert(angle_results, {
       angle = angle,
       verdict = parsed and parsed.verdict or nil,
       reply = parsed and parsed.reply or nil,
       blocking_gap = parsed and parsed.blocking_gap or nil,
+      protocol_violation = parsed == nil and protocol_violation or nil,
       stdout = type(result) == "table" and result.stdout or nil,
       stderr = type(result) == "table" and result.stderr or nil,
       exit_code = type(result) == "table" and result.exit_code or nil,

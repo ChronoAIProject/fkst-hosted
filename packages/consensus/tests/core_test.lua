@@ -623,7 +623,7 @@ return {
     -- validator enforces, so a compliant model is not silently truncated.
     local prompt = core.build_angle_prompt(proposal(), "teleology")
     t.is_true(prompt:find("at most 2000 characters", 1, true) ~= nil)
-    t.is_true(prompt:find("on the same single line", 1, true) ~= nil)
+    t.is_true(prompt:find("two separate physical lines", 1, true) ~= nil)
   end,
 
   test_aggregate_accepts_unanimous_approve = function()

@@ -6,9 +6,9 @@ return {
 
 Response contract:
 {{mode_contract}}
-Then emit exactly one adjacent sentinel pair:
-- The marker ⟦FKST:VERDICT⟧ followed by one word - {{verdict_options}}.
-- The marker ⟦FKST:REPLY⟧ followed, on the same single line, by one concise paragraph of at most {{reply_budget}} characters.
+Then emit exactly one sentinel pair on two separate physical lines:
+- Line 1 contains only the marker ⟦FKST:VERDICT⟧ followed by one word - {{verdict_options}}.
+- Line 2 begins with the marker ⟦FKST:REPLY⟧ followed, on that same physical line, by one concise paragraph of at most {{reply_budget}} characters.
 {{readiness_instruction}}
 {{weakest_instruction}}
 
