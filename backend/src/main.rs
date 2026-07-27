@@ -697,12 +697,14 @@ async fn run_worker_generation(
 
     let rotation_backend = ctx.backend.clone();
     let rotation_github = ctx.github.clone();
+    let rotation_delivery_grants = ctx.config.delivery_grants.clone();
     let rotation_config = ctx.config.reconcile.clone();
     let rotation_handle = handle.clone();
     tasks.spawn(async move {
         fkst_control_plane::k8s::run_token_rotation_loop(
             rotation_backend,
             rotation_github,
+            rotation_delivery_grants,
             rotation_config,
             rotation_handle,
         )

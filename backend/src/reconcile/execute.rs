@@ -463,11 +463,24 @@ async fn resolve_session_credentials(
     // next rotation always lands before expiry. This is the same reasoning the rotation
     // sweep applies (`k8s::token_rotation::rotate_one`); delivery — spawn AND
     // crash-recovery, on both session backends — needs it just as much.
-    let (token, expires_at) = match ctx
-        .github
-        .token_with_expiry_for_repo_forced(&owner_repo, Some(session_permissions()))
-        .await
-    {
+    let implementation_repos = ctx
+        .config
+        .delivery_grants
+        .implementation_repos_for(&reg.repo);
+    let mint_result = if implementation_repos.is_empty() {
+        ctx.github
+            .token_with_expiry_for_repo_forced(&owner_repo, Some(session_permissions()))
+            .await
+    } else {
+        ctx.github
+            .token_with_expiry_for_repositories_forced(
+                &owner_repo,
+                &implementation_repos,
+                Some(session_permissions()),
+            )
+            .await
+    };
+    let (token, expires_at) = match mint_result {
         Ok(pair) => pair,
         Err(error) => return Err(CredentialResolutionError::TokenMintFailed(error)),
     };
@@ -477,6 +490,7 @@ async fn resolve_session_credentials(
         detected_work_labels,
         ctx.config.reconcile.github_bot_login.clone(),
         &ctx.config.access,
+        ctx.config.delivery_grants.session_json_for(&reg.repo),
     );
     let storage = storage_writer_creds(&ctx.config);
     let creds = credential_secret_data(
@@ -533,6 +547,7 @@ fn session_pod_spec_from(
     detected_work_labels: &[String],
     bot_login: Option<String>,
     access: &AccessPolicy,
+    delivery_grants_json: Option<String>,
 ) -> SessionPodSpec {
     SessionPodSpec {
         session_id: reg.session_id.clone(),
@@ -556,6 +571,7 @@ fn session_pod_spec_from(
             .target_branch
             .clone()
             .unwrap_or_else(|| DEFAULT_TARGET_BRANCH.to_string()),
+        delivery_grants_json,
     }
 }
 

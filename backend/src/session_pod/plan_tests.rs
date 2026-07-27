@@ -60,6 +60,26 @@ fn read_substrate_env_maps_a_full_env() {
     assert_eq!(env.creds_dir, "/var/run/fkst/creds");
     assert_eq!(env.codex_home, "/var/run/fkst/codex");
     assert_eq!(env.target_branch.as_deref(), Some("feature-x"));
+    assert!(env.delivery_grants.is_empty());
+}
+
+#[test]
+fn read_substrate_env_parses_only_scoped_delivery_grants() {
+    let mut map = full_env();
+    map.insert(
+        "FKST_SESSION_DELIVERY_GRANTS".to_string(),
+        r#"[{"lifecycle_repo":"acme/site","lifecycle_issue":41,"implementation_repo":"acme/tools","implementation_branch":"release"}]"#.to_string(),
+    );
+    let env = read_substrate_env_from(lookup(&map)).expect("scoped grant parses");
+    assert_eq!(env.delivery_grants.len(), 1);
+    assert_eq!(env.delivery_grants[0].lifecycle_issue, 41);
+
+    map.insert(
+        "FKST_SESSION_DELIVERY_GRANTS".to_string(),
+        r#"[{"lifecycle_repo":"acme/other","lifecycle_issue":41,"implementation_repo":"acme/tools","implementation_branch":"release"}]"#.to_string(),
+    );
+    let error = read_substrate_env_from(lookup(&map)).expect_err("wrong lifecycle scope fails");
+    assert!(error.contains("expected only acme/site"), "{error}");
 }
 
 #[test]
@@ -165,6 +185,96 @@ fn plan_clones_rejects_refs_from_two_repos() {
 fn plan_clones_rejects_refs_at_two_git_refs() {
     let refs = refs(&["org/pkgs@dev:packages/a", "org/pkgs@main:packages/b"]);
     assert!(plan_clones(&refs).is_err(), "differing git_ref must fail");
+}
+
+fn grant(issue: u64, implementation_repo: &str, implementation_branch: &str) -> DeliveryGrant {
+    DeliveryGrant {
+        lifecycle_repo: "acme/site".to_string(),
+        lifecycle_issue: issue,
+        implementation_repo: implementation_repo.to_string(),
+        implementation_branch: implementation_branch.to_string(),
+    }
+}
+
+#[test]
+fn delivery_plan_reuses_the_exact_platform_checkout() {
+    let plan = plan_delivery_checkouts(
+        &[
+            grant(41, "Acme/Packages", "fkst-hosted"),
+            grant(43, "acme/packages", "fkst-hosted"),
+        ],
+        "acme/site",
+        Some("main"),
+        Path::new("/runtime/project"),
+        "acme/packages",
+        "fkst-hosted",
+        Path::new("/runtime/platform"),
+        Path::new("/runtime"),
+    );
+
+    assert!(plan.clones.is_empty());
+    assert_eq!(plan.resolved_grants.len(), 2);
+    assert!(plan
+        .resolved_grants
+        .iter()
+        .all(|grant| grant.implementation_root == "/runtime/platform"));
+}
+
+#[test]
+fn delivery_plan_deduplicates_deterministic_additional_checkouts() {
+    let grants = [
+        grant(41, "acme/tools", "release/v1"),
+        grant(43, "ACME/TOOLS", "release/v1"),
+    ];
+    let first = plan_delivery_checkouts(
+        &grants,
+        "acme/site",
+        Some("main"),
+        Path::new("/runtime/project"),
+        "acme/packages",
+        "fkst-hosted",
+        Path::new("/runtime/platform"),
+        Path::new("/runtime"),
+    );
+    let second = plan_delivery_checkouts(
+        &grants,
+        "acme/site",
+        Some("main"),
+        Path::new("/runtime/project"),
+        "acme/packages",
+        "fkst-hosted",
+        Path::new("/runtime/platform"),
+        Path::new("/runtime"),
+    );
+
+    assert_eq!(first, second, "restart planning must be deterministic");
+    assert_eq!(first.clones.len(), 1);
+    assert_eq!(first.clones[0].repository, "acme/tools");
+    assert_eq!(first.clones[0].branch, "release/v1");
+    assert!(first.clones[0].root.starts_with("/runtime/delivery"));
+    assert_eq!(
+        first.resolved_grants[0].implementation_root,
+        first.resolved_grants[1].implementation_root
+    );
+}
+
+#[test]
+fn delivery_plan_does_not_reuse_a_checkout_on_the_wrong_branch() {
+    let plan = plan_delivery_checkouts(
+        &[grant(41, "acme/packages", "other")],
+        "acme/site",
+        Some("main"),
+        Path::new("/runtime/project"),
+        "acme/packages",
+        "fkst-hosted",
+        Path::new("/runtime/platform"),
+        Path::new("/runtime"),
+    );
+    assert_eq!(plan.clones.len(), 1);
+    assert_ne!(
+        plan.resolved_grants[0].implementation_root,
+        "/runtime/platform"
+    );
 }
 
 #[test]

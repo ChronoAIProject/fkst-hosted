@@ -6,6 +6,10 @@
 
 pub mod access_policy;
 pub mod config;
+// Exact lifecycle-issue -> implementation-repository delivery grants. The
+// operator policy is startup-validated and workers receive only their repo's
+// non-secret subset.
+pub mod delivery_grants;
 // Private, process-local handoff for disposable session environments. The
 // create API writes it once and reconciliation consumes it after the sandbox
 // accepts the complete credential bundle; no read route or durable store exists.

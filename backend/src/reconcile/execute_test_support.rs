@@ -58,6 +58,7 @@ pub(super) struct RecordingApi {
     /// `Some(..)`, with a `perms: None` caller recording `default_permissions()`
     /// (the service substitutes it before building the request).
     mint_perms: Mutex<Vec<Option<TokenPermissions>>>,
+    pub(super) mint_repositories: Mutex<Vec<Vec<String>>>,
     mint_count: AtomicUsize,
 }
 
@@ -84,6 +85,15 @@ impl RecordingApi {
             .filter(|requested| requested.as_ref() == Some(perms))
             .count()
     }
+
+    pub(super) fn last_mint_repositories(&self) -> Vec<String> {
+        self.mint_repositories
+            .lock()
+            .unwrap()
+            .last()
+            .cloned()
+            .unwrap_or_default()
+    }
 }
 
 #[async_trait]
@@ -108,6 +118,10 @@ impl GithubApi for RecordingApi {
             .lock()
             .unwrap()
             .push(req.permissions.clone());
+        self.mint_repositories
+            .lock()
+            .unwrap()
+            .push(req.repositories.clone());
         let lifetime = self
             .mint_lifetimes
             .lock()

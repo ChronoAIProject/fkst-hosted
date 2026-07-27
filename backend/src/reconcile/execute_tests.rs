@@ -235,6 +235,7 @@ fn session_pod_spec_is_built_from_the_registration() {
         &["fkst-run".to_string()],
         Some("fkst-bot".to_string()),
         &crate::access_policy::AccessPolicy::default(),
+        None,
     );
 
     assert_eq!(spec.session_id, "sess-abc");
@@ -275,6 +276,7 @@ fn package_roots_come_from_the_effective_set_not_just_explicit_packages() {
         &["fkst-run".to_string()],
         None,
         &crate::access_policy::AccessPolicy::default(),
+        None,
     );
     assert_eq!(
         spec.package_roots,
@@ -300,6 +302,7 @@ fn spec_work_label_is_the_comma_joined_detected_set() {
         &["pkg-a".to_string(), "pkg-b".to_string()],
         Some("fkst-bot".to_string()),
         &crate::access_policy::AccessPolicy::default(),
+        None,
     );
     assert_eq!(discovered_only.work_label, "pkg-a,pkg-b");
 
@@ -313,6 +316,7 @@ fn spec_work_label_is_the_comma_joined_detected_set() {
         ],
         Some("fkst-bot".to_string()),
         &crate::access_policy::AccessPolicy::default(),
+        None,
     );
     assert_eq!(union.work_label, "fkst-run,pkg-a");
 }
@@ -324,6 +328,7 @@ fn missing_bot_login_defaults_to_empty() {
         &["fkst-run".to_string()],
         None,
         &crate::access_policy::AccessPolicy::default(),
+        None,
     );
     assert_eq!(spec.bot_login, "", "an unset bot login renders as empty");
 }

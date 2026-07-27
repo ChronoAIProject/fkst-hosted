@@ -258,6 +258,8 @@ than copy their objects. It must patch, at minimum:
 - immutable image references for the control plane and frontend;
 - public API/frontend hosts and TLS record;
 - LLM endpoint/model and GitHub App bot login/client ID;
+- exact issue-scoped `FKST_CROSS_REPO_DELIVERY_GRANTS`, when lifecycle issues
+  are explicitly allowed to deliver into another installed repository;
 - access model, allowed GitHub logins, and global-admin logins;
 - a durable namespace outside `chronoai-fkst`, its Secret-only Role/RoleBinding,
   and `FKST_ENV_STORE_NAMESPACE`;

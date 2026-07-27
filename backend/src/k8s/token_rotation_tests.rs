@@ -31,6 +31,7 @@ use crate::session_spec::creds::GITHUB_TOKEN_FILE;
 #[derive(Default)]
 struct ScriptedApi {
     mint_count: AtomicUsize,
+    mint_repositories: Mutex<Vec<Vec<String>>>,
     /// Served to every mint while present; absent → the mint succeeds.
     mint_error: Mutex<Option<GithubAppError>>,
 }
@@ -45,6 +46,15 @@ impl ScriptedApi {
 
     fn mint_count(&self) -> usize {
         self.mint_count.load(Ordering::SeqCst)
+    }
+
+    fn last_mint_repositories(&self) -> Vec<String> {
+        self.mint_repositories
+            .lock()
+            .unwrap()
+            .last()
+            .cloned()
+            .unwrap_or_default()
     }
 }
 
@@ -63,9 +73,13 @@ impl GithubApi for ScriptedApi {
         &self,
         _app_jwt: &SecretString,
         _id: InstallationId,
-        _req: &InstallationTokenRequest,
+        req: &InstallationTokenRequest,
     ) -> Result<InstallationToken, GithubAppError> {
         self.mint_count.fetch_add(1, Ordering::SeqCst);
+        self.mint_repositories
+            .lock()
+            .unwrap()
+            .push(req.repositories.clone());
         if let Some(error) = self.mint_error.lock().unwrap().clone() {
             return Err(error);
         }
@@ -173,7 +187,7 @@ async fn rotation_delivers_a_credential_to_every_fleet_handle() {
     ];
     let backend = FakeSessionBackend::default().with_fleet(fleet);
 
-    let summary = rotate_once(&backend, &github, &handle)
+    let summary = rotate_once(&backend, &github, &DeliveryGrantPolicy::default(), &handle)
         .await
         .expect("sweep ok");
 
@@ -188,6 +202,29 @@ async fn rotation_delivers_a_credential_to_every_fleet_handle() {
 }
 
 #[tokio::test]
+async fn rotation_preserves_the_granted_repository_scope() {
+    let api = Arc::new(ScriptedApi::default());
+    let github = tokens_with(api.clone());
+    let grants = DeliveryGrantPolicy::parse(
+        r#"[{"lifecycle_repo":"acme/site","lifecycle_issue":41,"implementation_repo":"acme/tools","implementation_branch":"main"}]"#,
+    )
+    .expect("policy");
+    let (handle, _rx) = reconcile_channel(16);
+    let backend =
+        FakeSessionBackend::default().with_fleet(vec![handle_for("sess-1", "site", Some(7))]);
+
+    rotate_once(&backend, &github, &grants, &handle)
+        .await
+        .expect("rotation");
+
+    assert_eq!(
+        api.last_mint_repositories(),
+        vec!["site".to_string(), "tools".to_string()]
+    );
+    assert_eq!(backend.delivered.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn rotation_tolerates_a_gone_session() {
     let github = tokens();
     let (handle, _rx) = reconcile_channel(16);
@@ -196,7 +233,7 @@ async fn rotation_tolerates_a_gone_session() {
         .with_fleet(fleet)
         .with_gone("sess-gone");
 
-    let summary = rotate_once(&backend, &github, &handle)
+    let summary = rotate_once(&backend, &github, &DeliveryGrantPolicy::default(), &handle)
         .await
         .expect("sweep ok despite a gone session");
 
@@ -226,7 +263,7 @@ async fn a_transient_delivery_failure_is_reported_as_retryable() {
         .with_fleet(fleet)
         .with_deliver_failures("sess-flaky", 1);
 
-    let summary = rotate_once(&backend, &github, &handle)
+    let summary = rotate_once(&backend, &github, &DeliveryGrantPolicy::default(), &handle)
         .await
         .expect("the sweep itself succeeds");
 
@@ -262,7 +299,7 @@ async fn a_repair_pass_rotates_only_the_failed_session() {
         .with_fleet(fleet)
         .with_deliver_failures("sess-flaky", 1);
 
-    let first = rotate_once(&backend, &github, &handle)
+    let first = rotate_once(&backend, &github, &DeliveryGrantPolicy::default(), &handle)
         .await
         .expect("first sweep");
     let mints_after_sweep = api.mint_count();
@@ -271,7 +308,14 @@ async fn a_repair_pass_rotates_only_the_failed_session() {
         "one mint per session in the full sweep (distinct repos, so no cache sharing)"
     );
 
-    let repair = rotate_sessions(&backend, &github, &handle, first.retryable).await;
+    let repair = rotate_sessions(
+        &backend,
+        &github,
+        &DeliveryGrantPolicy::default(),
+        &handle,
+        first.retryable,
+    )
+    .await;
 
     assert!(repair.retryable.is_empty(), "the retry converged");
     assert_eq!(
@@ -300,7 +344,7 @@ async fn a_permanent_mint_failure_is_not_retried_and_enqueues_the_repo() {
     let backend =
         FakeSessionBackend::default().with_fleet(vec![handle_for("sess-1", "site", Some(7))]);
 
-    let summary = rotate_once(&backend, &github, &handle)
+    let summary = rotate_once(&backend, &github, &DeliveryGrantPolicy::default(), &handle)
         .await
         .expect("sweep ok");
 
@@ -326,7 +370,7 @@ async fn a_transient_mint_failure_is_retried_rather_than_enqueued() {
     let backend =
         FakeSessionBackend::default().with_fleet(vec![handle_for("sess-1", "site", Some(7))]);
 
-    let summary = rotate_once(&backend, &github, &handle)
+    let summary = rotate_once(&backend, &github, &DeliveryGrantPolicy::default(), &handle)
         .await
         .expect("sweep ok");
 
@@ -351,6 +395,9 @@ fn mint_failure_classification_defaults_to_retryable() {
         GithubAppError::NotInstalled {
             owner_repo: "acme/site".to_string(),
             install_url: None,
+        },
+        GithubAppError::InstallationMismatch {
+            repositories: vec!["acme/site".to_string(), "acme/tools".to_string()],
         },
         GithubAppError::AppAuth,
         GithubAppError::InvalidKey,
@@ -392,6 +439,7 @@ async fn a_failed_delivery_is_retried_long_before_the_periodic_interval() {
     tokio::spawn(run_token_rotation_loop(
         backend.clone(),
         tokens(),
+        DeliveryGrantPolicy::default(),
         ReconcileConfig::default(),
         handle,
     ));
@@ -423,6 +471,7 @@ async fn a_failed_fleet_list_retries_the_whole_sweep() {
     tokio::spawn(run_token_rotation_loop(
         backend.clone(),
         tokens(),
+        DeliveryGrantPolicy::default(),
         ReconcileConfig::default(),
         handle,
     ));
@@ -449,6 +498,7 @@ async fn a_healthy_sweep_waits_the_full_interval() {
     tokio::spawn(run_token_rotation_loop(
         backend.clone(),
         tokens(),
+        DeliveryGrantPolicy::default(),
         ReconcileConfig::default(),
         handle,
     ));
@@ -481,6 +531,7 @@ async fn a_chronically_broken_session_does_not_slow_another_sessions_first_retry
     tokio::spawn(run_token_rotation_loop(
         backend.clone(),
         tokens(),
+        DeliveryGrantPolicy::default(),
         ReconcileConfig::default(),
         handle,
     ));
@@ -536,6 +587,7 @@ async fn a_permanently_broken_session_does_not_starve_the_rest_of_the_fleet() {
     tokio::spawn(run_token_rotation_loop(
         backend.clone(),
         tokens(),
+        DeliveryGrantPolicy::default(),
         ReconcileConfig::default(),
         handle,
     ));
@@ -571,6 +623,7 @@ async fn a_permanently_failing_session_is_not_retried_in_a_loop() {
     tokio::spawn(run_token_rotation_loop(
         backend.clone(),
         tokens_with(api.clone()),
+        DeliveryGrantPolicy::default(),
         ReconcileConfig::default(),
         handle,
     ));

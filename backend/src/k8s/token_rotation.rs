@@ -53,6 +53,7 @@ use secrecy::SecretString;
 // one follows it.
 use tokio::time::Instant;
 
+use crate::delivery_grants::DeliveryGrantPolicy;
 use crate::error::AppError;
 use crate::github_app::{session_permissions, GithubAppError, GithubAppTokens};
 use crate::k8s::session_launcher::session_github_token_json;
@@ -116,6 +117,7 @@ struct PendingRotation {
 pub async fn run_token_rotation_loop(
     backend: Arc<dyn SessionBackend>,
     github: GithubAppTokens,
+    delivery_grants: DeliveryGrantPolicy,
     cfg: ReconcileConfig,
     handle: ReconcileHandle,
 ) {
@@ -142,7 +144,7 @@ pub async fn run_token_rotation_loop(
         let now = Instant::now();
         if now >= next_full_sweep {
             next_full_sweep = now + periodic_interval;
-            match rotate_once(backend.as_ref(), &github, &handle).await {
+            match rotate_once(backend.as_ref(), &github, &delivery_grants, &handle).await {
                 Ok(summary) => {
                     fleet_retry.reset();
                     // The fleet list is authoritative: forget any backlog entry for a
@@ -176,7 +178,9 @@ pub async fn run_token_rotation_loop(
                 .map(|p| p.session.clone())
                 .collect();
             if !due.is_empty() {
-                let summary = rotate_sessions(backend.as_ref(), &github, &handle, due).await;
+                let summary =
+                    rotate_sessions(backend.as_ref(), &github, &delivery_grants, &handle, due)
+                        .await;
                 // Anything attempted and no longer retryable has been repaired (or has
                 // gone away, or failed permanently) — either way it leaves the backlog.
                 let repaired = summary.attempted.len() - summary.retryable.len();
@@ -237,6 +241,7 @@ fn absorb(
 async fn rotate_once(
     backend: &dyn SessionBackend,
     github: &GithubAppTokens,
+    delivery_grants: &DeliveryGrantPolicy,
     handle: &ReconcileHandle,
 ) -> Result<SweepSummary, AppError> {
     let fleet = backend
@@ -244,7 +249,7 @@ async fn rotate_once(
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("token rotation list pods: {e}")))?;
 
-    Ok(rotate_sessions(backend, github, handle, fleet).await)
+    Ok(rotate_sessions(backend, github, delivery_grants, handle, fleet).await)
 }
 
 /// Rotate exactly these sessions, classifying each outcome. Drives both a full sweep
@@ -252,6 +257,7 @@ async fn rotate_once(
 async fn rotate_sessions(
     backend: &dyn SessionBackend,
     github: &GithubAppTokens,
+    delivery_grants: &DeliveryGrantPolicy,
     handle: &ReconcileHandle,
     sessions: Vec<SessionHandle>,
 ) -> SweepSummary {
@@ -266,7 +272,7 @@ async fn rotate_sessions(
     // OUT of its map and puts it back after the upload, so a cancelled future would
     // destroy it permanently.
     for session in sessions {
-        match rotate_one(backend, github, handle, &session).await {
+        match rotate_one(backend, github, delivery_grants, handle, &session).await {
             RotationOutcome::Refreshed | RotationOutcome::Gone => {}
             RotationOutcome::Retryable => summary.retryable.push(session),
             RotationOutcome::Permanent => summary.permanent += 1,
@@ -280,6 +286,7 @@ async fn rotate_sessions(
 async fn rotate_one(
     backend: &dyn SessionBackend,
     github: &GithubAppTokens,
+    delivery_grants: &DeliveryGrantPolicy,
     handle: &ReconcileHandle,
     session: &SessionHandle,
 ) -> RotationOutcome {
@@ -288,10 +295,21 @@ async fn rotate_one(
     // path only re-mints in the last EXPIRY_BUFFER before expiry, so a rotation
     // interval longer than that buffer would leave the credential file with an expired
     // token between rotations for a session that outlives the token TTL.
-    let (token, expires_at) = match github
-        .token_with_expiry_for_repo_forced(&owner_repo, Some(session_permissions()))
-        .await
-    {
+    let implementation_repos = delivery_grants.implementation_repos_for(&session.repo);
+    let mint_result = if implementation_repos.is_empty() {
+        github
+            .token_with_expiry_for_repo_forced(&owner_repo, Some(session_permissions()))
+            .await
+    } else {
+        github
+            .token_with_expiry_for_repositories_forced(
+                &owner_repo,
+                &implementation_repos,
+                Some(session_permissions()),
+            )
+            .await
+    };
+    let (token, expires_at) = match mint_result {
         Ok(pair) => pair,
         Err(error) if is_permanent_mint_failure(&error) => {
             // No amount of retrying mints a token the App is no longer entitled to.
@@ -362,6 +380,7 @@ fn is_permanent_mint_failure(error: &GithubAppError) -> bool {
         error,
         GithubAppError::InstallationGone { .. }
             | GithubAppError::NotInstalled { .. }
+            | GithubAppError::InstallationMismatch { .. }
             | GithubAppError::AppAuth
             | GithubAppError::InvalidKey
             | GithubAppError::InvalidRepoRef

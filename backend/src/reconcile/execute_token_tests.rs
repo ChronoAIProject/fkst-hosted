@@ -120,6 +120,50 @@ async fn delivered_session_token_outlives_the_rotation_interval() {
 }
 
 #[tokio::test]
+async fn granted_delivery_mints_exact_multi_repo_scope_and_embeds_scoped_contract() {
+    let api = Arc::new(RecordingApi::default());
+    let github = tokens(api.clone());
+    let mut ctx = test_ctx_with_github(Arc::new(FakeSessionBackend::default()), github);
+    ctx.config.delivery_grants = crate::delivery_grants::DeliveryGrantPolicy::parse(
+        r#"[
+          {"lifecycle_repo":"acme/site","lifecycle_issue":41,"implementation_repo":"acme/tools","implementation_branch":"main"},
+          {"lifecycle_repo":"acme/site","lifecycle_issue":43,"implementation_repo":"acme/tools","implementation_branch":"main"},
+          {"lifecycle_repo":"acme/other","lifecycle_issue":1,"implementation_repo":"acme/elsewhere","implementation_branch":"main"}
+        ]"#,
+    )
+    .expect("policy");
+    let reg = registration();
+
+    let Ok((spec, _creds)) =
+        resolve_session_credentials(&reg, &["fkst-run".to_string()], &ctx).await
+    else {
+        panic!("granted credential resolution must succeed");
+    };
+
+    assert_eq!(
+        api.last_mint_repositories(),
+        vec!["site".to_string(), "tools".to_string()],
+        "duplicate issue routes share one exact implementation-repository scope"
+    );
+    let grants: Vec<crate::delivery_grants::DeliveryGrant> = serde_json::from_str(
+        spec.delivery_grants_json
+            .as_deref()
+            .expect("scoped launcher contract"),
+    )
+    .expect("grant json");
+    assert_eq!(
+        grants
+            .iter()
+            .map(|grant| grant.lifecycle_issue)
+            .collect::<Vec<_>>(),
+        vec![41, 43]
+    );
+    assert!(grants
+        .iter()
+        .all(|grant| grant.lifecycle_repo == "acme/site"));
+}
+
+#[tokio::test]
 async fn spawn_delivers_a_freshly_minted_token() {
     let (api, github, _) = github_with_a_near_expiry_cached_session_token().await;
     let backend = Arc::new(FakeSessionBackend::default());

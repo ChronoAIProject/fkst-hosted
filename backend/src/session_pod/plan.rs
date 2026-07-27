@@ -7,8 +7,14 @@
 //! reserved-key filtering) — are unit-testable with ZERO cluster / network /
 //! process side effects. The driver is the thin I/O shell around these.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
+use sha2::{Digest, Sha256};
+
+use crate::delivery_grants::{
+    DeliveryGrant, DeliveryGrantPolicy, ResolvedDeliveryGrant, SESSION_DELIVERY_GRANTS_ENV,
+};
 use crate::goals::package_ref::{parse_package_ref, PackageRef};
 use crate::reserved_env::{is_reserved_env_key, GIT_TRACE_SILENCING_ENV, LLM_ENV_KEY};
 
@@ -78,6 +84,9 @@ pub struct SubstrateEnv {
     /// Target branch to clone. `None` preserves the legacy default-branch clone
     /// for callers outside the hosted session launcher.
     pub target_branch: Option<String>,
+    /// Exact operator grants for this lifecycle repository. Empty preserves the
+    /// historical single-repository worker contract.
+    pub delivery_grants: Vec<DeliveryGrant>,
 }
 
 /// Read the injected env into a [`SubstrateEnv`] from the process environment.
@@ -127,6 +136,11 @@ pub(crate) fn read_substrate_env_from(
         return Err(format!("{PACKAGE_ROOTS_ENV} lists no package refs"));
     }
 
+    let delivery_grants = DeliveryGrantPolicy::parse_session_value(
+        get(SESSION_DELIVERY_GRANTS_ENV).as_deref(),
+        &repo,
+    )?;
+
     Ok(SubstrateEnv {
         repo,
         package_refs,
@@ -141,7 +155,104 @@ pub(crate) fn read_substrate_env_from(
         creds_dir: required(CREDS_DIR_ENV)?,
         codex_home: required(CODEX_HOME_ENV)?,
         target_branch: optional(DEVLOOP_INTEGRATION_BRANCH_ENV),
+        delivery_grants,
     })
+}
+
+/// One additional checkout the driver must clone. Grants that exactly match the
+/// lifecycle or platform checkout are resolved to those existing roots instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeliveryClone {
+    pub repository: String,
+    pub branch: String,
+    pub root: PathBuf,
+}
+
+/// Pure cross-repository checkout plan consumed by the effectful driver.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeliveryCheckoutPlan {
+    pub resolved_grants: Vec<ResolvedDeliveryGrant>,
+    pub clones: Vec<DeliveryClone>,
+}
+
+/// Resolve every grant to an exact checkout. Repository comparison follows
+/// GitHub's case-insensitive identity; branches remain case-sensitive. Distinct
+/// repo/branch pairs get one deterministic runtime root and one clone operation.
+#[allow(clippy::too_many_arguments)]
+pub fn plan_delivery_checkouts(
+    grants: &[DeliveryGrant],
+    lifecycle_repo: &str,
+    lifecycle_branch: Option<&str>,
+    project_root: &Path,
+    platform_repo: &str,
+    platform_branch: &str,
+    platform_root: &Path,
+    runtime_root: &Path,
+) -> DeliveryCheckoutPlan {
+    let mut resolved_grants = Vec::with_capacity(grants.len());
+    let mut clones = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    for grant in grants {
+        let root = if checkout_matches(
+            &grant.implementation_repo,
+            &grant.implementation_branch,
+            platform_repo,
+            Some(platform_branch),
+        ) {
+            platform_root.to_path_buf()
+        } else if checkout_matches(
+            &grant.implementation_repo,
+            &grant.implementation_branch,
+            lifecycle_repo,
+            lifecycle_branch,
+        ) {
+            project_root.to_path_buf()
+        } else {
+            let identity = format!(
+                "{}\0{}",
+                grant.implementation_repo.to_ascii_lowercase(),
+                grant.implementation_branch
+            );
+            let digest = Sha256::digest(identity.as_bytes());
+            let suffix: String = digest
+                .iter()
+                .take(8)
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            let root = runtime_root.join("delivery").join(suffix);
+            if seen.insert(identity) {
+                clones.push(DeliveryClone {
+                    repository: grant.implementation_repo.clone(),
+                    branch: grant.implementation_branch.clone(),
+                    root: root.clone(),
+                });
+            }
+            root
+        };
+
+        resolved_grants.push(ResolvedDeliveryGrant {
+            lifecycle_repo: grant.lifecycle_repo.clone(),
+            lifecycle_issue: grant.lifecycle_issue,
+            implementation_repo: grant.implementation_repo.clone(),
+            implementation_branch: grant.implementation_branch.clone(),
+            implementation_root: root.to_string_lossy().into_owned(),
+        });
+    }
+
+    DeliveryCheckoutPlan {
+        resolved_grants,
+        clones,
+    }
+}
+
+fn checkout_matches(
+    repository: &str,
+    branch: &str,
+    checkout_repo: &str,
+    checkout_branch: Option<&str>,
+) -> bool {
+    repository.eq_ignore_ascii_case(checkout_repo) && checkout_branch == Some(branch)
 }
 
 /// The single workspace repo `(owner, repo, git_ref)` all v1 package refs must
