@@ -131,6 +131,10 @@ whole section for English (the default).
 <!--
 Optional. Advanced engine tunables, ONE `KEY=value` per line, drawn ONLY from
 this allowlist (anything else is rejected with an explanatory comment):
+  FKST_LLM_MODEL=<model id>                run THIS session on a different model
+    served by the deployment's LLM endpoint (letters, digits, . _ / : - only)
+  FKST_LLM_REASONING_EFFORT=<tier>         minimal | low | medium | high | max
+    (deployment default: max)
   FKST_CODEX_PERMIT_SLOTS=<1..32>          concurrent codex subprocesses
   FKST_QUEUE_CAPACITY=<1..1024>            per-queue capacity
   FKST_MAX_IN_FLIGHT_PER_DEPT=<1..1024>    per-department concurrency
