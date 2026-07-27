@@ -693,6 +693,13 @@ source:
   # Paths that can plausibly change the PRODUCT SURFACE. This set drives cycle
   # admission and the meaning of publication.requireCurrentSource (section
   # 17.5). It is deliberately NOT "**": a comment typo must not launch a cycle.
+  #
+  # The list below is ILLUSTRATIVE, not a shipped default. No default set is
+  # specified by this draft: a too-narrow guess misses real product changes
+  # invisibly, and a too-broad one reproduces the per-commit cost the split
+  # exists to remove. Enrollment REQUIRES an explicit declaration (section
+  # 13.3), and rollout Phase 1 measures real repositories to determine whether
+  # a defensible default exists at all (open question 16).
   productRelevant:
     include:
       - "src/**"
@@ -3602,9 +3609,15 @@ The following decisions remain open for implementation review:
 14. How should localization review and human translation overrides be modeled?
 15. What maximum repository and artifact sizes should trigger companion-repo
     guidance or block generation?
-16. What belongs in `source.productRelevant` by default, per ecosystem? Section
-    13.2's example is illustrative; a wrong default here either floods the lane
-    or silently misses product changes. Phase 1 measures this directly.
+16. What belongs in `source.productRelevant`, and does a defensible default
+    exist at all? **Deliberately deferred to Phase 1 measurement rather than
+    decided here.** Section 13.2's example is illustrative only and no default
+    ships; enrollment requires an explicit declaration. The asymmetry is why:
+    a too-broad set is merely expensive and visibly so, while a too-narrow set
+    fails silently — the artifact that was never regenerated generates no
+    signal, and nobody files a bug for a thing that did not happen. Phase 1's
+    read-only oracle reports where it *would* have fired across real
+    repositories, converting this from a guess into an observation.
 17. Should `generatorEnvFingerprint` ever gate convergence, and if so under
     what fleet-wide rollout budget (section 32.3)?
 18. What is the observed rate of section 17.8 managed-output drift on real
