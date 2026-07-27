@@ -432,6 +432,9 @@ enum CredentialResolutionError {
 /// Resolve the current full session credential bundle from durable/control-plane
 /// sources: the registration, environment store, static service configuration, and a
 /// repository-scoped GitHub token. No bundle is persisted in GitHub or logs.
+///
+/// The GitHub token is FORCE-minted (#3410): see the call site for why a session may
+/// never be handed a cached one.
 async fn resolve_session_credentials(
     reg: &SessionRegistration,
     detected_work_labels: &[String],
@@ -445,9 +448,24 @@ async fn resolve_session_credentials(
     };
 
     let owner_repo = format!("{}/{}", reg.repo.owner, reg.repo.name);
+    // FORCED re-mint (#3410). A session is a LONG-LIVED consumer of this token, and the
+    // control plane only revisits it every `pod_token_refresh_secs` (default 45 min).
+    // The cached variant may legally serve a token with as little as the shared
+    // `EXPIRY_BUFFER` (5 min) of life left — harmless for the reconciler's own
+    // millisecond read calls, fatal here: the session's `gh`/`git` would start returning
+    // `Bad credentials` minutes after spawn and stay broken until the next rotation tick.
+    // Nor is the poisoning entry rare: the cache is keyed on `(repo, permissions)` and
+    // `session_permissions()` is structurally equal to `default_permissions()`, so ANY
+    // App call on the repo — the reachability probe a few lines up, a branch lookup, an
+    // issue comment — leaves behind the entry this mint would otherwise read.
+    // Forcing the mint makes the delivered life a full token TTL, which
+    // [`ReconcileConfig`] already bounds strictly above `pod_token_refresh_secs`, so the
+    // next rotation always lands before expiry. This is the same reasoning the rotation
+    // sweep applies (`k8s::token_rotation::rotate_one`); delivery — spawn AND
+    // crash-recovery, on both session backends — needs it just as much.
     let (token, expires_at) = match ctx
         .github
-        .token_with_expiry_for_repo(&owner_repo, Some(session_permissions()))
+        .token_with_expiry_for_repo_forced(&owner_repo, Some(session_permissions()))
         .await
     {
         Ok(pair) => pair,
@@ -947,3 +965,6 @@ mod routing_tests;
 #[cfg(test)]
 #[path = "execute_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "execute_token_tests.rs"]
+mod token_tests;

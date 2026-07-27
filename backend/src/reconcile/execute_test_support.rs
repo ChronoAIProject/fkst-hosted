@@ -4,7 +4,8 @@
 //! session-backend fake lives in [`crate::session_backend::test_support`] and is
 //! re-exported here.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -14,7 +15,7 @@ use secrecy::SecretString;
 use super::ReconcileCtx;
 use crate::config::Config;
 use crate::github_app::api::{
-    GithubApi, InstallationId, InstallationToken, InstallationTokenRequest,
+    GithubApi, InstallationId, InstallationToken, InstallationTokenRequest, TokenPermissions,
 };
 use crate::github_app::config::GithubAppConfig;
 use crate::github_app::listing::{GithubListing, InstallationSummary, IssueSummary};
@@ -33,6 +34,10 @@ pub(super) type Call = (String, String, u64, String);
 /// A recorded label-add call: `(owner, repo, issue_number, labels)`.
 pub(super) type LabelCall = (String, String, u64, Vec<String>);
 
+/// The lifetime a minted installation token carries unless a test scripts a shorter
+/// one — GitHub's real one-hour installation-token TTL.
+pub(super) const FULL_TOKEN_TTL: Duration = Duration::from_secs(3600);
+
 #[derive(Default)]
 pub(super) struct RecordingApi {
     pub(super) comments: Mutex<Vec<Call>>,
@@ -44,6 +49,41 @@ pub(super) struct RecordingApi {
     pub(super) branch_heads: Mutex<Option<HashMap<String, String>>>,
     pub(super) create_refs: Mutex<Vec<(String, String)>>,
     pub(super) create_ref_error: Mutex<Option<GithubAppError>>,
+    /// Remaining lifetimes handed to successive token mints; an empty/exhausted queue
+    /// falls back to [`FULL_TOKEN_TTL`]. Lets a test reproduce the near-expiry token
+    /// that #3410 leaked into the shared cache.
+    mint_lifetimes: Mutex<VecDeque<Duration>>,
+    /// The permissions each mint requested, in call order. Only an
+    /// installation-wide mint records `None`; every repo-scoped mint records
+    /// `Some(..)`, with a `perms: None` caller recording `default_permissions()`
+    /// (the service substitutes it before building the request).
+    mint_perms: Mutex<Vec<Option<TokenPermissions>>>,
+    mint_count: AtomicUsize,
+}
+
+impl RecordingApi {
+    /// Script the remaining lifetime of the next mints (the rest are
+    /// [`FULL_TOKEN_TTL`]).
+    pub(super) fn with_mint_lifetimes(self, lifetimes: impl IntoIterator<Item = Duration>) -> Self {
+        *self.mint_lifetimes.lock().unwrap() = lifetimes.into_iter().collect();
+        self
+    }
+
+    /// How many mints requested exactly `perms`.
+    ///
+    /// NOT a session-vs-reconciler discriminator: `session_permissions()` is
+    /// structurally equal to `default_permissions()`, so this also counts the
+    /// reconciler's own repo-scoped reads. It answers only "how many mints carried
+    /// these permissions" — which is what a caller wants when it has already primed
+    /// the cache, making every other call on the path a hit.
+    pub(super) fn mints_with_perms(&self, perms: &TokenPermissions) -> usize {
+        self.mint_perms
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|requested| requested.as_ref() == Some(perms))
+            .count()
+    }
 }
 
 #[async_trait]
@@ -61,11 +101,24 @@ impl GithubApi for RecordingApi {
         &self,
         _app_jwt: &SecretString,
         _id: InstallationId,
-        _req: &InstallationTokenRequest,
+        req: &InstallationTokenRequest,
     ) -> Result<InstallationToken, GithubAppError> {
+        let nth = self.mint_count.fetch_add(1, Ordering::SeqCst) + 1;
+        self.mint_perms
+            .lock()
+            .unwrap()
+            .push(req.permissions.clone());
+        let lifetime = self
+            .mint_lifetimes
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or(FULL_TOKEN_TTL);
+        // The mint ordinal makes successive tokens distinguishable, so a test can prove
+        // WHICH mint's token was delivered rather than only that one happened.
         Ok(InstallationToken {
-            token: SecretString::from("ghs_fake".to_string()),
-            expires_at: SystemTime::now() + Duration::from_secs(3600),
+            token: SecretString::from(format!("ghs_fake_{nth}")),
+            expires_at: SystemTime::now() + lifetime,
         })
     }
 
@@ -244,10 +297,19 @@ impl GithubListing for FakeListing {
 /// Build a [`ReconcileCtx`] wired to `backend`; every other field is a trivial fake
 /// the pod-effect routing tests do not exercise.
 pub(crate) fn test_ctx(backend: Arc<dyn SessionBackend>) -> ReconcileCtx {
+    test_ctx_with_github(backend, tokens(Arc::new(RecordingApi::default())))
+}
+
+/// [`test_ctx`] with the GitHub token service supplied, so a test can pre-seed its
+/// cache or observe its mints.
+pub(crate) fn test_ctx_with_github(
+    backend: Arc<dyn SessionBackend>,
+    github: GithubAppTokens,
+) -> ReconcileCtx {
     ReconcileCtx {
         backend,
         env_store: Arc::new(EnvStore::fake()),
-        github: tokens(Arc::new(RecordingApi::default())),
+        github,
         listing: Arc::new(FakeListing),
         http: reqwest::Client::new(),
         config: Config::default(),
