@@ -17,6 +17,7 @@ Response contract:
   settled: <finding>, by refutation of <exact verified-move citation>
   settled-by-agreement (unverified): <finding>
   open: <still-open finding>
+{{findings_contract}}
 - If a settled finding has no matching verified-move citation, it will be stored as settled-by-agreement (unverified).
 - A converge outcome must include at least one findings line. An essence-stall outcome is terminal and may omit findings.
 - Optionally emit verified-move lines after the outcome, one per mechanically verified mover:

@@ -257,7 +257,7 @@ function M.install(core, deps)
       render_prompt_template = function(template, vars, target_proposal)
         return core.render_prompt_template(template, vars, target_proposal)
       end,
-      vars = function(repair, prior_result)
+      vars = function(repair, prior_result, parse_violation)
         local context_block = ""
         if proposal.context ~= nil and proposal.context ~= "" then
           context_block = "Context:\n" .. neutralize(proposal.context)
@@ -271,7 +271,10 @@ function M.install(core, deps)
         local repair_instruction = "This is the first synthesis attempt."
         if repair then
           local stdout = type(prior_result) == "table" and prior_result.stdout or ""
-          repair_instruction = "Repair attempt: the previous synthesis output failed the parser. Emit one valid response contract and do not rerun Phase B or Phase R. Previous output:\n" .. neutralize(stdout)
+          repair_instruction = "Repair attempt: the previous synthesis output failed the parser ("
+            .. synthesis.format_violation(parse_violation)
+            .. "). Correct that exact violation, emit one valid response contract, and do not rerun Phase B or Phase R. Previous output:\n"
+            .. neutralize(stdout)
         end
         return {
           title = neutralize(proposal.title),
@@ -289,12 +292,13 @@ function M.install(core, deps)
             and "Converge synthesis calibration: emit reached:approve when the proposal is sound, actionable, bounded, and code-verifiable and no evidenced issue-admission blocker survived. Emit premise-refuted only when verified contrary evidence disproves the proposal's source premise. Do not emit converge or essence-stall merely for a seat's ideal-shortfall, broader-class preference, or future-PR grounding concern. Emit converge only for an evidenced essence-level blocker that would make development likely wrong and for which concrete resolving evidence can be named; emit essence-stall only when such a blocker exists and no concrete resolving evidence is nameable."
             or "",
           repair_instruction = repair_instruction,
+          findings_contract = synthesis.findings_contract(),
           verified_move_candidates = synthesis.verified_move_candidates(p2_results),
           p1_transcripts = synthesis.full_transcript_lines(neutralize, "Phase B transcripts:", p1_results),
           p2_transcripts = synthesis.full_transcript_lines(neutralize, "Phase R transcripts:", p2_results),
         }
       end,
-    }, options and options.repair, options and options.prior_result)
+    }, options and options.repair, options and options.prior_result, options and options.parse_violation)
   end
 end
 

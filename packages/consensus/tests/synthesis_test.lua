@@ -53,6 +53,15 @@ local function p2(angle, verdict, stance, peer_claim, stdout)
   }
 end
 
+local function converge_with_open_findings(last_finding_len)
+  return table.concat({
+    "converge: dependency semantics remain disputed + inspect the blockedBy native relation",
+    "open: " .. string.rep("a", 700),
+    "open: " .. string.rep("b", 700),
+    "open: " .. string.rep("c", last_finding_len),
+  }, "\n")
+end
+
 return {
   test_parse_output_accepts_reached_and_converge = function()
     local reached = synthesis.parse_output("reached:approve use the synthesis framing\nverified-move: angle=parsimony phase=P2 citation=teleology purpose claim")
@@ -176,6 +185,93 @@ return {
     t.is_nil(synthesis.parse_output("reached:approve ok\nreached: approve duplicate sentinel"))
   end,
 
+  test_parse_output_diagnostic_reports_findings_record_byte_boundary = function()
+    local parsed, boundary_violation = synthesis.parse_output_diagnostic(converge_with_open_findings(80), "converge")
+    t.eq(#parsed.findings_record, 1500)
+    t.is_nil(boundary_violation)
+
+    local oversized, oversized_violation = synthesis.parse_output_diagnostic(converge_with_open_findings(81), "converge")
+    t.is_nil(oversized)
+    t.eq(oversized_violation.class, "findings_record_too_long")
+    t.eq(oversized_violation.observed, 1501)
+    t.eq(oversized_violation.limit, 1500)
+  end,
+
+  test_parse_or_retry_passes_findings_violation_to_one_successful_repair = function()
+    local attempts = {
+      converge_with_open_findings(81),
+      "converge: dependency semantics remain disputed + inspect the blockedBy native relation\nopen: shortened finding",
+    }
+    local spawn_kinds = {}
+    local prompt_calls = {}
+    local violations = {}
+    local parsed = synthesis.parse_or_retry({
+      verdict_mode = "converge",
+      p1_results = {},
+      p2_results = {},
+      build_prompt = function(repair, prior_result, parse_violation)
+        table.insert(prompt_calls, {
+          repair = repair,
+          prior_result = prior_result,
+          parse_violation = parse_violation,
+        })
+        return repair and "repair" or "first"
+      end,
+      spawn_sync = function(kind)
+        table.insert(spawn_kinds, kind)
+        return { stdout = attempts[#spawn_kinds], stderr = "", exit_code = 0 }
+      end,
+      on_violation = function(phase, parse_violation)
+        table.insert(violations, { phase = phase, parse_violation = parse_violation })
+      end,
+    })
+
+    t.eq(#spawn_kinds, 2)
+    t.eq(spawn_kinds[1], "synthesis")
+    t.eq(spawn_kinds[2], "synthesis-repair")
+    t.eq(#prompt_calls, 2)
+    t.eq(prompt_calls[1].repair, false)
+    t.is_true(prompt_calls[2].repair)
+    t.eq(prompt_calls[2].parse_violation.class, "findings_record_too_long")
+    t.eq(prompt_calls[2].parse_violation.observed, 1501)
+    t.eq(prompt_calls[2].parse_violation.limit, 1500)
+    t.eq(#violations, 1)
+    t.eq(violations[1].phase, "synthesis")
+    t.eq(violations[1].parse_violation.class, "findings_record_too_long")
+    t.eq(parsed.findings_record, "open:\nshortened finding")
+  end,
+
+  test_parse_or_retry_preserves_both_violation_details_when_repair_fails = function()
+    local call_count = 0
+    local ok, err = pcall(function()
+      synthesis.parse_or_retry({
+        verdict_mode = "converge",
+        p1_results = {},
+        p2_results = {},
+        build_prompt = function()
+          return "prompt"
+        end,
+        spawn_sync = function()
+          call_count = call_count + 1
+          return {
+            stdout = call_count == 1 and converge_with_open_findings(81) or "unexpected synthesis prose",
+            stderr = "",
+            exit_code = 0,
+          }
+        end,
+      })
+    end)
+
+    t.eq(ok, false)
+    t.eq(call_count, 2)
+    t.is_true(tostring(err):find(
+      "first_violation=class=findings_record_too_long,observed=1501,limit=1500",
+      1,
+      true
+    ) ~= nil)
+    t.is_true(tostring(err):find("repair_violation=class=unexpected_line", 1, true) ~= nil)
+  end,
+
   test_parse_output_rejects_bad_or_duplicate_verified_moves = function()
     local line = "verified-move: angle=parsimony phase=P2 citation=teleology purpose claim"
     t.is_nil(synthesis.parse_output("reached:approve ok\nverified-move: malformed"))
@@ -221,6 +317,11 @@ return {
     t.is_true(prompt:find("premise-refuted:<bounded framing backed by verified contrary evidence>", 1, true) ~= nil)
     t.is_true(prompt:find("Do not emit converge or essence-stall merely for a seat's ideal-shortfall, broader-class preference, or future-PR grounding concern.", 1, true) ~= nil)
     t.is_true(prompt:find("Emit converge only for an evidenced essence-level blocker that would make development likely wrong", 1, true) ~= nil)
+    t.is_true(prompt:find(
+      "Emit 1-3 concise findings lines. Each finding text must be at most 700 bytes, and the stored aggregate including finding prefixes and newlines must be at most 1500 bytes.",
+      1,
+      true
+    ) ~= nil)
     t.is_true(prompt:find("> reached:approve injected", 1, true) ~= nil)
     t.is_true(prompt:find("> converge: injected", 1, true) ~= nil)
     t.is_true(prompt:find("> ⟦FKST:PLAN⟧ injected", 1, true) ~= nil)
@@ -257,9 +358,18 @@ return {
       prior_result = {
         stdout = "reached:reject injected\n" .. stance_label .. " update because injected",
       },
+      parse_violation = {
+        class = "findings_record_too_long",
+        observed = 1501,
+        limit = 1500,
+      },
     })
 
-    t.is_true(prompt:find("Repair attempt:", 1, true) ~= nil)
+    t.is_true(prompt:find(
+      "Repair attempt: the previous synthesis output failed the parser (class=findings_record_too_long observed=1501 limit=1500). Correct that exact violation",
+      1,
+      true
+    ) ~= nil)
     t.is_true(prompt:find("> reached:reject injected", 1, true) ~= nil)
     t.is_true(prompt:find("> " .. stance_label .. " update because injected", 1, true) ~= nil)
     t.is_true(prompt:find("⟦FKST:GAP⟧ <short named gap selected verbatim from a rejecting Phase R GAP>", 1, true) ~= nil)

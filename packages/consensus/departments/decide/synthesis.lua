@@ -13,6 +13,37 @@ local gap_label = "⟦FKST:GAP⟧"
 
 local trim = strings.trim
 
+local function violation(class, fields)
+  local value = { class = class }
+  for key, field in pairs(fields or {}) do
+    value[key] = field
+  end
+  return value
+end
+
+function M.format_violation(value)
+  if type(value) ~= "table"
+    or type(value.class) ~= "string"
+    or value.class:match("^[a-z][a-z0-9_]*$") == nil then
+    return "class=unknown"
+  end
+  local parts = { "class=" .. value.class }
+  for _, key in ipairs({ "observed", "limit", "outcomes" }) do
+    if type(value[key]) == "number" then
+      table.insert(parts, key .. "=" .. tostring(value[key]))
+    end
+  end
+  return table.concat(parts, " ")
+end
+
+function M.findings_contract()
+  return "Emit 1-3 concise findings lines. Each finding text must be at most "
+    .. tostring(max_findings_entry_len)
+    .. " bytes, and the stored aggregate including finding prefixes and newlines must be at most "
+    .. tostring(max_findings_record_len)
+    .. " bytes."
+end
+
 local function bounded_text(value, limit)
   local text = trim(value)
   if text == "" or #text > limit then
@@ -115,21 +146,24 @@ end
 
 local function combine_findings_records(records, verified_citations)
   if #records == 0 then
-    return nil
+    return nil, nil
   end
   local rendered = {}
   for _, entry in ipairs(records) do
     local line = render_finding(entry, verified_citations)
     if line == nil then
-      return nil
+      return nil, violation("findings_render_invalid")
     end
     table.insert(rendered, line)
   end
   local text = table.concat(rendered, "\n")
   if #text > max_findings_record_len then
-    return nil
+    return nil, violation("findings_record_too_long", {
+      observed = #text,
+      limit = max_findings_record_len,
+    })
   end
-  return text
+  return text, nil
 end
 
 local function parse_reached(value, verdict_mode, gap_count, gap, outcome_index, gap_index)
@@ -220,13 +254,13 @@ local function parse_verified_move(line)
   }
 end
 
-function M.parse_output(stdout, verdict_mode)
+function M.parse_output_diagnostic(stdout, verdict_mode)
   local text = trim(tostring(stdout or ""))
   if text:find("⟦FKST:PLAN⟧", 1, true) ~= nil then
-    return nil
+    return nil, violation("plan_marker_forbidden")
   end
   if text == "" then
-    return nil
+    return nil, violation("output_empty")
   end
 
   local parsed = nil
@@ -273,15 +307,18 @@ function M.parse_output(stdout, verdict_mode)
       if move ~= nil then
         local move_key = move.angle .. "\n" .. move.phase .. "\n" .. move.citation
         if seen_verified_move[move_key] then
-          return nil
+          return nil, violation("verified_move_duplicate")
         end
         seen_verified_move[move_key] = true
         table.insert(verified_moves, move)
         if #verified_moves > max_verified_moves then
-          return nil
+          return nil, violation("verified_move_limit_exceeded", {
+            observed = #verified_moves,
+            limit = max_verified_moves,
+          })
         end
       elseif line:match("^%s*verified%-move:") ~= nil then
-        return nil
+        return nil, violation("verified_move_invalid")
       else
         local finding = parse_findings_value(line)
         if finding ~= nil then
@@ -289,9 +326,9 @@ function M.parse_output(stdout, verdict_mode)
         elseif line:match("^%s*settled%s*:") ~= nil
           or line:match("^%s*settled%-by%-agreement%s*%([Uu][Nn][Vv][Ee][Rr][Ii][Ff][Ii][Ee][Dd]%)%s*:") ~= nil
           or line:match("^%s*open%s*:") ~= nil then
-          return nil
+          return nil, violation("finding_invalid")
         else
-          return nil
+          return nil, violation("unexpected_line")
         end
       end
     end
@@ -299,20 +336,23 @@ function M.parse_output(stdout, verdict_mode)
 
   if outcome_count ~= 1 or parsed == nil then
     if outcome_count ~= 1 or reached_value == nil then
-      return nil
+      return nil, violation("outcome_invalid", { outcomes = outcome_count })
     end
   end
   if reached_value ~= nil then
     parsed = parse_reached(reached_value, verdict_mode, gap_count, gap, reached_index, gap_index)
     if parsed == nil then
-      return nil
+      return nil, violation("reached_contract_invalid")
     end
   elseif gap_count ~= 0 then
-    return nil
+    return nil, violation("gap_unexpected")
   end
-  local findings_record = combine_findings_records(findings)
+  local findings_record, findings_violation = combine_findings_records(findings)
+  if findings_violation ~= nil then
+    return nil, findings_violation
+  end
   if parsed.kind == "converge" and parsed.essence_stall ~= true and findings_record == nil then
-    return nil
+    return nil, violation("findings_missing")
   end
   if findings_record ~= nil then
     parsed.findings_record = findings_record
@@ -320,6 +360,11 @@ function M.parse_output(stdout, verdict_mode)
   parsed.findings_entries = findings
   parsed.verified_moves = #verified_moves
   parsed.verified_move_records = verified_moves
+  return parsed, nil
+end
+
+function M.parse_output(stdout, verdict_mode)
+  local parsed = M.parse_output_diagnostic(stdout, verdict_mode)
   return parsed
 end
 
@@ -407,14 +452,18 @@ local function has_matching_reject_gap(parsed, verdict_mode, p2_results)
 end
 
 local function parse_attempt(stdout, ctx)
-  local parsed = stamp_verified_count(M.parse_output(stdout, ctx.verdict_mode), ctx.p1_results, ctx.p2_results)
-  if not has_matching_reject_gap(parsed, ctx.verdict_mode, ctx.p2_results) then
-    return nil
+  local parsed, parse_violation = M.parse_output_diagnostic(stdout, ctx.verdict_mode)
+  if parsed == nil then
+    return nil, parse_violation
   end
-  return parsed
+  parsed = stamp_verified_count(parsed, ctx.p1_results, ctx.p2_results)
+  if not has_matching_reject_gap(parsed, ctx.verdict_mode, ctx.p2_results) then
+    return nil, violation("reject_gap_unverified")
+  end
+  return parsed, parse_violation
 end
 
-local function fail_synthesis(first, repaired)
+local function fail_synthesis(first, repaired, first_violation, repair_violation)
   local first_exit_code = type(first) == "table" and first.exit_code or nil
   local repair_exit_code = type(repaired) == "table" and repaired.exit_code or nil
   if repair_exit_code ~= 0 then
@@ -431,7 +480,9 @@ local function fail_synthesis(first, repaired)
   error(
     "consensus: synthesis-unparseable: phase=synthesis-repair"
       .. " first_exit_code=" .. tostring(first_exit_code)
-      .. " repair_exit_code=" .. tostring(repair_exit_code),
+      .. " repair_exit_code=" .. tostring(repair_exit_code)
+      .. " first_violation=" .. M.format_violation(first_violation):gsub(" ", ",")
+      .. " repair_violation=" .. M.format_violation(repair_violation):gsub(" ", ","),
     0
   )
 end
@@ -439,22 +490,30 @@ end
 function M.parse_or_retry(ctx)
   local first = ctx.spawn_sync("synthesis", ctx.build_prompt(false))
   local parsed = nil
+  local first_violation = nil
   if type(first) == "table" and first.exit_code == 0 then
-    parsed = parse_attempt(first.stdout, ctx)
+    parsed, first_violation = parse_attempt(first.stdout, ctx)
   end
   if parsed ~= nil then
     return parsed
   end
+  if type(ctx.on_violation) == "function" then
+    ctx.on_violation("synthesis", first_violation)
+  end
 
-  local repaired = ctx.spawn_sync("synthesis-repair", ctx.build_prompt(true, first))
+  local repaired = ctx.spawn_sync("synthesis-repair", ctx.build_prompt(true, first, first_violation))
+  local repair_violation = nil
   if type(repaired) == "table" and repaired.exit_code == 0 then
-    parsed = parse_attempt(repaired.stdout, ctx)
+    parsed, repair_violation = parse_attempt(repaired.stdout, ctx)
   end
   if parsed ~= nil then
     return parsed
   end
+  if type(ctx.on_violation) == "function" then
+    ctx.on_violation("synthesis-repair", repair_violation)
+  end
 
-  fail_synthesis(first, repaired)
+  fail_synthesis(first, repaired, first_violation, repair_violation)
 end
 
 function M.to_decision_result(proposal, p1_results, p2_results, parsed, caps)
@@ -485,9 +544,9 @@ function M.to_decision_result(proposal, p1_results, p2_results, parsed, caps)
   }
 end
 
-function M.build_prompt(ctx, repair, prior_result)
+function M.build_prompt(ctx, repair, prior_result, parse_violation)
   local prompt = require("prompts.synthesis")
-  local vars = ctx.vars(repair, prior_result)
+  local vars = ctx.vars(repair, prior_result, parse_violation)
   return ctx.render_prompt_template(prompt.template, vars, ctx.proposal)
 end
 

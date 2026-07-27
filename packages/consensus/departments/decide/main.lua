@@ -196,11 +196,20 @@ local function decide(proposal)
     verdict_mode = verdict_mode,
     p1_results = angle_results,
     p2_results = rebuttal_results,
-    build_prompt = function(repair, prior_result)
+    build_prompt = function(repair, prior_result, parse_violation)
       return core.build_synthesis_prompt(proposal, angle_results, rebuttal_results, {
         repair = repair,
         prior_result = prior_result,
+        parse_violation = parse_violation,
       })
+    end,
+    on_violation = function(phase, parse_violation)
+      log.warn(
+        "consensus dept=decide tag=PROTOCOL_VIOLATION"
+          .. " proposal_id=" .. tostring(proposal.proposal_id)
+          .. " phase=" .. tostring(phase)
+          .. " " .. synthesis.format_violation(parse_violation)
+      )
     end,
     spawn_sync = function(_kind, prompt)
       local repair = _kind == "synthesis-repair"
