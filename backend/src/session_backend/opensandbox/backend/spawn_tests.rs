@@ -487,6 +487,68 @@ async fn ensure_existing_session_restores_the_full_bundle_when_runtime_creds_are
 }
 
 #[tokio::test]
+async fn warm_cache_detects_and_repairs_credentials_lost_by_a_replacement_pod() {
+    let server = MockServer::start().await;
+    // The BatchSandbox identity survives while its Kubernetes pod is replaced.
+    Mock::given(method("GET"))
+        .and(path("/v1/sandboxes"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(list_page(json!([sandbox_json(
+                "sbx-existing",
+                "Running",
+                "2026-07-09T00:00:00Z",
+                json!({ "fkst-session-id": SESSION_ID }),
+            )]))),
+        )
+        .expect(2)
+        .mount(&server)
+        .await;
+    // Both the recovery predicate and adoption observe the replacement pod's empty
+    // credential directory.
+    Mock::given(method("GET"))
+        .and(path(EXISTING_FILE_INFO_PATH))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(EXISTING_UPLOAD_PATH))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let b = backend(&server.uri(), osb_config());
+    b.creds
+        .lock()
+        .unwrap()
+        .insert(SESSION_ID.to_string(), complete_creds());
+
+    assert!(
+        b.credential_recovery_needed_impl(SESSION_ID)
+            .await
+            .expect("runtime probe"),
+        "a warm process cache must not hide lost runtime credentials"
+    );
+    let outcome = b
+        .ensure_session_impl(&spec(), complete_creds())
+        .await
+        .expect("complete recovery");
+    assert_eq!(outcome, EnsureOutcome::AlreadyLive);
+
+    let requests = server.received_requests().await.expect("recorded requests");
+    let uploads: Vec<String> = requests
+        .iter()
+        .filter(|request| request.url.path() == EXISTING_UPLOAD_PATH)
+        .map(|request| String::from_utf8_lossy(&request.body).into_owned())
+        .collect();
+    assert_eq!(uploads.len(), 7, "six credentials plus the sentinel");
+    assert!(uploads[6].contains(SENTINEL_PATH));
+    assert!(uploads[..6]
+        .iter()
+        .all(|upload| !upload.contains(SENTINEL_PATH)));
+}
+
+#[tokio::test]
 async fn ensure_existing_session_does_not_publish_or_cache_a_partial_recovery() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

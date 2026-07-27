@@ -151,10 +151,44 @@ impl OsbBackend {
         Ok(EnsureOutcome::Created)
     }
 
-    /// Adopt `creds` for an already-live sandbox after a reconcile-side rebuild. A
-    /// warm cache only needs its authoritative bundle replaced. An empty cache means
-    /// the control plane restarted, so the runtime's completeness sentinel decides
-    /// whether this is cache-only recovery or a full sentinel-last re-upload.
+    /// A pushed credential directory is ephemeral at the container boundary, while
+    /// the OpenSandbox identity can outlive its Kubernetes pod. Probe both sides of
+    /// the recovery contract: a missing control-plane bundle needs adoption, and a
+    /// missing runtime sentinel needs a complete sentinel-last re-upload even when
+    /// the bundle cache is still warm.
+    pub(super) async fn credential_recovery_needed_impl(
+        &self,
+        session_id: &str,
+    ) -> Result<bool, BackendError> {
+        let cache_present = self
+            .creds
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(session_id);
+        if !cache_present {
+            return Ok(true);
+        }
+
+        let sandbox_id = match self.resolve_one(session_id).await {
+            Ok(view) => view.id,
+            // The runtime can disappear between planning and this probe. Route the
+            // action through `ensure_session`, which safely recreates an absent one.
+            Err(BackendError::NotFound) => return Ok(true),
+            Err(error) => return Err(error),
+        };
+        let execd = (self.execd_factory)(&sandbox_id, session_id);
+        let sentinel = path_str(&CredsLayout::new(OSB_CREDS_DIR).creds_complete());
+        match execd.file_info(&sentinel).await {
+            Ok(_) => Ok(false),
+            Err(OsbError::NotFound) => Ok(true),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Adopt `creds` for an already-live sandbox after a reconcile-side rebuild. The
+    /// runtime sentinel is authoritative even when the process-local cache is warm:
+    /// an OpenSandbox-owned Kubernetes pod can be replaced without changing the
+    /// sandbox identity or restarting the control plane.
     async fn adopt_existing_credentials(
         &self,
         sandbox_id: &str,
@@ -166,28 +200,23 @@ impl OsbBackend {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .contains_key(session_id);
-        if cache_present {
-            self.creds
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .insert(session_id.to_string(), creds);
-            return Ok(());
-        }
-
         let execd = (self.execd_factory)(sandbox_id, session_id);
         let sentinel = path_str(&CredsLayout::new(OSB_CREDS_DIR).creds_complete());
         match execd.file_info(&sentinel).await {
             Ok(_) => {
-                tracing::info!(
-                    session_id = %session_id,
-                    "opensandbox ensure_session: rebuilt empty credential bundle cache from authoritative sources"
-                );
+                if !cache_present {
+                    tracing::info!(
+                        session_id = %session_id,
+                        "opensandbox ensure_session: rebuilt empty credential bundle cache from authoritative sources"
+                    );
+                }
             }
             Err(OsbError::NotFound) => {
                 self.upload_creds(sandbox_id, session_id, &creds).await?;
                 tracing::warn!(
                     session_id = %session_id,
-                    "opensandbox ensure_session: restored complete credentials after control-plane and runtime loss"
+                    cache_present,
+                    "opensandbox ensure_session: restored complete credentials after runtime credential loss"
                 );
             }
             Err(error) => return Err(error.into()),
