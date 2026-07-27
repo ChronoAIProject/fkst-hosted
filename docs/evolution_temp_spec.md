@@ -1,6 +1,6 @@
 # FKST Evolution: GitHub-Native Continuous Product Evolution
 
-Status: Draft for discussion — revision 2
+Status: Draft for discussion — revision 3
 
 Date: 2026-07-24, revised 2026-07-27
 
@@ -26,6 +26,23 @@ Revision 2 responds to a design review. The substantive changes:
 | **Rollout inverted.** The convergence oracle ships first, alone, writing nothing. | 37 |
 
 Open questions 6 and 7 are answered in the body; 16 through 19 are new.
+
+### Changes in revision 3
+
+Revision 3 responds to a second review, which found that each mechanism
+revision 2 introduced had a hole. The substantive changes:
+
+| Change | Sections |
+| ------ | -------- |
+| **The required check must not block humans.** Requiring `fkst-evolution/input-current` on a branch requires it of *every* PR on that branch — GitHub scopes required checks to a ref, not to an app. The controller now publishes `neutral` on every non-sync PR. Without this, enrolling Evolution made every human PR permanently unmergeable. | 21.5.1(5), 21.5.1.1, 37 |
+| **The required set is defined.** Conditions 3 and 4 quantified over "every REQUIRED artifact", a concept no schema expressed. Now an explicit `required` flag with a derivation from enabled classes × observed model, minus owner-declared absent producer roles. Condition 3 splits into presence and integrity, which have different outcomes. | 16.2, 17.7, 17.7.2, 23.1 |
+| **Corroboration claim narrowed to the truth.** The journey runs in the sandbox, so the check run is a controller transcription, not independent observation. It defeats tampering, replay, forgery, and deletion — not generator trust. Invariant 41.11 restated; `automerge-managed` now states what it trusts. | 17.7.1, 41.11 |
+| **Token shape corrected.** `contents: write` alone is unbuildable: FKST sessions claim work by writing a label, because an App cannot be an assignee. Now `contents` + `issues`, still never `pull_requests`. | 25.5 |
+| **Ruleset made honest and sufficient.** Bypass-actor verification needs Administration, which this App deliberately lacks — so that item is human-acknowledged at enrollment, not machine-verified. Added required review with stale-approval dismissal, and extended the confinement check to every App-authored commit on every ref. | 25.1(5), 25.5.1, 25.8 |
+| **Phase 1 made implementable.** Canonical serialization named (RFC 8785), `normalizedRelevantConfiguration` removed as double-hashing, generator-pinned inputs enumerated, condition 5 given an algorithm, and a synthetic-baseline replay added — without it, every Phase 1 repo has no manifest and the phase measures nothing. | 17.4, 17.5, 17.6, 17.7, 37 |
+| **Singleton given a repair rule.** Ref creation is the atomic lane lock (branch keyed on input fingerprint alone); duplicates resolve to the lowest number. | 20.1.1, 21.2 |
+| **Fleet-correlated generator changes bounded.** The packages ref is a control-plane branch here, so a routine merge moves every enrolled repo's fingerprint at once — the budget now covers that, not only deliberate rebuilds. Rebuild requests made durable. | 17.4, 32.3, 32.3.1 |
+| **Accuracy finally tested.** The protected-fact veto and uncertainty emission had no test or criterion; added, plus a sync-PR review-outcome metric gating promotion to `automerge-managed`. | 31.2, 35.1, 36.5 |
 
 ## Document map
 
@@ -1184,7 +1201,7 @@ replaces the need for a database cursor or hosted artifact registry. It answers:
     "generatorEpoch": 1,
     "pinnedFingerprint": "sha256:...",
 
-    "_comment": "everything below is provenance only and does NOT gate convergence (section 17.4)",
+    "provenanceOnly": ["engineVersion", "model", "toolchain", "envFingerprint"],
     "engineVersion": "<version>",
     "model": "<provider-and-model-id>",
     "toolchain": {
@@ -1220,6 +1237,7 @@ replaces the need for a database cursor or hosted artifact registry. It answers:
       "repositoryPath": ".fkst/evolution/docs/csv-import.md",
       "contentHash": "sha256:...",
       "status": "current",
+      "required": true,
       "verification": "passed",
       "updatedAt": "2026-07-24T12:00:00Z"
     },
@@ -1241,6 +1259,7 @@ replaces the need for a database cursor or hosted artifact registry. It answers:
       },
       "contentHash": "sha256:...",
       "status": "current",
+      "required": true,
       "verification": "passed",
       "updatedAt": "2026-07-24T12:00:00Z"
     }
@@ -1383,14 +1402,35 @@ makes the rule a prefix comparison rather than a pattern set.
 The generator inputs are split by who controls them, because they converge
 differently.
 
-`generatorPinnedFingerprint` covers inputs a repository can pin, and
-participates in convergence:
+`generatorPinnedFingerprint` participates in convergence and is computed as the
+section 17.2 tree fingerprint over an explicitly enumerated leaf set, so that
+two implementations agree byte-for-byte:
 
-- every FKST manifest and package reference resolved to an immutable commit;
-- package configuration and prompts;
-- template and theme files not already covered by section 17.3;
-- schema versions for capabilities, journeys, changes, and manifest; and
-- `config.yaml`'s `generatorEpoch`.
+```text
+generatorPinnedFingerprint = SHA256(
+  "fkst-evolution-genpin-v1" ||
+  leaf("manifestRef",  <owner/repo@RESOLVED-COMMIT-SHA:path>) ||
+  leaf("package[i]",   <owner/repo@RESOLVED-COMMIT-SHA:path>)  for each package,
+                                                sorted by the full ref string ||
+  leaf("packageTree[i]", <tree fingerprint of that package's directory
+                          at the resolved commit, per section 17.2>) ||
+  leaf("schemaVersions", <decimal schemaVersion of capabilities, journeys,
+                          changes, and manifest, in that order, comma-joined>) ||
+  leaf("generatorEpoch", <decimal integer, no padding>)
+)
+```
+
+Notes that remove the remaining ambiguity:
+
+- References MUST be recorded **post-resolution**. A ref authored as a branch or
+  tag contributes its resolved commit SHA, never its symbolic name.
+- "Package configuration and prompts" and "template and theme files" are not
+  separate terms: they are covered by `packageTree[i]`, the section 17.2 tree
+  fingerprint of each resolved package directory. This is what makes the set
+  enumerable — there is no free-standing "templates located somewhere" input.
+- `generatorEpoch` is serialized as its decimal integer representation.
+- Leaves use the same length-delimited construction as section 17.2, so a name
+  and a value cannot collide across the boundary.
 
 `generatorEnvFingerprint` covers deployment facts the repository does not
 control, and is recorded as provenance only:
@@ -1423,12 +1463,19 @@ that affect visible output SHOULD enter one of the two.
 inputFingerprint = SHA256(
   "fkst-evolution-input-v2" ||
   productRelevantFingerprint ||
-  generatorPinnedFingerprint ||
-  normalizedRelevantConfiguration
+  generatorPinnedFingerprint
 )
 
 coverageState = ( coverageFingerprint, observedHead )
 ```
+
+An earlier draft added a third term, `normalizedRelevantConfiguration`. It is
+removed: `config.yaml` is already hashed as raw bytes into
+`productRelevantFingerprint` by section 17.3, so a normalized projection would
+hash the same file twice under two different rules, and the term was never
+defined. Raw-bytes-once is the rule. A cosmetic reformat of `config.yaml`
+therefore does admit a cycle; that is accepted as the price of having exactly
+one definition, and it is rare.
 
 `inputFingerprint` decides whether a cycle runs and whether a sync PR is stale.
 `coverageState` records what range was observed.
@@ -1466,8 +1513,16 @@ The output fingerprint covers everything Evolution wrote:
 `manifest.json` is excluded from repository *file* hashing to avoid a circular
 hash, because the file contains the fingerprint being computed. A canonical
 projection of it MUST nevertheless be included: every field except
-`outputFingerprint` itself, serialized with sorted keys and no insignificant
-whitespace.
+`outputFingerprint` itself, serialized as **JCS (RFC 8785, JSON Canonicalization
+Scheme)**.
+
+RFC 8785 is named rather than described because this projection enters a hash,
+so byte-exactness is the entire point, and "sorted keys and no insignificant
+whitespace" — the earlier draft's wording — leaves number formatting, Unicode
+escaping and normalization, and duplicate-key handling unspecified. Two
+conforming implementations would disagree on the fingerprint of the same
+manifest. Implementations MUST reject a manifest containing duplicate keys
+rather than canonicalizing it.
 
 This is a **MUST**, not the previous draft's MAY. Under the MAY, the
 `verification` and `artifacts` sections could sit outside the hash while
@@ -1485,13 +1540,33 @@ by reading a status field out of the manifest alone.
    fingerprint;
 2. the current output fingerprint equals the committed manifest output
    fingerprint;
-3. every REQUIRED artifact is present, and for each one the manifest's
-   `contentHash` matches a freshly computed hash of the blob at its
-   `repositoryPath`, or of the referenced Release asset;
-4. every REQUIRED verification entry is corroborated per section 17.7.1;
+3. **presence** — every required artifact (section 17.7.2) whose status is not
+   `removed` exists at its `repositoryPath` or as its referenced Release asset;
+   and **integrity** — for each one present, the manifest's `contentHash`
+   matches a freshly computed hash of those bytes;
+4. every required verification entry is corroborated per section 17.7.1;
 5. no newer **product-relevant** change remains uncovered; and
 6. no open canonical sync PR in the artifact repository represents a different
    current input.
+
+**Evaluating condition 5.** It is not implied by condition 1: a product-relevant
+change followed by its revert leaves `productRelevantFingerprint` equal to the
+manifest's while product-relevant commits remain uncovered. The required method
+is a single comparison, not a per-commit walk:
+
+```text
+uncovered = (manifest.source.previousCoveredHead != observedHead)
+            AND treeDiff(previousCoveredHead, observedHead)
+                  intersects source.productRelevant
+```
+
+`treeDiff` is one `GET /repos/{o}/{r}/compare/{base}...{head}` call, whose
+changed-file list is intersected with the product-relevant selector. Condition 5
+holds when that intersection is empty. Implementations MUST NOT enumerate and
+hash every commit in the range on every reconcile of every repository; the range
+is walked commit-by-commit only when a cycle actually runs (section 15.5). When
+the compare response is truncated, treat condition 5 as failed rather than
+guessing.
 
 Condition 5 deliberately says product-relevant, not authoritative. Under the
 section 17.5 split, `coverageState` advances only when a cycle merges, so after
@@ -1502,18 +1577,102 @@ reproduce exactly the behavior the split exists to remove. Coverage lag is not a
 convergence failure; it is reconciled in batch by the next product-relevant
 cycle, which walks the full range from `previousCoveredHead` (section 15.5).
 
-A mismatch in condition 3 is managed-output drift and MUST be handled under
-section 17.8. Because the mismatch means either the file or the manifest was
-edited outside the Evolution lane, it is resolved as `block` regardless of the
-repository's configured drift policy — a `contentHash` disagreeing with its own
-bytes is an integrity failure, not the ordinary manual-edit case that `repair`
-and `adopt` address.
+**The two halves of condition 3 have different outcomes.** An *integrity*
+failure — bytes present but disagreeing with their recorded `contentHash` —
+means either the file or the manifest was edited outside the Evolution lane. It
+is managed-output drift under section 17.8 and is resolved as `block` regardless
+of the configured drift policy.
+
+A *presence* failure is not drift and MUST NOT be routed to `block`. An artifact
+can be legitimately absent because its first generation failed, or because its
+producer role is not deployed at all. Presence failure is an ordinary
+non-converged outcome: it admits a cycle, retries under section 26.4's
+classification, and leaves any previous good artifact untouched (section 26.5).
+Conflating the two would force a repository that has simply never rendered a
+video into an integrity-failure branch its drift policy cannot reach.
+
+#### 17.7.2 Which artifacts and verifications are required
+
+Conditions 3 and 4 quantify over a set that MUST be derivable from repository
+state alone. It is not a judgement made by the generator, and it is not implied
+by an artifact merely appearing in `artifacts[]`.
+
+Each artifact record carries an explicit boolean:
+
+```json
+"required": true
+```
+
+The expected set is the cross product of **enabled `managedOutputs` classes**
+(section 13.2) with the **observed capabilities and journeys** that declare an
+artifact of that class, minus any producer role the owner has declared absent:
+
+```yaml
+# config.yaml — producer roles this deployment does not run.
+# The verifier must not report their artifact classes as missing.
+absentProducerRoles:
+  - "demo-producer"
+  - "artifact-renderer"
+```
+
+Rules:
+
+1. An artifact class whose producer role is listed in `absentProducerRoles`, or
+   whose `managedOutputs` entry is disabled, contributes **no** required
+   entries. Section 28.1's requirement that the verifier know which roles were
+   omitted is satisfied by this declaration rather than by verifier-internal
+   knowledge — the control plane must be able to evaluate conditions 3 and 4
+   without consulting a generator-side actor.
+2. An entry with status `removed` is a tombstone. It is excluded from the
+   presence test by construction; its bytes are permitted to be absent.
+3. An entry with status `blocked` or `failed` is required-but-absent. It keeps
+   the repository non-converged, truthfully, until it generates or the owner
+   disables its class. It MUST NOT be silently downgraded to not-required.
+4. `required: false` entries are informational: they are recorded with
+   provenance and are ignored by conditions 3 and 4.
+
+The two readings this replaces both failed. Quantifying over all of
+`artifacts[]` made every tombstone and every never-generated artifact a
+permanent convergence failure. Quantifying over entries whose status is already
+`current` let a generator mark everything `stale` and converge with nothing
+generated — destroying invariant 41.11.
 
 #### 17.7.1 Corroborating verification
 
 "Corroborated" means: the controller re-fetches the check run that recorded the
-verification result and independently confirms it. It is not a status string in
-the manifest, and it is not a claim by the generation sandbox.
+verification result and confirms its actor, freshness, and conclusion. It is not
+a status string read out of the manifest.
+
+**What corroboration does and does not establish.** It is honest to be precise
+here, because invariant 41.11 rests on it.
+
+It *does* defeat: a hand-edited `manifest.json` claiming success; replay of a
+stale verification against new input; a check run published by any actor other
+than the configured App; and silent deletion of the evidence.
+
+It does **not** establish independence from the generator. Journeys are executed
+by the verifier role inside the generation sandbox (sections 28.1, 20.2 step 14),
+and section 25.2.1 has the controller parse structured results without
+evaluating them. The check run is therefore a controller **transcription** of a
+sandbox-produced result, bound to an actor and an input fingerprint. An earlier
+draft claimed corroboration was "not a claim by the generation sandbox"; that
+was an overstatement and is withdrawn.
+
+The consequence must be stated rather than hidden: **`automerge-managed` trusts
+the generation zone's verification result.** Section 25.2.1 already grants that
+a merged pull request gives its author code execution in that zone. A deployment
+unwilling to extend that trust has two options, and MUST take one before
+enabling `automerge-managed`:
+
+- have the controller derive the conclusion from an execution it observes
+  itself, over the pushed sync-branch tree, using a runner the sandbox cannot
+  influence; or
+- keep `publication.mode` at `propose`, where a human is the verifier of last
+  resort.
+
+The check-run `output` MUST record the provenance of the result — which package
+role produced it, at which resolved commit — so that a later reader can tell
+transcription from independent observation.
 
 The manifest's `verification` block MUST therefore record, for each required
 check, the identity of a GitHub check run:
@@ -1740,6 +1899,41 @@ tuple, there MUST be at most:
 The generic FKST behavior of processing independent issues in parallel MUST NOT
 be used to create one Evolution issue per commit.
 
+#### 20.1.1 How the singleton is enforced, and repaired when it is not
+
+There is no compare-and-swap on GitHub issue creation, leader election is an
+unfenced time-based Lease, and the issue index is eventually consistent
+(section 26.2). Duplicate creation is therefore possible and MUST have a
+specified repair, not merely a specified prohibition.
+
+**Primary lock.** The sync branch name of section 21.2 MUST be keyed on the
+input fingerprint alone:
+
+```text
+fkst/evolution/<input-short-hash>
+```
+
+`POST /git/refs` fails with `422` when the ref already exists, which makes ref
+creation the atomic lane lock the issue index cannot provide. An earlier draft
+keyed the branch on the issue number as well, which made two racing lanes
+produce two distinct branch names and defeated this.
+
+**Repair.** When reconciliation observes more than one candidate sync issue or
+sync PR for one lane, markers and App identity cannot disambiguate them —
+duplicates of the same lane carry identical markers and the same author. The
+canonical resource is therefore **the lowest-numbered** one, and the controller
+MUST:
+
+1. keep the lowest-numbered issue or PR as canonical;
+2. comment on each duplicate identifying the canonical resource, then close it
+   without deleting anything; and
+3. report the event, since repeated duplication indicates a leader or index
+   problem rather than a benign race.
+
+Duplicate *execution* is separately prevented by section 28.3's
+`max_in_flight = 1`; this rule addresses the residual duplicate coordination
+resources.
+
 ### 20.2 Reconciliation algorithm
 
 Each canonical reconciliation performs these steps:
@@ -1942,8 +2136,13 @@ rather than by loosening the generic validator for all sessions.
 A canonical cycle SHOULD use an owned branch such as:
 
 ```text
-fkst/evolution/issue-<issue-number>/<input-short-hash>
+fkst/evolution/<input-short-hash>
 ```
+
+The name is keyed on the input fingerprint **alone**, deliberately: creating the
+ref is the lane's atomic lock (section 20.1.1), which only works if two racing
+reconciliations compute the same name. Including the issue number would give
+them different names and defeat it.
 
 The branch is temporary and MAY be deleted after merge. Evolution MUST NOT
 force-push shared branches. If the trusted source advances while the sync PR is
@@ -2040,6 +2239,39 @@ The gate is expressed as an artifact GitHub already honors:
 4. The artifact repository's ruleset REQUIRES that check. Enrollment MUST verify
    the requirement is present (section 25.5.1); a gate no ruleset requires is
    advisory.
+5. **The control plane MUST publish `fkst-evolution/input-current` with
+   conclusion `neutral` on the head of every pull request targeting the
+   protected branch that is not the canonical sync PR**, and MUST refresh it on
+   every `pull_request.synchronize`.
+
+#### 21.5.1.1 Why rule 5 is not optional
+
+A GitHub ruleset's required-status-checks rule conditions on the **protected
+ref**. It has no head-branch, author, or App condition. Once
+`fkst-evolution/input-current` is required on a branch, *every* pull request
+targeting that branch must report it — and with the default
+`artifactRepository: "."` (section 13.2) and section 21.1's rule that Evolution
+targets the resolved default branch, that ref is the product repository's own
+default branch: the base of every ordinary human pull request.
+
+Without rule 5, the only publisher is the control plane on the sync PR head, so
+every human PR would sit permanently at "Expected — Waiting for status to be
+reported" and could not be merged by anyone. Enrolling Evolution would halt
+development in the repository Evolution exists to document, before it produced a
+single artifact — and removing the rule would trip the fail-closed gate at
+section 20.2 step 8, so the repository could never leave `observe`. Both
+branches of the owner's only choice would be wrong.
+
+`neutral` is the correct conclusion: GitHub treats it as not-failing for
+required-check purposes, and it truthfully says "Evolution asserts nothing about
+this pull request," which is exactly the case. Only the canonical sync PR ever
+receives `success` or `failure`.
+
+Implementations MAY instead omit ruleset item 3 entirely and rely solely on the
+controller-performed `sha`-pinned merge. That is a coherent choice, but it
+weakens invariant 41.7's "check-gated" to "controller-gated" and removes the
+protection against a *human* merging a stale or unverified sync PR from the
+GitHub UI. If taken, both must be restated.
 
 This requires `checks: write`, which open question 40.7 previously asked about
 only for reading.
@@ -2082,8 +2314,11 @@ verification failed and whose fingerprint is stale would be merged on the next
 ordinary sweep, in any `publication.mode` including `propose`, violating
 invariants 41.7 and 41.11.
 
-The generic hook MUST therefore skip any pull request whose head branch matches
-`fkst/evolution/*` or whose body carries the `fkst-evolution-pr:v1` marker.
+The generic hook MUST therefore skip any pull request whose body carries the
+`fkst-evolution-pr:v1` marker. A head-branch match on `fkst/evolution/*` MAY be
+used as a cheap additional signal, but MUST NOT be the only one: candidate
+branch names are composed by the engine from platform-owned constants, so the
+name is not guaranteed to match. The marker is the load-bearing half.
 This exclusion MUST be covered by a regression test. It is not sufficient for
 Appendix D to note that the generic hook "must not be reused"; it must be
 actively excluded.
@@ -2161,7 +2396,8 @@ Every artifact record MUST include:
 - repository path or GitHub Release asset identity;
 - content hash;
 - freshness status;
-- verification status; and
+- verification status;
+- a `required` boolean (section 17.7.2); and
 - creation or last-update time.
 
 ### 23.2 Dependency graph
@@ -2370,9 +2606,11 @@ Evolution MUST preserve these security properties:
    boundary. Configuration selects among subtrees inside a fixed root; it
    cannot move the root (sections 12.1.1, 13.3.1).
 4. Generated artifacts cannot silently disclose secrets or private demo data.
-5. A compromised renderer cannot **merge** its own output, cannot write to the
-   trusted source branch, and cannot write outside `.fkst/evolution/` in any
-   change that reaches that branch.
+5. A compromised renderer cannot **merge** its own output (section 25.5), and
+   cannot write to a branch protected by the section 25.5.1 ruleset. Any
+   App-authored commit outside `.fkst/evolution/` on any ref is detected and
+   blocks the lane (section 25.8). Confinement rests on ruleset item 5, which
+   the permission model cannot machine-verify — see section 25.5.1.
 6. A forged webhook cannot trigger repository access.
 7. A malicious repository cannot use prompt content to override package or
    platform policy.
@@ -2478,13 +2716,14 @@ unprotected branch in the repository and can create and publish Releases. All
 credential design below is bounded by that fact, and no wording in this
 document may imply otherwise.
 
-The generation sandbox is granted `contents: write` and nothing else:
+The generation sandbox is granted `contents: write` and `issues: write`, and
+never `pull_requests: write`:
 
 | Phase                          | Holder     | Permissions                                  |
 | ------------------------------ | ---------- | -------------------------------------------- |
 | Discovery, contents read       | Controller | `contents: read`, `metadata: read`           |
 | PR preview comment             | Controller | `pull_requests: write`                       |
-| Generation, sync branch push   | **Sandbox**| `contents: write` **only**                   |
+| Generation, sync branch push   | **Sandbox**| `contents: write` + `issues: write`          |
 | Sync issue and PR mutation     | Controller | `issues: write`, `pull_requests: write`      |
 | Merge gate check run           | Controller | `checks: write`                              |
 | Merge                          | Controller | `pull_requests: write`, `contents: write`    |
@@ -2492,12 +2731,28 @@ The generation sandbox is granted `contents: write` and nothing else:
 
 Withholding `pull_requests: write` from the sandbox is the load-bearing part.
 It is what makes "generated code cannot merge itself" a property rather than a
-convention, and it is a **MUST**, not the previous draft's SHOULD.
+convention, and it is a **MUST**, not an earlier draft's SHOULD.
 
 This matters concretely in the current implementation, where the session token
 and the auto-merge token are capability-identical (`contents`, `issues`,
 `pull_requests` all `write`) — meaning a session pod can merge its own pull
 request today. Evolution MUST NOT reuse that token shape.
+
+**Why `issues: write` is retained rather than withheld.** An earlier draft gave
+the sandbox `contents: write` and nothing else. That is unbuildable against the
+FKST session runtime this design deliberately reuses: a session claims its work
+item by **writing a label** on the issue — the claim mode is fixed to `label`
+precisely because a GitHub App cannot be an issue assignee — so a
+contents-only token cannot claim work and cannot even list the issue. Sections
+20.3 and 28.2 depend on that same routing.
+
+`issues: write` therefore stays, and the residual reach of section 25.5.1 must
+be read to include issue and label writes across the repository: a compromised
+generator can comment on, label, and close issues. That is materially less
+severe than merge authority, and it is not concealable — every such action is
+attributed to the App in the issue timeline. An implementation that wants it
+gone must take the tokenless variant below; there is no middle option, because
+the claim mechanism is a platform constraint rather than a configuration choice.
 
 #### 25.5.1 Residual reach and the required ruleset
 
@@ -2522,12 +2777,45 @@ direct pushes available. The ruleset MUST therefore:
    request;
 2. block force pushes and branch deletion;
 3. require the `fkst-evolution/input-current` check run (section 21.5.1(4)) on
-   the artifact repository's target branch; and
-4. list no bypass actor that resolves to the Evolution App, including via an
+   the artifact repository's target branch, together with the `neutral`
+   publication of section 21.5.1(5);
+4. require at least one approving review and dismiss stale approvals on new
+   commits; and
+5. list no bypass actor that resolves to the Evolution App, including via an
    organization role or team.
 
-Without all four, section 21.6's "Evolution MUST NOT push directly to the
+Item 4 exists because without it the sandbox's repository-wide `contents: write`
+can push to the head branch of a human's already-approved open pull request, and
+that content reaches the protected branch on the human's merge — never passing
+through the section 25.8 check, which only inspects the sync PR.
+
+Without items 1-3, section 21.6's "Evolution MUST NOT push directly to the
 trusted source branch" is a policy the credential does not enforce.
+
+**What is machine-verifiable, and what is not.** Items 1-4 are readable through
+`GET /repos/{owner}/{repo}/rules/branches/{branch}`, which needs no permission
+beyond the implicit `metadata: read`. **Item 5 is not.** GitHub returns
+`bypass_actors` only to a caller with write access to the ruleset, which
+requires the Administration permission — and this deployment's App deliberately
+declares none, because including it makes every unscoped token mint fail with
+`422` on a correctly least-privilege installation. Organization-level rulesets,
+roles, and teams need org-scoped reads that no repository permission grants.
+
+Therefore:
+
+- Section 20.2 step 8 MUST verify items 1-4 every cycle and fail closed.
+- Item 5 MUST be verified **at enrollment by a human**, recorded as an
+  acknowledgement in the enrollment PR, and MUST NOT be represented as
+  machine-enforced. An implementation that silently treats an absent
+  `bypass_actors` field as "no bypass actors" is failing open on the one item
+  it cannot see, which is worse than not checking.
+- An implementation MAY additionally verify item 5 where the installation
+  happens to grant Administration, and SHOULD report the difference between
+  verified and acknowledged in the section 30.2 repository view.
+
+This is a real residual: item 5 is the clause that makes items 1-4 meaningful,
+and it is the one the permission model cannot confirm. Section 25.1(5) is
+narrowed accordingly.
 
 Implementations that require containment stronger than a ruleset provides
 SHOULD adopt the stricter variant: the sandbox holds no GitHub token at all and
@@ -2573,6 +2861,21 @@ This check is a **merge-time veto, not a write prevention** — section 25.5.1
 explains why the credential cannot prevent the write itself. The ruleset
 required there is what stops a confined-at-merge path set from being bypassed
 by a direct push.
+
+**Scope.** The check MUST additionally be applied to every commit authored by
+the Evolution App on **every ref**, not only on the sync PR, and a violation
+MUST be reported and block the lane. Restricting it to the sync PR leaves two
+channels open: the sandbox's repository-wide `contents: write` can push
+non-Evolution content to an integration branch, or onto the head branch of a
+human's already-approved pull request, and that content then reaches the
+protected branch on the human's merge without ever passing through this check.
+Section 25.5.1 item 4's dismiss-stale-approvals requirement closes the second
+channel; this rule is what detects the first.
+
+The one deliberate exception is the intent-proposal pull request of section
+12.1.1 rule 2, which by design touches `intent/**`. It is never merged by
+autonomous policy and is identified by carrying no `fkst-evolution-pr:v1`
+marker.
 
 ### 25.9 Generated-content safety
 
@@ -2723,7 +3026,9 @@ Periodic reconciliation SHOULD detect:
 - an open sync issue with no live runtime and no PR;
 - an open sync PR with no matching issue;
 - a draft Release with no matching open PR or canonical manifest;
-- a manifest that references a missing Release asset;
+- a manifest that references a missing Release asset (detection is owned by
+  section 17.7 condition 3, which blocks convergence; section 26.6 only
+  reports it so an operator sees it without reading fingerprints);
 - multiple candidate sync issues or PRs; and
 - a live runtime for a retired trigger.
 
@@ -2964,6 +3269,15 @@ The UI SHOULD distinguish:
 Status MUST not be inferred from color alone and MUST not display unknown data
 as zero or healthy.
 
+This nine-value list is a **projection**, not a fourth vocabulary. Each value
+MUST be derived from a stated (cycle state, artifact status) pair — cycle states
+from section 20.5, artifact statuses from section 16.3 — and the mapping MUST be
+documented. Appendix B's `Not configured` corresponds to a disabled
+`managedOutputs` class or an `absentProducerRoles` entry (section 17.7.2), not to
+an artifact status. Section 33.3's fail-on-unknown rule applies to the two source
+vocabularies; the projection MUST surface an unmapped pair as unknown rather than
+choosing a neighbouring value.
+
 ### 30.4 API behavior
 
 Any public API SHOULD return a projection timestamp, source GitHub revision,
@@ -2992,6 +3306,11 @@ noise. Durable labels provide compact lifecycle latches.
 
 The service MAY expose ephemeral metrics such as:
 
+- sync-PR review outcome rate: merged unchanged, merged after human edits, or
+  closed unmerged. This is the only signal that generated content is actually
+  accurate, and a deployment SHOULD require an acceptable rate before promoting
+  a repository from `propose` to `automerge-managed` (section 27.1). Every
+  other metric here measures plumbing;
 - reconcile hints received and dropped;
 - repositories reconciled;
 - converged no-ops;
@@ -3037,7 +3356,7 @@ Examples:
 
 A full rebuild SHOULD occur when:
 
-- the owner requests it;
+- the owner requests it, durably (see below);
 - `config.yaml`'s `generatorEpoch` is incremented;
 - a configured product release is published;
 - `generatorPinnedFingerprint` changes — that is, the repository's own resolved
@@ -3046,6 +3365,32 @@ A full rebuild SHOULD occur when:
 - previous manifest ancestry is lost; or
 - dependency integrity cannot establish selective safety.
 
+#### 32.3.1 A rebuild request must be durable
+
+A forced rebuild is a first-class trigger — section 18.3 routes
+`release.published` to it, section 20.5 draws it as the `CONVERGED -> PENDING`
+edge, and section 37 Phase 6 exposes it as a manual command — but publishing a
+Release changes none of the six fingerprints, and section 20.2 stops
+unconditionally at step 7 when converged. An in-memory "force-full flag" is lost
+on the queue-full path of section 26.2 and on restart, which would make that
+row's "recover on sweep/resync" promise false for this event class and
+invariants 41.2 and 41.14 unsatisfiable for it.
+
+A rebuild request MUST therefore be durable GitHub state. The control plane
+records it as:
+
+- a `fkst-evolution-rebuild-requested` label on the sync issue, applied by an
+  owner or by the controller on a qualifying `release.published`; and
+- `source.lastFullRebuildFor` in the manifest, recording the trigger already
+  satisfied.
+
+Section 20.2 MUST consult both **before** its step 7 convergence stop, and treat
+a request whose identifier differs from `lastFullRebuildFor` as
+not-converged. The label is removed when the resulting cycle merges.
+
+`generatorEpoch` remains the owner-written lever; it cannot be the controller's,
+because invariant 41.16 forbids the controller from writing `config.yaml`.
+
 A change to `generatorEnvFingerprint` alone (engine version, model identifier,
 renderer versions — section 17.4) MUST NOT trigger a full rebuild. It is
 recorded as provenance. The previous draft's condition "generator fingerprint
@@ -3053,10 +3398,27 @@ changes incompatibly" never defined "incompatibly" and, applied to the
 environment fingerprint, would have made every operator model roll a
 fleet-wide regeneration event.
 
-When an operator does intend a fleet-wide regeneration, it MUST be executed
-under a rollout budget bounding how many repositories may enter a cycle per
-interval, so that section 18.4's startup resync cannot synchronize the entire
-fleet's regeneration with a deploy.
+The rollout budget MUST bound **any fleet-correlated fingerprint change**, not
+only a deliberate regeneration. Bounding only the intended case leaves the
+common case unbounded.
+
+This matters because `generatorPinnedFingerprint`'s "repository-pinnable"
+framing is inverted in practice for the dominant deployment. Sections 25.10 and
+28.4 permit authoring package references as a branch, and this deployment's
+canonical form *is* a branch, control-plane-supplied and identical for every
+enrolled repository. An ordinary merge to that packages branch moves the
+resolved commit for the entire fleet at once and fails convergence condition 1
+everywhere within one sweep — and it is not an "intended fleet-wide
+regeneration", so an intent-conditioned budget never engages.
+
+Therefore:
+
+- Any change that moves `generatorPinnedFingerprint` for more than a configured
+  fraction of enrolled repositories in one interval MUST be rate-limited by the
+  rollout budget, regardless of intent.
+- Enrollment SHOULD record a commit-pinned package reference that advances only
+  under an explicit per-repository lever, so that a packages-branch merge is a
+  deliberate adoption rather than an implicit fleet event.
 
 ### 32.4 Media generation
 
@@ -3187,7 +3549,14 @@ Unit tests MUST cover:
   carve-outs and symlink and submodule cases (sections 12.1.1, 25.8);
 - capability identity: rename preserves the identifier, and merge and split
   produce relations rather than remove-plus-add (sections 14.2.1, 14.2.2);
-- suppression-latch set, match, and auto-clear (section 26.2.1); and
+- suppression-latch set, match, auto-clear, and survival of sync-issue closure
+  (section 26.2.1);
+- the required-set derivation of section 17.7.2, including that a `removed`
+  tombstone and an `absentProducerRoles` class contribute no required entries;
+- the protected-fact veto of section 14.5: a generated claim contradicting
+  `intent/overrides.yaml` blocks publication of that artifact;
+- section 8.6 uncertainty emission: an unsupported inference is marked
+  `current-unverified` or raised for review, never asserted as fact; and
 - secret enforcement.
 
 ### 35.2 Property tests
@@ -3347,6 +3716,19 @@ merely implemented:
 - A cycle whose source keeps advancing terminates as `BLOCKED` with reason
   `source-outpaces-cycle` rather than regenerating indefinitely (section 20.2
   step 17).
+- Requiring `fkst-evolution/input-current` on a branch does not block ordinary
+  human pull requests, because the controller publishes `neutral` on every
+  non-sync PR targeting it (section 21.5.1(5)). Demonstrated by opening an
+  unrelated human PR on an enrolled repository and merging it.
+- A generated claim that contradicts a protected fact in
+  `intent/overrides.yaml` blocks publication of that artifact and produces a
+  review request (section 14.5).
+- An inference with no supporting evidence is emitted as `current-unverified`
+  or raised for owner review, and never as a plain factual claim (section 8.6).
+- Two concurrent reconciliations produce exactly one sync branch, because ref
+  creation is the lane lock; and where two sync issues nonetheless exist, the
+  lower-numbered one survives and the other is closed with a pointer (section
+  20.1.1).
 
 ### 36.6 Recovery
 
@@ -3380,34 +3762,71 @@ the generators — so it ships first, alone, writing nothing.
 - All six fingerprints of section 17.1.
 - Manifest read, parse, validate, and section 17.7 evaluation.
 - Startup, sweep, and periodic full resync.
-- Output is one line per repository: converged, or not converged with the
-  reason. The only permitted write is an optional single sync-issue comment.
-- Run in `observe` mode against three to five real repositories for at least a
-  week.
+- **Synthetic-baseline replay.** Every Phase 1 repository is a real repository
+  with no Evolution history and therefore no manifest, so conditions 1, 2, 3, 4
+  and 6 have no operand and a live oracle would emit `BASELINE_REQUIRED` for
+  every repository for a week — measuring nothing. The phase MUST therefore
+  additionally: pick a historical revision per repository, compute a
+  *hypothetical* manifest at that revision, replay the branch forward
+  commit-by-commit, and report per commit whether it was product-relevant or
+  coverage-only, and at which commits a cycle would have been admitted.
+- Output is one line per repository per replayed commit, plus a summary: the
+  would-have-fired timeline, the input delta per admitted cycle, and the
+  product-relevant/coverage classification rate. The only permitted write is an
+  optional single sync-issue comment.
+- Run against three to five real repositories for at least a week of history.
 
-This phase answers questions 40.16, 40.17, and 40.18 with measurement rather
-than argument: how often a cycle would have fired, what an operator model roll
-does to the fleet, and what section 17.8 drift looks like in practice — all at
-zero blast radius.
+This phase answers questions 40.16 and 40.17 with measurement rather than
+argument: how often a cycle would have fired under a candidate
+`source.productRelevant` set, and what a generator change does to the fleet —
+all at zero blast radius. Question 40.18 (real-world drift rate) is **not**
+answerable here: drift is defined against a committed manifest's
+`outputFingerprint` and `contentHash`, and no Phase 1 repository has one. It
+moves to Phase 2.
+
+Note that conditions 3 and 4 are exercised only against the synthetic baseline,
+not against production history. Their first real test is Phase 2.
 
 ### Phase 2: one artifact class, `propose` only, one pilot repository
+
+Phase 2 is the first phase that writes, so the mitigations that make writing
+safe belong here, not in Phase 3. An earlier draft deferred all three and had
+Phase 2 open real sync PRs on a real repository using today's session token
+shape — which section 25.5 notes can merge its own pull request — with no
+ruleset backstop and the generic auto-merge hook still armed.
+
+Prerequisites, all before the first write:
+
+- The section 25.5 token split, so the sandbox cannot merge.
+- The section 21.5.2 exclusion of sync PRs from the generic repo-level
+  auto-merge hook, with its regression test. Phase 2's "no auto-merge" scopes
+  Evolution's own machinery; it does not disarm a pre-existing hook that any
+  other session on the repository may have armed via `### Auto-merge`.
+- Ruleset items 1, 2 and 4 of section 25.5.1 (items 3 and 5 depend on the
+  Phase 3 check run and on human acknowledgement respectively).
+- A pilot repository that is disposable, or verified to have no
+  auto-merge-opted session.
+
+Then:
 
 - Documentation only. No skills, journeys, media, Releases, or auto-merge.
 - Add push and pull_request webhook classification, singleton issue, and
   dynamic `@default` resolution.
 - Prove section 22 self-trigger suppression and section 20.2 step 17
   regeneration against real pushes.
+- Measure section 17.8 drift rate (open question 40.18), which Phase 1 cannot.
 
 ### Phase 3: the merge gate as a first-class object
 
-- The `fkst-evolution/input-current` check run (section 21.5.1).
-- The `sha`-pinned controller merge fallback.
-- Exclusion of sync PRs from the generic auto-merge hook (section 21.5.2),
-  with its regression test.
-- The branch-ruleset enrollment precondition (section 25.5.1) and the section
-  25.5 token split.
-- `automerge-managed` only after all of the above, and only on a disposable
-  repository.
+- The `fkst-evolution/input-current` check run (section 21.5.1), **including
+  the 21.5.1(5) `neutral` publication on non-sync PRs**, which must ship in the
+  same change as the ruleset requirement — requiring the check without
+  publishing it blocks every human pull request on the branch.
+- The controller-performed `sha`-pinned merge.
+- Ruleset items 3 and 5 completed (section 25.5.1).
+- `automerge-managed` only after all of the above, only on a disposable
+  repository, and only once section 17.7.1's trust consequence has been
+  explicitly accepted.
 
 ### Phase 4: PR preview
 
@@ -3654,10 +4073,14 @@ invariants:
 8. Human product intent is not an autonomous managed output.
 9. Input and output fingerprints prevent recursive self-triggering.
 10. Every artifact records exact source and generator provenance.
-11. Required verification failure cannot appear as current success. This holds
-    only because section 17.7 re-derives conditions 3 and 4 from repository
-    state and a controller-published check run, rather than reading a status
-    field out of the manifest the generator wrote.
+11. A recorded verification result cannot be altered, replayed, forged by
+    another actor, or deleted without detection, because section 17.7
+    re-derives conditions 3 and 4 from repository state and a re-fetched
+    controller-published check run rather than from a manifest status field.
+    This is narrower than "verification failure cannot appear as success": the
+    result itself originates in the generation sandbox (section 17.7.1), so
+    `automerge-managed` trusts that zone unless the deployment adopts
+    controller-observed execution.
 12. A failed run preserves the last known good canonical artifact.
 13. Large durable binaries remain in GitHub, not external storage.
 14. A full restart can reconstruct convergence and pending work from GitHub.
