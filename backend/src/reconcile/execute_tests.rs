@@ -173,7 +173,16 @@ async fn missing_target_is_created_at_the_current_source_head() {
     )]));
     let ctx = target_branch_ctx(api.clone());
 
-    assert!(ensure_target_branch(&registration(), &ctx).await);
+    let topology = ensure_branch_topology(&registration(), &ctx)
+        .await
+        .expect("branch topology resolves");
+    assert_eq!(
+        topology,
+        ResolvedBranchTopology {
+            upstream: "main".to_string(),
+            integration: "fkst-hosted-default".to_string(),
+        }
+    );
     assert_eq!(
         *api.create_refs.lock().unwrap(),
         [("fkst-hosted-default".to_string(), "source-head".to_string())]
@@ -190,7 +199,9 @@ async fn target_create_lost_race_is_successful() {
     *api.create_ref_error.lock().unwrap() = Some(GithubAppError::RefExists);
     let ctx = target_branch_ctx(api);
 
-    assert!(ensure_target_branch(&registration(), &ctx).await);
+    assert!(ensure_branch_topology(&registration(), &ctx)
+        .await
+        .is_some());
 }
 
 #[tokio::test]
@@ -202,7 +213,32 @@ async fn existing_target_is_never_reset_or_recreated() {
     )]));
     let ctx = target_branch_ctx(api.clone());
 
-    assert!(ensure_target_branch(&registration(), &ctx).await);
+    let topology = ensure_branch_topology(&registration(), &ctx)
+        .await
+        .expect("existing target still resolves its upstream");
+    assert_eq!(topology.upstream, "main");
+    assert_eq!(topology.integration, "fkst-hosted-default");
+    assert!(api.create_refs.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn explicit_source_remains_upstream_after_target_exists() {
+    let api = Arc::new(RecordingApi::default());
+    *api.branch_heads.lock().unwrap() = Some(std::collections::HashMap::from([(
+        "integration/release".to_string(),
+        "existing-head".to_string(),
+    )]));
+    let ctx = target_branch_ctx(api.clone());
+    let mut reg = registration();
+    reg.def.source_branch = Some("release/v2".to_string());
+    reg.def.target_branch = Some("integration/release".to_string());
+
+    let topology = ensure_branch_topology(&reg, &ctx)
+        .await
+        .expect("explicit topology resolves");
+
+    assert_eq!(topology.upstream, "release/v2");
+    assert_eq!(topology.integration, "integration/release");
     assert!(api.create_refs.lock().unwrap().is_empty());
 }
 
@@ -218,12 +254,21 @@ async fn target_create_failure_skips_spawn_without_issue_feedback() {
     ));
     let ctx = target_branch_ctx(api.clone());
 
-    assert!(!ensure_target_branch(&registration(), &ctx).await);
+    assert!(ensure_branch_topology(&registration(), &ctx)
+        .await
+        .is_none());
     assert!(api.comments.lock().unwrap().is_empty());
     assert!(api.labels_added.lock().unwrap().is_empty());
 }
 
 // ---- pure argument assembly -------------------------------------------------
+
+fn branch_topology() -> ResolvedBranchTopology {
+    ResolvedBranchTopology {
+        upstream: "develop".to_string(),
+        integration: "fkst-hosted-default".to_string(),
+    }
+}
 
 #[test]
 fn session_pod_spec_is_built_from_the_registration() {
@@ -233,6 +278,7 @@ fn session_pod_spec_is_built_from_the_registration() {
     let spec = session_pod_spec_from(
         &reg,
         &["fkst-run".to_string()],
+        &branch_topology(),
         Some("fkst-bot".to_string()),
         &crate::access_policy::AccessPolicy::default(),
         None,
@@ -246,6 +292,7 @@ fn session_pod_spec_is_built_from_the_registration() {
     assert_eq!(spec.bot_login, "fkst-bot");
     assert_eq!(spec.creator_login, "author-login");
     assert_eq!(spec.config_hash, "hash123");
+    assert_eq!(spec.upstream_branch, "develop");
     assert_eq!(spec.target_branch, "fkst-hosted-default");
     // package_roots are the refs rendered back to `owner/repo@ref:path`, in order.
     assert_eq!(
@@ -274,6 +321,7 @@ fn package_roots_come_from_the_effective_set_not_just_explicit_packages() {
     let spec = session_pod_spec_from(
         &reg,
         &["fkst-run".to_string()],
+        &branch_topology(),
         None,
         &crate::access_policy::AccessPolicy::default(),
         None,
@@ -300,6 +348,7 @@ fn spec_work_label_is_the_comma_joined_detected_set() {
     let discovered_only = session_pod_spec_from(
         &reg,
         &["pkg-a".to_string(), "pkg-b".to_string()],
+        &branch_topology(),
         Some("fkst-bot".to_string()),
         &crate::access_policy::AccessPolicy::default(),
         None,
@@ -314,6 +363,7 @@ fn spec_work_label_is_the_comma_joined_detected_set() {
             "pkg-a".to_string(),
             "fkst-run".to_string(),
         ],
+        &branch_topology(),
         Some("fkst-bot".to_string()),
         &crate::access_policy::AccessPolicy::default(),
         None,
@@ -326,6 +376,7 @@ fn missing_bot_login_defaults_to_empty() {
     let spec = session_pod_spec_from(
         &registration(),
         &["fkst-run".to_string()],
+        &branch_topology(),
         None,
         &crate::access_policy::AccessPolicy::default(),
         None,

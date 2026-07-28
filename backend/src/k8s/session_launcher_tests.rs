@@ -39,6 +39,7 @@ fn spec() -> SessionPodSpec {
         engine_config: BTreeMap::new(),
         creator_login: "author-login".to_string(),
         contributors: vec!["author-login".to_string()],
+        upstream_branch: "develop".to_string(),
         target_branch: "fkst-hosted-default".to_string(),
         delivery_grants_json: None,
     }
@@ -177,7 +178,7 @@ fn build_session_pod_injects_the_section_5_2_env() {
     assert_eq!(env_value(env, "FKST_SESSION_CREATOR"), Some("author-login"));
     assert_eq!(
         env_value(env, "FKST_DEVLOOP_UPSTREAM_BRANCH"),
-        Some("fkst-hosted-default")
+        Some("develop")
     );
     assert_eq!(
         env_value(env, "FKST_DEVLOOP_INTEGRATION_BRANCH"),

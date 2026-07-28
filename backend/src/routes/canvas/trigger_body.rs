@@ -44,8 +44,9 @@ pub struct CreateSessionRequest {
     /// the trigger issue and are never returned by the API.
     #[serde(default)]
     pub disposable_environment: Option<DisposableEnvironmentRequest>,
-    /// The optional source branch (`### Source Branch`). When omitted, the
-    /// repository default branch seeds a missing target branch.
+    /// The optional upstream branch (`### Source Branch`). It seeds a missing
+    /// target and receives completed target work. When omitted, it resolves to
+    /// the repository default branch.
     #[serde(default)]
     pub source_branch: Option<String>,
     /// The optional target branch (`### Target Branch`). When omitted, the

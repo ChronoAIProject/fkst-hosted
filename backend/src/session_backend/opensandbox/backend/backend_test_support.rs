@@ -50,6 +50,7 @@ pub(crate) fn spec() -> SessionPodSpec {
         engine_config: BTreeMap::new(),
         creator_login: "author-login".to_string(),
         contributors: vec!["author-login".to_string()],
+        upstream_branch: "develop".to_string(),
         target_branch: "fkst-hosted-default".to_string(),
         delivery_grants_json: None,
     }

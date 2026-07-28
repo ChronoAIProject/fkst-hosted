@@ -86,7 +86,8 @@ fn seed_intro(session_name: &str, labels_line: &str, frontend_url: Option<&str>)
          section names one of your saved environment profiles.{dashboard}.\n\n\
          **Defaults in effect:** {labels_line} Each work issue is worked as an \
          independent pull request into the `{DEFAULT_TARGET_BRANCH}` target branch \
-         (auto-created from the repository default branch when absent), and auto-merge \
+         (auto-created from the repository default branch when absent), completed \
+         target work rolls up into the repository default source branch, and auto-merge \
          is on.\n\n"
     )
 }
