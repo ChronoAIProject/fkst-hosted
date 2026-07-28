@@ -40,6 +40,19 @@ use crate::state::SelfRouter;
 /// context window (and the bill) rather than merely being large.
 pub const MAX_TOOL_RESULT_BYTES: usize = 48 * 1024;
 
+/// Wall-clock budget for ONE dispatched read.
+///
+/// Comfortably under the default 120s whole-turn deadline, and deliberately so: some
+/// read endpoints scale with how much history a repository has accumulated (the canvas
+/// session list assembles every trigger issue the repository ever had), and a single one
+/// of those can otherwise eat a turn's entire budget. When that happens the user gets
+/// `deadline_exceeded` — a dead end that says nothing about what went wrong.
+///
+/// With this bound the slow call comes back as a 504 RESULT instead, leaving the model
+/// most of the turn to say plainly that the lookup timed out and suggest the dashboard.
+/// A truthful partial answer beats an opaque failure.
+pub const DISPATCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+
 /// A dispatch failure. Both variants are process-level faults, NOT the "the API
 /// said 403" case — an HTTP error status is a successful dispatch whose status is
 /// data the model must see and explain.
@@ -108,10 +121,30 @@ impl SelfDispatch {
             .body(Body::empty())
             .map_err(|e| DispatchError::BadRequest(e.to_string()))?;
 
-        let response = router
-            .oneshot(request)
-            .await
-            .map_err(|e| DispatchError::Transport(e.to_string()))?;
+        // Bounded, and a timeout is a RESULT rather than an error: the model can explain
+        // "that lookup timed out" and move on, where a `DispatchError` would surface as a
+        // bare tool failure with no actionable content. See `DISPATCH_TIMEOUT`.
+        let response = match tokio::time::timeout(DISPATCH_TIMEOUT, router.oneshot(request)).await {
+            Ok(result) => result.map_err(|e| DispatchError::Transport(e.to_string()))?,
+            Err(_) => {
+                tracing::warn!(
+                    path = %redact_query(path_and_query),
+                    timeout_secs = DISPATCH_TIMEOUT.as_secs(),
+                    "chat dispatch timed out"
+                );
+                return Ok(DispatchResponse {
+                    status: StatusCode::GATEWAY_TIMEOUT.as_u16(),
+                    body: serde_json::json!({
+                        "error": "dispatch_timeout",
+                        "message": format!(
+                            "this lookup did not finish within {}s; it may be unusually large",
+                            DISPATCH_TIMEOUT.as_secs()
+                        ),
+                    }),
+                    truncated: false,
+                });
+            }
+        };
         let status = response.status();
         let bytes = response
             .into_body()
