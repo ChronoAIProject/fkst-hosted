@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 use super::config_hash as config_hash_with_branches;
 use super::desired_test_fixtures::pkg;
+use super::runtime_config_hash;
 use crate::goals::trigger_parse::PackageRef;
 
 fn config_hash(
@@ -61,6 +62,21 @@ fn config_hash_is_stable_for_identical_inputs() {
     // A SHA-256 hex digest is 64 chars.
     assert_eq!(a.len(), 64);
     assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+}
+
+#[test]
+fn runtime_hash_moves_with_provider_namespace_without_changing_legacy_hash() {
+    let authored = "a".repeat(64);
+    assert_eq!(runtime_config_hash(&authored, None), authored);
+
+    let cloud = runtime_config_hash(&authored, Some("chronoai-fkst"));
+    assert_ne!(cloud, authored);
+    assert_eq!(cloud.len(), 64);
+    assert_eq!(cloud, runtime_config_hash(&authored, Some("chronoai-fkst")));
+    assert_ne!(
+        cloud,
+        runtime_config_hash(&authored, Some("other-provider"))
+    );
 }
 
 #[test]

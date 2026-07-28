@@ -17,6 +17,7 @@ fn defaults_apply_when_nothing_is_set() {
     let config = ReconcileConfig::from_vars(&vars(&[])).expect("defaults should deserialize");
     assert_eq!(config.substrate_trigger_label, "fkst-substrate-trigger");
     assert_eq!(config.github_bot_login, None);
+    assert_eq!(config.work_label_namespace, None);
     assert_eq!(config.reconcile_interval_secs, 30);
     assert_eq!(config.pod_full_resync_interval_secs, 600);
     assert_eq!(config.startup_resync_retry_initial_secs, 5);
@@ -90,6 +91,10 @@ fn default_impl_matches_env_defaults() {
     );
     assert_eq!(from_default.github_bot_login, from_env.github_bot_login);
     assert_eq!(
+        from_default.work_label_namespace,
+        from_env.work_label_namespace
+    );
+    assert_eq!(
         from_default.reconcile_interval_secs,
         from_env.reconcile_interval_secs
     );
@@ -143,6 +148,7 @@ fn every_knob_is_overridable() {
     let config = ReconcileConfig::from_vars(&vars(&[
         ("FKST_SUBSTRATE_TRIGGER_LABEL", "fkst-run"),
         ("FKST_GITHUB_BOT_LOGIN", "fkst-bot"),
+        ("FKST_WORK_LABEL_NAMESPACE", "chronoai-fkst"),
         ("FKST_RECONCILE_INTERVAL_SECS", "15"),
         ("FKST_POD_FULL_RESYNC_INTERVAL_SECS", "1200"),
         ("FKST_STARTUP_RESYNC_RETRY_INITIAL_SECS", "7"),
@@ -158,6 +164,10 @@ fn every_knob_is_overridable() {
     .expect("overrides should deserialize");
     assert_eq!(config.substrate_trigger_label, "fkst-run");
     assert_eq!(config.github_bot_login.as_deref(), Some("fkst-bot"));
+    assert_eq!(
+        config.work_label_namespace.as_deref(),
+        Some("chronoai-fkst")
+    );
     assert_eq!(config.reconcile_interval_secs, 15);
     assert_eq!(config.pod_full_resync_interval_secs, 1200);
     assert_eq!(config.startup_resync_retry_initial_secs, 7);
@@ -176,6 +186,26 @@ fn blank_bot_login_is_coerced_to_none() {
     let config =
         ReconcileConfig::from_vars(&vars(&[("FKST_GITHUB_BOT_LOGIN", "   ")])).expect("blank");
     assert_eq!(config.github_bot_login, None);
+}
+
+#[test]
+fn blank_work_label_namespace_is_disabled_and_invalid_slugs_fail_closed() {
+    let blank = ReconcileConfig::from_vars(&vars(&[("FKST_WORK_LABEL_NAMESPACE", "   ")]))
+        .expect("blank disables namespacing");
+    assert_eq!(blank.work_label_namespace, None);
+
+    for invalid in [
+        "ChronoAI",
+        "chronoai_cloud",
+        "-cloud",
+        "cloud-",
+        "cloud--one",
+    ] {
+        let error = ReconcileConfig::from_vars(&vars(&[("FKST_WORK_LABEL_NAMESPACE", invalid)]))
+            .expect_err("invalid namespace must fail startup");
+        assert!(matches!(error, AppError::Config(_)));
+        assert!(error.to_string().contains("FKST_WORK_LABEL_NAMESPACE"));
+    }
 }
 
 #[test]

@@ -22,7 +22,7 @@ use crate::reconcile_config::ReconcileConfig;
 
 // The pure content hashes live in the sibling `hashing` module; re-exported here so
 // the planner (and its attached test modules) reach them as `desired::…` unchanged.
-pub use crate::reconcile::hashing::{config_hash, full_config_hash};
+pub use crate::reconcile::hashing::{config_hash, full_config_hash, runtime_config_hash};
 
 /// The launch inputs one substrate session needs, distilled from a parsed trigger
 /// issue. This is the non-identifying "what to run" half of a
@@ -313,8 +313,9 @@ fn idle_kill_due(pod: &LivePod, now: DateTime<Utc>, cfg: &ReconcileConfig) -> bo
 
 /// True when the live pod is running a config that no longer matches its
 /// registration. A pod with no recorded hash (`None`) yields no drift decision.
-fn config_drifted(pod: &LivePod, reg: &SessionRegistration) -> bool {
-    matches!(&pod.config_hash, Some(h) if h != &reg.config_hash)
+fn config_drifted(pod: &LivePod, reg: &SessionRegistration, cfg: &ReconcileConfig) -> bool {
+    let expected = runtime_config_hash(&reg.config_hash, cfg.work_label_namespace.as_deref());
+    matches!(&pod.config_hash, Some(h) if h != &expected)
 }
 
 /// True when a registration's CURRENT [`full_config_hash`] differs from the ORIGINAL
@@ -421,7 +422,7 @@ pub fn plan_repo(
             // pod keeps serving; it still touches-pending / idle-kills normally.
             PodLiveness::Starting | PodLiveness::Live => {
                 let pod = pod.expect("Starting/Live liveness implies a pod is present");
-                if config_drifted(pod, reg) && !rejected {
+                if config_drifted(pod, reg, cfg) && !rejected {
                     actions.push(ReconcileAction::Kill {
                         session_id: reg.session_id.clone(),
                         reason: KillReason::ConfigChanged,

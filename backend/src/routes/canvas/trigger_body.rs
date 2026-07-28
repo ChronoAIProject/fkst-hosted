@@ -24,7 +24,7 @@ use crate::routes::canvas::types::render_package_ref;
 /// Request body for creating a session (a trigger issue) on a repo.
 #[derive(Clone, Deserialize, ToSchema)]
 pub struct CreateSessionRequest {
-    /// The session name (`### Session Name`; also the issue title).
+    /// The session name (`### Session Name`; also the trigger-issue title suffix).
     pub name: String,
     /// Fully-qualified package references (`owner/repo@ref:path`). Optional since
     /// a `### Manifest` reference can supply the packages (epic #594 I7), but at

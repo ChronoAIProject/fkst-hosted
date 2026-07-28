@@ -215,6 +215,7 @@ async fn installation_created_with_sender_seeds_with_assignee() {
         "fkst-substrate-trigger",
         &[],
         Some(DEFAULT_MANIFEST),
+        Some("chronoai-fkst-cloud"),
         "octo-owner",
         "installing-user",
         &["octo-owner/repo-a".to_string()],
@@ -227,7 +228,10 @@ async fn installation_created_with_sender_seeds_with_assignee() {
     let (owner, repo, title, body, labels, assignees) = &created[0];
     assert_eq!(owner, "octo-owner");
     assert_eq!(repo, "repo-a");
-    assert_eq!(title, "[session] default-workflows (auto-seeded)");
+    assert_eq!(
+        title,
+        "🔔[CHRONOAI FKST CLOUD SESSION] Default FKST Substrate"
+    );
     assert_eq!(labels, &vec!["fkst-substrate-trigger".to_string()]);
     assert_eq!(
         assignees,
@@ -257,6 +261,7 @@ async fn skips_a_repo_that_already_has_an_open_trigger_issue() {
         "fkst-substrate-trigger",
         &[],
         Some(DEFAULT_MANIFEST),
+        None,
         "octo-owner",
         "installing-user",
         &["octo-owner/repo-a".to_string()],
@@ -280,6 +285,7 @@ async fn legacy_seed_used_when_no_default_manifest_is_configured() {
         &github,
         "fkst-substrate-trigger",
         &["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()],
+        None,
         None,
         "octo-owner",
         "installing-user",

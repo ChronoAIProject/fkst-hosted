@@ -178,6 +178,9 @@ pub struct SessionPodSpec {
     /// label value. Built via [`crate::k8s::work_label_wire::join_work_labels`];
     /// recovered on observe via [`crate::k8s::work_label_wire::split_work_labels`].
     pub work_label: String,
+    /// Optional deterministic logical-to-effective work-label mapping for package
+    /// discovery and outbound GitHub effects. Absent on unnamespaced deployments.
+    pub work_label_map_json: Option<String>,
     /// The bot login (`FKST_GITHUB_BOT_LOGIN` + git author/committer name).
     pub bot_login: String,
     /// Config-hash annotation used by the reconciler for drift detection.
@@ -340,6 +343,12 @@ pub(crate) fn session_env_pairs(
     }
     if let Some(grants) = &spec.delivery_grants_json {
         env.push((SESSION_DELIVERY_GRANTS_ENV.to_string(), grants.clone()));
+    }
+    if let Some(work_label_map_json) = &spec.work_label_map_json {
+        env.push((
+            crate::reconcile::work_labels::SESSION_WORK_LABEL_MAP_JSON_ENV.to_string(),
+            work_label_map_json.clone(),
+        ));
     }
     // The engine-tunable tail: output locale + the tighten-merged engine config
     // (operator rate-pool defaults vs the trigger's `### Engine Config`). All

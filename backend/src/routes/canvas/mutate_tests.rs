@@ -102,10 +102,10 @@ async fn create_session_opens_the_trigger_issue_as_the_user() {
     Mock::given(method("POST"))
         .and(path("/repos/acme/site/issues"))
         // The USER token (never an App token) must authenticate the write, the
-        // title must be the session name, and the trigger label must be applied.
+        // The provider namespace brands the title; the trigger label is applied.
         .and(header("authorization", "Bearer user-token"))
         .and(body_partial_json(serde_json::json!({
-            "title": "site",
+            "title": "🔔[CHRONOAI FKST CLOUD SESSION] site",
             "labels": ["fkst-substrate-trigger"]
         })))
         .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
@@ -116,7 +116,8 @@ async fn create_session_opens_the_trigger_issue_as_the_user() {
         .mount(&server)
         .await;
 
-    let state = state_with_creator_role(&server, "acme", "site", 200, Some("maintain")).await;
+    let mut state = state_with_creator_role(&server, "acme", "site", 200, Some("maintain")).await;
+    state.config.reconcile.work_label_namespace = Some("chronoai-fkst-cloud".to_string());
     let (status, Json(created)) = create_session(
         State(state),
         Path(("acme".to_string(), "site".to_string())),
