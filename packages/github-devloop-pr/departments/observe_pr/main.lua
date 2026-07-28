@@ -29,6 +29,7 @@ local M = {}
 local spec = {
   consumes = { "github-proxy.github_pr_changed", "devloop_observe_pr" },
   produces = {
+    "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
     "github-devloop-decompose.devloop_decompose",

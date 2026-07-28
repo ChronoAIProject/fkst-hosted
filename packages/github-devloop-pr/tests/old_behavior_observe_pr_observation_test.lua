@@ -370,6 +370,17 @@ local function capture_fixture(fixture)
   local result, captured = observe_real_department(function()
     return testing.run_fake(observe_pr_department, event)
   end)
+  local declared_produces = {}
+  for _, queue_name in ipairs(observe_pr_department.spec.produces or {}) do
+    declared_produces[queue_name] = true
+  end
+  for _, raised in ipairs(result.raises or {}) do
+    t.eq(
+      declared_produces[raised.queue],
+      true,
+      fixture.name .. ": raised queue is declared in observe_pr spec.produces"
+    )
+  end
   if #captured.probes ~= 1 then
     error(fixture.name .. ": expected one versioned probe; lines=" .. canonical_json(captured.lines))
   end
