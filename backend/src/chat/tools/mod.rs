@@ -27,6 +27,7 @@ use super::llm::ToolDef;
 
 pub mod manual;
 pub mod propose;
+pub mod propose_resources;
 pub mod read;
 
 /// Characters escaped inside a single URL path segment or query value.
@@ -251,7 +252,10 @@ pub fn default_registry() -> ToolRegistry {
     read::register(&mut registry);
     // The confirm-gated drafting tools. They never write anything: each produces a
     // proposal the user must review and the SPA executes with the user's own token.
+    // Session lifecycle first — it is what most requests are about — then the
+    // resources a session runs on.
     propose::register(&mut registry);
+    propose_resources::register(&mut registry);
     // Last, so the live-data tools lead the list the model reads.
     manual::register(&mut registry);
     registry

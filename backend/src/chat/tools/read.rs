@@ -374,6 +374,38 @@ impl ChatTool for ListEnvironmentProfiles {
     }
 }
 
+// ---- get_environment_profile ---------------------------------------------
+
+struct GetEnvironmentProfile;
+
+#[async_trait]
+impl ChatTool for GetEnvironmentProfile {
+    fn def(&self) -> ToolDef {
+        ToolDef {
+            name: "get_environment_profile".to_string(),
+            description: "Read ONE saved environment profile in full: its install commands, its \
+                 non-secret variables, and the NAMES of its secrets. Secret VALUES are \
+                 write-only and are never returned — not to you, not to anyone. Call this \
+                 before drafting a replacement with `draft_environment_profile`, because \
+                 saving REPLACES a profile wholesale and a draft that omits an existing \
+                 command would silently drop it. Returns 404 when no profile has that name."
+                .to_string(),
+            parameters: params(
+                serde_json::json!({
+                    "name": { "type": "string", "description": "Profile name exactly as list_environment_profiles reports it." },
+                }),
+                &["name"],
+            ),
+        }
+    }
+
+    async fn call(&self, ctx: &ToolCtx, args: serde_json::Value) -> Result<ToolOutcome, ToolError> {
+        let name = required_str(&args, "name")?;
+        let path = format!("/api/v1/users/me/environment-profiles/{}", encode(&name));
+        dispatch_get(ctx, &path, false).await
+    }
+}
+
 /// Register every read-only tool. Order is the order the model sees them in, so the
 /// broad "what do I have" tools come first and the narrow log reads last.
 pub(super) fn register(registry: &mut ToolRegistry) {
@@ -385,6 +417,7 @@ pub(super) fn register(registry: &mut ToolRegistry) {
     registry.register(Arc::new(GetLogManifest));
     registry.register(Arc::new(TailLogFile));
     registry.register(Arc::new(ListEnvironmentProfiles));
+    registry.register(Arc::new(GetEnvironmentProfile));
 }
 
 #[cfg(test)]

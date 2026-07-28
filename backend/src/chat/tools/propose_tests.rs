@@ -67,6 +67,14 @@ fn every_proposal_schema_is_closed_and_warns_that_nothing_is_executed() {
     }
 }
 
+/// The ONE argument in the whole tool surface whose name mentions secrets.
+///
+/// It carries secret NAMES so an environment draft can say which credentials a profile
+/// needs; the values are collected by the confirmation card. Allowlisted by exact name and
+/// then shape-checked below, so adding a second secret-shaped argument fails this test
+/// rather than passing unnoticed.
+const SECRET_NAMES_ARG: &str = "secret_names";
+
 #[test]
 fn no_proposal_tool_accepts_secret_bearing_arguments() {
     // Secrets are excluded structurally; this guards the schema surface too.
@@ -77,12 +85,34 @@ fn no_proposal_tool_accepts_secret_bearing_arguments() {
             .cloned()
             .unwrap_or_default();
         for key in properties.keys() {
+            if key == SECRET_NAMES_ARG {
+                continue;
+            }
             assert!(
                 !key.contains("secret") && !key.contains("disposable") && !key.contains("token"),
                 "{} must not accept {key}",
                 def.name
             );
         }
+    }
+}
+
+#[test]
+fn the_secret_names_argument_can_only_carry_names() {
+    // The allowlist above is only safe while the argument stays an array of plain strings.
+    // An object (`{"NPM_TOKEN": "..."}`) or a richer item schema would give a VALUE
+    // somewhere to live, which is exactly what the structural guarantee forbids.
+    for def in default_registry().defs() {
+        let Some(schema) = def.parameters["properties"].get(SECRET_NAMES_ARG) else {
+            continue;
+        };
+        assert_eq!(schema["type"], "array", "{} secret_names", def.name);
+        assert_eq!(
+            schema["items"],
+            serde_json::json!({ "type": "string" }),
+            "{} secret_names items must be bare strings",
+            def.name
+        );
     }
 }
 
