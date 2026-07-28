@@ -12,6 +12,7 @@ local opts = h.opts
 local run_implement = h.run_implement
 local mock_issue_implement = h.mock_issue_implement
 local mock_fresh_external_pr_implement_worktree = h.mock_fresh_external_pr_implement_worktree
+local mock_existing_dirty_external_pr_implement_worktree = h.mock_existing_dirty_external_pr_implement_worktree
 local mock_implement_codex = h.mock_implement_codex
 local mock_git_status = h.mock_git_status
 local mock_git_commit = h.mock_git_commit
@@ -255,6 +256,33 @@ return {
     assert_pr_child_handoff(result)
     assert_package_side_fetch_before_codex()
     assert_codex_not_asked_to_fetch_external_pr()
+  end,
+
+  test_external_pr_bridge_redelivery_preserves_dirty_worktree_without_reprovisioning = function()
+    local event = ready()
+    local branch = deterministic_branch_for(event)
+    mock_bridge_issue(event)
+    mock_existing_dirty_external_pr_implement_worktree(nil, branch)
+    mock_implement_codex(0, "Recovered external PR implementation output.")
+    mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_git_commit(implementation_head, branch)
+    mock_git_push(branch)
+    mock_pr_child_created(branch)
+    mock_real_write_mode()
+
+    local result = run_implement(event, opts("implement-external-pr-bridge-redelivery", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0, tostring(result.error or result.stderr or "external PR bridge redelivery failed"))
+    t.eq(count_calls("git worktree remove --force"), 0)
+    t.eq(count_calls("git worktree add -B"), 0)
+    t.eq(count_calls("merge --no-edit '" .. base_head .. "'"), 0)
+    t.eq(count_calls("git fetch 'origin' 'refs/pull/7/head'"), 0)
+    t.eq(count_calls("merge --no-edit '" .. external_head .. "'"), 0)
+    t.eq(count_calls("status --porcelain"), 2)
+    assert_no_impl_failed(result)
+    assert_pr_child_handoff(result)
   end,
 
   test_external_pr_bridge_visible_child_redrive_reaches_awaiting_pr = function()

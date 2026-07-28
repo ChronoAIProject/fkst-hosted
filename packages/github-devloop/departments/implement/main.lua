@@ -205,12 +205,17 @@ local function merge_integration_for_implementation(worktree, integration_branch
 end
 
 local function prepare_attempt(repo, issue_number, ready, branches, branch, base_head, attempt, bridge_marker, target)
-  local worktree = bridge_marker ~= nil
-    and worktree_lifecycle.prepare_worktree_from_base(repo, issue_number, ready, branch, base_head, target.git)
-    or worktree_lifecycle.prepare_worktree(repo, issue_number, ready, branch, base_head, target.git)
-  local merge_clean = merge_integration_for_implementation(worktree, branches.integration, base_head, target.git)
-  merge_clean = external_pr_bridge.provision(worktree, bridge_marker, ready.proposal_id, { git = target.git }) and merge_clean
-  substrate_pin.refresh(worktree, branch, base_head, merge_clean, { git = target.git })
+  local worktree, recovering
+  if bridge_marker ~= nil then
+    worktree, recovering = worktree_lifecycle.prepare_worktree_from_base(repo, issue_number, ready, branch, base_head, target.git)
+  else
+    worktree, recovering = worktree_lifecycle.prepare_worktree(repo, issue_number, ready, branch, base_head, target.git)
+  end
+  if not recovering then
+    local merge_clean = merge_integration_for_implementation(worktree, branches.integration, base_head, target.git)
+    merge_clean = external_pr_bridge.provision(worktree, bridge_marker, ready.proposal_id, { git = target.git }) and merge_clean
+    substrate_pin.refresh(worktree, branch, base_head, merge_clean, { git = target.git })
+  end
 
   local codex_started_at = now()
   local exec_ref = core.implement_exec_ref(ready.proposal_id, ready.dedup_key)

@@ -253,6 +253,38 @@ function M.new(deps)
     return worktree
   end
 
+  local function mock_existing_dirty_external_pr_implement_worktree(path, branch)
+    local runtime, opts = worktree_options(path)
+    local worktree = implement_worktree_for(runtime, opts)
+    t.mock_command("git fetch 'origin' 'dev'", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("refs/remotes/'origin'/'dev'^{commit}", {
+      stdout = "abc123\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+      stdout = runtime,
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("git worktree list --porcelain", {
+      stdout = "worktree " .. worktree .. "\nHEAD abc123\nbranch refs/heads/"
+        .. tostring(branch) .. "\n\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("status --porcelain", {
+      stdout = " M packages/github-devloop/core.lua\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    return worktree
+  end
+
   local function mock_existing_empty_implement_worktree(path, base_pin, branch_pin)
     local runtime, opts = worktree_options(path)
     local worktree = implement_worktree_for(runtime, opts)
@@ -313,7 +345,7 @@ function M.new(deps)
     mock_substrate_pin_refresh(worktree, base_pin, branch_pin)
   end
 
-  local function mock_existing_empty_implement_worktree_reuse(path, branch, ahead_count)
+  local function mock_existing_implement_worktree_reuse(path, branch, ahead_count, status_stdout)
     local runtime = path or default_runtime_root
     local worktree = enable_substrate_pin_refresh and implement_worktree_for(runtime, {})
       or (runtime .. "/worktrees/devloop-owner-repo-42-01HY")
@@ -347,18 +379,34 @@ function M.new(deps)
       stderr = "",
       exit_code = 0,
     })
-    mock_implement_worktree_reconcile()
-    t.mock_command("merge --no-edit 'abc123'", {
-      stdout = "Already up to date.\n",
+    t.mock_command("status --porcelain", {
+      stdout = status_stdout or "",
       stderr = "",
       exit_code = 0,
     })
-    mock_substrate_pin_refresh(worktree)
+    if tostring(status_stdout or "") == "" then
+      mock_implement_worktree_reconcile()
+      t.mock_command("merge --no-edit 'abc123'", {
+        stdout = "Already up to date.\n",
+        stderr = "",
+        exit_code = 0,
+      })
+      mock_substrate_pin_refresh(worktree)
+    end
     return worktree
   end
 
+  local function mock_existing_empty_implement_worktree_reuse(path, branch, ahead_count)
+    return mock_existing_implement_worktree_reuse(path, branch, ahead_count, "")
+  end
+
   local function mock_existing_dirty_implement_worktree_reuse(path, branch, ahead_count)
-    return mock_existing_empty_implement_worktree_reuse(path, branch, ahead_count)
+    return mock_existing_implement_worktree_reuse(
+      path,
+      branch,
+      ahead_count,
+      " M packages/github-devloop/core.lua\n"
+    )
   end
 
   local function mock_outside_runtime_implement_worktree_rebuild(runtime_root, branch)
@@ -851,6 +899,7 @@ function M.new(deps)
     deterministic_branch_for = deterministic_branch_for,
     mock_fresh_implement_worktree = mock_fresh_implement_worktree,
     mock_fresh_external_pr_implement_worktree = mock_fresh_external_pr_implement_worktree,
+    mock_existing_dirty_external_pr_implement_worktree = mock_existing_dirty_external_pr_implement_worktree,
     mock_existing_empty_implement_worktree = mock_existing_empty_implement_worktree,
     mock_existing_empty_implement_worktree_reuse = mock_existing_empty_implement_worktree_reuse,
     mock_existing_dirty_implement_worktree_reuse = mock_existing_dirty_implement_worktree_reuse,

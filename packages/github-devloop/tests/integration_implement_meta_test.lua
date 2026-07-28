@@ -5,7 +5,6 @@ local payloads_builders = require("devloop.payloads.builders")
 local m_facts = require("devloop.markers.facts")
 local t = h.t
 local core = h.core
-local gh_argv = require("testkit.gh_argv_mock")
 local action_label = h.action_label
 local reason_label = h.reason_label
 local has_value = h.has_value
@@ -311,7 +310,7 @@ return {
     t.eq(count_calls("git worktree add"), 0)
     t.eq(count_calls("codex exec"), 1)
     t.eq(count_calls("merge --no-edit 'abc123'"), 1)
-    t.eq(count_calls("status --porcelain"), 1)
+    t.eq(count_calls("status --porcelain"), 2)
     t.eq(count_calls("impl-failed"), 0)
   end,
 
@@ -457,44 +456,26 @@ return {
     t.eq(count_calls("codex exec"), 1)
   end,
 
-  test_implement_reused_worktree_is_reset_and_cleaned_before_merge = function()
+  test_implement_reused_dirty_worktree_is_preserved_before_codex_redelivery = function()
     local event = ready()
     local branch = deterministic_branch_for(event)
     mock_issue_implement({ "fkst-dev:ready" })
-    local worktree = mock_existing_dirty_implement_worktree_reuse(nil, branch, "1")
-    mock_implement_codex(0, "Committed implementation directly.")
-    mock_git_status("")
-    mock_branch_diff_paths("packages/github-devloop/core.lua\n")
-    t.mock_command("rev-list --count", {
-      stdout = "1\n",
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command("rev-parse --verify refs/heads/", {
-      stdout = "def456\n",
-      stderr = "",
-      exit_code = 0,
-    })
+    local worktree = mock_existing_dirty_implement_worktree_reuse(nil, branch, "0")
+    mock_implement_codex(0, "Recovered implementation output.")
+    mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_git_commit("def456", branch)
 
     local result = run_implement(event, opts("implement-dirty-worktree-reuse"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 4)
     assert_implement_attempt(result.raises, event)
     assert_worktree_ready_state(result.raises, event)
-    t.eq(count_calls("reset --hard"), 1)
-    t.eq(count_calls("clean -fd"), 1)
-    t.eq(count_calls("merge --no-edit 'abc123'"), 1)
-
-    local reset_before_merge = false
-    local reset_seen = false
-    for _, call in ipairs(t.command_calls()) do
-      if gh_argv.argv_contains(call, { "git", "-C", worktree, "reset", "--hard" }) then
-        reset_seen = true
-      elseif gh_argv.argv_contains(call, { "git", "-C", worktree, "merge", "--no-edit", "abc123" }) then
-        reset_before_merge = reset_seen
-      end
-    end
-    t.eq(reset_before_merge, true)
+    t.eq(count_calls("reset --hard"), 0)
+    t.eq(count_calls("clean -fd"), 0)
+    t.eq(count_calls("merge --no-edit 'abc123'"), 0)
+    t.eq(count_calls("status --porcelain"), 2)
+    t.eq(count_calls("codex exec"), 1)
+    t.is_true(find_comment_with(result.raises, worktree) ~= nil)
   end,
 
   test_implement_ignores_existing_worktree_outside_current_runtime_root = function()
