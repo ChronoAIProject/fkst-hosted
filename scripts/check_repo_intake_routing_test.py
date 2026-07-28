@@ -68,7 +68,7 @@ class IntakeRoutingRatchetTest(unittest.TestCase):
             textwrap.dedent(
                 f"""\
                 local spec = {{
-                  consumes = {{ "github-proxy.github_entity_changed" }},
+                  consumes = {{ "github-proxy.github_issue_changed" }},
                   produces = {{ {produces_body} }},
                 }}
 

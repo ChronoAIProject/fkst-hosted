@@ -16,7 +16,7 @@ end
 
 local function event(number)
   return {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_issue_changed",
     payload = {
       schema = "github-proxy.v1",
       type = "issue",

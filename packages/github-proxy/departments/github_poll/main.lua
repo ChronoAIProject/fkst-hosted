@@ -5,7 +5,7 @@ local saga = require("workflow.saga")
 
 local spec = {
   consumes = { "github_poll_tick" },
-  produces = { "github_entity_changed", "github_issue_observed" },
+  produces = { "github_issue_changed", "github_pr_changed", "github_issue_observed" },
   stall_window = "30s",
 }
 
@@ -16,6 +16,11 @@ end
 local entity_types = {
   { type = "issue", read = function(repo, timeout) return core.github().issue_list(repo, timeout) end },
   { type = "pr", read = function(repo, timeout) return core.github().pr_list(repo, timeout) end },
+}
+
+local changed_queues = {
+  issue = "github_issue_changed",
+  pr = "github_pr_changed",
 }
 
 local function replay_sort_key(entity)
@@ -120,7 +125,7 @@ local function raise_changed_item(repo, item, poll_token)
       local dedup_key = item_dedup_key(repo, item, poll_token)
       -- At-least-once: raise before cache_set. If this process crashes
       -- before the write, the next tick raises the same dedup_key again.
-      raise("github_entity_changed", {
+      raise(changed_queues[item.entity_type], {
         schema = "github-proxy.v1",
         type = item.entity_type,
         repo = repo,

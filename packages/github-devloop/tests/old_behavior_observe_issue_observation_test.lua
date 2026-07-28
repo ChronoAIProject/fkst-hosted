@@ -57,7 +57,7 @@ end
 
 local function issue_event(updated_at, issue_number)
   return {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_issue_changed",
     payload = issue_payload(updated_at, issue_number),
     now_seconds = 1780448523,
   }
@@ -478,7 +478,7 @@ local FIXTURES = {
     reason_code = "claim-held-by-other",
     effect_count = 0,
     expected_source_state = JSON_NULL,
-    expected_source_boundary = "github-proxy.github_entity_changed",
+    expected_source_boundary = "github-proxy.github_issue_changed",
   },
   {
     name = "unmanaged-author-unknown-at-admission",
@@ -492,7 +492,7 @@ local FIXTURES = {
     reason_code = "claim-author-unknown-at-admission",
     effect_count = 0,
     expected_source_state = JSON_NULL,
-    expected_source_boundary = "github-proxy.github_entity_changed",
+    expected_source_boundary = "github-proxy.github_issue_changed",
   },
   {
     name = "unmanaged-peer-bot-author",
@@ -507,7 +507,7 @@ local FIXTURES = {
     reason_code = "claim-peer-bot-author",
     effect_count = 0,
     expected_source_state = JSON_NULL,
-    expected_source_boundary = "github-proxy.github_entity_changed",
+    expected_source_boundary = "github-proxy.github_issue_changed",
   },
   {
     name = "unmanaged-unauthorized-author",
@@ -522,7 +522,7 @@ local FIXTURES = {
     reason_code = "claim-author-not-authorized",
     effect_count = 0,
     expected_source_state = JSON_NULL,
-    expected_source_boundary = "github-proxy.github_entity_changed",
+    expected_source_boundary = "github-proxy.github_issue_changed",
   },
   {
     name = "unmanaged-existing-fork",
@@ -540,7 +540,7 @@ local FIXTURES = {
     reason_code = "fork-present-before-rederive",
     effect_count = 0,
     expected_source_state = JSON_NULL,
-    expected_source_boundary = "github-proxy.github_entity_changed",
+    expected_source_boundary = "github-proxy.github_issue_changed",
   },
   {
     name = "unmanaged-fork-grace",
@@ -556,7 +556,7 @@ local FIXTURES = {
     reason_code = "fork-grace-pending",
     effect_count = 0,
     expected_source_state = JSON_NULL,
-    expected_source_boundary = "github-proxy.github_entity_changed",
+    expected_source_boundary = "github-proxy.github_issue_changed",
   },
   {
     name = "unmanaged-fork-original-closed-after-rederive",
@@ -574,7 +574,7 @@ local FIXTURES = {
     reason_code = "fork-original-closed-after-rederive",
     effect_count = 0,
     expected_source_state = JSON_NULL,
-    expected_source_boundary = "github-proxy.github_entity_changed",
+    expected_source_boundary = "github-proxy.github_issue_changed",
   },
   {
     name = "unmanaged-fork-author-missing-after-rederive",
@@ -592,7 +592,7 @@ local FIXTURES = {
     reason_code = "fork-author-missing-after-rederive",
     effect_count = 0,
     expected_source_state = JSON_NULL,
-    expected_source_boundary = "github-proxy.github_entity_changed",
+    expected_source_boundary = "github-proxy.github_issue_changed",
   },
   {
     name = "unmanaged-fork-appears-after-rederive",
@@ -614,7 +614,7 @@ local FIXTURES = {
     reason_code = "fork-present-after-rederive",
     effect_count = 0,
     expected_source_state = JSON_NULL,
-    expected_source_boundary = "github-proxy.github_entity_changed",
+    expected_source_boundary = "github-proxy.github_issue_changed",
   },
   {
     name = "unmanaged-fork-raised",
@@ -632,7 +632,7 @@ local FIXTURES = {
     reason_code = "fork-raised-before-management",
     effect_count = 1,
     expected_source_state = JSON_NULL,
-    expected_source_boundary = "github-proxy.github_entity_changed",
+    expected_source_boundary = "github-proxy.github_issue_changed",
   },
   {
     name = "unmanaged-label-claim-lost",
@@ -661,7 +661,7 @@ local FIXTURES = {
     reason_code = "label-claim-lost-after-verification",
     effect_count = 0,
     expected_source_state = JSON_NULL,
-    expected_source_boundary = "github-proxy.github_entity_changed",
+    expected_source_boundary = "github-proxy.github_issue_changed",
   },
   {
     name = "unmanaged-assignee-claim-permission-denied",
@@ -684,7 +684,7 @@ local FIXTURES = {
     reason_code = "assignee-claim-permission-denied",
     effect_count = 0,
     expected_source_state = JSON_NULL,
-    expected_source_boundary = "github-proxy.github_entity_changed",
+    expected_source_boundary = "github-proxy.github_issue_changed",
   },
   {
     name = "unmanaged-assignee-claim-lost",
@@ -712,7 +712,7 @@ local FIXTURES = {
     reason_code = "assignee-claim-lost-after-verification",
     effect_count = 0,
     expected_source_state = JSON_NULL,
-    expected_source_boundary = "github-proxy.github_entity_changed",
+    expected_source_boundary = "github-proxy.github_issue_changed",
   },
   {
     name = "unmanaged-assignee-claim-error",
@@ -733,7 +733,7 @@ local FIXTURES = {
     cas_outcome = "error(gh-command-failed)",
     effect_count = 0,
     expected_source_state = JSON_NULL,
-    expected_source_boundary = "github-proxy.github_entity_changed",
+    expected_source_boundary = "github-proxy.github_issue_changed",
   },
   {
     name = "unmanaged-ingress-apply",
@@ -746,7 +746,7 @@ local FIXTURES = {
     effect_count = 3,
     applies_thinking = true,
     expected_source_state = JSON_NULL,
-    expected_source_boundary = "github-proxy.github_entity_changed",
+    expected_source_boundary = "github-proxy.github_issue_changed",
   },
   {
     name = "declined-state-advanced",

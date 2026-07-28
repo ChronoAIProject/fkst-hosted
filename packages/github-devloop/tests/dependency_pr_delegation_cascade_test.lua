@@ -138,7 +138,7 @@ return {
     mock_merged_child_pr()
 
     local result = h.run_department("departments/observe_issue/main.lua", {
-      queue = "github-proxy.github_entity_changed",
+      queue = "github-proxy.github_issue_changed",
       payload = h.issue({
         number = dependent_number,
         labels = { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
@@ -195,7 +195,7 @@ return {
     })
 
     local result = h.run_department("departments/observe_issue/main.lua", {
-      queue = "github-proxy.github_entity_changed",
+      queue = "github-proxy.github_issue_changed",
       payload = h.issue({
         number = dependent_number,
         labels = { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },

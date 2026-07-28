@@ -69,15 +69,15 @@ return {
     local trace = graph.require_quiescent(graph.run("github-proxy.github_poll", { max_steps = 4 }))
     graph.assert_covers(trace, {
       "github-proxy.github_poll_tick -> github-proxy.github_poll",
-      "github-proxy.github_entity_changed -> github-devloop-intake.admission",
+      "github-proxy.github_issue_changed -> github-devloop-intake.admission",
     })
 
     local spec = require("departments.admission.main").spec
-    t.eq(spec.consumes[1], "github-proxy.github_entity_changed")
+    t.eq(spec.consumes[1], "github-proxy.github_issue_changed")
     t.eq(spec.produces[1], "devloop_intake_candidate")
 
     local _, admission_index = graph.require_delivery(trace, {
-      queue = "github-proxy.github_entity_changed",
+      queue = "github-proxy.github_issue_changed",
       consumer = "github-devloop-intake.admission",
     })
     local raised, _, raised_step_index = graph.require_raise(trace, "github-devloop-intake.devloop_intake_candidate", function(item)

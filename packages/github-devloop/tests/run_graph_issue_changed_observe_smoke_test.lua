@@ -23,7 +23,7 @@ end
 
 local function initial_event()
   return {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_issue_changed",
     payload = {
       schema = "github-proxy.v1",
       type = "issue",
@@ -93,13 +93,13 @@ return {
 
     local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 4 }))
     graph.assert_covers(trace, {
-      "github-proxy.github_entity_changed -> github-devloop.observe_issue",
+      "github-proxy.github_issue_changed -> github-devloop.observe_issue",
       "github-proxy.github_issue_label_request -> github-proxy.github_issue_label",
     })
 
     local route = graph.require_router_regression(trace, {
       spec = observe_spec(),
-      entry_queue = "github-proxy.github_entity_changed",
+      entry_queue = "github-proxy.github_issue_changed",
       consumer = "github-devloop.observe_issue",
       raised_queue = "github-proxy.github_issue_label_request",
       downstream_consumer = "github-proxy.github_issue_label",

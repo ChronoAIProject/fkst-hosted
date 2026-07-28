@@ -477,7 +477,7 @@ re-implemented.
 - `workflow.codex` (`unrestricted_codex_opts`, `codex.lua:19`) for the drafting agent;
   `workflow.env.read_env` (`env.lua:24`) for `FKST_WORKFLOW_CATALOG_ROOT`.
 - github-proxy seams: `github_issue_comment_request`, `github_issue_label_request`,
-  `github_entity_changed`/`github_poll` (verified live in `packages/github-proxy`).
+  `github_issue_changed`/`github_poll` (verified live in `packages/github-proxy`).
 - The PR-open **technique** from the github-devloop convention (branch→write→commit→push→
   `gh pr create`, `Closes #issue`) — reused inside the adapter's own executor binding; the dev
   INTAKE is NOT imported, and `gh`/`git` text lives in the adapter/forge boundary, never the lib.
@@ -494,7 +494,7 @@ re-implemented.
   self-validate with `workflow.engine.blueprint.parse_blueprint` → write
   `$FKST_WORKFLOW_CATALOG_ROOT/<id>.json` → open PR; refuse PR on validation failure.
 - `departments/workflow_writer_select/main.lua` — ~3-line lazy wrapper; own `fkst-workflow`
-  label claim, consumes `github-proxy.github_entity_changed` filtered to `fkst-workflow`.
+  label claim, consumes `github-proxy.github_issue_changed` filtered to `fkst-workflow`.
 - `departments/workflow_writer_materialize_next/main.lua` — ~3-line
   `engine.make_departments(...).materialize_next()`.
 - `departments/dead_letter/main.lua` — ~3-line lazy wrapper.

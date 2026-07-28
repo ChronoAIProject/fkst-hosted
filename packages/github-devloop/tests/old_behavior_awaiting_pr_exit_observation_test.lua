@@ -183,7 +183,7 @@ local FIXTURES = {
 
 -- The exact-target-marker branch after the CAS probe is target-parameterized,
 -- but it is unreachable through observe_issue. Both production activation
--- payload shapes are pointer-only: github_poll's github_entity_changed payload
+-- payload shapes are pointer-only: github_poll's github_issue_changed payload
 -- and liveness_scan_build_observe_payload omit comments. The department derives
 -- state from its own issue-view comments; if an exact target marker is visible
 -- in that snapshot, current_state selects the target and the awaiting-pr gate
@@ -304,7 +304,7 @@ end
 
 local function fixture_event(fixture)
   return {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_issue_changed",
     payload = {
       schema = "github-proxy.v1",
       type = "issue",
@@ -671,7 +671,7 @@ return {
     t.eq(apply_derivations, 4, "all four apply derivations are covered by the reachability ruling")
 
     local poll_payload = fixture_event(FIXTURES[1]).payload
-    t.eq(poll_payload.comments, nil, "github_entity_changed observation payload is pointer-only")
+    t.eq(poll_payload.comments, nil, "github_issue_changed observation payload is pointer-only")
     local redrive_payload = liveness_scan.liveness_scan_build_observe_payload(REPO, {
       number = ISSUE_NUMBER,
       title = "Capture awaiting PR exit behavior",

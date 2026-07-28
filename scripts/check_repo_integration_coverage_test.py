@@ -235,7 +235,7 @@ class IntegrationCoverageRatchetTest(unittest.TestCase):
             "consensus.proposal -> consensus.decide",
             "consensus.consensus_reached -> autochrono.reply",
             "autochrono.reply -> github-autochrono.outbound_glue",
-            "github-proxy.github_entity_changed -> github-autochrono.inbound_glue",
+            "github-proxy.github_issue_changed -> github-autochrono.inbound_glue",
         }
         observed = {"consensus.proposal -> consensus.decide"}
 
@@ -262,7 +262,7 @@ class IntegrationCoverageRatchetTest(unittest.TestCase):
         )
         self.assertEqual(by_edge["autochrono.reply -> github-autochrono.outbound_glue"]["status"], "excluded")
         self.assertEqual(
-            by_edge["github-proxy.github_entity_changed -> github-autochrono.inbound_glue"]["status"],
+            by_edge["github-proxy.github_issue_changed -> github-autochrono.inbound_glue"]["status"],
             "uncovered-UNLISTED",
         )
         self.assertEqual(by_edge["consensus.proposal -> consensus.decide"]["queue"], "consensus.proposal")

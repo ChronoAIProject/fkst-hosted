@@ -478,10 +478,14 @@ local function poll_pr_list_from(items)
   return "[[" .. table.concat(items, ",") .. "]]\n"
 end
 
+local function is_changed_queue(queue)
+  return queue == "github_issue_changed" or queue == "github_pr_changed"
+end
+
 local function changed_numbers(raises)
   local result = {}
   for _, raised in ipairs(raises or {}) do
-    if raised.queue == "github_entity_changed" then
+    if is_changed_queue(raised.queue) then
       table.insert(result, raised.payload.number)
     end
   end
@@ -503,12 +507,18 @@ local function observed_issue_raises(raises)
 end
 
 local function changed_raises(raises)
-  return raises_for_queue(raises, "github_entity_changed")
+  local result = {}
+  for _, raised in ipairs(raises or {}) do
+    if is_changed_queue(raised.queue) then
+      table.insert(result, raised)
+    end
+  end
+  return result
 end
 
 local function find_entity_raise(raises, entity_type, number)
   for _, raised in ipairs(raises or {}) do
-    if raised.queue == "github_entity_changed"
+    if raised.queue == "github_" .. tostring(entity_type) .. "_changed"
       and raised.payload.type == entity_type
       and tonumber(raised.payload.number) == tonumber(number)
     then

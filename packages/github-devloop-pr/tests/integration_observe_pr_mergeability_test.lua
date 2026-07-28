@@ -65,7 +65,7 @@ local function run_observe_pr_mergeability(name)
   h.mock_bot_env()
   mock_self_owned_issue()
   return t.run_department("departments/observe_pr/main.lua", {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_pr_changed",
     payload = pr_event(),
   }, opts(name))
 end

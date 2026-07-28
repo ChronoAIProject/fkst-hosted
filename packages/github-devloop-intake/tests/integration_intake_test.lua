@@ -27,7 +27,7 @@ local function entity_changed(number, fields)
   local selected = number or f.number or 42
   local updated_at = f.updated_at or "2026-06-03T01:02:03Z"
   return {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_issue_changed",
     payload = {
       schema = "github-proxy.v1",
       type = f.type or "issue",

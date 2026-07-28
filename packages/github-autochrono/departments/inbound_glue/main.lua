@@ -2,9 +2,9 @@ local core = require("core")
 local saga = require("workflow.saga")
 
 local spec = {
-  consumes = { "github-proxy.github_entity_changed" },
+  consumes = { "github-proxy.github_issue_changed" },
   produces = { "autochrono.issue" },
-  fanout = { "github-proxy.github_entity_changed" },
+  fanout = { "github-proxy.github_issue_changed" },
   stall_window = "30s",
 }
 

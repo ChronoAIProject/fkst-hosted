@@ -1,5 +1,5 @@
 {
-  "artifact_sha256": "6e4768fd3630fb168925f36d288592aef77d6b4e2bba1c5cdfc8e8f1d762dba2",
+  "artifact_sha256": "343ec61bcf6e81d596f3c3c57454777dc048427cbc8b51c034a7570c330adc2d",
   "consumer_entry_acceptors": [
     {
       "ordinal": "consumes:consensus.consensus_converge",
@@ -201,7 +201,7 @@
             "ref": "owner/repo#issue/42"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": "blocked",
         "target": "devloop_ready"
       }
@@ -311,7 +311,7 @@
             "ref": "owner/repo#issue/42"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": "blocked",
         "target": "devloop_ready"
       }
@@ -402,7 +402,7 @@
             "ref": "owner/repo#issue/42"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": "impl-failed",
         "target": "devloop_ready"
       }
@@ -3987,7 +3987,7 @@
             "ref": "owner/repo#pr/9702"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_pr_changed",
         "source_state": null,
         "target": "reviewing"
       }
@@ -4053,7 +4053,7 @@
             "ref": "owner/repo#pr/9707"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_pr_changed",
         "source_state": null,
         "target": "reviewing"
       }
@@ -12339,7 +12339,7 @@
             "ref": "owner/repo#issue/42"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": null,
         "target": "thinking"
       }
@@ -12404,7 +12404,7 @@
             "ref": "owner/repo#issue/42"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": null,
         "target": "thinking"
       }
@@ -12469,7 +12469,7 @@
             "ref": "owner/repo#issue/42"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": null,
         "target": "thinking"
       }
@@ -12534,7 +12534,7 @@
             "ref": "owner/repo#issue/42004"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": null,
         "target": "thinking"
       }
@@ -12599,7 +12599,7 @@
             "ref": "owner/repo#issue/42003"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": null,
         "target": "thinking"
       }
@@ -12664,7 +12664,7 @@
             "ref": "owner/repo#issue/42002"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": null,
         "target": "thinking"
       }
@@ -12729,7 +12729,7 @@
             "ref": "owner/repo#issue/42"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": null,
         "target": "thinking"
       }
@@ -12794,7 +12794,7 @@
             "ref": "owner/repo#issue/42"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": null,
         "target": "thinking"
       }
@@ -12859,7 +12859,7 @@
             "ref": "owner/repo#issue/42"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": null,
         "target": "thinking"
       }
@@ -12924,7 +12924,7 @@
             "ref": "owner/repo#issue/42"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": null,
         "target": "thinking"
       }
@@ -12989,7 +12989,7 @@
             "ref": "owner/repo#issue/42"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": null,
         "target": "thinking"
       }
@@ -13054,7 +13054,7 @@
             "ref": "owner/repo#issue/42"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": null,
         "target": "thinking"
       }
@@ -13119,7 +13119,7 @@
             "ref": "owner/repo#issue/42"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": null,
         "target": "thinking"
       }
@@ -13222,7 +13222,7 @@
             "ref": "owner/repo#issue/42"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": null,
         "target": "thinking"
       }
@@ -13391,7 +13391,7 @@
             "ref": "owner/repo#issue/42"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": null,
         "target": "thinking"
       }
@@ -13456,7 +13456,7 @@
             "ref": "owner/repo#issue/42001"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": null,
         "target": "thinking"
       }
@@ -13521,7 +13521,7 @@
             "ref": "owner/repo#issue/42"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": null,
         "target": "thinking"
       }
@@ -13586,7 +13586,7 @@
             "ref": "owner/repo#issue/42"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": null,
         "target": "thinking"
       }
@@ -13651,7 +13651,7 @@
             "ref": "owner/repo#issue/42"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_issue_changed",
         "source_state": null,
         "target": "thinking"
       }
@@ -16050,7 +16050,7 @@
             "ref": "owner/repo#pr/7"
           }
         },
-        "source_boundary": "github-proxy.github_entity_changed",
+        "source_boundary": "github-proxy.github_pr_changed",
         "source_state": "reviewing",
         "target": "devloop_merge_ready"
       }

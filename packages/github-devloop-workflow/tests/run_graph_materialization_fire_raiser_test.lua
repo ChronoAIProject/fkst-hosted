@@ -349,7 +349,7 @@ end
 
 local function native_pr_merged_event()
   return {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_pr_changed",
     payload = {
       schema = "github-proxy.v1",
       type = "pr",
@@ -435,7 +435,7 @@ return {
     mock_native_merge_observation()
     local merged_trace = graph.require_quiescent(graph.run(native_pr_merged_event(), { max_steps = 4 }))
     graph.assert_covers(merged_trace, {
-      "github-proxy.github_entity_changed -> github-devloop.observe_issue",
+      "github-proxy.github_pr_changed -> github-devloop.observe_issue",
     })
     local close_calls = 0
     for _, call in ipairs(t.command_calls()) do

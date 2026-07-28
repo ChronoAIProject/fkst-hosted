@@ -25,7 +25,7 @@ local expected_entries = {
   ["github-devloop/thinking/entry/unmanaged_issue"] = {
     row_id = "thinking",
     source_state = nil,
-    source_boundary = "github-proxy.github_entity_changed",
+    source_boundary = "github-proxy.github_issue_changed",
     target = "thinking",
     field = "entry_inventory.unmanaged_issue",
     semantic_variant = "unmanaged_issue",
@@ -173,7 +173,7 @@ end
 
 local function observe_unmanaged_issue_entry()
   local department = require("departments.observe_issue.main")
-  local queue_name = consumed_queue(department.spec, "github-proxy.github_entity_changed")
+  local queue_name = consumed_queue(department.spec, "github-proxy.github_issue_changed")
   local payload = h.issue()
   local proposal_id = base_ids.proposal_id(payload.repo, payload.number)
 

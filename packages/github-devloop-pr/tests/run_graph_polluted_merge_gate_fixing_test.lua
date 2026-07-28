@@ -198,7 +198,7 @@ end
 
 local function initial_event()
   return {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_pr_changed",
     payload = {
       schema = "github-proxy.v1",
       type = "pr",
@@ -231,7 +231,7 @@ return {
 
     local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 12 }))
     graph.assert_covers(trace, {
-      "github-proxy.github_entity_changed -> github-devloop-pr.observe_pr",
+      "github-proxy.github_pr_changed -> github-devloop-pr.observe_pr",
       "github-proxy.github_pr_comment_request -> github-proxy.github_pr_comment",
       "github-proxy.github_comment_written -> github-devloop-pr.comment_handoff",
       "github-devloop-pr.devloop_fixing -> github-devloop-pr.fix",

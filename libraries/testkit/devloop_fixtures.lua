@@ -341,7 +341,7 @@ function M.new(deps)
 
   local function run_observe(payload, run_opts)
     return run_department("departments/observe_issue/main.lua", {
-      queue = "github-proxy.github_entity_changed",
+      queue = "github-proxy.github_issue_changed",
       payload = payload,
     }, run_opts)
   end
@@ -474,7 +474,7 @@ function M.new(deps)
       version = reviewing().version,
     }, "def456")
     return run_department("departments/observe_pr/main.lua", {
-      queue = "github-proxy.github_entity_changed",
+      queue = "github-proxy.github_pr_changed",
       payload = payload,
       now_seconds = now_seconds,
     }, run_opts)

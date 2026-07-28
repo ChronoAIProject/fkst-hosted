@@ -135,7 +135,7 @@ local FIXTURES = {
 
 local function event_for(fixture)
   return {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_issue_changed",
     ts = "2026-06-03T02:03:04Z",
     payload = h.issue({
       labels = fixture.labels,

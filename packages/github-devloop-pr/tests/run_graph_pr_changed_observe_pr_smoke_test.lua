@@ -20,7 +20,7 @@ end
 
 local function initial_event()
   return {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_pr_changed",
     payload = {
       schema = "github-proxy.v1",
       type = "pr",
@@ -39,7 +39,12 @@ local function initial_event()
 end
 
 local function mock_runtime_and_pr_view()
-  for _ = 1, 4 do
+  for _ = 1, 8 do
+    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_WRITE"), {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
     t.mock_command(devloop_base.read_env_command("FKST_GITHUB_BOT_LOGIN"), {
       stdout = "fkst-test-bot",
       stderr = "",
@@ -87,19 +92,19 @@ local function mock_runtime_and_pr_view()
 end
 
 return {
-  test_run_graph_entity_changed_delivers_to_observe_pr = function()
+  test_run_graph_pr_changed_delivers_to_observe_pr = function()
     mock_runtime_and_pr_view()
 
     local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 3 }))
     graph.assert_covers(trace, {
-      "github-proxy.github_entity_changed -> github-devloop-pr.observe_pr",
+      "github-proxy.github_pr_changed -> github-devloop-pr.observe_pr",
     })
 
     local step = graph.require_delivery(trace, {
-      queue = "github-proxy.github_entity_changed",
+      queue = "github-proxy.github_pr_changed",
       consumer = "github-devloop-pr.observe_pr",
     })
     t.eq(step.exit_code, 0)
-    t.is_true(observe_spec().consumes[1] == "github-proxy.github_entity_changed")
+    t.is_true(observe_spec().consumes[1] == "github-proxy.github_pr_changed")
   end,
 }

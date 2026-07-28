@@ -2,7 +2,7 @@
 
 This is a **composed package** (adapter / wiring layer) that combines `github-proxy` and
 `autochrono` while the two packages remain unaware of each other. `github-proxy` only publishes
-GitHub entity changes and consumes comment requests; `autochrono` only consumes its own `issue`
+typed GitHub issue and pull-request changes and consumes comment requests; `autochrono` only consumes its own `issue`
 contract and produces its own `reply` contract. This package's glue departments are the only layer
 that references both `github-proxy.*` and `autochrono.*` queues, keeping that coupling centralized.
 
@@ -14,7 +14,7 @@ run single-root conformance; it is valid only inside the composed graph.
 Flow:
 
 ```text
-github-proxy.github_entity_changed
+github-proxy.github_issue_changed
   -> autochrono.issue
   -> consensus.proposal
   -> consensus.consensus_reached
@@ -22,7 +22,7 @@ github-proxy.github_entity_changed
   -> github-proxy.github_issue_comment_request
 ```
 
-`departments/inbound_glue` maps only GitHub issue events to `autochrono.issue.v1` and ignores PRs.
+`departments/inbound_glue` maps GitHub issue events to `autochrono.issue.v1`; PR events are not routed to it.
 `autochrono` maps issues to `consensus.proposal.v1`; `consensus` produces
 `consensus.consensus_reached.v1`; only an approve result continues to `autochrono.reply.v1`.
 `departments/outbound_glue` maps `autochrono.reply.v1` to `github_issue_comment_request`, preserving

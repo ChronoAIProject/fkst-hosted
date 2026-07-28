@@ -63,7 +63,7 @@ end
 local function run_observe_pr(name)
   mock_branch_config_env()
   return h.run_department("departments/observe_pr/main.lua", {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_pr_changed",
     payload = {
       schema = "github-proxy.v1",
       type = "pr",
