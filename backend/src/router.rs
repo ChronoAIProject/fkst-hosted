@@ -110,7 +110,7 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
     // in-handler via a GitHub token or OAuth). It shares this subtree's timeout,
     // which is a comfortable upper bound — its own presign + `/user` round-trips are
     // each independently bounded well below it.
-    let api_routes = routes::environments::router()
+    let mut api_routes = routes::environments::router()
         .merge(routes::logs::router())
         .merge(routes::auth::router())
         .merge(routes::repos::router())
@@ -118,11 +118,24 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
         .merge(routes::canvas::router())
         // The identity-gated engine observe read-model (issue #473); authorizes
         // in-handler with the SAME three-tier check as the log download.
-        .merge(routes::observe::router())
-        .layer(middleware::from_fn_with_state(
-            leadership_gate.clone(),
-            require_ready_leader,
-        ));
+        .merge(routes::observe::router());
+
+    // The chat concierge (`POST /api/v1/chat`), mounted only when the feature is
+    // configured — the same "the spec reflects what is actually served" treatment as
+    // the webhook below. It joins the `/api/v1` nest deliberately: it then inherits
+    // the leader gate and this subtree's timeout with no new middleware. The nest's
+    // TimeoutLayer bounds the response FUTURE, not a streaming body, and the chat
+    // handler returns its SSE response immediately (the turn runs in a spawned
+    // task), so nothing severs a live stream.
+    if let Some(chat) = &state.chat {
+        api_routes = api_routes.merge(routes::chat::router(chat.config().request_max_bytes));
+        tracing::info!("chat concierge endpoint mounted (POST /api/v1/chat)");
+    }
+
+    let api_routes = api_routes.layer(middleware::from_fn_with_state(
+        leadership_gate.clone(),
+        require_ready_leader,
+    ));
 
     // The GitHub App webhook (issue #108) is UNAUTHENTICATED at the app layer
     // but signature-verified inside the handler over the raw body. It lives at

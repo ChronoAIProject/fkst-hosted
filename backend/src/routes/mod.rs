@@ -8,6 +8,9 @@ pub mod auth_broader;
 // The canvas dashboard's live REST surface: whole-account overview + per-repo
 // session detail/create/stop, all computed from live GitHub reads (stateless).
 pub mod canvas;
+// The chat concierge's single public surface (`POST /api/v1/chat`): an authenticated
+// SSE stream of one conversation turn. Mounted only when chat is configured.
+pub mod chat;
 pub mod dashboard;
 pub mod environments;
 pub mod github_app_webhook;

@@ -310,6 +310,13 @@ async fn main() -> ExitCode {
         recovery.mark_unavailable();
     }
 
+    // The chat concierge's runtime, built iff the feature is configured. `None`
+    // leaves POST /api/v1/chat unmounted and absent from the served spec.
+    let chat = config
+        .chat
+        .clone()
+        .map(|cfg| std::sync::Arc::new(fkst_control_plane::chat::ChatRuntime::from_config(cfg)));
+
     let app = match build_router(AppState {
         config,
         recovery,
@@ -324,6 +331,7 @@ async fn main() -> ExitCode {
         // Filled by `build_router` with the router it returns, so chat tools can
         // dispatch through it (see `AppState::self_router`).
         self_router: fkst_control_plane::state::empty_self_router(),
+        chat,
     }) {
         Ok(router) => router,
         Err(error) => {

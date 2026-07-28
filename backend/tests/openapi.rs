@@ -20,8 +20,30 @@ use tower::ServiceExt;
 /// Build the real router. `webhook_secret` toggles the conditionally-mounted
 /// GitHub App webhook so a test can assert the spec reflects live configuration.
 fn app(webhook_secret: bool) -> axum::Router {
+    app_with(webhook_secret, false)
+}
+
+/// [`app`] plus a toggle for the conditionally-mounted chat concierge, which tracks
+/// live configuration the same way the webhook does.
+fn app_with(webhook_secret: bool, chat: bool) -> axum::Router {
     let github_app_webhook_secret = webhook_secret
         .then(|| secrecy::SecretString::new("dummy-webhook-secret".to_string().into()));
+    let chat = chat.then(|| {
+        let chat_config = fkst_control_plane::chat::config::from_vars(&[
+            ("FKST_CHAT_ENABLED".to_string(), "true".to_string()),
+            (
+                "FKST_LLM_BASE_URL".to_string(),
+                "https://llm.example/v1".to_string(),
+            ),
+            ("FKST_LLM_API_KEY".to_string(), "dummy-chat-key".to_string()),
+            ("FKST_LLM_MODEL".to_string(), "dummy-model".to_string()),
+        ])
+        .expect("chat config parses")
+        .expect("chat config is enabled");
+        std::sync::Arc::new(fkst_control_plane::chat::ChatRuntime::from_config(
+            chat_config,
+        ))
+    });
     build_router(AppState {
         config: Config::default(),
         recovery: Default::default(),
@@ -34,6 +56,7 @@ fn app(webhook_secret: bool) -> axum::Router {
         log_bundle_cache: Default::default(),
         disposable_environments: Default::default(),
         self_router: empty_self_router(),
+        chat,
     })
     .expect("router builds")
 }
@@ -517,6 +540,66 @@ async fn internal_worker_protocol_is_never_in_the_spec() {
             "internal route {key} leaked"
         );
     }
+}
+
+#[tokio::test]
+async fn chat_path_tracks_configuration() {
+    // A deployment with chat off must not DOCUMENT a chat endpoint it does not serve.
+    let without = fetch_spec(app_with(true, false)).await;
+    assert!(
+        without["paths"].get("/api/v1/chat").is_none(),
+        "chat must be absent when the feature is not configured"
+    );
+
+    let with = fetch_spec(app_with(true, true)).await;
+    let operation = &with["paths"]["/api/v1/chat"]["post"];
+    assert!(
+        operation.is_object(),
+        "chat must be documented when enabled"
+    );
+    assert!(
+        operation.get("security").is_none(),
+        "chat authenticates via the per-request GitHub token, not a documented scheme"
+    );
+    assert_eq!(operation["operationId"], "chat_turn");
+    // The streaming content type is the contract the SPA's parser depends on.
+    assert!(
+        operation["responses"]["200"]["content"]
+            .get("text/event-stream")
+            .is_some(),
+        "the 200 response must be documented as an SSE stream: {:?}",
+        operation["responses"]["200"]
+    );
+    for status in ["401", "403", "413", "422", "429", "503"] {
+        assert!(
+            operation["responses"].get(status).is_some(),
+            "chat must document its {status} response"
+        );
+    }
+
+    let components = &with["components"]["schemas"];
+    for schema in [
+        "ChatRequest",
+        "ChatClientMessage",
+        "ChatClientRole",
+        "ChatStreamEvent",
+        "SessionRef",
+    ] {
+        assert!(
+            components.get(schema).is_some(),
+            "component schema {schema} must be present; got {:?}",
+            components.as_object().map(|m| m.keys().collect::<Vec<_>>())
+        );
+    }
+    // Still no application-level auth anywhere, chat included.
+    assert!(
+        with["components"]["securitySchemes"].as_object().is_none()
+            || with["components"]["securitySchemes"]
+                .as_object()
+                .expect("object")
+                .is_empty(),
+        "the surface must register zero security schemes"
+    );
 }
 
 #[tokio::test]

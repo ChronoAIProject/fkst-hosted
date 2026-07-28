@@ -191,6 +191,7 @@ mod tests {
             log_bundle_cache: Default::default(),
             disposable_environments: Default::default(),
             self_router: crate::state::empty_self_router(),
+            chat: None,
         }
     }
 
