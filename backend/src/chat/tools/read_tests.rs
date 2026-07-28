@@ -64,7 +64,9 @@ async fn invoke(
 // ---- registry surface -----------------------------------------------------
 
 #[test]
-fn the_default_registry_exposes_exactly_the_eight_read_tools() {
+fn the_default_registry_leads_with_the_eight_read_tools() {
+    // Order is the order the model reads: the live-data tools lead, and the in-process
+    // manual search comes last.
     let registry = default_registry();
     let names: Vec<String> = registry.defs().into_iter().map(|d| d.name).collect();
     assert_eq!(
@@ -78,6 +80,7 @@ fn the_default_registry_exposes_exactly_the_eight_read_tools() {
             "get_log_manifest",
             "tail_log_file",
             "list_environment_profiles",
+            "search_manual",
         ]
     );
 }
