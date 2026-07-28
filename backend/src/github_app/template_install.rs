@@ -3,25 +3,39 @@
 //! [`IssueTemplateGithub::install_templates`], decoupled from token minting so
 //! it is unit-testable against a fake [`GithubApi`].
 //!
-//! Merge-blocked repos are a supported steady state, not a failure. On a repo
-//! whose default branch enforces required checks/reviews, the immediate merge
-//! is rejected — the PR is then LEFT OPEN ([`TemplateInstallOutcome::PendingPr`])
-//! for the repo's own CI/review flow, and the next ensure pass (TTL-gated by
-//! the caller) finds and reuses that same PR instead of opening a replacement.
-//! The head branch of an open install PR is never deleted: deleting it
-//! force-closes the PR, which is exactly the churn loop this module replaces
-//! (one closed PR per reconcile, forever — see issue #5578).
+//! Two invariants drive the design, both learned from issue #5578 (a repo whose
+//! protected default branch blocks the immediate merge saw a fresh install PR
+//! opened and force-closed roughly once a minute, forever):
+//!
+//! 1. **Never churn.** A merge this App cannot complete is a normal steady state,
+//!    not a failure: the PR is LEFT OPEN for the repository's own CI/review flow
+//!    ([`TemplateInstallOutcome::Deferred`]) and the caller TTL-gates the retry.
+//!    The head branch of an open install PR is never deleted — deleting it
+//!    force-closes the PR, which is precisely how the churn loop sustained
+//!    itself. The one exception is a PR GitHub reports as definitively
+//!    conflicted: it can never merge, so it is rebuilt from the current base
+//!    head (see [`recreate_conflicted`]), and even that is TTL-bounded.
+//! 2. **Never merge what this App did not write.** The install branch lives in an
+//!    App-owned namespace, but a branch NAME is not an identity: a fork PR
+//!    carries a bare `head.ref` that can say anything. Reuse therefore resolves
+//!    the PR through [`GithubApi::open_pull_for_head`] (owner-qualified, so forks
+//!    cannot match) and then verifies the PR's diff touches ONLY bundled template
+//!    paths before merging it with the App token.
 //!
 //! [`IssueTemplateGithub::install_templates`]: super::templates::IssueTemplateGithub::install_templates
 
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 
-use super::api::GithubApi;
+use super::api::{GithubApi, PullRequestSummary};
 use super::templates::{bundled_templates, encode_content, TemplateInstallOutcome};
 use super::GithubAppError;
 
+#[cfg(test)]
+#[path = "template_install_tests.rs"]
+mod tests;
+
 /// Head-branch name of the install PR for `target_version`.
-fn template_branch(target_version: u32) -> String {
+pub(super) fn template_branch(target_version: u32) -> String {
     format!("fkst/issue-templates-v{target_version}")
 }
 
@@ -39,10 +53,84 @@ fn pr_title(target_version: u32) -> String {
     format!("Install/Update fkst issue templates to v{target_version}")
 }
 
-/// Install/update all bundled templates in `owner/repo` to `target_version`
-/// via a PR onto the default branch, merged immediately when the repo allows
-/// it. See the module docs for the pending-PR contract on protected branches.
-pub(super) async fn install_templates_with_api(
+/// Whether `pr` is a pull request from a branch in `owner/repo` ITSELF rather
+/// than from a fork. A fork PR's `head.ref` is an unqualified branch name in the
+/// fork, so it can impersonate any App-owned branch name; only the head
+/// repository identity settles it. A PR whose head repository was deleted
+/// (`None`) is not treated as ours.
+fn is_same_repo(pr: &PullRequestSummary, owner: &str, repo: &str) -> bool {
+    pr.head_repo_full_name
+        .as_deref()
+        .is_some_and(|full_name| full_name.eq_ignore_ascii_case(&format!("{owner}/{repo}")))
+}
+
+/// Whether merging `pr` can only touch files this module manages, i.e. every
+/// changed path is one of the bundled template paths. This is the last gate
+/// before the App merges a pull request it did not create in this process — it
+/// bounds a reused PR's blast radius to the inert template files even if someone
+/// with push access staged something else on the App's branch.
+///
+/// FAILS CLOSED: a listing error, or a diff larger than the transport's page cap
+/// (which necessarily contains non-template paths), yields `false`.
+async fn touches_only_templates(
+    api: &dyn GithubApi,
+    token: &SecretString,
+    owner: &str,
+    repo: &str,
+    number: u64,
+) -> bool {
+    let files = match api
+        .list_pull_files(token.expose_secret(), owner, repo, number as i64)
+        .await
+    {
+        Ok(files) => files,
+        Err(error) => {
+            tracing::warn!(
+                owner = %owner,
+                repo = %repo,
+                pull = number,
+                error = %error,
+                "issue-templates: cannot read the pending PR's files; refusing to merge it"
+            );
+            return false;
+        }
+    };
+    let bundled = bundled_templates();
+    let is_bundled = |path: &str| bundled.iter().any(|tf| tf.path == path);
+    // A rename is two paths: merging it also REMOVES the old one, so both ends
+    // must be ours.
+    files
+        .iter()
+        .all(|f| is_bundled(&f.filename) && f.previous_filename.as_deref().is_none_or(&is_bundled))
+}
+
+/// Rebuild the install branch from the current base head and open a fresh PR,
+/// after the existing one was found permanently unmergeable (conflicted). This
+/// DOES force-close the old PR (deleting a head branch closes its PR) — the
+/// deliberate exception to the never-churn rule, safe only because the caller
+/// reaches it at most once per ensure TTL and only on a definitive conflict.
+async fn recreate_conflicted(
+    api: &dyn GithubApi,
+    token: &SecretString,
+    owner: &str,
+    repo: &str,
+    target_version: u32,
+    stale_pull: u64,
+) -> Result<TemplateInstallOutcome, GithubAppError> {
+    tracing::warn!(
+        owner = %owner,
+        repo = %repo,
+        pull = stale_pull,
+        "issue-templates: pending install PR is conflicted; rebuilding it from the base head"
+    );
+    let branch = template_branch(target_version);
+    api.delete_ref(token, owner, repo, &branch).await.ok();
+    open_install_pull(api, token, owner, repo, target_version).await
+}
+
+/// Create the install branch, write every bundled template onto it, open the PR,
+/// and try to merge it. Assumes no open PR already owns the branch.
+async fn open_install_pull(
     api: &dyn GithubApi,
     token: &SecretString,
     owner: &str,
@@ -52,57 +140,6 @@ pub(super) async fn install_templates_with_api(
     let branch = template_branch(target_version);
     let title = pr_title(target_version);
 
-    // One open-PR listing serves two purposes: find a still-open install PR
-    // from a prior merge-blocked run (reuse it instead of churning a
-    // replacement), and supersede install PRs left open for an OLDER bundled
-    // version (delete their head branches, which closes them) so two template
-    // PRs are never open at once after a version bump.
-    let mut pending: Option<u64> = None;
-    for pr in api.list_open_pulls(token, owner, repo).await? {
-        match template_branch_version(&pr.head_ref) {
-            Some(version) if version == target_version => pending = Some(pr.number),
-            Some(version) => {
-                tracing::info!(
-                    owner = %owner,
-                    repo = %repo,
-                    pull = pr.number,
-                    superseded = version,
-                    target = target_version,
-                    "issue-templates: closing stale-version install PR"
-                );
-                // Best-effort: a failure leaves the stale PR open and the
-                // next ensure pass retries the supersede.
-                api.delete_ref(token, owner, repo, &pr.head_ref).await.ok();
-            }
-            None => {}
-        }
-    }
-
-    if let Some(number) = pending {
-        // A previous run opened this exact PR but could not merge it. Retry
-        // the merge — the repo's required checks may have passed since — and
-        // when still blocked leave the PR (and its branch!) untouched.
-        return match api
-            .merge_pull_request(token, owner, repo, number, &title)
-            .await
-        {
-            Ok(()) => {
-                api.delete_ref(token, owner, repo, &branch).await.ok();
-                Ok(TemplateInstallOutcome::Merged)
-            }
-            Err(error) => {
-                tracing::info!(
-                    owner = %owner,
-                    repo = %repo,
-                    pull = number,
-                    error = %error,
-                    "issue-templates: pending install PR still unmergeable; leaving it open"
-                );
-                Ok(TemplateInstallOutcome::PendingPr { number })
-            }
-        };
-    }
-
     let base = api.repo_default_branch(token, owner, repo).await?;
     let head_sha = api
         .branch_head_sha(token, owner, repo, &base)
@@ -111,9 +148,9 @@ pub(super) async fn install_templates_with_api(
             GithubAppError::Http(format!("repository default branch {base:?} has no Git ref"))
         })?;
 
-    // Create the working branch. A surviving branch WITHOUT an open PR (none
-    // was found above) is stale — a crashed run or a manually closed PR — so
-    // drop and recreate it to start from the current head.
+    // A surviving branch with no open PR (the caller established that) is stale
+    // — a crashed run, or a PR closed by hand — so restart it from the current
+    // head rather than building on whatever it holds.
     if let Err(GithubAppError::RefExists) =
         api.create_ref(token, owner, repo, &branch, &head_sha).await
     {
@@ -123,8 +160,8 @@ pub(super) async fn install_templates_with_api(
     }
 
     for tf in bundled_templates() {
-        // An existing blob on the base branch => UPDATE (PUT requires its
-        // sha); None => CREATE.
+        // An existing blob on the base branch => UPDATE (PUT requires its sha);
+        // None => CREATE.
         let existing = api
             .content_file(token, owner, repo, tf.path, Some(&base))
             .await?;
@@ -157,6 +194,7 @@ pub(super) async fn install_templates_with_api(
              open for the repository's own merge flow.",
         )
         .await?;
+
     match api
         .merge_pull_request(token, owner, repo, number, &title)
         .await
@@ -168,331 +206,155 @@ pub(super) async fn install_templates_with_api(
             Ok(TemplateInstallOutcome::Merged)
         }
         Err(error) => {
-            // Expected on protected default branches (required checks /
-            // reviews). NOT an error: the PR stays open for the repo's own
-            // merge flow and the caller gates the next attempt to its TTL.
+            // Expected wherever the base branch enforces checks or reviews, and
+            // on repositories that disallow merge commits. NOT an error: the PR
+            // stays open for the repository's own merge flow.
             tracing::info!(
                 owner = %owner,
                 repo = %repo,
                 pull = number,
                 error = %error,
-                "issue-templates: immediate merge blocked; leaving install PR open"
+                "issue-templates: immediate merge unavailable; leaving install PR open"
             );
-            Ok(TemplateInstallOutcome::PendingPr { number })
+            Ok(TemplateInstallOutcome::Deferred { pull: number })
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::sync::Mutex;
-
-    use async_trait::async_trait;
-
-    use crate::github_app::api::{PullRequestSummary, RemoteFile};
-
-    use super::*;
-
-    fn token() -> SecretString {
-        SecretString::from("test-token".to_string())
+/// Retry the merge of an install PR a previous pass left open, recovering if it
+/// has since become conflicted. Never deletes the branch of a PR that is still
+/// mergeable — that is the churn loop.
+async fn resume_pending_pull(
+    api: &dyn GithubApi,
+    token: &SecretString,
+    owner: &str,
+    repo: &str,
+    target_version: u32,
+    pending: PullRequestSummary,
+) -> Result<TemplateInstallOutcome, GithubAppError> {
+    let number = pending.number;
+    if !is_same_repo(&pending, owner, repo)
+        || !touches_only_templates(api, token, owner, repo, number).await
+    {
+        // Someone else's pull request occupies the App's branch name. Touch
+        // nothing: not the branch (deleting it would close their PR), not the
+        // merge. The repository simply stays on its current template version
+        // until a human resolves the squat.
+        tracing::warn!(
+            owner = %owner,
+            repo = %repo,
+            pull = number,
+            head_repo = pending.head_repo_full_name.as_deref().unwrap_or("<deleted>"),
+            author = %pending.author_login,
+            "issue-templates: install branch held by a pull request this app did not \
+             write; refusing to merge it"
+        );
+        return Ok(TemplateInstallOutcome::Deferred { pull: number });
     }
 
-    fn summary(number: u64, head_ref: &str) -> PullRequestSummary {
-        PullRequestSummary {
-            number,
-            author_login: "fkst-app[bot]".to_string(),
-            head_sha: "abc123".to_string(),
-            head_ref: head_ref.to_string(),
-            title: "Install/Update fkst issue templates".to_string(),
+    let title = pr_title(target_version);
+    match api
+        .merge_pull_request(token, owner, repo, number, &title)
+        .await
+    {
+        Ok(()) => {
+            api.delete_ref(token, owner, repo, &template_branch(target_version))
+                .await
+                .ok();
+            Ok(TemplateInstallOutcome::Merged)
         }
-    }
-
-    /// Fake [`GithubApi`] recording every call as `"op:detail"`, with
-    /// configurable open-PR listing, merge outcome, and a first-`create_ref`
-    /// [`GithubAppError::RefExists`]. Unimplemented trait methods keep their
-    /// panicking defaults, so an unexpected call fails the test loudly.
-    struct FakeApi {
-        open_pulls: Vec<PullRequestSummary>,
-        merge_ok: bool,
-        ref_exists_once: bool,
-        calls: Mutex<Vec<String>>,
-    }
-
-    impl FakeApi {
-        fn new(open_pulls: Vec<PullRequestSummary>, merge_ok: bool) -> Self {
-            Self {
-                open_pulls,
-                merge_ok,
-                ref_exists_once: false,
-                calls: Mutex::new(Vec::new()),
+        Err(error) => {
+            // A merge can fail because the base branch gates it (retry later) or
+            // because the PR is genuinely conflicted (retrying can never work).
+            // Only GitHub's `mergeable` flag separates the two, and only
+            // `Some(false)` is definitive — `None` means "not computed yet".
+            if let Ok(Some(false)) = api.pull_request_mergeable(token, owner, repo, number).await {
+                return recreate_conflicted(api, token, owner, repo, target_version, number).await;
             }
-        }
-
-        fn record(&self, call: String) {
-            self.calls.lock().unwrap().push(call);
-        }
-
-        fn count(&self, prefix: &str) -> usize {
-            self.calls
-                .lock()
-                .unwrap()
-                .iter()
-                .filter(|c| c.starts_with(prefix))
-                .count()
+            tracing::info!(
+                owner = %owner,
+                repo = %repo,
+                pull = number,
+                error = %error,
+                "issue-templates: pending install PR still unmergeable; leaving it open"
+            );
+            Ok(TemplateInstallOutcome::Deferred { pull: number })
         }
     }
+}
 
-    #[async_trait]
-    impl GithubApi for FakeApi {
-        // The two trait methods without panicking defaults; the install
-        // orchestration never mints tokens, so a call here is a test failure.
-        async fn installation_for_repo(
-            &self,
-            _app_jwt: &SecretString,
-            _owner: &str,
-            _repo: &str,
-        ) -> Result<crate::github_app::api::InstallationId, GithubAppError> {
-            unimplemented!("install orchestration must not resolve installations")
+/// Close install PRs left open for a version BELOW `target_version` so a version
+/// bump never leaves two template PRs open at once. Best-effort and purely
+/// cosmetic: every failure is logged and skipped, because a lingering stale PR
+/// is untidy, not harmful. Only same-repository PRs are considered — a fork PR
+/// named like an install branch describes nothing about this repository.
+async fn supersede_older_pulls(
+    api: &dyn GithubApi,
+    token: &SecretString,
+    owner: &str,
+    repo: &str,
+    target_version: u32,
+) {
+    let open = match api.list_open_pulls(token, owner, repo).await {
+        Ok(open) => open,
+        Err(error) => {
+            tracing::warn!(
+                owner = %owner,
+                repo = %repo,
+                error = %error,
+                "issue-templates: cannot list open PRs; skipping stale-version cleanup"
+            );
+            return;
         }
-
-        async fn create_installation_token(
-            &self,
-            _app_jwt: &SecretString,
-            _id: crate::github_app::api::InstallationId,
-            _req: &crate::github_app::api::InstallationTokenRequest,
-        ) -> Result<crate::github_app::api::InstallationToken, GithubAppError> {
-            unimplemented!("install orchestration must not mint tokens")
+    };
+    for pr in open {
+        let Some(version) = template_branch_version(&pr.head_ref) else {
+            continue;
+        };
+        if version >= target_version || !is_same_repo(&pr, owner, repo) {
+            continue;
         }
-
-        async fn list_open_pulls(
-            &self,
-            _token: &SecretString,
-            _owner: &str,
-            _repo: &str,
-        ) -> Result<Vec<PullRequestSummary>, GithubAppError> {
-            self.record("list_open_pulls".to_string());
-            Ok(self.open_pulls.clone())
-        }
-
-        async fn repo_default_branch(
-            &self,
-            _token: &SecretString,
-            _owner: &str,
-            _repo: &str,
-        ) -> Result<String, GithubAppError> {
-            self.record("repo_default_branch".to_string());
-            Ok("main".to_string())
-        }
-
-        async fn branch_head_sha(
-            &self,
-            _token: &SecretString,
-            _owner: &str,
-            _repo: &str,
-            branch: &str,
-        ) -> Result<Option<String>, GithubAppError> {
-            self.record(format!("branch_head_sha:{branch}"));
-            Ok(Some("headsha".to_string()))
-        }
-
-        async fn create_ref(
-            &self,
-            _token: &SecretString,
-            _owner: &str,
-            _repo: &str,
-            branch: &str,
-            _sha: &str,
-        ) -> Result<(), GithubAppError> {
-            self.record(format!("create_ref:{branch}"));
-            if self.ref_exists_once && self.count("create_ref:") == 1 {
-                return Err(GithubAppError::RefExists);
-            }
-            Ok(())
-        }
-
-        async fn content_file(
-            &self,
-            _token: &SecretString,
-            _owner: &str,
-            _repo: &str,
-            path: &str,
-            _git_ref: Option<&str>,
-        ) -> Result<Option<RemoteFile>, GithubAppError> {
-            self.record(format!("content_file:{path}"));
-            Ok(Some(RemoteFile {
-                sha: "blobsha".to_string(),
-                content_base64: String::new(),
-            }))
-        }
-
-        #[allow(clippy::too_many_arguments)]
-        async fn put_file(
-            &self,
-            _token: &SecretString,
-            _owner: &str,
-            _repo: &str,
-            path: &str,
-            _message: &str,
-            _content_base64: &str,
-            _branch: &str,
-            _sha: Option<&str>,
-        ) -> Result<(), GithubAppError> {
-            self.record(format!("put_file:{path}"));
-            Ok(())
-        }
-
-        #[allow(clippy::too_many_arguments)]
-        async fn create_pull_request(
-            &self,
-            _token: &SecretString,
-            _owner: &str,
-            _repo: &str,
-            _title: &str,
-            head: &str,
-            _base: &str,
-            _body: &str,
-        ) -> Result<u64, GithubAppError> {
-            self.record(format!("create_pull_request:{head}"));
-            Ok(77)
-        }
-
-        async fn merge_pull_request(
-            &self,
-            _token: &SecretString,
-            _owner: &str,
-            _repo: &str,
-            number: u64,
-            _commit_title: &str,
-        ) -> Result<(), GithubAppError> {
-            self.record(format!("merge_pull_request:{number}"));
-            if self.merge_ok {
-                Ok(())
-            } else {
-                Err(GithubAppError::Http(
-                    "405: required status checks have not succeeded".to_string(),
-                ))
-            }
-        }
-
-        async fn delete_ref(
-            &self,
-            _token: &SecretString,
-            _owner: &str,
-            _repo: &str,
-            branch: &str,
-        ) -> Result<(), GithubAppError> {
-            self.record(format!("delete_ref:{branch}"));
-            Ok(())
-        }
-    }
-
-    async fn install(api: &FakeApi, target: u32) -> TemplateInstallOutcome {
-        install_templates_with_api(api, &token(), "acme", "site", target)
-            .await
-            .expect("install must not error")
-    }
-
-    #[tokio::test]
-    async fn fresh_install_merges_and_cleans_up() {
-        let api = FakeApi::new(vec![], true);
-        assert_eq!(install(&api, 10).await, TemplateInstallOutcome::Merged);
-        assert_eq!(api.count("put_file:"), bundled_templates().len());
-        assert_eq!(api.count("create_pull_request:"), 1);
-        assert_eq!(api.count("merge_pull_request:"), 1);
-        assert_eq!(
-            api.count("delete_ref:fkst/issue-templates-v10"),
-            1,
-            "merged branch is cleaned up"
+        tracing::info!(
+            owner = %owner,
+            repo = %repo,
+            pull = pr.number,
+            superseded = version,
+            target = target_version,
+            "issue-templates: closing stale-version install PR"
         );
+        if let Err(error) = api.delete_ref(token, owner, repo, &pr.head_ref).await {
+            tracing::warn!(
+                owner = %owner,
+                repo = %repo,
+                pull = pr.number,
+                error = %error,
+                "issue-templates: stale-version install PR could not be closed; leaving it open"
+            );
+        }
+    }
+}
+
+/// Install/update all bundled templates in `owner/repo` to `target_version` via
+/// a PR onto the default branch, merged immediately where the repository allows
+/// it. See the module docs for the never-churn and never-merge-foreign-content
+/// contracts.
+pub(super) async fn install_templates_with_api(
+    api: &dyn GithubApi,
+    token: &SecretString,
+    owner: &str,
+    repo: &str,
+    target_version: u32,
+) -> Result<TemplateInstallOutcome, GithubAppError> {
+    // Exact + owner-qualified: a busy repo's 100-PR listing page cannot hide
+    // this, and a fork branch of the same name cannot impersonate it.
+    let pending = api
+        .open_pull_for_head(token, owner, repo, &template_branch(target_version))
+        .await?;
+
+    if let Some(pending) = pending {
+        return resume_pending_pull(api, token, owner, repo, target_version, pending).await;
     }
 
-    #[tokio::test]
-    async fn merge_blocked_leaves_pr_and_branch_open() {
-        let api = FakeApi::new(vec![], false);
-        assert_eq!(
-            install(&api, 10).await,
-            TemplateInstallOutcome::PendingPr { number: 77 }
-        );
-        assert_eq!(
-            api.count("delete_ref:"),
-            0,
-            "a blocked PR's head branch must never be deleted (deleting it \
-             force-closes the PR — the churn loop)"
-        );
-    }
-
-    #[tokio::test]
-    async fn pending_pr_is_reused_not_churned() {
-        let api = FakeApi::new(vec![summary(55, "fkst/issue-templates-v10")], false);
-        assert_eq!(
-            install(&api, 10).await,
-            TemplateInstallOutcome::PendingPr { number: 55 }
-        );
-        assert_eq!(api.count("create_ref:"), 0, "no new branch");
-        assert_eq!(api.count("put_file:"), 0, "no rewritten files");
-        assert_eq!(api.count("create_pull_request:"), 0, "no replacement PR");
-        assert_eq!(api.count("delete_ref:"), 0, "the open PR's branch survives");
-        assert_eq!(api.count("merge_pull_request:55"), 1, "merge is retried");
-    }
-
-    #[tokio::test]
-    async fn pending_pr_merge_retry_converges() {
-        let api = FakeApi::new(vec![summary(55, "fkst/issue-templates-v10")], true);
-        assert_eq!(install(&api, 10).await, TemplateInstallOutcome::Merged);
-        assert_eq!(
-            api.count("delete_ref:fkst/issue-templates-v10"),
-            1,
-            "merged branch is cleaned up"
-        );
-        assert_eq!(api.count("create_pull_request:"), 0, "no replacement PR");
-    }
-
-    #[tokio::test]
-    async fn stale_version_pr_is_superseded() {
-        let api = FakeApi::new(vec![summary(41, "fkst/issue-templates-v9")], true);
-        assert_eq!(install(&api, 10).await, TemplateInstallOutcome::Merged);
-        assert_eq!(
-            api.count("delete_ref:fkst/issue-templates-v9"),
-            1,
-            "the older-version PR is closed via its head branch"
-        );
-        assert_eq!(api.count("create_pull_request:"), 1, "v10 PR still opens");
-    }
-
-    #[tokio::test]
-    async fn non_template_prs_are_untouched() {
-        let api = FakeApi::new(vec![summary(3, "devloop/issue/acme/site/12/fix")], true);
-        assert_eq!(install(&api, 10).await, TemplateInstallOutcome::Merged);
-        assert_eq!(
-            api.count("delete_ref:devloop"),
-            0,
-            "unrelated PR branches are never deleted"
-        );
-    }
-
-    #[tokio::test]
-    async fn stale_branch_without_pr_is_recreated() {
-        let mut api = FakeApi::new(vec![], true);
-        api.ref_exists_once = true;
-        assert_eq!(install(&api, 10).await, TemplateInstallOutcome::Merged);
-        assert_eq!(
-            api.count("create_ref:"),
-            2,
-            "delete + recreate on RefExists"
-        );
-        // One delete for the stale branch, one cleanup after the merge.
-        assert_eq!(api.count("delete_ref:fkst/issue-templates-v10"), 2);
-    }
-
-    #[test]
-    fn template_branch_version_parses_only_install_branches() {
-        assert_eq!(
-            template_branch_version("fkst/issue-templates-v10"),
-            Some(10)
-        );
-        assert_eq!(template_branch_version("fkst/issue-templates-v9"), Some(9));
-        assert_eq!(template_branch_version("fkst/issue-templates-vX"), None);
-        assert_eq!(template_branch_version("devloop/issue/a/b/1/x"), None);
-        assert_eq!(template_branch_version("main"), None);
-    }
+    supersede_older_pulls(api, token, owner, repo, target_version).await;
+    open_install_pull(api, token, owner, repo, target_version).await
 }

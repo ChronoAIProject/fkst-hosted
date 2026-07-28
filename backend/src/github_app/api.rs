@@ -82,7 +82,16 @@ pub struct PullRequestSummary {
     /// The PR's head branch name (GitHub `head.ref`). The devloop bot encodes the
     /// work-issue number in it (`devloop/issue/<owner>/<repo>/<N>/…`), so the
     /// auto-merge step parses it to close the linked issue after a merge.
+    ///
+    /// NOTE: for a cross-repository (fork) PR this is the bare branch name in the
+    /// FORK — it carries no owner qualification, so it alone NEVER identifies a
+    /// branch as one this App created. Pair it with [`Self::head_repo_full_name`].
     pub head_ref: String,
+    /// The head repository's `owner/name` (GitHub `head.repo.full_name`), or
+    /// `None` when the head repository was deleted. Equal to the base repo for a
+    /// same-repository PR and different for a fork PR — the discriminator any
+    /// branch-name-driven decision must check first.
+    pub head_repo_full_name: Option<String>,
     /// The PR title (GitHub `title`). A fallback source for the work-issue number
     /// (`… for #<N>` / `… for issue #<N>`) when the branch name does not carry it.
     pub title: String,
@@ -394,6 +403,24 @@ pub trait GithubApi: Send + Sync {
         unimplemented!("list_open_pulls is only implemented by the HTTP transport")
     }
 
+    /// `GET {base}/repos/{owner}/{repo}/pulls?state=open&head={owner}:{branch}` →
+    /// the open PR whose head is THAT branch IN THIS repository, if any.
+    ///
+    /// Preferred over scanning [`Self::list_open_pulls`] whenever a specific
+    /// branch is the subject: it is exact (no 100-PR single-page blind spot on a
+    /// busy repo) and, because the `head` filter is qualified with this repo's
+    /// own owner, a same-name branch in a FORK can never match. Default panics.
+    async fn open_pull_for_head(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> Result<Option<PullRequestSummary>, GithubAppError> {
+        let _ = (token, owner, repo, branch);
+        unimplemented!("open_pull_for_head is only implemented by the HTTP transport")
+    }
+
     /// `GET {base}/repos/{owner}/{repo}/pulls/{number}` → GitHub's `mergeable`
     /// tri-state: `Some(true)` mergeable, `Some(false)` conflict, `None` not yet
     /// computed (JSON `null`/absent → retry next reconcile). Default panics.
@@ -452,6 +479,21 @@ pub trait GithubApi: Send + Sync {
         let _ = (token, owner, repo, branch);
         unimplemented!("delete_ref is only implemented by the HTTP transport")
     }
+}
+
+/// Project one GitHub pull-request JSON object into a [`PullRequestSummary`].
+/// Shared by the listing endpoints so both carry identical field semantics
+/// (notably `head.repo.full_name`, which fork-vs-same-repo decisions rest on).
+/// A PR without a numeric `number` is not a PR — skip it rather than invent one.
+fn project_pull_summary(pr: &serde_json::Value) -> Option<PullRequestSummary> {
+    Some(PullRequestSummary {
+        number: pr["number"].as_u64()?,
+        author_login: pr["user"]["login"].as_str().unwrap_or_default().to_string(),
+        head_sha: pr["head"]["sha"].as_str().unwrap_or_default().to_string(),
+        head_ref: pr["head"]["ref"].as_str().unwrap_or_default().to_string(),
+        head_repo_full_name: pr["head"]["repo"]["full_name"].as_str().map(str::to_string),
+        title: pr["title"].as_str().unwrap_or_default().to_string(),
+    })
 }
 
 /// Production HTTP transport backed by reqwest.
@@ -1354,18 +1396,51 @@ impl GithubApi for HttpGithubApi {
             .await
             .map_err(|e| GithubAppError::Http(format!("list_open_pulls body: {e}")))?;
         let arr = body.as_array().cloned().unwrap_or_default();
-        Ok(arr
-            .iter()
-            .filter_map(|pr| {
-                Some(PullRequestSummary {
-                    number: pr["number"].as_u64()?,
-                    author_login: pr["user"]["login"].as_str().unwrap_or_default().to_string(),
-                    head_sha: pr["head"]["sha"].as_str().unwrap_or_default().to_string(),
-                    head_ref: pr["head"]["ref"].as_str().unwrap_or_default().to_string(),
-                    title: pr["title"].as_str().unwrap_or_default().to_string(),
-                })
-            })
-            .collect())
+        Ok(arr.iter().filter_map(project_pull_summary).collect())
+    }
+
+    async fn open_pull_for_head(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> Result<Option<PullRequestSummary>, GithubAppError> {
+        let url = format!("{}/repos/{owner}/{repo}/pulls", self.api_base);
+        let response = self
+            .client
+            .get(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            // `head` is `<head repo owner>:<ref>`; qualifying it with THIS repo's
+            // owner is what excludes same-name fork branches.
+            .query(&[
+                ("state", "open"),
+                ("head", &format!("{owner}:{branch}")),
+                ("per_page", "10"),
+            ])
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("open_pull_for_head: {e}")))?;
+        let status = response.status();
+        if let Some(err) = classify_auth_status(status, response.headers()) {
+            return Err(err);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "open_pull_for_head status {status}: {body}"
+            )));
+        }
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("open_pull_for_head body: {e}")))?;
+        let arr = body.as_array().cloned().unwrap_or_default();
+        // GitHub allows only one open PR per head ref, so the filter yields at
+        // most one; take the first and ignore any surprise extras.
+        Ok(arr.iter().find_map(project_pull_summary))
     }
 
     async fn pull_request_mergeable(

@@ -11,10 +11,11 @@
 //!     [`GithubAppTokens`] impl — a mint-then-call wrapper that reads the installed
 //!     version and installs/updates all templates via a PR onto the repo's
 //!     default branch, merged immediately where the branch allows it (trusted
-//!     fixed content). When branch protection blocks the immediate merge, the
-//!     PR is left open ([`TemplateInstallOutcome::PendingPr`]) and reused on the
-//!     next ensure pass — see the [`template_install`](super::template_install)
-//!     module docs for that contract.
+//!     fixed content). When the repository's own rules block the immediate
+//!     merge, the PR is left open ([`TemplateInstallOutcome::Deferred`]) and
+//!     reused on the next ensure pass — see the
+//!     [`template_install`](super::template_install) module docs for that
+//!     contract and for why a branch name alone never authorizes a merge.
 //!
 //! Secret hygiene: the installation token is minted with the least-privilege
 //! [`issue_templates_permissions`] set (contents+pull_requests only, never the
@@ -101,11 +102,12 @@ pub(super) fn encode_content(content: &str) -> String {
 pub enum TemplateInstallOutcome {
     /// The install PR merged — the repo is now at the target version.
     Merged,
-    /// The install PR exists but its merge is blocked (protected default
-    /// branch: required checks/reviews). It is left open for the repo's own
-    /// merge flow; the caller must gate the next attempt (TTL) instead of
-    /// retrying every reconcile.
-    PendingPr { number: u64 },
+    /// No merge happened and nothing was churned: an install PR is open,
+    /// awaiting the repository's own merge flow (protected base branch,
+    /// required checks/reviews, or a repo that disallows merge commits), or the
+    /// install branch is held by a pull request this App did not write. The
+    /// caller must TTL-gate the retry rather than re-attempting every reconcile.
+    Deferred { pull: u64 },
 }
 
 /// The GitHub-facing operations the template reconcile needs, injected so the
@@ -119,8 +121,8 @@ pub trait IssueTemplateGithub: Send + Sync {
 
     /// Install/update ALL bundled templates in `owner_repo` to `target_version`
     /// via a single PR onto the default branch: merged immediately when the
-    /// branch allows it, otherwise left open as
-    /// [`TemplateInstallOutcome::PendingPr`].
+    /// repository allows it, otherwise left open as
+    /// [`TemplateInstallOutcome::Deferred`].
     async fn install_templates(
         &self,
         owner_repo: &str,
