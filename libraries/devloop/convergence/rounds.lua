@@ -2,6 +2,7 @@ local parsers_misc = require("devloop.parsers.misc")
 local devloop_base = require("devloop.base")
 local shared = require("devloop.convergence.shared")
 local transition_version = require("contract.transition_version")
+local contract_time = require("contract.time")
 local C = {}
 
 local valid_round = shared.valid_round
@@ -195,6 +196,22 @@ function C.converge_round_facts_for_proposal(comments, proposal_id)
     return attr(marker, "proposal") == tostring(proposal_id)
   end
   return converge_record_map(comments, "converge%-round", matches)
+end
+
+function C.converge_round_facts_since(comments, proposal_id, marker_created_at)
+  local facts = C.converge_round_facts_for_proposal(comments, proposal_id)
+  local epoch_seconds = contract_time.iso_timestamp_epoch_seconds(marker_created_at)
+  if epoch_seconds == nil then
+    return facts
+  end
+  local filtered = {}
+  for _, fact in ipairs(facts) do
+    local fact_seconds = contract_time.iso_timestamp_epoch_seconds(fact.comment_created_at)
+    if fact_seconds ~= nil and fact_seconds >= epoch_seconds then
+      table.insert(filtered, fact)
+    end
+  end
+  return filtered
 end
 
 function C.review_converge_round_facts(M, comments, review_proposal_id, issue_proposal_id, issue_version, head_sha, source_ref_digest)

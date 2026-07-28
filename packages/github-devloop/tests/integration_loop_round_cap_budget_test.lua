@@ -146,6 +146,46 @@ return {
     t.eq(comment.payload.handoff.terminal_cause, "evidence-continuation-budget-exhausted")
   end,
 
+  test_loop_fresh_thinking_epoch_does_not_terminalize_from_prior_generation = function()
+    local current_base = "consensus:github-devloop/issue/owner/repo/42/intake/current"
+    local old_base = "consensus:github-devloop/issue/owner/repo/42/intake/old"
+    local event = unresolved({
+      dedup_key = current_base,
+      round = 0,
+      narrowed_question = "Current generation question",
+      angle_digests = angles(0),
+    })
+    local source_digest = convergence_shared.source_ref_digest(event.source_ref)
+    mock_issue_loop({ "fkst-dev:thinking" }, {
+      {
+        body = conv_rounds.converge_round_marker(event.proposal_id, old_base, source_digest, 0,
+          old_base, "Old question zero", angles(0)),
+        created_at = "2026-06-03T00:00:00Z",
+      },
+      {
+        body = conv_rounds.converge_round_marker(event.proposal_id, old_base, source_digest, 1,
+          old_base .. "/loop/1", "Old question one", angles(1)),
+        created_at = "2026-06-03T00:05:00Z",
+      },
+      {
+        body = core.state_marker(event.proposal_id, "thinking", current_base),
+        created_at = "2026-06-03T02:00:00Z",
+      },
+    })
+
+    local result = run_loop(event, opts("loop-fresh-epoch-ignores-old-terminal"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    local proposal = find_raise(result.raises, "consensus.proposal")
+    t.is_true(proposal ~= nil)
+    t.eq(proposal.payload.round, 1)
+    t.eq(proposal.payload.dedup_key, "github-devloop/issue/owner/repo/42/intake/current/loop/1")
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(comment ~= nil)
+    t.eq(comment.payload.handoff, nil)
+    t.is_true(comment.payload.body:find('round="0"', 1, true) ~= nil)
+  end,
+
   test_loop_essence_stall_handoffs_terminal_reconcile_without_continuation = function()
     local base_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local event = unresolved({

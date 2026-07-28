@@ -33,8 +33,8 @@ id = "convergence.requires-stable-round-facts"
 severity = "error"
 kind = "text_require_regex"
 include = ["departments/loop/main.lua"]
-pattern = "local\\s+lineage\\s*=\\s*conv_rounds\\.converge_round_facts_for_proposal\\s*\\(\\s*current\\.comments\\s*,\\s*unresolved\\.proposal_id\\s*\\)"
-message = "convergence round cap and stale detection must derive from the proposal-wide converge-round:v1 marker stream keyed only by proposal_id"
+pattern = "local\\s+lineage\\s*=\\s*conv_rounds\\.converge_round_facts_since\\s*\\(\\s*current\\.comments\\s*,\\s*unresolved\\.proposal_id\\s*,\\s*state\\.marker_created_at\\s*\\)"
+message = "convergence round cap and stale detection must derive from the proposal-wide converge-round:v1 marker stream within the current trusted thinking epoch"
 
 [[rules]]
 id = "convergence.forbids-boundary-round-cap"
