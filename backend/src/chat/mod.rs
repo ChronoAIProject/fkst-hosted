@@ -13,6 +13,11 @@
 //!   refactor.
 //! * [`llm_openai`] — the one shipped implementation: OpenAI-compatible
 //!   chat-completions, streaming, with tool-call fragment reassembly.
+//! * [`dispatch`] — GET-only, in-process dispatch of data reads through this
+//!   deployment's own router, carrying the caller's token.
+//! * [`tools`] — the [`ChatTool`](tools::ChatTool) registry: every capability the
+//!   model has, and nothing else. The orchestrator depends on the trait, never on a
+//!   concrete tool, so later milestones extend the concierge by registering a tool.
 //!
 //! Security posture, stated once here because every later layer inherits it: the
 //! chat backend is a **client of the public API acting with the calling user's own
@@ -21,5 +26,7 @@
 //! dashboard.
 
 pub mod config;
+pub mod dispatch;
 pub mod llm;
 pub mod llm_openai;
+pub mod tools;

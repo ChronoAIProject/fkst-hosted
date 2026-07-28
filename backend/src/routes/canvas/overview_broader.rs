@@ -19,7 +19,7 @@ use crate::state::AppState;
 
 /// The request header carrying the OPTIONAL broader-visibility OAuth token. The value
 /// is a bare token (an optional `Bearer ` prefix is tolerated); it is NEVER logged.
-pub(super) const BROADER_TOKEN_HEADER: &str = "x-github-broader-token";
+pub(crate) const BROADER_TOKEN_HEADER: &str = "x-github-broader-token";
 
 /// Pull the OPTIONAL broader-visibility token out of the [`BROADER_TOKEN_HEADER`],
 /// tolerating an optional `Bearer ` prefix and rejecting an empty value. The token is
