@@ -5,6 +5,10 @@
 //! the application without a real TCP bind.
 
 pub mod access_policy;
+// The chat concierge (milestone `fkst-chat-interface`): the conversational surface
+// users drive fkst-hosted through. Config + LLM client here; it acts strictly as a
+// client of the public API with the calling user's own token.
+pub mod chat;
 pub mod config;
 // Exact lifecycle-issue -> implementation-repository delivery grants. The
 // operator policy is startup-validated and workers receive only their repo's

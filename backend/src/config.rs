@@ -453,6 +453,10 @@ pub struct Config {
     /// creds. All optional; a half-configured OAuth pair fails closed (see
     /// [`LogConfig::from_vars`]).
     pub log: LogConfig,
+    /// Chat-concierge config (`FKST_CHAT_*`). `None` when `FKST_CHAT_ENABLED` is
+    /// not true — the feature is then entirely dark (no route mounted, no provider
+    /// credential required). See [`crate::chat::config::from_vars`].
+    pub chat: Option<crate::chat::config::ChatConfig>,
 }
 
 impl Default for Config {
@@ -475,6 +479,7 @@ impl Default for Config {
             leader: LeaderElectionConfig::default(),
             storage: None,
             log: LogConfig::default(),
+            chat: None,
         }
     }
 }
@@ -717,6 +722,13 @@ impl Config {
         // snapshot; fails closed only on a half-configured OAuth id/secret pair.
         let log = LogConfig::from_vars(&vars)?;
 
+        // Chat concierge (FKST_CHAT_*). `None` unless FKST_CHAT_ENABLED=true — with
+        // the feature off no chat variable is validated at all, so a half-staged
+        // block cannot fail an unrelated deploy. When on, it inherits the FKST_LLM_*
+        // provider values above unless overridden, and fails closed naming the
+        // exact variable. Shares the same `vars` snapshot.
+        let chat = crate::chat::config::from_vars(&vars)?;
+
         // Deployment-wide access policy (FKST_ACCESS_ALLOWED_USERS +
         // FKST_ACCESS_BLOCKED_USERS + FKST_GLOBAL_ADMINS + FKST_AUTH_MODEL).
         // Derived default: no list = open, allowed list = enforced allowlist
@@ -745,6 +757,7 @@ impl Config {
             leader,
             storage,
             log,
+            chat,
         })
     }
 
