@@ -2,6 +2,7 @@ import { CopyButton } from '@/components/ui/copy-button';
 import { MarkdownPreview } from '@/components/ui/markdown-preview';
 import { useContent } from '@/i18n';
 import type { ChatMessage } from './chat-context';
+import { ActionCards } from './action-card';
 import { RichCards } from './rich-cards';
 import { ToolActivity } from './tool-activity';
 
@@ -67,6 +68,10 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
       {/* Deterministic deep-link cards, derived only from the turn's structured
           tool results — never from the model's prose. */}
       <RichCards refs={message.sessionRefs ?? []} />
+
+      {/* Confirm-gated action cards last, so the answer explaining them is read
+          first. */}
+      <ActionCards proposals={message.proposals ?? []} />
 
       {/* The pending caret IS the typing indicator — no separate component, so
           there is never a moment showing both or neither. */}

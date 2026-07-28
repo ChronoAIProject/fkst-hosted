@@ -71,6 +71,41 @@ export const chat = {
   signInBody:
     'The concierge answers using your own GitHub access, so it needs you signed in first.',
 
+  /** Confirm-gated action cards. */
+  kindNewSession: 'NEW SESSION',
+  kindWorkItem: 'WORK ITEM',
+  kindStopSession: 'STOP SESSION',
+  previewToggle: 'issue body',
+  fieldWorkLabel: 'work label',
+  fieldAutoDiscovered: 'auto-discovered',
+  fieldPackages: 'package refs',
+  fieldBranches: 'branches',
+  fieldDefault: 'default',
+  fieldAutoMerge: 'auto-merge',
+  fieldEnvironment: 'environment',
+  on: 'on',
+  off: 'off',
+  workItemBodyAria: 'Work item body',
+  stopTriggerLine: 'Closes trigger #{number} — this is permanent.',
+  finalChecksNote: 'Final permission and collision checks run when you confirm.',
+  confirmExecute: 'CONFIRM & EXECUTE',
+  dismiss: 'DISMISS',
+  executing: 'EXECUTING…',
+  executeFailed: 'That action could not be completed.',
+  unreadableProposal: 'The assistant produced an unreadable action draft — ask it to try again.',
+  restoredUnknown:
+    'This action was still running when the page closed, so its outcome is unknown — check the dashboard before retrying.',
+  outcomeChipCreated: 'CREATED',
+  outcomeChipStopped: 'STOPPED',
+  openIssue: 'ISSUE',
+  outcomeSession: 'Created trigger #{number} in {repo}.',
+  outcomeWorkItem: 'Created work item #{number} in {repo}.',
+  outcomeStopped: 'Closed trigger #{number} in {repo}; the session is retired.',
+  stopConfirmTitle: 'Stop this session?',
+  stopConfirmBody:
+    'Closing trigger #{number} in {repo} retires the session permanently — it never revives. Open work issues stay open but are no longer worked.',
+  stopConfirmAction: 'Stop session',
+
   /** Error copy, keyed by the stream's stable error code. */
   errors: {
     deadline_exceeded: 'That took too long to answer. Try a narrower question.',
