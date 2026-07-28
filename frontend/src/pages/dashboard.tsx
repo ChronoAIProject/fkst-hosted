@@ -18,6 +18,7 @@ import { Level1Sidebar } from '@/components/sidebar/level1';
 import { RepoWorkspace } from '@/components/repo-workspace/repo-workspace';
 import { SidebarPanel } from '@/components/sidebar/panel';
 import { useTour } from '@/components/tour/tour-context';
+import { useLevelParams } from '@/lib/hooks/use-level-params';
 import { useRepoSessions } from '@/lib/hooks/use-repo-sessions';
 import { DashboardGate, DashboardHeader, DashboardUnconfigured } from './dashboard-gate';
 
@@ -52,11 +53,23 @@ export function Dashboard() {
   const [overviewRefreshing, setOverviewRefreshing] = useState(false);
   const [tick, setTick] = useState(0);
 
-  const [level, setLevel] = useState<CanvasLevel>({ kind: 'root' });
+  // The dashboard's location is URL-addressable, so a refresh restores the exact
+  // view and a link (from chat, a notification, a colleague) opens it directly.
+  const { initial, navigateLevel, clearParams, isUnknownLocation } = useLevelParams();
+  const [level, setLevel] = useState<CanvasLevel>(initial.level);
+  // The session the URL asked for. Handed to RepoWorkspace as its initial
+  // selection, then kept in step with the user's own choices.
+  const [selectedSessionKey, setSelectedSessionKey] = useState<string | null>(
+    initial.sessionKey ?? null
+  );
   const [accountQuery, setAccountQuery] = useState('');
   const [repoQuery, setRepoQuery] = useState('');
   // `owner/name` of a repo created via the modal — highlighted at level 1.
   const [createdKey, setCreatedKey] = useState<string | null>(null);
+
+  // The level the Escape handler walks up from, so its listener binds once.
+  const levelForEscapeRef = useRef(level);
+  levelForEscapeRef.current = level;
 
   // The repo-level session projection with its poll and race guards.
   const { sessions, sessionsFailed, refreshSessions } = useRepoSessions(level, apiFetch);
@@ -109,6 +122,44 @@ export function Dashboard() {
   // Escape; ModalShell also stops propagation as the first line of defense)
   // or the key was pressed inside an editable field (WebKit/Blink natively
   // clear a search input on Escape; that must not also change the level).
+
+  // The ONE place a level change happens: it moves the view and writes the URL
+  // together, so no call site can update one without the other.
+  const goToLevel = useCallback(
+    (target: CanvasLevel, selectedKey?: string | null) => {
+      if (target.kind === 'account') setRepoQuery('');
+      setLevel(target);
+      setSelectedSessionKey(selectedKey ?? null);
+      navigateLevel(target, selectedKey);
+    },
+    [navigateLevel]
+  );
+
+  const openAccount = useCallback(
+    (login: string) => goToLevel({ kind: 'account', login }),
+    [goToLevel]
+  );
+
+  const openRepo = useCallback(
+    (owner: string, name: string) => goToLevel({ kind: 'repo', owner, name }),
+    [goToLevel]
+  );
+
+  // A session was selected inside the repo workspace: reflect it in the URL so the
+  // exact pane is linkable. Keyed off the CURRENT level, which is always the repo
+  // the workspace belongs to.
+  const onSelectedSessionChange = useCallback(
+    (key: string) => {
+      setSelectedSessionKey(key);
+      if (level.kind === 'repo') navigateLevel(level, key);
+    },
+    [level, navigateLevel]
+  );
+
+  // Escape mirrors the Back button — unless a dialog is open (dialogs own
+  // Escape; ModalShell also stops propagation as the first line of defense)
+  // or the key was pressed inside an editable field (WebKit/Blink natively
+  // clear a search input on Escape; that must not also change the level).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
@@ -119,25 +170,14 @@ export function Dashboard() {
         return;
       }
       if (document.querySelector('[role="dialog"]')) return;
-      setLevel((current) => parentLevel(current) ?? current);
+      // Walking up rewrites the URL too, so Escape and a breadcrumb click leave
+      // the same addressable state.
+      const parent = parentLevel(levelForEscapeRef.current);
+      if (parent != null) goToLevel(parent);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
-  const openAccount = useCallback((login: string) => {
-    setRepoQuery('');
-    setLevel({ kind: 'account', login });
-  }, []);
-
-  const openRepo = useCallback((owner: string, name: string) => {
-    setLevel({ kind: 'repo', owner, name });
-  }, []);
-
-  const navigate = useCallback((target: CanvasLevel) => {
-    if (target.kind === 'account') setRepoQuery('');
-    setLevel(target);
-  }, []);
+  }, [goToLevel]);
 
   const refetchOverview = useCallback(() => setTick((t) => t + 1), []);
 
@@ -157,8 +197,8 @@ export function Dashboard() {
     setAccountQuery('');
     setRepoQuery('');
     setTick((t) => t + 1);
-    setLevel({ kind: 'account', login: repo.owner });
-  }, []);
+    goToLevel({ kind: 'account', login: repo.owner });
+  }, [goToLevel]);
 
   // A trigger was created/stopped: refresh the session list now and the
   // overview counts quietly behind it.
@@ -180,8 +220,35 @@ export function Dashboard() {
   useEffect(() => {
     if (overview != null && selectedLogin != null && selectedAccount == null) {
       setLevel({ kind: 'root' });
+      setSelectedSessionKey(null);
+      // Without this a stale `?owner` survives the fallback and re-opens the
+      // vanished account on the next refresh.
+      clearParams();
     }
-  }, [overview, selectedLogin, selectedAccount]);
+  }, [overview, selectedLogin, selectedAccount, clearParams]);
+
+  // A URL naming an owner/repo this viewer cannot see (a typo, a stale link, a
+  // repo they lost access to) falls back to the root cleanly — never a crash,
+  // never a half-rendered level. Checked once, after the overview lands, so a
+  // poll cannot fight the user's navigation.
+  useEffect(() => {
+    if (isUnknownLocation(overview, level)) {
+      setLevel({ kind: 'root' });
+      setSelectedSessionKey(null);
+      clearParams();
+    }
+  }, [overview, level, isUnknownLocation, clearParams]);
+
+  // Entering a DIFFERENT repository must not carry the previous repo's session
+  // selection into the URL.
+  const repoIdentity = level.kind === 'repo' ? `${level.owner}/${level.name}` : null;
+  const previousRepoIdentityRef = useRef(repoIdentity);
+  useEffect(() => {
+    if (previousRepoIdentityRef.current !== repoIdentity) {
+      previousRepoIdentityRef.current = repoIdentity;
+      setSelectedSessionKey(null);
+    }
+  }, [repoIdentity]);
 
   // The cold sign-in card is shown ONLY for a never-signed-in visitor. An
   // involuntary expiry (sessionExpired) keeps the dashboard body mounted with a
@@ -307,7 +374,7 @@ export function Dashboard() {
         data-tour="breadcrumb"
         className="flex-none flex items-center gap-3 flex-wrap pb-3 border-b border-line"
       >
-        <CanvasBreadcrumb level={level} onNavigate={navigate} />
+        <CanvasBreadcrumb level={level} onNavigate={goToLevel} />
         <span className="flex-1" aria-hidden="true" />
         <button
           type="button"
@@ -387,6 +454,8 @@ export function Dashboard() {
                     onChanged={onSessionsChanged}
                     viewerLogin={overview?.viewer.login ?? ''}
                     readOnly={repoReadOnly}
+                    initialSelectedKey={selectedSessionKey}
+                    onSelectedKeyChange={onSelectedSessionChange}
                   />
                 )}
               </FadeSwap>

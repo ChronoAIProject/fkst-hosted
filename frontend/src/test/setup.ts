@@ -122,4 +122,12 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
 
 afterEach(() => {
   cleanup();
+  // jsdom shares one `location` across every test in a file, so a test that
+  // navigates (the dashboard writes its level into the query string) would leave
+  // those parameters set for the next one — which would then mount at a repo it
+  // never asked for. Reset the URL so suites stay independent; a deep-link test
+  // seeds its own URL before rendering.
+  if (typeof window !== 'undefined' && window.location.search !== '') {
+    window.history.replaceState(null, '', window.location.pathname);
+  }
 });
