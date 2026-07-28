@@ -246,6 +246,53 @@ async fn fragmented_tool_call_arguments_reassemble_into_one_item() {
 }
 
 #[tokio::test]
+async fn a_blank_name_on_a_later_fragment_does_not_erase_the_real_one() {
+    // The exact wire shape of the provider this deployment runs against: it repeats the
+    // `function` object on EVERY argument fragment with `"name": ""`. Taking that
+    // literally overwrites the name from the first fragment, and the turn then dies with
+    // `unknown tool: ""` — on every tool call the model ever makes.
+    let items = decode_chunks(vec![&format!(
+        "{}{}",
+        sse_body(&[
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_x","type":"function","function":{"name":"list_repo_sessions","arguments":""}}]},"finish_reason":null}]}"#,
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"","arguments":"{\"owner"}}]},"finish_reason":null}]}"#,
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"","arguments":"\":\"acme\",\"name\":\"site\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+        ]),
+        "data: [DONE]\n\n"
+    )])
+    .await;
+
+    let Ok(StreamItem::ToolCalls(calls)) = items.into_iter().next().expect("one item") else {
+        panic!("expected reassembled tool calls");
+    };
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "list_repo_sessions");
+    let args: serde_json::Value = serde_json::from_str(&calls[0].arguments_json).expect("json");
+    assert_eq!(args["owner"], "acme");
+    assert_eq!(args["name"], "site");
+}
+
+#[tokio::test]
+async fn a_fragment_whose_name_is_only_ever_blank_is_dropped() {
+    // Blank must read as ABSENT everywhere, so a provider that never sends a real name
+    // produces a logged drop rather than a call the registry cannot resolve.
+    let items = decode_chunks(vec![&format!(
+        "{}{}",
+        sse_body(&[
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_x","function":{"name":"","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#,
+        ]),
+        "data: [DONE]\n\n"
+    )])
+    .await;
+    assert!(
+        !items
+            .iter()
+            .any(|item| matches!(item, Ok(StreamItem::ToolCalls(_)))),
+        "a nameless fragment must not become a tool call"
+    );
+}
+
+#[tokio::test]
 async fn parallel_tool_calls_keep_their_indexes_apart() {
     let items = decode_chunks(vec![
         &sse_body(&[
