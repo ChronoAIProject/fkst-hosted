@@ -12,7 +12,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fkst_control_plane::config::Config;
 use fkst_control_plane::router::build_router;
-use fkst_control_plane::state::AppState;
+use fkst_control_plane::state::{empty_self_router, AppState};
 use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
@@ -33,6 +33,7 @@ fn app(webhook_secret: bool) -> axum::Router {
         log_registry: Default::default(),
         log_bundle_cache: Default::default(),
         disposable_environments: Default::default(),
+        self_router: empty_self_router(),
     })
     .expect("router builds")
 }

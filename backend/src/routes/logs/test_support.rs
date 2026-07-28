@@ -23,7 +23,7 @@ use crate::log_config::LogConfig;
 use crate::models::RepoRef;
 use crate::reconcile::creator::SessionCreator;
 use crate::router::build_router;
-use crate::state::AppState;
+use crate::state::{empty_self_router, AppState};
 use crate::storage::{ChronoStorageClient, ChronoStorageConfig};
 
 pub(crate) const SESSION_ID: &str = "sess-abc-123";
@@ -96,6 +96,7 @@ pub(crate) fn state(
         log_registry: registry,
         log_bundle_cache: Default::default(),
         disposable_environments: Default::default(),
+        self_router: empty_self_router(),
     }
 }
 

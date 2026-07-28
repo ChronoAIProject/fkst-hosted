@@ -10,6 +10,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::config::Config;
+use crate::state::empty_self_router;
 
 /// An [`AppState`] whose log config has the broader pair + URLs set, with the OAuth
 /// host pointed at `oauth_base` (a wiremock server for the exchange tests).
@@ -31,6 +32,7 @@ fn broader_state(oauth_base: &str) -> AppState {
         log_registry: Default::default(),
         log_bundle_cache: Default::default(),
         disposable_environments: Default::default(),
+        self_router: empty_self_router(),
     }
 }
 
@@ -47,6 +49,7 @@ fn unconfigured_state() -> AppState {
         log_registry: Default::default(),
         log_bundle_cache: Default::default(),
         disposable_environments: Default::default(),
+        self_router: empty_self_router(),
     }
 }
 

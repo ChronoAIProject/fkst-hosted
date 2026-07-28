@@ -13,7 +13,7 @@ use fkst_control_plane::config::Config;
 use fkst_control_plane::reconcile::{reconcile_channel, ReconcileDispatcher};
 use fkst_control_plane::recovery::{RecoveryMonitor, ResyncResult};
 use fkst_control_plane::router::build_router;
-use fkst_control_plane::state::AppState;
+use fkst_control_plane::state::{empty_self_router, AppState};
 use hmac::{Hmac, Mac};
 use http_body_util::BodyExt;
 use serde_json::Value;
@@ -32,6 +32,7 @@ fn test_router(recovery: RecoveryMonitor) -> axum::Router {
         log_registry: Default::default(),
         log_bundle_cache: Default::default(),
         disposable_environments: Default::default(),
+        self_router: empty_self_router(),
     })
     .expect("router")
 }
@@ -192,6 +193,7 @@ async fn follower_rejects_api_and_signed_webhook_before_side_effects() {
         log_registry: Default::default(),
         log_bundle_cache: Default::default(),
         disposable_environments: Default::default(),
+        self_router: empty_self_router(),
     })
     .expect("router");
 

@@ -30,7 +30,9 @@
 //! NO presigned S3 URL is ever exposed to the caller — the control plane fetches the
 //! bundle server-side (a presigned URL is used only internally) and returns the bytes.
 
-mod identity;
+// `pub(crate)` for its test-only cache reset: the chat dispatch tests drive this
+// same router and must clear the process-global token→identity cache too.
+pub(crate) mod identity;
 // Shared with `crate::routes::auth` (the frontend login flow reuses the signed-state
 // + authorize-URL + token-exchange primitives).
 pub(crate) mod oauth;
@@ -518,8 +520,11 @@ pub fn router() -> OpenApiRouter<AppState> {
 #[cfg(test)]
 #[path = "bundle_cache_tests.rs"]
 mod bundle_cache_tests;
+// The cluster-free, wiremock-backed fixtures for driving the real router. Shared
+// with the chat dispatch tests (`crate::chat::dispatch`), which need exactly this:
+// an endpoint that reaches a 200 without a Kubernetes cluster.
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;

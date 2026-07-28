@@ -33,6 +33,10 @@ mod work_item;
 mod work_projection;
 
 pub use types::IssueDetail;
+// Re-exported for the chat tool layer, which forwards the SAME header when it
+// dispatches `get_overview` — one definition, so the concierge can never end up
+// seeing a narrower repository set than the dashboard.
+pub(crate) use overview_broader::BROADER_TOKEN_HEADER;
 
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
