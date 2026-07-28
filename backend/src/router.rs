@@ -79,6 +79,10 @@ fn cors_layer() -> CorsLayer {
 /// GitHub App webhook (which lives outside the `/api/v1` nest, like `/health`).
 pub fn build_router(state: AppState) -> Result<Router, AppError> {
     let short_timeout = Duration::from_secs(state.config.request_timeout_secs);
+    // Captured before `state` is consumed by `with_state` below; filled with the
+    // finished router so the chat tool layer can dispatch through it (see
+    // `AppState::self_router`).
+    let self_router = state.self_router.clone();
     let leadership_gate = LeadershipGate {
         enabled: state.config.leader.enabled,
         recovery: state.recovery.clone(),
@@ -170,7 +174,7 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
     // `/openapi.json` route, merged back onto the concrete axum router.
     let (router, spec) = top.merge(env).split_for_parts();
 
-    Ok(router
+    let router = router
         .merge(openapi::spec_route(spec)?)
         .with_state(state)
         .layer(
@@ -179,5 +183,16 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
                 .layer(TraceLayer::new_for_http())
                 .layer(PropagateRequestIdLayer::x_request_id())
                 .layer(cors_layer()),
-        ))
+        );
+
+    // Close the loop: hand the finished router back to the state it was built from,
+    // so chat tools can dispatch through it. `axum::Router` is cheaply clonable —
+    // this is the framework's intended reuse model, not a copy of the route table.
+    //
+    // The `Err` is deliberately ignored: some tests call `build_router` more than
+    // once on one state, and the FIRST router wins. That is harmless — every router
+    // built from a given state serves the same routes over the same state.
+    let _ = self_router.set(router.clone());
+
+    Ok(router)
 }

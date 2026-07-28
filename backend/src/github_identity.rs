@@ -190,6 +190,7 @@ mod tests {
             log_registry: Default::default(),
             log_bundle_cache: Default::default(),
             disposable_environments: Default::default(),
+            self_router: crate::state::empty_self_router(),
         }
     }
 

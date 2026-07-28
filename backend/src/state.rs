@@ -63,4 +63,28 @@ pub struct AppState {
     /// environments. Shared with the active reconciler; never exposed by a read
     /// route or backed by durable storage.
     pub disposable_environments: DisposableEnvironmentRegistry,
+    /// A handle to this process's own assembled router, populated at the end of
+    /// [`crate::router::build_router`].
+    ///
+    /// It exists for ONE caller: the chat concierge's tool layer, which answers
+    /// data questions by issuing real `GET` requests through the real router with
+    /// the calling user's own bearer token (see [`crate::chat::dispatch`]). That is
+    /// what makes chat inherit — with zero duplicated logic — the `GithubUser`
+    /// extractor, the log/observe authorization tiers, canvas visibility scoping,
+    /// and the leader-readiness gate. The handle must be on the state because the
+    /// router is built FROM the state, so the dependency can only be closed after
+    /// the fact.
+    pub self_router: SelfRouter,
+}
+
+/// Deferred handle to the assembled router (see [`AppState::self_router`]).
+///
+/// `OnceLock` because the value cannot exist when the state is constructed, and
+/// `Arc` because every clone of the state must observe the same fill.
+pub type SelfRouter = std::sync::Arc<std::sync::OnceLock<axum::Router>>;
+
+/// An unpopulated [`SelfRouter`] — what every [`AppState`] starts with, and what
+/// tests that never dispatch through the router can keep.
+pub fn empty_self_router() -> SelfRouter {
+    std::sync::Arc::new(std::sync::OnceLock::new())
 }

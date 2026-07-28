@@ -321,6 +321,9 @@ async fn main() -> ExitCode {
         log_registry,
         log_bundle_cache: fkst_control_plane::log_bundle_cache::LogBundleCache::new(),
         disposable_environments,
+        // Filled by `build_router` with the router it returns, so chat tools can
+        // dispatch through it (see `AppState::self_router`).
+        self_router: fkst_control_plane::state::empty_self_router(),
     }) {
         Ok(router) => router,
         Err(error) => {
