@@ -1,4 +1,5 @@
 local base_ids = require("devloop.base_ids")
+local context_bundle = require("devloop.context_bundle")
 local h = require("tests.devloop_helpers")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local execution_start = require("devloop.execution_start")
@@ -59,6 +60,31 @@ local function find_raise(raises, queue)
   return h.find_raise(raises, queue)
 end
 
+local function capture_bundle_args(request)
+  local original = context_bundle.context_fetch_ref_from_bundle
+  local captured = nil
+  context_bundle.context_fetch_ref_from_bundle = function(_core, args)
+    captured = args
+    return "runtime-cache:test/execution-start-context"
+  end
+  local ok, proposal = pcall(
+    execution_start.build_execution_start_proposal,
+    core,
+    "owner/repo",
+    42,
+    request,
+    current_issue(),
+    nil,
+    "execute_start_test"
+  )
+  context_bundle.context_fetch_ref_from_bundle = original
+  if not ok then
+    error(proposal, 0)
+  end
+  t.is_true(proposal ~= nil)
+  return captured
+end
+
 local function assert_execution_effects(raises, request)
   t.eq(#raises, 3)
   t.eq(raises[1].queue, "github-proxy.github_issue_comment_request")
@@ -100,6 +126,81 @@ local function assert_execution_effects(raises, request)
 end
 
 return {
+  test_trusted_workflow_child_execution_adds_parsed_origin_issue_to_context = function()
+    local request = execution_request({
+      origin = {
+        package = "github-devloop-workflow",
+        route = "workflow-child",
+        decision = "committed-child",
+        lineage = {
+          origin = "github-devloop/issue/ChronoAIProject/fkst-hosted/3830",
+          blueprint_digest = "d-1784791911",
+          slot = "walking-skeleton",
+        },
+      },
+    })
+
+    local args = capture_bundle_args(request)
+    t.eq(args.repo, "owner/repo")
+    t.eq(tostring(args.issue_number), "42")
+    t.eq(args.origin_issue_repo, "ChronoAIProject/fkst-hosted")
+    t.eq(tostring(args.origin_issue_number), "3830")
+  end,
+
+  test_ordinary_execution_request_does_not_fetch_workflow_origin = function()
+    local args = capture_bundle_args(execution_request())
+
+    t.is_nil(args.origin_issue_repo)
+    t.is_nil(args.origin_issue_number)
+  end,
+
+  test_workflow_origin_context_fails_closed_for_untrusted_or_malformed_lineage = function()
+    local valid = {
+      package = "github-devloop-workflow",
+      route = "workflow-child",
+      decision = "committed-child",
+      lineage = {
+        origin = "github-devloop/issue/owner/repo/7",
+        blueprint_digest = "d-1234567890",
+        slot = "walking-skeleton",
+      },
+    }
+    local cases = {
+      { package = "github-devloop-workflow", route = "workflow-child", decision = "committed-child" },
+      { package = "foreign", route = valid.route, decision = valid.decision, lineage = valid.lineage },
+      { package = valid.package, route = "foreign", decision = valid.decision, lineage = valid.lineage },
+      { package = valid.package, route = valid.route, decision = "enable", lineage = valid.lineage },
+      {
+        package = valid.package,
+        route = valid.route,
+        decision = valid.decision,
+        lineage = { origin = "foreign/issue/owner/repo/7", blueprint_digest = "d-1234567890", slot = "walking-skeleton" },
+      },
+      {
+        package = valid.package,
+        route = valid.route,
+        decision = valid.decision,
+        lineage = { origin = "github-devloop/issue/owner/repo/with space", blueprint_digest = "d-1234567890", slot = "walking-skeleton" },
+      },
+      {
+        package = valid.package,
+        route = valid.route,
+        decision = valid.decision,
+        lineage = { origin = "github-devloop/issue/owner/repo/42", blueprint_digest = "d-1234567890", slot = "walking-skeleton" },
+      },
+      {
+        package = valid.package,
+        route = valid.route,
+        decision = valid.decision,
+        lineage = { origin = "github-devloop/issue/owner/repo/7", blueprint_digest = "", slot = "walking-skeleton" },
+      },
+    }
+
+    for _, origin in ipairs(cases) do
+      t.is_nil(execution_start.workflow_origin_issue(execution_request({ origin = origin })))
+    end
+  end,
+
   test_execution_start_shared_builder_matches_direct_path_shape = function()
     local request = execution_request()
     local current = current_issue()

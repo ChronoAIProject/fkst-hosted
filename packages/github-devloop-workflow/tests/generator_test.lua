@@ -1,4 +1,5 @@
 local generator = require("core.generator")
+local strings = require("contract.strings")
 local t = fkst.test
 
 local static_slot = {
@@ -64,7 +65,49 @@ local tests = {
     t.eq(spec.body, "Implement the generated follow-up.")
     t.is_true(seen_prompt:find("owner/repo#issue/42", 1, true) ~= nil)
     t.is_true(seen_prompt:find("runtime-cache:workflow/predecessor", 1, true) ~= nil)
+    t.is_true(seen_prompt:find("independently self-contained", 1, true) ~= nil)
+    t.is_true(seen_prompt:find("Copy every exact external contract or wire grammar", 1, true) ~= nil)
+    t.is_true(seen_prompt:find("required literal examples", 1, true) ~= nil)
+    t.is_true(seen_prompt:find("never require the downstream worker to fetch either source", 1, true) ~= nil)
     t.is_nil(seen_prompt:find("Implement the generated follow%-up%."))
+  end,
+
+  test_generated_first_slot_can_copy_parent_only_wire_grammar_into_self_contained_body = function()
+    local wire_grammar = '<!-- fkst-cron-run:v1 slot="..." manual="false" status="ok" started="..." ended="..." detail="..." issue="812" -->'
+    local seen_prompt = nil
+    local spec, reason = generator.run_slot_generator({
+      content_fetch = function()
+        return "Workflow origin issue JSON: /tmp/context/origin-issue.json"
+      end,
+      spawn_codex = function(prompt)
+        seen_prompt = prompt
+        return {
+          exit_code = 0,
+          stdout = '{"title":"Emit the first cron marker","body":'
+            .. strings.json_string("Implement this exact wire grammar:\n" .. wire_grammar) .. "}",
+        }
+      end,
+    }, {
+      origin_proposal_id = "github-devloop/issue/ChronoAIProject/fkst-hosted/3830",
+      workflow_id = "software-feature-flow",
+    }, {
+      id = "walking-skeleton",
+      title = "Build the walking skeleton",
+      content = {
+        kind = "generated",
+        generator = "Generate the first bounded implementation issue from the origin.",
+      },
+    }, {
+      source_ref = {
+        kind = "external",
+        ref = "ChronoAIProject/fkst-hosted#issue/3830",
+      },
+    })
+
+    t.is_nil(reason)
+    t.is_true(seen_prompt:find("origin-issue.json", 1, true) ~= nil)
+    t.is_true(seen_prompt:find("independently self-contained", 1, true) ~= nil)
+    t.is_true(spec.body:find(wire_grammar, 1, true) ~= nil)
   end,
 
   -- Regression (found by real dogfood): a pre-fetch failure must NOT block

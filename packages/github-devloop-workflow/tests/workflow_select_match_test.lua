@@ -479,6 +479,9 @@ local tests = {
     t.eq(request.origin.package, "github-devloop-workflow")
     t.eq(request.origin.route, "workflow-child")
     t.eq(request.origin.decision, "committed-child")
+    t.eq(request.origin.lineage.origin, origin)
+    t.eq(request.origin.lineage.blueprint_digest, "d-1234567890")
+    t.eq(request.origin.lineage.slot, "slot-one")
   end,
 
   test_origin_issue_with_no_lineage_still_runs_selection_and_default_intake = function()

@@ -57,7 +57,37 @@ function E.execution_intake_hand_off(request)
   }
 end
 
+local function workflow_origin_issue(request)
+  local origin = type(request) == "table" and request.origin or nil
+  local lineage = type(origin) == "table" and origin.lineage or nil
+  if type(origin) ~= "table"
+    or origin.package ~= "github-devloop-workflow"
+    or origin.route ~= "workflow-child"
+    or origin.decision ~= "committed-child"
+    or type(lineage) ~= "table"
+    or type(lineage.origin) ~= "string"
+    or type(lineage.blueprint_digest) ~= "string"
+    or lineage.blueprint_digest == ""
+    or type(lineage.slot) ~= "string"
+    or lineage.slot == "" then
+    return nil
+  end
+
+  local repo, issue_number = base_ids.parse_proposal_id(lineage.origin)
+  if repo == nil
+    or issue_number == nil
+    or base_ids.proposal_id(repo, issue_number) ~= lineage.origin
+    or lineage.origin == request.proposal_id then
+    return nil
+  end
+  return {
+    repo = repo,
+    issue_number = issue_number,
+  }
+end
+
 function E.build_execution_start_proposal(core, repo, issue_number, request, current, event_ts, dept)
+  local origin_issue = workflow_origin_issue(request)
   local issue = {
     repo = repo,
     number = issue_number,
@@ -71,6 +101,8 @@ function E.build_execution_start_proposal(core, repo, issue_number, request, cur
       proposal_id = request.proposal_id,
       version = request.dedup_key,
       tick = event_ts,
+      origin_issue_repo = origin_issue and origin_issue.repo or nil,
+      origin_issue_number = origin_issue and origin_issue.issue_number or nil,
     }),
   }
   local proposal = payloads_builders.build_board_proposal(core, issue, event_ts)
@@ -79,6 +111,8 @@ function E.build_execution_start_proposal(core, repo, issue_number, request, cur
   proposal.intake_hand_off = E.execution_intake_hand_off(request)
   return v_validate_proposal.validate_proposal(proposal) and proposal or nil
 end
+
+E.workflow_origin_issue = workflow_origin_issue
 
 function E.build_execution_start_effects(core, repo, issue_number, request, current, event_ts, dept)
   local proposal = E.build_execution_start_proposal(core, repo, issue_number, request, current, event_ts, dept)

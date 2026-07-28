@@ -184,11 +184,12 @@ local function manifest_files_are_valid(manifest, exec)
   return manifest_has_notice(paths) and files_are_readable(paths, exec)
 end
 
-local function bundle_paths(dir, has_pr)
+local function bundle_paths(dir, has_pr, has_origin_issue)
   return {
     dir = dir,
     notice_path = path_join(dir, notice_file_name),
     issue_path = path_join(dir, "issue.json"),
+    origin_issue_path = has_origin_issue and path_join(dir, "origin-issue.json") or nil,
     pr_path = has_pr and path_join(dir, "pr.json") or nil,
     diff_path = has_pr and path_join(dir, "diff.patch") or nil,
     risk_path = has_pr and path_join(dir, risk_file_name) or nil,
@@ -199,6 +200,7 @@ end
 local function hydrate_bundle_sizes(bundle, exec)
   bundle.notice_bytes = file_size(bundle.notice_path, exec)
   bundle.issue_bytes = file_size(bundle.issue_path, exec)
+  bundle.origin_issue_bytes = bundle.origin_issue_path ~= nil and file_size(bundle.origin_issue_path, exec) or nil
   bundle.pr_bytes = bundle.pr_path ~= nil and file_size(bundle.pr_path, exec) or nil
   bundle.diff_bytes = bundle.diff_path ~= nil and file_size(bundle.diff_path, exec) or nil
   bundle.risk_bytes = bundle.risk_path ~= nil and file_size(bundle.risk_path, exec) or nil
@@ -263,7 +265,11 @@ local function publish_bundle(tmp_dir, target_bundle, exec)
       run_optional("rm -rf " .. devloop_base._shell_single_quote(tmp_dir), 30, exec)
       return target_bundle
     end
-    local unique_bundle = bundle_paths(uniquified_publish_dir(target_dir, exec), target_bundle.pr_path ~= nil)
+    local unique_bundle = bundle_paths(
+      uniquified_publish_dir(target_dir, exec),
+      target_bundle.pr_path ~= nil,
+      target_bundle.origin_issue_path ~= nil
+    )
     run_required(rename_dir_cmd(tmp_dir, unique_bundle.dir), 30, "publish", exec)
     return unique_bundle
   end
@@ -291,6 +297,25 @@ local function fetch_result(fn, label)
     error("github-devloop: context bundle " .. label .. " failed: " .. tostring(result and result.stderr or "nil result"))
   end
   return result.stdout or ""
+end
+
+local function fetch_filtered_issue_json(M, opts)
+  local issue_json = fetch_result(function(timeout)
+    return M.gh_issue_view(
+      opts.repo,
+      opts.issue_number,
+      "title,body,updatedAt,labels,comments,state,author",
+      timeout,
+      opts.exec,
+      opts.exec
+    )
+  end, opts.fetch_label)
+  if opts.whitelist ~= nil then
+    local redactions = {}
+    issue_json = content_filter.filter_gh_content_json(issue_json, "issue", opts.whitelist, redactions)
+    log_content_redactions(opts.dept, opts.proposal_id, opts.repo, opts.entity, redactions)
+  end
+  return truncate_if_needed(issue_json, opts.dept, opts.proposal_id, opts.file_name)
 end
 
 local function risk_report(classification)
@@ -389,6 +414,13 @@ function C.context_bundle_manifest(bundle)
     sized("Issue JSON (full issue including all available comments)", bundle.issue_path, bundle.issue_bytes),
     sized("Board digest", bundle.board_path, bundle.board_bytes),
   }
+  if bundle.origin_issue_path ~= nil then
+    table.insert(lines, 6, sized(
+      "Workflow origin issue JSON (full origin issue including all available comments)",
+      bundle.origin_issue_path,
+      bundle.origin_issue_bytes
+    ))
+  end
   if bundle.pr_path ~= nil then
     table.insert(lines, sized("PR JSON", bundle.pr_path, bundle.pr_bytes))
   end
@@ -441,11 +473,17 @@ function C.build_context_bundle(M, args)
   local pr_repo = args and args.pr_repo or repo
   local board_repo = args and args.board_repo or issue_repo
   local issue_number = args and args.issue_number
+  local origin_issue_repo = args and args.origin_issue_repo
+  local origin_issue_number = args and args.origin_issue_number
   local proposal_id = args and args.proposal_id
   local version = args and args.version
   if repo == nil or proposal_id == nil or version == nil then
     error("github-devloop: context bundle requires repo, proposal, and version")
   end
+  if (origin_issue_repo == nil) ~= (origin_issue_number == nil) then
+    error("github-devloop: context bundle workflow origin requires repo and issue number")
+  end
+  local has_origin_issue = origin_issue_repo ~= nil
 
   local key = C.context_bundle_key(proposal_id, version)
   local manifest_key = C.context_bundle_manifest_key(proposal_id, version)
@@ -453,7 +491,7 @@ function C.build_context_bundle(M, args)
   local dir = context_dir(root, proposal_id, version)
   local cached = cache_get(key)
   if cached ~= nil and cached ~= "" then
-    local cached_bundle = bundle_paths(cached, args.pr_number ~= nil)
+    local cached_bundle = bundle_paths(cached, args.pr_number ~= nil, has_origin_issue)
     if validate_cached_manifest(cache_get(manifest_key), args.exec) and validate_bundle(cached_bundle, args.exec) then
       hydrate_bundle_sizes(cached_bundle, args.exec)
       cache_set(manifest_key, C.context_bundle_manifest(cached_bundle))
@@ -461,7 +499,7 @@ function C.build_context_bundle(M, args)
     end
   end
 
-  local existing_bundle = bundle_paths(dir, args.pr_number ~= nil)
+  local existing_bundle = bundle_paths(dir, args.pr_number ~= nil, has_origin_issue)
   if dir_exists(dir, args.exec) and validate_bundle(existing_bundle, args.exec) then
     hydrate_bundle_sizes(existing_bundle, args.exec)
     cache_set(manifest_key, C.context_bundle_manifest(existing_bundle))
@@ -482,7 +520,7 @@ function C.build_context_bundle(M, args)
     error("github-devloop: context bundle invalid temp directory")
   end
 
-  local tmp_bundle = bundle_paths(tmp_dir, args.pr_number ~= nil)
+  local tmp_bundle = bundle_paths(tmp_dir, args.pr_number ~= nil, has_origin_issue)
   local risk_classification = nil
   local notice = table.concat({
     "BEGIN UNTRUSTED BUNDLE DATA",
@@ -499,18 +537,38 @@ function C.build_context_bundle(M, args)
   local whitelist = content_whitelist(args.exec)
   local issue_json = '{"title":"PR-only context","body":"No backing GitHub issue is available for this delivery.","labels":[],"comments":[],"state":"UNKNOWN"}\n'
   if issue_number ~= nil then
-    issue_json = fetch_result(function(timeout)
-      return M.gh_issue_view(issue_repo, issue_number, "title,body,updatedAt,labels,comments,state,author", timeout, args.exec, args.exec)
-    end, "issue fetch")
-    if whitelist ~= nil then
-      local issue_redactions = {}
-      issue_json = content_filter.filter_gh_content_json(issue_json, "issue", whitelist, issue_redactions)
-      log_content_redactions(args.dept, proposal_id, issue_repo, "issue/" .. tostring(issue_number), issue_redactions)
-    end
+    issue_json = fetch_filtered_issue_json(M, {
+      repo = issue_repo,
+      issue_number = issue_number,
+      exec = args.exec,
+      whitelist = whitelist,
+      dept = args.dept,
+      proposal_id = proposal_id,
+      fetch_label = "issue fetch",
+      entity = "issue/" .. tostring(issue_number),
+      file_name = "issue.json",
+    })
+  else
+    issue_json = truncate_if_needed(issue_json, args.dept, proposal_id, "issue.json")
   end
-  issue_json = truncate_if_needed(issue_json, args.dept, proposal_id, "issue.json")
   write_file(tmp_bundle.issue_path, issue_json, args.exec)
   tmp_bundle.issue_bytes = #issue_json
+
+  if has_origin_issue then
+    local origin_issue_json = fetch_filtered_issue_json(M, {
+      repo = origin_issue_repo,
+      issue_number = origin_issue_number,
+      exec = args.exec,
+      whitelist = whitelist,
+      dept = args.dept,
+      proposal_id = proposal_id,
+      fetch_label = "workflow origin issue fetch",
+      entity = "workflow-origin-issue/" .. tostring(origin_issue_number),
+      file_name = "origin-issue.json",
+    })
+    write_file(tmp_bundle.origin_issue_path, origin_issue_json, args.exec)
+    tmp_bundle.origin_issue_bytes = #origin_issue_json
+  end
 
   if args.pr_number ~= nil then
     local pr_json = fetch_result(function(timeout)
@@ -550,12 +608,17 @@ function C.build_context_bundle(M, args)
   if dir_exists(dir, args.exec) and not validate_bundle(existing_bundle, args.exec) then
     target_dir = uniquified_publish_dir(dir, args.exec)
   end
-  local final_bundle = publish_bundle(tmp_dir, bundle_paths(target_dir, args.pr_number ~= nil), args.exec)
+  local final_bundle = publish_bundle(
+    tmp_dir,
+    bundle_paths(target_dir, args.pr_number ~= nil, has_origin_issue),
+    args.exec
+  )
   if not validate_bundle(final_bundle, args.exec) then
     error("github-devloop: context bundle publish validation failed")
   end
   final_bundle.notice_bytes = tmp_bundle.notice_bytes
   final_bundle.issue_bytes = tmp_bundle.issue_bytes
+  final_bundle.origin_issue_bytes = tmp_bundle.origin_issue_bytes
   final_bundle.pr_bytes = tmp_bundle.pr_bytes
   final_bundle.diff_bytes = tmp_bundle.diff_bytes
   final_bundle.risk_bytes = tmp_bundle.risk_bytes
