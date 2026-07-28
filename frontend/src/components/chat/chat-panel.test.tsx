@@ -1,6 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { act, fireEvent, screen } from '@testing-library/react';
-import { useChat } from './chat-context';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import { AuthProvider } from '@/lib/auth/github-auth';
+import { Toaster, ToastProvider } from '@/components/ui/toast';
+import { ChatProvider, useChat } from './chat-context';
+import { sseChatTransport } from './transport';
+
+/** A bare `apiFetch` — the stubbed global `fetch`, with no token handling. The
+ *  integration cases assert the STREAM path, not authentication. */
+const directApiFetch = (path: string, init?: RequestInit) => fetch(path, init);
 import { ChatLauncher } from './chat-launcher';
 import { ChatPanel } from './chat-panel';
 import { renderChat, scriptedTransport } from './chat-test-kit';
@@ -182,5 +190,142 @@ describe('ChatPanel', () => {
 
     fireEvent.click(launcher);
     expect(launcher).toHaveAttribute('aria-expanded', 'false');
+  });
+});
+
+describe('ChatPanel — real SSE transport', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+    // Signed in, or the panel shows its sign-in card instead of the transcript.
+    window.localStorage.setItem('fkst-gh-access', 'ghu_x');
+    captured.current = null;
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** A `fetch` serving one SSE turn from a real ReadableStream, so the panel is
+   *  driven through the SAME parser production uses. */
+  function stubSseFetch(frames: string[]) {
+    const encoder = new TextEncoder();
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          frames.forEach((frame) => controller.enqueue(encoder.encode(frame)));
+          controller.close();
+        },
+      }),
+      json: async () => ({}),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  const frame = (payload: unknown) => `data: ${JSON.stringify(payload)}\n\n`;
+
+  it('streams a real turn into the transcript, with tool chips and a session card', async () => {
+    stubSseFetch([
+      frame({ type: 'delta', text: 'Looking' }),
+      frame({ type: 'tool_call', id: 't1', name: 'list_repo_sessions', args_preview: '{}' }),
+      frame({
+        type: 'tool_result',
+        id: 't1',
+        name: 'list_repo_sessions',
+        status: 200,
+        truncated: false,
+      }),
+      frame({ type: 'delta', text: ' — one session is live.' }),
+      frame({
+        type: 'done',
+        finish_reason: 'stop',
+        session_refs: [
+          {
+            owner: 'acme',
+            name: 'site',
+            session_id: 'sess-1',
+            trigger_number: 7,
+            title: 'nightly',
+            status_label: 'fkst-substrate-active',
+          },
+        ],
+      }),
+    ]);
+
+    render(
+      <ToastProvider>
+        <AuthProvider>
+          <MemoryRouter>
+            <ChatProvider transport={sseChatTransport(directApiFetch)}>
+              <Probe />
+              <Surface />
+            </ChatProvider>
+          </MemoryRouter>
+        </AuthProvider>
+      </ToastProvider>
+    );
+
+    act(() => chat().openPanel());
+    await act(async () => {
+      chat().sendMessage('what is running on acme/site?');
+    });
+
+    // Streamed text landed as one growing answer.
+    await waitFor(() =>
+      expect(screen.getByTestId('chat-assistant-message')).toHaveTextContent(
+        'Looking — one session is live.'
+      )
+    );
+    // Tool activity is visible, with its state as text.
+    expect(screen.getByText('repo sessions')).toBeInTheDocument();
+    expect(screen.getByText(/OK 200/)).toBeInTheDocument();
+    // The card came from the DONE frame's structured refs, not from the prose.
+    expect(screen.getByTestId('chat-session-card')).toHaveTextContent('nightly');
+    expect(screen.getByTestId('chat-card-dashboard-link')).toHaveAttribute(
+      'href',
+      '/dashboard?owner=acme&repo=site&session=sess-1'
+    );
+    // The turn ended, so the composer is usable again.
+    expect(screen.getByTestId('chat-send')).toBeInTheDocument();
+  });
+
+  it('surfaces a stream error as a warning note and a toast', async () => {
+    stubSseFetch([
+      frame({ type: 'delta', text: 'partial' }),
+      frame({ type: 'error', code: 'deadline_exceeded', message: 'too slow' }),
+    ]);
+
+    render(
+      <ToastProvider>
+        <AuthProvider>
+          <MemoryRouter>
+            <ChatProvider transport={sseChatTransport(directApiFetch)}>
+              <Probe />
+              <Surface />
+              <Toaster dismissLabel="Dismiss" />
+            </ChatProvider>
+          </MemoryRouter>
+        </AuthProvider>
+      </ToastProvider>
+    );
+
+    act(() => chat().openPanel());
+    await act(async () => {
+      chat().sendMessage('something slow');
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('chat-system-note')).toHaveTextContent(
+        'That took too long to answer.'
+      )
+    );
+    // The note explains it in place; the toast makes sure it is noticed even when
+    // the transcript is scrolled away.
+    expect(screen.getAllByText(/That took too long to answer/).length).toBeGreaterThan(1);
+    // The transcript survives — only the turn ended.
+    expect(screen.getByTestId('chat-user-message')).toHaveTextContent('something slow');
   });
 });

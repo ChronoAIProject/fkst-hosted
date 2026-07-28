@@ -3,6 +3,8 @@ import { render, screen, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { Shell, nextCondensed } from './shell';
 import { AuthProvider } from '@/lib/auth/github-auth';
+import { BroaderOAuthProvider } from '@/lib/auth/broader-oauth';
+import { ToastProvider } from '@/components/ui/toast';
 
 const ACCESS_KEY = 'fkst-gh-access';
 
@@ -17,14 +19,22 @@ function renderShell({
   }
   return render(
     <AuthProvider>
-      <MemoryRouter initialEntries={[initialEntry]}>
-        <Routes>
-          <Route element={<Shell />}>
-            <Route index element={<div>home content</div>} />
-            <Route path="get-started" element={<div>doc content</div>} />
-          </Route>
-        </Routes>
-      </MemoryRouter>
+      {/* The shell now hosts the chat concierge, which forwards the
+          broader-visibility credential and raises toasts — so it needs both
+          providers, exactly as production does (app/index.tsx mounts them above
+          the router). */}
+      <BroaderOAuthProvider>
+        <ToastProvider>
+          <MemoryRouter initialEntries={[initialEntry]}>
+            <Routes>
+              <Route element={<Shell />}>
+                <Route index element={<div>home content</div>} />
+                <Route path="get-started" element={<div>doc content</div>} />
+              </Route>
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </BroaderOAuthProvider>
     </AuthProvider>
   );
 }
@@ -114,7 +124,9 @@ describe('Shell', () => {
     const menu = screen.getByRole('menu');
     // Signed-out: the menu carries a Sign in entry and never a Sign out. The
     // v2 chrome has no Get Started CTA, so the menu carries none either.
-    expect(within(menu).getByRole('menuitem', { name: /sign in with github/i })).toBeInTheDocument();
+    expect(
+      within(menu).getByRole('menuitem', { name: /sign in with github/i })
+    ).toBeInTheDocument();
     expect(within(menu).queryByRole('menuitem', { name: /sign out/i })).not.toBeInTheDocument();
     expect(within(menu).getByRole('menuitem', { name: 'GitHub ↗' })).toBeInTheDocument();
     expect(within(menu).queryByRole('menuitem', { name: /get started/i })).not.toBeInTheDocument();
@@ -160,7 +172,10 @@ describe('Shell', () => {
   it('opens the environments drawer from the authenticated topbar entry', () => {
     // The drawer fetches profiles on open; stub the network so no real request
     // is made — the fetch failing still renders the drawer chrome.
-    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('no network'))));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('no network')))
+    );
 
     renderShell({ authenticated: true });
     const envButton = screen.getByRole('button', { name: 'Environments' });

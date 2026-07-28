@@ -8,7 +8,9 @@ import {
   useState,
 } from 'react';
 import type { ReactNode } from 'react';
+import { useContent } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
+import { useToast } from '@/components/ui/toast';
 import { mockEchoTransport } from './transport';
 import type { ChatTransport, ChatTurnMessage, SessionRef } from './transport';
 
@@ -71,6 +73,22 @@ function nextId(prefix: string): string {
   return `${prefix}-${messageSeq}`;
 }
 
+/** Resolve user-facing error copy from a stable code.
+ *
+ *  `rate_limited` gets a variant naming the retry delay when the server sent one,
+ *  because "try again in 5s" is actionable where "try again" is not. */
+function errorCopy(
+  s: ReturnType<typeof useContent>['chat'],
+  code: string,
+  fallback: string,
+  retryAfterSeconds?: number
+): string {
+  if (code === 'rate_limited' && retryAfterSeconds != null) {
+    return s.errors.rate_limited_after!.replace('{seconds}', String(retryAfterSeconds));
+  }
+  return s.errors[code] ?? fallback ?? s.errors.unknown!;
+}
+
 /** Read the stored transcript, tolerating anything. A corrupt or foreign value
  *  must degrade to an empty transcript, never break the panel. */
 function readStored(): ChatMessage[] {
@@ -129,6 +147,8 @@ export function ChatProvider({
   transport?: ChatTransport;
 }) {
   const { isAuthenticated } = useAuth();
+  const s = useContent().chat;
+  const { show: showToast } = useToast();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>(() => readStored());
   const [streaming, setStreaming] = useState(false);
@@ -230,20 +250,28 @@ export function ChatProvider({
                     [...events, { id, name, status, truncated }],
               };
             }),
-          // Proposals are the confirm-UI milestone's job; ignoring them here keeps
-          // this surface honest about what it can do.
+          // Rendering a proposal card is the confirm-UI milestone's job. Ignoring it
+          // here — rather than half-rendering one — keeps this surface honest about
+          // what it can actually do with one.
           onActionProposal: () => {},
           onDone: ({ sessionRefs }) => {
             patch(assistantId, (message) => ({ ...message, pending: false, sessionRefs }));
             setStreaming(false);
             abortRef.current = null;
           },
-          onError: ({ message }) => {
+          onError: ({ code, message, retryAfterSeconds }) => {
+            // Copy comes from the stable CODE, not the server's prose: the prose is
+            // for the log, and a user-facing string must be translatable. The raw
+            // message is kept as a fallback for a code we do not recognize yet.
+            const text = errorCopy(s, code, message, retryAfterSeconds);
             patch(assistantId, (current) => ({ ...current, pending: false }));
             setMessages((current) => [
               ...current,
-              { id: nextId('n'), role: 'system-note', content: message, tone: 'warn' },
+              { id: nextId('n'), role: 'system-note', content: text, tone: 'warn' },
             ]);
+            // The note explains it in place; the toast makes sure it is noticed even
+            // if the panel is scrolled away from the bottom.
+            showToast({ kind: 'error', message: text });
             setStreaming(false);
             abortRef.current = null;
           },
@@ -251,7 +279,7 @@ export function ChatProvider({
         controller.signal
       );
     },
-    [messages, patch, streaming, transport]
+    [messages, patch, showToast, s, streaming, transport]
   );
 
   const clearTranscript = useCallback(() => {

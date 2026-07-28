@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useOutlet } from 'react-router-dom';
 import { FkstMark } from '../components/brand/fkst-mark';
 import { LanguageToggle } from '../components/layout/language-toggle';
@@ -6,6 +6,8 @@ import { RouteTransition } from '../components/ui/motion';
 import { ChatLauncher } from '@/components/chat/chat-launcher';
 import { ChatPanel } from '@/components/chat/chat-panel';
 import { ChatProvider } from '@/components/chat/chat-context';
+import { sseChatTransport } from '@/components/chat/transport';
+import { useBroaderOAuth } from '@/lib/auth/broader-oauth';
 import { EnvironmentsDrawer } from '@/components/environments/environments-drawer';
 import { TourOverlay } from '@/components/tour/tour-overlay';
 import { useTour } from '@/components/tour/tour-context';
@@ -46,7 +48,11 @@ export function Shell() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [envOpen, setEnvOpen] = useState(false);
   const c = useContent();
-  const { isAuthenticated, signIn, signOut } = useAuth();
+  const { isAuthenticated, signIn, signOut, apiFetch } = useAuth();
+  // The broader-visibility credential is forwarded to chat exactly as the
+  // dashboard forwards it, so the concierge's overview tool sees the same
+  // repository set the user is looking at.
+  const { token: broaderToken } = useBroaderOAuth();
   // The guided tour is launched on demand from the topbar `?` control.
   const { start: startTour } = useTour();
   const location = useLocation();
@@ -55,6 +61,15 @@ export function Shell() {
   // route while the entering frame shows the new one — a live <Outlet/> would
   // render the destination in BOTH frames (double-mount) during the transition.
   const outlet = useOutlet();
+  // Built once per apiFetch identity; the broader token is read through a getter
+  // PER TURN, so connecting or disconnecting it takes effect on the next question
+  // rather than needing a remount.
+  const broaderTokenRef = useRef(broaderToken);
+  broaderTokenRef.current = broaderToken;
+  const chatTransport = useMemo(
+    () => sseChatTransport(apiFetch, () => broaderTokenRef.current),
+    [apiFetch]
+  );
   // The dashboard is a fixed-viewport app view: it fills <main> exactly and its
   // panels scroll internally, so it must NOT sit inside the auto-height padded
   // wrapper (that collapses its h-full chain) and carries no marketing footer.
@@ -121,7 +136,7 @@ export function Shell() {
     // share one transcript and one open state. It is mounted on EVERY route, docs
     // pages included: a first-time visitor lands there, and that is exactly who
     // has questions.
-    <ChatProvider>
+    <ChatProvider transport={chatTransport}>
       <div className="h-[100dvh] bg-bg bg-bg-glow bg-fixed text-fg font-ui flex flex-col overflow-hidden">
         <div className="max-w-shell w-full mx-auto px-6 max-[480px]:px-4 flex-1 min-h-0 flex flex-col">
           {/* pinned topbar (the column itself never scrolls, so no sticky needed).
