@@ -56,7 +56,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 envy = "0.4"
 tempfile = "3"
 nix = { version = "0.29", features = ["signal", "process"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
+# `stream` powers `Response::bytes_stream()`, which the chat concierge's LLM
+# client reads the provider's SSE body from incrementally (a buffered read would
+# defeat streaming answers to the browser).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart", "stream"] }
 secrecy = "0.10"
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 once_cell = "1"
