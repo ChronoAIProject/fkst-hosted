@@ -706,6 +706,40 @@ export interface SiteContent {
     kindNewSession: string;
     kindWorkItem: string;
     kindStopSession: string;
+    kindNewRepo: string;
+    kindSaveEnv: string;
+    kindDeleteEnv: string;
+    kindUninstallApp: string;
+    /** Scope line for a proposal that belongs to the user, not a repository. */
+    scopeYourAccount: string;
+    scopePersonal: string;
+    /** New-repository card. */
+    repoPrivate: string;
+    repoPublic: string;
+    repoInstallNote: string;
+    /** Environment card. */
+    envInstall: string;
+    envVariables: string;
+    envSecrets: string;
+    envNoVariables: string;
+    envCreateNote: string;
+    envReplaceNote: string;
+    envUnknownNote: string;
+    envSecretHint: string;
+    envSecretPlaceholder: string;
+    envSecretsRequired: string;
+    envValidateNote: string;
+    /** Carries `{name}`. */
+    deleteEnvLine: string;
+    deleteEnvConfirmTitle: string;
+    /** Carries `{name}`. */
+    deleteEnvConfirmBody: string;
+    deleteEnvConfirmAction: string;
+    /** Uninstall-App card. Each carries `{owner}`. */
+    uninstallLine: string;
+    uninstallConfirmTitle: string;
+    uninstallConfirmBody: string;
+    uninstallConfirmAction: string;
     previewToggle: string;
     fieldWorkLabel: string;
     fieldAutoDiscovered: string;
@@ -728,11 +762,22 @@ export interface SiteContent {
     restoredUnknown: string;
     outcomeChipCreated: string;
     outcomeChipStopped: string;
+    outcomeChipSaved: string;
+    outcomeChipDeleted: string;
+    outcomeChipRemoved: string;
     openIssue: string;
+    openRepo: string;
     /** Each carries `{number}` and `{repo}`. */
     outcomeSession: string;
     outcomeWorkItem: string;
     outcomeStopped: string;
+    /** Carries `{repo}`. */
+    outcomeRepo: string;
+    /** Each carries `{name}`. */
+    outcomeEnvSaved: string;
+    outcomeEnvDeleted: string;
+    /** Carries `{owner}`. */
+    outcomeUninstalled: string;
     stopConfirmTitle: string;
     /** Carries `{number}` and `{repo}`. */
     stopConfirmBody: string;

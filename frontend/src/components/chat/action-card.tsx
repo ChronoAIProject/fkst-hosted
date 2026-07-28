@@ -1,103 +1,21 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Chip } from '@/components/ui/chip';
 import { ErrorNote } from '@/components/ui/error-note';
-import { MarkdownPreview } from '@/components/ui/markdown-preview';
-import { Reveal } from '@/components/ui/motion';
 import { ConfirmDialog } from '@/components/modals/confirm-dialog';
 import { useContent } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
-import { stopTrigger } from '@/lib/api/canvas';
 import { RESTORED_UNKNOWN, useChat } from './chat-context';
 import type { ChatProposal } from './chat-context';
-import type { ActionProposal } from './action-types';
-
-/** The kind chip's label. */
-function kindLabel(proposal: ActionProposal, s: ReturnType<typeof useContent>['chat']): string {
-  switch (proposal.kind) {
-    case 'create_session':
-      return s.kindNewSession;
-    case 'create_work_item':
-      return s.kindWorkItem;
-    case 'stop_session':
-      return s.kindStopSession;
-  }
-}
-
-/** The per-kind body. Each shows the thing that will actually be created, because
- *  the confirm gate is only meaningful if the user can see what they are approving. */
-function CardBody({ proposal }: { proposal: ActionProposal }) {
-  const s = useContent().chat;
-  const [previewOpen, setPreviewOpen] = useState(false);
-
-  if (proposal.kind === 'create_session') {
-    const { request } = proposal;
-    return (
-      <div className="flex flex-col gap-2">
-        {/* Collapsed by default: the exact issue body is the authoritative preview,
-            but it is long, and the field table answers most questions at a glance. */}
-        <button
-          type="button"
-          onClick={() => setPreviewOpen((open) => !open)}
-          aria-expanded={previewOpen}
-          data-testid="chat-action-preview-toggle"
-          className="self-start rounded-control font-mono text-[10px] uppercase tracking-[0.12em] text-ghost transition-colors hover:text-faint cursor-pointer"
-        >
-          {s.previewToggle} {previewOpen ? '▴' : '▾'}
-        </button>
-        <Reveal open={previewOpen}>
-          <pre
-            data-testid="chat-action-preview"
-            className="max-h-64 overflow-auto rounded-control border border-line bg-glass px-3 py-2 font-mono text-[11.5px] leading-5 text-dim whitespace-pre-wrap"
-          >
-            {proposal.rendered_issue_body}
-          </pre>
-        </Reveal>
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-[10.5px]">
-          {[
-            [s.fieldWorkLabel, request.work_label ?? s.fieldAutoDiscovered],
-            [s.fieldPackages, String(request.packages.length + request.manifests.length)],
-            [
-              s.fieldBranches,
-              `${request.source_branch ?? s.fieldDefault} → ${request.target_branch ?? 'fkst-hosted-default'}`,
-            ],
-            [s.fieldAutoMerge, request.auto_merge ? s.on : s.off],
-            ...(request.environment ? [[s.fieldEnvironment, request.environment]] : []),
-          ].map(([label, value]) => (
-            <div key={label} className="contents">
-              <dt className="text-ghost uppercase tracking-[0.1em]">{label}</dt>
-              <dd className="text-faint">{value}</dd>
-            </div>
-          ))}
-        </dl>
-      </div>
-    );
-  }
-
-  if (proposal.kind === 'create_work_item') {
-    return (
-      <div className="flex flex-col gap-2">
-        <p className="font-ui text-[12.5px] font-semibold text-fg">{proposal.title}</p>
-        {proposal.label && (
-          <span className="font-mono text-[10.5px] text-faint">{proposal.label}</span>
-        )}
-        {proposal.body !== '' && (
-          <MarkdownPreview markdown={proposal.body} ariaLabel={s.workItemBodyAria} />
-        )}
-      </div>
-    );
-  }
-
-  return (
-    // Stopping is destructive, so it is styled with --warn — never the brand accent.
-    <div className="flex flex-col gap-1 border-l-2 border-l-warn pl-2.5">
-      <p className="font-mono text-[11.5px] text-warn">
-        {s.stopTriggerLine.replace('{number}', String(proposal.trigger_issue_number))}
-      </p>
-      <p className="text-[12px] leading-relaxed text-dim">{proposal.reason}</p>
-    </div>
-  );
-}
+import { CardBody } from './action-card-bodies';
+import { runProposalAsMutation } from './proposal-exec';
+import {
+  destructiveConfirm,
+  kindLabel,
+  outcomeChip,
+  requiredSecretKeys,
+  scopeLine,
+} from './proposal-meta';
 
 /**
  * A confirm-gated proposal card.
@@ -106,6 +24,9 @@ function CardBody({ proposal }: { proposal: ActionProposal }) {
  * capability, and confirming calls the same typed API function the dashboard's own
  * buttons use, under the user's own token. Nothing here ever auto-executes —
  * including on a transcript restore.
+ *
+ * Three kinds have no undo (retire a session, delete an environment, uninstall the App)
+ * and route through `ConfirmDialog` instead of executing on the first click.
  */
 export function ActionCard({ entry }: { entry: ChatProposal }) {
   const s = useContent().chat;
@@ -113,12 +34,19 @@ export function ActionCard({ entry }: { entry: ChatProposal }) {
   const { executeProposal, dismissProposal, markProposalSucceeded } = useChat();
   const { proposal, state } = entry;
   const [confirmOpen, setConfirmOpen] = useState(false);
+  /** Secret VALUES the user typed. Component state only: never lifted into the
+   *  transcript, never persisted, and gone the moment the card unmounts. */
+  const [secrets, setSecrets] = useState<Record<string, string>>({});
 
   const executing = state === 'executing';
   const succeeded = state === 'succeeded';
   // A restored mid-flight proposal is `failed` with a sentinel, because its real
   // outcome is unknowable — the copy says exactly that rather than pretending.
   const errorText = entry.error === RESTORED_UNKNOWN ? s.restoredUnknown : (entry.error ?? null);
+
+  const secretKeys = requiredSecretKeys(proposal);
+  const missingSecret = secretKeys.some((key) => (secrets[key] ?? '').trim() === '');
+  const danger = useMemo(() => destructiveConfirm(proposal, s), [proposal, s]);
 
   if (succeeded) {
     const dashboardHref =
@@ -133,12 +61,8 @@ export function ActionCard({ entry }: { entry: ChatProposal }) {
         data-state="succeeded"
         className="rounded-card border border-line bg-raise px-2.5 py-2 flex items-center gap-2 flex-wrap"
       >
-        <Chip tone="green">
-          {proposal.kind === 'stop_session' ? s.outcomeChipStopped : s.outcomeChipCreated}
-        </Chip>
-        <span className="font-mono text-[10.5px] text-faint">
-          {proposal.owner}/{proposal.name}
-        </span>
+        <Chip tone="green">{outcomeChip(proposal, s)}</Chip>
+        <span className="font-mono text-[10.5px] text-faint">{scopeLine(proposal, s)}</span>
         <span className="flex-1" aria-hidden="true" />
         {entry.issueUrl && (
           <a
@@ -149,6 +73,17 @@ export function ActionCard({ entry }: { entry: ChatProposal }) {
             className="rounded-chip border border-line-2 bg-raise-2 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-faint no-underline transition-colors hover:text-fg"
           >
             {s.openIssue} ↗
+          </a>
+        )}
+        {proposal.kind === 'create_repository' && (
+          <a
+            href={`https://github.com/${proposal.owner ?? ''}${proposal.owner ? '/' : ''}${proposal.name}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="chat-action-repo-link"
+            className="rounded-chip border border-line-2 bg-raise-2 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-faint no-underline transition-colors hover:text-fg"
+          >
+            {s.openRepo} ↗
           </a>
         )}
         {dashboardHref && (
@@ -168,17 +103,20 @@ export function ActionCard({ entry }: { entry: ChatProposal }) {
     <div
       data-testid="chat-action-card"
       data-state={state}
+      data-kind={proposal.kind}
       className="rounded-card border border-line bg-glass backdrop-blur-glass p-2.5 flex flex-col gap-2 shadow-[var(--shadow-1),var(--highlight-top)]"
     >
       <div className="flex items-center gap-2 flex-wrap">
         <Chip tone="neutral">{kindLabel(proposal, s)}</Chip>
-        <span className="font-mono text-[10.5px] text-ghost">
-          {proposal.owner}/{proposal.name}
-        </span>
+        <span className="font-mono text-[10.5px] text-ghost">{scopeLine(proposal, s)}</span>
       </div>
       <p className="text-[12.5px] leading-relaxed text-dim">{proposal.summary}</p>
 
-      <CardBody proposal={proposal} />
+      <CardBody
+        proposal={proposal}
+        secrets={secrets}
+        onSecretChange={(key, value) => setSecrets((current) => ({ ...current, [key]: value }))}
+      />
 
       <p className="font-mono text-[10px] text-ghost">
         {proposal.target.method} {proposal.target.path}
@@ -187,20 +125,25 @@ export function ActionCard({ entry }: { entry: ChatProposal }) {
           repository authority or label collisions — those run at confirmation. */}
       <p className="font-mono text-[10px] text-ghost">{s.finalChecksNote}</p>
 
-      {/* The stop path routes through ConfirmDialog, which owns its own inline
-          error — so this card shows none for that kind (its verified contract). */}
-      {errorText != null && proposal.kind !== 'stop_session' && <ErrorNote message={errorText} />}
+      {/* A destructive kind routes through ConfirmDialog, which owns its own inline
+          error — so this card shows none for those (its verified contract). */}
+      {errorText != null && danger == null && <ErrorNote message={errorText} />}
+      {missingSecret && (
+        <p data-testid="chat-env-secrets-required" className="font-mono text-[10px] text-warn">
+          {s.envSecretsRequired}
+        </p>
+      )}
 
       <div className="flex items-center gap-2">
         <button
           type="button"
-          disabled={executing}
+          disabled={executing || missingSecret}
           onClick={() => {
-            if (proposal.kind === 'stop_session') {
+            if (danger != null) {
               setConfirmOpen(true);
               return;
             }
-            void executeProposal(entry.id);
+            void executeProposal(entry.id, { secrets });
           }}
           data-testid="chat-action-confirm"
           className="rounded-control bg-grad-accent px-3 py-1.5 font-ui text-[12px] font-semibold text-amber-ink shadow-[var(--shadow-1),var(--glow-amber)] transition-[filter,opacity] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
@@ -227,28 +170,24 @@ export function ActionCard({ entry }: { entry: ChatProposal }) {
         </button>
       </div>
 
-      {confirmOpen && proposal.kind === 'stop_session' && (
+      {confirmOpen && danger != null && (
         <ConfirmDialog
-          title={s.stopConfirmTitle}
-          body={s.stopConfirmBody
-            .replace('{number}', String(proposal.trigger_issue_number))
-            .replace('{repo}', `${proposal.owner}/${proposal.name}`)}
-          confirmLabel={s.stopConfirmAction}
+          title={danger.title}
+          body={danger.body}
+          confirmLabel={danger.action}
           pendingLabel={s.executing}
           cancelLabel={s.dismiss}
           // The dialog runs the mutation and owns its own error/close. The card's
-          // own state is then updated through the same execute path on success, so
+          // own state is then updated through markProposalSucceeded on success, so
           // the success row renders exactly as it does for the other kinds.
-          action={() =>
-            stopTrigger(apiFetch, proposal.owner, proposal.name, proposal.trigger_issue_number)
-          }
+          action={() => runProposalAsMutation(apiFetch, proposal, { secrets })}
           fallbackError={s.executeFailed}
           onClose={() => setConfirmOpen(false)}
           onDone={() => {
             setConfirmOpen(false);
             // The dialog ALREADY ran the mutation (its verified contract), so this
-            // only records the outcome — calling executeProposal here would close
-            // the trigger a second time.
+            // only records the outcome — calling executeProposal here would run the
+            // destructive action a second time.
             markProposalSucceeded(entry.id);
           }}
         />
