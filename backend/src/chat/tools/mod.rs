@@ -25,6 +25,7 @@ use secrecy::SecretString;
 use super::dispatch::{DispatchError, SelfDispatch};
 use super::llm::ToolDef;
 
+pub mod manual;
 pub mod read;
 
 /// Characters escaped inside a single URL path segment or query value.
@@ -235,9 +236,12 @@ pub(crate) fn required_i64(args: &serde_json::Value, key: &str) -> Result<i64, T
         .ok_or_else(|| ToolError::InvalidArgs(format!("{key} must be an integer")))
 }
 
-/// The registry the shipped concierge runs with: every read-only tool.
+/// The registry the shipped concierge runs with: every read-only tool plus the
+/// in-process manual search.
 pub fn default_registry() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
     read::register(&mut registry);
+    // Last, so the live-data tools lead the list the model reads.
+    manual::register(&mut registry);
     registry
 }
