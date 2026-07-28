@@ -173,8 +173,9 @@ pub struct TriggerSpec {
     /// launcher injects as session env. Empty when the section is absent/blank.
     /// Every key/value is bounded at parse time; part of BOTH config hashes.
     pub engine_config: std::collections::BTreeMap<String, String>,
-    /// Optional branch whose head seeds a missing target branch. When absent,
-    /// the repository default branch is resolved during reconciliation.
+    /// Optional upstream branch whose head seeds a missing target branch and
+    /// receives completed target work. When absent, the repository default
+    /// branch is resolved during reconciliation.
     pub source_branch: Option<String>,
     /// Optional branch all session work and pull requests target. When absent,
     /// the reconciler uses `fkst-hosted-default`.

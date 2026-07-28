@@ -194,6 +194,9 @@ pub struct SessionPodSpec {
     /// The session's allowed work authors (creator, Session Collaborators, and
     /// login-shaped deployment admins), case-insensitively deduped.
     pub contributors: Vec<String>,
+    /// Resolved source branch that receives completed integration work. Always
+    /// concrete (the repository default when omitted by the author).
+    pub upstream_branch: String,
     /// Resolved branch the target repository is cloned from and every session PR
     /// targets. Always concrete (`fkst-hosted-default` when omitted by the author).
     pub target_branch: String,
@@ -311,7 +314,7 @@ pub(crate) fn session_env_pairs(
         (SESSION_PACKAGE_ROOTS_ENV, spec.package_roots.join(" ")),
         (SESSION_WORK_LABEL_ENV, spec.work_label.clone()),
         (SESSION_CREATOR_ENV, spec.creator_login.clone()),
-        (DEVLOOP_UPSTREAM_BRANCH_ENV, spec.target_branch.clone()),
+        (DEVLOOP_UPSTREAM_BRANCH_ENV, spec.upstream_branch.clone()),
         (DEVLOOP_INTEGRATION_BRANCH_ENV, spec.target_branch.clone()),
         // The engine's required HostFacts — without them any package calling
         // `setup_worktree()` fails at runtime with a HostFact-missing error.

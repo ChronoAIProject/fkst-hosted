@@ -98,8 +98,12 @@ async fn delivered_session_token_outlives_the_rotation_interval() {
 
     let ctx = test_ctx_with_github(Arc::new(FakeSessionBackend::default()), github);
     let reg = registration();
+    let branches = ResolvedBranchTopology {
+        upstream: "main".to_string(),
+        integration: "fkst-hosted-default".to_string(),
+    };
     let Ok((_spec, creds)) =
-        resolve_session_credentials(&reg, &["fkst-run".to_string()], &ctx).await
+        resolve_session_credentials(&reg, &["fkst-run".to_string()], &branches, &ctx).await
     else {
         panic!("credential resolution must succeed against the fake transport");
     };
@@ -133,9 +137,13 @@ async fn granted_delivery_mints_exact_multi_repo_scope_and_embeds_scoped_contrac
     )
     .expect("policy");
     let reg = registration();
+    let branches = ResolvedBranchTopology {
+        upstream: "main".to_string(),
+        integration: "fkst-hosted-default".to_string(),
+    };
 
     let Ok((spec, _creds)) =
-        resolve_session_credentials(&reg, &["fkst-run".to_string()], &ctx).await
+        resolve_session_credentials(&reg, &["fkst-run".to_string()], &branches, &ctx).await
     else {
         panic!("granted credential resolution must succeed");
     };

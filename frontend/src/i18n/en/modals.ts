@@ -28,7 +28,7 @@ export const canvasModals: CanvasModalsSlice = {
   createWorkLabelLabel: 'Work label (optional)',
   createAdvancedLabel: 'Advanced',
   createSourceBranchLabel: 'Source branch (optional)',
-  createSourceBranchPlaceholder: 'Repository default branch',
+  createSourceBranchPlaceholder: 'Repository default · rollup destination',
   createTargetBranchLabel: 'Target branch (optional)',
   createTargetBranchPlaceholder: 'fkst-hosted-default · created from source if missing',
   createBranchInvalid:

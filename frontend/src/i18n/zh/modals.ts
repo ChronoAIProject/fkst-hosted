@@ -27,7 +27,7 @@ export const canvasModals: CanvasModalsSlice = {
   createWorkLabelLabel: '工作标签（可选）',
   createAdvancedLabel: '高级',
   createSourceBranchLabel: '源分支（可选）',
-  createSourceBranchPlaceholder: '仓库默认分支',
+  createSourceBranchPlaceholder: '仓库默认分支 · 汇总目标',
   createTargetBranchLabel: '目标分支（可选）',
   createTargetBranchPlaceholder: 'fkst-hosted-default · 不存在时从源分支创建',
   createBranchInvalid:

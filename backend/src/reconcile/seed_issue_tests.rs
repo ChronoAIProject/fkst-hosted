@@ -126,6 +126,10 @@ fn manifest_seed_body_round_trips_with_manifest_and_no_packages_or_work_label() 
         "names the default target branch: {body}"
     );
     assert!(
+        body.contains("target work rolls up into the repository default source branch"),
+        "explains where completed seeded work lands: {body}"
+    );
+    assert!(
         !body.contains("### Packages"),
         "manifest seed omits ### Packages"
     );

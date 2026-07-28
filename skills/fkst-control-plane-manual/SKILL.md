@@ -95,8 +95,8 @@ template are ignored, so you can fill the template in place.
 | `### Manifest` | one of these two | zero or more lines, each a **manifest reference** `owner/repo@ref:path` pointing at an fkst-manifest JSON file |
 | `### Work Label` | optional | **exactly one** label, ≤ 50 chars, **no comma**. Omit (or leave blank) to auto-discover labels from the session's packages |
 | `### Environment` | optional | the name of **one** reusable environment profile you have saved (see §7). Selects the profile only — **never put commands, variable values, or secrets in an issue**. Disposable environments cannot be authored directly in a GitHub issue |
-| `### Source Branch` | optional | branch used to seed a missing target branch; omit to use the repository's default branch |
-| `### Target Branch` | optional | branch the session works against; omit to use `fkst-hosted-default` |
+| `### Source Branch` | optional | upstream branch used to seed a missing target and receive completed target work; omit to use the repository's default branch |
+| `### Target Branch` | optional | integration branch the session works against; omit to use `fkst-hosted-default` |
 | `### Auto-merge` | optional | `true` / `yes` / `on` / `enabled` / `1` (case-insensitive) turns it on: the App bot's PRs auto-merge to the default branch when mergeable and the linked work issue is closed. Anything else = off. Note this bypasses your review/checks flow |
 | `### FKST Contributors` | optional | the session's **trusted users** (you, the author, are always included): the session acts only on issues/comments from these people, and they may download the session's logs. GitHub logins and/or numeric ids, separated by spaces/commas/newlines; a leading `@` is fine; numeric ids count for log access only. Legacy heading `### Log Access Allowlist` is a permanent alias (both may appear; lists merge) |
 | `### Session Collaborators` | optional | people granted **work-item authority** — they may raise, label, and comment on this session's work issues (distinct from log access; they cannot stop the session). Same list format |

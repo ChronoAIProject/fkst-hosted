@@ -55,8 +55,9 @@ pub struct SessionDef {
     /// launcher injects as session env). Part of BOTH hashes: it changes the
     /// pod env, so editing it after registration is a rejected config change.
     pub engine_config: std::collections::BTreeMap<String, String>,
-    /// Optional source branch from the trigger. `None` means the repository's
-    /// default branch, resolved against GitHub at reconcile/spawn time.
+    /// Optional upstream branch from the trigger. It seeds a missing target and
+    /// receives completed target work. `None` means the repository's default
+    /// branch, resolved against GitHub at reconcile/spawn time.
     pub source_branch: Option<String>,
     /// Optional target branch from the trigger. `None` resolves to
     /// `fkst-hosted-default`.

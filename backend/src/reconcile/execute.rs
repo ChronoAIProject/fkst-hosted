@@ -244,14 +244,21 @@ async fn spawn_session(
     // Provision the target ref before constructing a runtime. This is retried on
     // every spawn pass, never resets an existing target, and deliberately emits
     // logs only: the spawn path has no durable comment-dedupe latch.
-    if !ensure_target_branch(&reg, ctx).await {
+    let Some(branches) = ensure_branch_topology(&reg, ctx).await else {
         return;
-    }
+    };
 
     // 2-5. Rebuild the launch spec + complete credential bundle from authoritative
     // sources. The same resolver drives live-runtime recovery, so spawn and restart
     // healing cannot drift to different credential layouts.
-    let (spec, creds) = match resolve_session_credentials(&reg, &detected_work_labels, ctx).await {
+    let (spec, creds) = match resolve_session_credentials(
+        &reg,
+        &detected_work_labels,
+        &branches,
+        ctx,
+    )
+    .await
+    {
         Ok(ready) => ready,
         Err(CredentialResolutionError::EnvironmentBlocked { comment }) => {
             post_comment_best_effort(&ctx.github, &owner_repo, reg.trigger_issue, &comment).await;
@@ -279,28 +286,21 @@ async fn spawn_session(
     }
 }
 
-async fn ensure_target_branch(reg: &SessionRegistration, ctx: &ReconcileCtx) -> bool {
-    let owner_repo = format!("{}/{}", reg.repo.owner, reg.repo.name);
-    let target = reg
-        .def
-        .target_branch
-        .as_deref()
-        .unwrap_or(DEFAULT_TARGET_BRANCH);
-    match ctx.github.branch_head_sha(&owner_repo, target).await {
-        Ok(Some(_)) => return true,
-        Ok(None) => {}
-        Err(error) => {
-            tracing::warn!(
-                session_id = %reg.session_id,
-                target_branch = %target,
-                error = %error,
-                "reconcile spawn: target branch lookup failed; retrying next pass"
-            );
-            return false;
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedBranchTopology {
+    upstream: String,
+    integration: String,
+}
 
-    let source = match &reg.def.source_branch {
+/// Resolve the source/upstream branch and ensure the target/integration branch
+/// exists. The source remains load-bearing after target creation: github-devloop
+/// promotes completed integration work back into it.
+async fn ensure_branch_topology(
+    reg: &SessionRegistration,
+    ctx: &ReconcileCtx,
+) -> Option<ResolvedBranchTopology> {
+    let owner_repo = format!("{}/{}", reg.repo.owner, reg.repo.name);
+    let upstream = match &reg.def.source_branch {
         Some(source) => source.clone(),
         None => match ctx.github.repo_default_branch(&owner_repo).await {
             Ok(source) => source,
@@ -310,45 +310,77 @@ async fn ensure_target_branch(reg: &SessionRegistration, ctx: &ReconcileCtx) -> 
                     error = %error,
                     "reconcile spawn: default source branch lookup failed; retrying next pass"
                 );
-                return false;
+                return None;
             }
         },
     };
-    let source_sha = match ctx.github.branch_head_sha(&owner_repo, &source).await {
+    let integration = reg
+        .def
+        .target_branch
+        .clone()
+        .unwrap_or_else(|| DEFAULT_TARGET_BRANCH.to_string());
+    let topology = ResolvedBranchTopology {
+        upstream,
+        integration,
+    };
+
+    match ctx
+        .github
+        .branch_head_sha(&owner_repo, &topology.integration)
+        .await
+    {
+        Ok(Some(_)) => return Some(topology),
+        Ok(None) => {}
+        Err(error) => {
+            tracing::warn!(
+                session_id = %reg.session_id,
+                target_branch = %topology.integration,
+                error = %error,
+                "reconcile spawn: target branch lookup failed; retrying next pass"
+            );
+            return None;
+        }
+    }
+
+    let source_sha = match ctx
+        .github
+        .branch_head_sha(&owner_repo, &topology.upstream)
+        .await
+    {
         Ok(Some(sha)) => sha,
         Ok(None) => {
             tracing::warn!(
                 session_id = %reg.session_id,
-                source_branch = %source,
+                source_branch = %topology.upstream,
                 "reconcile spawn: source branch disappeared before target provisioning; retrying next pass"
             );
-            return false;
+            return None;
         }
         Err(error) => {
             tracing::warn!(
                 session_id = %reg.session_id,
-                source_branch = %source,
+                source_branch = %topology.upstream,
                 error = %error,
                 "reconcile spawn: source branch lookup failed; retrying next pass"
             );
-            return false;
+            return None;
         }
     };
     match ctx
         .github
-        .create_ref(&owner_repo, target, &source_sha)
+        .create_ref(&owner_repo, &topology.integration, &source_sha)
         .await
     {
-        Ok(()) | Err(GithubAppError::RefExists) => true,
+        Ok(()) | Err(GithubAppError::RefExists) => Some(topology),
         Err(error) => {
             tracing::warn!(
                 session_id = %reg.session_id,
-                source_branch = %source,
-                target_branch = %target,
+                source_branch = %topology.upstream,
+                target_branch = %topology.integration,
                 error = %error,
                 "reconcile spawn: target branch creation failed; retrying next pass"
             );
-            false
+            None
         }
     }
 }
@@ -379,10 +411,17 @@ async fn recover_credentials(
     // A backend may report recovery needed and then discover the runtime vanished
     // at `ensure_session`. Apply the same branch precondition as the ordinary
     // spawn path before that race can recreate a runtime.
-    if !ensure_target_branch(&reg, ctx).await {
+    let Some(branches) = ensure_branch_topology(&reg, ctx).await else {
         return;
-    }
-    let (spec, creds) = match resolve_session_credentials(&reg, &detected_work_labels, ctx).await {
+    };
+    let (spec, creds) = match resolve_session_credentials(
+        &reg,
+        &detected_work_labels,
+        &branches,
+        ctx,
+    )
+    .await
+    {
         Ok(ready) => ready,
         Err(CredentialResolutionError::EnvironmentBlocked { .. }) => {
             tracing::warn!(
@@ -438,6 +477,7 @@ enum CredentialResolutionError {
 async fn resolve_session_credentials(
     reg: &SessionRegistration,
     detected_work_labels: &[String],
+    branches: &ResolvedBranchTopology,
     ctx: &ReconcileCtx,
 ) -> Result<(SessionPodSpec, BTreeMap<String, SecretString>), CredentialResolutionError> {
     let environment = match resolve_environment(reg, ctx).await {
@@ -488,6 +528,7 @@ async fn resolve_session_credentials(
     let spec = session_pod_spec_from(
         reg,
         detected_work_labels,
+        branches,
         ctx.config.reconcile.github_bot_login.clone(),
         &ctx.config.access,
         ctx.config.delivery_grants.session_json_for(&reg.repo),
@@ -545,6 +586,7 @@ fn complete_disposable_handoff(reg: &SessionRegistration, ctx: &ReconcileCtx) {
 fn session_pod_spec_from(
     reg: &SessionRegistration,
     detected_work_labels: &[String],
+    branches: &ResolvedBranchTopology,
     bot_login: Option<String>,
     access: &AccessPolicy,
     delivery_grants_json: Option<String>,
@@ -566,11 +608,8 @@ fn session_pod_spec_from(
         engine_config: reg.def.engine_config.clone(),
         creator_login: reg.creator_login.clone(),
         contributors: session_contributors(reg, access),
-        target_branch: reg
-            .def
-            .target_branch
-            .clone()
-            .unwrap_or_else(|| DEFAULT_TARGET_BRANCH.to_string()),
+        upstream_branch: branches.upstream.clone(),
+        target_branch: branches.integration.clone(),
         delivery_grants_json,
     }
 }

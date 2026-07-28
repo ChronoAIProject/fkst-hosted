@@ -27,12 +27,14 @@ issue needs exactly one assignee: this session's creator. Its author must be the
 creator, a login under `### Session Collaborators`, or a deployment global admin.
 
 BRANCHES: To override branch topology, add an optional `### Source Branch`
-section with exactly one existing branch (default: the repository default), and/or
-an optional `### Target Branch` section with exactly one branch (default:
-`fkst-hosted-default`). fkst creates a missing target at the source head before
-the session starts, retries provisioning failures reported in operator logs, and
-never resets an existing target. Work branches start from the target branch and
-pull requests merge into the target. Source and target may be the same branch.
+section with exactly one existing upstream branch (default: the repository
+default), and/or an optional `### Target Branch` section with exactly one
+integration branch (default: `fkst-hosted-default`). fkst creates a missing target
+at the source head before the session starts, retries provisioning failures
+reported in operator logs, and never resets an existing target.
+Work branches start from the target branch and pull requests merge into it;
+completed target work rolls up into the source. Source and target may be the same
+branch, which disables the separate rollup step.
 -->
 
 ### Session Name
