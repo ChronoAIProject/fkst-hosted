@@ -180,6 +180,7 @@ pub(super) async fn session_outcomes(
                 &owner,
                 &name,
                 std::slice::from_mut(&mut reg),
+                state.config.reconcile.work_label_namespace.as_deref(),
             )
             .await?;
             let work = projected

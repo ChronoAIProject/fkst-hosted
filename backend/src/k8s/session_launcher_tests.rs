@@ -33,6 +33,7 @@ fn spec() -> SessionPodSpec {
         trigger_issue_number: 7,
         package_roots: vec!["web".to_string(), "api".to_string()],
         work_label: "fkst".to_string(),
+        work_label_map_json: None,
         bot_login: "fkst-bot[bot]".to_string(),
         config_hash: "cfg-deadbeef".to_string(),
         output_lang: None,
@@ -175,6 +176,11 @@ fn build_session_pod_injects_the_section_5_2_env() {
         Some("web api")
     );
     assert_eq!(env_value(env, "FKST_SESSION_WORK_LABEL"), Some("fkst"));
+    assert_eq!(
+        env_value(env, "FKST_SESSION_WORK_LABEL_MAP_JSON"),
+        None,
+        "an unnamespaced session preserves the historical environment"
+    );
     assert_eq!(env_value(env, "FKST_SESSION_CREATOR"), Some("author-login"));
     assert_eq!(
         env_value(env, "FKST_DEVLOOP_UPSTREAM_BRANCH"),
@@ -193,6 +199,24 @@ fn build_session_pod_injects_the_section_5_2_env() {
         None,
         "an ungranted session preserves the historical environment"
     );
+}
+
+#[test]
+fn session_env_pairs_render_the_namespaced_work_label_map_for_both_backends() {
+    let mut namespaced = spec();
+    namespaced.work_label = "fkst-dev-chronoai-fkst".to_string();
+    namespaced.work_label_map_json = Some(r#"{"fkst-dev":"fkst-dev-chronoai-fkst"}"#.to_string());
+    let pairs = session_env_pairs(&namespaced, &config());
+    assert_eq!(
+        pairs
+            .iter()
+            .find(|(key, _)| key == "FKST_SESSION_WORK_LABEL_MAP_JSON")
+            .map(|(_, value)| value.as_str()),
+        namespaced.work_label_map_json.as_deref()
+    );
+    assert!(pairs
+        .iter()
+        .any(|(key, value)| key == "FKST_SESSION_WORK_LABEL" && value == "fkst-dev-chronoai-fkst"));
 }
 
 #[test]

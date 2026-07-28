@@ -30,13 +30,16 @@ use crate::k8s::{session_github_token_json, SessionPodSpec};
 use crate::models::RepoRef;
 use crate::reconcile::announce::announce_session_comment;
 use crate::reconcile::branches::DEFAULT_TARGET_BRANCH;
-use crate::reconcile::desired::{KillReason, ReconcileAction, SessionRegistration};
+use crate::reconcile::desired::{
+    runtime_config_hash, KillReason, ReconcileAction, SessionRegistration,
+};
 use crate::reconcile::execute_comments::{
     config_rejected_comment, env_not_ready_comment, env_verify_failed_comment,
     flag_invalid_comment, invalid_refs_comment, trigger_unauthorized_comment,
 };
 use crate::reconcile::reachability;
 use crate::reconcile::retire::retire_work_issues;
+use crate::reconcile::work_labels::{apply_work_label_namespace, WorkLabelError};
 use crate::session_backend::{BackendError, EnsureOutcome, SessionBackend};
 use crate::session_spec::creds::{credential_secret_data, StorageWriterCreds};
 
@@ -167,6 +170,23 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
             creator_login,
             full_config_hash,
         } => {
+            let effective_labels = match apply_work_label_namespace(
+                &detected_work_labels,
+                ctx.config.reconcile.work_label_namespace.as_deref(),
+            ) {
+                Ok(labels) => labels,
+                Err(error) => {
+                    tracing::error!(
+                        trigger_issue,
+                        error = %error,
+                        "reconcile announce: effective work-label validation failed"
+                    );
+                    return;
+                }
+            };
+            let effective_explicit = work_label
+                .as_ref()
+                .and_then(|logical| effective_labels.logical_to_effective.get(logical).cloned());
             // Build the identity-gated log-download link from the configured public
             // base URL; `None` (unset) omits the log line. The endpoint authorizes
             // every request, so the static URL is safe to post.
@@ -176,8 +196,8 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
                 });
             let comment = announce_session_comment(
                 &session_name,
-                work_label.as_deref(),
-                &detected_work_labels,
+                effective_explicit.as_deref(),
+                &effective_labels.effective,
                 &packages,
                 environment.as_deref(),
                 source_branch.as_deref(),
@@ -266,6 +286,10 @@ async fn spawn_session(
         }
         Err(CredentialResolutionError::TokenMintFailed(error)) => {
             tracing::error!(session_id = %reg.session_id, error = %error, "reconcile spawn: token mint failed; not spawning");
+            return;
+        }
+        Err(CredentialResolutionError::WorkLabelsInvalid(error)) => {
+            tracing::error!(session_id = %reg.session_id, error = %error, "reconcile spawn: effective work labels invalid; not spawning");
             return;
         }
     };
@@ -438,6 +462,14 @@ async fn recover_credentials(
             );
             return;
         }
+        Err(CredentialResolutionError::WorkLabelsInvalid(error)) => {
+            tracing::error!(
+                session_id = %session_id,
+                error = %error,
+                "reconcile credential recovery: effective work labels invalid"
+            );
+            return;
+        }
     };
 
     match ctx.backend.ensure_session(&spec, creds).await {
@@ -466,6 +498,7 @@ async fn recover_credentials(
 enum CredentialResolutionError {
     EnvironmentBlocked { comment: String },
     TokenMintFailed(GithubAppError),
+    WorkLabelsInvalid(WorkLabelError),
 }
 
 /// Resolve the current full session credential bundle from durable/control-plane
@@ -532,7 +565,9 @@ async fn resolve_session_credentials(
         ctx.config.reconcile.github_bot_login.clone(),
         &ctx.config.access,
         ctx.config.delivery_grants.session_json_for(&reg.repo),
-    );
+        ctx.config.reconcile.work_label_namespace.as_deref(),
+    )
+    .map_err(CredentialResolutionError::WorkLabelsInvalid)?;
     let storage = storage_writer_creds(&ctx.config);
     let creds = credential_secret_data(
         &github_token_json,
@@ -590,8 +625,10 @@ fn session_pod_spec_from(
     bot_login: Option<String>,
     access: &AccessPolicy,
     delivery_grants_json: Option<String>,
-) -> SessionPodSpec {
-    SessionPodSpec {
+    work_label_namespace: Option<&str>,
+) -> Result<SessionPodSpec, WorkLabelError> {
+    let labels = apply_work_label_namespace(detected_work_labels, work_label_namespace)?;
+    Ok(SessionPodSpec {
         session_id: reg.session_id.clone(),
         installation_id: reg.installation_id,
         repo: reg.repo.clone(),
@@ -601,9 +638,10 @@ fn session_pod_spec_from(
             .iter()
             .map(reachability::render_ref)
             .collect(),
-        work_label: crate::k8s::work_label_wire::join_work_labels(detected_work_labels),
+        work_label: crate::k8s::work_label_wire::join_work_labels(&labels.effective),
+        work_label_map_json: labels.map_json(),
         bot_login: bot_login.unwrap_or_default(),
-        config_hash: reg.config_hash.clone(),
+        config_hash: runtime_config_hash(&reg.config_hash, work_label_namespace),
         output_lang: reg.def.output_lang.clone(),
         engine_config: reg.def.engine_config.clone(),
         creator_login: reg.creator_login.clone(),
@@ -611,7 +649,7 @@ fn session_pod_spec_from(
         upstream_branch: branches.upstream.clone(),
         target_branch: branches.integration.clone(),
         delivery_grants_json,
-    }
+    })
 }
 
 /// Package-side work authors: creator first, then Session Collaborators, then

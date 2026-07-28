@@ -337,6 +337,7 @@ fn maybe_seed_trigger_issues(
     let label = state.config.reconcile.substrate_trigger_label.clone();
     let packages = state.config.reconcile.seed_packages.clone();
     let default_manifest = state.config.reconcile.default_manifest.clone();
+    let work_label_namespace = state.config.reconcile.work_label_namespace.clone();
     // The seeded intro's dashboard pointer (issue #3379); `None` omits the URL.
     let frontend_url = state.config.log.frontend_url.clone();
     let owner = owner_login.to_string();
@@ -347,6 +348,7 @@ fn maybe_seed_trigger_issues(
             &label,
             &packages,
             default_manifest.as_deref(),
+            work_label_namespace.as_deref(),
             &owner,
             &installer,
             &owner_repos,

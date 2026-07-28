@@ -565,8 +565,15 @@ pub(super) async fn repo_sessions(
             }
         }
     }
-    let mut work_projection =
-        work_issues_by_session(&gh, &inst_token, &owner, &name, &mut registrations).await?;
+    let mut work_projection = work_issues_by_session(
+        &gh,
+        &inst_token,
+        &owner,
+        &name,
+        &mut registrations,
+        state.config.reconcile.work_label_namespace.as_deref(),
+    )
+    .await?;
     let mut registrations_by_issue: HashMap<_, _> = registrations
         .into_iter()
         .map(|reg| (reg.trigger_issue, reg))
@@ -642,7 +649,14 @@ pub(super) async fn repo_sessions(
                     session_id: Some(reg.session_id.clone()),
                     name: Some(reg.def.name.clone()),
                     creator: reg.creator_login.clone(),
-                    work_label: reg.def.work_label.clone(),
+                    work_label: reg.def.work_label.as_ref().and_then(|logical| {
+                        crate::reconcile::work_labels::apply_work_label_namespace(
+                            std::slice::from_ref(logical),
+                            state.config.reconcile.work_label_namespace.as_deref(),
+                        )
+                        .ok()
+                        .and_then(|labels| labels.effective.into_iter().next())
+                    }),
                     work_labels,
                     auto_merge: Some(reg.auto_merge),
                     environment: reg.def.environment.clone(),

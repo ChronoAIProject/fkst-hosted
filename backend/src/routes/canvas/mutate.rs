@@ -23,6 +23,7 @@ use crate::error::{AppError, ErrorEnvelope};
 use crate::github_app::{GithubListing, HttpGithubListing};
 use crate::github_identity::GithubUser;
 use crate::goals::trigger_parse::parse_trigger_issue_body;
+use crate::reconcile::work_labels::provider_session_issue_title;
 use crate::reconcile::{effective_creator, CreatorResolution};
 use crate::routes::canvas::sessions::validate_repo_segment;
 use crate::routes::canvas::trigger_body::{validated_trigger_body, CreateSessionRequest};
@@ -113,8 +114,16 @@ pub(super) async fn create_session(
     }
 
     let labels = vec![trigger_label];
+    let session_name = req.name.trim();
+    let issue_title = state
+        .config
+        .reconcile
+        .work_label_namespace
+        .as_deref()
+        .map(|namespace| provider_session_issue_title(namespace, session_name))
+        .unwrap_or_else(|| session_name.to_string());
     let created = gh
-        .create_issue(&token, &owner, &name, req.name.trim(), &body, &labels, &[])
+        .create_issue(&token, &owner, &name, &issue_title, &body, &labels, &[])
         .await?;
     if let Some(disposable) = &req.disposable_environment {
         state

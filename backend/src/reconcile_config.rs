@@ -154,6 +154,9 @@ struct ReconcileVars {
     /// dispatch-on requirement; a blank override is coerced to `None`.
     #[serde(default)]
     github_bot_login: Option<String>,
+    /// Optional provider namespace appended to every session work label.
+    #[serde(default)]
+    work_label_namespace: Option<String>,
     #[serde(default = "defaults::reconcile_interval_secs")]
     reconcile_interval_secs: u64,
     #[serde(default = "defaults::pod_full_resync_interval_secs")]
@@ -200,6 +203,9 @@ pub struct ReconcileConfig {
     /// The bot's GitHub login. Env: `FKST_GITHUB_BOT_LOGIN`. Default `None`
     /// (blank coerced to `None`); the dispatch-on requirement is a PR6 concern.
     pub github_bot_login: Option<String>,
+    /// Deployment/provider namespace appended to every logical GitHub work label.
+    /// Env: `FKST_WORK_LABEL_NAMESPACE`. Unset/blank preserves logical labels.
+    pub work_label_namespace: Option<String>,
     /// Reconcile-loop cadence, seconds. Env: `FKST_RECONCILE_INTERVAL_SECS`.
     /// Default 30; must be >= 1.
     pub reconcile_interval_secs: u64,
@@ -269,6 +275,7 @@ impl Default for ReconcileConfig {
         Self {
             substrate_trigger_label: defaults::substrate_trigger_label(),
             github_bot_login: None,
+            work_label_namespace: None,
             seed_trigger_issue_on_install: defaults::seed_trigger_issue_on_install(),
             seed_packages: defaults::seed_packages(),
             default_manifest: defaults::default_manifest(),
@@ -365,6 +372,15 @@ impl ReconcileConfig {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
 
+        let work_label_namespace = env
+            .work_label_namespace
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        if let Some(namespace) = work_label_namespace.as_deref() {
+            crate::reconcile::work_labels::validate_work_label_namespace(namespace)
+                .map_err(|error| AppError::Config(format!("FKST_WORK_LABEL_NAMESPACE {error}")))?;
+        }
+
         // Whitespace-separated package refs; a blank/all-whitespace value falls
         // back to the default so a stray empty ConfigMap value cannot seed an
         // issue with an empty `### Packages` section (which the parser rejects).
@@ -392,6 +408,7 @@ impl ReconcileConfig {
         Ok(ReconcileConfig {
             substrate_trigger_label: env.substrate_trigger_label,
             github_bot_login,
+            work_label_namespace,
             reconcile_interval_secs: env.reconcile_interval_secs,
             pod_full_resync_interval_secs: env.pod_full_resync_interval_secs,
             startup_resync_retry_initial_secs: env.startup_resync_retry_initial_secs,

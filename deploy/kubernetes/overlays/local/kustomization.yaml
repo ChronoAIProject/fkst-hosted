@@ -22,3 +22,6 @@ patches:
       - op: add
         path: /data/FKST_ENV_STORE_NAMESPACE
         value: fkst-recovery-source
+      - op: add
+        path: /data/FKST_WORK_LABEL_NAMESPACE
+        value: chronoai-fkst-cloud-test

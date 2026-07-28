@@ -40,13 +40,17 @@
 
 use crate::github_app::GithubAppTokens;
 use crate::reconcile::branches::DEFAULT_TARGET_BRANCH;
+use crate::reconcile::work_labels::provider_session_issue_title;
 
 /// The manifest-driven seed session's name (`### Session Name`, I9). A DNS-1123-ish
 /// env-name the parser accepts; names the default-workflows bundle for humans.
 const SEED_MANIFEST_SESSION_NAME: &str = "default-workflows";
 
-/// The manifest-driven seed issue title (I9).
-const SEED_MANIFEST_TITLE: &str = "[session] default-workflows (auto-seeded)";
+/// Human-facing name used in a provider-namespaced manifest seed issue title.
+const SEED_MANIFEST_DISPLAY_NAME: &str = "Default FKST Substrate";
+
+/// Historical title retained when no provider namespace is configured.
+const SEED_MANIFEST_LEGACY_TITLE: &str = "[session] default-workflows (auto-seeded)";
 
 /// The legacy seed session's name (the `### Session Name` section). A DNS-1123-ish
 /// env-name the parser accepts.
@@ -56,7 +60,7 @@ const SEED_SESSION_NAME: &str = "evolve";
 const SEED_WORK_LABEL: &str = "fkst-evolve";
 
 /// The legacy issue title.
-const SEED_TITLE: &str = "[session] evolve (auto-seeded)";
+const SEED_LEGACY_TITLE: &str = "[session] evolve (auto-seeded)";
 
 /// Render the parser-ignored onboarding intro both seed shapes open with
 /// (issue #3379). `session_name` names the session the trigger registers;
@@ -162,6 +166,8 @@ fn seed_contributors(installer: &str, owner_login: &str) -> String {
 /// becomes the issue's sole assignee and first log-access principal.
 /// `default_manifest` selects the body shape: `Some(ref)` renders the manifest-driven
 /// default (I9); `None` renders the legacy `packages` + work-label body.
+/// `work_label_namespace` brands the title for a hosted provider; an unnamespaced
+/// deployment retains the historical auto-seeded title.
 /// `frontend_url` (the configured `FKST_FRONTEND_URL`) renders the intro's
 /// dashboard pointer when present.
 ///
@@ -176,6 +182,7 @@ pub async fn seed_trigger_issues(
     trigger_label: &str,
     packages: &[String],
     default_manifest: Option<&str>,
+    work_label_namespace: Option<&str>,
     owner_login: &str,
     installer: &str,
     repos: &[String],
@@ -190,11 +197,13 @@ pub async fn seed_trigger_issues(
         owner_login,
         frontend_url,
     );
-    // The title names the seed session, which differs between the two body shapes.
-    let title = if default_manifest.is_some() {
-        SEED_MANIFEST_TITLE
-    } else {
-        SEED_TITLE
+    let title = match (work_label_namespace, default_manifest.is_some()) {
+        (Some(namespace), true) => {
+            provider_session_issue_title(namespace, SEED_MANIFEST_DISPLAY_NAME)
+        }
+        (Some(namespace), false) => provider_session_issue_title(namespace, SEED_SESSION_NAME),
+        (None, true) => SEED_MANIFEST_LEGACY_TITLE.to_string(),
+        (None, false) => SEED_LEGACY_TITLE.to_string(),
     };
     for owner_repo in repos {
         match github
@@ -217,7 +226,7 @@ pub async fn seed_trigger_issues(
             }
         }
         match github
-            .create_issue(owner_repo, title, &body, &labels, &assignees)
+            .create_issue(owner_repo, &title, &body, &labels, &assignees)
             .await
         {
             Ok(number) => {

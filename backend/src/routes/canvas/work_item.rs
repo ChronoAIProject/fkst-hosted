@@ -28,7 +28,7 @@ use crate::models::RepoRef;
 use crate::reconcile::desired::{config_hash, SessionDef, SessionRegistration};
 use crate::reconcile::effective_packages::resolve_effective_packages;
 use crate::reconcile::work_authz::is_work_author_allowed;
-use crate::reconcile::work_labels::resolve_work_label_sets;
+use crate::reconcile::work_labels::{apply_work_label_namespace, resolve_work_label_sets};
 use crate::reconcile::{effective_creator, CreatorResolution, SessionCreator};
 use crate::routes::canvas::sessions::validate_repo_segment;
 use crate::routes::dashboard::{bearer_token, DashboardGithub};
@@ -333,8 +333,17 @@ pub(super) async fn create_work_item(
     reg.effective_packages = packages.clone();
     let mut label_sets =
         resolve_work_label_sets(&gh.client, &gh.api_base, &token, std::slice::from_ref(&reg)).await;
-    let applicable = label_sets.remove(&reg.session_id).unwrap_or_default();
-    if applicable.is_empty() {
+    let logical = label_sets.remove(&reg.session_id).unwrap_or_default();
+    let applicable = apply_work_label_namespace(
+        &logical,
+        state.config.reconcile.work_label_namespace.as_deref(),
+    )
+    .map_err(|error| {
+        AppError::Unprocessable(format!(
+            "this session cannot accept work because its effective work labels are invalid: {error}"
+        ))
+    })?;
+    if applicable.effective.is_empty() {
         return Err(AppError::Unprocessable(
             "this session has no applicable work labels".to_string(),
         ));
@@ -345,18 +354,23 @@ pub(super) async fn create_work_item(
         .ok_or_else(|| {
             AppError::Unprocessable(format!(
                 "this session has no explicit work label; choose one of: {}",
-                applicable.join(", ")
+                applicable.effective.join(", ")
             ))
         })?;
     let work_label = applicable
+        .logical
         .iter()
-        .find(|label| label.eq_ignore_ascii_case(requested_work_label))
-        .cloned()
+        .zip(applicable.effective.iter())
+        .find(|(logical, effective)| {
+            logical.eq_ignore_ascii_case(requested_work_label)
+                || effective.eq_ignore_ascii_case(requested_work_label)
+        })
+        .map(|(_, effective)| effective.clone())
         .ok_or_else(|| {
             AppError::Unprocessable(format!(
                 "work label `{requested_work_label}` is not applicable to this session; \
                  refresh the dashboard and choose one of: {}",
-                applicable.join(", ")
+                applicable.effective.join(", ")
             ))
         })?;
 

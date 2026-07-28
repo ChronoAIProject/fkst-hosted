@@ -6,7 +6,10 @@ use secrecy::SecretString;
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use super::resolve_work_labels;
+use super::{
+    apply_work_label_namespace, provider_session_issue_title, resolve_work_labels,
+    validate_work_label_namespace, GITHUB_LABEL_NAME_MAX_CHARS,
+};
 use crate::goals::trigger_parse::PackageRef;
 
 fn pkg(owner: &str, repo: &str, git_ref: &str, path: &str) -> PackageRef {
@@ -20,6 +23,14 @@ fn pkg(owner: &str, repo: &str, git_ref: &str, path: &str) -> PackageRef {
 
 fn tok() -> SecretString {
     SecretString::from("t".to_string())
+}
+
+#[test]
+fn provider_session_title_expands_the_namespace_for_humans() {
+    assert_eq!(
+        provider_session_issue_title("chronoai-fkst-cloud", "Default FKST Substrate"),
+        "🔔[CHRONOAI FKST CLOUD SESSION] Default FKST Substrate"
+    );
 }
 
 /// Mount a `fkst.toml` body at `contents/{path}/fkst.toml`.
@@ -132,4 +143,80 @@ async fn missing_or_sectionless_manifests_contribute_nothing() {
     .await;
 
     assert!(labels.is_empty());
+}
+
+#[test]
+fn provider_namespace_maps_multiple_labels_deterministically() {
+    let labels = apply_work_label_namespace(
+        &[
+            "fkst-security".to_string(),
+            "fkst-dev".to_string(),
+            "fkst-dev".to_string(),
+        ],
+        Some("chronoai-fkst"),
+    )
+    .expect("valid namespace");
+
+    assert_eq!(
+        labels.logical,
+        vec!["fkst-dev".to_string(), "fkst-security".to_string()]
+    );
+    assert_eq!(
+        labels.effective,
+        vec![
+            "fkst-dev-chronoai-fkst".to_string(),
+            "fkst-security-chronoai-fkst".to_string(),
+        ]
+    );
+    assert_eq!(
+        labels.map_json().as_deref(),
+        Some(
+            r#"{"fkst-dev":"fkst-dev-chronoai-fkst","fkst-security":"fkst-security-chronoai-fkst"}"#
+        )
+    );
+}
+
+#[test]
+fn absent_namespace_is_identity_and_omits_mapping_env() {
+    let labels = apply_work_label_namespace(&["fkst-dev".to_string()], None)
+        .expect("identity mapping is valid");
+    assert_eq!(labels.logical, labels.effective);
+    assert_eq!(labels.map_json(), None);
+}
+
+#[test]
+fn namespace_and_derived_label_validation_fail_closed() {
+    for invalid in [
+        "ChronoAI-fkst",
+        "chronoai_fkst",
+        "-chronoai",
+        "chronoai-",
+        "chronoai--fkst",
+        "provider namespace",
+    ] {
+        assert!(
+            validate_work_label_namespace(invalid).is_err(),
+            "{invalid} must be rejected"
+        );
+    }
+    assert!(validate_work_label_namespace("chronoai-fkst").is_ok());
+
+    let empty = apply_work_label_namespace(&[String::new()], Some("cloud"))
+        .expect_err("an empty logical label cannot become valid through suffixing");
+    assert!(empty.to_string().contains("must be non-empty"));
+
+    let logical = "x".repeat(GITHUB_LABEL_NAME_MAX_CHARS);
+    let error = apply_work_label_namespace(&[logical], Some("cloud"))
+        .expect_err("derived label exceeds GitHub's limit");
+    assert!(error.to_string().contains("at most 50"));
+}
+
+#[test]
+fn case_insensitive_effective_collisions_are_rejected() {
+    let error = apply_work_label_namespace(
+        &["FKST-DEV".to_string(), "fkst-dev".to_string()],
+        Some("cloud"),
+    )
+    .expect_err("GitHub label identity is case-insensitive");
+    assert!(error.to_string().contains("collide"));
 }

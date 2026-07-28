@@ -9,6 +9,9 @@
 //! - [`full_config_hash`] — the FULL superset (the above + session name + both
 //!   opt-ins). The basis of the config-immutability check: any edited field flips it,
 //!   even an opt-in that does not respawn the pod.
+//! - [`runtime_config_hash`] — the pod hash after deployment-owned runtime inputs
+//!   (currently the optional work-label namespace) are applied. These inputs must
+//!   replace stale runtimes without changing the trigger's immutable authored hash.
 //!
 //! Both project each `PackageRef` through a borrow-only canonical struct (so
 //! `PackageRef` need not be `Serialize`); the field set + order IS the canonical form
@@ -122,6 +125,31 @@ pub fn config_hash(
         target_branch,
     };
     hex_digest(&canonical, "config-hash")
+}
+
+/// Derive the live-runtime drift hash from the trigger-authored [`config_hash`] and
+/// the optional provider work-label namespace.
+///
+/// An unnamespaced deployment returns the historical hash byte-for-byte. Enabling or
+/// changing a namespace moves only this runtime hash, causing normal pod replacement
+/// while leaving [`full_config_hash`] unchanged so the control plane does not mistake
+/// an operator configuration change for an edit to the immutable trigger issue.
+pub fn runtime_config_hash(config_hash: &str, work_label_namespace: Option<&str>) -> String {
+    let Some(work_label_namespace) = work_label_namespace else {
+        return config_hash.to_string();
+    };
+    #[derive(Serialize)]
+    struct Canonical<'a> {
+        config_hash: &'a str,
+        work_label_namespace: &'a str,
+    }
+    hex_digest(
+        &Canonical {
+            config_hash,
+            work_label_namespace,
+        },
+        "runtime-config-hash",
+    )
 }
 
 /// A stable content hash over a registration's FULL launch config — the superset of

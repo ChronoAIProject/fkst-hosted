@@ -34,7 +34,7 @@ use crate::reconcile::registry::parse_registration;
 use crate::reconcile::trigger_authz::{
     check_trigger_creator, TriggerAuthzCache, TriggerGateDecision,
 };
-use crate::reconcile::work_labels::resolve_work_label_sets;
+use crate::reconcile::work_labels::{apply_work_label_namespace, resolve_work_label_sets};
 
 use super::{
     SUBSTRATE_ANNOUNCED_LABEL, SUBSTRATE_CONFIG_REJECTED_LABEL, SUBSTRATE_INVALID_LABEL,
@@ -328,8 +328,43 @@ pub async fn reconcile_repo(
     // immutable per session config), bounding the manifest fetches to one resolve per
     // distinct session config. Walks each session's EFFECTIVE package set (I7), so a
     // manifest's packages' `[github].work_labels` are auto-discovered too.
-    let work_labels_by_session =
+    let logical_work_labels_by_session =
         resolve_work_label_sets(&ctx.http, &ctx.config.github_api_base_url, &token, &regs).await;
+
+    // Apply the deployment/provider namespace after package discovery. Trigger bodies
+    // and package manifests stay provider-neutral; every GitHub-facing operation below
+    // uses only this effective set. Invalid/overlong labels and case-insensitive output
+    // collisions fail closed through the ordinary invalid-trigger latch.
+    let mut effective_work_labels_by_session: HashMap<String, Vec<String>> = HashMap::new();
+    let mut work_label_demotions = Vec::new();
+    for reg in &regs {
+        let logical = logical_work_labels_by_session
+            .get(&reg.session_id)
+            .cloned()
+            .unwrap_or_default();
+        match apply_work_label_namespace(&logical, cfg.work_label_namespace.as_deref()) {
+            Ok(labels) => {
+                effective_work_labels_by_session.insert(reg.session_id.clone(), labels.effective);
+            }
+            Err(error) => work_label_demotions.push((
+                reg.trigger_issue,
+                format!("invalid effective work labels: {error}"),
+            )),
+        }
+    }
+    if !work_label_demotions.is_empty() {
+        let losers: HashSet<i64> = work_label_demotions
+            .iter()
+            .map(|(issue, _)| *issue)
+            .collect();
+        tracing::info!(
+            owner_repo = %owner_repo,
+            demoted = work_label_demotions.len(),
+            "reconcile: effective work-label validation failed; demoting trigger(s) to invalid"
+        );
+        regs.retain(|reg| !losers.contains(&reg.trigger_issue));
+        invalid.extend(work_label_demotions);
+    }
 
     // I4 label-less reject (epic #594). A session whose EFFECTIVE work-label set is empty
     // (no explicit `### Work Label` AND no package-declared `[github].work_labels`) can
@@ -340,7 +375,7 @@ pub async fn reconcile_repo(
     // queue, so it never collides anyway; ordering it first keeps its reason precise). A
     // spawned session therefore always carries ≥1 work label, keeping the in-pod guard
     // satisfied.
-    let missing = detect_missing_work_labels(&regs, &work_labels_by_session);
+    let missing = detect_missing_work_labels(&regs, &logical_work_labels_by_session);
     if !missing.is_empty() {
         let losers: HashSet<i64> = missing.iter().map(|(issue, _)| *issue).collect();
         tracing::info!(
@@ -361,7 +396,7 @@ pub async fn reconcile_repo(
     // as a parse failure (it un-flags itself the moment the collision resolves and it
     // becomes a plain valid registration again). Removing losers from `regs` before the
     // pending gate + planner is what actually blocks the competing pod from spawning.
-    let collisions = detect_work_label_collisions(&regs, &work_labels_by_session);
+    let collisions = detect_work_label_collisions(&regs, &effective_work_labels_by_session);
     if !collisions.is_empty() {
         let losers: HashSet<i64> = collisions.iter().map(|(issue, _)| *issue).collect();
         tracing::info!(
@@ -440,7 +475,7 @@ pub async fn reconcile_repo(
         &token,
         repo,
         &regs,
-        &work_labels_by_session,
+        &effective_work_labels_by_session,
         &ctx.config.access,
         cfg.github_bot_login.as_deref(),
     )
@@ -465,7 +500,7 @@ pub async fn reconcile_repo(
     );
     let mut pending: HashMap<String, bool> = HashMap::new();
     for reg in &regs {
-        let labels = work_labels_by_session
+        let labels = effective_work_labels_by_session
             .get(&reg.session_id)
             .cloned()
             .unwrap_or_default();
@@ -478,7 +513,7 @@ pub async fn reconcile_repo(
     // 5. Plan (pure), then execute each action best-effort.
     let mut actions = plan_repo(
         &regs,
-        &work_labels_by_session,
+        &logical_work_labels_by_session,
         &invalid,
         &live,
         &pending,

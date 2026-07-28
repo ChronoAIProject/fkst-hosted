@@ -282,7 +282,9 @@ fn session_pod_spec_is_built_from_the_registration() {
         Some("fkst-bot".to_string()),
         &crate::access_policy::AccessPolicy::default(),
         None,
-    );
+        None,
+    )
+    .expect("valid labels");
 
     assert_eq!(spec.session_id, "sess-abc");
     assert_eq!(spec.installation_id, 42);
@@ -325,7 +327,9 @@ fn package_roots_come_from_the_effective_set_not_just_explicit_packages() {
         None,
         &crate::access_policy::AccessPolicy::default(),
         None,
-    );
+        None,
+    )
+    .expect("valid labels");
     assert_eq!(
         spec.package_roots,
         vec![
@@ -352,7 +356,9 @@ fn spec_work_label_is_the_comma_joined_detected_set() {
         Some("fkst-bot".to_string()),
         &crate::access_policy::AccessPolicy::default(),
         None,
-    );
+        None,
+    )
+    .expect("valid labels");
     assert_eq!(discovered_only.work_label, "pkg-a,pkg-b");
 
     // Explicit + discovered union, comma-joined in the given order, deduped.
@@ -367,8 +373,41 @@ fn spec_work_label_is_the_comma_joined_detected_set() {
         Some("fkst-bot".to_string()),
         &crate::access_policy::AccessPolicy::default(),
         None,
-    );
+        None,
+    )
+    .expect("valid labels");
     assert_eq!(union.work_label, "fkst-run,pkg-a");
+}
+
+#[test]
+fn namespaced_spec_uses_only_effective_labels_and_carries_the_mapping() {
+    let reg = registration();
+    let spec = session_pod_spec_from(
+        &reg,
+        &["fkst-dev".to_string(), "fkst-security".to_string()],
+        &branch_topology(),
+        Some("fkst-bot".to_string()),
+        &crate::access_policy::AccessPolicy::default(),
+        None,
+        Some("chronoai-fkst"),
+    )
+    .expect("valid namespaced labels");
+
+    assert_eq!(
+        spec.work_label,
+        "fkst-dev-chronoai-fkst,fkst-security-chronoai-fkst"
+    );
+    assert_eq!(
+        spec.work_label_map_json.as_deref(),
+        Some(
+            r#"{"fkst-dev":"fkst-dev-chronoai-fkst","fkst-security":"fkst-security-chronoai-fkst"}"#
+        )
+    );
+    assert_eq!(
+        spec.config_hash,
+        runtime_config_hash(&reg.config_hash, Some("chronoai-fkst"))
+    );
+    assert!(!spec.work_label.split(',').any(|label| label == "fkst-dev"));
 }
 
 #[test]
@@ -380,7 +419,9 @@ fn missing_bot_login_defaults_to_empty() {
         None,
         &crate::access_policy::AccessPolicy::default(),
         None,
-    );
+        None,
+    )
+    .expect("valid labels");
     assert_eq!(spec.bot_login, "", "an unset bot login renders as empty");
 }
 

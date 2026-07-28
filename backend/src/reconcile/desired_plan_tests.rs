@@ -8,7 +8,7 @@
 //! and each assertion stays about the single lifecycle action under test.
 
 use super::desired_test_fixtures::*;
-use super::{plan_repo, KillReason, PodLiveness, ReconcileAction};
+use super::{plan_repo, runtime_config_hash, KillReason, PodLiveness, ReconcileAction};
 
 // ---- matrix rows -----------------------------------------------------------
 
@@ -244,6 +244,66 @@ fn config_mismatch_kills_config_changed_regardless_of_pending() {
             "drift with pending={is_pending} must Kill(ConfigChanged)"
         );
     }
+}
+
+#[test]
+fn provider_namespace_change_replaces_the_runtime_without_editing_trigger_config() {
+    let regs = vec![reg("s1", 1, "authored-hash")];
+    let mut namespaced = cfg(300, 120);
+    namespaced.work_label_namespace = Some("chronoai-fkst".to_string());
+
+    let old_runtime = vec![pod(
+        "s1",
+        1,
+        PodLiveness::Live,
+        ago(10),
+        Some(ago(1)),
+        Some("authored-hash"),
+    )];
+    let actions = plan_repo(
+        &regs,
+        &work_labels(&[]),
+        &[],
+        &old_runtime,
+        &pending(&[("s1", false)]),
+        &latched(&[]),
+        &latched(&[1]),
+        &config_hashes(&[]),
+        &latched(&[]),
+        now(),
+        &namespaced,
+    );
+    assert_eq!(
+        actions,
+        vec![ReconcileAction::Kill {
+            session_id: "s1".to_string(),
+            reason: KillReason::ConfigChanged,
+        }]
+    );
+
+    let expected = runtime_config_hash("authored-hash", Some("chronoai-fkst"));
+    let current_runtime = vec![pod(
+        "s1",
+        1,
+        PodLiveness::Live,
+        ago(10),
+        Some(ago(1)),
+        Some(&expected),
+    )];
+    let current_actions = plan_repo(
+        &regs,
+        &work_labels(&[]),
+        &[],
+        &current_runtime,
+        &pending(&[("s1", false)]),
+        &latched(&[]),
+        &latched(&[1]),
+        &config_hashes(&[]),
+        &latched(&[]),
+        now(),
+        &namespaced,
+    );
+    assert!(current_actions.is_empty());
 }
 
 #[test]

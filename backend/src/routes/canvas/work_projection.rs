@@ -12,7 +12,7 @@ use secrecy::SecretString;
 use crate::error::AppError;
 use crate::reconcile::desired::SessionRegistration;
 use crate::reconcile::effective_packages::resolve_effective_packages;
-use crate::reconcile::work_labels::resolve_work_label_sets;
+use crate::reconcile::work_labels::{apply_work_label_namespace, resolve_work_label_sets};
 use crate::routes::dashboard::{DashboardGithub, IssueWithMeta};
 
 /// The work projection for a repo's sessions: each session's issues plus the
@@ -35,6 +35,7 @@ pub(super) async fn work_issues_by_session(
     owner: &str,
     repo: &str,
     regs: &mut [SessionRegistration],
+    work_label_namespace: Option<&str>,
 ) -> Result<WorkProjection, AppError> {
     let effective = resolve_effective_packages(&gh.client, &gh.api_base, token, regs).await;
     let mut resolved_regs = Vec::with_capacity(regs.len());
@@ -58,8 +59,28 @@ pub(super) async fn work_issues_by_session(
         resolved_regs.push(reg.clone());
     }
 
-    let labels_by_session =
+    let logical_labels_by_session =
         resolve_work_label_sets(&gh.client, &gh.api_base, token, &resolved_regs).await;
+    let mut labels_by_session = HashMap::new();
+    let mut effective_regs = Vec::with_capacity(resolved_regs.len());
+    for reg in resolved_regs {
+        let logical = logical_labels_by_session
+            .get(&reg.session_id)
+            .cloned()
+            .unwrap_or_default();
+        match apply_work_label_namespace(&logical, work_label_namespace) {
+            Ok(labels) => {
+                labels_by_session.insert(reg.session_id.clone(), labels.effective);
+                effective_regs.push(reg);
+            }
+            Err(error) => tracing::debug!(
+                session_id = %reg.session_id,
+                trigger_issue = reg.trigger_issue,
+                error = %error,
+                "canvas work projection: effective work-label validation failed"
+            ),
+        }
+    }
 
     // Several sessions can share package configuration, and one issue can carry more
     // than one effective label. Fetch each label once, then deduplicate per session.
@@ -75,7 +96,7 @@ pub(super) async fn work_issues_by_session(
     }
 
     let mut projected = HashMap::new();
-    for reg in resolved_regs {
+    for reg in effective_regs {
         let mut seen = HashSet::new();
         let mut issues = Vec::new();
         if let Some(labels) = labels_by_session.get(&reg.session_id) {
