@@ -820,6 +820,7 @@ mod tests {
             log_bundle_cache: Default::default(),
             disposable_environments: Default::default(),
             self_router: crate::state::empty_self_router(),
+            chat: None,
         };
         (state, rx)
     }
@@ -905,6 +906,7 @@ mod tests {
             log_bundle_cache: Default::default(),
             disposable_environments: Default::default(),
             self_router: crate::state::empty_self_router(),
+            chat: None,
         };
         let handled = handle_installation(&state, body).await.expect("dispatch");
         assert_eq!(handled.as_str(), "cache_busted");

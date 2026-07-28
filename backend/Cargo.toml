@@ -20,6 +20,9 @@ utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-axum = "0.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net", "process", "time", "sync", "io-util", "io-std", "fs"] }
 tokio-util = "0.7"
+# Wraps the chat orchestrator's mpsc receiver as a `Stream` for axum's SSE
+# response (`ReceiverStream`).
+tokio-stream = "0.1"
 # `util` carries `ServiceExt::oneshot`, which the chat tool layer uses to drive
 # this process's own router in-process (previously a dev-only need).
 tower = { version = "0.5", features = ["util"] }

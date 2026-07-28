@@ -75,6 +75,10 @@ pub struct AppState {
     /// router is built FROM the state, so the dependency can only be closed after
     /// the fact.
     pub self_router: SelfRouter,
+    /// The chat concierge's runtime (model client, tool registry, admission limits).
+    /// `None` when `FKST_CHAT_ENABLED` is not true — `POST /api/v1/chat` is then not
+    /// mounted at all, and is likewise absent from `/openapi.json`.
+    pub chat: Option<Arc<crate::chat::ChatRuntime>>,
 }
 
 /// Deferred handle to the assembled router (see [`AppState::self_router`]).

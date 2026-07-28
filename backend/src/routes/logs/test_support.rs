@@ -97,6 +97,7 @@ pub(crate) fn state(
         log_bundle_cache: Default::default(),
         disposable_environments: Default::default(),
         self_router: empty_self_router(),
+        chat: None,
     }
 }
 
