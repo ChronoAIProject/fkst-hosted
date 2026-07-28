@@ -11,6 +11,9 @@
  * purpose: an adapter that has to reshape events is an adapter that can lose one.
  */
 
+import { streamChat } from '@/lib/api/chat';
+import type { ApiFetch } from '@/lib/api/canvas';
+
 /** One message on the wire. Deliberately narrower than the UI's message type:
  *  only user/assistant CONTENT is ever sent — local notices, pending
  *  placeholders, and tool events are display state, not conversation. */
@@ -38,7 +41,9 @@ export interface ChatTransportHandlers {
   onToolResult(ev: { id: string; name: string; status: number; truncated: boolean }): void;
   onActionProposal(proposal: unknown): void;
   onDone(ev: { finishReason: string; sessionRefs: SessionRef[] }): void;
-  onError(err: { code: string; message: string }): void;
+  /** `retryAfterSeconds` rides along when the server advertised `Retry-After`,
+   *  because "try again in 5s" is actionable where "try again" is not. */
+  onError(err: { code: string; message: string; retryAfterSeconds?: number }): void;
 }
 
 /** Runs one conversation turn. Implementations must honor `signal` (the user can
@@ -47,6 +52,37 @@ export interface ChatTransportHandlers {
  *  completion. */
 export interface ChatTransport {
   send(history: ChatTurnMessage[], handlers: ChatTransportHandlers, signal: AbortSignal): void;
+}
+
+/** The real transport: `POST /api/v1/chat` as a streamed SSE response.
+ *
+ *  A thin adapter by design — the handler names and shapes already line up with the
+ *  wire protocol, so this maps them one-to-one and adds no interpretation of its
+ *  own. `getBroaderToken` is read PER TURN, not captured, so connecting or
+ *  disconnecting broader visibility takes effect on the next question rather than
+ *  requiring a remount. */
+export function sseChatTransport(
+  apiFetch: ApiFetch,
+  getBroaderToken?: () => string | null
+): ChatTransport {
+  return {
+    send(history, handlers, signal) {
+      void streamChat(
+        apiFetch,
+        { messages: history.map(({ role, content }) => ({ role, content })) },
+        {
+          onDelta: handlers.onDelta,
+          onToolCall: ({ id, name }) => handlers.onToolCall({ id, name }),
+          onToolResult: handlers.onToolResult,
+          onActionProposal: handlers.onActionProposal,
+          onDone: handlers.onDone,
+          onError: handlers.onError,
+        },
+        signal,
+        getBroaderToken?.()
+      );
+    },
+  };
 }
 
 /** Delay between mock chunks — slow enough to see streaming, fast enough that a

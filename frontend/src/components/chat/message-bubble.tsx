@@ -1,54 +1,9 @@
-import { Chip } from '@/components/ui/chip';
 import { CopyButton } from '@/components/ui/copy-button';
 import { MarkdownPreview } from '@/components/ui/markdown-preview';
 import { useContent } from '@/i18n';
-import type { ChatMessage, ChatToolEvent } from './chat-context';
-
-/** How a tool event reads: state text plus a tone. The TEXT always carries the
- *  meaning — a chip's colour is reinforcement, never the signal. */
-function toolState(event: ChatToolEvent, s: ReturnType<typeof useContent>['chat']) {
-  if (event.status == null) return { text: s.toolRunning, tone: 'neutral' as const, running: true };
-  if (event.status >= 200 && event.status < 300) {
-    return { text: `${s.toolOk} ${event.status}`, tone: 'green' as const, running: false };
-  }
-  if (event.status === 401 || event.status === 403 || event.status === 404) {
-    // A denial is an answer about the user's access, not a fault — worth
-    // distinguishing from a genuine failure.
-    return { text: `${s.toolDenied} ${event.status}`, tone: 'red' as const, running: false };
-  }
-  return { text: `${s.toolError} ${event.status}`, tone: 'red' as const, running: false };
-}
-
-/** The compact tool-activity row. A fuller visualization arrives with the real
- *  transport; this already shows the machine working, which is the trust beat. */
-function ToolEvents({ events }: { events: ChatToolEvent[] }) {
-  const s = useContent().chat;
-  if (events.length === 0) return null;
-  return (
-    <div data-testid="chat-tool-events" className="flex flex-wrap items-center gap-1.5">
-      {events.map((event) => {
-        const state = toolState(event, s);
-        return (
-          <span key={event.id} className="inline-flex items-center gap-1">
-            <span aria-hidden="true" className="font-mono text-[10px] text-ghost">
-              ▸
-            </span>
-            <span className="font-mono text-[10.5px] text-faint">{event.name}</span>
-            <Chip tone={state.tone}>
-              {state.running && (
-                <span aria-hidden="true" className="anim-dot-blink mr-1 inline-block">
-                  ·
-                </span>
-              )}
-              {state.text}
-              {event.truncated ? ` ${s.toolTruncated}` : ''}
-            </Chip>
-          </span>
-        );
-      })}
-    </div>
-  );
-}
+import type { ChatMessage } from './chat-context';
+import { RichCards } from './rich-cards';
+import { ToolActivity } from './tool-activity';
 
 /** One transcript entry. Three shapes, because they answer three different
  *  questions: what the assistant said, what the user asked, and what the client
@@ -103,11 +58,15 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
         {message.content !== '' && <CopyButton value={message.content} label={s.copyAnswer} />}
       </div>
 
-      <ToolEvents events={message.toolEvents ?? []} />
+      <ToolActivity events={message.toolEvents ?? []} />
 
       {message.content !== '' && (
         <MarkdownPreview markdown={message.content} ariaLabel={s.answerAria} />
       )}
+
+      {/* Deterministic deep-link cards, derived only from the turn's structured
+          tool results — never from the model's prose. */}
+      <RichCards refs={message.sessionRefs ?? []} />
 
       {/* The pending caret IS the typing indicator — no separate component, so
           there is never a moment showing both or neither. */}

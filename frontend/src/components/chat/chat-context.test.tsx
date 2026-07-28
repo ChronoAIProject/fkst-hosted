@@ -108,19 +108,42 @@ describe('ChatProvider', () => {
     expect(chat().messages[1]!.sessionRefs).toEqual(refs);
   });
 
-  it('turns a transport error into a warning note and re-enables the composer', () => {
+  it('turns a transport error into a localized warning note', () => {
+    // The user-facing string comes from the stable CODE, not the server's prose:
+    // the prose is for the log, and a user-facing string must be translatable.
     const script = scriptedTransport();
     renderChat(<Probe />, { transport: script.transport });
     act(() => chat().sendMessage('hi'));
-    act(() => script.handlers().onError({ code: 'llm_error', message: 'provider unreachable' }));
+    act(() => script.handlers().onError({ code: 'llm_error', message: 'raw provider text' }));
 
     const last = chat().messages[chat().messages.length - 1]!;
     expect(last.role).toBe('system-note');
     expect(last.tone).toBe('warn');
-    expect(last.content).toBe('provider unreachable');
+    expect(last.content).toBe('The language model could not be reached. Please try again.');
+    expect(last.content).not.toContain('raw provider text');
     // The transcript survives; only the turn ended.
     expect(chat().messages.some((m) => m.role === 'user')).toBe(true);
     expect(chat().streaming).toBe(false);
+  });
+
+  it('names the retry delay when the server advertised one', () => {
+    // "try again in 5s" is actionable where "try again" is not.
+    const script = scriptedTransport();
+    renderChat(<Probe />, { transport: script.transport });
+    act(() => chat().sendMessage('hi'));
+    act(() =>
+      script.handlers().onError({ code: 'rate_limited', message: 'busy', retryAfterSeconds: 5 })
+    );
+    expect(chat().messages[chat().messages.length - 1]!.content).toContain('5s');
+  });
+
+  it('falls back to the server message for an unrecognized code', () => {
+    // A newer backend code must still say something useful rather than nothing.
+    const script = scriptedTransport();
+    renderChat(<Probe />, { transport: script.transport });
+    act(() => chat().sendMessage('hi'));
+    act(() => script.handlers().onError({ code: 'brand_new_code', message: 'a new failure' }));
+    expect(chat().messages[chat().messages.length - 1]!.content).toBe('a new failure');
   });
 
   it('aborts the transport on stopStreaming', () => {

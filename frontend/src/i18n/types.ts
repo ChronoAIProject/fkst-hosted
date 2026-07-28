@@ -685,6 +685,13 @@ export interface SiteContent {
     toolDenied: string;
     toolError: string;
     toolTruncated: string;
+    /** Human labels keyed by backend tool name; an unlisted name renders raw. */
+    toolNames: Record<string, string>;
+    /** Session rich-cards. */
+    triggerPrefix: string;
+    sessionChip: string;
+    openInDashboard: string;
+    openTrigger: string;
     placeholder: string;
     inputAria: string;
     send: string;
@@ -695,6 +702,9 @@ export interface SiteContent {
     charCount: string;
     signInTitle: string;
     signInBody: string;
+    /** Error copy keyed by the stream's stable error code, plus an `unknown`
+     *  fallback and a `rate_limited_after` variant carrying `{seconds}`. */
+    errors: Record<string, string>;
   };
   tour: {
     /** Accessible name for the topbar `?` launcher. */

@@ -74,7 +74,8 @@ describe('MessageList', () => {
     act(() => chat().sendMessage('why did it fail?'));
 
     act(() => script.handlers().onToolCall({ id: 't1', name: 'tail_log_file' }));
-    expect(screen.getByText('tail_log_file')).toBeInTheDocument();
+    // Humanized from the i18n map; the raw wire name is the fallback.
+    expect(screen.getByText('log tail')).toBeInTheDocument();
     expect(screen.getByText(/RUNNING/)).toBeInTheDocument();
 
     act(() =>
@@ -106,7 +107,8 @@ describe('MessageList', () => {
     act(() => script.handlers().onError({ code: 'llm_error', message: 'provider unreachable' }));
 
     const note = screen.getByTestId('chat-system-note');
-    expect(note).toHaveTextContent('provider unreachable');
+    // Localized from the code, not the server's prose.
+    expect(note).toHaveTextContent('The language model could not be reached.');
     // Warning tone is --warn, never the brand accent.
     expect(note.className).toContain('text-warn');
   });

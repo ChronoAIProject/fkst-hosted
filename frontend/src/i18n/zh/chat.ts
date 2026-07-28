@@ -34,6 +34,23 @@ export const chat = {
   toolDenied: '无权限',
   toolError: '错误',
   toolTruncated: '已截断',
+  /** 后端工具名的中文标签；未列出的名称按原样显示。 */
+  toolNames: {
+    get_overview: '账户与仓库',
+    list_repo_sessions: '仓库会话',
+    get_session_outcomes: '会话产出',
+    observe_session: '实时引擎状态',
+    list_log_runs: '日志运行',
+    get_log_manifest: '日志文件',
+    tail_log_file: '日志尾部',
+    list_environment_profiles: '环境',
+    search_manual: '手册',
+  } as Record<string, string>,
+
+  triggerPrefix: 'trigger #',
+  sessionChip: '会话',
+  openInDashboard: '在仪表盘中打开',
+  openTrigger: 'TRIGGER',
 
   placeholder: '询问某个会话、日志，或某项功能的原理……',
   inputAria: '向助理发送消息',
@@ -45,4 +62,18 @@ export const chat = {
 
   signInTitle: '登录后使用智能助理',
   signInBody: '助理使用你自己的 GitHub 权限作答，因此需要先登录。',
+
+  errors: {
+    deadline_exceeded: '这个问题回答超时了，请换一个更聚焦的问题。',
+    tool_budget_exhausted: '这个问题需要查询太多内容，请一次只问一件事。',
+    rate_limited: '一次只能问一个问题，请稍后再试。',
+    rate_limited_after: '一次只能问一个问题，请在 {seconds} 秒后再试。',
+    llm_error: '无法连接语言模型，请重试。',
+    protocol: '无法读取回答，请重试。',
+    unavailable: '当前部署暂时无法使用智能助理。',
+    unauthorized: '登录已过期，请重新登录后继续提问。',
+    network: '回答尚未结束，连接已中断。',
+    request: '请求被拒绝。',
+    unknown: '回答时出现问题。',
+  } as Record<string, string>,
 } as const;
