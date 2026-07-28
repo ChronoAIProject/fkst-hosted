@@ -3,6 +3,9 @@ import { Link, NavLink, useLocation, useOutlet } from 'react-router-dom';
 import { FkstMark } from '../components/brand/fkst-mark';
 import { LanguageToggle } from '../components/layout/language-toggle';
 import { RouteTransition } from '../components/ui/motion';
+import { ChatLauncher } from '@/components/chat/chat-launcher';
+import { ChatPanel } from '@/components/chat/chat-panel';
+import { ChatProvider } from '@/components/chat/chat-context';
 import { EnvironmentsDrawer } from '@/components/environments/environments-drawer';
 import { TourOverlay } from '@/components/tour/tour-overlay';
 import { useTour } from '@/components/tour/tour-context';
@@ -25,9 +28,7 @@ export function nextCondensed(prev: boolean, y: number): boolean {
 // so the current page reads without relying on the hover-only underline.
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `hover-underline text-nav no-underline px-3 py-[7px] rounded-control transition-colors ${
-    isActive
-      ? 'text-fg bg-raise'
-      : 'text-faint hover:text-dim'
+    isActive ? 'text-fg bg-raise' : 'text-faint hover:text-dim'
   }`;
 
 /** Shared mono action styling for the inline topbar utility controls. */
@@ -116,275 +117,306 @@ export function Shell() {
   }, [location.pathname]);
 
   return (
-    <div className="h-[100dvh] bg-bg bg-bg-glow bg-fixed text-fg font-ui flex flex-col overflow-hidden">
-      <div className="max-w-shell w-full mx-auto px-6 max-[480px]:px-4 flex-1 min-h-0 flex flex-col">
-        {/* pinned topbar (the column itself never scrolls, so no sticky needed).
+    // The concierge provider wraps the whole shell so the launcher and the panel
+    // share one transcript and one open state. It is mounted on EVERY route, docs
+    // pages included: a first-time visitor lands there, and that is exactly who
+    // has questions.
+    <ChatProvider>
+      <div className="h-[100dvh] bg-bg bg-bg-glow bg-fixed text-fg font-ui flex flex-col overflow-hidden">
+        <div className="max-w-shell w-full mx-auto px-6 max-[480px]:px-4 flex-1 min-h-0 flex flex-col">
+          {/* pinned topbar (the column itself never scrolls, so no sticky needed).
             Refined glass bar: translucent --raise fill + backdrop-blur floats it
             over the app bloom, a soft shadow-1 separates it, and a gradient
             hairline (below) replaces the flat bottom border for a lit edge. */}
-        <div className="flex-none z-40 relative bg-glass backdrop-blur-glass shadow-1">
-          <header
-            className={`flex items-center gap-4 transition-[height] duration-200 motion-reduce:transition-none ${
-              condensed ? 'h-[48px]' : 'h-[62px]'
-            }`}
-          >
-            <Link
-              to="/"
-              className="text-fg no-underline inline-block flex-none"
-              aria-label={c.nav.homeAria}
+          <div className="flex-none z-40 relative bg-glass backdrop-blur-glass shadow-1">
+            <header
+              className={`flex items-center gap-4 transition-[height] duration-200 motion-reduce:transition-none ${
+                condensed ? 'h-[48px]' : 'h-[62px]'
+              }`}
             >
-              {/* v2 wordmark: plain fg letters (no gradient clip) — the mark's
+              <Link
+                to="/"
+                className="text-fg no-underline inline-block flex-none"
+                aria-label={c.nav.homeAria}
+              >
+                {/* v2 wordmark: plain fg letters (no gradient clip) — the mark's
                   own accent counter-dot is the only color carrier. */}
-              <FkstMark className="text-[19px]" />
-            </Link>
+                <FkstMark className="text-[19px]" />
+              </Link>
 
-            <nav className="flex gap-0.5">
-              <NavLink to="/" end className={navLinkClass}>
-                {c.nav.home}
-              </NavLink>
-              <NavLink to="/dashboard" className={navLinkClass}>
-                {c.nav.dashboard}
-              </NavLink>
-            </nav>
+              <nav className="flex gap-0.5">
+                <NavLink to="/" end className={navLinkClass}>
+                  {c.nav.home}
+                </NavLink>
+                <NavLink to="/dashboard" className={navLinkClass}>
+                  {c.nav.dashboard}
+                </NavLink>
+              </nav>
 
-            <div className="flex items-center gap-2 ml-auto">
-              {/* Environments manager entry — authenticated users only. At
+              <div className="flex items-center gap-2 ml-auto">
+                {/* Environments manager entry — authenticated users only. At
                   narrow widths the full English label moves into the overflow
                   menu so the primary nav and utility controls cannot collide. */}
-              {isAuthenticated && (
-                <button
-                  type="button"
-                  onClick={() => setEnvOpen(true)}
-                  data-tour="environments"
-                  className={`${inlineActionClass} flex-none max-[600px]:hidden`}
-                >
-                  {c.nav.environments}
-                </button>
-              )}
+                {isAuthenticated && (
+                  <button
+                    type="button"
+                    onClick={() => setEnvOpen(true)}
+                    data-tour="environments"
+                    className={`${inlineActionClass} flex-none max-[600px]:hidden`}
+                  >
+                    {c.nav.environments}
+                  </button>
+                )}
 
-              {/* Guided-tour launcher — re-opens the tour on demand, ignoring
+                {/* Guided-tour launcher — re-opens the tour on demand, ignoring
                   the per-login seen flag. Named by aria-label (glyph is
                   decorative). Kept from the previous chrome (the tour is a
                   product feature the v2 comp does not model). */}
-              <button
-                type="button"
-                onClick={startTour}
-                data-tour="help"
-                aria-label={c.tour.helpAria}
-                className="inline-flex items-center justify-center w-8 h-8 flex-none rounded-control text-faint hover:text-fg hover:bg-raise transition-colors cursor-pointer"
-              >
-                <span aria-hidden="true" className="text-[14px] leading-none font-semibold">
-                  ?
-                </span>
-              </button>
-
-              <a
-                href={REPO}
-                target="_blank"
-                rel="noreferrer"
-                className={`${inlineActionClass} max-[720px]:hidden`}
-              >
-                GitHub ↗
-              </a>
-
-              <LanguageToggle className="max-[600px]:hidden" />
-
-              {/* Hairline divider separating utilities from the auth action
-                  (v2 nav grammar). Decorative. */}
-              <span
-                aria-hidden="true"
-                className="w-px h-4 bg-line-2 flex-none max-[600px]:hidden"
-              />
-
-              {/* Inline auth action: Sign in wears the v2 outlined pill;
-                  Sign out stays a plain utility item. Both progressively hide
-                  below 600px but stay reachable through the overflow menu. */}
-              {isAuthenticated ? (
                 <button
                   type="button"
-                  onClick={signOut}
-                  className={`${inlineActionClass} max-[600px]:hidden`}
+                  onClick={startTour}
+                  data-tour="help"
+                  aria-label={c.tour.helpAria}
+                  className="inline-flex items-center justify-center w-8 h-8 flex-none rounded-control text-faint hover:text-fg hover:bg-raise transition-colors cursor-pointer"
                 >
-                  {c.auth.signOut}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={signIn}
-                  // Border is an fg tint (not --line-2, which computes 1.4:1 on
-                  // the bar — invisible): the outlined affordance must read at rest.
-                  className="font-mono text-[12px] text-dim hover:text-fg border border-[color-mix(in_oklab,var(--fg)_25%,transparent)] rounded-pill px-3.5 py-[6px] transition-[color,border-color,box-shadow] hover:shadow-glow-amber cursor-pointer flex-none max-[600px]:hidden"
-                >
-                  {c.auth.signIn}
-                </button>
-              )}
-
-              {/* Responsive overflow menu — shown once the first inline item
-                  (GitHub, ≤720px) starts collapsing. Below 600px it also owns
-                  Environments and the language segmented control, keeping all
-                  actions reachable without squeezing the primary navigation. */}
-              <div ref={menuRef} className="relative flex-none min-[721px]:hidden">
-                <button
-                  type="button"
-                  onClick={() => setMenuOpen((open) => !open)}
-                  aria-haspopup="menu"
-                  aria-expanded={menuOpen}
-                  aria-label={c.nav.menuAria}
-                  className="inline-flex items-center justify-center w-8 h-8 rounded-control text-faint hover:text-fg hover:bg-raise transition-colors cursor-pointer"
-                >
-                  {/* Decorative glyph; the control is named by aria-label. */}
-                  <span aria-hidden="true" className="text-[15px] leading-none">
-                    ☰
+                  <span aria-hidden="true" className="text-[14px] leading-none font-semibold">
+                    ?
                   </span>
                 </button>
 
-                {menuOpen && (
-                  <div className="anim-notice-in absolute right-0 top-[calc(100%+6px)] z-50 min-w-[168px] rounded-control border border-line bg-glass backdrop-blur-glass shadow-modal-seat flex flex-col p-1">
-                    <div role="menu" className="flex flex-col">
-                      {isAuthenticated && (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            setMenuOpen(false);
-                            setEnvOpen(true);
-                          }}
-                          className={`${menuItemClass} min-[601px]:hidden`}
-                        >
-                          {c.nav.environments}
-                        </button>
-                      )}
-                      {isAuthenticated ? (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            setMenuOpen(false);
-                            signOut();
-                          }}
-                          className={menuItemClass}
-                        >
-                          {c.auth.signOut}
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            setMenuOpen(false);
-                            signIn();
-                          }}
-                          className={menuItemClass}
-                        >
-                          {c.auth.signIn}
-                        </button>
-                      )}
-                      <a
-                        role="menuitem"
-                        href={REPO}
-                        target="_blank"
-                        rel="noreferrer"
-                        onClick={() => setMenuOpen(false)}
-                        className={menuItemClass}
-                      >
-                        GitHub ↗
-                      </a>
-                    </div>
-                    <div className="border-t border-line mt-1 pt-1 min-[601px]:hidden">
-                      <LanguageToggle className="w-full justify-center" />
-                    </div>
-                  </div>
+                <a
+                  href={REPO}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`${inlineActionClass} max-[720px]:hidden`}
+                >
+                  GitHub ↗
+                </a>
+
+                <LanguageToggle className="max-[600px]:hidden" />
+
+                {/* Hairline divider separating utilities from the auth action
+                  (v2 nav grammar). Decorative. */}
+                <span
+                  aria-hidden="true"
+                  className="w-px h-4 bg-line-2 flex-none max-[600px]:hidden"
+                />
+
+                {/* Inline auth action: Sign in wears the v2 outlined pill;
+                  Sign out stays a plain utility item. Both progressively hide
+                  below 600px but stay reachable through the overflow menu. */}
+                {isAuthenticated ? (
+                  <button
+                    type="button"
+                    onClick={signOut}
+                    className={`${inlineActionClass} max-[600px]:hidden`}
+                  >
+                    {c.auth.signOut}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={signIn}
+                    // Border is an fg tint (not --line-2, which computes 1.4:1 on
+                    // the bar — invisible): the outlined affordance must read at rest.
+                    className="font-mono text-[12px] text-dim hover:text-fg border border-[color-mix(in_oklab,var(--fg)_25%,transparent)] rounded-pill px-3.5 py-[6px] transition-[color,border-color,box-shadow] hover:shadow-glow-amber cursor-pointer flex-none max-[600px]:hidden"
+                  >
+                    {c.auth.signIn}
+                  </button>
                 )}
+
+                {/* Responsive overflow menu — shown once the first inline item
+                  (GitHub, ≤720px) starts collapsing. Below 600px it also owns
+                  Environments and the language segmented control, keeping all
+                  actions reachable without squeezing the primary navigation. */}
+                <div ref={menuRef} className="relative flex-none min-[721px]:hidden">
+                  <button
+                    type="button"
+                    onClick={() => setMenuOpen((open) => !open)}
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpen}
+                    aria-label={c.nav.menuAria}
+                    className="inline-flex items-center justify-center w-8 h-8 rounded-control text-faint hover:text-fg hover:bg-raise transition-colors cursor-pointer"
+                  >
+                    {/* Decorative glyph; the control is named by aria-label. */}
+                    <span aria-hidden="true" className="text-[15px] leading-none">
+                      ☰
+                    </span>
+                  </button>
+
+                  {menuOpen && (
+                    <div className="anim-notice-in absolute right-0 top-[calc(100%+6px)] z-50 min-w-[168px] rounded-control border border-line bg-glass backdrop-blur-glass shadow-modal-seat flex flex-col p-1">
+                      <div role="menu" className="flex flex-col">
+                        {isAuthenticated && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setMenuOpen(false);
+                              setEnvOpen(true);
+                            }}
+                            className={`${menuItemClass} min-[601px]:hidden`}
+                          >
+                            {c.nav.environments}
+                          </button>
+                        )}
+                        {isAuthenticated ? (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setMenuOpen(false);
+                              signOut();
+                            }}
+                            className={menuItemClass}
+                          >
+                            {c.auth.signOut}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setMenuOpen(false);
+                              signIn();
+                            }}
+                            className={menuItemClass}
+                          >
+                            {c.auth.signIn}
+                          </button>
+                        )}
+                        <a
+                          role="menuitem"
+                          href={REPO}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={() => setMenuOpen(false)}
+                          className={menuItemClass}
+                        >
+                          GitHub ↗
+                        </a>
+                      </div>
+                      <div className="border-t border-line mt-1 pt-1 min-[601px]:hidden">
+                        <LanguageToggle className="w-full justify-center" />
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          </header>
-          {/* Gradient hairline bottom edge — a top-lit 1px sweep in place of the
+            </header>
+            {/* Gradient hairline bottom edge — a top-lit 1px sweep in place of the
               flat border, reading like light catching the bar's lower lip. Pure
               paint, no layout, ignores pointer events. */}
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-grad-hairline"
-          />
-        </div>
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-grad-hairline"
+            />
+          </div>
 
-        {/* The SOLE scroll container: topbar stays pinned above; both the routed
+          {/* The SOLE scroll container: topbar stays pinned above; both the routed
             content and the footer scroll together inside here (the footer keeps
             its end-of-document position). */}
-        <main ref={mainRef} className="flex-1 min-h-0 overflow-y-auto">
-          {/* Keyed on the pathname so a route change crossfades on the shared
+          <main ref={mainRef} className="flex-1 min-h-0 overflow-y-auto">
+            {/* Keyed on the pathname so a route change crossfades on the shared
               curve; collapses to an instant swap under reduced motion. On the
               app route the transition is h-full (main is a definite-height flex
               item, so h-full resolves and the dashboard fills it); on doc routes
               it is auto-height so its content overflows and <main> scrolls. */}
-          <RouteTransition
-            k={location.pathname}
-            className={isFullHeight ? 'h-full' : ''}
-          >
-            <div className={isApp ? 'h-full pb-3' : isLanding ? 'h-full' : 'py-10 max-[480px]:py-8'}>
-              {outlet}
-            </div>
-          </RouteTransition>
+            <RouteTransition k={location.pathname} className={isFullHeight ? 'h-full' : ''}>
+              <div
+                className={isApp ? 'h-full pb-3' : isLanding ? 'h-full' : 'py-10 max-[480px]:py-8'}
+              >
+                {outlet}
+              </div>
+            </RouteTransition>
 
-          {/* Marketing footer — only on scrolling doc routes (it scrolls in at
+            {/* Marketing footer — only on scrolling doc routes (it scrolls in at
               the end of content). Full-height routes (dashboard + landing) use
               the pinned bar below instead. v2 grammar: wordmark · GitHub ·
               Operator manual, dot-separated and centered. */}
-          {!isFullHeight && (
-            <footer className="border-t border-line py-7 flex items-center justify-center gap-x-5 gap-y-2 flex-wrap font-mono text-[10.5px] text-ghost">
-              <span className="flex items-center gap-2">
-                <FkstMark className="text-[13px] text-dim" />
-                <span>{c.footer.tagline}</span>
-              </span>
-              <span aria-hidden="true">·</span>
-              <a href={REPO} target="_blank" rel="noreferrer" className="text-faint hover:text-fg no-underline">
-                {c.footer.github}
-              </a>
-              <span aria-hidden="true">·</span>
-              <a href={MANUAL_URL} target="_blank" rel="noreferrer" className="text-faint hover:text-fg no-underline">
-                {c.footer.manual}
-              </a>
-            </footer>
-          )}
-        </main>
+            {!isFullHeight && (
+              <footer className="border-t border-line py-7 flex items-center justify-center gap-x-5 gap-y-2 flex-wrap font-mono text-[10.5px] text-ghost">
+                <span className="flex items-center gap-2">
+                  <FkstMark className="text-[13px] text-dim" />
+                  <span>{c.footer.tagline}</span>
+                </span>
+                <span aria-hidden="true">·</span>
+                <a
+                  href={REPO}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-faint hover:text-fg no-underline"
+                >
+                  {c.footer.github}
+                </a>
+                <span aria-hidden="true">·</span>
+                <a
+                  href={MANUAL_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-faint hover:text-fg no-underline"
+                >
+                  {c.footer.manual}
+                </a>
+              </footer>
+            )}
+          </main>
 
-        {/* Slim pinned footer — full-height routes (dashboard + landing). Sits
+          {/* Slim pinned footer — full-height routes (dashboard + landing). Sits
             as a flex-none row AFTER <main> so topbar + main(flex-1) + this bar
             sum to the column height: content keeps its internal scroll (or, on
             the landing, fits exactly), this bar stays pinned at the viewport
             bottom, and the window never scrolls. */}
-        {isFullHeight && (
-          <footer
-            className={`flex-none relative border-t border-line h-[44px] flex items-center justify-center gap-x-5 gap-y-1 flex-wrap px-1 font-mono text-[10.5px] text-ghost ${
-              // Short-viewport tier (comp): the landing gives its footer row back
-              // to the hero; the dashboard keeps its bar at every height.
-              isLanding ? '[@media(max-height:760px)]:hidden' : ''
-            }`}
-          >
-            <span className="flex items-center gap-2">
-              <FkstMark className="text-[12px] text-dim" />
-              <span>{c.footer.tagline}</span>
-            </span>
-            <span aria-hidden="true">·</span>
-            <a href={REPO} target="_blank" rel="noreferrer" className="text-faint hover:text-fg no-underline">
-              {c.footer.github}
-            </a>
-            <span aria-hidden="true">·</span>
-            <a href={MANUAL_URL} target="_blank" rel="noreferrer" className="text-faint hover:text-fg no-underline">
-              {c.footer.manual}
-            </a>
-          </footer>
-        )}
-      </div>
+          {isFullHeight && (
+            <footer
+              className={`flex-none relative border-t border-line h-[44px] flex items-center justify-center gap-x-5 gap-y-1 flex-wrap px-1 font-mono text-[10.5px] text-ghost ${
+                // Short-viewport tier (comp): the landing gives its footer row back
+                // to the hero; the dashboard keeps its bar at every height.
+                isLanding ? '[@media(max-height:760px)]:hidden' : ''
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <FkstMark className="text-[12px] text-dim" />
+                <span>{c.footer.tagline}</span>
+              </span>
+              <span aria-hidden="true">·</span>
+              <a
+                href={REPO}
+                target="_blank"
+                rel="noreferrer"
+                className="text-faint hover:text-fg no-underline"
+              >
+                {c.footer.github}
+              </a>
+              <span aria-hidden="true">·</span>
+              <a
+                href={MANUAL_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="text-faint hover:text-fg no-underline"
+              >
+                {c.footer.manual}
+              </a>
+            </footer>
+          )}
+        </div>
 
-      {/* Environments manager: a full-height right drawer overlaying the shell.
+        {/* Environments manager: a full-height right drawer overlaying the shell.
           It owns its own open→close animation (OverlayPresence), so it is
           always mounted and driven by `open`. */}
-      <EnvironmentsDrawer open={envOpen} onClose={() => setEnvOpen(false)} />
+        <EnvironmentsDrawer open={envOpen} onClose={() => setEnvOpen(false)} />
 
-      {/* The guided-tour overlay. Mounted here (the router root) so its finish
+        {/* The guided-tour overlay. Mounted here (the router root) so its finish
           step's react-router Link resolves; it renders nothing until active and
           portals itself to <body>. */}
-      <TourOverlay />
-    </div>
+        <TourOverlay />
+
+        {/* The chat concierge: a floating launcher plus a docked, non-modal panel.
+          The panel stays MOUNTED and is driven by its open flag (the DrawerShell
+          contract), so it can animate out and keeps its scroll position. */}
+        <ChatPanel />
+        <ChatLauncher />
+      </div>
+    </ChatProvider>
   );
 }

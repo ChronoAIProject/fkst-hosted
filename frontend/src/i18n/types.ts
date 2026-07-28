@@ -649,6 +649,53 @@ export interface SiteContent {
   /** Guided product tour: the `?` help launcher, the coachmark controls shared
    *  by every step, and one `{title, body}` card per step. The `steps` keys map
    *  1:1 to the step ids in `components/tour/tour-steps.ts`. */
+  /** The chat concierge: launcher, panel chrome, transcript, and composer. Every
+   *  string the surface renders lives here — the components hold no literals. */
+  chat: {
+    launcherLabel: string;
+    launcherAria: string;
+    launcherCloseAria: string;
+    panelTitle: string;
+    panelAria: string;
+    /** Idle status chip text (paired with a tone, never colour alone). */
+    linkActive: string;
+    /** Streaming status chip text. */
+    streaming: string;
+    clear: string;
+    clearAria: string;
+    close: string;
+    closeAria: string;
+    welcomeTitle: string;
+    welcomeBody: string;
+    /** Starter prompts that prefill the composer from the empty state. */
+    starters: {
+      running: string;
+      unrouted: string;
+      start: string;
+    };
+    transcriptAria: string;
+    jumpToLatest: string;
+    assistantRole: string;
+    userRole: string;
+    copyAnswer: string;
+    answerAria: string;
+    activityToggle: string;
+    toolRunning: string;
+    toolOk: string;
+    toolDenied: string;
+    toolError: string;
+    toolTruncated: string;
+    placeholder: string;
+    inputAria: string;
+    send: string;
+    sendAria: string;
+    stop: string;
+    stopAria: string;
+    /** `{used}` / `{max}` character counter. */
+    charCount: string;
+    signInTitle: string;
+    signInBody: string;
+  };
   tour: {
     /** Accessible name for the topbar `?` launcher. */
     helpAria: string;
