@@ -25,6 +25,7 @@ pub mod config;
 pub mod contents;
 pub mod jwt;
 pub mod listing;
+mod template_install;
 pub mod templates;
 
 use std::collections::HashMap;
