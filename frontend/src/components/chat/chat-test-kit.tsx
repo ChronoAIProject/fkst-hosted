@@ -39,12 +39,40 @@ export function scriptedTransport() {
   };
 }
 
-/** Mount `children` with the providers the chat surface needs. */
+/** Make `prefers-reduced-motion` answer `matches`, for the whole document.
+ *
+ *  jsdom ships no `matchMedia`, so without this the provider cannot ask — and a test
+ *  asserting WHAT the transcript holds would otherwise have to drive the typewriter's
+ *  interval, which is exactly the timer dependence this kit avoids. */
+export function stubReducedMotion(matches: boolean) {
+  window.matchMedia = ((query: string) => ({
+    matches,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+}
+
+/** Mount `children` with the providers the chat surface needs.
+ *
+ *  `reducedMotion` defaults to TRUE so the typewriter reveals each delta synchronously.
+ *  That keeps every behavioural test ("what does the transcript contain") free of timers;
+ *  the reveal ANIMATION is covered by `typewriter.test.ts` and by the one provider test
+ *  that opts out with `reducedMotion: false`. */
 export function renderChat(
   children: ReactNode,
-  { transport, signedIn = true }: { transport?: ChatTransport; signedIn?: boolean } = {}
+  {
+    transport,
+    signedIn = true,
+    reducedMotion = true,
+  }: { transport?: ChatTransport; signedIn?: boolean; reducedMotion?: boolean } = {}
 ) {
   if (signedIn) window.localStorage.setItem('fkst-gh-access', 'ghu_x');
+  stubReducedMotion(reducedMotion);
   return render(
     <ToastProvider>
       <AuthProvider>
