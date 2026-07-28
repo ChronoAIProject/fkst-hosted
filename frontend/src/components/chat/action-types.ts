@@ -64,7 +64,61 @@ export interface StopSessionProposal {
   target: ActionTarget;
 }
 
-export type ActionProposal = CreateSessionProposal | CreateWorkItemProposal | StopSessionProposal;
+export interface CreateRepositoryProposal {
+  kind: 'create_repository';
+  /** The organization to create under; null/absent means the personal account. */
+  owner?: string | null;
+  name: string;
+  private: boolean;
+  description?: string | null;
+  summary: string;
+  target: ActionTarget;
+}
+
+/** One non-secret variable in an environment draft. */
+export interface EnvVarDraft {
+  key: string;
+  value: string;
+}
+
+export interface SaveEnvironmentProfileProposal {
+  kind: 'save_environment_profile';
+  profile_name: string;
+  /** Whether a profile with this name already exists; null when the check could not
+   *  run, in which case the card states the ambiguity rather than guessing. */
+  replaces_existing?: boolean | null;
+  install: string[];
+  variables: EnvVarDraft[];
+  /** Secret NAMES only. The values are collected by the card — they never appear on
+   *  the wire, which is why this is a plain string list and not a map. */
+  secret_keys: string[];
+  summary: string;
+  target: ActionTarget;
+}
+
+export interface DeleteEnvironmentProfileProposal {
+  kind: 'delete_environment_profile';
+  profile_name: string;
+  summary: string;
+  target: ActionTarget;
+}
+
+export interface UninstallAppProposal {
+  kind: 'uninstall_app';
+  owner: string;
+  reason: string;
+  summary: string;
+  target: ActionTarget;
+}
+
+export type ActionProposal =
+  | CreateSessionProposal
+  | CreateWorkItemProposal
+  | StopSessionProposal
+  | CreateRepositoryProposal
+  | SaveEnvironmentProfileProposal
+  | DeleteEnvironmentProfileProposal
+  | UninstallAppProposal;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value != null;
@@ -107,34 +161,73 @@ function isDraft(value: unknown): value is DraftSessionRequest {
   );
 }
 
+/** A `{ key, value }` pair as an environment draft carries it. */
+const isEnvVar = (value: unknown): value is EnvVarDraft =>
+  isRecord(value) && isText(value.key) && isString(value.value);
+
+/** An optional boolean field: absent, null, or a boolean. */
+const isOptionalBoolean = (value: unknown): boolean =>
+  value === undefined || value === null || typeof value === 'boolean';
+
+/** Both repository coordinates, required by the session-scoped variants. */
+const hasRepo = (value: Record<string, unknown>): boolean =>
+  isText(value.owner) && isText(value.name);
+
 /**
  * Structurally validate a proposal from the stream.
  *
  * Returns `null` for anything malformed OR for an unrecognized `kind`. There is
- * deliberately no "unsupported action" card: the union has exactly three variants,
- * and a card the SPA cannot execute is worse than an honest note saying the draft
- * was unreadable.
+ * deliberately no "unsupported action" card: a card the SPA cannot execute is worse
+ * than an honest note saying the draft was unreadable.
+ *
+ * Only `summary` and `target` are checked up front. Repository coordinates are checked
+ * PER KIND, because they are not universal: an environment profile belongs to the user
+ * rather than a repository, and a repository draft has no owner at all when it targets
+ * the personal account.
  */
 export function parseActionProposal(value: unknown): ActionProposal | null {
   if (!isRecord(value)) return null;
-  if (!isText(value.owner) || !isText(value.name)) return null;
   if (!isText(value.summary) || !isTarget(value.target)) return null;
 
   switch (value.kind) {
     case 'create_session':
+      if (!hasRepo(value)) return null;
       if (!isDraft(value.request) || !isString(value.rendered_issue_body)) return null;
       return value as unknown as CreateSessionProposal;
 
     case 'create_work_item':
+      if (!hasRepo(value)) return null;
       if (!isIssueNumber(value.trigger_issue_number)) return null;
       if (!isText(value.title) || !isString(value.body)) return null;
       if (!isOptionalString(value.label)) return null;
       return value as unknown as CreateWorkItemProposal;
 
     case 'stop_session':
+      if (!hasRepo(value)) return null;
       if (!isIssueNumber(value.trigger_issue_number)) return null;
       if (!isText(value.reason)) return null;
       return value as unknown as StopSessionProposal;
+
+    case 'create_repository':
+      // `owner` is optional here and ONLY here: absent means the personal account.
+      if (!isText(value.name) || !isOptionalString(value.owner)) return null;
+      if (typeof value.private !== 'boolean' || !isOptionalString(value.description)) return null;
+      return value as unknown as CreateRepositoryProposal;
+
+    case 'save_environment_profile':
+      if (!isText(value.profile_name) || !isOptionalBoolean(value.replaces_existing)) return null;
+      if (!isStringArray(value.install) || value.install.length === 0) return null;
+      if (!Array.isArray(value.variables) || !value.variables.every(isEnvVar)) return null;
+      if (!isStringArray(value.secret_keys)) return null;
+      return value as unknown as SaveEnvironmentProfileProposal;
+
+    case 'delete_environment_profile':
+      if (!isText(value.profile_name)) return null;
+      return value as unknown as DeleteEnvironmentProfileProposal;
+
+    case 'uninstall_app':
+      if (!isText(value.owner) || !isText(value.reason)) return null;
+      return value as unknown as UninstallAppProposal;
 
     default:
       return null;
