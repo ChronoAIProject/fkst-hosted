@@ -141,7 +141,7 @@ local function validate_real_execution_signal(state, row, real_execution, errors
   end
   local match = real_execution.match
   if type(match) ~= "table" then
-    table.insert(errors, state .. ": live-defer codex_run real_execution.match must declare role, proposal_id, and dedup_key")
+    table.insert(errors, state .. ": live-defer codex_run real_execution.match must declare a supported execution identity")
     return
   end
   if type(match.role) ~= "string" or match.role == "" then
@@ -150,10 +150,22 @@ local function validate_real_execution_signal(state, row, real_execution, errors
   if match.proposal_id ~= "state.proposal_id" then
     table.insert(errors, state .. ": live-defer codex_run real_execution.match.proposal_id must be state.proposal_id")
   end
-  if match.dedup_key ~= "state.version" and match.dedup_key ~= "state.work_unit_key" then
-    table.insert(errors, state .. ": live-defer codex_run real_execution.match.dedup_key must be state.version or state.work_unit_key")
+  local match_scope = match.scope or "execution"
+  if match_scope ~= "execution" and match_scope ~= "proposal" then
+    table.insert(errors, state .. ": live-defer codex_run real_execution.match.scope must be execution or proposal")
   end
-  if consumes_ci_repair_identity(row) and match.dedup_key ~= "state.work_unit_key" then
+  if match_scope == "proposal" then
+    if match.role ~= "consensus" then
+      table.insert(errors, state .. ": live-defer proposal-scoped codex_run must use the consensus role")
+    end
+    if match.dedup_key ~= nil then
+      table.insert(errors, state .. ": live-defer proposal-scoped codex_run must not declare real_execution.match.dedup_key")
+    end
+  elseif match.dedup_key ~= "state.version" and match.dedup_key ~= "state.work_unit_key" then
+    table.insert(errors, state .. ": live-defer execution-scoped codex_run real_execution.match.dedup_key must be state.version or state.work_unit_key")
+  end
+  if consumes_ci_repair_identity(row)
+    and (match_scope ~= "execution" or match.dedup_key ~= "state.work_unit_key") then
     table.insert(errors, state .. ": live-defer code-producing CI repair real_execution.match.dedup_key must be state.work_unit_key")
   end
   if real_execution.status ~= "running" then

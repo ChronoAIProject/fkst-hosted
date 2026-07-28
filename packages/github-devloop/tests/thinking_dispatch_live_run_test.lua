@@ -3,6 +3,7 @@ local payloads_builders = require("devloop.payloads.builders")
 local codex_status = require("tests.codex_status_helpers")
 local convergence_shared = require("devloop.convergence.shared")
 local conv_rounds = require("devloop.convergence.rounds")
+local convergence_identity = require("contract.convergence_identity")
 local t = h.t
 local core = h.core
 local issue = h.issue
@@ -12,6 +13,16 @@ local run_loop = h.run_loop
 local mock_issue_state = h.mock_issue_state
 local mock_issue_loop = h.mock_issue_loop
 local find_raise = h.find_raise
+
+local function consensus_lane_dedup(proposal_id, proposal_dedup, round, lane)
+  return convergence_identity.from_proposal("consensus", {
+    proposal_id = proposal_id,
+    dedup_key = proposal_dedup,
+    round = round,
+  }, {
+    angle_lane = lane or "teleology",
+  }).dedup_key
+end
 
 local function converge_round_comment(event, proposal_id, base_version, round, question, verdict)
   return {
@@ -29,8 +40,11 @@ local function converge_round_comment(event, proposal_id, base_version, round, q
 end
 
 return {
-  test_thinking_redrive_defers_when_matching_consensus_run_is_live = function()
-    local event = issue()
+  test_stale_liveness_activation_defers_when_fresh_thinking_consensus_lane_is_live = function()
+    local event = issue({
+      dedup_key = "liveness-scan/stale-before-current-thinking",
+      source = "liveness-scan",
+    })
     local original = payloads_builders.build_proposal(event)
     local version = original.dedup_key .. "/loop/1"
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
@@ -43,7 +57,8 @@ return {
     local run_opts = opts("thinking-live-consensus-redrive", {
       now = "2026-06-03T02:00:00Z",
     })
-    codex_status.seed_role_codex_run(run_opts, "consensus", original.proposal_id, version, {
+    codex_status.seed_role_codex_run(run_opts, "consensus", original.proposal_id,
+      consensus_lane_dedup(original.proposal_id, version, 1), {
       started_at = "2026-06-03T00:30:00Z",
       started_at_ms = nil,
       timeout_seconds = 7200,
@@ -146,7 +161,8 @@ return {
     local run_opts = opts("thinking-latest-converge-live-consensus-redrive", {
       now = "2026-06-03T02:00:00Z",
     })
-    codex_status.seed_role_codex_run(run_opts, "consensus", original.proposal_id, version, {
+    codex_status.seed_role_codex_run(run_opts, "consensus", original.proposal_id,
+      consensus_lane_dedup(original.proposal_id, version, 1), {
       started_at = "2026-06-03T00:30:00Z",
       started_at_ms = nil,
       timeout_seconds = 7200,

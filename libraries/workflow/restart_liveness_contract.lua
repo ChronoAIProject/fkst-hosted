@@ -358,7 +358,7 @@ local function validate_codex_run_defer(row, errors, expected_epoch_source)
   end
   local match = real_execution.match
   if type(match) ~= "table" then
-    table.insert(errors, state .. ": codex_run defer real_execution.match must declare role, proposal_id, and dedup_key")
+    table.insert(errors, state .. ": codex_run defer real_execution.match must declare a supported execution identity")
     return
   end
   if not non_empty_string(match.role) then
@@ -367,8 +367,19 @@ local function validate_codex_run_defer(row, errors, expected_epoch_source)
   if match.proposal_id ~= "state.proposal_id" then
     table.insert(errors, state .. ": codex_run defer real_execution.match.proposal_id must be state.proposal_id")
   end
-  if match.dedup_key ~= "state.version" and match.dedup_key ~= "state.work_unit_key" then
-    table.insert(errors, state .. ": codex_run defer real_execution.match.dedup_key must be state.version or state.work_unit_key")
+  local match_scope = match.scope or "execution"
+  if match_scope ~= "execution" and match_scope ~= "proposal" then
+    table.insert(errors, state .. ": codex_run defer real_execution.match.scope must be execution or proposal")
+  end
+  if match_scope == "proposal" then
+    if match.role ~= "consensus" then
+      table.insert(errors, state .. ": proposal-scoped codex_run defer must use the consensus role")
+    end
+    if match.dedup_key ~= nil then
+      table.insert(errors, state .. ": proposal-scoped codex_run defer must not declare real_execution.match.dedup_key")
+    end
+  elseif match.dedup_key ~= "state.version" and match.dedup_key ~= "state.work_unit_key" then
+    table.insert(errors, state .. ": execution-scoped codex_run defer real_execution.match.dedup_key must be state.version or state.work_unit_key")
   end
   local signature = row.responsibility_signature
   local lineage = {}
@@ -379,7 +390,7 @@ local function validate_codex_run_defer(row, errors, expected_epoch_source)
     and signature.receiver_kind == "code-producer"
     and (lineage["ci-failure.ci_failure_key"] == true
       or (type(row.payload_fields) == "table" and row.payload_fields.ci_failure_key ~= nil))
-    and match.dedup_key ~= "state.work_unit_key" then
+    and (match_scope ~= "execution" or match.dedup_key ~= "state.work_unit_key") then
     table.insert(errors, state .. ": code-producing CI repair codex_run defer real_execution.match.dedup_key must be state.work_unit_key")
   end
   if real_execution.status ~= expected_status then
