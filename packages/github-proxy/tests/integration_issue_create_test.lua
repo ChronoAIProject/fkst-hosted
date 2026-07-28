@@ -1,4 +1,5 @@
 local h = require("tests.proxy_integration_helpers")
+local config = require("devloop.config")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -150,6 +151,17 @@ local function first_call_index(needle)
     end
   end
   return nil
+end
+
+local function has_arg_pair(rendered, flag, value)
+  local text = tostring(rendered or "")
+  local quoted = tostring(flag) .. " '" .. tostring(value) .. "'"
+  if text:find(quoted, 1, true) ~= nil then
+    return true
+  end
+  local plain = tostring(flag) .. " " .. tostring(value)
+  local start_at, end_at = text:find(plain, 1, true)
+  return start_at ~= nil and (end_at == #text or text:sub(end_at + 1, end_at + 1) == " ")
 end
 
 return {
@@ -380,6 +392,48 @@ return {
     t.eq(count_calls("--assignee 'fkst-test-bot'"), 1)
     t.eq(count_calls("gh pr comment"), 2)
     t.is_true(first_call_index("gh pr comment") < first_call_index("gh issue create"))
+  end,
+
+  test_issue_create_translates_only_exact_work_labels_at_the_adapter_boundary = function()
+    local payload = event({
+      labels = { "fkst-dev", "fkst-dev:claimed", "bug" },
+    }).payload
+    t.mock_command(config.read_env_command("FKST_SESSION_WORK_LABEL_MAP_JSON"), {
+      stdout = [[{"fkst-dev":"fkst-dev-chronoai-fkst"}]],
+      stderr = "",
+      exit_code = 0,
+    })
+    mock_write_env("1")
+    mock_bot_env()
+    mock_parent_pr_comments({})
+    mock_parent_pr_comments({
+      {
+        body = core.issue_create_intent_marker(payload.dedup_key),
+        author_login = "fkst-test-bot",
+      },
+    })
+    mock_issue_create_search("[]\n")
+    mock_issue_create()
+    mock_parent_pr_comment_write()
+
+    local result = t.run_department("departments/github_issue_create/main.lua", {
+      queue = "github_issue_create_request",
+      payload = payload,
+    }, opts("issue-create-namespaced-work-label", {
+      FKST_GITHUB_WRITE = "1",
+      FKST_SESSION_WORK_LABEL_MAP_JSON = [[{"fkst-dev":"fkst-dev-chronoai-fkst"}]],
+    }))
+
+    if result.exit_code ~= 0 then
+      error("namespaced issue create failed: error=" .. tostring(result.error)
+        .. " stderr=" .. tostring(result.stderr) .. " stdout=" .. tostring(result.stdout))
+    end
+    local create = h.calls_matching("gh issue create")[1]
+    local rendered = create.rendered
+    t.is_true(has_arg_pair(rendered, "--label", "fkst-dev-chronoai-fkst"), rendered)
+    t.is_true(has_arg_pair(rendered, "--label", "fkst-dev:claimed"), rendered)
+    t.is_true(has_arg_pair(rendered, "--label", "bug"), rendered)
+    t.is_true(not has_arg_pair(rendered, "--label", "fkst-dev"), rendered)
   end,
 
   test_issue_create_request_raises_blocked_by_after_fresh_create = function()

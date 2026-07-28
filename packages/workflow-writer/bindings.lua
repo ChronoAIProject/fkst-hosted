@@ -12,6 +12,7 @@ local engine = require("workflow.engine")
 local codex = require("workflow.codex")
 local env = require("workflow.env")
 local strings = require("contract.strings")
+local devloop_config = require("devloop.config")
 local github_factory = require("devloop.github_factory")
 
 local authoring = require("authoring")
@@ -112,6 +113,8 @@ local discovery, lease = discovery_mod.build({
   marker = marker,
   bot_login = bot_login,
   label = authoring.LABEL,
+  effective_work_label = devloop_config.effective_work_label,
+  exec = exec_sync,
   resolve_created_fact = attach_pr_result,
   log_prefix = "workflow-writer",
 })

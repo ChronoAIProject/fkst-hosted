@@ -5,6 +5,7 @@
 -- excluded from the trusted text, latest_blueprint returned nil, and the reconcile
 -- stalled forever at "no trusted blueprint marker" (workflow-security/writer never ran).
 local scopes = require("github-issue.scopes")
+local config = require("devloop.config")
 local t = fkst.test
 
 local function issue_with_bot_comment(author_login)
@@ -61,5 +62,29 @@ return {
     local text = scopes.trusted_text(issue_with_bot_comment("anyone"), "")
     t.is_true(text:find("fkst:blueprint:v1", 1, true) ~= nil)
     t.is_true(text:find("unrelated human comment", 1, true) ~= nil)
+  end,
+
+  test_discovery_searches_the_effective_provider_label = function()
+    local query = nil
+    local result = scopes.list({
+      repo = "owner/repo",
+      label = "fkst-security",
+      effective_work_label = config.effective_work_label,
+      exec = function()
+        return {
+          stdout = [[{"fkst-security":"fkst-security-chronoai-fkst"}]],
+          stderr = "",
+          exit_code = 0,
+        }
+      end,
+      github = {
+        issue_search = function(_repo, search_query)
+          query = search_query
+          return { stdout = "[]", stderr = "", exit_code = 0 }
+        end,
+      },
+    })
+    t.eq(#result, 0)
+    t.eq(query, "label:fkst-security-chronoai-fkst")
   end,
 }

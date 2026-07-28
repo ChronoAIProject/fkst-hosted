@@ -118,8 +118,7 @@ local function act(event)
     return
   end
 
-  local add_labels = core.normalize_labels(payload.add_labels)
-  local remove_labels = core.normalize_labels(payload.remove_labels)
+  local add_labels, remove_labels = core.effective_label_changes(payload.add_labels, payload.remove_labels)
   if #add_labels == 0 and #remove_labels == 0 then
     log.warn("github-proxy: label request has no label changes")
     return

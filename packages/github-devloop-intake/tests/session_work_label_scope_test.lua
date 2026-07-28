@@ -89,6 +89,30 @@ return {
     t.eq(h.count_calls("--add-label"), 0)
   end,
 
+  test_namespaced_cloud_label_passes_exact_session_scope = function()
+    mock_repo_env()
+    mock_scope("fkst-dev-chronoai-fkst", 3)
+    mock_issue(49, { "fkst-dev-chronoai-fkst" })
+
+    local result = run_admission(49, "namespaced-session-work-label-exact")
+
+    t.eq(result.exit_code, 0)
+    t.is_true(candidate(result) ~= nil)
+    t.eq(candidate(result).payload.issue_number, "49")
+  end,
+
+  test_plain_label_is_rejected_by_namespaced_cloud_session = function()
+    mock_repo_env()
+    mock_scope("fkst-dev-chronoai-fkst")
+    mock_issue(50, { "fkst-dev" })
+
+    local result = run_admission(50, "namespaced-session-rejects-plain-label")
+
+    t.eq(result.exit_code, 0)
+    t.eq(candidate(result), nil)
+    t.eq(h.count_calls("--add-label"), 0)
+  end,
+
   test_label_mode_rejects_non_work_entities_before_claim = function()
     local cases = {
       { number = 43, name = "prefix-only", labels = { "fkst-dev:thinking" } },

@@ -103,7 +103,12 @@ local function mock_cycle(labels, child_reads)
   mock_env("FKST_GITHUB_REPO", repo)
   mock_env("FKST_GITHUB_BOT_LOGIN", "fkst-test-bot")
   mock_env("FKST_WORKFLOW_CATALOG_ROOT", "")
-  mock_env("FKST_SESSION_WORK_LABEL", "fkst-dev,fkst-security")
+  mock_env("FKST_SESSION_WORK_LABEL", "fkst-dev-chronoai-fkst,fkst-security-chronoai-fkst")
+  mock_env(
+    "FKST_SESSION_WORK_LABEL_MAP_JSON",
+    [[{"fkst-dev":"fkst-dev-chronoai-fkst","fkst-security":"fkst-security-chronoai-fkst"}]],
+    8
+  )
   mock_env("FKST_GITHUB_CLAIM_MODE", "assignee")
   mock_env("FKST_GITHUB_WRITE", "")
 
@@ -153,7 +158,7 @@ return {
       "github-proxy.github_issue_label_request -> github-proxy.github_issue_label",
     })
     local first_label = graph.require_raise(first, "github-proxy.github_issue_label_request")
-    t.eq(first_label.payload.add_labels[1], "fkst-dev")
+    t.eq(first_label.payload.add_labels[1], "fkst-dev-chronoai-fkst")
     t.eq(#first_label.payload.add_labels, 1)
     t.eq(#first_label.payload.remove_labels, 0)
     t.is_nil(first_label.payload.claim)
@@ -165,7 +170,7 @@ return {
     t.eq(replay_label.payload.dedup_key, first_label.payload.dedup_key)
     t.eq(graph.find_raise(replay, "github-proxy.github_issue_create_request"), nil)
 
-    mock_cycle({ "bug", "fkst-dev" }, 2)
+    mock_cycle({ "bug", "fkst-dev-chronoai-fkst" }, 2)
     local visible = graph.require_quiescent(graph.run(tick("after-visible"), { max_steps = 4 }))
     graph.assert_covers(visible, {
       "github-devloop-workflow.workflow_materialization_tick -> github-devloop-workflow.workflow_materialize_next",

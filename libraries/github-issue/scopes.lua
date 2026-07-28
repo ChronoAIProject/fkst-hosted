@@ -89,12 +89,20 @@ end
 
 M.fetch_issue = fetch_issue
 
--- deps = { github, repo, label, bot_login }
+-- deps = {
+--   github, repo, label, bot_login,
+--   effective_work_label, exec, -- optional provider-label translation seam
+-- }
 -- Returns an array of scope handles { number, repo, origin, state, text }.
 -- Asserts a non-empty label FIRST (no silent default), then searches
--- `label:<label>` and shapes every OPEN result.
+-- `label:<effective-label>` and shapes every OPEN result. Keeping translation
+-- injected preserves this leaf library's zero-lib-dependency contract.
 function M.list(deps)
-  local search_label = label.require(deps and deps.label)
+  local logical_label = label.require(deps and deps.label)
+  local search_label = logical_label
+  if type(deps.effective_work_label) == "function" then
+    search_label = deps.effective_work_label(logical_label, deps.exec)
+  end
   local github = deps.github
   local repo = deps.repo
   local bot_login = deps.bot_login

@@ -17,9 +17,10 @@ local scopes = require("github-issue.scopes")
 local M = {}
 
 -- deps = {
---   github, repo, marker, bot_login, label,   -- discovery inputs
---   resolve_created_fact,                      -- fn(fact) -> fact  (per-package differ)
---   log_prefix,                                -- string for log_decision lines
+--   github, repo, marker, bot_login, label,     -- discovery inputs
+--   effective_work_label, exec,                 -- optional provider-label translation seam
+--   resolve_created_fact,                       -- fn(fact) -> fact  (per-package differ)
+--   log_prefix,                                 -- string for log_decision lines
 -- }
 function M.build(deps)
   label.require(deps and deps.label)

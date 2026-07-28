@@ -1,6 +1,7 @@
 local base_ids = require("devloop.base_ids")
 local devloop_base = require("devloop.base")
 local devloop_claims = require("devloop.claims")
+local devloop_config = require("devloop.config")
 local devloop_entity = require("devloop.entity")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
@@ -17,6 +18,10 @@ local M = {}
 
 M.DEPT = "workflow_materialize_next"
 M.MATERIALIZED_CHILD_WORK_LABEL = "fkst-dev"
+
+function M.materialized_child_work_label(exec)
+  return devloop_config.effective_work_label(M.MATERIALIZED_CHILD_WORK_LABEL, exec)
+end
 
 local terminal_child_labels = {
   ["fkst-dev:merged"] = true,
@@ -217,7 +222,7 @@ local function workflow_step_source_ref(repo, origin_issue_number, slot_id)
   }
 end
 
-function M.issue_create_request(repo, issue_number, origin, blueprint_digest, slot_id, entry, generated_spec, session_creator)
+function M.issue_create_request(repo, issue_number, origin, blueprint_digest, slot_id, entry, generated_spec, session_creator, exec)
   local lineage, err = marker.build_lineage_header(origin, blueprint_digest, slot_id)
   if lineage == nil then
     error("github-devloop-workflow: lineage-marker-build-failed: lineage marker build failed: " .. tostring(err and err.code or "unknown"))
@@ -227,7 +232,7 @@ function M.issue_create_request(repo, issue_number, origin, blueprint_digest, sl
     repo = repo,
     title = generated_spec.title,
     body = lineage .. "\n\n" .. generated_spec.body,
-    labels = { "fkst-dev" },
+    labels = { M.materialized_child_work_label(exec) },
     dedup_key = entry.child_dedup,
     source_ref = workflow_step_source_ref(repo, issue_number, slot_id),
     parent = tonumber(issue_number),
@@ -447,7 +452,7 @@ function M.current_created_entries(facts)
   return entries
 end
 
-function M.materialized_child_label_repair_decision(repo, origin, blueprint_digest, blueprint, entry, child, session_work_labels)
+function M.materialized_child_label_repair_decision(repo, origin, blueprint_digest, blueprint, entry, child, session_work_labels, exec)
   if type(entry) ~= "table" or entry.state ~= "created" then
     return repair_decision("skip", "skip-ledger-not-created", "current ledger entry is not created")
   end
@@ -502,29 +507,30 @@ function M.materialized_child_label_repair_decision(repo, origin, blueprint_dige
     return repair_decision("skip", "skip-child-terminal", terminal_reason)
   end
 
+  local target_work_label = M.materialized_child_work_label(exec)
   local configured = label_set(session_work_labels)
-  if not configured[M.MATERIALIZED_CHILD_WORK_LABEL] then
-    return repair_decision("skip", "skip-target-work-label-unconfigured", "fkst-dev is not an exact configured session work label")
+  if not configured[target_work_label] then
+    return repair_decision("skip", "skip-target-work-label-unconfigured", target_work_label .. " is not an exact configured session work label")
   end
   local child_labels = label_set(child.labels)
   for label, _ in pairs(configured) do
-    if label ~= M.MATERIALIZED_CHILD_WORK_LABEL and child_labels[label] then
+    if label ~= target_work_label and child_labels[label] then
       return repair_decision("skip", "skip-conflicting-work-label", "child already carries a different exact configured session work label: " .. label)
     end
   end
-  if child_labels[M.MATERIALIZED_CHILD_WORK_LABEL] then
-    return repair_decision("noop", "skip-idempotent(work-label-present)", "fkst-dev is already present")
+  if child_labels[target_work_label] then
+    return repair_decision("noop", "skip-idempotent(work-label-present)", target_work_label .. " is already present")
   end
   return repair_decision("repair", "applied(repaired-missing-work-label)", "trusted ledger-backed child is open and execution-eligible")
 end
 
-function M.materialized_child_work_label_request(repo, origin, entry)
+function M.materialized_child_work_label_request(repo, origin, entry, exec)
   local issue_number = tonumber(entry and entry.child_issue)
   local source_ref = safe_source_ref(repo, issue_number)
   return requests_labels.build_preclaim_label_request(
     repo,
     issue_number,
-    { M.MATERIALIZED_CHILD_WORK_LABEL },
+    { M.materialized_child_work_label(exec) },
     {},
     base_ids.dedup_key({
       "workflow",

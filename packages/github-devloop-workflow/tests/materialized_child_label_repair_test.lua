@@ -94,6 +94,14 @@ local function copy_entry()
   return copy
 end
 
+local function namespaced_exec()
+  return {
+    stdout = [[{"fkst-dev":"fkst-dev-chronoai-fkst","fkst-security":"fkst-security-chronoai-fkst"}]],
+    stderr = "",
+    exit_code = 0,
+  }
+end
+
 return {
   test_open_bot_child_with_exact_ledger_is_repairable = function()
     local result = decision(fixture_entry(), fixture_child())
@@ -189,5 +197,38 @@ return {
     t.is_nil(first.claim)
     t.eq(first.dedup_key, replay.dedup_key)
     t.eq(first.source_ref.ref, repo .. "#issue/" .. tostring(child_issue))
+  end,
+
+  test_namespaced_child_convergence_never_restores_the_plain_label = function()
+    devloop_base.configure_trusted_bot_login("fkst-test-bot")
+    local configured = { "fkst-dev-chronoai-fkst", "fkst-security-chronoai-fkst" }
+    local missing = actions.materialized_child_label_repair_decision(
+      repo,
+      origin,
+      digest.blueprint_digest(blueprint()),
+      blueprint(),
+      fixture_entry(),
+      fixture_child(),
+      configured,
+      namespaced_exec
+    )
+    t.eq(missing.action, "repair")
+
+    local visible = actions.materialized_child_label_repair_decision(
+      repo,
+      origin,
+      digest.blueprint_digest(blueprint()),
+      blueprint(),
+      fixture_entry(),
+      fixture_child({ labels = { "fkst-dev-chronoai-fkst" } }),
+      configured,
+      namespaced_exec
+    )
+    t.eq(visible.action, "noop")
+
+    local request = actions.materialized_child_work_label_request(repo, origin, fixture_entry(), namespaced_exec)
+    t.eq(#request.add_labels, 1)
+    t.eq(request.add_labels[1], "fkst-dev-chronoai-fkst")
+    t.is_true(request.add_labels[1] ~= "fkst-dev")
   end,
 }

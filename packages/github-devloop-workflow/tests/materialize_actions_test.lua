@@ -149,6 +149,21 @@ return {
     t.eq(req.parent_comment_target.issue_number, 42)
   end,
 
+  test_issue_create_uses_the_effective_materialized_child_work_label = function()
+    local req = actions.issue_create_request(repo, 42, origin, "d-3588118930", "implement", entry(), {
+      title = "Implement the website feature",
+      body = "Implement the requested page.",
+    }, nil, function()
+      return {
+        stdout = [[{"fkst-dev":"fkst-dev-chronoai-fkst"}]],
+        stderr = "",
+        exit_code = 0,
+      }
+    end)
+    t.eq(#req.labels, 1)
+    t.eq(req.labels[1], "fkst-dev-chronoai-fkst")
+  end,
+
   test_spec_from_created_issue_strips_lineage_and_proxy_marker = function()
     local req = actions.issue_create_request(repo, 42, origin, "d-3588118930", "implement", entry(), {
       title = "Implement the website feature",

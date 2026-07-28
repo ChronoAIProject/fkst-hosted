@@ -2,6 +2,7 @@ local S = {}
 
 function S.install(M, deps)
 local shared = deps or M
+local devloop_config = require("devloop.config")
 local strings = require("contract.strings")
 local max_title_len = 240
 local max_body_len = 12000
@@ -162,11 +163,12 @@ function M.github_issue_create_search(repo, dedup_key, timeout)
 end
 
 function M.github_issue_create(repo, title, body_file, labels, assignees, timeout)
+  local effective_labels = devloop_config.effective_work_labels(filtered_labels(labels))
   return M.github().issue_create(
     repo,
     title,
     body_file,
-    filtered_labels(labels),
+    effective_labels,
     filtered_assignees(assignees),
     timeout or 30
   )

@@ -14,6 +14,7 @@ local allowed_env = {
   FKST_GITHUB_REPO = true,
   FKST_SESSION_CREATOR = true,
   FKST_SESSION_WORK_LABEL = true,
+  FKST_SESSION_WORK_LABEL_MAP_JSON = true,
   FKST_GITHUB_WRITE = true,
   FKST_DEVLOOP_UPSTREAM_BRANCH = true,
   FKST_DEVLOOP_INTEGRATION_BRANCH = true,
@@ -111,6 +112,108 @@ end
 
 function C.session_work_labels(exec)
   return C.parse_session_work_labels(C.read_env("FKST_SESSION_WORK_LABEL", exec))
+end
+
+local github_label_name_max_chars = 50
+
+local function valid_utf8(value)
+  if type(utf8) ~= "table" or type(utf8.len) ~= "function" then
+    return false, nil
+  end
+  local ok, length = pcall(utf8.len, value)
+  return ok and length ~= nil, length
+end
+
+local function contains_control_character(value)
+  for _, codepoint in utf8.codes(value) do
+    if codepoint <= 31 or (codepoint >= 127 and codepoint <= 159) then
+      return true
+    end
+  end
+  return false
+end
+
+local function validate_work_label_map_entry(kind, value)
+  if type(value) ~= "string" or value == "" then
+    error("github-devloop: invalid FKST_SESSION_WORK_LABEL_MAP_JSON: " .. kind .. " must be a non-empty string")
+  end
+  if strings.trim(value) ~= value then
+    error("github-devloop: invalid FKST_SESSION_WORK_LABEL_MAP_JSON: " .. kind .. " cannot have surrounding whitespace")
+  end
+  if value:find(",", 1, true) ~= nil then
+    error("github-devloop: invalid FKST_SESSION_WORK_LABEL_MAP_JSON: " .. kind .. " cannot contain a comma")
+  end
+  local is_valid_utf8, length = valid_utf8(value)
+  if not is_valid_utf8 then
+    error("github-devloop: invalid FKST_SESSION_WORK_LABEL_MAP_JSON: " .. kind .. " must be valid UTF-8")
+  end
+  if contains_control_character(value) then
+    error("github-devloop: invalid FKST_SESSION_WORK_LABEL_MAP_JSON: " .. kind .. " cannot contain control characters")
+  end
+  return length
+end
+
+function C.parse_work_label_map_json(raw)
+  local source = strings.trim(tostring(raw or ""))
+  if source == "" then
+    return {}
+  end
+  if source:sub(1, 1) ~= "{" or source:sub(-1) ~= "}" then
+    error("github-devloop: invalid FKST_SESSION_WORK_LABEL_MAP_JSON: expected a JSON object")
+  end
+
+  local ok, decoded = pcall(json.decode, source)
+  if not ok or type(decoded) ~= "table" then
+    error("github-devloop: invalid FKST_SESSION_WORK_LABEL_MAP_JSON: malformed JSON object")
+  end
+
+  local map = {}
+  local owner_by_effective_label = {}
+  for logical, effective in pairs(decoded) do
+    validate_work_label_map_entry("logical label", logical)
+    local effective_length = validate_work_label_map_entry("effective label", effective)
+    if effective_length > github_label_name_max_chars then
+      error(
+        "github-devloop: invalid FKST_SESSION_WORK_LABEL_MAP_JSON: effective label exceeds GitHub's 50-character limit"
+      )
+    end
+    local folded = effective:lower()
+    local owner = owner_by_effective_label[folded]
+    if owner ~= nil and owner ~= logical then
+      error("github-devloop: invalid FKST_SESSION_WORK_LABEL_MAP_JSON: effective labels collide case-insensitively")
+    end
+    owner_by_effective_label[folded] = logical
+    map[logical] = effective
+  end
+  return map
+end
+
+function C.work_label_map(exec)
+  return C.parse_work_label_map_json(C.read_env("FKST_SESSION_WORK_LABEL_MAP_JSON", exec))
+end
+
+function C.effective_work_label(logical, exec)
+  local label = tostring(logical or "")
+  return C.work_label_map(exec)[label] or label
+end
+
+function C.apply_work_label_map(labels, map)
+  local effective = {}
+  local seen = {}
+  for _, logical in ipairs(labels or {}) do
+    local label = tostring(logical or "")
+    local translated = type(map) == "table" and map[label] or nil
+    translated = translated or label
+    if translated ~= "" and not seen[translated] then
+      seen[translated] = true
+      effective[#effective + 1] = translated
+    end
+  end
+  return effective
+end
+
+function C.effective_work_labels(labels, exec)
+  return C.apply_work_label_map(labels, C.work_label_map(exec))
 end
 
 -- Set by fkst-hosted for creator-routed sessions. Nil preserves the legacy
