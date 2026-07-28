@@ -1,10 +1,16 @@
 import { vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
+import { BrowserRouter } from 'react-router-dom';
 import { Dashboard } from './dashboard';
 import { AuthProvider } from '@/lib/auth/github-auth';
 import { BroaderOAuthProvider } from '@/lib/auth/broader-oauth';
 import { ToastProvider } from '@/components/ui/toast';
-import type { AccountOverview, OverviewResponse, RepoOverview } from '@/lib/api/types';
+import type {
+  AccountOverview,
+  OverviewResponse,
+  RepoOverview,
+  RepoSessionsResponse,
+} from '@/lib/api/types';
 
 // Shared fixtures + fetch stubs for the canvas dashboard page tests
 // (dashboard.repos / dashboard.repo-admin / dashboard.canvas suites).
@@ -56,12 +62,36 @@ export const overviewBody = (
   broader_oauth_available: false,
 });
 
-/** Stub global fetch: GET /api/v1/overview gets the given body/status. */
-export function stubApi(body: OverviewResponse | null, status = 200) {
+/** An empty per-repo sessions payload for `owner/name`. */
+export const repoSessionsBody = (
+  owner: string,
+  name: string,
+  over: Partial<RepoSessionsResponse> = {}
+): RepoSessionsResponse => ({
+  owner,
+  name,
+  installed: true,
+  sessions: [],
+  ...over,
+});
+
+/** Stub global fetch: GET /api/v1/overview gets the given body/status.
+ *
+ *  `sessions` additionally serves `GET /api/v1/repos/{owner}/{name}/sessions`, which
+ *  a deep link straight to a repository reaches on mount — without it the stub's
+ *  deliberate `unexpected fetch` guard would throw. */
+export function stubApi(
+  body: OverviewResponse | null,
+  status = 200,
+  sessions?: RepoSessionsResponse
+) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.endsWith('/api/v1/overview') && init?.method === undefined) {
       return jsonResponse(body, status);
+    }
+    if (sessions != null && /\/api\/v1\/repos\/[^/]+\/[^/]+\/sessions$/.test(url)) {
+      return jsonResponse(sessions);
     }
     throw new Error(`unexpected fetch: ${url}`);
   });
@@ -128,16 +158,33 @@ export const repoPostCall = (fetchMock: FetchMock) =>
 export const deleteCall = (fetchMock: FetchMock) =>
   fetchMock.mock.calls.find(([, init]) => init?.method === 'DELETE');
 
+/** Render the dashboard inside a real router.
+ *
+ *  `BrowserRouter`, not `MemoryRouter`, deliberately: the dashboard writes its
+ *  location into the query string, and only a browser router puts that on
+ *  `window.location.search` where a test can assert it meaningfully. */
 export function renderDashboard() {
   return render(
     <ToastProvider>
       <AuthProvider>
         <BroaderOAuthProvider>
-          <Dashboard />
+          <BrowserRouter>
+            <Dashboard />
+          </BrowserRouter>
         </BroaderOAuthProvider>
       </AuthProvider>
     </ToastProvider>
   );
+}
+
+/** Point the browser at a dashboard URL before rendering, for deep-link cases.
+ *  Call {@link resetDashboardUrl} afterwards so suites stay independent. */
+export function seedDashboardUrl(search: string) {
+  window.history.replaceState(null, '', `/dashboard${search}`);
+}
+
+export function resetDashboardUrl() {
+  window.history.replaceState(null, '', '/dashboard');
 }
 
 /** Drill into an account (canvas node or sidebar affordance — same label).

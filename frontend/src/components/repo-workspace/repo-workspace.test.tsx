@@ -246,3 +246,62 @@ describe('RepoWorkspace', () => {
     expect(onChanged).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('RepoWorkspace — deep-linked selection', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem('fkst-gh-access', 'ghu_x');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise<Response>(() => {}))
+    );
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('selects the session named by initialSelectedKey', () => {
+    renderWorkspace({ initialSelectedKey: beta.session_id! });
+    expect(screen.getByRole('heading', { level: 2, name: 'beta' })).toBeInTheDocument();
+  });
+
+  it('also matches the trigger-<n> alias for a session that has an id', () => {
+    // A chat card can only mint `trigger-<n>` before a session acquires its
+    // session_id; that link must keep working once it does.
+    renderWorkspace({ initialSelectedKey: `trigger-${beta.trigger.number}` });
+    expect(screen.getByRole('heading', { level: 2, name: 'beta' })).toBeInTheDocument();
+  });
+
+  it('selects an id-less session by its trigger key', () => {
+    const pending = session({
+      session_id: null,
+      name: 'pending',
+      trigger: issue({ number: 42, title: 'p-trig' }),
+    });
+    renderWorkspace({
+      data: body([alpha, pending]),
+      initialSelectedKey: 'trigger-42',
+    });
+    expect(screen.getByRole('heading', { level: 2, name: 'pending' })).toBeInTheDocument();
+  });
+
+  it('falls back to the first session for an unknown key', () => {
+    // A stale link must never leave the detail pane blank.
+    renderWorkspace({ initialSelectedKey: 'no-such-session' });
+    expect(screen.getByRole('heading', { level: 2, name: 'alpha' })).toBeInTheDocument();
+  });
+
+  it('notifies the page when the user selects a session', async () => {
+    const onSelectedKeyChange = vi.fn();
+    renderWorkspace({ onSelectedKeyChange });
+    await userEvent.click(screen.getByRole('button', { name: 'Open details for session beta' }));
+    expect(onSelectedKeyChange).toHaveBeenCalledWith(beta.session_id);
+  });
+
+  it('works without the notification callback', async () => {
+    // The props are optional so existing call sites (and the drawer) keep working.
+    renderWorkspace();
+    await userEvent.click(screen.getByRole('button', { name: 'Open details for session beta' }));
+    expect(screen.getByRole('heading', { level: 2, name: 'beta' })).toBeInTheDocument();
+  });
+});
