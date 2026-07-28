@@ -98,6 +98,36 @@ return {
     t.is_nil(result.issue_content:find(core._untrusted_issue_data_begin, 1, true))
   end,
 
+  test_workflow_child_bundle_keeps_current_issue_and_parent_only_contract_separate = function()
+    local result = run_probe("workflow_origin_context", runtime_root("workflow-origin-context"))
+
+    t.eq(#result.paths, 4)
+    t.eq(result.issue_fetch_count, 2)
+    t.is_true(result.ref:find("runtime-cache:", 1, true) == 1)
+    t.eq(result.child_title, "Walking skeleton child")
+    t.eq(result.child_body, "Emit the predecessor's fkst-cron-run marker wire format.")
+    t.eq(result.origin_title, "Cron capability origin")
+    t.is_true(result.origin_body:find(result.wire_grammar, 1, true) ~= nil)
+    t.is_nil(result.child_body:find(result.wire_grammar, 1, true))
+    t.is_true(result.manifest:find("Workflow origin issue JSON", 1, true) ~= nil)
+    t.is_true(result.manifest:find("origin-issue.json", 1, true) ~= nil)
+    t.is_true(result.origin_external_comment:find("[fkst:blocked-github-content:v1", 1, true) == 1)
+    t.is_nil(result.origin_external_comment:find("external command", 1, true))
+    t.eq(result.origin_bot_comment, result.bot_comment)
+  end,
+
+  test_workflow_origin_requirement_rebuilds_cached_child_only_bundle = function()
+    local result = run_probe("workflow_origin_cache_upgrade", runtime_root("workflow-origin-cache-upgrade"))
+
+    t.eq(result.first_had_origin, false)
+    t.is_true(result.second_dir ~= result.first_dir)
+    t.is_true(result.second_dir:find(result.first_dir .. ".publish-", 1, true) == 1)
+    t.eq(result.issue_fetch_count, 3)
+    t.eq(result.second_child_title, "Walking skeleton child rebuilt")
+    t.is_true(result.second_origin_body:find(result.wire_grammar, 1, true) ~= nil)
+    t.is_true(result.manifest:find("origin-issue.json", 1, true) ~= nil)
+  end,
+
   test_context_bundle_redacts_external_comment_and_preserves_bot_comment = function()
     local result = run_probe("content_redaction", runtime_root("content-redaction"))
 
