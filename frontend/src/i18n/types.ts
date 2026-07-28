@@ -702,6 +702,41 @@ export interface SiteContent {
     charCount: string;
     signInTitle: string;
     signInBody: string;
+    /** Confirm-gated action cards. */
+    kindNewSession: string;
+    kindWorkItem: string;
+    kindStopSession: string;
+    previewToggle: string;
+    fieldWorkLabel: string;
+    fieldAutoDiscovered: string;
+    fieldPackages: string;
+    fieldBranches: string;
+    fieldDefault: string;
+    fieldAutoMerge: string;
+    fieldEnvironment: string;
+    on: string;
+    off: string;
+    workItemBodyAria: string;
+    /** Carries `{number}`. */
+    stopTriggerLine: string;
+    finalChecksNote: string;
+    confirmExecute: string;
+    dismiss: string;
+    executing: string;
+    executeFailed: string;
+    unreadableProposal: string;
+    restoredUnknown: string;
+    outcomeChipCreated: string;
+    outcomeChipStopped: string;
+    openIssue: string;
+    /** Each carries `{number}` and `{repo}`. */
+    outcomeSession: string;
+    outcomeWorkItem: string;
+    outcomeStopped: string;
+    stopConfirmTitle: string;
+    /** Carries `{number}` and `{repo}`. */
+    stopConfirmBody: string;
+    stopConfirmAction: string;
     /** Error copy keyed by the stream's stable error code, plus an `unknown`
      *  fallback and a `rate_limited_after` variant carrying `{seconds}`. */
     errors: Record<string, string>;

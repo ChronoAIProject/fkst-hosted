@@ -287,6 +287,137 @@ describe('ChatProvider', () => {
     expect(chat().messages.length).toBeGreaterThan(0);
   });
 
+  // ---- action proposals ---------------------------------------------------
+
+  it('lands a valid proposal on the assistant message with an id', () => {
+    const script = scriptedTransport();
+    renderChat(<Probe />, { transport: script.transport });
+    act(() => chat().sendMessage('stop my session'));
+    act(() =>
+      script.handlers().onActionProposal({
+        kind: 'stop_session',
+        owner: 'acme',
+        name: 'site',
+        trigger_issue_number: 7,
+        reason: 'done',
+        summary: 'Stop it',
+        target: { method: 'DELETE', path: '/api/v1/repos/acme/site/sessions/7' },
+      })
+    );
+
+    const proposals = chat().messages[1]!.proposals!;
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]!.id).toBeTruthy();
+    expect(proposals[0]!.state).toBe('idle');
+    expect(proposals[0]!.proposal.kind).toBe('stop_session');
+  });
+
+  it('turns an unreadable proposal into a note without killing the stream', () => {
+    // The turn is fine; only this draft is not. A card the SPA cannot execute would
+    // be worse than saying so.
+    const script = scriptedTransport();
+    renderChat(<Probe />, { transport: script.transport });
+    act(() => chat().sendMessage('do something'));
+    act(() => script.handlers().onActionProposal({ kind: 'delete_the_repo' }));
+
+    const last = chat().messages[chat().messages.length - 1]!;
+    expect(last.role).toBe('system-note');
+    expect(last.content).toContain('unreadable action draft');
+    // Not a warning, and not an error toast: nothing went wrong with the turn.
+    expect(last.tone).toBe('info');
+    expect(chat().messages[1]!.proposals ?? []).toHaveLength(0);
+
+    // The stream continues.
+    act(() => script.handlers().onDelta('carrying on'));
+    expect(chat().messages[1]!.content).toBe('carrying on');
+  });
+
+  it('persists a proposal with its final state', () => {
+    const script = scriptedTransport();
+    const first = renderChat(<Probe />, { transport: script.transport });
+    act(() => chat().sendMessage('stop it'));
+    act(() =>
+      script.handlers().onActionProposal({
+        kind: 'stop_session',
+        owner: 'acme',
+        name: 'site',
+        trigger_issue_number: 7,
+        reason: 'done',
+        summary: 'Stop it',
+        target: { method: 'DELETE', path: '/api/v1/repos/acme/site/sessions/7' },
+      })
+    );
+    act(() => script.handlers().onDone({ finishReason: 'stop', sessionRefs: [] }));
+    first.unmount();
+
+    renderChat(<Probe />, { transport: scriptedTransport().transport });
+    const restored = chat().messages.find((m) => m.proposals != null)!;
+    expect(restored.proposals).toHaveLength(1);
+    expect(restored.proposals![0]!.state).toBe('idle');
+  });
+
+  it('rehydrates a mid-flight proposal as failed rather than re-running it', () => {
+    // The outcome is genuinely unknowable after a reload, and the one thing that
+    // must never happen is executing it again silently.
+    const stored = [
+      {
+        id: 'a-1',
+        role: 'assistant',
+        content: 'here you go',
+        proposals: [
+          {
+            id: 'p-1',
+            state: 'executing',
+            proposal: {
+              kind: 'stop_session',
+              owner: 'acme',
+              name: 'site',
+              trigger_issue_number: 7,
+              reason: 'done',
+              summary: 'Stop it',
+              target: { method: 'DELETE', path: '/api/v1/repos/acme/site/sessions/7' },
+            },
+          },
+        ],
+      },
+    ];
+    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+
+    renderChat(<Probe />, { transport: scriptedTransport().transport });
+    const entry = chat().messages[0]!.proposals![0]!;
+    expect(entry.state).toBe('failed');
+    expect(entry.error).toBe('restored-unknown');
+  });
+
+  it('dismisses a proposal without touching the transcript', () => {
+    const script = scriptedTransport();
+    renderChat(<Probe />, { transport: script.transport });
+    act(() => chat().sendMessage('stop it'));
+    act(() =>
+      script.handlers().onActionProposal({
+        kind: 'stop_session',
+        owner: 'acme',
+        name: 'site',
+        trigger_issue_number: 7,
+        reason: 'done',
+        summary: 'Stop it',
+        target: { method: 'DELETE', path: '/api/v1/repos/acme/site/sessions/7' },
+      })
+    );
+    const id = chat().messages[1]!.proposals![0]!.id;
+    act(() => chat().dismissProposal(id));
+
+    expect(chat().messages[1]!.proposals).toHaveLength(0);
+    expect(chat().messages[0]!.content).toBe('stop it');
+  });
+
+  it('ignores an execute for an unknown id', () => {
+    const script = scriptedTransport();
+    renderChat(<Probe />, { transport: script.transport });
+    // A no-op rather than a throw: a stale card id must not crash the panel.
+    return expect(chat().executeProposal('no-such-proposal')).resolves.toBeUndefined();
+  });
+
   it('throws outside a provider rather than silently doing nothing', () => {
     // A mis-mounted panel should fail loudly, not look merely broken.
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});

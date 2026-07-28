@@ -11,6 +11,9 @@ import type { ReactNode } from 'react';
 import { useContent } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
 import { useToast } from '@/components/ui/toast';
+import { createTrigger, createWorkItem, stopTrigger } from '@/lib/api/canvas';
+import { mapDraftToRequest, parseActionProposal } from './action-types';
+import type { ActionProposal } from './action-types';
 import { mockEchoTransport } from './transport';
 import type { ChatTransport, ChatTurnMessage, SessionRef } from './transport';
 
@@ -21,6 +24,26 @@ export interface ChatToolEvent {
   /** `undefined` while the call is in flight. */
   status?: number;
   truncated?: boolean;
+}
+
+/** How far a proposal's execution has got.
+ *
+ *  `failed` covers both a rejected mutation and the unknowable case: a transcript
+ *  restored while a request was in flight, where the outcome cannot be recovered. */
+export type ProposalExecState = 'idle' | 'executing' | 'succeeded' | 'failed';
+
+/** A confirm-gated proposal as the UI tracks it. */
+export interface ChatProposal {
+  /** Client-assigned: the wire union carries no id. */
+  id: string;
+  proposal: ActionProposal;
+  state: ProposalExecState;
+  /** Server message on failure, or the restored-mid-flight note. */
+  error?: string;
+  /** The created issue's URL on success. */
+  issueUrl?: string;
+  /** The created issue's number on success — the dashboard deep link needs it. */
+  issueNumber?: number;
 }
 
 /** One entry in the visible transcript.
@@ -38,6 +61,8 @@ export interface ChatMessage {
   toolEvents?: ChatToolEvent[];
   /** Sessions the turn identified, for deep-linking cards. */
   sessionRefs?: SessionRef[];
+  /** Confirm-gated action proposals drafted during this turn. */
+  proposals?: ChatProposal[];
   /** A `system-note` that should read as a warning rather than information. */
   tone?: 'info' | 'warn';
 }
@@ -52,6 +77,17 @@ interface ChatContextValue {
   sendMessage: (text: string) => void;
   stopStreaming: () => void;
   clearTranscript: () => void;
+  /** Execute a reviewed proposal under the user's own token. Nothing ever runs
+   *  without a deliberate call to this. */
+  executeProposal: (id: string) => Promise<void>;
+  /** Drop a proposal the user does not want. */
+  dismissProposal: (id: string) => void;
+  /** Record that a proposal's mutation ALREADY ran elsewhere and succeeded.
+   *
+   *  Exists for exactly one caller: the stop path, where `ConfirmDialog` owns the
+   *  mutation by contract. Calling `executeProposal` after the dialog succeeded
+   *  would close the trigger a second time. */
+  markProposalSucceeded: (id: string) => void;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
@@ -89,6 +125,24 @@ function errorCopy(
   return s.errors[code] ?? fallback ?? s.errors.unknown!;
 }
 
+/** The thread note recording what a confirmed proposal actually created. */
+function outcomeNote(
+  s: ReturnType<typeof useContent>['chat'],
+  proposal: ActionProposal,
+  issueNumber?: number
+): string {
+  const repo = `${proposal.owner}/${proposal.name}`;
+  const template =
+    proposal.kind === 'stop_session'
+      ? s.outcomeStopped
+      : proposal.kind === 'create_session'
+        ? s.outcomeSession
+        : s.outcomeWorkItem;
+  const number =
+    issueNumber ?? ('trigger_issue_number' in proposal ? proposal.trigger_issue_number : 0);
+  return template.replace('{number}', String(number)).replace('{repo}', repo);
+}
+
 /** Read the stored transcript, tolerating anything. A corrupt or foreign value
  *  must degrade to an empty transcript, never break the panel. */
 function readStored(): ChatMessage[] {
@@ -97,16 +151,40 @@ function readStored(): ChatMessage[] {
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (entry): entry is ChatMessage =>
-        typeof entry === 'object' &&
-        entry != null &&
-        typeof (entry as ChatMessage).id === 'string' &&
-        typeof (entry as ChatMessage).content === 'string'
-    );
+    return parsed
+      .filter(
+        (entry): entry is ChatMessage =>
+          typeof entry === 'object' &&
+          entry != null &&
+          typeof (entry as ChatMessage).id === 'string' &&
+          typeof (entry as ChatMessage).content === 'string'
+      )
+      .map(restoreProposals);
   } catch {
     return [];
   }
+}
+
+/** Rehydrate a restored message's proposals.
+ *
+ *  A proposal stored as `executing` is unknowable after a reload: the request may
+ *  have succeeded, failed, or never left. It becomes `failed` with a note telling
+ *  the user to check the dashboard — because the one thing that must NEVER happen
+ *  is re-executing it silently on restore.
+ *
+ *  `RESTORED_UNKNOWN` is a sentinel, not copy: the component localizes it. */
+export const RESTORED_UNKNOWN = 'restored-unknown';
+
+function restoreProposals(message: ChatMessage): ChatMessage {
+  if (message.proposals == null || message.proposals.length === 0) return message;
+  return {
+    ...message,
+    proposals: message.proposals.map((entry) =>
+      entry.state === 'executing'
+        ? { ...entry, state: 'failed' as const, error: RESTORED_UNKNOWN }
+        : entry
+    ),
+  };
 }
 
 function writeStored(messages: ChatMessage[]) {
@@ -146,7 +224,7 @@ export function ChatProvider({
   children: ReactNode;
   transport?: ChatTransport;
 }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, apiFetch } = useAuth();
   const s = useContent().chat;
   const { show: showToast } = useToast();
   const [open, setOpen] = useState(false);
@@ -250,10 +328,31 @@ export function ChatProvider({
                     [...events, { id, name, status, truncated }],
               };
             }),
-          // Rendering a proposal card is the confirm-UI milestone's job. Ignoring it
-          // here — rather than half-rendering one — keeps this surface honest about
-          // what it can actually do with one.
-          onActionProposal: () => {},
+          onActionProposal: (raw) => {
+            const proposal = parseActionProposal(raw);
+            if (proposal == null) {
+              // An unreadable or unrecognized draft becomes a note, NOT an error
+              // toast and never a card: the turn is fine, only this draft is not,
+              // and a card the SPA cannot execute is worse than saying so.
+              setMessages((current) => [
+                ...current,
+                {
+                  id: nextId('n'),
+                  role: 'system-note',
+                  content: s.unreadableProposal,
+                  tone: 'info',
+                },
+              ]);
+              return;
+            }
+            patch(assistantId, (message) => ({
+              ...message,
+              proposals: [
+                ...(message.proposals ?? []),
+                { id: nextId('p'), proposal, state: 'idle' as const },
+              ],
+            }));
+          },
           onDone: ({ sessionRefs }) => {
             patch(assistantId, (message) => ({ ...message, pending: false, sessionRefs }));
             setStreaming(false);
@@ -282,6 +381,140 @@ export function ChatProvider({
     [messages, patch, showToast, s, streaming, transport]
   );
 
+  /** Update one proposal by id, wherever in the transcript it lives. */
+  const patchProposal = useCallback((id: string, update: (entry: ChatProposal) => ChatProposal) => {
+    setMessages((current) =>
+      current.map((message) =>
+        message.proposals?.some((entry) => entry.id === id)
+          ? {
+              ...message,
+              proposals: message.proposals.map((entry) =>
+                entry.id === id ? update(entry) : entry
+              ),
+            }
+          : message
+      )
+    );
+  }, []);
+
+  /** Find a proposal by id across the transcript. */
+  const findProposal = useCallback(
+    (id: string): ChatProposal | undefined =>
+      messages.flatMap((message) => message.proposals ?? []).find((entry) => entry.id === id),
+    [messages]
+  );
+
+  const executeProposal = useCallback(
+    async (id: string) => {
+      const entry = findProposal(id);
+      if (entry == null) return;
+      // Double-submit guard: a `succeeded` proposal never re-runs, and an
+      // `executing` one is already in flight.
+      if (entry.state === 'executing' || entry.state === 'succeeded') return;
+
+      patchProposal(id, (current) => ({ ...current, state: 'executing', error: undefined }));
+      const { proposal } = entry;
+      try {
+        // Only these three whitelisted, typed functions — the exact ones the
+        // dashboard's own buttons call. There is deliberately no generic
+        // method/path executor, so `target` can never drive a request.
+        const result =
+          proposal.kind === 'create_session'
+            ? await createTrigger(
+                apiFetch,
+                proposal.owner,
+                proposal.name,
+                mapDraftToRequest(proposal.request)
+              )
+            : proposal.kind === 'create_work_item'
+              ? await createWorkItem(
+                  apiFetch,
+                  proposal.owner,
+                  proposal.name,
+                  proposal.trigger_issue_number,
+                  {
+                    title: proposal.title,
+                    ...(proposal.label ? { label: proposal.label } : {}),
+                    body: proposal.body,
+                  }
+                )
+              : await stopTrigger(
+                  apiFetch,
+                  proposal.owner,
+                  proposal.name,
+                  proposal.trigger_issue_number
+                );
+
+        if (!result.ok) {
+          patchProposal(id, (current) => ({
+            ...current,
+            state: 'failed',
+            error: result.message ?? s.executeFailed,
+          }));
+          showToast({ kind: 'error', message: result.message ?? s.executeFailed });
+          return;
+        }
+
+        // A created issue carries its own number and URL; a stop returns nothing.
+        const created = result.data as { issue_number?: number; html_url?: string } | null;
+        patchProposal(id, (current) => ({
+          ...current,
+          state: 'succeeded',
+          error: undefined,
+          ...(created?.html_url ? { issueUrl: created.html_url } : {}),
+          ...(created?.issue_number ? { issueNumber: created.issue_number } : {}),
+        }));
+        // A note in the thread so the outcome is part of the conversation, not just
+        // a card the user might scroll past.
+        setMessages((current) => [
+          ...current,
+          {
+            id: nextId('n'),
+            role: 'system-note',
+            content: outcomeNote(s, proposal, created?.issue_number),
+            tone: 'info',
+          },
+        ]);
+      } catch {
+        patchProposal(id, (current) => ({
+          ...current,
+          state: 'failed',
+          error: s.executeFailed,
+        }));
+        showToast({ kind: 'error', message: s.executeFailed });
+      }
+    },
+    [apiFetch, findProposal, patchProposal, s, showToast]
+  );
+
+  const markProposalSucceeded = useCallback(
+    (id: string) => {
+      const entry = findProposal(id);
+      if (entry == null) return;
+      patchProposal(id, (current) => ({ ...current, state: 'succeeded', error: undefined }));
+      setMessages((current) => [
+        ...current,
+        {
+          id: nextId('n'),
+          role: 'system-note',
+          content: outcomeNote(s, entry.proposal),
+          tone: 'info',
+        },
+      ]);
+    },
+    [findProposal, patchProposal, s]
+  );
+
+  const dismissProposal = useCallback((id: string) => {
+    setMessages((current) =>
+      current.map((message) =>
+        message.proposals?.some((entry) => entry.id === id)
+          ? { ...message, proposals: message.proposals.filter((entry) => entry.id !== id) }
+          : message
+      )
+    );
+  }, []);
+
   const clearTranscript = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
@@ -300,8 +533,21 @@ export function ChatProvider({
       sendMessage,
       stopStreaming,
       clearTranscript,
+      executeProposal,
+      dismissProposal,
+      markProposalSucceeded,
     }),
-    [open, messages, streaming, sendMessage, stopStreaming, clearTranscript]
+    [
+      open,
+      messages,
+      streaming,
+      sendMessage,
+      stopStreaming,
+      clearTranscript,
+      executeProposal,
+      dismissProposal,
+      markProposalSucceeded,
+    ]
   );
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
