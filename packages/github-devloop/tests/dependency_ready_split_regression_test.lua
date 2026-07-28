@@ -172,14 +172,14 @@ end
 
 local function run_observe()
   return h.run_department("departments/observe_issue/main.lua", {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_issue_changed",
     payload = h.issue(),
   }, h.opts("ready-split-regression-observe"))
 end
 
 local function run_observe_with_issue(event)
   return h.run_department("departments/observe_issue/main.lua", {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_issue_changed",
     payload = event,
   }, h.opts("ready-split-regression-observe-visible"))
 end

@@ -30,7 +30,7 @@ to decide which PRs are external, claim those PRs, create bridge issues, and wri
 adapter.
 
 Reusing the existing `github-proxy` PR poll plus `github_issue_create_request` effect sink still
-leaves the required policy owner missing. `github_poll` can only publish `github_entity_changed`
+leaves the required policy owner missing. `github_poll` can only publish `github_pr_changed`
 snapshots, while `github_issue_create` can only execute a complete issue-create request already
 prepared by an upstream package. The bridge work is the missing middle: scheduled PR selection,
 external-author/head filtering, claim ownership, bridge body construction, and the

@@ -288,7 +288,7 @@ end
 
 local function run_observe()
   return h.run_department("departments/observe_issue/main.lua", {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_issue_changed",
     payload = h.issue(),
   }, h.opts("dependency-observe"))
 end

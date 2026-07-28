@@ -207,7 +207,7 @@ return {
     mock_board_lists(55, 10)
 
     local event = {
-      queue = "github-proxy.github_entity_changed",
+      queue = "github-proxy.github_issue_changed",
       ts = "2026-06-10T01:02:03Z",
       payload = h.issue(),
     }

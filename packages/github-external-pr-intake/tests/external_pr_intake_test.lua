@@ -415,15 +415,16 @@ return {
     local external_scan_raiser = read_disk_file(package_root .. "/raisers/external_pr_scan.lua")
     local external_intake = read_disk_file(package_root .. "/departments/external_pr_intake/main.lua")
 
-    -- Necessity proof: `github-proxy` can observe generic PR facts and execute
+    -- Necessity proof: `github-proxy` can observe typed PR facts and execute
     -- already-formed issue-create effects, but it has no policy owner for the
     -- required middle step: external PR selection -> bridge issue materialization.
     t.is_true(proxy_raiser:find('produces = "github_poll_tick"', 1, true) ~= nil)
     t.is_true(proxy_raiser:find("external_pr_scan", 1, true) == nil)
     t.is_true(proxy_poll:find('consumes = { "github_poll_tick" }', 1, true) ~= nil)
-    t.is_true(proxy_poll:find('produces = { "github_entity_changed", "github_issue_observed" }', 1, true) ~= nil)
+    t.is_true(proxy_poll:find('produces = { "github_issue_changed", "github_pr_changed", "github_issue_observed" }', 1, true) ~= nil)
     t.is_true(proxy_poll:find('{ type = "pr"', 1, true) ~= nil)
-    t.is_true(proxy_poll:find('raise("github_entity_changed"', 1, true) ~= nil)
+    t.is_true(proxy_poll:find('pr = "github_pr_changed"', 1, true) ~= nil)
+    t.is_true(proxy_poll:find('raise(changed_queues[item.entity_type]', 1, true) ~= nil)
     t.is_true(proxy_poll:find("core.is_external_candidate", 1, true) == nil)
     t.is_true(proxy_poll:find('"github_issue_create_request"', 1, true) == nil)
     t.is_true(proxy_poll:find("external_pr_candidate", 1, true) == nil)
@@ -439,8 +440,8 @@ return {
     t.is_true(proxy_issue_create_core:find("external-pr-bridge:v1", 1, true) == nil)
 
     -- Devloop issue intake admits only GitHub issues already surfaced by the
-    -- proxy entity stream; it has no PR source or bridge materialization policy.
-    t.is_true(devloop_admission:find('"github-proxy.github_entity_changed"', 1, true) ~= nil)
+    -- proxy issue stream; it has no PR source or bridge materialization policy.
+    t.is_true(devloop_admission:find('"github-proxy.github_issue_changed"', 1, true) ~= nil)
     t.is_true(devloop_admission:find("devloop_intake_candidate", 1, true) ~= nil)
     t.is_true(devloop_admission:find("issue_list_intake", 1, true) == nil)
     t.is_true(devloop_admission:find("devloop_intake_tick", 1, true) == nil)

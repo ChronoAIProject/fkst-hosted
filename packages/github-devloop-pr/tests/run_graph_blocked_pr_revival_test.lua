@@ -26,7 +26,7 @@ end
 local function entity_changed_event(updated_at, number)
   local selected_pr_number = number or pr_number
   return {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_pr_changed",
     payload = {
       schema = "github-proxy.v1",
       type = "pr",
@@ -174,7 +174,7 @@ return {
       { max_steps = 3 }
     ))
     graph.assert_covers(head_push_trace, {
-      "github-proxy.github_entity_changed -> github-devloop-pr.observe_pr",
+      "github-proxy.github_pr_changed -> github-devloop-pr.observe_pr",
     })
     t.eq(graph.find_raise(head_push_trace, "github-proxy.github_pr_comment_request"), nil)
     t.eq(graph.find_raise(head_push_trace, "github-devloop-pr.devloop_reviewing"), nil)
@@ -252,7 +252,7 @@ return {
       { max_steps = 12 }
     ))
     graph.assert_covers(reentry_trace, {
-      "github-proxy.github_entity_changed -> github-devloop-pr.observe_pr",
+      "github-proxy.github_pr_changed -> github-devloop-pr.observe_pr",
       "github-proxy.github_pr_comment_request -> github-proxy.github_pr_comment",
       "github-proxy.github_comment_written -> github-devloop-pr.comment_handoff",
       "github-devloop-pr.devloop_reviewing -> github-devloop-pr.review_pr",

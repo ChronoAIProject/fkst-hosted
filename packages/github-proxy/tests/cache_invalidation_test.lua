@@ -81,7 +81,7 @@ return {
     mock_poll()
     local after_write = t.run_department("departments/github_poll/main.lua", poll_event, run_opts)
     t.eq(after_write.exit_code, 0)
-    t.eq(after_write.raises[1].queue, "github_entity_changed")
+    t.eq(after_write.raises[1].queue, "github_issue_changed")
     t.eq(after_write.raises[1].payload.type, "issue")
     t.eq(after_write.raises[1].payload.number, 42)
     t.eq(after_write.raises[1].payload.updated_at, "2026-06-03T01:02:03Z")

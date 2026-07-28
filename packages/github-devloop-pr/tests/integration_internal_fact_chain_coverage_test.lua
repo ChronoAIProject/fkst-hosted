@@ -275,7 +275,7 @@ local function run_observe_pr_direct(run_opts)
     exit_code = 0,
   })
   return t.run_department("departments/observe_pr/main.lua", {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_pr_changed",
     payload = {
       schema = "github-proxy.v1",
       type = "pr",
@@ -290,7 +290,7 @@ end
 local function run_observe_pr_payload(payload, run_opts)
   mock_branch_config_env()
   return t.run_department("departments/observe_pr/main.lua", {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_pr_changed",
     payload = payload,
   }, run_opts)
 end

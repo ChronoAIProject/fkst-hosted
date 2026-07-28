@@ -23,7 +23,7 @@ end
 
 local function initial_event()
   return {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_issue_changed",
     payload = {
       schema = "github-proxy.v1",
       type = "issue",
@@ -188,13 +188,13 @@ return {
 
     local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 12 }))
     graph.assert_covers(trace, {
-      "github-proxy.github_entity_changed -> github-devloop-intake.admission",
+      "github-proxy.github_issue_changed -> github-devloop-intake.admission",
       "github-devloop-intake.devloop_intake_candidate -> github-devloop-intake-default.intake_judge",
       "github-devloop.devloop_execute_request -> github-devloop.execute_start",
     })
 
     local _, admission_index = graph.require_delivery(trace, {
-      queue = "github-proxy.github_entity_changed",
+      queue = "github-proxy.github_issue_changed",
       consumer = "github-devloop-intake.admission",
     })
     local candidate = require_raise_from_step(trace, admission_index, "github-devloop-intake.devloop_intake_candidate", function(raised)

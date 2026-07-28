@@ -90,7 +90,7 @@ end
 
 local function event_for(fixture)
   return {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_pr_changed",
     ts = fixture.tick,
     now_seconds = 1784048400,
     payload = {

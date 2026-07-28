@@ -92,7 +92,7 @@ local function run_pr_observe(pr_state, merged_at)
   mock_env()
   mock_reads(pr_state, merged_at)
   return t.run_department("departments/observe_issue/main.lua", {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_pr_changed",
     payload = {
       schema = "github-proxy.v1",
       type = "pr",
@@ -110,7 +110,7 @@ local function run_issue_observe(pr_state, merged_at, state)
   mock_env()
   mock_reads(pr_state, merged_at, state)
   return t.run_department("departments/observe_issue/main.lua", {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_issue_changed",
     payload = {
       schema = "github-proxy.v1",
       type = "issue",

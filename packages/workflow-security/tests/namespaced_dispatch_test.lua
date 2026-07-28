@@ -75,6 +75,6 @@ return {
   test_reconcile_rejects_foreign_queue = function()
     local handlers = reconcile_handlers()
     t.is_true(not handlers.accept({ queue = "workflow-security.workflow_security_tick" }))
-    t.is_true(not handlers.accept({ queue = "github-proxy.github_entity_changed" }))
+    t.is_true(not handlers.accept({ queue = "github-proxy.github_pr_changed" }))
   end,
 }

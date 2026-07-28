@@ -39,8 +39,8 @@ end
 local function payload_for_queue(queue)
   local payloads = {
     dead_letter = {
-      delivery_id = "delivery/v1/raised/queue/github-devloop-intake.github_entity_changed/dept/github-devloop-intake.admission/01HY",
-      queue = "github-devloop-intake.github_entity_changed",
+      delivery_id = "delivery/v1/raised/queue/github-proxy.github_issue_changed/dept/github-devloop-intake.admission/01HY",
+      queue = "github-proxy.github_issue_changed",
       dept = "github-devloop-intake.admission",
       error_class = "namespaced-dispatch-test",
       dedup_key = "namespaced-dispatch/dead-letter",
@@ -48,7 +48,7 @@ local function payload_for_queue(queue)
       error = "namespaced dispatch test error",
       source_ref = entity_lib.issue_source_ref("owner/repo", 42),
     },
-    ["github-proxy.github_entity_changed"] = {
+    ["github-proxy.github_issue_changed"] = {
       schema = "github-proxy.v1",
       type = "issue",
       repo = "owner/repo",

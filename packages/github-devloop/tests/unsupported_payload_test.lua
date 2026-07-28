@@ -276,7 +276,8 @@ local function payload_for_queue(queue)
         source_ref = { kind = "external", ref = "owner/repo#issue/42" },
       },
     },
-    ["github-proxy.github_entity_changed"] = issue_entity_payload(),
+    ["github-proxy.github_issue_changed"] = issue_entity_payload(),
+    ["github-proxy.github_pr_changed"] = pr_entity_payload(),
     devloop_observe_issue = issue_entity_payload({ source = "liveness-scan" }),
   }
   local payload = payloads[queue]
@@ -324,7 +325,12 @@ local cases = {
   {
     dept = "observe_issue",
     path = "departments/observe_issue/main.lua",
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_issue_changed",
+  },
+  {
+    dept = "observe_issue",
+    path = "departments/observe_issue/main.lua",
+    queue = "github-proxy.github_pr_changed",
   },
   {
     dept = "observe_issue",
@@ -377,7 +383,7 @@ return {
     local handled = queue.dispatch_consumed_queue("test", {
       consumes = { "devloop_ready" },
     }, {
-      queue = "github-proxy.github_entity_changed",
+      queue = "github-proxy.github_issue_changed",
       payload = {},
     }, {
       devloop_ready = function()

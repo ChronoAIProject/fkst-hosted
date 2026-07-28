@@ -28,7 +28,7 @@ end
 local function event(updated_at)
   local selected_updated_at = updated_at or "2026-06-03T01:02:03Z"
   return {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_issue_changed",
     payload = {
       schema = "github-proxy.v1",
       type = "issue",

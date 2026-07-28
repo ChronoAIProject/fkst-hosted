@@ -250,7 +250,7 @@ local function run_observe(issue_comments, pr_comments, opts)
   end
   mock_reads(issue_comments, pr_comments, options)
   return t.run_department("departments/observe_issue/main.lua", {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_issue_changed",
     payload = {
       schema = "github-proxy.v1",
       type = "issue",
@@ -276,7 +276,7 @@ local function run_pr_observe(issue_comments, pr_comments, opts)
   options.pr_view_times = options.pr_view_times or 2
   mock_reads(issue_comments, pr_comments, options)
   return t.run_department("departments/observe_issue/main.lua", {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_pr_changed",
     payload = {
       schema = "github-proxy.v1",
       type = "pr",

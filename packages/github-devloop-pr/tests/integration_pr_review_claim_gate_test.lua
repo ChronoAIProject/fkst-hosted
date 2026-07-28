@@ -87,7 +87,7 @@ end
 local function run_observe_pr_with_integration(event, name, integration_branch)
   mock_observe_pr_env(integration_branch)
   return t.run_department("departments/observe_pr/main.lua", {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_pr_changed",
     payload = event,
   }, opts(name))
 end
@@ -112,7 +112,7 @@ local function run_observe_pr_with_logs(event, name, integration_branch)
     mock_observe_pr_env(integration_branch)
     local module = require("departments.observe_pr.main")
     module.pipeline({
-      queue = "github-proxy.github_entity_changed",
+      queue = "github-proxy.github_pr_changed",
       payload = event,
     })
     return {

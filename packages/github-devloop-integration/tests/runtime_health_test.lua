@@ -118,7 +118,7 @@ return {
               ts = "2026-06-14T09:00:00Z",
             },
             {
-              queue = "github-proxy.github_entity_changed",
+              queue = "github-proxy.github_pr_changed",
               outcome = "skip-foreign",
               ts = "2026-06-14T09:00:00Z",
             },

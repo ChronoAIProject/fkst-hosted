@@ -97,7 +97,7 @@ local function run_observe_pr_with_comments(comments)
     register_all_views = true,
   })
   return t.run_department("departments/observe_pr/main.lua", {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_pr_changed",
     payload = pr_event("2026-06-04T01:02:03Z"),
   }, opts("review-v2-real-review-loop-heartbeat-consumer"))
 end

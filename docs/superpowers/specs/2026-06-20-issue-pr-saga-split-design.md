@@ -329,7 +329,8 @@ child state is terminal.
    from the PR comment stream. The child marker is the durable fact.
 4. If the child state is nonterminal (`pr-open`, `reviewing`, `fixing`,
    `review-meta`, `merge-ready`, `merging`), defer/no-op. The existing liveness
-   sweep redrives via `github_entity_changed`; no terminal queue is needed.
+   sweep redrives observation, while `github_pr_changed` provides the typed child wakeup;
+   no terminal queue is needed.
 5. If the child state is terminal and its lineage matches the delegation:
    - child `merged` → parent issue `merged`, plus the existing issue-close side
      effect in real-write mode.
@@ -366,7 +367,7 @@ mode the operator head-nudge hit.
 - **PR A boundary:** the current package declares the boundary as
   `awaiting-pr + pr-delegation + poll`, not as a push return queue. Conformance
   checks the `awaiting-pr` row as a `child_workflow_wait` poll row driven by
-  `github-proxy.github_entity_changed`, with required facts `state`,
+  `github-proxy.github_pr_changed`, with required facts `state`,
   `pr-delegation`, and child PR `state`.
 - **No push return queue:** `devloop_pr_terminal`, `on_pr_terminal`, `pr-terminal`,
   and `child-completed` are not part of the contract. The parent reducer reads the
@@ -387,8 +388,8 @@ terminal state yet?"
 The liveness shape is pull-based:
 
 - child nonterminal & healthy under the PR row's contract → **defer/no-op**;
-- child state marker stale or missing → the sweep redrives observation with
-  `github-proxy.github_entity_changed`;
+- child state marker stale or missing → the sweep redrives observation; a fresh child
+  poll enters through `github-proxy.github_pr_changed`;
 - child terminal visible and delegation matches → parent CAS resumes from child
   state;
 - child missing/broken beyond bounded `child_workflow_wait` budget → issue `blocked`
@@ -408,7 +409,7 @@ more") close each:
 | Parent writes `awaiting-pr` before child exists | parent waits forever | CAS only after PR start fact visible (§7); key = deterministic branch |
 | Child PR created, parent pointer write fails | orphan PR | `ensure_pr_child` idempotent; reconciler writes missing `pr-delegation` if parent valid |
 | Parent resumes from "some PR for this issue" | wrong PR completes wrong attempt | resume requires delegation child id/version == terminal child id (§8.2) |
-| Parent poll misses a transient delivery wakeup | parent resumes on the next poll | `awaiting-pr` re-reads the child PR `state:v1`; the sweep redrives `github_entity_changed` |
+| Parent poll misses a transient delivery wakeup | parent resumes on the next poll | `awaiting-pr` re-reads the child PR `state:v1`; the sweep redrives observation and the typed poll emits `github_pr_changed` |
 | `merge-ready` copied back to the issue | original desync returns | issue package has no PR-phase symbol (§3/§6); resume only on terminal (§8) |
 | `merge-ready` not bound to head SHA | a push silently invalidates readiness | head-bound invariant (§9) re-verifies head before merge |
 | Issue projection consumed by automation | cache becomes authority | projection is display-only (§6); automation reads the PR stream |

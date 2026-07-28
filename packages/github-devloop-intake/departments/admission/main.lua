@@ -15,13 +15,13 @@ local replay_authorization = require("core.replay_authorization")
 local config = require("devloop.config")
 
 local spec = {
-  consumes = { "github-proxy.github_entity_changed", "github-proxy.github_issue_observed" },
+  consumes = { "github-proxy.github_issue_changed", "github-proxy.github_issue_observed" },
   produces = {
     "devloop_intake_candidate",
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_create_request",
   },
-  fanout = { "github-proxy.github_entity_changed", "github-proxy.github_issue_observed", "devloop_intake_candidate" },
+  fanout = { "github-proxy.github_issue_changed", "github-proxy.github_issue_observed", "devloop_intake_candidate" },
   stall_window = "30s",
 }
 
@@ -341,7 +341,7 @@ local function act_entity_changed(event)
 end
 
 local handlers = {
-  ["github-proxy.github_entity_changed"] = act_entity_changed,
+  ["github-proxy.github_issue_changed"] = act_entity_changed,
   ["github-proxy.github_issue_observed"] = act_issue_observed,
 }
 

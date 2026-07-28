@@ -163,7 +163,7 @@ local function run_observe_pr(name)
     exit_code = 0,
   })
   return t.run_department("departments/observe_pr/main.lua", {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_pr_changed",
     payload = pr_event(),
   }, h.opts(name))
 end
@@ -269,7 +269,7 @@ local function observe_base_unmanaged_self_heal()
 
   mock_base_heal_env()
   local result = t.run_department("departments/observe_pr/main.lua", {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_pr_changed",
     payload = pr_event(),
   }, h.opts("restart-canonicalization-pr-base-unmanaged-self-heal"))
   assert_department_ok(result, "blocked-to-reviewing")

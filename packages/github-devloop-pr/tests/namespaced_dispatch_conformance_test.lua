@@ -80,7 +80,7 @@ local function payload_for_queue(_path, queue)
         source_ref = { kind = "external", ref = "owner/repo#pr/7" },
       },
     },
-    ["github-proxy.github_entity_changed"] = {
+    ["github-proxy.github_pr_changed"] = {
       schema = "github-proxy.v1",
       type = "pr",
       repo = "owner/repo",

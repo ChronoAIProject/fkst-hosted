@@ -337,7 +337,7 @@ return os.getenv("FKST_INTAKE_REPLAY_NESTED") == "1" and {
 
     graph.assert_covers(first, {
       "github-proxy.github_poll_tick -> github-proxy.github_poll",
-      "github-proxy.github_entity_changed -> github-devloop-intake.admission",
+      "github-proxy.github_issue_changed -> github-devloop-intake.admission",
       "github-devloop-intake.devloop_intake_candidate -> github-devloop-intake-default.intake_judge",
     })
     t.eq(first.status, "quiescent")
@@ -353,7 +353,7 @@ return os.getenv("FKST_INTAKE_REPLAY_NESTED") == "1" and {
     t.eq(judge_step.status, "error")
     t.eq(judge_step.exit_code, 1)
     t.is_true(type(judge_step.delivery_id) == "string" and judge_step.delivery_id ~= "")
-    t.is_true(admission_step.queue == "github-proxy.github_entity_changed")
+    t.is_true(admission_step.queue == "github-proxy.github_issue_changed")
 
     t.mock_observe(observe_snapshot({ live_row() }, nil))
     seed_proxy_cache()

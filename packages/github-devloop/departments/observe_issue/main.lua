@@ -29,7 +29,11 @@ local delivery_target = require("devloop.delivery_target")
 local M = {}
 
 local spec = {
-  consumes = { "github-proxy.github_entity_changed", "devloop_observe_issue" },
+  consumes = {
+    "github-proxy.github_issue_changed",
+    "github-proxy.github_pr_changed",
+    "devloop_observe_issue",
+  },
   produces = {
     "consensus.proposal",
     "github-proxy.github_issue_label_request",
@@ -41,7 +45,7 @@ local spec = {
     "devloop_reconcile",
     "devloop_timeout_reconcile",
   },
-  fanout = { "github-proxy.github_entity_changed" },
+  fanout = { "github-proxy.github_issue_changed", "github-proxy.github_pr_changed" },
   stall_window = "30s",
 }
 
@@ -889,12 +893,8 @@ end
 
 return saga.department(spec, { done = function() return false end, act = function(event)
   queue.dispatch_consumed_queue("observe_issue", spec, event, {
-    ["github-proxy.github_entity_changed"] = function(e)
-      if devloop_logging.payload_field(e and e.payload, "type") == "pr" then
-        return process_pr_event(e)
-      end
-      return process_issue_event(e)
-    end,
+    ["github-proxy.github_issue_changed"] = process_issue_event,
+    ["github-proxy.github_pr_changed"] = process_pr_event,
     devloop_observe_issue = process_issue_event,
   })
 end, wrap = devloop_logging.wrap_pipeline_failure, name = "observe_issue" })

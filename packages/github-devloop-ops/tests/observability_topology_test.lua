@@ -101,7 +101,10 @@ local function topology_fixture()
   b.raiser("github-devloop-ops.ensure_repo_poll", "github-devloop-ops.devloop_ensure_repo_tick")
   b.raiser("fkst-substrate-ref-maintainer.substrate_ref_poll", "fkst-substrate-ref-maintainer.devloop_substrate_ref_tick")
 
-  b.department("github-proxy.github_poll", { "github-proxy.github_poll_tick" }, { "github-proxy.github_entity_changed" })
+  b.department("github-proxy.github_poll", { "github-proxy.github_poll_tick" }, {
+    "github-proxy.github_issue_changed",
+    "github-proxy.github_pr_changed",
+  })
   b.department("github-proxy.github_comment", { "github-proxy.github_issue_comment_request" }, { "github-proxy.github_comment_written" })
   b.department("github-proxy.github_pr_comment", { "github-proxy.github_pr_comment_request" }, { "github-proxy.github_comment_written" })
   b.department("github-proxy.github_issue_label", { "github-proxy.github_issue_label_request" }, {})
@@ -111,7 +114,10 @@ local function topology_fixture()
   b.department("consensus.decide", { "consensus.proposal" }, { "consensus.consensus_reached", "consensus.consensus_converge" })
   b.department("consensus.dead_letter", { "consensus.dead_letter" }, {})
 
-  b.department("github-devloop.observe_issue", { "github-proxy.github_entity_changed" }, {
+  b.department("github-devloop.observe_issue", {
+    "github-proxy.github_issue_changed",
+    "github-proxy.github_pr_changed",
+  }, {
     "consensus.proposal",
     "github-devloop.devloop_ready",
     "github-devloop.devloop_reviewing",
@@ -122,7 +128,7 @@ local function topology_fixture()
     "github-devloop.devloop_review_reconcile",
     "github-devloop.devloop_timeout_reconcile",
   })
-  b.department("github-devloop.observe_pr", { "github-proxy.github_entity_changed" }, {
+  b.department("github-devloop.observe_pr", { "github-proxy.github_pr_changed" }, {
     "github-devloop.devloop_reviewing",
     "github-devloop.devloop_fixing",
     "github-devloop-decompose.devloop_decompose",
@@ -131,7 +137,7 @@ local function topology_fixture()
     "github-devloop.devloop_review_reconcile",
     "github-devloop.devloop_timeout_reconcile",
   })
-  b.department("github-devloop-intake.admission", { "github-proxy.github_entity_changed" }, { "github-devloop-intake.devloop_intake_candidate" })
+  b.department("github-devloop-intake.admission", { "github-proxy.github_issue_changed" }, { "github-devloop-intake.devloop_intake_candidate" })
   b.department("github-devloop-intake.intake_judge", { "github-devloop-intake.devloop_intake_candidate" }, { "github-devloop.devloop_execute_request" })
   b.department("github-devloop.execute_start", { "github-devloop.devloop_execute_request" }, { "consensus.proposal" })
   b.department("github-devloop.consensus_result", { "consensus.consensus_reached" }, { "github-proxy.github_issue_comment_request" })

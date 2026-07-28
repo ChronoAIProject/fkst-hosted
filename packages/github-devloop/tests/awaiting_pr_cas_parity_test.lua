@@ -272,7 +272,7 @@ local function run_real_department(fixture)
     source_ref = entity_lib.issue_source_ref(REPO, ISSUE_NUMBER),
   }
   local ok, failure = pcall(observe_issue_department.pipeline, {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_issue_changed",
     payload = event,
   })
   raise = original_raise

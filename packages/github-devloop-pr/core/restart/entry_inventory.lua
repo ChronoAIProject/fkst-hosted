@@ -6,7 +6,7 @@ return {
     kind = "entry",
     source = {
       state = nil,
-      boundary = "github-proxy.github_entity_changed",
+      boundary = "github-proxy.github_pr_changed",
     },
     target = "reviewing",
     pending_order = { participates = false },

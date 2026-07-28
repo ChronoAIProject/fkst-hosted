@@ -214,10 +214,15 @@ local function mock_blocker_issue(number, state)
   })
 end
 
-local function run_issue_observe(name, payload)
+local function run_entity_observe(name, payload)
+  local entity = payload or h.issue()
+  local changed_queue = {
+    issue = "github-proxy.github_issue_changed",
+    pr = "github-proxy.github_pr_changed",
+  }
   return h.run_department("departments/observe_issue/main.lua", {
-    queue = "github-proxy.github_entity_changed",
-    payload = payload or h.issue(),
+    queue = assert(changed_queue[entity.type], "unsupported GitHub entity type"),
+    payload = entity,
   }, h.opts(name))
 end
 
@@ -272,7 +277,7 @@ local function observe_ready_split(target)
 
   local source = core.current_state(comments, proposal_id)
   t.eq(source.state, "ready")
-  local result = run_issue_observe("restart-canonicalization-ready-to-" .. target)
+  local result = run_entity_observe("restart-canonicalization-ready-to-" .. target)
   assert_department_ok(result, "ready-to-" .. target)
   local emitted = find_comment_with(result.raises, "fkst:github-devloop:ready-split-canonicalized:v1")
   t.is_true(emitted ~= nil)
@@ -339,7 +344,7 @@ local function observe_implementing_merged_child()
   local comments = mock_merged_child_reads()
   local source = core.current_state(comments, proposal_id)
   t.eq(source.state, "implementing")
-  local result = run_issue_observe("restart-canonicalization-implementing-awaiting-pr", {
+  local result = run_entity_observe("restart-canonicalization-implementing-awaiting-pr", {
     schema = "github-proxy.v1",
     type = "pr",
     repo = repo,

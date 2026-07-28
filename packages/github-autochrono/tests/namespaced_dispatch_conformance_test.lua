@@ -48,7 +48,7 @@ end
 
 local function payload_for_queue(_path, queue)
   local payloads = {
-    ["github-proxy.github_entity_changed"] = entity_payload(),
+    ["github-proxy.github_issue_changed"] = entity_payload(),
     ["autochrono.reply"] = reply_payload(),
   }
   local payload = payloads[queue]

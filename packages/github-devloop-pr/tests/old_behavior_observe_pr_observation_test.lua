@@ -38,7 +38,7 @@ local V_ORDERING_EQUAL_INCOMING = V_EQUAL .. "/loop/1"
 local function pr_event(fixture)
   local pr_number = fixture.pr_number
   return {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_pr_changed",
     payload = {
       schema = "github-proxy.v1",
       type = "pr",
@@ -259,7 +259,7 @@ local FIXTURES = {
     expected_cas_outcome = "applied",
     expected_effects = 1,
     expected_source_state = JSON_NULL,
-    expected_source_boundary = "github-proxy.github_entity_changed",
+    expected_source_boundary = "github-proxy.github_pr_changed",
   },
   {
     name = "incoming-older",
@@ -329,7 +329,7 @@ local FIXTURES = {
     expected_cas_outcome = "skip-stale(pr-closed)",
     expected_effects = 0,
     expected_source_state = JSON_NULL,
-    expected_source_boundary = "github-proxy.github_entity_changed",
+    expected_source_boundary = "github-proxy.github_pr_changed",
   },
   {
     name = "pr-open-merged-missing-head-sha",

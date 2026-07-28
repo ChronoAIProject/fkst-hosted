@@ -25,7 +25,7 @@ local observe_pr_department = require("departments.observe_pr.main")
 local POLICY_ID = "cas.legacy_observe_pr_v1"
 local VARIANT = "pr_open_to_reviewing"
 local SEMANTIC_VARIANT = "first_seen_pr"
-local SOURCE_BOUNDARY = "github-proxy.github_entity_changed"
+local SOURCE_BOUNDARY = "github-proxy.github_pr_changed"
 local PROPOSAL_ID = "github-devloop/issue/owner/repo/42"
 local BRANCH = "devloop-owner-repo-42-01HY"
 local BASE_BRANCH = "dev"
@@ -188,7 +188,7 @@ local function run_real_department(event)
     table.insert(raises, { queue = queue, payload = payload })
   end
   local ok, failure = pcall(observe_pr_department.pipeline, {
-    queue = "github-proxy.github_entity_changed",
+    queue = "github-proxy.github_pr_changed",
     payload = event,
   })
   raise = original_raise

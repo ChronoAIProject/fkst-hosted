@@ -31,7 +31,7 @@ local expected_entries = {
     row_id = "reviewing",
     output_variant = "first_seen_pr",
     source_state = nil,
-    source_boundary = "github-proxy.github_entity_changed",
+    source_boundary = "github-proxy.github_pr_changed",
     target = "reviewing",
     field = "entry_inventory.first_seen_pr",
     semantic_variant = "first_seen_pr",
@@ -278,7 +278,7 @@ end
 
 local function observe_first_seen_pr_entry()
   local department = require("departments.observe_pr.main")
-  local queue_name = consumed_queue(department.spec, "github-proxy.github_entity_changed")
+  local queue_name = consumed_queue(department.spec, "github-proxy.github_pr_changed")
 
   t.eq(core.current_state({ origin_marker() }, proposal_id).state, nil)
   h.mock_bot_env()
