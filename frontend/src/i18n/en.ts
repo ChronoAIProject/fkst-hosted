@@ -7,6 +7,7 @@ import { canvasModals, reposModals } from './en/modals';
 import { canvasEnv, environmentScalar } from './en/environments';
 import { detail } from './en/detail';
 import { pages } from './en/pages';
+import { chat } from './en/chat';
 import { tour } from './en/tour';
 
 // English catalog, composed from the per-domain modules under `en/`. The split
@@ -27,4 +28,5 @@ export const en: SiteContent = {
   },
   ...pages,
   tour,
+  chat,
 };
