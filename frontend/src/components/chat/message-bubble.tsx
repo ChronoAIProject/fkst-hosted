@@ -61,8 +61,11 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
 
       <ToolActivity events={message.toolEvents ?? []} />
 
+      {/* `flow`, not the boxed preview: the answer IS this message, so it must grow
+          with its content and let the TRANSCRIPT scroll. Boxed would nest a second
+          scroll area inside a scrolling panel and cut the answer mid-sentence. */}
       {message.content !== '' && (
-        <MarkdownPreview markdown={message.content} ariaLabel={s.answerAria} />
+        <MarkdownPreview markdown={message.content} ariaLabel={s.answerAria} variant="flow" />
       )}
 
       {/* Deterministic deep-link cards, derived only from the turn's structured

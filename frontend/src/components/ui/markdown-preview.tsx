@@ -183,14 +183,43 @@ function markdownNodes(markdown: string): ReactNode[] {
   return nodes;
 }
 
+/** How the rendered markdown is framed.
+ *
+ *  `boxed` is the original: a fixed-height, self-scrolling panel — right for a
+ *  PREVIEW of something (an issue body beside a form), where the surrounding page owns
+ *  the layout and the preview must not push it around.
+ *
+ *  `flow` renders the markdown as ordinary content with no box and no height cap —
+ *  right when the markdown IS the content. In the chat transcript the boxed variant
+ *  put a 256px scroll area inside a message inside the already-scrolling transcript:
+ *  answers appeared truncated mid-sentence while the panel below them sat empty, and
+ *  short answers still reserved 132px of blank space. */
+export type MarkdownPreviewVariant = 'boxed' | 'flow';
+
+const VARIANT_CLASSES: Record<MarkdownPreviewVariant, string> = {
+  boxed:
+    'min-h-[132px] max-h-64 overflow-auto rounded-control border border-line bg-glass px-3 py-2.5 leading-5',
+  // No overflow rule of its own: a long answer grows the message and the transcript
+  // scrolls, which is the one scrollbar the reader expects.
+  flow: 'leading-[1.65]',
+};
+
 /** Small, safe GitHub-issue preview. Markdown is converted only to React
  * elements; raw HTML remains text and links are restricted to HTTP(S). */
-export function MarkdownPreview({ markdown, ariaLabel }: { markdown: string; ariaLabel: string }) {
+export function MarkdownPreview({
+  markdown,
+  ariaLabel,
+  variant = 'boxed',
+}: {
+  markdown: string;
+  ariaLabel: string;
+  variant?: MarkdownPreviewVariant;
+}) {
   return (
     <div
       role="region"
       aria-label={ariaLabel}
-      className="min-h-[132px] max-h-64 overflow-auto rounded-control border border-line bg-glass px-3 py-2.5 font-mono text-[12px] leading-5 text-dim space-y-2"
+      className={`font-mono text-[12px] text-dim space-y-2 ${VARIANT_CLASSES[variant]}`}
     >
       {markdownNodes(markdown)}
     </div>
