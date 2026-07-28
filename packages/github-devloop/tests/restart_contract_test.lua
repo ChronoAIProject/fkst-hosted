@@ -371,7 +371,7 @@ return {
   test_liveness_contract_declares_receiver_liveness_for_every_non_terminal_row = function()
     local by_state = table_by_state()
     local expected = {
-      thinking = { mode = "live-defer", codex_run = true, role = "consensus", budget = 150 },
+      thinking = { mode = "live-defer", codex_run = true, role = "consensus", scope = "proposal", budget = 150 },
       dependency_wait = { mode = "live-defer", family = "dependency-wait", resolver = "dependency-hold", max_age = 525600, budget = 525600 },
       ready = { mode = "row-budget-bounds-receiver", receiver = 15, external = 0, budget = 120 },
       implementing = { mode = "live-defer", codex_run = true, role = "implement", budget = 120 },
@@ -387,11 +387,16 @@ return {
       t.eq(row.liveness_contract.mode, spec.mode)
       if spec.mode == "live-defer" then
         if spec.codex_run then
+          local expected_dedup = "state.version"
+          if spec.scope == "proposal" then
+            expected_dedup = nil
+          end
           t.eq(row.liveness_contract.signal, nil)
           t.eq(row.liveness_contract.real_execution.primitive, "fkst.codex_runs")
           t.eq(row.liveness_contract.real_execution.match.role, spec.role)
           t.eq(row.liveness_contract.real_execution.match.proposal_id, "state.proposal_id")
-          t.eq(row.liveness_contract.real_execution.match.dedup_key, "state.version")
+          t.eq(row.liveness_contract.real_execution.match.scope or "execution", spec.scope or "execution")
+          t.eq(row.liveness_contract.real_execution.match.dedup_key, expected_dedup)
         else
           t.eq(row.liveness_contract.signal.family, spec.family)
           t.eq(row.liveness_contract.signal.resolver, spec.resolver)
@@ -538,7 +543,7 @@ return {
           status = "running",
           role = "consensus",
           proposal_id = "github-devloop/issue/owner/repo/42",
-          dedup_key = version,
+          dedup_key = "convergence:consensus:github-devloop/issue/owner/repo/42:g0:r0:teleology",
           started_at = "2026-06-04T00:30:00Z",
           timeout_seconds = 7200,
         },

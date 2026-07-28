@@ -59,7 +59,11 @@ local function assert_inventory_errors(inventory, state, expected)
   t.eq(count, expected_count, state)
 end
 
-local function assert_codex_run_row(row, expected_role, state)
+local function assert_codex_run_row(row, expected_role, state, expected_scope)
+  local expected_dedup = "state.version"
+  if expected_scope == "proposal" then
+    expected_dedup = nil
+  end
   t.eq(row.actionable_epoch.source, "codex_run:v1", state)
   t.eq(row.defer.kind, "codex_run", state)
   t.eq(row.defer.producer, nil, state)
@@ -69,7 +73,8 @@ local function assert_codex_run_row(row, expected_role, state)
   t.eq(row.liveness_contract.real_execution.primitive, "fkst.codex_runs", state)
   t.eq(row.liveness_contract.real_execution.match.role, expected_role, state)
   t.eq(row.liveness_contract.real_execution.match.proposal_id, "state.proposal_id", state)
-  t.eq(row.liveness_contract.real_execution.match.dedup_key, "state.version", state)
+  t.eq(row.liveness_contract.real_execution.match.scope or "execution", expected_scope or "execution", state)
+  t.eq(row.liveness_contract.real_execution.match.dedup_key, expected_dedup, state)
   t.eq(row.liveness_contract.real_execution.status, "running", state)
   t.eq(row.liveness_contract.real_execution.on_error, "defer", state)
   t.eq(row.liveness_contract.real_execution.indeterminate_timeout, "row-budget", state)
@@ -425,7 +430,7 @@ return {
 
   test_live_defer_rows_pass_strict_contract = function()
     local by_state = rows_by_state(core.restart_transition_table())
-    assert_codex_run_row(by_state.thinking, "consensus", "thinking")
+    assert_codex_run_row(by_state.thinking, "consensus", "thinking", "proposal")
     assert_codex_run_row(by_state.implementing, "implement", "implementing")
   end,
 
@@ -505,10 +510,18 @@ return {
     t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.primitive must be fkst.codex_runs"), joined_errors(errors))
     t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.match.role must be non-empty"), joined_errors(errors))
     t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.match.proposal_id must be state.proposal_id"), joined_errors(errors))
-    t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.match.dedup_key must be state.version"), joined_errors(errors))
+    t.is_true(contains_error(errors, "implementing: execution-scoped codex_run defer real_execution.match.dedup_key must be state.version"), joined_errors(errors))
     t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.status must be running"), joined_errors(errors))
     t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.on_error must be defer"), joined_errors(errors))
     t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.indeterminate_timeout must be row-budget"), joined_errors(errors))
+  end,
+
+  test_proposal_scoped_codex_run_is_consensus_only_and_has_no_lane_dedup = function()
+    local row = copy_value(rows_by_state(core.restart_transition_table()).implementing)
+    row.liveness_contract.real_execution.match.scope = "proposal"
+    local errors = core.strict_restart_liveness_contract_errors({ row })
+    t.is_true(contains_error(errors, "implementing: proposal-scoped codex_run defer must use the consensus role"), joined_errors(errors))
+    t.is_true(contains_error(errors, "implementing: proposal-scoped codex_run defer must not declare real_execution.match.dedup_key"), joined_errors(errors))
   end,
 
   test_heartbeat_defer_rejects_clear_fact_shape = function()

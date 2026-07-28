@@ -29,7 +29,9 @@ local function row_matches_role(row, role)
     and type(match) == "table"
     and tostring(match.role or "") == tostring(role or "")
     and match.proposal_id == "state.proposal_id"
-    and (match.dedup_key == "state.version" or match.dedup_key == "state.work_unit_key")
+    and ((match.scope == "proposal" and match.dedup_key == nil)
+      or ((match.scope == nil or match.scope == "execution")
+        and (match.dedup_key == "state.version" or match.dedup_key == "state.work_unit_key")))
 end
 
 local function table_opt(value)

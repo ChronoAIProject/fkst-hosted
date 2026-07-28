@@ -41,9 +41,9 @@ return function(M, h)
       real_execution = {
         primitive = "fkst.codex_runs",
         match = {
+          scope = "proposal",
           role = "consensus",
           proposal_id = "state.proposal_id",
-          dedup_key = "state.version",
         },
         status = "running",
         on_error = "defer",
@@ -142,7 +142,7 @@ return function(M, h)
     },
     version_identity = "strip_transition_version_suffixes(state.version)",
     effects = effect({ "consensus.proposal" }, "consensus proposal dedup is derived from state.version or next complete converge-round"),
-    marker_facts = "active run uses state:v1 thinking plus fkst.codex_runs real execution; converge-round:v1 opens the next output-obligation generation and is not a heartbeat",
+    marker_facts = "active run uses state:v1 thinking plus proposal-scoped consensus lanes from fkst.codex_runs real execution; converge-round:v1 opens the next output-obligation generation and is not a heartbeat",
     kickoff = "consensus.proposal",
     replay = "Initial thinking reuses the state version as proposal dedup; convergence replays the next /loop/N from the latest complete converge-round marker.",
     span_contract = span_contract({
