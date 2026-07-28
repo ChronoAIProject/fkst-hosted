@@ -31,8 +31,8 @@ use crate::goals::section_parse::{
 };
 
 /// The canonical `fkst-substrate-trigger` section headings, in template order.
-const HEADING_SESSION_NAME: &str = "### Session Name";
-const HEADING_PACKAGES: &str = "### Packages";
+pub(crate) const HEADING_SESSION_NAME: &str = "### Session Name";
+pub(crate) const HEADING_PACKAGES: &str = "### Packages";
 /// The OPTIONAL `### Manifest` section (epic #594 I3). Zero or more GitHub
 /// references spelled IDENTICALLY to a `### Packages` line (`owner/repo@ref:path`):
 /// a fkst-manifest is a JSON file that a LATER pass expands into a package list.
@@ -40,25 +40,25 @@ const HEADING_PACKAGES: &str = "### Packages";
 /// are disambiguated POSITIONALLY — a ref under `### Manifest` is a manifest, a ref
 /// under `### Packages` is a package. This PR only PARSES + CARRIES the reference; it
 /// does NOT fetch or expand it.
-const HEADING_MANIFEST: &str = "### Manifest";
-const HEADING_WORK_LABEL: &str = "### Work Label";
-const HEADING_ENVIRONMENT: &str = "### Environment";
-const HEADING_AUTO_MERGE: &str = "### Auto-merge";
-const HEADING_LOG_ACCESS: &str = "### Log Access Allowlist";
+pub(crate) const HEADING_MANIFEST: &str = "### Manifest";
+pub(crate) const HEADING_WORK_LABEL: &str = "### Work Label";
+pub(crate) const HEADING_ENVIRONMENT: &str = "### Environment";
+pub(crate) const HEADING_AUTO_MERGE: &str = "### Auto-merge";
+pub(crate) const HEADING_LOG_ACCESS: &str = "### Log Access Allowlist";
 /// The CURRENT name of the trusted-users section (issue #487). The legacy
 /// [`HEADING_LOG_ACCESS`] heading stays accepted as an alias forever: the
 /// reconciler re-parses live issue bodies every tick, so dropping it would
 /// change existing sessions' parsed list → flip their `full_config_hash` →
 /// false `fkst-config-rejected` across the fleet.
-const HEADING_FKST_CONTRIBUTORS: &str = "### FKST Contributors";
+pub(crate) const HEADING_FKST_CONTRIBUTORS: &str = "### FKST Contributors";
 /// The OPTIONAL work-item collaborators section (issue #572 F3). A separate list
 /// from [`HEADING_FKST_CONTRIBUTORS`]: it will later gate who may raise/label/
 /// comment on the session's WORK issues. F3 only parses + freezes it.
-const HEADING_SESSION_COLLABORATORS: &str = "### Session Collaborators";
-const HEADING_OUTPUT_LANGUAGE: &str = "### Output Language";
-const HEADING_ENGINE_CONFIG: &str = "### Engine Config";
-const HEADING_SOURCE_BRANCH: &str = "### Source Branch";
-const HEADING_TARGET_BRANCH: &str = "### Target Branch";
+pub(crate) const HEADING_SESSION_COLLABORATORS: &str = "### Session Collaborators";
+pub(crate) const HEADING_OUTPUT_LANGUAGE: &str = "### Output Language";
+pub(crate) const HEADING_ENGINE_CONFIG: &str = "### Engine Config";
+pub(crate) const HEADING_SOURCE_BRANCH: &str = "### Source Branch";
+pub(crate) const HEADING_TARGET_BRANCH: &str = "### Target Branch";
 
 /// GitHub caps a label name at 50 characters; the Work Label must fit so the
 /// launcher can apply it verbatim.
@@ -66,7 +66,7 @@ const MAX_WORK_LABEL_LEN: usize = 50;
 
 /// The expected form of one `### Packages` line, echoed in every 422 so the author
 /// can self-correct without leaving the issue.
-const PACKAGE_REF_FORM: &str = "owner/repo@ref:path/to/package";
+pub(crate) const PACKAGE_REF_FORM: &str = "owner/repo@ref:path/to/package";
 
 /// Anchored owner/repo-segment pattern: the safe token set a single `owner` or
 /// `repo` segment of a package reference may draw from (letters, digits, `.`, `_`,
