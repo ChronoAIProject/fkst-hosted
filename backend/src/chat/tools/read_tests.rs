@@ -65,8 +65,8 @@ async fn invoke(
 
 #[test]
 fn the_default_registry_leads_with_the_eight_read_tools() {
-    // Order is the order the model reads: the live-data tools lead, and the in-process
-    // manual search comes last.
+    // Order is the order the model reads: the live-data tools lead, then the
+    // confirm-gated drafting tools, then the in-process manual search.
     let registry = default_registry();
     let names: Vec<String> = registry.defs().into_iter().map(|d| d.name).collect();
     assert_eq!(
@@ -80,9 +80,28 @@ fn the_default_registry_leads_with_the_eight_read_tools() {
             "get_log_manifest",
             "tail_log_file",
             "list_environment_profiles",
+            "draft_trigger_session",
+            "draft_work_item",
+            "propose_stop_session",
             "search_manual",
         ]
     );
+}
+
+#[test]
+fn no_read_tool_ever_drafts_an_action() {
+    // The read surface and the drafting surface are disjoint by construction; this
+    // guards the boundary rather than trusting it.
+    for def in default_registry().defs() {
+        if def.name.starts_with("draft_") || def.name.starts_with("propose_") {
+            continue;
+        }
+        assert!(
+            !def.description.contains("confirm"),
+            "{} is a read tool and must not describe a confirm flow",
+            def.name
+        );
+    }
 }
 
 #[test]

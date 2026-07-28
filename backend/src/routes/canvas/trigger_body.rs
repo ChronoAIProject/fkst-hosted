@@ -260,7 +260,7 @@ fn render_trigger_body(req: &CreateSessionRequest) -> Result<String, AppError> {
 /// reconciler's later 422 on a live issue); any parse-back divergence — which
 /// would mean the created trigger registers something other than what was
 /// requested — fails closed as a 400.
-pub(super) fn validated_trigger_body(req: &CreateSessionRequest) -> Result<String, AppError> {
+pub(crate) fn validated_trigger_body(req: &CreateSessionRequest) -> Result<String, AppError> {
     let body = render_trigger_body(req)?;
     let spec = match parse_trigger_issue_body(&body) {
         Ok(spec) => spec,

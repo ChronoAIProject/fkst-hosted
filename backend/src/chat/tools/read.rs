@@ -74,6 +74,8 @@ async fn dispatch_get(
         }),
         truncated: response.truncated,
         status: Some(response.status),
+        // A read tool never drafts an action.
+        proposal: None,
     })
 }
 

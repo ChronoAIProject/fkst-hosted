@@ -27,7 +27,10 @@ mod overview_broader;
 mod sessions;
 #[cfg(test)]
 pub(crate) mod test_support;
-mod trigger_body;
+// `pub(crate)` so the chat concierge's proposal validator can render a draft with the
+// EXACT renderer the real create-session handler uses — a preview that differs from
+// what confirmation files would be worse than no preview.
+pub(crate) mod trigger_body;
 mod types;
 mod work_item;
 mod work_projection;

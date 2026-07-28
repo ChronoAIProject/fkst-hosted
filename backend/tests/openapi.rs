@@ -584,6 +584,10 @@ async fn chat_path_tracks_configuration() {
         "ChatClientRole",
         "ChatStreamEvent",
         "SessionRef",
+        // The confirm-gated action-proposal payload the SPA renders and executes.
+        "ActionProposal",
+        "ActionTarget",
+        "DraftSessionRequest",
     ] {
         assert!(
             components.get(schema).is_some(),
@@ -591,6 +595,18 @@ async fn chat_path_tracks_configuration() {
             components.as_object().map(|m| m.keys().collect::<Vec<_>>())
         );
     }
+    // A session draft must never carry a field secrets could ride in — the whole reason
+    // it is a dedicated DTO rather than the real create-session request.
+    let draft_properties = components["DraftSessionRequest"]["properties"]
+        .as_object()
+        .expect("DraftSessionRequest properties");
+    for forbidden in ["disposable_environment", "secrets", "variables", "install"] {
+        assert!(
+            !draft_properties.contains_key(forbidden),
+            "DraftSessionRequest must not expose {forbidden}"
+        );
+    }
+
     // Still no application-level auth anywhere, chat included.
     assert!(
         with["components"]["securitySchemes"].as_object().is_none()
