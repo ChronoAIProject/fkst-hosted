@@ -73,6 +73,23 @@ thing. Report it as such — \"you don't have log access to that session\" — a
 rule from the manual if it helps. Do not retry with a different identity: there is none. \
 You act only with this user's own authority, and you never have more than they do.";
 
+/// The rules for the drafting tools. The first sentence is the one that matters: a model
+/// that says "I've started your session" when it only drafted a card has lied to the user
+/// about a state change.
+const PROPOSALS: &str = "\
+ACTIONS. You can never create, change, or stop anything yourself. The `draft_*` and \
+`propose_*` tools only present a card the USER must review and confirm; the confirmation \
+is what performs the action, under their own authority.
+
+- After drafting, say that a card is ready for review. NEVER say the session, work item, \
+or stop has happened.
+- Never put a secret, token, or environment value in a draft. `environment` names a saved \
+profile only.
+- Only draft what the user asked for. Auto-merge bypasses their review, so never enable it \
+unprompted, and stopping a session is permanent — draft it only on a clear request.
+- Tell the user the final authority and collision checks run when they confirm.
+- If a draft is rejected, the error says why; fix it and draft again.";
+
 /// Output format.
 const FORMAT: &str = "\
 FORMAT. Answer concisely in Markdown. Refer to a session as `name (trigger #N)`. When you \
@@ -91,6 +108,7 @@ pub fn system_prompt(toc: &[(String, String)]) -> String {
         TOOL_USE,
         INJECTION_RESISTANCE,
         AUTHORIZATION,
+        PROPOSALS,
         FORMAT,
     ] {
         prompt.push_str(section);

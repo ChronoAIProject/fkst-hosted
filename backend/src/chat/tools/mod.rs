@@ -26,6 +26,7 @@ use super::dispatch::{DispatchError, SelfDispatch};
 use super::llm::ToolDef;
 
 pub mod manual;
+pub mod propose;
 pub mod read;
 
 /// Characters escaped inside a single URL path segment or query value.
@@ -94,6 +95,13 @@ pub struct ToolOutcome {
     /// orchestrator reads `None` as 200). This single field is what the SSE
     /// `tool_result` event and its UI rendering are built on.
     pub status: Option<u16>,
+    /// A confirm-gated action the tool drafted, handed to the orchestrator OUT OF BAND.
+    ///
+    /// It deliberately does not travel through `result_json`: the model already knows
+    /// what it drafted, so re-sending the full payload would only consume context — and
+    /// the user must review the payload the SERVER validated, not whatever the model
+    /// would restate. `None` for every tool that drafts nothing.
+    pub proposal: Option<super::actions::ActionProposal>,
 }
 
 /// A tool-invocation fault. Distinct from "the API returned an error status" —
@@ -241,6 +249,9 @@ pub(crate) fn required_i64(args: &serde_json::Value, key: &str) -> Result<i64, T
 pub fn default_registry() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
     read::register(&mut registry);
+    // The confirm-gated drafting tools. They never write anything: each produces a
+    // proposal the user must review and the SPA executes with the user's own token.
+    propose::register(&mut registry);
     // Last, so the live-data tools lead the list the model reads.
     manual::register(&mut registry);
     registry

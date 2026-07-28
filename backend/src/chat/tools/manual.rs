@@ -82,6 +82,7 @@ impl ChatTool for SearchManual {
             truncated: false,
             // In-process: there is no HTTP status to report.
             status: None,
+            proposal: None,
         })
     }
 }

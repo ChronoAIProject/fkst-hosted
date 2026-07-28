@@ -22,6 +22,9 @@
 //!   with a drift guard tying it to the backend's own label and heading constants.
 //! * [`prompt`] — the system prompt: grounding, injection resistance, and the manual's
 //!   table of contents.
+//! * [`actions`] — confirm-gated action PROPOSALS. The chat backend never executes a
+//!   write: the model drafts, the user confirms, and the SPA calls the pre-existing
+//!   endpoint with its own token.
 //! * [`limits`] — per-user and process-wide admission control for turns.
 //! * [`orchestrator`] — the model↔tools loop, emitting wire events as they happen.
 //!
@@ -33,6 +36,7 @@
 //! path — so a user can never see through chat what they could not see on the
 //! dashboard.
 
+pub mod actions;
 pub mod config;
 pub mod dispatch;
 pub mod knowledge;

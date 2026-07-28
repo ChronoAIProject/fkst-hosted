@@ -194,6 +194,7 @@ async fn run_one_call(
     // Every failure below becomes a tool RESULT the model can react to, not a dead
     // turn: a model that emitted invalid arguments or an unknown tool name can
     // recover within the same turn if it is told what went wrong.
+    let mut proposal = None;
     let (result_json, status, truncated) = match serde_json::from_str::<serde_json::Value>(
         arguments_or_empty(&call.arguments_json),
     ) {
@@ -204,6 +205,7 @@ async fn run_one_call(
         {
             Ok(outcome) => {
                 collect_session_refs(session_refs, &call.name, &args, &outcome.result_json);
+                proposal = outcome.proposal;
                 (outcome.result_json, outcome.status, outcome.truncated)
             }
             Err(error) => {
@@ -241,6 +243,19 @@ async fn run_one_call(
         },
     )
     .await?;
+
+    // A drafted action follows its tool result immediately, so the card lands next to
+    // the sentence introducing it. Several proposals in one turn each get their own
+    // frame; the server keeps none of them — the frame carries everything the SPA needs.
+    if let Some(proposal) = proposal {
+        send(
+            tx,
+            ChatStreamEvent::ActionProposal {
+                proposal: Box::new(proposal),
+            },
+        )
+        .await?;
+    }
 
     messages.push(ChatMessage::tool_result(&call.id, result_json.to_string()));
     Ok(())

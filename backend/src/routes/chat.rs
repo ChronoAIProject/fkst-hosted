@@ -29,6 +29,7 @@ use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use crate::chat::actions::ActionProposal;
 use crate::chat::dispatch::SelfDispatch;
 use crate::chat::orchestrator;
 use crate::chat::tools::ToolCtx;
@@ -115,9 +116,16 @@ pub enum ChatStreamEvent {
         status: u16,
         truncated: bool,
     },
-    /// A confirm-gated action the user may review and execute. Reserved here; the
-    /// action-proposals work emits it.
-    ActionProposal { proposal: serde_json::Value },
+    /// A confirm-gated action the user may review and execute.
+    ///
+    /// The chat backend never performs the action: this frame carries the complete,
+    /// server-validated payload, the user confirms it, and the SPA calls the
+    /// pre-existing REST endpoint with its own token. Nothing is stored server-side.
+    ///
+    /// Boxed because a proposal is far larger than any other frame, and every `Delta`
+    /// would otherwise pay that size. It serializes transparently, so the wire shape is
+    /// unchanged.
+    ActionProposal { proposal: Box<ActionProposal> },
     /// The turn completed normally.
     Done {
         finish_reason: String,

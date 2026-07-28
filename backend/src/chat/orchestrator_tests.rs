@@ -21,6 +21,8 @@ struct StubTool {
     outcome: serde_json::Value,
     status: Option<u16>,
     calls: Arc<Mutex<Vec<serde_json::Value>>>,
+    /// A drafted action to hand back out of band, as the proposal tools do.
+    proposal: Option<crate::chat::actions::ActionProposal>,
 }
 
 #[async_trait]
@@ -43,6 +45,7 @@ impl ChatTool for StubTool {
             result_json: self.outcome.clone(),
             truncated: false,
             status: self.status,
+            proposal: self.proposal.clone(),
         })
     }
 }
@@ -171,6 +174,7 @@ async fn one_tool_round_trip_emits_call_then_result_then_the_answer() {
         outcome: serde_json::json!({ "status": 200, "body": { "accounts": [] } }),
         status: Some(200),
         calls: calls.clone(),
+        proposal: None,
     });
     let client = ScriptedClient::new(vec![
         Ok(vec![
@@ -223,6 +227,7 @@ async fn every_registered_tool_is_advertised_to_the_model() {
         outcome: serde_json::json!({}),
         status: None,
         calls: Arc::new(Mutex::new(Vec::new())),
+        proposal: None,
     });
     let client = ScriptedClient::new(vec![Ok(vec![StreamItem::Done {
         finish_reason: "stop".to_string(),
@@ -245,6 +250,7 @@ async fn an_in_process_tool_without_a_status_reports_200() {
         // In-process tools have no HTTP status.
         status: None,
         calls: Arc::new(Mutex::new(Vec::new())),
+        proposal: None,
     });
     let client = ScriptedClient::new(vec![
         Ok(vec![StreamItem::ToolCalls(vec![call(
@@ -274,6 +280,7 @@ async fn a_denied_tool_call_reports_its_status_and_the_turn_continues() {
         outcome: serde_json::json!({ "status": 403, "body": { "error": "forbidden" } }),
         status: Some(403),
         calls: Arc::new(Mutex::new(Vec::new())),
+        proposal: None,
     });
     let client = ScriptedClient::new(vec![
         Ok(vec![StreamItem::ToolCalls(vec![call(
@@ -372,6 +379,7 @@ async fn a_zero_argument_call_with_an_empty_payload_still_runs() {
         outcome: serde_json::json!({ "status": 200, "body": {} }),
         status: Some(200),
         calls: calls.clone(),
+        proposal: None,
     });
     let client = ScriptedClient::new(vec![
         Ok(vec![StreamItem::ToolCalls(vec![call(
@@ -400,6 +408,7 @@ async fn parallel_tool_calls_each_get_their_own_event_pair() {
             outcome: serde_json::json!({ "status": 200, "body": {} }),
             status: Some(200),
             calls: Arc::new(Mutex::new(Vec::new())),
+            proposal: None,
         }));
     }
     let client = ScriptedClient::new(vec![
@@ -445,6 +454,7 @@ async fn exhausting_the_tool_budget_ends_the_turn_with_a_stable_code() {
         outcome: serde_json::json!({ "status": 200, "body": {} }),
         status: Some(200),
         calls: Arc::new(Mutex::new(Vec::new())),
+        proposal: None,
     });
     // The model calls a tool on every iteration and never answers.
     let turns = (0..2)
@@ -603,6 +613,7 @@ async fn a_sessions_tool_result_yields_deduped_session_refs() {
         outcome: sessions_body("Acme", "Site", &[7, 9]),
         status: Some(200),
         calls: Arc::new(Mutex::new(Vec::new())),
+        proposal: None,
     });
     let client = ScriptedClient::new(vec![
         Ok(vec![StreamItem::ToolCalls(vec![
@@ -648,6 +659,7 @@ async fn a_turn_without_a_sessions_tool_yields_no_refs() {
         outcome: serde_json::json!({ "status": 200, "body": { "accounts": [] } }),
         status: Some(200),
         calls: Arc::new(Mutex::new(Vec::new())),
+        proposal: None,
     });
     let client = ScriptedClient::new(vec![
         Ok(vec![StreamItem::ToolCalls(vec![call(
@@ -674,6 +686,7 @@ async fn a_failed_sessions_lookup_yields_no_refs() {
         outcome: serde_json::json!({ "status": 403, "body": { "error": "forbidden" } }),
         status: Some(403),
         calls: Arc::new(Mutex::new(Vec::new())),
+        proposal: None,
     });
     let client = ScriptedClient::new(vec![
         Ok(vec![StreamItem::ToolCalls(vec![call(
@@ -735,6 +748,7 @@ async fn a_disconnected_client_aborts_the_turn_promptly() {
         outcome: serde_json::json!({ "status": 200, "body": {} }),
         status: Some(200),
         calls: calls.clone(),
+        proposal: None,
     });
     let client = ScriptedClient::new(vec![Ok(vec![
         StreamItem::TextDelta("first".to_string()),
@@ -772,4 +786,155 @@ fn a_short_args_payload_is_previewed_verbatim() {
         truncate_chars(r#"{"owner":"acme"}"#, ARGS_PREVIEW_MAX_CHARS),
         r#"{"owner":"acme"}"#
     );
+}
+
+// ---- action proposals ----------------------------------------------------
+
+#[tokio::test]
+async fn a_drafted_action_is_emitted_right_after_its_tool_result() {
+    // Ordering matters for the UI: the card must land next to the sentence introducing
+    // it, not after the whole answer.
+    let proposal = crate::chat::actions::propose_stop_session("acme", "site", 7, "done")
+        .expect("a valid stop proposal");
+    let registry = registry_with(StubTool {
+        name: "propose_stop_session".to_string(),
+        outcome: serde_json::json!({ "proposal_presented": true, "summary": "Stop it" }),
+        status: None,
+        calls: Arc::new(Mutex::new(Vec::new())),
+        proposal: Some(proposal),
+    });
+    let client = ScriptedClient::new(vec![
+        Ok(vec![StreamItem::ToolCalls(vec![call(
+            "c1",
+            "propose_stop_session",
+            "{}",
+        )])]),
+        Ok(vec![
+            StreamItem::TextDelta("Review the card below.".to_string()),
+            StreamItem::Done {
+                finish_reason: "stop".to_string(),
+            },
+        ]),
+    ]);
+    let events = run(client, registry, vec![user("stop my session")], |_| {}).await;
+    assert_eq!(
+        shape(&events),
+        vec![
+            "tool_call(propose_stop_session)",
+            "tool_result(propose_stop_session,200)",
+            "action_proposal",
+            "delta(Review the card below.)",
+            "done(stop)",
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_proposal_frame_round_trips_through_the_wire_format() {
+    let proposal = crate::chat::actions::propose_create_session(
+        "acme",
+        "site",
+        crate::chat::actions::DraftSessionRequest {
+            name: "sitebuilder".to_string(),
+            packages: vec!["acme/pkgs@main:packages/site".to_string()],
+            manifests: Vec::new(),
+            work_label: Some("site-build".to_string()),
+            environment: None,
+            source_branch: None,
+            target_branch: None,
+            auto_merge: None,
+            log_access: Vec::new(),
+            collaborators: Vec::new(),
+            output_lang: None,
+        },
+    )
+    .expect("a valid session proposal");
+    let registry = registry_with(StubTool {
+        name: "draft_trigger_session".to_string(),
+        outcome: serde_json::json!({ "proposal_presented": true, "summary": "Start it" }),
+        status: None,
+        calls: Arc::new(Mutex::new(Vec::new())),
+        proposal: Some(proposal),
+    });
+    let client = ScriptedClient::new(vec![
+        Ok(vec![StreamItem::ToolCalls(vec![call(
+            "c1",
+            "draft_trigger_session",
+            "{}",
+        )])]),
+        Ok(vec![StreamItem::Done {
+            finish_reason: "stop".to_string(),
+        }]),
+    ]);
+    let events = run(client, registry, vec![user("start a session")], |_| {}).await;
+
+    let frame = events
+        .iter()
+        .find(|event| matches!(event, ChatStreamEvent::ActionProposal { .. }))
+        .expect("a proposal frame");
+    // Serialized exactly as the SSE body would carry it.
+    let json = serde_json::to_value(frame).expect("the frame serializes");
+    assert_eq!(json["type"], "action_proposal");
+    assert_eq!(json["proposal"]["kind"], "create_session");
+    assert!(json["proposal"]["rendered_issue_body"]
+        .as_str()
+        .expect("the rendered body")
+        .contains("### Session Name"));
+}
+
+#[tokio::test]
+async fn several_proposals_in_one_turn_each_get_their_own_frame() {
+    let mut registry = ToolRegistry::new();
+    for (name, trigger) in [("propose_stop_session", 7), ("propose_stop_session_b", 9)] {
+        registry.register(Arc::new(StubTool {
+            name: name.to_string(),
+            outcome: serde_json::json!({ "proposal_presented": true }),
+            status: None,
+            calls: Arc::new(Mutex::new(Vec::new())),
+            proposal: Some(
+                crate::chat::actions::propose_stop_session("acme", "site", trigger, "done")
+                    .expect("valid"),
+            ),
+        }));
+    }
+    let client = ScriptedClient::new(vec![
+        Ok(vec![StreamItem::ToolCalls(vec![
+            call("c1", "propose_stop_session", "{}"),
+            call("c2", "propose_stop_session_b", "{}"),
+        ])]),
+        Ok(vec![StreamItem::Done {
+            finish_reason: "stop".to_string(),
+        }]),
+    ]);
+    let events = run(client, registry, vec![user("stop both")], |_| {}).await;
+    let proposals = events
+        .iter()
+        .filter(|event| matches!(event, ChatStreamEvent::ActionProposal { .. }))
+        .count();
+    assert_eq!(proposals, 2);
+}
+
+#[tokio::test]
+async fn a_tool_that_drafts_nothing_emits_no_proposal_frame() {
+    let registry = registry_with(StubTool {
+        name: "get_overview".to_string(),
+        outcome: serde_json::json!({ "status": 200, "body": {} }),
+        status: Some(200),
+        calls: Arc::new(Mutex::new(Vec::new())),
+        proposal: None,
+    });
+    let client = ScriptedClient::new(vec![
+        Ok(vec![StreamItem::ToolCalls(vec![call(
+            "c1",
+            "get_overview",
+            "{}",
+        )])]),
+        Ok(vec![StreamItem::Done {
+            finish_reason: "stop".to_string(),
+        }]),
+    ]);
+    let events = run(client, registry, vec![user("hi")], |_| {}).await;
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, ChatStreamEvent::ActionProposal { .. })));
 }
