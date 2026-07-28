@@ -75,7 +75,9 @@ local function rest_comments_json(comments)
 end
 
 local function ownership_json()
-  return '{"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n'
+  return '{"number":' .. tostring(origin_issue)
+    .. ',"state":"OPEN","labels":[{"name":"fkst-dev"}]'
+    .. ',"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n'
 end
 
 local function created_materialization_marker(blueprint, slot, predecessor_digest, child_issue)
@@ -144,7 +146,7 @@ local function child_history(proposal_id, issue_number, pr_number, merged)
   return issue_json(
     issue_number,
     "Workflow child",
-    { merged and "fkst-dev:merged" or "fkst-dev:blocked" },
+    { "fkst-dev", merged and "fkst-dev:merged" or "fkst-dev:blocked" },
     { { body = body } }
   )
 end
@@ -164,7 +166,7 @@ local function revived_child_history(state)
   return issue_json(
     revived_child_issue,
     "Workflow child",
-    { "fkst-dev:enabled", "fkst-dev:blocked" },
+    { "fkst-dev", "fkst-dev:enabled", "fkst-dev:blocked" },
     { { body = revived_child_body() } },
     state
   )
@@ -209,7 +211,7 @@ end
 
 local function issue_rest_json()
   return string.format(
-    '{"number":%d,"title":"Workflow child","body":"fixture","state":"open","created_at":"2026-07-10T20:00:00Z","updated_at":"2026-07-12T00:25:02Z","labels":[{"name":"fkst-dev:enabled"},{"name":"fkst-dev:blocked"}],"user":{"login":"fkst-test-bot"},"assignees":[{"login":"fkst-test-bot"}]}\n',
+    '{"number":%d,"title":"Workflow child","body":"fixture","state":"open","created_at":"2026-07-10T20:00:00Z","updated_at":"2026-07-12T00:25:02Z","labels":[{"name":"fkst-dev"},{"name":"fkst-dev:enabled"},{"name":"fkst-dev:blocked"}],"user":{"login":"fkst-test-bot"},"assignees":[{"login":"fkst-test-bot"}]}\n',
     revived_child_issue
   )
 end
@@ -228,9 +230,9 @@ local function mock_materialization_cycle(origin_comments, revived_state, pr_sta
   })
   local full_fields = "title,body,updatedAt,labels,comments,state,assignees,author"
   t.mock_command("gh issue view " .. tostring(origin_issue) .. " --repo " .. repo .. " --json '" .. full_fields .. "'", {
-    stdout = issue_json(origin_issue, "Workflow origin", {}, origin_comments), stderr = "", exit_code = 0,
+    stdout = issue_json(origin_issue, "Workflow origin", { "fkst-dev" }, origin_comments), stderr = "", exit_code = 0,
   })
-  t.mock_command("gh issue view " .. tostring(origin_issue) .. " --repo " .. repo .. " --json 'assignees,author'", {
+  t.mock_command("gh issue view " .. tostring(origin_issue) .. " --repo " .. repo .. " --json 'number,state,labels,assignees,author'", {
     stdout = ownership_json(), stderr = "", exit_code = 0,
   })
   for _ = 1, 2 do
@@ -247,14 +249,14 @@ local function mock_materialization_cycle(origin_comments, revived_state, pr_sta
     mock_pr_view(pr_state or "OPEN")
   end
   if releases_claim then
-    t.mock_command("gh issue view " .. tostring(origin_issue) .. " --repo " .. repo .. " --json 'assignees,author'", {
+    t.mock_command("gh issue view " .. tostring(origin_issue) .. " --repo " .. repo .. " --json 'number,state,labels,assignees,author'", {
       stdout = ownership_json(), stderr = "", exit_code = 0,
     })
   end
 end
 
 local function mock_env()
-  for _ = 1, 9 do
+  for _ = 1, 64 do
     t.mock_command(devloop_base.read_env_command("FKST_GITHUB_REPO"), {
       stdout = repo,
       stderr = "",

@@ -39,6 +39,31 @@ local function mock_authorized_login(login, bot_login, managed_bot_logins)
   })
 end
 
+local function mock_plain_work_scope()
+  for _ = 1, 3 do
+    t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL"', {
+      stdout = "fkst-dev",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
+  t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL_MAP_JSON"', {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_WORK_LABEL_NAMESPACE"', {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_GITHUB_CLAIM_MODE"', {
+    stdout = "assignee",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function count_calls(needle)
   local count = 0
   for _, call in ipairs(t.command_calls()) do
@@ -700,6 +725,26 @@ return {
       author_login = "human",
     }, "github-devloop/issue/owner/repo/42"), false)
     t.eq(m_claims.verify_pr_review_issue_claim("claim_contract", "owner/repo", nil, nil, "github-devloop/pr/owner/repo/7"), false)
+  end,
+
+  test_plain_assignee_pr_guard_rejects_cloud_and_dual_labels_for_the_same_owner = function()
+    local cloud = "fkst-dev-chronoai-fkst-cloud-test"
+    for _, case in ipairs({
+      { labels = { "fkst-dev" }, expected = true },
+      { labels = { cloud }, expected = false },
+      { labels = { "fkst-dev", cloud }, expected = false },
+    }) do
+      mock_bot("fkst-test-bot", "")
+      mock_plain_work_scope()
+
+      local verified = m_claims.verify_pr_review_issue_claim("claim_contract", "owner/repo", 42, {
+        assignees = { "fkst-test-bot" },
+        author_login = "fkst-test-bot",
+        labels = case.labels,
+      }, "github-devloop/issue/owner/repo/42")
+
+      t.eq(verified, case.expected)
+    end
   end,
 
   test_verify_pr_review_issue_claim_uses_configured_claim_owner_before_assert = function()

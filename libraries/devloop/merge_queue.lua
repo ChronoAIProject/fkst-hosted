@@ -494,7 +494,7 @@ function C.wip_capacity_allows_start(M, repo, current_issue_number)
 
   local integration_branch = config.branch_config().integration
   local family_isolation_active = config.work_label_family_isolation_active()
-  local session_work_labels = family_isolation_active and config.session_work_labels() or {}
+  local session_work_scope = family_isolation_active and config.session_work_label_scope() or nil
 
   local list = M.gh_issue_list_wip(repo, 30)
   if list.exit_code ~= 0 then
@@ -512,7 +512,7 @@ function C.wip_capacity_allows_start(M, repo, current_issue_number)
       local current = parsers_issue.parse_issue_view_state(M, view.stdout)
       local proposal_id = base_ids.proposal_id(repo, issue_number)
       local in_scope = not family_isolation_active
-        or config.matches_session_work_label(current.labels, nil, session_work_labels)
+        or config.matches_session_work_label(current.labels, nil, session_work_scope)
       if in_scope then
         local state = M.current_state(current.comments, proposal_id)
         local classification = C.wip_admission_classification(

@@ -68,11 +68,11 @@ local function is_level_replay_candidate_snapshot(entity_type, entity, poll_labe
     and #(entity.assignees or {}) == 0
 end
 
-local function collect_changed(repo, entity_type, entities, fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator, session_work_labels)
+local function collect_changed(repo, entity_type, entities, fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator, session_work_scope)
   for _, entity in ipairs(entities) do
     local in_scope = entity_type ~= "issue"
-      or session_work_labels == nil
-      or config.matches_session_work_label(entity.labels, nil, session_work_labels)
+      or session_work_scope == nil
+      or config.matches_session_work_label(entity.labels, nil, session_work_scope)
     if in_scope then
       local key = core.entity_cache_key(repo, entity_type, entity.number)
       local cached_updated_at = cache_get(key)
@@ -196,7 +196,7 @@ local function raise_changed(repo, fresh_changes, replay_changes, observed_issue
   end
 end
 
-local function poll_entities(repo, event, fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator, session_work_labels)
+local function poll_entities(repo, event, fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator, session_work_scope)
   for _, entity_type in ipairs(entity_types) do
     local ok, result_or_err = core.gh_exec_result(function(timeout)
       return entity_type.read(repo, timeout)
@@ -211,7 +211,7 @@ local function poll_entities(repo, event, fresh_changes, replay_candidates, obse
         error(result_or_err.message)
       end
     else
-      collect_changed(repo, entity_type.type, core.parse_entity_list(result_or_err.stdout, entity_type.type), fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator, session_work_labels)
+      collect_changed(repo, entity_type.type, core.parse_entity_list(result_or_err.stdout, entity_type.type), fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator, session_work_scope)
     end
   end
 end
@@ -227,14 +227,14 @@ local function act(event)
   local poll_label_prefixes = core.github_proxy_poll_label_prefixes()
   local session_creator = config.session_creator()
   local family_isolation_active = config.work_label_family_isolation_active()
-  local session_work_labels = family_isolation_active and config.session_work_labels() or nil
+  local session_work_scope = family_isolation_active and config.session_work_label_scope() or nil
   local fresh_changes = {}
   local replay_candidates = {}
   local observed_issues = nil
   if config.claim_mode() == "assignee" then
     observed_issues = {}
   end
-  poll_entities(repo, event, fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator, session_work_labels)
+  poll_entities(repo, event, fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator, session_work_scope)
   raise_changed(repo, fresh_changes, replay_allowance(replay_candidates, replay_budget), observed_issues, event and event.ts)
 end
 

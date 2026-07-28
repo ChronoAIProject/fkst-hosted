@@ -161,11 +161,11 @@ function C.queue_starvation_recent_closed_merged_issues(M, repo, limits, deadlin
   local issues = parsers_issue.parse_issue_list_recent_closed(listed.stdout)
   local merged = {}
   local family_isolation_active = config.work_label_family_isolation_active()
-  local session_work_labels = family_isolation_active and config.session_work_labels() or {}
+  local session_work_scope = family_isolation_active and config.session_work_label_scope() or nil
   for _, issue in ipairs(issues) do
     local fact = nil
     local in_scope = not family_isolation_active
-      or config.matches_session_work_label(issue.labels, nil, session_work_labels)
+      or config.matches_session_work_label(issue.labels, nil, session_work_scope)
     if in_scope and has_label(issue, M._merged_label) then
       local view = run_observability_adapter(
         M,

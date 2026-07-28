@@ -44,9 +44,12 @@ local function mock_env(max_inflight, delivery_grants, session_work_label)
   t.mock_command('printf %s "$FKST_DEVLOOP_DELIVERY_GRANTS"', {
     stdout = delivery_grants or "[]", stderr = "", exit_code = 0,
   })
-  t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL"', {
-    stdout = session_work_label or "", stderr = "", exit_code = 0,
-  })
+  local session_work_label_reads = session_work_label ~= nil and session_work_label ~= "" and 2 or 1
+  for _ = 1, session_work_label_reads do
+    t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL"', {
+      stdout = session_work_label or "", stderr = "", exit_code = 0,
+    })
+  end
   if session_work_label ~= nil and session_work_label ~= "" then
     for _ = 1, 2 do
       t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL_MAP_JSON"', {

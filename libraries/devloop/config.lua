@@ -213,6 +213,9 @@ function C.work_label_namespace(exec)
 end
 
 function C.work_label_family_isolation_active(exec)
+  if #raw_session_work_labels(exec) > 0 then
+    return true
+  end
   local explicit_map = strings.trim(tostring(C.read_env("FKST_SESSION_WORK_LABEL_MAP_JSON", exec) or ""))
   if explicit_map ~= "" then
     return true
@@ -379,8 +382,42 @@ function C.effective_work_labels(labels, exec)
 end
 
 function C.session_work_labels(exec)
-  local labels = raw_session_work_labels(exec)
-  return C.apply_work_label_map(labels, C.work_label_map(exec, labels))
+  return C.session_work_label_scope(exec).labels
+end
+
+function C.session_work_label_scope(exec)
+  local raw_labels = raw_session_work_labels(exec)
+  local map = C.work_label_map(exec, raw_labels)
+  local labels = C.apply_work_label_map(raw_labels, map)
+  local effective_roots = {}
+  local logical_roots = {}
+
+  for _, effective in ipairs(labels) do
+    effective_roots[effective] = true
+  end
+  for logical, effective in pairs(map) do
+    if effective_roots[effective] then
+      logical_roots[logical] = true
+    end
+  end
+  for _, effective in ipairs(labels) do
+    local mapped = false
+    for _, mapped_effective in pairs(map) do
+      if mapped_effective == effective then
+        mapped = true
+        break
+      end
+    end
+    if not mapped then
+      logical_roots[effective] = true
+    end
+  end
+
+  return {
+    labels = labels,
+    effective_roots = effective_roots,
+    logical_roots = logical_roots,
+  }
 end
 
 function C.effective_label_colors(label_colors, map)
@@ -429,21 +466,59 @@ function C.session_creator(exec)
   return creator
 end
 
-function C.matches_session_work_label(issue_labels, exec, configured_labels)
-  local configured = configured_labels or C.session_work_labels(exec)
+local function normalize_work_label_scope(exec, configured_scope)
+  if type(configured_scope) == "table" and configured_scope.labels ~= nil then
+    return configured_scope
+  end
+  if configured_scope == nil then
+    return C.session_work_label_scope(exec)
+  end
+
+  local effective_roots = {}
+  local logical_roots = {}
+  for _, label in ipairs(configured_scope) do
+    effective_roots[label] = true
+    logical_roots[label] = true
+  end
+  return {
+    labels = configured_scope,
+    effective_roots = effective_roots,
+    logical_roots = logical_roots,
+  }
+end
+
+local function label_root(label)
+  return tostring(label or ""):match("^([^:]+)") or ""
+end
+
+local function is_logical_family_alias(root, logical)
+  return root == logical or root:sub(1, #logical + 1) == logical .. "-"
+end
+
+function C.matches_session_work_label(issue_labels, exec, configured_scope)
+  local scope = normalize_work_label_scope(exec, configured_scope)
+  local configured = scope.labels
   if #configured == 0 then
     return false, "FKST_SESSION_WORK_LABEL is empty"
   end
 
-  local allowed = {}
-  for _, label in ipairs(configured) do
-    allowed[label] = true
-  end
+  local exact_match = false
   for _, label in ipairs(issue_labels or {}) do
     local name = type(label) == "table" and label.name or label
-    if allowed[tostring(name or "")] then
-      return true, nil
+    name = tostring(name or "")
+    if scope.effective_roots[name] then
+      exact_match = true
     end
+
+    local root = label_root(name)
+    for logical in pairs(scope.logical_roots) do
+      if is_logical_family_alias(root, logical) and not scope.effective_roots[root] then
+        return false, "issue carries a conflicting provider work label family"
+      end
+    end
+  end
+  if exact_match then
+    return true, nil
   end
   return false, "issue has no exact configured session work label"
 end

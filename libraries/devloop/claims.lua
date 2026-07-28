@@ -139,8 +139,8 @@ function C.issue_in_session_scope(labels, exec)
   if not config.work_label_family_isolation_active(exec) then
     return true, nil
   end
-  local configured = config.session_work_labels(exec)
-  return config.matches_session_work_label(labels, exec, configured)
+  local scope = config.session_work_label_scope(exec)
+  return config.matches_session_work_label(labels, exec, scope)
 end
 
 -- assignee (default) ⇒ exactly today's behavior. label ⇒ opt-in GitHub App mode.

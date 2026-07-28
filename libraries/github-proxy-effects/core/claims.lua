@@ -88,8 +88,8 @@ local function snapshot_in_session_scope(snapshot)
   if not devloop_config.work_label_family_isolation_active() then
     return true
   end
-  local configured = devloop_config.session_work_labels()
-  return devloop_config.matches_session_work_label(snapshot and snapshot.labels, nil, configured)
+  local scope = devloop_config.session_work_label_scope()
+  return devloop_config.matches_session_work_label(snapshot and snapshot.labels, nil, scope)
 end
 
 local function snapshot_holds_claim(snapshot, claim)

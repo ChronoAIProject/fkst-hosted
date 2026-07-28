@@ -34,6 +34,26 @@ local function run_poll(run_opts, token)
   }, run_opts)
 end
 
+local function mock_plain_session_scope(label, reads)
+  for _ = 1, reads or 4 do
+    t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL"', {
+      stdout = label,
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL_MAP_JSON"', {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command('printf %s "$FKST_WORK_LABEL_NAMESPACE"', {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
+end
+
 return {
   test_assignee_mode_emits_observed_issue_replay = function()
     local run_opts = h.opts("assignee-mode-observation", {
@@ -70,6 +90,34 @@ return {
     t.eq(#second.raises, 0)
   end,
 
+  test_plain_assignee_poll_rejects_cloud_and_ambiguous_dual_label_issues = function()
+    local logical = "fkst-dev"
+    local cloud = "fkst-dev-chronoai-fkst-cloud-test"
+    local run_opts = h.opts("plain-assignee-poll-scope", {
+      FKST_GITHUB_CLAIM_MODE = "assignee",
+      FKST_SESSION_WORK_LABEL = logical,
+    })
+    mock_plain_session_scope(logical)
+    h.mock_repo_env()
+    h.mock_poll_label_prefix_env(logical .. ":")
+    h.mock_proxy_replay_budget_env("10")
+    h.mock_issue_list(h.poll_issue_list_from({
+      issue_with_labels(10, { logical }),
+      issue_with_labels(11, { cloud }),
+      issue_with_labels(12, { logical, cloud }),
+      issue_with_labels(13, { logical, logical .. ":thinking" }),
+      issue_with_labels(14, { cloud, cloud .. ":thinking" }),
+    }))
+    h.mock_pr_list("[]\n")
+
+    local result = run_poll(run_opts, "plain-assignee-poll")
+    t.eq(result.exit_code, 0)
+    local changed = h.changed_raises(result.raises)
+    t.eq(#changed, 2)
+    t.eq(changed[1].payload.number, 10)
+    t.eq(changed[2].payload.number, 13)
+  end,
+
   test_namespaced_poll_emits_only_issues_with_the_exact_effective_base_label = function()
     local logical = "fkst-dev"
     local namespace = "chronoai-fkst-cloud-test"
@@ -80,18 +128,18 @@ return {
       FKST_SESSION_WORK_LABEL_MAP_JSON = string.format('{"%s":"%s"}', logical, effective),
       FKST_WORK_LABEL_NAMESPACE = namespace,
     })
-    t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL"', {
-      stdout = effective,
-      stderr = "",
-      exit_code = 0,
-    })
     for _ = 1, 2 do
-      t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL_MAP_JSON"', {
-        stdout = string.format('{"%s":"%s"}', logical, effective),
+      t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL"', {
+        stdout = effective,
         stderr = "",
         exit_code = 0,
       })
     end
+    t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL_MAP_JSON"', {
+      stdout = string.format('{"%s":"%s"}', logical, effective),
+      stderr = "",
+      exit_code = 0,
+    })
     t.mock_command('printf %s "$FKST_WORK_LABEL_NAMESPACE"', {
       stdout = namespace,
       stderr = "",
@@ -107,6 +155,7 @@ return {
       issue_with_labels(4, { effective .. ":claimed" }),
       issue_with_labels(5, { "fkst-dev-another-provider" }),
       issue_with_labels(6, { effective, effective .. ":thinking" }),
+      issue_with_labels(8, { effective, "fkst-dev" }),
     }))
     h.mock_pr_list("[]\n")
 
@@ -129,11 +178,13 @@ return {
       FKST_SESSION_WORK_LABEL_MAP_JSON = map_json,
       FKST_WORK_LABEL_NAMESPACE = namespace,
     })
-    t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL"', {
-      stdout = "",
-      stderr = "",
-      exit_code = 0,
-    })
+    for _ = 1, 2 do
+      t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL"', {
+        stdout = "",
+        stderr = "",
+        exit_code = 0,
+      })
+    end
     for _ = 1, 2 do
       t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL_MAP_JSON"', {
         stdout = map_json,

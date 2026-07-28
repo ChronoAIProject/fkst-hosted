@@ -115,6 +115,50 @@ return {
     t.is_true(tostring(err):find("does not match FKST_WORK_LABEL_NAMESPACE", 1, true) ~= nil)
   end,
 
+  test_plain_and_namespaced_session_scopes_reject_each_other_and_dual_labels = function()
+    local namespace = "chronoai-fkst-cloud-test"
+    local effective = "fkst-dev-" .. namespace
+    local plain_exec = env_values({
+      [config.read_env_command("FKST_SESSION_WORK_LABEL")] = "fkst-dev",
+    })
+    local cloud_exec = env_values({
+      [config.read_env_command("FKST_WORK_LABEL_NAMESPACE")] = namespace,
+      [config.read_env_command("FKST_SESSION_WORK_LABEL")] = effective,
+      [config.read_env_command("FKST_SESSION_WORK_LABEL_MAP_JSON")] =
+        string.format('{"fkst-dev":"%s"}', effective),
+    })
+
+    t.is_true(config.work_label_family_isolation_active(plain_exec))
+    t.is_true(config.matches_session_work_label({ "fkst-dev" }, plain_exec))
+    t.is_true(not config.matches_session_work_label({ effective }, plain_exec))
+    local plain_dual, plain_reason = config.matches_session_work_label({ "fkst-dev", effective }, plain_exec)
+    t.eq(plain_dual, false)
+    t.eq(plain_reason, "issue carries a conflicting provider work label family")
+
+    t.is_true(config.matches_session_work_label({ effective }, cloud_exec))
+    t.is_true(not config.matches_session_work_label({ "fkst-dev" }, cloud_exec))
+    local cloud_dual, cloud_reason = config.matches_session_work_label({ effective, "fkst-dev" }, cloud_exec)
+    t.eq(cloud_dual, false)
+    t.eq(cloud_reason, "issue carries a conflicting provider work label family")
+    t.is_true(not config.matches_session_work_label({
+      "fkst-dev-another-provider",
+    }, cloud_exec))
+  end,
+
+  test_arbitrary_work_label_families_apply_the_same_provider_conflict_rule = function()
+    local namespace = "chronoai-fkst-cloud-test"
+    for _, logical in ipairs({ "fkst-dev", "fkst-security", "fkst-abcdefg" }) do
+      local effective = logical .. "-" .. namespace
+      local exec = env_values({
+        [config.read_env_command("FKST_WORK_LABEL_NAMESPACE")] = namespace,
+        [config.read_env_command("FKST_SESSION_WORK_LABEL")] = effective,
+      })
+      t.is_true(config.matches_session_work_label({ effective }, exec))
+      t.is_true(not config.matches_session_work_label({ logical }, exec))
+      t.is_true(not config.matches_session_work_label({ effective, logical }, exec))
+    end
+  end,
+
   test_arbitrary_and_overlapping_roots_use_longest_family_match = function()
     local map = {
       ["fkst"] = "fkst-cloud",

@@ -46,7 +46,7 @@ local function mock_proxy_poll_lists()
 end
 
 local function mock_admission_issue_view()
-  entity_read_mocks.mock_issue_view_selector(t, {
+  local issue = {
     repo = repo,
     number = issue_number,
     title = "Fresh unmanaged issue",
@@ -57,7 +57,13 @@ local function mock_admission_issue_view()
     comments = {},
     assignees = { "fkst-test-bot" },
     author_login = "fkst-test-bot",
-  }, "title,body,createdAt,updatedAt,labels,comments,state,assignees,author")
+  }
+  entity_read_mocks.mock_issue_view_selector(t, issue, "number,state,labels,assignees,author")
+  entity_read_mocks.mock_issue_view_selector(
+    t,
+    issue,
+    "title,body,createdAt,updatedAt,labels,comments,state,assignees,author"
+  )
 end
 
 return {
