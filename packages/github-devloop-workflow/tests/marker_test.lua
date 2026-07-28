@@ -299,6 +299,7 @@ local tests = {
     local body = '<!-- fkst:github-devloop-workflow:terminal:v1 origin="' .. origin
       .. '" state="done" reason_code="bad reason" -->'
     t.is_nil(marker.parse_terminal_marker(body, origin))
+    t.is_nil(marker.parse_terminal_marker(body, 42))
   end,
 
   test_lineage_header_round_trip_and_parse_from_body = function()

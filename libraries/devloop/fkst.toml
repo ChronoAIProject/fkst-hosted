@@ -136,6 +136,7 @@ public = [
   "devloop.validators.reviewing",
   "devloop.validators.unresolved",
   "devloop.validators.validate_proposal",
+  "devloop.workflow_terminal",
 ]
 exact = true
 

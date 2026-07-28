@@ -74,6 +74,7 @@
 {"path":"libraries/devloop/strings.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/sweep_bounds.lua","owner":"shared","reason":"sweep budget helpers are shared by issue and PR liveness scans after extraction."}
 {"path":"libraries/devloop/validators.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/workflow_terminal.lua","owner":"shared","reason":"workflow terminal marker grammar is written by workflow orchestration and read by issue dependency completion checks."}
 {"path":"packages/github-devloop-intake-default/departments/intake_judge/main.lua","owner":"intake","reason":"owns default intake route enable and decline policy."}
 {"path":"packages/github-devloop-intake/core/admission.lua","owner":"intake","reason":"core module owns event-driven unmanaged issue admission."}
 {"path":"packages/github-devloop-intake/core/replay_authorization.lua","owner":"intake","reason":"core module owns engine-fact authorization for terminal intake replay."}
