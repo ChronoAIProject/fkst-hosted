@@ -82,6 +82,8 @@ async fn main() -> ExitCode {
         bind_addr = %config.bind_addr,
         request_timeout_secs = config.request_timeout_secs,
         log_level = %config.log_level,
+        // Whether the chat concierge is on — never its endpoint or credential.
+        chat_enabled = config.chat.is_some(),
         "config loaded"
     );
     // Log the RESOLVED auth model (FKST_AUTH_MODEL + the FKST_ACCESS_* lists),
