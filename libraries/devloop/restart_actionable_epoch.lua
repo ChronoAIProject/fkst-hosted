@@ -186,7 +186,8 @@ local function codex_run_progress_epoch(M, row, state, facts)
     comments,
     proposal_id,
     transition_version.strip_suffixes(state and state.version),
-    facts and facts.source_ref
+    facts and facts.source_ref,
+    state and state.marker_created_at
   )
   local epoch_ms = fact_created_ms(latest)
   local round = tonumber(latest and latest.round)

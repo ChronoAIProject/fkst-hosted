@@ -6,13 +6,14 @@ local transition_version = require("contract.transition_version")
 local devloop_logging = require("devloop.logging")
 local v_validate_proposal = require("devloop.validators.validate_proposal")
 
-local function latest_converge_round(caps, comments, proposal_id, state_version, source_ref)
-  local base_version = transition_version.strip_suffixes(state_version)
-  return caps.latest_complete_converge_round(comments, proposal_id, base_version, source_ref)
+local function latest_converge_round(caps, comments, proposal_id, state, source_ref)
+  local base_version = transition_version.strip_suffixes(state and state.version)
+  return caps.latest_complete_converge_round(comments, proposal_id, base_version, source_ref,
+    state and state.marker_created_at)
 end
 
 local function replay_position(caps, current, proposal_id, state, source_ref)
-  local latest = latest_converge_round(caps, current.comments, proposal_id, state.version, source_ref)
+  local latest = latest_converge_round(caps, current.comments, proposal_id, state, source_ref)
   if latest ~= nil then
     local base_version = conv_rounds.converge_proposal_base_dedup(latest.dedup)
     local replay_round = latest.round + 1
@@ -68,9 +69,10 @@ function C.has_converge_replay(caps, current, proposal_id, state, source_ref)
   if state.state ~= "thinking" then
     return false
   end
-  local facts = conv_rounds.converge_round_facts_for_proposal(current.comments, proposal_id)
+  local facts = conv_rounds.converge_round_facts_since(current.comments, proposal_id, state.marker_created_at)
   local round = conv_rounds.max_converge_round(facts)
-  return caps.latest_complete_converge_round(current.comments, proposal_id, nil, source_ref) ~= nil
+  return caps.latest_complete_converge_round(current.comments, proposal_id, nil, source_ref,
+    state.marker_created_at) ~= nil
     or conv_rounds.terminal_cause(facts, round) ~= nil
 end
 
@@ -82,7 +84,8 @@ local function visible_true_stall(M, issue, state, facts)
       return nil
     end
     local base_version = transition_version.strip_suffixes(state.version)
-    local converge_facts = conv_rounds.converge_round_facts_for_proposal(current.comments, proposal_id)
+    local converge_facts = conv_rounds.converge_round_facts_since(current.comments, proposal_id,
+      state.marker_created_at)
     local round = conv_rounds.max_converge_round(converge_facts)
     local terminal_cause = conv_rounds.terminal_cause(converge_facts, round)
     if #converge_facts == 0 or terminal_cause == nil then

@@ -253,6 +253,23 @@ return {
     t.eq(conv_rounds.terminal_cause(filtered, 1), "evidence-continuation-budget-exhausted")
   end,
 
+  test_proposal_lineage_epoch_excludes_prior_thinking_generation = function()
+    local source_digest = convergence_shared.source_ref_digest(source_ref)
+    local old = trusted(conv_rounds.converge_round_marker(proposal_id, base_version .. "/old",
+      source_digest, 1, base_version .. "/old/loop/1", "Old generation", angles()))
+    old.created_at = "2026-06-03T01:00:00Z"
+    local current = trusted(conv_rounds.converge_round_marker(proposal_id, base_version,
+      source_digest, 0, base_version, "Current generation", angles()))
+    current.created_at = "2026-06-03T02:00:00Z"
+
+    local all = conv_rounds.converge_round_facts_since({ old, current }, proposal_id, nil)
+    local current_generation = conv_rounds.converge_round_facts_since(
+      { old, current }, proposal_id, "2026-06-03T02:00:00Z")
+    t.eq(#all, 2)
+    t.eq(#current_generation, 1)
+    t.eq(current_generation[1].round, 0)
+  end,
+
   test_continuation_budget_uses_round_identity_not_findings_presence = function()
     local source_a = convergence_shared.source_ref_digest(source_ref)
     local comments = {

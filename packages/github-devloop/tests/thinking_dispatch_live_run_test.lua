@@ -173,4 +173,47 @@ return {
     t.eq(find_raise(result.raises, "consensus.proposal"), nil)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_comment_request"), nil)
   end,
+
+  test_fresh_thinking_epoch_does_not_inherit_prior_terminal_convergence = function()
+    local event = issue()
+    local original = payloads_builders.build_proposal(event)
+    local old_base = original.dedup_key .. "/prior-generation"
+    local old_round_zero = converge_round_comment(event, original.proposal_id, old_base, 0,
+      "Old question zero", "abstain")
+    old_round_zero.created_at = "2026-06-03T00:00:00Z"
+    local old_round_one = converge_round_comment(event, original.proposal_id, old_base, 1,
+      "Old question one", "abstain")
+    old_round_one.created_at = "2026-06-03T00:05:00Z"
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
+      old_round_zero,
+      old_round_one,
+      {
+        body = core.state_marker(original.proposal_id, "thinking", original.dedup_key),
+        created_at = "2026-06-03T02:00:00Z",
+      },
+    })
+
+    local result = run_observe(event, opts("thinking-fresh-epoch-ignores-old-terminal", {
+      now = "2026-06-03T02:05:00Z",
+    }))
+    t.eq(result.exit_code, 0)
+    local proposal = find_raise(result.raises, "consensus.proposal")
+    t.is_true(proposal ~= nil)
+    t.eq(proposal.payload.dedup_key, original.dedup_key)
+    t.eq(proposal.payload.round, nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_comment_request", function(payload)
+      local handoff = payload.handoff or {}
+      return handoff.kind == "github-devloop.reconcile"
+        or tostring(payload.body or ""):find('state="blocked"', 1, true) ~= nil
+    end), nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request", function(payload)
+      for _, label in ipairs(payload.add_labels or {}) do
+        if label == "fkst-dev:blocked" then
+          return true
+        end
+      end
+      return false
+    end), nil)
+    t.eq(find_raise(result.raises, "devloop_timeout_reconcile"), nil)
+  end,
 }

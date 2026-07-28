@@ -92,7 +92,8 @@ return saga.department(spec, { done = function() return false end, act = functio
     local function build_comment_request(unresolved_for_comment, round_for_comment, marker_body_for_comment, handoff_for_comment)
       return requests_lifecycle.build_converge_round_comment_request(core, repo, issue_number, unresolved_for_comment, round_for_comment, marker_body_for_comment, handoff_for_comment)
     end
-    local lineage = conv_rounds.converge_round_facts_for_proposal(current.comments, unresolved.proposal_id)
+    local lineage = conv_rounds.converge_round_facts_since(current.comments, unresolved.proposal_id,
+      state.marker_created_at)
     local has_lineage = #lineage > 0
     local latest_round = conv_rounds.max_converge_round(lineage)
     local latest_fact = latest_lineage_fact(lineage)

@@ -137,7 +137,8 @@ local function require_marker_fact(M, facts, family)
   end
   if family == "converge-round" then
     local base_version = M.version_loop_round(facts.state.version) > 0 and conv_rounds.converge_base_version(facts.state.version) or nil
-    return M.latest_complete_converge_round(facts.snapshot.comments, facts.proposal_id, base_version, facts.issue.source_ref)
+    return M.latest_complete_converge_round(facts.snapshot.comments, facts.proposal_id, base_version,
+      facts.issue.source_ref, facts.state.marker_created_at)
   end
   if family == "dependency-release" then
     return M.dependency_release_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
