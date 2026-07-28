@@ -38,7 +38,8 @@ local function read_env_command(name)
   if name ~= "FKST_GITHUB_REPO"
     and name ~= "FKST_GITHUB_BOT_LOGIN"
     and name ~= "FKST_DEVLOOP_MANAGED_BOT_LOGINS"
-    and name ~= "FKST_GITHUB_AUTHORIZED_LOGINS" then
+    and name ~= "FKST_GITHUB_AUTHORIZED_LOGINS"
+    and name ~= "FKST_SESSION_WORK_LABEL" then
     error("integration-coverage-producer: invalid-env-name: " .. tostring(name), 0)
   end
   return 'printf %s "$' .. name .. '"'
@@ -135,7 +136,8 @@ end
 
 local function board_is_busy(github, repo)
   local issues = open_issues(github, repo)
-  local count = core.devloop_issue_count(issues)
+  local work_labels = core.parse_work_labels(read_env("FKST_SESSION_WORK_LABEL"))
+  local count = core.devloop_issue_count(issues, work_labels)
   if count > busy_issue_threshold then
     log.info("integration-coverage-producer: skip busy board open_devloop_issues=" .. tostring(count))
     return true

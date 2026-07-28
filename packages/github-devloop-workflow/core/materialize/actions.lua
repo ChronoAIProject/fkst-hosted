@@ -421,10 +421,10 @@ local function label_set(labels)
 end
 
 local function terminal_child_reason(repo, child)
-  local labels = label_set(child and child.labels)
+  local labels = github_view.label_names(child and child.labels)
   for label, _ in pairs(terminal_child_labels) do
-    if labels[label] then
-      return "terminal lifecycle label " .. label .. " is present"
+    if devloop_state.has_label(labels, label) then
+      return "terminal lifecycle label " .. devloop_config.effective_work_label(label) .. " is present"
     end
   end
   local proposal_id = base_ids.proposal_id(repo, child and child.number)

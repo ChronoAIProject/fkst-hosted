@@ -40,6 +40,11 @@ local function mock_env()
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL"', {
+    stdout = "fkst-dev",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command('printf %s "$FKST_GITHUB_WRITE"', {
     stdout = "",
     stderr = "",

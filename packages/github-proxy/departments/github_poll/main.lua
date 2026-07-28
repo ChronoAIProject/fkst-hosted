@@ -68,32 +68,37 @@ local function is_level_replay_candidate_snapshot(entity_type, entity, poll_labe
     and #(entity.assignees or {}) == 0
 end
 
-local function collect_changed(repo, entity_type, entities, fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator)
+local function collect_changed(repo, entity_type, entities, fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator, session_work_labels)
   for _, entity in ipairs(entities) do
-    local key = core.entity_cache_key(repo, entity_type, entity.number)
-    local cached_updated_at = cache_get(key)
-    local level_replay = is_level_replay_candidate_snapshot(entity_type, entity, poll_label_prefixes, session_creator)
-    if level_replay or cached_updated_at ~= entity.updated_at then
-      local item = {
-        entity_type = entity_type,
-        entity = entity,
-        key = key,
-        level_replay = level_replay,
-        replay = cached_updated_at == nil,
-      }
-      item.entity.type = entity_type
-      if item.replay and not item.level_replay then
-        table.insert(replay_candidates, item)
-      else
-        table.insert(fresh_changes, item)
+    local in_scope = entity_type ~= "issue"
+      or session_work_labels == nil
+      or config.matches_session_work_label(entity.labels, nil, session_work_labels)
+    if in_scope then
+      local key = core.entity_cache_key(repo, entity_type, entity.number)
+      local cached_updated_at = cache_get(key)
+      local level_replay = is_level_replay_candidate_snapshot(entity_type, entity, poll_label_prefixes, session_creator)
+      if level_replay or cached_updated_at ~= entity.updated_at then
+        local item = {
+          entity_type = entity_type,
+          entity = entity,
+          key = key,
+          level_replay = level_replay,
+          replay = cached_updated_at == nil,
+        }
+        item.entity.type = entity_type
+        if item.replay and not item.level_replay then
+          table.insert(replay_candidates, item)
+        else
+          table.insert(fresh_changes, item)
+        end
+      elseif observed_issues ~= nil and is_observed_issue_snapshot(entity_type, entity) then
+        entity.type = entity_type
+        table.insert(observed_issues, {
+          entity_type = entity_type,
+          entity = entity,
+          key = key,
+        })
       end
-    elseif observed_issues ~= nil and is_observed_issue_snapshot(entity_type, entity) then
-      entity.type = entity_type
-      table.insert(observed_issues, {
-        entity_type = entity_type,
-        entity = entity,
-        key = key,
-      })
     end
   end
 end
@@ -191,7 +196,7 @@ local function raise_changed(repo, fresh_changes, replay_changes, observed_issue
   end
 end
 
-local function poll_entities(repo, event, fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator)
+local function poll_entities(repo, event, fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator, session_work_labels)
   for _, entity_type in ipairs(entity_types) do
     local ok, result_or_err = core.gh_exec_result(function(timeout)
       return entity_type.read(repo, timeout)
@@ -206,7 +211,7 @@ local function poll_entities(repo, event, fresh_changes, replay_candidates, obse
         error(result_or_err.message)
       end
     else
-      collect_changed(repo, entity_type.type, core.parse_entity_list(result_or_err.stdout, entity_type.type), fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator)
+      collect_changed(repo, entity_type.type, core.parse_entity_list(result_or_err.stdout, entity_type.type), fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator, session_work_labels)
     end
   end
 end
@@ -221,13 +226,15 @@ local function act(event)
   local replay_budget = core.github_proxy_replay_budget()
   local poll_label_prefixes = core.github_proxy_poll_label_prefixes()
   local session_creator = config.session_creator()
+  local family_isolation_active = config.work_label_family_isolation_active()
+  local session_work_labels = family_isolation_active and config.session_work_labels() or nil
   local fresh_changes = {}
   local replay_candidates = {}
   local observed_issues = nil
   if config.claim_mode() == "assignee" then
     observed_issues = {}
   end
-  poll_entities(repo, event, fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator)
+  poll_entities(repo, event, fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator, session_work_labels)
   raise_changed(repo, fresh_changes, replay_allowance(replay_candidates, replay_budget), observed_issues, event and event.ts)
 end
 

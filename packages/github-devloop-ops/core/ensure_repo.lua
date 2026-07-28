@@ -135,11 +135,11 @@ local function write_dashboard_anchor_input(repo)
   return path
 end
 
-local function ensure_labels(repo, mode, existing_labels)
+local function ensure_labels(repo, mode, existing_labels, desired_labels)
   local existing = label_index(existing_labels)
   local missing = {}
   local drifted = {}
-  for _, desired in ipairs(canonical_labels) do
+  for _, desired in ipairs(desired_labels) do
     local current = existing[desired.name]
     if current == nil then
       table.insert(missing, desired)
@@ -393,9 +393,23 @@ function M.ensure_repo_label_specs()
   return copy
 end
 
+local function effective_label_specs(specs, map)
+  local effective = {}
+  for _, label in ipairs(specs) do
+    effective[#effective + 1] = {
+      name = config.apply_work_label_map_to_label(label.name, map),
+      color = label.color,
+      description = label.description,
+    }
+  end
+  return effective
+end
+
 function M.ensure_repo()
   local cfg = config.devloop_config()
   local repo = require_repo(cfg.repo)
+  local work_label_map = config.work_label_map()
+  local lifecycle_labels = effective_label_specs(canonical_labels, work_label_map)
   if cfg.write_mode == "real" then
     devloop_base.assert_trusted_bot_configured()
   end
@@ -414,7 +428,7 @@ function M.ensure_repo()
   if topology_result.held then
     apply_mode = "held"
   end
-  local label_result = ensure_labels(repo, apply_mode, repo_labels)
+  local label_result = ensure_labels(repo, apply_mode, repo_labels, lifecycle_labels)
   local dashboard_label_result = ensure_label(repo, apply_mode, repo_labels, {
     name = dashboard_label,
     color = "ededed",
@@ -425,7 +439,7 @@ function M.ensure_repo()
   local claim_label_result = nil
   if config.claim_mode() == "label" then
     claim_label_result = ensure_label(repo, apply_mode, repo_labels, {
-      name = m_claims.claimed_label(),
+      name = config.apply_work_label_map_to_label(m_claims.claimed_label(), work_label_map),
       color = "0E8A16",
       description = "fkst-dev-label-mode-ownership-claim",
     })

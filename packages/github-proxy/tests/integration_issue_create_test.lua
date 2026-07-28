@@ -394,7 +394,7 @@ return {
     t.is_true(first_call_index("gh pr comment") < first_call_index("gh issue create"))
   end,
 
-  test_issue_create_translates_only_exact_work_labels_at_the_adapter_boundary = function()
+  test_issue_create_translates_complete_work_label_families_at_the_adapter_boundary = function()
     local payload = event({
       labels = { "fkst-dev", "fkst-dev:claimed", "bug" },
     }).payload
@@ -431,7 +431,7 @@ return {
     local create = h.calls_matching("gh issue create")[1]
     local rendered = create.rendered
     t.is_true(has_arg_pair(rendered, "--label", "fkst-dev-chronoai-fkst"), rendered)
-    t.is_true(has_arg_pair(rendered, "--label", "fkst-dev:claimed"), rendered)
+    t.is_true(has_arg_pair(rendered, "--label", "fkst-dev-chronoai-fkst:claimed"), rendered)
     t.is_true(has_arg_pair(rendered, "--label", "bug"), rendered)
     t.is_true(not has_arg_pair(rendered, "--label", "fkst-dev"), rendered)
   end,

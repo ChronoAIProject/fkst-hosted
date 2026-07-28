@@ -18,6 +18,8 @@ local REPO = "owner/repo"
 local INTEGRATION = "integration/dev"
 local IMPLEMENTATION_REPO = "owner/implementation"
 local IMPLEMENTATION_BRANCH = "fkst-hosted"
+local WORK_LABEL_NAMESPACE = "chronoai-fkst-cloud-test"
+local LOGICAL_WORK_LABEL = "fkst-dev"
 
 local function render_comment(body)
   return string.format(
@@ -26,7 +28,7 @@ local function render_comment(body)
   )
 end
 
-local function mock_env(max_inflight, delivery_grants)
+local function mock_env(max_inflight, delivery_grants, session_work_label)
   author_policy.mock_env(t, nil, {
     configure_trusted_bot_login = h.mock_author_policy_configure,
   })
@@ -42,6 +44,21 @@ local function mock_env(max_inflight, delivery_grants)
   t.mock_command('printf %s "$FKST_DEVLOOP_DELIVERY_GRANTS"', {
     stdout = delivery_grants or "[]", stderr = "", exit_code = 0,
   })
+  t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL"', {
+    stdout = session_work_label or "", stderr = "", exit_code = 0,
+  })
+  if session_work_label ~= nil and session_work_label ~= "" then
+    for _ = 1, 2 do
+      t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL_MAP_JSON"', {
+        stdout = string.format('{"%s":"%s"}', LOGICAL_WORK_LABEL, session_work_label),
+        stderr = "",
+        exit_code = 0,
+      })
+    end
+    t.mock_command('printf %s "$FKST_WORK_LABEL_NAMESPACE"', {
+      stdout = WORK_LABEL_NAMESPACE, stderr = "", exit_code = 0,
+    })
+  end
 end
 
 local function mock_wip_list(numbers)
@@ -55,7 +72,7 @@ local function mock_wip_list(numbers)
 end
 
 -- markers may be nil to model an implementing holder with no pr-link yet
-local function mock_wip_state(issue_number, state_name, base_branch, implementation_repo)
+local function mock_wip_state(issue_number, state_name, base_branch, implementation_repo, labels)
   local proposal_id = base_ids.proposal_id(REPO, issue_number)
   local version = "ready/consensus-github-devloop/issue/owner/repo/" .. tostring(issue_number) .. "/intake/1/loop/1"
   local comments = { render_comment(core.state_marker(proposal_id, state_name, version)) }
@@ -72,7 +89,14 @@ local function mock_wip_state(issue_number, state_name, base_branch, implementat
   end
   t.mock_command(core.gh_issue_view_state_cmd(REPO, issue_number), {
     stdout = string.format(
-      '{"title":"Issue","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
+      '{"title":"Issue","state":"OPEN","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
+      table.concat((function()
+        local rendered = {}
+        for _, label in ipairs(labels or { "fkst-dev:enabled" }) do
+          rendered[#rendered + 1] = string.format('{"name":"%s"}', label)
+        end
+        return rendered
+      end)(), ","),
       table.concat(comments, ",")
     ),
     stderr = "", exit_code = 0,
@@ -211,5 +235,23 @@ return {
     t.eq(reason, "wip-cap-reached")
     t.eq(count, 1)
     t.eq(max, 1)
+  end,
+
+  test_namespaced_wip_cap_excludes_local_and_other_provider_issues = function()
+    local effective = "fkst-dev-chronoai-fkst-cloud-test"
+    mock_env(2, nil, effective)
+    mock_wip_list({ 51, 52, 53 })
+    mock_wip_state(51, "implementing", nil, nil, { "fkst-dev", "fkst-dev:implementing" })
+    mock_wip_state(52, "implementing", nil, nil, { effective, effective .. ":implementing" })
+    mock_wip_state(53, "implementing", nil, nil, {
+      "fkst-dev-another-provider",
+      "fkst-dev-another-provider:implementing",
+    })
+
+    local allowed, reason, count, max = m_mq.wip_capacity_allows_start(core, REPO, 42)
+    t.eq(allowed, true)
+    t.eq(reason, "wip-cap-available")
+    t.eq(count, 1)
+    t.eq(max, 2)
   end,
 }

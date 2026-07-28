@@ -1,5 +1,6 @@
 local testing = require("testkit.testing")
 local github_fake = require("forge.github_fake")
+local core = require("core")
 local produce = require("departments.produce.main")
 local t = fkst.test
 
@@ -56,6 +57,11 @@ end
 local function mock_env()
   t.mock_command('printf %s "$FKST_GITHUB_REPO"', {
     stdout = "owner/repo",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL"', {
+    stdout = "fkst-dev",
     stderr = "",
     exit_code = 0,
   })
@@ -144,6 +150,18 @@ local function checker_call()
 end
 
 return {
+  test_busy_label_count_uses_only_the_configured_effective_family = function()
+    local root = "fkst-dev-chronoai-fkst-cloud-test"
+    local issues = {
+      { state = "OPEN", labels = { root .. ":ready" } },
+      { state = "OPEN", labels = { root .. ":thinking" } },
+      { state = "OPEN", labels = { "fkst-dev:reviewing" } },
+      { state = "OPEN", labels = { "fkst-dev-another-provider:fixing" } },
+      { state = "CLOSED", labels = { root .. ":merged" } },
+    }
+    t.eq(core.devloop_issue_count(issues, { root }), 2)
+  end,
+
   test_uncovered_edges_on_idle_board_produces_one_coverage_issue = function()
     mock_env()
     mock_checker(checker_fixture, 1)

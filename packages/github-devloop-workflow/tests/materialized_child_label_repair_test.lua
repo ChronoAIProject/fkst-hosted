@@ -2,6 +2,7 @@ local actions = require("core.materialize.actions")
 local base_ids = require("devloop.base_ids")
 local core = require("core")
 local devloop_base = require("devloop.base")
+local devloop_config = require("devloop.config")
 local devloop_state = require("devloop.state")
 local digest = require("core.digest")
 local marker = require("core.marker")
@@ -94,9 +95,13 @@ local function copy_entry()
   return copy
 end
 
-local function namespaced_exec()
+local function namespaced_exec(command)
+  local stdout = ""
+  if command == devloop_config.read_env_command("FKST_SESSION_WORK_LABEL_MAP_JSON") then
+    stdout = [[{"fkst-dev":"fkst-dev-chronoai-fkst","fkst-security":"fkst-security-chronoai-fkst"}]]
+  end
   return {
-    stdout = [[{"fkst-dev":"fkst-dev-chronoai-fkst","fkst-security":"fkst-security-chronoai-fkst"}]],
+    stdout = stdout,
     stderr = "",
     exit_code = 0,
   }

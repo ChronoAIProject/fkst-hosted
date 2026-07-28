@@ -15,6 +15,7 @@ local allowed_env = {
   FKST_SESSION_CREATOR = true,
   FKST_SESSION_WORK_LABEL = true,
   FKST_SESSION_WORK_LABEL_MAP_JSON = true,
+  FKST_WORK_LABEL_NAMESPACE = true,
   FKST_GITHUB_WRITE = true,
   FKST_DEVLOOP_UPSTREAM_BRANCH = true,
   FKST_DEVLOOP_INTEGRATION_BRANCH = true,
@@ -110,7 +111,7 @@ function C.parse_session_work_labels(value)
   return labels
 end
 
-function C.session_work_labels(exec)
+local function raw_session_work_labels(exec)
   return C.parse_session_work_labels(C.read_env("FKST_SESSION_WORK_LABEL", exec))
 end
 
@@ -188,13 +189,175 @@ function C.parse_work_label_map_json(raw)
   return map
 end
 
-function C.work_label_map(exec)
-  return C.parse_work_label_map_json(C.read_env("FKST_SESSION_WORK_LABEL_MAP_JSON", exec))
+function C.parse_work_label_namespace(raw)
+  local namespace = strings.trim(tostring(raw or ""))
+  if namespace == "" then
+    return nil
+  end
+  if #namespace > github_label_name_max_chars - 2 then
+    error("github-devloop: invalid FKST_WORK_LABEL_NAMESPACE: must be at most 48 characters")
+  end
+  if namespace:find("^[a-z0-9-]+$") == nil
+    or namespace:sub(1, 1) == "-"
+    or namespace:sub(-1) == "-"
+    or namespace:find("--", 1, true) ~= nil then
+    error(
+      "github-devloop: invalid FKST_WORK_LABEL_NAMESPACE: must be a lowercase ASCII slug with single interior hyphens"
+    )
+  end
+  return namespace
+end
+
+function C.work_label_namespace(exec)
+  return C.parse_work_label_namespace(C.read_env("FKST_WORK_LABEL_NAMESPACE", exec))
+end
+
+function C.work_label_family_isolation_active(exec)
+  local explicit_map = strings.trim(tostring(C.read_env("FKST_SESSION_WORK_LABEL_MAP_JSON", exec) or ""))
+  if explicit_map ~= "" then
+    return true
+  end
+  return C.work_label_namespace(exec) ~= nil
+end
+
+local function validate_namespaced_mapping(logical, effective, namespace)
+  validate_work_label_map_entry("logical label", logical)
+  local effective_length = validate_work_label_map_entry("effective label", effective)
+  local expected = logical .. "-" .. namespace
+  if effective ~= expected then
+    error(
+      "github-devloop: invalid FKST_SESSION_WORK_LABEL_MAP_JSON: effective label does not match FKST_WORK_LABEL_NAMESPACE"
+    )
+  end
+  if effective_length > github_label_name_max_chars then
+    error(
+      "github-devloop: invalid FKST_SESSION_WORK_LABEL_MAP_JSON: effective label exceeds GitHub's 50-character limit"
+    )
+  end
+end
+
+local function derive_namespaced_mapping(configured_label, namespace)
+  local label = tostring(configured_label or "")
+  validate_work_label_map_entry("session work label", label)
+  local namespace_suffix = "-" .. namespace
+  if #label > #namespace_suffix and label:sub(-#namespace_suffix) == namespace_suffix then
+    return label:sub(1, #label - #namespace_suffix), label
+  end
+  return label, label .. namespace_suffix
+end
+
+-- The explicit map is useful for diagnostics and removes any ambiguity about
+-- logical identities. The namespace remains the authority: when the map is
+-- absent it is reconstructed from FKST_SESSION_WORK_LABEL, and when both are
+-- present every entry must agree exactly. This prevents a malformed runtime
+-- injection from silently falling back to a generic or foreign provider family.
+function C.work_label_map(exec, configured_labels)
+  local map = C.parse_work_label_map_json(C.read_env("FKST_SESSION_WORK_LABEL_MAP_JSON", exec))
+  local namespace = C.work_label_namespace(exec)
+  if namespace == nil then
+    return map
+  end
+
+  local owner_by_effective_label = {}
+  for logical, effective in pairs(map) do
+    validate_namespaced_mapping(logical, effective, namespace)
+    owner_by_effective_label[effective:lower()] = logical
+  end
+
+  local labels = configured_labels or raw_session_work_labels(exec)
+  for _, configured_label in ipairs(labels) do
+    local logical, effective = derive_namespaced_mapping(configured_label, namespace)
+    validate_namespaced_mapping(logical, effective, namespace)
+    if map[logical] ~= nil and map[logical] ~= effective then
+      error(
+        "github-devloop: invalid FKST_SESSION_WORK_LABEL_MAP_JSON: session work label conflicts with explicit mapping"
+      )
+    end
+    local folded = effective:lower()
+    local owner = owner_by_effective_label[folded]
+    if owner ~= nil and owner ~= logical then
+      error("github-devloop: invalid FKST_SESSION_WORK_LABEL_MAP_JSON: effective labels collide case-insensitively")
+    end
+    owner_by_effective_label[folded] = logical
+    map[logical] = effective
+  end
+  return map
+end
+
+local function utf8_prefix(value, character_count)
+  if character_count <= 0 then
+    return ""
+  end
+  local next_byte = utf8.offset(value, character_count + 1)
+  if next_byte == nil then
+    return value
+  end
+  return value:sub(1, next_byte - 1)
+end
+
+local function compact_derived_label(root, suffix, expanded)
+  local _, expanded_length = valid_utf8(expanded)
+  if expanded_length <= github_label_name_max_chars then
+    return expanded
+  end
+
+  -- Preserve the complete effective work-label root. Only an overlong derived
+  -- suffix is compacted, and its checksum keeps the result deterministic. This
+  -- matters for provider namespaces whose readable root fits GitHub while a long
+  -- lifecycle suffix (for example blocked-on-dependency) does not.
+  local _, root_length = valid_utf8(root)
+  local checksum = strings.decimal_checksum(expanded)
+  local readable_suffix_chars = github_label_name_max_chars
+    - root_length
+    - 1 -- colon
+    - 1 -- checksum separator
+    - #checksum
+  if readable_suffix_chars < 1 then
+    error(
+      "github-devloop: derived effective label exceeds GitHub's 50-character limit and its work-label root leaves no room for deterministic compaction"
+    )
+  end
+  return root .. ":" .. utf8_prefix(suffix, readable_suffix_chars) .. "-" .. checksum
+end
+
+local function sorted_logical_roots(map)
+  local roots = {}
+  for logical in pairs(type(map) == "table" and map or {}) do
+    roots[#roots + 1] = logical
+  end
+  table.sort(roots, function(left, right)
+    local left_length = select(2, valid_utf8(left)) or #left
+    local right_length = select(2, valid_utf8(right)) or #right
+    if left_length ~= right_length then
+      return left_length > right_length
+    end
+    return left < right
+  end)
+  return roots
+end
+
+-- Translate one logical GitHub label through the declared work-label FAMILY.
+-- A root maps exactly, and root:suffix maps to effective-root:suffix. Unrelated
+-- labels are untouched. Longest-root matching makes overlapping declarations
+-- deterministic (for example `fkst` and `fkst-dev`).
+function C.apply_work_label_map_to_label(logical, map)
+  local label = tostring(logical or "")
+  for _, root in ipairs(sorted_logical_roots(map)) do
+    if label == root then
+      return map[root]
+    end
+    local prefix = root .. ":"
+    if label:sub(1, #prefix) == prefix then
+      local suffix = label:sub(#prefix + 1)
+      local effective_root = map[root]
+      return compact_derived_label(effective_root, suffix, effective_root .. ":" .. suffix)
+    end
+  end
+  return label
 end
 
 function C.effective_work_label(logical, exec)
-  local label = tostring(logical or "")
-  return C.work_label_map(exec)[label] or label
+  return C.apply_work_label_map_to_label(logical, C.work_label_map(exec))
 end
 
 function C.apply_work_label_map(labels, map)
@@ -202,8 +365,7 @@ function C.apply_work_label_map(labels, map)
   local seen = {}
   for _, logical in ipairs(labels or {}) do
     local label = tostring(logical or "")
-    local translated = type(map) == "table" and map[label] or nil
-    translated = translated or label
+    local translated = C.apply_work_label_map_to_label(label, map)
     if translated ~= "" and not seen[translated] then
       seen[translated] = true
       effective[#effective + 1] = translated
@@ -216,6 +378,47 @@ function C.effective_work_labels(labels, exec)
   return C.apply_work_label_map(labels, C.work_label_map(exec))
 end
 
+function C.session_work_labels(exec)
+  local labels = raw_session_work_labels(exec)
+  return C.apply_work_label_map(labels, C.work_label_map(exec, labels))
+end
+
+function C.effective_label_colors(label_colors, map)
+  if type(label_colors) ~= "table" then
+    return label_colors
+  end
+  local effective = {}
+  for logical, color in pairs(label_colors) do
+    effective[C.apply_work_label_map_to_label(logical, map)] = color
+  end
+  return effective
+end
+
+-- Incoming GitHub labels remain in their effective form. Package lifecycle
+-- code supplies logical expected labels, so compare only against the one
+-- effective identity for this session. Deliberately do not accept both forms:
+-- doing so would let a namespaced cloud session adopt a local session's issue.
+function C.label_matches_effective(actual, logical, exec, map)
+  local effective_map = map or C.work_label_map(exec)
+  local expected = C.apply_work_label_map_to_label(logical, effective_map)
+  return tostring(actual or "") == expected
+end
+
+function C.has_effective_label(labels, logical, exec, map)
+  if type(labels) ~= "table" then
+    return false
+  end
+  local effective_map = map or C.work_label_map(exec)
+  local expected = C.apply_work_label_map_to_label(logical, effective_map)
+  for _, label in ipairs(labels) do
+    local name = type(label) == "table" and label.name or label
+    if tostring(name or "") == expected then
+      return true
+    end
+  end
+  return false
+end
+
 -- Set by fkst-hosted for creator-routed sessions. Nil preserves the legacy
 -- single-operator contract used by standalone package deployments.
 function C.session_creator(exec)
@@ -226,8 +429,8 @@ function C.session_creator(exec)
   return creator
 end
 
-function C.matches_session_work_label(issue_labels, exec)
-  local configured = C.session_work_labels(exec)
+function C.matches_session_work_label(issue_labels, exec, configured_labels)
+  local configured = configured_labels or C.session_work_labels(exec)
   if #configured == 0 then
     return false, "FKST_SESSION_WORK_LABEL is empty"
   end

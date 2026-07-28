@@ -131,6 +131,18 @@ function C.claimed_label()
   return claimed_label
 end
 
+function C.effective_claimed_label(exec)
+  return config.effective_work_label(claimed_label, exec)
+end
+
+function C.issue_in_session_scope(labels, exec)
+  if not config.work_label_family_isolation_active(exec) then
+    return true, nil
+  end
+  local configured = config.session_work_labels(exec)
+  return config.matches_session_work_label(labels, exec, configured)
+end
+
 -- assignee (default) ⇒ exactly today's behavior. label ⇒ opt-in GitHub App mode.
 function C.claim_mode_active()
   return config.claim_mode()
@@ -189,13 +201,12 @@ function C.read_current_issue_ownership(repo, issue_number, session_creator)
   if issue_number == nil then
     return nil
   end
+  local scoped = config.work_label_family_isolation_active()
   local fields = "assignees,author"
-  if config.claim_mode() == "label" then
-    if session_creator ~= nil then
-      fields = "number,state,labels,assignees,author"
-    else
-      fields = "assignees,author,labels"
-    end
+  if scoped or session_creator ~= nil then
+    fields = "number,state,labels,assignees,author"
+  elseif config.claim_mode() == "label" then
+    fields = "assignees,author,labels"
   end
   local view = github().issue_view(repo, issue_number, fields, 30)
   local decoded = json.decode(view.stdout or "{}")
@@ -213,15 +224,15 @@ function C.verify_issue_claim(repo, issue_number, owner, session_creator)
   if C.issue_claim_state(ownership and ownership.assignees, owner, ownership and ownership.labels) ~= "self" then
     return false
   end
+  local scoped = config.work_label_family_isolation_active()
+  if (scoped or session_creator ~= nil) and ownership.state ~= "OPEN" then
+    return false
+  end
+  if scoped and not C.issue_in_session_scope(ownership.labels) then
+    return false
+  end
   if session_creator == nil then
     return true
-  end
-  if ownership.state ~= "OPEN" then
-    return false
-  end
-  local in_scope = config.matches_session_work_label(ownership.labels)
-  if not in_scope then
-    return false
   end
   local admission = C.claim_admission_precheck(ownership, {
     owner = owner,
@@ -264,6 +275,7 @@ function C.verify_pr_review_issue_claim(dept, repo, issue_number, current_issue,
   end
   local owner = C.claim_owner()
   local ownership = nil
+  local scoped = config.work_label_family_isolation_active()
   local current_usable
   if config.claim_mode() == "label" then
     -- label-mode ownership is derived from the labels projection.
@@ -272,11 +284,16 @@ function C.verify_pr_review_issue_claim(dept, repo, issue_number, current_issue,
     current_usable = type(current_issue) == "table"
       and current_issue.assignees ~= nil
       and C.issue_author_login(current_issue) ~= nil
+      and (not scoped or current_issue.labels ~= nil)
   end
   if current_usable then
     ownership = current_issue
   else
     ownership = C.read_current_issue_ownership(repo, issue_number)
+  end
+  if scoped and not C.issue_in_session_scope(ownership and ownership.labels) then
+    log_claim(dept, proposal_id, "skip-work-label-scope", "backing issue has no exact configured session work label")
+    return false
   end
   if C.is_self_owned_issue(ownership, owner) then
     return true
@@ -448,14 +465,19 @@ function C.log_claim_admission_skip(dept, proposal_id, detail)
 end
 
 function C.claim_issue_for_management(M, dept, repo, issue_number, current, proposal_id)
+  local in_scope, scope_reason = C.issue_in_session_scope(current and current.labels)
+  if not in_scope then
+    log_claim(dept, proposal_id, "skip-work-label-scope", scope_reason)
+    return false
+  end
   local admission, detail = C.claim_admission_precheck(current, C.claim_admission_inputs(current))
   if admission == "held" then
-    if detail.creator ~= nil then
+    if detail.creator ~= nil or config.work_label_family_isolation_active() then
       if C.verify_issue_claim(repo, issue_number, detail.owner, detail.creator) then
-        log_claim(dept, proposal_id, "claim-held", "creator-routed label claim verified")
+        log_claim(dept, proposal_id, "claim-held", "session-scoped claim verified")
         return true
       end
-      log_claim(dept, proposal_id, "claim-lost", "creator-routed label claim failed fresh verification")
+      log_claim(dept, proposal_id, "claim-lost", "session-scoped claim failed fresh verification")
       return false
     end
     return true
@@ -514,14 +536,15 @@ function C.claim_issue_for_management(M, dept, repo, issue_number, current, prop
   end
 
   if config.claim_mode() == "label" then
-    github().issue_add_label(repo, issue_number, claimed_label, 30)
+    local effective_claimed_label = C.effective_claimed_label()
+    github().issue_add_label(repo, issue_number, effective_claimed_label, 30)
     M.invalidate_entity_after_write(repo, "issue", issue_number)
     if C.verify_issue_claim(repo, issue_number, owner, detail.creator) then
       log_claim(dept, proposal_id, "claim-won", "label claim verified after add-label")
       return true
     end
 
-    github().issue_remove_label(repo, issue_number, claimed_label, 30)
+    github().issue_remove_label(repo, issue_number, effective_claimed_label, 30)
     M.invalidate_entity_after_write(repo, "issue", issue_number)
     log_claim(dept, proposal_id, "claim-lost", "label claim lost after add-label verification")
     return false
@@ -557,24 +580,19 @@ function C.claim_required_payload(source_ref)
   if repo == nil or issue_number == nil then
     return nil
   end
-  return {
+  local claim = {
     owner = C.claim_owner(),
     source_ref = normalized,
   }
+  if config.claim_mode() == "label" then
+    claim.mode = "label"
+    claim.label = C.effective_claimed_label()
+  end
+  return claim
 end
 
 function C.attach_issue_claim(payload, source_ref)
   if type(payload) ~= "table" then
-    return payload
-  end
-  -- github-proxy's pre-write guard verifies the attached claim against the
-  -- issue's ASSIGNEES. In label-mode the owner is a GitHub App, which holds the
-  -- fkst-dev:claimed label but is never an assignee, so an attached assignee
-  -- claim would always read as "lost" and block every write. Ownership in
-  -- label-mode is instead verified at claim time (claim_issue_for_management),
-  -- so skip attaching the assignee claim and let github-proxy's no-claim path
-  -- proceed. Assignee-mode is unchanged.
-  if config.claim_mode() == "label" then
     return payload
   end
   payload.claim = C.claim_required_payload(source_ref or payload.source_ref)

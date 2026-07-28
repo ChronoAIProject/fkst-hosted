@@ -127,12 +127,7 @@ local function merged_fact_from_issue(M, issue)
 end
 
 local function has_label(issue, label)
-  for _, item in ipairs(issue and issue.labels or {}) do
-    if item == label then
-      return true
-    end
-  end
-  return false
+  return config.has_effective_label(issue and issue.labels, label)
 end
 
 local function run_observability_adapter(M, read_fn, limits, deadline, error_class)
@@ -165,9 +160,13 @@ function C.queue_starvation_recent_closed_merged_issues(M, repo, limits, deadlin
   end
   local issues = parsers_issue.parse_issue_list_recent_closed(listed.stdout)
   local merged = {}
+  local family_isolation_active = config.work_label_family_isolation_active()
+  local session_work_labels = family_isolation_active and config.session_work_labels() or {}
   for _, issue in ipairs(issues) do
     local fact = nil
-    if has_label(issue, M._merged_label) then
+    local in_scope = not family_isolation_active
+      or config.matches_session_work_label(issue.labels, nil, session_work_labels)
+    if in_scope and has_label(issue, M._merged_label) then
       local view = run_observability_adapter(
         M,
         function(timeout)

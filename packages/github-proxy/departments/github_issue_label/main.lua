@@ -118,7 +118,8 @@ local function act(event)
     return
   end
 
-  local add_labels, remove_labels = core.effective_label_changes(payload.add_labels, payload.remove_labels)
+  local add_labels, remove_labels, work_label_map = core.effective_label_changes(payload.add_labels, payload.remove_labels)
+  local label_colors = core.effective_label_colors(payload.label_colors, work_label_map)
   if #add_labels == 0 and #remove_labels == 0 then
     log.warn("github-proxy: label request has no label changes")
     return
@@ -148,8 +149,8 @@ local function act(event)
     end
 
     local changed = kind == "pr"
-      and core.apply_entity_labels(repo, kind, number, add_labels, remove_labels, payload.label_colors)
-      or core.apply_issue_labels(repo, number, add_labels, remove_labels, payload.label_colors)
+      and core.apply_entity_labels(repo, kind, number, add_labels, remove_labels, label_colors)
+      or core.apply_issue_labels(repo, number, add_labels, remove_labels, label_colors)
     if changed ~= true then
       log_skip(payload, repo, add_labels, remove_labels, "no-effective-label-change")
     end

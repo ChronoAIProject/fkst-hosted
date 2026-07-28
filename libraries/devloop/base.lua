@@ -117,18 +117,6 @@ local is_bounded_string = strings.is_bounded_string
 local decimal_checksum = strings.decimal_checksum
 
 
-local function has_value(values, expected)
-  if type(values) ~= "table" then
-    return false
-  end
-  for _, value in ipairs(values) do
-    if value == expected then
-      return true
-    end
-  end
-  return false
-end
-
 local function is_review_meta_action(value)
   return value == "fix"
     or value == "block"
@@ -207,20 +195,11 @@ function C.safe_pr_review_repo_segment(repo)
 end
 
 function C.is_opted_in(labels)
-  if type(labels) ~= "table" then
-    return false
-  end
-
-  for _, label in ipairs(labels) do
-    if tostring(label) == enabled_label then
-      return true
-    end
-  end
-  return false
+  return config.has_effective_label(labels, enabled_label)
 end
 
 function C.is_intake_held(labels)
-  return has_value(labels, hold_label)
+  return config.has_effective_label(labels, hold_label)
 end
 
 function C.safe_head_segment(head_sha)
