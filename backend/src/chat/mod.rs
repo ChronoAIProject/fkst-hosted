@@ -18,6 +18,7 @@
 //! * [`tools`] — the [`ChatTool`](tools::ChatTool) registry: every capability the
 //!   model has, and nothing else. The orchestrator depends on the trait, never on a
 //!   concrete tool, so later milestones extend the concierge by registering a tool.
+//! * [`limits`] — per-user and process-wide admission control for turns.
 //!
 //! Security posture, stated once here because every later layer inherits it: the
 //! chat backend is a **client of the public API acting with the calling user's own
@@ -27,6 +28,7 @@
 
 pub mod config;
 pub mod dispatch;
+pub mod limits;
 pub mod llm;
 pub mod llm_openai;
 pub mod tools;
