@@ -87,7 +87,7 @@ local function collect_changed(repo, entity_type, entities, fresh_changes, repla
       else
         table.insert(fresh_changes, item)
       end
-    elseif is_observed_issue_snapshot(entity_type, entity) then
+    elseif observed_issues ~= nil and is_observed_issue_snapshot(entity_type, entity) then
       entity.type = entity_type
       table.insert(observed_issues, {
         entity_type = entity_type,
@@ -223,7 +223,10 @@ local function act(event)
   local session_creator = config.session_creator()
   local fresh_changes = {}
   local replay_candidates = {}
-  local observed_issues = {}
+  local observed_issues = nil
+  if config.claim_mode() == "assignee" then
+    observed_issues = {}
+  end
   poll_entities(repo, event, fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator)
   raise_changed(repo, fresh_changes, replay_allowance(replay_candidates, replay_budget), observed_issues, event and event.ts)
 end

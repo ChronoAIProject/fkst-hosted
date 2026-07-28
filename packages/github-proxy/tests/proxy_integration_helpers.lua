@@ -49,6 +49,11 @@ function t.run_department(...)
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command('printf %s "$FKST_GITHUB_CLAIM_MODE"', {
+    stdout = type(run_env) == "table" and tostring(run_env.FKST_GITHUB_CLAIM_MODE or "") or "",
+    stderr = "",
+    exit_code = 0,
+  })
   return raw_run_department(...)
 end
 
