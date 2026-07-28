@@ -124,9 +124,18 @@ function E.build_execution_start_effects(core, repo, issue_number, request, curr
     number = issue_number,
     source_ref = request.source_ref,
   }
+  local origin_issue = workflow_origin_issue(request)
+  local dependency_origin = origin_issue
+    and base_ids.proposal_id(origin_issue.repo, origin_issue.issue_number)
+    or nil
   return {
     proposal = proposal,
-    thinking_comment_request = requests_lifecycle.build_observe_comment_request(core, issue_ref, proposal),
+    thinking_comment_request = requests_lifecycle.build_observe_comment_request(
+      core,
+      issue_ref,
+      proposal,
+      dependency_origin
+    ),
     thinking_label_request = requests_labels.build_thinking_label_request(issue_ref, proposal),
   }
 end

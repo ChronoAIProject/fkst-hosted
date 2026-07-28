@@ -60,15 +60,15 @@ local function find_raise(raises, queue)
   return h.find_raise(raises, queue)
 end
 
-local function capture_bundle_args(request)
+local function capture_execution_start(request)
   local original = context_bundle.context_fetch_ref_from_bundle
   local captured = nil
   context_bundle.context_fetch_ref_from_bundle = function(_core, args)
     captured = args
     return "runtime-cache:test/execution-start-context"
   end
-  local ok, proposal = pcall(
-    execution_start.build_execution_start_proposal,
+  local ok, effects = pcall(
+    execution_start.build_execution_start_effects,
     core,
     "owner/repo",
     42,
@@ -79,9 +79,14 @@ local function capture_bundle_args(request)
   )
   context_bundle.context_fetch_ref_from_bundle = original
   if not ok then
-    error(proposal, 0)
+    error(effects, 0)
   end
-  t.is_true(proposal ~= nil)
+  t.is_true(effects ~= nil)
+  return effects, captured
+end
+
+local function capture_bundle_args(request)
+  local _, captured = capture_execution_start(request)
   return captured
 end
 
@@ -140,18 +145,29 @@ return {
       },
     })
 
-    local args = capture_bundle_args(request)
+    local effects, args = capture_execution_start(request)
     t.eq(args.repo, "owner/repo")
     t.eq(tostring(args.issue_number), "42")
     t.eq(args.origin_issue_repo, "ChronoAIProject/fkst-hosted")
     t.eq(tostring(args.origin_issue_number), "3830")
+    t.is_true(effects.thinking_comment_request.body:find(
+      core.dependency_origin_marker(
+        request.proposal_id,
+        request.dedup_key,
+        "github-devloop/issue/ChronoAIProject/fkst-hosted/3830"
+      ),
+      1,
+      true
+    ) ~= nil)
   end,
 
   test_ordinary_execution_request_does_not_fetch_workflow_origin = function()
-    local args = capture_bundle_args(execution_request())
+    local request = execution_request()
+    local effects, args = capture_execution_start(request)
 
     t.is_nil(args.origin_issue_repo)
     t.is_nil(args.origin_issue_number)
+    t.is_nil(effects.thinking_comment_request.body:find("fkst:github-devloop:dependency-origin:v1", 1, true))
   end,
 
   test_workflow_origin_context_fails_closed_for_untrusted_or_malformed_lineage = function()

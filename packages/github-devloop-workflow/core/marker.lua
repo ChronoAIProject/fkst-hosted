@@ -1,5 +1,6 @@
 local strings = require("contract.strings")
 local fail = require("core.errors").fail
+local workflow_terminal = require("devloop.workflow_terminal")
 
 local M = {}
 
@@ -10,7 +11,7 @@ M.MAX_SLOT_ID_BYTES = 128
 M.MAX_MATERIALIZATION_DIGEST_BYTES = M.MAX_PLAN_DIGEST_BYTES
 M.MAX_CHILD_DEDUP_KEY_BYTES = 512
 M.MAX_CHILD_ISSUE_BYTES = 30
-M.MAX_TERMINAL_REASON_CODE_BYTES = 128
+M.MAX_TERMINAL_REASON_CODE_BYTES = workflow_terminal.MAX_TERMINAL_REASON_CODE_BYTES
 
 M.MATERIALIZATION_STATES = {
   pending = true,
@@ -24,15 +25,10 @@ M.MATERIALIZATION_STATE_RANK = {
   created = 3,
 }
 
-M.TERMINAL_STATES = {
-  done = true,
-  blocked = true,
-  error = true,
-}
+M.TERMINAL_STATES = workflow_terminal.TERMINAL_STATES
 
 local BLUEPRINT_MARKER_PATTERN = "<!%-%- fkst:github%-devloop%-workflow:blueprint:v1.-%-%->"
 local MATERIALIZATION_MARKER_PATTERN = "<!%-%- fkst:github%-devloop%-workflow:materialization:v1.-%-%->"
-local TERMINAL_MARKER_PATTERN = "<!%-%- fkst:github%-devloop%-workflow:terminal:v1.-%-%->"
 local LINEAGE_MARKER_PATTERN = "<!%-%- fkst:github%-devloop%-workflow:lineage:v1.-%-%->"
 
 local function attr(marker, name)
@@ -357,46 +353,8 @@ function M.build_terminal_marker(origin_proposal_id, terminal_state, reason_code
     nil
 end
 
-local function terminal_fact_from_marker(marker, origin_proposal_id)
-  local origin = attr(marker, "origin")
-  local state = attr(marker, "state")
-  local reason_code = attr(marker, "reason_code")
-  local ok = validate_origin(origin, "origin")
-  if not ok then return nil end
-  ok = validate_terminal_state(state, "state")
-  if not ok then return nil end
-  ok = validate_reason_code(reason_code, "reason_code")
-  if not ok then return nil end
-  if origin ~= tostring(origin_proposal_id) then
-    return nil
-  end
-  return {
-    origin = origin,
-    state = state,
-    reason_code = reason_code,
-  }
-end
-
 function M.parse_terminal_marker(comment_body, origin_proposal_id)
-  if type(comment_body) ~= "string" then
-    return nil
-  end
-  local ok = validate_origin(origin_proposal_id, "origin_proposal_id")
-  if not ok then
-    return nil
-  end
-
-  -- Caller owns bot-author trust filtering; this parser only inspects one body string.
-  local latest_marker = nil
-  for marker in comment_body:gmatch(TERMINAL_MARKER_PATTERN) do
-    if attr(marker, "origin") == tostring(origin_proposal_id) then
-      latest_marker = marker
-    end
-  end
-  if latest_marker == nil then
-    return nil
-  end
-  return terminal_fact_from_marker(latest_marker, origin_proposal_id)
+  return workflow_terminal.parse_marker(comment_body, origin_proposal_id)
 end
 
 function M.build_lineage_header(origin_proposal_id, blueprint_digest, slot_id)

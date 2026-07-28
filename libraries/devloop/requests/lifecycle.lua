@@ -15,13 +15,21 @@ local m_mq = require("devloop.merge_queue")
 local strings = shared.strings
 local ai_sentinel = shared.ai_sentinel
 
-function C.build_observe_comment_request(M, issue, proposal)
+function C.build_observe_comment_request(M, issue, proposal, dependency_origin_proposal_id)
+  local version = tostring(proposal.effect_version or proposal.dedup_key)
+  local markers = M.state_marker(proposal.proposal_id, "thinking", version)
+  if dependency_origin_proposal_id ~= nil then
+    markers = markers .. "\n" .. M.dependency_origin_marker(
+      proposal.proposal_id,
+      version,
+      dependency_origin_proposal_id
+    )
+  end
   return m_claims.attach_issue_claim({
     schema = "github-proxy.v1",
     repo = issue.repo,
     issue_number = issue.number,
-    body = comment_strings.comment_string(M, "thinking_started") .. "\n\n"
-      .. M.state_marker(proposal.proposal_id, "thinking", tostring(proposal.effect_version or proposal.dedup_key)),
+    body = comment_strings.comment_string(M, "thinking_started") .. "\n\n" .. markers,
     dedup_key = base_ids.dedup_key({
       tostring(proposal.proposal_id),
       "comment",

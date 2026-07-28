@@ -14,6 +14,7 @@ local strings = require("forge.strings")
 local transition_version = require("contract.transition_version")
 local config = require("devloop.config")
 local delivery_target = require("devloop.delivery_target")
+local workflow_terminal = require("devloop.workflow_terminal")
 
 local max_dependency_depth = 32
 
@@ -77,6 +78,116 @@ end
 
 local function marker_attr(marker, name)
   return tostring(marker or ""):match(name .. '="([^"]*)"')
+end
+
+local function canonical_proposal_target(proposal_id)
+  local repo, issue_number = base_ids.parse_proposal_id(proposal_id)
+  if repo == nil
+    or not forge_validators.is_positive_pr_number(issue_number)
+    or base_ids.proposal_id(repo, issue_number) ~= tostring(proposal_id) then
+    return nil
+  end
+  return {
+    proposal_id = tostring(proposal_id),
+    repo = repo,
+    issue_number = tonumber(issue_number),
+  }
+end
+
+local function dependency_origin_lineage(version)
+  if type(version) ~= "string" or version == "" then
+    return nil
+  end
+  local normalized = version:match("^consensus:(.+)$") or version
+  normalized = normalized:match("^ready/(.+)$") or normalized
+  if not strings_c.is_path_safe_key(normalized, base_ids.max_dedup_len) then
+    return nil
+  end
+  local lineage = transition_version.strip_suffixes(normalized)
+  if lineage == "" then
+    return nil
+  end
+  return lineage
+end
+
+function M.dependency_origin_marker(proposal_id, version, origin_proposal_id)
+  local proposal = canonical_proposal_target(proposal_id)
+  local origin = canonical_proposal_target(origin_proposal_id)
+  if proposal == nil
+    or origin == nil
+    or proposal.proposal_id == origin.proposal_id
+    or not strings_c.is_path_safe_key(version, base_ids.max_dedup_len) then
+    error("github-devloop: invalid-dependency-origin: invalid dependency origin marker")
+  end
+  return '<!-- fkst:github-devloop:dependency-origin:v1 proposal="' .. proposal.proposal_id
+    .. '" version="' .. tostring(version)
+    .. '" origin="' .. origin.proposal_id
+    .. '" -->'
+end
+
+function M.dependency_origin_fact(comments, proposal_id, version)
+  if type(comments) ~= "table" then
+    return nil, nil
+  end
+
+  local marker_pattern = "<!%-%- fkst:github%-devloop:dependency%-origin:v1.-%-%->"
+  local markers = {}
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
+      markers[#markers + 1] = { comment = comment, marker = marker }
+    end
+  end
+  if #markers == 0 then
+    return nil, nil
+  end
+
+  local proposal = canonical_proposal_target(proposal_id)
+  local expected_lineage = dependency_origin_lineage(version)
+  if proposal == nil or expected_lineage == nil then
+    return nil, "dependency-origin-invalid"
+  end
+
+  local found = nil
+  local saw_current_proposal = false
+  for _, entry in ipairs(markers) do
+    local marker = entry.marker
+    local comment = entry.comment
+    local marker_proposal = canonical_proposal_target(marker_attr(marker, "proposal"))
+    if marker_proposal == nil then
+      return nil, "dependency-origin-invalid"
+    end
+    if marker_proposal.proposal_id == proposal.proposal_id then
+      saw_current_proposal = true
+      local marker_version = marker_attr(marker, "version")
+      local marker_lineage = dependency_origin_lineage(marker_version)
+      if marker_lineage == nil then
+        return nil, "dependency-origin-invalid"
+      end
+      if marker_lineage == expected_lineage then
+        if not devloop_state.has_state_marker(
+          { comment },
+          proposal.proposal_id,
+          "thinking",
+          marker_version
+        ) then
+          return nil, "dependency-origin-invalid"
+        end
+        local origin = canonical_proposal_target(marker_attr(marker, "origin"))
+        if origin == nil or origin.proposal_id == proposal.proposal_id then
+          return nil, "dependency-origin-invalid"
+        end
+        if found ~= nil and found.proposal_id ~= origin.proposal_id then
+          return nil, "dependency-origin-conflict"
+        end
+        origin.comment_created_at = parsers_misc._comment_created_at(comment)
+        found = origin
+      end
+    end
+  end
+  if found == nil and saw_current_proposal then
+    return nil, "dependency-origin-version-mismatch"
+  end
+  return found, nil
 end
 
 local function safe_dependency_attr(value)
@@ -211,6 +322,11 @@ local function blocker_merged(repo, blocker_number)
   end
   local state = require("devloop.entity").current_entity_state(current.comments, blocker_proposal_id)
   if type(state) == "table" and state.state == "merged" then
+    return true, nil
+  end
+
+  local workflow_fact = workflow_terminal.latest_trusted_fact(current.comments, blocker_proposal_id)
+  if type(workflow_fact) == "table" and workflow_fact.state == "done" then
     return true, nil
   end
 
@@ -462,7 +578,26 @@ function M.dependency_gate(repo, issue_number, context)
     gate_context = {}
   end
   gate_context.managed_sibling_repos = config.managed_sibling_repos()
-  local ok, result = pcall(visit, repo, issue_number, {}, {}, {}, {}, 0, gate_context, {})
+  local origin, origin_reason = M.dependency_origin_fact(
+    gate_context.comments,
+    gate_context.proposal_id,
+    gate_context.version
+  )
+  if origin_reason ~= nil then
+    return gate("unresolvable", origin_reason, {})
+  end
+  if origin ~= nil and tostring(origin.repo):lower() ~= tostring(repo):lower() then
+    return gate("unresolvable", "cross-repo-dependency-origin", { origin.issue_number })
+  end
+
+  local ok, result = pcall(function()
+    local stack, visited, unmet, unmet_seen, notes = {}, {}, {}, {}, {}
+    local child = visit(repo, issue_number, stack, visited, unmet, unmet_seen, 0, gate_context, notes)
+    if child.kind ~= "satisfied" or origin == nil then
+      return child
+    end
+    return visit(repo, origin.issue_number, stack, visited, unmet, unmet_seen, 0, gate_context, notes)
+  end)
   if not ok or type(result) ~= "table" then
     return gate("unresolvable", "dependency-gate-exception", {})
   end
