@@ -34,6 +34,7 @@ fn spec() -> SessionPodSpec {
         package_roots: vec!["web".to_string(), "api".to_string()],
         work_label: "fkst".to_string(),
         work_label_map_json: None,
+        work_label_namespace: None,
         bot_login: "fkst-bot[bot]".to_string(),
         config_hash: "cfg-deadbeef".to_string(),
         output_lang: None,
@@ -181,6 +182,11 @@ fn build_session_pod_injects_the_section_5_2_env() {
         None,
         "an unnamespaced session preserves the historical environment"
     );
+    assert_eq!(
+        env_value(env, "FKST_WORK_LABEL_NAMESPACE"),
+        None,
+        "an unnamespaced session does not receive a provider namespace"
+    );
     assert_eq!(env_value(env, "FKST_SESSION_CREATOR"), Some("author-login"));
     assert_eq!(
         env_value(env, "FKST_DEVLOOP_UPSTREAM_BRANCH"),
@@ -206,6 +212,7 @@ fn session_env_pairs_render_the_namespaced_work_label_map_for_both_backends() {
     let mut namespaced = spec();
     namespaced.work_label = "fkst-dev-chronoai-fkst".to_string();
     namespaced.work_label_map_json = Some(r#"{"fkst-dev":"fkst-dev-chronoai-fkst"}"#.to_string());
+    namespaced.work_label_namespace = Some("chronoai-fkst".to_string());
     let pairs = session_env_pairs(&namespaced, &config());
     assert_eq!(
         pairs
@@ -214,6 +221,13 @@ fn session_env_pairs_render_the_namespaced_work_label_map_for_both_backends() {
             .map(|(_, value)| value.as_str()),
         namespaced.work_label_map_json.as_deref()
     );
+    assert!(pairs
+        .iter()
+        .any(|(key, value)| { key == "FKST_WORK_LABEL_NAMESPACE" && value == "chronoai-fkst" }));
+    assert!(pairs.iter().any(|(key, value)| {
+        key == "FKST_GITHUB_PROXY_POLL_LABEL_PREFIX"
+            && value == "fkst-dev-chronoai-fkst:,fkst-class:,fkst-dashboard"
+    }));
     assert!(pairs
         .iter()
         .any(|(key, value)| key == "FKST_SESSION_WORK_LABEL" && value == "fkst-dev-chronoai-fkst"));
@@ -627,38 +641,41 @@ fn lifecycle_suppression_prefixes_are_separate_from_exact_work_labels() {
     // #626: github-proxy gets only lifecycle-label suppression prefixes. The exact
     // effective work-label set remains in its dedicated admission env and metadata.
     let mut spec = spec();
-    spec.work_label = "alpha,beta".to_string();
+    spec.work_label = "alpha-cloud,beta-cloud".to_string();
+    spec.work_label_namespace = Some("cloud".to_string());
     let pod = build_session_pod(&spec, &config()).expect("pod builds");
     let pod_spec = pod.spec.as_ref().expect("spec");
     let env = pod_spec.containers[0].env.as_ref().expect("env");
     assert_eq!(
         env_value(env, "FKST_GITHUB_PROXY_POLL_LABEL_PREFIX"),
-        Some("fkst-dev:,fkst-class:,fkst-security:,fkst-workflow:,fkst-dashboard")
+        Some("alpha-cloud:,beta-cloud:,fkst-class:,fkst-dashboard")
     );
     assert_eq!(
         env_value(env, "FKST_SESSION_WORK_LABEL"),
-        Some("alpha,beta")
+        Some("alpha-cloud,beta-cloud")
     );
     assert_eq!(
         pod.metadata.annotations.as_ref().expect("annotations")["fkst.chrono-ai.fun/work-label"],
-        "alpha,beta"
+        "alpha-cloud,beta-cloud"
     );
 
-    let prefixes: Vec<&str> = GITHUB_PROXY_POLL_LABEL_PREFIX_VALUE.split(',').collect();
+    let rendered = env_value(env, "FKST_GITHUB_PROXY_POLL_LABEL_PREFIX").unwrap();
+    let prefixes: Vec<&str> = rendered.split(',').collect();
     let suppressed = |label: &str| prefixes.iter().any(|prefix| label.starts_with(prefix));
     assert!(
-        !suppressed("fkst-dev"),
+        !suppressed("alpha-cloud"),
         "the exact work label must be replayed"
     );
     for lifecycle in [
-        "fkst-dev:claimed",
+        "alpha-cloud:claimed",
+        "beta-cloud:thinking",
         "fkst-class:bug",
-        "fkst-security:reviewed",
-        "fkst-workflow:implementing",
         "fkst-dashboard",
     ] {
         assert!(suppressed(lifecycle), "{lifecycle} must be suppressed");
     }
+    assert!(!suppressed("alpha:claimed"));
+    assert!(!suppressed("alpha-other-provider:claimed"));
 }
 
 #[test]

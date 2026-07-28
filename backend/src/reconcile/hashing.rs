@@ -135,6 +135,7 @@ pub fn config_hash(
 /// while leaving [`full_config_hash`] unchanged so the control plane does not mistake
 /// an operator configuration change for an edit to the immutable trigger issue.
 pub fn runtime_config_hash(config_hash: &str, work_label_namespace: Option<&str>) -> String {
+    const NAMESPACED_WORK_LABEL_RUNTIME_CONTRACT: &str = "work-label-family-v2";
     let Some(work_label_namespace) = work_label_namespace else {
         return config_hash.to_string();
     };
@@ -142,11 +143,13 @@ pub fn runtime_config_hash(config_hash: &str, work_label_namespace: Option<&str>
     struct Canonical<'a> {
         config_hash: &'a str,
         work_label_namespace: &'a str,
+        work_label_runtime_contract: &'static str,
     }
     hex_digest(
         &Canonical {
             config_hash,
             work_label_namespace,
+            work_label_runtime_contract: NAMESPACED_WORK_LABEL_RUNTIME_CONTRACT,
         },
         "runtime-config-hash",
     )

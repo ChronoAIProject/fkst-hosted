@@ -91,12 +91,12 @@ const GITHUB_CLAIM_MODE_ENV: &str = "FKST_GITHUB_CLAIM_MODE";
 /// work by LABEL, never by assignment. Must be `label`.
 const GITHUB_CLAIM_MODE_VALUE: &str = "label";
 const GITHUB_PROXY_POLL_LABEL_PREFIX_ENV: &str = "FKST_GITHUB_PROXY_POLL_LABEL_PREFIX";
-/// Package lifecycle labels suppressed from github-proxy's level replay. These are
-/// prefixes, not the session's positive work-item allowlist: notably `fkst-dev:`
-/// suppresses `fkst-dev:claimed` while leaving the exact work label `fkst-dev`
-/// eligible for replay and exact admission through [`SESSION_WORK_LABEL_ENV`].
-const GITHUB_PROXY_POLL_LABEL_PREFIX_VALUE: &str =
+/// Historical suppression contract for unnamespaced deployments. Namespaced
+/// sessions derive their lifecycle prefixes from their own effective work-label
+/// set so a local or another provider's family cannot influence replay behavior.
+const LEGACY_GITHUB_PROXY_POLL_LABEL_PREFIX_VALUE: &str =
     "fkst-dev:,fkst-class:,fkst-security:,fkst-workflow:,fkst-dashboard";
+const NON_WORK_LABEL_POLL_PREFIXES: [&str; 2] = ["fkst-class:", "fkst-dashboard"];
 /// Comma-separated GitHub logins the packages' github author policy trusts
 /// (issues/comments from anyone else are ignored by the session). The bot's own
 /// login is implicitly authorized package-side via `FKST_GITHUB_BOT_LOGIN`.
@@ -181,6 +181,9 @@ pub struct SessionPodSpec {
     /// Optional deterministic logical-to-effective work-label mapping for package
     /// discovery and outbound GitHub effects. Absent on unnamespaced deployments.
     pub work_label_map_json: Option<String>,
+    /// Validated provider namespace. Present together with the mapping above and
+    /// injected into the substrate runtime as `FKST_WORK_LABEL_NAMESPACE`.
+    pub work_label_namespace: Option<String>,
     /// The bot login (`FKST_GITHUB_BOT_LOGIN` + git author/committer name).
     pub bot_login: String,
     /// Config-hash annotation used by the reconciler for drift detection.
@@ -257,6 +260,21 @@ fn downward_env_var(name: &str, field_path: &str) -> EnvVar {
     }
 }
 
+fn github_proxy_poll_label_prefix_value(spec: &SessionPodSpec) -> String {
+    if spec.work_label_namespace.is_none() {
+        return LEGACY_GITHUB_PROXY_POLL_LABEL_PREFIX_VALUE.to_string();
+    }
+
+    let mut prefixes: Vec<String> =
+        crate::k8s::work_label_wire::split_work_labels(&spec.work_label)
+            .into_iter()
+            .map(|label| format!("{label}:"))
+            .collect();
+    prefixes.extend(NON_WORK_LABEL_POLL_PREFIXES.map(str::to_string));
+    prefixes.dedup();
+    prefixes.join(",")
+}
+
 /// The plain (non-downward-API) env var name/value pairs injected into a session
 /// runtime, factored out so BOTH session backends share ONE env source and can
 /// never drift. This is the §5.2 non-secret env (the ~16 core vars), the engine's
@@ -302,7 +320,7 @@ pub(crate) fn session_env_pairs(
         (GITHUB_CLAIM_MODE_ENV, GITHUB_CLAIM_MODE_VALUE.to_string()),
         (
             GITHUB_PROXY_POLL_LABEL_PREFIX_ENV,
-            GITHUB_PROXY_POLL_LABEL_PREFIX_VALUE.to_string(),
+            github_proxy_poll_label_prefix_value(spec),
         ),
         (LLM_MODEL_ENV, llm_model),
         (LLM_BASE_URL_ENV, config.llm_base_url.clone()),
@@ -348,6 +366,12 @@ pub(crate) fn session_env_pairs(
         env.push((
             crate::reconcile::work_labels::SESSION_WORK_LABEL_MAP_JSON_ENV.to_string(),
             work_label_map_json.clone(),
+        ));
+    }
+    if let Some(work_label_namespace) = &spec.work_label_namespace {
+        env.push((
+            crate::reconcile::work_labels::WORK_LABEL_NAMESPACE_ENV.to_string(),
+            work_label_namespace.clone(),
         ));
     }
     // The engine-tunable tail: output locale + the tighten-merged engine config

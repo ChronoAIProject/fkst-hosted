@@ -403,6 +403,7 @@ fn namespaced_spec_uses_only_effective_labels_and_carries_the_mapping() {
             r#"{"fkst-dev":"fkst-dev-chronoai-fkst","fkst-security":"fkst-security-chronoai-fkst"}"#
         )
     );
+    assert_eq!(spec.work_label_namespace.as_deref(), Some("chronoai-fkst"));
     assert_eq!(
         spec.config_hash,
         runtime_config_hash(&reg.config_hash, Some("chronoai-fkst"))

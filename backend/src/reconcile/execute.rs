@@ -640,6 +640,7 @@ fn session_pod_spec_from(
             .collect(),
         work_label: crate::k8s::work_label_wire::join_work_labels(&labels.effective),
         work_label_map_json: labels.map_json(),
+        work_label_namespace: work_label_namespace.map(str::to_string),
         bot_login: bot_login.unwrap_or_default(),
         config_hash: runtime_config_hash(&reg.config_hash, work_label_namespace),
         output_lang: reg.def.output_lang.clone(),

@@ -29,6 +29,10 @@ pub const GITHUB_LABEL_NAME_MAX_CHARS: usize = 50;
 
 /// The package-side contract carrying the logical-to-effective label mapping.
 pub const SESSION_WORK_LABEL_MAP_JSON_ENV: &str = "FKST_SESSION_WORK_LABEL_MAP_JSON";
+/// The provider namespace injected into a hosted substrate runtime. Package
+/// runtimes enforce this value as the family-translation authority and verify
+/// that the explicit logical-to-effective map agrees with it.
+pub const WORK_LABEL_NAMESPACE_ENV: &str = "FKST_WORK_LABEL_NAMESPACE";
 
 /// Render the GitHub trigger-issue title used by a namespaced hosted provider.
 /// The namespace is already validated as a lowercase hyphenated slug at config

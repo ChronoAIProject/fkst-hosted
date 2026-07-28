@@ -107,6 +107,11 @@ async fn check_reachable_errors_on_a_non_success_status() {
 #[tokio::test]
 async fn ensure_session_creates_with_null_timeout_stamped_metadata_and_execd_token() {
     let server = MockServer::start().await;
+    let mut namespaced_spec = spec();
+    namespaced_spec.work_label = "fkst-work-chronoai-fkst-cloud-test".to_string();
+    namespaced_spec.work_label_map_json =
+        Some(r#"{"fkst-work":"fkst-work-chronoai-fkst-cloud-test"}"#.to_string());
+    namespaced_spec.work_label_namespace = Some("chronoai-fkst-cloud-test".to_string());
     // The list-guard finds nothing → proceed to create.
     Mock::given(method("GET"))
         .and(path("/v1/sandboxes"))
@@ -141,8 +146,11 @@ async fn ensure_session_creates_with_null_timeout_stamped_metadata_and_execd_tok
                 "FKST_CANDIDATE_FROM_SEP": "--from--",
                 // #5567: both backends preserve the resolved split topology.
                 "FKST_GITHUB_PROXY_POLL_LABEL_PREFIX":
-                    "fkst-dev:,fkst-class:,fkst-security:,fkst-workflow:,fkst-dashboard",
-                "FKST_SESSION_WORK_LABEL": "fkst-work",
+                    "fkst-work-chronoai-fkst-cloud-test:,fkst-class:,fkst-dashboard",
+                "FKST_SESSION_WORK_LABEL": "fkst-work-chronoai-fkst-cloud-test",
+                "FKST_SESSION_WORK_LABEL_MAP_JSON":
+                    r#"{"fkst-work":"fkst-work-chronoai-fkst-cloud-test"}"#,
+                "FKST_WORK_LABEL_NAMESPACE": "chronoai-fkst-cloud-test",
                 "FKST_SESSION_CREATOR": "author-login",
                 "FKST_DEVLOOP_UPSTREAM_BRANCH": "develop",
                 "FKST_DEVLOOP_INTEGRATION_BRANCH": "fkst-hosted-default",
@@ -166,7 +174,7 @@ async fn ensure_session_creates_with_null_timeout_stamped_metadata_and_execd_tok
         .await;
 
     let outcome = backend(&server.uri(), osb_config())
-        .ensure_session_impl(&spec(), one_cred())
+        .ensure_session_impl(&namespaced_spec, one_cred())
         .await
         .expect("created");
     assert_eq!(outcome, EnsureOutcome::Created);
