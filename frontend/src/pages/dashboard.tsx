@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Eyebrow } from '@/components/layout/eyebrow';
 import { FadeSwap } from '@/components/ui/motion';
 import { useContent } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
 import { useBroaderOAuth } from '@/lib/auth/broader-oauth';
-import { getOverview, getRepoSessions } from '@/lib/api/canvas';
-import type { OverviewResponse, RepoSessionsResponse } from '@/lib/api/types';
+import { getOverview } from '@/lib/api/canvas';
+import type { OverviewResponse } from '@/lib/api/types';
 import { filterAccounts, filterRepos } from '@/lib/api/derive';
 import { CanvasBreadcrumb } from '@/components/canvas/breadcrumb';
 import { BroaderVisibilityBanner } from '@/components/canvas/broader-visibility';
 import { CanvasFlow } from '@/components/canvas/flow';
-import { levelKey, parentLevel } from '@/components/canvas/level';
+import { parentLevel } from '@/components/canvas/level';
 import type { CanvasLevel } from '@/components/canvas/level';
 import { CanvasSkeleton, SidebarSkeleton } from '@/components/canvas/skeletons';
 import type { UserRepo } from '@/components/modals/create-repo-modal';
@@ -19,13 +18,11 @@ import { Level1Sidebar } from '@/components/sidebar/level1';
 import { RepoWorkspace } from '@/components/repo-workspace/repo-workspace';
 import { SidebarPanel } from '@/components/sidebar/panel';
 import { useTour } from '@/components/tour/tour-context';
-import { useVisibilityPoll } from '@/lib/hooks/use-visibility-poll';
+import { useRepoSessions } from '@/lib/hooks/use-repo-sessions';
+import { DashboardGate, DashboardHeader, DashboardUnconfigured } from './dashboard-gate';
 
 // Re-exported from its new home so existing imports (tests included) hold.
 export { formatSgt } from '@/lib/format';
-
-/** How often the level-2 session view refreshes while mounted and visible. */
-const SESSIONS_POLL_MS = 15_000;
 
 /**
  * The dashboard page is a thin orchestrator: it owns the fetches (overview +
@@ -61,30 +58,8 @@ export function Dashboard() {
   // `owner/name` of a repo created via the modal — highlighted at level 1.
   const [createdKey, setCreatedKey] = useState<string | null>(null);
 
-  const [sessions, setSessions] = useState<RepoSessionsResponse | null>(null);
-  const [sessionsFailed, setSessionsFailed] = useState(false);
-  // Guards stale async responses after the level moved on.
-  const levelRef = useRef(levelKey(level));
-  levelRef.current = levelKey(level);
-  // Monotonic id per sessions request: an out-of-order response for the SAME
-  // level key (slow poll racing a post-mutation refetch) must not win either.
-  const sessionsRequestRef = useRef(0);
-  // A repo projection can legitimately take longer than the 15-second poll
-  // interval (for example when many historical triggers require package
-  // resolution). Keep background polls single-flight so they cannot continually
-  // supersede the only response that could remove the loading skeleton.
-  const sessionsInFlightRef = useRef<{ key: string; requestId: number } | null>(null);
-  // User/mutation refreshes are stronger than background polls: when one lands
-  // during an in-flight request, coalesce them into one follow-up request.
-  const sessionsRefreshPendingRef = useRef(false);
-
-  // The OAuth error banner is locally dismissable. The context has no clearError
-  // (a fresh sign-in clears it), so a per-slug local flag hides the banner until
-  // a NEW error arrives — the reset effect below keys the flag to `error`.
-  const [errorDismissed, setErrorDismissed] = useState(false);
-  useEffect(() => {
-    setErrorDismissed(false);
-  }, [error]);
+  // The repo-level session projection with its poll and race guards.
+  const { sessions, sessionsFailed, refreshSessions } = useRepoSessions(level, apiFetch);
 
   useEffect(() => {
     document.title = d.metaTitle;
@@ -129,68 +104,6 @@ export function Dashboard() {
     };
   }, [isAuthenticated, configured, apiFetch, tick, broaderToken]);
 
-  // Level-2 sessions: re-fetch keeping the current frame (used by the poll
-  // and after mutations); the level-change effect below handles the reset.
-  const refreshSessions = useCallback((queueIfBusy = false) => {
-    if (level.kind !== 'repo') return;
-    const requestedFor = levelKey(level);
-    if (sessionsInFlightRef.current?.key === requestedFor) {
-      if (queueIfBusy) sessionsRefreshPendingRef.current = true;
-      return;
-    }
-
-    const startRequest = () => {
-      const requestId = ++sessionsRequestRef.current;
-      sessionsInFlightRef.current = { key: requestedFor, requestId };
-      // A response only lands when it is BOTH for the current level key and the
-      // latest request issued — otherwise a stale slow response could overwrite
-      // fresher data (e.g. resurrect a just-stopped session).
-      const isCurrent = () =>
-        levelRef.current === requestedFor && sessionsRequestRef.current === requestId;
-      getRepoSessions(apiFetch, level.owner, level.name)
-        .then((body) => {
-          if (!isCurrent()) return;
-          setSessions(body);
-          setSessionsFailed(false);
-        })
-        .catch(() => {
-          if (!isCurrent()) return;
-          setSessionsFailed(true);
-        })
-        .finally(() => {
-          if (sessionsInFlightRef.current?.requestId !== requestId) return;
-          sessionsInFlightRef.current = null;
-          if (
-            sessionsRefreshPendingRef.current &&
-            levelRef.current === requestedFor
-          ) {
-            sessionsRefreshPendingRef.current = false;
-            startRequest();
-          }
-        });
-    };
-
-    startRequest();
-  }, [level, apiFetch]);
-
-  // Entering (or switching) a repo clears the old repo's data → skeleton,
-  // then fetches. Leaving level 2 just drops the data.
-  const currentLevelKey = levelKey(level);
-  useEffect(() => {
-    // Invalidate the single-flight slot even when a user leaves and re-enters
-    // the same repository before its old request finishes. The request id still
-    // prevents that abandoned response from landing over the new selection.
-    sessionsInFlightRef.current = null;
-    sessionsRefreshPendingRef.current = false;
-    setSessions(null);
-    setSessionsFailed(false);
-    if (level.kind === 'repo') refreshSessions();
-    // Reacting to the level identity only: refreshSessions is re-created with
-    // `level`, so listing it here would double-fire every fetch.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentLevelKey]);
-
-  useVisibilityPoll(refreshSessions, SESSIONS_POLL_MS, level.kind === 'repo');
 
   // Escape mirrors the Back button — unless a dialog is open (dialogs own
   // Escape; ModalShell also stops propagation as the first line of defense)
@@ -270,24 +183,6 @@ export function Dashboard() {
     }
   }, [overview, selectedLogin, selectedAccount]);
 
-  const header = (
-    <header className="flex-none">
-      <div className="flex items-center gap-3 flex-wrap">
-        <Eyebrow>{d.eyebrow}</Eyebrow>
-        {overview?.global_admin && (
-          <span className="border border-amber/45 rounded-control bg-amber/10 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-amber">
-            {d.globalAdmin}
-          </span>
-        )}
-      </div>
-      {/* Page headline as a bright fg->dim gradient sweep (legible low end). */}
-      <h1 className="grad-text grad-text-fg mt-5 font-display font-bold text-[clamp(28px,4vw,40px)] leading-[1.1] tracking-[-0.02em]">
-        {d.title}
-      </h1>
-      <p className="mt-5 text-[15px] leading-relaxed text-dim max-w-[68ch]">{d.lede}</p>
-    </header>
-  );
-
   // The cold sign-in card is shown ONLY for a never-signed-in visitor. An
   // involuntary expiry (sessionExpired) keeps the dashboard body mounted with a
   // context-preserving re-auth prompt instead (see `expiredBanner`), so the
@@ -298,58 +193,6 @@ export function Dashboard() {
     : !configured
       ? 'unconfigured'
       : 'app';
-
-  const gateBody = (
-    <div className="flex flex-col gap-8 max-w-[960px]">
-      {header}
-      {error && !errorDismissed && (
-        // Frosted danger notice: glass fill, red left accent + a soft red bloom.
-        <div className="anim-row-in border border-line border-l-2 border-l-red rounded-card bg-glass backdrop-blur-glass shadow-[var(--shadow-1),var(--glow-red)] px-4 py-3 flex items-start gap-3">
-          <div className="min-w-0 flex-1">
-            {/* Map the callback's real OAuth slug to specific copy; the raw slug
-                stays visible (mono) so an unrecognized one is still diagnosable. */}
-            <p className="text-[13px] text-dim">{d.authErrorBySlug[error] ?? d.authError}</p>
-            <p className="font-mono text-[11px] text-ghost mt-1">{error}</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setErrorDismissed(true)}
-            className="flex-none font-ui font-semibold text-[12px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg transition-colors cursor-pointer"
-          >
-            {c.shell.toastDismiss}
-          </button>
-        </div>
-      )}
-      {/* Hero-accent sign-in card: amber->gold hairline + card depth & amber bloom. */}
-      <section className="anim-row-in grad-border grad-border-accent rounded-panel p-8 max-[600px]:p-5 flex flex-col items-start gap-4 shadow-glow shadow-highlight-top">
-        <h2 className="grad-text grad-text-fg font-display font-semibold text-[20px]">
-          {d.signInTitle}
-        </h2>
-        <p className="text-[14px] leading-relaxed text-dim max-w-[56ch]">{d.signInBody}</p>
-        {configured ? (
-          <button
-            type="button"
-            onClick={signIn}
-            className="anim-sheen relative overflow-hidden font-ui font-semibold text-[13.5px] bg-grad-accent text-amber-ink rounded-control px-5 py-2.5 transition-[filter] hover:brightness-110 cursor-pointer shadow-[var(--shadow-2),var(--glow-amber)]"
-          >
-            {c.auth.signIn}
-          </button>
-        ) : (
-          <p className="font-mono text-[12px] text-ghost">{d.notConfigured}</p>
-        )}
-      </section>
-    </div>
-  );
-
-  const unconfiguredBody = (
-    <div className="flex flex-col gap-8 max-w-[960px]">
-      {header}
-      {/* Gradient-hairline glass card frames the not-configured notice. */}
-      <section className="anim-row-in grad-border rounded-panel p-8 max-[600px]:p-5 shadow-2 shadow-highlight-top">
-        <p className="font-mono text-[12px] text-ghost">{d.notConfigured}</p>
-      </section>
-    </div>
-  );
 
   const filteredAccounts = overview != null ? filterAccounts(overview.accounts, accountQuery) : [];
   const filteredRepos =
@@ -438,7 +281,7 @@ export function Dashboard() {
     // flex child actually shrink so the row's internal scroll — not the page —
     // absorbs overflow).
     <div className="h-full flex flex-col min-h-0 gap-6">
-      {header}
+      <DashboardHeader globalAdmin={overview?.global_admin === true} />
 
       {/* Involuntary expiry: prompt to re-authenticate WITHOUT tearing down the
           body, so the last-good canvas + the user's level/selection persist. */}
@@ -575,7 +418,13 @@ export function Dashboard() {
   // (instant under reduced motion via FadeSwap).
   return (
     <FadeSwap k={view} className="h-full">
-      {view === 'gate' ? gateBody : view === 'unconfigured' ? unconfiguredBody : appBody}
+      {view === 'gate' ? (
+        <DashboardGate error={error} configured={configured} onSignIn={signIn} />
+      ) : view === 'unconfigured' ? (
+        <DashboardUnconfigured />
+      ) : (
+        appBody
+      )}
     </FadeSwap>
   );
 }
