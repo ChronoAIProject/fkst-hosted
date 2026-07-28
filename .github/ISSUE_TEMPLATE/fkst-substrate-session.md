@@ -27,14 +27,12 @@ issue needs exactly one assignee: this session's creator. Its author must be the
 creator, a login under `### Session Collaborators`, or a deployment global admin.
 
 BRANCHES: To override branch topology, add an optional `### Source Branch`
-section with exactly one existing upstream branch (default: the repository
-default), and/or an optional `### Target Branch` section with exactly one
-integration branch (default: `fkst-hosted-default`). fkst creates a missing target
-at the source head before the session starts, retries provisioning failures
-reported in operator logs, and never resets an existing target.
-Work branches start from the target branch and pull requests merge into it;
-completed target work rolls up into the source. Source and target may be the same
-branch, which disables the separate rollup step.
+section with exactly one existing branch (default: the repository default), and/or
+an optional `### Target Branch` section with exactly one branch (default:
+`fkst-hosted-default`). fkst creates a missing target at the source head before
+the session starts, retries provisioning failures reported in operator logs, and
+never resets an existing target. Work branches start from the target branch and
+pull requests merge into the target. Source and target may be the same branch.
 -->
 
 ### Session Name
@@ -133,6 +131,10 @@ whole section for English (the default).
 <!--
 Optional. Advanced engine tunables, ONE `KEY=value` per line, drawn ONLY from
 this allowlist (anything else is rejected with an explanatory comment):
+  FKST_LLM_MODEL=<model id>                run THIS session on a different model
+    served by the deployment's LLM endpoint (letters, digits, . _ / : - only)
+  FKST_LLM_REASONING_EFFORT=<tier>         minimal | low | medium | high | max
+    (deployment default: max)
   FKST_CODEX_PERMIT_SLOTS=<1..32>          concurrent codex subprocesses
   FKST_QUEUE_CAPACITY=<1..1024>            per-queue capacity
   FKST_MAX_IN_FLIGHT_PER_DEPT=<1..1024>    per-department concurrency
