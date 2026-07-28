@@ -9,6 +9,7 @@ use crate::github_app::GithubAppError;
 use crate::goals::trigger_parse::PackageRef;
 use crate::models::{GithubActor, RepoRef};
 use crate::reconcile::desired::{SessionDef, SessionRegistration};
+use crate::reconcile::work_labels::apply_work_label_namespace;
 
 struct FakeListing {
     count: Result<u64, GithubAppError>,
@@ -113,11 +114,20 @@ fn repo() -> RepoRef {
 }
 
 fn issue(author_id: i64, author_login: &str, assignees: &[&str]) -> IssueSummary {
+    issue_with_labels(author_id, author_login, assignees, &["fkst-run"])
+}
+
+fn issue_with_labels(
+    author_id: i64,
+    author_login: &str,
+    assignees: &[&str],
+    labels: &[&str],
+) -> IssueSummary {
     IssueSummary {
         number: 5,
         title: "work item".to_string(),
         body: "content must never be consulted".to_string(),
-        labels: vec!["fkst-run".to_string()],
+        labels: labels.iter().map(|label| (*label).to_string()).collect(),
         state: "open".to_string(),
         assignees: assignees.iter().map(|value| value.to_string()).collect(),
         user_login: author_login.to_string(),
@@ -165,8 +175,9 @@ async fn pending(
     policy: &AccessPolicy,
 ) -> Result<bool, AppError> {
     let token = SecretString::from("ghs_x".to_string());
+    let scope = apply_work_label_namespace(&["fkst-run".to_string()], None).unwrap();
     LabelCountPending::new(listing, &token)
-        .has_pending(42, &repo(), &["fkst-run".to_string()], reg, policy)
+        .has_pending(42, &repo(), &scope, reg, policy)
         .await
 }
 
@@ -230,16 +241,17 @@ async fn configured_app_child_is_pending_but_an_unconfigured_bot_is_not() {
     let token = SecretString::from("ghs_x".to_string());
     let reg = registration();
     let policy = access("");
+    let scope = apply_work_label_namespace(&["fkst-run".to_string()], None).unwrap();
 
     let configured = LabelCountPending::new_with_bot_login(&listing, &token, Some("app/FKST-App"))
-        .has_pending(42, &repo(), &["fkst-run".to_string()], &reg, &policy)
+        .has_pending(42, &repo(), &scope, &reg, &policy)
         .await
         .unwrap();
     assert!(configured);
 
     let mismatched =
         LabelCountPending::new_with_bot_login(&listing, &token, Some("other-app[bot]"))
-            .has_pending(42, &repo(), &["fkst-run".to_string()], &reg, &policy)
+            .has_pending(42, &repo(), &scope, &reg, &policy)
             .await
             .unwrap();
     assert!(!mismatched);
@@ -249,13 +261,46 @@ async fn configured_app_child_is_pending_but_an_unconfigured_bot_is_not() {
 async fn empty_label_set_never_calls_github() {
     let listing = FakeListing::ok(1, vec![issue(7, "alice", &["alice"])]);
     let token = SecretString::from("ghs_x".to_string());
+    let scope = apply_work_label_namespace(&[], None).unwrap();
     let result = LabelCountPending::new(&listing, &token)
-        .has_pending(42, &repo(), &[], &registration(), &access(""))
+        .has_pending(42, &repo(), &scope, &registration(), &access(""))
         .await
         .unwrap();
     assert!(!result);
     assert_eq!(listing.count_calls.load(Ordering::SeqCst), 0);
     assert_eq!(listing.list_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn namespaced_gate_rejects_plain_foreign_and_dual_family_issues() {
+    let namespace = "chronoai-fkst-cloud-test";
+    let effective = "fkst-run-chronoai-fkst-cloud-test";
+    let scope = apply_work_label_namespace(&["fkst-run".to_string()], Some(namespace)).unwrap();
+    let token = SecretString::from("ghs_x".to_string());
+    let reg = registration();
+    let policy = access("");
+
+    for labels in [
+        vec!["fkst-run"],
+        vec![effective, "fkst-run-other-cloud"],
+        vec![effective, "fkst-run"],
+    ] {
+        let listing = FakeListing::ok(1, vec![issue_with_labels(7, "alice", &["alice"], &labels)]);
+        let pending = LabelCountPending::new(&listing, &token)
+            .has_pending(42, &repo(), &scope, &reg, &policy)
+            .await
+            .unwrap();
+        assert!(!pending, "labels={labels:?}");
+    }
+
+    let listing = FakeListing::ok(
+        1,
+        vec![issue_with_labels(7, "alice", &["alice"], &[effective])],
+    );
+    assert!(LabelCountPending::new(&listing, &token)
+        .has_pending(42, &repo(), &scope, &reg, &policy)
+        .await
+        .unwrap());
 }
 
 #[tokio::test]

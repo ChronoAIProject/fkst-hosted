@@ -14,6 +14,7 @@ use crate::models::RepoRef;
 use crate::reconcile::desired::SessionRegistration;
 use crate::reconcile::routing::{route_work_issue, WorkRouting};
 use crate::reconcile::work_authz::is_work_author_allowed_with_bot;
+use crate::reconcile::work_labels::EffectiveWorkLabels;
 
 #[async_trait]
 pub trait PendingWork: Send + Sync {
@@ -23,7 +24,7 @@ pub trait PendingWork: Send + Sync {
         &self,
         installation_id: i64,
         repo: &RepoRef,
-        work_labels: &[String],
+        work_labels: &EffectiveWorkLabels,
         reg: &SessionRegistration,
         global_admins: &AccessPolicy,
     ) -> Result<bool, AppError>;
@@ -64,11 +65,11 @@ impl PendingWork for LabelCountPending<'_> {
         &self,
         _installation_id: i64,
         repo: &RepoRef,
-        work_labels: &[String],
+        work_labels: &EffectiveWorkLabels,
         reg: &SessionRegistration,
         global_admins: &AccessPolicy,
     ) -> Result<bool, AppError> {
-        for label in work_labels {
+        for label in &work_labels.effective {
             let count = self
                 .listing
                 .count_open_issues_with_label_assignee(
@@ -94,7 +95,8 @@ impl PendingWork for LabelCountPending<'_> {
                 )
                 .await?;
             if issues.iter().map(|issue| issue.metadata()).any(|meta| {
-                route_work_issue(&meta, &reg.creator_login) == WorkRouting::Routed
+                work_labels.matches_issue_labels(&meta.labels)
+                    && route_work_issue(&meta, &reg.creator_login) == WorkRouting::Routed
                     && is_work_author_allowed_with_bot(
                         reg,
                         global_admins,

@@ -15,6 +15,7 @@ use crate::models::RepoRef;
 use crate::reconcile::desired::SessionRegistration;
 use crate::reconcile::routing::{route_work_issue, WorkRouting};
 use crate::reconcile::work_authz::is_work_author_allowed_with_bot;
+use crate::reconcile::work_labels::EffectiveWorkLabels;
 
 use super::{WORK_PICKED_UP_LABEL, WORK_UNAUTHORIZED_LABEL, WORK_UNROUTED_LABEL};
 
@@ -59,7 +60,7 @@ pub async fn ack_open_work_issues(
     token: &SecretString,
     repo: &RepoRef,
     regs: &[SessionRegistration],
-    work_labels_by_session: &HashMap<String, Vec<String>>,
+    work_labels_by_session: &HashMap<String, EffectiveWorkLabels>,
     global_admins: &AccessPolicy,
 ) {
     ack_open_work_issues_with_bot(
@@ -85,7 +86,7 @@ pub async fn ack_open_work_issues_with_bot(
     token: &SecretString,
     repo: &RepoRef,
     regs: &[SessionRegistration],
-    work_labels_by_session: &HashMap<String, Vec<String>>,
+    work_labels_by_session: &HashMap<String, EffectiveWorkLabels>,
     global_admins: &AccessPolicy,
     github_bot_login: Option<&str>,
 ) {
@@ -96,7 +97,10 @@ pub async fn ack_open_work_issues_with_bot(
     let mut unique_labels = Vec::new();
     let mut seen_labels = HashSet::new();
     for reg in regs {
-        for label in labels_for(reg, work_labels_by_session) {
+        let Some(scope) = scope_for(reg, work_labels_by_session) else {
+            continue;
+        };
+        for label in &scope.effective {
             if seen_labels.insert(label.clone()) {
                 unique_labels.push(label.clone());
             }
@@ -129,12 +133,26 @@ pub async fn ack_open_work_issues_with_bot(
         }
     }
 
+    // GitHub's label query normally guarantees an effective base match, but an
+    // issue may simultaneously carry a logical or foreign provider family. Drop
+    // those issues before the repo-level unrouted branch as well as the per-session
+    // pickup branch, otherwise the control plane would still mutate an ambiguous
+    // issue with `fkst-unrouted`.
+    issues.retain(|issue| {
+        regs.iter().any(|reg| {
+            scope_for(reg, work_labels_by_session)
+                .is_some_and(|scope| scope.matches_issue_labels(&issue.labels))
+        })
+    });
+
     // Unrouted is a repo-level decision: a sole assignee must match at least one
     // active creator watching at least one work label carried by the issue.
     for issue in &issues {
         let routed = regs.iter().any(|reg| {
-            issue_matches_labels(issue, labels_for(reg, work_labels_by_session))
-                && route_work_issue(issue, &reg.creator_login) == WorkRouting::Routed
+            scope_for(reg, work_labels_by_session).is_some_and(|scope| {
+                scope.matches_issue_labels(&issue.labels)
+                    && route_work_issue(issue, &reg.creator_login) == WorkRouting::Routed
+            })
         });
         let carries_unrouted = carries_label(issue, WORK_UNROUTED_LABEL);
         if routed {
@@ -147,9 +165,11 @@ pub async fn ack_open_work_issues_with_bot(
     }
 
     for reg in regs {
-        let labels = labels_for(reg, work_labels_by_session);
+        let Some(scope) = scope_for(reg, work_labels_by_session) else {
+            continue;
+        };
         for issue in &issues {
-            if !issue_matches_labels(issue, labels)
+            if !scope.matches_issue_labels(&issue.labels)
                 || route_work_issue(issue, &reg.creator_login) != WorkRouting::Routed
             {
                 continue;
@@ -180,27 +200,18 @@ pub async fn ack_open_work_issues_with_bot(
                 repo,
                 issue.number,
                 &reg.def.name,
-                first_matching_label(issue, labels),
+                first_matching_label(issue, &scope.effective),
             )
             .await;
         }
     }
 }
 
-fn labels_for<'a>(
+fn scope_for<'a>(
     reg: &SessionRegistration,
-    work_labels_by_session: &'a HashMap<String, Vec<String>>,
-) -> &'a [String] {
-    work_labels_by_session
-        .get(&reg.session_id)
-        .map(Vec::as_slice)
-        .unwrap_or_default()
-}
-
-fn issue_matches_labels(issue: &IssueMetadata, labels: &[String]) -> bool {
-    labels
-        .iter()
-        .any(|label| issue.labels.iter().any(|candidate| candidate == label))
+    work_labels_by_session: &'a HashMap<String, EffectiveWorkLabels>,
+) -> Option<&'a EffectiveWorkLabels> {
+    work_labels_by_session.get(&reg.session_id)
 }
 
 fn carries_label(issue: &IssueMetadata, label: &str) -> bool {

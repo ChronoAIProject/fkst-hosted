@@ -60,6 +60,40 @@ impl EffectiveWorkLabels {
                 .expect("a string-to-string work-label map always serializes")
         })
     }
+
+    /// Whether an issue belongs exclusively to this session's work-label family.
+    ///
+    /// The exact effective base label must be present. A logical base, a lifecycle
+    /// label rooted at that logical base, or a foreign provider variant of the same
+    /// logical family makes the issue ambiguous and therefore ineligible. This is
+    /// the control-plane equivalent of the package runtime's admission guard.
+    pub fn matches_issue_labels(&self, issue_labels: &[String]) -> bool {
+        let effective_roots: BTreeSet<&str> = self.effective.iter().map(String::as_str).collect();
+        if !issue_labels
+            .iter()
+            .any(|label| effective_roots.contains(label.as_str()))
+        {
+            return false;
+        }
+
+        for label in issue_labels {
+            let root = label
+                .split_once(':')
+                .map_or(label.as_str(), |(root, _)| root);
+            if effective_roots.contains(root) {
+                continue;
+            }
+            if self.logical.iter().any(|logical| {
+                root == logical
+                    || root
+                        .strip_prefix(logical)
+                        .is_some_and(|suffix| suffix.starts_with('-'))
+            }) {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 /// A configuration or package label that cannot be represented safely on GitHub.
@@ -172,6 +206,45 @@ pub fn apply_work_label_namespace(
         logical_to_effective,
         namespaced: namespace.is_some(),
     })
+}
+
+/// Reconstruct a complete logical/effective scope from labels persisted by a
+/// runtime. This is used when an orphaned runtime is retired: only effective
+/// labels survive in backend metadata, while exact-family filtering also needs
+/// their logical roots. A namespaced deployment fails closed if any persisted
+/// label does not belong to its configured namespace.
+pub fn recover_work_label_scope(
+    effective_labels: &[String],
+    namespace: Option<&str>,
+) -> Result<EffectiveWorkLabels, WorkLabelError> {
+    let Some(namespace) = namespace else {
+        return apply_work_label_namespace(effective_labels, None);
+    };
+    validate_work_label_namespace(namespace)?;
+    let suffix = format!("-{namespace}");
+    let mut logical = Vec::with_capacity(effective_labels.len());
+    for effective in effective_labels {
+        let Some(root) = effective.strip_suffix(&suffix) else {
+            return Err(WorkLabelError::new(format!(
+                "persisted effective work label `{effective}` does not belong to namespace `{namespace}`"
+            )));
+        };
+        if root.is_empty() {
+            return Err(WorkLabelError::new(format!(
+                "persisted effective work label `{effective}` has an empty logical root"
+            )));
+        }
+        logical.push(root.to_string());
+    }
+    let scope = apply_work_label_namespace(&logical, Some(namespace))?;
+    let persisted: BTreeSet<&str> = effective_labels.iter().map(String::as_str).collect();
+    let reconstructed: BTreeSet<&str> = scope.effective.iter().map(String::as_str).collect();
+    if persisted != reconstructed {
+        return Err(WorkLabelError::new(
+            "persisted effective work-label set is not a canonical namespace mapping",
+        ));
+    }
+    Ok(scope)
 }
 
 /// The slice of a package `fkst.toml` this module reads. `#[serde(default)]` +

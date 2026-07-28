@@ -312,6 +312,46 @@ async fn retires_an_unretired_open_work_issue() {
 }
 
 #[tokio::test]
+async fn namespaced_retirement_refuses_plain_foreign_and_dual_family_issues() {
+    let namespace = "chronoai-fkst-cloud-test";
+    let effective = "fkst-dev-chronoai-fkst-cloud-test";
+    for labels in [
+        vec!["fkst-dev"],
+        vec![effective, "fkst-dev-other-cloud"],
+        vec![effective, "fkst-dev"],
+    ] {
+        let api = std::sync::Arc::new(RecordingApi::default());
+        let github = tokens(api.clone());
+        let listing = FakeListing::ok(vec![issue(5, &labels)]);
+        retire_work_issues_with_namespace(
+            &github,
+            &listing,
+            &repo(),
+            &[effective.to_string()],
+            Some(namespace),
+        )
+        .await;
+
+        assert!(api.comments.lock().unwrap().is_empty(), "{labels:?}");
+        assert!(api.labels_added.lock().unwrap().is_empty(), "{labels:?}");
+        assert!(api.labels_removed.lock().unwrap().is_empty(), "{labels:?}");
+    }
+
+    let api = std::sync::Arc::new(RecordingApi::default());
+    let github = tokens(api.clone());
+    let listing = FakeListing::ok(vec![issue(5, &[effective, WORK_PICKED_UP_LABEL])]);
+    retire_work_issues_with_namespace(
+        &github,
+        &listing,
+        &repo(),
+        &[effective.to_string()],
+        Some(namespace),
+    )
+    .await;
+    assert_eq!(api.comments.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn retire_work_issues_lists_every_label_and_dedups_a_shared_issue() {
     // A multi-label session (epic #594 I4): the executor entry point retires across EACH
     // of the session's labels. The fake listing returns the SAME issue for both labels
@@ -319,7 +359,7 @@ async fn retire_work_issues_lists_every_label_and_dedups_a_shared_issue() {
     // it EXACTLY once — while both labels are still queried.
     let api = std::sync::Arc::new(RecordingApi::default());
     let github = tokens(api.clone());
-    let listing = FakeListing::ok(vec![issue(5, &["fkst-run", WORK_PICKED_UP_LABEL])]);
+    let listing = FakeListing::ok(vec![issue(5, &["alpha", "beta", WORK_PICKED_UP_LABEL])]);
 
     retire_work_issues(
         &github,

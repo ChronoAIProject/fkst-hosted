@@ -335,7 +335,7 @@ pub async fn reconcile_repo(
     // and package manifests stay provider-neutral; every GitHub-facing operation below
     // uses only this effective set. Invalid/overlong labels and case-insensitive output
     // collisions fail closed through the ordinary invalid-trigger latch.
-    let mut effective_work_labels_by_session: HashMap<String, Vec<String>> = HashMap::new();
+    let mut work_label_scopes_by_session = HashMap::new();
     let mut work_label_demotions = Vec::new();
     for reg in &regs {
         let logical = logical_work_labels_by_session
@@ -344,7 +344,7 @@ pub async fn reconcile_repo(
             .unwrap_or_default();
         match apply_work_label_namespace(&logical, cfg.work_label_namespace.as_deref()) {
             Ok(labels) => {
-                effective_work_labels_by_session.insert(reg.session_id.clone(), labels.effective);
+                work_label_scopes_by_session.insert(reg.session_id.clone(), labels);
             }
             Err(error) => work_label_demotions.push((
                 reg.trigger_issue,
@@ -352,6 +352,12 @@ pub async fn reconcile_repo(
             )),
         }
     }
+
+    let effective_work_labels_by_session: HashMap<String, Vec<String>> =
+        work_label_scopes_by_session
+            .iter()
+            .map(|(session_id, scope)| (session_id.clone(), scope.effective.clone()))
+            .collect();
     if !work_label_demotions.is_empty() {
         let losers: HashSet<i64> = work_label_demotions
             .iter()
@@ -475,7 +481,7 @@ pub async fn reconcile_repo(
         &token,
         repo,
         &regs,
-        &effective_work_labels_by_session,
+        &work_label_scopes_by_session,
         &ctx.config.access,
         cfg.github_bot_login.as_deref(),
     )
@@ -500,12 +506,12 @@ pub async fn reconcile_repo(
     );
     let mut pending: HashMap<String, bool> = HashMap::new();
     for reg in &regs {
-        let labels = effective_work_labels_by_session
-            .get(&reg.session_id)
-            .cloned()
-            .unwrap_or_default();
+        let Some(labels) = work_label_scopes_by_session.get(&reg.session_id) else {
+            pending.insert(reg.session_id.clone(), false);
+            continue;
+        };
         let is_pending = gate
-            .has_pending(installation_id, repo, &labels, reg, &ctx.config.access)
+            .has_pending(installation_id, repo, labels, reg, &ctx.config.access)
             .await?;
         pending.insert(reg.session_id.clone(), is_pending);
     }

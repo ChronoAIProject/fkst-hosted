@@ -15,6 +15,7 @@ use crate::github_app::listing::{GithubListing, InstallationSummary, IssueSummar
 use crate::github_app::{GithubAppError, GithubAppTokens};
 use crate::models::{GithubActor, RepoRef};
 use crate::reconcile::desired::{SessionDef, SessionRegistration};
+use crate::reconcile::work_labels::{apply_work_label_namespace, EffectiveWorkLabels};
 
 pub(super) type Call = (String, String, i64, String);
 pub(super) type LabelCall = (String, String, i64, Vec<String>);
@@ -295,20 +296,32 @@ pub(super) fn token() -> SecretString {
     SecretString::from("ghs_x".to_string())
 }
 
-pub(super) fn label_map(entries: &[(&str, &[&str])]) -> HashMap<String, Vec<String>> {
+pub(super) fn label_map(entries: &[(&str, &[&str])]) -> HashMap<String, EffectiveWorkLabels> {
     entries
         .iter()
         .map(|(session, labels)| {
+            let logical: Vec<String> = labels.iter().map(|value| (*value).to_string()).collect();
             (
                 (*session).to_string(),
-                labels.iter().map(|value| (*value).to_string()).collect(),
+                apply_work_label_namespace(&logical, None).expect("test label scope"),
             )
         })
         .collect()
 }
 
-pub(super) fn one_label_map(labels: &[&str]) -> HashMap<String, Vec<String>> {
+pub(super) fn one_label_map(labels: &[&str]) -> HashMap<String, EffectiveWorkLabels> {
     label_map(&[("sess-1", labels)])
+}
+
+pub(super) fn one_namespaced_label_map(
+    labels: &[&str],
+    namespace: &str,
+) -> HashMap<String, EffectiveWorkLabels> {
+    let logical: Vec<String> = labels.iter().map(|value| (*value).to_string()).collect();
+    HashMap::from([(
+        "sess-1".to_string(),
+        apply_work_label_namespace(&logical, Some(namespace)).expect("test namespaced label scope"),
+    )])
 }
 
 pub(super) fn access(global_admins: &str) -> AccessPolicy {

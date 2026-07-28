@@ -7,8 +7,8 @@ use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::{
-    apply_work_label_namespace, provider_session_issue_title, resolve_work_labels,
-    validate_work_label_namespace, GITHUB_LABEL_NAME_MAX_CHARS,
+    apply_work_label_namespace, provider_session_issue_title, recover_work_label_scope,
+    resolve_work_labels, validate_work_label_namespace, GITHUB_LABEL_NAME_MAX_CHARS,
 };
 use crate::goals::trigger_parse::PackageRef;
 
@@ -182,6 +182,54 @@ fn absent_namespace_is_identity_and_omits_mapping_env() {
         .expect("identity mapping is valid");
     assert_eq!(labels.logical, labels.effective);
     assert_eq!(labels.map_json(), None);
+}
+
+#[test]
+fn exact_family_scope_rejects_plain_foreign_dual_and_lifecycle_only_issues() {
+    let scope = apply_work_label_namespace(
+        &["fkst-dev".to_string(), "fkst-security".to_string()],
+        Some("chronoai-fkst-cloud-test"),
+    )
+    .unwrap();
+    let dev = "fkst-dev-chronoai-fkst-cloud-test";
+    let security = "fkst-security-chronoai-fkst-cloud-test";
+
+    assert!(scope.matches_issue_labels(&[
+        dev.to_string(),
+        format!("{dev}:claimed"),
+        "bug".to_string(),
+    ]));
+    assert!(scope.matches_issue_labels(&[security.to_string(), dev.to_string(),]));
+    for labels in [
+        vec!["fkst-dev".to_string()],
+        vec![dev.to_string(), "fkst-dev".to_string()],
+        vec![dev.to_string(), "fkst-dev-other-provider".to_string()],
+        vec![format!("{dev}:claimed")],
+        vec![security.to_string(), "fkst-security:blocked".to_string()],
+    ] {
+        assert!(!scope.matches_issue_labels(&labels), "labels={labels:?}");
+    }
+}
+
+#[test]
+fn retirement_scope_round_trips_namespace_and_rejects_foreign_runtime_labels() {
+    let effective = vec![
+        "fkst-dev-chronoai-fkst-cloud-test".to_string(),
+        "fkst-security-chronoai-fkst-cloud-test".to_string(),
+    ];
+    let recovered = recover_work_label_scope(&effective, Some("chronoai-fkst-cloud-test")).unwrap();
+    assert_eq!(recovered.effective, effective);
+    assert_eq!(
+        recovered.logical,
+        vec!["fkst-dev".to_string(), "fkst-security".to_string()]
+    );
+
+    let error = recover_work_label_scope(
+        &["fkst-dev-another-provider".to_string()],
+        Some("chronoai-fkst-cloud-test"),
+    )
+    .expect_err("foreign runtime metadata must fail closed");
+    assert!(error.to_string().contains("does not belong"));
 }
 
 #[test]

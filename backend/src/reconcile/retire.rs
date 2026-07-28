@@ -29,6 +29,7 @@ use crate::github_app::listing::GithubListing;
 use crate::github_app::{GithubAppError, GithubAppTokens};
 use crate::k8s::work_label_wire::join_work_labels;
 use crate::models::RepoRef;
+use crate::reconcile::work_labels::{recover_work_label_scope, EffectiveWorkLabels};
 
 use super::{SUBSTRATE_RETIRED_LABEL, WORK_PICKED_UP_LABEL};
 
@@ -60,7 +61,27 @@ pub async fn retire_work_issues(
     repo: &RepoRef,
     work_labels: &[String],
 ) {
+    retire_work_issues_with_namespace(github, listing, repo, work_labels, None).await;
+}
+
+/// Namespace-aware retirement entry point used by the reconciler. Runtime
+/// metadata retains effective labels, so the logical roots are reconstructed
+/// from the configured provider namespace before any issue can be mutated.
+pub async fn retire_work_issues_with_namespace(
+    github: &GithubAppTokens,
+    listing: &dyn GithubListing,
+    repo: &RepoRef,
+    work_labels: &[String],
+    work_label_namespace: Option<&str>,
+) {
     let owner_repo = format!("{}/{}", repo.owner, repo.name);
+    let scope = match recover_work_label_scope(work_labels, work_label_namespace) {
+        Ok(scope) => scope,
+        Err(error) => {
+            tracing::warn!(owner_repo = %owner_repo, error = %error, "retire: persisted work-label scope is invalid; refusing issue writes");
+            return;
+        }
+    };
     let token = match github.token_for_repo(&owner_repo, None).await {
         Ok(token) => token,
         Err(error) => {
@@ -72,13 +93,13 @@ pub async fn retire_work_issues(
     // once per pass, independent of GitHub's list read-after-write timing.
     let mut retired: HashSet<i64> = HashSet::new();
     for work_label in work_labels {
-        retire_open_work_issues(
+        retire_open_work_issues_in_scope(
             github,
             listing,
             &token,
             repo,
             work_label,
-            work_labels,
+            &scope,
             &mut retired,
         )
         .await;
@@ -107,6 +128,22 @@ pub async fn retire_open_work_issues(
     effective_work_labels: &[String],
     retired: &mut HashSet<i64>,
 ) {
+    let Ok(scope) = recover_work_label_scope(effective_work_labels, None) else {
+        return;
+    };
+    retire_open_work_issues_in_scope(github, listing, token, repo, work_label, &scope, retired)
+        .await;
+}
+
+async fn retire_open_work_issues_in_scope(
+    github: &GithubAppTokens,
+    listing: &dyn GithubListing,
+    token: &SecretString,
+    repo: &RepoRef,
+    work_label: &str,
+    scope: &EffectiveWorkLabels,
+    retired: &mut HashSet<i64>,
+) {
     let issues = match listing
         .list_issues_by_label(token, &repo.owner, &repo.name, work_label)
         .await
@@ -125,6 +162,9 @@ pub async fn retire_open_work_issues(
     };
 
     for issue in issues {
+        if !scope.matches_issue_labels(&issue.labels) {
+            continue;
+        }
         // Already handled under a sibling label THIS pass (a multi-label session's issue
         // that carries two of its labels) — retire it once.
         if retired.contains(&issue.number) {
@@ -136,7 +176,7 @@ pub async fn retire_open_work_issues(
         if issue.labels.iter().any(|l| l == SUBSTRATE_RETIRED_LABEL) {
             continue;
         }
-        retire_issue(github, repo, issue.number, effective_work_labels).await;
+        retire_issue(github, repo, issue.number, &scope.effective).await;
         retired.insert(issue.number);
     }
 }

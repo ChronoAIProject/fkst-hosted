@@ -38,7 +38,7 @@ use crate::reconcile::execute_comments::{
     flag_invalid_comment, invalid_refs_comment, trigger_unauthorized_comment,
 };
 use crate::reconcile::reachability;
-use crate::reconcile::retire::retire_work_issues;
+use crate::reconcile::retire::retire_work_issues_with_namespace;
 use crate::reconcile::work_labels::{apply_work_label_namespace, WorkLabelError};
 use crate::session_backend::{BackendError, EnsureOutcome, SessionBackend};
 use crate::session_spec::creds::{credential_secret_data, StorageWriterCreds};
@@ -120,7 +120,14 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
             // claimed (its full effective set, recovered from the pod annotation). An
             // empty set (a pre-multi-label pod that recorded no label) has none to notify.
             if !work_labels.is_empty() {
-                retire_work_issues(&ctx.github, ctx.listing.as_ref(), repo, &work_labels).await
+                retire_work_issues_with_namespace(
+                    &ctx.github,
+                    ctx.listing.as_ref(),
+                    repo,
+                    &work_labels,
+                    ctx.config.reconcile.work_label_namespace.as_deref(),
+                )
+                .await
             }
         }
         ReconcileAction::FlagInvalid {

@@ -62,6 +62,7 @@ pub(super) async fn work_issues_by_session(
     let logical_labels_by_session =
         resolve_work_label_sets(&gh.client, &gh.api_base, token, &resolved_regs).await;
     let mut labels_by_session = HashMap::new();
+    let mut scopes_by_session = HashMap::new();
     let mut effective_regs = Vec::with_capacity(resolved_regs.len());
     for reg in resolved_regs {
         let logical = logical_labels_by_session
@@ -70,7 +71,8 @@ pub(super) async fn work_issues_by_session(
             .unwrap_or_default();
         match apply_work_label_namespace(&logical, work_label_namespace) {
             Ok(labels) => {
-                labels_by_session.insert(reg.session_id.clone(), labels.effective);
+                labels_by_session.insert(reg.session_id.clone(), labels.effective.clone());
+                scopes_by_session.insert(reg.session_id.clone(), labels);
                 effective_regs.push(reg);
             }
             Err(error) => tracing::debug!(
@@ -99,11 +101,15 @@ pub(super) async fn work_issues_by_session(
     for reg in effective_regs {
         let mut seen = HashSet::new();
         let mut issues = Vec::new();
+        let scope = scopes_by_session.get(&reg.session_id);
         if let Some(labels) = labels_by_session.get(&reg.session_id) {
             for label in labels {
                 if let Some(label_issues) = issues_by_label.get(label) {
                     for issue in label_issues {
-                        if seen.insert(issue.summary.number) {
+                        if scope
+                            .is_some_and(|scope| scope.matches_issue_labels(&issue.summary.labels))
+                            && seen.insert(issue.summary.number)
+                        {
                             issues.push(issue.clone());
                         }
                     }

@@ -48,6 +48,34 @@ async fn routed_authorized_issue_is_acked_once() {
 }
 
 #[tokio::test]
+async fn namespaced_ack_is_silent_for_plain_foreign_and_dual_family_issues() {
+    let namespace = "chronoai-fkst-cloud-test";
+    let effective = "fkst-dev-chronoai-fkst-cloud-test";
+    for (case, labels) in [
+        ("plain", vec!["fkst-dev"]),
+        ("foreign", vec![effective, "fkst-dev-other-cloud"]),
+        ("dual", vec![effective, "fkst-dev"]),
+    ] {
+        let api = Arc::new(RecordingApi::default());
+        let listing = FakeListing::ok(vec![issue(5, &labels)]);
+        ack_open_work_issues(
+            &tokens(api.clone()),
+            &listing,
+            &token(),
+            &repo(),
+            &[registration("cloud", "fkst-dev")],
+            &one_namespaced_label_map(&["fkst-dev"], namespace),
+            &access(""),
+        )
+        .await;
+
+        assert!(api.comments.lock().unwrap().is_empty(), "{case}");
+        assert!(api.labels_added.lock().unwrap().is_empty(), "{case}");
+        assert!(api.labels_removed.lock().unwrap().is_empty(), "{case}");
+    }
+}
+
+#[tokio::test]
 async fn already_acked_issue_is_not_reprocessed() {
     let api = Arc::new(RecordingApi::default());
     let listing = FakeListing::ok(vec![issue(5, &["fkst-run", WORK_PICKED_UP_LABEL])]);

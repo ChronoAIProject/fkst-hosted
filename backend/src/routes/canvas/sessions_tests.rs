@@ -139,6 +139,14 @@ async fn repo_sessions_assembles_the_full_detail() {
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
             issue_json(8, "work", &["site-build"], "open"),
             issue_json(9, "done work", &["site-build"], "closed"),
+            // Returned by the effective-label query, but the foreign variant makes
+            // the issue ambiguous. It must not appear in the session projection.
+            issue_json(
+                10,
+                "ambiguous work",
+                &["site-build", "site-build-other-provider"],
+                "open"
+            ),
         ])))
         .mount(&server)
         .await;
@@ -260,7 +268,11 @@ async fn repo_sessions_assembles_the_full_detail() {
         session.trigger.html_url,
         "https://github.com/acme/site/issues/5"
     );
-    assert_eq!(session.work_issues.len(), 2);
+    assert_eq!(
+        session.work_issues.len(),
+        2,
+        "an issue carrying a foreign work-label family is excluded"
+    );
     assert_eq!(session.work_issues[1].number, 9);
     assert_eq!(
         session.work_issues[1].closed_at.as_deref(),
