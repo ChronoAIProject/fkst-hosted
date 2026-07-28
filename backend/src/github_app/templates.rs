@@ -9,8 +9,12 @@
 //!   - EFFECTFUL: the [`IssueTemplateGithub`] abstraction (injected so the
 //!     reconcile ensure is unit-testable against a fake) and its production
 //!     [`GithubAppTokens`] impl — a mint-then-call wrapper that reads the installed
-//!     version and installs/updates all templates via a MERGED PR onto the repo's
-//!     default branch (trusted fixed content, no review/CI gate).
+//!     version and installs/updates all templates via a PR onto the repo's
+//!     default branch, merged immediately where the branch allows it (trusted
+//!     fixed content). When branch protection blocks the immediate merge, the
+//!     PR is left open ([`TemplateInstallOutcome::PendingPr`]) and reused on the
+//!     next ensure pass — see the [`template_install`](super::template_install)
+//!     module docs for that contract.
 //!
 //! Secret hygiene: the installation token is minted with the least-privilege
 //! [`issue_templates_permissions`] set (contents+pull_requests only, never the
@@ -92,6 +96,18 @@ pub(super) fn encode_content(content: &str) -> String {
     base64::engine::general_purpose::STANDARD.encode(content.as_bytes())
 }
 
+/// How an [`IssueTemplateGithub::install_templates`] call left the repo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TemplateInstallOutcome {
+    /// The install PR merged — the repo is now at the target version.
+    Merged,
+    /// The install PR exists but its merge is blocked (protected default
+    /// branch: required checks/reviews). It is left open for the repo's own
+    /// merge flow; the caller must gate the next attempt (TTL) instead of
+    /// retrying every reconcile.
+    PendingPr { number: u64 },
+}
+
 /// The GitHub-facing operations the template reconcile needs, injected so the
 /// ensure orchestration is unit-testable against a fake without a live GitHub.
 /// [`GithubAppTokens`] is the production implementation.
@@ -102,12 +118,14 @@ pub trait IssueTemplateGithub: Send + Sync {
     async fn installed_templates_version(&self, owner_repo: &str) -> Result<u32, GithubAppError>;
 
     /// Install/update ALL bundled templates in `owner_repo` to `target_version`
-    /// via a single merged PR onto the default branch.
+    /// via a single PR onto the default branch: merged immediately when the
+    /// branch allows it, otherwise left open as
+    /// [`TemplateInstallOutcome::PendingPr`].
     async fn install_templates(
         &self,
         owner_repo: &str,
         target_version: u32,
-    ) -> Result<(), GithubAppError>;
+    ) -> Result<TemplateInstallOutcome, GithubAppError>;
 }
 
 #[async_trait]
@@ -137,7 +155,7 @@ impl IssueTemplateGithub for GithubAppTokens {
         &self,
         owner_repo: &str,
         target_version: u32,
-    ) -> Result<(), GithubAppError> {
+    ) -> Result<TemplateInstallOutcome, GithubAppError> {
         let (owner, repo) = owner_repo
             .split_once('/')
             .ok_or(GithubAppError::InvalidRepoRef)?;

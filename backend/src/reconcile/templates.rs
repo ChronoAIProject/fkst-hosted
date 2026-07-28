@@ -11,13 +11,17 @@
 //!
 //! Error discipline: this NEVER returns an error and NEVER aborts the reconcile.
 //! A read/install failure is logged and NOT recorded, so the next reconcile
-//! retries. The installation token is minted inside [`IssueTemplateGithub`] with a
-//! least-privilege permission set and is never logged.
+//! retries. A merge-blocked install ([`TemplateInstallOutcome::PendingPr`] — the
+//! repo's protected default branch rejected the immediate merge) IS recorded:
+//! the PR stays open for the repo's own merge flow and the next attempt waits
+//! for the TTL, so a protected repo never sees PR churn. The installation token
+//! is minted inside [`IssueTemplateGithub`] with a least-privilege permission
+//! set and is never logged.
 
 use std::time::Instant;
 
 use crate::github_app::templates::FKST_ISSUE_TEMPLATES_VERSION;
-use crate::github_app::IssueTemplateGithub;
+use crate::github_app::{IssueTemplateGithub, TemplateInstallOutcome};
 
 use super::{EnsuredMark, EnsuredTemplates, RepoKey, ENSURED_TEMPLATES_TTL};
 
@@ -36,7 +40,9 @@ fn check_due(ensured: &EnsuredTemplates, key: &RepoKey, now: Instant) -> bool {
     }
 }
 
-/// Record that `key` was confirmed at `version` as of `now`. Poison-safe.
+/// Record that `key` was handled at `version` as of `now` — either confirmed
+/// installed or left as a pending merge-blocked PR (both gate the next check
+/// to the TTL). Poison-safe.
 fn record(ensured: &EnsuredTemplates, key: &RepoKey, version: u32, now: Instant) {
     ensured.lock().unwrap_or_else(|e| e.into_inner()).insert(
         key.clone(),
@@ -93,11 +99,26 @@ pub async fn ensure_issue_templates(
         .install_templates(owner_repo, FKST_ISSUE_TEMPLATES_VERSION)
         .await
     {
-        Ok(()) => {
+        Ok(TemplateInstallOutcome::Merged) => {
             tracing::info!(
                 owner_repo = %owner_repo,
                 version = FKST_ISSUE_TEMPLATES_VERSION,
                 "issue-templates: installed via merged PR"
+            );
+            record(ensured, &key, FKST_ISSUE_TEMPLATES_VERSION, Instant::now());
+        }
+        Ok(TemplateInstallOutcome::PendingPr { number }) => {
+            // Branch protection blocked the immediate merge; the PR stays
+            // open for the repo's own merge flow. RECORD the target version
+            // anyway: the mark means "handled as of now", gating the next
+            // attempt to one per TTL instead of one per reconcile (the
+            // churn loop of issue #5578). The TTL re-check's version read
+            // decides whether the pending PR merged in the meantime.
+            tracing::info!(
+                owner_repo = %owner_repo,
+                version = FKST_ISSUE_TEMPLATES_VERSION,
+                pull = number,
+                "issue-templates: install PR merge blocked; left open, re-checked after TTL"
             );
             record(ensured, &key, FKST_ISSUE_TEMPLATES_VERSION, Instant::now());
         }
@@ -123,14 +144,15 @@ mod tests {
     use super::*;
 
     /// A fake [`IssueTemplateGithub`] that records call counts and can be told to
-    /// fail either operation, so the ensure gate + orchestration are testable
-    /// without a live GitHub.
+    /// fail either operation or report a merge-blocked pending PR, so the ensure
+    /// gate + orchestration are testable without a live GitHub.
     struct FakeTemplates {
         installed: u32,
         version_calls: AtomicUsize,
         install_calls: AtomicUsize,
         fail_version: bool,
         fail_install: bool,
+        pending_pr: bool,
     }
 
     impl FakeTemplates {
@@ -141,6 +163,7 @@ mod tests {
                 install_calls: AtomicUsize::new(0),
                 fail_version: false,
                 fail_install: false,
+                pending_pr: false,
             }
         }
 
@@ -155,6 +178,13 @@ mod tests {
             Self {
                 fail_version: true,
                 ..Self::new(0)
+            }
+        }
+
+        fn with_pending_pr(installed: u32) -> Self {
+            Self {
+                pending_pr: true,
+                ..Self::new(installed)
             }
         }
 
@@ -184,12 +214,15 @@ mod tests {
             &self,
             _owner_repo: &str,
             _target_version: u32,
-        ) -> Result<(), GithubAppError> {
+        ) -> Result<TemplateInstallOutcome, GithubAppError> {
             self.install_calls.fetch_add(1, Ordering::SeqCst);
             if self.fail_install {
                 return Err(GithubAppError::Http("boom".to_string()));
             }
-            Ok(())
+            if self.pending_pr {
+                return Ok(TemplateInstallOutcome::PendingPr { number: 7 });
+            }
+            Ok(TemplateInstallOutcome::Merged)
         }
     }
 
@@ -290,6 +323,39 @@ mod tests {
         // Next reconcile re-attempts (not gated away, since nothing was recorded).
         ensure_issue_templates(key(), "acme/site", &fake, &ensured).await;
         assert_eq!(fake.install_calls(), 2, "install is retried after failure");
+    }
+
+    #[tokio::test]
+    async fn pending_pr_records_and_gates_until_ttl() {
+        // A merge-blocked repo (protected default branch) must get ONE install
+        // attempt per (version, TTL) — not one churned PR per reconcile.
+        let fake = FakeTemplates::with_pending_pr(outdated());
+        let ensured = new_ensured_templates();
+        ensure_issue_templates(key(), "acme/site", &fake, &ensured).await;
+        assert_eq!(fake.install_calls(), 1, "one install attempt");
+        assert_eq!(
+            ensured.lock().unwrap().get(&key()).unwrap().version,
+            FKST_ISSUE_TEMPLATES_VERSION,
+            "a pending PR is recorded like an install (gates to the TTL)"
+        );
+        ensure_issue_templates(key(), "acme/site", &fake, &ensured).await;
+        assert_eq!(
+            fake.version_calls(),
+            1,
+            "the next reconcile is a gated no-op — no churned replacement PR"
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_pr_retries_after_ttl() {
+        // After the TTL the gate re-opens: the still-outdated repo gets one
+        // fresh attempt (which reuses + retries the pending PR downstream).
+        let fake = FakeTemplates::with_pending_pr(outdated());
+        let ensured = new_ensured_templates();
+        let stale = Instant::now() - (ENSURED_TEMPLATES_TTL + Duration::from_secs(3600));
+        mark_at(&ensured, &key(), FKST_ISSUE_TEMPLATES_VERSION, stale);
+        ensure_issue_templates(key(), "acme/site", &fake, &ensured).await;
+        assert_eq!(fake.install_calls(), 1, "a TTL-stale pending repo retries");
     }
 
     #[tokio::test]

@@ -59,8 +59,9 @@ pub use listing::{
 };
 
 /// Re-export the issue-template reconcile surface: the compile-time version
-/// constant + the injectable `IssueTemplateGithub` abstraction its ensure uses.
-pub use templates::{IssueTemplateGithub, FKST_ISSUE_TEMPLATES_VERSION};
+/// constant, the injectable `IssueTemplateGithub` abstraction its ensure uses,
+/// and the install outcome (merged vs pending-PR) the ensure gates on.
+pub use templates::{IssueTemplateGithub, TemplateInstallOutcome, FKST_ISSUE_TEMPLATES_VERSION};
 
 // `InstallationProbe` is defined in this module; it is `pub` already and needs
 // no re-export.

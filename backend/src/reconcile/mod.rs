@@ -184,7 +184,8 @@ pub fn new_active_repos() -> ActiveRepos {
 pub const ENSURED_TEMPLATES_TTL: std::time::Duration = std::time::Duration::from_secs(6 * 3600);
 
 /// What the issue-template ensure last recorded for a repo: the version it
-/// confirmed present and WHEN it confirmed it (monotonic [`std::time::Instant`]).
+/// handled (confirmed installed, or left as a pending merge-blocked install
+/// PR) and WHEN (monotonic [`std::time::Instant`]).
 #[derive(Debug, Clone)]
 pub struct EnsuredMark {
     pub version: u32,
