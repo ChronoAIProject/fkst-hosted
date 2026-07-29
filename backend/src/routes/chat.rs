@@ -101,20 +101,47 @@ pub struct SessionRef {
 pub enum ChatStreamEvent {
     /// An incremental piece of assistant text.
     Delta { text: String },
+    /// A model round is starting.
+    ///
+    /// Answering one user message takes several round trips between this service and
+    /// the model: it is offered the tool catalogue, picks a tool, the result is fed
+    /// back, and it decides the next step. This frame — with its `RoundEnd` partner —
+    /// makes that loop observable instead of leaving the client with an unexplained
+    /// pause. `index` is 0-based and stable for the turn.
+    RoundStart { index: u32, tools_offered: u32 },
+    /// A model round finished. `finish_reason` names why the model stopped and
+    /// `tool_calls` how many calls it asked for (0 when it answered directly).
+    RoundEnd {
+        index: u32,
+        finish_reason: String,
+        tool_calls: u32,
+    },
     /// A tool call is starting. `args_preview` is truncated — it exists to show the
-    /// user what is being looked up, not to be re-parsed.
+    /// user what is being looked up, not to be re-parsed. `args` carries the COMPLETE
+    /// argument JSON for the step timeline's expanded detail, bounded only by
+    /// `FKST_CHAT_DETAIL_MAX_BYTES` (unlimited by default).
     ToolCall {
         id: String,
         name: String,
         args_preview: String,
+        args: String,
+        args_truncated: bool,
     },
     /// A tool call finished. `status` is the underlying HTTP status (200 for
     /// in-process tools), so the UI can distinguish "denied" from "failed".
+    ///
+    /// `response` carries the complete response body for the expanded detail and
+    /// `bytes` its true size BEFORE any cap, so a truncated frame can still state how
+    /// much there really was. `truncated` remains the dispatch layer's own flag;
+    /// `response_truncated` is this frame's cap.
     ToolResult {
         id: String,
         name: String,
         status: u16,
         truncated: bool,
+        response: String,
+        bytes: u64,
+        response_truncated: bool,
     },
     /// A confirm-gated action the user may review and execute.
     ///

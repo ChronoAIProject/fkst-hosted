@@ -84,21 +84,52 @@ async fn run(
 }
 
 /// A compact label per event, so an order assertion reads as the sequence it is.
+///
+/// Round frames are deliberately OMITTED here: these assertions are about the
+/// content sequence — which tool ran, when a card lands relative to its proposal,
+/// how a turn terminates — and interleaving round bookkeeping through all of them
+/// would obscure the thing each test actually checks. The round contract is
+/// asserted precisely, and separately, via [`full_shape`].
 fn shape(events: &[ChatStreamEvent]) -> Vec<String> {
     events
         .iter()
-        .map(|event| match event {
-            ChatStreamEvent::Delta { text } => format!("delta({text})"),
-            ChatStreamEvent::ToolCall { name, .. } => format!("tool_call({name})"),
-            ChatStreamEvent::ToolResult { name, status, .. } => {
-                format!("tool_result({name},{status})")
-            }
-            ChatStreamEvent::ActionProposal { .. } => "action_proposal".to_string(),
-            ChatStreamEvent::DataCard { .. } => "data_card".to_string(),
-            ChatStreamEvent::Done { finish_reason, .. } => format!("done({finish_reason})"),
-            ChatStreamEvent::Error { code, .. } => format!("error({code})"),
+        .filter(|event| {
+            !matches!(
+                event,
+                ChatStreamEvent::RoundStart { .. } | ChatStreamEvent::RoundEnd { .. }
+            )
         })
+        .map(label)
         .collect()
+}
+
+/// Every event, round frames included — for the tests that assert the round
+/// contract itself.
+fn full_shape(events: &[ChatStreamEvent]) -> Vec<String> {
+    events.iter().map(label).collect()
+}
+
+fn label(event: &ChatStreamEvent) -> String {
+    match event {
+        ChatStreamEvent::Delta { text } => format!("delta({text})"),
+        ChatStreamEvent::RoundStart {
+            index,
+            tools_offered,
+        } => format!("round_start({index},{tools_offered})"),
+        ChatStreamEvent::RoundEnd {
+            index,
+            finish_reason,
+            tool_calls,
+        } => format!("round_end({index},{finish_reason},{tool_calls})"),
+        ChatStreamEvent::ToolCall { name, .. } => format!("tool_call({name})"),
+        ChatStreamEvent::ToolResult { name, status, .. } => {
+            format!("tool_result({name},{status})")
+        }
+        ChatStreamEvent::ActionProposal { .. } => "action_proposal".to_string(),
+        ChatStreamEvent::DataCard { .. } => "data_card".to_string(),
+        ChatStreamEvent::Done { finish_reason, .. } => format!("done({finish_reason})"),
+        ChatStreamEvent::Error { code, .. } => format!("error({code})"),
+    }
 }
 
 // ---- pure text ------------------------------------------------------------
@@ -165,6 +196,196 @@ fn registry_with(tool: StubTool) -> ToolRegistry {
     let mut registry = ToolRegistry::new();
     registry.register(Arc::new(tool));
     registry
+}
+
+// ---- the round contract ---------------------------------------------------
+
+#[tokio::test]
+async fn a_zero_tool_turn_still_brackets_its_single_round() {
+    // The loop always runs at least one round, so a plain answer must still be
+    // bracketed — otherwise a client cannot tell "thinking" from "idle".
+    let client = ScriptedClient::new(vec![Ok(vec![
+        StreamItem::TextDelta("Hello".to_string()),
+        StreamItem::Done {
+            finish_reason: "stop".to_string(),
+        },
+    ])]);
+    let events = run(client, ToolRegistry::new(), vec![user("hi")], |_| {}).await;
+    assert_eq!(
+        full_shape(&events),
+        vec![
+            "round_start(0,0)",
+            "delta(Hello)",
+            "round_end(0,stop,0)",
+            "done(stop)",
+        ]
+    );
+}
+
+#[tokio::test]
+async fn each_round_is_bracketed_and_indexed_across_a_tool_round_trip() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let registry = registry_with(StubTool {
+        name: "get_overview".to_string(),
+        outcome: serde_json::json!({ "status": 200, "body": {} }),
+        status: Some(200),
+        calls,
+        proposal: None,
+    });
+    let client = ScriptedClient::new(vec![
+        Ok(vec![StreamItem::ToolCalls(vec![call(
+            "c1",
+            "get_overview",
+            "{}",
+        )])]),
+        Ok(vec![
+            StreamItem::TextDelta("done".to_string()),
+            StreamItem::Done {
+                finish_reason: "stop".to_string(),
+            },
+        ]),
+    ]);
+    let events = run(client, registry, vec![user("what do I have?")], |_| {}).await;
+
+    // Round 0 asks for the tool and closes BEFORE the tool runs; round 1 answers.
+    // `tools_offered` is 1 because exactly one tool is registered.
+    assert_eq!(
+        full_shape(&events),
+        vec![
+            "round_start(0,1)",
+            "round_end(0,stop,1)",
+            "tool_call(get_overview)",
+            "tool_result(get_overview,200)",
+            "round_start(1,1)",
+            "delta(done)",
+            "round_end(1,stop,0)",
+            "done(stop)",
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_round_that_fails_at_the_provider_is_not_falsely_closed() {
+    // The turn dies inside round 0: a RoundEnd would claim a round completed that
+    // never did, so the error must be the only thing that follows the start.
+    let client = ScriptedClient::new(vec![Err(LlmError::Transport(
+        "connection reset".to_string(),
+    ))]);
+    let events = run(client, ToolRegistry::new(), vec![user("hi")], |_| {}).await;
+    assert_eq!(
+        full_shape(&events),
+        vec!["round_start(0,0)", "error(llm_error)"]
+    );
+}
+
+// ---- expanded step detail -------------------------------------------------
+
+#[tokio::test]
+async fn a_tool_step_carries_its_full_arguments_and_full_response() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let body = serde_json::json!({ "status": 200, "body": { "repos": ["a", "b"] } });
+    let registry = registry_with(StubTool {
+        name: "list_repos".to_string(),
+        outcome: body.clone(),
+        status: Some(200),
+        calls,
+        proposal: None,
+    });
+    let args_json = r#"{"account":"wudirruby","limit":50}"#;
+    let client = ScriptedClient::new(vec![
+        Ok(vec![StreamItem::ToolCalls(vec![call(
+            "c1",
+            "list_repos",
+            args_json,
+        )])]),
+        Ok(vec![StreamItem::Done {
+            finish_reason: "stop".to_string(),
+        }]),
+    ]);
+    let events = run(client, registry, vec![user("repos?")], |_| {}).await;
+
+    let (args, args_truncated) = events
+        .iter()
+        .find_map(|e| match e {
+            ChatStreamEvent::ToolCall {
+                args,
+                args_truncated,
+                ..
+            } => Some((args.clone(), *args_truncated)),
+            _ => None,
+        })
+        .expect("a tool_call frame");
+    assert_eq!(args, args_json, "the complete arguments, not the preview");
+    assert!(!args_truncated);
+
+    let (response, bytes, truncated) = events
+        .iter()
+        .find_map(|e| match e {
+            ChatStreamEvent::ToolResult {
+                response,
+                bytes,
+                response_truncated,
+                ..
+            } => Some((response.clone(), *bytes, *response_truncated)),
+            _ => None,
+        })
+        .expect("a tool_result frame");
+    assert_eq!(response, body.to_string(), "the complete response body");
+    assert_eq!(bytes, body.to_string().len() as u64);
+    assert!(!truncated);
+}
+
+#[tokio::test]
+async fn a_detail_cap_truncates_the_frame_but_never_what_the_model_is_told() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let body = serde_json::json!({ "status": 200, "body": { "pad": "0123456789abcdefghij" } });
+    let registry = registry_with(StubTool {
+        name: "list_repos".to_string(),
+        outcome: body.clone(),
+        status: Some(200),
+        calls,
+        proposal: None,
+    });
+    let client = ScriptedClient::new(vec![
+        Ok(vec![StreamItem::ToolCalls(vec![call(
+            "c1",
+            "list_repos",
+            "{}",
+        )])]),
+        Ok(vec![StreamItem::Done {
+            finish_reason: "stop".to_string(),
+        }]),
+    ]);
+    let probe = client.clone();
+    let events = run(client, registry, vec![user("repos?")], |config| {
+        config.detail_max_bytes = 12;
+    })
+    .await;
+
+    let (response, bytes, truncated) = events
+        .iter()
+        .find_map(|e| match e {
+            ChatStreamEvent::ToolResult {
+                response,
+                bytes,
+                response_truncated,
+                ..
+            } => Some((response.clone(), *bytes, *response_truncated)),
+            _ => None,
+        })
+        .expect("a tool_result frame");
+    let full = body.to_string();
+    assert_eq!(response.len(), 12, "the frame is cut to the cap");
+    assert!(truncated);
+    assert_eq!(bytes, full.len() as u64, "bytes reports the TRUE size");
+
+    // The cap is a display bound only: the model still reasons over the whole result.
+    let sent = probe.requests();
+    let last = sent.last().expect("a second round");
+    assert!(
+        last.messages.iter().any(|m| m.content == full),
+        "the model must receive the untruncated result"
+    );
 }
 
 #[tokio::test]
@@ -494,9 +715,14 @@ async fn a_provider_failure_becomes_a_generic_error_frame() {
     .await;
     assert_eq!(shape(&events), vec!["error(llm_error)"]);
     // The provider's detail can quote a key or a request; it must stay in the log.
-    let ChatStreamEvent::Error { message, .. } = &events[0] else {
-        panic!("expected an error frame");
-    };
+    // Located by variant rather than by index: the round frame precedes it.
+    let message = events
+        .iter()
+        .find_map(|e| match e {
+            ChatStreamEvent::Error { message, .. } => Some(message),
+            _ => None,
+        })
+        .expect("expected an error frame");
     assert!(
         !message.contains("sk-secret"),
         "provider detail must not reach the client: {message}"

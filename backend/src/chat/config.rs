@@ -23,6 +23,7 @@
 //! | `FKST_CHAT_MAX_CONCURRENT_TURNS` | `4` | ≥ 1; process-wide admission |
 //! | `FKST_CHAT_HISTORY_MAX_MESSAGES` | `40` | ≥ 2; oldest-first truncation target |
 //! | `FKST_CHAT_REQUEST_MAX_BYTES` | `262144` | ≥ 4096; request-body limit |
+//! | `FKST_CHAT_DETAIL_MAX_BYTES` | `0` (unlimited) | per-frame cap on the step timeline's tool arguments and tool response |
 
 use secrecy::SecretString;
 use serde::Deserialize;
@@ -57,6 +58,8 @@ struct ChatVars {
     history_max_messages: usize,
     #[serde(default = "defaults::request_max_bytes")]
     request_max_bytes: usize,
+    #[serde(default = "defaults::detail_max_bytes")]
+    detail_max_bytes: usize,
 }
 
 /// The `FKST_LLM_*` subset the chat block inherits. These are read RAW (no serde
@@ -87,6 +90,13 @@ mod defaults {
     }
     pub(super) fn request_max_bytes() -> usize {
         256 * 1024
+    }
+    /// Unlimited. The step timeline exists so a user can inspect exactly what was
+    /// sent and returned, and a silent cap would make that record quietly
+    /// incomplete — so the default withholds nothing and a deployment that needs
+    /// smaller frames opts into a cap explicitly.
+    pub(super) fn detail_max_bytes() -> usize {
+        0
     }
 }
 
@@ -124,6 +134,10 @@ pub struct ChatConfig {
     pub history_max_messages: usize,
     /// Request-body limit for `POST /api/v1/chat`.
     pub request_max_bytes: usize,
+    /// Per-frame cap on the tool arguments and tool response carried by the step
+    /// timeline. `0` means unlimited — the default, so the timeline is a complete
+    /// record. A capped value truncates the payload and flags the frame.
+    pub detail_max_bytes: usize,
 }
 
 // Manual `Debug` rendering the credential as `<redacted>` (the config-module
@@ -140,6 +154,7 @@ impl std::fmt::Debug for ChatConfig {
             .field("max_concurrent_turns", &self.max_concurrent_turns)
             .field("history_max_messages", &self.history_max_messages)
             .field("request_max_bytes", &self.request_max_bytes)
+            .field("detail_max_bytes", &self.detail_max_bytes)
             .finish()
     }
 }
@@ -248,6 +263,7 @@ pub fn from_vars(vars: &[(String, String)]) -> Result<Option<ChatConfig>, AppErr
         max_concurrent_turns: raw.max_concurrent_turns,
         history_max_messages: raw.history_max_messages,
         request_max_bytes: raw.request_max_bytes,
+        detail_max_bytes: raw.detail_max_bytes,
     }))
 }
 

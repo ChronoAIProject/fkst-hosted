@@ -113,6 +113,14 @@ async fn drive(
     let mut session_refs: Vec<SessionRef> = Vec::new();
 
     for iteration in 0..config.max_tool_iterations {
+        send(
+            tx,
+            ChatStreamEvent::RoundStart {
+                index: iteration,
+                tools_offered: tools.len() as u32,
+            },
+        )
+        .await?;
         let request = TurnRequest {
             model: config.model.clone(),
             messages: messages.clone(),
@@ -139,14 +147,27 @@ async fn drive(
             }
         }
 
-        // No tool calls means the model answered. A stream that ended without an
-        // explicit finish reason is still a completed answer — some providers just
-        // close the body — so it is reported as a normal stop rather than an error.
+        // A stream that ended without an explicit finish reason is still a completed
+        // answer — some providers just close the body — so it is reported as a normal
+        // stop rather than an error. Resolved once here so the round frame and the
+        // terminal frame cannot disagree about why the round ended.
+        let resolved_finish = finish_reason.unwrap_or_else(|| "stop".to_string());
+        send(
+            tx,
+            ChatStreamEvent::RoundEnd {
+                index: iteration,
+                finish_reason: resolved_finish.clone(),
+                tool_calls: calls.len() as u32,
+            },
+        )
+        .await?;
+
+        // No tool calls means the model answered.
         if calls.is_empty() {
             send(
                 tx,
                 ChatStreamEvent::Done {
-                    finish_reason: finish_reason.unwrap_or_else(|| "stop".to_string()),
+                    finish_reason: resolved_finish,
                     session_refs,
                 },
             )
@@ -181,12 +202,16 @@ async fn run_one_call(
     messages: &mut Vec<ChatMessage>,
     session_refs: &mut Vec<SessionRef>,
 ) -> Result<(), TurnFailure> {
+    let detail_max = runtime.config().detail_max_bytes;
+    let (args, args_truncated) = cap_detail(arguments_or_empty(&call.arguments_json), detail_max);
     send(
         tx,
         ChatStreamEvent::ToolCall {
             id: call.id.clone(),
             name: call.name.clone(),
             args_preview: truncate_chars(&call.arguments_json, ARGS_PREVIEW_MAX_CHARS),
+            args,
+            args_truncated,
         },
     )
     .await?;
@@ -236,6 +261,11 @@ async fn run_one_call(
         ),
     };
 
+    // Rendered once: this same string is both the timeline's expanded detail and, in
+    // its untruncated form below, what the model is told.
+    let response_full = result_json.to_string();
+    let response_bytes = response_full.len() as u64;
+    let (response, response_truncated) = cap_detail(&response_full, detail_max);
     send(
         tx,
         ChatStreamEvent::ToolResult {
@@ -245,6 +275,9 @@ async fn run_one_call(
             // "it ran and produced a result".
             status: status.unwrap_or(200),
             truncated,
+            response,
+            bytes: response_bytes,
+            response_truncated,
         },
     )
     .await?;
@@ -275,7 +308,9 @@ async fn run_one_call(
         .await?;
     }
 
-    messages.push(ChatMessage::tool_result(&call.id, result_json.to_string()));
+    // The model always receives the WHOLE result: `detail_max_bytes` bounds what the
+    // client is shown, never what the turn reasons over.
+    messages.push(ChatMessage::tool_result(&call.id, response_full));
     Ok(())
 }
 
@@ -327,6 +362,23 @@ fn truncate_chars(text: &str, max: usize) -> String {
         return text.to_string();
     }
     text.chars().take(max).collect()
+}
+
+/// Bound one timeline detail payload to `max` BYTES, reporting whether it was cut.
+///
+/// `max == 0` means unlimited, which is the default: the timeline is meant to be a
+/// complete record of what was sent and returned. The cut lands on a character
+/// boundary so a truncated payload is still valid UTF-8 (it is not necessarily valid
+/// JSON any more — the `*_truncated` flag beside it is what tells a client that).
+fn cap_detail(text: &str, max: usize) -> (String, bool) {
+    if max == 0 || text.len() <= max {
+        return (text.to_string(), false);
+    }
+    let mut end = max;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    (text[..end].to_string(), true)
 }
 
 /// Harvest session references from a successful, structured tool result.

@@ -68,3 +68,9 @@ data:
   # FKST_CHAT_MAX_CONCURRENT_TURNS: "4"
   # FKST_CHAT_HISTORY_MAX_MESSAGES: "40"
   # FKST_CHAT_REQUEST_MAX_BYTES: "262144"
+  # Per-frame cap on the step timeline's tool arguments and tool response. Unset/0
+  # is UNLIMITED, so the timeline a user expands is a complete record of what was
+  # sent and returned. Set a byte value to bound large frames; the payload is then
+  # truncated and the frame flags it, while the model still receives the whole
+  # result either way.
+  # FKST_CHAT_DETAIL_MAX_BYTES: "0"
