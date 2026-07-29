@@ -1,23 +1,25 @@
-# fkst-packages
+# FKST hosted package catalog
 
-`fkst-packages` is the official package library for `fkst`: reusable Lua packages that run on the
-separate `fkst-substrate` engine. The repository contains behavior-layer packages, tests, and
-package documentation; it does not contain engine Rust code and does not store host application
-state.
+The `packages` branch of `ChronoAIProject/fkst-hosted` is the managed package catalog for FKST
+Cloud. It is derived from the hosted catalog formerly maintained on
+`ChronoAIProject/fkst-packages@fkst-hosted` and contains reusable Lua packages that run on the
+separate `fkst-substrate` engine. The branch contains behavior-layer packages, tests, and package
+documentation; it does not contain engine Rust code or host application state.
 
 ## Project Status
 
 - License: Apache-2.0, see [`LICENSE`](LICENSE).
 - CI: `.github/workflows/ci.yml` builds `fkst-framework` from `ChronoAIProject/fkst-substrate` and
   runs `scripts/run.sh test`.
-- Default integration branch: `dev`.
+- Catalog integration branch: `packages`.
+- Canonical package reference prefix: `ChronoAIProject/fkst-hosted@packages:`.
 - Engine source pin: `.fkst/substrate-ref` when present, otherwise CI falls back to `dev`.
 
 ## What This Repository Provides
 
-`fkst` is split into an engine and package repositories. `fkst-substrate` owns the runtime,
-delivery, SDK primitives, conformance checks, and `fkst-framework` binary. `fkst-packages` is
-library B: it defines Lua package development source under `packages/`, with departments, raisers,
+`fkst` is split into an engine and package catalogs. `fkst-substrate` owns the runtime, delivery,
+SDK primitives, conformance checks, and `fkst-framework` binary. This hosted catalog is library B:
+it defines Lua package development source under `packages/`, with departments, raisers,
 package-local shared code, and tests. The engine never loads from repo-root `packages/` directly:
 `scripts/run.sh` regenerates `.fkst/local-packages -> ../packages` for this repository's own
 packages, and also loads any external runtime packages present under `.fkst/packages/`.
