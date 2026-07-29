@@ -6,6 +6,22 @@ const FENCE_RE = /^\s*```([^`]*)\s*$/;
 const HEADING_RE = /^(#{1,6})\s+(.+)$/;
 const UNORDERED_ITEM_RE = /^\s*[-+*]\s+(.+)$/;
 const ORDERED_ITEM_RE = /^\s*\d+\.\s+(.+)$/;
+/** A pipe table row: at least one `|`, and the line starts or ends with one. */
+const TABLE_ROW_RE = /^\s*\|.*\|\s*$/;
+/** The delimiter row under a table header (`|---|:--:|`). It is what distinguishes a
+ *  real table from a paragraph that happens to contain pipes. */
+const TABLE_DIVIDER_RE = /^\s*\|(\s*:?-{1,}:?\s*\|)+\s*$/;
+
+/** Split one pipe-table row into its cells, dropping the leading/trailing empties the
+ *  outer pipes produce. */
+function tableCells(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim());
+}
 
 const HEADING_CLASSES = [
   'text-[18px]',
@@ -74,7 +90,10 @@ function startsBlock(line: string): boolean {
     FENCE_RE.test(line) ||
     HEADING_RE.test(line) ||
     UNORDERED_ITEM_RE.test(line) ||
-    ORDERED_ITEM_RE.test(line)
+    ORDERED_ITEM_RE.test(line) ||
+    // A table row must end a paragraph too, or the header line is swallowed into the
+    // prose above it and the table never starts.
+    TABLE_ROW_RE.test(line)
   );
 }
 
@@ -128,6 +147,58 @@ function markdownNodes(markdown: string): ReactNode[] {
       );
       blockIndex += 1;
       lineIndex += 1;
+      continue;
+    }
+
+    // A table needs its delimiter row to be a table at all; without it the pipes are
+    // ordinary text and fall through to the paragraph branch.
+    if (
+      TABLE_ROW_RE.test(line) &&
+      lineIndex + 1 < lines.length &&
+      TABLE_DIVIDER_RE.test(lines[lineIndex + 1]!)
+    ) {
+      const header = tableCells(line);
+      lineIndex += 2;
+      const rows: string[][] = [];
+      while (lineIndex < lines.length && TABLE_ROW_RE.test(lines[lineIndex]!)) {
+        rows.push(tableCells(lines[lineIndex]!));
+        lineIndex += 1;
+      }
+      nodes.push(
+        <div key={`block-${blockIndex}`} className="overflow-x-auto">
+          <table className="w-full border-collapse text-left">
+            <thead>
+              <tr>
+                {header.map((cell, cellIndex) => (
+                  <th
+                    key={cellIndex}
+                    className="border-b border-line px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-ghost"
+                  >
+                    {inlineNodes(cell, `block-${blockIndex}-h-${cellIndex}`)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {/* Indexed by the HEADER width, so a short or long row cannot shift
+                      the columns out of alignment. */}
+                  {header.map((_, cellIndex) => (
+                    <td
+                      key={cellIndex}
+                      className="border-b border-line-2 px-2 py-1 align-top text-faint"
+                    >
+                      {inlineNodes(row[cellIndex] ?? '', `block-${blockIndex}-${rowIndex}-${cellIndex}`)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      blockIndex += 1;
       continue;
     }
 
