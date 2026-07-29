@@ -2263,9 +2263,9 @@ five checks, all under `.github/workflows/`:
 
 | Check | Workflow | What it does |
 |-------|----------|--------------|
-| `rust lint` | `rust-ci.yml` | `cargo fmt --check` + `cargo clippy --all-targets -D warnings` |
-| `rust build` | `rust-ci.yml` | `cargo build --workspace --locked` |
-| `rust test` | `rust-ci.yml` | `cargo test --workspace --locked` |
+| `rust lint` | `rust-ci.yml` | formats and lints the hosted backend plus the Local QA Runtime workspace |
+| `rust build` | `rust-ci.yml` | builds the backend and Local QA Runtime, cross-target checks the inert Rust shells, and compiles/type-checks workers |
+| `rust test` | `rust-ci.yml` | tests the backend and Local QA Runtime workspace |
 | `docker build` | `docker-build.yml` | builds `backend/Dockerfile` `--target server-builder` |
 | `gitleaks` | `gitleaks.yml` | scans the working tree for committed secrets |
 

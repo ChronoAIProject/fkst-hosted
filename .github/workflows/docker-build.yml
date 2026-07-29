@@ -2,7 +2,7 @@ name: Docker build
 
 on:
   pull_request:
-    branches: [develop, develop-auto]
+    branches: [develop, develop-auto, feat/local-qa-runtime]
 
 permissions:
   contents: read
