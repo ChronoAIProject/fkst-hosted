@@ -1,13 +1,13 @@
-/** Copy for the chat concierge: launcher, panel chrome, transcript, composer. */
+/** Copy for the FKST Orchestrator: launcher, panel chrome, transcript, composer. */
 export const chat = {
   /** Launcher label + accessible name. */
-  launcherLabel: 'CONCIERGE',
-  launcherAria: 'Open the fkst concierge',
-  launcherCloseAria: 'Close the fkst concierge',
+  launcherLabel: 'ORCHESTRATOR',
+  launcherAria: 'Open the FKST Orchestrator',
+  launcherCloseAria: 'Close the FKST Orchestrator',
 
   /** Panel chrome. */
-  panelTitle: 'FKST // CONCIERGE',
-  panelAria: 'fkst concierge',
+  panelTitle: 'FKST // ORCHESTRATOR',
+  panelAria: 'FKST Orchestrator',
   linkActive: 'LINK ACTIVE',
   streaming: 'STREAMING',
   clear: 'Clear',
@@ -19,7 +19,7 @@ export const chat = {
   fullScreenExitAria: 'Exit full screen',
   exportAria: 'Download this conversation as JSON',
   close: 'Close',
-  closeAria: 'Close the concierge panel',
+  closeAria: 'Close the FKST Orchestrator panel',
 
   /** Empty state. */
   welcomeTitle: 'Ask about your sessions',
@@ -34,7 +34,7 @@ export const chat = {
   /** Transcript. */
   transcriptAria: 'Conversation',
   jumpToLatest: 'JUMP TO LATEST',
-  assistantRole: 'CONCIERGE',
+  assistantRole: 'ORCHESTRATOR',
   userRole: 'YOU',
   copyAnswer: 'Copy',
   answerAria: 'Assistant answer',
@@ -105,7 +105,7 @@ export const chat = {
 
   /** Composer. */
   placeholder: 'Ask about a session, a log, or how something works…',
-  inputAria: 'Message the concierge',
+  inputAria: 'Message the FKST Orchestrator',
   send: 'Send',
   sendAria: 'Send message',
   stop: 'Stop',
@@ -113,9 +113,9 @@ export const chat = {
   charCount: '{used} / {max}',
 
   /** Sign-in gate inside the panel. */
-  signInTitle: 'Sign in to use the concierge',
+  signInTitle: 'Sign in to use the FKST Orchestrator',
   signInBody:
-    'The concierge answers using your own GitHub access, so it needs you signed in first.',
+    'The FKST Orchestrator answers using your own GitHub access, so it needs you signed in first.',
 
   /** Confirm-gated action cards. */
   kindNewSession: 'NEW SESSION',
@@ -210,7 +210,7 @@ export const chat = {
     rate_limited_after: 'One question at a time — try again in {seconds}s.',
     llm_error: 'The language model could not be reached. Please try again.',
     protocol: 'The answer could not be read. Please try again.',
-    unavailable: 'The concierge is not available on this deployment right now.',
+    unavailable: 'The FKST Orchestrator is not available on this deployment right now.',
     unauthorized: 'Your session expired. Sign in again to keep asking.',
     network: 'The connection dropped before the answer finished.',
     request: 'That request was rejected.',

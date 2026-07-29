@@ -183,7 +183,7 @@
   animation: drawer-in 220ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
 }
 
-/* The concierge panel's entrance: a short slide from the right plus a fade.
+/* The FKST Orchestrator panel's entrance: a short slide from the right plus a fade.
    Deliberately gentler and shorter-travel than `.anim-drawer-in` — the chat panel
    is a non-modal companion that slides in beside the page, not a takeover. Timed
    to MOTION_MS.drawer so it agrees with the JS motion primitives. */

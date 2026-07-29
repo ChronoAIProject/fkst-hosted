@@ -649,7 +649,7 @@ export interface SiteContent {
   /** Guided product tour: the `?` help launcher, the coachmark controls shared
    *  by every step, and one `{title, body}` card per step. The `steps` keys map
    *  1:1 to the step ids in `components/tour/tour-steps.ts`. */
-  /** The chat concierge: launcher, panel chrome, transcript, and composer. Every
+  /** The FKST Orchestrator: launcher, panel chrome, transcript, and composer. Every
    *  string the surface renders lives here — the components hold no literals. */
   chat: {
     launcherLabel: string;

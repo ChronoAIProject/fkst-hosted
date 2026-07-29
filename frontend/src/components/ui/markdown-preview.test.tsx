@@ -57,7 +57,7 @@ describe('MarkdownPreview', () => {
   });
 
   it('renders a pipe table as a real table', () => {
-    // Observed live: the concierge answered with a Markdown table and it rendered as
+    // Observed live: the Orchestrator answered with a Markdown table and it rendered as
     // raw pipes, which reads as broken output.
     const markdown = [
       '| Profile | Status | Secrets |',

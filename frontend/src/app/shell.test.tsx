@@ -19,7 +19,7 @@ function renderShell({
   }
   return render(
     <AuthProvider>
-      {/* The shell now hosts the chat concierge, which forwards the
+      {/* The shell now hosts the FKST Orchestrator, which forwards the
           broader-visibility credential and raises toasts — so it needs both
           providers, exactly as production does (app/index.tsx mounts them above
           the router). */}

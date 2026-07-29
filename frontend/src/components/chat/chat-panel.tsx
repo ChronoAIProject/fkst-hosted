@@ -92,7 +92,7 @@ function ViewLevelToggle() {
 }
 
 /**
- * The docked concierge panel.
+ * The docked FKST Orchestrator panel.
  *
  * Deliberately NOT `DrawerShell`: that is a modal takeover with a scrim and a focus
  * trap, and this is a companion. The page stays interactive and visible beside it,
@@ -291,7 +291,7 @@ export function ChatPanel() {
           <Composer value={draft} onChange={setDraft} />
         </div>
       ) : (
-        // Signed out: the concierge answers with the USER's access, so there is
+        // Signed out: the Orchestrator answers with the USER's access, so there is
         // nothing useful to show until they sign in. Say that, and offer the action.
         <div
           data-testid="chat-signin-card"
