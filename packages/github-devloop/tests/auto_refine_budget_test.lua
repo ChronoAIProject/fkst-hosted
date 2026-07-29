@@ -20,12 +20,13 @@ return {
     -- row would silently sit for a day anyway.
     local builders = require("devloop.payloads.builders")
     local decompose = require("devloop.decompose")
+    local base_ids = require("devloop.base_ids")
 
     local payload = builders.build_devloop_decompose_payload({
       proposal_id = "github-devloop/issue/acme/site/42",
       issue_version = "github-devloop/issue/acme/site/42/intake/7",
       round = 1,
-      source_ref = "github-devloop/issue/acme/site/42",
+      source_ref = base_ids.issue_source_ref("acme/site", 42),
     })
 
     t.is_true(decompose.is_supported_decompose(payload))

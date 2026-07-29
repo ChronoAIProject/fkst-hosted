@@ -36,6 +36,7 @@ queue("observe_issue", "devloop_ready", "lifecycle-authoritative", "ready:v1/pro
 queue("observe_issue", "github-devloop-decompose.devloop_decompose", "grantless-published-intent", "decompose.v1/proposal+attempt")
 queue("observe_issue", "devloop_reconcile", "lifecycle-authoritative", "reconcile:v1/proposal+round")
 queue("observe_issue", "devloop_timeout_reconcile", "lifecycle-authoritative", "timeout-reconcile:v1/proposal+state+round")
+queue("reconcile", "github-devloop-decompose.devloop_decompose", "grantless-published-intent", "decompose.v1/proposal+attempt")
 queue("test_board_digest_probe", "board_digest_probe", "grantless-non-lifecycle", "test-probe/board-digest-request")
 queue("test_board_digest_probe", "board_digest_result", "grantless-non-lifecycle", "test-probe/board-digest-result")
 queue("test_cache_seed", "cache_seed", "grantless-non-lifecycle", "test-probe/cache-seed-request")
