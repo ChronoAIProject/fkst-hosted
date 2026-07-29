@@ -663,6 +663,9 @@ export interface SiteContent {
     streaming: string;
     clear: string;
     clearAria: string;
+    /** Download the whole session, including every step's parameters and response. */
+    export: string;
+    exportAria: string;
     close: string;
     closeAria: string;
     welcomeTitle: string;
