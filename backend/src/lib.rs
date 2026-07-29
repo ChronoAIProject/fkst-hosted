@@ -79,6 +79,7 @@ pub mod k8s;
 pub mod openapi;
 pub mod router;
 pub mod routes;
+pub mod schedule;
 pub mod session_backend;
 // Optional chrono-storage object-store client + its NyxID service-account token
 // provider (log-streaming Wave 1). Self-contained + wiremock-tested; disabled
