@@ -48,6 +48,47 @@ function Scanlines() {
 }
 
 /**
+ * CLEAN/VERBOSE switch: how much of the orchestration each ANSWER FROM HERE shows.
+ *
+ * A segmented pair rather than a checkbox, because both states are real choices
+ * with names — and the two-state pair makes the current one legible at a glance
+ * without reading a label. It never rewrites what is already on screen; the
+ * transcript note the context appends is what marks where the change takes effect.
+ */
+function ViewLevelToggle() {
+  const s = useContent().chat;
+  const { viewLevel, setViewLevel } = useChat();
+  return (
+    <div
+      role="group"
+      aria-label={s.viewLevelAria}
+      data-testid="chat-view-level"
+      className="flex items-center gap-0.5 rounded-control border border-[color-mix(in_oklab,var(--fg)_12%,transparent)] p-0.5"
+    >
+      {(['clean', 'verbose'] as const).map((level) => {
+        const active = viewLevel === level;
+        return (
+          <button
+            key={level}
+            type="button"
+            onClick={() => setViewLevel(level)}
+            aria-pressed={active}
+            data-testid={`chat-view-level-${level}`}
+            className={`rounded-control px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-[0.12em] transition-colors cursor-pointer ${
+              active
+                ? 'bg-[color-mix(in_oklab,var(--fg)_10%,transparent)] text-fg'
+                : 'text-ghost hover:text-faint'
+            }`}
+          >
+            {level === 'clean' ? s.viewLevelClean : s.viewLevelVerbose}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
  * The docked concierge panel.
  *
  * Deliberately NOT `DrawerShell`: that is a modal takeover with a scrim and a focus
@@ -63,6 +104,7 @@ export function ChatPanel() {
   const s = c.chat;
   const { isAuthenticated, signIn } = useAuth();
   const { open, closePanel, streaming, messages, clearTranscript } = useChat();
+
   const panelRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<Element | null>(null);
   // The composer's text lives here so a starter prompt can prefill it.
@@ -150,6 +192,7 @@ export function ChatPanel() {
           {streaming ? s.streaming : s.linkActive}
         </Chip>
         <span className="flex-1" aria-hidden="true" />
+        <ViewLevelToggle />
         {messages.length > 0 && (
           <button
             type="button"

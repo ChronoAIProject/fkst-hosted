@@ -39,6 +39,21 @@ export const chat = {
   toolNone: 'NONE',
   toolError: 'ERR',
   toolTruncated: 'TRUNCATED',
+
+  // ---- orchestration timeline (CLEAN/VERBOSE) ----
+  stepRound: 'round',
+  stepRoundOpen: 'working',
+  stepRoundCalls: 'calls',
+  stepParameters: 'Parameters',
+  stepResponse: 'Response',
+  stepTruncated: 'truncated',
+  stepSummaryOne: 'step',
+  stepSummaryMany: 'steps',
+  viewLevelAria: 'Detail level',
+  viewLevelClean: 'Clean',
+  viewLevelVerbose: 'Verbose',
+  viewLevelNoteVerbose: 'Verbose view on — the steps behind each answer are shown from here.',
+  viewLevelNoteClean: 'Clean view on — intermediate steps are hidden from here.',
   /** Human labels for the backend's tool names; an unlisted name renders raw. */
   toolNames: {
     get_overview: 'accounts & repos',

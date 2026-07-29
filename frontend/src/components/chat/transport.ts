@@ -37,8 +37,25 @@ export interface SessionRef {
 /** Callbacks a transport drives as a turn streams. */
 export interface ChatTransportHandlers {
   onDelta(text: string): void;
-  onToolCall(ev: { id: string; name: string }): void;
-  onToolResult(ev: { id: string; name: string; status: number; truncated: boolean }): void;
+  /** A model round opened / closed — the orchestration loop made visible. */
+  onRoundStart(ev: { index: number; toolsOffered: number }): void;
+  onRoundEnd(ev: { index: number; finishReason: string; toolCalls: number }): void;
+  onToolCall(ev: {
+    id: string;
+    name: string;
+    argsPreview: string;
+    args?: string;
+    argsTruncated?: boolean;
+  }): void;
+  onToolResult(ev: {
+    id: string;
+    name: string;
+    status: number;
+    truncated: boolean;
+    response?: string;
+    bytes?: number;
+    responseTruncated?: boolean;
+  }): void;
   onActionProposal(proposal: unknown): void;
   /** A structured rendering of the tool result that just landed. */
   onDataCard(card: unknown): void;
@@ -74,7 +91,9 @@ export function sseChatTransport(
         { messages: history.map(({ role, content }) => ({ role, content })) },
         {
           onDelta: handlers.onDelta,
-          onToolCall: ({ id, name }) => handlers.onToolCall({ id, name }),
+          onRoundStart: handlers.onRoundStart,
+          onRoundEnd: handlers.onRoundEnd,
+          onToolCall: handlers.onToolCall,
           onToolResult: handlers.onToolResult,
           onActionProposal: handlers.onActionProposal,
           onDataCard: handlers.onDataCard,
@@ -135,9 +154,31 @@ export const mockEchoTransport: ChatTransport = {
     };
 
     const toolId = 'mock-tool-1';
-    at(MOCK_CHUNK_MS, () => handlers.onToolCall({ id: toolId, name: 'search_manual' }));
+    // The mock walks the same shape as the real loop — round, call, result, round
+    // close — so the timeline can be developed without a backend.
+    const mockArgs = '{"query":"fkst"}';
+    const mockResponse = '{"status":200,"body":{"matches":3}}';
+    at(0, () => handlers.onRoundStart({ index: 0, toolsOffered: 1 }));
+    at(MOCK_CHUNK_MS, () =>
+      handlers.onToolCall({
+        id: toolId,
+        name: 'search_manual',
+        argsPreview: mockArgs,
+        args: mockArgs,
+      })
+    );
     at(MOCK_CHUNK_MS * 2, () =>
-      handlers.onToolResult({ id: toolId, name: 'search_manual', status: 200, truncated: false })
+      handlers.onToolResult({
+        id: toolId,
+        name: 'search_manual',
+        status: 200,
+        truncated: false,
+        response: mockResponse,
+        bytes: mockResponse.length,
+      })
+    );
+    at(MOCK_CHUNK_MS * 2, () =>
+      handlers.onRoundEnd({ index: 0, finishReason: 'tool_calls', toolCalls: 1 })
     );
 
     MOCK_CHUNKS.forEach((chunk, index) => {

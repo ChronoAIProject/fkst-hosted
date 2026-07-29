@@ -8,6 +8,9 @@ function recorder() {
   const trace: string[] = [];
   const handlers: StreamChatHandlers = {
     onDelta: (text) => trace.push(`delta:${text}`),
+    onRoundStart: ({ index, toolsOffered }) => trace.push(`round_start:${index}:${toolsOffered}`),
+    onRoundEnd: ({ index, finishReason, toolCalls }) =>
+      trace.push(`round_end:${index}:${finishReason}:${toolCalls}`),
     onToolCall: ({ name }) => trace.push(`tool_call:${name}`),
     onToolResult: ({ name, status, truncated }) =>
       trace.push(`tool_result:${name}:${status}${truncated ? ':truncated' : ''}`),

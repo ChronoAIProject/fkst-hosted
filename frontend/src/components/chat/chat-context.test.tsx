@@ -162,16 +162,51 @@ describe('ChatProvider', () => {
     renderChat(<Probe />, { transport: script.transport });
 
     act(() => chat().sendMessage('why did it fail?'));
-    act(() => script.handlers().onToolCall({ id: 't1', name: 'tail_log_file' }));
-    expect(chat().messages[1]!.toolEvents).toEqual([{ id: 't1', name: 'tail_log_file' }]);
+    act(() =>
+      script.handlers().onToolCall({ id: 't1', name: 'tail_log_file', argsPreview: '{"n":1}' })
+    );
+    expect(chat().messages[1]!.steps).toEqual([
+      { kind: 'tool', id: 't1', name: 'tail_log_file', argsPreview: '{"n":1}' },
+    ]);
 
     act(() =>
-      script
-        .handlers()
-        .onToolResult({ id: 't1', name: 'tail_log_file', status: 403, truncated: false })
+      script.handlers().onToolResult({
+        id: 't1',
+        name: 'tail_log_file',
+        status: 403,
+        truncated: false,
+        response: '{"error":"denied"}',
+        bytes: 18,
+      })
     );
-    expect(chat().messages[1]!.toolEvents).toEqual([
-      { id: 't1', name: 'tail_log_file', status: 403, truncated: false },
+    // The result folds onto the SAME step rather than appending a second row.
+    expect(chat().messages[1]!.steps).toEqual([
+      {
+        kind: 'tool',
+        id: 't1',
+        name: 'tail_log_file',
+        argsPreview: '{"n":1}',
+        status: 403,
+        truncated: false,
+        response: '{"error":"denied"}',
+        bytes: 18,
+      },
+    ]);
+  });
+
+  it('brackets the turn with its model rounds', () => {
+    const script = scriptedTransport();
+    renderChat(<Probe />, { transport: script.transport });
+    act(() => chat().sendMessage('what do I have?'));
+
+    act(() => script.handlers().onRoundStart({ index: 0, toolsOffered: 17 }));
+    expect(chat().messages[1]!.steps).toEqual([{ kind: 'round', index: 0, toolsOffered: 17 }]);
+
+    act(() =>
+      script.handlers().onRoundEnd({ index: 0, finishReason: 'tool_calls', toolCalls: 2 })
+    );
+    expect(chat().messages[1]!.steps).toEqual([
+      { kind: 'round', index: 0, toolsOffered: 17, finishReason: 'tool_calls', toolCalls: 2 },
     ]);
   });
 
@@ -185,7 +220,35 @@ describe('ChatProvider', () => {
         .handlers()
         .onToolResult({ id: 'orphan', name: 'get_overview', status: 200, truncated: false })
     );
-    expect(chat().messages[1]!.toolEvents).toHaveLength(1);
+    expect(chat().messages[1]!.steps).toHaveLength(1);
+  });
+
+  it('captures the view level per message so a toggle never rewrites history', () => {
+    const script = scriptedTransport();
+    renderChat(<Probe />, { transport: script.transport });
+
+    act(() => chat().sendMessage('first'));
+    expect(chat().messages[1]!.viewLevel).toBe('clean');
+
+    // Switching mid-session must leave the turn already on screen untouched...
+    act(() => chat().setViewLevel('verbose'));
+    expect(chat().messages[1]!.viewLevel).toBe('clean');
+    // ...and mark the boundary in the transcript.
+    const note = chat().messages.find((m) => m.role === 'system-note');
+    expect(note).toBeTruthy();
+
+    // ...and apply from the NEXT message onwards.
+    act(() => script.handlers().onDone({ finishReason: 'stop', sessionRefs: [] }));
+    act(() => chat().sendMessage('second'));
+    const latest = chat().messages.filter((m) => m.role === 'assistant').at(-1);
+    expect(latest!.viewLevel).toBe('verbose');
+  });
+
+  it('does not append a note when the level is set to what it already is', () => {
+    const script = scriptedTransport();
+    renderChat(<Probe />, { transport: script.transport });
+    act(() => chat().setViewLevel('clean'));
+    expect(chat().messages.filter((m) => m.role === 'system-note')).toHaveLength(0);
   });
 
   it('stores the session refs from done onto the finishing message', () => {

@@ -199,6 +199,8 @@ describe('ChatPanel — real SSE transport', () => {
     window.sessionStorage.clear();
     // Signed in, or the panel shows its sign-in card instead of the transcript.
     window.localStorage.setItem('fkst-gh-access', 'ghu_x');
+    // This spec asserts the individual step rows, which CLEAN collapses to a count.
+    window.localStorage.setItem('fkst-chat-view-level', 'verbose');
     captured.current = null;
   });
   afterEach(() => {

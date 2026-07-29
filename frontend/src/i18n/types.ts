@@ -687,6 +687,22 @@ export interface SiteContent {
     toolNone: string;
     toolError: string;
     toolTruncated: string;
+    /** The orchestration timeline: one row per model round and per tool call,
+     *  each expandable to the exact parameters and response, plus the
+     *  CLEAN/VERBOSE switch that decides how much of it a turn renders. */
+    stepRound: string;
+    stepRoundOpen: string;
+    stepRoundCalls: string;
+    stepParameters: string;
+    stepResponse: string;
+    stepTruncated: string;
+    stepSummaryOne: string;
+    stepSummaryMany: string;
+    viewLevelAria: string;
+    viewLevelClean: string;
+    viewLevelVerbose: string;
+    viewLevelNoteVerbose: string;
+    viewLevelNoteClean: string;
     /** Human labels keyed by backend tool name; an unlisted name renders raw. */
     toolNames: Record<string, string>;
     /** Structured data cards projected from a tool result. Placeholders as named. */
