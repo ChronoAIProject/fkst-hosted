@@ -75,14 +75,18 @@ local function mock_runtime_and_context()
 end
 
 local function mock_github_proxy_writes()
-  for _ = 1, 2 do
+  -- Three of each now: the reconcile comment, the label write, and the
+  -- amend-and-reintake comment that re-enters the loop on a refinable cause.
+  -- Each comment write re-reads the thread first, so the read mock count tracks
+  -- the write count.
+  for _ = 1, 3 do
     t.mock_command("gh api --paginate --slurp repos/owner/repo/issues/42/comments?per_page=100", {
       stdout = "[[]]\n",
       stderr = "",
       exit_code = 0,
     })
   end
-  for comment_id = 123456, 123457 do
+  for comment_id = 123456, 123458 do
     t.mock_command("gh api --method POST repos/owner/repo/issues/42/comments --field 'body=", {
       stdout = '{"id":' .. tostring(comment_id) .. ',"body":"created","user":{"login":"fkst-test-bot"}}\n',
       stderr = "",
@@ -174,7 +178,11 @@ return {
     mock_issue_reads()
     mock_github_proxy_writes()
 
-    local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 8 }))
+    -- 9, not 8: a refinable terminal cause now also raises the amend-and-reintake
+    -- comment, so the graph has one more effect to drain before it quiesces. The
+    -- budget stays exact rather than generous -- `require_quiescent` proves the
+    -- graph actually settles, and a padded ceiling would stop proving that.
+    local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 9 }))
     graph.assert_covers(trace, {
       "consensus.consensus_converge -> github-devloop.loop",
       "github-proxy.github_issue_comment_request -> github-proxy.github_comment",

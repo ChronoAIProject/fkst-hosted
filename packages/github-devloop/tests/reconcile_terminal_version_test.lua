@@ -64,7 +64,10 @@ return {
 
     local result = run_reconcile(event, opts("reconcile-terminal-thinking"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
+    -- 3 effects, not 2: a refinable terminal cause now also raises the
+    -- amend-and-reintake comment alongside the reconcile comment and label
+    -- write, so the loop re-enters instead of ending here.
+    t.eq(#result.raises, 3)
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
     local version = conv_reconcile.reconcile_terminal_state_version(state_version, event.round)
     t.eq(core.versioned_transition_status({ state = "thinking", version = state_version }, { "thinking" }, "blocked", version), "apply")

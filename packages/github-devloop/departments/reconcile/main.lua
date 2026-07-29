@@ -7,6 +7,7 @@ local transition_version = require("contract.transition_version")
 
 local saga = require("workflow.saga")
 local conv_reconcile = require("devloop.convergence.reconcile")
+local conv_rounds = require("devloop.convergence.rounds")
 local conv_attempts = require("devloop.convergence.attempts")
 local entity_lib = require("devloop.entity")
 local devloop_logging = require("devloop.logging")
@@ -145,12 +146,49 @@ local function pipeline_thinking(event)
       return
     end
 
-    -- re-design/re-cluster require a trusted directive fact; current deterministic reconcile drops.
+    -- A convergence terminal used to end here unconditionally: drop to `blocked`
+    -- and wait for a human to notice and type `fkst: reintake`. For a self-driving
+    -- session that is a full stop on the FIRST disagreement, which is the common
+    -- outcome for a large generated spec.
+    --
+    -- Now a refinable cause spends one auto-refinement instead: the item still
+    -- lands in `blocked` (terminal states are sticky, and `blocked` owns the
+    -- documented reintake re-entry edge), and the same pass emits a trusted
+    -- amend-and-reintake comment that puts it straight back into intake with the
+    -- review's narrowed question as a standing directive. The budget is counted
+    -- from durable markers, so recycling a pod cannot silently grant more laps.
+    local comments = (current and current.comments) or {}
+    local refinable = conv_rounds.is_refinable_cause(reconcile.terminal_cause)
+    local budget_left = conv_rounds.auto_refine_budget_remaining(comments, reconcile.proposal_id)
+    local refine_round = conv_rounds.auto_refine_count(comments, reconcile.proposal_id) + 1
+
     local action = "drop"
     local reason = tostring(reconcile.terminal_cause) .. "-after-" .. tostring(reconcile.round) .. "-rounds"
+    if refinable and budget_left then
+      -- `re-design` is the vocabulary the marker grammar already defines for this
+      -- outcome (`reconcile.lua` has accepted drop/re-design/re-cluster all along);
+      -- the deterministic path simply never emitted anything but `drop`.
+      action = "re-design"
+      reason = reason .. "; auto-refinement " .. tostring(refine_round) .. "/"
+        .. tostring(conv_rounds.MAX_AUTO_REFINEMENTS) .. " re-entering intake"
+    elseif refinable then
+      reason = reason .. "; auto-refinement budget exhausted after "
+        .. tostring(conv_rounds.MAX_AUTO_REFINEMENTS)
+        .. " amendments -- the disagreement survived every amendment and wants a human"
+    end
+
     local comment_request = core.build_reconcile_comment_request(repo, issue_number, reconcile, action, reason, version)
     local label_request = core.build_reconcile_label_request(repo, issue_number, reconcile)
     emit_blocked_reconcile(reconcile.proposal_id, state, version, action, reason, comment_request, label_request)
+
+    -- Raised AFTER the terminal write so the re-entry can never race ahead of the
+    -- state marker it is re-entering from.
+    if refinable and budget_left then
+      local refine_request = core.build_auto_refine_comment_request(
+        repo, issue_number, reconcile, refine_round, reconcile.terminal_cause, version)
+      devloop_logging.log_raise("reconcile", reconcile.proposal_id,
+        "github-proxy.github_issue_comment_request", refine_request)
+    end
   end)
 end
 
