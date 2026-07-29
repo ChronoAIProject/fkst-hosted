@@ -35,6 +35,7 @@ const RUNTIME_ROOT_ENV: &str = "FKST_RUNTIME_ROOT";
 const CREDS_DIR_ENV: &str = "FKST_SESSION_CREDS_DIR";
 const CODEX_HOME_ENV: &str = "CODEX_HOME";
 const DEVLOOP_INTEGRATION_BRANCH_ENV: &str = "FKST_DEVLOOP_INTEGRATION_BRANCH";
+const DEVLOOP_UPSTREAM_BRANCH_ENV: &str = "FKST_DEVLOOP_UPSTREAM_BRANCH";
 
 /// `git config` count key + the LLM env key the child reads its API key from.
 const GIT_CONFIG_COUNT_ENV: &str = "GIT_CONFIG_COUNT";
@@ -84,6 +85,12 @@ pub struct SubstrateEnv {
     /// Target branch to clone. `None` preserves the legacy default-branch clone
     /// for callers outside the hosted session launcher.
     pub target_branch: Option<String>,
+    /// Upstream (source) branch the devloop rolls completed target work into.
+    /// Read so the clone can ALSO fetch this ref: the shallow `--single-branch`
+    /// clone otherwise leaves `refs/remotes/origin/<source>` absent, and the
+    /// devloop's rollup/sync scans resolve ranges against it on every branch
+    /// tick. `None` for callers outside the hosted launcher.
+    pub source_branch: Option<String>,
     /// Exact operator grants for this lifecycle repository. Empty preserves the
     /// historical single-repository worker contract.
     pub delivery_grants: Vec<DeliveryGrant>,
@@ -155,6 +162,7 @@ pub(crate) fn read_substrate_env_from(
         creds_dir: required(CREDS_DIR_ENV)?,
         codex_home: required(CODEX_HOME_ENV)?,
         target_branch: optional(DEVLOOP_INTEGRATION_BRANCH_ENV),
+        source_branch: optional(DEVLOOP_UPSTREAM_BRANCH_ENV),
         delivery_grants,
     })
 }

@@ -224,6 +224,20 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     )
     .await?;
 
+    // The clone above is `--single-branch` on the TARGET, so it leaves
+    // `refs/remotes/origin/<source>` absent. The devloop's rollup and sync scans
+    // resolve `origin/<source>..origin/<target>` on every branch tick; without
+    // that ref each tick dies `fatal: ambiguous argument` (git exit 128), and the
+    // accumulated faults eventually take the whole session pod down mid-work.
+    // Fetching the source ref is what makes a split source/target topology
+    // survivable; it is skipped when source and target are the same branch.
+    if let Some(source) = env.source_branch.as_deref() {
+        let differs = env.target_branch.as_deref() != Some(source);
+        if differs && !source.is_empty() {
+            fetch_extra_ref(source, &project_root, &git_entries, &token_file).await?;
+        }
+    }
+
     // 4b. The framework's host-root workspace discovery walks UP from --project-root
     //     for a `fkst.workspace.toml` and fails CLOSED without one. The target repo
     //     is a plain repo with no fkst workspace, so write a minimal manifest
@@ -604,6 +618,69 @@ async fn git_output(dest: &Path, args: &[&str]) -> Result<String, ()> {
         return Err(());
     }
     String::from_utf8(output.stdout).map_err(|_| ())
+}
+
+/// Fetch one extra branch into an existing shallow clone so
+/// `refs/remotes/origin/<branch>` resolves.
+///
+/// `set-branches --add` widens the single-branch refspec first — without it the
+/// fetch would write the ref but leave the configured refspec unable to refresh
+/// it on later fetches. Kept at `--depth 1`: the scans need the ref to EXIST and
+/// count commits against it, not the full history, so this stays cheap.
+async fn fetch_extra_ref(
+    branch: &str,
+    dest: &Path,
+    git_entries: &[GitConfigEntry],
+    token_file: &Path,
+) -> Result<(), String> {
+    for args in [
+        vec![
+            OsString::from("remote"),
+            OsString::from("set-branches"),
+            OsString::from("--add"),
+            OsString::from("origin"),
+            OsString::from(branch),
+        ],
+        vec![
+            OsString::from("fetch"),
+            OsString::from("--depth"),
+            OsString::from("1"),
+            OsString::from("origin"),
+            OsString::from(format!("+refs/heads/{branch}:refs/remotes/origin/{branch}")),
+        ],
+    ] {
+        let mut command = Command::new("git");
+        command
+            .args(&args)
+            .current_dir(dest)
+            .env(TOKEN_FILE_ENV, token_file)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        command.env("GIT_CONFIG_COUNT", git_entries.len().to_string());
+        for (i, entry) in git_entries.iter().enumerate() {
+            command.env(format!("GIT_CONFIG_KEY_{i}"), &entry.key);
+            command.env(format!("GIT_CONFIG_VALUE_{i}"), &entry.value);
+        }
+        let output = command
+            .output()
+            .await
+            .map_err(|error| format!("git {args:?}: {error}"))?;
+        if !output.status.success() {
+            // Non-fatal: a source branch that does not exist yet (the launcher
+            // seeds it lazily) must not stop the session from starting. The scans
+            // degrade exactly as they do today rather than the pod failing to boot.
+            tracing::warn!(
+                branch = %branch,
+                stderr = %String::from_utf8_lossy(&output.stderr),
+                "run-substrate: could not fetch source branch ref; rollup/sync scans may not resolve"
+            );
+            return Ok(());
+        }
+    }
+    tracing::info!(branch = %branch, "run-substrate: fetched source branch ref for devloop scans");
+    Ok(())
 }
 
 /// Build the non-secret `git clone` argv. Factored out so branch selection is

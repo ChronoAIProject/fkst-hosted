@@ -64,6 +64,41 @@ fn read_substrate_env_maps_a_full_env() {
 }
 
 #[test]
+fn source_branch_is_read_so_the_clone_can_fetch_the_upstream_ref() {
+    // The shallow --single-branch clone leaves refs/remotes/origin/<source>
+    // absent; the driver needs this value to fetch it, or the devloop's
+    // rollup/sync scans fatal on every branch tick.
+    let mut map = full_env();
+    map.insert(
+        "FKST_DEVLOOP_UPSTREAM_BRANCH".to_string(),
+        "develop".to_string(),
+    );
+    let env = read_substrate_env_from(lookup(&map)).expect("env parses");
+    assert_eq!(env.source_branch.as_deref(), Some("develop"));
+    assert_eq!(env.target_branch.as_deref(), Some("feature-x"));
+}
+
+#[test]
+fn source_branch_is_optional_and_blank_is_unset() {
+    // A caller outside the hosted launcher sets no upstream; that must stay a
+    // clean no-op rather than a parse failure.
+    let mut map = full_env();
+    assert_eq!(
+        read_substrate_env_from(lookup(&map))
+            .expect("unset source remains compatible")
+            .source_branch,
+        None
+    );
+    map.insert("FKST_DEVLOOP_UPSTREAM_BRANCH".to_string(), "  ".to_string());
+    assert_eq!(
+        read_substrate_env_from(lookup(&map))
+            .expect("blank source is unset")
+            .source_branch,
+        None
+    );
+}
+
+#[test]
 fn read_substrate_env_parses_only_scoped_delivery_grants() {
     let mut map = full_env();
     map.insert(
