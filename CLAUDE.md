@@ -26,13 +26,14 @@ These are **reference-only** dependencies. Do **not** modify them from within fk
 | Component | Repository |
 |-----------|------------|
 | Engine    | https://github.com/ChronoAIProject/fkst-substrate |
-| Packages  | https://github.com/ChronoAIProject/fkst-packages   |
+| Upstream package reference | https://github.com/ChronoAIProject/fkst-packages |
 
-> **fkst-hosted package home:** all fkst-hosted packages reside on the
-> [`fkst-hosted` branch of `fkst-packages`](https://github.com/ChronoAIProject/fkst-packages/tree/fkst-hosted).
+> **fkst-hosted package home:** FKST Cloud owns its package catalog on the
+> [`packages` branch of this repository](https://github.com/ChronoAIProject/fkst-hosted/tree/packages).
+> Treat the upstream `fkst-packages` repository as a read-only reference.
 > When referencing a package for this deployment — a trigger issue's
 > `### Packages` entries or `FKST_SEED_PACKAGES`, both in `owner/repo@ref:path`
-> form — use `ChronoAIProject/fkst-packages@fkst-hosted:<path>`.
+> form — use `ChronoAIProject/fkst-hosted@packages:<path>`.
 
 ## Integrations & Platform
 
@@ -1491,7 +1492,7 @@ data:
   # secret goes in the §14.7 Secret). Unset = installed repos only.
   # FKST_GITHUB_BROADER_OAUTH_CLIENT_ID: <your OAuth App's Client ID>
   # Default fkst-manifest the install-seeder references (see the auto-seed line
-  # below). Default: ChronoAIProject/fkst-packages@fkst-hosted:manifests/default-workflows.json
+  # below). Default: ChronoAIProject/fkst-hosted@packages:manifests/default-workflows.json
   # Set blank to disable the manifest-driven seed body (falls back to FKST_SEED_PACKAGES).
   # FKST_DEFAULT_MANIFEST: <owner>/<repo>@<ref>:manifests/<name>.json
   # Auto-seed a trigger on a NEW App install. DEFAULT IS NOW "true": a successful
@@ -2054,7 +2055,7 @@ lifecycle API → BatchSandbox → controller → caged gVisor pod.
 |---|---|
 | **Rebuild the backend after code changes** | `docker build -f "$FKST_REPO/backend/Dockerfile" -t fkst-control-plane:local "$FKST_REPO" && kind load docker-image fkst-control-plane:local --name opensandbox-local && kubectl -n chronoai-fkst rollout restart deploy/fkst-control-plane` (`kind load` replaces the image on the nodes; the restart picks it up) |
 | **Rebuild the frontend** | same pattern with the §15 build command (`$FKST_REPO/frontend` + the `VITE_FKST_API_BASE` build-arg) and `deploy/fkst-frontend` |
-| **Recover a session runtime created before the exact work-label fix (#626)** | Deploy the corrected control-plane image and `fkst-packages@fkst-hosted` package revision first. Then delete only the affected runtime through its backend's supported delete operation: OpenSandbox `DELETE /v1/sandboxes/<sandbox-id>` with the tenant API key, or Kubernetes `kubectl --context kind-opensandbox-local -n chronoai-fkst delete pod fkst-sess-<session-id>`. Do **not** edit the trigger/work issue or add claim labels manually. Level-triggered reconciliation recreates the same deterministic session and redrives pending durable work. Confirm the trigger and dashboard issues remain unclaimed and the open issue carrying an exact effective work label resumes. |
+| **Recover a session runtime created before the exact work-label fix (#626)** | Deploy the corrected control-plane image and the current `fkst-hosted@packages` catalog revision first. Then delete only the affected runtime through its backend's supported delete operation: OpenSandbox `DELETE /v1/sandboxes/<sandbox-id>` with the tenant API key, or Kubernetes `kubectl --context kind-opensandbox-local -n chronoai-fkst delete pod fkst-sess-<session-id>`. Do **not** edit the trigger/work issue or add claim labels manually. Level-triggered reconciliation recreates the same deterministic session and redrives pending durable work. Confirm the trigger and dashboard issues remain unclaimed and the open issue carrying an exact effective work label resumes. |
 | **Re-attribute an App-seeded trigger** | A bot-authored trigger's effective creator is its sole assignee. Remove any existing assignees and assign **exactly the intended creator**; zero or multiple assignees are rejected with `fkst-trigger-unauthorized`. Ensure that creator is a deployment global admin or has repository admin/maintain permission. Keep the same creator in `### FKST Contributors` when they need seeded-session log access. |
 | Change backend config | edit + `kubectl apply -f "$OSB_LOCAL/manifests/fkst-control-plane-config.yaml"`, then `kubectl -n chronoai-fkst rollout restart deploy/fkst-control-plane` (env is read at startup) |
 | Restart the webhook relay | re-run the §14.2 `npx smee-client …` command (it is a long-lived process, like the §12 port-forward); deliveries missed while it was down can be replayed from the App's **Advanced → Recent Deliveries** page |
@@ -2287,7 +2288,7 @@ The durable status labels explain what happened and prevent duplicate comments a
 - The control plane serves a dynamic OpenAPI 3 spec at `/openapi.json` (no static file). New/changed public endpoints MUST be annotated with `#[utoipa::path]` + `ToSchema`/`IntoParams` and registered via `OpenApiRouter`/`routes!`; pin `utoipa-axum` to `0.1` (axum 0.7). See **API Contract (OpenAPI)**.
 - The fkst deployables run exclusively on Kubernetes — the full local setup is embedded above in **FKST Local Deployment Guide** (the single source of truth; there is no standalone copy); `docker-compose` is not used in this repo.
 - Each deployment needs its own GitHub App registration — permissions, OAuth callbacks, and env-var mapping are in the deployment guide's **§14.3 Register your GitHub App** (local webhook delivery needs the **§14.2 smee relay** — GitHub cannot POST to `127.0.0.1`); never set `FKST_GITHUB_OAUTH_CLIENT_ID` without its client secret, never commit App secrets.
-- Treat the upstream engine and packages repos as read-only references; all fkst-hosted packages reside on the `fkst-hosted` branch of `fkst-packages` (reference form `ChronoAIProject/fkst-packages@fkst-hosted:<path>`).
+- Treat the upstream engine and packages repositories as read-only references; the FKST Cloud package catalog resides on this repository's `packages` branch (reference form `ChronoAIProject/fkst-hosted@packages:<path>`).
 - When filing work issues for a substrate session, **wave the backlog by dependency** (merge foundation before dependent issues), use one feature per issue, keep each creator's trigger-label sets disjoint, and assign every work issue to exactly one matching session creator; different creators may reuse labels. Work authors are limited to the creator, Session Collaborators, and global admins. See **Authoring work issues for a substrate session**.
 - Keep commits small and self-contained.
 - Never add `Co-Authored-By`; always act under the user's own GitHub identity (never a bot/AI identity).

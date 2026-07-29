@@ -50,7 +50,7 @@ at a PUBLIC repo that has an `fkst.toml` at that path. At least one package sour
 required across `### Packages` and `### Manifest`; this section may be empty or deleted
 when a manifest supplies the packages.
 -->
-ChronoAIProject/fkst-packages@main:packages/example
+ChronoAIProject/fkst-hosted@packages:packages/workflow-dev
 
 ### Manifest
 

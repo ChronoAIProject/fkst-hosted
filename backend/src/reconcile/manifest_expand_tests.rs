@@ -31,8 +31,8 @@ fn tok() -> SecretString {
 fn manifest_ref() -> PackageRef {
     pkg(
         "ChronoAIProject",
-        "fkst-packages",
         "fkst-hosted",
+        "packages",
         "manifests/default-workflows.json",
     )
 }
@@ -59,7 +59,7 @@ const PACKAGE_NAMES: [&str; 14] = [
 fn fourteen_ref_strings() -> Vec<String> {
     PACKAGE_NAMES
         .iter()
-        .map(|name| format!("ChronoAIProject/fkst-packages@fkst-hosted:packages/{name}"))
+        .map(|name| format!("ChronoAIProject/fkst-hosted@packages:packages/{name}"))
         .collect()
 }
 
@@ -67,8 +67,8 @@ fn fourteen_ref_strings() -> Vec<String> {
 fn expected_ref(name: &str) -> PackageRef {
     pkg(
         "ChronoAIProject",
-        "fkst-packages",
         "fkst-hosted",
+        "packages",
         &format!("packages/{name}"),
     )
 }
@@ -134,8 +134,8 @@ async fn valid_manifest_expands_all_fourteen_refs() {
     // Spot-check the parse landed on the manifest's owner/repo/ref, not the file path.
     assert_eq!(refs.len(), 14);
     assert_eq!(refs[0].owner, "ChronoAIProject");
-    assert_eq!(refs[0].repo, "fkst-packages");
-    assert_eq!(refs[0].git_ref, "fkst-hosted");
+    assert_eq!(refs[0].repo, "fkst-hosted");
+    assert_eq!(refs[0].git_ref, "packages");
     assert_eq!(refs[0].path, "packages/workflow-dev");
     assert_eq!(refs[13].path, "packages/log-streamer");
 }
@@ -171,7 +171,7 @@ async fn over_the_cap_is_rejected() {
     let server = MockServer::start().await;
     // 65 valid refs — one past the 64 ceiling.
     let packages: Vec<String> = (0..65)
-        .map(|i| format!("ChronoAIProject/fkst-packages@fkst-hosted:packages/p{i}"))
+        .map(|i| format!("ChronoAIProject/fkst-hosted@packages:packages/p{i}"))
         .collect();
     mount_body(&server, manifest_body(1, &packages)).await;
 
@@ -187,9 +187,9 @@ async fn malformed_ref_names_its_index() {
     let server = MockServer::start().await;
     // A bad entry (no `@`) sits at index 1, between two valid refs.
     let packages = vec![
-        "ChronoAIProject/fkst-packages@fkst-hosted:packages/workflow-dev".to_string(),
+        "ChronoAIProject/fkst-hosted@packages:packages/workflow-dev".to_string(),
         "not-a-valid-package-reference".to_string(),
-        "ChronoAIProject/fkst-packages@fkst-hosted:packages/workflow-writer".to_string(),
+        "ChronoAIProject/fkst-hosted@packages:packages/workflow-writer".to_string(),
     ];
     mount_body(&server, manifest_body(1, &packages)).await;
 
@@ -250,7 +250,7 @@ async fn unknown_extra_field_still_parses() {
         "schemaVersion": 1,
         "name": "default-workflows",
         "description": "…",
-        "packages": ["ChronoAIProject/fkst-packages@fkst-hosted:packages/workflow-dev"],
+        "packages": ["ChronoAIProject/fkst-hosted@packages:packages/workflow-dev"],
         "futureField": { "nested": true },
     })
     .to_string();

@@ -8,7 +8,7 @@
 //!
 //! ```json
 //! { "schemaVersion": 1, "name": "default-workflows", "description": "…",
-//!   "packages": [ "ChronoAIProject/fkst-packages@fkst-hosted:packages/workflow-dev", … ] }
+//!   "packages": [ "ChronoAIProject/fkst-hosted@packages:packages/workflow-dev", … ] }
 //! ```
 //!
 //! This module FETCHES that JSON (a plain authenticated `contents` fetch, mirroring

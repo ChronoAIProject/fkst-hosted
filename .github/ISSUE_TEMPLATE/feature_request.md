@@ -20,13 +20,15 @@ assignees: []
 
 ## Scope Check
 
-- [ ] This work is within **fkst-hosted** scope — a user-facing/public interface, **not** the kernel engine.
-      (Engine changes belong upstream in `fkst-substrate`; shared packages in `fkst-packages`.)
+- [ ] This work is within **fkst-hosted** scope — a user-facing/public interface or an FKST Cloud
+      package-catalog change, **not** the kernel engine. Engine changes belong upstream in
+      `fkst-substrate`; cloud catalog changes target this repository's `packages` branch.
 
 ## Affected Area
 
 - [ ] Backend (Rust)
 - [ ] Frontend (React)
+- [ ] FKST Cloud package catalog (`packages` branch)
 
 ## Acceptance Criteria
 

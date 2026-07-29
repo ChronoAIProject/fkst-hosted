@@ -300,7 +300,7 @@ fn session_pod_spec_is_built_from_the_registration() {
     assert_eq!(
         spec.package_roots,
         vec![
-            "ChronoAIProject/fkst-packages@dev:packages/github-devloop".to_string(),
+            "ChronoAIProject/fkst-hosted@packages:packages/github-devloop".to_string(),
             "acme/pkgs@main:packages/proxy".to_string(),
         ]
     );
@@ -333,7 +333,7 @@ fn package_roots_come_from_the_effective_set_not_just_explicit_packages() {
     assert_eq!(
         spec.package_roots,
         vec![
-            "ChronoAIProject/fkst-packages@dev:packages/github-devloop".to_string(),
+            "ChronoAIProject/fkst-hosted@packages:packages/github-devloop".to_string(),
             "acme/pkgs@main:packages/proxy".to_string(),
             "acme/manifests-pkgs@main:packages/from-manifest".to_string(),
         ],

@@ -131,7 +131,7 @@ test.describe('dashboard full UI journey', () => {
     await expect(dialog.getByText('Dev workflow', { exact: true })).toBeVisible();
     await expect(dialog.getByText('Devloop', { exact: true })).toBeVisible();
     await expect(
-      dialog.getByText('ChronoAIProject/fkst-packages@fkst-hosted:workflow-dev')
+      dialog.getByText('ChronoAIProject/fkst-hosted@packages:workflow-dev')
     ).toBeVisible();
     await expect(dialog.getByText('Queue activity')).toBeVisible();
     await shot(page, '06-packages');

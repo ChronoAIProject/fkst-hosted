@@ -42,7 +42,7 @@ my-session
 
 ### Packages
 
-ChronoAIProject/fkst-packages@dev:packages/github-devloop
+ChronoAIProject/fkst-hosted@packages:packages/github-devloop
 acme/tools@v1.0.0:pkg/thing
 
 ### Work Label
@@ -61,8 +61,8 @@ prod-env
             packages: vec![
                 PackageRef {
                     owner: "ChronoAIProject".to_string(),
-                    repo: "fkst-packages".to_string(),
-                    git_ref: "dev".to_string(),
+                    repo: "fkst-hosted".to_string(),
+                    git_ref: "packages".to_string(),
                     path: "packages/github-devloop".to_string(),
                 },
                 PackageRef {
@@ -852,7 +852,7 @@ fn the_full_pristine_bundled_template_parses_with_its_sample_values() {
         "comment-only Manifest section carries no references"
     );
     assert_eq!(spec.packages.len(), 1);
-    assert_eq!(spec.packages[0].repo, "fkst-packages");
+    assert_eq!(spec.packages[0].repo, "fkst-hosted");
     assert_eq!(spec.environment, None, "comment-only section is unset");
     assert!(!spec.auto_merge, "the template ships `false`");
     // The pristine `### Session Collaborators` section is comment-only; the parser

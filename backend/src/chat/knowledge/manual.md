@@ -177,7 +177,7 @@ A minimal, valid trigger body:
 sitebuilder
 
 ### Manifest
-ChronoAIProject/fkst-packages@fkst-hosted:manifests/default-workflows.json
+ChronoAIProject/fkst-hosted@packages:manifests/default-workflows.json
 
 ### Work Label
 site-build
@@ -193,7 +193,7 @@ A fuller one exercising the optional sections:
 docs-refresh
 
 ### Packages
-ChronoAIProject/fkst-packages@fkst-hosted:packages/writer
+ChronoAIProject/fkst-hosted@packages:packages/workflow-writer
 
 ### Work Label
 docs-work

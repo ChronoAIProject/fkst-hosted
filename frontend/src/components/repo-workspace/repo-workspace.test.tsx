@@ -29,7 +29,7 @@ const session = (over: Partial<SessionDetail>): SessionDetail => ({
   environment: 'staging',
   source_branch: null,
   target_branch: 'fkst-hosted-default',
-  packages: ['ChronoAIProject/fkst-packages@fkst-hosted:codex/base'],
+  packages: ['ChronoAIProject/fkst-hosted@packages:codex/base'],
   invalid_reason: null,
   status_labels: ['fkst-substrate-active'],
   trigger: issue({ number: 7, title: 'nightly session' }),
