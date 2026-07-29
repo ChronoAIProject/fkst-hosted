@@ -601,6 +601,11 @@ local function process_issue_event(event)
       devloop_logging.log_cas_decision("observe_issue", proposal_id, { state = nil, version = nil }, "unmanaged", "thinking", "skip-advanced-or-diverged", "issue is not open")
       return
     end
+    local in_scope, scope_reason = m_claims.issue_in_session_scope(current.labels)
+    if not in_scope then
+      devloop_logging.log_cas_decision("observe_issue", proposal_id, { state = nil, version = nil }, "unmanaged", "thinking", "skip-work-label-scope", scope_reason)
+      return
+    end
     if not devloop_base.is_opted_in(current.labels) then
       devloop_logging.log_cas_decision("observe_issue", proposal_id, { state = nil, version = nil }, "unmanaged", "thinking", "skip-not-opted-in", "fkst-dev:enabled label is absent")
       return

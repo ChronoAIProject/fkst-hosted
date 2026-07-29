@@ -1,8 +1,10 @@
-# Contributing to fkst-packages
+# Contributing to the FKST hosted package catalog
 
-`fkst-packages` is the behavior-layer package library for the separate `fkst-substrate` engine.
-Contributions should change Lua packages, tests, scripts, or documentation in this repository only.
-Engine Rust changes belong in `fkst-substrate`.
+The `packages` branch of `ChronoAIProject/fkst-hosted` is the managed behavior-layer package
+catalog for the separate `fkst-substrate` engine. Contributions should change Lua packages, tests,
+scripts, manifests, or package documentation on catalog-derived branches only. Engine Rust changes
+belong in `fkst-substrate`; hosted control-plane and frontend changes belong on branches derived
+from `develop`.
 
 ## Development Setup
 
@@ -29,8 +31,8 @@ facts are unset. `run` never sets `FKST_GITHUB_WRITE`. Real GitHub writes happen
 
 ## Branch and PR Workflow
 
-- Use `dev` as the integration branch.
-- Do not commit directly to `dev`; open a PR into `dev`.
+- Use `packages` as the catalog integration branch.
+- Do not commit directly to `packages`; open a PR into `packages`.
 - Use branch names of the form `<type>/<kebab-topic>`, where `<type>` is one of `feat`, `fix`,
   `docs`, `chore`, `refactor`, or `test`.
 - Keep each commit to one coherent logical change.

@@ -1,5 +1,6 @@
 local actions = require("core.materialize.actions")
 local base_ids = require("devloop.base_ids")
+local config = require("devloop.config")
 local marker = require("core.marker")
 local t = fkst.test
 
@@ -45,6 +46,14 @@ end
 
 local function has(s, sub)
   return tostring(s):find(sub, 1, true) ~= nil
+end
+
+local function namespaced_exec(command)
+  local stdout = ""
+  if command == config.read_env_command("FKST_SESSION_WORK_LABEL_MAP_JSON") then
+    stdout = [[{"fkst-dev":"fkst-dev-chronoai-fkst"}]]
+  end
+  return { stdout = stdout, stderr = "", exit_code = 0 }
 end
 
 return {
@@ -153,13 +162,7 @@ return {
     local req = actions.issue_create_request(repo, 42, origin, "d-3588118930", "implement", entry(), {
       title = "Implement the website feature",
       body = "Implement the requested page.",
-    }, nil, function()
-      return {
-        stdout = [[{"fkst-dev":"fkst-dev-chronoai-fkst"}]],
-        stderr = "",
-        exit_code = 0,
-      }
-    end)
+    }, nil, namespaced_exec)
     t.eq(#req.labels, 1)
     t.eq(req.labels[1], "fkst-dev-chronoai-fkst")
   end,

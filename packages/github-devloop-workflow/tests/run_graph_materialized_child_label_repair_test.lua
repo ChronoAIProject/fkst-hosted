@@ -79,7 +79,7 @@ local function fixture()
     .. "\n\n<!-- fkst:github-proxy:issue-create:" .. entry.child_dedup .. " -->"
   return {
     entry = entry,
-    parent = issue_json("Workflow origin", "Run the workflow.", {}, {
+    parent = issue_json("Workflow origin", "Run the workflow.", { "fkst-dev-chronoai-fkst" }, {
       blueprint_marker,
       ledger_marker,
     }),
@@ -103,11 +103,12 @@ local function mock_cycle(labels, child_reads)
   mock_env("FKST_GITHUB_REPO", repo)
   mock_env("FKST_GITHUB_BOT_LOGIN", "fkst-test-bot")
   mock_env("FKST_WORKFLOW_CATALOG_ROOT", "")
-  mock_env("FKST_SESSION_WORK_LABEL", "fkst-dev-chronoai-fkst,fkst-security-chronoai-fkst")
+  mock_env("FKST_SESSION_WORK_LABEL", "fkst-dev-chronoai-fkst,fkst-security-chronoai-fkst", 32)
+  mock_env("FKST_WORK_LABEL_NAMESPACE", "chronoai-fkst", 32)
   mock_env(
     "FKST_SESSION_WORK_LABEL_MAP_JSON",
     [[{"fkst-dev":"fkst-dev-chronoai-fkst","fkst-security":"fkst-security-chronoai-fkst"}]],
-    8
+    32
   )
   mock_env("FKST_GITHUB_CLAIM_MODE", "assignee")
   mock_env("FKST_GITHUB_WRITE", "")
@@ -123,8 +124,10 @@ local function mock_cycle(labels, child_reads)
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("gh issue view " .. tostring(origin_issue) .. " --repo " .. repo .. " --json 'assignees,author'", {
-    stdout = '{"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"app/fkst-test-bot"}}\n',
+  t.mock_command("gh issue view " .. tostring(origin_issue) .. " --repo " .. repo .. " --json 'number,state,labels,assignees,author'", {
+    stdout = '{"number":' .. tostring(origin_issue)
+      .. ',"state":"OPEN","labels":[{"name":"fkst-dev-chronoai-fkst"}]'
+      .. ',"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"app/fkst-test-bot"}}\n',
     stderr = "",
     exit_code = 0,
   })

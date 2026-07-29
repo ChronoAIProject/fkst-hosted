@@ -643,7 +643,12 @@ end
 function M.effective_label_changes(add_labels, remove_labels, exec)
   local map = devloop_config.work_label_map(exec)
   return devloop_config.apply_work_label_map(M.normalize_labels(add_labels), map),
-    devloop_config.apply_work_label_map(M.normalize_labels(remove_labels), map)
+    devloop_config.apply_work_label_map(M.normalize_labels(remove_labels), map),
+    map
+end
+
+function M.effective_label_colors(label_colors, map)
+  return devloop_config.effective_label_colors(label_colors, map)
 end
 
 function M.is_gh_label_already_exists(result)

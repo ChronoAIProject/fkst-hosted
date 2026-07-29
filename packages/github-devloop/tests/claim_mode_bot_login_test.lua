@@ -37,6 +37,21 @@ local function mock_env(login, claim_mode, write_mode, reads)
   end
 end
 
+local function mock_namespaced_scope(base, map_json, reads)
+  for _ = 1, reads or 16 do
+    t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL"', {
+      stdout = base,
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(config.read_env_command("FKST_SESSION_WORK_LABEL_MAP_JSON"), {
+      stdout = map_json,
+      stderr = "",
+      exit_code = 0,
+    })
+  end
+end
+
 local function count_calls(needle)
   local count = 0
   for _, call in ipairs(t.command_calls()) do
@@ -249,6 +264,38 @@ return {
     t.eq(count_adapter_calls("--remove-label", claimed_label), 0)
     -- Assignee-mode commands are never issued in label-mode.
     t.eq(count_adapter_calls("--add-assignee", "fkst-test-bot"), 0)
+  end,
+
+  test_namespaced_label_mode_claim_adds_and_verifies_only_the_effective_claim = function()
+    local base = "fkst-dev-chronoai-fkst-cloud-test"
+    local effective_claim = base .. ":claimed"
+    local map_json = [[{"fkst-dev":"fkst-dev-chronoai-fkst-cloud-test"}]]
+    mock_env("fkst-test-bot", "label", "1", 24)
+    mock_namespaced_scope(base, map_json, 24)
+    t.mock_command("gh issue edit 42 --repo owner/repo --add-label '" .. effective_claim .. "'", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh issue view 42 --repo owner/repo --json number,state,labels,assignees,author", {
+      stdout = '{"number":42,"state":"OPEN","assignees":[],"author":{"login":"fkst-test-bot"},"labels":[{"name":"'
+        .. base .. '"},{"name":"' .. effective_claim .. '"}]}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local ok = m_claims.claim_issue_for_management(core,
+      "claim_mode",
+      "owner/repo",
+      42,
+      { assignees = {}, labels = { base }, author_login = "fkst-test-bot", comments = {} },
+      "github-devloop/issue/owner/repo/42"
+    )
+
+    t.eq(ok, true)
+    t.eq(count_adapter_calls("--add-label", effective_claim), 1)
+    t.eq(count_adapter_calls("--add-label", "fkst-dev:claimed"), 0)
+    t.eq(count_adapter_calls("--remove-label", effective_claim), 0)
   end,
 
   test_label_mode_claim_loss_removes_label_and_skips = function()

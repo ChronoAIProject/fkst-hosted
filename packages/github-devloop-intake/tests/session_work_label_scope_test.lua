@@ -34,10 +34,22 @@ local function mock_repo_env()
 end
 
 local function mock_scope(value, claim_mode_reads)
-  for _ = 1, claim_mode_reads or 1 do
+  for _ = 1, claim_mode_reads or 16 do
     t.mock_command('printf %s "$FKST_GITHUB_CLAIM_MODE"', { stdout = "label", stderr = "", exit_code = 0 })
   end
-  t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL"', { stdout = value or "", stderr = "", exit_code = 0 })
+  for _ = 1, 16 do
+    t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL"', { stdout = value or "", stderr = "", exit_code = 0 })
+    t.mock_command(config.read_env_command("FKST_SESSION_WORK_LABEL_MAP_JSON"), {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(config.read_env_command("FKST_WORK_LABEL_NAMESPACE"), {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
 end
 
 local function mock_issue(number, labels)
@@ -65,6 +77,18 @@ end
 
 local function candidate(result)
   return h.find_raise(result.raises, "devloop_intake_candidate")
+end
+
+local function assert_label_mode_rejects(number, name, labels, scope)
+  mock_repo_env()
+  mock_scope(scope == nil and "fkst-dev,fkst-security,fkst-workflow" or scope)
+  mock_issue(number, labels)
+
+  local result = run_admission(number, "session-work-label-reject-" .. name)
+
+  t.eq(result.exit_code, 0)
+  t.eq(candidate(result), nil)
+  t.eq(h.count_calls("--add-label"), 0)
 end
 
 return {
@@ -113,26 +137,72 @@ return {
     t.eq(h.count_calls("--add-label"), 0)
   end,
 
-  test_label_mode_rejects_non_work_entities_before_claim = function()
-    local cases = {
-      { number = 43, name = "prefix-only", labels = { "fkst-dev:thinking" } },
-      { number = 44, name = "trigger", labels = { "fkst-session" } },
-      { number = 45, name = "dashboard", labels = { "fkst-dashboard" } },
-      { number = 46, name = "unrelated", labels = { "bug" } },
-      { number = 47, name = "blank-scope", labels = { "fkst-dev" }, scope = "" },
-    }
-
-    for _, case in ipairs(cases) do
+  test_plain_assignee_session_rejects_namespaced_and_dual_work_labels_before_claim = function()
+    local cloud = "fkst-dev-chronoai-fkst-cloud-test"
+    for index, labels in ipairs({
+      { cloud },
+      { "fkst-dev", cloud },
+    }) do
       mock_repo_env()
-      mock_scope(case.scope == nil and "fkst-dev,fkst-security,fkst-workflow" or case.scope)
-      mock_issue(case.number, case.labels)
+      for _ = 1, 4 do
+        t.mock_command('printf %s "$FKST_GITHUB_CLAIM_MODE"', {
+          stdout = "assignee",
+          stderr = "",
+          exit_code = 0,
+        })
+        t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL"', {
+          stdout = "fkst-dev",
+          stderr = "",
+          exit_code = 0,
+        })
+        t.mock_command(config.read_env_command("FKST_SESSION_WORK_LABEL_MAP_JSON"), {
+          stdout = "",
+          stderr = "",
+          exit_code = 0,
+        })
+        t.mock_command(config.read_env_command("FKST_WORK_LABEL_NAMESPACE"), {
+          stdout = "",
+          stderr = "",
+          exit_code = 0,
+        })
+      end
+      mock_issue(50 + index, labels)
 
-      local result = run_admission(case.number, "session-work-label-reject-" .. case.name)
+      local result = t.run_department("departments/admission/main.lua", event(50 + index), h.opts(
+        "plain-assignee-session-rejects-foreign-" .. tostring(index),
+        {
+          FKST_GITHUB_CLAIM_MODE = "assignee",
+          FKST_GITHUB_REPO = "owner/repo",
+          FKST_GITHUB_WRITE = "1",
+          FKST_SESSION_WORK_LABEL = "fkst-dev",
+        }
+      ))
 
       t.eq(result.exit_code, 0)
       t.eq(candidate(result), nil)
+      t.eq(h.count_calls("--add-assignee"), 0)
       t.eq(h.count_calls("--add-label"), 0)
     end
+  end,
+
+  test_label_mode_rejects_lifecycle_suffix_without_base_work_label = function()
+    assert_label_mode_rejects(43, "prefix-only", { "fkst-dev:thinking" })
+  end,
+
+  test_label_mode_rejects_session_trigger_label = function()
+    assert_label_mode_rejects(44, "trigger", { "fkst-session" })
+  end,
+
+  test_label_mode_rejects_dashboard_label = function()
+    assert_label_mode_rejects(45, "dashboard", { "fkst-dashboard" })
+  end,
+
+  test_label_mode_rejects_unrelated_label = function()
+    assert_label_mode_rejects(46, "unrelated", { "bug" })
+  end,
+
+  test_label_mode_rejects_when_session_work_scope_is_empty = function()
+    assert_label_mode_rejects(47, "blank-scope", { "fkst-dev" }, "")
   end,
 
   test_pull_request_is_rejected_without_issue_read_or_claim = function()

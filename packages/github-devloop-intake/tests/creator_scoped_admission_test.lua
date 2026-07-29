@@ -79,6 +79,16 @@ local function mock_creator_env(creator)
       stderr = "",
       exit_code = 0,
     })
+    t.mock_command('printf %s "$FKST_SESSION_WORK_LABEL_MAP_JSON"', {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command('printf %s "$FKST_WORK_LABEL_NAMESPACE"', {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
     t.mock_command('printf %s "$FKST_GITHUB_WRITE"', {
       stdout = "1",
       stderr = "",
@@ -112,10 +122,6 @@ end
 
 local function mock_content(number, fields)
   entity_read_mocks.mock_issue_view_selector(t, issue_fields(number, fields), content_fields)
-end
-
-local function mock_legacy_claim_view(number, fields)
-  entity_read_mocks.mock_issue_view_selector(t, issue_fields(number, fields), "assignees,author,labels")
 end
 
 local function mock_add_claim(number)
@@ -315,14 +321,14 @@ return {
     t.eq(count_calls("--json " .. content_fields), 0)
   end,
 
-  test_creator_unset_preserves_legacy_label_mode_author_and_full_view_flow = function()
+  test_creator_unset_preserves_label_mode_author_and_full_view_flow = function()
     mock_creator_env("")
     mock_content(47, {
       assignees = {},
       author_login = "untrusted-human",
     })
     mock_add_claim(47)
-    mock_legacy_claim_view(47, {
+    mock_metadata(47, {
       labels = { "shared-work", claimed_label },
       assignees = {},
       author_login = "untrusted-human",
@@ -332,7 +338,7 @@ return {
 
     t.eq(result.exit_code, 0)
     t.is_true(candidate(result) ~= nil)
-    t.eq(count_calls("--json " .. metadata_fields), 0)
+    t.eq(count_calls("--json " .. metadata_fields), 1)
     t.eq(count_calls("--json " .. content_fields), 1)
     t.eq(count_calls("--add-label"), 1)
   end,

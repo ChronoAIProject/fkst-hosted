@@ -70,9 +70,13 @@ return {
       repo = "owner/repo",
       label = "fkst-security",
       effective_work_label = config.effective_work_label,
-      exec = function()
+      exec = function(command)
+        local stdout = ""
+        if command == config.read_env_command("FKST_SESSION_WORK_LABEL_MAP_JSON") then
+          stdout = [[{"fkst-security":"fkst-security-chronoai-fkst"}]]
+        end
         return {
-          stdout = [[{"fkst-security":"fkst-security-chronoai-fkst"}]],
+          stdout = stdout,
           stderr = "",
           exit_code = 0,
         }

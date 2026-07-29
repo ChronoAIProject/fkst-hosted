@@ -130,7 +130,7 @@ local function issue_from_current(issue_number, current)
 end
 
 local function session_work_scope_allows(current, proposal_id, transition)
-  if config.claim_mode() ~= "label" then
+  if config.claim_mode() ~= "label" and not config.work_label_family_isolation_active() then
     return true
   end
   local allowed, reason = config.matches_session_work_label(current.labels)

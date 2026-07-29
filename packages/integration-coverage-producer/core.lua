@@ -90,25 +90,46 @@ function M.open_issue_state()
   return "open"
 end
 
-function M.has_devloop_label(issue)
+function M.parse_work_labels(value)
+  local labels = {}
+  local seen = {}
+  for raw in tostring(value or ""):gmatch("[^,]+") do
+    local label = strings.trim(raw)
+    if label ~= "" and not seen[label] then
+      seen[label] = true
+      labels[#labels + 1] = label
+    end
+  end
+  return labels
+end
+
+function M.has_devloop_label(issue, work_labels)
   if type(issue) ~= "table" then
     return false
   end
+  local roots = work_labels
+  if type(roots) ~= "table" or #roots == 0 then
+    roots = { "fkst-dev" }
+  end
   for _, label in ipairs(issue.labels or {}) do
     local name = type(label) == "table" and label.name or label
-    if tostring(name or ""):sub(1, #"fkst-dev:") == "fkst-dev:" then
-      return true
+    local text = tostring(name or "")
+    for _, root in ipairs(roots) do
+      local prefix = tostring(root) .. ":"
+      if text:sub(1, #prefix) == prefix then
+        return true
+      end
     end
   end
   return false
 end
 
-function M.devloop_issue_count(issues)
+function M.devloop_issue_count(issues, work_labels)
   local count = 0
   for _, issue in ipairs(issues or {}) do
     if type(issue) == "table"
       and tostring(issue.state or ""):upper() ~= "CLOSED"
-      and M.has_devloop_label(issue) then
+      and M.has_devloop_label(issue, work_labels) then
       count = count + 1
     end
   end

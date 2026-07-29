@@ -5,6 +5,7 @@ local payloads_predicates = require("devloop.payloads.predicates")
 local S = {}
 local C = {}
 local devloop_base = require("devloop.base")
+local devloop_config = require("devloop.config")
 local transition_version = require("contract.transition_version")
 local m_builders = require("devloop.markers.builders")
 
@@ -26,19 +27,19 @@ local function marker_attrs(marker)
 end
 
 function C.has_label(labels, expected)
-  if type(labels) ~= "table" then
-    return false
-  end
-  for _, label in ipairs(labels) do
-    if tostring(label) == expected then
+  return devloop_config.has_effective_label(labels, expected)
+end
+
+function C.is_state(state) return label_by_state[state] ~= nil end
+function C.is_state_label(label, map)
+  local effective_map = map or devloop_config.work_label_map()
+  for logical_label in pairs(state_labels) do
+    if devloop_config.label_matches_effective(label, logical_label, nil, effective_map) then
       return true
     end
   end
   return false
 end
-
-function C.is_state(state) return label_by_state[state] ~= nil end
-function C.is_state_label(label) return state_labels[tostring(label)] == true end
 function C.state_label(state) return label_by_state[state] end
 function C.state_order() return copy_array(state_order) end
 function C.issue_state_order() return copy_array(issue_state_order) end
@@ -344,8 +345,9 @@ local function current_marker_state(comments, proposal_id)
 end
 
 local function has_any_state_label(labels)
+  local work_label_map = devloop_config.work_label_map()
   for _, label in ipairs(labels or {}) do
-    if C.is_state_label(label) then
+    if C.is_state_label(label, work_label_map) then
       return true
     end
   end
@@ -627,11 +629,12 @@ function C.state_label_reconcile_changes(labels, to_state)
   local add_labels = {}
   local remove_labels = {}
   local has_expected = false
+  local work_label_map = devloop_config.work_label_map()
   for _, label in ipairs(labels or {}) do
     local label_text = tostring(label)
-    if label_text == expected_label then
+    if devloop_config.label_matches_effective(label_text, expected_label, nil, work_label_map) then
       has_expected = true
-    elseif C.is_state_label(label_text) then
+    elseif C.is_state_label(label_text, work_label_map) then
       table.insert(remove_labels, label_text)
     end
   end
@@ -648,11 +651,12 @@ function C.state_label_hint_matches(labels, state)
   end
 
   local has_expected = false
+  local work_label_map = devloop_config.work_label_map()
   for _, label in ipairs(labels or {}) do
     local label_text = tostring(label)
-    if label_text == expected_label then
+    if devloop_config.label_matches_effective(label_text, expected_label, nil, work_label_map) then
       has_expected = true
-    elseif C.is_state_label(label_text) then
+    elseif C.is_state_label(label_text, work_label_map) then
       return false
     end
   end

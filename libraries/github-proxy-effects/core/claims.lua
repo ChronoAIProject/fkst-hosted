@@ -1,4 +1,5 @@
 local content_filter = require("forge.github.content_filter")
+local devloop_config = require("devloop.config")
 
 local S = {}
 
@@ -54,10 +55,55 @@ function M.parse_issue_assignees(stdout)
   return M.assignee_logins(decoded.assignees)
 end
 
+local function issue_label_names(labels)
+  local names = {}
+  for _, label in ipairs(labels or {}) do
+    local name = type(label) == "table" and label.name or label
+    if name ~= nil and tostring(name) ~= "" then
+      names[#names + 1] = tostring(name)
+    end
+  end
+  return names
+end
+
+function M.parse_issue_claim_snapshot(stdout)
+  local decoded = json.decode(stdout or "{}")
+  return {
+    assignees = M.assignee_logins(decoded.assignees),
+    labels = issue_label_names(decoded.labels),
+  }
+end
+
+function M.issue_claim_snapshot(repo, issue_number)
+  local view = M.gh_exec(M.gh_issue_view_assignees_cmd(repo, issue_number), 30, "GitHub issue claim")
+  return M.parse_issue_claim_snapshot(view.stdout)
+end
+
 function M.issue_claim_held_by_self(repo, issue_number, login)
-  local view = M.gh_exec(M.gh_issue_view_assignees_cmd(repo, issue_number), 30, "GitHub issue REST assignees")
-  local logins = M.parse_issue_assignees(view.stdout)
+  local logins = M.issue_claim_snapshot(repo, issue_number).assignees
   return #logins == 1 and same_login(logins[1], login)
+end
+
+local function snapshot_in_session_scope(snapshot)
+  if not devloop_config.work_label_family_isolation_active() then
+    return true
+  end
+  local scope = devloop_config.session_work_label_scope()
+  return devloop_config.matches_session_work_label(snapshot and snapshot.labels, nil, scope)
+end
+
+local function snapshot_holds_claim(snapshot, claim)
+  if tostring(claim and claim.mode or "assignee") == "label" then
+    local expected = tostring(claim.label or "")
+    for _, label in ipairs(snapshot and snapshot.labels or {}) do
+      if tostring(label) == expected then
+        return true
+      end
+    end
+    return false
+  end
+  local logins = snapshot and snapshot.assignees or {}
+  return #logins == 1 and same_login(logins[1], claim.owner)
 end
 
 local function claim_source_ref_matches(payload, repo, issue_number)
@@ -92,10 +138,16 @@ function M.verify_issue_claim_before_write(payload, repo, issue_number, dept)
     return false
   end
   local owner = tostring(claim.owner)
-  if M.issue_claim_held_by_self(repo, issue_number, owner) then
+  local snapshot = M.issue_claim_snapshot(repo, issue_number)
+  if not snapshot_in_session_scope(snapshot) then
+    verify_claim_log(dept, "work-label-scope-lost", repo, issue_number, owner)
+    return false
+  end
+  if snapshot_holds_claim(snapshot, claim) then
     return true
   end
-  verify_claim_log(dept, "assignee-claim-lost", repo, issue_number, owner)
+  local reason = tostring(claim.mode or "assignee") == "label" and "label-claim-lost" or "assignee-claim-lost"
+  verify_claim_log(dept, reason, repo, issue_number, owner)
   return false
 end
 
@@ -108,11 +160,19 @@ function M.verify_issue_claim_in_issue(issue, payload, repo, issue_number, dept)
     verify_claim_log(dept, "source-ref-mismatch", repo, issue_number, claim.owner)
     return false
   end
-  local logins = M.assignee_logins(issue and issue.assignees)
-  if #logins == 1 and same_login(logins[1], claim.owner) then
+  local snapshot = {
+    assignees = M.assignee_logins(issue and issue.assignees),
+    labels = issue_label_names(issue and issue.labels),
+  }
+  if not snapshot_in_session_scope(snapshot) then
+    verify_claim_log(dept, "work-label-scope-lost", repo, issue_number, claim.owner)
+    return false
+  end
+  if snapshot_holds_claim(snapshot, claim) then
     return true
   end
-  verify_claim_log(dept, "assignee-claim-lost", repo, issue_number, claim.owner)
+  local reason = tostring(claim.mode or "assignee") == "label" and "label-claim-lost" or "assignee-claim-lost"
+  verify_claim_log(dept, reason, repo, issue_number, claim.owner)
   return false
 end
 

@@ -1,5 +1,6 @@
 local t = fkst.test
 local core = require("core")
+local devloop_config = require("devloop.config")
 local gh_argv = require("testkit.gh_argv_mock")
 gh_argv.install(t, core)
 
@@ -187,6 +188,18 @@ local function canonical_labels()
   return core.ensure_repo_label_specs()
 end
 
+local function effective_labels(map)
+  local labels = {}
+  for _, label in ipairs(canonical_labels()) do
+    labels[#labels + 1] = {
+      name = devloop_config.apply_work_label_map_to_label(label.name, map),
+      color = label.color,
+      description = label.description,
+    }
+  end
+  return labels
+end
+
 return {
   test_dry_run_empty_repo_renders_management_plane_diff_without_writes = function()
     mock_env("")
@@ -274,6 +287,94 @@ return {
     t.is_true(written:find('"title":"fkst-dev board"', 1, true) ~= nil)
     t.is_true(written:find('"labels":["fkst-dashboard"]', 1, true) ~= nil)
     t.is_true(written:find('<!-- fkst:dashboard:v1 version=\\"1970-01-01T00:00:00Z\\" hash=\\"anchor\\"', 1, true) ~= nil)
+  end,
+
+  test_real_mode_bootstraps_namespaced_lifecycle_and_claim_labels_only = function()
+    local base = "fkst-dev-chronoai-fkst-cloud-test"
+    local map = { ["fkst-dev"] = base }
+    local map_json = [[{"fkst-dev":"fkst-dev-chronoai-fkst-cloud-test"}]]
+    local lifecycle = effective_labels(map)
+    local claim = devloop_config.apply_work_label_map_to_label("fkst-dev:claimed", map)
+
+    mock_env("1")
+    t.mock_command(devloop_config.read_env_command("FKST_SESSION_WORK_LABEL_MAP_JSON"), {
+      stdout = map_json,
+      stderr = "",
+      exit_code = 0,
+    })
+    for _ = 1, 2 do
+      t.mock_command('printf %s "$FKST_GITHUB_CLAIM_MODE"', {
+        stdout = "label",
+        stderr = "",
+        exit_code = 0,
+      })
+    end
+    mock_labels({})
+    mock_dashboard_anchor(false)
+    mock_topology(0)
+    for _, label in ipairs(lifecycle) do
+      t.mock_command(core.gh_repo_label_create_cmd(
+        "owner/repo",
+        label.name,
+        label.color,
+        label.description
+      ), {
+        stdout = '{"name":"' .. encode_json_string(label.name) .. '"}\n',
+        stderr = "",
+        exit_code = 0,
+      })
+    end
+    t.mock_command(core.gh_repo_label_create_cmd(
+      "owner/repo",
+      core.dashboard_label(),
+      "ededed",
+      "fkst observability dashboard singleton"
+    ), {
+      stdout = '{"name":"fkst-dashboard"}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(core.gh_repo_label_create_cmd(
+      "owner/repo",
+      claim,
+      "0E8A16",
+      "fkst-dev-label-mode-ownership-claim"
+    ), {
+      stdout = '{"name":"' .. claim .. '"}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh api --method POST 'repos/owner/repo/issues' --input '/tmp/fkst-github-devloop-dashboard-anchor-owner-repo.json'", {
+      stdout = '{"number":268}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_ensure(opts("ensure-namespaced-real", {
+      FKST_GITHUB_WRITE = "1",
+      FKST_GITHUB_CLAIM_MODE = "label",
+      FKST_SESSION_WORK_LABEL_MAP_JSON = map_json,
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls(core.gh_repo_label_create_cmd(
+      "owner/repo",
+      base .. ":thinking",
+      "8250DF",
+      "consensus-deliberation-in-progress"
+    )), 1)
+    t.eq(count_calls(core.gh_repo_label_create_cmd(
+      "owner/repo",
+      claim,
+      "0E8A16",
+      "fkst-dev-label-mode-ownership-claim"
+    )), 1)
+    t.is_true(utf8.len(devloop_config.apply_work_label_map_to_label(
+      "fkst-dev:blocked-on-dependency",
+      map
+    )) <= 50)
+    t.eq(count_calls("repos/owner/repo/labels/fkst-dev%3Athinking"), 0)
+    t.eq(count_calls("labels[]=fkst-dev:claimed"), 0)
   end,
 
   test_real_mode_updates_canonical_label_drift = function()
