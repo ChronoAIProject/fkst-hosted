@@ -211,11 +211,14 @@ return {
     t.is_true(reconcile_index > written_index)
     t.eq(reconcile.payload.schema, "github-devloop.reconcile.v1")
 
-    local blocked_comment, _, blocked_index = graph.require_raise(
+    -- A refinable cause with budget left reconciles as `re-design`, not `drop`:
+    -- the round still terminates and still writes the blocked marker, but the loop
+    -- is left re-enterable rather than closed out.
+    local blocked_comment, _, blocked_index, blocked_raise = graph.require_raise(
       trace,
       "github-proxy.github_issue_comment_request",
       function(raised)
-        return graph.payload_contains(raised, "github-devloop reconcile action: drop")
+        return graph.payload_contains(raised, "github-devloop reconcile action: re-design")
           and graph.payload_contains(raised, "evidence-continuation-budget-exhausted-after-")
           and graph.payload_contains(raised, 'state="blocked"')
       end
@@ -226,5 +229,20 @@ return {
     graph.require_raise(trace, "github-proxy.github_issue_label_request", function(raised)
       return raised.payload.add_labels[1] == "fkst-dev:blocked"
     end)
+
+    -- The re-entry itself: an operator-grammar `fkst: reintake` comment. One reconcile
+    -- pass emits both it and the terminal marker, so the ordering that matters is the
+    -- raise order WITHIN that step -- refine last, so a crash mid-pass leaves the block
+    -- durable rather than a re-entry into a round nothing recorded as finished.
+    local refine, _, refine_index, refine_raise = graph.require_raise(
+      trace,
+      "github-proxy.github_issue_comment_request",
+      function(raised)
+        return graph.payload_contains(raised, "fkst:github-devloop:auto-refine:v1")
+      end
+    )
+    t.eq(refine_index, blocked_index)
+    t.is_true(refine_raise > blocked_raise)
+    t.is_true(refine.payload.body:match("^fkst: reintake") ~= nil)
   end,
 }
