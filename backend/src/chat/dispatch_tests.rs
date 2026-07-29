@@ -166,6 +166,42 @@ async fn a_malformed_path_is_rejected_before_dispatch() {
     );
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_slow_endpoint_times_out_into_a_504_result_rather_than_an_error() {
+    // A read that outlives the budget must come back as DATA the model can explain.
+    // Built over a bare router with one deliberately slow route rather than the logs
+    // fixtures, because the point under test is the timeout, not the endpoint.
+    //
+    // `start_paused` lets the runtime auto-advance to the timeout instead of the test
+    // actually waiting 45 seconds.
+    let slow = axum::Router::new().route(
+        "/api/v1/slow",
+        axum::routing::get(|| async {
+            tokio::time::sleep(std::time::Duration::from_secs(600)).await;
+            "never"
+        }),
+    );
+    let handle = empty_self_router();
+    handle.set(slow).expect("handle is empty");
+
+    let response = SelfDispatch::new(handle)
+        .get("/api/v1/slow", &bearer("gho_author"), None)
+        .await
+        .expect("a timeout is a result, never a dispatch error");
+
+    assert_eq!(response.status, 504);
+    assert_eq!(response.body["error"], "dispatch_timeout");
+    assert!(
+        response.body["message"]
+            .as_str()
+            .expect("a message")
+            .contains("45"),
+        "the message should name the budget: {}",
+        response.body["message"]
+    );
+    assert!(!response.truncated);
+}
+
 #[test]
 fn query_strings_are_kept_out_of_debug_logs() {
     assert_eq!(

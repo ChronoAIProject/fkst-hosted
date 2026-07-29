@@ -341,7 +341,13 @@ fn process_frame(state: &mut SseState, frame: &[u8]) {
                 entry.id = Some(id);
             }
             if let Some(function) = fragment.function {
-                if let Some(name) = function.name {
+                // A BLANK name is not a name. Observed in the wild: some providers
+                // (including the one this deployment uses) repeat the `function` object
+                // on every argument fragment with `"name": ""`. Assigning that would
+                // erase the real name carried by the first fragment, and the turn would
+                // then fail with `unknown tool: ""` — every tool call, every time. Only a
+                // non-empty name may overwrite.
+                if let Some(name) = function.name.filter(|name| !name.is_empty()) {
                     entry.name = Some(name);
                 }
                 if let Some(arguments) = function.arguments {
@@ -371,7 +377,9 @@ fn flush_tool_calls(state: &mut SseState) {
     state.tools_flushed = true;
     let mut calls = Vec::with_capacity(state.tools.len());
     for (index, fragment) in std::mem::take(&mut state.tools) {
-        match fragment.name {
+        // Blank is treated as absent here too, so a provider that only ever sent `""`
+        // produces a logged drop rather than a call the registry cannot resolve.
+        match fragment.name.filter(|name| !name.is_empty()) {
             Some(name) => calls.push(ToolCall {
                 // A provider that omits the id still gets a stable pairing key.
                 id: fragment.id.unwrap_or_else(|| format!("call_{index}")),

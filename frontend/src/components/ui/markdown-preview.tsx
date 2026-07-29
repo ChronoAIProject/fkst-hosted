@@ -6,6 +6,22 @@ const FENCE_RE = /^\s*```([^`]*)\s*$/;
 const HEADING_RE = /^(#{1,6})\s+(.+)$/;
 const UNORDERED_ITEM_RE = /^\s*[-+*]\s+(.+)$/;
 const ORDERED_ITEM_RE = /^\s*\d+\.\s+(.+)$/;
+/** A pipe table row: at least one `|`, and the line starts or ends with one. */
+const TABLE_ROW_RE = /^\s*\|.*\|\s*$/;
+/** The delimiter row under a table header (`|---|:--:|`). It is what distinguishes a
+ *  real table from a paragraph that happens to contain pipes. */
+const TABLE_DIVIDER_RE = /^\s*\|(\s*:?-{1,}:?\s*\|)+\s*$/;
+
+/** Split one pipe-table row into its cells, dropping the leading/trailing empties the
+ *  outer pipes produce. */
+function tableCells(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim());
+}
 
 const HEADING_CLASSES = [
   'text-[18px]',
@@ -74,7 +90,10 @@ function startsBlock(line: string): boolean {
     FENCE_RE.test(line) ||
     HEADING_RE.test(line) ||
     UNORDERED_ITEM_RE.test(line) ||
-    ORDERED_ITEM_RE.test(line)
+    ORDERED_ITEM_RE.test(line) ||
+    // A table row must end a paragraph too, or the header line is swallowed into the
+    // prose above it and the table never starts.
+    TABLE_ROW_RE.test(line)
   );
 }
 
@@ -131,6 +150,58 @@ function markdownNodes(markdown: string): ReactNode[] {
       continue;
     }
 
+    // A table needs its delimiter row to be a table at all; without it the pipes are
+    // ordinary text and fall through to the paragraph branch.
+    if (
+      TABLE_ROW_RE.test(line) &&
+      lineIndex + 1 < lines.length &&
+      TABLE_DIVIDER_RE.test(lines[lineIndex + 1]!)
+    ) {
+      const header = tableCells(line);
+      lineIndex += 2;
+      const rows: string[][] = [];
+      while (lineIndex < lines.length && TABLE_ROW_RE.test(lines[lineIndex]!)) {
+        rows.push(tableCells(lines[lineIndex]!));
+        lineIndex += 1;
+      }
+      nodes.push(
+        <div key={`block-${blockIndex}`} className="overflow-x-auto">
+          <table className="w-full border-collapse text-left">
+            <thead>
+              <tr>
+                {header.map((cell, cellIndex) => (
+                  <th
+                    key={cellIndex}
+                    className="border-b border-line px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-ghost"
+                  >
+                    {inlineNodes(cell, `block-${blockIndex}-h-${cellIndex}`)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {/* Indexed by the HEADER width, so a short or long row cannot shift
+                      the columns out of alignment. */}
+                  {header.map((_, cellIndex) => (
+                    <td
+                      key={cellIndex}
+                      className="border-b border-line-2 px-2 py-1 align-top text-faint"
+                    >
+                      {inlineNodes(row[cellIndex] ?? '', `block-${blockIndex}-${rowIndex}-${cellIndex}`)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      blockIndex += 1;
+      continue;
+    }
+
     const unordered = UNORDERED_ITEM_RE.exec(line);
     const ordered = ORDERED_ITEM_RE.exec(line);
     if (unordered || ordered) {
@@ -183,14 +254,43 @@ function markdownNodes(markdown: string): ReactNode[] {
   return nodes;
 }
 
+/** How the rendered markdown is framed.
+ *
+ *  `boxed` is the original: a fixed-height, self-scrolling panel — right for a
+ *  PREVIEW of something (an issue body beside a form), where the surrounding page owns
+ *  the layout and the preview must not push it around.
+ *
+ *  `flow` renders the markdown as ordinary content with no box and no height cap —
+ *  right when the markdown IS the content. In the chat transcript the boxed variant
+ *  put a 256px scroll area inside a message inside the already-scrolling transcript:
+ *  answers appeared truncated mid-sentence while the panel below them sat empty, and
+ *  short answers still reserved 132px of blank space. */
+export type MarkdownPreviewVariant = 'boxed' | 'flow';
+
+const VARIANT_CLASSES: Record<MarkdownPreviewVariant, string> = {
+  boxed:
+    'min-h-[132px] max-h-64 overflow-auto rounded-control border border-line bg-glass px-3 py-2.5 leading-5',
+  // No overflow rule of its own: a long answer grows the message and the transcript
+  // scrolls, which is the one scrollbar the reader expects.
+  flow: 'leading-[1.65]',
+};
+
 /** Small, safe GitHub-issue preview. Markdown is converted only to React
  * elements; raw HTML remains text and links are restricted to HTTP(S). */
-export function MarkdownPreview({ markdown, ariaLabel }: { markdown: string; ariaLabel: string }) {
+export function MarkdownPreview({
+  markdown,
+  ariaLabel,
+  variant = 'boxed',
+}: {
+  markdown: string;
+  ariaLabel: string;
+  variant?: MarkdownPreviewVariant;
+}) {
   return (
     <div
       role="region"
       aria-label={ariaLabel}
-      className="min-h-[132px] max-h-64 overflow-auto rounded-control border border-line bg-glass px-3 py-2.5 font-mono text-[12px] leading-5 text-dim space-y-2"
+      className={`font-mono text-[12px] text-dim space-y-2 ${VARIANT_CLASSES[variant]}`}
     >
       {markdownNodes(markdown)}
     </div>

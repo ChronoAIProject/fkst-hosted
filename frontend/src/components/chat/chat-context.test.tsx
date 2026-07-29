@@ -49,6 +49,95 @@ describe('ChatProvider', () => {
     expect(chat().streaming).toBe(false);
   });
 
+  it('types a delta out progressively instead of showing it in one chunk', () => {
+    // The product rule: a provider that flushes a whole paragraph must still READ as
+    // typing. This is the one test that opts out of the kit's reduced-motion default,
+    // because the animation is the thing under test.
+    vi.useFakeTimers();
+    try {
+      const script = scriptedTransport();
+      renderChat(<Probe />, { transport: script.transport, reducedMotion: false });
+      act(() => chat().sendMessage('what is running?'));
+
+      const paragraph = 'Two sessions are running, and both are healthy right now.';
+      act(() => script.handlers().onDelta(paragraph));
+
+      // Nothing lands synchronously...
+      expect(chat().messages[1]!.content).toBe('');
+      // ...and a partial reveal is genuinely partial.
+      act(() => vi.advanceTimersByTime(64));
+      const partial = chat().messages[1]!.content;
+      expect(partial.length).toBeGreaterThan(0);
+      expect(partial.length).toBeLessThan(paragraph.length);
+      expect(paragraph.startsWith(partial)).toBe(true);
+
+      // The turn stays "streaming" until the reveal drains, so the caret and the
+      // disabled composer match what the reader is watching.
+      act(() => script.handlers().onDone({ finishReason: 'stop', sessionRefs: [] }));
+      expect(chat().streaming).toBe(true);
+      expect(chat().messages[1]!.pending).toBe(true);
+
+      act(() => vi.advanceTimersByTime(3000));
+      expect(chat().messages[1]!.content).toBe(paragraph);
+      expect(chat().messages[1]!.pending).toBe(false);
+      expect(chat().streaming).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stopping mid-reveal shows what already arrived rather than discarding it', () => {
+    vi.useFakeTimers();
+    try {
+      const script = scriptedTransport();
+      renderChat(<Probe />, { transport: script.transport, reducedMotion: false });
+      act(() => chat().sendMessage('what is running?'));
+      act(() => script.handlers().onDelta('a partially revealed answer'));
+      act(() => vi.advanceTimersByTime(32));
+
+      act(() => chat().stopStreaming());
+      // Stop means "stop the answer", not "throw away the words already paid for".
+      expect(chat().messages[1]!.content).toBe('a partially revealed answer');
+      expect(chat().messages[1]!.pending).toBe(false);
+      expect(chat().streaming).toBe(false);
+      expect(script.aborted()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('attaches structured data cards to the assistant message', () => {
+    const script = scriptedTransport();
+    renderChat(<Probe />, { transport: script.transport });
+    act(() => chat().sendMessage('what environments do I have?'));
+
+    act(() =>
+      script.handlers().onDataCard({
+        kind: 'environments',
+        profiles: [{ name: 'video-studio', status: 'ready' }],
+        omitted: 0,
+      })
+    );
+    act(() => script.handlers().onDone({ finishReason: 'stop', sessionRefs: [] }));
+
+    const cards = chat().messages[1]!.dataCards ?? [];
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ kind: 'environments' });
+  });
+
+  it('drops an unreadable data card silently rather than noting it', () => {
+    // The prose answer still stands on its own; a note about a rendering detail
+    // would be noise in the thread.
+    const script = scriptedTransport();
+    renderChat(<Probe />, { transport: script.transport });
+    act(() => chat().sendMessage('hi'));
+    act(() => script.handlers().onDataCard({ kind: 'not_a_real_card' }));
+    act(() => script.handlers().onDone({ finishReason: 'stop', sessionRefs: [] }));
+
+    expect(chat().messages[1]!.dataCards ?? []).toHaveLength(0);
+    expect(chat().messages.filter((m) => m.role === 'system-note')).toHaveLength(0);
+  });
+
   it('sends only user and assistant content on the wire', () => {
     const script = scriptedTransport();
     renderChat(<Probe />, { transport: script.transport });

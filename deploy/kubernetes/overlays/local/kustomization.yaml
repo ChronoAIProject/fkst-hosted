@@ -25,3 +25,18 @@ patches:
       - op: add
         path: /data/FKST_WORK_LABEL_NAMESPACE
         value: chronoai-fkst-cloud-test
+      # The chat concierge is opted into per environment (the base keeps it dark).
+      # Local runs it against the same provider the session engine uses, so only
+      # the master switch and the turn budget differ from the defaults.
+      - op: replace
+        path: /data/FKST_CHAT_ENABLED
+        value: "true"
+      # A tool-driven answer can take several round trips (look up the repo, then
+      # the session, then draft), so local gets more headroom than the 8/120s
+      # defaults while the surface is being exercised.
+      - op: add
+        path: /data/FKST_CHAT_MAX_TOOL_ITERATIONS
+        value: "12"
+      - op: add
+        path: /data/FKST_CHAT_TURN_DEADLINE_SECS
+        value: "180"

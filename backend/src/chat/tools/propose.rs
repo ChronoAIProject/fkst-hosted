@@ -1,4 +1,7 @@
-//! The three proposal tools: the model's only way to suggest a mutation.
+//! The session-lifecycle proposal tools, plus the shaping and argument helpers the
+//! sibling [`super::propose_resources`] tools reuse.
+//!
+//! Proposal tools are the model's only way to suggest a mutation.
 //!
 //! Each one validates a draft and hands the typed proposal to the orchestrator
 //! **out of band** via [`ToolOutcome::proposal`], while returning the model only a lean
@@ -23,12 +26,8 @@ use super::{
 /// Shape a successful proposal for the model: an acknowledgement plus the same one-line
 /// summary the card shows, so the model can refer to it in prose without restating the
 /// whole draft.
-fn presented(proposal: actions::ActionProposal) -> ToolOutcome {
-    let summary = match &proposal {
-        actions::ActionProposal::CreateSession { summary, .. }
-        | actions::ActionProposal::CreateWorkItem { summary, .. }
-        | actions::ActionProposal::StopSession { summary, .. } => summary.clone(),
-    };
+pub(super) fn presented(proposal: actions::ActionProposal) -> ToolOutcome {
+    let summary = proposal.summary().to_string();
     ToolOutcome {
         result_json: serde_json::json!({
             "proposal_presented": true,
@@ -42,7 +41,7 @@ fn presented(proposal: actions::ActionProposal) -> ToolOutcome {
 }
 
 /// Shape a rejected draft as data the model can act on.
-fn rejected(error: actions::ProposalError) -> ToolOutcome {
+pub(super) fn rejected(error: actions::ProposalError) -> ToolOutcome {
     ToolOutcome {
         result_json: serde_json::json!({
             "proposal_presented": false,
@@ -55,7 +54,7 @@ fn rejected(error: actions::ProposalError) -> ToolOutcome {
 }
 
 /// Read an optional string array argument, dropping blank entries.
-fn optional_list(args: &serde_json::Value, key: &str) -> Result<Vec<String>, ToolError> {
+pub(super) fn optional_list(args: &serde_json::Value, key: &str) -> Result<Vec<String>, ToolError> {
     match args.get(key) {
         None | Some(serde_json::Value::Null) => Ok(Vec::new()),
         Some(serde_json::Value::Array(items)) => items
@@ -80,7 +79,10 @@ fn optional_list(args: &serde_json::Value, key: &str) -> Result<Vec<String>, Too
 }
 
 /// Read an optional boolean argument.
-fn optional_bool(args: &serde_json::Value, key: &str) -> Result<Option<bool>, ToolError> {
+pub(super) fn optional_bool(
+    args: &serde_json::Value,
+    key: &str,
+) -> Result<Option<bool>, ToolError> {
     match args.get(key) {
         None | Some(serde_json::Value::Null) => Ok(None),
         Some(serde_json::Value::Bool(value)) => Ok(Some(*value)),
@@ -95,7 +97,7 @@ fn optional_bool(args: &serde_json::Value, key: &str) -> Result<Option<bool>, To
     }
 }
 
-fn string_array(description: &str) -> serde_json::Value {
+pub(super) fn string_array(description: &str) -> serde_json::Value {
     serde_json::json!({
         "type": "array",
         "items": { "type": "string" },
@@ -275,7 +277,7 @@ impl ChatTool for ProposeStopSession {
     }
 }
 
-/// Register the three proposal tools.
+/// Register the three session-lifecycle proposal tools.
 pub(super) fn register(registry: &mut ToolRegistry) {
     registry.register(Arc::new(DraftTriggerSession));
     registry.register(Arc::new(DraftWorkItem));

@@ -39,9 +39,10 @@ describe('ToolActivity', () => {
     expect(screen.getByText(/ERR 500/)).toBeInTheDocument();
   });
 
-  it('reads 404 as a denial too', () => {
-    // The backend returns 404 for "no runtime, or you cannot see it" — from the
-    // user's side that is the same class of answer as a 403.
+  it('reads an observe 404 as a denial, because that endpoint conflates the two', () => {
+    // `observe_session` answers 404 for "no runtime, OR you cannot see it" — collapsing
+    // those is what stops it leaking whether a session exists, so from the user's side
+    // it is the same class of answer as a 403.
     render(<ToolActivity events={[event({ id: 'a', name: 'observe_session', status: 404 })]} />);
     expect(screen.getByText(/DENIED 404/)).toBeInTheDocument();
   });
@@ -112,5 +113,32 @@ describe('ToolActivity', () => {
 
     fireEvent.click(toggle);
     expect(screen.queryByText('log tail')).not.toBeInTheDocument();
+  });
+
+  it('calls a LOG 404 absent rather than denied', () => {
+    // Observed live: a session with no logs yet showed "DENIED 404", telling the user
+    // they lacked access when the thing simply did not exist. The log endpoints decide
+    // access separately (403), so their 404 is unambiguous.
+    render(<ToolActivity events={[event({ id: 't1', name: 'list_log_runs', status: 404, truncated: false })]} />);
+    expect(screen.getByText(/NONE 404/)).toBeInTheDocument();
+    expect(screen.queryByText(/DENIED/)).not.toBeInTheDocument();
+  });
+
+  it('treats a 409 as nothing-to-show on any tool', () => {
+    render(<ToolActivity events={[event({ id: 't1', name: 'observe_session', status: 409 })]} />);
+    expect(screen.getByText(/NONE 409/)).toBeInTheDocument();
+  });
+
+  it('still calls a 401 and 403 denied', () => {
+    render(
+      <ToolActivity
+        events={[
+          event({ id: 't1', name: 'tail_log_file', status: 403, truncated: false }),
+          event({ id: 't2', name: 'get_overview', status: 401, truncated: false }),
+        ]}
+      />
+    );
+    expect(screen.getByText(/DENIED 403/)).toBeInTheDocument();
+    expect(screen.getByText(/DENIED 401/)).toBeInTheDocument();
   });
 });

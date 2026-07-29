@@ -36,6 +36,7 @@ export const chat = {
   toolRunning: 'RUNNING',
   toolOk: 'OK',
   toolDenied: 'DENIED',
+  toolNone: 'NONE',
   toolError: 'ERR',
   toolTruncated: 'TRUNCATED',
   /** Human labels for the backend's tool names; an unlisted name renders raw. */
@@ -48,8 +49,30 @@ export const chat = {
     get_log_manifest: 'log files',
     tail_log_file: 'log tail',
     list_environment_profiles: 'environments',
+    get_environment_profile: 'environment detail',
     search_manual: 'manual',
+    draft_trigger_session: 'drafting a session',
+    draft_work_item: 'drafting a work item',
+    propose_stop_session: 'drafting a stop',
+    propose_create_repository: 'drafting a repository',
+    draft_environment_profile: 'drafting an environment',
+    propose_delete_environment_profile: 'drafting an environment delete',
+    propose_uninstall_app: 'drafting an uninstall',
   } as Record<string, string>,
+
+  /** Structured data cards projected from a tool result. */
+  cardEnvironments: 'ENVIRONMENTS',
+  cardEnvironment: 'ENVIRONMENT',
+  cardNoEnvironments: 'No saved environment profiles yet.',
+  cardEnvCounts: '{install} install · {vars} vars · {secrets} secrets',
+  cardOutcomes: 'OUTCOMES',
+  cardOutcomeSummary: '{total} pull request(s) · {merged} merged',
+  cardMerged: 'MERGED',
+  cardFilesChanged: '{count} file(s)',
+  cardLogRuns: 'LOG RUNS',
+  cardRunLive: 'RUNNING',
+  cardLogFiles: 'LOG FILES',
+  cardOmitted: '+{count} more — open the dashboard for the full list.',
 
   /** Session rich-cards. */
   triggerPrefix: 'trigger #',
@@ -75,6 +98,47 @@ export const chat = {
   kindNewSession: 'NEW SESSION',
   kindWorkItem: 'WORK ITEM',
   kindStopSession: 'STOP SESSION',
+  kindNewRepo: 'NEW REPOSITORY',
+  kindSaveEnv: 'ENVIRONMENT',
+  kindDeleteEnv: 'DELETE ENVIRONMENT',
+  kindUninstallApp: 'UNINSTALL APP',
+  /** Scope line for a proposal that belongs to the user, not a repository. */
+  scopeYourAccount: 'your account',
+  scopePersonal: 'personal account',
+
+  /** New-repository card. */
+  repoPrivate: 'PRIVATE',
+  repoPublic: 'PUBLIC',
+  repoInstallNote:
+    'A new repository has no fkst App installed yet — install it before starting a session there.',
+
+  /** Environment card. */
+  envInstall: 'install',
+  envVariables: 'variables',
+  envSecrets: 'secrets',
+  envNoVariables: 'none',
+  envCreateNote: 'This creates a new environment profile.',
+  envReplaceNote: 'This REPLACES the existing profile — everything not listed here is dropped.',
+  envUnknownNote:
+    'Whether a profile with this name already exists could not be checked; confirming replaces it if it does.',
+  envSecretHint:
+    'Secret values stay in this browser until you confirm — the assistant never sees them, and they are not saved to the transcript.',
+  envSecretPlaceholder: 'value',
+  envSecretsRequired: 'Enter every secret value before confirming.',
+  envValidateNote:
+    'Confirming runs the install commands in an isolated pod before saving, which can take a minute.',
+  deleteEnvLine: 'Deletes `{name}` permanently — its secret values cannot be recovered.',
+  deleteEnvConfirmTitle: 'Delete this environment?',
+  deleteEnvConfirmBody:
+    'Deleting `{name}` is permanent. Its secret values cannot be recovered, and any trigger that names it in its Environment section will stop resolving.',
+  deleteEnvConfirmAction: 'Delete environment',
+
+  /** Uninstall-App card. */
+  uninstallLine: 'Removes fkst from EVERY repository on {owner}.',
+  uninstallConfirmTitle: 'Uninstall the fkst App?',
+  uninstallConfirmBody:
+    'This removes the fkst App from every repository on {owner} at once and stops every session running there. Re-installing later does not resume retired sessions.',
+  uninstallConfirmAction: 'Uninstall App',
   previewToggle: 'issue body',
   fieldWorkLabel: 'work label',
   fieldAutoDiscovered: 'auto-discovered',
@@ -97,10 +161,18 @@ export const chat = {
     'This action was still running when the page closed, so its outcome is unknown — check the dashboard before retrying.',
   outcomeChipCreated: 'CREATED',
   outcomeChipStopped: 'STOPPED',
+  outcomeChipSaved: 'SAVED',
+  outcomeChipDeleted: 'DELETED',
+  outcomeChipRemoved: 'REMOVED',
   openIssue: 'ISSUE',
+  openRepo: 'REPOSITORY',
   outcomeSession: 'Created trigger #{number} in {repo}.',
   outcomeWorkItem: 'Created work item #{number} in {repo}.',
   outcomeStopped: 'Closed trigger #{number} in {repo}; the session is retired.',
+  outcomeRepo: 'Created the repository {repo}.',
+  outcomeEnvSaved: 'Saved the environment profile {name}.',
+  outcomeEnvDeleted: 'Deleted the environment profile {name}.',
+  outcomeUninstalled: 'Uninstalled the fkst App from {owner}.',
   stopConfirmTitle: 'Stop this session?',
   stopConfirmBody:
     'Closing trigger #{number} in {repo} retires the session permanently — it never revives. Open work issues stay open but are no longer worked.',

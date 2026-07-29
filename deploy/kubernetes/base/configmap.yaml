@@ -51,3 +51,20 @@ data:
   # FKST_ACCESS_BLOCKED_USERS: "<blocked-github-login>, <another-login>"
   FKST_PUBLIC_BASE_URL: https://api.chronoai-fkst.local
   FKST_FRONTEND_URL: https://app.chronoai-fkst.local
+  # ---- chat concierge (POST /api/v1/chat) ----
+  # Dark by default, matching the feature's own fail-closed contract: with
+  # FKST_CHAT_ENABLED unset/false the route is neither served nor documented and
+  # no other FKST_CHAT_* value is read or validated. An environment overlay opts
+  # in, so enabling the surface is always a deliberate per-deployment act rather
+  # than something a base-manifest bump switches on everywhere.
+  #
+  # Every knob below falls back to the session engine's FKST_LLM_* value, so a
+  # deployment that wants chat on the same provider sets only ENABLED. Override
+  # BASE_URL / API_KEY / MODEL to point chat at a cheaper or faster model.
+  FKST_CHAT_ENABLED: "false"
+  # FKST_CHAT_MODEL: <model id; defaults to FKST_LLM_MODEL>
+  # FKST_CHAT_MAX_TOOL_ITERATIONS: "8"
+  # FKST_CHAT_TURN_DEADLINE_SECS: "120"
+  # FKST_CHAT_MAX_CONCURRENT_TURNS: "4"
+  # FKST_CHAT_HISTORY_MAX_MESSAGES: "40"
+  # FKST_CHAT_REQUEST_MAX_BYTES: "262144"

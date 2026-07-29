@@ -1,17 +1,4 @@
-//! Confirm-gated action proposals: the concierge may DRAFT a mutation, never perform one.
-//!
-//! The security architecture is fixed and is the whole reason this module is shaped the
-//! way it is:
-//!
-//! 1. The model calls a proposal tool, which VALIDATES and RENDERS a draft.
-//! 2. The draft is streamed to the SPA as a structured `action_proposal` event.
-//! 3. A human reviews the exact payload and confirms.
-//! 4. The **SPA** then calls the pre-existing REST endpoint with the user's own token —
-//!    the same code path the dashboard's own buttons use.
-//!
-//! So prompt-injection blast radius for mutations is **zero**: a hijacked model can at
-//! worst present a strange proposal card. No new write surface exists, and the chat
-//! backend never holds write capability.
+//! Session-lifecycle proposals: start a session, queue work on it, stop it.
 //!
 //! ## Why a separate draft DTO instead of `CreateSessionRequest`
 //!
@@ -25,6 +12,10 @@
 use serde::Serialize;
 use utoipa::ToSchema;
 
+use super::{
+    clean_list, optional, positive_issue_number, required, ActionProposal, ActionTarget,
+    ProposalError,
+};
 use crate::goals::trigger_parse::parse_package_ref;
 use crate::routes::canvas::trigger_body::{validated_trigger_body, CreateSessionRequest};
 
@@ -37,19 +28,6 @@ const MAX_WORK_ITEM_BODY_BYTES: usize = 20 * 1024;
 const MAX_WORK_LABEL_CHARS: usize = 50;
 /// Maximum stop-reason length; it is display-only on the card.
 const MAX_STOP_REASON_CHARS: usize = 500;
-
-/// Why a draft was rejected. The message is returned to the MODEL as tool-result data,
-/// so it must be precise enough for the model to fix the draft and retry in the same
-/// turn.
-#[derive(Debug, thiserror::Error)]
-#[error("{0}")]
-pub struct ProposalError(pub String);
-
-impl ProposalError {
-    fn new(message: impl Into<String>) -> Self {
-        Self(message.into())
-    }
-}
 
 /// The subset of a create-session request a chat draft may carry.
 ///
@@ -104,82 +82,6 @@ impl DraftSessionRequest {
             output_lang: self.output_lang.clone(),
         }
     }
-}
-
-/// Descriptive metadata for the preview card: which endpoint a confirmation will reach.
-///
-/// **Display only.** The SPA maps `kind` to its own typed API function and must never
-/// blindly fetch `path` — a generic method/path executor driven by model output would
-/// reintroduce exactly the write capability this design removes.
-#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
-pub struct ActionTarget {
-    pub method: String,
-    pub path: String,
-}
-
-/// A confirm-gated action the user may review and execute.
-#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ActionProposal {
-    /// Open a trigger issue — start a session.
-    CreateSession {
-        owner: String,
-        name: String,
-        request: DraftSessionRequest,
-        /// The EXACT issue body a confirmation will file, rendered by the same function
-        /// the real endpoint uses. Preview equals reality.
-        rendered_issue_body: String,
-        /// One line the card shows above the preview.
-        summary: String,
-        target: ActionTarget,
-    },
-    /// Open a labeled, assigned work issue on an existing session.
-    CreateWorkItem {
-        owner: String,
-        name: String,
-        trigger_issue_number: i64,
-        title: String,
-        label: Option<String>,
-        body: String,
-        summary: String,
-        target: ActionTarget,
-    },
-    /// Close a trigger issue — retire a session permanently.
-    StopSession {
-        owner: String,
-        name: String,
-        trigger_issue_number: i64,
-        /// Shown on the card so the user sees why the assistant suggested it. Not sent
-        /// anywhere on confirmation.
-        reason: String,
-        summary: String,
-        target: ActionTarget,
-    },
-}
-
-/// Trim a value, rejecting a blank one.
-fn required(value: &str, field: &str) -> Result<String, ProposalError> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err(ProposalError::new(format!("{field} must not be empty")));
-    }
-    Ok(trimmed.to_string())
-}
-
-/// Trim an optional value; blank counts as absent.
-fn optional(value: Option<String>) -> Option<String> {
-    value
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-}
-
-/// Drop blank entries from a list.
-fn clean_list(values: Vec<String>) -> Vec<String> {
-    values
-        .into_iter()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .collect()
 }
 
 /// A session draft that passed validation, with the body a confirmation will file.
@@ -316,11 +218,7 @@ pub fn propose_work_item(
 ) -> Result<ActionProposal, ProposalError> {
     let owner = required(owner, "owner")?;
     let repo = required(repo, "name")?;
-    if trigger_issue_number <= 0 {
-        return Err(ProposalError::new(
-            "the trigger issue number must be positive",
-        ));
-    }
+    let trigger_issue_number = positive_issue_number(trigger_issue_number)?;
     let title = required(title, "the work-item title")?;
     if title.chars().count() > MAX_WORK_ITEM_TITLE_CHARS {
         return Err(ProposalError::new(format!(
@@ -369,11 +267,7 @@ pub fn propose_stop_session(
 ) -> Result<ActionProposal, ProposalError> {
     let owner = required(owner, "owner")?;
     let repo = required(repo, "name")?;
-    if trigger_issue_number <= 0 {
-        return Err(ProposalError::new(
-            "the trigger issue number must be positive",
-        ));
-    }
+    let trigger_issue_number = positive_issue_number(trigger_issue_number)?;
     // Required because stopping is irreversible: the user deserves to see why the
     // assistant is suggesting it before confirming.
     let reason = required(reason, "the stop reason")?;
@@ -399,5 +293,5 @@ pub fn propose_stop_session(
 }
 
 #[cfg(test)]
-#[path = "actions_tests.rs"]
+#[path = "session_tests.rs"]
 mod tests;

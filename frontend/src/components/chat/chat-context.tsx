@@ -11,11 +11,16 @@ import type { ReactNode } from 'react';
 import { useContent } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
 import { useToast } from '@/components/ui/toast';
-import { createTrigger, createWorkItem, stopTrigger } from '@/lib/api/canvas';
-import { mapDraftToRequest, parseActionProposal } from './action-types';
+import { parseActionProposal } from './action-types';
 import type { ActionProposal } from './action-types';
+import { parseDataCard } from './data-card-types';
+import type { DataCard } from './data-card-types';
+import { outcomeNote } from './proposal-meta';
+import { runProposal } from './proposal-exec';
+import type { ProposalExecutionInput } from './proposal-exec';
 import { mockEchoTransport } from './transport';
 import type { ChatTransport, ChatTurnMessage, SessionRef } from './transport';
+import { prefersReducedMotion, TypewriterQueue } from './typewriter';
 
 /** One tool the assistant used during a turn, as the UI shows it. */
 export interface ChatToolEvent {
@@ -63,6 +68,8 @@ export interface ChatMessage {
   sessionRefs?: SessionRef[];
   /** Confirm-gated action proposals drafted during this turn. */
   proposals?: ChatProposal[];
+  /** Structured renderings of the turn's tool results, in arrival order. */
+  dataCards?: DataCard[];
   /** A `system-note` that should read as a warning rather than information. */
   tone?: 'info' | 'warn';
 }
@@ -79,7 +86,7 @@ interface ChatContextValue {
   clearTranscript: () => void;
   /** Execute a reviewed proposal under the user's own token. Nothing ever runs
    *  without a deliberate call to this. */
-  executeProposal: (id: string) => Promise<void>;
+  executeProposal: (id: string, input?: ProposalExecutionInput) => Promise<void>;
   /** Drop a proposal the user does not want. */
   dismissProposal: (id: string) => void;
   /** Record that a proposal's mutation ALREADY ran elsewhere and succeeded.
@@ -123,24 +130,6 @@ function errorCopy(
     return s.errors.rate_limited_after!.replace('{seconds}', String(retryAfterSeconds));
   }
   return s.errors[code] ?? fallback ?? s.errors.unknown!;
-}
-
-/** The thread note recording what a confirmed proposal actually created. */
-function outcomeNote(
-  s: ReturnType<typeof useContent>['chat'],
-  proposal: ActionProposal,
-  issueNumber?: number
-): string {
-  const repo = `${proposal.owner}/${proposal.name}`;
-  const template =
-    proposal.kind === 'stop_session'
-      ? s.outcomeStopped
-      : proposal.kind === 'create_session'
-        ? s.outcomeSession
-        : s.outcomeWorkItem;
-  const number =
-    issueNumber ?? ('trigger_issue_number' in proposal ? proposal.trigger_issue_number : 0);
-  return template.replace('{number}', String(number)).replace('{repo}', repo);
 }
 
 /** Read the stored transcript, tolerating anything. A corrupt or foreign value
@@ -231,6 +220,10 @@ export function ChatProvider({
   const [messages, setMessages] = useState<ChatMessage[]>(() => readStored());
   const [streaming, setStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  // The turn's reveal buffer. A provider emits whatever it happened to flush — often a
+  // whole paragraph at once — so what the transport delivers is NOT what the transcript
+  // shows: deltas go in here and come out at a readable rate. See `./typewriter`.
+  const typewriterRef = useRef<TypewriterQueue | null>(null);
 
   // Persist on every change so a refresh (or an accidental tab switch) keeps the
   // conversation the user is reading.
@@ -245,6 +238,7 @@ export function ChatProvider({
   useEffect(() => {
     if (wasAuthenticated.current && !isAuthenticated) {
       abortRef.current?.abort();
+      typewriterRef.current?.cancel();
       setMessages([]);
       setStreaming(false);
     }
@@ -252,12 +246,24 @@ export function ChatProvider({
   }, [isAuthenticated]);
 
   // A turn outlives the panel being closed only if we let it; aborting on unmount
-  // stops a dead component's callbacks from firing.
-  useEffect(() => () => abortRef.current?.abort(), []);
+  // stops a dead component's callbacks from firing — and cancelling the reveal stops
+  // its interval from ticking into an unmounted tree.
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      typewriterRef.current?.cancel();
+    },
+    []
+  );
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
+    // Flush rather than cancel: the user asked to stop the ANSWER, not to discard the
+    // words already streamed and paid for. They appear at once, which is the honest
+    // rendering of "this is everything that arrived".
+    typewriterRef.current?.flush();
+    typewriterRef.current = null;
     setStreaming(false);
     setMessages((current) =>
       current.map((message) => (message.pending ? { ...message, pending: false } : message))
@@ -303,11 +309,19 @@ export function ChatProvider({
       const controller = new AbortController();
       abortRef.current = controller;
 
+      // One queue per turn, writing into THIS turn's assistant message. Reduced motion
+      // is read here rather than captured once, so an OS-setting change takes effect on
+      // the next question instead of needing a reload.
+      const typewriter = new TypewriterQueue(
+        (slice) => patch(assistantId, (message) => ({ ...message, content: message.content + slice })),
+        { instant: prefersReducedMotion() }
+      );
+      typewriterRef.current = typewriter;
+
       transport.send(
         history,
         {
-          onDelta: (delta) =>
-            patch(assistantId, (message) => ({ ...message, content: message.content + delta })),
+          onDelta: (delta) => typewriter.push(delta),
           onToolCall: ({ id, name }) =>
             patch(assistantId, (message) => ({
               ...message,
@@ -328,6 +342,16 @@ export function ChatProvider({
                     [...events, { id, name, status, truncated }],
               };
             }),
+          onDataCard: (raw) => {
+            const card = parseDataCard(raw);
+            // An unreadable card is DROPPED, not reported: the prose answer still
+            // stands on its own, and a note about a rendering detail would be noise.
+            if (card == null) return;
+            patch(assistantId, (message) => ({
+              ...message,
+              dataCards: [...(message.dataCards ?? []), card],
+            }));
+          },
           onActionProposal: (raw) => {
             const proposal = parseActionProposal(raw);
             if (proposal == null) {
@@ -354,11 +378,21 @@ export function ChatProvider({
             }));
           },
           onDone: ({ sessionRefs }) => {
-            patch(assistantId, (message) => ({ ...message, pending: false, sessionRefs }));
-            setStreaming(false);
-            abortRef.current = null;
+            // The wire is done; the reader is not. Dropping the caret and re-enabling the
+            // composer while text is still appearing would contradict what is on screen,
+            // so the turn "ends" when the reveal drains.
+            typewriter.finish(() => {
+              patch(assistantId, (message) => ({ ...message, pending: false, sessionRefs }));
+              setStreaming(false);
+              abortRef.current = null;
+              typewriterRef.current = null;
+            });
           },
           onError: ({ code, message, retryAfterSeconds }) => {
+            // Show whatever had already streamed before the failure — a partial answer is
+            // more useful than a blank bubble above the error note.
+            typewriter.flush();
+            typewriterRef.current = null;
             // Copy comes from the stable CODE, not the server's prose: the prose is
             // for the log, and a user-facing string must be translatable. The raw
             // message is kept as a fallback for a code we do not recognize yet.
@@ -405,7 +439,7 @@ export function ChatProvider({
   );
 
   const executeProposal = useCallback(
-    async (id: string) => {
+    async (id: string, input: ProposalExecutionInput = {}) => {
       const entry = findProposal(id);
       if (entry == null) return;
       // Double-submit guard: a `succeeded` proposal never re-runs, and an
@@ -415,35 +449,10 @@ export function ChatProvider({
       patchProposal(id, (current) => ({ ...current, state: 'executing', error: undefined }));
       const { proposal } = entry;
       try {
-        // Only these three whitelisted, typed functions — the exact ones the
-        // dashboard's own buttons call. There is deliberately no generic
-        // method/path executor, so `target` can never drive a request.
-        const result =
-          proposal.kind === 'create_session'
-            ? await createTrigger(
-                apiFetch,
-                proposal.owner,
-                proposal.name,
-                mapDraftToRequest(proposal.request)
-              )
-            : proposal.kind === 'create_work_item'
-              ? await createWorkItem(
-                  apiFetch,
-                  proposal.owner,
-                  proposal.name,
-                  proposal.trigger_issue_number,
-                  {
-                    title: proposal.title,
-                    ...(proposal.label ? { label: proposal.label } : {}),
-                    body: proposal.body,
-                  }
-                )
-              : await stopTrigger(
-                  apiFetch,
-                  proposal.owner,
-                  proposal.name,
-                  proposal.trigger_issue_number
-                );
+        // `runProposal` maps each kind to ONE whitelisted, typed API function — the
+        // exact ones the dashboard's own buttons call. There is deliberately no
+        // generic method/path executor, so `target` can never drive a request.
+        const result = await runProposal(apiFetch, proposal, input);
 
         if (!result.ok) {
           patchProposal(id, (current) => ({
@@ -455,14 +464,12 @@ export function ChatProvider({
           return;
         }
 
-        // A created issue carries its own number and URL; a stop returns nothing.
-        const created = result.data as { issue_number?: number; html_url?: string } | null;
         patchProposal(id, (current) => ({
           ...current,
           state: 'succeeded',
           error: undefined,
-          ...(created?.html_url ? { issueUrl: created.html_url } : {}),
-          ...(created?.issue_number ? { issueNumber: created.issue_number } : {}),
+          ...(result.issueUrl ? { issueUrl: result.issueUrl } : {}),
+          ...(result.issueNumber ? { issueNumber: result.issueNumber } : {}),
         }));
         // A note in the thread so the outcome is part of the conversation, not just
         // a card the user might scroll past.
@@ -471,7 +478,7 @@ export function ChatProvider({
           {
             id: nextId('n'),
             role: 'system-note',
-            content: outcomeNote(s, proposal, created?.issue_number),
+            content: outcomeNote(proposal, s, result.issueNumber),
             tone: 'info',
           },
         ]);
@@ -497,7 +504,7 @@ export function ChatProvider({
         {
           id: nextId('n'),
           role: 'system-note',
-          content: outcomeNote(s, entry.proposal),
+          content: outcomeNote(entry.proposal, s),
           tone: 'info',
         },
       ]);
@@ -518,6 +525,10 @@ export function ChatProvider({
   const clearTranscript = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
+    // Cancel, not flush: the transcript is being discarded, so revealing into a message
+    // that is about to disappear would only race the clear.
+    typewriterRef.current?.cancel();
+    typewriterRef.current = null;
     setStreaming(false);
     setMessages([]);
   }, []);

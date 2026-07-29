@@ -64,9 +64,10 @@ async fn invoke(
 // ---- registry surface -----------------------------------------------------
 
 #[test]
-fn the_default_registry_leads_with_the_eight_read_tools() {
+fn the_default_registry_leads_with_the_read_tools() {
     // Order is the order the model reads: the live-data tools lead, then the
-    // confirm-gated drafting tools, then the in-process manual search.
+    // confirm-gated drafting tools (session lifecycle before the resources a session
+    // runs on), then the in-process manual search.
     let registry = default_registry();
     let names: Vec<String> = registry.defs().into_iter().map(|d| d.name).collect();
     assert_eq!(
@@ -80,9 +81,14 @@ fn the_default_registry_leads_with_the_eight_read_tools() {
             "get_log_manifest",
             "tail_log_file",
             "list_environment_profiles",
+            "get_environment_profile",
             "draft_trigger_session",
             "draft_work_item",
             "propose_stop_session",
+            "propose_create_repository",
+            "draft_environment_profile",
+            "propose_delete_environment_profile",
+            "propose_uninstall_app",
             "search_manual",
         ]
     );

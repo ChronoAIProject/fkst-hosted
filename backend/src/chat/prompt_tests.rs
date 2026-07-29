@@ -20,6 +20,39 @@ fn the_prompt_states_the_concierge_identity_and_its_limits() {
 }
 
 #[test]
+fn a_failed_lookup_must_not_block_a_draft() {
+    // Observed live: an earlier wording ("look things up before you draft") read as a
+    // PRECONDITION, so when `get_overview` returned a 502 the model refused to draft a
+    // session the user had fully specified — removing the very card they were going to
+    // review. The confirm step is what runs the real checks, so the prompt must say this.
+    let prompt = prompt();
+    assert!(
+        prompt.contains("NEVER blocks a draft"),
+        "the prompt must state that a failed lookup does not block drafting"
+    );
+    assert!(
+        prompt.contains("RESOLVE what the user meant"),
+        "lookups are for resolving ambiguity, not for earning permission"
+    );
+}
+
+#[test]
+fn the_prompt_forbids_repeating_a_secret_the_user_pasted() {
+    // The tool schemas make a secret value impossible to DRAFT; only the prompt can stop
+    // the model echoing one back into the transcript.
+    let prompt = prompt();
+    assert!(prompt.contains("SECRETS."));
+    assert!(
+        prompt.contains("not even one the user typed at you"),
+        "the secrets rule must cover values the user pasted into the conversation"
+    );
+    assert!(
+        prompt.contains("secret_names"),
+        "the prompt must name the names-only argument"
+    );
+}
+
+#[test]
 fn the_prompt_mandates_grounding() {
     let prompt = prompt();
     assert!(prompt.contains("search_manual"));

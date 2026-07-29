@@ -3,6 +3,7 @@ import { MarkdownPreview } from '@/components/ui/markdown-preview';
 import { useContent } from '@/i18n';
 import type { ChatMessage } from './chat-context';
 import { ActionCards } from './action-card';
+import { DataCards } from './data-cards';
 import { RichCards } from './rich-cards';
 import { ToolActivity } from './tool-activity';
 
@@ -61,9 +62,18 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
 
       <ToolActivity events={message.toolEvents ?? []} />
 
+      {/* `flow`, not the boxed preview: the answer IS this message, so it must grow
+          with its content and let the TRANSCRIPT scroll. Boxed would nest a second
+          scroll area inside a scrolling panel and cut the answer mid-sentence. */}
       {message.content !== '' && (
-        <MarkdownPreview markdown={message.content} ariaLabel={s.answerAria} />
+        <MarkdownPreview markdown={message.content} ariaLabel={s.answerAria} variant="flow" />
       )}
+
+      {/* Structured renderings of the data the turn actually fetched. Above the
+          session cards because they answer the question; the session cards are
+          navigation. Both are projected server-side from tool results — neither is
+          derived from the model's prose. */}
+      <DataCards cards={message.dataCards ?? []} />
 
       {/* Deterministic deep-link cards, derived only from the turn's structured
           tool results — never from the model's prose. */}
