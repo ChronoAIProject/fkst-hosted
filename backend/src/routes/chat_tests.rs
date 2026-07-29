@@ -329,12 +329,20 @@ async fn a_successful_turn_streams_event_stream_frames_in_order() {
         .iter()
         .map(|f| f["type"].as_str().unwrap_or_default())
         .collect();
-    assert_eq!(types, vec!["delta", "delta", "done"]);
-    assert_eq!(frames[0]["text"], "Hel");
-    assert_eq!(frames[1]["text"], "lo");
-    assert_eq!(frames[2]["finish_reason"], "stop");
+    // The round frames bracket the answer so a client can render the orchestration
+    // loop; the text and terminal frames sit inside that bracket.
+    assert_eq!(
+        types,
+        vec!["round_start", "delta", "delta", "round_end", "done"]
+    );
+    assert_eq!(frames[0]["index"], 0);
+    assert_eq!(frames[1]["text"], "Hel");
+    assert_eq!(frames[2]["text"], "lo");
+    assert_eq!(frames[3]["finish_reason"], "stop");
+    assert_eq!(frames[3]["tool_calls"], 0);
+    assert_eq!(frames[4]["finish_reason"], "stop");
     assert!(
-        frames[2]["session_refs"]
+        frames[4]["session_refs"]
             .as_array()
             .expect("session_refs array")
             .is_empty(),
@@ -357,10 +365,13 @@ async fn a_provider_failure_terminates_the_stream_with_an_error_frame() {
         "the response had already started; the failure is a frame"
     );
     let frames = sse_frames(response).await;
-    assert_eq!(frames.len(), 1);
-    assert_eq!(frames[0]["type"], "error");
-    assert_eq!(frames[0]["code"], "llm_error");
-    let message = frames[0]["message"].as_str().unwrap_or_default();
+    // The round opened before the provider was called, so it is on the wire; the
+    // failure then terminates the stream without falsely closing that round.
+    assert_eq!(frames.len(), 2);
+    assert_eq!(frames[0]["type"], "round_start");
+    assert_eq!(frames[1]["type"], "error");
+    assert_eq!(frames[1]["code"], "llm_error");
+    let message = frames[1]["message"].as_str().unwrap_or_default();
     assert!(
         !message.contains("upstream exploded"),
         "provider detail must not reach the client: {message}"
