@@ -3,6 +3,7 @@ local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
 local parsers_issue = require("devloop.parsers.issue")
 local core, replay_fields = require("core"), require("devloop.replay_fields")
+local payloads_builders = require("devloop.payloads.builders")
 local transition_version = require("contract.transition_version")
 
 local saga = require("workflow.saga")
@@ -20,6 +21,7 @@ local spec = {
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
+    "github-devloop-decompose.devloop_decompose",
   },
   stall_window = "2m",
 }
@@ -172,9 +174,16 @@ local function pipeline_thinking(event)
       reason = reason .. "; auto-refinement " .. tostring(refine_round) .. "/"
         .. tostring(conv_rounds.MAX_AUTO_REFINEMENTS) .. " re-entering intake"
     elseif refinable then
+      -- Budget spent and the disagreement survived. Re-running consensus on the same
+      -- spec a third time would only reproduce the same verdict, so hand off to the
+      -- structural remedy instead: `blocked` already declares the decompose queue as
+      -- its driving queue and `budget_exhausted_decompose` as its watchdog escape.
+      -- Left alone the row reaches that escape only after its 1410-minute wait for an
+      -- operator, which for an unattended session is a day of dead time. Raising the
+      -- same queue now takes the row's own designed successor immediately.
       reason = reason .. "; auto-refinement budget exhausted after "
         .. tostring(conv_rounds.MAX_AUTO_REFINEMENTS)
-        .. " amendments -- the disagreement survived every amendment and wants a human"
+        .. " amendments -- decomposing instead of re-running the same spec"
     end
 
     local comment_request = core.build_reconcile_comment_request(repo, issue_number, reconcile, action, reason, version)
@@ -188,6 +197,19 @@ local function pipeline_thinking(event)
         repo, issue_number, reconcile, refine_round, reconcile.terminal_cause, version)
       devloop_logging.log_raise("reconcile", reconcile.proposal_id,
         "github-proxy.github_issue_comment_request", refine_request)
+    elseif refinable then
+      -- Forward (not replay) decompose: proposal_id + version only, no review binding
+      -- and no child counts, which is the shape `is_supported_decompose` accepts and
+      -- dedups as decompose/<proposal_id>/<version>. Child fan-out and recursion stay
+      -- bounded by max_decompose_issues/max_decompose_depth, so this cannot run away.
+      local decompose_request = payloads_builders.build_devloop_decompose_payload({
+        proposal_id = reconcile.proposal_id,
+        issue_version = version,
+        round = reconcile.round,
+        source_ref = reconcile.source_ref,
+      })
+      devloop_logging.log_raise("reconcile", reconcile.proposal_id,
+        core.decompose_package_queue(), decompose_request)
     end
   end)
 end

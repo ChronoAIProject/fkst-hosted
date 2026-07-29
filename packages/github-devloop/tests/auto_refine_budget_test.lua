@@ -12,6 +12,33 @@ local function marker(proposal_id, round)
 end
 
 return {
+  test_exhausted_budget_hands_off_a_forward_decompose_payload = function()
+    -- When the budget is spent, reconcile raises the decompose queue instead of
+    -- leaving the row to idle out its 1410-minute operator wait. That handoff is
+    -- only real if the payload is the FORWARD shape the decompose department
+    -- accepts -- a replay-shaped or review-bound payload would be dropped and the
+    -- row would silently sit for a day anyway.
+    local builders = require("devloop.payloads.builders")
+    local decompose = require("devloop.decompose")
+
+    local payload = builders.build_devloop_decompose_payload({
+      proposal_id = "github-devloop/issue/acme/site/42",
+      issue_version = "github-devloop/issue/acme/site/42/intake/7",
+      round = 1,
+      source_ref = "github-devloop/issue/acme/site/42",
+    })
+
+    t.is_true(decompose.is_supported_decompose(payload))
+    t.eq(payload.schema, "github-devloop.decompose.v1")
+    t.eq(payload.version, "github-devloop/issue/acme/site/42/intake/7")
+    -- Forward, not replay: a review binding or child counts would change the dedup
+    -- key and route this down the replay path.
+    t.eq(payload.review_proposal_id, nil)
+    t.eq(payload.head_sha, nil)
+    t.eq(payload.expected_child_count, nil)
+    t.eq(payload.completed_child_count, nil)
+  end,
+
   test_every_terminal_cause_is_refinable_and_nothing_else_is = function()
     local rounds = require("devloop.convergence.rounds")
 
