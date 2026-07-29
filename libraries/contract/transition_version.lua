@@ -410,6 +410,13 @@ function V.strip_suffixes(version)
       :gsub("%-timeout%-reconcile%-[%w%-]+%-%d+$", "")
       :gsub("/timeout/[%w%-]+/%d+$", "")
       :gsub("%-timeout%-[%w%-]+%-%d+$", "")
+      -- `redrive/<state>/<n>`, appended by ready_split.next_ready_redrive_version.
+      -- Same <state>/<n> shape as timeout. Without this a redriven version reduces
+      -- to a DIFFERENT lineage than the version it was redriven from, so every
+      -- lineage-base comparison built on this function -- dependency origins, CAS
+      -- catalog bases, scheduled-vs-current state -- sees two unrelated lineages.
+      :gsub("/redrive/[%w%-]+/%d+$", "")
+      :gsub("%-redrive%-[%w%-]+%-%d+$", "")
       :gsub("/reimplement/%d+$", "")
       :gsub("%-reimplement%-%d+$", "")
       :gsub("/ready%-split/%d+$", "")
