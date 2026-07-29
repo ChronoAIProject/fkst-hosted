@@ -174,7 +174,11 @@ return {
     mock_issue_reads()
     mock_github_proxy_writes()
 
-    local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 8 }))
+    -- 9, not 8: a refinable terminal cause now also raises the amend-and-reintake
+    -- comment, so the graph has one more effect to drain before it quiesces. The
+    -- budget stays exact rather than generous -- `require_quiescent` proves the
+    -- graph actually settles, and a padded ceiling would stop proving that.
+    local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 9 }))
     graph.assert_covers(trace, {
       "consensus.consensus_converge -> github-devloop.loop",
       "github-proxy.github_issue_comment_request -> github-proxy.github_comment",
