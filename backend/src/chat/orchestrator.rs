@@ -140,7 +140,14 @@ async fn drive(
             match item.map_err(TurnFailure::Llm)? {
                 StreamItem::TextDelta(text) => {
                     assistant_text.push_str(&text);
-                    send(tx, ChatStreamEvent::Delta { text }).await?;
+                    send(
+                        tx,
+                        ChatStreamEvent::Delta {
+                            text,
+                            round: iteration,
+                        },
+                    )
+                    .await?;
                 }
                 StreamItem::ToolCalls(requested) => calls = requested,
                 StreamItem::Done { finish_reason: r } => finish_reason = Some(r),

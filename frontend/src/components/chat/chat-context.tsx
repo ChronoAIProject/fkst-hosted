@@ -23,6 +23,7 @@ export { RESTORED_UNKNOWN } from './transcript-storage';
 import { useProposals } from './use-proposals';
 import {
   appendRoundStart,
+  appendRoundText,
   appendToolCall,
   applyRoundEnd,
   applyToolResult,
@@ -313,7 +314,15 @@ export function ChatProvider({
       transport.send(
         history,
         {
-          onDelta: (delta) => typewriter.push(delta),
+          // The delta goes to BOTH places on purpose: the bubble is the answer,
+          // the timeline is the record of the loop that produced it.
+          onDelta: (delta, round) => {
+            typewriter.push(delta);
+            patch(assistantId, (message) => ({
+              ...message,
+              steps: appendRoundText(message.steps ?? [], { round, text: delta }),
+            }));
+          },
           // The four step handlers fold the orchestration loop into one ORDERED
           // list; the reducers live in `./steps` so their ordering rules are
           // testable without mounting anything.

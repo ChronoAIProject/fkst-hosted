@@ -52,6 +52,7 @@ export const chat = {
   stepRound: 'round',
   stepRoundOpen: 'working',
   stepRoundCalls: 'calls',
+  stepRoundSilent: 'no message — went straight to tools',
   stepParameters: 'Parameters',
   stepResponse: 'Response',
   stepTruncated: 'truncated',

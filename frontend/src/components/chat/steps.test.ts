@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   appendRoundStart,
+  appendRoundText,
   appendToolCall,
   applyRoundEnd,
   applyToolResult,
@@ -100,6 +101,32 @@ describe('step reducers', () => {
     });
     expect(steps).toHaveLength(1);
     expect(steps[0]).toMatchObject({ status: 200 });
+  });
+
+  it('folds a delta onto the round the SERVER named, not the round that is open', () => {
+    // Round 0 is still the last one appended, but the delta says round 1.
+    let steps: ChatStep[] = [round(0), round(1)];
+    steps = appendRoundText(steps, { round: 1, text: 'answer' });
+    expect(steps[0]).not.toHaveProperty('text');
+    expect(steps[1]).toMatchObject({ index: 1, text: 'answer' });
+  });
+
+  it('accumulates successive deltas for the same round', () => {
+    let steps: ChatStep[] = [round(0)];
+    steps = appendRoundText(steps, { round: 0, text: 'Look' });
+    steps = appendRoundText(steps, { round: 0, text: 'ing…' });
+    expect(steps[0]).toMatchObject({ text: 'Looking…' });
+  });
+
+  it('drops text for a round that never started rather than misattributing it', () => {
+    // Silently attaching it to the wrong round would be worse than losing it.
+    const steps: ChatStep[] = [round(0)];
+    expect(appendRoundText(steps, { round: 7, text: 'ghost' })).toEqual(steps);
+  });
+
+  it('ignores a delta with no round, so an older server cannot corrupt a round', () => {
+    const steps: ChatStep[] = [round(0)];
+    expect(appendRoundText(steps, { text: 'unattributed' })).toEqual(steps);
   });
 
   it('selects only the tool steps for the CLEAN summary', () => {

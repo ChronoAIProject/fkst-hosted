@@ -111,7 +111,7 @@ fn full_shape(events: &[ChatStreamEvent]) -> Vec<String> {
 
 fn label(event: &ChatStreamEvent) -> String {
     match event {
-        ChatStreamEvent::Delta { text } => format!("delta({text})"),
+        ChatStreamEvent::Delta { text, .. } => format!("delta({text})"),
         ChatStreamEvent::RoundStart {
             index,
             tools_offered,
@@ -262,6 +262,87 @@ async fn each_round_is_bracketed_and_indexed_across_a_tool_round_trip() {
             "done(stop)",
         ]
     );
+}
+
+#[tokio::test]
+async fn assistant_text_is_attributed_to_the_round_that_produced_it() {
+    // The model can speak in EVERY round -- a preamble before calling a tool, then
+    // the answer. Without the round on each delta a client has a bare token stream
+    // and cannot say which message a piece belongs to.
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let registry = registry_with(StubTool {
+        name: "get_overview".to_string(),
+        outcome: serde_json::json!({ "status": 200, "body": {} }),
+        status: Some(200),
+        calls,
+        proposal: None,
+    });
+    let client = ScriptedClient::new(vec![
+        Ok(vec![
+            StreamItem::TextDelta("Looking that up".to_string()),
+            StreamItem::ToolCalls(vec![call("c1", "get_overview", "{}")]),
+        ]),
+        Ok(vec![
+            StreamItem::TextDelta("You have none.".to_string()),
+            StreamItem::Done {
+                finish_reason: "stop".to_string(),
+            },
+        ]),
+    ]);
+    let events = run(client, registry, vec![user("what do I have?")], |_| {}).await;
+
+    let deltas: Vec<(u32, String)> = events
+        .iter()
+        .filter_map(|e| match e {
+            ChatStreamEvent::Delta { text, round } => Some((*round, text.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        deltas,
+        vec![
+            (0, "Looking that up".to_string()),
+            (1, "You have none.".to_string()),
+        ],
+        "the preamble belongs to round 0 and the answer to round 1"
+    );
+}
+
+#[tokio::test]
+async fn a_round_that_produces_no_prose_emits_no_delta_for_it() {
+    // "The model said nothing this round" must be distinguishable from "the model
+    // spoke", so a silent round contributes no delta rather than an empty one.
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let registry = registry_with(StubTool {
+        name: "get_overview".to_string(),
+        outcome: serde_json::json!({ "status": 200, "body": {} }),
+        status: Some(200),
+        calls,
+        proposal: None,
+    });
+    let client = ScriptedClient::new(vec![
+        Ok(vec![StreamItem::ToolCalls(vec![call(
+            "c1",
+            "get_overview",
+            "{}",
+        )])]),
+        Ok(vec![
+            StreamItem::TextDelta("Answer.".to_string()),
+            StreamItem::Done {
+                finish_reason: "stop".to_string(),
+            },
+        ]),
+    ]);
+    let events = run(client, registry, vec![user("?")], |_| {}).await;
+
+    let rounds: Vec<u32> = events
+        .iter()
+        .filter_map(|e| match e {
+            ChatStreamEvent::Delta { round, .. } => Some(*round),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(rounds, vec![1], "only round 1 spoke");
 }
 
 #[tokio::test]

@@ -99,8 +99,13 @@ pub struct SessionRef {
 #[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChatStreamEvent {
-    /// An incremental piece of assistant text.
-    Delta { text: String },
+    /// An incremental piece of assistant text, and the round that produced it.
+    ///
+    /// `round` is stated rather than inferred from frame position: the loop can
+    /// produce text in EVERY round (a preamble before a tool call, then the
+    /// answer), and without it a client has a bare token stream with no way to say
+    /// which message each piece belongs to.
+    Delta { text: String, round: u32 },
     /// A model round is starting.
     ///
     /// Answering one user message takes several round trips between this service and
