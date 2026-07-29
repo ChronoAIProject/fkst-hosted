@@ -130,25 +130,46 @@ function ToolRow({ step }: { step: ChatToolStep }) {
   );
 }
 
-/** A round marker: the boundary of one exchange with the model. */
+/** A round marker plus what the model said in that round.
+ *
+ *  A round with no prose renders an explicit "said nothing" line rather than
+ *  nothing at all: "the model went straight to calling tools" is information, and
+ *  an empty gap would read as a rendering bug. */
 function RoundRow({ step }: { step: ChatRoundStep }) {
   const s = useContent().chat;
   const open = step.finishReason == null;
+  const said = step.text?.trim();
   return (
-    <li
-      data-testid="chat-step-round"
-      className="flex items-center gap-2 px-1 pt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-ghost"
-    >
-      <span aria-hidden="true">{open ? '◇' : '◆'}</span>
-      <span>
-        {s.stepRound} {step.index + 1}
-      </span>
-      <span className="h-px flex-1 bg-[color-mix(in_oklab,var(--fg)_10%,transparent)]" />
-      <span>
-        {open
-          ? s.stepRoundOpen
-          : `${step.finishReason} · ${step.toolCalls ?? 0} ${s.stepRoundCalls}`}
-      </span>
+    <li data-testid="chat-step-round" className="flex flex-col gap-1 pt-1">
+      <div className="flex items-center gap-2 px-1 font-mono text-[10px] uppercase tracking-[0.12em] text-ghost">
+        <span aria-hidden="true">{open ? '◇' : '◆'}</span>
+        <span>
+          {s.stepRound} {step.index + 1}
+        </span>
+        <span className="h-px flex-1 bg-[color-mix(in_oklab,var(--fg)_10%,transparent)]" />
+        <span>
+          {open
+            ? s.stepRoundOpen
+            : `${step.finishReason} · ${step.toolCalls ?? 0} ${s.stepRoundCalls}`}
+        </span>
+      </div>
+      {said ? (
+        <p
+          data-testid="chat-step-round-text"
+          className="ml-4 border-l border-[color-mix(in_oklab,var(--fg)_10%,transparent)] py-0.5 pl-3 text-[11.5px] leading-relaxed text-faint"
+        >
+          {said}
+        </p>
+      ) : (
+        !open && (
+          <p
+            data-testid="chat-step-round-silent"
+            className="ml-4 border-l border-[color-mix(in_oklab,var(--fg)_10%,transparent)] py-0.5 pl-3 font-mono text-[10px] italic text-ghost"
+          >
+            {s.stepRoundSilent}
+          </p>
+        )
+      )}
     </li>
   );
 }

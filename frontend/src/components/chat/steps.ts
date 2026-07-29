@@ -21,6 +21,10 @@ export interface ChatRoundStep {
   /** Absent while the round is still open. */
   finishReason?: string;
   toolCalls?: number;
+  /** What the model SAID in this round, accumulated from its deltas. Absent when
+   *  the round produced no prose at all — which is itself worth showing, since a
+   *  silent round means the model went straight to calling tools. */
+  text?: string;
 }
 
 /** One tool invocation, from request to result. */
@@ -87,6 +91,28 @@ export function applyRoundEnd(
     if (step.finishReason != null) return step;
     matched = true;
     return { ...step, finishReason: ev.finishReason, toolCalls: ev.toolCalls };
+  });
+  return matched ? next : steps;
+}
+
+/**
+ * Fold a delta onto the round that produced it.
+ *
+ * Attributed by the round index the server states, NOT by "the round that happens
+ * to be open" — the same identity-over-position rule the other reducers follow. A
+ * delta for a round that never started is DROPPED rather than attached to the
+ * wrong one; silently misattributing what the model said is worse than losing it.
+ */
+export function appendRoundText(
+  steps: ChatStep[],
+  ev: { round?: number; text: string }
+): ChatStep[] {
+  if (ev.round == null) return steps;
+  let matched = false;
+  const next = steps.map((step) => {
+    if (matched || step.kind !== 'round' || step.index !== ev.round) return step;
+    matched = true;
+    return { ...step, text: (step.text ?? '') + ev.text };
   });
   return matched ? next : steps;
 }

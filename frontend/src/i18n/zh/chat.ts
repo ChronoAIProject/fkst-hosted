@@ -48,6 +48,7 @@ export const chat = {
   stepRound: '轮次',
   stepRoundOpen: '进行中',
   stepRoundCalls: '次调用',
+  stepRoundSilent: '没有输出文字 —— 直接调用了工具',
   stepParameters: '入参',
   stepResponse: '返回',
   stepTruncated: '已截断',

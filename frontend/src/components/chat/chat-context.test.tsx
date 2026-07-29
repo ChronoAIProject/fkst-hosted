@@ -269,6 +269,25 @@ describe('ChatProvider', () => {
     ]);
   });
 
+  it("records each round's message on its round while the bubble keeps the answer", () => {
+    const script = scriptedTransport();
+    renderChat(<Probe />, { transport: script.transport });
+    act(() => chat().sendMessage('what do I have?'));
+
+    act(() => script.handlers().onRoundStart({ index: 0, toolsOffered: 3 }));
+    act(() => script.handlers().onDelta('Looking that up', 0));
+    act(() => script.handlers().onRoundEnd({ index: 0, finishReason: 'tool_calls', toolCalls: 1 }));
+    act(() => script.handlers().onRoundStart({ index: 1, toolsOffered: 3 }));
+    act(() => script.handlers().onDelta('You have none.', 1));
+
+    const steps = chat().messages[1]!.steps ?? [];
+    const rounds = steps.filter((s) => s.kind === 'round');
+    expect(rounds[0]).toMatchObject({ index: 0, text: 'Looking that up' });
+    expect(rounds[1]).toMatchObject({ index: 1, text: 'You have none.' });
+    // The bubble is still the whole answer — the timeline is a record, not a move.
+    expect(chat().messages[1]!.content).toContain('You have none.');
+  });
+
   it('shows a result with no matching call rather than dropping it', () => {
     // Silence would hide real activity from the user.
     const script = scriptedTransport();

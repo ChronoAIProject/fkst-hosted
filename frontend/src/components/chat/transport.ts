@@ -36,7 +36,7 @@ export interface SessionRef {
 
 /** Callbacks a transport drives as a turn streams. */
 export interface ChatTransportHandlers {
-  onDelta(text: string): void;
+  onDelta(text: string, round?: number): void;
   /** A model round opened / closed — the orchestration loop made visible. */
   onRoundStart(ev: { index: number; toolsOffered: number }): void;
   onRoundEnd(ev: { index: number; finishReason: string; toolCalls: number }): void;

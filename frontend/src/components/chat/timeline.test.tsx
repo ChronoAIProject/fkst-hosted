@@ -90,6 +90,48 @@ describe('Timeline', () => {
     expect(screen.getByText(/truncated/i)).toBeInTheDocument();
   });
 
+  it("shows what the model said in EACH round, not just the last", () => {
+    renderTimeline(
+      [
+        {
+          kind: 'round',
+          index: 0,
+          toolsOffered: 3,
+          finishReason: 'tool_calls',
+          toolCalls: 1,
+          text: 'Looking that up',
+        },
+        { kind: 'tool', id: 't1', name: 'get_overview', argsPreview: '{}', status: 200 },
+        {
+          kind: 'round',
+          index: 1,
+          toolsOffered: 3,
+          finishReason: 'stop',
+          toolCalls: 0,
+          text: 'You have none.',
+        },
+      ],
+      'verbose'
+    );
+    const said = screen.getAllByTestId('chat-step-round-text').map((n) => n.textContent);
+    expect(said).toEqual(['Looking that up', 'You have none.']);
+  });
+
+  it('says so explicitly when a finished round produced no prose', () => {
+    // An empty gap would read as a rendering bug; "went straight to tools" is
+    // information.
+    renderTimeline(
+      [{ kind: 'round', index: 0, toolsOffered: 3, finishReason: 'tool_calls', toolCalls: 1 }],
+      'verbose'
+    );
+    expect(screen.getByTestId('chat-step-round-silent')).toBeInTheDocument();
+  });
+
+  it('does not claim silence for a round still in flight', () => {
+    renderTimeline([{ kind: 'round', index: 0, toolsOffered: 3 }], 'verbose');
+    expect(screen.queryByTestId('chat-step-round-silent')).not.toBeInTheDocument();
+  });
+
   it('marks a round still in flight differently from a closed one', () => {
     renderTimeline([{ kind: 'round', index: 0, toolsOffered: 3 }], 'verbose');
     expect(screen.getByTestId('chat-step-round')).toHaveTextContent(/working/i);

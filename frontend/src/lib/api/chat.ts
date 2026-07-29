@@ -22,7 +22,7 @@ export interface ChatSessionRef {
 
 /** One frame of the response stream. `type` is the discriminant the backend sets. */
 export type ChatStreamEvent =
-  | { type: 'delta'; text: string }
+  | { type: 'delta'; text: string; round?: number }
   | { type: 'round_start'; index: number; tools_offered: number }
   | { type: 'round_end'; index: number; finish_reason: string; tool_calls: number }
   | {
@@ -51,7 +51,7 @@ export type ChatStreamEvent =
 /** Callbacks `streamChat` drives. Exactly one terminal callback — `onDone` or
  *  `onError` — always fires, so a caller never has to infer completion. */
 export interface StreamChatHandlers {
-  onDelta(text: string): void;
+  onDelta(text: string, round?: number): void;
   /** A model round opened. Pairs with `onRoundEnd`, except when the turn dies
    *  inside the round — the server does not falsely close one. */
   onRoundStart(ev: { index: number; toolsOffered: number }): void;
@@ -239,7 +239,7 @@ export async function streamChat(
 function dispatch(event: ChatStreamEvent, handlers: StreamChatHandlers) {
   switch (event.type) {
     case 'delta':
-      handlers.onDelta(event.text);
+      handlers.onDelta(event.text, event.round);
       return;
     case 'round_start':
       handlers.onRoundStart({ index: event.index, toolsOffered: event.tools_offered });

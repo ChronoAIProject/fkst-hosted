@@ -704,6 +704,8 @@ export interface SiteContent {
     stepRound: string;
     stepRoundOpen: string;
     stepRoundCalls: string;
+    /** Shown for a finished round in which the model produced no prose. */
+    stepRoundSilent: string;
     stepParameters: string;
     stepResponse: string;
     stepTruncated: string;
