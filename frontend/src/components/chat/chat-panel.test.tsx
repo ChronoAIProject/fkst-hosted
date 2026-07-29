@@ -135,7 +135,7 @@ describe('ChatPanel', () => {
 
     act(() => chat().openPanel());
     expect(screen.getByTestId('chat-panel')).toHaveAttribute('aria-hidden', 'false');
-    expect(screen.getByText('FKST // CONCIERGE')).toBeInTheDocument();
+    expect(screen.getByText('FKST // ORCHESTRATOR')).toBeInTheDocument();
     expect(screen.getByTestId('chat-transcript')).toBeInTheDocument();
     expect(screen.getByTestId('chat-input')).toBeInTheDocument();
   });

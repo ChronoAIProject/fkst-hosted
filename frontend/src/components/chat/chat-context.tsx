@@ -117,7 +117,7 @@ const ChatContext = createContext<ChatContextValue | null>(null);
 const VIEW_LEVEL_KEY = 'fkst-chat-view-level';
 
 /**
- * Owns the concierge's client state: panel visibility, the transcript, and the
+ * Owns the Orchestrator's client state: panel visibility, the transcript, and the
  * one in-flight turn.
  *
  * The transport is injected rather than imported so the shell can supply the real

@@ -50,7 +50,7 @@ export function Shell() {
   const c = useContent();
   const { isAuthenticated, signIn, signOut, apiFetch } = useAuth();
   // The broader-visibility credential is forwarded to chat exactly as the
-  // dashboard forwards it, so the concierge's overview tool sees the same
+  // dashboard forwards it, so the Orchestrator's overview tool sees the same
   // repository set the user is looking at.
   const { token: broaderToken } = useBroaderOAuth();
   // The guided tour is launched on demand from the topbar `?` control.
@@ -132,7 +132,7 @@ export function Shell() {
   }, [location.pathname]);
 
   return (
-    // The concierge provider wraps the whole shell so the launcher and the panel
+    // The Orchestrator provider wraps the whole shell so the launcher and the panel
     // share one transcript and one open state. It is mounted on EVERY route, docs
     // pages included: a first-time visitor lands there, and that is exactly who
     // has questions.
@@ -426,7 +426,7 @@ export function Shell() {
           portals itself to <body>. */}
         <TourOverlay />
 
-        {/* The chat concierge: a floating launcher plus a docked, non-modal panel.
+        {/* The FKST Orchestrator: a floating launcher plus a docked, non-modal panel.
           The panel stays MOUNTED and is driven by its open flag (the DrawerShell
           contract), so it can animate out and keeps its scroll position. */}
         <ChatPanel />

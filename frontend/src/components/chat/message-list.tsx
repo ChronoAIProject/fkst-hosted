@@ -40,7 +40,7 @@ function CornerBrackets() {
   );
 }
 
-/** The empty state: what the concierge is for, plus three prompts that fill the
+/** The empty state: what the Orchestrator is for, plus three prompts that fill the
  *  composer so a first-time user never has to invent an opening line. */
 function WelcomeCard({ onPick }: { onPick: (text: string) => void }) {
   const s = useContent().chat;

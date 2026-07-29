@@ -1,11 +1,11 @@
-/** 聊天助理文案：启动器、面板框架、对话记录、输入框。 */
+/** FKST Orchestrator 文案：启动器、面板框架、对话记录、输入框。 */
 export const chat = {
-  launcherLabel: '智能助理',
-  launcherAria: '打开 fkst 智能助理',
-  launcherCloseAria: '关闭 fkst 智能助理',
+  launcherLabel: 'ORCHESTRATOR',
+  launcherAria: '打开 FKST Orchestrator',
+  launcherCloseAria: '关闭 FKST Orchestrator',
 
-  panelTitle: 'FKST // 智能助理',
-  panelAria: 'fkst 智能助理',
+  panelTitle: 'FKST // ORCHESTRATOR',
+  panelAria: 'FKST Orchestrator',
   linkActive: '连接正常',
   streaming: '生成中',
   clear: '清空',
@@ -17,7 +17,7 @@ export const chat = {
   fullScreenExitAria: '退出全屏',
   exportAria: '将本次对话下载为 JSON',
   close: '关闭',
-  closeAria: '关闭助理面板',
+  closeAria: '关闭 FKST Orchestrator 面板',
 
   welcomeTitle: '询问你的会话',
   welcomeBody:
@@ -30,10 +30,10 @@ export const chat = {
 
   transcriptAria: '对话',
   jumpToLatest: '跳到最新',
-  assistantRole: '助理',
+  assistantRole: 'ORCHESTRATOR',
   userRole: '你',
   copyAnswer: '复制',
-  answerAria: '助理回答',
+  answerAria: 'Orchestrator 回答',
   activityToggle: '活动记录',
   toolRunning: '执行中',
   toolOk: '成功',
@@ -98,15 +98,15 @@ export const chat = {
   openTrigger: 'TRIGGER',
 
   placeholder: '询问某个会话、日志，或某项功能的原理……',
-  inputAria: '向助理发送消息',
+  inputAria: '向 FKST Orchestrator 发送消息',
   send: '发送',
   sendAria: '发送消息',
   stop: '停止',
   stopAria: '停止当前回答',
   charCount: '{used} / {max}',
 
-  signInTitle: '登录后使用智能助理',
-  signInBody: '助理使用你自己的 GitHub 权限作答，因此需要先登录。',
+  signInTitle: '登录后使用 FKST Orchestrator',
+  signInBody: 'FKST Orchestrator 使用你自己的 GitHub 权限作答，因此需要先登录。',
 
   /** 确认后才执行的操作卡片。 */
   kindNewSession: '新建会话',
@@ -130,7 +130,7 @@ export const chat = {
   envCreateNote: '这将新建一个环境配置。',
   envReplaceNote: '这会整体替换已有配置 —— 未在此列出的内容都会被删除。',
   envUnknownNote: '无法确认是否已存在同名配置；若已存在，确认后会将其替换。',
-  envSecretHint: '密钥值在你确认前只保存在此浏览器中 —— 助理看不到它们，也不会写入对话记录。',
+  envSecretHint: '密钥值在你确认前只保存在此浏览器中 —— Orchestrator 看不到它们，也不会写入对话记录。',
   envSecretPlaceholder: '值',
   envSecretsRequired: '请先填写所有密钥值再确认。',
   envValidateNote: '确认后会先在隔离 Pod 中执行安装命令再保存，可能需要一分钟。',
@@ -163,7 +163,7 @@ export const chat = {
   dismiss: '忽略',
   executing: '执行中…',
   executeFailed: '该操作未能完成。',
-  unreadableProposal: '助理生成的操作草稿无法解析 —— 请让它重试。',
+  unreadableProposal: 'Orchestrator 生成的操作草稿无法解析 —— 请让它重试。',
   restoredUnknown: '页面关闭时该操作仍在执行，结果未知 —— 重试前请先在仪表盘确认。',
   outcomeChipCreated: '已创建',
   outcomeChipStopped: '已停止',
@@ -191,7 +191,7 @@ export const chat = {
     rate_limited_after: '一次只能问一个问题，请在 {seconds} 秒后再试。',
     llm_error: '无法连接语言模型，请重试。',
     protocol: '无法读取回答，请重试。',
-    unavailable: '当前部署暂时无法使用智能助理。',
+    unavailable: '当前部署暂时无法使用 FKST Orchestrator。',
     unauthorized: '登录已过期，请重新登录后继续提问。',
     network: '回答尚未结束，连接已中断。',
     request: '请求被拒绝。',
