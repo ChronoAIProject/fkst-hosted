@@ -64,6 +64,14 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
           must not rewrite a turn the user has already read. */}
       <Timeline steps={message.steps ?? []} level={message.viewLevel ?? 'clean'} />
 
+      {/* Says the answer is incomplete, so a partial reply is never mistaken for a
+          finished one. */}
+      {message.interrupted && (
+        <p data-testid="chat-interrupted" className="font-mono text-[10px] text-warn">
+          {s.interrupted}
+        </p>
+      )}
+
       {/* `flow`, not the boxed preview: the answer IS this message, so it must grow
           with its content and let the TRANSCRIPT scroll. Boxed would nest a second
           scroll area inside a scrolling panel and cut the answer mid-sentence. */}

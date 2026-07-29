@@ -40,7 +40,9 @@ export function Composer({ value, onChange }: { value: string; onChange: (next: 
   }, [value]);
 
   const trimmed = value.trim();
-  const canSend = trimmed.length > 0 && !streaming;
+  // Deliberately NOT gated on `streaming`: sending mid-turn interrupts it and asks
+  // the new question, so the user never has to press Stop first (#5620).
+  const canSend = trimmed.length > 0;
 
   const submit = () => {
     if (!canSend) return;
@@ -69,7 +71,11 @@ export function Composer({ value, onChange }: { value: string; onChange: (next: 
           data-testid="chat-input"
           className={`${FIELD_INPUT} resize-none font-mono text-[12.5px] leading-5`}
         />
-        {streaming ? (
+        {/* Both buttons are present while a turn streams, because they now do
+            DIFFERENT things: Stop discards the answer and asks nothing new, while
+            Send interrupts it and asks the next question. Collapsing them into one
+            control is what forced the old two-step dance. */}
+        {streaming && (
           <button
             type="button"
             onClick={stopStreaming}
@@ -81,18 +87,17 @@ export function Composer({ value, onChange }: { value: string; onChange: (next: 
           >
             {s.stop}
           </button>
-        ) : (
-          <button
-            type="button"
-            onClick={submit}
-            disabled={!canSend}
-            aria-label={s.sendAria}
-            data-testid="chat-send"
-            className="flex-none rounded-control bg-grad-accent px-3 py-2 font-ui text-[12.5px] font-semibold text-amber-ink shadow-[var(--shadow-2),var(--glow-amber)] transition-[filter,opacity] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
-          >
-            {s.send}
-          </button>
         )}
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!canSend}
+          aria-label={streaming ? s.sendInterruptAria : s.sendAria}
+          data-testid="chat-send"
+          className="flex-none rounded-control bg-grad-accent px-3 py-2 font-ui text-[12.5px] font-semibold text-amber-ink shadow-[var(--shadow-2),var(--glow-amber)] transition-[filter,opacity] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+        >
+          {s.send}
+        </button>
       </div>
       {showCounter && (
         <p

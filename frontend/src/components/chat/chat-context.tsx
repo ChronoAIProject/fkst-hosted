@@ -16,6 +16,7 @@ import type { ActionProposal } from './action-types';
 import { parseDataCard } from './data-card-types';
 import type { DataCard } from './data-card-types';
 import type { ProposalExecutionInput } from './proposal-exec';
+import { errorCopy, nextId } from './chat-helpers';
 import { readStored, writeStored } from './transcript-storage';
 // Re-exported so this module stays the façade its consumers already import from.
 export { RESTORED_UNKNOWN } from './transcript-storage';
@@ -65,6 +66,10 @@ export interface ChatMessage {
   content: string;
   /** True while the assistant message is still growing. */
   pending?: boolean;
+  /** The user sent the next question before this answer finished. Kept on the
+   *  record — with whatever text and steps it had — rather than deleted, so the
+   *  transcript stays a truthful account of what happened. */
+  interrupted?: boolean;
   /** The orchestration loop attributed to this assistant message, in arrival order. */
   steps?: ChatStep[];
   /** The view level captured when THIS turn started. Rendering reads this rather
@@ -110,30 +115,6 @@ const ChatContext = createContext<ChatContextValue | null>(null);
 
 /** Persisted CLEAN/VERBOSE preference. */
 const VIEW_LEVEL_KEY = 'fkst-chat-view-level';
-
-let messageSeq = 0;
-/** Monotonic ids. A counter, not a timestamp: two messages appended in the same
- *  millisecond must not collide as React keys. */
-function nextId(prefix: string): string {
-  messageSeq += 1;
-  return `${prefix}-${messageSeq}`;
-}
-
-/** Resolve user-facing error copy from a stable code.
- *
- *  `rate_limited` gets a variant naming the retry delay when the server sent one,
- *  because "try again in 5s" is actionable where "try again" is not. */
-function errorCopy(
-  s: ReturnType<typeof useContent>['chat'],
-  code: string,
-  fallback: string,
-  retryAfterSeconds?: number
-): string {
-  if (code === 'rate_limited' && retryAfterSeconds != null) {
-    return s.errors.rate_limited_after!.replace('{seconds}', String(retryAfterSeconds));
-  }
-  return s.errors[code] ?? fallback ?? s.errors.unknown!;
-}
 
 /**
  * Owns the concierge's client state: panel visibility, the transcript, and the
@@ -249,6 +230,10 @@ export function ChatProvider({
     );
   }, []);
 
+  /** Which turn is current. Bumped per send so a superseded turn's late callbacks
+   *  can tell they no longer own the panel's state. */
+  const turnSeqRef = useRef(0);
+
   /** Apply an update to the assistant message with `id`. */
   const patch = useCallback((id: string, update: (message: ChatMessage) => ChatMessage) => {
     setMessages((current) =>
@@ -259,7 +244,32 @@ export function ChatProvider({
   const sendMessage = useCallback(
     (text: string) => {
       const content = text.trim();
-      if (!content || streaming) return;
+      if (!content) return;
+
+      // Sending WHILE a turn streams interrupts it. Previously this returned early,
+      // so changing your mind mid-answer — the common case when the orchestrator is
+      // off down the wrong path — meant pressing Stop, then typing, then sending.
+      if (streaming) {
+        abortRef.current?.abort();
+        abortRef.current = null;
+        // Flush rather than cancel: the user is redirecting, not disowning what was
+        // already said, so the partial answer stays on the record and is MARKED as
+        // interrupted rather than silently looking like a complete reply.
+        typewriterRef.current?.flush();
+        typewriterRef.current = null;
+        setMessages((current) =>
+          current.map((message) =>
+            message.pending ? { ...message, pending: false, interrupted: true } : message
+          )
+        );
+      }
+
+      // Generation token. The aborted turn's in-flight callbacks can still fire, and
+      // without this its terminal handler would clear `streaming` and null the
+      // abort ref belonging to the turn that REPLACED it.
+      turnSeqRef.current += 1;
+      const turn = turnSeqRef.current;
+      const isCurrentTurn = () => turnSeqRef.current === turn;
 
       const userMessage: ChatMessage = { id: nextId('u'), role: 'user', content };
       const assistantId = nextId('a');
@@ -367,13 +377,20 @@ export function ChatProvider({
             // composer while text is still appearing would contradict what is on screen,
             // so the turn "ends" when the reveal drains.
             typewriter.finish(() => {
+              // Session refs still belong on THIS message even if it was superseded —
+              // only the shared panel state below is off-limits to an old turn.
               patch(assistantId, (message) => ({ ...message, pending: false, sessionRefs }));
+              if (!isCurrentTurn()) return;
               setStreaming(false);
               abortRef.current = null;
               typewriterRef.current = null;
             });
           },
           onError: ({ code, message, retryAfterSeconds }) => {
+            // An interrupted turn's failure is not the user's problem: they already
+            // moved on, and a warning note about the answer they abandoned would be
+            // noise attached to the wrong question.
+            if (!isCurrentTurn()) return;
             // Show whatever had already streamed before the failure — a partial answer is
             // more useful than a blank bubble above the error note.
             typewriter.flush();

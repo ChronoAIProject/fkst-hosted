@@ -39,6 +39,8 @@ export const chat = {
   toolNone: 'NONE',
   toolError: 'ERR',
   toolTruncated: 'TRUNCATED',
+  interrupted: 'Interrupted — you asked something else.',
+  sendInterruptAria: 'Interrupt the current answer and send this message',
 
   // ---- orchestration timeline (CLEAN/VERBOSE) ----
   stepRound: 'round',

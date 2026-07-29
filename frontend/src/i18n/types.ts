@@ -687,6 +687,9 @@ export interface SiteContent {
     toolNone: string;
     toolError: string;
     toolTruncated: string;
+    /** Marks an answer the user cut short by asking something else. */
+    interrupted: string;
+    sendInterruptAria: string;
     /** The orchestration timeline: one row per model round and per tool call,
      *  each expandable to the exact parameters and response, plus the
      *  CLEAN/VERBOSE switch that decides how much of it a turn renders. */

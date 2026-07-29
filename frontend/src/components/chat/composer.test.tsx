@@ -73,32 +73,37 @@ describe('Composer', () => {
     expect(script.sent).toHaveLength(0);
   });
 
-  it('becomes Stop while streaming, and stops the turn', () => {
+  it('offers Stop ALONGSIDE Send while streaming, and stops the turn', () => {
+    // Stop used to REPLACE Send, which is what forced the two-step interrupt.
+    // They now coexist because they do different things: Stop discards the
+    // answer, Send interrupts it and asks the next question (#5620).
     const script = scriptedTransport();
     renderChat(<Host />, { transport: script.transport });
     fireEvent.change(input(), { target: { value: 'hi' } });
     fireEvent.keyDown(input(), { key: 'Enter' });
 
-    // The primary action becomes the one the user now wants, rather than sitting
-    // uselessly disabled.
-    expect(screen.queryByTestId('chat-send')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-send')).toBeInTheDocument();
     const stop = screen.getByTestId('chat-stop');
     // Stopping is a caution, so it carries --warn — never the brand accent.
     expect(stop.className).toContain('text-warn');
 
     fireEvent.click(stop);
     expect(script.aborted()).toBe(true);
+    // Stop leaves once the turn is over; Send remains the primary action.
+    expect(screen.queryByTestId('chat-stop')).not.toBeInTheDocument();
     expect(screen.getByTestId('chat-send')).toBeInTheDocument();
   });
 
-  it('does not send a second message while streaming', () => {
+  it('sends a second message while streaming, interrupting the first', () => {
     const script = scriptedTransport();
     renderChat(<Host />, { transport: script.transport });
     fireEvent.change(input(), { target: { value: 'first' } });
     fireEvent.keyDown(input(), { key: 'Enter' });
     fireEvent.change(input(), { target: { value: 'second' } });
     fireEvent.keyDown(input(), { key: 'Enter' });
-    expect(script.sent).toHaveLength(1);
+    // No intermediate Stop press: the second question goes out immediately.
+    expect(script.sent).toHaveLength(2);
+    expect(script.aborted()).toBe(true);
   });
 
   it('caps the message length', () => {
