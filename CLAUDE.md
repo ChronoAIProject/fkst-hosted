@@ -4,17 +4,18 @@ This file guides Claude Code (and any AI agent) when working in the **fkst-hoste
 
 ## Project Overview
 
-**fkst-hosted** serves the **fkst** project's hosting-related concerns and is deployed as **ChronoAI's cloud services**.
+**fkst-hosted** contains the **fkst** project's user-facing hosted and local products.
 
 - **Backend:** Rust-based backend service.
 - **Frontend:** React.
-- **Purpose:** User-facing and public interfaces for the fkst project, running as ChronoAI's hosted cloud offering.
+- **Local QA Runtime:** An independently buildable local product under `apps/local-qa-runtime/`.
+- **Purpose:** User-facing and public interfaces for the fkst project, including ChronoAI's hosted cloud offering and the Local QA Runtime.
 
 ## Scope & Boundaries
 
 fkst-hosted has a deliberately narrow scope. Respect these boundaries on every change:
 
-- ✅ **In scope:** Only user-facing and public interfaces that matter to the user.
+- ✅ **In scope:** User-facing and public interfaces that matter to the user, including the Local QA Runtime.
 - ❌ **Out of scope:** Anything related to the **kernel engine**. fkst-hosted does **not** change or include kernel-engine code.
 
 > When a task seems to require touching engine internals, stop and reconsider — that work belongs upstream (see below), not in this repo.
@@ -52,6 +53,13 @@ fkst-hosted integrates with the following ChronoAI platform services. When doing
 |-----------|-------|----------------|
 | Backend   | Rust  | Hosted backend service, public APIs, user-facing endpoints |
 | Frontend  | React | User-facing web interface |
+| Local QA Runtime | Rust + TypeScript | Local user-facing QA runtime under `apps/local-qa-runtime/`; currently an inert scaffold |
+
+The Local QA Runtime scaffold establishes ownership and build boundaries only.
+It does not define protocols, ledgers, grants, leases, fencing, VM or browser
+execution, Secret materialization, privileged helpers, installation, cleanup,
+recovery, or update behavior. Those capabilities require separate issues and
+review before entering this repository.
 
 ## FKST Local Deployment Guide
 
@@ -2191,16 +2199,22 @@ Scope and constraints:
 | `main`         | **Production** branch. |
 | `develop`      | **Active development** branch. |
 | `develop-auto` | Branch actively developed and evolved by **unattended AI agent looping sessions**. |
+| `feat/local-qa-runtime` | Temporary Local QA Runtime integration branch; usable only when an issue explicitly names it as both source and target. |
 
 ### Branching & Merge Rules
 
 - All features and bug fixes **must** land via a **pull request** into `develop` or `develop-auto`.
+- A work issue may explicitly authorize the temporary `feat/local-qa-runtime`
+  integration branch. That exception applies only to Local QA Runtime work whose
+  issue names the branch as its source and target; it does not authorize arbitrary
+  feature-to-feature pull requests.
 - **Only `develop` may be merged into `main`.** (`develop-auto` does not merge directly into `main`.)
-- **No force push** is allowed on `main`, `develop`, or `develop-auto`.
+- `feat/local-qa-runtime` must eventually integrate through `develop`; it never merges directly into `main`.
+- **No force push** is allowed on `main`, `develop`, `develop-auto`, or `feat/local-qa-runtime`.
 
 ### Issue & Pull Request Discipline
 
-- **All work must be done via a proper pull request.** No direct commits to shared branches (`main`, `develop`, `develop-auto`); always branch, then open a PR.
+- **All work must be done via a proper pull request.** No direct commits to shared branches (`main`, `develop`, `develop-auto`, `feat/local-qa-runtime`); always branch, then open a PR.
 - **Every pull request must have a corresponding GitHub issue.** Open the issue first, then reference it from the PR so it auto-closes on merge (e.g., `Closes #123`).
 - A PR without a linked issue is not ready to merge.
 - Standard flow: **open an issue → create a branch → implement → open a PR linking the issue → review → merge**.
@@ -2242,9 +2256,10 @@ the Docker build. There is **no automated release pipeline** (the Changesets +
 release-note + tag workflows were removed): PRs into `develop` do **not** need a
 changeset, and a release — if ever cut — is a plain git tag on `main`.
 
-## CI (pull requests into `develop`)
+## CI (pull requests into `develop` and authorized integration branches)
 
-PRs into `develop` run exactly five checks, all under `.github/workflows/`:
+PRs into `develop` and issue-authorized `feat/local-qa-runtime` work run exactly
+five checks, all under `.github/workflows/`:
 
 | Check | Workflow | What it does |
 |-------|----------|--------------|
@@ -2295,8 +2310,8 @@ The durable status labels explain what happened and prevent duplicate comments a
 - For PRs into `develop`, auto-merge as soon as CI is green; if CI fails, fix it then auto-merge — unless told otherwise.
 - Every PR must have a corresponding GitHub issue and link it (`Closes #N`).
 - Use the issue/PR templates under `.github/`.
-- Use pull requests into `develop` or `develop-auto`; only `develop` merges into `main`.
-- Never force push `main`, `develop`, or `develop-auto`.
+- Use pull requests into `develop` or `develop-auto`; `feat/local-qa-runtime` is a narrow exception only when the work issue explicitly names it. Only `develop` merges into `main`.
+- Never force push `main`, `develop`, `develop-auto`, or `feat/local-qa-runtime`.
 - For NyxID / IAM work, reference NyxID's latest `main`; for Ornn / agent-skill work, reference Ornn's latest `main`.
-- PRs into `develop` run exactly five checks (rust lint/build/test, docker build, gitleaks); there is no changeset or release-note requirement.
+- PRs into `develop` and issue-authorized `feat/local-qa-runtime` work run exactly five checks (rust lint/build/test, docker build, gitleaks); there is no changeset or release-note requirement.
 - The product version lives in root `package.json`; there is no automated release pipeline — releases are manual git tags on `main`.

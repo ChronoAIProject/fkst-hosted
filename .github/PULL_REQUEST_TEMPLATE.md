@@ -1,6 +1,7 @@
 <!--
 Every PR must have a corresponding GitHub issue and must be small and self-contained.
-Target develop or develop-auto — never commit directly to or PR straight into main.
+Target develop or develop-auto unless the linked issue explicitly authorizes a named
+integration branch. Never commit directly to a shared branch or PR straight into main.
 -->
 
 ## Linked Issue
@@ -31,7 +32,7 @@ Closes #
 ## Checklist
 
 - [ ] A corresponding GitHub issue exists and is linked above (`Closes #N`).
-- [ ] This PR targets `develop` or `develop-auto` (not `main` directly).
+- [ ] This PR targets `develop` / `develop-auto`, or the linked issue explicitly authorizes its named integration branch (never `main` directly).
 - [ ] The change is **small and self-contained**.
 - [ ] Stays within **fkst-hosted** scope — no kernel-engine changes.
 - [ ] Tests / checks pass locally.
