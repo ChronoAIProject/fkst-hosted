@@ -2,7 +2,7 @@ name: Rust CI
 
 on:
   pull_request:
-    branches: [develop, develop-auto]
+    branches: [develop, develop-auto, feat/local-qa-runtime]
 
 permissions:
   contents: read
@@ -22,11 +22,19 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: backend
+          workspaces: |
+            backend
+            apps/local-qa-runtime
       - name: rustfmt --check
         run: cargo fmt --all -- --check
       - name: clippy -D warnings
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Local QA Runtime rustfmt --check
+        working-directory: apps/local-qa-runtime
+        run: cargo fmt --all -- --check
+      - name: Local QA Runtime clippy -D warnings
+        working-directory: apps/local-qa-runtime
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   build:
     name: rust build
@@ -34,13 +42,44 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
-        run: rustup show
+        run: |
+          rustup show
+          rustup target add aarch64-apple-darwin x86_64-pc-windows-msvc
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: backend
+          workspaces: |
+            backend
+            apps/local-qa-runtime
       - name: build
         run: cargo build --workspace --locked
+      - name: Build Local QA Runtime
+        working-directory: apps/local-qa-runtime
+        run: cargo build --workspace --locked
+      - name: Check Local QA Runtime macOS target
+        working-directory: apps/local-qa-runtime
+        run: cargo check --workspace --all-targets --locked --target aarch64-apple-darwin
+      - name: Check Local QA Runtime Windows target
+        working-directory: apps/local-qa-runtime
+        run: cargo check --workspace --all-targets --locked --target x86_64-pc-windows-msvc
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/local-qa-runtime/workers/package-lock.json
+      - name: Install Local QA workers
+        working-directory: apps/local-qa-runtime/workers
+        run: npm ci --ignore-scripts
+      - name: Type-check Local QA workers
+        working-directory: apps/local-qa-runtime/workers
+        run: npm run --ignore-scripts typecheck
+      - name: Build Local QA workers
+        working-directory: apps/local-qa-runtime/workers
+        run: npm run --ignore-scripts build
+      - name: Verify inert Local QA scaffold
+        working-directory: .
+        run: bash apps/local-qa-runtime/tests/scaffold-structure.sh
 
   test:
     name: rust test
@@ -52,6 +91,11 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: backend
+          workspaces: |
+            backend
+            apps/local-qa-runtime
       - name: test
+        run: cargo test --workspace --locked
+      - name: Test Local QA Runtime
+        working-directory: apps/local-qa-runtime
         run: cargo test --workspace --locked

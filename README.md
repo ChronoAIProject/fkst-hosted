@@ -1,9 +1,9 @@
 # fkst-hosted
 
-**fkst-hosted** is ChronoAI's hosted cloud service for the **fkst** project. It
-gives you a managed home for your fkst packages and the engine that runs them —
-so you can build, run, and collaborate without operating any infrastructure
-yourself.
+**fkst-hosted** contains ChronoAI's user-facing products for the **fkst**
+project. Its hosted control plane gives you a managed home for fkst packages and
+the engine sessions that run them, while the Local QA Runtime provides the
+repository boundary for local QA tooling.
 
 ## What you can do
 
@@ -21,8 +21,19 @@ yourself.
 - **Manage GitHub issues from one place.** See the issues across all of your
   linked GitHub accounts, and create, update, or comment on them.
 
-Everything is reached through a simple HTTP API and secured by your ChronoAI
-(NyxID) sign-in.
+## Repository boundaries
+
+- `backend/`, `frontend/`, and `deploy/` own the hosted control plane and web
+  experience.
+- `apps/local-qa-runtime/` owns the user-facing Local QA Runtime. It is currently
+  an inert, independently buildable scaffold; runtime protocols and behavior
+  belong to later, separately reviewed changes.
+- Kernel-engine code remains upstream in `fkst-substrate`. Shared fkst packages
+  remain upstream in `fkst-packages`; both repositories are reference-only from
+  this checkout.
+
+The hosted capabilities are reached through a simple HTTP API and secured by
+your ChronoAI (NyxID) sign-in.
 
 ## Using the API
 
