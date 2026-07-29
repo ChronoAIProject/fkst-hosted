@@ -101,6 +101,58 @@ function C.continuation_budget_exhausted(facts)
   return C.max_converge_round(facts) >= 1
 end
 
+-- Auto-refinement budget. A convergence terminal used to be the end of the line:
+-- the reconcile dropped the item to `blocked` and a human had to notice and issue
+-- `fkst: reintake` by hand. That makes a self-driving session stop on the first
+-- disagreement, which is the common case for a large generated spec.
+--
+-- Instead the loop now refines and retries ITSELF, bounded. Two refinements is
+-- deliberate: the angles are re-run against an amended spec each time, so a
+-- disagreement that survives two amendments is a genuine design question that
+-- wants a human, not another lap.
+C.MAX_AUTO_REFINEMENTS = 2
+
+-- `external-evidence-required` is deliberately NOT refinable: it means the angles
+-- need a fact from outside the issue (a doc, a decision, a measurement). Rewriting
+-- the spec cannot manufacture that evidence, so retrying would just burn rounds
+-- and bury the real request under generated text.
+local refinable_causes = {
+  ["evidence-continuation-budget-exhausted"] = true,
+  ["no-semantic-progress"] = true,
+}
+
+function C.is_refinable_cause(value)
+  return refinable_causes[tostring(value)] == true
+end
+
+local auto_refine_pattern = "fkst:github%-devloop:auto%-refine:v1"
+
+--- Count auto-refinements already recorded on this proposal.
+--
+-- Counted from durable trusted markers rather than held in memory: a session pod
+-- is recycled freely, and a budget that resets on restart is not a budget.
+function C.auto_refine_count(comments, proposal_id)
+  local seen = 0
+  for _, comment in ipairs(comments or {}) do
+    local body = type(comment) == "table" and tostring(comment.body or "") or tostring(comment or "")
+    if body:find(auto_refine_pattern) ~= nil
+      and body:find(tostring(proposal_id or ""), 1, true) ~= nil then
+      seen = seen + 1
+    end
+  end
+  return seen
+end
+
+function C.auto_refine_budget_remaining(comments, proposal_id)
+  return C.auto_refine_count(comments, proposal_id) < C.MAX_AUTO_REFINEMENTS
+end
+
+function C.auto_refine_marker(proposal_id, refine_round, cause)
+  return "<!-- fkst:github-devloop:auto-refine:v1 proposal=\"" .. tostring(proposal_id)
+    .. "\" round=\"" .. tostring(refine_round)
+    .. "\" cause=\"" .. tostring(cause) .. "\" -->"
+end
+
 local terminal_causes = {
   ["external-evidence-required"] = true,
   ["no-semantic-progress"] = true,
