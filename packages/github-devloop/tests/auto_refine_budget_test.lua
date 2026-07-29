@@ -52,6 +52,21 @@ return {
     t.eq(rounds.auto_refine_budget_remaining(comments, mine), true)
   end,
 
+  test_auto_refine_uses_an_action_the_marker_grammar_already_accepts = function()
+    -- The reconcile marker validates its action against drop/re-design/re-cluster
+    -- and ERRORS otherwise -- before the CAS decision is logged, so an unsupported
+    -- action does not merely mislabel the outcome, it aborts the whole reconcile
+    -- pass. Auto-refinement reuses `re-design` rather than inventing a verb.
+    local conv_reconcile = require("devloop.convergence.reconcile")
+    local pid = "github-devloop/issue/acme/site/42"
+
+    local m = conv_reconcile.reconcile_marker(pid, "v1", 1, "re-design", "no-semantic-progress")
+    t.is_true(m:find("re-design", 1, true) ~= nil)
+
+    local ok = pcall(conv_reconcile.reconcile_marker, pid, "v1", 1, "refine", "no-semantic-progress")
+    t.eq(ok, false)
+  end,
+
   test_marker_carries_proposal_round_and_cause = function()
     local rounds = require("devloop.convergence.rounds")
     local m = rounds.auto_refine_marker("github-devloop/issue/acme/site/42", 2, "no-semantic-progress")

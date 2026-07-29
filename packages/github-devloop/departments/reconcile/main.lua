@@ -165,7 +165,10 @@ local function pipeline_thinking(event)
     local action = "drop"
     local reason = tostring(reconcile.terminal_cause) .. "-after-" .. tostring(reconcile.round) .. "-rounds"
     if refinable and budget_left then
-      action = "refine"
+      -- `re-design` is the vocabulary the marker grammar already defines for this
+      -- outcome (`reconcile.lua` has accepted drop/re-design/re-cluster all along);
+      -- the deterministic path simply never emitted anything but `drop`.
+      action = "re-design"
       reason = reason .. "; auto-refinement " .. tostring(refine_round) .. "/"
         .. tostring(conv_rounds.MAX_AUTO_REFINEMENTS) .. " re-entering intake"
     elseif refinable then
