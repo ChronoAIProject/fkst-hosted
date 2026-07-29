@@ -194,6 +194,65 @@ describe('ChatProvider', () => {
     ]);
   });
 
+  it('interrupts the running turn and sends the new message in one step', () => {
+    // The old behaviour made sendMessage a no-op while streaming, so redirecting
+    // meant Stop, then type, then Send.
+    const script = scriptedTransport();
+    renderChat(<Probe />, { transport: script.transport });
+
+    act(() => chat().sendMessage('first question'));
+    act(() => script.handlers().onDelta('partial answ'));
+    expect(chat().streaming).toBe(true);
+
+    act(() => chat().sendMessage('actually, something else'));
+
+    const roles = chat().messages.map((m) => m.role);
+    expect(roles.filter((r) => r === 'user')).toHaveLength(2);
+    // The abandoned answer keeps what it had and is MARKED, not deleted.
+    const first = chat().messages.find((m) => m.role === 'assistant');
+    expect(first!.interrupted).toBe(true);
+    expect(first!.pending).toBeFalsy();
+    expect(first!.content).toContain('partial answ');
+  });
+
+  it('does not let a superseded turn clear the state of the turn that replaced it', () => {
+    // The aborted request's callbacks can still fire; without a generation guard
+    // its terminal handler would stop the NEW turn's streaming.
+    const script = scriptedTransport();
+    renderChat(<Probe />, { transport: script.transport });
+
+    act(() => chat().sendMessage('first'));
+    const stale = script.handlers();
+    act(() => chat().sendMessage('second'));
+    expect(chat().streaming).toBe(true);
+
+    act(() => stale.onDone({ finishReason: 'stop', sessionRefs: [] }));
+    expect(chat().streaming).toBe(true);
+  });
+
+  it('does not surface an interrupted turn\'s failure against the new question', () => {
+    const script = scriptedTransport();
+    renderChat(<Probe />, { transport: script.transport });
+
+    act(() => chat().sendMessage('first'));
+    const stale = script.handlers();
+    act(() => chat().sendMessage('second'));
+
+    const before = chat().messages.filter((m) => m.role === 'system-note').length;
+    act(() => stale.onError({ code: 'llm_error', message: 'boom' }));
+    expect(chat().messages.filter((m) => m.role === 'system-note')).toHaveLength(before);
+    expect(chat().streaming).toBe(true);
+  });
+
+  it('still refuses to send an empty message while streaming', () => {
+    const script = scriptedTransport();
+    renderChat(<Probe />, { transport: script.transport });
+    act(() => chat().sendMessage('first'));
+    const count = chat().messages.length;
+    act(() => chat().sendMessage('   '));
+    expect(chat().messages).toHaveLength(count);
+  });
+
   it('brackets the turn with its model rounds', () => {
     const script = scriptedTransport();
     renderChat(<Probe />, { transport: script.transport });
@@ -310,12 +369,15 @@ describe('ChatProvider', () => {
     expect(chat().messages.every((m) => !m.pending)).toBe(true);
   });
 
-  it('refuses a second turn while one is streaming', () => {
+  it('starts a second turn while one is streaming, aborting the first', () => {
+    // This previously REFUSED the second turn. Interrupting is now the point
+    // (#5620): the new question is dispatched and the old request is aborted.
     const script = scriptedTransport();
     renderChat(<Probe />, { transport: script.transport });
     act(() => chat().sendMessage('first'));
     act(() => chat().sendMessage('second'));
-    expect(script.sent).toHaveLength(1);
+    expect(script.sent).toHaveLength(2);
+    expect(script.aborted()).toBe(true);
   });
 
   it('ignores a blank message', () => {

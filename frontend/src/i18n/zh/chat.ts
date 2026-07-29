@@ -35,6 +35,8 @@ export const chat = {
   toolNone: '无内容',
   toolError: '错误',
   toolTruncated: '已截断',
+  interrupted: '已中断 — 你提出了新的问题。',
+  sendInterruptAria: '中断当前回答并发送这条消息',
 
   // ---- 编排过程时间线（简洁/详细）----
   stepRound: '轮次',
