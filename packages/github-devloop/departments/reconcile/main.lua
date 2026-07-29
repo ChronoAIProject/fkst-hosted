@@ -15,13 +15,18 @@ local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
 local devloop_commands = require("devloop.commands")
 
+-- Declared as a literal, like every other cross-package queue in `produces`,
+-- rather than read back through `core`: departments must not grow ambient
+-- service-locator reads (G-DEVLOOP-SERVICE-LOCATOR).
+local DECOMPOSE_QUEUE = "github-devloop-decompose.devloop_decompose"
+
 local spec = {
   consumes = { "devloop_reconcile", "devloop_timeout_reconcile" },
   produces = {
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
-    "github-devloop-decompose.devloop_decompose",
+    DECOMPOSE_QUEUE,
   },
   stall_window = "2m",
 }
@@ -209,7 +214,7 @@ local function pipeline_thinking(event)
         source_ref = reconcile.source_ref,
       })
       devloop_logging.log_raise("reconcile", reconcile.proposal_id,
-        core.decompose_package_queue(), decompose_request)
+        DECOMPOSE_QUEUE, decompose_request)
     end
   end)
 end
