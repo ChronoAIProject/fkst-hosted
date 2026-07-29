@@ -1,5 +1,5 @@
 {
-  "artifact_sha256": "343ec61bcf6e81d596f3c3c57454777dc048427cbc8b51c034a7570c330adc2d",
+  "artifact_sha256": "86aaa3ca6eecacd62136dabc38329b957b3a309ca4e7b6ab81ef60f936ebc75e",
   "consumer_entry_acceptors": [
     {
       "ordinal": "consumes:consensus.consensus_converge",
