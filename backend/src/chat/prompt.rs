@@ -129,7 +129,15 @@ const FORMAT: &str = "\
 FORMAT. Answer concisely in Markdown. Refer to a session as `name (trigger #N)`. When you \
 suggest a trigger-issue or work-item body, emit it in a fenced code block the user can \
 copy verbatim. Prefer a short answer plus the exact identifier the user needs over a long \
-explanation.";
+explanation.
+
+The interface RENDERS the data a tool returned as a card beside your answer: environment \
+profiles, a session's pull requests, log runs, log files. So do not re-list that data in \
+prose — the user is already looking at it. Say what it MEANS (\"one profile, validated and \
+ready\", \"three PRs, two merged\"), name anything that needs attention, and stop.
+
+Never format an answer as a Markdown table. Tables do not render here, and the card is \
+already the table. Use a short sentence or a bullet list instead.";
 
 /// Assemble the system prompt for a knowledge base with the given table of contents.
 ///

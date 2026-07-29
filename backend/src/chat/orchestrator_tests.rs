@@ -94,6 +94,7 @@ fn shape(events: &[ChatStreamEvent]) -> Vec<String> {
                 format!("tool_result({name},{status})")
             }
             ChatStreamEvent::ActionProposal { .. } => "action_proposal".to_string(),
+            ChatStreamEvent::DataCard { .. } => "data_card".to_string(),
             ChatStreamEvent::Done { finish_reason, .. } => format!("done({finish_reason})"),
             ChatStreamEvent::Error { code, .. } => format!("error({code})"),
         })

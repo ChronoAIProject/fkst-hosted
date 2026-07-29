@@ -59,6 +59,20 @@ export const chat = {
     propose_uninstall_app: 'drafting an uninstall',
   } as Record<string, string>,
 
+  /** Structured data cards projected from a tool result. */
+  cardEnvironments: 'ENVIRONMENTS',
+  cardEnvironment: 'ENVIRONMENT',
+  cardNoEnvironments: 'No saved environment profiles yet.',
+  cardEnvCounts: '{install} install · {vars} vars · {secrets} secrets',
+  cardOutcomes: 'OUTCOMES',
+  cardOutcomeSummary: '{total} pull request(s) · {merged} merged',
+  cardMerged: 'MERGED',
+  cardFilesChanged: '{count} file(s)',
+  cardLogRuns: 'LOG RUNS',
+  cardRunLive: 'RUNNING',
+  cardLogFiles: 'LOG FILES',
+  cardOmitted: '+{count} more — open the dashboard for the full list.',
+
   /** Session rich-cards. */
   triggerPrefix: 'trigger #',
   sessionChip: 'SESSION',

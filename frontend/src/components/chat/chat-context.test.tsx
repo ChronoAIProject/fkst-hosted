@@ -106,6 +106,38 @@ describe('ChatProvider', () => {
     }
   });
 
+  it('attaches structured data cards to the assistant message', () => {
+    const script = scriptedTransport();
+    renderChat(<Probe />, { transport: script.transport });
+    act(() => chat().sendMessage('what environments do I have?'));
+
+    act(() =>
+      script.handlers().onDataCard({
+        kind: 'environments',
+        profiles: [{ name: 'video-studio', status: 'ready' }],
+        omitted: 0,
+      })
+    );
+    act(() => script.handlers().onDone({ finishReason: 'stop', sessionRefs: [] }));
+
+    const cards = chat().messages[1]!.dataCards ?? [];
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ kind: 'environments' });
+  });
+
+  it('drops an unreadable data card silently rather than noting it', () => {
+    // The prose answer still stands on its own; a note about a rendering detail
+    // would be noise in the thread.
+    const script = scriptedTransport();
+    renderChat(<Probe />, { transport: script.transport });
+    act(() => chat().sendMessage('hi'));
+    act(() => script.handlers().onDataCard({ kind: 'not_a_real_card' }));
+    act(() => script.handlers().onDone({ finishReason: 'stop', sessionRefs: [] }));
+
+    expect(chat().messages[1]!.dataCards ?? []).toHaveLength(0);
+    expect(chat().messages.filter((m) => m.role === 'system-note')).toHaveLength(0);
+  });
+
   it('sends only user and assistant content on the wire', () => {
     const script = scriptedTransport();
     renderChat(<Probe />, { transport: script.transport });

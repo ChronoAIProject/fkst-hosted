@@ -22,6 +22,11 @@
 //!   with a drift guard tying it to the backend's own label and heading constants.
 //! * [`prompt`] — the system prompt: grounding, injection resistance, and the manual's
 //!   table of contents.
+//! * [`cards`] — structured display cards projected from a tool's own result, so a
+//!   data-heavy answer is rendered rather than described.
+//! * [`cards`] — structured display cards projected from a tool's own result, so a
+//!   data-heavy answer is rendered rather than described (and cannot be authored by
+//!   the model).
 //! * [`actions`] — confirm-gated action PROPOSALS. The chat backend never executes a
 //!   write: the model drafts, the user confirms, and the SPA calls the pre-existing
 //!   endpoint with its own token.
@@ -37,6 +42,7 @@
 //! dashboard.
 
 pub mod actions;
+pub mod cards;
 pub mod config;
 pub mod dispatch;
 pub mod knowledge;

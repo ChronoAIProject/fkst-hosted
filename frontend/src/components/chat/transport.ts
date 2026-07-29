@@ -40,6 +40,8 @@ export interface ChatTransportHandlers {
   onToolCall(ev: { id: string; name: string }): void;
   onToolResult(ev: { id: string; name: string; status: number; truncated: boolean }): void;
   onActionProposal(proposal: unknown): void;
+  /** A structured rendering of the tool result that just landed. */
+  onDataCard(card: unknown): void;
   onDone(ev: { finishReason: string; sessionRefs: SessionRef[] }): void;
   /** `retryAfterSeconds` rides along when the server advertised `Retry-After`,
    *  because "try again in 5s" is actionable where "try again" is not. */
@@ -75,6 +77,7 @@ export function sseChatTransport(
           onToolCall: ({ id, name }) => handlers.onToolCall({ id, name }),
           onToolResult: handlers.onToolResult,
           onActionProposal: handlers.onActionProposal,
+          onDataCard: handlers.onDataCard,
           onDone: handlers.onDone,
           onError: handlers.onError,
         },

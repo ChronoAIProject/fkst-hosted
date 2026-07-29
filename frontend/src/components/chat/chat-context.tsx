@@ -13,6 +13,8 @@ import { useAuth } from '@/lib/auth/github-auth';
 import { useToast } from '@/components/ui/toast';
 import { parseActionProposal } from './action-types';
 import type { ActionProposal } from './action-types';
+import { parseDataCard } from './data-card-types';
+import type { DataCard } from './data-card-types';
 import { outcomeNote } from './proposal-meta';
 import { runProposal } from './proposal-exec';
 import type { ProposalExecutionInput } from './proposal-exec';
@@ -66,6 +68,8 @@ export interface ChatMessage {
   sessionRefs?: SessionRef[];
   /** Confirm-gated action proposals drafted during this turn. */
   proposals?: ChatProposal[];
+  /** Structured renderings of the turn's tool results, in arrival order. */
+  dataCards?: DataCard[];
   /** A `system-note` that should read as a warning rather than information. */
   tone?: 'info' | 'warn';
 }
@@ -338,6 +342,16 @@ export function ChatProvider({
                     [...events, { id, name, status, truncated }],
               };
             }),
+          onDataCard: (raw) => {
+            const card = parseDataCard(raw);
+            // An unreadable card is DROPPED, not reported: the prose answer still
+            // stands on its own, and a note about a rendering detail would be noise.
+            if (card == null) return;
+            patch(assistantId, (message) => ({
+              ...message,
+              dataCards: [...(message.dataCards ?? []), card],
+            }));
+          },
           onActionProposal: (raw) => {
             const proposal = parseActionProposal(raw);
             if (proposal == null) {

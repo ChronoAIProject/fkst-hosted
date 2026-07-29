@@ -26,6 +26,7 @@ export type ChatStreamEvent =
   | { type: 'tool_call'; id: string; name: string; args_preview: string }
   | { type: 'tool_result'; id: string; name: string; status: number; truncated: boolean }
   | { type: 'action_proposal'; proposal: unknown }
+  | { type: 'data_card'; card: unknown }
   | { type: 'done'; finish_reason: string; session_refs: ChatSessionRef[] }
   | { type: 'error'; code: string; message: string };
 
@@ -36,6 +37,7 @@ export interface StreamChatHandlers {
   onToolCall(ev: { id: string; name: string; argsPreview: string }): void;
   onToolResult(ev: { id: string; name: string; status: number; truncated: boolean }): void;
   onActionProposal(proposal: unknown): void;
+  onDataCard(card: unknown): void;
   onDone(ev: { finishReason: string; sessionRefs: ChatSessionRef[] }): void;
   onError(err: { code: string; message: string; retryAfterSeconds?: number }): void;
 }
@@ -216,6 +218,9 @@ function dispatch(event: ChatStreamEvent, handlers: StreamChatHandlers) {
       return;
     case 'action_proposal':
       handlers.onActionProposal(event.proposal);
+      return;
+    case 'data_card':
+      handlers.onDataCard(event.card);
       return;
     case 'done':
       handlers.onDone({

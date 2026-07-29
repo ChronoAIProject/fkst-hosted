@@ -126,6 +126,13 @@ pub enum ChatStreamEvent {
     /// would otherwise pay that size. It serializes transparently, so the wire shape is
     /// unchanged.
     ActionProposal { proposal: Box<ActionProposal> },
+    /// A structured rendering of the tool result that just landed.
+    ///
+    /// Projected from the RESULT, never from the model's prose: a card that links
+    /// somewhere, or states that a pull request merged, must not be steerable by
+    /// generated text. Boxed for the same reason as a proposal — it is far larger than
+    /// a `Delta`, which every token would otherwise pay for.
+    DataCard { card: Box<crate::chat::cards::DataCard> },
     /// The turn completed normally.
     Done {
         finish_reason: String,

@@ -12,6 +12,7 @@ function recorder() {
     onToolResult: ({ name, status, truncated }) =>
       trace.push(`tool_result:${name}:${status}${truncated ? ':truncated' : ''}`),
     onActionProposal: (proposal) => trace.push(`proposal:${JSON.stringify(proposal)}`),
+    onDataCard: (card) => trace.push(`card:${JSON.stringify(card)}`),
     onDone: ({ finishReason, sessionRefs }) =>
       trace.push(`done:${finishReason}:${sessionRefs.length}`),
     onError: ({ code, retryAfterSeconds }) =>
@@ -96,6 +97,7 @@ describe('streamChat — frame parsing', () => {
           status: 200,
           truncated: false,
         }),
+        frame({ type: 'data_card', card: { kind: 'environments', profiles: [] } }),
         frame({ type: 'action_proposal', proposal: { kind: 'stop_session' } }),
         frame({
           type: 'done',
@@ -111,6 +113,7 @@ describe('streamChat — frame parsing', () => {
       'delta:Hello',
       'tool_call:get_overview',
       'tool_result:get_overview:200',
+      'card:{"kind":"environments","profiles":[]}',
       'proposal:{"kind":"stop_session"}',
       'done:stop:1',
     ]);

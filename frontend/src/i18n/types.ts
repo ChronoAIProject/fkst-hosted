@@ -687,6 +687,19 @@ export interface SiteContent {
     toolTruncated: string;
     /** Human labels keyed by backend tool name; an unlisted name renders raw. */
     toolNames: Record<string, string>;
+    /** Structured data cards projected from a tool result. Placeholders as named. */
+    cardEnvironments: string;
+    cardEnvironment: string;
+    cardNoEnvironments: string;
+    cardEnvCounts: string;
+    cardOutcomes: string;
+    cardOutcomeSummary: string;
+    cardMerged: string;
+    cardFilesChanged: string;
+    cardLogRuns: string;
+    cardRunLive: string;
+    cardLogFiles: string;
+    cardOmitted: string;
     /** Session rich-cards. */
     triggerPrefix: string;
     sessionChip: string;

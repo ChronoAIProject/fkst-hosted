@@ -195,6 +195,10 @@ async fn run_one_call(
     // turn: a model that emitted invalid arguments or an unknown tool name can
     // recover within the same turn if it is told what went wrong.
     let mut proposal = None;
+    // Kept beside the result so the card projection can read the one value a response
+    // sometimes cannot supply (a session id the endpoint does not echo). Empty when the
+    // arguments were unparseable, in which case nothing projects anyway.
+    let mut args_for_cards = serde_json::Value::Null;
     let (result_json, status, truncated) = match serde_json::from_str::<serde_json::Value>(
         arguments_or_empty(&call.arguments_json),
     ) {
@@ -205,6 +209,7 @@ async fn run_one_call(
         {
             Ok(outcome) => {
                 collect_session_refs(session_refs, &call.name, &args, &outcome.result_json);
+                args_for_cards = args;
                 proposal = outcome.proposal;
                 (outcome.result_json, outcome.status, outcome.truncated)
             }
@@ -243,6 +248,19 @@ async fn run_one_call(
         },
     )
     .await?;
+
+    // A structured card for the data that just arrived, emitted before any proposal so
+    // the reader sees WHAT was found before what is being suggested about it. Projected
+    // from the result only — see `chat::cards`.
+    if let Some(card) = super::cards::project(&call.name, &args_for_cards, &result_json) {
+        send(
+            tx,
+            ChatStreamEvent::DataCard {
+                card: Box::new(card),
+            },
+        )
+        .await?;
+    }
 
     // A drafted action follows its tool result immediately, so the card lands next to
     // the sentence introducing it. Several proposals in one turn each get their own
