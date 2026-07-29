@@ -4,7 +4,17 @@ local workflow_codex = require("workflow.codex")
 local M = {}
 
 M.MAX_GENERATED_TITLE_BYTES = blueprint.MAX_STEP_TITLE_BYTES
-M.MAX_GENERATED_BODY_BYTES = blueprint.MAX_STATIC_INTENT_BYTES
+-- Generated bodies are bounded SEPARATELY from static blueprint intent. The
+-- generator prompt requires a self-contained body that copies every external
+-- contract, wire grammar and literal example a downstream worker needs, so a
+-- real production-slice spec routinely lands well past the 8000-byte static
+-- ceiling -- observed at ~15 KB against a detailed origin issue, which failed
+-- `invalid-body` and terminally blocked the workflow with the generation itself
+-- perfectly healthy. Sized just under GitHub's 65536-character issue-body limit,
+-- leaving headroom for the lineage marker prepended to the created issue.
+-- Static intent keeps its own tighter 8000 budget: that is hand-authored
+-- blueprint content, where brevity is a virtue rather than a truncation risk.
+M.MAX_GENERATED_BODY_BYTES = 60000
 M.WORKFLOW_GENERATOR_LABEL = "FKST_WORKFLOW_GENERATED_ISSUE_V1"
 
 local function trim(value)
