@@ -150,7 +150,9 @@ local function capture_apply_record()
   t.eq(record.old_outcome.status, "apply", "captured issue reconcile status")
   t.eq(record.old_outcome.reason_code, "apply", "captured issue reconcile disposition")
   t.eq(record.old_outcome.cas_outcome, "applied", "captured issue reconcile CAS outcome")
-  t.eq(#record.old_outcome.emitted_effects, 2, "issue reconcile emits comment and label effects")
+  -- 3 effects: the reconcile comment, the label write, and the
+  -- amend-and-reintake comment that re-enters the loop on a refinable cause.
+  t.eq(#record.old_outcome.emitted_effects, 3, "issue reconcile emits comment, label, and auto-refine effects")
   t.eq(captured.liveness_read_count, 0, "deterministic issue reconcile never reads Codex liveness")
   return record
 end

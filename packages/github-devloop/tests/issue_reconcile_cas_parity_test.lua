@@ -259,7 +259,11 @@ local function assert_catalog_matches_observed_decision(fixture)
     t.eq(boundary.repo, "owner/repo", fixture.name .. ": boundary repo")
     t.eq(boundary.issue_number, "42", fixture.name .. ": boundary issue")
     t.eq(boundary.reconcile, event, fixture.name .. ": boundary event")
-    t.eq(boundary.action, "drop", fixture.name .. ": boundary action")
+    -- A refinable terminal cause now spends an auto-refinement instead of ending
+    -- the item, so the boundary action is `re-design`. These fixtures carry no
+    -- prior auto-refine marker, so the budget is always intact here; the drop path
+    -- after the budget is spent is pinned in auto_refine_budget_test.lua.
+    t.eq(boundary.action, "re-design", fixture.name .. ": boundary action")
     t.eq(boundary.state_version, probe.incoming_version, fixture.name .. ": boundary terminal version")
   end
 
