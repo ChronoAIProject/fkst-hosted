@@ -10,6 +10,8 @@ export const chat = {
   streaming: '生成中',
   clear: '清空',
   clearAria: '清空对话',
+  export: '导出',
+  exportAria: '将本次对话下载为 JSON',
   close: '关闭',
   closeAria: '关闭助理面板',
 

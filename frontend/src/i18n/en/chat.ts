@@ -12,6 +12,8 @@ export const chat = {
   streaming: 'STREAMING',
   clear: 'Clear',
   clearAria: 'Clear the conversation',
+  export: 'Export',
+  exportAria: 'Download this conversation as JSON',
   close: 'Close',
   closeAria: 'Close the concierge panel',
 

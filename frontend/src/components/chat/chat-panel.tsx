@@ -4,6 +4,7 @@ import { useContent } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
 import { API_CONFIGURED } from '@/lib/env';
 import { useChat } from './chat-context';
+import { downloadSessionExport } from './export-session';
 import { Composer } from './composer';
 import { MessageList } from './message-list';
 
@@ -193,6 +194,19 @@ export function ChatPanel() {
         </Chip>
         <span className="flex-1" aria-hidden="true" />
         <ViewLevelToggle />
+        {messages.length > 0 && (
+          <button
+            type="button"
+            // `new Date()` at click time, not render time, so the filename stamps
+            // when the export was taken.
+            onClick={() => downloadSessionExport(messages, new Date().toISOString())}
+            aria-label={s.exportAria}
+            data-testid="chat-export"
+            className="rounded-control px-2 py-1 font-mono text-[10.5px] text-faint transition-colors hover:text-fg cursor-pointer"
+          >
+            {s.export}
+          </button>
+        )}
         {messages.length > 0 && (
           <button
             type="button"
