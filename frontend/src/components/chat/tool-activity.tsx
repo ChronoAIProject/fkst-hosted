@@ -7,6 +7,26 @@ import type { ChatToolEvent } from './chat-context';
  *  machine's work is a trust feature, burying the answer under it is not. */
 const COLLAPSE_ABOVE = 3;
 
+/**
+ * Tools whose 404 means the thing is ABSENT rather than hidden.
+ *
+ * The distinction is per-endpoint and cannot be read off the status alone.
+ * `observe_session` deliberately answers 404 for "no runtime, OR you cannot see it" —
+ * collapsing those is what stops it leaking whether a session exists — so a 404 there
+ * really is the same class of answer as a 403. The log and environment reads decide
+ * access separately (they return 403), so their 404 is unambiguous: no logs yet, no
+ * such profile.
+ *
+ * Anything not listed keeps the conservative reading, because mislabelling a hidden
+ * thing as absent is the worse error of the two.
+ */
+const ABSENT_ON_404 = new Set([
+  'list_log_runs',
+  'get_log_manifest',
+  'tail_log_file',
+  'get_environment_profile',
+]);
+
 /** How a tool event reads. The TEXT always carries the meaning — a chip's colour
  *  is reinforcement, never the signal. */
 function toolState(event: ChatToolEvent, s: ReturnType<typeof useContent>['chat']) {
@@ -15,6 +35,14 @@ function toolState(event: ChatToolEvent, s: ReturnType<typeof useContent>['chat'
   }
   if (event.status >= 200 && event.status < 300) {
     return { text: `${s.toolOk} ${event.status}`, tone: 'green' as const, running: false };
+  }
+  // 409 is "nothing to observe here" on every endpoint that returns it, so it needs
+  // no per-tool judgement.
+  if (event.status === 409 || (event.status === 404 && ABSENT_ON_404.has(event.name))) {
+    // "There is nothing there" is not "you may not see it". Labelling a session's
+    // missing logs DENIED told users they lacked access, and it reads neutral rather
+    // than red because an absent thing is a fact, not a fault.
+    return { text: `${s.toolNone} ${event.status}`, tone: 'neutral' as const, running: false };
   }
   if (event.status === 401 || event.status === 403 || event.status === 404) {
     // A denial is an answer about the USER's access, not a fault — worth saying

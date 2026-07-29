@@ -36,6 +36,7 @@ export const chat = {
   toolRunning: 'RUNNING',
   toolOk: 'OK',
   toolDenied: 'DENIED',
+  toolNone: 'NONE',
   toolError: 'ERR',
   toolTruncated: 'TRUNCATED',
   /** Human labels for the backend's tool names; an unlisted name renders raw. */

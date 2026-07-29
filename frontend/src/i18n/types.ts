@@ -683,6 +683,8 @@ export interface SiteContent {
     toolRunning: string;
     toolOk: string;
     toolDenied: string;
+    /** A 404/409 — the thing is absent, which is not the same as denied. */
+    toolNone: string;
     toolError: string;
     toolTruncated: string;
     /** Human labels keyed by backend tool name; an unlisted name renders raw. */

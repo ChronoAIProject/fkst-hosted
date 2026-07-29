@@ -32,6 +32,7 @@ export const chat = {
   toolRunning: '执行中',
   toolOk: '成功',
   toolDenied: '无权限',
+  toolNone: '无内容',
   toolError: '错误',
   toolTruncated: '已截断',
   /** 后端工具名的中文标签；未列出的名称按原样显示。 */
