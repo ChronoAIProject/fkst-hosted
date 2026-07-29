@@ -1,9 +1,11 @@
 # Rust build artifacts
 backend/target/
+apps/local-qa-runtime/target/
 **/*.rs.bk
 
 # Node
 node_modules/
+apps/local-qa-runtime/workers/dist/
 
 # Secrets and credentials — never commit these
 .env

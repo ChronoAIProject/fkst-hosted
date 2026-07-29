@@ -1,0 +1,8 @@
+[package]
+name = "fkst-local-qa-guest-agent"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
