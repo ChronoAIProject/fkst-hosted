@@ -345,7 +345,7 @@ return {
       incoming_version = V_EQUAL,
       boundary_reached = true,
       admission_status = "apply",
-      effect_count = 2,
+      effect_count = 3,
       post_admission_disposition = "effect-emitted(blocked)",
       legacy_log_outcome = "applied",
     })
@@ -359,7 +359,7 @@ return {
       incoming_version = V_OLDER,
       boundary_reached = true,
       admission_status = "apply",
-      effect_count = 2,
+      effect_count = 3,
       post_admission_disposition = "effect-emitted(blocked)",
       legacy_log_outcome = "applied",
     })
@@ -373,7 +373,7 @@ return {
       incoming_version = V_NEWER,
       boundary_reached = true,
       admission_status = "apply",
-      effect_count = 2,
+      effect_count = 3,
       post_admission_disposition = "effect-emitted(blocked)",
     })
   end,
@@ -424,7 +424,7 @@ return {
       incoming_version = V_ORDERING_EQUAL_INCOMING,
       boundary_reached = true,
       admission_status = "apply",
-      effect_count = 2,
+      effect_count = 3,
       post_admission_disposition = "effect-emitted(blocked)",
     })
   end,
