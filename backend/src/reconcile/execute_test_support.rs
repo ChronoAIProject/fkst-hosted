@@ -360,8 +360,8 @@ pub(super) fn registration() -> SessionRegistration {
             packages: vec![
                 PackageRef {
                     owner: "ChronoAIProject".to_string(),
-                    repo: "fkst-packages".to_string(),
-                    git_ref: "dev".to_string(),
+                    repo: "fkst-hosted".to_string(),
+                    git_ref: "packages".to_string(),
                     path: "packages/github-devloop".to_string(),
                 },
                 PackageRef {
@@ -384,8 +384,8 @@ pub(super) fn registration() -> SessionRegistration {
         effective_packages: vec![
             PackageRef {
                 owner: "ChronoAIProject".to_string(),
-                repo: "fkst-packages".to_string(),
-                git_ref: "dev".to_string(),
+                repo: "fkst-hosted".to_string(),
+                git_ref: "packages".to_string(),
                 path: "packages/github-devloop".to_string(),
             },
             PackageRef {

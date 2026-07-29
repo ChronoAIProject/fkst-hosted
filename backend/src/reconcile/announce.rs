@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn renders_all_metadata_with_packages_and_auto_merge_on() {
         let packages = vec![
-            "ChronoAIProject/fkst-packages@dev:packages/github-devloop".to_string(),
+            "ChronoAIProject/fkst-hosted@packages:packages/github-devloop".to_string(),
             "acme/pkgs@main:packages/proxy".to_string(),
         ];
         let body = announce_session_comment_with_defaults(
@@ -311,7 +311,7 @@ mod tests {
         assert!(body.contains("open an issue with any of these labels"));
         // Package count + each rendered ref bulleted.
         assert!(body.contains("**Packages:** 2"));
-        assert!(body.contains("- `ChronoAIProject/fkst-packages@dev:packages/github-devloop`"));
+        assert!(body.contains("- `ChronoAIProject/fkst-hosted@packages:packages/github-devloop`"));
         assert!(body.contains("- `acme/pkgs@main:packages/proxy`"));
         // Environment name.
         assert!(body.contains("**Environment:** `prod`"));

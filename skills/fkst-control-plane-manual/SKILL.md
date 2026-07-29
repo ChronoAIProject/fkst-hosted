@@ -168,7 +168,7 @@ you so).
 sitebuilder
 
 ### Manifest
-ChronoAIProject/fkst-packages@fkst-hosted:manifests/default-workflows.json
+ChronoAIProject/fkst-hosted@packages:manifests/default-workflows.json
 
 ### Work Label
 site-build

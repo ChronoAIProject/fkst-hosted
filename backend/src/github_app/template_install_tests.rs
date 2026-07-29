@@ -672,10 +672,13 @@ async fn pending_lookup_error_propagates_before_any_mutation() {
 #[test]
 fn template_branch_version_parses_only_install_branches() {
     assert_eq!(
+        template_branch_version("fkst/issue-templates-v11"),
+        Some(11)
+    );
+    assert_eq!(
         template_branch_version("fkst/issue-templates-v10"),
         Some(10)
     );
-    assert_eq!(template_branch_version("fkst/issue-templates-v9"), Some(9));
     assert_eq!(template_branch_version("fkst/issue-templates-vX"), None);
     assert_eq!(template_branch_version("devloop/issue/a/b/1/x"), None);
     assert_eq!(template_branch_version("main"), None);

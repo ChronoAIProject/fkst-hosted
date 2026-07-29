@@ -34,11 +34,11 @@ fn defaults_apply_when_nothing_is_set() {
     assert!(config.seed_trigger_issue_on_install);
     assert_eq!(
         config.default_manifest.as_deref(),
-        Some("ChronoAIProject/fkst-packages@fkst-hosted:manifests/default-workflows.json")
+        Some("ChronoAIProject/fkst-hosted@packages:manifests/default-workflows.json")
     );
     assert_eq!(
         config.seed_packages,
-        vec!["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()]
+        vec!["ChronoAIProject/fkst-hosted@packages:packages/github-devloop-workflow".to_string()]
     );
 }
 

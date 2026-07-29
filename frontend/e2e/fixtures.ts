@@ -74,8 +74,8 @@ export const overview = {
           viewer_visible: true,
           active_sessions: 2,
           packages: [
-            'ChronoAIProject/fkst-packages@fkst-hosted:workflow-dev',
-            'ChronoAIProject/fkst-packages@fkst-hosted:github-devloop',
+            'ChronoAIProject/fkst-hosted@packages:workflow-dev',
+            'ChronoAIProject/fkst-hosted@packages:github-devloop',
           ],
         },
         {
@@ -87,7 +87,7 @@ export const overview = {
           installed: true,
           viewer_visible: true,
           active_sessions: 1,
-          packages: ['ChronoAIProject/fkst-packages@fkst-hosted:github-devloop'],
+          packages: ['ChronoAIProject/fkst-hosted@packages:github-devloop'],
         },
         {
           id: 3,
@@ -122,8 +122,8 @@ export const overview = {
           viewer_visible: true,
           active_sessions: 3,
           packages: [
-            'ChronoAIProject/fkst-packages@fkst-hosted:consensus-triage',
-            'ChronoAIProject/fkst-packages@fkst-hosted:code-review',
+            'ChronoAIProject/fkst-hosted@packages:consensus-triage',
+            'ChronoAIProject/fkst-hosted@packages:code-review',
           ],
         },
         {
@@ -143,10 +143,10 @@ export const overview = {
   totals: {
     sessions: 6,
     packages: [
-      { package: 'ChronoAIProject/fkst-packages@fkst-hosted:github-devloop', count: 2 },
-      { package: 'ChronoAIProject/fkst-packages@fkst-hosted:workflow-dev', count: 1 },
-      { package: 'ChronoAIProject/fkst-packages@fkst-hosted:consensus-triage', count: 1 },
-      { package: 'ChronoAIProject/fkst-packages@fkst-hosted:code-review', count: 1 },
+      { package: 'ChronoAIProject/fkst-hosted@packages:github-devloop', count: 2 },
+      { package: 'ChronoAIProject/fkst-hosted@packages:workflow-dev', count: 1 },
+      { package: 'ChronoAIProject/fkst-hosted@packages:consensus-triage', count: 1 },
+      { package: 'ChronoAIProject/fkst-hosted@packages:code-review', count: 1 },
     ],
   },
   broader_oauth_available: false,
@@ -165,8 +165,8 @@ const liveSession: SessionDetail = {
   source_branch: 'feature/auth',
   target_branch: 'main',
   packages: [
-    'ChronoAIProject/fkst-packages@fkst-hosted:workflow-dev',
-    'ChronoAIProject/fkst-packages@fkst-hosted:github-devloop',
+    'ChronoAIProject/fkst-hosted@packages:workflow-dev',
+    'ChronoAIProject/fkst-hosted@packages:github-devloop',
   ],
   invalid_reason: null,
   status_labels: ['fkst-substrate-active'],
@@ -219,7 +219,7 @@ const degradedSession: SessionDetail = {
   environment: null,
   source_branch: null,
   target_branch: 'main',
-  packages: ['ChronoAIProject/fkst-packages@fkst-hosted:code-review'],
+  packages: ['ChronoAIProject/fkst-hosted@packages:code-review'],
   invalid_reason: null,
   status_labels: ['fkst-degraded'],
   trigger: issue(202, 'refactor-core session', 'open', ['fkst-substrate-trigger']),
@@ -457,7 +457,7 @@ const globalAdminOverviewBody = {
           installed: true,
           viewer_visible: false,
           active_sessions: 1,
-          packages: ['ChronoAIProject/fkst-packages@fkst-hosted:code-review'],
+          packages: ['ChronoAIProject/fkst-hosted@packages:code-review'],
         },
       ],
     },

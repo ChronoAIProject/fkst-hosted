@@ -31,7 +31,7 @@ const session = (over: Partial<SessionDetail> = {}): SessionDetail => ({
   environment: null,
   source_branch: null,
   target_branch: 'fkst-hosted-default',
-  packages: ['ChronoAIProject/fkst-packages@fkst-hosted:codex/base'],
+  packages: ['ChronoAIProject/fkst-hosted@packages:codex/base'],
   invalid_reason: null,
   status_labels: ['fkst-substrate-active'],
   trigger,
@@ -102,7 +102,7 @@ describe('SessionDetailDrawer', () => {
     await user.click(screen.getByRole('tab', { name: 'Packages' }));
     expect(screen.getByText('Base')).toBeInTheDocument();
     expect(
-      screen.getByText('ChronoAIProject/fkst-packages@fkst-hosted:codex/base')
+      screen.getByText('ChronoAIProject/fkst-hosted@packages:codex/base')
     ).toBeInTheDocument();
   });
 

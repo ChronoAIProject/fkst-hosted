@@ -53,7 +53,7 @@ const INSTALLATION_TOKEN_TTL_SECS: u64 = 3600;
 /// `[github].work_labels`. Overridable via `FKST_DEFAULT_MANIFEST`; a blank override
 /// disables the manifest-driven seed and falls back to the legacy packages+label body.
 const DEFAULT_MANIFEST_REF: &str =
-    "ChronoAIProject/fkst-packages@fkst-hosted:manifests/default-workflows.json";
+    "ChronoAIProject/fkst-hosted@packages:manifests/default-workflows.json";
 
 /// Default values, shared by serde defaults and [`ReconcileConfig::default`].
 mod defaults {
@@ -111,7 +111,7 @@ mod defaults {
     pub(super) fn seed_packages() -> Vec<String> {
         // The default package(s) an auto-seeded trigger issue loads when
         // FKST_SEED_PACKAGES is unset: the composed github-devloop-workflow root.
-        vec!["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()]
+        vec!["ChronoAIProject/fkst-hosted@packages:packages/github-devloop-workflow".to_string()]
     }
 
     pub(super) fn seed_trigger_issue_on_install() -> bool {

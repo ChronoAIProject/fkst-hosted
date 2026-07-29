@@ -148,8 +148,8 @@ fn announcement_carries_rendered_packages_and_auto_merge() {
     r.def.packages = vec![
         pkg(
             "ChronoAIProject",
-            "fkst-packages",
-            "dev",
+            "fkst-hosted",
+            "packages",
             "packages/github-devloop",
         ),
         pkg("acme", "pkgs", "main", "packages/proxy"),
@@ -179,7 +179,7 @@ fn announcement_carries_rendered_packages_and_auto_merge() {
             work_label: Some("wl".to_string()),
             detected_work_labels: vec![],
             packages: vec![
-                "ChronoAIProject/fkst-packages@dev:packages/github-devloop".to_string(),
+                "ChronoAIProject/fkst-hosted@packages:packages/github-devloop".to_string(),
                 "acme/pkgs@main:packages/proxy".to_string(),
             ],
             environment: Some("prod".to_string()),
