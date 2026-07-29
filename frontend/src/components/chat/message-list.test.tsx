@@ -39,6 +39,11 @@ describe('MessageList', () => {
   beforeEach(() => {
     window.localStorage.clear();
     window.sessionStorage.clear();
+    // These assertions are about the step rows themselves, which only CLEAN's
+    // counterpart renders. Seeded through storage rather than by calling
+    // setViewLevel, so the toggle's transcript note does not shift the message
+    // indices these tests read.
+    window.localStorage.setItem('fkst-chat-view-level', 'verbose');
     captured.current = null;
     vi.restoreAllMocks();
   });
@@ -73,7 +78,9 @@ describe('MessageList', () => {
     renderChat(<Host />, { transport: script.transport });
     act(() => chat().sendMessage('why did it fail?'));
 
-    act(() => script.handlers().onToolCall({ id: 't1', name: 'tail_log_file' }));
+    act(() =>
+      script.handlers().onToolCall({ id: 't1', name: 'tail_log_file', argsPreview: '{}' })
+    );
     // Humanized from the i18n map; the raw wire name is the fallback.
     expect(screen.getByText('log tail')).toBeInTheDocument();
     expect(screen.getByText(/RUNNING/)).toBeInTheDocument();

@@ -5,7 +5,7 @@ import type { ChatMessage } from './chat-context';
 import { ActionCards } from './action-card';
 import { DataCards } from './data-cards';
 import { RichCards } from './rich-cards';
-import { ToolActivity } from './tool-activity';
+import { Timeline } from './timeline';
 
 /** One transcript entry. Three shapes, because they answer three different
  *  questions: what the assistant said, what the user asked, and what the client
@@ -60,7 +60,9 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
         {message.content !== '' && <CopyButton value={message.content} label={s.copyAnswer} />}
       </div>
 
-      <ToolActivity events={message.toolEvents ?? []} />
+      {/* The level captured with THIS message, not the live setting — a toggle
+          must not rewrite a turn the user has already read. */}
+      <Timeline steps={message.steps ?? []} level={message.viewLevel ?? 'clean'} />
 
       {/* `flow`, not the boxed preview: the answer IS this message, so it must grow
           with its content and let the TRANSCRIPT scroll. Boxed would nest a second

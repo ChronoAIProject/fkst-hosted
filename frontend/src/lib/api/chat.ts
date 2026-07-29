@@ -23,8 +23,26 @@ export interface ChatSessionRef {
 /** One frame of the response stream. `type` is the discriminant the backend sets. */
 export type ChatStreamEvent =
   | { type: 'delta'; text: string }
-  | { type: 'tool_call'; id: string; name: string; args_preview: string }
-  | { type: 'tool_result'; id: string; name: string; status: number; truncated: boolean }
+  | { type: 'round_start'; index: number; tools_offered: number }
+  | { type: 'round_end'; index: number; finish_reason: string; tool_calls: number }
+  | {
+      type: 'tool_call';
+      id: string;
+      name: string;
+      args_preview: string;
+      args?: string;
+      args_truncated?: boolean;
+    }
+  | {
+      type: 'tool_result';
+      id: string;
+      name: string;
+      status: number;
+      truncated: boolean;
+      response?: string;
+      bytes?: number;
+      response_truncated?: boolean;
+    }
   | { type: 'action_proposal'; proposal: unknown }
   | { type: 'data_card'; card: unknown }
   | { type: 'done'; finish_reason: string; session_refs: ChatSessionRef[] }
@@ -34,8 +52,26 @@ export type ChatStreamEvent =
  *  `onError` — always fires, so a caller never has to infer completion. */
 export interface StreamChatHandlers {
   onDelta(text: string): void;
-  onToolCall(ev: { id: string; name: string; argsPreview: string }): void;
-  onToolResult(ev: { id: string; name: string; status: number; truncated: boolean }): void;
+  /** A model round opened. Pairs with `onRoundEnd`, except when the turn dies
+   *  inside the round — the server does not falsely close one. */
+  onRoundStart(ev: { index: number; toolsOffered: number }): void;
+  onRoundEnd(ev: { index: number; finishReason: string; toolCalls: number }): void;
+  onToolCall(ev: {
+    id: string;
+    name: string;
+    argsPreview: string;
+    args?: string;
+    argsTruncated?: boolean;
+  }): void;
+  onToolResult(ev: {
+    id: string;
+    name: string;
+    status: number;
+    truncated: boolean;
+    response?: string;
+    bytes?: number;
+    responseTruncated?: boolean;
+  }): void;
   onActionProposal(proposal: unknown): void;
   onDataCard(card: unknown): void;
   onDone(ev: { finishReason: string; sessionRefs: ChatSessionRef[] }): void;
@@ -205,8 +241,24 @@ function dispatch(event: ChatStreamEvent, handlers: StreamChatHandlers) {
     case 'delta':
       handlers.onDelta(event.text);
       return;
+    case 'round_start':
+      handlers.onRoundStart({ index: event.index, toolsOffered: event.tools_offered });
+      return;
+    case 'round_end':
+      handlers.onRoundEnd({
+        index: event.index,
+        finishReason: event.finish_reason,
+        toolCalls: event.tool_calls,
+      });
+      return;
     case 'tool_call':
-      handlers.onToolCall({ id: event.id, name: event.name, argsPreview: event.args_preview });
+      handlers.onToolCall({
+        id: event.id,
+        name: event.name,
+        argsPreview: event.args_preview,
+        args: event.args,
+        argsTruncated: event.args_truncated,
+      });
       return;
     case 'tool_result':
       handlers.onToolResult({
@@ -214,6 +266,9 @@ function dispatch(event: ChatStreamEvent, handlers: StreamChatHandlers) {
         name: event.name,
         status: event.status,
         truncated: event.truncated,
+        response: event.response,
+        bytes: event.bytes,
+        responseTruncated: event.response_truncated,
       });
       return;
     case 'action_proposal':

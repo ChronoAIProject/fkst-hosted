@@ -35,6 +35,21 @@ export const chat = {
   toolNone: '无内容',
   toolError: '错误',
   toolTruncated: '已截断',
+
+  // ---- 编排过程时间线（简洁/详细）----
+  stepRound: '轮次',
+  stepRoundOpen: '进行中',
+  stepRoundCalls: '次调用',
+  stepParameters: '入参',
+  stepResponse: '返回',
+  stepTruncated: '已截断',
+  stepSummaryOne: '个步骤',
+  stepSummaryMany: '个步骤',
+  viewLevelAria: '详细程度',
+  viewLevelClean: '简洁',
+  viewLevelVerbose: '详细',
+  viewLevelNoteVerbose: '已切换到详细视图 — 从这里开始将显示每个回答背后的步骤。',
+  viewLevelNoteClean: '已切换到简洁视图 — 从这里开始将隐藏中间步骤。',
   /** 后端工具名的中文标签；未列出的名称按原样显示。 */
   toolNames: {
     get_overview: '账户与仓库',

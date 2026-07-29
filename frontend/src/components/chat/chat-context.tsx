@@ -15,21 +15,24 @@ import { parseActionProposal } from './action-types';
 import type { ActionProposal } from './action-types';
 import { parseDataCard } from './data-card-types';
 import type { DataCard } from './data-card-types';
-import { outcomeNote } from './proposal-meta';
-import { runProposal } from './proposal-exec';
 import type { ProposalExecutionInput } from './proposal-exec';
+import { readStored, writeStored } from './transcript-storage';
+// Re-exported so this module stays the façade its consumers already import from.
+export { RESTORED_UNKNOWN } from './transcript-storage';
+import { useProposals } from './use-proposals';
+import {
+  appendRoundStart,
+  appendToolCall,
+  applyRoundEnd,
+  applyToolResult,
+  isViewLevel,
+} from './steps';
+import type { ChatStep, ChatViewLevel } from './steps';
 import { mockEchoTransport } from './transport';
 import type { ChatTransport, ChatTurnMessage, SessionRef } from './transport';
 import { prefersReducedMotion, TypewriterQueue } from './typewriter';
 
-/** One tool the assistant used during a turn, as the UI shows it. */
-export interface ChatToolEvent {
-  id: string;
-  name: string;
-  /** `undefined` while the call is in flight. */
-  status?: number;
-  truncated?: boolean;
-}
+export type { ChatStep, ChatToolStep, ChatViewLevel } from './steps';
 
 /** How far a proposal's execution has got.
  *
@@ -62,8 +65,11 @@ export interface ChatMessage {
   content: string;
   /** True while the assistant message is still growing. */
   pending?: boolean;
-  /** Tool activity attributed to this assistant message. */
-  toolEvents?: ChatToolEvent[];
+  /** The orchestration loop attributed to this assistant message, in arrival order. */
+  steps?: ChatStep[];
+  /** The view level captured when THIS turn started. Rendering reads this rather
+   *  than the live setting, so toggling never rewrites a turn already on screen. */
+  viewLevel?: ChatViewLevel;
   /** Sessions the turn identified, for deep-linking cards. */
   sessionRefs?: SessionRef[];
   /** Confirm-gated action proposals drafted during this turn. */
@@ -78,6 +84,9 @@ interface ChatContextValue {
   open: boolean;
   messages: ChatMessage[];
   streaming: boolean;
+  /** The level the NEXT turn will be captured at. */
+  viewLevel: ChatViewLevel;
+  setViewLevel: (level: ChatViewLevel) => void;
   openPanel: () => void;
   closePanel: () => void;
   toggle: () => void;
@@ -99,14 +108,8 @@ interface ChatContextValue {
 
 const ChatContext = createContext<ChatContextValue | null>(null);
 
-/** Per-tab transcript storage. `sessionStorage`, not `localStorage`: a chat
- *  transcript is a working conversation, not a saved document, and per-tab scope
- *  means two tabs do not fight over one thread. */
-const STORAGE_KEY = 'fkst-chat-transcript';
-
-/** Transcript cap. Bounded because a long conversation would otherwise grow the
- *  stored payload without limit; the oldest messages are the least useful. */
-const MAX_STORED_MESSAGES = 100;
+/** Persisted CLEAN/VERBOSE preference. */
+const VIEW_LEVEL_KEY = 'fkst-chat-view-level';
 
 let messageSeq = 0;
 /** Monotonic ids. A counter, not a timestamp: two messages appended in the same
@@ -132,72 +135,6 @@ function errorCopy(
   return s.errors[code] ?? fallback ?? s.errors.unknown!;
 }
 
-/** Read the stored transcript, tolerating anything. A corrupt or foreign value
- *  must degrade to an empty transcript, never break the panel. */
-function readStored(): ChatMessage[] {
-  try {
-    const raw = window.sessionStorage?.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter(
-        (entry): entry is ChatMessage =>
-          typeof entry === 'object' &&
-          entry != null &&
-          typeof (entry as ChatMessage).id === 'string' &&
-          typeof (entry as ChatMessage).content === 'string'
-      )
-      .map(restoreProposals);
-  } catch {
-    return [];
-  }
-}
-
-/** Rehydrate a restored message's proposals.
- *
- *  A proposal stored as `executing` is unknowable after a reload: the request may
- *  have succeeded, failed, or never left. It becomes `failed` with a note telling
- *  the user to check the dashboard — because the one thing that must NEVER happen
- *  is re-executing it silently on restore.
- *
- *  `RESTORED_UNKNOWN` is a sentinel, not copy: the component localizes it. */
-export const RESTORED_UNKNOWN = 'restored-unknown';
-
-function restoreProposals(message: ChatMessage): ChatMessage {
-  if (message.proposals == null || message.proposals.length === 0) return message;
-  return {
-    ...message,
-    proposals: message.proposals.map((entry) =>
-      entry.state === 'executing'
-        ? { ...entry, state: 'failed' as const, error: RESTORED_UNKNOWN }
-        : entry
-    ),
-  };
-}
-
-function writeStored(messages: ChatMessage[]) {
-  try {
-    // An EMPTY transcript removes the key rather than storing `[]`. That makes this
-    // effect the single writer: a clear (or a sign-out) does not need to also call
-    // removeItem, which the very next persist would undo anyway.
-    if (messages.length === 0) {
-      window.sessionStorage?.removeItem(STORAGE_KEY);
-      return;
-    }
-    // A restored `pending` message would show a caret that never resolves, so the
-    // flag is dropped on the way out.
-    const storable = messages.slice(-MAX_STORED_MESSAGES).map((message) => {
-      const stored: ChatMessage = { ...message };
-      delete stored.pending;
-      return stored;
-    });
-    window.sessionStorage?.setItem(STORAGE_KEY, JSON.stringify(storable));
-  } catch {
-    // Storage can be full or blocked; the transcript still works in memory.
-  }
-}
-
 /**
  * Owns the concierge's client state: panel visibility, the transcript, and the
  * one in-flight turn.
@@ -219,6 +156,18 @@ export function ChatProvider({
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>(() => readStored());
   const [streaming, setStreaming] = useState(false);
+  // localStorage, not sessionStorage: unlike the transcript (a per-tab working
+  // conversation) this is a durable preference about how much machinery you want
+  // to see, and it should survive a new tab.
+  const [viewLevel, setViewLevelState] = useState<ChatViewLevel>(() => {
+    try {
+      const stored = window.localStorage.getItem(VIEW_LEVEL_KEY);
+      return isViewLevel(stored) ? stored : 'clean';
+    } catch {
+      // A blocked or full storage must never stop the panel opening.
+      return 'clean';
+    }
+  });
   const abortRef = useRef<AbortController | null>(null);
   // The turn's reveal buffer. A provider emits whatever it happened to flush — often a
   // whole paragraph at once — so what the transport delivers is NOT what the transcript
@@ -256,6 +205,36 @@ export function ChatProvider({
     []
   );
 
+  /** Switch the level for FUTURE turns and mark the switch in the transcript.
+   *
+   *  Deliberately does not touch existing messages: each carries the level it was
+   *  produced under, so the change reads as a point in the conversation rather
+   *  than a silent rewrite of what the user already saw. The note is what makes
+   *  that boundary visible. */
+  const setViewLevel = useCallback(
+    (level: ChatViewLevel) => {
+      setViewLevelState((current) => {
+        if (current === level) return current;
+        try {
+          window.localStorage.setItem(VIEW_LEVEL_KEY, level);
+        } catch {
+          // Preference lost on reload is acceptable; failing the toggle is not.
+        }
+        setMessages((messages) => [
+          ...messages,
+          {
+            id: nextId('n'),
+            role: 'system-note',
+            content: level === 'verbose' ? s.viewLevelNoteVerbose : s.viewLevelNoteClean,
+            tone: 'info',
+          },
+        ]);
+        return level;
+      });
+    },
+    [s]
+  );
+
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
@@ -289,7 +268,10 @@ export function ChatProvider({
         role: 'assistant',
         content: '',
         pending: true,
-        toolEvents: [],
+        steps: [],
+        // Captured HERE, at turn start, so a toggle later in the session cannot
+        // change how this turn renders.
+        viewLevel,
       };
 
       // The wire history is built from what is on screen PLUS this message, and
@@ -322,26 +304,29 @@ export function ChatProvider({
         history,
         {
           onDelta: (delta) => typewriter.push(delta),
-          onToolCall: ({ id, name }) =>
+          // The four step handlers fold the orchestration loop into one ORDERED
+          // list; the reducers live in `./steps` so their ordering rules are
+          // testable without mounting anything.
+          onRoundStart: (ev) =>
             patch(assistantId, (message) => ({
               ...message,
-              toolEvents: [...(message.toolEvents ?? []), { id, name }],
+              steps: appendRoundStart(message.steps ?? [], ev),
             })),
-          onToolResult: ({ id, name, status, truncated }) =>
-            patch(assistantId, (message) => {
-              const events = message.toolEvents ?? [];
-              const known = events.some((event) => event.id === id);
-              return {
-                ...message,
-                toolEvents: known
-                  ? events.map((event) =>
-                      event.id === id ? { ...event, status, truncated } : event
-                    )
-                  : // A result with no matching call still gets shown rather than
-                    // dropped — silence would hide real activity.
-                    [...events, { id, name, status, truncated }],
-              };
-            }),
+          onRoundEnd: (ev) =>
+            patch(assistantId, (message) => ({
+              ...message,
+              steps: applyRoundEnd(message.steps ?? [], ev),
+            })),
+          onToolCall: (ev) =>
+            patch(assistantId, (message) => ({
+              ...message,
+              steps: appendToolCall(message.steps ?? [], ev),
+            })),
+          onToolResult: (ev) =>
+            patch(assistantId, (message) => ({
+              ...message,
+              steps: applyToolResult(message.steps ?? [], ev),
+            })),
           onDataCard: (raw) => {
             const card = parseDataCard(raw);
             // An unreadable card is DROPPED, not reported: the prose answer still
@@ -412,115 +397,19 @@ export function ChatProvider({
         controller.signal
       );
     },
-    [messages, patch, showToast, s, streaming, transport]
+    // `viewLevel` is read at turn start to stamp the message, so it belongs here:
+    // a stale capture would give a new turn the PREVIOUS level.
+    [messages, patch, showToast, s, streaming, transport, viewLevel]
   );
 
-  /** Update one proposal by id, wherever in the transcript it lives. */
-  const patchProposal = useCallback((id: string, update: (entry: ChatProposal) => ChatProposal) => {
-    setMessages((current) =>
-      current.map((message) =>
-        message.proposals?.some((entry) => entry.id === id)
-          ? {
-              ...message,
-              proposals: message.proposals.map((entry) =>
-                entry.id === id ? update(entry) : entry
-              ),
-            }
-          : message
-      )
-    );
-  }, []);
-
-  /** Find a proposal by id across the transcript. */
-  const findProposal = useCallback(
-    (id: string): ChatProposal | undefined =>
-      messages.flatMap((message) => message.proposals ?? []).find((entry) => entry.id === id),
-    [messages]
-  );
-
-  const executeProposal = useCallback(
-    async (id: string, input: ProposalExecutionInput = {}) => {
-      const entry = findProposal(id);
-      if (entry == null) return;
-      // Double-submit guard: a `succeeded` proposal never re-runs, and an
-      // `executing` one is already in flight.
-      if (entry.state === 'executing' || entry.state === 'succeeded') return;
-
-      patchProposal(id, (current) => ({ ...current, state: 'executing', error: undefined }));
-      const { proposal } = entry;
-      try {
-        // `runProposal` maps each kind to ONE whitelisted, typed API function — the
-        // exact ones the dashboard's own buttons call. There is deliberately no
-        // generic method/path executor, so `target` can never drive a request.
-        const result = await runProposal(apiFetch, proposal, input);
-
-        if (!result.ok) {
-          patchProposal(id, (current) => ({
-            ...current,
-            state: 'failed',
-            error: result.message ?? s.executeFailed,
-          }));
-          showToast({ kind: 'error', message: result.message ?? s.executeFailed });
-          return;
-        }
-
-        patchProposal(id, (current) => ({
-          ...current,
-          state: 'succeeded',
-          error: undefined,
-          ...(result.issueUrl ? { issueUrl: result.issueUrl } : {}),
-          ...(result.issueNumber ? { issueNumber: result.issueNumber } : {}),
-        }));
-        // A note in the thread so the outcome is part of the conversation, not just
-        // a card the user might scroll past.
-        setMessages((current) => [
-          ...current,
-          {
-            id: nextId('n'),
-            role: 'system-note',
-            content: outcomeNote(proposal, s, result.issueNumber),
-            tone: 'info',
-          },
-        ]);
-      } catch {
-        patchProposal(id, (current) => ({
-          ...current,
-          state: 'failed',
-          error: s.executeFailed,
-        }));
-        showToast({ kind: 'error', message: s.executeFailed });
-      }
-    },
-    [apiFetch, findProposal, patchProposal, s, showToast]
-  );
-
-  const markProposalSucceeded = useCallback(
-    (id: string) => {
-      const entry = findProposal(id);
-      if (entry == null) return;
-      patchProposal(id, (current) => ({ ...current, state: 'succeeded', error: undefined }));
-      setMessages((current) => [
-        ...current,
-        {
-          id: nextId('n'),
-          role: 'system-note',
-          content: outcomeNote(entry.proposal, s),
-          tone: 'info',
-        },
-      ]);
-    },
-    [findProposal, patchProposal, s]
-  );
-
-  const dismissProposal = useCallback((id: string) => {
-    setMessages((current) =>
-      current.map((message) =>
-        message.proposals?.some((entry) => entry.id === id)
-          ? { ...message, proposals: message.proposals.filter((entry) => entry.id !== id) }
-          : message
-      )
-    );
-  }, []);
+  // Proposal execution lives in its own hook: a separate concern from streaming a
+  // turn, and keeping it here pushed this file past the 500-line limit.
+  const { executeProposal, markProposalSucceeded, dismissProposal } = useProposals({
+    messages,
+    setMessages,
+    apiFetch,
+    nextId,
+  });
 
   const clearTranscript = useCallback(() => {
     abortRef.current?.abort();
@@ -538,6 +427,8 @@ export function ChatProvider({
       open,
       messages,
       streaming,
+      viewLevel,
+      setViewLevel,
       openPanel: () => setOpen(true),
       closePanel: () => setOpen(false),
       toggle: () => setOpen((current) => !current),
@@ -552,6 +443,8 @@ export function ChatProvider({
       open,
       messages,
       streaming,
+      viewLevel,
+      setViewLevel,
       sendMessage,
       stopStreaming,
       clearTranscript,
