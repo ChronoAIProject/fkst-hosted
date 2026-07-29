@@ -14,7 +14,7 @@ M.MAX_GENERATED_TITLE_BYTES = blueprint.MAX_STEP_TITLE_BYTES
 -- leaving headroom for the lineage marker prepended to the created issue.
 -- Static intent keeps its own tighter 8000 budget: that is hand-authored
 -- blueprint content, where brevity is a virtue rather than a truncation risk.
-M.MAX_GENERATED_BODY_BYTES = 60000
+M.MAX_GENERATED_BODY_BYTES = 32000
 M.WORKFLOW_GENERATOR_LABEL = "FKST_WORKFLOW_GENERATED_ISSUE_V1"
 
 local function trim(value)

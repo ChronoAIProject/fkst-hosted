@@ -5,7 +5,16 @@ local shared = deps or M
 local devloop_config = require("devloop.config")
 local strings = require("contract.strings")
 local max_title_len = 240
-local max_body_len = 12000
+-- Bounded by the RELIABLE-DELIVERY payload (~64 KiB static upper limit), not by
+-- GitHub's 65536-character issue body. 12000 rejected real generated workflow
+-- specs (~15 KB observed) SILENTLY, stalling a workflow with no usable
+-- diagnostic. 32000 admits them while leaving the payload ample headroom for
+-- schema, repo, title, dedup_key, source_ref, labels and encoding overhead.
+-- NOTE: per CLAUDE.md this whole `max_*_len` family is acknowledged tech debt --
+-- the target design carries a `source_ref` and lets the consumer fetch the
+-- content, rather than moving bytes through the delivery pipeline at all. This
+-- raise is an interim unblock, deliberately NOT a new content-in-payload design.
+local max_body_len = 32000
 local max_label_len = 80
 local max_login_len = 80
 local max_dedup_len = 512
@@ -460,7 +469,22 @@ end
 
 function M.write_issue_create_request(payload)
   if not M.validate_issue_create_payload(payload) then
-    log.warn("github-proxy: issue-create request missing or invalid fields")
+    -- Name the offending field and its size. The bare "missing or invalid
+    -- fields" warning dropped a valid workflow materialization on the floor with
+    -- nothing to act on: the request simply vanished and the workflow stalled
+    -- with no error anywhere. A rejection that cannot be diagnosed is worse than
+    -- the rejection itself.
+    local why = "unknown-field"
+    if type(payload) ~= "table" then
+      why = "payload-not-a-table"
+    elseif payload.schema ~= "github-proxy.issue-create.v1" then
+      why = "schema=" .. tostring(payload.schema)
+    elseif not strings.is_bounded_string(payload.title, max_title_len) then
+      why = "title-bytes=" .. tostring(#tostring(payload.title or "")) .. " max=" .. tostring(max_title_len)
+    elseif not strings.is_bounded_string(payload.body, max_body_len) then
+      why = "body-bytes=" .. tostring(#tostring(payload.body or "")) .. " max=" .. tostring(max_body_len)
+    end
+    log.warn("github-proxy: issue-create request rejected: " .. why)
     return
   end
 
