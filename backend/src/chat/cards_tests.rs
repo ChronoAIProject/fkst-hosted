@@ -57,7 +57,10 @@ fn an_unrecognized_payload_yields_no_card_rather_than_a_blank_one() {
         project("get_session_outcomes", &serde_json::json!({}), &result),
         None
     );
-    assert_eq!(project("list_log_runs", &serde_json::json!({}), &result), None);
+    assert_eq!(
+        project("list_log_runs", &serde_json::json!({}), &result),
+        None
+    );
 }
 
 // ---- environments --------------------------------------------------------

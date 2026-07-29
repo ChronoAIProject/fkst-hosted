@@ -113,7 +113,7 @@ export const chat = {
   deleteEnvLine: '将永久删除 `{name}` —— 其密钥值无法恢复。',
   deleteEnvConfirmTitle: '删除这个环境？',
   deleteEnvConfirmBody:
-    '删除 `{name}` 不可撤销。其密钥值无法恢复，且所有 ### Environment 指向它的 trigger 都将无法解析。',
+    '删除 `{name}` 不可撤销。其密钥值无法恢复，且所有在 Environment 段落中引用它的 trigger 都将无法解析。',
   deleteEnvConfirmAction: '删除环境',
 
   uninstallLine: '将从 {owner} 的每一个仓库中移除 fkst。',

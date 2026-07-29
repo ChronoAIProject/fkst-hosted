@@ -132,7 +132,9 @@ pub enum ChatStreamEvent {
     /// somewhere, or states that a pull request merged, must not be steerable by
     /// generated text. Boxed for the same reason as a proposal — it is far larger than
     /// a `Delta`, which every token would otherwise pay for.
-    DataCard { card: Box<crate::chat::cards::DataCard> },
+    DataCard {
+        card: Box<crate::chat::cards::DataCard>,
+    },
     /// The turn completed normally.
     Done {
         finish_reason: String,

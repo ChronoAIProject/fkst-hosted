@@ -129,7 +129,7 @@ export const chat = {
   deleteEnvLine: 'Deletes `{name}` permanently — its secret values cannot be recovered.',
   deleteEnvConfirmTitle: 'Delete this environment?',
   deleteEnvConfirmBody:
-    'Deleting `{name}` is permanent. Its secret values cannot be recovered, and any trigger whose ### Environment names it will stop resolving.',
+    'Deleting `{name}` is permanent. Its secret values cannot be recovered, and any trigger that names it in its Environment section will stop resolving.',
   deleteEnvConfirmAction: 'Delete environment',
 
   /** Uninstall-App card. */
