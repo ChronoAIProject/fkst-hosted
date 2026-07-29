@@ -75,14 +75,18 @@ local function mock_runtime_and_context()
 end
 
 local function mock_github_proxy_writes()
-  for _ = 1, 2 do
+  -- Three of each now: the reconcile comment, the label write, and the
+  -- amend-and-reintake comment that re-enters the loop on a refinable cause.
+  -- Each comment write re-reads the thread first, so the read mock count tracks
+  -- the write count.
+  for _ = 1, 3 do
     t.mock_command("gh api --paginate --slurp repos/owner/repo/issues/42/comments?per_page=100", {
       stdout = "[[]]\n",
       stderr = "",
       exit_code = 0,
     })
   end
-  for comment_id = 123456, 123457 do
+  for comment_id = 123456, 123458 do
     t.mock_command("gh api --method POST repos/owner/repo/issues/42/comments --field 'body=", {
       stdout = '{"id":' .. tostring(comment_id) .. ',"body":"created","user":{"login":"fkst-test-bot"}}\n',
       stderr = "",
