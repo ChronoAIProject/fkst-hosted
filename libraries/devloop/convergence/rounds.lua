@@ -112,17 +112,18 @@ end
 -- wants a human, not another lap.
 C.MAX_AUTO_REFINEMENTS = 2
 
--- `external-evidence-required` is deliberately NOT refinable: it means the angles
--- need a fact from outside the issue (a doc, a decision, a measurement). Rewriting
--- the spec cannot manufacture that evidence, so retrying would just burn rounds
--- and bury the real request under generated text.
-local refinable_causes = {
-  ["evidence-continuation-budget-exhausted"] = true,
-  ["no-semantic-progress"] = true,
-}
-
+-- Every terminal cause is refinable, including `external-evidence-required`.
+-- That cause means the angles could not settle the question from the issue and
+-- the repo alone -- which in an unattended loop is a request for a decision, and
+-- a decision is exactly what a refinement pass can record. Stopping instead would
+-- wait on a human who is not there. If the missing fact really is unobtainable,
+-- the budget below runs out and the loop stops with the full round history intact,
+-- so the bound on retrying is `MAX_AUTO_REFINEMENTS` -- never the cause.
+--
+-- A cause added to `terminal_causes` is therefore refinable by default; excluding
+-- one is a deliberate act that belongs here, with its reason.
 function C.is_refinable_cause(value)
-  return refinable_causes[tostring(value)] == true
+  return C.is_terminal_cause(value)
 end
 
 local auto_refine_pattern = "fkst:github%-devloop:auto%-refine:v1"

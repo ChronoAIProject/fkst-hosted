@@ -12,14 +12,16 @@ local function marker(proposal_id, round)
 end
 
 return {
-  test_only_causes_a_rewrite_can_actually_fix_are_refinable = function()
+  test_every_terminal_cause_is_refinable_and_nothing_else_is = function()
     local rounds = require("devloop.convergence.rounds")
 
     t.eq(rounds.is_refinable_cause("evidence-continuation-budget-exhausted"), true)
     t.eq(rounds.is_refinable_cause("no-semantic-progress"), true)
-    -- external-evidence-required needs a fact from OUTSIDE the issue; amending the
-    -- spec cannot manufacture it, so retrying would bury the real request.
-    t.eq(rounds.is_refinable_cause("external-evidence-required"), false)
+    -- external-evidence-required included on purpose: unattended, "we need a fact
+    -- we do not have" is a request for a decision, and a refinement can record one.
+    -- The budget, not the cause, is what stops the loop.
+    t.eq(rounds.is_refinable_cause("external-evidence-required"), true)
+    -- A non-terminal string must never open the refine path.
     t.eq(rounds.is_refinable_cause("something-else"), false)
     t.eq(rounds.is_refinable_cause(nil), false)
   end,
