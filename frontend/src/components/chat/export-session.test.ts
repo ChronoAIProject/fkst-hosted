@@ -101,7 +101,7 @@ describe('buildSessionExport', () => {
       ],
       AT
     );
-    const call = (doc.messages[0] as { rounds: { tool_calls: Record<string, unknown>[] }[] })
+    const call = (doc.messages[0] as unknown as { rounds: { tool_calls: Record<string, unknown>[] }[] })
       .rounds[0]!.tool_calls[0]!;
     expect(call.response).toBe('{"partial"');
     expect(call.response_truncated).toBe(true);

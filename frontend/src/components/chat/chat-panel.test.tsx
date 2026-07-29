@@ -41,6 +41,84 @@ describe('ChatPanel', () => {
     vi.unstubAllGlobals();
   });
 
+  it('resizes by keyboard, clamps at the bounds, and persists the width', () => {
+    // Drag-only would put resizing out of reach of keyboard users entirely.
+    renderChat(
+      <>
+        <Probe />
+        <Surface />
+      </>,
+      { transport: scriptedTransport().transport }
+    );
+    act(() => chat().openPanel());
+
+    const handle = screen.getByTestId('chat-resize');
+    const before = Number(handle.getAttribute('aria-valuenow'));
+    fireEvent.keyDown(handle, { key: 'ArrowLeft' });
+    expect(Number(handle.getAttribute('aria-valuenow'))).toBeGreaterThan(before);
+
+    // Narrow repeatedly: it must settle at the minimum, never below.
+    for (let i = 0; i < 40; i += 1) fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    const floor = Number(handle.getAttribute('aria-valuenow'));
+    expect(floor).toBe(320);
+    expect(window.localStorage.getItem('fkst-chat-width')).toBe('320');
+  });
+
+  it('toggles full screen and lets Escape leave it WITHOUT closing the panel', () => {
+    renderChat(
+      <>
+        <Probe />
+        <Surface />
+      </>,
+      { transport: scriptedTransport().transport }
+    );
+    act(() => chat().openPanel());
+
+    const full = screen.getByTestId('chat-fullscreen');
+    expect(full).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(full);
+    expect(screen.getByTestId('chat-fullscreen')).toHaveAttribute('aria-pressed', 'true');
+    // Full screen has no width to drag, so the handle stands down.
+    expect(screen.queryByTestId('chat-resize')).not.toBeInTheDocument();
+
+    fireEvent.keyDown(screen.getByTestId('chat-panel'), { key: 'Escape' });
+    expect(screen.getByTestId('chat-fullscreen')).toHaveAttribute('aria-pressed', 'false');
+    // Escape peeled one layer only.
+    expect(chat().open).toBe(true);
+  });
+
+  it('a pinned panel ignores Escape but still closes deliberately', () => {
+    renderChat(
+      <>
+        <Probe />
+        <Surface />
+      </>,
+      { transport: scriptedTransport().transport }
+    );
+    act(() => chat().openPanel());
+    fireEvent.click(screen.getByTestId('chat-pin'));
+    expect(screen.getByTestId('chat-pin')).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.keyDown(screen.getByTestId('chat-panel'), { key: 'Escape' });
+    expect(chat().open).toBe(true);
+
+    fireEvent.click(screen.getByTestId('chat-close'));
+    expect(chat().open).toBe(false);
+  });
+
+  it('reopens on mount when it was left pinned', () => {
+    // Otherwise the pin survives a reload as a preference that visibly does nothing.
+    window.localStorage.setItem('fkst-chat-pinned', 'true');
+    renderChat(
+      <>
+        <Probe />
+        <Surface />
+      </>,
+      { transport: scriptedTransport().transport }
+    );
+    expect(chat().open).toBe(true);
+  });
+
   it('renders the panel chrome, transcript and composer when open', () => {
     renderChat(
       <>
