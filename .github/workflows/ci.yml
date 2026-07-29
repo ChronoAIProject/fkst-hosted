@@ -2,9 +2,9 @@ name: ci
 
 on:
   push:
-    branches: [main, dev, integration, "integration-*"]
+    branches: [packages]
   pull_request:
-    branches: [main, dev, fkst-hosted, integration, "integration-*"]
+    branches: [packages]
   workflow_dispatch:
     inputs:
       substrate_ref:
@@ -20,15 +20,15 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout fkst-packages
+      - name: Checkout hosted package catalog
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Ensure dev ref is available
+      - name: Ensure packages base ref is available
         run: |
-          git fetch --no-tags --prune origin +refs/heads/dev:refs/remotes/origin/dev
-          git rev-parse --verify refs/remotes/origin/dev^{commit}
+          git fetch --no-tags --prune origin +refs/heads/packages:refs/remotes/origin/packages
+          git rev-parse --verify refs/remotes/origin/packages^{commit}
 
       - name: Resolve fkst-substrate source pin
         id: substrate_ref
@@ -74,6 +74,7 @@ jobs:
         env:
           BIN: ${{ github.workspace }}/fkst-substrate/target/debug/fkst-framework
           FKST_LUA_COVERAGE_OUTPUT: ${{ github.workspace }}/.fkst/run/lua-coverage/coverage.json
+          FKST_RATCHET_DEV_REF: origin/packages
         run: |
           test -x "$BIN"
           scripts/run.sh test
