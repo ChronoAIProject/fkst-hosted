@@ -665,6 +665,11 @@ export interface SiteContent {
     clearAria: string;
     /** Download the whole session, including every step's parameters and response. */
     export: string;
+    /** Window controls: drag-resize, pin-open, and full screen. */
+    resizeAria: string;
+    pinAria: string;
+    fullScreenAria: string;
+    fullScreenExitAria: string;
     exportAria: string;
     close: string;
     closeAria: string;

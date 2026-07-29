@@ -5,6 +5,8 @@ import { useAuth } from '@/lib/auth/github-auth';
 import { API_CONFIGURED } from '@/lib/env';
 import { useChat } from './chat-context';
 import { downloadSessionExport } from './export-session';
+import { ResizeHandle } from './resize-handle';
+import { useWindowState } from './use-window-state';
 import { Composer } from './composer';
 import { MessageList } from './message-list';
 
@@ -104,7 +106,9 @@ export function ChatPanel() {
   const c = useContent();
   const s = c.chat;
   const { isAuthenticated, signIn } = useAuth();
-  const { open, closePanel, streaming, messages, clearTranscript } = useChat();
+  const { open, openPanel, closePanel, streaming, messages, clearTranscript } = useChat();
+  const { width, setWidth, fullScreen, toggleFullScreen, exitFullScreen, pinned, togglePinned } =
+    useWindowState();
 
   const panelRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<Element | null>(null);
@@ -132,12 +136,32 @@ export function ChatPanel() {
       const target = event.target;
       if (target instanceof Node && panelRef.current?.contains(target)) {
         event.stopPropagation();
+        // Escape peels one layer at a time: leaving full screen is almost never
+        // meant as "close the panel too".
+        if (fullScreen) {
+          exitFullScreen();
+          return;
+        }
+        // A pinned panel is explicitly "stay open"; only the close button (or
+        // unpinning) dismisses it.
+        if (pinned) return;
         closePanel();
       }
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-  }, [open, closePanel]);
+  }, [open, closePanel, fullScreen, exitFullScreen, pinned]);
+
+  // A pinned panel comes back open. `open` lives in memory, so a reload would
+  // otherwise leave the pin set while the panel it pins is shut — a preference
+  // that visibly does nothing. Runs once on mount only: re-opening on every
+  // `pinned` change would fight a deliberate close.
+  const didRestorePin = useRef(false);
+  useEffect(() => {
+    if (didRestorePin.current) return;
+    didRestorePin.current = true;
+    if (pinned) openPanel();
+  }, [pinned, openPanel]);
 
   const onPickStarter = useCallback((text: string) => {
     setDraft(text);
@@ -155,20 +179,28 @@ export function ChatPanel() {
       aria-hidden={!open}
       // Kept mounted; `open` drives both visibility and interactivity. `invisible`
       // rather than `hidden` so the entrance animation has something to animate.
-      className={`fixed right-3 z-50 flex w-[min(480px,calc(100vw-24px))] flex-col overflow-hidden rounded-panel ${
-        open ? 'anim-chat-open visible' : 'pointer-events-none invisible'
-      }`}
+      className={`fixed z-50 flex flex-col overflow-hidden rounded-panel ${
+        fullScreen ? 'inset-3' : 'right-3'
+      } ${open ? 'anim-chat-open visible' : 'pointer-events-none invisible'}`}
       style={{
-        // Sits below the topbar and above the pinned footer, so it never covers the
-        // shell chrome the user needs to navigate away.
-        top: '76px',
-        bottom: '56px',
+        // Full screen fills the viewport via `inset-3`, so it must not also carry a
+        // fixed width or the two rules fight.
+        ...(fullScreen
+          ? {}
+          : {
+              width: `${width}px`,
+              // Sits below the topbar and above the pinned footer, so it never covers
+              // the shell chrome the user needs to navigate away.
+              top: '76px',
+              bottom: '56px',
+            }),
         background:
           'linear-gradient(var(--glass), var(--glass)) padding-box, var(--grad-hairline) border-box',
         border: '1px solid transparent',
         boxShadow: 'var(--shadow-2), var(--highlight-top), var(--glow-amber)',
       }}
     >
+      <ResizeHandle width={width} onResize={setWidth} disabled={fullScreen} />
       <PanelBrackets />
       <Scanlines />
       {/* Top edge: a gradient hairline that reads as light catching the lip. */}
@@ -194,6 +226,30 @@ export function ChatPanel() {
         </Chip>
         <span className="flex-1" aria-hidden="true" />
         <ViewLevelToggle />
+        <button
+          type="button"
+          onClick={togglePinned}
+          aria-pressed={pinned}
+          aria-label={s.pinAria}
+          title={s.pinAria}
+          data-testid="chat-pin"
+          className={`rounded-control px-2 py-1 font-mono text-[12px] leading-none transition-colors cursor-pointer ${
+            pinned ? 'text-amber' : 'text-faint hover:text-fg'
+          }`}
+        >
+          {pinned ? '\u25c9' : '\u25cb'}
+        </button>
+        <button
+          type="button"
+          onClick={toggleFullScreen}
+          aria-pressed={fullScreen}
+          aria-label={fullScreen ? s.fullScreenExitAria : s.fullScreenAria}
+          title={fullScreen ? s.fullScreenExitAria : s.fullScreenAria}
+          data-testid="chat-fullscreen"
+          className="rounded-control px-2 py-1 font-mono text-[12px] leading-none text-faint transition-colors hover:text-fg cursor-pointer"
+        >
+          {fullScreen ? '\u2921' : '\u2922'}
+        </button>
         {messages.length > 0 && (
           <button
             type="button"
