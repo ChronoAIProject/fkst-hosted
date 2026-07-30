@@ -59,6 +59,9 @@ pub(crate) const HEADING_OUTPUT_LANGUAGE: &str = "### Output Language";
 pub(crate) const HEADING_ENGINE_CONFIG: &str = "### Engine Config";
 pub(crate) const HEADING_SOURCE_BRANCH: &str = "### Source Branch";
 pub(crate) const HEADING_TARGET_BRANCH: &str = "### Target Branch";
+/// The OPTIONAL `### Package Env` section: per-package configuration grouped
+/// under `#### <package>` lines (see [`crate::goals::package_env`]).
+pub(crate) const HEADING_PACKAGE_ENV: &str = "### Package Env";
 
 /// GitHub caps a label name at 50 characters; the Work Label must fit so the
 /// launcher can apply it verbatim.
@@ -180,6 +183,9 @@ pub struct TriggerSpec {
     /// Optional branch all session work and pull requests target. When absent,
     /// the reconciler uses `fkst-hosted-default`.
     pub target_branch: Option<String>,
+    /// `### Package Env`: per-package configuration, package name → (key → value).
+    /// Empty when the section is absent or carries only guidance comments.
+    pub package_env: crate::goals::package_env::PackageEnv,
 }
 
 /// Parse the `fkst-substrate-trigger` issue body into a [`TriggerSpec`].
@@ -229,6 +235,17 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
     let source_branch = parse_branch(&sections, HEADING_SOURCE_BRANCH)?;
     let target_branch = parse_branch(&sections, HEADING_TARGET_BRANCH)?;
 
+    // `### Package Env` — OPTIONAL, per-package configuration. Parsed and carried
+    // here; a later pass merges it with the manifest's `packageEnv` and delivers
+    // the result to the pod. Absent → empty map.
+    let package_env = match sections
+        .iter()
+        .find(|(heading, _)| heading == HEADING_PACKAGE_ENV)
+    {
+        Some((_, content)) => crate::goals::package_env::parse_package_env(content)?,
+        None => crate::goals::package_env::PackageEnv::new(),
+    };
+
     Ok(TriggerSpec {
         name,
         packages,
@@ -242,6 +259,7 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
         engine_config,
         source_branch,
         target_branch,
+        package_env,
     })
 }
 

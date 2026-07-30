@@ -14,6 +14,7 @@ pub mod labels;
 // "packages are FETCHED"): the single source of truth for the ref shape shared by
 // the trigger parser / launcher (writer) and the `run-substrate` entrypoint
 // (reader).
+pub mod package_env;
 pub mod package_ref;
 pub mod section_parse;
 pub mod trigger_parse;
