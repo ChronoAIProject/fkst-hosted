@@ -87,11 +87,16 @@ session" template applies the label). The body is a set of `### ` sections match
 - `#### ` and deeper are ordinary text.
 - HTML comments (`<!-- … -->`) are ignored, so the template can be filled in place.
 
+The form is grouped into two halves. `### Session Configuration` and
+`### Package Configuration` are dividers: they group what follows and are otherwise
+ignored, so deleting one changes nothing. Session settings describe the session and
+mean the same thing whichever packages run; package settings belong to a package.
+
+**Session configuration**
+
 | Section | Required? | Rule |
 |---|---|---|
 | `### Session Name` | **yes** | exactly one line: lowercase letters, digits, and inner dashes (`my-session`), 1–40 chars |
-| `### Packages` | one of these two | zero or more lines, each a package reference `owner/repo@ref:path` |
-| `### Manifest` | one of these two | zero or more lines, each a manifest reference `owner/repo@ref:path` pointing at an fkst-manifest JSON file |
 | `### Work Label` | optional | **exactly one** label, ≤ 50 characters, no comma. Omit or leave blank to auto-discover labels from the session's packages |
 | `### Environment` | optional | the name of **one** reusable environment profile the trigger author has saved. Selects the profile only — never put commands, variable values, or secrets in an issue |
 | `### Source Branch` | optional | upstream branch used to seed a missing target and receive completed target work; omit for the repository's default branch |
@@ -101,7 +106,15 @@ session" template applies the label). The body is a set of `### ` sections match
 | `### Log Access Allowlist` | optional | a permanent alias of `### FKST Contributors`. Both may appear and the lists merge |
 | `### Session Collaborators` | optional | people granted **work-item authority** — they may raise, label and comment on this session's work issues. Distinct from log access, and they deliberately cannot stop the session. Same list format |
 | `### Output Language` | optional | one locale tag (`en`, `zh`, `zh-CN`, …). It must exactly match a locale the session's package ships, or output silently falls back to English |
-| `### Engine Config` | optional | advanced tunables, one `KEY=value` per line from a strict allowlist. Any other key makes the trigger invalid |
+| `### Engine Config` | optional | advanced ENGINE-wide tunables, one `KEY=value` per line from a strict allowlist. Any other key makes the trigger invalid. Settings belonging to a package go in `### Package Env` |
+
+**Package configuration**
+
+| Section | Required? | Rule |
+|---|---|---|
+| `### Packages` | one of these two | zero or more lines, each a package reference `owner/repo@ref:path` |
+| `### Manifest` | one of these two | zero or more lines, each a manifest reference `owner/repo@ref:path` pointing at an fkst-manifest JSON file. A manifest may also supply package settings |
+| `### Package Env` | optional | settings for a specific package, grouped under `#### <package>` lines with one `FKST_KEY=value` per line. `<package>` is the last path segment of a package reference. Precedence: the package default, then a manifest's `packageEnv`, then this (which wins, per key). A key may be configured by only one package, and platform-owned names are rejected |
 
 **At least one package source is required.** A trigger with neither `### Packages` nor
 `### Manifest` is invalid: "the trigger must list at least one package source".

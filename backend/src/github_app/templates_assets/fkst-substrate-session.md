@@ -16,6 +16,21 @@ EVERYTHING in this issue body is FROZEN. Edits after that are rejected with an
 `fkst-config-rejected` label and change nothing. To change any setting, close
 this issue and open a new trigger.
 
+TWO KINDS OF SETTING. `### Session Configuration` and `### Package Configuration`
+below are DIVIDERS: they group what follows and are otherwise ignored, so
+deleting one changes nothing. Session settings describe THIS session — who drives
+it, which branches it moves, what it emits — and mean the same thing whichever
+packages run. Package settings belong to a package and are meaningless without it.
+
+BRANCHES: To override branch topology, add an optional `### Source Branch` section
+with exactly one existing upstream branch (default: the repository default), and/or
+an optional `### Target Branch` section with exactly one integration branch
+(default: `fkst-hosted-default`). Add the heading only WITH a value — an empty
+branch section is rejected. fkst creates a missing target at the source head before
+the session starts and never resets an existing target. Work branches start from the target branch
+and pull requests merge into it; completed target work rolls up into the
+source. Source and target may be the same branch, which disables the rollup step.
+
 CREATOR AND AUTHORITY: For a human-authored trigger, the session creator is the
 issue author. For an App-authored trigger, the trigger's sole assignee is the creator.
 The creator must be a deployment global admin or have admin or maintain permission
@@ -25,53 +40,14 @@ LABEL ISOLATION AND ROUTING: One creator's open triggers must have pairwise-disj
 effective work-label sets; different creators may reuse the same labels. Every work
 issue needs exactly one assignee: this session's creator. Its author must be the
 creator, a login under `### Session Collaborators`, or a deployment global admin.
-
-BRANCHES: To override branch topology, add an optional `### Source Branch`
-section with exactly one existing upstream branch (default: the repository
-default), and/or an optional `### Target Branch` section with exactly one
-integration branch (default: `fkst-hosted-default`). fkst creates a missing target
-at the source head before the session starts, retries provisioning failures
-reported in operator logs, and never resets an existing target.
-Work branches start from the target branch and pull requests merge into it;
-completed target work rolls up into the source. Source and target may be the same
-branch, which disables the separate rollup step.
 -->
+
+### Session Configuration
 
 ### Session Name
 
 <!-- One line. Lower-case DNS-label: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$, 1-40 chars. -->
 my-first-session
-
-### Packages
-
-<!--
-One package reference per line, each as `owner/repo@ref:path/to/package`, pointing
-at a PUBLIC repo that has an `fkst.toml` at that path. At least one package source is
-required across `### Packages` and `### Manifest`; this section may be empty or deleted
-when a manifest supplies the packages.
--->
-ChronoAIProject/fkst-hosted@packages:packages/workflow-dev
-
-### Manifest
-
-<!--
-Optional. One `owner/repo@ref:path` per line pointing at a fkst-manifest JSON (a
-reusable package bundle) — its packages are added to any you list in `### Packages`.
-Delete this section if unused.
--->
-
-### Work Label
-
-<!--
-Optional. Delete this whole section to auto-detect the work label(s) from your
-packages' `[github].work_labels` — a session with no explicit label is driven by
-every label its packages declare. Otherwise name ONE GitHub label whose OPEN issues
-are this session's work queue: max 50 characters, no commas. Create work items as
-separate issues carrying this label (see the "fkst work item" template). Your open
-sessions' effective label sets must not overlap each other, but a different creator's
-sessions may use the same labels. Give every work issue exactly one assignee equal to
-this session's creator; zero, multiple, or another assignee is `fkst-unrouted`.
--->
 
 ### Environment
 
@@ -128,11 +104,25 @@ separator-sensitive); a mismatch silently falls back to English. Delete this
 whole section for English (the default).
 -->
 
+### Work Label
+
+<!--
+Optional. Delete this whole section to auto-detect the work label(s) from your
+packages' `[github].work_labels` — a session with no explicit label is driven by
+every label its packages declare. Otherwise name ONE GitHub label whose OPEN issues
+are this session's work queue: max 50 characters, no commas. Create work items as
+separate issues carrying this label (see the "fkst work item" template). Your open
+sessions' effective label sets must not overlap each other, but a different creator's
+sessions may use the same labels. Give every work issue exactly one assignee equal to
+this session's creator; zero, multiple, or another assignee is `fkst-unrouted`.
+-->
+
 ### Engine Config
 
 <!--
-Optional. Advanced engine tunables, ONE `KEY=value` per line, drawn ONLY from
-this allowlist (anything else is rejected with an explanatory comment):
+Optional. Advanced ENGINE-wide tunables, ONE `KEY=value` per line, drawn ONLY from
+this allowlist (anything else is rejected with an explanatory comment). Settings
+that belong to a PACKAGE go in `### Package Env` below, not here:
   FKST_LLM_MODEL=<model id>                run THIS session on a different model
     served by the deployment's LLM endpoint (letters, digits, . _ / : - only)
   FKST_LLM_REASONING_EFFORT=<tier>         minimal | low | medium | high | max
@@ -150,4 +140,45 @@ this allowlist (anything else is rejected with an explanatory comment):
     basename (e.g. FKST_RATE_POOL_GH=10,10); platform defaults can only be
     TIGHTENED, never widened.
 Delete this whole section for the engine defaults.
+-->
+
+### Package Configuration
+
+### Packages
+
+<!--
+One package reference per line, each as `owner/repo@ref:path/to/package`, pointing
+at a PUBLIC repo that has an `fkst.toml` at that path. At least one package source is
+required across `### Packages` and `### Manifest`; this section may be empty or deleted
+when a manifest supplies the packages.
+-->
+ChronoAIProject/fkst-hosted@packages:packages/workflow-dev
+
+### Manifest
+
+<!--
+Optional. One `owner/repo@ref:path` per line pointing at a fkst-manifest JSON (a
+reusable package bundle) — its packages are added to any you list in `### Packages`.
+A manifest may also supply package settings; anything you set below overrides it.
+Delete this section if unused.
+-->
+
+### Package Env
+
+<!--
+Optional. Settings for a specific PACKAGE, grouped under `#### <package>` lines,
+then one `FKST_KEY=value` per line. `<package>` is the last path segment of a
+package reference — `github-devloop` for `…@packages:packages/github-devloop`.
+
+Precedence: the package's own default, then a manifest's `packageEnv`, then what
+you write here (which wins, per key).
+
+A key may be configured by only one package, and platform-owned names
+(FKST_SESSION_*, FKST_GITHUB_*, FKST_TRIGGER_ISSUE, …) are rejected.
+
+Example — let the devloop refine a blocked specification itself instead of
+stopping for a human, allowing two attempts (0, the default, keeps it stopping):
+
+#### github-devloop
+FKST_DEVLOOP_AUTO_REFINE_MAX=2
 -->
