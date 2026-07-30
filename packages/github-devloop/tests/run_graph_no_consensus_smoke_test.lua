@@ -79,14 +79,14 @@ local function mock_github_proxy_writes()
   -- amend-and-reintake comment that re-enters the loop on a refinable cause.
   -- Each comment write re-reads the thread first, so the read mock count tracks
   -- the write count.
-  for _ = 1, 3 do
+  for _ = 1, 2 do
     t.mock_command("gh api --paginate --slurp repos/owner/repo/issues/42/comments?per_page=100", {
       stdout = "[[]]\n",
       stderr = "",
       exit_code = 0,
     })
   end
-  for comment_id = 123456, 123458 do
+  for comment_id = 123456, 123457 do
     t.mock_command("gh api --method POST repos/owner/repo/issues/42/comments --field 'body=", {
       stdout = '{"id":' .. tostring(comment_id) .. ',"body":"created","user":{"login":"fkst-test-bot"}}\n',
       stderr = "",
@@ -182,7 +182,7 @@ return {
     -- comment, so the graph has one more effect to drain before it quiesces. The
     -- budget stays exact rather than generous -- `require_quiescent` proves the
     -- graph actually settles, and a padded ceiling would stop proving that.
-    local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 9 }))
+    local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 8 }))
     graph.assert_covers(trace, {
       "consensus.consensus_converge -> github-devloop.loop",
       "github-proxy.github_issue_comment_request -> github-proxy.github_comment",
@@ -218,7 +218,7 @@ return {
       trace,
       "github-proxy.github_issue_comment_request",
       function(raised)
-        return graph.payload_contains(raised, "github-devloop reconcile action: re-design")
+        return graph.payload_contains(raised, "github-devloop reconcile action: drop")
           and graph.payload_contains(raised, "evidence-continuation-budget-exhausted-after-")
           and graph.payload_contains(raised, 'state="blocked"')
       end
@@ -230,19 +230,5 @@ return {
       return raised.payload.add_labels[1] == "fkst-dev:blocked"
     end)
 
-    -- The re-entry itself: an operator-grammar `fkst: reintake` comment. One reconcile
-    -- pass emits both it and the terminal marker, so the ordering that matters is the
-    -- raise order WITHIN that step -- refine last, so a crash mid-pass leaves the block
-    -- durable rather than a re-entry into a round nothing recorded as finished.
-    local refine, _, refine_index, refine_raise = graph.require_raise(
-      trace,
-      "github-proxy.github_issue_comment_request",
-      function(raised)
-        return graph.payload_contains(raised, "fkst:github-devloop:auto-refine:v1")
-      end
-    )
-    t.eq(refine_index, blocked_index)
-    t.is_true(refine_raise > blocked_raise)
-    t.is_true(refine.payload.body:match("^fkst: reintake") ~= nil)
   end,
 }

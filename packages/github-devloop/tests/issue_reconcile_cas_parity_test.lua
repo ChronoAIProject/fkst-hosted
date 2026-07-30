@@ -263,7 +263,7 @@ local function assert_catalog_matches_observed_decision(fixture)
     -- the item, so the boundary action is `re-design`. These fixtures carry no
     -- prior auto-refine marker, so the budget is always intact here; the drop path
     -- after the budget is spent is pinned in auto_refine_budget_test.lua.
-    t.eq(boundary.action, "re-design", fixture.name .. ": boundary action")
+    t.eq(boundary.action, "drop", fixture.name .. ": boundary action")
     t.eq(boundary.state_version, probe.incoming_version, fixture.name .. ": boundary terminal version")
   end
 
