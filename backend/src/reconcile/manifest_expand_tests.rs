@@ -112,7 +112,16 @@ async fn mount_status(server: &MockServer, status: u16) {
         .await;
 }
 
+/// The package list only — every pre-existing test asserts on packages, so this
+/// keeps them expressing exactly what they did before `packageEnv` existed.
 async fn expand(server: &MockServer) -> Result<Vec<PackageRef>, ManifestError> {
+    expand_full(server).await.map(|expanded| expanded.packages)
+}
+
+/// The whole expansion, for the `packageEnv` tests.
+async fn expand_full(
+    server: &MockServer,
+) -> Result<crate::reconcile::manifest_expand::ExpandedManifest, ManifestError> {
     expand_manifest(
         &reqwest::Client::new(),
         &server.uri(),
@@ -281,5 +290,86 @@ async fn errors_never_leak_the_token_or_url() {
     for rendered in [format!("{nf_err}"), format!("{nf_err:?}")] {
         assert!(!rendered.contains(SECRET_TOKEN), "leaked token: {rendered}");
         assert!(!rendered.contains(&nf_uri), "leaked url: {rendered}");
+    }
+}
+
+/// A manifest may supply per-package configuration for every session that uses it,
+/// so a fleet-wide package setting is written once instead of in every trigger.
+#[tokio::test]
+async fn package_env_is_expanded() {
+    let server = MockServer::start().await;
+    mount_body(
+        &server,
+        serde_json::json!({
+            "schemaVersion": 1,
+            "packages": ["acme/tools@main:pkg/a"],
+            "packageEnv": {
+                "github-devloop": { "FKST_DEVLOOP_AUTO_REFINE_MAX": "2" }
+            }
+        })
+        .to_string(),
+    )
+    .await;
+
+    let expanded = expand_full(&server).await.expect("valid manifest");
+    assert_eq!(
+        expanded.package_env["github-devloop"]["FKST_DEVLOOP_AUTO_REFINE_MAX"],
+        "2"
+    );
+}
+
+/// Every manifest written before this key existed must expand byte-identically.
+#[tokio::test]
+async fn a_manifest_without_package_env_expands_to_an_empty_map() {
+    let server = MockServer::start().await;
+    mount_body(
+        &server,
+        manifest_body(1, &["acme/tools@main:pkg/a".to_string()]),
+    )
+    .await;
+
+    let expanded = expand_full(&server).await.expect("valid manifest");
+    assert!(expanded.package_env.is_empty());
+}
+
+/// The manifest and the trigger share ONE validator, so a manifest can never ship
+/// configuration a trigger author would be refused. Each case here is rejected by
+/// the same rule that rejects it in `### Package Env`.
+#[tokio::test]
+async fn a_malformed_package_env_fails_closed() {
+    for (label, block) in [
+        (
+            "bad key",
+            serde_json::json!({ "pkg": { "lowercase": "x" } }),
+        ),
+        (
+            "platform-owned key",
+            serde_json::json!({ "pkg": { "FKST_GITHUB_BOT_LOGIN": "x" } }),
+        ),
+        (
+            "cross-block conflict",
+            serde_json::json!({ "a": { "FKST_SHARED": "1" }, "b": { "FKST_SHARED": "2" } }),
+        ),
+        (
+            "bad package name",
+            serde_json::json!({ "has spaces": { "FKST_A": "1" } }),
+        ),
+    ] {
+        let server = MockServer::start().await;
+        mount_body(
+            &server,
+            serde_json::json!({
+                "schemaVersion": 1,
+                "packages": ["acme/tools@main:pkg/a"],
+                "packageEnv": block
+            })
+            .to_string(),
+        )
+        .await;
+
+        match expand_full(&server).await {
+            Err(ManifestError::BadPackageEnv { .. }) => {}
+            other => panic!("{label}: expected BadPackageEnv, got {other:?}"),
+        }
     }
 }

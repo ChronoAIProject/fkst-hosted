@@ -86,7 +86,10 @@ pub async fn resolve_effective_packages(
     // Cache each distinct manifest reference's expansion (Ok packages / Err reason) so a
     // manifest shared by two sessions is fetched once. The Err reason is the manifest's
     // own leak-free message (without the per-ref prefix, which is re-added per session).
-    let mut cache: HashMap<RefKey, Result<Vec<PackageRef>, String>> = HashMap::new();
+    let mut cache: HashMap<
+        RefKey,
+        Result<crate::reconcile::manifest_expand::ExpandedManifest, String>,
+    > = HashMap::new();
     let mut by_session: HashMap<String, Vec<PackageRef>> = HashMap::new();
     let mut demotions: Vec<(i64, String)> = Vec::new();
 
@@ -113,7 +116,10 @@ async fn expand_one(
     api_base: &str,
     token: &SecretString,
     reg: &SessionRegistration,
-    cache: &mut HashMap<RefKey, Result<Vec<PackageRef>, String>>,
+    cache: &mut HashMap<
+        RefKey,
+        Result<crate::reconcile::manifest_expand::ExpandedManifest, String>,
+    >,
 ) -> Result<Vec<PackageRef>, String> {
     // Explicit packages first (author order); then each manifest's expansion appended in
     // manifest order (in-file order preserved within each expansion).
@@ -131,7 +137,9 @@ async fn expand_one(
             }
         };
         match resolved {
-            Ok(packages) => effective.extend(packages),
+            // Only the package list is consumed here. The manifest's `packageEnv`
+            // is merged by a later pass, which owns the precedence rules.
+            Ok(expanded) => effective.extend(expanded.packages),
             // Fail-closed: a manifest a session names but that cannot be expanded demotes
             // the whole session. The reason names the offending manifest + its cause.
             Err(reason) => {
