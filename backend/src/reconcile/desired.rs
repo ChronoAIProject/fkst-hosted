@@ -62,6 +62,11 @@ pub struct SessionDef {
     /// Optional target branch from the trigger. `None` resolves to
     /// `fkst-hosted-default`.
     pub target_branch: Option<String>,
+    /// Per-package configuration parsed from `### Package Env`, later merged with
+    /// any manifest-supplied defaults. Part of BOTH hashes: it changes the pod
+    /// env, so editing it after registration is a rejected config change, exactly
+    /// like `output_lang` and `engine_config`.
+    pub package_env: crate::goals::package_env::PackageEnv,
 }
 
 /// One valid trigger issue resolved to everything the reconciler needs to spawn

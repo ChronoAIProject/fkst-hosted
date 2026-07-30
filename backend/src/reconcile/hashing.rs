@@ -19,6 +19,8 @@
 
 use std::collections::BTreeMap;
 
+use crate::goals::package_env::PackageEnv;
+
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -88,6 +90,7 @@ pub fn config_hash(
     manifest_refs: &[PackageRef],
     source_branch: Option<&str>,
     target_branch: Option<&str>,
+    package_env: &PackageEnv,
 ) -> String {
     #[derive(Serialize)]
     struct Canonical<'a> {
@@ -113,6 +116,13 @@ pub fn config_hash(
         source_branch: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         target_branch: Option<&'a str>,
+        // Per-package configuration. Appended LAST and skip-if-empty for the
+        // digest-stability invariant above: a session that configures no package
+        // hashes byte-for-byte as it did before this field existed. It belongs in
+        // THIS hash (not only the full one) because the value reaches the pod --
+        // changing it must respawn, exactly like `output_lang`.
+        #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+        package_env: &'a PackageEnv,
     }
     let canonical = Canonical {
         packages: canon_packages(packages),
@@ -123,6 +133,7 @@ pub fn config_hash(
         manifest_refs: canon_packages(manifest_refs),
         source_branch,
         target_branch,
+        package_env,
     };
     hex_digest(&canonical, "config-hash")
 }
@@ -209,6 +220,11 @@ pub fn full_config_hash(reg: &SessionRegistration) -> String {
         source_branch: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         target_branch: Option<&'a str>,
+        // Appended LAST and skip-if-empty, same reason as the fields above. A
+        // non-empty map flips the full hash, FREEZING per-package configuration
+        // under config-immutability: it cannot be edited after registration.
+        #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+        package_env: &'a PackageEnv,
     }
     let canonical = Canonical {
         packages: canon_packages(&reg.def.packages),
@@ -223,6 +239,7 @@ pub fn full_config_hash(reg: &SessionRegistration) -> String {
         manifest_refs: canon_packages(&reg.def.manifest_refs),
         source_branch: reg.def.source_branch.as_deref(),
         target_branch: reg.def.target_branch.as_deref(),
+        package_env: &reg.def.package_env,
     };
     hex_digest(&canonical, "full-config-hash")
 }

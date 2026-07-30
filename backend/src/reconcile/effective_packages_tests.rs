@@ -60,6 +60,7 @@ fn reg(
             engine_config: BTreeMap::new(),
             source_branch: None,
             target_branch: None,
+            package_env: crate::goals::package_env::PackageEnv::new(),
         },
         effective_packages: Vec::new(),
         session_id: session_id.to_string(),

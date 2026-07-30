@@ -27,6 +27,7 @@ fn config_hash(
         manifest_refs,
         None,
         None,
+        &crate::goals::package_env::PackageEnv::new(),
     )
 }
 
@@ -146,6 +147,7 @@ fn branch_sections_round_trip_into_the_registration_and_config_hash() {
             &reg.def.manifest_refs,
             Some("release/v1"),
             Some("feature-x"),
+            &crate::goals::package_env::PackageEnv::new(),
         )
     );
 }
