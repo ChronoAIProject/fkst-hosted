@@ -30,7 +30,7 @@
 //! rendering + [`crate::reconcile::manifest_expand::ManifestError`]'s leak-free `Display`
 //! — never the token, the fetch URL, or transport detail.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use secrecy::SecretString;
 
@@ -150,7 +150,8 @@ async fn expand_one(
         match resolved {
             Ok(expanded) => {
                 effective.extend(expanded.packages);
-                merge_package_env(&mut manifest_env, expanded.package_env);
+                // First manifest wins, like the package list's first occurrence.
+                merge_package_env(&mut manifest_env, expanded.package_env, false);
             }
             // Fail-closed: a manifest a session names but that cannot be expanded demotes
             // the whole session. The reason names the offending manifest + its cause.
@@ -195,7 +196,14 @@ async fn expand_one(
     // trigger overriding one setting must not silently discard the manifest's
     // other settings for that same package.
     let mut package_env = manifest_env;
-    merge_package_env(&mut package_env, reg.def.package_env.clone());
+    merge_package_env(&mut package_env, reg.def.package_env.clone(), true);
+
+    if let Some((key, first, second)) = conflicting_package_env_key(&package_env) {
+        return Err(format!(
+            "package env sets {key} under both `#### {first}` and `#### {second}`: a key may \
+             be configured by only one package"
+        ));
+    }
 
     Ok((deduped, package_env))
 }
@@ -203,19 +211,57 @@ async fn expand_one(
 /// Fold `overlay` onto `base`, `overlay` winning per key.
 ///
 /// Blocks are merged rather than replaced, so overriding one key leaves the rest of
-/// that package's configuration intact. Used twice with opposite precedence: manifest
-/// over manifest (first wins, so the overlay is applied only where the base is silent)
-/// and trigger over manifest (the trigger always wins).
+/// that package's configuration intact.
+///
+/// `overwrite` states the precedence explicitly because this is used twice with
+/// OPPOSITE precedence, and an unconditional insert silently gave last-wins to both:
+/// manifest over manifest keeps the FIRST value (matching how the effective package
+/// list keeps its first occurrence), while the trigger always overrides.
 fn merge_package_env(
     base: &mut crate::goals::package_env::PackageEnv,
     overlay: crate::goals::package_env::PackageEnv,
+    overwrite: bool,
 ) {
     for (package, keys) in overlay {
         let block = base.entry(package).or_default();
         for (key, value) in keys {
-            block.insert(key, value);
+            match block.entry(key) {
+                std::collections::btree_map::Entry::Vacant(slot) => {
+                    slot.insert(value);
+                }
+                std::collections::btree_map::Entry::Occupied(mut slot) if overwrite => {
+                    slot.insert(value);
+                }
+                std::collections::btree_map::Entry::Occupied(_) => {}
+            }
         }
     }
+}
+
+/// The key that two different package blocks both configure, if any.
+///
+/// The trigger's own section rejects this, and each manifest is checked in
+/// isolation, but their UNION is not — and the pod receives one flat environment,
+/// so a conflict there is not ambiguous, it is fatal: the in-pod reader errors at
+/// boot and the session never starts. Detecting it here turns a dead pod into a
+/// demotion the author can see on their trigger issue.
+fn conflicting_package_env_key(
+    package_env: &crate::goals::package_env::PackageEnv,
+) -> Option<(String, String, String)> {
+    let mut owner: BTreeMap<&str, &str> = BTreeMap::new();
+    for (package, keys) in package_env {
+        for key in keys.keys() {
+            match owner.get(key.as_str()) {
+                Some(first) if *first != package.as_str() => {
+                    return Some((key.clone(), (*first).to_string(), package.clone()));
+                }
+                _ => {
+                    owner.insert(key.as_str(), package.as_str());
+                }
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]

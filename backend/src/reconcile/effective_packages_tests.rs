@@ -451,3 +451,92 @@ async fn a_manifest_free_session_keeps_its_trigger_package_env() {
         "2"
     );
 }
+
+/// A key configured under two different package blocks reaches the pod as one
+/// flat environment, where the in-pod reader errors at boot and the session never
+/// starts. The trigger's own section rejects this and each manifest is checked in
+/// isolation, but their UNION was not — so it had to be caught here, where the
+/// author can see it.
+#[tokio::test]
+async fn a_manifest_and_trigger_key_conflict_demotes_instead_of_killing_the_pod() {
+    let server = MockServer::start().await;
+    let m = pkg("acme", "manifests", "main", "m.json");
+    mount_manifest_json(
+        &server,
+        &m,
+        json!({
+            "schemaVersion": 1,
+            "packages": ["acme/tools@main:pkg/a"],
+            "packageEnv": { "alpha": { "FKST_DEVLOOP_TEST_COMMAND": "from-manifest" } }
+        })
+        .to_string(),
+    )
+    .await;
+
+    let mut reg = reg("s1", 1, vec![], vec![m]);
+    reg.def.package_env.insert(
+        "beta".to_string(),
+        [(
+            "FKST_DEVLOOP_TEST_COMMAND".to_string(),
+            "from-trigger".to_string(),
+        )]
+        .into_iter()
+        .collect(),
+    );
+
+    let resolved =
+        resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), &[reg]).await;
+
+    assert!(
+        !resolved.package_env_by_session.contains_key("s1"),
+        "a conflicting session must not resolve"
+    );
+    let (_, reason) = resolved
+        .demotions
+        .first()
+        .expect("the conflict must demote the session");
+    assert!(reason.contains("FKST_DEVLOOP_TEST_COMMAND"), "{reason}");
+    assert!(reason.contains("alpha"), "{reason}");
+    assert!(reason.contains("beta"), "{reason}");
+}
+
+/// Manifest-over-manifest keeps the FIRST value, matching how the effective
+/// package list keeps its first occurrence. An unconditional insert gave
+/// last-wins here, contradicting the documented precedence.
+#[tokio::test]
+async fn the_first_manifest_wins_a_cross_manifest_key_collision() {
+    let server = MockServer::start().await;
+    let first = pkg("acme", "manifests", "main", "first.json");
+    let second = pkg("acme", "manifests", "main", "second.json");
+    mount_manifest_json(
+        &server,
+        &first,
+        json!({
+            "schemaVersion": 1,
+            "packages": ["acme/tools@main:pkg/a"],
+            "packageEnv": { "github-devloop": { "FKST_DEVLOOP_MAX_INFLIGHT": "1" } }
+        })
+        .to_string(),
+    )
+    .await;
+    mount_manifest_json(
+        &server,
+        &second,
+        json!({
+            "schemaVersion": 1,
+            "packages": ["acme/tools@main:pkg/b"],
+            "packageEnv": { "github-devloop": { "FKST_DEVLOOP_MAX_INFLIGHT": "9" } }
+        })
+        .to_string(),
+    )
+    .await;
+
+    let reg = reg("s1", 1, vec![], vec![first, second]);
+    let resolved =
+        resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), &[reg]).await;
+
+    assert_eq!(
+        resolved.package_env_by_session["s1"]["github-devloop"]["FKST_DEVLOOP_MAX_INFLIGHT"], "1",
+        "the first manifest to set a key must win"
+    );
+}
