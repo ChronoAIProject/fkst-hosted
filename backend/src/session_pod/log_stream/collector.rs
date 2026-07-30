@@ -29,6 +29,7 @@ use crate::session_spec::creds::CredsLayout;
 use super::bundle::tar_gz_dir;
 use super::classify::{discover_sources, LogClass, TreeAnchors};
 use super::copied::CopiedFileTracker;
+use super::health_publish::HealthPublishQueue;
 use super::instance::{compute_instance_id, readme_markdown, InstanceMeta};
 use super::redact::Redactor;
 use super::seed::{read_github_token, seed_secrets, LABEL_GITHUB_TOKEN};
@@ -237,8 +238,10 @@ fn collect(config: CollectorConfig, rx: Receiver<CollectorRecord>, uploader: Opt
     let mut tree = TreeWriter::new(config.tree_dir.clone());
     let anchors = TreeAnchors::new(&config.runtime_root, &config.codex_home);
     let mut tails: HashMap<PathBuf, (LogClass, TailTracker)> = HashMap::new();
-    // Health reports are captured WHOLE, on the same tick as the tails.
+    // Health reports are captured WHOLE, on the same tick as the tails, and published
+    // as small objects on the (slower) flush cadence.
     let mut reports = CopiedFileTracker::new();
+    let mut health = HealthPublishQueue::new();
 
     let flush_interval = Duration::from_secs(config.flush_secs.max(1));
     let mut uploaded_once = false;
@@ -255,7 +258,7 @@ fn collect(config: CollectorConfig, rx: Receiver<CollectorRecord>, uploader: Opt
         let now = Instant::now();
         if now.duration_since(last_tick) >= POLL_INTERVAL {
             tail_sources(&anchors, &mut tails, &redactor, &mut tree);
-            reports.sweep(&anchors, &redactor, &mut tree);
+            health.enqueue(reports.sweep(&anchors, &redactor, &mut tree), &redactor);
             last_tick = now;
         }
         if now.duration_since(last_token) >= Duration::from_secs(TOKEN_REREAD_SECS) {
@@ -266,6 +269,7 @@ fn collect(config: CollectorConfig, rx: Receiver<CollectorRecord>, uploader: Opt
             || tree.pending_bytes() >= config.flush_bytes
         {
             flush_and_index(&mut tree, uploader.as_ref(), &redactor, &mut uploaded_once);
+            health.publish_pending(uploader.as_ref(), &config.session_id, &redactor);
             last_flush = now;
         }
     }
@@ -275,9 +279,10 @@ fn collect(config: CollectorConfig, rx: Receiver<CollectorRecord>, uploader: Opt
     // poll — the likeliest moment for one, since the producer and the pod are ending
     // together — still reaches the bundle.
     tail_sources(&anchors, &mut tails, &redactor, &mut tree);
-    reports.sweep(&anchors, &redactor, &mut tree);
+    health.enqueue(reports.sweep(&anchors, &redactor, &mut tree), &redactor);
     finish_tails(&mut tails, &redactor, &mut tree);
     flush_and_index(&mut tree, uploader.as_ref(), &redactor, &mut uploaded_once);
+    health.publish_pending(uploader.as_ref(), &config.session_id, &redactor);
     // The run produced a bundle → stamp its end time into the session's run index.
     if uploaded_once {
         if let Some(uploader) = uploader.as_ref() {
@@ -448,3 +453,7 @@ fn log_redacted(redactor: &Redactor, message: &str) {
 #[cfg(test)]
 #[path = "collector_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "collector_health_tests.rs"]
+mod health_tests;

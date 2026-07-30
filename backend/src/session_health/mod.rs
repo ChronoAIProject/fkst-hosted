@@ -53,9 +53,14 @@
 //! and neither literal appears here). Filenames are generated *and* parsed by
 //! [`naming`], so the two can never drift.
 
+pub mod index;
 pub mod naming;
 pub mod report;
 
+pub use index::{
+    health_index_key, health_report_key, index_entry, parse_index, upsert_report, HealthIndex,
+    HealthIndexEntry,
+};
 pub use naming::{parse_report_filename, report_filename, ReportName};
 pub use report::{
     parse_report, EvidenceEntry, HealthReport, HealthStatus, ReportParseError, WorkItemProgress,
