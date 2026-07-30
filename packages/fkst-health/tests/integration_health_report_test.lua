@@ -27,6 +27,41 @@ local function scalar(matter, key)
 end
 
 return {
+  -- ---- the production-port landmine (regression) ----------------------------
+  --
+  -- Found by a real session on the local cluster, not by a test: every tick failed
+  -- with "forge.ports: trusted_author_policy is required for production GitHub
+  -- reads" and no report was ever written. forge.ports installs a POISON OBJECT as
+  -- ports.github when it cannot build an author policy -- a table whose metatable
+  -- raises on ANY field access -- so even `type(github.issue_search)`, written as a
+  -- guard, was itself the failure, outside every pcall.
+  --
+  -- Every other test here injects a well-behaved fake port, which is exactly why
+  -- none of them could see it. This one injects the poison object.
+  test_a_poison_github_port_degrades_one_signal_instead_of_killing_the_tick = function()
+    local poison = setmetatable({}, {
+      __index = function()
+        error("forge.ports: trusted_author_policy is required for production GitHub reads")
+      end,
+    })
+    local department = helper.department({ github = poison })
+
+    -- run_fake errors loudly if the pipeline throws, so surviving IS the assertion.
+    testing.run_fake(department, helper.tick())
+
+    local report = helper.only_report(department)
+    t.is_true(report ~= nil, "a report must still be written")
+    t.is_true(
+      report.text:find("fkst_health_report = 1", 1, true) ~= nil,
+      "the report must still be a valid v1 document"
+    )
+    local status = scalar(report.text, "status")
+    t.is_true(
+      status ~= nil and status ~= "",
+      "the rules-derived status must survive an unusable github port"
+    )
+  end,
+
   -- ---- the happy path -------------------------------------------------------
   test_a_tick_writes_exactly_one_report_with_the_contract_filename = function()
     local department = helper.department()

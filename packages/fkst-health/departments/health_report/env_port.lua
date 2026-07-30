@@ -16,6 +16,12 @@ M.allowed = {
   FKST_RUNTIME_ROOT = true,
   FKST_SESSION_WORK_LABEL = true,
   FKST_GITHUB_REPO = true,
+  -- Logins, not credentials. forge.ports builds the trusted-author policy every
+  -- production GitHub read requires from these two; without them the github handle
+  -- is a poison object that raises on ANY field access. Same pair idle-detector
+  -- reads for the same reason.
+  FKST_GITHUB_BOT_LOGIN = true,
+  FKST_GITHUB_AUTHORIZED_LOGINS = true,
 }
 
 function M.command_for(name)

@@ -215,10 +215,27 @@ local function make_department(ports)
 
     observations.work_items = probes.unreadable(probe_failed.work_items)
     local repo, label = env("FKST_GITHUB_REPO"), env("FKST_SESSION_WORK_LABEL")
-    local github = ports.github
-    if repo ~= "" and label ~= "" and type(github) == "table" and type(github.issue_search) == "function" then
+    -- Resolving the handle is itself fallible and MUST be guarded. When the
+    -- production wiring cannot build a trusted-author policy, forge.ports makes
+    -- ports.github a poison object whose metatable raises on any field access -- so
+    -- merely reading `github.issue_search` to test it raises, outside every pcall,
+    -- and kills the whole tick. This package ships in the default manifest, so a
+    -- tick that dies instead of degrading one signal is a fleet-wide outage.
+    local ok_handle, issue_search = pcall(function()
+      local handle = ports.github
+      if type(handle) ~= "table" then
+        return nil
+      end
+      local fn = handle.issue_search
+      return type(fn) == "function" and fn or nil
+    end)
+    if not ok_handle then
+      note("SKIP", event, "github port unavailable: " .. error_facts.one_line(issue_search))
+      issue_search = nil
+    end
+    if repo ~= "" and label ~= "" and type(issue_search) == "function" then
       local ok_issues, result = pcall(
-        github.issue_search,
+        issue_search,
         repo,
         'is:open label:"' .. label .. '"',
         issue_query_fields,
@@ -363,4 +380,16 @@ local function make_department(ports)
   return department
 end
 
-return ports_lib.install(make_department)
+-- Production wiring. WITHOUT the author-policy options, forge.ports installs a
+-- POISON OBJECT as ports.github (ports.lua: a metatable whose __index raises on any
+-- field access), so the work-item probe cannot run at all. Mirrors
+-- idle-detector/departments/idle_gate/main.lua, which passes the same shape.
+local github_author_policy_env = {
+  bot_login_env = "FKST_GITHUB_BOT_LOGIN",
+  extra_login_envs = { "FKST_GITHUB_AUTHORIZED_LOGINS" },
+}
+
+return ports_lib.install(
+  make_department,
+  ports_lib.github_author_options(env_port.read, "fkst-health", github_author_policy_env)
+)
