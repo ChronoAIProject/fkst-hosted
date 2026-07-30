@@ -31,15 +31,38 @@ return {
     local pid = "github-devloop/issue/acme/site/42"
 
     t.eq(rounds.auto_refine_count({}, pid), 0)
-    t.eq(rounds.auto_refine_budget_remaining({}, pid), true)
+    t.eq(rounds.auto_refine_budget_remaining({}, pid, 2), true)
 
     t.eq(rounds.auto_refine_count({ marker(pid, 1) }, pid), 1)
-    t.eq(rounds.auto_refine_budget_remaining({ marker(pid, 1) }, pid), true)
+    t.eq(rounds.auto_refine_budget_remaining({ marker(pid, 1) }, pid, 2), true)
 
     -- At the cap the loop must hand over to a human rather than take another lap.
     local spent = { marker(pid, 1), marker(pid, 2) }
-    t.eq(rounds.auto_refine_count(spent, pid), rounds.MAX_AUTO_REFINEMENTS)
-    t.eq(rounds.auto_refine_budget_remaining(spent, pid), false)
+    t.eq(rounds.auto_refine_count(spent, pid), 2)
+    t.eq(rounds.auto_refine_budget_remaining(spent, pid, 2), false)
+  end,
+
+  test_refinement_is_off_unless_the_session_asks_for_it = function()
+    -- The default is what a session gets when its trigger says nothing, and it
+    -- must be OFF: consensus blocks and a human resolves it, exactly as before
+    -- self-refinement existed. Turning it on is the session owner's decision.
+    local rounds = require("devloop.convergence.rounds")
+    local pid = "github-devloop/issue/acme/site/42"
+
+    t.eq(rounds.DEFAULT_MAX_AUTO_REFINEMENTS, 0)
+    t.eq(rounds.auto_refine_budget_remaining({}, pid, 0), false)
+    -- An unresolvable budget is read as the default, never as "unlimited".
+    t.eq(rounds.auto_refine_budget_remaining({}, pid, nil), false)
+  end,
+
+  test_a_configured_budget_is_bounded_and_typo_tolerant = function()
+    local rounds = require("devloop.convergence.rounds")
+    local pid = "github-devloop/issue/acme/site/42"
+
+    -- A budget only bounds if it is itself bounded.
+    t.eq(rounds.auto_refine_budget_remaining({ marker(pid, 1) }, pid, 1), false)
+    t.eq(rounds.auto_refine_budget_remaining({ marker(pid, 1) }, pid, 5), true)
+    t.is_true(rounds.MAX_AUTO_REFINEMENTS_CEILING > 0)
   end,
 
   test_another_proposals_refinements_do_not_spend_this_budget = function()
@@ -51,7 +74,7 @@ return {
 
     local comments = { marker(theirs, 1), marker(theirs, 2) }
     t.eq(rounds.auto_refine_count(comments, mine), 0)
-    t.eq(rounds.auto_refine_budget_remaining(comments, mine), true)
+    t.eq(rounds.auto_refine_budget_remaining(comments, mine, 2), true)
   end,
 
   test_auto_refine_uses_an_action_the_marker_grammar_already_accepts = function()

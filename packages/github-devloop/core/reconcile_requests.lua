@@ -87,12 +87,12 @@ end
 -- re-reads the issue and all its comments from source on the next lap, so the
 -- detail is already available; copying it would duplicate content into a payload,
 -- which is the pattern CLAUDE.md explicitly rules out.
-function M.build_auto_refine_comment_request(repo, issue_number, reconcile, refine_round, cause, state_version)
+function M.build_auto_refine_comment_request(repo, issue_number, reconcile, refine_round, cause, state_version, budget)
   local marker = conv_rounds.auto_refine_marker(reconcile.proposal_id, refine_round, cause)
   local body = "fkst: reintake"
     .. "\n\n" .. ai_sentinel
     .. "\n\n**Auto-refinement " .. tostring(refine_round) .. "/"
-    .. tostring(conv_rounds.MAX_AUTO_REFINEMENTS)
+    .. tostring(budget or conv_rounds.DEFAULT_MAX_AUTO_REFINEMENTS)
     .. "** — consensus reached terminal cause `" .. tostring(cause) .. "` at round "
     .. tostring(reconcile.round) .. ", so this item is being refined and re-run"
     .. " rather than left blocked for a human to notice."
