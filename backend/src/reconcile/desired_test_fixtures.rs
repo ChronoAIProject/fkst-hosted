@@ -60,6 +60,7 @@ pub(super) fn reg(session_id: &str, trigger_issue: i64, config_hash: &str) -> Se
         auto_merge: false,
         log_access: vec![],
         collaborators: vec![],
+        effective_package_env: crate::goals::package_env::PackageEnv::new(),
     }
 }
 

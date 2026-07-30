@@ -64,6 +64,7 @@ fn base_reg() -> SessionRegistration {
         auto_merge: false,
         log_access: vec!["alice".to_string()],
         collaborators: vec![],
+        effective_package_env: crate::goals::package_env::PackageEnv::new(),
     }
 }
 

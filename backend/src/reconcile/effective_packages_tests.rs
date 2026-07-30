@@ -68,6 +68,7 @@ fn reg(
         auto_merge: false,
         log_access: vec![],
         collaborators: vec![],
+        effective_package_env: crate::goals::package_env::PackageEnv::new(),
     }
 }
 
@@ -380,5 +381,73 @@ async fn a_manifest_package_contributes_its_work_labels() {
     assert!(
         labels.contains("fkst-from-manifest"),
         "a package reachable only via the manifest contributes its work labels: {labels:?}"
+    );
+}
+
+/// Per-package configuration merges manifest defaults with the trigger's own
+/// settings. The precedence is per KEY, not per block: a trigger overriding one
+/// setting must not silently discard the manifest's other settings for that
+/// package, which is the failure mode a whole-block replace would have.
+#[tokio::test]
+async fn trigger_package_env_overrides_the_manifest_per_key() {
+    let server = MockServer::start().await;
+    let m = pkg("acme", "manifests", "main", "m.json");
+    mount_manifest_json(
+        &server,
+        &m,
+        json!({
+            "schemaVersion": 1,
+            "packages": ["acme/tools@main:pkg/a"],
+            "packageEnv": {
+                "github-devloop": {
+                    "FKST_DEVLOOP_AUTO_REFINE_MAX": "2",
+                    "FKST_DEVLOOP_ROLLUP_MERGE": "auto"
+                }
+            }
+        })
+        .to_string(),
+    )
+    .await;
+
+    let mut reg = reg("s1", 1, vec![], vec![m]);
+    reg.def.package_env.insert(
+        "github-devloop".to_string(),
+        [("FKST_DEVLOOP_AUTO_REFINE_MAX".to_string(), "0".to_string())]
+            .into_iter()
+            .collect(),
+    );
+
+    let resolved =
+        resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), &[reg]).await;
+
+    let env = &resolved.package_env_by_session["s1"]["github-devloop"];
+    assert_eq!(
+        env["FKST_DEVLOOP_AUTO_REFINE_MAX"], "0",
+        "the trigger must win for the key it sets"
+    );
+    assert_eq!(
+        env["FKST_DEVLOOP_ROLLUP_MERGE"], "auto",
+        "a manifest key the trigger did not touch must survive"
+    );
+}
+
+/// A manifest-free session's effective configuration is exactly its trigger's.
+#[tokio::test]
+async fn a_manifest_free_session_keeps_its_trigger_package_env() {
+    let server = MockServer::start().await;
+    let mut reg = reg("s1", 1, vec![pkg("acme", "tools", "main", "pkg/a")], vec![]);
+    reg.def.package_env.insert(
+        "github-devloop".to_string(),
+        [("FKST_DEVLOOP_AUTO_REFINE_MAX".to_string(), "2".to_string())]
+            .into_iter()
+            .collect(),
+    );
+
+    let resolved =
+        resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), &[reg]).await;
+
+    assert_eq!(
+        resolved.package_env_by_session["s1"]["github-devloop"]["FKST_DEVLOOP_AUTO_REFINE_MAX"],
+        "2"
     );
 }

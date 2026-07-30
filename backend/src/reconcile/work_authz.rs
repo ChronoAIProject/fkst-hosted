@@ -109,6 +109,7 @@ mod tests {
                 .iter()
                 .map(|value| value.to_string())
                 .collect(),
+            effective_package_env: crate::goals::package_env::PackageEnv::new(),
         }
     }
 

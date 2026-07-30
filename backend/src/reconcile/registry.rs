@@ -57,6 +57,10 @@ pub fn parse_registration(
     // manifest-free session stays byte-identical. Cloned here because `spec.packages` is
     // moved into `def.packages` below.
     let effective_packages = spec.packages.clone();
+    // Same manifest-free default as `effective_packages`: the trigger's own map.
+    // The expand pass overwrites it with (manifest ∪ trigger) before any consumer
+    // reads it, so a manifest-free session is already correct here.
+    let effective_package_env = spec.package_env.clone();
 
     Ok(SessionRegistration {
         installation_id,
@@ -84,6 +88,7 @@ pub fn parse_registration(
         auto_merge: spec.auto_merge,
         log_access: spec.log_access,
         collaborators: spec.collaborators,
+        effective_package_env,
     })
 }
 
