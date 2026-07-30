@@ -91,13 +91,19 @@ function C.load(exec)
     return cached
   end
   local raw = read_raw(C.PACKAGE_ENV_VAR, exec)
-  if raw == nil or raw == "" then
+  raw = tostring(raw or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  -- Only text that actually looks like a package-env object is treated as one.
+  -- `read_env` is the funnel EVERY devloop env read passes through, so this
+  -- function must be total: throwing on a value that is not a blob at all would
+  -- take an unrelated read -- and with it the session -- down.
+  if raw == "" or raw:sub(1, 1) ~= "{" then
     cached = {}
     return cached
   end
   local ok, decoded = pcall(json.decode, raw)
-  if not ok then
-    -- Fail loudly. Silently ignoring a malformed blob would run the session on
+  if not ok or type(decoded) ~= "table" then
+    -- It claimed to be an object and is not. That is a real defect rather than an
+    -- absent value, so it is loud: silently ignoring it would run the session on
     -- defaults while the author believes their configuration applied.
     error("devloop.package_env: package env is not valid JSON")
   end

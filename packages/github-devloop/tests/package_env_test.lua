@@ -44,11 +44,20 @@ return {
     t.eq(pkg_env.is_author_settable("FKST_DEVLOOP_AUTO_REFINE_MAX"), true)
   end,
 
-  test_malformed_json_fails_loudly = function()
-    -- Ignoring it would run the session on defaults while the author believes
-    -- their configuration applied -- the worst of both outcomes.
+  test_a_value_that_is_not_a_blob_is_simply_unset = function()
+    -- read_env is the funnel EVERY devloop env read passes through, so this must
+    -- be total. Throwing on a value that is not a package-env object at all would
+    -- take an unrelated read -- and with it the session -- down.
     local pkg_env = fresh()
-    local ok = pcall(pkg_env.get, "FKST_DEVLOOP_AUTO_REFINE_MAX", exec_returning("not json"))
+    t.eq(pkg_env.get("FKST_DEVLOOP_AUTO_REFINE_MAX", exec_returning("45")), nil)
+    pkg_env._reset()
+    t.eq(pkg_env.get("FKST_DEVLOOP_AUTO_REFINE_MAX", exec_returning("not json")), nil)
+  end,
+
+  test_a_malformed_object_fails_loudly = function()
+    -- It claimed to be an object and is not: a real defect, not an absent value.
+    local pkg_env = fresh()
+    local ok = pcall(pkg_env.get, "FKST_DEVLOOP_AUTO_REFINE_MAX", exec_returning('{"broken'))
     t.eq(ok, false)
   end,
 
@@ -62,9 +71,10 @@ return {
     t.eq(ok, false)
   end,
 
-  test_a_non_object_blob_errors = function()
+  test_a_json_array_is_unset = function()
     local pkg_env = fresh()
-    t.eq(pcall(pkg_env.get, "FKST_DEVLOOP_AUTO_REFINE_MAX", exec_returning("[1,2]")), false)
+    -- A JSON array is not an object, and does not start with `{`, so it is unset.
+    t.eq(pkg_env.get("FKST_DEVLOOP_AUTO_REFINE_MAX", exec_returning("[1,2]")), nil)
   end,
 
   test_a_non_object_block_errors = function()
