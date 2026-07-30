@@ -42,7 +42,6 @@ const GH_SHIM_SCRIPT: &str = include_str!("gh-shim.sh");
 /// The shim filename (must be exactly `gh` so it shadows the real one on PATH).
 const GH_SHIM_NAME: &str = "gh";
 /// Subdirs the driver creates under the (writable) runtime root.
-const PLATFORM_SUBDIR: &str = "platform";
 const PROJECT_SUBDIR: &str = "project";
 const GITCRED_SUBDIR: &str = "gitcred";
 /// Repo-local workflow catalog. workflow-writer authors new `fkst.workflow.v1`
@@ -168,36 +167,48 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     let shim_dir = runtime_root.join(SHIM_SUBDIR);
     install_gh_shim(&shim_dir)?;
 
-    // 4. Fetch: the one workspace repo (all refs share it in v1) into
-    //    <runtime>/platform at its ref, and the target repo at its provisioned
-    //    integration branch into
-    //    <runtime>/project. Both authenticate via the credential helper (public
-    //    repos succeed regardless; a private target uses the App token).
-    let plan = plan_clones(&env.package_refs)?;
-    let platform_root = runtime_root.join(PLATFORM_SUBDIR);
+    // 4. Fetch: each distinct package workspace repo at its ref, then the target
+    //    repo at its provisioned integration branch into <runtime>/project. The
+    //    first package workspace keeps the legacy <runtime>/platform checkout root;
+    //    additional workspaces are cloned under <runtime>/platforms/<hash>. All
+    //    clones authenticate via the credential helper (public repos succeed
+    //    regardless; a private target uses the App token).
+    let plan = plan_clones(&env.package_refs, runtime_root)?;
     let project_root = runtime_root.join(PROJECT_SUBDIR);
-    let workspace_url = format!(
-        "https://github.com/{}/{}.git",
-        plan.platform_repo.owner, plan.platform_repo.repo
-    );
-    git_clone(
-        &workspace_url,
-        Some(&plan.platform_repo.git_ref),
-        &platform_root,
-        &git_entries,
-        &token_file,
-    )
-    .await?;
+    let primary_workspace = plan
+        .workspaces
+        .first()
+        .ok_or_else(|| "no package workspaces to clone".to_string())?;
+    for workspace in &plan.workspaces {
+        if let Some(parent) = workspace.root.parent() {
+            create_dir_idempotent(parent)?;
+        }
+        let workspace_url = format!(
+            "https://github.com/{}/{}.git",
+            workspace.repo.owner, workspace.repo.repo
+        );
+        git_clone(
+            &workspace_url,
+            Some(&workspace.repo.git_ref),
+            &workspace.root,
+            &git_entries,
+            &token_file,
+        )
+        .await?;
+    }
 
-    let platform_repo = format!("{}/{}", plan.platform_repo.owner, plan.platform_repo.repo);
+    let platform_repo = format!(
+        "{}/{}",
+        primary_workspace.repo.owner, primary_workspace.repo.repo
+    );
     let delivery_plan = plan_delivery_checkouts(
         &env.delivery_grants,
         &env.repo,
         env.target_branch.as_deref(),
         &project_root,
         &platform_repo,
-        &plan.platform_repo.git_ref,
-        &platform_root,
+        &primary_workspace.repo.git_ref,
+        &primary_workspace.root,
         runtime_root,
     );
     for checkout in &delivery_plan.clones {
@@ -242,8 +253,8 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     //     for a `fkst.workspace.toml` and fails CLOSED without one. The target repo
     //     is a plain repo with no fkst workspace, so write a minimal manifest
     //     declaring zero units: the host root owns no departments, while each
-    //     platform `--package-root` resolves its `libraries/*` from the platform
-    //     clone's OWN `fkst.workspace.toml` (walk-up from that package root). Verified
+    //     `--package-root` resolves its `libraries/*` from that package root's
+    //     workspace clone OWN `fkst.workspace.toml` (walk-up from that root). Verified
     //     against fkst-substrate `path_resolver.rs` host-root discovery.
     let workspace_manifest = project_root.join("fkst.workspace.toml");
     std::fs::write(&workspace_manifest, "[workspace]\nunits = []\n")
@@ -256,8 +267,7 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     // 6. Build the supervise argv + the child env.
     let args = build_supervise_args(
         &project_root.to_string_lossy(),
-        &platform_root.to_string_lossy(),
-        &plan.package_paths,
+        &plan.package_roots,
         FRAMEWORK_BIN,
     );
     let mut child_env = substrate_child_env(
@@ -322,7 +332,7 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     //     block supervise.
     let log_stream = spawn_collector(collector_config_from_env(
         env.repo.clone(),
-        plan.platform_repo.git_ref.clone(),
+        primary_workspace.repo.git_ref.clone(),
         runtime_root.to_path_buf(),
         Path::new(&env.codex_home).to_path_buf(),
         Path::new(&env.creds_dir).to_path_buf(),
@@ -334,7 +344,7 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     // side of the run, not only the supervise/codex output.
     log_stream.emit_driver(format!(
         "run-substrate: supervising {} at engine ref {}",
-        env.repo, plan.platform_repo.git_ref
+        env.repo, primary_workspace.repo.git_ref
     ));
 
     // 7. exec supervise, forwarding SIGTERM to its group for a graceful drain, and
