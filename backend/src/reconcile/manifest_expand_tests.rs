@@ -3,8 +3,8 @@
 
 use secrecy::SecretString;
 use serde_json::json;
-use wiremock::matchers::{method, path, query_param};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::matchers::{header, method, path, query_param};
+use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 use super::{expand_manifest, ManifestError};
 use crate::goals::trigger_parse::PackageRef;
@@ -147,6 +147,42 @@ async fn valid_manifest_expands_all_fourteen_refs() {
     assert_eq!(refs[0].git_ref, "packages");
     assert_eq!(refs[0].path, "packages/workflow-dev");
     assert_eq!(refs[13].path, "packages/log-streamer");
+}
+
+#[tokio::test]
+async fn authenticated_forbidden_falls_back_to_public_manifest_read() {
+    let server = MockServer::start().await;
+    let m = manifest_ref();
+    let manifest_path = format!("/repos/{}/{}/contents/{}", m.owner, m.repo, m.path);
+
+    Mock::given(method("GET"))
+        .and(path(manifest_path.as_str()))
+        .and(query_param("ref", m.git_ref.as_str()))
+        .and(header(
+            "authorization",
+            format!("Bearer {SECRET_TOKEN}").as_str(),
+        ))
+        .respond_with(ResponseTemplate::new(403))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(manifest_path))
+        .and(query_param("ref", m.git_ref.as_str()))
+        .and(|request: &Request| !request.headers.contains_key("authorization"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(manifest_body(
+            1,
+            &["ChronoAIProject/fkst-hosted@packages:packages/workflow-dev".to_string()],
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let refs = expand(&server)
+        .await
+        .expect("public manifest should be retried without auth");
+
+    assert_eq!(refs, vec![expected_ref("workflow-dev")]);
 }
 
 #[tokio::test]

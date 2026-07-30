@@ -3,8 +3,8 @@
 //! contents API.
 
 use secrecy::SecretString;
-use wiremock::matchers::{method, path, query_param};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::matchers::{header, method, path, query_param};
+use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 use super::{
     apply_work_label_namespace, provider_session_issue_title, resolve_work_labels,
@@ -75,6 +75,43 @@ async fn unions_declared_labels_across_packages() {
     assert!(labels.contains("fkst-security"));
     assert!(labels.contains("fkst-workflow"));
     assert_eq!(labels.len(), 2);
+}
+
+#[tokio::test]
+async fn authenticated_forbidden_falls_back_to_public_package_manifest_read() {
+    let server = MockServer::start().await;
+    let repo_path = "o/r/contents/packages/workflow-dev";
+
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/{repo_path}/fkst.toml")))
+        .and(query_param("ref", "main"))
+        .and(header("authorization", "Bearer t"))
+        .respond_with(ResponseTemplate::new(403))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/{repo_path}/fkst.toml")))
+        .and(query_param("ref", "main"))
+        .and(|request: &Request| !request.headers.contains_key("authorization"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("[github]\nwork_labels = [\"fkst-dev\"]\n".to_string()),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let labels = resolve_work_labels(
+        &reqwest::Client::new(),
+        &server.uri(),
+        &tok(),
+        &[pkg("o", "r", "main", "packages/workflow-dev")],
+    )
+    .await;
+
+    assert!(labels.contains("fkst-dev"));
+    assert_eq!(labels.len(), 1);
 }
 
 #[tokio::test]

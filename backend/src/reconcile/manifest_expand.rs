@@ -248,16 +248,10 @@ async fn fetch_manifest_json(
     } = manifest_ref;
     // The path IS the .json file — no `/fkst.toml` suffix (that is a package convention).
     let url = format!("{base}/repos/{owner}/{repo}/contents/{path}");
-    let response = http
-        .get(&url)
-        .query(&[("ref", git_ref.as_str())])
-        // `raw` returns the file bytes directly rather than the base64 envelope.
-        .header(reqwest::header::ACCEPT, "application/vnd.github.raw")
-        .header(reqwest::header::USER_AGENT, "fkst-hosted-api")
-        .bearer_auth(token.expose_secret())
-        .send()
-        .await
-        .map_err(|_| ManifestError::Fetch("transport error".to_string()))?;
+    let mut response = manifest_request(http, &url, git_ref, Some(token)).await?;
+    if should_retry_without_auth(response.status()) {
+        response = manifest_request(http, &url, git_ref, None).await?;
+    }
 
     let status = response.status();
     if status == reqwest::StatusCode::NOT_FOUND {
@@ -270,6 +264,35 @@ async fn fetch_manifest_json(
         .text()
         .await
         .map_err(|_| ManifestError::Fetch("body read error".to_string()))
+}
+
+fn should_retry_without_auth(status: reqwest::StatusCode) -> bool {
+    matches!(
+        status,
+        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+    )
+}
+
+async fn manifest_request(
+    http: &reqwest::Client,
+    url: &str,
+    git_ref: &str,
+    token: Option<&SecretString>,
+) -> Result<reqwest::Response, ManifestError> {
+    let request = http
+        .get(url)
+        .query(&[("ref", git_ref)])
+        // `raw` returns the file bytes directly rather than the base64 envelope.
+        .header(reqwest::header::ACCEPT, "application/vnd.github.raw")
+        .header(reqwest::header::USER_AGENT, "fkst-hosted-api");
+    let request = match token {
+        Some(token) => request.bearer_auth(token.expose_secret()),
+        None => request,
+    };
+    request
+        .send()
+        .await
+        .map_err(|_| ManifestError::Fetch("transport error".to_string()))
 }
 
 #[cfg(test)]
