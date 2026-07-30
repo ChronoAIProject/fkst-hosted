@@ -15,6 +15,8 @@ local allowed_env = {
   FKST_SESSION_CREATOR = true,
   FKST_SESSION_WORK_LABEL = true,
   FKST_SESSION_WORK_LABEL_MAP_JSON = true,
+  FKST_SESSION_PACKAGE_ENV_JSON = true,
+  FKST_DEVLOOP_AUTO_REFINE_MAX = true,
   FKST_WORK_LABEL_NAMESPACE = true,
   FKST_GITHUB_WRITE = true,
   FKST_DEVLOOP_UPSTREAM_BRANCH = true,
@@ -65,6 +67,14 @@ function C.read_env_command(name)
 end
 
 function C.read_env(name, exec)
+  -- Per-package configuration wins over the process environment for the names a
+  -- session author is allowed to set. Everything else -- and every name when the
+  -- control plane sets no blob -- falls through unchanged, which is what lets the
+  -- control plane and these packages deploy in either order.
+  local overlay = require("devloop.package_env").get(name, exec)
+  if overlay ~= nil then
+    return overlay
+  end
   return read_env(name, exec)
 end
 

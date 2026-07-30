@@ -78,6 +78,7 @@ public = [
   "devloop.merge_queue",
   "devloop.operator_commands",
   "devloop.parsers",
+  "devloop.package_env",
   "devloop.parsers.issue",
   "devloop.parsers.misc",
   "devloop.parsers.pr",
