@@ -1,8 +1,9 @@
-import { useCallback, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { useContent } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
 import { cn } from '@/lib/utils';
 import { getObserve, ObserveError } from '@/lib/api/observe';
+import { getSessionHealth, HealthError } from '@/lib/api/health';
 import { canQueueSessionWork, decodeSessionStatus, sessionWorkLabels } from '@/lib/api/derive';
 import type { SessionDetail } from '@/lib/api/types';
 import { CreateWorkItemModal } from '@/components/modals/create-work-item-modal';
@@ -15,8 +16,10 @@ import { TabStatus } from './tab-status';
 import { TabPackages } from './tab-packages';
 import { TabLogs } from './tab-logs';
 import { TabOutcomes } from './tab-outcomes';
+import { TabHealth, type HealthState } from './tab-health';
+import { healthChip } from './health-state';
 
-type TabKey = 'status' | 'packages' | 'logs' | 'outcomes';
+type TabKey = 'status' | 'packages' | 'logs' | 'health' | 'outcomes';
 
 /** The reusable inner detail surface: a sticky header with the decoded status
  *  pill and a four-tab body (status / packages / logs / outcomes). It renders
@@ -67,6 +70,11 @@ export function SessionDetailView({
 
   const [tab, setTab] = useState<TabKey>('status');
   const [observe, setObserve] = useState<ObserveState>({ status: 'idle' });
+  // The health listing is LIFTED here, not deferred to the tab, because the header
+  // chip is the "at a glance" half of the feature and cannot wait for the reader to
+  // open the tab. One fetch serves both surfaces, so this is strictly fewer requests
+  // than fetching per tab activation; the backend serves it from a TTL-cached index.
+  const [health, setHealth] = useState<HealthState>({ status: 'idle' });
   const [showWorkItem, setShowWorkItem] = useState(false);
 
   // Live refs to each tab button so the arrow-key handler can move focus onto
@@ -97,10 +105,34 @@ export function SessionDetailView({
       );
   }, [apiFetch, session.session_id]);
 
+  const loadHealth = useCallback(() => {
+    const sessionId = session.session_id;
+    if (!sessionId) {
+      setHealth({ status: 'error' });
+      return;
+    }
+    setHealth({ status: 'loading' });
+    getSessionHealth(apiFetch, sessionId)
+      .then((loaded) => setHealth({ status: 'loaded', health: loaded }))
+      .catch((err) =>
+        setHealth({
+          status: 'error',
+          httpStatus: err instanceof HealthError ? err.status : undefined,
+        })
+      );
+  }, [apiFetch, session.session_id]);
+
+  useEffect(() => {
+    loadHealth();
+  }, [loadHealth]);
+
+  const chip = healthChip(health.status === 'loaded' ? health.health : null);
+
   const tabs: Array<{ key: TabKey; label: string }> = [
     { key: 'status', label: t.tabStatus },
     { key: 'packages', label: t.tabPackages },
     { key: 'logs', label: t.tabLogs },
+    { key: 'health', label: t.tabHealth },
     { key: 'outcomes', label: t.tabOutcomes },
   ];
 
@@ -148,6 +180,19 @@ export function SessionDetailView({
                 <span className="anim-chip-in inline-flex">
                   <Chip tone={status.liveness === 'live' ? 'green' : 'neutral'}>
                     {status.liveness}
+                  </Chip>
+                </span>
+              )}
+              {/* Business-aware health. A STALE heartbeat overrides the reported
+                  status (a 35-minute-old "working" verdict is not evidence of
+                  work); `not_running` renders neutral because a reaped pod is
+                  normal; `never_reported` renders nothing at all. */}
+              {chip && (
+                <span className="anim-chip-in inline-flex">
+                  <Chip tone={chip.tone}>
+                    {chip.kind === 'stale'
+                      ? t.healthStaleChip
+                      : t.healthStatus[chip.status]}
                   </Chip>
                 </span>
               )}
@@ -263,6 +308,13 @@ export function SessionDetailView({
           )}
           {tab === 'packages' && <TabPackages session={session} observe={observe} />}
           {tab === 'logs' && <TabLogs session={session} />}
+          {tab === 'health' && (
+            <TabHealth
+              sessionId={session.session_id ?? ''}
+              state={health}
+              onRetry={loadHealth}
+            />
+          )}
           {tab === 'outcomes' && (
             <TabOutcomes owner={owner} name={name} issue={session.trigger.number} />
           )}

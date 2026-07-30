@@ -63,10 +63,13 @@ describe('SessionDetailDrawer', () => {
 
     const dialog = await screen.findByRole('dialog');
     expect(dialog).toBeInTheDocument();
-    // Header decoded pill + the four tabs.
+    // Header decoded pill + the five tabs.
     expect(screen.getByRole('tab', { name: 'Status' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Packages' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Logs' })).toBeInTheDocument();
+    // Health sits between Logs and Outcomes: the second thing a reader wants after
+    // "is it running", and before the finished-work view.
+    expect(screen.getByRole('tab', { name: 'Health' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Outcomes' })).toBeInTheDocument();
   });
 
