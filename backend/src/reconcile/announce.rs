@@ -79,6 +79,7 @@ pub(crate) fn announce_session_comment_with_defaults(
         None,
         log_url,
         full_config_hash,
+        &crate::goals::package_env::PackageEnv::new(),
     )
 }
 
@@ -100,6 +101,7 @@ pub fn announce_session_comment(
     frontend_url: Option<&str>,
     log_url: Option<&str>,
     full_config_hash: &str,
+    package_env: &crate::goals::package_env::PackageEnv,
 ) -> String {
     let mut body = format!("🟢 **fkst session `{session_name}` registered.**\n\n");
 
@@ -156,6 +158,25 @@ pub fn announce_session_comment(
             "**Environment:** default — no named environment profile, no extra \
              configuration or software installations.\n\n",
         ),
+    }
+
+    // Echo the per-package configuration that was actually applied. Unknown
+    // package names and unknown keys are advisory by design -- a package the
+    // session does not run simply ignores them -- so without this echo a typo is
+    // silently inert and the author never learns their setting did nothing.
+    //
+    // KEY NAMES ONLY, never values: a value can carry a test command or another
+    // detail that does not belong in a public comment.
+    if !package_env.is_empty() {
+        body.push_str("**Package configuration applied:**\n\n");
+        for (package, keys) in package_env {
+            let names: Vec<&str> = keys.keys().map(String::as_str).collect();
+            body.push_str(&format!("- `{package}`: `{}`\n", names.join("`, `")));
+        }
+        body.push_str(
+            "\nIf a package or key above is misspelled it is ignored, so check this \
+             list matches what you intended.\n\n",
+        );
     }
 
     body.push_str(&format!(
@@ -383,6 +404,7 @@ mod tests {
             Some("https://fkst.chrono-ai.fun"),
             None,
             "h",
+            &crate::goals::package_env::PackageEnv::new(),
         );
         assert!(with_url.contains("**🖥️ Dashboard**"), "{with_url}");
         assert!(
@@ -659,6 +681,7 @@ mod work_label_set_tests {
             None,
             None,
             "h",
+            &crate::goals::package_env::PackageEnv::new(),
         );
         assert!(body.contains("**Source branch:** `release/v1`"));
         assert!(body.contains("**Target branch:** `feature-x`"));
@@ -666,5 +689,64 @@ mod work_label_set_tests {
         // The what-to-expect PR line names the resolved target branch too.
         assert!(body.contains("as its own pull request into `feature-x`"));
         assert!(body.ends_with("<!-- fkst-config-hash: h -->"));
+    }
+}
+
+#[cfg(test)]
+mod package_env_echo_tests {
+    use super::*;
+
+    fn body_with(package_env: crate::goals::package_env::PackageEnv) -> String {
+        announce_session_comment(
+            "sess",
+            Some("wl"),
+            &["wl".to_string()],
+            &["acme/tools@main:pkg/a".to_string()],
+            None,
+            None,
+            "fkst-hosted-default",
+            false,
+            "creator",
+            None,
+            None,
+            "hash",
+            &package_env,
+        )
+    }
+
+    #[test]
+    fn an_unconfigured_session_says_nothing_about_package_config() {
+        let body = body_with(crate::goals::package_env::PackageEnv::new());
+        assert!(!body.contains("Package configuration applied"));
+    }
+
+    #[test]
+    fn applied_package_config_is_echoed_by_key_name_only() {
+        // Unknown packages and keys are advisory by design, so without this echo a
+        // typo is silently inert and the author never learns their setting did
+        // nothing. Values are deliberately NOT rendered: one can carry a test
+        // command or another detail that does not belong in a public comment.
+        let mut env = crate::goals::package_env::PackageEnv::new();
+        env.insert(
+            "github-devloop".to_string(),
+            [
+                ("FKST_DEVLOOP_AUTO_REFINE_MAX".to_string(), "2".to_string()),
+                (
+                    "FKST_DEVLOOP_TEST_COMMAND".to_string(),
+                    "cargo test --secret-looking-thing".to_string(),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        );
+
+        let body = body_with(env);
+        assert!(body.contains("**Package configuration applied:**"));
+        assert!(body.contains("`github-devloop`"));
+        assert!(body.contains("FKST_DEVLOOP_AUTO_REFINE_MAX"));
+        assert!(
+            !body.contains("cargo test --secret-looking-thing"),
+            "values must never be rendered into the announcement"
+        );
     }
 }
