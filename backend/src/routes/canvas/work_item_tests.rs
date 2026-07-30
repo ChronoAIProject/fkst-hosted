@@ -216,6 +216,7 @@ fn work_registration_preserves_creator_and_authored_branches_in_the_hash() {
         &spec.manifest_refs,
         spec.source_branch.as_deref(),
         spec.target_branch.as_deref(),
+        &crate::goals::package_env::PackageEnv::new(),
     );
     let reg = work_registration(
         "acme",

@@ -98,6 +98,7 @@ mod tests {
                 engine_config: std::collections::BTreeMap::new(),
                 source_branch: None,
                 target_branch: None,
+                package_env: crate::goals::package_env::PackageEnv::new(),
             },
             effective_packages: Vec::new(),
             session_id: "sess-abc".to_string(),

@@ -378,6 +378,7 @@ pub(super) fn registration() -> SessionRegistration {
             engine_config: std::collections::BTreeMap::new(),
             source_branch: None,
             target_branch: None,
+            package_env: crate::goals::package_env::PackageEnv::new(),
         },
         // A manifest-free registration: the effective set equals the explicit packages, so
         // `package_roots` + reachability read exactly these two refs.

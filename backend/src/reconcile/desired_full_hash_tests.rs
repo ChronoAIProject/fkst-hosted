@@ -28,6 +28,7 @@ fn config_hash(
         manifest_refs,
         None,
         None,
+        &crate::goals::package_env::PackageEnv::new(),
     )
 }
 
@@ -55,6 +56,7 @@ fn base_reg() -> SessionRegistration {
             engine_config: std::collections::BTreeMap::new(),
             source_branch: None,
             target_branch: None,
+            package_env: crate::goals::package_env::PackageEnv::new(),
         },
         effective_packages: vec![pkg("acme", "tools", "main", "pkg/a")],
         session_id: "sid".to_string(),
@@ -361,5 +363,53 @@ fn full_config_hash_moves_with_the_engine_config() {
         base,
         full_config_hash(&reg),
         "engine_config must move the hash"
+    );
+}
+
+/// The full-hash twin of `package_env_is_skipped_when_empty_and_flips_the_digest_when_set`.
+/// This is the hash the immutability check compares, so it is what actually
+/// FREEZES per-package configuration after registration.
+#[test]
+fn full_hash_skips_empty_package_env_and_freezes_a_configured_one() {
+    let base = base_reg();
+    let baseline = full_config_hash(&base);
+
+    // (a) An unconfigured session is byte-identical, so the deploy that adds the
+    // field cannot trip `fkst-config-rejected` across the fleet.
+    let mut untouched = base_reg();
+    untouched.def.package_env = crate::goals::package_env::PackageEnv::new();
+    assert_eq!(
+        full_config_hash(&untouched),
+        baseline,
+        "an empty package env must leave the full hash untouched"
+    );
+
+    // (b) Configuring a package moves the full hash, so a later edit is detected
+    // and rejected rather than silently applied.
+    let mut configured = base_reg();
+    configured.def.package_env.insert(
+        "github-devloop".to_string(),
+        [("FKST_DEVLOOP_AUTO_REFINE_MAX".to_string(), "2".to_string())]
+            .into_iter()
+            .collect(),
+    );
+    assert_ne!(
+        full_config_hash(&configured),
+        baseline,
+        "configuring a package must move the full config hash"
+    );
+
+    // (c) A different VALUE for the same key is a different config.
+    let mut other_value = base_reg();
+    other_value.def.package_env.insert(
+        "github-devloop".to_string(),
+        [("FKST_DEVLOOP_AUTO_REFINE_MAX".to_string(), "3".to_string())]
+            .into_iter()
+            .collect(),
+    );
+    assert_ne!(
+        full_config_hash(&other_value),
+        full_config_hash(&configured),
+        "changing a package env value must move the full config hash"
     );
 }

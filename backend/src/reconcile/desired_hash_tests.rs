@@ -25,6 +25,7 @@ fn config_hash(
         manifest_refs,
         None,
         None,
+        &crate::goals::package_env::PackageEnv::new(),
     )
 }
 
@@ -354,6 +355,7 @@ fn source_and_target_branches_each_move_the_config_hash() {
             &no_manifest(),
             None,
             None,
+            &crate::goals::package_env::PackageEnv::new(),
         ),
         "unset trailing branch fields preserve the historical digest"
     );
@@ -368,6 +370,7 @@ fn source_and_target_branches_each_move_the_config_hash() {
             &no_manifest(),
             Some("main"),
             None,
+            &crate::goals::package_env::PackageEnv::new(),
         )
     );
     assert_ne!(
@@ -381,6 +384,69 @@ fn source_and_target_branches_each_move_the_config_hash() {
             &no_manifest(),
             None,
             Some("feature-x"),
+            &crate::goals::package_env::PackageEnv::new(),
         )
+    );
+}
+
+/// Per-package configuration must not disturb any existing session's digest, and
+/// must flip it once used. Both halves matter: the first keeps the fleet alive
+/// across the deploy that adds the field, the second is what FREEZES the config.
+#[test]
+fn package_env_is_skipped_when_empty_and_flips_the_digest_when_set() {
+    let pkgs = vec![pkg("acme", "tools", "main", "pkg/a")];
+    let empty = crate::goals::package_env::PackageEnv::new();
+
+    // (a) An empty map serializes to nothing, so the digest is byte-identical to
+    // the one pinned before this field existed.
+    assert_eq!(
+        config_hash_with_branches(
+            &pkgs,
+            Some("wl"),
+            Some("env"),
+            None,
+            &no_engine_config(),
+            &no_manifest(),
+            None,
+            None,
+            &empty,
+        ),
+        "7a039ccf53042416ee9ae7127e168806f353fa7472e49eb24d39e7994ef9dfea",
+        "an unconfigured session must hash exactly as it did before the field existed"
+    );
+
+    // (b) A configured session hashes differently, so editing package config
+    // after registration is a rejected config change and respawns the pod.
+    let mut configured = crate::goals::package_env::PackageEnv::new();
+    configured.insert(
+        "github-devloop".to_string(),
+        [("FKST_DEVLOOP_AUTO_REFINE_MAX".to_string(), "2".to_string())]
+            .into_iter()
+            .collect(),
+    );
+    assert_ne!(
+        config_hash_with_branches(
+            &pkgs,
+            Some("wl"),
+            Some("env"),
+            None,
+            &no_engine_config(),
+            &no_manifest(),
+            None,
+            None,
+            &empty,
+        ),
+        config_hash_with_branches(
+            &pkgs,
+            Some("wl"),
+            Some("env"),
+            None,
+            &no_engine_config(),
+            &no_manifest(),
+            None,
+            None,
+            &configured,
+        ),
+        "configuring a package must move the config hash"
     );
 }
