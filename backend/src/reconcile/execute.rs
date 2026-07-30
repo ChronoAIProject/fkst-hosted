@@ -673,6 +673,7 @@ fn session_pod_spec_from(
             .collect(),
         work_label: crate::k8s::work_label_wire::join_work_labels(&labels.effective),
         work_label_map_json: labels.map_json(),
+        work_label_namespace: work_label_namespace.map(str::to_string),
         // Serialized only when the session configures at least one package, so an
         // unconfigured session renders no key. BTreeMap ordering makes the JSON
         // deterministic, which matters because this value feeds the runtime config

@@ -377,8 +377,14 @@ impl ReconcileConfig {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
         if let Some(namespace) = work_label_namespace.as_deref() {
-            crate::reconcile::work_labels::validate_work_label_namespace(namespace)
-                .map_err(|error| AppError::Config(format!("FKST_WORK_LABEL_NAMESPACE {error}")))?;
+            crate::reconcile::work_labels::validate_work_label_namespace(namespace).map_err(
+                |error| {
+                    AppError::Config(format!(
+                        "{} {error}",
+                        crate::reconcile::work_labels::WORK_LABEL_NAMESPACE_ENV
+                    ))
+                },
+            )?;
         }
 
         // Whitespace-separated package refs; a blank/all-whitespace value falls
