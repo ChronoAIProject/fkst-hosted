@@ -893,32 +893,46 @@ staging
 }
 
 #[test]
-fn the_bundled_templates_new_sections_parse_unset_verbatim() {
-    // The EXACT bundled text of the two NEW sections (explanatory comments and
-    // all) must parse to "not set" — never a 422 that punishes an author who
-    // kept the template's comments. The tail of the bundled asset (from
-    // `### Output Language` onward) is spliced verbatim onto valid required
-    // sections, so this test breaks if the asset's new-section text ever stops
-    // being comment-only or stops stripping cleanly.
+fn the_bundled_templates_optional_sections_parse_unset_verbatim() {
+    // The EXACT bundled text of every comment-only OPTIONAL section must parse to
+    // "not set" — never a 422 that punishes an author who kept the template's
+    // guidance comments. Sections are pulled BY NAME rather than by slicing the
+    // template's tail, so reordering the form (as the session/package grouping
+    // does) cannot silently stop this from testing what it claims to.
     let template = include_str!("../github_app/templates_assets/fkst-substrate-session.md");
-    let new_sections_start = template
-        .find("### Output Language")
-        .expect("the bundled template carries the Output Language section");
+
+    fn section(template: &str, heading: &str) -> String {
+        let start = template
+            .find(heading)
+            .unwrap_or_else(|| panic!("the bundled template carries {heading}"));
+        let rest = &template[start + heading.len()..];
+        let end = rest.find("\n### ").map(|at| at + 1).unwrap_or(rest.len());
+        format!("{heading}{}", &rest[..end])
+    }
+
+    let optional = [
+        "### Output Language",
+        "### Engine Config",
+        "### Package Env",
+    ]
+    .into_iter()
+    .map(|heading| section(template, heading))
+    .collect::<Vec<_>>()
+    .join("\n");
+
     let body = format!(
-        "### Session Name
-sess
-### Packages
-{VALID_PKG}
-### Work Label
-label
-{}",
-        &template[new_sections_start..]
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\nlabel\n{optional}"
     );
-    let spec = parse_trigger_issue_body(&body).expect("the bundled new-section text must parse");
+    let spec =
+        parse_trigger_issue_body(&body).expect("the bundled optional-section text must parse");
     assert_eq!(spec.output_lang, None, "comment-only section is unset");
     assert!(
         spec.engine_config.is_empty(),
         "comment-only section is an empty map"
+    );
+    assert!(
+        spec.package_env.is_empty(),
+        "the Package Env example lives inside a comment, so it must configure nothing"
     );
 }
 
