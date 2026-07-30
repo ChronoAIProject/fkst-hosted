@@ -640,6 +640,19 @@ fn session_pod_spec_from(
             .collect(),
         work_label: crate::k8s::work_label_wire::join_work_labels(&labels.effective),
         work_label_map_json: labels.map_json(),
+        // Serialized only when the session configures at least one package, so an
+        // unconfigured session renders no key. BTreeMap ordering makes the JSON
+        // deterministic, which matters because this value feeds the runtime config
+        // hash: a non-deterministic rendering would look like config drift and
+        // respawn the pod on every pass.
+        package_env_json: if reg.effective_package_env.is_empty() {
+            None
+        } else {
+            Some(
+                serde_json::to_string(&reg.effective_package_env)
+                    .expect("a BTreeMap of strings always serializes"),
+            )
+        },
         bot_login: bot_login.unwrap_or_default(),
         config_hash: runtime_config_hash(&reg.config_hash, work_label_namespace),
         output_lang: reg.def.output_lang.clone(),
