@@ -470,3 +470,61 @@ fn parse_errors_render_a_useful_message() {
         .to_string()
         .contains("front matter"));
 }
+
+/// A CROSS-PRODUCER conformance fixture: the exact bytes the `fkst-health` package's
+/// Lua renderer emits, captured by running that renderer and pasted here verbatim.
+///
+/// The producer and this parser ship from two different branches and two different
+/// languages, so nothing but a real captured artifact proves they agree. If the
+/// producer's rendering ever drifts — a YAML fence, a reordered table, a `:` in the
+/// stamp — this test fails on the develop side before a session ever writes one.
+#[test]
+fn the_real_producers_output_parses_into_every_field() {
+    let text = include_str!("fixtures/producer-report-v1.md");
+    let report = parse_report(text).expect("the shipped producer's output must parse");
+
+    assert_eq!(report.schema_version, SCHEMA_VERSION);
+    assert_eq!(report.session_id, "8f2c1d64-0a1b-4c2d-8e3f-0123456789ab");
+    assert_eq!(
+        report.namespace.as_deref(),
+        Some("chronoai-fkst-cloud-test")
+    );
+    assert_eq!(report.producer, "fkst-health@0.1.0");
+    assert_eq!(
+        report.generated_at.to_rfc3339(),
+        "2026-07-31T12:15:00+00:00"
+    );
+    assert_eq!(
+        report.window_start.expect("window").to_rfc3339(),
+        "2026-07-31T12:05:00+00:00"
+    );
+    assert_eq!(report.expected_interval_secs, 600);
+    assert_eq!(report.status, HealthStatus::Stalled);
+    assert_eq!(report.confidence.as_deref(), Some("high"));
+    assert_eq!(report.evidence.len(), 2);
+    assert_eq!(report.evidence[0].key, "deliveries_completed_delta");
+    assert_eq!(report.work_items.len(), 1);
+    assert_eq!(report.work_items[0].number, 812);
+    assert!(report
+        .body_markdown
+        .starts_with("## What this session is doing"));
+}
+
+/// The filenames that same renderer produces, parsed by this module's parser — the
+/// other half of the cross-language contract.
+#[test]
+fn the_real_producers_filenames_parse() {
+    let namespaced = "chronoai-fkst-cloud-test-8f2c1d64-0a1b-4c2d-8e3f-0123456789ab-health-agent-status-report-20260731-121500.md";
+    let parsed = crate::session_health::parse_report_filename(namespaced).expect("parses");
+    assert_eq!(
+        parsed.namespace.as_deref(),
+        Some("chronoai-fkst-cloud-test")
+    );
+    assert_eq!(parsed.session_id, "8f2c1d64-0a1b-4c2d-8e3f-0123456789ab");
+    assert_eq!(parsed.stamp, "20260731-121500");
+
+    let bare = "8f2c1d64-0a1b-4c2d-8e3f-0123456789ab-health-agent-status-report-20260731-121500.md";
+    let parsed = crate::session_health::parse_report_filename(bare).expect("parses");
+    assert_eq!(parsed.namespace, None);
+    assert_eq!(parsed.session_id, "8f2c1d64-0a1b-4c2d-8e3f-0123456789ab");
+}
