@@ -157,6 +157,11 @@ pub const SESSION_ID_LABEL: &str = "fkst.chrono-ai.fun/session-id";
 
 /// What the control plane needs to launch (and later reconcile) one long-lived
 /// substrate-session Pod. Non-secret: a `{:?}` of it can never leak a token.
+/// The single env var carrying per-package configuration into the session pod.
+/// Named in [`crate::goals::package_env::PLATFORM_OWNED_SESSION_ENV`] so a trigger
+/// author cannot set it themselves and forge another package's configuration.
+pub const SESSION_PACKAGE_ENV_JSON_ENV: &str = "FKST_SESSION_PACKAGE_ENV_JSON";
+
 pub struct SessionPodSpec {
     /// Session id; `fkst-sess-<session_id>` is the deterministic Pod (and Secret)
     /// name, so a re-trigger is an at-most-one / 409-idempotent no-op.
@@ -181,6 +186,12 @@ pub struct SessionPodSpec {
     /// Optional deterministic logical-to-effective work-label mapping for package
     /// discovery and outbound GitHub effects. Absent on unnamespaced deployments.
     pub work_label_map_json: Option<String>,
+    /// Optional per-package configuration, as one JSON object of
+    /// `{package: {KEY: value}}` (`### Package Env` merged with the manifest's
+    /// `packageEnv`). `None` when the session configures no package, which renders
+    /// NO env key at all — an unconfigured session's pod env stays byte-identical
+    /// to what it was before this feature existed.
+    pub package_env_json: Option<String>,
     /// The bot login (`FKST_GITHUB_BOT_LOGIN` + git author/committer name).
     pub bot_login: String,
     /// Config-hash annotation used by the reconciler for drift detection.
@@ -348,6 +359,16 @@ pub(crate) fn session_env_pairs(
         env.push((
             crate::reconcile::work_labels::SESSION_WORK_LABEL_MAP_JSON_ENV.to_string(),
             work_label_map_json.clone(),
+        ));
+    }
+    // Per-package configuration travels as ONE variable rather than as flattened
+    // per-package keys: the packages read it through a single funnel, and a lone
+    // variable keeps the platform-owned surface (and its denylist) small enough to
+    // enumerate. Absent when unconfigured, like every conditional var above.
+    if let Some(package_env_json) = &spec.package_env_json {
+        env.push((
+            SESSION_PACKAGE_ENV_JSON_ENV.to_string(),
+            package_env_json.clone(),
         ));
     }
     // The engine-tunable tail: output locale + the tighten-merged engine config

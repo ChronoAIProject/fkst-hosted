@@ -34,6 +34,7 @@ fn spec() -> SessionPodSpec {
         package_roots: vec!["web".to_string(), "api".to_string()],
         work_label: "fkst".to_string(),
         work_label_map_json: None,
+        package_env_json: None,
         bot_login: "fkst-bot[bot]".to_string(),
         config_hash: "cfg-deadbeef".to_string(),
         output_lang: None,
@@ -725,4 +726,75 @@ fn without_engine_config_overrides_the_operator_llm_values_render() {
     assert!(pairs
         .iter()
         .any(|(k, v)| k == "FKST_LLM_REASONING_EFFORT" && v == "max"));
+}
+
+/// An unconfigured session must render NO package-env key, so adding this feature
+/// cannot change any existing pod's environment.
+#[test]
+fn an_unconfigured_session_renders_no_package_env_key() {
+    let rendered = session_env_pairs(&spec(), &config());
+    assert!(
+        !rendered
+            .iter()
+            .any(|(key, _)| key == crate::k8s::session_launcher::SESSION_PACKAGE_ENV_JSON_ENV),
+        "an empty package env must render no key at all"
+    );
+}
+
+/// A configured session renders exactly one deterministic key.
+#[test]
+fn a_configured_session_renders_one_deterministic_package_env_key() {
+    let mut configured = spec();
+    configured.package_env_json =
+        Some(r#"{"github-devloop":{"FKST_DEVLOOP_AUTO_REFINE_MAX":"2"}}"#.to_string());
+
+    let rendered = session_env_pairs(&configured, &config());
+    let hits: Vec<_> = rendered
+        .iter()
+        .filter(|(key, _)| key == crate::k8s::session_launcher::SESSION_PACKAGE_ENV_JSON_ENV)
+        .collect();
+
+    assert_eq!(hits.len(), 1, "exactly one key, never a duplicate EnvVar");
+    assert_eq!(
+        hits[0].1,
+        r#"{"github-devloop":{"FKST_DEVLOOP_AUTO_REFINE_MAX":"2"}}"#
+    );
+}
+
+/// The denylist a trigger author is validated against must name EVERY variable the
+/// platform actually renders. A static list drifts the moment someone adds a new
+/// platform variable and forgets, which would silently let an author set it from
+/// their trigger — so this derives the truth from a fully populated spec instead of
+/// restating it.
+#[test]
+fn every_platform_rendered_env_key_is_on_the_author_denylist() {
+    use crate::goals::package_env::PLATFORM_OWNED_SESSION_ENV;
+
+    let mut full = spec();
+    full.work_label_map_json = Some("{}".to_string());
+    full.package_env_json = Some("{}".to_string());
+    full.delivery_grants_json = Some("[]".to_string());
+    full.contributors = vec!["someone".to_string()];
+
+    let rendered = session_env_pairs(&full, &config());
+
+    let mut missing: Vec<String> = Vec::new();
+    // Only the names a session AUTHOR could plausibly collide with are policed:
+    // the session-identity and routing variables. Engine tunables have their own
+    // allowlisted section (`### Engine Config`) and are excluded there by name.
+    for (key, _) in &rendered {
+        let policed = key.starts_with("FKST_SESSION_")
+            || key.starts_with("FKST_GITHUB_")
+            || key == "FKST_TRIGGER_ISSUE"
+            || key == "FKST_WORK_LABEL_NAMESPACE";
+        if policed && !PLATFORM_OWNED_SESSION_ENV.contains(&key.as_str()) {
+            missing.push(key.clone());
+        }
+    }
+
+    assert!(
+        missing.is_empty(),
+        "rendered by the platform but missing from PLATFORM_OWNED_SESSION_ENV \
+         (a trigger author could set these): {missing:?}"
+    );
 }
