@@ -89,6 +89,14 @@ pub mod router;
 pub mod routes;
 pub mod schedule;
 pub mod session_backend;
+// The v1 session **health report** contract (milestone "Session health reports"):
+// the file location, filename shape, and TOML-front-matter schema an in-session
+// package writes and the control plane parses. Pure — no I/O — and deliberately the
+// FIRST thing to land, because the producer (the `fkst-health` package on the
+// `packages` branch) and the consumer (this crate) are independent release streams.
+// It relays `status`/`headline` verbatim and treats the body as opaque, which is what
+// preserves the package-agnosticism `crate::k8s::health_scrape` depends on.
+pub mod session_health;
 // Optional chrono-storage object-store client + its NyxID service-account token
 // provider (log-streaming Wave 1). Self-contained + wiremock-tested; disabled
 // (resolves to `None`) unless the `FKST_STORAGE_*` / `FKST_NYXID_*` vars are set.
