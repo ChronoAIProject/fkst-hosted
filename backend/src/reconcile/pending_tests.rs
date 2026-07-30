@@ -152,6 +152,7 @@ fn registration() -> SessionRegistration {
         auto_merge: false,
         log_access: vec![],
         collaborators: vec!["bob".to_string()],
+        effective_package_env: crate::goals::package_env::PackageEnv::new(),
     }
 }
 

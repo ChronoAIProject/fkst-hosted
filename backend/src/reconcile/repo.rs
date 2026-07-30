@@ -298,6 +298,7 @@ pub async fn reconcile_repo(
     let EffectivePackages {
         by_session: effective_by_session,
         demotions: manifest_demotions,
+        package_env_by_session,
     } = crate::reconcile::effective_packages::resolve_effective_packages(
         &ctx.http,
         &ctx.config.github_api_base_url,
@@ -318,6 +319,12 @@ pub async fn reconcile_repo(
     for reg in &mut regs {
         if let Some(packages) = effective_by_session.get(&reg.session_id) {
             reg.effective_packages = packages.clone();
+        }
+        // The effective (manifest-merged) configuration replaces the trigger-only
+        // map parsed at registration, so every downstream consumer reads one value
+        // and never has to re-apply precedence.
+        if let Some(package_env) = package_env_by_session.get(&reg.session_id) {
+            reg.effective_package_env = package_env.clone();
         }
     }
 

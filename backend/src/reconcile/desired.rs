@@ -113,6 +113,11 @@ pub struct SessionRegistration {
     /// Defaults to the explicit packages at parse time; the driver overwrites it with the
     /// expanded union before any consumer reads it.
     pub effective_packages: Vec<PackageRef>,
+    /// The session's EFFECTIVE per-package configuration: manifest-supplied defaults
+    /// merged with the trigger's own `### Package Env`, the trigger winning per key.
+    /// Populated by the reconcile driver's expand pass; before that it mirrors the
+    /// trigger-only map, so a manifest-free session is already correct.
+    pub effective_package_env: crate::goals::package_env::PackageEnv,
     /// The deterministic session id (see [`crate::session_spec::derive_session_id`]).
     pub session_id: String,
     /// A stable hash over the launch inputs; a live pod whose recorded hash differs

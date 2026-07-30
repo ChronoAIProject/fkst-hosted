@@ -450,6 +450,7 @@ fn work_registration(
         auto_merge: spec.auto_merge,
         log_access: spec.log_access,
         collaborators: spec.collaborators,
+        effective_package_env: crate::goals::package_env::PackageEnv::new(),
     }
 }
 

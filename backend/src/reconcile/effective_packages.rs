@@ -69,6 +69,10 @@ pub struct EffectivePackages {
     /// registrations whose manifest expansion failed or whose effective union came out
     /// empty. The driver folds these into the planner's `invalid` input (fail-closed).
     pub demotions: Vec<(i64, String)>,
+    /// `session_id -> effective per-package configuration` for every registration
+    /// that resolved cleanly. Manifest-supplied defaults merged with the trigger's
+    /// own `### Package Env`, the trigger winning PER KEY (see [`merge_package_env`]).
+    pub package_env_by_session: HashMap<String, crate::goals::package_env::PackageEnv>,
 }
 
 /// Resolve the effective package set for each registration, fetching + expanding its
@@ -91,12 +95,15 @@ pub async fn resolve_effective_packages(
         Result<crate::reconcile::manifest_expand::ExpandedManifest, String>,
     > = HashMap::new();
     let mut by_session: HashMap<String, Vec<PackageRef>> = HashMap::new();
+    let mut package_env_by_session: HashMap<String, crate::goals::package_env::PackageEnv> =
+        HashMap::new();
     let mut demotions: Vec<(i64, String)> = Vec::new();
 
     for reg in regs {
         match expand_one(http, api_base, token, reg, &mut cache).await {
-            Ok(effective) => {
+            Ok((effective, package_env)) => {
                 by_session.insert(reg.session_id.clone(), effective);
+                package_env_by_session.insert(reg.session_id.clone(), package_env);
             }
             Err(reason) => demotions.push((reg.trigger_issue, reason)),
         }
@@ -107,6 +114,7 @@ pub async fn resolve_effective_packages(
     EffectivePackages {
         by_session,
         demotions,
+        package_env_by_session,
     }
 }
 
@@ -120,10 +128,13 @@ async fn expand_one(
         RefKey,
         Result<crate::reconcile::manifest_expand::ExpandedManifest, String>,
     >,
-) -> Result<Vec<PackageRef>, String> {
+) -> Result<(Vec<PackageRef>, crate::goals::package_env::PackageEnv), String> {
     // Explicit packages first (author order); then each manifest's expansion appended in
     // manifest order (in-file order preserved within each expansion).
     let mut effective: Vec<PackageRef> = reg.def.packages.clone();
+    // Manifest-supplied configuration, folded in manifest order. The FIRST manifest
+    // to set a key wins, matching how the package list keeps its first occurrence.
+    let mut manifest_env = crate::goals::package_env::PackageEnv::new();
     for manifest_ref in &reg.def.manifest_refs {
         let key = ref_key(manifest_ref);
         let resolved = match cache.get(&key) {
@@ -137,9 +148,10 @@ async fn expand_one(
             }
         };
         match resolved {
-            // Only the package list is consumed here. The manifest's `packageEnv`
-            // is merged by a later pass, which owns the precedence rules.
-            Ok(expanded) => effective.extend(expanded.packages),
+            Ok(expanded) => {
+                effective.extend(expanded.packages);
+                merge_package_env(&mut manifest_env, expanded.package_env);
+            }
             // Fail-closed: a manifest a session names but that cannot be expanded demotes
             // the whole session. The reason names the offending manifest + its cause.
             Err(reason) => {
@@ -178,7 +190,32 @@ async fn expand_one(
         effective = deduped.len(),
         "reconcile: resolved effective package set"
     );
-    Ok(deduped)
+
+    // Trigger over manifest, PER KEY. Per key and not per block on purpose: a
+    // trigger overriding one setting must not silently discard the manifest's
+    // other settings for that same package.
+    let mut package_env = manifest_env;
+    merge_package_env(&mut package_env, reg.def.package_env.clone());
+
+    Ok((deduped, package_env))
+}
+
+/// Fold `overlay` onto `base`, `overlay` winning per key.
+///
+/// Blocks are merged rather than replaced, so overriding one key leaves the rest of
+/// that package's configuration intact. Used twice with opposite precedence: manifest
+/// over manifest (first wins, so the overlay is applied only where the base is silent)
+/// and trigger over manifest (the trigger always wins).
+fn merge_package_env(
+    base: &mut crate::goals::package_env::PackageEnv,
+    overlay: crate::goals::package_env::PackageEnv,
+) {
+    for (package, keys) in overlay {
+        let block = base.entry(package).or_default();
+        for (key, value) in keys {
+            block.insert(key, value);
+        }
+    }
 }
 
 #[cfg(test)]
