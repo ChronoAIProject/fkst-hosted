@@ -9,7 +9,6 @@
 {"path":"libraries/devloop/conflict_telemetry.lua","owner":"shared","reason":"conflict telemetry parsing and logging are used by PR fix and issue-side hotspot patrol."}
 {"path":"libraries/devloop/context_bundle.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/convergence.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/convergence/refine.lua","owner":"shared","reason":"spec-refinement payload, prompt and comment shape; raised by the issue-side reconcile and consumed by the refine department."}
 {"path":"libraries/devloop/decompose.lua","owner":"shared","reason":"decompose marker grammar and child-completion facts are shared by the issue decompose saga and PR-side replay/observe."}
 {"path":"libraries/devloop/delivery_target.lua","owner":"shared","reason":"exact lifecycle-to-implementation grant resolution and checkout verification are shared by issue delivery and PR review/replay handlers."}
 {"path":"libraries/devloop/dispatch_live_run.lua","owner":"shared","reason":"live codex dispatch deduplication is shared by issue implement and PR fix workers."}
@@ -239,6 +238,7 @@
 {"path":"packages/github-devloop/departments/loop/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
 {"path":"packages/github-devloop/departments/observe_issue/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
 {"path":"packages/github-devloop/departments/reconcile/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
+{"path":"packages/github-devloop/departments/refine/main.lua","owner":"issue","reason":"authors the spec amendment after an issue-side convergence block; issue lifecycle only."}
 {"path":"packages/github-devloop/departments/test_board_digest_probe/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
 {"path":"packages/github-devloop/departments/test_cache_seed/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
 {"path":"packages/github-devloop/departments/test_context_bundle_probe/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}

@@ -10,21 +10,37 @@
 -- lock across it would block every other pass on this proposal for the duration.
 -- The issue is re-read and re-gated after the call, so a state that moved while
 -- the model was thinking cannot be written over.
-local core = require("core")
 local saga = require("workflow.saga")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local entity_lib = require("devloop.entity")
-local devloop_state = require("devloop.state")
 local devloop_logging = require("devloop.logging")
 local devloop_commands = require("devloop.commands")
-local parsers_issue = require("devloop.parsers.issue")
 local workflow_codex = require("workflow.codex")
 local conv_rounds = require("devloop.convergence.rounds")
 local conv_refine = require("devloop.convergence.refine")
 
 local AI_SENTINEL = "⟦AI:FKST⟧"
+
+--- The issue's comments, and nothing else.
+--
+-- Only comments are needed here, and reading them through a comments-only helper
+-- avoids threading the composed core into a department -- the pattern the
+-- core-param ratchet exists to shrink.
+local function read_comments(stdout)
+  local decoded = json.decode(stdout or "{}")
+  local raw = decoded.comments or {}
+  local comments = {}
+  for _, comment in ipairs(raw) do
+    comments[#comments + 1] = {
+      body = tostring(comment.body or ""),
+      author_login = tostring((comment.author or {}).login or ""),
+      created_at = comment.createdAt or comment.created_at,
+    }
+  end
+  return comments
+end
 
 local spec = {
   consumes = { "devloop_refine" },
@@ -49,14 +65,19 @@ local function latest_converge_fact(comments, proposal_id)
   return newest
 end
 
---- Still worth refining? Re-checked after the model call.
-local function still_blocked(comments, proposal_id, refine)
-  local state = devloop_state.current_state(comments, proposal_id)
-  if tostring(state.state or "") ~= "blocked" then
-    return false, "state advanced beyond blocked while the amendment was authored"
-  end
-  -- Durable budget: a pod recycle must not grant another lap, and a duplicate
-  -- delivery must not spend one twice.
+--- Is this refinement round still unspent?
+--
+-- The durable marker count is the whole guard. A pod recycle must not grant
+-- another lap and a duplicate delivery must not spend one twice, and the count
+-- survives both because it is read from the issue, not from memory.
+--
+-- Deliberately NOT also checking that the state is still `blocked`. The comment
+-- this produces leads with `fkst: reintake`, and that command is only a re-entry
+-- edge FROM `blocked` -- from any other state it is inert. So a refinement that
+-- lands after the state moved adds prose to the thread and changes nothing, which
+-- is a better outcome than a cursor read that would have to be kept correct as
+-- the lifecycle grows.
+local function round_unspent(comments, proposal_id, refine)
   if conv_rounds.auto_refine_count(comments, proposal_id) >= tonumber(refine.refine_round) then
     return false, "this refinement round is already recorded"
   end
@@ -87,10 +108,9 @@ local function pipeline(event)
     if view.exit_code ~= 0 then
       error("github-devloop: issue-read-failed: refine issue view failed: " .. tostring(view.stderr))
     end
-    local current = parsers_issue.parse_issue_view_loop(core, view.stdout)
-    local comments = current.comments or {}
+    local comments = read_comments(view.stdout)
 
-    local ok, reason = still_blocked(comments, refine.proposal_id, refine)
+    local ok, reason = round_unspent(comments, refine.proposal_id, refine)
     if not ok then
       gate_reason = reason
       return
@@ -139,11 +159,10 @@ local function pipeline(event)
     if view.exit_code ~= 0 then
       error("github-devloop: issue-read-failed: refine re-read failed: " .. tostring(view.stderr))
     end
-    local current = parsers_issue.parse_issue_view_loop(core, view.stdout)
-    local comments = current.comments or {}
+    local comments = read_comments(view.stdout)
 
-    -- Re-gate: the state may have moved while the model was thinking.
-    local still_ok, reason = still_blocked(comments, refine.proposal_id, refine)
+    -- Re-gate: another pass may have recorded this round while the model worked.
+    local still_ok, reason = round_unspent(comments, refine.proposal_id, refine)
     if not still_ok then
       devloop_logging.log_cas_decision("refine", refine.proposal_id,
         { state = nil, version = nil }, "blocked", "blocked", "skip", reason)
