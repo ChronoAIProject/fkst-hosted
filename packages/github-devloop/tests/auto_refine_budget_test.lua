@@ -106,7 +106,13 @@ return {
     t.is_true(m:find('round="2"', 1, true) ~= nil)
     t.is_true(m:find('cause="no-semantic-progress"', 1, true) ~= nil)
     -- Round-trips through its own counter.
-    t.eq(rounds.auto_refine_count({ { body = m } }, "github-devloop/issue/acme/site/42"), 1)
+    t.eq(
+      rounds.auto_refine_count(
+        { { author_login = core._test_bot_login, body = m } },
+        "github-devloop/issue/acme/site/42"
+      ),
+      1
+    )
   end,
 
   test_a_user_cannot_burn_the_budget_by_pasting_the_marker = function()
