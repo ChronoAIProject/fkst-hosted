@@ -290,6 +290,45 @@ fn a_dotfile_is_refused_even_with_a_markdown_extension() {
     assert_eq!(tracker.copies(), 0);
 }
 
+/// A producer legitimately keeps working files beside its reports — the health
+/// reporter writes its codex context as `.fkst-health-context.md` — and the poll runs
+/// twice a second. Re-deciding a skipped file without remembering it floods the log
+/// bundle this module exists to fill. Observed on the real cluster: 411 identical
+/// warnings in four minutes.
+#[test]
+fn a_repeatedly_seen_unsafe_filename_is_only_judged_once() {
+    let mut fixture = Fixture::new();
+    std::fs::write(
+        fixture.anchors.health_dir.join(".fkst-health-context.md"),
+        "codex context",
+    )
+    .expect("write");
+
+    let mut tracker = CopiedFileTracker::new();
+    for _ in 0..10 {
+        assert!(tracker
+            .sweep(&fixture.anchors, &fixture.redactor, &mut fixture.tree)
+            .is_empty());
+    }
+    assert_eq!(tracker.judged(), 1, "judged once, not once per poll");
+    assert_eq!(tracker.copies(), 0);
+}
+
+/// ...but a CHANGE re-opens the question, so a file that becomes valid is picked up.
+#[test]
+fn a_changed_file_is_judged_again() {
+    let mut fixture = Fixture::new();
+    let hidden = fixture.anchors.health_dir.join(".fkst-health-context.md");
+    std::fs::write(&hidden, "v1").expect("write");
+
+    let mut tracker = CopiedFileTracker::new();
+    tracker.sweep(&fixture.anchors, &fixture.redactor, &mut fixture.tree);
+    std::fs::write(&hidden, "a longer v2").expect("rewrite");
+    tracker.sweep(&fixture.anchors, &fixture.redactor, &mut fixture.tree);
+
+    assert_eq!(tracker.judged(), 2);
+}
+
 #[test]
 fn an_absent_health_dir_contributes_nothing_and_does_not_fail() {
     let dir = tempfile::tempdir().expect("dir");

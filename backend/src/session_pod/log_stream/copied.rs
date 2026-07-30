@@ -81,6 +81,7 @@ pub(crate) struct CopiedFileTracker {
     seen: HashMap<PathBuf, FileStamp>,
     total_bytes: usize,
     copies: usize,
+    judged: usize,
     over_budget_reported: bool,
 }
 
@@ -94,6 +95,14 @@ impl CopiedFileTracker {
     #[cfg(test)]
     pub(crate) fn copies(&self) -> usize {
         self.copies
+    }
+
+    /// How many distinct (path, stamp) pairs have been judged at all — including the
+    /// ones skipped for a bound or an unsafe name. Makes "decided once, not once per
+    /// poll" observable, which is otherwise only visible as log volume.
+    #[cfg(test)]
+    pub(crate) fn judged(&self) -> usize {
+        self.judged
     }
 
     /// Copy every new-or-changed report into the tree and return what was copied.
@@ -135,12 +144,6 @@ impl CopiedFileTracker {
         redactor: &Redactor,
         tree: &mut TreeWriter,
     ) -> Result<Option<CopiedFile>, String> {
-        let Some(file_name) = safe_file_name(path) else {
-            return Err(format!(
-                "log-stream: unsafe {HEALTH_DIR_NAME} filename skipped: {path:?}"
-            ));
-        };
-
         let metadata = std::fs::metadata(path)
             .map_err(|error| format!("log-stream: {HEALTH_DIR_NAME} stat failed: {error}"))?;
         let stamp = FileStamp {
@@ -150,9 +153,20 @@ impl CopiedFileTracker {
         if self.seen.get(path) == Some(&stamp) {
             return Ok(None);
         }
-        // Record BEFORE deciding, so a file that is skipped for a bound is not
-        // re-warned every poll. A later change moves the stamp and re-evaluates it.
+        // Record BEFORE deciding — for EVERY skip reason, including an unsafe name.
+        // A producer legitimately keeps a working file in this directory (the health
+        // reporter writes its codex context as a dotfile there), and this poll runs
+        // twice a second: re-deciding without recording re-warns ~2x/s for the pod's
+        // whole life and floods the very bundle this module exists to fill. Observed
+        // on a real session: 411 identical warnings in four minutes.
         self.seen.insert(path.to_path_buf(), stamp);
+        self.judged += 1;
+
+        let Some(file_name) = safe_file_name(path) else {
+            return Err(format!(
+                "log-stream: unsafe {HEALTH_DIR_NAME} filename skipped: {path:?}"
+            ));
+        };
 
         if metadata.len() > MAX_FILE_BYTES {
             return Err(format!(

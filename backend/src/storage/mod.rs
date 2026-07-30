@@ -101,6 +101,22 @@ pub fn client_from_config(config: ChronoStorageConfig) -> ChronoStorageClient {
     ChronoStorageClient::new(build_http_client(), config)
 }
 
+/// How long an idle pooled connection may be reused.
+///
+/// Deliberately SHORTER than the in-pod collector's default 20 s flush cadence. The
+/// collector's uploads are widely spaced and always arrive in bursts, so with a long
+/// pool idle timeout every burst opens with a connection the peer has since dropped:
+/// the FIRST request of each burst fails on a transport error and the second, on a
+/// fresh connection, succeeds. That is not theoretical — it was observed on the local
+/// cluster, where it silently pinned `latest.tar.gz` at a stale bundle for an entire
+/// session while the per-run object (the burst's second PUT) kept updating.
+///
+/// Retrying at the call site could not fix it: the next flush is another 20 s later,
+/// so the retry inherits the same stale pool. Not reusing a connection that has been
+/// idle longer than the gap between bursts is the actual fix, and it costs one TCP +
+/// TLS handshake per burst.
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// A pooled HTTP client for chrono-storage + NyxID, built with a bounded timeout
 /// and a User-Agent (some proxies reject a UA-less request). `reqwest::Client`
 /// holds a connection pool and is cheap to clone, so the same client is shared by
@@ -108,6 +124,7 @@ pub fn client_from_config(config: ChronoStorageConfig) -> ChronoStorageClient {
 fn build_http_client() -> reqwest::Client {
     reqwest::Client::builder()
         .timeout(REQUEST_TIMEOUT)
+        .pool_idle_timeout(POOL_IDLE_TIMEOUT)
         .user_agent("fkst-hosted")
         .build()
         .expect("build chrono-storage http client")
