@@ -1,6 +1,7 @@
 local devloop_base = require("devloop.base")
 local payloads_builders = require("devloop.payloads.builders")
 local conv_reconcile = require("devloop.convergence.reconcile")
+local conv_refine = require("devloop.convergence.refine")
 local t = fkst.test
 local core = require("core")
 local execution_start = require("devloop.execution_start")
@@ -220,6 +221,13 @@ local function payload_for_queue(queue)
       dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3",
       source_ref = { kind = "external", ref = "owner/repo#issue/42" },
     }, 3, "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", "no-semantic-progress"),
+    devloop_refine = conv_refine.build_refine_payload({
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      base_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+      round = 3,
+      terminal_cause = "no-semantic-progress",
+      source_ref = { kind = "external", ref = "owner/repo#issue/42" },
+    }, 1, 2),
     devloop_review_meta = payloads_builders.build_devloop_review_meta_payload({
       schema = "consensus.consensus_converge.v1",
       proposal_id = review_proposal_id(),

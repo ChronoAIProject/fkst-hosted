@@ -41,6 +41,7 @@ public = [
   "devloop.convergence",
   "devloop.convergence.attempts",
   "devloop.convergence.reconcile",
+  "devloop.convergence.refine",
   "devloop.convergence.rounds",
   "devloop.convergence.shared",
   "devloop.decompose",

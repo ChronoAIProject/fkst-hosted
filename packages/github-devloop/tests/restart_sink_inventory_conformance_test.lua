@@ -69,6 +69,7 @@ local department_names = {
   "loop",
   "observe_issue",
   "reconcile",
+  "refine",
   "test_board_digest_probe",
   "test_cache_seed",
   "test_context_bundle_probe",
@@ -92,6 +93,7 @@ local queue_policies = {
   ["devloop_observe_issue"] = { "grantless-telemetry", "observe-issue:v1/source-ref+dedup" },
   ["devloop_ready"] = { "lifecycle-authoritative", "ready:v1/proposal+version" },
   ["devloop_reconcile"] = { "lifecycle-authoritative", "reconcile:v1/proposal+round" },
+  ["devloop_refine"] = { "lifecycle-authoritative", "refine.v1/proposal+version+round+refine-round" },
   ["devloop_timeout_reconcile"] = { "lifecycle-authoritative", "timeout-reconcile:v1/proposal+state+round" },
   ["github-devloop-decompose.devloop_decompose"] = { "grantless-published-intent", "decompose.v1/proposal+attempt" },
 }
@@ -146,6 +148,7 @@ local semantic_specs = {
   { "comment:issue:row-replay", "liveness_scan", "scan.restart_replay_issue_comments", "comment", "lifecycle-authoritative", "restart-row-replay/issue-comment-marker-families", "libraries/devloop/liveness/timeout.lua", { "replayer.replay_from_table_classified", "github-proxy.github_issue_comment_request" } },
   { "comment:pr:row-replay", "liveness_scan", "scan.restart_replay_pr_comments", "comment", "lifecycle-authoritative", "restart-row-replay/pr-comment-marker-families", "libraries/devloop/liveness/timeout.lua", { "replayer.replay_from_table_classified", "github-proxy.github_pr_comment_request" } },
   { "comment:issue:reconcile-blocked", "reconcile", "emit_blocked_reconcile.issue_comment", "comment", "lifecycle-authoritative", "state:v1/blocked+reconcile:v1;dedup=reconcile/comment", "packages/github-devloop/departments/reconcile/main.lua", { "emit_blocked_reconcile", "build_reconcile_comment_request" } },
+  { "comment:issue:refine-amendment", "refine", "pipeline.amendment_comment", "comment", "lifecycle-authoritative", "auto-refine:v1;dedup=refine/comment", "packages/github-devloop/departments/refine/main.lua", { "github-proxy.github_issue_comment_request", "build_comment_body" } },
   { "label:issue:reconcile-blocked", "reconcile", "emit_blocked_reconcile.issue_label", "label", "lifecycle-authoritative", "state-label:blocked;dedup=reconcile/label", "packages/github-devloop/departments/reconcile/main.lua", { "emit_blocked_reconcile", "build_reconcile_label_request" } },
   { "comment:pr:reconcile-blocked", "reconcile", "emit_effects.pr_comment", "comment", "lifecycle-authoritative", "state:v1/blocked+review-reconcile|fix-reconcile:v1", "packages/github-devloop/departments/reconcile/main.lua", { "github-proxy.github_pr_comment_request", "emit_effects" } },
   { "comment:issue:timeout-reconcile", "reconcile", "pipeline_timeout.comment", "comment", "lifecycle-authoritative", "state:v1/blocked+timeout-reconcile:v1;dedup=timeout-reconcile/comment", "packages/github-devloop/departments/reconcile/main.lua", { "pipeline_timeout", "build_timeout_reconcile_comment_request" } },

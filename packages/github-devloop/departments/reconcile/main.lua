@@ -8,11 +8,16 @@ local transition_version = require("contract.transition_version")
 local saga = require("workflow.saga")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local conv_rounds = require("devloop.convergence.rounds")
+local conv_refine = require("devloop.convergence.refine")
 local conv_attempts = require("devloop.convergence.attempts")
 local entity_lib = require("devloop.entity")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
 local devloop_commands = require("devloop.commands")
+
+-- Own-package queue, named as a literal like every other entry in `produces`:
+-- departments must not grow ambient service-locator reads.
+local REFINE_QUEUE = "devloop_refine"
 
 local spec = {
   consumes = { "devloop_reconcile", "devloop_timeout_reconcile" },
@@ -20,6 +25,7 @@ local spec = {
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
+    REFINE_QUEUE,
   },
   stall_window = "2m",
 }
@@ -184,13 +190,18 @@ local function pipeline_thinking(event)
     local label_request = core.build_reconcile_label_request(repo, issue_number, reconcile)
     emit_blocked_reconcile(reconcile.proposal_id, state, version, action, reason, comment_request, label_request)
 
-    -- Raised AFTER the terminal write so the re-entry can never race ahead of the
-    -- state marker it is re-entering from.
+    -- Raised AFTER the terminal write so the refinement can never race ahead of
+    -- the state marker it re-enters from.
+    --
+    -- A REQUEST, not the comment itself. The comment this used to write began
+    -- with `fkst: reintake`, and parse_command reads only the first line -- so
+    -- the command fired before any amendment existed, nothing in the tree ever
+    -- authored one, and the next lap re-judged byte-identical content and
+    -- reproduced the same verdict. The refine department writes the amendment
+    -- and the command together, in one atomic comment.
     if refinable and budget_left then
-      local refine_request = core.build_auto_refine_comment_request(
-        repo, issue_number, reconcile, refine_round, reconcile.terminal_cause, version, budget)
-      devloop_logging.log_raise("reconcile", reconcile.proposal_id,
-        "github-proxy.github_issue_comment_request", refine_request)
+      devloop_logging.log_raise("reconcile", reconcile.proposal_id, REFINE_QUEUE,
+        conv_refine.build_refine_payload(reconcile, refine_round, budget))
     end
   end)
 end
