@@ -170,8 +170,12 @@ local auto_refine_pattern = "fkst:github%-devloop:auto%-refine:v1"
 -- is recycled freely, and a budget that resets on restart is not a budget.
 function C.auto_refine_count(comments, proposal_id)
   local seen = 0
-  for _, comment in ipairs(comments or {}) do
-    local body = type(comment) == "table" and tostring(comment.body or "") or tostring(comment or "")
+  -- TRUSTED comments only, like every other marker reader in this file. Counting
+  -- the raw list let anyone who can comment on the issue paste the marker text and
+  -- burn the budget, silently switching self-refinement back off for a session that
+  -- explicitly opted in -- and with no signal that it had happened.
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments or {})) do
+    local body = parsers_misc._comment_body(comment)
     if body:find(auto_refine_pattern) ~= nil
       and body:find(tostring(proposal_id or ""), 1, true) ~= nil then
       seen = seen + 1

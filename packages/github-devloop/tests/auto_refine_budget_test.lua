@@ -4,8 +4,13 @@ local t = fkst.test
 -- full stop for a self-driving session -- and, equally, what stops it becoming an
 -- infinite retry. Both directions are pinned here.
 
-local function marker(proposal_id, round)
+local core = require("core")
+
+-- A marker the LOOP wrote. author_login matters: the budget is counted from
+-- trusted comments only, so a fixture without it is not a spent refinement.
+local function marker(proposal_id, round, author)
   return {
+    author_login = author or core._test_bot_login,
     body = "fkst: reintake\n\n<!-- fkst:github-devloop:auto-refine:v1 proposal=\""
       .. proposal_id .. "\" round=\"" .. tostring(round) .. "\" cause=\"no-semantic-progress\" -->",
   }
@@ -102,5 +107,27 @@ return {
     t.is_true(m:find('cause="no-semantic-progress"', 1, true) ~= nil)
     -- Round-trips through its own counter.
     t.eq(rounds.auto_refine_count({ { body = m } }, "github-devloop/issue/acme/site/42"), 1)
+  end,
+
+  test_a_user_cannot_burn_the_budget_by_pasting_the_marker = function()
+    -- The marker text is public: it is visible in every refinement comment. If the
+    -- count were taken over all comments, anyone able to comment on the issue could
+    -- paste it twice and silently switch self-refinement back off for a session that
+    -- explicitly opted in -- with nothing to say it had happened.
+    local rounds = require("devloop.convergence.rounds")
+    local pid = "github-devloop/issue/acme/site/42"
+
+    local forged = { marker(pid, 1, "mallory"), marker(pid, 2, "mallory") }
+    t.eq(rounds.auto_refine_count(forged, pid), 0)
+    t.eq(rounds.auto_refine_budget_remaining(forged, pid, 2), true)
+
+    -- The loop's own marker still counts, so the budget is a real bound.
+    local genuine = { marker(pid, 1) }
+    t.eq(rounds.auto_refine_count(genuine, pid), 1)
+
+    -- And a forged one cannot pad a genuine one to exhaust the budget.
+    local mixed = { marker(pid, 1), marker(pid, 2, "mallory") }
+    t.eq(rounds.auto_refine_count(mixed, pid), 1)
+    t.eq(rounds.auto_refine_budget_remaining(mixed, pid, 2), true)
   end,
 }
