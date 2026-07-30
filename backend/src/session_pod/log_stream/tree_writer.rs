@@ -48,6 +48,16 @@ impl TreeWriter {
         self.pending_bytes
     }
 
+    /// Account bytes a WHOLE-FILE writer already wrote into the tree itself.
+    ///
+    /// Load-bearing, not cosmetic: the flush cycle skips re-bundling when nothing is
+    /// pending, so a report copied straight to disk would otherwise never reach the
+    /// uploaded bundle. Nothing is buffered here — the bytes are already on disk —
+    /// only the dirty accounting the flush trigger reads.
+    pub(crate) fn note_external_bytes(&mut self, bytes: usize) {
+        self.pending_bytes += bytes;
+    }
+
     /// Append every non-empty class buffer to its tree file (creating parent dirs),
     /// then clear the buffers. A per-class write error propagates but leaves the
     /// unwritten buffer intact for the next attempt.

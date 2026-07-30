@@ -385,3 +385,85 @@ fn collector_without_an_uploader_still_captures_to_disk_and_never_crashes() {
     let driver_log = fs::read_to_string(tree_dir.join("fkst-hosted/driver.log")).expect("driver");
     assert!(driver_log.contains("driver up"));
 }
+
+/// A report written after the last periodic poll — the likeliest moment for one,
+/// since the producer and the pod terminate together — must still reach the bundle
+/// via the shutdown drain.
+#[test]
+fn the_shutdown_drain_captures_a_report_written_after_the_last_poll() {
+    let dir = tempfile::tempdir().expect("dir");
+    let config = collector_config(dir.path(), "sess-health", 1);
+    let health_dir = config
+        .runtime_root
+        .join(crate::session_health::HEALTH_DIR_NAME);
+    fs::create_dir_all(&health_dir).expect("health dir");
+    let name = "chronoai-fkst-8f2c1d64-0a1b-4c2d-8e3f-0123456789ab-health-agent-status-report-20260730-141500.md";
+    fs::write(
+        health_dir.join(name),
+        "+++\nfkst_health_report = 1\n+++\nnarrative\n",
+    )
+    .expect("report");
+
+    let fake = FakeSink::default();
+    let uploader = fake_uploader(fake.clone(), "sess-health");
+    let (tx, rx) = sync_channel::<CollectorRecord>(64);
+    drop(tx); // straight to the drain: no poll tick ever runs
+
+    collect(config, rx, Some(uploader));
+
+    let latest = fake
+        .stored("logs/sess-health/latest.tar.gz")
+        .expect("a bundle was uploaded");
+    let entries = extract(&latest);
+    let report = entries
+        .iter()
+        .find(|(path, _)| path == &format!("fkst-health/{name}"))
+        .map(|(_, content)| content.as_str())
+        .unwrap_or_else(|| {
+            panic!(
+                "report missing from the bundle: {:?}",
+                entries.iter().map(|(p, _)| p).collect::<Vec<_>>()
+            )
+        });
+    assert_eq!(report, "+++\nfkst_health_report = 1\n+++\nnarrative\n");
+}
+
+/// A secret quoted inside a report must not survive the collector, end to end.
+#[test]
+fn a_secret_inside_a_report_is_redacted_before_the_bundle_leaves_the_pod() {
+    let dir = tempfile::tempdir().expect("dir");
+    let config = collector_config(dir.path(), "sess-secret", 1);
+    let health_dir = config
+        .runtime_root
+        .join(crate::session_health::HEALTH_DIR_NAME);
+    fs::create_dir_all(&health_dir).expect("health dir");
+    fs::write(
+        health_dir.join(
+            "8f2c1d64-0a1b-4c2d-8e3f-0123456789ab-health-agent-status-report-20260730-141500.md",
+        ),
+        "the codex quoted ghs_supersecretvalue in its narrative\n",
+    )
+    .expect("report");
+
+    let fake = FakeSink::default();
+    let uploader = fake_uploader(fake.clone(), "sess-secret");
+    let (tx, rx) = sync_channel::<CollectorRecord>(64);
+    drop(tx);
+
+    collect(config, rx, Some(uploader));
+
+    let latest = fake
+        .stored("logs/sess-secret/latest.tar.gz")
+        .expect("a bundle was uploaded");
+    assert!(
+        !String::from_utf8_lossy(&latest).contains("ghs_supersecretvalue"),
+        "the raw secret must never reach the archive"
+    );
+    let entries = extract(&latest);
+    let report = entries
+        .iter()
+        .find(|(path, _)| path.starts_with("fkst-health/"))
+        .map(|(_, content)| content.as_str())
+        .expect("the report is in the bundle");
+    assert!(report.contains("«REDACTED:github-token»"), "{report}");
+}

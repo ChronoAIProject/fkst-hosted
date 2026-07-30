@@ -28,6 +28,7 @@
 pub mod bundle;
 pub mod classify;
 pub mod collector;
+pub mod copied;
 pub mod instance;
 pub mod redact;
 pub mod runs;

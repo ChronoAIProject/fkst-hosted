@@ -207,6 +207,10 @@ fn classify_bundle_path(path: &str) -> &'static str {
         "Meta"
     } else if lower.starts_with("fkst-hosted/") {
         "Driver"
+    } else if lower.starts_with("fkst-health/") {
+        // Checked before the substring branches below: a report's filename is
+        // producer-chosen, and an incidental "codex" in it must not relabel it.
+        "Health"
     } else if lower.contains("/framework/") || lower.contains("supervise") {
         "Supervise"
     } else if lower.contains("/codex/") || lower.contains("codex") {

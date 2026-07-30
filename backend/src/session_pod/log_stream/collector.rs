@@ -28,6 +28,7 @@ use crate::session_spec::creds::CredsLayout;
 
 use super::bundle::tar_gz_dir;
 use super::classify::{discover_sources, LogClass, TreeAnchors};
+use super::copied::CopiedFileTracker;
 use super::instance::{compute_instance_id, readme_markdown, InstanceMeta};
 use super::redact::Redactor;
 use super::seed::{read_github_token, seed_secrets, LABEL_GITHUB_TOKEN};
@@ -236,6 +237,8 @@ fn collect(config: CollectorConfig, rx: Receiver<CollectorRecord>, uploader: Opt
     let mut tree = TreeWriter::new(config.tree_dir.clone());
     let anchors = TreeAnchors::new(&config.runtime_root, &config.codex_home);
     let mut tails: HashMap<PathBuf, (LogClass, TailTracker)> = HashMap::new();
+    // Health reports are captured WHOLE, on the same tick as the tails.
+    let mut reports = CopiedFileTracker::new();
 
     let flush_interval = Duration::from_secs(config.flush_secs.max(1));
     let mut uploaded_once = false;
@@ -252,6 +255,7 @@ fn collect(config: CollectorConfig, rx: Receiver<CollectorRecord>, uploader: Opt
         let now = Instant::now();
         if now.duration_since(last_tick) >= POLL_INTERVAL {
             tail_sources(&anchors, &mut tails, &redactor, &mut tree);
+            reports.sweep(&anchors, &redactor, &mut tree);
             last_tick = now;
         }
         if now.duration_since(last_token) >= Duration::from_secs(TOKEN_REREAD_SECS) {
@@ -267,7 +271,11 @@ fn collect(config: CollectorConfig, rx: Receiver<CollectorRecord>, uploader: Opt
     }
 
     // Final drain: last tail read, flush the unterminated tails, then a final upload.
+    // The report sweep runs here too, so a report written after the last periodic
+    // poll — the likeliest moment for one, since the producer and the pod are ending
+    // together — still reaches the bundle.
     tail_sources(&anchors, &mut tails, &redactor, &mut tree);
+    reports.sweep(&anchors, &redactor, &mut tree);
     finish_tails(&mut tails, &redactor, &mut tree);
     flush_and_index(&mut tree, uploader.as_ref(), &redactor, &mut uploaded_once);
     // The run produced a bundle → stamp its end time into the session's run index.

@@ -424,6 +424,12 @@ fn classify_bundle_path_maps_the_layout() {
         "Codex"
     );
     assert_eq!(classify_bundle_path("fkst-substrate/etc/misc.log"), "Misc");
+    assert_eq!(
+        classify_bundle_path(
+            "fkst-health/chronoai-fkst-8f2c1d64-0a1b-4c2d-8e3f-0123456789ab-health-agent-status-report-20260730-141500.md"
+        ),
+        "Health"
+    );
     assert_eq!(classify_bundle_path("README.md"), "README");
     assert_eq!(classify_bundle_path("meta.json"), "Meta");
 }
