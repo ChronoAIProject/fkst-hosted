@@ -21,6 +21,14 @@ local workflow_codex = require("workflow.codex")
 local conv_rounds = require("devloop.convergence.rounds")
 local conv_refine = require("devloop.convergence.refine")
 
+local spec = {
+  consumes = { "devloop_refine" },
+  published_seam = { "devloop_refine" },
+  produces = { "github-proxy.github_issue_comment_request" },
+  stall_window = "2m",
+  retry = { max_attempts = 2, base = "5s", cap = "10s" },
+}
+
 local AI_SENTINEL = "⟦AI:FKST⟧"
 
 --- The issue's comments, and nothing else.
@@ -42,13 +50,6 @@ local function read_comments(stdout)
   return comments
 end
 
-local spec = {
-  consumes = { "devloop_refine" },
-  published_seam = { "devloop_refine" },
-  produces = { "github-proxy.github_issue_comment_request" },
-  stall_window = "2m",
-  retry = { max_attempts = 2, base = "5s", cap = "10s" },
-}
 
 --- The newest convergence round recorded for this proposal.
 --
