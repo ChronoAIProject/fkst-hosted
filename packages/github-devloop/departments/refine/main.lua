@@ -213,4 +213,11 @@ local function pipeline(event)
   end)
 end
 
-saga.department(spec, pipeline)
+return saga.department(spec, {
+  -- No terminal fact of its own: the amendment comment IS the outcome, and the
+  -- durable auto-refine marker is what makes a second delivery a no-op.
+  done = function() return false end,
+  act = pipeline,
+  wrap = devloop_logging.wrap_pipeline_failure,
+  name = "refine",
+})
