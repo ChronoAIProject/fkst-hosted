@@ -157,9 +157,12 @@ local function pipeline_thinking(event)
     -- amend-and-reintake comment that puts it straight back into intake with the
     -- review's narrowed question as a standing directive. The budget is counted
     -- from durable markers, so recycling a pod cannot silently grant more laps.
+    -- Resolved ONCE per pass so the state marker, the comment, and the refine
+    -- request all quote the same number.
     local comments = (current and current.comments) or {}
+    local budget = conv_rounds.max_auto_refinements()
     local refinable = conv_rounds.is_refinable_cause(reconcile.terminal_cause)
-    local budget_left = conv_rounds.auto_refine_budget_remaining(comments, reconcile.proposal_id)
+    local budget_left = conv_rounds.auto_refine_budget_remaining(comments, reconcile.proposal_id, budget)
     local refine_round = conv_rounds.auto_refine_count(comments, reconcile.proposal_id) + 1
 
     local action = "drop"
@@ -170,10 +173,10 @@ local function pipeline_thinking(event)
       -- the deterministic path simply never emitted anything but `drop`.
       action = "re-design"
       reason = reason .. "; auto-refinement " .. tostring(refine_round) .. "/"
-        .. tostring(conv_rounds.MAX_AUTO_REFINEMENTS) .. " re-entering intake"
-    elseif refinable then
+        .. tostring(budget) .. " re-entering intake"
+    elseif refinable and budget > 0 then
       reason = reason .. "; auto-refinement budget exhausted after "
-        .. tostring(conv_rounds.MAX_AUTO_REFINEMENTS)
+        .. tostring(budget)
         .. " amendments -- the disagreement survived every amendment and wants a human"
     end
 
@@ -185,7 +188,7 @@ local function pipeline_thinking(event)
     -- state marker it is re-entering from.
     if refinable and budget_left then
       local refine_request = core.build_auto_refine_comment_request(
-        repo, issue_number, reconcile, refine_round, reconcile.terminal_cause, version)
+        repo, issue_number, reconcile, refine_round, reconcile.terminal_cause, version, budget)
       devloop_logging.log_raise("reconcile", reconcile.proposal_id,
         "github-proxy.github_issue_comment_request", refine_request)
     end

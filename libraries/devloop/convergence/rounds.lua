@@ -106,11 +106,47 @@ end
 -- `fkst: reintake` by hand. That makes a self-driving session stop on the first
 -- disagreement, which is the common case for a large generated spec.
 --
--- Instead the loop now refines and retries ITSELF, bounded. Two refinements is
--- deliberate: the angles are re-run against an amended spec each time, so a
--- disagreement that survives two amendments is a genuine design question that
--- wants a human, not another lap.
-C.MAX_AUTO_REFINEMENTS = 2
+-- Instead the loop can refine and retry ITSELF, bounded -- but only when the
+-- session asks for it.
+--
+-- The default is 0: OFF. Self-refinement changes what a blocked item does, and
+-- that is the session owner's call, not the platform's. With it off, consensus
+-- blocks and a human resolves it, exactly as before this existed. A session opts
+-- in from its trigger:
+--
+--   ### Package Env
+--   #### github-devloop
+--   FKST_DEVLOOP_AUTO_REFINE_MAX=2
+--
+-- Two is the suggested value for the same reason it used to be the constant: the
+-- angles are re-run against an amended spec each time, so a disagreement that
+-- survives two amendments is a genuine design question that wants a human, not
+-- another lap.
+C.DEFAULT_MAX_AUTO_REFINEMENTS = 0
+
+-- Upper bound on what a session may ask for. A budget is only a budget if it is
+-- bounded: without this an author could type a number large enough to make the
+-- loop effectively unbounded.
+C.MAX_AUTO_REFINEMENTS_CEILING = 5
+
+--- The refinement budget this session is configured for.
+--
+-- Read through `config.read_env`, so the value comes from the session's
+-- `### Package Env` (or a manifest default) when set and is 0 otherwise. A value
+-- that is not a non-negative integer within the ceiling falls back to the
+-- default rather than erroring: a typo must not take a session down, and 0 is
+-- the safe reading of "I could not understand what you asked for".
+function C.max_auto_refinements(exec)
+  local raw = require("devloop.config").read_env("FKST_DEVLOOP_AUTO_REFINE_MAX", exec)
+  local parsed = tonumber(raw)
+  if parsed == nil or parsed ~= math.floor(parsed) or parsed < 0 then
+    return C.DEFAULT_MAX_AUTO_REFINEMENTS
+  end
+  if parsed > C.MAX_AUTO_REFINEMENTS_CEILING then
+    return C.MAX_AUTO_REFINEMENTS_CEILING
+  end
+  return parsed
+end
 
 -- Every terminal cause is refinable, including `external-evidence-required`.
 -- That cause means the angles could not settle the question from the issue and
@@ -118,7 +154,7 @@ C.MAX_AUTO_REFINEMENTS = 2
 -- a decision is exactly what a refinement pass can record. Stopping instead would
 -- wait on a human who is not there. If the missing fact really is unobtainable,
 -- the budget below runs out and the loop stops with the full round history intact,
--- so the bound on retrying is `MAX_AUTO_REFINEMENTS` -- never the cause.
+-- so the bound on retrying is the configured budget -- never the cause.
 --
 -- A cause added to `terminal_causes` is therefore refinable by default; excluding
 -- one is a deliberate act that belongs here, with its reason.
@@ -144,8 +180,14 @@ function C.auto_refine_count(comments, proposal_id)
   return seen
 end
 
-function C.auto_refine_budget_remaining(comments, proposal_id)
-  return C.auto_refine_count(comments, proposal_id) < C.MAX_AUTO_REFINEMENTS
+--- Whether another refinement is allowed for this proposal.
+--
+-- `budget` is the resolved value from `C.max_auto_refinements`. Passed in rather
+-- than read here so one reconcile pass resolves it once and every message it
+-- renders quotes the same number.
+function C.auto_refine_budget_remaining(comments, proposal_id, budget)
+  local allowed = tonumber(budget) or C.DEFAULT_MAX_AUTO_REFINEMENTS
+  return C.auto_refine_count(comments, proposal_id) < allowed
 end
 
 function C.auto_refine_marker(proposal_id, refine_round, cause)

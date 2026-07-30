@@ -1,5 +1,5 @@
 {
-  "artifact_sha256": "86aaa3ca6eecacd62136dabc38329b957b3a309ca4e7b6ab81ef60f936ebc75e",
+  "artifact_sha256": "343ec61bcf6e81d596f3c3c57454777dc048427cbc8b51c034a7570c330adc2d",
   "consumer_entry_acceptors": [
     {
       "ordinal": "consumes:consensus.consensus_converge",
@@ -10912,12 +10912,6 @@
             "effect_id": "label:issue:reconcile-blocked",
             "ordinal": 2,
             "sink_kind": "label"
-          },
-          {
-            "authority_class": "lifecycle-authoritative",
-            "effect_id": "comment:issue:reconcile-blocked",
-            "ordinal": 3,
-            "sink_kind": "comment"
           }
         ],
         "handoff_direct_lookup_count": 0,
@@ -10925,7 +10919,7 @@
           {
             "effect_id": "comment:issue:reconcile-blocked",
             "payload": {
-              "body": "github-devloop reconcile action: re-design\n\nReason:\nno-semantic-progress-after-3-rounds; auto-refinement 1/2 re-entering intake\n\n<!-- fkst:github-devloop:state:v1 proposal=\"github-devloop/issue/owner/repo/42\" state=\"blocked\" version=\"consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3\" stage_rank=\"800\" marker_order_key=\"2026-06-03T01-02-03Z/000000000003/000000000000/000000000000/000000000000/000000000000/000000000000/000000000000/000000000800\" -->\n<!-- fkst:github-devloop:reconcile:v1 proposal=\"github-devloop/issue/owner/repo/42\" version=\"consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3\" round=\"3\" action=\"re-design\" terminal_cause=\"no-semantic-progress\" dedup=\"reconcile:consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3\" -->\n⟦AI:FKST⟧",
+              "body": "github-devloop reconcile action: drop\n\nReason:\nno-semantic-progress-after-3-rounds\n\n<!-- fkst:github-devloop:state:v1 proposal=\"github-devloop/issue/owner/repo/42\" state=\"blocked\" version=\"consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3\" stage_rank=\"800\" marker_order_key=\"2026-06-03T01-02-03Z/000000000003/000000000000/000000000000/000000000000/000000000000/000000000000/000000000000/000000000800\" -->\n<!-- fkst:github-devloop:reconcile:v1 proposal=\"github-devloop/issue/owner/repo/42\" version=\"consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3\" round=\"3\" action=\"drop\" terminal_cause=\"no-semantic-progress\" dedup=\"reconcile:consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3\" -->\n⟦AI:FKST⟧",
               "claim": {
                 "owner": "fkst-test-bot",
                 "source_ref": {
@@ -10987,28 +10981,6 @@
               "target_number": "42"
             },
             "queue": "github-proxy.github_issue_label_request"
-          },
-          {
-            "effect_id": "comment:issue:reconcile-blocked",
-            "payload": {
-              "body": "fkst: reintake\n\n⟦AI:FKST⟧\n\n**Auto-refinement 1/2** — consensus reached terminal cause `no-semantic-progress` at round 3, so this item is being refined and re-run rather than left blocked for a human to notice.\n\nBefore the next consensus lap, amend this issue's specification to resolve the narrowed question recorded in the convergence round comment above: tighten every rule it reports as contradictory or under-specified, and add the tests it asks for. State the amendment explicitly in a comment so the next lap reads it as part of the spec.\n\nDo NOT widen scope to make the disagreement go away, and do not restate the whole spec — amend only what the review actually challenged.\n\n<!-- fkst:github-devloop:auto-refine:v1 proposal=\"github-devloop/issue/owner/repo/42\" round=\"1\" cause=\"no-semantic-progress\" -->",
-              "claim": {
-                "owner": "fkst-test-bot",
-                "source_ref": {
-                  "kind": "external",
-                  "ref": "owner/repo#issue/42"
-                }
-              },
-              "dedup_key": "auto-refine/comment/reconcile-consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3/1",
-              "issue_number": "42",
-              "repo": "owner/repo",
-              "schema": "github-proxy.v1",
-              "source_ref": {
-                "kind": "external",
-                "ref": "owner/repo#issue/42"
-              }
-            },
-            "queue": "github-proxy.github_issue_comment_request"
           }
         ],
         "reason_code": "apply",
