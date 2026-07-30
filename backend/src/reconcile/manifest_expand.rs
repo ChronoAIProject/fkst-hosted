@@ -58,6 +58,15 @@ struct FkstManifest {
     /// The bundled package references, each an `owner/repo@ref:path` string validated
     /// with [`parse_package_ref`].
     packages: Vec<String>,
+    /// OPTIONAL per-package configuration: package name → (KEY → value). Supplies
+    /// defaults for every session that uses this manifest, so a fleet-wide package
+    /// setting is written once here instead of repeated in every trigger.
+    ///
+    /// `#[serde(default)]` keeps every existing manifest parsing byte-identically,
+    /// and the key is validated with the SAME rules as the trigger's
+    /// `### Package Env` section so the two surfaces cannot drift apart.
+    #[serde(rename = "packageEnv", default)]
+    package_env: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
 }
 
 /// Why a fkst-manifest could not be expanded. Every variant's `Display` (and derived
@@ -92,6 +101,11 @@ pub enum ManifestError {
     /// content only — no token/URL).
     #[error("fkst-manifest package #{index} is an invalid reference: {detail}")]
     BadRef { index: usize, detail: String },
+    /// The `packageEnv` block is malformed. `detail` is the same grammar reason a
+    /// trigger author would see for the equivalent `### Package Env` mistake — the
+    /// two surfaces share one validator so they cannot drift.
+    #[error("fkst-manifest packageEnv is invalid: {detail}")]
+    BadPackageEnv { detail: String },
 }
 
 /// Fetch the fkst-manifest JSON at `manifest_ref` and expand it into its validated
@@ -108,7 +122,7 @@ pub async fn expand_manifest(
     api_base: &str,
     token: &SecretString,
     manifest_ref: &PackageRef,
-) -> Result<Vec<PackageRef>, ManifestError> {
+) -> Result<ExpandedManifest, ManifestError> {
     let base = api_base.trim_end_matches('/');
     let body = fetch_manifest_json(http, base, token, manifest_ref).await?;
 
@@ -130,7 +144,7 @@ pub async fn expand_manifest(
 /// Checks run in a fail-closed order — schema version, then non-empty, then the size
 /// ceiling, then each entry (rejecting on the FIRST malformed reference, naming its
 /// index) — so the most fundamental defect is the one surfaced.
-fn validate_manifest(manifest: FkstManifest) -> Result<Vec<PackageRef>, ManifestError> {
+fn validate_manifest(manifest: FkstManifest) -> Result<ExpandedManifest, ManifestError> {
     if manifest.schema_version != SUPPORTED_SCHEMA_VERSION {
         return Err(ManifestError::BadSchemaVersion(manifest.schema_version));
     }
@@ -152,7 +166,56 @@ fn validate_manifest(manifest: FkstManifest) -> Result<Vec<PackageRef>, Manifest
         })?;
         refs.push(package_ref);
     }
-    Ok(refs)
+
+    // Validated with the trigger's own parser so a manifest can never express a
+    // shape a trigger would reject (or vice versa). Rendering the map back to the
+    // section's text form is deliberate: it means there is exactly ONE grammar and
+    // one set of error messages for per-package configuration.
+    let package_env = validate_package_env(&manifest.package_env)?;
+
+    Ok(ExpandedManifest {
+        packages: refs,
+        package_env,
+    })
+}
+
+/// A manifest after expansion: its package list plus any per-package configuration
+/// it supplies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpandedManifest {
+    pub packages: Vec<PackageRef>,
+    pub package_env: crate::goals::package_env::PackageEnv,
+}
+
+/// Re-validate the authored `packageEnv` through the trigger-section parser.
+///
+/// The JSON is rendered back into the `### Package Env` text form and parsed, rather
+/// than validated by a second hand-written checker: one grammar, one set of bounds,
+/// one set of messages. A divergence here would let a manifest ship configuration a
+/// trigger could not express, which is exactly the drift this avoids.
+fn validate_package_env(
+    authored: &std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+) -> Result<crate::goals::package_env::PackageEnv, ManifestError> {
+    if authored.is_empty() {
+        return Ok(crate::goals::package_env::PackageEnv::new());
+    }
+    let mut rendered = String::new();
+    for (package, keys) in authored {
+        rendered.push_str("#### ");
+        rendered.push_str(package);
+        rendered.push('\n');
+        for (key, value) in keys {
+            rendered.push_str(key);
+            rendered.push('=');
+            rendered.push_str(value);
+            rendered.push('\n');
+        }
+    }
+    crate::goals::package_env::parse_package_env(&rendered).map_err(|err| {
+        ManifestError::BadPackageEnv {
+            detail: app_error_detail(err),
+        }
+    })
 }
 
 /// Extract the client-safe message from the 422 [`parse_package_ref`] returns. The
