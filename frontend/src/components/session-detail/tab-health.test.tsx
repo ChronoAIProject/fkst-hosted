@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { AuthProvider } from '@/lib/auth/github-auth';
 import type { HealthReport, SessionHealth, StalenessState } from '@/lib/api/health';
 import { TabHealth, type HealthState } from './tab-health';
+import liveFixture from './__fixtures__/live-health.json';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
@@ -222,5 +223,60 @@ describe('TabHealth', () => {
   it('shows a loading state while the listing is in flight', () => {
     renderTab({ status: 'loading' });
     expect(screen.getByText('Loading health…')).toBeInTheDocument();
+  });
+});
+
+/// A CROSS-BOUNDARY conformance fixture: the exact JSON the LIVE control plane served
+/// for a real session on the local cluster, captured verbatim from
+/// `GET /api/v1/sessions/{id}/health` and `.../health/{report_id}`.
+///
+/// Every other test here feeds this component a payload this repository wrote, which
+/// proves the component self-consistent and proves nothing about the shape the
+/// backend actually emits. A renamed field, a null where an object was expected, or a
+/// status string outside the taxonomy now fails here.
+describe('TabHealth against the live control plane payload', () => {
+  const live = liveFixture as { listing: SessionHealth; report: HealthReport };
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem('fkst-gh-access', 'ghu_x');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(live.report))
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('renders a real session listing end to end', async () => {
+    renderTab({ status: 'loaded', health: live.listing });
+
+    // The real verdict and headline, not a fixture's.
+    const latest = live.listing.latest ?? live.listing.reports[0]!;
+    expect(await screen.findByText(latest.headline, { selector: 'p' })).toBeInTheDocument();
+    expect(
+      screen.getAllByText(/Working|Idle|Blocked|Stalled|Failing|Unknown/, {
+        selector: '.rounded-chip',
+      }).length
+    ).toBeGreaterThan(0);
+
+    // Every report the backend listed becomes a history row.
+    const history = await screen.findByRole('list', { name: 'Health report history' });
+    expect(history.querySelectorAll('li')).toHaveLength(live.listing.reports.length);
+
+    // The real evidence keys and the real narrative render.
+    expect(await screen.findByText(live.report.evidence[0]!.key)).toBeInTheDocument();
+    expect(
+      screen.getByRole('region', { name: 'Session health assessment' })
+    ).toBeInTheDocument();
+  });
+
+  it('agrees with the backend about the staleness vocabulary', () => {
+    // A state the frontend does not know would render an undefined label.
+    expect(['not_running', 'never_reported', 'fresh', 'stale']).toContain(
+      live.listing.staleness.state
+    );
+    expect(['working', 'idle', 'blocked', 'stalled', 'failing', 'unknown']).toContain(
+      (live.listing.latest ?? live.listing.reports[0]!).status
+    );
   });
 });
