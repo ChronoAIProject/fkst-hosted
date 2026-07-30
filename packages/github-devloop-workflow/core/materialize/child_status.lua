@@ -1,4 +1,5 @@
 local base_ids = require("devloop.base_ids")
+local conv_rounds = require("devloop.convergence.rounds")
 local child_result = require("core.child_result")
 local commands = require("devloop.commands")
 local devloop_marker_facts = require("devloop.markers.facts")
@@ -172,6 +173,22 @@ local function production_child_status_deps(core, repo)
     irreversible_terminal = function(child_ref)
       local child = issue(child_ref)
       if devloop_state.has_blocked_label(child.labels) then
+        -- A blocked child is terminal only when nothing can still re-enter it.
+        --
+        -- Auto-refinement deliberately passes THROUGH `blocked`: that state owns the
+        -- documented reintake edge, so a refinement lands there and re-enters from
+        -- it. Treating every blocked child as fatal therefore killed the parent
+        -- workflow on the child's FIRST refinement lap -- the child would go on to
+        -- refine itself and reach `implementing`, with nothing left driving it.
+        --
+        -- Gated on the resolved budget so the default (0, refinement off) keeps the
+        -- previous behaviour exactly: with no refinement possible, blocked is fatal.
+        local budget = conv_rounds.max_auto_refinements()
+        if budget > 0
+          and conv_rounds.auto_refine_budget_remaining(child.comments, child_ref.proposal_id, budget)
+        then
+          return false
+        end
         return true
       end
       if tostring(child.state or ""):upper() == "CLOSED" then

@@ -507,6 +507,29 @@ local tests = {
     t.eq(action.state, "blocked")
     t.eq(action.reason_code, "child-fatal-second-codex-failed")
   end,
+
+  test_a_blocked_child_is_still_terminal_when_refinement_is_off = function()
+    -- Regression guard for the auto-refinement interaction. Auto-refinement lands
+    -- in `blocked` on purpose -- that state owns the reintake edge it re-enters
+    -- from -- so the predicate no longer treats every blocked child as fatal.
+    --
+    -- This pins the DEFAULT: with refinement off (budget 0, the default), a blocked
+    -- child must stay terminal exactly as before, so a session that never opted in
+    -- sees no behaviour change. The budget>0 case is covered by the refinement
+    -- budget unit tests in github-devloop.
+    local repo = "owner/repo"
+    local child_issue = 91
+    local reader = child_status.reader(core, {}, repo)
+    local child_ref = actions.child_ref_for_entry(repo, { child_issue = child_issue })
+
+    t.mock_command("gh issue view", {
+      stdout = issue_view_stdout(child_issue, "OPEN", {}, { "fkst-dev:blocked" }),
+      stderr = "",
+      exit_code = 0,
+    })
+
+    t.eq(reader(child_ref), "result_ready")
+  end,
 }
 
 return tests
