@@ -35,6 +35,7 @@ pub mod seed;
 pub mod sink;
 pub mod tail;
 pub mod tee;
+pub mod tree_writer;
 pub mod uploader;
 
 pub use classify::LogClass;
