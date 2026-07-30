@@ -287,6 +287,10 @@ pub enum ReconcileAction {
         source_branch: Option<String>,
         /// Resolved target branch displayed to the trigger author.
         target_branch: String,
+        /// The session's effective per-package configuration, echoed in the
+        /// announcement so a misspelled package or key -- which is advisory and
+        /// therefore silently inert -- is visible to the author.
+        package_env: crate::goals::package_env::PackageEnv,
         /// Whether this trigger opted into reconcile-side PR auto-merge.
         auto_merge: bool,
         /// The session's effective creator login — rendered into the announce
@@ -484,6 +488,7 @@ pub fn plan_repo(
                     .iter()
                     .map(reachability::render_ref)
                     .collect(),
+                package_env: reg.effective_package_env.clone(),
                 environment: reg.def.environment.clone(),
                 source_branch: reg.def.source_branch.clone(),
                 target_branch: reg.def.target_branch.clone().unwrap_or_else(|| {

@@ -163,6 +163,7 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
             // auto-detect session's discovered labels appear, not just the explicit one.
             detected_work_labels,
             packages,
+            package_env,
             environment,
             source_branch,
             target_branch,
@@ -208,6 +209,7 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
                 ctx.config.log.frontend_url.as_deref(),
                 log_url.as_deref(),
                 &full_config_hash,
+                &package_env,
             );
             announce_session(&ctx.github, &owner_repo, trigger_issue, &comment).await
         }
