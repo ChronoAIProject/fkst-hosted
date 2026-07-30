@@ -12,7 +12,7 @@ use serde_json::json;
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use super::{resolve_effective_packages, NO_PACKAGES_DETAIL};
+use super::{resolve_effective_packages, MAX_EFFECTIVE_PACKAGE_WORKSPACES, NO_PACKAGES_DETAIL};
 use crate::goals::trigger_parse::PackageRef;
 use crate::models::RepoRef;
 use crate::reconcile::desired::{SessionDef, SessionRegistration};
@@ -80,6 +80,18 @@ fn manifest_body(schema_version: i64, packages: &[&str]) -> String {
         "packages": packages,
     })
     .to_string()
+}
+
+fn distinct_workspace_packages(count: usize) -> Vec<PackageRef> {
+    (0..count)
+        .map(|i| pkg(&format!("org{i}"), "pkgs", "main", "packages/workflow"))
+        .collect()
+}
+
+fn same_workspace_packages(count: usize) -> Vec<PackageRef> {
+    (0..count)
+        .map(|i| pkg("acme", "pkgs", "main", &format!("packages/workflow-{i}")))
+        .collect()
 }
 
 /// Mount a manifest JSON body at its contents path (the path IS the .json file).
@@ -334,6 +346,57 @@ async fn manifest_free_session_effective_equals_explicit() {
         Some(&packages),
         "no manifest → effective is EXACTLY the explicit packages, order preserved (byte-identical)"
     );
+}
+
+#[tokio::test]
+async fn exactly_at_the_effective_workspace_limit_is_allowed() {
+    let server = MockServer::start().await; // never queried — no manifest to fetch
+    let packages = distinct_workspace_packages(MAX_EFFECTIVE_PACKAGE_WORKSPACES);
+    let regs = vec![reg("s1", 1, packages.clone(), vec![])];
+    let out = resolve(&server, &regs).await;
+
+    assert!(out.demotions.is_empty());
+    assert_eq!(
+        out.by_session.get("s1").map(Vec::len),
+        Some(MAX_EFFECTIVE_PACKAGE_WORKSPACES),
+        "the boundary itself is accepted"
+    );
+}
+
+#[tokio::test]
+async fn one_over_the_effective_workspace_limit_demotes_before_pod_creation() {
+    let server = MockServer::start().await; // never queried — no manifest to fetch
+    let packages = distinct_workspace_packages(MAX_EFFECTIVE_PACKAGE_WORKSPACES + 1);
+    let regs = vec![reg("s1", 7, packages, vec![])];
+    let out = resolve(&server, &regs).await;
+
+    assert!(
+        !out.by_session.contains_key("s1"),
+        "an over-limit session must not produce a spawnable effective set"
+    );
+    assert_eq!(out.demotions.len(), 1);
+    let (issue, reason) = &out.demotions[0];
+    assert_eq!(*issue, 7);
+    assert!(
+        reason.contains("package workspaces")
+            && reason.contains(&(MAX_EFFECTIVE_PACKAGE_WORKSPACES + 1).to_string())
+            && reason.contains(&MAX_EFFECTIVE_PACKAGE_WORKSPACES.to_string()),
+        "reason should name the workspace limit: {reason}"
+    );
+}
+
+#[tokio::test]
+async fn many_packages_sharing_one_workspace_do_not_trip_the_workspace_limit() {
+    let server = MockServer::start().await; // never queried — no manifest to fetch
+    let packages = same_workspace_packages(MAX_EFFECTIVE_PACKAGE_WORKSPACES + 1);
+    let regs = vec![reg("s1", 1, packages.clone(), vec![])];
+    let out = resolve(&server, &regs).await;
+
+    assert!(
+        out.demotions.is_empty(),
+        "the cap is on distinct cloned workspaces, not paths inside one workspace"
+    );
+    assert_eq!(out.by_session.get("s1").map(Vec::len), Some(packages.len()));
 }
 
 #[tokio::test]

@@ -2,8 +2,8 @@
 //! `Ok`, an unreachable (404) ref is named in the `Err`, and a mix reports only
 //! the bad refs.
 
-use wiremock::matchers::{method, path, query_param};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::matchers::{header, method, path, query_param};
+use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 use super::*;
 
@@ -35,6 +35,34 @@ async fn mount(server: &MockServer, r: &PackageRef, status: u16) {
         .await;
 }
 
+async fn mount_authenticated_status_then_anonymous_status(
+    server: &MockServer,
+    r: &PackageRef,
+    authenticated_status: u16,
+    anonymous_status: u16,
+) {
+    let p = format!(
+        "/repos/{}/{}/contents/{}/fkst.toml",
+        r.owner, r.repo, r.path
+    );
+    Mock::given(method("GET"))
+        .and(path(p.as_str()))
+        .and(query_param("ref", r.git_ref.as_str()))
+        .and(header("authorization", "Bearer reach-token"))
+        .respond_with(ResponseTemplate::new(authenticated_status))
+        .expect(1)
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(p))
+        .and(query_param("ref", r.git_ref.as_str()))
+        .and(|request: &Request| !request.headers.contains_key("authorization"))
+        .respond_with(ResponseTemplate::new(anonymous_status))
+        .expect(1)
+        .mount(server)
+        .await;
+}
+
 #[tokio::test]
 async fn all_reachable_is_ok() {
     let server = MockServer::start().await;
@@ -47,6 +75,45 @@ async fn all_reachable_is_ok() {
     check_reachable(&refs, &client(), &server.uri(), None)
         .await
         .expect("all reachable");
+}
+
+#[tokio::test]
+async fn authenticated_fallback_statuses_retry_public_package_reachability() {
+    for status in [401, 403, 404] {
+        let server = MockServer::start().await;
+        let r = pkg("acme", "public-pkgs", "main", "packages/workflow-dev");
+        mount_authenticated_status_then_anonymous_status(&server, &r, status, 200).await;
+
+        check_reachable(&[r], &client(), &server.uri(), Some("reach-token"))
+            .await
+            .unwrap_or_else(|failures| {
+                panic!("auth {status} should fall back anonymously: {failures:?}")
+            });
+    }
+}
+
+#[tokio::test]
+async fn authenticated_404_followed_by_anonymous_404_stays_not_found() {
+    let server = MockServer::start().await;
+    let r = pkg("acme", "missing-pkgs", "main", "packages/missing");
+    mount_authenticated_status_then_anonymous_status(&server, &r, 404, 404).await;
+
+    let failures = check_reachable(
+        std::slice::from_ref(&r),
+        &client(),
+        &server.uri(),
+        Some("reach-token"),
+    )
+    .await
+    .expect_err("anonymous 404 remains a genuine not-found");
+
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].0, render_ref(&r));
+    assert!(
+        failures[0].1.contains("not reachable"),
+        "reason: {}",
+        failures[0].1
+    );
 }
 
 #[tokio::test]

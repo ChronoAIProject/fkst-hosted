@@ -29,6 +29,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 
 use crate::goals::trigger_parse::{parse_package_ref, PackageRef};
+use crate::reconcile::auth_fallback::should_retry_without_auth;
 
 /// The only fkst-manifest schema version this expander understands. A manifest
 /// declaring anything else is rejected rather than best-guessed (fail-closed).
@@ -264,13 +265,6 @@ async fn fetch_manifest_json(
         .text()
         .await
         .map_err(|_| ManifestError::Fetch("body read error".to_string()))
-}
-
-fn should_retry_without_auth(status: reqwest::StatusCode) -> bool {
-    matches!(
-        status,
-        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
-    )
 }
 
 async fn manifest_request(

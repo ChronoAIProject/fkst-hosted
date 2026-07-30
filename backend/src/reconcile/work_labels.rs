@@ -22,6 +22,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 
 use crate::goals::trigger_parse::PackageRef;
+use crate::reconcile::auth_fallback::should_retry_without_auth;
 use crate::reconcile::desired::SessionRegistration;
 
 /// GitHub's maximum label-name length, measured in Unicode scalar values.
@@ -323,13 +324,6 @@ async fn fetch_manifest(
     }
     let body = response.text().await.ok()?;
     toml::from_str::<Manifest>(&body).ok()
-}
-
-fn should_retry_without_auth(status: reqwest::StatusCode) -> bool {
-    matches!(
-        status,
-        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
-    )
 }
 
 async fn package_manifest_request(

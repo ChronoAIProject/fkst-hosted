@@ -16,6 +16,7 @@
 //! (the Job launcher + webhook trigger) is untouched.
 
 pub mod announce;
+mod auth_fallback;
 pub mod automerge;
 pub mod branches;
 // Pure work-label collision backstop (R4a): demotes the lower-priority of two active
