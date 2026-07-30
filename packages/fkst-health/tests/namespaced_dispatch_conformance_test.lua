@@ -42,11 +42,15 @@ end
 
 local function opts_for_case(_path, _queue, event)
   event.ts = event.payload.slot
+  -- FKST_SESSION_ID is deliberately absent. The department then takes its "no session
+  -- identity, no report" path, which routes and logs without spawning a codex or
+  -- writing anything. What this test owns is that the production namespaced queue
+  -- ROUTES; the write path is covered end to end against fakes in
+  -- integration_health_report_test.lua.
   return {
     run_opts = {
       env = {
         FKST_RUNTIME_ROOT = "/tmp/fkst-packages-test/fkst-health/namespaced",
-        FKST_SESSION_ID = "8f2c1d64-0a1b-4c2d-8e3f-0123456789ab",
       },
     },
   }
@@ -54,6 +58,11 @@ end
 
 return {
   test_all_departments_accept_production_namespaced_consumed_queues = function()
+    -- Belt and braces: this department runs here with PRODUCTION ports, so pin the
+    -- codex command even though the path above never reaches it. A test must never be
+    -- one environment change away from spawning a real model run.
+    t.mock_command("codex exec", { stdout = "", stderr = "", exit_code = 1 })
+
     conformance.assert_all_consumed_queues_route({
       t = t,
       package_name = "fkst-health",

@@ -22,8 +22,10 @@ return {
     end
     t.eq(trace.consumer_result.status, "accepted")
 
-    -- The scaffold department raises nothing yet; the report write and the
-    -- health_report_written broadcast arrive with the judgment-codex change.
+    -- No FKST_SESSION_ID exists in the test harness, so the tick routes, decides it
+    -- has no session identity to report for, logs that, and raises nothing. That is
+    -- the fleet-safety property in miniature: a session the reporter cannot identify
+    -- costs a report, never an error.
     t.eq(#trace.raised, 0)
 
     -- fkst-health is self-contained: its cron tick, its queue, its department. No

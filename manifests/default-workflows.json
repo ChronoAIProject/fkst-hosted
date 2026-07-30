@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "default-workflows",
-  "description": "Default fkst session bundle: the development (workflow-dev), security-review (workflow-security), and workflow-authoring (workflow-writer) adapters plus their package dependencies, resolved so a trigger need only reference this manifest. Each adapter auto-declares its own work label via [github].work_labels (fkst-dev / fkst-security / fkst-workflow), so a session using this manifest can omit ### Work Label and be driven by all three.",
+  "description": "Default fkst session bundle: the development (workflow-dev), security-review (workflow-security), and workflow-authoring (workflow-writer) adapters plus their package dependencies, resolved so a trigger need only reference this manifest. Each adapter auto-declares its own work label via [github].work_labels (fkst-dev / fkst-security / fkst-workflow), so a session using this manifest can omit ### Work Label and be driven by all three. It also bundles fkst-health, which writes a session health report every ten minutes for the dashboard to render; fkst-health declares NO work label, so its presence leaves every session's effective work-label set unchanged.",
   "packages": [
     "ChronoAIProject/fkst-hosted@packages:packages/workflow-dev",
     "ChronoAIProject/fkst-hosted@packages:packages/github-proxy",
@@ -16,6 +16,7 @@
     "ChronoAIProject/fkst-hosted@packages:packages/workflow-security",
     "ChronoAIProject/fkst-hosted@packages:packages/github-comment-effect",
     "ChronoAIProject/fkst-hosted@packages:packages/github-issue-effect",
-    "ChronoAIProject/fkst-hosted@packages:packages/workflow-writer"
+    "ChronoAIProject/fkst-hosted@packages:packages/workflow-writer",
+    "ChronoAIProject/fkst-hosted@packages:packages/fkst-health"
   ]
 }

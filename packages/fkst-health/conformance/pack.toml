@@ -71,3 +71,46 @@ kind = "text_forbid_regex"
 include = ["health.lua"]
 pattern = "os\\.execute|io\\.open|io\\.popen|exec_sync|exec_argv|spawn_codex|\\braise\\s*\\(|file\\.(write|read|list|exists)|fkst\\.observe"
 message = "health.lua is the pure evidence core: I/O, process execution, and queue effects belong in the department"
+
+# The judgment codex must stay read-only. It runs inside a live session pod alongside
+# that session's own work codex, and a write-capable health reporter could mutate the
+# very repository it is reporting on.
+[[rules]]
+id = "codex.read-only-judgment"
+severity = "error"
+kind = "text_require_regex"
+include = ["departments/health_report/main.lua"]
+pattern = "codex_lib\\.judgment_codex_opts\\("
+message = "the health narrative must be spawned through workflow.codex.judgment_codex_opts, which pins sandbox = \"read-only\""
+
+[[rules]]
+id = "codex.no-write-capable-sandbox"
+severity = "error"
+kind = "text_forbid_regex"
+include = ["**/*.lua"]
+exclude = ["tests/**", "**/*_test.lua"]
+pattern = "unrestricted_codex_opts|workspace-write|danger-full-access"
+message = "fkst-health observes and reports; it must never spawn a write-capable codex"
+
+# The reporter is a read-only observer of the session it rides. It performs no git
+# write, no push, and no issue mutation -- the only GitHub call it makes is the
+# read-only work-item query, and its only writes land under the health directory.
+[[rules]]
+id = "department.no-mutation"
+severity = "error"
+kind = "text_forbid_regex"
+include = ["**/*.lua"]
+exclude = ["tests/**", "**/*_test.lua"]
+pattern = "issue_create|issue_comment|issue_edit_labels|commit_tree|push_ref_update|forge\\.git\\b"
+message = "fkst-health must not mutate the repository or its issues: it observes and writes one report file"
+
+# The report is written through the atomic publish path, never straight to its final
+# name: the control-plane collector polls this directory roughly twice a second and
+# would copy a half-written file and publish it as a corrupt report.
+[[rules]]
+id = "writer.atomic-publish"
+severity = "error"
+kind = "text_require_regex"
+include = ["departments/health_report/writer.lua"]
+pattern = "\"mv\", \"-f\", partial, final"
+message = "the report must be written under a temporary name and renamed into place, so the collector never observes a partial file"
