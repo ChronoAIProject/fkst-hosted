@@ -1,36 +1,40 @@
 # fkst-hosted
 
-**fkst-hosted** is ChronoAI's hosted cloud service for the **fkst** project. It
-gives you a managed home for your fkst packages and the engine that runs them —
-so you can build, run, and collaborate without operating any infrastructure
-yourself.
+**fkst-hosted** turns GitHub issues into autonomous coding sessions. Install the
+GitHub App on a repository, describe work as issues, and receive a pull request
+for each task without operating the session infrastructure yourself.
 
 ## What you can do
 
-- **Keep your fkst packages in one place.** Create, update, and organize your
-  packages (the lua bundles the engine runs), or upload them as a zip.
-- **Generate a package from a description.** Describe what you want in plain
-  language and get a ready-to-run package draft back.
-- **Share with your team.** Give other people — or a whole organization —
-  permission to view or run a package.
-- **Run your packages.** Start an engine session, follow it while it runs, and
-  stop it whenever you like.
-- **Pursue goals against GitHub.** Capture a goal — an intent plus the packages
-  to use — point it at a GitHub repository (existing, or created for you), and
-  trigger it when you're ready.
-- **Manage GitHub issues from one place.** See the issues across all of your
-  linked GitHub accounts, and create, update, or comment on them.
+- **Run coding sessions for your repositories.** Declare each session with a
+  GitHub trigger issue and configure the workflows and environment it should use.
+- **Queue work with issues.** Add focused work items, follow their status, and
+  review the pull requests the session creates.
+- **Work from GitHub or the dashboard.** Use issues as the durable source of
+  truth, or sign in with GitHub for a visual view of repositories and sessions.
+- **Inspect and control sessions.** Start or stop sessions, manage environments
+  and GitHub App installations, and review live state, logs, and outcomes.
+- **Automate through REST.** Use the dashboard's machine-readable API for
+  supported session, work-item, environment, log, and outcome operations.
 
-Everything is reached through a simple HTTP API and secured by your ChronoAI
-(NyxID) sign-in.
+## Get started
 
-## Using the API
+1. Install the fkst-hosted GitHub App on the repositories where sessions should
+   run.
+2. Start a session from the dashboard or the installed **fkst substrate
+   session** issue template.
+3. Queue a task from the dashboard or the **fkst work item** issue template,
+   then follow its issue status and review the resulting pull request.
 
-The control plane serves a live **OpenAPI 3.1** document at `GET /openapi.json`,
-generated at runtime from the actual routes — every public endpoint, its
-authentication, the permissions it requires, and its request/response shapes.
+See the [fkst-hosted user manual](skills/fkst-control-plane-manual/SKILL.md) for
+session configuration, work labels, environments, permissions, and lifecycle
+details.
 
----
+## API and deployment
 
-<sub>Deploying fkst-hosted? See the **FKST Local Deployment Guide** section in
-[`CLAUDE.md`](CLAUDE.md#fkst-local-deployment-guide).</sub>
+The control plane serves its runtime-generated **OpenAPI 3.1** contract at
+`GET /openapi.json`. Use that contract as the authority for available routes,
+request and response shapes, and each operation's authentication requirements.
+
+For self-hosting, follow the
+[FKST Local Deployment Guide](CLAUDE.md#fkst-local-deployment-guide).
