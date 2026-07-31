@@ -101,7 +101,10 @@ function M.read_current_for_candidate(package_core, dept, repo, issue_number, ca
     return nil
   end
 
-  local reintake_command = operator_commands.operator_command_fact(current.comments, "reintake")
+  -- No exec handle here: core stays pure of the ambient exec, and read_env falls
+  -- back to the ambient reader when none is passed.
+  local reintake_command = operator_commands.operator_command_fact(current.comments, "reintake",
+    operator_commands.operator_author_policy())
   local has_pending_reintake = reintake_command ~= nil and not operator_commands.has_operator_command_response(current.comments, reintake_command)
   if has_pending_reintake and not m_facts.has_intake_history_marker(current.comments, candidate.proposal_id) then
     local refusal = operator_commands.build_operator_issue_command_refusal_request(repo,

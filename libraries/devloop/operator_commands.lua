@@ -9,6 +9,9 @@ local transition_version = require("contract.transition_version")
 local forge_validators = require("devloop.forge_validators")
 local devloop_logging = require("devloop.logging")
 local source_refs = require("contract.source_ref")
+local github_author_policy = require("devloop.github_author_policy")
+local content_filter = require("forge.github.content_filter")
+local devloop_config = require("devloop.config")
 
 local ai_sentinel = "⟦AI:FKST⟧"
 
@@ -60,7 +63,56 @@ local function parse_command(body)
   return nil
 end
 
-function C.operator_command_fact(comments, command_name)
+--- Who may issue an operator command on this session's issues.
+--
+-- Historically this was the trusted bot alone, which made `fkst: reintake` --
+-- the documented re-entry edge out of `blocked` -- usable only by the refine
+-- department writing it into its own amendment. A human operator's command was
+-- dropped in silence, so an issue whose refinement budget was spent could never
+-- be recovered (prod: #5714 had to be closed and recreated).
+--
+-- The tier here is the one that already governs work authorship: the trusted
+-- bot(s), the session's authorized logins, and the session creator. Global
+-- admins are deliberately absent -- the control plane does not publish them to
+-- the pod -- so an admin who is not also a contributor still cannot command a
+-- session. Returning nil keeps the bot-only behaviour for callers that pass no
+-- policy.
+function C.operator_author_policy(exec)
+  local ok, policy = pcall(github_author_policy.from_env, exec)
+  if not ok then
+    return nil
+  end
+  local whitelist = content_filter.policy_whitelist(policy)
+  if whitelist == nil then
+    return policy
+  end
+  local logins = {}
+  for login in pairs(whitelist) do
+    table.insert(logins, login)
+  end
+  local creator = devloop_config.session_creator(exec)
+  if creator ~= nil and tostring(creator) ~= "" then
+    table.insert(logins, creator)
+  end
+  return github_author_policy.from_logins(logins)
+end
+
+--- Is this comment's author allowed to command the loop?
+--
+-- Canonicalization matters: the whitelist stores folded logins, so a raw
+-- `trust_set[author]` lookup would reject `Chronoai-Shining` and every
+-- `<slug>[bot]` spelling. Route through is_authorized, which folds first.
+local function is_trusted_operator(comment, policy)
+  if policy == nil then
+    return parsers_misc._is_trusted_comment(comment)
+  end
+  return content_filter.is_authorized(
+    parsers_misc._comment_author_login(comment),
+    content_filter.policy_whitelist(policy)
+  )
+end
+
+function C.operator_command_fact(comments, command_name, policy)
   if type(comments) ~= "table" then
     return nil
   end
@@ -68,7 +120,7 @@ function C.operator_command_fact(comments, command_name)
   for index, comment in ipairs(comments) do
     local parsed = parse_command(parsers_misc._comment_body(comment))
     if parsed ~= nil and parsed.command == command_name then
-      if parsers_misc._is_trusted_comment(comment) then
+      if is_trusted_operator(comment, policy) then
         latest = {
           command = parsed.command,
           key = command_key(comment, index),
