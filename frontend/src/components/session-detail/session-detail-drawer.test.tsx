@@ -73,6 +73,29 @@ describe('SessionDetailDrawer', () => {
     expect(screen.getByRole('tab', { name: 'Outcomes' })).toBeInTheDocument();
   });
 
+  /// Every tab scrolls inside the panel, not by moving the page or the header.
+  /// Regression for a reported fault: reading one Health report scrolled the whole
+  /// tab and slid the navigation rail out of view.
+  it('gives every tab its own scroll region inside the panel', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse([])));
+    render(
+      <AuthProvider>
+        <SessionDetailDrawer owner="acme" name="site" session={session()} onClose={() => {}} />
+      </AuthProvider>
+    );
+    const panel = await screen.findByRole('tabpanel');
+    // The panel is the fixed box; it must not scroll itself.
+    expect(panel.className).toContain('min-h-0');
+    expect(panel.className).not.toContain('overflow-y-auto');
+
+    for (const name of ['Status', 'Packages', 'Logs', 'Health', 'Outcomes']) {
+      await user.click(screen.getByRole('tab', { name }));
+      const scroller = (await screen.findByRole('tabpanel')).querySelector('.overflow-y-auto');
+      expect(scroller, `${name} tab must own a scroll region`).not.toBeNull();
+    }
+  });
+
   it('renders the effective creator and authored/resolved branch facts', () => {
     render(
       <AuthProvider>

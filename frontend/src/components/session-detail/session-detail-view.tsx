@@ -8,6 +8,7 @@ import { canQueueSessionWork, decodeSessionStatus, sessionWorkLabels } from '@/l
 import type { SessionDetail } from '@/lib/api/types';
 import { CreateWorkItemModal } from '@/components/modals/create-work-item-modal';
 import { Chip } from '@/components/ui/chip';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { CopyButton } from '@/components/ui/copy-button';
 import { FadeSwap } from '@/components/ui/motion';
 import { PHASE_TONE } from './tones';
@@ -154,11 +155,11 @@ export function SessionDetailView({
   };
 
   return (
-    <>
-      {/* Frosted sticky header: a translucent bg-glass strip with backdrop-blur
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* Frosted header: a translucent bg-glass strip with backdrop-blur
           keeps it legible while body content scrolls faintly beneath it, and a
           layered highlight/hairline seats it above the panel. */}
-      <div className="sticky top-0 z-10 bg-glass backdrop-blur-glass border-b border-line px-5 py-4 flex flex-col gap-3 shadow-[var(--shadow-1),var(--highlight-top)]">
+      <div className="flex-none bg-glass backdrop-blur-glass border-b border-line px-5 py-4 flex flex-col gap-3 shadow-[var(--shadow-1),var(--highlight-top)]">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex flex-col gap-1.5">
             {/* Bright fg→dim display sweep on the session name for a premium
@@ -300,23 +301,45 @@ export function SessionDetailView({
         id={panelId}
         aria-labelledby={tabId(tab)}
         tabIndex={0}
-        className="relative px-5 py-4 outline-none"
+        className="relative flex-1 min-h-0 flex flex-col outline-none"
       >
-        <FadeSwap k={tab}>
+        {/* The PANEL is the fixed box; each tab owns its own scrollbar inside it.
+            Scrolling here instead would drag the header and tablist away with the
+            body, and — for a master/detail tab like Health — slide the navigation
+            rail out of view while reading an entry. Every tab scrolls through the
+            same themed ScrollArea so the scrollbar looks identical across tabs. */}
+        <FadeSwap k={tab} className="flex-1 min-h-0 flex flex-col">
           {tab === 'status' && (
-            <TabStatus session={session} observe={observe} onLoadObserve={loadObserve} />
+            <ScrollArea className="px-5 py-4">
+              <TabStatus session={session} observe={observe} onLoadObserve={loadObserve} />
+            </ScrollArea>
           )}
-          {tab === 'packages' && <TabPackages session={session} observe={observe} />}
-          {tab === 'logs' && <TabLogs session={session} />}
+          {tab === 'packages' && (
+            <ScrollArea className="px-5 py-4">
+              <TabPackages session={session} observe={observe} />
+            </ScrollArea>
+          )}
+          {tab === 'logs' && (
+            <ScrollArea className="px-5 py-4">
+              <TabLogs session={session} />
+            </ScrollArea>
+          )}
+          {/* Health manages TWO scroll regions of its own (rail + detail), so it
+              gets the box rather than a scroller — nesting one inside another
+              would give it two competing scrollbars. */}
           {tab === 'health' && (
-            <TabHealth
-              sessionId={session.session_id ?? ''}
-              state={health}
-              onRetry={loadHealth}
-            />
+            <div className="flex-1 min-h-0 px-5 py-4">
+              <TabHealth
+                sessionId={session.session_id ?? ''}
+                state={health}
+                onRetry={loadHealth}
+              />
+            </div>
           )}
           {tab === 'outcomes' && (
-            <TabOutcomes owner={owner} name={name} issue={session.trigger.number} />
+            <ScrollArea className="px-5 py-4">
+              <TabOutcomes owner={owner} name={name} issue={session.trigger.number} />
+            </ScrollArea>
           )}
         </FadeSwap>
       </div>
@@ -335,6 +358,6 @@ export function SessionDetailView({
           }}
         />
       )}
-    </>
+    </div>
   );
 }

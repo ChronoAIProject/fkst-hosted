@@ -6,6 +6,7 @@ import { formatAbsolute, formatTimeShort } from '@/lib/format';
 import { getHealthReport, type HealthReport, type SessionHealth } from '@/lib/api/health';
 import { Chip } from '@/components/ui/chip';
 import { MarkdownPreview } from '@/components/ui/markdown-preview';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Note, SectionLabel, Spinner } from './parts';
 import { StatusCard } from './status-charts';
 import { HEALTH_TONE, minutes, showsStaleNotice } from './health-state';
@@ -123,7 +124,7 @@ export function TabHealth({
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 h-full min-h-0">
       {/* Session-level heartbeat line: about the SESSION, not the selected report,
           so it sits above the master/detail split rather than inside either pane. */}
       <div className="flex items-center gap-2 flex-wrap text-[11.5px] font-mono text-ghost">
@@ -152,19 +153,17 @@ export function TabHealth({
         </div>
       )}
 
-      {/* ONE shared height for both panes, so they are the same size and each
-          scrolls its OWN content. Without it the columns size to their own content
-          (unequal), and the right pane's overflow escapes to the tab panel — so the
-          reader scrolls the whole tab to read one report, losing the rail. Matches
-          the viewport-relative sizing the log viewer already uses. */}
-      <div className="grid gap-4 md:grid-cols-[11.5rem_minmax(0,1fr)] md:h-[52vh] md:min-h-[20rem]">
+      {/* Both panes fill the SAME box and each scrolls its own content. Sizing to
+          content instead leaves the columns unequal and lets the right pane's
+          overflow escape to the tab panel — which would scroll the rail out of
+          view while reading an entry. The height comes from the panel now, not a
+          hardcoded viewport fraction, so every tab is the same size. */}
+      <div className="grid gap-4 md:grid-cols-[11.5rem_minmax(0,1fr)] flex-1 min-h-0">
         {/* ---- master: one entry per report, newest first, keyed by time ---- */}
         <nav className="flex flex-col gap-1.5 min-w-0 min-h-0">
           <SectionLabel>{t.healthHistory}</SectionLabel>
-          <ul
-            aria-label={t.healthHistoryAria}
-            className="flex flex-col gap-1 min-h-0 flex-1 overflow-y-auto pr-1 max-h-[14rem] md:max-h-none"
-          >
+          <ScrollArea className="pr-1 max-h-[14rem] md:max-h-none">
+          <ul aria-label={t.healthHistoryAria} className="flex flex-col gap-1">
             {reports.map((entry) => {
               const active = entry.id === activeId;
               return (
@@ -194,12 +193,14 @@ export function TabHealth({
               );
             })}
           </ul>
+          </ScrollArea>
         </nav>
 
         {/* ---- detail: everything about the selected report ---- */}
+        <ScrollArea className="pr-1">
         <section
           aria-label={t.healthDetailAria}
-          className="flex flex-col gap-3.5 min-w-0 min-h-0 overflow-y-auto pr-1"
+          className="flex flex-col gap-3.5 min-w-0"
         >
           <StatusCard label={t.healthCurrent}>
             <div className="flex items-center gap-2 flex-wrap">
@@ -263,6 +264,7 @@ export function TabHealth({
             </div>
           )}
         </section>
+        </ScrollArea>
       </div>
     </div>
   );

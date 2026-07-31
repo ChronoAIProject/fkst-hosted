@@ -322,16 +322,20 @@ describe('TabHealth layout', () => {
   it('gives each pane its own scroll container so the tab itself does not scroll', () => {
     const { container } = renderTab(loaded(listing()));
 
+    // Each pane sits inside its OWN scroll container, so neither one's overflow
+    // escapes to the tab panel.
     const rail = screen.getByRole('list', { name: 'Health report history' });
-    expect(rail.className).toContain('overflow-y-auto');
+    expect(rail.closest('.overflow-y-auto')).not.toBeNull();
 
     const detail = screen.getByRole('region', { name: 'Selected health report' });
-    expect(detail.className).toContain('overflow-y-auto');
+    expect(detail.closest('.overflow-y-auto')).not.toBeNull();
+    expect(rail.closest('.overflow-y-auto')).not.toBe(detail.closest('.overflow-y-auto'));
 
-    // Both panes are children of ONE grid, which is what makes them equal height.
+    // Both panes fill ONE grid, which is what makes them equal height. The height
+    // comes from the tab panel, so the grid only has to be a shrinkable flex child.
     const grid = container.querySelector('.grid');
     expect(grid).not.toBeNull();
-    expect(grid!.className).toMatch(/md:h-\[/);
+    expect(grid!.className).toContain('min-h-0');
     expect(grid!.contains(rail)).toBe(true);
     expect(grid!.contains(detail)).toBe(true);
   });
