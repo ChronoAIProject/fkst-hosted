@@ -75,7 +75,10 @@ local function mock_runtime_and_context()
   -- The refine department reads the issue under lock, once before dispatching the
   -- amendment and once after, so it can re-gate on a state that may have moved.
   for _ = 1, 2 do
-    t.mock_command("gh issue view 42 --repo owner/repo", {
+    -- Matched on the FULL command: the refine read asks for `author` as well, and
+    -- a prefix mock here would also swallow the loop department's own issue view,
+    -- leaving it unable to see the thinking state marker.
+    t.mock_command("gh issue view 42 --repo owner/repo --json 'title,updatedAt,labels,comments,state,author'", {
       stdout = '{"title":"t","updatedAt":"2026-07-04T00:00:00Z","labels":[{"name":"fkst-dev:blocked"}],'
         .. '"comments":[],"state":"OPEN","author":{"login":"fkst-test-bot"}}\n',
       stderr = "",
