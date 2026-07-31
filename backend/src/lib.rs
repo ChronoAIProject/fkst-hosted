@@ -82,6 +82,7 @@ pub mod session_backend;
 // (resolves to `None`) unless the `FKST_STORAGE_*` / `FKST_NYXID_*` vars are set.
 // No in-pod wiring yet — this is the client library only.
 pub mod storage;
+pub mod workflow_catalog;
 // In-pod `run-substrate` subcommand (Model B, issue #359 §5): the long-lived
 // substrate-session entrypoint that fetches packages + the target repo, wires the
 // rotating GitHub token into git + gh, renders the codex config, and execs
