@@ -17,6 +17,13 @@ const Dashboard = lazy(() =>
   import('../pages/dashboard').then((m) => ({ default: m.Dashboard }))
 );
 
+// The operations workspace carries its own tables, filter toolbar, and icon set
+// and is only ever opened deliberately — lazy-load it so neither the docs pages
+// nor the dashboard pay for it.
+const OperationsPage = lazy(() =>
+  import('../pages/operations').then((m) => ({ default: m.Operations }))
+);
+
 /** Route-level skeleton shown while the lazy dashboard chunk downloads —
  *  page-shaped shimmer blocks (index.css vocabulary) so the content area
  *  never flashes blank on a slow connection. Exported for its unit test. */
@@ -33,6 +40,25 @@ export function DashboardFallback() {
       <div className="anim-shimmer rounded-card h-10 w-2/3 max-w-[520px]" />
       <div className="anim-shimmer rounded-chip h-4 w-1/2 max-w-[400px]" />
       <div className="anim-shimmer rounded-panel h-[440px]" />
+    </div>
+  );
+}
+
+/** Route-level skeleton for the lazy operations chunk. Shaped like the page it
+ *  replaces — a toolbar strip above one tall table region — so the fixed-height
+ *  layout does not jump when the real workspace mounts. Exported for its test. */
+export function OperationsFallback() {
+  const t = useContent().operations;
+  return (
+    <div
+      role="status"
+      aria-label={t.loading}
+      data-testid="operations-route-skeleton"
+      className="h-full flex flex-col gap-3"
+    >
+      <div className="anim-shimmer rounded-chip h-6 w-56 flex-none" />
+      <div className="anim-shimmer rounded-control h-8 w-full max-w-[720px] flex-none" />
+      <div className="anim-shimmer rounded-panel flex-1 min-h-[240px]" />
     </div>
   );
 }
@@ -68,6 +94,14 @@ const router = createBrowserRouter(
               element: (
                 <Suspense fallback={<DashboardFallback />}>
                   <Dashboard />
+                </Suspense>
+              ),
+            },
+            {
+              path: 'operations',
+              element: (
+                <Suspense fallback={<OperationsFallback />}>
+                  <OperationsPage />
                 </Suspense>
               ),
             },

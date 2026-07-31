@@ -1,3 +1,4 @@
+import type { OperationsContent } from './operations-types';
 import type { FieldKey, GrammarKey, SignalKey, StepId } from './literals';
 import type { SessionHealth, SessionPhase, WorkItemState } from '@/lib/api/derive';
 import type {
@@ -858,4 +859,5 @@ export interface SiteContent {
       finish: TitleBody;
     };
   };
+  operations: OperationsContent;
 }

@@ -9,6 +9,7 @@ import { detail } from './en/detail';
 import { pages } from './en/pages';
 import { chat } from './en/chat';
 import { tour } from './en/tour';
+import { operations } from './en/operations';
 
 // English catalog, composed from the per-domain modules under `en/`. The split
 // is the point: parallel work items each own a disjoint module, so they never
@@ -29,4 +30,5 @@ export const en: SiteContent = {
   ...pages,
   tour,
   chat,
+  operations,
 };

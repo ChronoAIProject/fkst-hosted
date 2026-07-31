@@ -30,6 +30,7 @@ function renderShell({
               <Route element={<Shell />}>
                 <Route index element={<div>home content</div>} />
                 <Route path="get-started" element={<div>doc content</div>} />
+                <Route path="operations" element={<div>operations content</div>} />
               </Route>
             </Routes>
           </MemoryRouter>
@@ -185,6 +186,44 @@ describe('Shell', () => {
     fireEvent.click(envButton);
     // Open: the drawer renders its heading (distinct from the topbar button).
     expect(screen.getByRole('heading', { name: 'Environments' })).toBeInTheDocument();
+  });
+
+  it('offers Operations to EVERY authenticated user, not only administrators', () => {
+    renderShell({ authenticated: true });
+    // The link is drawn from the locally-known session flag alone. Nothing here
+    // consults an overview, an admin claim, or any other API state — the route's
+    // own API is the boundary, and a regular user is entitled to the route.
+    const nav = screen.getByRole('navigation');
+    expect(within(nav).getByRole('link', { name: 'Operations' })).toHaveAttribute(
+      'href',
+      '/operations'
+    );
+  });
+
+  it('keeps Operations reachable from the overflow menu at narrow widths', () => {
+    // The inline nav link hides below 721px; without this menu entry the route
+    // would simply vanish on a phone.
+    renderShell({ authenticated: true });
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    expect(
+      within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Operations' })
+    ).toHaveAttribute('href', '/operations');
+  });
+
+  it('hides Operations from a signed-out visitor', () => {
+    renderShell();
+    expect(screen.queryByRole('link', { name: 'Operations' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Operations' })).not.toBeInTheDocument();
+  });
+
+  it('treats /operations as a fixed-height app route with no marketing footer', () => {
+    renderShell({ authenticated: true, initialEntry: '/operations' });
+    const main = screen.getByRole('main');
+    expect(main).toContainElement(screen.getByText('operations content'));
+    // Same contract as the dashboard: the scroll region holds no footer, and the
+    // slim bar is pinned after <main> so the window itself never scrolls.
+    expect(main.querySelector('footer')).toBeNull();
+    expect(main.nextElementSibling?.tagName).toBe('FOOTER');
   });
 });
 
