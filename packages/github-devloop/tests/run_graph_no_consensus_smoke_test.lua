@@ -72,19 +72,6 @@ local function mock_runtime_and_context()
       exit_code = 0,
     })
   end
-  -- The refine department reads the issue under lock, once before dispatching the
-  -- amendment and once after, so it can re-gate on a state that may have moved.
-  for _ = 1, 2 do
-    -- Matched on the FULL command: the refine read asks for `author` as well, and
-    -- a prefix mock here would also swallow the loop department's own issue view,
-    -- leaving it unable to see the thinking state marker.
-    t.mock_command("gh issue view 42 --repo owner/repo --json 'title,updatedAt,labels,comments,state,author'", {
-      stdout = '{"title":"t","updatedAt":"2026-07-04T00:00:00Z","labels":[{"name":"fkst-dev:blocked"}],'
-        .. '"comments":[],"state":"OPEN","author":{"login":"fkst-test-bot"}}\n',
-      stderr = "",
-      exit_code = 0,
-    })
-  end
 end
 
 local function mock_github_proxy_writes()
@@ -143,7 +130,12 @@ local function mock_issue_reads()
     state = "OPEN",
     labels = { "fkst-dev:thinking" },
     comments = comments,
-  }, "title,updatedAt,labels,comments,state,author", 2)
+    -- 4, not 2: `loop`, `reconcile` and now `refine` all read the issue through
+    -- the same gh_issue_view_loop selector, and refine reads twice -- once before
+    -- the model call and once to re-gate after it. Registering a second mock for
+    -- this command instead would be wrong: the first registration wins, so it
+    -- would answer the loop's read and hide the thinking state marker from it.
+  }, "title,updatedAt,labels,comments,state,author", 4)
   t.mock_command("gh issue view 42 --repo owner/repo --json 'title,updatedAt,labels,comments,state'", {
     stdout = entity_read_mocks.issue_view_stdout({
       repo = "owner/repo",
@@ -191,11 +183,12 @@ return {
     mock_issue_reads()
     mock_github_proxy_writes()
 
-    -- 9, not 8: a refinable terminal cause now also raises the amend-and-reintake
-    -- comment, so the graph has one more effect to drain before it quiesces. The
+    -- 10, not 8: a refinable terminal cause now also raises the amend-and-reintake
+    -- comment, and that comment drains through write + handoff, so the graph has
+    -- two more effects to settle before it quiesces. The
     -- budget stays exact rather than generous -- `require_quiescent` proves the
     -- graph actually settles, and a padded ceiling would stop proving that.
-    local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 9 }))
+    local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 10 }))
     graph.assert_covers(trace, {
       "consensus.consensus_converge -> github-devloop.loop",
       "github-proxy.github_issue_comment_request -> github-proxy.github_comment",
