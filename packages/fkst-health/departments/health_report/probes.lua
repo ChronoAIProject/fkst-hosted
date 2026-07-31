@@ -144,24 +144,103 @@ local function delivery_ids(facts)
   return ids, seen
 end
 
--- A dead-lettered delivery is a fault that already exhausted its retries, and the
--- QUEUE NAME is the only thing we group by. That is a security decision as much as a
--- design one: queue names come from package source and can never carry a credential,
--- whereas any free-text error surface could. The observe snapshot's dead-letter rows
--- carry no message at all -- only a payload digest -- so nothing session-authored
--- ever reaches the narrative.
+-- A dead-lettered delivery is a fault that already exhausted its retries. Grouping by
+-- queue name alone was the original design, on the stated belief that "the observe
+-- snapshot's dead-letter rows carry no message at all -- only a payload digest".
+--
+-- That belief was WRONG. A dead-letter row carries `dept`, `delivery_id` (which embeds
+-- the originating issue), `attempts`, `permanent`, and `error_excerpt`. Discarding all
+-- of it reduced every failure report to "dead letters grew by 2" -- a number that tells
+-- a reader nothing about WHERE the failure is, WHAT it costs them, WHY it happened, or
+-- WHAT TO DO. A health report that cannot answer those four questions has no reason to
+-- exist, so the detail is extracted here.
+--
+-- SECRET HYGIENE. `error_excerpt` is free text produced inside the session, so it is
+-- the one field here that could in principle carry a credential. It is therefore
+-- (a) reduced to a single line, (b) restricted to lines that look like an error rather
+-- than echoed prompt or context, and (c) hard-bounded. The control plane's collector
+-- redacts every byte on the way out as defence in depth, but this is the first line.
+
+-- The terminal cause, pulled out of a codex/department stderr blob.
+--
+-- Two traps, both hit for real:
+--   1. The engine embeds newlines in `error_excerpt` as the TWO characters `\` + `n`,
+--      so splitting on real newlines sees one enormous line and returns the log
+--      preamble ("exit=1 stderr=TIMESTAMP=... LEVEL=info ...") instead of the error.
+--   2. A retry ladder prints "Reconnecting... 1/5" before the real cause, so the
+--      FIRST error-looking line is the least informative one.
+local reason_ceiling = 200
+
+local function fault_reason(excerpt)
+  if type(excerpt) ~= "string" or excerpt == "" then
+    return nil
+  end
+  local text = excerpt:gsub("\\n", "\n")
+  local strong, weak = nil, nil
+  for line in text:gmatch("[^\r\n]+") do
+    local trimmed = line:gsub("^%s+", ""):gsub("%s+$", "")
+    if trimmed ~= "" and not trimmed:find("Reconnecting") then
+      -- An explicit ERROR line is the cause; keep the LAST one (the terminal
+      -- failure). `exit=`/`error_class=` is only a fallback when there is no ERROR.
+      if trimmed:find("^ERROR:") ~= nil or trimmed:find("^error:") ~= nil then
+        strong = trimmed
+      elseif weak == nil and (trimmed:find("error_class=") ~= nil or trimmed:find("^exit=%d") ~= nil) then
+        weak = trimmed
+      end
+    end
+  end
+  local best = strong or weak
+  if best == nil then
+    return nil
+  end
+  return best:sub(1, reason_ceiling)
+end
+
+-- The originating work item, recovered from the delivery id. Devloop delivery ids
+-- embed `.../issue/<owner>/<repo>/<number>/...` with `/` percent-escaped as `_2F_`,
+-- so the number is addressable without the package knowing devloop's schema.
+local function work_item_of(row)
+  local id = type(row) == "table" and row.delivery_id or nil
+  if type(id) ~= "string" then
+    return nil
+  end
+  local last = nil
+  for number in id:gmatch("issue_2F_[^_]+_2F_[^_]+_2F_(%d+)") do
+    last = tonumber(number)
+  end
+  if last == nil then
+    for number in id:gmatch("/issue/[^/]+/[^/]+/(%d+)") do
+      last = tonumber(number)
+    end
+  end
+  return last
+end
+
+--- The dominant dead-letter fault, with everything a reader needs to locate and act on
+--- it. Returns nil when there are no dead letters.
 local function repeated_fault(facts)
-  local counts, top, top_count = {}, nil, 0
+  local counts, top_row, top_count = {}, nil, 0
   for _, row in ipairs(rows(facts, "dead_letters")) do
     local queue = type(row) == "table" and row.queue or nil
     if type(queue) == "string" and queue ~= "" then
       counts[queue] = (counts[queue] or 0) + 1
       if counts[queue] > top_count then
-        top, top_count = queue, counts[queue]
+        top_row, top_count = row, counts[queue]
       end
     end
   end
-  return top, top_count
+  if top_row == nil then
+    return nil, 0
+  end
+  return {
+    queue = top_row.queue,
+    dept = type(top_row.dept) == "string" and top_row.dept or nil,
+    work_item = work_item_of(top_row),
+    attempts = whole(top_row.attempts),
+    permanent = top_row.permanent == true,
+    reason = fault_reason(top_row.error_excerpt),
+    count = top_count,
+  }, top_count
 end
 
 local function unreadable(why)
@@ -209,11 +288,14 @@ function P.from_observe(facts, memory)
   local faults = {
     readable = true,
     recurring = recurrence,
+    -- The dominant fault's identity + cause, so the report can say WHERE and WHY
+    -- rather than only HOW MANY.
+    detail = top_fault,
     -- More dead letters than the snapshot can carry is not a package's bad window;
     -- it is an engine in trouble, and the only unambiguous "framework is erroring"
     -- fact this surface exposes.
     framework_erroring = truncated.dead_letters == true,
-    top_fault = top_fault,
+    top_fault = type(top_fault) == "table" and top_fault.queue or nil,
   }
   return deliveries, faults, {
     deliveries = tally(rows(facts, "deliveries")),

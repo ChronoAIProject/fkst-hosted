@@ -277,6 +277,15 @@ local function confidence_for(status, observations)
   return "medium"
 end
 
+--- The dominant fault's detail table, when the faults probe read one.
+local function fault_detail(observations)
+  local faults = as_table(as_table(observations).faults)
+  local detail = faults.detail
+  return type(detail) == "table" and detail or nil
+end
+
+H.fault_detail = fault_detail
+
 local function headline_for(status, detail, observations)
   local open = open_work_items(observations)
   local items = open == nil and "an unknown number of" or tostring(open)
@@ -287,6 +296,19 @@ local function headline_for(status, detail, observations)
     return "No open work items; the pod is inside its reap grace window."
   end
   if status == "failing" then
+    -- Name the thing that is broken. "dead letters grew by 2" is a number; a reader
+    -- needs the work item and the department to act on it.
+    local fault = fault_detail(observations)
+    if fault ~= nil then
+      local where = fault.work_item ~= nil and ("work item #" .. tostring(fault.work_item))
+        or ("queue " .. tostring(fault.queue))
+      return where
+        .. " keeps failing and has exhausted its retries ("
+        .. tostring(fault.count)
+        .. " dead letter(s)"
+        .. (fault.dept ~= nil and ("; " .. fault.dept) or "")
+        .. ")."
+    end
     return "The framework is erroring: " .. tostring(detail) .. "."
   end
   if status == "blocked" then

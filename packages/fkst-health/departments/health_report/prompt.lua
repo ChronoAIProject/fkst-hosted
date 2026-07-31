@@ -28,7 +28,7 @@ end
 
 --- The evidence context file's contents: the rules-derived verdict followed by the
 --- observations that produced it, one per line.
-function P.context(verdict, session_id)
+function P.context(verdict, session_id, fault)
   local out = { "# fkst-health evidence for the last window", "" }
   line(out, "session_id", session_id)
   line(out, "rules_derived_status", verdict.status)
@@ -38,6 +38,19 @@ function P.context(verdict, session_id)
   table.insert(out, "## observations")
   for _, entry in ipairs(type(verdict.evidence) == "table" and verdict.evidence or {}) do
     line(out, entry.key, entry.value)
+  end
+  if type(fault) == "table" then
+    table.insert(out, "")
+    table.insert(out, "## the dominant failure")
+    line(out, "work_item", fault.work_item)
+    line(out, "department", fault.dept)
+    line(out, "queue", fault.queue)
+    line(out, "attempts_before_dead_letter", fault.attempts)
+    line(out, "dead_letters_for_this_queue", fault.count)
+    line(out, "permanent", fault.permanent)
+    -- The terminal error text. Already reduced to one bounded line upstream; the
+    -- ceiling above bounds it again before it reaches the judge.
+    line(out, "terminal_error", fault.reason)
   end
   table.insert(out, "")
   table.insert(out, "## open work items")
@@ -57,7 +70,7 @@ end
 --- a read-only-sandbox codex refuses to start outside a git repository -- and reads
 --- its evidence from this path instead, which is the shape every judgment codex in
 --- this catalog uses.
-function P.build(verdict, context_path)
+function P.build(verdict, context_path, fault)
   return table.concat({
     "You are the health reporter for one running fkst coding session.",
     "Read the evidence file at " .. tostring(context_path) .. " and nothing else.",
@@ -69,6 +82,14 @@ function P.build(verdict, context_path)
     "Write 3 to 6 short sentences of plain markdown explaining, in this session's own",
     "terms, what that status means right now and what a human should do about it.",
     "",
+    (type(fault) == "table"
+      and "The evidence names a specific failure. Your answer MUST say, concretely: "
+        .. "WHERE it is failing (the work item and department), WHAT it costs the user "
+        .. "if they do nothing, WHY it failed (quote the terminal error), and WHAT THE "
+        .. "USER SHOULD DO. You are reporting only -- never claim you fixed or will fix "
+        .. "anything."
+      or "Say what a human should watch for next."),
+    "",
     "Hard constraints:",
     "- Do not assert any progress, failure, or cause that is not in the evidence.",
     "- Do not restate a different status, and do not hedge the given one.",
@@ -78,18 +99,145 @@ function P.build(verdict, context_path)
   }, "\n")
 end
 
+-- WHAT A FAILING REPORT MUST ANSWER.
+--
+-- Four questions, in this order, or the report is worthless to the person reading it:
+--   1. WHERE   -- which work item / department / queue
+--   2. IMPACT  -- what it costs them if they do nothing
+--   3. WHY     -- the actual terminal error, not a count
+--   4. WHAT TO DO -- an action they can take themselves
+--
+-- These are built from the RULES and the EVIDENCE, never from the narrating codex.
+-- That is the whole point: the codex is exactly what dies during an outage -- it died
+-- during the outage that motivated this -- so the fallback body is the one a reader is
+-- most likely to see, and it must therefore be the most informative, not the least.
+-- This package never remediates anything; it reports, and the actions below are for a
+-- human to run.
+
+local function fault_sections(fault)
+  if fault == nil then
+    return nil
+  end
+  local where = {}
+  if fault.work_item ~= nil then
+    table.insert(where, "work item #" .. tostring(fault.work_item))
+  end
+  if fault.dept ~= nil then
+    table.insert(where, "department `" .. tostring(fault.dept) .. "`")
+  end
+  if fault.queue ~= nil then
+    table.insert(where, "queue `" .. tostring(fault.queue) .. "`")
+  end
+
+  local impact = {}
+  if fault.work_item ~= nil then
+    table.insert(
+      impact,
+      "This work item will NOT produce a pull request. It has exhausted its retries "
+        .. "and will not recover on its own."
+    )
+  else
+    table.insert(impact, "Deliveries on this queue are being discarded after their retries run out.")
+  end
+  if fault.permanent then
+    table.insert(
+      impact,
+      "The failure is marked permanent, so the engine will not redrive it automatically."
+    )
+  end
+  table.insert(
+    impact,
+    "The session stays alive while the work item is open, so it keeps holding its pod "
+      .. "and its CPU/memory reservation without making progress."
+  )
+
+  local action = {}
+  if fault.log_path ~= nil then
+    table.insert(
+      action,
+      "Read the failing department's own log for the full stack: `" .. tostring(fault.log_path) .. "`."
+    )
+  end
+  for _, line in ipairs({
+    "Close and re-open the work item so a fresh proposal is created, or delete the "
+      .. "session pod so the session restarts from a clean state.",
+    "If it fails again the same way, the cause is upstream of this session -- fix that "
+      .. "first, because a retry alone will not clear it.",
+  }) do
+    table.insert(action, line)
+  end
+
+  return {
+    log_path = fault.log_path,
+    where = #where > 0 and table.concat(where, ", ") or nil,
+    impact = impact,
+    why = fault.reason,
+    attempts = fault.attempts,
+    count = fault.count,
+    action = action,
+  }
+end
+
+P.fault_sections = fault_sections
+
 --- The body written when the judge fails, times out, or answers with nothing usable.
 --- A missing narrative must never cost a heartbeat: the control plane reads silence
---- as a stalled engine, so the report still goes out with the rules-derived verdict.
-function P.fallback_body(verdict, why)
-  return table.concat({
-    "## " .. tostring(verdict.headline),
-    "",
-    "Status `" .. tostring(verdict.status) .. "` was derived from the evidence listed in this",
-    "report's front matter. The narrative summary is unavailable for this window ("
-      .. tostring(why)
-      .. "); the verdict and its evidence are unaffected.",
-  }, "\n") .. "\n"
+--- as a stalled engine, so the report still goes out with the rules-derived verdict --
+--- and, when there is a fault, with the full WHERE / IMPACT / WHY / WHAT TO DO.
+function P.fallback_body(verdict, why, fault)
+  local out = { "## " .. tostring(verdict.headline), "" }
+  local sections = fault_sections(fault)
+
+  if sections ~= nil then
+    if sections.where ~= nil then
+      table.insert(out, "### Where")
+      table.insert(out, sections.where)
+      table.insert(out, "")
+    end
+
+    table.insert(out, "### What this costs you")
+    for _, line in ipairs(sections.impact) do
+      table.insert(out, "- " .. line)
+    end
+    table.insert(out, "")
+
+    table.insert(out, "### Why it failed")
+    if sections.why ~= nil then
+      table.insert(out, "```")
+      table.insert(out, tostring(sections.why))
+      table.insert(out, "```")
+    elseif sections.log_path ~= nil then
+      table.insert(
+        out,
+        "The engine's own error excerpt is truncated before the cause. The full error is in `"
+          .. tostring(sections.log_path) .. "`."
+      )
+    else
+      table.insert(out, "The engine reported no error text for this failure.")
+    end
+    if sections.attempts ~= nil then
+      table.insert(
+        out,
+        "Retried " .. tostring(sections.attempts) .. " time(s) before being dead-lettered; "
+          .. tostring(sections.count) .. " dead letter(s) so far."
+      )
+    end
+    table.insert(out, "")
+
+    table.insert(out, "### How to resolve it")
+    for index, line in ipairs(sections.action) do
+      table.insert(out, tostring(index) .. ". " .. line)
+    end
+    table.insert(out, "")
+  end
+
+  table.insert(
+    out,
+    "Status `" .. tostring(verdict.status) .. "` was derived from the evidence in this "
+      .. "report's front matter. The narrative summary is unavailable for this window ("
+      .. tostring(why) .. "); the verdict, and everything above, are unaffected."
+  )
+  return table.concat(out, "\n") .. "\n"
 end
 
 --- Normalize a codex reply into a report body, or nil when it is not usable.

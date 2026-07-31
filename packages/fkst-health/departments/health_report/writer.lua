@@ -20,6 +20,9 @@ local W = {}
 -- accumulate reports for as long as it lives. The newest 200 is over a day of
 -- history at this cadence.
 W.retention = 200
+-- Where the engine writes one log per department invocation.
+W.fault_log_directory = "logs/framework-child"
+W.fault_reason_ceiling = 200
 W.directory_leaf = "health"
 W.partial_prefix = "."
 W.partial_suffix = ".partial"
@@ -118,6 +121,59 @@ function W.new(handles)
 
   function self.ensure(path)
     return run(runner, { "mkdir", "-p", path })
+  end
+
+  --- The terminal error line for a failing department, read from its newest
+  --- framework-child log.
+  ---
+  --- WHY THIS EXISTS. The engine's observe snapshot caps `error_excerpt` at 500
+  --- characters, and a department's log preamble (timestamps, provenance, package
+  --- versions) consumes all of it -- so the actual cause is ALWAYS past the cap and
+  --- never appears in the snapshot. The only place it exists is the child log. A
+  --- health report that cannot say WHY something failed is not worth writing, so this
+  --- goes and gets it.
+  ---
+  --- Best-effort and bounded: any failure returns nil and the report degrades to
+  --- naming the log instead of quoting it. `dept` is validated before it reaches a
+  --- shell, even though it originates from the engine and not from a user.
+  function self.terminal_error(runtime_root, dept)
+    if type(runner) ~= "function" or type(dept) ~= "string" then
+      return nil
+    end
+    if dept:find("^[%w%-%._]+$") == nil then
+      return nil
+    end
+    local directory = tostring(runtime_root):gsub("/+$", "") .. "/" .. W.fault_log_directory
+    local ok_list, listed = pcall(runner, {
+      argv = { "sh", "-c", 'ls -t "$0"/"$1"-*.log 2>/dev/null | head -1', directory, dept },
+      timeout = process_timeout_seconds,
+    })
+    if not ok_list or type(listed) ~= "table" or tonumber(listed.exit_code) ~= 0 then
+      return nil
+    end
+    local path = tostring(listed.stdout or ""):gsub("%s+$", "")
+    if path == "" then
+      return nil
+    end
+    -- The LAST ERROR line is the terminal cause; a retry ladder prints
+    -- "Reconnecting... n/5" ahead of it, which is noise.
+    local ok_grep, found = pcall(runner, {
+      argv = {
+        "sh",
+        "-c",
+        'grep -a "ERROR:" "$0" 2>/dev/null | grep -v "Reconnecting" | tail -1',
+        path,
+      },
+      timeout = process_timeout_seconds,
+    })
+    if not ok_grep or type(found) ~= "table" then
+      return nil
+    end
+    local line = tostring(found.stdout or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if line == "" then
+      return nil
+    end
+    return line:sub(1, W.fault_reason_ceiling), path
   end
 
   --- Write `text` to `<directory>/<name>` atomically. Returns ok, why.

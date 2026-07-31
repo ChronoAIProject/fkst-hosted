@@ -262,18 +262,18 @@ local function make_department(ports)
   -- The judge NARRATES the verdict; it never changes it. Anything it returns becomes
   -- the report body and nothing else, so a reply claiming a different status cannot
   -- reach the emitted `status`.
-  local function narrate(event, verdict, directory, session_id)
+  local function narrate(event, verdict, directory, session_id, fault)
     local context_path = directory .. "/" .. context_leaf
-    if not files.write_context(context_path, prompt.context(verdict, session_id)) then
+    if not files.write_context(context_path, prompt.context(verdict, session_id, fault)) then
       note("SKIP", event, "evidence context could not be written")
-      return prompt.fallback_body(verdict, "evidence context unavailable")
+      return prompt.fallback_body(verdict, "evidence context unavailable", fault)
     end
     -- judgment_codex_opts already sets sandbox = "read-only" and carries no
     -- role/proposal_id/dedup_key, which is what keeps a raw spawn compliant with the
     -- live-run-dispatch ratchet. The worktree is "." because a read-only-sandbox
     -- codex refuses to start outside a git repository; it reads its evidence from the
     -- absolute context path above.
-    local opts = codex_lib.judgment_codex_opts(prompt.build(verdict, context_path), ".")
+    local opts = codex_lib.judgment_codex_opts(prompt.build(verdict, context_path, fault), ".")
     opts.timeout = prompt.timeout_seconds
 
     local ok_codex, result = pcall(run_codex, opts)
@@ -294,7 +294,7 @@ local function make_department(ports)
       why = "codex produced no narrative"
     end
     note("SKIP", event, "narrative unavailable: " .. why)
-    return prompt.fallback_body(verdict, why)
+    return prompt.fallback_body(verdict, why, fault)
   end
 
   local function act_health(event)
@@ -328,7 +328,20 @@ local function make_department(ports)
       return
     end
 
-    local body = narrate(event, verdict, directory, session_id)
+    -- The observe snapshot truncates its error excerpt before the actual cause, so
+    -- go and read the failing department's own log for the terminal error. Failure
+    -- here is fine: the report then names the log instead of quoting it.
+    local fault = health.fault_detail(observations)
+    if fault ~= nil then
+      local ok_reason, reason, log_path = pcall(files.terminal_error, runtime_root, fault.dept)
+      if ok_reason and reason ~= nil then
+        fault.reason, fault.log_path = reason, log_path
+      elseif ok_reason then
+        fault.log_path = log_path
+      end
+    end
+
+    local body = narrate(event, verdict, directory, session_id, fault)
     local text = report.render({
       session_id = session_id,
       namespace = namespace ~= "" and namespace or nil,
