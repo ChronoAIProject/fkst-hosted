@@ -29,8 +29,10 @@ function M.reintake_has_active_devloop_state(labels, comments, proposal_id)
   return operator_commands.reintake_has_active_devloop_state(labels, comments, proposal_id)
 end
 
-function M.pending_reintake_command(comments)
-  local command = operator_commands.operator_command_fact(comments, "reintake")
+-- `policy` widens the command's accepted authors beyond the trusted bot; nil
+-- preserves the bot-only contract for callers that do not supply one.
+function M.pending_reintake_command(comments, policy)
+  local command = operator_commands.operator_command_fact(comments, "reintake", policy)
   if command ~= nil and not operator_commands.has_operator_command_response(comments, command) then
     return command
   end

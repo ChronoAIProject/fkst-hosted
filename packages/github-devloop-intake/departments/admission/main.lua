@@ -25,6 +25,16 @@ local spec = {
   stall_window = "30s",
 }
 
+-- Memoized per pass: the policy is assembled from env reads (subprocesses), and
+-- both reintake call sites below want the same answer.
+local operator_policy = nil
+local function reintake_policy()
+  if operator_policy == nil then
+    operator_policy = operator_commands.operator_author_policy(exec_sync)
+  end
+  return operator_policy
+end
+
 local function claim_issue_for_management(repo, issue_number, current, proposal_id)
   return m_claims.claim_issue_for_management(core, "admission", repo, issue_number, current, proposal_id)
 end
@@ -41,7 +51,7 @@ local function raise_reintake_refusal(repo, issue_number, proposal_id, command, 
 end
 
 local function handle_pending_reintake(repo, issue, current, proposal_id, source_ref, claim_verified)
-  local command = core.pending_reintake_command(current.comments)
+  local command = core.pending_reintake_command(current.comments, reintake_policy())
   if command == nil then
     return false
   end
@@ -160,7 +170,7 @@ end
 local function handle_creator_scoped_known_issue(entity, repo, issue_number, proposal_id)
   local _, _, current = current_issue_from_source_ref(entity.source_ref, entity.updated_at)
   devloop_logging.log_forged_markers("admission", proposal_id, current.comments)
-  if core.pending_reintake_command(current.comments) == nil then
+  if core.pending_reintake_command(current.comments, reintake_policy()) == nil then
     log_known_state_skip(proposal_id, "entity")
     return
   end
