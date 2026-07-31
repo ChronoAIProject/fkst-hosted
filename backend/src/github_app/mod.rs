@@ -39,7 +39,8 @@ pub use config::GithubAppConfig;
 
 /// Re-export API types for downstream consumers.
 pub use api::{
-    InstallationId, InstallationToken, PullFileMeta, PullRequestSummary, TokenPermissions,
+    InstallationId, InstallationToken, PullFileMeta, PullRequestSummary, RepoDirEntry,
+    RepoEntryKind, TokenPermissions,
 };
 
 /// Re-export the Contents READ helper types (#179): the `get_contents` result
@@ -433,6 +434,23 @@ impl GithubAppTokens {
         perms: Option<TokenPermissions>,
     ) -> Result<SecretString, GithubAppError> {
         Ok(self.token_with_expiry_for_repo(owner_repo, perms).await?.0)
+    }
+
+    /// List one repository directory with an App installation token.
+    pub async fn list_dir(
+        &self,
+        owner_repo: &str,
+        path: &str,
+        git_ref: &str,
+    ) -> Result<Vec<RepoDirEntry>, GithubAppError> {
+        let (owner, repo) = owner_repo
+            .split_once('/')
+            .ok_or(GithubAppError::InvalidRepoRef)?;
+        let token = self.token_for_repo(owner_repo, None).await?;
+        self.inner
+            .api
+            .list_dir(&token, owner, repo, path, git_ref)
+            .await
     }
 
     /// Post a comment on `owner/repo`'s issue `number` as the App: mint an

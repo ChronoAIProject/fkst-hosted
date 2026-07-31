@@ -965,3 +965,66 @@ async fn pull_request_mergeable_reads_tri_state() {
         None
     );
 }
+
+#[tokio::test]
+async fn list_dir_maps_a_github_directory_response() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/contents/.fkst/packages"))
+        .and(query_param("ref", "feature/catalog"))
+        .and(header("authorization", "Bearer ghs_tok"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "name": "workflow.json",
+                "path": ".fkst/packages/workflow.json",
+                "type": "file",
+                "size": 42
+            },
+            {
+                "name": "nested",
+                "path": ".fkst/packages/nested",
+                "type": "dir"
+            },
+            {
+                "name": "linked.json",
+                "path": ".fkst/packages/linked.json",
+                "type": "symlink",
+                "size": 7
+            }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let entries = api(&server.uri())
+        .list_dir(&tok(), "acme", "site", ".fkst/packages", "feature/catalog")
+        .await
+        .expect("directory listing");
+
+    assert_eq!(entries.len(), 3);
+    assert_eq!(entries[0].name, "workflow.json");
+    assert_eq!(entries[0].path, ".fkst/packages/workflow.json");
+    assert_eq!(entries[0].kind, RepoEntryKind::File);
+    assert_eq!(entries[0].size, 42);
+    assert_eq!(entries[1].kind, RepoEntryKind::Dir);
+    assert_eq!(entries[1].size, 0);
+    assert_eq!(entries[2].kind, RepoEntryKind::Other);
+}
+
+#[tokio::test]
+async fn list_dir_returns_empty_for_a_missing_directory() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/contents/.fkst/packages"))
+        .and(query_param("ref", "main"))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let entries = api(&server.uri())
+        .list_dir(&tok(), "acme", "site", ".fkst/packages", "main")
+        .await
+        .expect("missing directory is empty");
+    assert!(entries.is_empty());
+}

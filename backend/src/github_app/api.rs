@@ -14,7 +14,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use secrecy::{ExposeSecret, SecretString};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::GithubAppError;
 
@@ -70,6 +70,23 @@ pub struct InstallationToken {
 pub struct RemoteFile {
     pub sha: String,
     pub content_base64: String,
+}
+
+/// One entry returned by the repository Contents API for a directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoDirEntry {
+    pub name: String,
+    pub path: String,
+    pub kind: RepoEntryKind,
+    pub size: u64,
+}
+
+/// GitHub repository entry kinds relevant to catalog discovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepoEntryKind {
+    File,
+    Dir,
+    Other,
 }
 
 /// One OPEN pull request, trimmed to what the auto-merge step needs.
@@ -282,6 +299,22 @@ pub trait GithubApi: Send + Sync {
     ) -> Result<Option<RemoteFile>, GithubAppError> {
         let _ = (token, owner, repo, path, git_ref);
         unimplemented!("content_file is only implemented by the HTTP transport")
+    }
+
+    /// `GET {base}/repos/{owner}/{repo}/contents/{path}?ref=…` returning one
+    /// directory listing. A 404 yields an empty listing. Default panics so a
+    /// test double cannot fabricate repository absence without implementing
+    /// directory access explicitly.
+    async fn list_dir(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        git_ref: &str,
+    ) -> Result<Vec<RepoDirEntry>, GithubAppError> {
+        let _ = (token, owner, repo, path, git_ref);
+        unimplemented!("list_dir is only implemented by the HTTP transport")
     }
 
     /// `GET {base}/repos/{owner}/{repo}` -> the repo's `default_branch`. Default panics.
@@ -1021,17 +1054,16 @@ impl GithubApi for HttpGithubApi {
         path: &str,
         git_ref: Option<&str>,
     ) -> Result<Option<RemoteFile>, GithubAppError> {
-        let mut url = format!(
+        let url = format!(
             "{}/repos/{owner}/{repo}/contents/{}",
             self.api_base,
             path.trim_start_matches('/')
         );
+        let mut request = self.client.get(&url);
         if let Some(git_ref) = git_ref {
-            url.push_str(&format!("?ref={git_ref}"));
+            request = request.query(&[("ref", git_ref)]);
         }
-        let response = self
-            .client
-            .get(&url)
+        let response = request
             .header("accept", "application/vnd.github+json")
             .header("user-agent", "fkst-hosted")
             .bearer_auth(token.expose_secret())
@@ -1067,6 +1099,72 @@ impl GithubApi for HttpGithubApi {
             sha,
             content_base64,
         }))
+    }
+
+    async fn list_dir(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        git_ref: &str,
+    ) -> Result<Vec<RepoDirEntry>, GithubAppError> {
+        let url = format!(
+            "{}/repos/{owner}/{repo}/contents/{}",
+            self.api_base,
+            path.trim_start_matches('/')
+        );
+        let response = self
+            .client
+            .get(&url)
+            .query(&[("ref", git_ref)])
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("list_dir: {e}")))?;
+        let status = response.status();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(Vec::new());
+        }
+        if let Some(err) = classify_auth_status(status, response.headers()) {
+            return Err(err);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "list_dir status {status}: {body}"
+            )));
+        }
+
+        #[derive(Deserialize)]
+        struct WireEntry {
+            name: String,
+            path: String,
+            #[serde(rename = "type")]
+            kind: String,
+            #[serde(default)]
+            size: u64,
+        }
+
+        let entries: Vec<WireEntry> = response
+            .json()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("list_dir body: {e}")))?;
+        Ok(entries
+            .into_iter()
+            .map(|entry| RepoDirEntry {
+                name: entry.name,
+                path: entry.path,
+                kind: match entry.kind.as_str() {
+                    "file" => RepoEntryKind::File,
+                    "dir" => RepoEntryKind::Dir,
+                    _ => RepoEntryKind::Other,
+                },
+                size: entry.size,
+            })
+            .collect())
     }
 
     async fn repo_default_branch(
