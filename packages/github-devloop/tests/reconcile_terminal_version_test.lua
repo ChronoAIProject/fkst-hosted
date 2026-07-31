@@ -64,9 +64,9 @@ return {
 
     local result = run_reconcile(event, opts("reconcile-terminal-thinking"))
     t.eq(result.exit_code, 0)
-    -- 2 effects: the reconcile comment and the label write. Self-refinement is
-    -- opt-in and this fixture does not enable it, so the item ends here.
-    t.eq(#result.raises, 2)
+    -- 3 effects: the reconcile comment, the label write, and the refine request
+    -- that re-enters the loop, since refinement runs by default.
+    t.eq(#result.raises, 3)
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
     local version = conv_reconcile.reconcile_terminal_state_version(state_version, event.round)
     t.eq(core.versioned_transition_status({ state = "thinking", version = state_version }, { "thinking" }, "blocked", version), "apply")

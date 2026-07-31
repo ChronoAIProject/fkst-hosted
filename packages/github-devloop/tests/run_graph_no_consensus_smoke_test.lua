@@ -79,14 +79,14 @@ local function mock_github_proxy_writes()
   -- amend-and-reintake comment that re-enters the loop on a refinable cause.
   -- Each comment write re-reads the thread first, so the read mock count tracks
   -- the write count.
-  for _ = 1, 2 do
+  for _ = 1, 3 do
     t.mock_command("gh api --paginate --slurp repos/owner/repo/issues/42/comments?per_page=100", {
       stdout = "[[]]\n",
       stderr = "",
       exit_code = 0,
     })
   end
-  for comment_id = 123456, 123457 do
+  for comment_id = 123456, 123458 do
     t.mock_command("gh api --method POST repos/owner/repo/issues/42/comments --field 'body=", {
       stdout = '{"id":' .. tostring(comment_id) .. ',"body":"created","user":{"login":"fkst-test-bot"}}\n',
       stderr = "",
@@ -130,7 +130,12 @@ local function mock_issue_reads()
     state = "OPEN",
     labels = { "fkst-dev:thinking" },
     comments = comments,
-  }, "title,updatedAt,labels,comments,state,author", 2)
+    -- 4, not 2: `loop`, `reconcile` and now `refine` all read the issue through
+    -- the same gh_issue_view_loop selector, and refine reads twice -- once before
+    -- the model call and once to re-gate after it. Registering a second mock for
+    -- this command instead would be wrong: the first registration wins, so it
+    -- would answer the loop's read and hide the thinking state marker from it.
+  }, "title,updatedAt,labels,comments,state,author", 4)
   t.mock_command("gh issue view 42 --repo owner/repo --json 'title,updatedAt,labels,comments,state'", {
     stdout = entity_read_mocks.issue_view_stdout({
       repo = "owner/repo",
@@ -178,11 +183,12 @@ return {
     mock_issue_reads()
     mock_github_proxy_writes()
 
-    -- 9, not 8: a refinable terminal cause now also raises the amend-and-reintake
-    -- comment, so the graph has one more effect to drain before it quiesces. The
+    -- 10, not 8: a refinable terminal cause now also raises the amend-and-reintake
+    -- comment, and that comment drains through write + handoff, so the graph has
+    -- two more effects to settle before it quiesces. The
     -- budget stays exact rather than generous -- `require_quiescent` proves the
     -- graph actually settles, and a padded ceiling would stop proving that.
-    local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 8 }))
+    local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 10 }))
     graph.assert_covers(trace, {
       "consensus.consensus_converge -> github-devloop.loop",
       "github-proxy.github_issue_comment_request -> github-proxy.github_comment",
@@ -218,7 +224,7 @@ return {
       trace,
       "github-proxy.github_issue_comment_request",
       function(raised)
-        return graph.payload_contains(raised, "github-devloop reconcile action: drop")
+        return graph.payload_contains(raised, "github-devloop reconcile action: re-design")
           and graph.payload_contains(raised, "evidence-continuation-budget-exhausted-after-")
           and graph.payload_contains(raised, 'state="blocked"')
       end

@@ -67,6 +67,13 @@ local EFFECTS = {
     sink_kind = "label",
     authority_class = "lifecycle-authoritative",
   },
+  -- The refine dispatch raised alongside the terminal write when a refinable
+  -- cause still has budget.
+  ["devloop_refine"] = {
+    effect_id = "queue:devloop_refine",
+    sink_kind = "queue",
+    authority_class = "lifecycle-authoritative",
+  },
 }
 
 local function outcome_status(probe, decision, apply)
@@ -152,7 +159,7 @@ local function capture_apply_record()
   t.eq(record.old_outcome.cas_outcome, "applied", "captured issue reconcile CAS outcome")
   -- 3 effects: the reconcile comment, the label write, and the
   -- amend-and-reintake comment that re-enters the loop on a refinable cause.
-  t.eq(#record.old_outcome.emitted_effects, 2, "issue reconcile emits the comment and label effects; refinement is opt-in")
+  t.eq(#record.old_outcome.emitted_effects, 3, "issue reconcile emits the comment, label and refine effects")
   t.eq(captured.liveness_read_count, 0, "deterministic issue reconcile never reads Codex liveness")
   return record
 end

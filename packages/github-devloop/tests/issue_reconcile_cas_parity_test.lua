@@ -263,7 +263,7 @@ local function assert_catalog_matches_observed_decision(fixture)
     -- the item, so the boundary action is `re-design`. These fixtures carry no
     -- prior auto-refine marker, so the budget is always intact here; the drop path
     -- after the budget is spent is pinned in auto_refine_budget_test.lua.
-    t.eq(boundary.action, "drop", fixture.name .. ": boundary action")
+    t.eq(boundary.action, "re-design", fixture.name .. ": boundary action")
     t.eq(boundary.state_version, probe.incoming_version, fixture.name .. ": boundary terminal version")
   end
 
@@ -345,9 +345,8 @@ return {
       incoming_version = V_EQUAL,
       boundary_reached = true,
       admission_status = "apply",
-      -- comment + label. Refinement is opt-in and these fixtures do not
-      -- enable it, so no third effect is raised.
-      effect_count = 2,
+      -- comment + label + the refine request raised on the own-package queue.
+      effect_count = 3,
       post_admission_disposition = "effect-emitted(blocked)",
       legacy_log_outcome = "applied",
     })
@@ -361,9 +360,8 @@ return {
       incoming_version = V_OLDER,
       boundary_reached = true,
       admission_status = "apply",
-      -- comment + label. Refinement is opt-in and these fixtures do not
-      -- enable it, so no third effect is raised.
-      effect_count = 2,
+      -- comment + label + the refine request raised on the own-package queue.
+      effect_count = 3,
       post_admission_disposition = "effect-emitted(blocked)",
       legacy_log_outcome = "applied",
     })
@@ -377,9 +375,8 @@ return {
       incoming_version = V_NEWER,
       boundary_reached = true,
       admission_status = "apply",
-      -- comment + label. Refinement is opt-in and these fixtures do not
-      -- enable it, so no third effect is raised.
-      effect_count = 2,
+      -- comment + label + the refine request raised on the own-package queue.
+      effect_count = 3,
       post_admission_disposition = "effect-emitted(blocked)",
     })
   end,
@@ -430,9 +427,8 @@ return {
       incoming_version = V_ORDERING_EQUAL_INCOMING,
       boundary_reached = true,
       admission_status = "apply",
-      -- comment + label. Refinement is opt-in and these fixtures do not
-      -- enable it, so no third effect is raised.
-      effect_count = 2,
+      -- comment + label + the refine request raised on the own-package queue.
+      effect_count = 3,
       post_admission_disposition = "effect-emitted(blocked)",
     })
   end,

@@ -109,25 +109,25 @@ end
 -- Instead the loop can refine and retry ITSELF, bounded -- but only when the
 -- session asks for it.
 --
--- The default is 0: OFF. Self-refinement changes what a blocked item does, and
--- that is the session owner's call, not the platform's. With it off, consensus
--- blocks and a human resolves it, exactly as before this existed. A session opts
--- in from its trigger:
+-- The default is 100: self-refinement is ON, and effectively unbounded for any
+-- realistic spec. A blocked item keeps amending itself rather than waiting for a
+-- human, which is the behaviour an unattended deployment wants. A session that
+-- wants the old stop-for-a-human behaviour sets 0 from its trigger:
 --
 --   ### Package Env
 --   #### github-devloop
---   FKST_DEVLOOP_AUTO_REFINE_MAX=2
+--   FKST_DEVLOOP_AUTO_REFINE_MAX=0
 --
--- Two is the suggested value for the same reason it used to be the constant: the
--- angles are re-run against an amended spec each time, so a disagreement that
--- survives two amendments is a genuine design question that wants a human, not
--- another lap.
-C.DEFAULT_MAX_AUTO_REFINEMENTS = 0
+-- The ceiling matches the default so a session can ask for the full budget. The
+-- bound still exists -- it is a runaway backstop, not a review budget: each lap
+-- costs a full consensus run plus a codex amendment, so a spec that survives a
+-- hundred amendments is not going to be fixed by the hundred-and-first.
+C.DEFAULT_MAX_AUTO_REFINEMENTS = 100
 
 -- Upper bound on what a session may ask for. A budget is only a budget if it is
 -- bounded: without this an author could type a number large enough to make the
 -- loop effectively unbounded.
-C.MAX_AUTO_REFINEMENTS_CEILING = 5
+C.MAX_AUTO_REFINEMENTS_CEILING = 100
 
 --- The refinement budget this session is configured for.
 --
