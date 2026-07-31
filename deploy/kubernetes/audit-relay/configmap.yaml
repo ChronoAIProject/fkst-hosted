@@ -1,0 +1,98 @@
+# Non-secret configuration for the durable audit relay.
+#
+# NOTHING in this object is a credential. The four secrets the relay needs —
+# FKST_AUDIT_RELAY_WRITE_TOKEN, FKST_AUDIT_RELAY_READ_TOKEN,
+# FKST_POSTHOG_PROJECT_TOKEN, and FKST_POSTHOG_QUERY_API_KEY — arrive only
+# through the `fkst-audit-relay-secret` record materialized by
+# `external-secrets/audit-relay.yaml` (epic `OPS-02`). A value that appears here
+# is in `kubectl get configmap -o yaml`, in every render, and in git history.
+#
+# Every numeric knob below is validated at relay startup, so a typo fails the
+# deploy that introduces it rather than the night a backlog builds. The commented
+# entries are the code's own defaults, repeated so an operator reading a manifest
+# does not have to read Rust to know what is in effect; uncomment to override.
+# See AUDIT-TRACE.md for the capacity worksheet these numbers come from.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fkst-audit-relay-config
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/component: audit-relay
+    app.kubernetes.io/name: fkst-audit-relay
+    app.kubernetes.io/part-of: fkst-hosted
+data:
+  FKST_HOSTED_LOG_LEVEL: info,fkst_control_plane=info
+  # Must match the container port and the Service target below.
+  FKST_AUDIT_RELAY_BIND_ADDR: 0.0.0.0:8090
+  # Inside the ReadWriteOnce PVC mounted at /var/lib/fkst-audit. Changing this
+  # to a path outside that mount silently turns the outbox into an emptyDir and
+  # loses every queued record on restart.
+  FKST_AUDIT_RELAY_DB_PATH: /var/lib/fkst-audit/audit.sqlite3
+
+  # ---- shared with the control plane; the two MUST agree ----
+  # The control plane writes `completion_deadline_at = started_at + grace`, and
+  # the relay closes a start as `incomplete` at `completion_deadline_at + grace`.
+  # Both read this same variable name, so a mismatch between the two ConfigMaps
+  # is the one way to make the writer and the closer disagree: too small here and
+  # a request that is STILL RUNNING gets force-closed as `incomplete`, which in
+  # required mode returns a 503 for work that actually succeeded.
+  #
+  # 420 = the `/api/v1` subtree ceiling (FKST_ENV_VALIDATE_DEADLINE_SECS default
+  # 300, plus the router's 60s environment-PUT buffer) plus the 30s clock-skew
+  # margin the control plane enforces, rounded up. Raising
+  # FKST_ENV_VALIDATE_DEADLINE_SECS REQUIRES raising this in both ConfigMaps;
+  # the control plane refuses to boot otherwise.
+  FKST_AUDIT_INCOMPLETE_GRACE_SECS: "420"
+
+  # ---- PostHog delivery target ----
+  # Deliberately UNSET here. With no host the relay is a pure durable outbox:
+  # records commit, readiness stays true, and the backlog gauges are how an
+  # operator sees them. That is the correct NON-PRODUCTION shape, and it means
+  # applying this directory alone can never start shipping a deployment's audit
+  # trail to a host nobody reviewed. `overlays/required-audit/` sets both.
+  # FKST_POSTHOG_HOST: <https base url of the self-hosted PostHog>
+  # FKST_POSTHOG_PROJECT_ID: <numeric project id from the PostHog project URL>
+  # Stamped on every event, and the switch that permits a plaintext http:// host
+  # (only "test"/"local" do). Set by the environment overlay, never inherited.
+  # FKST_DEPLOYMENT_ENVIRONMENT: <production|staging|local|test>
+
+  # ---- capacity guard ----
+  # Past this row count ingress is refused with a bounded error rather than
+  # filling the volume; readiness goes false, so required-mode traffic fails
+  # closed instead of running unaudited. 5,000,000 rows at the worksheet's ~1 KiB
+  # average is roughly 7 GiB of database — comfortably inside the 20Gi claim,
+  # with room for the WAL and a vacuum. Resizing the PVC means recomputing BOTH
+  # this number and the FkStAuditRelayDiskPressure thresholds.
+  # FKST_AUDIT_RELAY_MAX_RECORDS: "5000000"
+  # FKST_AUDIT_RELAY_MAX_BODY_BYTES: "65536"
+
+  # ---- delivery worker ----
+  # FKST_AUDIT_RELAY_CAPTURE_BATCH_SIZE: "100"
+  # FKST_AUDIT_RELAY_MAX_CAPTURE_ATTEMPTS: "8"
+  # FKST_AUDIT_RELAY_RETRY_INITIAL_SECS: "5"
+  # FKST_AUDIT_RELAY_RETRY_MAX_SECS: "900"
+  # FKST_AUDIT_RELAY_WORKER_INTERVAL_SECS: "5"
+
+  # ---- verification (capture acceptance is NOT query visibility) ----
+  # FKST_AUDIT_RELAY_VERIFICATION_DELAY_SECS: "30"
+  # FKST_AUDIT_RELAY_VERIFICATION_MAX_AGE_SECS: "300"
+  # FKST_AUDIT_RELAY_VERIFICATION_BATCH_SIZE: "200"
+
+  # ---- retention ----
+  # The dedup/query overlap kept after a row is PROVEN query-visible in PostHog.
+  # Only those rows are ever purged. Started, incomplete, unverified, and
+  # dead-letter rows are never auto-deleted — they are precisely the records
+  # whose delivery could not be proven, which makes them the last thing an audit
+  # trail may discard.
+  # FKST_AUDIT_RELAY_VERIFIED_RETENTION_DAYS: "7"
+  # The documented floor an operator must keep unpurgeable rows for before
+  # remediating by hand. Validated to be at least the verified window.
+  # FKST_AUDIT_RELAY_AUDIT_RETENTION_DAYS: "90"
+
+  # ---- scoped read surface (the control plane's backlog merge) ----
+  # FKST_AUDIT_RELAY_MAX_READ_ROWS: "500"
+  # FKST_AUDIT_RELAY_MAX_READ_CONCURRENCY: "8"
+  # FKST_AUDIT_RELAY_MAX_RANGE_DAYS: "400"
+  # FKST_AUDIT_RELAY_BUSY_TIMEOUT_MS: "5000"
+  # FKST_AUDIT_RELAY_WRITER_QUEUE_CAPACITY: "512"

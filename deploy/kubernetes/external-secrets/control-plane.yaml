@@ -1,3 +1,43 @@
+# Credential binding for the control plane.
+#
+# `dataFrom.extract` materializes every property of the remote record, so the
+# record's CONTENT is the access-control boundary: a key that is in the record is
+# in the control plane's environment. That makes the split below load-bearing
+# rather than cosmetic.
+#
+# Remote record `fkst-control-plane` -> Secret `chronoai-fkst/fkst-control-plane-secret`
+#
+# Required properties: FKST_LLM_API_KEY, FKST_OSB_EXECD_TOKEN_SEED,
+# FKST_GITHUB_APP_ID, FKST_GITHUB_APP_PRIVATE_KEY_PEM, FKST_GITHUB_APP_SLUG,
+# FKST_GITHUB_APP_WEBHOOK_SECRET, FKST_GITHUB_OAUTH_CLIENT_SECRET,
+# FKST_ENV_STORE_ENCRYPTION_KEY.
+#
+# Optional properties: FKST_GITHUB_BROADER_OAUTH_CLIENT_SECRET,
+# FKST_NYXID_CLIENT_SECRET.
+#
+# ## Activity-trace properties, and the one that must NOT be here
+#
+# | Property                      | Belongs in this record?                          |
+# |-------------------------------|--------------------------------------------------|
+# | FKST_POSTHOG_QUERY_API_KEY    | yes — the activity API queries PostHog from here  |
+# | FKST_AUDIT_RELAY_WRITE_TOKEN  | yes — required/best-effort delivery writes records|
+# | FKST_AUDIT_RELAY_READ_TOKEN   | yes — the backlog merge reads the relay           |
+# | FKST_POSTHOG_PROJECT_TOKEN    | ONLY when capturing DIRECTLY (no relay)           |
+#
+# A relay deployment MUST NOT put `FKST_POSTHOG_PROJECT_TOKEN` in this record.
+# Capture is the relay's job, and the capture token is a forge-anything-into-the
+# -project credential: keeping it out of the control plane means a control-plane
+# compromise cannot fabricate history, only read it. It lives in the separate
+# `fkst-audit-relay` record (see `../audit-relay/external-secret.yaml`).
+#
+# Conversely a deployment that has NOT adopted the relay — direct capture, the
+# `FKST_POSTHOG_ENABLED=true` sink with `FKST_AUDIT_DELIVERY_MODE=disabled` —
+# keeps the project token here and omits the two relay tokens. The two shapes are
+# mutually exclusive; running both means two writers into one project.
+#
+# The query key is a Query-Read-only credential and is never sent to a browser,
+# never logged, and never rendered in `Debug` output. See AUDIT-RUNBOOK.md for
+# the ordered rotation procedure for each of these values.
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:

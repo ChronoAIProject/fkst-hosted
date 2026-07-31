@@ -2,7 +2,7 @@
 set -eu
 
 usage() {
-  echo "usage: $0 --context CONTEXT [--overlay PATH] [--migration-overlay PATH] [--monitoring-overlay PATH]" >&2
+  echo "usage: $0 --context CONTEXT [--overlay PATH] [--migration-overlay PATH] [--monitoring-overlay PATH] [--audit-relay-overlay PATH] [--required-audit-overlay PATH]" >&2
   exit 2
 }
 
@@ -11,6 +11,8 @@ script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 overlay="$script_dir/overlays/local"
 migration_overlay="$script_dir/overlays/local-migration"
 monitoring_overlay="$script_dir/monitoring"
+audit_relay_overlay="$script_dir/audit-relay"
+required_audit_overlay="$script_dir/overlays/required-audit"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -34,6 +36,16 @@ while [ "$#" -gt 0 ]; do
       monitoring_overlay=$2
       shift 2
       ;;
+    --audit-relay-overlay)
+      [ "$#" -ge 2 ] || usage
+      audit_relay_overlay=$2
+      shift 2
+      ;;
+    --required-audit-overlay)
+      [ "$#" -ge 2 ] || usage
+      required_audit_overlay=$2
+      shift 2
+      ;;
     *) usage ;;
   esac
 done
@@ -51,6 +63,14 @@ done
   echo "monitoring overlay has no kustomization.yaml: $monitoring_overlay" >&2
   exit 1
 }
+[ -f "$audit_relay_overlay/kustomization.yaml" ] || {
+  echo "audit-relay overlay has no kustomization.yaml: $audit_relay_overlay" >&2
+  exit 1
+}
+[ -f "$required_audit_overlay/kustomization.yaml" ] || {
+  echo "required-audit overlay has no kustomization.yaml: $required_audit_overlay" >&2
+  exit 1
+}
 
 first=$(mktemp "${TMPDIR:-/tmp}/fkst-render.XXXXXX")
 second=$(mktemp "${TMPDIR:-/tmp}/fkst-render.XXXXXX")
@@ -60,7 +80,13 @@ monitoring_first=$(mktemp "${TMPDIR:-/tmp}/fkst-monitoring-render.XXXXXX")
 monitoring_second=$(mktemp "${TMPDIR:-/tmp}/fkst-monitoring-render.XXXXXX")
 base_first=$(mktemp "${TMPDIR:-/tmp}/fkst-base-render.XXXXXX")
 base_second=$(mktemp "${TMPDIR:-/tmp}/fkst-base-render.XXXXXX")
-trap 'rm -f "$first" "$second" "$migration_first" "$migration_second" "$monitoring_first" "$monitoring_second" "$base_first" "$base_second"' EXIT HUP INT TERM
+relay_first=$(mktemp "${TMPDIR:-/tmp}/fkst-relay-render.XXXXXX")
+relay_second=$(mktemp "${TMPDIR:-/tmp}/fkst-relay-render.XXXXXX")
+required_first=$(mktemp "${TMPDIR:-/tmp}/fkst-required-render.XXXXXX")
+required_second=$(mktemp "${TMPDIR:-/tmp}/fkst-required-render.XXXXXX")
+secrets_first=$(mktemp "${TMPDIR:-/tmp}/fkst-secrets-render.XXXXXX")
+secrets_second=$(mktemp "${TMPDIR:-/tmp}/fkst-secrets-render.XXXXXX")
+trap 'rm -f "$first" "$second" "$migration_first" "$migration_second" "$monitoring_first" "$monitoring_second" "$base_first" "$base_second" "$relay_first" "$relay_second" "$required_first" "$required_second" "$secrets_first" "$secrets_second"' EXIT HUP INT TERM
 
 kubectl --context "$context" kustomize "$overlay" >"$first"
 kubectl --context "$context" kustomize "$overlay" >"$second"
@@ -80,31 +106,59 @@ kubectl --context "$context" kustomize "$script_dir/base" >"$base_second"
 cmp "$base_first" "$base_second" >/dev/null
 ruby "$script_dir/validate-monitoring.rb" "$monitoring_first" "$base_first" "$first"
 
+# The audit relay and the composed required-delivery shape. The relay render is
+# checked twice for determinism like the others, and the composed overlay is put
+# through BOTH validators: the steady namespace policy (it is a superset of the
+# local overlay) and the relay-specific policy.
+kubectl --context "$context" kustomize "$audit_relay_overlay" >"$relay_first"
+kubectl --context "$context" kustomize "$audit_relay_overlay" >"$relay_second"
+cmp "$relay_first" "$relay_second" >/dev/null
+kubectl --context "$context" kustomize "$required_audit_overlay" >"$required_first"
+kubectl --context "$context" kustomize "$required_audit_overlay" >"$required_second"
+cmp "$required_first" "$required_second" >/dev/null
+ruby "$script_dir/validate-render.rb" "$required_first" steady
+ruby "$script_dir/validate-audit-relay.rb" "$relay_first" "$required_first" "$base_first"
+
+# The provider-neutral credential bindings, rendered on their own: they are
+# applied before workloads during a restore, so they must stand alone.
+kubectl --context "$context" kustomize "$script_dir/external-secrets" >"$secrets_first"
+kubectl --context "$context" kustomize "$script_dir/external-secrets" >"$secrets_second"
+cmp "$secrets_first" "$secrets_second" >/dev/null
+
 sh -n "$script_dir/migrate-environment-store.sh"
 sh -n "$script_dir/restore-namespace.sh"
 sh -n "$script_dir/verify-namespace.sh"
 sh -n "$script_dir/verify-envstore-rbac.sh"
 sh -n "$script_dir/run-disaster-drill.sh"
+sh -n "$script_dir/verify-audit-relay.sh"
 sh -n "$script_dir/tests/disaster-drill-test.sh"
+sh -n "$script_dir/tests/audit-relay-verify-test.sh"
 ruby -c "$script_dir/render-recovery-evidence.rb" >/dev/null
 ruby -c "$script_dir/validate-monitoring.rb" >/dev/null
+ruby -c "$script_dir/validate-audit-relay.rb" >/dev/null
 if command -v shellcheck >/dev/null 2>&1; then
   shellcheck "$script_dir/migrate-environment-store.sh" \
     "$script_dir/restore-namespace.sh" \
     "$script_dir/verify-namespace.sh" \
     "$script_dir/verify-envstore-rbac.sh" \
+    "$script_dir/verify-audit-relay.sh" \
     "$script_dir/run-disaster-drill.sh" \
     "$script_dir/tests/disaster-drill-test.sh" \
+    "$script_dir/tests/audit-relay-verify-test.sh" \
     "$script_dir/validate-manifests.sh"
 fi
 
 "$script_dir/tests/disaster-drill-test.sh"
+"$script_dir/tests/audit-relay-verify-test.sh"
 
 if command -v kubeconform >/dev/null 2>&1; then
   kubeconform -strict -summary -ignore-missing-schemas - <"$first"
   kubeconform -strict -summary -ignore-missing-schemas - <"$migration_first"
   kubeconform -strict -summary -ignore-missing-schemas - <"$monitoring_first"
   kubeconform -strict -summary -ignore-missing-schemas - <"$base_first"
+  kubeconform -strict -summary -ignore-missing-schemas - <"$relay_first"
+  kubeconform -strict -summary -ignore-missing-schemas - <"$required_first"
+  kubeconform -strict -summary -ignore-missing-schemas - <"$secrets_first"
 else
   echo "kubeconform not found; structural policy validation passed (schema validation skipped)" >&2
 fi

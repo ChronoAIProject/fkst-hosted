@@ -15,7 +15,9 @@ context, deletes a resource, or contacts a production cluster implicitly.
 | `base/` | Namespace, Pod Security labels, service accounts, quota/limits, sandbox NetworkPolicy, env-store and Lease RBAC, configuration, workloads, Services, PDBs, Ingress, and the OpenSandbox base template. |
 | `external-secrets/` | Provider-neutral External Secrets Operator bindings. It contains remote record names and target key names, never credential values. |
 | `overlays/local/` | Disposable local-cluster overlay. Its Kubernetes provider reads source Secrets from `fkst-recovery-source`, outside the namespace being reconstructed. |
-| `monitoring/` | Optional Prometheus Operator Service, ServiceMonitor, and fixed-label recovery alerts. It is intentionally separate from the base overlay. |
+| `monitoring/` | Optional Prometheus Operator Services, ServiceMonitors, and fixed-label recovery and activity-trace alerts. It is intentionally separate from the base overlay. |
+| `audit-relay/` | Optional durable audit outbox: ServiceAccount, configuration, its own credential binding, ReadWriteOnce claim, hardened single-replica Deployment, ClusterIP Service, PDB, and NetworkPolicy. Separate from `base/` because it owns persistent state. |
+| `overlays/required-audit/` | Reference composition that layers `audit-relay/` onto the local overlay and selects `required` delivery. |
 | `overlays/local/durable-store/` | Cross-namespace, Secret-only Role and RoleBinding for the encrypted environment store. |
 | `overlays/local-migration/` | Temporary local overlay that enables one-time migration from legacy namespace-local profile pairs. |
 | `migrations/` | Temporary legacy ConfigMap/Secret read/delete RBAC; never part of the steady overlay. |
@@ -25,6 +27,9 @@ context, deletes a resource, or contacts a production cluster implicitly.
 | `verify-namespace.sh` | Redacted live verification of security, RBAC, ExternalSecret, rollout, route, and recovery-readiness contracts. |
 | `run-disaster-drill.sh` | Fail-closed kind-only namespace-loss drill with deterministic runtime reconstruction and redacted evidence. |
 | `RECOVERY-RUNBOOK.md` | Alert response, escalation, rollback boundaries, recovery objectives, and disaster-drill procedure. |
+| `AUDIT-TRACE.md` | Activity-trace reference: architecture, event contract, authorization model, configuration ownership, PostHog prerequisites, capacity worksheet, purge rules, access review. |
+| `AUDIT-RUNBOOK.md` | Activity-trace operations: provisioning and smoke tests, the cross-user authorization smoke test, staged rollout and rollback, outage/replay/rotation/backup procedures. |
+| `verify-audit-relay.sh` | Redacted live verification of relay least privilege, credential ownership, storage, network isolation, and bounded telemetry. |
 | `validate-manifests.sh` | Deterministic render and structural/security policy checks; also runs shellcheck and kubeconform when installed. |
 
 The base runs two control-plane replicas with rolling updates and Kubernetes
@@ -64,19 +69,30 @@ The provider exposes three logical records:
 | `fkst-control-plane` | `chronoai-fkst/fkst-control-plane-secret` | `FKST_LLM_API_KEY`, `FKST_OSB_EXECD_TOKEN_SEED`, `FKST_GITHUB_APP_ID`, `FKST_GITHUB_APP_PRIVATE_KEY_PEM`, `FKST_GITHUB_APP_SLUG`, `FKST_GITHUB_APP_WEBHOOK_SECRET`, `FKST_GITHUB_OAUTH_CLIENT_SECRET`, `FKST_ENV_STORE_ENCRYPTION_KEY` |
 | `fkst-opensandbox-tenant` | `chronoai-fkst/opensandbox-fkst-api-key` and `opensandbox-system/opensandbox-api-key` | `opensandbox-fkst-api-key` |
 | `fkst-ingress-tls` | `chronoai-fkst/fkst-ingress-tls` | `tls.crt`, `tls.key` |
+| `fkst-audit-relay` | `chronoai-fkst/fkst-audit-relay-secret` | `FKST_AUDIT_RELAY_WRITE_TOKEN`, `FKST_AUDIT_RELAY_READ_TOKEN`, `FKST_POSTHOG_PROJECT_TOKEN`, `FKST_POSTHOG_QUERY_API_KEY` |
+
+The fourth record exists only when the optional `audit-relay/` composition is
+applied; its binding travels with that directory rather than with
+`external-secrets/`, so a deployment that has not adopted the relay carries no
+permanently unresolvable ExternalSecret.
 
 Optional broader-OAuth, log-storage, and activity-trace deployments put
-`FKST_GITHUB_BROADER_OAUTH_CLIENT_SECRET`, `FKST_NYXID_CLIENT_SECRET`, and
-`FKST_POSTHOG_PROJECT_TOKEN` in the control-plane record. Their non-secret
-client IDs, endpoints, bucket names, and the PostHog host belong in the
-environment ConfigMap patch. ExternalSecret status and Secret key names are safe
-to inspect; Secret values are not.
+`FKST_GITHUB_BROADER_OAUTH_CLIENT_SECRET`, `FKST_NYXID_CLIENT_SECRET`,
+`FKST_POSTHOG_QUERY_API_KEY`, `FKST_AUDIT_RELAY_WRITE_TOKEN`, and
+`FKST_AUDIT_RELAY_READ_TOKEN` in the control-plane record. Their non-secret
+client IDs, endpoints, bucket names, PostHog host, and numeric project id belong
+in the environment ConfigMap patch. ExternalSecret status and Secret key names
+are safe to inspect; Secret values are not.
 
-`FKST_POSTHOG_PROJECT_TOKEN` is the PostHog **write** (capture) token and is
-read only when `FKST_POSTHOG_ENABLED=true`. It never crosses the backend
-boundary: no frontend build argument, response body, or log line carries it, and
-the control plane's own `Debug` output renders it as `<redacted>`. A deployment
-with capture disabled omits the key entirely.
+`FKST_POSTHOG_PROJECT_TOKEN` is the PostHog **write** (capture) token. It never
+crosses the backend boundary: no frontend build argument, response body, or log
+line carries it, and `Debug` output renders it as `<redacted>`. **Which record
+holds it is the access boundary.** A relay deployment puts it ONLY in
+`fkst-audit-relay` — capture is the relay's job, so a control-plane compromise
+can read history but never fabricate it. A deployment capturing directly
+(`FKST_POSTHOG_ENABLED=true`, `FKST_AUDIT_DELIVERY_MODE=disabled`) keeps it in
+the control-plane record instead. The two shapes are mutually exclusive, and a
+deployment using neither omits the key entirely.
 
 `FKST_ENV_STORE_NAMESPACE` selects the namespace-independent profile store. It
 persists each profile as one AES-256-GCM encrypted Secret whose data keys are
@@ -127,6 +143,18 @@ kubectl --context kind-opensandbox-local --namespace fkst-recovery-source \
 kubectl --context kind-opensandbox-local --namespace fkst-recovery-source \
   create secret tls fkst-ingress-tls \
   --cert='<local certificate file>' --key='<local key file>'
+```
+
+Add a fourth record only when adopting the optional relay. The write and read
+tokens must be different values; the relay refuses to start otherwise:
+
+```bash
+kubectl --context kind-opensandbox-local --namespace fkst-recovery-source \
+  create secret generic fkst-audit-relay \
+  --from-literal=FKST_AUDIT_RELAY_WRITE_TOKEN='<local value>' \
+  --from-literal=FKST_AUDIT_RELAY_READ_TOKEN='<a DIFFERENT local value>' \
+  --from-literal=FKST_POSTHOG_PROJECT_TOKEN='<project capture token>' \
+  --from-literal=FKST_POSTHOG_QUERY_API_KEY='<query-read-only key>'
 ```
 
 In a retained cluster, create/update those source records before deleting a
@@ -216,14 +244,54 @@ kubectl --context kind-opensandbox-local apply \
   -k deploy/kubernetes/monitoring
 ```
 
-The ServiceMonitor drops the two identity-bearing info metrics before ingestion.
-Alerts use only fixed namespace/service selectors and bounded recovery series;
-their labels and annotations contain no dynamic repository, issue, user,
+The control-plane ServiceMonitor drops the two identity-bearing info metrics
+before ingestion. Alerts use only fixed namespace/service selectors and bounded
+series; their labels and annotations contain no dynamic repository, issue, user,
 installation, session, proposal, holder, identity, or credential values. Keep
 the overlay optional in clusters without the Operator.
 
-See [RECOVERY-RUNBOOK.md](RECOVERY-RUNBOOK.md) for the alert-to-response map,
-escalation windows, rollback limits, and recovery objectives.
+The same overlay carries the activity-trace half: a metrics Service and
+ServiceMonitor for the relay, and the `fkst-audit` PrometheusRule covering
+required-delivery refusals, relay readiness, delivery backlog, verification lag,
+dead letters, incomplete requests, disk pressure, scoped query failures,
+inventory failures, and session-visibility readiness. The relay scrape target
+carries the distinct `service="fkst-audit-relay-metrics"` label because the
+control plane and the relay both publish `fkst_audit_relay_*` families — the
+client side and the storage side — and every expression pins which one it means.
+
+For the relay's NetworkPolicy to admit the scraper, label the Prometheus
+namespace `fkst.chronoai.io/metrics-scraper=true`. Without it the relay's
+metrics port is unreachable, which fails closed.
+
+See [RECOVERY-RUNBOOK.md](RECOVERY-RUNBOOK.md) for the recovery alert-to-response
+map, and [AUDIT-RUNBOOK.md](AUDIT-RUNBOOK.md) for the activity-trace one.
+
+## Durable audit relay
+
+Optional, and separate from `base/` because it owns a volume holding the
+deployment's undelivered audit trail. It is the workload that makes
+`FKST_AUDIT_DELIVERY_MODE=required` possible: a request's start is committed
+before its handler runs, so the deployment cannot serve a request it failed to
+record.
+
+```bash
+deploy/kubernetes/validate-manifests.sh --context kind-opensandbox-local
+kubectl --context kind-opensandbox-local apply -k deploy/kubernetes/audit-relay
+deploy/kubernetes/verify-audit-relay.sh --context kind-opensandbox-local
+```
+
+One replica with a `Recreate` strategy (SQLite has one writer), a ClusterIP
+Service and no Ingress, a ReadWriteOnce claim with an explicit size and class, a
+ServiceAccount bound to nothing with no mounted token, the restricted Pod
+Security profile, probes on unauthenticated internal endpoints with no
+credential in any URL, a `minAvailable: 1` PDB, and a NetworkPolicy admitting
+only the control plane and a labelled scraper.
+
+Read [AUDIT-TRACE.md](AUDIT-TRACE.md) before provisioning — it carries the
+PostHog prerequisites checklist, the capacity worksheet the 20Gi claim and the
+disk-pressure thresholds come from, and the purge rules. Then follow
+[AUDIT-RUNBOOK.md](AUDIT-RUNBOOK.md) for provisioning, the cross-user
+authorization smoke test, and the staged rollout to `required`.
 
 ## Disposable recovery drill
 
@@ -274,7 +342,12 @@ than copy their objects. It must patch, at minimum:
 - the External Secret provider/store references and remote record identifiers;
 - provider-specific Workload Identity annotations;
 - runtime class, placement, resources, and replica policy appropriate to the
-  environment.
+  environment;
+- when the activity trace is adopted: `FKST_AUDIT_DELIVERY_MODE`, the relay's
+  PostHog host and numeric project id, `FKST_DEPLOYMENT_ENVIRONMENT`, and the
+  audit claim's storage class — see `overlays/required-audit/` for the exact
+  patch set and [AUDIT-RUNBOOK.md](AUDIT-RUNBOOK.md#staged-rollout) for the
+  order in which to apply it.
 
 Any overlay changing leader timings must preserve
 `retry period < renew deadline < lease duration`. The holder cancels its worker

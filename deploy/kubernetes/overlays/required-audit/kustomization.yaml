@@ -1,0 +1,70 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# The reference REQUIRED-DELIVERY composition.
+#
+# This repository ships no production overlay — a production environment's
+# images, hosts, access model, secret provider, and storage classes belong to the
+# reviewed infrastructure repository that owns that environment. What this
+# overlay does own is the shape: the exact resource set and the exact two patches
+# that turn the checked-in base into a deployment which cannot serve a product
+# request it failed to record.
+#
+# It layers onto `overlays/local` so it renders and applies in a disposable
+# cluster, which is what makes the required-mode path testable at all (see
+# AUDIT-RUNBOOK.md, "staged rollout"). A real environment overlay applies the
+# SAME two patches on top of its own composition, with its own PostHog host,
+# project id, deployment-environment name, and storage class.
+#
+# Preconditions before applying this anywhere — all of them, in this order:
+#
+#   1. the `fkst-audit-relay` remote record exists with all four properties;
+#   2. the relay Pod is Ready and its PVC is bound;
+#   3. the deployment has run in `best_effort` for a full observation window.
+#
+# Selecting `required` before the relay is Ready fails every product request
+# closed. That is the correct behaviour and still a self-inflicted outage.
+resources:
+  - ../local
+  - ../../audit-relay
+patches:
+  - target:
+      version: v1
+      kind: ConfigMap
+      name: fkst-control-plane-config
+      namespace: chronoai-fkst
+    patch: |-
+      # The one key that makes durability mandatory: the start is committed
+      # before the handler runs, the terminal event before the response is
+      # released, and a relay that cannot acknowledge turns the request into a
+      # 503 rather than an unrecorded success.
+      - op: replace
+        path: /data/FKST_AUDIT_DELIVERY_MODE
+        value: required
+      # The read side. The numeric project id is public; its Query-Read-only key
+      # is a secret and arrives through the control-plane record. `0` is a
+      # placeholder every environment overlay replaces with its real project id.
+      - op: add
+        path: /data/FKST_POSTHOG_PROJECT_ID
+        value: "0"
+      - op: add
+        path: /data/FKST_DEPLOYMENT_ENVIRONMENT
+        value: local
+  - target:
+      version: v1
+      kind: ConfigMap
+      name: fkst-audit-relay-config
+      namespace: chronoai-fkst
+    patch: |-
+      # The relay's delivery target. `.invalid` is reserved by RFC 2606 and can
+      # never resolve, so a copy of this overlay that reaches a cluster without
+      # being edited buffers durably instead of shipping a deployment's audit
+      # trail somewhere nobody reviewed.
+      - op: add
+        path: /data/FKST_POSTHOG_HOST
+        value: https://posthog.example.invalid
+      - op: add
+        path: /data/FKST_POSTHOG_PROJECT_ID
+        value: "0"
+      - op: add
+        path: /data/FKST_DEPLOYMENT_ENVIRONMENT
+        value: local

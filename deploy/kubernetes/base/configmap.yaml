@@ -107,3 +107,63 @@ data:
   # that HTTPS gate for any overlay that forgot to patch it, so each environment
   # overlay sets its own.
   # FKST_DEPLOYMENT_ENVIRONMENT: <production|staging|local|test>
+  # ---- audit delivery (the durable relay) ----
+  # THIS IS THE NON-PRODUCTION DEFAULT. `disabled` makes no relay call at all:
+  # delivery is whatever the capture sink above is configured to be, which
+  # preserves the behaviour of a deployment that has not adopted the relay.
+  #
+  #   disabled     no relay call. Base and local default.
+  #   best_effort  the relay is called; a failure is counted, logged, and then
+  #                IGNORED, and the record falls back to the local sink. Never
+  #                changes a response. This is the SHADOW mode of the staged
+  #                rollout, and the documented incident rollback target.
+  #   required     production. The start must be durably acknowledged BEFORE the
+  #                handler runs and the terminal event committed before the
+  #                response is released; failures become 503s.
+  #
+  # `overlays/required-audit/` is the reference production composition. Moving
+  # from `required` back to `best_effort` is an explicit, alerted operator
+  # action (see AUDIT-RUNBOOK.md) — never a silent automatic fallback.
+  FKST_AUDIT_DELIVERY_MODE: disabled
+  # In-cluster address of the relay Service from `audit-relay/`. Set even while
+  # the mode is `disabled` so adopting the relay is a one-key patch; it is
+  # validated (http(s), host present, no embedded userinfo) either way, and
+  # unused until the mode changes.
+  FKST_AUDIT_RELAY_URL: http://fkst-audit-relay.chronoai-fkst.svc.cluster.local
+  # SHARED with the relay's own ConfigMap — the two MUST carry the same value.
+  # The control plane writes `completion_deadline_at = started_at + grace`; the
+  # relay closes a start as `incomplete` at `completion_deadline_at + grace`.
+  # It must outlast the LONGEST audited request (the `/api/v1` subtree ceiling,
+  # FKST_ENV_VALIDATE_DEADLINE_SECS + 60s) plus a 30s clock-skew margin, or the
+  # relay force-closes a request that is still running and required mode returns
+  # a 503 for work that succeeded. The control plane refuses to boot on a value
+  # that does not cover it, so raising FKST_ENV_VALIDATE_DEADLINE_SECS means
+  # raising this in BOTH ConfigMaps.
+  FKST_AUDIT_INCOMPLETE_GRACE_SECS: "420"
+  # Pre-handler acknowledgement budget: every audited request pays it before its
+  # handler runs, so it is deliberately short.
+  # FKST_AUDIT_RELAY_START_TIMEOUT_MS: "1000"
+  # Completion budget: the response is held until it elapses.
+  # FKST_AUDIT_RELAY_COMPLETION_TIMEOUT_MS: "5000"
+  #
+  # The relay's WRITE and READ tokens are SECRETS delivered through the
+  # fkst-control-plane record (FKST_AUDIT_RELAY_WRITE_TOKEN /
+  # FKST_AUDIT_RELAY_READ_TOKEN). They never appear here.
+  # ---- activity query (GET /api/v1/operations/activity) ----
+  # The read side of the trace. The numeric project id is NOT a secret (it is in
+  # every PostHog project URL); the Query-Read-only key that goes with it is, and
+  # is delivered as FKST_POSTHOG_QUERY_API_KEY in the control-plane secret
+  # record. Without both, the activity API reports itself unconfigured instead of
+  # returning an apparently complete empty result.
+  # FKST_POSTHOG_PROJECT_ID: <numeric project id from the PostHog project URL>
+  # FKST_POSTHOG_QUERY_TIMEOUT_MS: "5000"
+  # FKST_POSTHOG_ACTIVITY_DEFAULT_LIMIT: "100"
+  # FKST_POSTHOG_ACTIVITY_MAX_LIMIT: "200"
+  # FKST_POSTHOG_ACTIVITY_MAX_RANGE_DAYS: "30"
+  # ---- live sandbox inventory (GET /api/v1/operations/sandboxes) ----
+  # Independent of PostHog by design: a capture or query outage must never hide
+  # live runtime state, and a runtime-backend outage must never falsify history.
+  # FKST_OPERATIONS_SANDBOX_MAX_RESULT_ITEMS: "5000"
+  # FKST_OPERATIONS_SANDBOX_TIMEOUT_MS: "5000"
+  # FKST_SANDBOX_INVENTORY_MAX_SOURCE_ITEMS: "5000"
+  # FKST_SANDBOX_INVENTORY_MAX_WARNINGS: "256"

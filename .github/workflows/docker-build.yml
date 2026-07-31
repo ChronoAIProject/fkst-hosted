@@ -26,7 +26,8 @@ jobs:
       # the private upstream repo (needs a cross-repo token + a long engine
       # build), whereas the server stage is the part this repo's changes can
       # break — it exercises backend/Dockerfile's COPY paths and the `--locked`
-      # release build of the control-plane binary. The GHA cache keeps reruns fast.
+      # release build of BOTH binaries (the control plane and the audit relay).
+      # The GHA cache keeps reruns fast.
       - name: Build control-plane image (server stage)
         uses: docker/build-push-action@v6
         with:
@@ -36,5 +37,23 @@ jobs:
           push: false
           load: false
           tags: fkst-control-plane:ci
+          cache-from: type=gha,scope=control-plane
+          cache-to: type=gha,mode=max,scope=control-plane
+
+      # The audit relay's runtime stage assembles fully in CI — unlike the
+      # control-plane runtime, it carries no engine, so there is nothing private
+      # to fetch and nothing slow to compile. It reuses the cached
+      # `server-builder` above, so this adds seconds rather than minutes, and it
+      # is the only thing that proves the deployable in deploy/kubernetes/audit-relay
+      # actually has an image to run. Same job, so the PR check set is unchanged.
+      - name: Build audit-relay image (runtime stage)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          target: audit-relay-runtime
+          push: false
+          load: false
+          tags: fkst-audit-relay:ci
           cache-from: type=gha,scope=control-plane
           cache-to: type=gha,mode=max,scope=control-plane

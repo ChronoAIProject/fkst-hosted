@@ -1756,6 +1756,57 @@ server proxy is the only supported execd transport — §12/§13.9);
 `FKST_POD_RUNTIME_CLASS` and `FKST_POD_TERMINATION_GRACE_SECS` are ignored in
 opensandbox mode (the BatchSandbox template owns them).
 
+#### 14.10 Optional: the activity trace and its durable audit relay
+
+The `/operations` surface answers two independent questions — historical API
+activity (captured into a self-hosted PostHog project) and live sandbox
+inventory (read straight from the runtime backend). Both are **off by default**:
+`FKST_AUDIT_DELIVERY_MODE=disabled` and `FKST_POSTHOG_ENABLED=false` in the base
+ConfigMap, so a local stack that ignores this section behaves exactly as before,
+except that the sandbox view already works (it needs no PostHog at all).
+
+Adopting the trace means running one more workload, `fkst-audit-relay`: a
+single-replica SQLite-WAL outbox on its own ReadWriteOnce PVC, bound to no
+Kubernetes RBAC, reachable only from the control plane and a labelled Prometheus
+namespace, and holding the PostHog capture token that the control plane
+deliberately does not. It is what makes `FKST_AUDIT_DELIVERY_MODE=required`
+honest: a request's start is committed durably before its handler runs, so the
+deployment refuses (`503`) to serve a request it could not record.
+
+```bash
+docker build -f "$FKST_REPO/backend/Dockerfile" --target audit-relay-runtime \
+  -t fkst-audit-relay:local "$FKST_REPO"
+kind load docker-image fkst-audit-relay:local --name opensandbox-local
+
+# The relay needs its own credential record first (write/read tokens must
+# DIFFER) — see deploy/kubernetes/README.md, "Local durable source".
+kubectl --context kind-opensandbox-local apply -k "$FKST_REPO/deploy/kubernetes/audit-relay"
+"$FKST_REPO/deploy/kubernetes/verify-audit-relay.sh" --context kind-opensandbox-local
+```
+
+Before turning anything on, read
+`deploy/kubernetes/AUDIT-TRACE.md` — it carries the self-hosted PostHog
+prerequisites checklist (dedicated project, capture token, a **Query
+Read-only** identity that is never a human admin key, retention, NTP), the
+capacity worksheet the PVC size and disk alerts come from, the exact data
+boundaries, and the purge rules. Then follow
+`deploy/kubernetes/AUDIT-RUNBOOK.md` for provisioning, the cross-user
+authorization smoke test, and the staged `best_effort` → `required` rollout.
+`deploy/kubernetes/overlays/required-audit/` is the reference composition.
+
+Two traps worth knowing before you hit them:
+
+- `FKST_AUDIT_INCOMPLETE_GRACE_SECS` is **shared** by the control plane and the
+  relay and must be the same value in both ConfigMaps, and large enough to
+  outlast the longest audited request (`FKST_ENV_VALIDATE_DEADLINE_SECS + 60`,
+  plus a 30s margin — hence the checked-in `420`). Too small and the relay
+  force-closes a still-running request as `incomplete`; the control plane
+  refuses to boot rather than let that happen silently.
+- `FKST_POSTHOG_PROJECT_TOKEN` belongs in the `fkst-audit-relay` record ONLY.
+  Putting it in the control-plane record as well gives you two writers into one
+  project and hands the capture credential to the process that only needs to
+  read.
+
 ### 15. Deploy the fkst frontend
 
 The canonical frontend Deployment, Service, and disruption policy are in
@@ -2057,6 +2108,9 @@ lifecycle API → BatchSandbox → controller → caged gVisor pod.
 | **Rebuild the frontend** | same pattern with the §15 build command (`$FKST_REPO/frontend` + the `VITE_FKST_API_BASE` build-arg) and `deploy/fkst-frontend` |
 | **Recover a session runtime created before the exact work-label fix (#626)** | Deploy the corrected control-plane image and the current `fkst-hosted@packages` catalog revision first. Then delete only the affected runtime through its backend's supported delete operation: OpenSandbox `DELETE /v1/sandboxes/<sandbox-id>` with the tenant API key, or Kubernetes `kubectl --context kind-opensandbox-local -n chronoai-fkst delete pod fkst-sess-<session-id>`. Do **not** edit the trigger/work issue or add claim labels manually. Level-triggered reconciliation recreates the same deterministic session and redrives pending durable work. Confirm the trigger and dashboard issues remain unclaimed and the open issue carrying an exact effective work label resumes. |
 | **Re-attribute an App-seeded trigger** | A bot-authored trigger's effective creator is its sole assignee. Remove any existing assignees and assign **exactly the intended creator**; zero or multiple assignees are rejected with `fkst-trigger-unauthorized`. Ensure that creator is a deployment global admin or has repository admin/maintain permission. Keep the same creator in `### FKST Contributors` when they need seeded-session log access. |
+| **Rebuild the audit relay** | `docker build -f "$FKST_REPO/backend/Dockerfile" --target audit-relay-runtime -t fkst-audit-relay:local "$FKST_REPO" && kind load docker-image fkst-audit-relay:local --name opensandbox-local && kubectl -n chronoai-fkst rollout restart deploy/fkst-audit-relay` (§14.10) |
+| **Roll the audit relay for node maintenance** | Its PDB is `minAvailable: 1` on a single replica, so an ordinary drain is blocked deliberately. Do **not** delete the PDB — follow AUDIT-RUNBOOK.md's planned-maintenance path (cordon, `rollout restart`, confirm readiness, uncordon). In `required` mode ingress is unavailable for that window and product traffic fails closed. |
+| **Roll back required audit delivery** | Patch `FKST_AUDIT_DELIVERY_MODE` to `best_effort`, apply, restart the control plane. It is an explicit, alerted, recorded operator incident action — never a silent fallback. See AUDIT-RUNBOOK.md, "staged rollout". |
 | Change backend config | edit + `kubectl apply -f "$OSB_LOCAL/manifests/fkst-control-plane-config.yaml"`, then `kubectl -n chronoai-fkst rollout restart deploy/fkst-control-plane` (env is read at startup) |
 | Restart the webhook relay | re-run the §14.2 `npx smee-client …` command (it is a long-lived process, like the §12 port-forward); deliveries missed while it was down can be replayed from the App's **Advanced → Recent Deliveries** page |
 | Renew the local TLS cert (mkcert leaf certs expire after ~2 years) | re-run the §16.2 `mkcert` cert command, then `kubectl -n chronoai-fkst create secret tls fkst-local-tls --cert=… --key=… --dry-run=client -o yaml \| kubectl apply -f -` — ingress-nginx reloads on Secret change, no restart needed |
@@ -2104,12 +2158,12 @@ opensandbox-local/
 ```
 
 (Plus two locally built images, `fkst-control-plane:local` and
-`fkst-frontend:local`, and the `fkst-control-plane-secret` created imperatively
-in §14.7. The §14.2 smee channel URL lives only in your shell/App form —
-nothing on disk. Also created imperatively: the `fkst-local-tls` TLS Secret
-(§16.2). Outside `$OSB_LOCAL` on your machine: the mkcert root CA
-(`mkcert -CAROOT`) and the §16.2 `/etc/hosts` line — one line carrying both
-hostnames.)
+`fkst-frontend:local` — three with the optional `fkst-audit-relay:local` from
+§14.10 — and the `fkst-control-plane-secret` created imperatively in §14.7. The
+§14.2 smee channel URL lives only in your shell/App form — nothing on disk. Also
+created imperatively: the `fkst-local-tls` TLS Secret (§16.2). Outside
+`$OSB_LOCAL` on your machine: the mkcert root CA (`mkcert -CAROOT`) and the
+§16.2 `/etc/hosts` line — one line carrying both hostnames.)
 
 ### Appendix B — Troubleshooting
 
@@ -2146,6 +2200,12 @@ hostnames.)
 | Session sandbox pod stuck `Pending` (untainted nodes full) | Each session requests 2 CPU / 4 Gi (`FKST_OSB_SESSION_CPU`/`MEMORY`) on the gVisor node — enlarge the Docker VM or lower those values (§16 sizing note). |
 | Named-environment API calls fail with `Forbidden` | The env-store RBAC (§14.5) is incomplete: `fkst-ksa` needs validation-Pod access in `chronoai-fkst` and Secret CRUD through `fkst-control-plane-durable-envstore` in the namespace selected by `FKST_ENV_STORE_NAMESPACE`. |
 | Backend fails startup with an environment-store key/decryption error | Supply exactly one stable standard-base64 32-byte key through the external control-plane record. Do not replace a lost key or delete the durable records; follow the provider's backup/recovery procedure. |
+| Backend crash-loops with `FKST_AUDIT_INCOMPLETE_GRACE_SECS … must be at least N` | Fail-closed by design (§14.10): the grace must outlast the longest audited request, or the relay would force-close a still-running request as `incomplete`. Raise it to at least `FKST_ENV_VALIDATE_DEADLINE_SECS + 90` in **both** the control-plane and relay ConfigMaps. |
+| Every `/api/v1` call returns `503` right after enabling required delivery | The relay is not Ready, so the deployment refuses to serve requests it cannot record. `deploy/kubernetes/verify-audit-relay.sh --context …`, then AUDIT-RUNBOOK.md's "audit ingress unavailable". Never "fix" it by disabling the audit without recording a rollback. |
+| Relay pod `CreateContainerConfigError` or `CrashLoopBackOff` at startup | The `fkst-audit-relay-secret` is missing, or its write and read tokens are the same value — the relay refuses to start when they match, because one value would promote an ingestion credential into the key to everyone's activity. |
+| Relay pod `Pending` with an unbound claim | No usable StorageClass. The checked-in claim names `standard` (kind's default); a cloud overlay must patch it to a reviewed, backed-up class — never swap the volume for an `emptyDir`. |
+| Activity view empty or "partial" while sandboxes work fine | Expected separation: history comes from PostHog, live inventory from the runtime backend, and one must never hide the other. Check `FKST_POSTHOG_PROJECT_ID` and the Query-Read-only key (capture and query use **different** credentials), then AUDIT-RUNBOOK.md's "activity query failures". |
+| A regular user gets `503 session_visibility_unavailable` on their sandboxes | The GitHub-derived access projection is cold or recovering, and failing closed is the requirement. It clears when the reconciler's full resync completes; if it persists, treat it as a discovery problem (RECOVERY-RUNBOOK.md), never as a reason to widen visibility. |
 
 ---
 
@@ -2252,7 +2312,7 @@ PRs into `develop` run exactly five checks, all under `.github/workflows/`:
 | `rust lint` | `rust-ci.yml` | `cargo fmt --check` + `cargo clippy --all-targets -D warnings` |
 | `rust build` | `rust-ci.yml` | `cargo build --workspace --locked` |
 | `rust test` | `rust-ci.yml` | `cargo test --workspace --locked` |
-| `docker build` | `docker-build.yml` | builds `backend/Dockerfile` `--target server-builder` |
+| `docker build` | `docker-build.yml` | builds `backend/Dockerfile` `--target server-builder` (both binaries) and `--target audit-relay-runtime` |
 | `gitleaks` | `gitleaks.yml` | scans the working tree for committed secrets |
 
 Keep this set minimal — do not add new PR gates without good reason.
@@ -2289,6 +2349,7 @@ The durable status labels explain what happened and prevent duplicate comments a
 - The fkst deployables run exclusively on Kubernetes — the full local setup is embedded above in **FKST Local Deployment Guide** (the single source of truth; there is no standalone copy); `docker-compose` is not used in this repo.
 - Each deployment needs its own GitHub App registration — permissions, OAuth callbacks, and env-var mapping are in the deployment guide's **§14.3 Register your GitHub App** (local webhook delivery needs the **§14.2 smee relay** — GitHub cannot POST to `127.0.0.1`); never set `FKST_GITHUB_OAUTH_CLIENT_ID` without its client secret, never commit App secrets.
 - Treat the upstream engine and packages repositories as read-only references; the FKST Cloud package catalog resides on this repository's `packages` branch (reference form `ChronoAIProject/fkst-hosted@packages:<path>`).
+- The user-activity trace is opt-in and documented in `deploy/kubernetes/AUDIT-TRACE.md` (reference) and `AUDIT-RUNBOOK.md` (operations), with the workload in `deploy/kubernetes/audit-relay/` — see the deployment guide's **§14.10**. The PostHog capture token lives ONLY in the relay's credential record, the query key is Query-Read-only and never reaches a browser, no Prometheus label may carry an actor/session/repository/request/event id, and `required` delivery may only ever be rolled back to `best_effort` as an explicit, alerted operator action.
 - When filing work issues for a substrate session, **wave the backlog by dependency** (merge foundation before dependent issues), use one feature per issue, keep each creator's trigger-label sets disjoint, and assign every work issue to exactly one matching session creator; different creators may reuse labels. Work authors are limited to the creator, Session Collaborators, and global admins. See **Authoring work issues for a substrate session**.
 - Keep commits small and self-contained.
 - Never add `Co-Authored-By`; always act under the user's own GitHub identity (never a bot/AI identity).

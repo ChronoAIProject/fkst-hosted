@@ -1,0 +1,186 @@
+# Activity-trace alerting.
+#
+# Deliberately a SECOND PrometheusRule rather than a group inside
+# `fkst-recovery`: recovery alerting is about leader election and namespace
+# reconstruction, this is about whether the deployment can still record what it
+# did. The two have different owners, different runbooks, and different reasons
+# to change.
+#
+# ## Cardinality contract (epic `OPS-04`)
+#
+# No expression, label, or annotation here carries an actor, login, repository,
+# session, runtime, request, event, or cursor id, a raw endpoint, a cursor, or
+# PostHog error text. Every selector is a fixed namespace/service pair plus a
+# closed-enum label; every annotation is a static string with no `{{ }}`
+# templating, so a notification can never project a value out of a series.
+# Operation id would be the one high-ish-cardinality label the epic permits (a
+# bounded, server-owned catalog) — no rule below needs it, so none uses it.
+#
+# ## Why `service=` is on every selector
+#
+# The control plane publishes the CLIENT side of the relay conversation and the
+# relay publishes the STORAGE side, and both use the `fkst_audit_relay_` prefix.
+# Pinning `service` keeps an expression from silently aggregating a client-side
+# call counter with a storage-side gauge.
+#
+# ## Thresholds
+#
+# Every number below comes from the capacity worksheet in AUDIT-TRACE.md.
+# Changing the PVC size, the retention windows, or the assumed request rate
+# means recomputing them in the same change.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: fkst-audit
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/component: audit-monitoring
+    app.kubernetes.io/name: fkst-audit
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  groups:
+    - name: fkst.audit
+      interval: 30s
+      rules:
+        # Required mode refused product traffic, or could not confirm an
+        # outcome durable. This is the only failure that is visible to users,
+        # and it can never be recorded as an audit event — which is exactly why
+        # it is a metric.
+        - alert: FKSTAuditIngressUnavailable
+          expr: sum(increase(fkst_audit_required_rejections_total{namespace="chronoai-fkst",service="fkst-control-plane-metrics"}[5m])) > 0
+          for: 5m
+          labels:
+            component: control-plane
+            severity: critical
+          annotations:
+            summary: FKST required audit delivery is refusing requests
+            description: Requests were refused or left unconfirmed under required delivery within the last five minutes.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/AUDIT-RUNBOOK.md#audit-ingress-unavailable
+        # Durable ingress is gone or unscrapable. In required mode this becomes
+        # the alert above within one control-plane timeout.
+        - alert: FKSTAuditRelayNotReady
+          expr: absent(fkst_audit_relay_ingress_ready{namespace="chronoai-fkst",service="fkst-audit-relay-metrics"}) or max(fkst_audit_relay_ingress_ready{namespace="chronoai-fkst",service="fkst-audit-relay-metrics"}) < 1
+          for: 2m
+          labels:
+            component: audit-relay
+            severity: critical
+          annotations:
+            summary: FKST audit relay cannot promise durable ingress
+            description: The relay is absent from telemetry or reports that a record can no longer be committed.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/AUDIT-RUNBOOK.md#relay-or-pvc-outage
+        # Committed but undelivered rows are both numerous AND old. Both halves
+        # are required: a burst that drains is normal, and a single stuck row is
+        # not an outage. Fifteen minutes is thirty times the normal ingestion
+        # lag assumed in the worksheet.
+        - alert: FKSTAuditBacklogGrowing
+          expr: max(fkst_audit_relay_records{namespace="chronoai-fkst",service="fkst-audit-relay-metrics",state="complete"}) > 1000 and max(fkst_audit_relay_oldest_record_age_seconds{namespace="chronoai-fkst",service="fkst-audit-relay-metrics",state="complete"}) > 900
+          for: 10m
+          labels:
+            component: audit-relay
+            severity: warning
+          annotations:
+            summary: FKST audit delivery backlog is not draining
+            description: Committed records are queued beyond the expected PostHog ingestion lag.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/AUDIT-RUNBOOK.md#posthog-outage
+        # PostHog accepted these records but they are still not query-visible.
+        # Capture acceptance is not delivery: an accepted-but-absent row means
+        # history is missing from the surface users actually read.
+        - alert: FKSTAuditPostHogUnverified
+          expr: max(fkst_audit_relay_oldest_record_age_seconds{namespace="chronoai-fkst",service="fkst-audit-relay-metrics",state="posthog_accepted"}) > 1800
+          for: 10m
+          labels:
+            component: audit-relay
+            severity: warning
+          annotations:
+            summary: FKST accepted audit records are not query-visible
+            description: Records accepted by capture have stayed unverified past the configured verification window.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/AUDIT-RUNBOOK.md#posthog-outage
+        # A dead letter is a record that will never reach PostHog without an
+        # operator. There is no acceptable rate; any new one pages.
+        - alert: FKSTAuditDeadLetters
+          expr: sum(increase(fkst_audit_relay_dead_letters_total{namespace="chronoai-fkst",service="fkst-audit-relay-metrics"}[15m])) > 0
+          for: 1m
+          labels:
+            component: audit-relay
+            severity: critical
+          annotations:
+            summary: FKST audit records were permanently abandoned
+            description: The relay dead-lettered at least one record in the last fifteen minutes.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/AUDIT-RUNBOOK.md#replay-and-dead-letter-remediation
+        # A request whose process died before a terminal event. A trickle is
+        # expected during a rollout; a sustained rate means requests are being
+        # killed mid-flight or the shared grace is configured too short.
+        - alert: FKSTAuditIncompleteRequests
+          expr: sum(increase(fkst_audit_relay_incomplete_total{namespace="chronoai-fkst",service="fkst-audit-relay-metrics"}[30m])) > 5
+          for: 5m
+          labels:
+            component: audit-relay
+            severity: warning
+          annotations:
+            summary: FKST audit requests are closing as incomplete
+            description: More requests than expected ended with no terminal outcome in the last thirty minutes.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/AUDIT-RUNBOOK.md#incomplete-records
+        # 70% of the 20Gi claim (15032385536 bytes). Warning: plan a retention
+        # or capacity change while there is still runway.
+        - alert: FKSTAuditRelayDiskPressure
+          expr: max(fkst_audit_relay_db_bytes{namespace="chronoai-fkst",service="fkst-audit-relay-metrics"}) > 15032385536
+          for: 15m
+          labels:
+            component: audit-relay
+            severity: warning
+          annotations:
+            summary: FKST audit outbox is consuming most of its volume
+            description: The outbox database has passed the warning fraction of the provisioned claim.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/AUDIT-RUNBOOK.md#disk-pressure-and-emergency-purge
+        # 85% of the 20Gi claim (18253611008 bytes). Critical: at the capacity
+        # guard the relay refuses ingress and required mode fails closed, so
+        # escalate BEFORE exhaustion rather than after.
+        - alert: FKSTAuditRelayDiskPressure
+          expr: max(fkst_audit_relay_db_bytes{namespace="chronoai-fkst",service="fkst-audit-relay-metrics"}) > 18253611008
+          for: 5m
+          labels:
+            component: audit-relay
+            severity: critical
+          annotations:
+            summary: FKST audit outbox is close to exhausting its volume
+            description: The outbox database has passed the critical fraction of the provisioned claim.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/AUDIT-RUNBOOK.md#disk-pressure-and-emergency-purge
+        # The scoped activity read is failing or answering partially. Users see
+        # an explicit partial state rather than a misleading empty page, so this
+        # is a warning — but a sustained one means history is unreadable.
+        - alert: FKSTOperationsActivityQueryFailures
+          expr: sum(increase(fkst_operations_activity_queries_total{namespace="chronoai-fkst",service="fkst-control-plane-metrics",result=~"upstream_error|unavailable"}[10m])) > 5 or sum(increase(fkst_operations_activity_source_partial_total{namespace="chronoai-fkst",service="fkst-control-plane-metrics"}[10m])) > 5
+          for: 10m
+          labels:
+            component: control-plane
+            severity: warning
+          annotations:
+            summary: FKST activity queries are failing or partial
+            description: Scoped activity reads returned source errors or partial pages at a sustained rate.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/AUDIT-RUNBOOK.md#activity-query-failures
+        # The live runtime backend cannot answer. Independent of PostHog by
+        # design, so this alert must never be silenced by an audit incident.
+        - alert: FKSTSandboxInventoryFailures
+          expr: sum(increase(fkst_operations_sandbox_inventory_requests_total{namespace="chronoai-fkst",service="fkst-control-plane-metrics",result=~"unavailable|too_large"}[10m])) > 5
+          for: 10m
+          labels:
+            component: control-plane
+            severity: warning
+          annotations:
+            summary: FKST live sandbox inventory is failing
+            description: The configured runtime backend could not answer inventory requests at a sustained rate.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/AUDIT-RUNBOOK.md#sandbox-inventory-failures
+        # Regular-user session visibility fails closed with 503 while the
+        # GitHub-derived access projection is cold or recovering. Expected for
+        # seconds after a restart; sustained means the projection never
+        # converged and no ordinary user can see their sandboxes.
+        - alert: FKSTSessionVisibilityNotReady
+          expr: max(fkst_session_access_registry_generation_state{namespace="chronoai-fkst",service="fkst-control-plane-metrics",state="ready"}) < 1
+          for: 10m
+          labels:
+            component: control-plane
+            severity: warning
+          annotations:
+            summary: FKST session visibility has not become ready
+            description: The session-access projection has stayed cold or recovering, so scoped sandbox views fail closed.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/AUDIT-RUNBOOK.md#session-visibility-not-ready

@@ -1,0 +1,79 @@
+# The relay's network cage.
+#
+# The read endpoint returns the deployment's entire recent audit trail under one
+# bearer token. The bearer check is the authorization boundary; this policy is
+# the second, independent one, so a leaked read token is not by itself enough to
+# reach the port from an arbitrary Pod.
+#
+# Ingress is exactly two callers and nothing else:
+#
+#   * the control plane, matched by its workload label in this namespace — it
+#     writes starts/completions/lifecycle events and performs the scoped read
+#     behind the activity backlog merge;
+#   * a Prometheus scraper, matched by a namespace LABEL the operator applies
+#     rather than a hard-coded namespace name, because the monitoring namespace
+#     differs per environment. Without that label the metrics port is simply
+#     unreachable, which fails closed.
+#
+# Egress is DNS plus outbound HTTPS. The `except` blocks keep the relay from
+# reaching cloud metadata or arbitrary in-cluster services: its only legitimate
+# destinations are the cluster DNS service and the self-hosted PostHog host.
+#
+# ## If PostHog runs inside this cluster
+#
+# Then it is inside one of the excluded RFC1918 / cluster-CIDR ranges and this
+# policy will block it. Do not widen the `except` list — add one narrow rule in
+# the environment overlay selecting exactly the PostHog namespace/Pod and port,
+# and leave everything else denied.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: fkst-audit-relay
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/component: audit-relay
+    app.kubernetes.io/name: fkst-audit-relay
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: fkst-audit-relay
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: fkst-control-plane
+      ports:
+        - protocol: TCP
+          port: 8090
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              fkst.chronoai.io/metrics-scraper: "true"
+      ports:
+        - protocol: TCP
+          port: 8090
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.169.254/32
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443

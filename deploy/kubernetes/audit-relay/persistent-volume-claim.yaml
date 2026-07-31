@@ -1,0 +1,49 @@
+# The audit outbox volume.
+#
+# ReadWriteOnce is not a limitation to work around: SQLite in WAL mode has ONE
+# writer, and the relay Deployment is deliberately one replica with a `Recreate`
+# strategy so two processes can never open the same database file. Widening this
+# to RWX would let a rolling update corrupt the trail.
+#
+# ## Deleting this claim discards audit data
+#
+# `kubectl apply -k` never deletes, so applying or removing the relay
+# Kustomization cannot drop this volume. The remaining risks are a `kubectl
+# delete -k`, a namespace delete, and a StorageClass whose reclaim policy is
+# `Delete`. An environment overlay MUST bind this claim to a StorageClass with
+# `reclaimPolicy: Retain` and a snapshot schedule (see AUDIT-RUNBOOK.md, backup
+# and restore); the annotation below is the human-readable half of that contract.
+#
+# ## Size
+#
+# 20Gi comes from the capacity worksheet in AUDIT-TRACE.md: seven days of the
+# verified overlap at the assumed peak, plus a 24-hour outage backlog, plus
+# index, WAL, and vacuum/checkpoint headroom, times a 2x safety factor. Resizing
+# means recomputing FKST_AUDIT_RELAY_MAX_RECORDS and the disk-pressure alert
+# thresholds in the same change.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fkst-audit-relay-data
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/component: audit-relay
+    app.kubernetes.io/name: fkst-audit-relay
+    app.kubernetes.io/part-of: fkst-hosted
+  annotations:
+    fkst.chronoai.io/data-class: audit-trail
+    fkst.chronoai.io/deletion-policy: >-
+      Holds undelivered and unverified audit records. Never delete or recreate
+      without an explicit, recorded operator loss acknowledgement.
+spec:
+  accessModes:
+    - ReadWriteOnce
+  # Explicit rather than inherited: a claim that silently picked up whichever
+  # class happens to be default is how an audit trail ends up on ephemeral local
+  # storage. `standard` is the portable stand-in every kind cluster provides; a
+  # production overlay patches it to a reviewed, backed-up, SSD-backed class
+  # whose reclaim policy is Retain.
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 20Gi

@@ -4,3 +4,10 @@ resources:
   - metrics-service.yaml
   - service-monitor.yaml
   - prometheus-rules.yaml
+  # Activity-trace monitoring. The relay scrape targets exist whether or not
+  # `audit-relay/` is applied: a Service and ServiceMonitor with no backing Pod
+  # simply have no endpoints, which is what makes FKSTAuditRelayNotReady's
+  # `absent()` arm meaningful for a deployment that expected a relay and lost it.
+  - audit-metrics-service.yaml
+  - audit-service-monitor.yaml
+  - audit-prometheus-rules.yaml

@@ -22,10 +22,19 @@ identity = lambda do |object|
    object.dig("metadata", "name").to_s]
 end
 
+find = lambda do |kind, name|
+  object = monitoring.find { |item| identity.call(item) == [kind, "chronoai-fkst", name] }
+  abort "monitoring render is missing #{kind}/#{name}" unless object
+  object
+end
+
 expected = Set[
   ["Service", "chronoai-fkst", "fkst-control-plane-metrics"],
   ["ServiceMonitor", "chronoai-fkst", "fkst-control-plane"],
-  ["PrometheusRule", "chronoai-fkst", "fkst-recovery"]
+  ["PrometheusRule", "chronoai-fkst", "fkst-recovery"],
+  ["Service", "chronoai-fkst", "fkst-audit-relay-metrics"],
+  ["ServiceMonitor", "chronoai-fkst", "fkst-audit-relay"],
+  ["PrometheusRule", "chronoai-fkst", "fkst-audit"]
 ]
 actual = monitoring.map(&identity).to_set
 abort "monitoring render must contain exactly the reviewed resources" unless actual == expected
@@ -45,29 +54,40 @@ other_disposable = local.select do |object|
 end.reject { |object| object.dig("metadata", "name") == "chronoai-fkst" }
 abort "only chronoai-fkst may be disposable in the local overlay" unless other_disposable.empty?
 
-service = monitoring.find { |object| object["kind"] == "Service" }
+service = find.call("Service", "fkst-control-plane-metrics")
 unless service.dig("spec", "selector") == { "app.kubernetes.io/name" => "fkst-control-plane" }
   abort "metrics Service must scrape both control-plane contenders"
 end
+relay_service = find.call("Service", "fkst-audit-relay-metrics")
+unless relay_service.dig("spec", "selector") == { "app.kubernetes.io/name" => "fkst-audit-relay" }
+  abort "audit-relay metrics Service selection drifted"
+end
 
-monitor = monitoring.find { |object| object["kind"] == "ServiceMonitor" }
-unless monitor.dig("spec", "namespaceSelector", "matchNames") == ["chronoai-fkst"]
-  abort "ServiceMonitor namespace selection drifted"
+# One reviewed endpoint contract per monitor: a fixed namespace, a fixed target
+# label, and a bounded interval. `honorLabels: false` keeps a scraped body from
+# overwriting the namespace/service labels every alert expression pins.
+check_monitor = lambda do |monitor, target_label|
+  name = monitor.dig("metadata", "name")
+  unless monitor.dig("spec", "namespaceSelector", "matchNames") == ["chronoai-fkst"]
+    abort "#{name} ServiceMonitor namespace selection drifted"
+  end
+  unless monitor.dig("spec", "selector", "matchLabels") == { "app.kubernetes.io/name" => target_label }
+    abort "#{name} ServiceMonitor target selection drifted"
+  end
+  endpoints = monitor.dig("spec", "endpoints")
+  abort "#{name} ServiceMonitor must expose one bounded endpoint" unless endpoints.is_a?(Array) && endpoints.length == 1
+  endpoint = endpoints.first
+  unless endpoint.slice("port", "path", "interval", "scrapeTimeout", "honorLabels") == {
+    "port" => "http", "path" => "/metrics", "interval" => "30s",
+    "scrapeTimeout" => "10s", "honorLabels" => false
+  }
+    abort "#{name} ServiceMonitor endpoint contract drifted"
+  end
+  endpoint
 end
-unless monitor.dig("spec", "selector", "matchLabels") == {
-  "app.kubernetes.io/name" => "fkst-control-plane-metrics"
-}
-  abort "ServiceMonitor target selection drifted"
-end
-endpoints = monitor.dig("spec", "endpoints")
-abort "ServiceMonitor must expose one bounded endpoint" unless endpoints.is_a?(Array) && endpoints.length == 1
-endpoint = endpoints.first
-unless endpoint.slice("port", "path", "interval", "scrapeTimeout", "honorLabels") == {
-  "port" => "http", "path" => "/metrics", "interval" => "30s",
-  "scrapeTimeout" => "10s", "honorLabels" => false
-}
-  abort "ServiceMonitor endpoint contract drifted"
-end
+
+monitor = find.call("ServiceMonitor", "fkst-control-plane")
+endpoint = check_monitor.call(monitor, "fkst-control-plane-metrics")
 expected_drop = [{
   "sourceLabels" => ["__name__"],
   "regex" => "fkst_leader_identity_info|fkst_leader_observed_holder_info",
@@ -75,15 +95,104 @@ expected_drop = [{
 }]
 abort "identity-bearing metrics must be dropped before ingestion" unless endpoint["metricRelabelings"] == expected_drop
 
-rules = monitoring.find { |object| object["kind"] == "PrometheusRule" }
-groups = rules.dig("spec", "groups")
-abort "PrometheusRule must contain one fixed group" unless groups.is_a?(Array) && groups.length == 1
-group = groups.first
-abort "PrometheusRule group identity drifted" unless group.slice("name", "interval") == {
-  "name" => "fkst.recovery", "interval" => "30s"
-}
+relay_monitor = find.call("ServiceMonitor", "fkst-audit-relay")
+relay_endpoint = check_monitor.call(relay_monitor, "fkst-audit-relay-metrics")
+# The relay publishes no info metric carrying an identity, so it needs no drop
+# list — and must not silently acquire one that nobody reviewed.
+abort "audit-relay scrape must not carry an unreviewed relabel rule" if relay_endpoint.key?("metricRelabelings")
 
-expected_alerts = Set[
+CONTROL_PLANE_SERVICE = "fkst-control-plane-metrics"
+RELAY_SERVICE = "fkst-audit-relay-metrics"
+
+# Substrings that would mean a series, label, or notification carries an
+# identity. Alert text is delivered to humans through systems this repository
+# does not control, so the check is on the literal rendered strings (epic
+# `OPS-04`).
+FORBIDDEN_IDENTITY_TOKENS = %w[
+  actor login repository session_id runtime_id request_id event_id
+  cursor viewer installation issue_number
+].freeze
+
+# One group per PrometheusRule, validated the same way: a fixed identity, a
+# closed alert set, an allowlisted metric vocabulary, the exact scrape scope for
+# each metric used, a bounded hold duration, and static notifications.
+validate_group = lambda do |rules_object, group_name, expected_alerts, metric_services, components, rule_count|
+  groups = rules_object.dig("spec", "groups")
+  abort "#{group_name} PrometheusRule must contain one fixed group" unless groups.is_a?(Array) && groups.length == 1
+  group = groups.first
+  unless group.slice("name", "interval") == { "name" => group_name, "interval" => "30s" }
+    abort "#{group_name} PrometheusRule group identity drifted"
+  end
+  alert_rules = group.fetch("rules")
+  unless alert_rules.length == rule_count
+    abort "#{group_name} must contain exactly #{rule_count} reviewed rules"
+  end
+  unless alert_rules.map { |rule| rule["alert"] }.to_set == expected_alerts
+    abort "#{group_name} alert set drifted"
+  end
+  alert_rules.each do |rule|
+    name = rule.fetch("alert")
+    expression = rule.fetch("expr").to_s
+    metrics = expression.scan(/\bfkst_[a-z0-9_]+\b/).to_set
+    unknown = metrics - metric_services.keys.to_set
+    abort "#{name} uses an unreviewed metric" unless unknown.empty?
+    abort "#{name} lacks the fixed namespace scope" unless expression.include?('namespace="chronoai-fkst"')
+    # Every metric must be read from the target that actually publishes it. The
+    # control plane and the relay share the `fkst_audit_relay_` prefix (client
+    # side vs storage side), so an expression missing this pin would aggregate
+    # two unrelated families.
+    required_services = metrics.map { |metric| metric_services.fetch(metric) }.to_set
+    used_services = expression.scan(/service="([a-z0-9-]+)"/).flatten.to_set
+    unless used_services == required_services
+      abort "#{name} does not pin exactly the scrape targets its metrics come from"
+    end
+    abort "#{name} must have a bounded hold duration" if rule["for"].to_s.empty?
+    labels = rule.fetch("labels")
+    unless labels.keys.to_set == Set["component", "severity"]
+      abort "#{name} labels are not the fixed reviewed set"
+    end
+    abort "#{name} carries an unreviewed component" unless components.include?(labels["component"])
+    unless %w[warning critical].include?(labels["severity"])
+      abort "#{name} severity must be warning or critical"
+    end
+    annotations = rule.fetch("annotations")
+    unless annotations.keys.to_set == Set["summary", "description", "runbook_url"]
+      abort "#{name} annotations are not the fixed reviewed set"
+    end
+    if (labels.values + annotations.values).any? { |value| value.to_s.include?("{{") }
+      abort "#{name} must not project dynamic labels into notifications"
+    end
+    unless annotations["runbook_url"].to_s.start_with?("https://")
+      abort "#{name} must link a runbook"
+    end
+    notification = (annotations.values + labels.values).join(" ").downcase
+    FORBIDDEN_IDENTITY_TOKENS.each do |token|
+      abort "#{name} notification text mentions #{token}" if notification.include?(token)
+    end
+  end
+  # Two rules may share an alert name only to express a warning/critical pair.
+  alert_rules.group_by { |rule| rule["alert"] }.each do |name, rules|
+    next if rules.length == 1
+    severities = rules.map { |rule| rule.dig("labels", "severity") }
+    unless severities.uniq.length == severities.length
+      abort "#{name} repeats an alert name without distinct severities"
+    end
+  end
+end
+
+recovery_metrics = {
+  "fkst_up" => CONTROL_PLANE_SERVICE,
+  "fkst_startup_resync_complete" => CONTROL_PLANE_SERVICE,
+  "fkst_startup_resync_last_success_timestamp_seconds" => CONTROL_PLANE_SERVICE,
+  "fkst_leader_state" => CONTROL_PLANE_SERVICE,
+  "fkst_leader_election_enabled" => CONTROL_PLANE_SERVICE,
+  "fkst_leader_ready" => CONTROL_PLANE_SERVICE,
+  "fkst_leader_routing_ready" => CONTROL_PLANE_SERVICE,
+  "fkst_leader_lease_failures_total" => CONTROL_PLANE_SERVICE,
+  "fkst_leader_routing_failures_total" => CONTROL_PLANE_SERVICE,
+  "fkst_leader_transitions_total" => CONTROL_PLANE_SERVICE
+}
+recovery_alerts = Set[
   "FKSTControlPlaneScrapeMissing",
   "FKSTStartupResyncIncomplete",
   "FKSTRecoveryDegraded",
@@ -94,41 +203,35 @@ expected_alerts = Set[
   "FKSTLeaderRoutingFailures",
   "FKSTExcessiveLeaderChurn"
 ]
-alert_rules = group.fetch("rules")
-abort "recovery alert set drifted" unless alert_rules.map { |rule| rule["alert"] }.to_set == expected_alerts
+validate_group.call(find.call("PrometheusRule", "fkst-recovery"), "fkst.recovery",
+                    recovery_alerts, recovery_metrics, Set["control-plane"], 9)
 
-allowed_metrics = Set[
-  "fkst_up",
-  "fkst_startup_resync_complete",
-  "fkst_startup_resync_last_success_timestamp_seconds",
-  "fkst_leader_state",
-  "fkst_leader_election_enabled",
-  "fkst_leader_ready",
-  "fkst_leader_routing_ready",
-  "fkst_leader_lease_failures_total",
-  "fkst_leader_routing_failures_total",
-  "fkst_leader_transitions_total"
+audit_metrics = {
+  "fkst_audit_required_rejections_total" => CONTROL_PLANE_SERVICE,
+  "fkst_operations_activity_queries_total" => CONTROL_PLANE_SERVICE,
+  "fkst_operations_activity_source_partial_total" => CONTROL_PLANE_SERVICE,
+  "fkst_operations_sandbox_inventory_requests_total" => CONTROL_PLANE_SERVICE,
+  "fkst_session_access_registry_generation_state" => CONTROL_PLANE_SERVICE,
+  "fkst_audit_relay_ingress_ready" => RELAY_SERVICE,
+  "fkst_audit_relay_records" => RELAY_SERVICE,
+  "fkst_audit_relay_oldest_record_age_seconds" => RELAY_SERVICE,
+  "fkst_audit_relay_dead_letters_total" => RELAY_SERVICE,
+  "fkst_audit_relay_incomplete_total" => RELAY_SERVICE,
+  "fkst_audit_relay_db_bytes" => RELAY_SERVICE
+}
+audit_alerts = Set[
+  "FKSTAuditIngressUnavailable",
+  "FKSTAuditRelayNotReady",
+  "FKSTAuditBacklogGrowing",
+  "FKSTAuditPostHogUnverified",
+  "FKSTAuditDeadLetters",
+  "FKSTAuditIncompleteRequests",
+  "FKSTAuditRelayDiskPressure",
+  "FKSTOperationsActivityQueryFailures",
+  "FKSTSandboxInventoryFailures",
+  "FKSTSessionVisibilityNotReady"
 ]
-alert_rules.each do |rule|
-  expression = rule.fetch("expr").to_s
-  metrics = expression.scan(/\bfkst_[a-z0-9_]+\b/).to_set
-  abort "#{rule.fetch('alert')} uses an unreviewed metric" unless (metrics - allowed_metrics).empty?
-  unless expression.include?('namespace="chronoai-fkst"') &&
-         expression.include?('service="fkst-control-plane-metrics"')
-    abort "#{rule.fetch('alert')} lacks the fixed scrape scope"
-  end
-  abort "#{rule.fetch('alert')} must have a bounded hold duration" if rule["for"].to_s.empty?
-  labels = rule.fetch("labels")
-  unless labels.keys.to_set == Set["component", "severity"] && labels["component"] == "control-plane"
-    abort "#{rule.fetch('alert')} labels are not the fixed reviewed set"
-  end
-  annotations = rule.fetch("annotations")
-  unless annotations.keys.to_set == Set["summary", "description", "runbook_url"]
-    abort "#{rule.fetch('alert')} annotations are not the fixed reviewed set"
-  end
-  if (labels.values + annotations.values).any? { |value| value.to_s.include?("{{") }
-    abort "#{rule.fetch('alert')} must not project dynamic labels into notifications"
-  end
-end
+validate_group.call(find.call("PrometheusRule", "fkst-audit"), "fkst.audit",
+                    audit_alerts, audit_metrics, Set["control-plane", "audit-relay"], 11)
 
-puts "validated optional recovery monitoring and local-only disposable boundary"
+puts "validated optional recovery/audit monitoring and local-only disposable boundary"
