@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   OperationsError,
   activitySearchParams,
+  clearsLastGood,
   describeError,
   getActivity,
   getSandboxes,
@@ -53,6 +54,7 @@ function page(overrides: Record<string, unknown> = {}) {
     can_view_all: false,
     items: [apiRow],
     source_status: { posthog: 'healthy', relay: 'not_configured', partial: false },
+    max_range_days: 30,
     ...overrides,
   };
 }
@@ -194,6 +196,17 @@ describe('validateActivityPage', () => {
     );
   });
 
+  it('rejects a page that states no usable window ceiling', () => {
+    // Falling back to a guessed bound is exactly the divergence this field
+    // exists to remove, so an absent or nonsensical one fails the page.
+    for (const bad of [undefined, 0, -1, '30']) {
+      expect(() => validateActivityPage(page({ max_range_days: bad }), 'mine')).toThrowError(
+        expect.objectContaining({ code: 'malformed' })
+      );
+    }
+    expect(validateActivityPage(page({ max_range_days: 7 }), 'mine').max_range_days).toBe(7);
+  });
+
   it('rejects a row missing a field the renderer dereferences', () => {
     const broken = page({ items: [{ ...apiRow, completed_at: undefined }] });
     expect(() => validateActivityPage(broken, 'mine')).toThrowError(
@@ -327,5 +340,31 @@ describe('describeError', () => {
       code: 'sandbox_not_found',
       requestId: 'r1',
     });
+  });
+});
+
+describe('clearsLastGood', () => {
+  it('invalidates the rows on every authorization or validation failure', () => {
+    for (const error of [
+      new OperationsError('unauthorized', 401),
+      new OperationsError('forbidden', 403),
+      new OperationsError('operations_scope_forbidden', 403),
+      new OperationsError('scope_mismatch', 200),
+      new OperationsError('malformed', 200),
+    ]) {
+      expect(clearsLastGood(error), error.code).toBe(true);
+    }
+  });
+
+  it('keeps them for a failure that is only about freshness', () => {
+    for (const error of [
+      new OperationsError('unavailable', 503),
+      new OperationsError('rate_limited', 429),
+      new OperationsError('upstream_error', 502),
+      new OperationsError('network', 0),
+      new TypeError('failed to fetch'),
+    ]) {
+      expect(clearsLastGood(error)).toBe(false);
+    }
   });
 });

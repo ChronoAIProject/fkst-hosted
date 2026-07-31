@@ -6,7 +6,7 @@ import {
   RECORD_KINDS,
   STATUS_CLASSES,
 } from '@/lib/api/operations';
-import type { ActivityFilters } from '@/lib/operations/state';
+import type { ActivityFilters, WindowProblem } from '@/lib/operations/state';
 import {
   DEFAULT_ACTIVITY_FILTERS,
   TIME_PRESETS,
@@ -16,7 +16,6 @@ import {
   parseRequestId,
   parseSessionId,
   parseStatusCode,
-  isUsableRange,
 } from '@/lib/operations/state';
 import {
   InstantFilter,
@@ -40,6 +39,8 @@ export function ActivityFiltersBar({
   filters,
   showActorFilters,
   refreshing,
+  windowIssue,
+  maxRangeDays,
   onChange,
   onReset,
   onRefresh,
@@ -48,6 +49,10 @@ export function ActivityFiltersBar({
   /** True only when the server said this caller is in the global scope. */
   showActorFilters: boolean;
   refreshing: boolean;
+  /** Why the named window cannot be queried, decided against THIS deployment's
+   *  stated ceiling rather than a client constant. */
+  windowIssue: WindowProblem | null;
+  maxRangeDays: number;
   onChange: (next: ActivityFilters) => void;
   onReset: () => void;
   onRefresh: () => void;
@@ -56,8 +61,7 @@ export function ActivityFiltersBar({
   const patch = (next: Partial<ActivityFilters>) => onChange({ ...filters, ...next });
   const isDefault =
     JSON.stringify(filters) === JSON.stringify(DEFAULT_ACTIVITY_FILTERS);
-  const rangeBroken =
-    filters.preset === 'custom' && !isUsableRange(filters.from, filters.to);
+  const days = String(maxRangeDays);
 
   return (
     <div
@@ -209,13 +213,15 @@ export function ActivityFiltersBar({
         />
       </div>
 
-      {rangeBroken && (
+      {windowIssue !== null && (
         <p className="w-full font-mono text-[11px] text-warn" role="status">
-          {t.rangeInvalid}
+          {t.rangeProblem[windowIssue].replace('{days}', days)}
         </p>
       )}
-      {filters.preset === 'custom' && !rangeBroken && (
-        <p className="w-full font-mono text-[10.5px] text-ghost">{t.rangeHint}</p>
+      {filters.preset === 'custom' && windowIssue === null && (
+        <p className="w-full font-mono text-[10.5px] text-ghost">
+          {t.rangeHint.replace('{days}', days)}
+        </p>
       )}
     </div>
   );

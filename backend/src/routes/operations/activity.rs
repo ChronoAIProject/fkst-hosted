@@ -27,7 +27,7 @@
 //! outage into a confident empty page.
 
 use axum::extract::State;
-use axum::http::Extensions;
+use axum::http::{header, Extensions};
 use axum::Json;
 use k8s_openapi::chrono::{SecondsFormat, Utc};
 use utoipa_axum::router::OpenApiRouter;
@@ -49,12 +49,21 @@ use crate::session_access::{
 };
 use crate::state::AppState;
 
-use super::dto::{page_from_merged, ActivityPage, EffectiveScope};
+use super::dto::{page_from_merged, ActivityPage, EffectiveScope, PageEnvelope};
 use super::query::{normalize, ActivityQueryParams, NormalizedActivityRequest};
 
 /// Fixed client text for an unresolvable lifecycle session. Identical whether the
 /// id is unknown, unauthorized, or absent — see [`lifecycle_session`].
 const SESSION_NOT_FOUND: &str = "no such session";
+
+/// The `Cache-Control` every page carries.
+///
+/// A page is a per-viewer, per-scope projection of an audit trail. A shared or
+/// private cache that stored it could hand the same bytes to a later — or a
+/// DIFFERENT — reader whose authorization has since changed, which is exactly
+/// the "no stale data crosses an identity change" rule the surface exists to
+/// keep. The sibling sandbox route states the same thing for the same reason.
+const NO_STORE: &str = "no-store";
 
 /// Serve one page of scoped historical activity.
 #[utoipa::path(
@@ -84,7 +93,7 @@ async fn operations_list_activity(
     // parameter grammar probeable without a token.
     viewer: AuthenticatedViewer,
     AuditedQuery(params): AuditedQuery<ActivityQueryParams>,
-) -> Result<Json<ActivityPage>, AppError> {
+) -> Result<([(header::HeaderName, &'static str); 1], Json<ActivityPage>), AppError> {
     let config = &state.config.activity_query;
     let now = Utc::now();
     // Pure validation first: it needs no identity beyond the one already proven,
@@ -164,15 +173,21 @@ async fn operations_list_activity(
         .as_ref()
         .map(|key| cursor::encode(key, &binding))
         .transpose()?;
-    Ok(Json(page_from_merged(
-        &merged,
-        now.to_rfc3339_opts(SecondsFormat::Millis, true),
-        range.from_rfc3339(),
-        range.to_rfc3339(),
-        effective_scope(&scope),
-        viewer.is_global_admin(),
-        next_cursor,
-    )))
+    Ok((
+        [(header::CACHE_CONTROL, NO_STORE)],
+        Json(page_from_merged(
+            &merged,
+            PageEnvelope {
+                queried_at: now.to_rfc3339_opts(SecondsFormat::Millis, true),
+                from: range.from_rfc3339(),
+                to: range.to_rfc3339(),
+                effective_scope: effective_scope(&scope),
+                can_view_all: viewer.is_global_admin(),
+                next_cursor,
+                max_range_days: config.activity_max_range_days,
+            },
+        )),
+    ))
 }
 
 /// Resolve the ONE exact lifecycle session a regular caller may add to their

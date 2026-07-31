@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import type { ApiFetch } from '@/lib/api/canvas';
-import { getSandboxes } from '@/lib/api/operations';
+import { clearsLastGood, getSandboxes } from '@/lib/api/operations';
 import type { SandboxInventory, SandboxScope } from '@/lib/api/operations';
 import type { SandboxFilters } from '@/lib/operations/state';
 import { useScopedPoll } from './use-scoped-poll';
@@ -38,7 +38,9 @@ export interface SandboxFeedOptions {
  * snapshot of one instant, and stitching two snapshots together would produce a
  * fleet that never existed. A failure therefore keeps the previous snapshot on
  * screen — but only while the cache key (identity, scope, filters) is unchanged,
- * which the polling engine enforces by construction.
+ * which the polling engine enforces by construction, and only while the failure
+ * is a freshness problem rather than an authorization or validation one (see
+ * `clearsLastGood`).
  */
 export function useOperationsSandboxes({
   apiFetch,
@@ -72,6 +74,7 @@ export function useOperationsSandboxes({
     intervalMs: SANDBOX_POLL_MS,
     enabled,
     fetcher,
+    clearsData: clearsLastGood,
   });
 
   return {

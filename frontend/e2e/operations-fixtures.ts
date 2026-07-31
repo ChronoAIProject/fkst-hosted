@@ -202,6 +202,10 @@ export interface RouteOptions {
   registryCold?: boolean;
   /** Return zero authorized rows/runtimes — a COMPLETE empty result. */
   empty?: boolean;
+  /** Observe the fleet far enough in the past that the snapshot is STALE.
+   *  Staleness is measured against the backend's own `observed_at`, so it is
+   *  the only thing a fixture has to move. */
+  runtimeObservedSecondsAgo?: number;
 }
 
 function json(route: Route, body: unknown, status = 200) {
@@ -271,6 +275,7 @@ export async function installOperationsRoutes(page: Page, opts: RouteOptions) {
               message_code: 'posthog_unavailable',
             }
           : { posthog: 'healthy', relay: 'healthy', partial: false },
+        max_range_days: 30,
       });
     }
 
@@ -303,7 +308,9 @@ export async function installOperationsRoutes(page: Page, opts: RouteOptions) {
           }).filter((item) => !sessionFilter || item.session_id === sessionFilter);
 
       return json(route, {
-        observed_at: new Date().toISOString(),
+        observed_at: new Date(
+          Date.now() - (opts.runtimeObservedSecondsAgo ?? 0) * 1000
+        ).toISOString(),
         backend: 'kubernetes',
         effective_scope: scope === 'all' ? 'all' : 'accessible',
         can_view_all: viewer.globalAdmin,

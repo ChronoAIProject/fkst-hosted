@@ -10,7 +10,7 @@ import {
   sandboxTone,
 } from '@/lib/operations/format';
 import { cn } from '@/lib/utils';
-import { Absent, StatusPill, Truncated } from './parts';
+import { Absent, OpenDetailsButton, StatusPill, Truncated } from './parts';
 
 /**
  * The live sandbox table.
@@ -113,25 +113,25 @@ export function SandboxTable({
               key={rowId}
               data-testid="sandbox-row"
               data-selected={rowId === selectedId || undefined}
-              tabIndex={0}
-              role="button"
-              aria-label={`${t.openDetails}: ${row.runtime_id}`}
+              // Pointer convenience only — the row keeps its native `row` role so
+              // the column headers stay associated with these cells. See the
+              // note in `activity-table.tsx`.
               onClick={() => onSelect(row)}
-              onKeyDown={(event) => {
-                if (event.key !== 'Enter' && event.key !== ' ') return;
-                event.preventDefault();
-                onSelect(row);
-              }}
               className={cn(
-                'border-b border-line/60 cursor-pointer transition-colors',
-                'hover:bg-raise focus-visible:outline focus-visible:outline-1 focus-visible:outline-amber',
+                'border-b border-line/60 cursor-pointer transition-colors hover:bg-raise',
                 rowId === selectedId && 'bg-raise'
               )}
             >
               <Cell index={0}>
-                <StatusPill tone={sandboxTone(row.status)} title={row.raw_status}>
-                  {status ? t.sandboxStatus[status] : row.status}
-                </StatusPill>
+                <OpenDetailsButton
+                  label={t.openDetails}
+                  title={row.raw_status}
+                  onSelect={() => onSelect(row)}
+                >
+                  <StatusPill tone={sandboxTone(row.status)}>
+                    {status ? t.sandboxStatus[status] : row.status}
+                  </StatusPill>
+                </OpenDetailsButton>
               </Cell>
               <Cell index={1}>
                 <Truncated value={row.session_id} />

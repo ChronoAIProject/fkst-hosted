@@ -19,10 +19,25 @@ interface ProbeProps {
   pollEnabled?: boolean;
   intervalMs?: number;
   fetcher: (signal: AbortSignal) => Promise<string>;
+  clearsData?: (error: unknown) => boolean;
 }
 
-function Probe({ cacheKey, enabled = true, pollEnabled, intervalMs = 5000, fetcher }: ProbeProps) {
-  const poll = useScopedPoll<string>({ key: cacheKey, intervalMs, enabled, pollEnabled, fetcher });
+function Probe({
+  cacheKey,
+  enabled = true,
+  pollEnabled,
+  intervalMs = 5000,
+  fetcher,
+  clearsData,
+}: ProbeProps) {
+  const poll = useScopedPoll<string>({
+    key: cacheKey,
+    intervalMs,
+    enabled,
+    pollEnabled,
+    fetcher,
+    clearsData,
+  });
   return (
     <div>
       <span data-testid="data">{poll.data ?? 'none'}</span>
@@ -202,6 +217,57 @@ describe('useScopedPoll', () => {
     });
     expect(value('data')).toBe('snapshot');
     expect(value('error')).toBe('boom');
+  });
+
+  it('drops the last-good frame for a failure the caller declares invalidating', async () => {
+    const good = deferred<string>();
+    const bad = deferred<string>();
+    let call = 0;
+    const fetcher = () => (call++ === 0 ? good.promise : bad.promise);
+    render(
+      <Probe
+        cacheKey="k1"
+        intervalMs={1000}
+        fetcher={fetcher}
+        clearsData={(error) => (error as Error).message === 'scope_mismatch'}
+      />
+    );
+    await act(async () => {
+      good.resolve('mine rows');
+    });
+    expect(value('data')).toBe('mine rows');
+
+    await act(async () => {
+      bad.reject(new Error('scope_mismatch'));
+      vi.advanceTimersByTime(1000);
+    });
+    // Not "stale": we can no longer say whose rows those were.
+    expect(value('data')).toBe('none');
+    expect(value('error')).toBe('scope_mismatch');
+  });
+
+  it('still keeps the frame for a failure the caller does NOT declare invalidating', async () => {
+    const good = deferred<string>();
+    const bad = deferred<string>();
+    let call = 0;
+    const fetcher = () => (call++ === 0 ? good.promise : bad.promise);
+    render(
+      <Probe
+        cacheKey="k1"
+        intervalMs={1000}
+        fetcher={fetcher}
+        clearsData={(error) => (error as Error).message === 'scope_mismatch'}
+      />
+    );
+    await act(async () => {
+      good.resolve('mine rows');
+    });
+    await act(async () => {
+      bad.reject(new Error('timeout'));
+      vi.advanceTimersByTime(1000);
+    });
+    expect(value('data')).toBe('mine rows');
+    expect(value('error')).toBe('timeout');
   });
 
   it('does not report a cancellation as a failure', async () => {

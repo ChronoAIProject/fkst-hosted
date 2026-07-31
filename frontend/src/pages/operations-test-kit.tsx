@@ -151,6 +151,7 @@ export function activityPage(over: Record<string, unknown> = {}) {
     can_view_all: false,
     items: [ALICE_ROW],
     source_status: { posthog: 'healthy', relay: 'healthy', partial: false },
+    max_range_days: 30,
     ...over,
   };
 }

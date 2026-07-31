@@ -45,6 +45,51 @@ export function Truncated({
   );
 }
 
+/**
+ * The per-row control that opens a details panel, rendered inside the row's
+ * first cell.
+ *
+ * It exists so the interactive affordance does NOT have to be `role="button"` on
+ * the `<tr>`: overriding a row's role invalidates its cells' role context, which
+ * silently breaks column-header association for screen-reader table navigation.
+ * A real button inside one cell keeps the whole table's semantics intact and is
+ * still the first thing reached when tabbing into a row.
+ *
+ * Its accessible name is its CONTENT (the cell's own value) plus a visually
+ * hidden verb, rather than an `aria-label` — an `aria-label` would replace that
+ * value with a bare "Details", losing the one piece of information the cell was
+ * there to convey.
+ */
+export function OpenDetailsButton({
+  label,
+  title,
+  onSelect,
+  children,
+}: {
+  /** The visually hidden verb, e.g. "Details". */
+  label: string;
+  /** Pointer tooltip carrying the full, untruncated value. */
+  title?: string;
+  onSelect: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={(event) => {
+        // The row also handles clicks; one activation is enough.
+        event.stopPropagation();
+        onSelect();
+      }}
+      className="block w-full text-left cursor-pointer rounded-[3px] focus-visible:outline focus-visible:outline-1 focus-visible:outline-amber"
+    >
+      {children}
+      <span className="sr-only"> {label}</span>
+    </button>
+  );
+}
+
 /** An uppercase mono eyebrow. */
 export function Eyebrow({ children }: { children: ReactNode }) {
   return <span className="font-mono text-eyebrow text-ghost uppercase">{children}</span>;
@@ -105,11 +150,21 @@ export function Notice({
 }
 
 /** The non-spinning empty state. Distinct from every failure state by design:
- *  "there is nothing here" and "we could not find out" must never look alike. */
-export function EmptyState({ message }: { message: string }) {
+ *  "there is nothing here" and "we could not find out" must never look alike.
+ *
+ *  `testId` defaults to the COMPLETE-empty identity. A caller rendering "no rows,
+ *  but the page is incomplete" must pass its own, so a test — and anyone reading
+ *  the DOM — can tell a result from an outage that merely looks like one. */
+export function EmptyState({
+  message,
+  testId = 'operations-empty',
+}: {
+  message: string;
+  testId?: string;
+}) {
   return (
     <div
-      data-testid="operations-empty"
+      data-testid={testId}
       className="flex-1 min-h-[160px] flex items-center justify-center px-6 py-10"
     >
       <p className="font-mono text-[12px] text-ghost text-center max-w-[46ch]">{message}</p>

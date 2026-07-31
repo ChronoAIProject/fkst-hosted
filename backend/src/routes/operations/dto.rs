@@ -193,6 +193,16 @@ pub struct ActivityPage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
     pub source_status: SourceStatusView,
+    /// The deployment's own ceiling on `to - from`, in days
+    /// (`FKST_POSTHOG_ACTIVITY_MAX_RANGE_DAYS`).
+    ///
+    /// It is stated on every page because a client that guesses it either
+    /// refuses windows this deployment would have answered, or issues windows it
+    /// is guaranteed to refuse — and a `400` at that boundary is a worse user
+    /// experience than a control that never offers the impossible range. It is
+    /// deployment policy, not a secret: the same bound is already observable by
+    /// sending one over-wide request.
+    pub max_range_days: u64,
 }
 
 impl SourceStatusView {
@@ -284,25 +294,32 @@ pub fn item_from_record(record: &ActivityRecord) -> ActivityItem {
     }
 }
 
+/// Everything about a page that is not derived from the merged rows.
+pub struct PageEnvelope {
+    /// When the server assembled this page, RFC3339 UTC.
+    pub queried_at: String,
+    /// The normalized window, RFC3339 UTC.
+    pub from: String,
+    pub to: String,
+    pub effective_scope: EffectiveScope,
+    pub can_view_all: bool,
+    pub next_cursor: Option<String>,
+    /// The deployment's configured `to - from` ceiling, in days.
+    pub max_range_days: u64,
+}
+
 /// Assemble the page body from a merged result.
-pub fn page_from_merged(
-    merged: &MergedPage,
-    queried_at: String,
-    from: String,
-    to: String,
-    effective_scope: EffectiveScope,
-    can_view_all: bool,
-    next_cursor: Option<String>,
-) -> ActivityPage {
+pub fn page_from_merged(merged: &MergedPage, envelope: PageEnvelope) -> ActivityPage {
     ActivityPage {
-        queried_at,
-        from,
-        to,
-        effective_scope,
-        can_view_all,
+        queried_at: envelope.queried_at,
+        from: envelope.from,
+        to: envelope.to,
+        effective_scope: envelope.effective_scope,
+        can_view_all: envelope.can_view_all,
         items: merged.items.iter().map(item_from_record).collect(),
-        next_cursor,
+        next_cursor: envelope.next_cursor,
         source_status: SourceStatusView::from_merged(&merged.status),
+        max_range_days: envelope.max_range_days,
     }
 }
 

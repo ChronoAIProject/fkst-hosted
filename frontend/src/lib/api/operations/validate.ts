@@ -137,6 +137,10 @@ export function validateActivityPage(body: unknown, requested: ActivityScope | n
   if (!isRecord(body)) malformed();
   if (!str(body.queried_at) || !str(body.from) || !str(body.to)) malformed();
   if (typeof body.can_view_all !== 'boolean') malformed();
+  // The window ceiling drives what the controls accept; a missing or nonsensical
+  // one would silently fall back to a guess, which is the divergence this field
+  // exists to remove.
+  if (!num(body.max_range_days) || body.max_range_days <= 0) malformed();
   if (!optionalStr(body.next_cursor)) malformed();
   if (!sourceStatus(body.source_status)) malformed();
   const scope = body.effective_scope;

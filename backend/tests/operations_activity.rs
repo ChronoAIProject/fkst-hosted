@@ -367,6 +367,38 @@ async fn the_default_and_custom_ranges_are_echoed_on_the_page() {
     assert_eq!(explicit["to"], "2026-07-30T12:00:00.000Z");
 }
 
+/// A client cannot mirror a CONFIGURABLE bound it is never told. Stating the
+/// deployment's own `FKST_POSTHOG_ACTIVITY_MAX_RANGE_DAYS` on every page is what
+/// lets a UI refuse an over-wide window at the control instead of turning it
+/// into a `400` the user has to interpret.
+#[tokio::test]
+async fn the_page_states_this_deployments_own_range_ceiling() {
+    let harness = harness(Sources::Posthog(dataset()), true).await;
+    let page = harness.page(ALICE, "").await;
+    assert_eq!(
+        page["max_range_days"], 30,
+        "the fixture deployment leaves the documented default in place"
+    );
+}
+
+/// A page is a per-viewer projection of an audit trail; a cache that stored it
+/// could hand the same bytes to a reader whose authorization has since changed.
+/// The sibling sandbox route already says this — an asymmetry here would make
+/// the personal audit page the one cacheable surface of the pair.
+#[tokio::test]
+async fn a_page_is_never_stored_by_a_cache() {
+    let harness = harness(Sources::Posthog(dataset()), true).await;
+    let response = harness.get(ALICE, "").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get("cache-control")
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
+}
+
 #[tokio::test]
 async fn every_fixed_filter_is_accepted_and_reaches_the_source() {
     let harness = harness(Sources::Posthog(dataset()), true).await;

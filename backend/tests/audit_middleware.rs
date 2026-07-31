@@ -187,6 +187,34 @@ async fn a_request_without_a_request_id_gets_a_generated_one() {
     assert_eq!(harness.only_event().request_id, echoed);
 }
 
+/// Echoing `X-Request-Id` is only half the contract: the frontend and the API
+/// are served from different origins in the deployment topology this repository
+/// prescribes, and a browser hides every response header that is neither
+/// CORS-safelisted nor explicitly exposed. Without this the operations UI's
+/// "quote this request id to support" line silently never renders.
+#[tokio::test]
+async fn the_request_id_header_is_exposed_to_cross_origin_callers() {
+    let harness = Harness::new();
+    let response = harness
+        .call(
+            Request::get("/api/v1/overview")
+                .header("origin", "https://app.example")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await;
+    let exposed = response
+        .headers()
+        .get("access-control-expose-headers")
+        .and_then(|value| value.to_str().ok())
+        .expect("a cross-origin response states which headers it exposes")
+        .to_ascii_lowercase();
+    assert!(
+        exposed.split(',').any(|name| name.trim() == "x-request-id"),
+        "x-request-id must be readable cross-origin, got {exposed:?}"
+    );
+}
+
 /// Different requests must never share a delivery id, or PostHog's UUID
 /// deduplication would silently collapse them into one row.
 #[tokio::test]

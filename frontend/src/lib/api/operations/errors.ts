@@ -82,6 +82,42 @@ export function isUnauthenticated(error: unknown): boolean {
   return error instanceof OperationsError && error.status === 401;
 }
 
+/**
+ * True when a failure invalidates whatever is already on screen, rather than
+ * merely making it older.
+ *
+ * A timeout, a rate limit, or an unavailable source says "I could not refresh
+ * this"; the rows already rendered are still a true account of what was
+ * observed, and blanking them would destroy an investigation in progress. The
+ * failures below say something else entirely — that we can no longer establish
+ * whose rows these are:
+ *
+ * - `401` / `forbidden` — the identity or the admission behind those rows is
+ *   gone. This is the permission downgrade the epic requires to clear last-good
+ *   data, and it must not wait for a re-fetch to prove it.
+ * - `operations_scope_forbidden` — the server has just refused the scope those
+ *   rows were fetched under.
+ * - `scope_mismatch` — the server answered a scope we did not ask for, so the
+ *   page's own scope label no longer describes what it holds.
+ * - `malformed` — validation is the only thing standing between the renderer and
+ *   an unverified payload. When it fails we cannot tell WHY the shape changed
+ *   (a rollback, an interposed proxy, a different endpoint answering), so
+ *   presenting the previous page as "last good" asserts a continuity that has
+ *   not been established.
+ *
+ * Everything else keeps its frame and shows a staleness banner beside it.
+ */
+export function clearsLastGood(error: unknown): boolean {
+  if (!(error instanceof OperationsError)) return false;
+  if (error.status === 401) return true;
+  return (
+    error.code === 'forbidden' ||
+    error.code === 'operations_scope_forbidden' ||
+    error.code === 'scope_mismatch' ||
+    error.code === 'malformed'
+  );
+}
+
 /** Reduce any thrown value to the pair the UI renders. A transport failure (an
  *  offline browser, a DNS error, a CORS refusal) produced no response at all, so
  *  it is `network` — distinct from every failure the server actually answered. */

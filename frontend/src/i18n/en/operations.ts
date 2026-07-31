@@ -48,8 +48,13 @@ export const operations: OperationsSlice = {
   },
   fFrom: 'From (UTC)',
   fTo: 'To (UTC)',
-  rangeHint: 'Custom bounds are UTC and may span at most 30 days.',
-  rangeInvalid: 'Set an ordered UTC range of at most 30 days to run this query.',
+  rangeHint: 'Custom bounds are UTC and may span at most {days} days.',
+  rangeProblem: {
+    incomplete: 'Enter both UTC bounds to run this query.',
+    unordered: 'The start must come before the end.',
+    too_wide: 'This window is wider than the {days} days this deployment allows.',
+    future: 'The start is in the future, so this window can hold no records yet.',
+  },
   fRecordKind: 'Records',
   recordKindFilter: {
     api_request: 'API requests',
@@ -78,6 +83,7 @@ export const operations: OperationsSlice = {
   sessionRequiredTitle: 'Name one session',
   sessionRequiredBody:
     'Lifecycle records are scoped to a single session you can access. Enter an exact session id, or open one from the Sandboxes view.',
+  windowRequiredTitle: 'Adjust the time window',
 
   fStatus: 'Status',
   fBackend: 'Backend',
@@ -231,6 +237,8 @@ export const operations: OperationsSlice = {
   inventoryWarnings: 'Snapshot warnings',
 
   emptyActivity: 'No records match these filters in this window.',
+  emptyActivityIncomplete:
+    'This page is incomplete — a source could not answer, so no records can be listed. This is not an empty result.',
   emptySandboxes: 'No live sandboxes match these filters.',
   errorTitle: 'Could not load',
   errorRequestId: 'Request id {id}',

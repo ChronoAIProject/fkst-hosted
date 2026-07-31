@@ -11,7 +11,7 @@ import {
 import { formatAbsolute, formatLocal } from '@/lib/format';
 import { deliveryTone, formatDurationMs, outcomeTone, summarizeArguments } from '@/lib/operations/format';
 import { cn } from '@/lib/utils';
-import { Absent, StatusPill, Truncated } from './parts';
+import { Absent, OpenDetailsButton, StatusPill, Truncated } from './parts';
 
 /**
  * The Activity table.
@@ -24,6 +24,15 @@ import { Absent, StatusPill, Truncated } from './parts';
  * The layout is `table-fixed` with explicit column widths. That is not cosmetic:
  * a 15-second poll that reflowed columns whenever a longer operation id arrived
  * would make the table unreadable exactly when it matters.
+ *
+ * Opening a row's details is carried by a REAL button inside the first cell, not
+ * by `role="button"` on the `<tr>`. Overriding the row's implicit `row` role
+ * invalidates its `<td>` children's `cell` role — they require a `row` parent —
+ * so the `<th scope="col">` headers stop announcing with their cells during
+ * screen-reader table navigation, and the row's `aria-label` suppresses
+ * name-from-content so the whole row reads as one opaque string. The row keeps a
+ * click handler purely as pointer convenience; the button is the keyboard and
+ * assistive-technology path.
  */
 
 /** Column widths, in the header's declaration order. Fixed so a poll cannot
@@ -99,27 +108,22 @@ export function ActivityTable({
               key={row.event_id}
               data-testid="activity-row"
               data-selected={row.event_id === selectedId || undefined}
-              // The row is a button-like target: click OR Enter/Space opens the
-              // details panel, and it is reachable by keyboard in row order.
-              tabIndex={0}
-              role="button"
-              aria-label={`${t.openDetails}: ${row.event_id}`}
+              // Pointer convenience only. The row keeps its native `row` role;
+              // the keyboard/AT affordance is the button in the first cell.
               onClick={() => onSelect(row)}
-              onKeyDown={(event) => {
-                if (event.key !== 'Enter' && event.key !== ' ') return;
-                event.preventDefault();
-                onSelect(row);
-              }}
               className={cn(
-                'border-b border-line/60 cursor-pointer transition-colors',
-                'hover:bg-raise focus-visible:outline focus-visible:outline-1 focus-visible:outline-amber',
+                'border-b border-line/60 cursor-pointer transition-colors hover:bg-raise',
                 row.event_id === selectedId && 'bg-raise'
               )}
             >
               <Cell index={0}>
-                <span title={time} className="tabular-nums">
-                  {formatLocal(time, lang)}
-                </span>
+                <OpenDetailsButton
+                  label={t.openDetails}
+                  title={time}
+                  onSelect={() => onSelect(row)}
+                >
+                  <span className="tabular-nums">{formatLocal(time, lang)}</span>
+                </OpenDetailsButton>
               </Cell>
               <Cell index={1}>
                 <span className="text-faint">{t.recordKind[row.record_kind]}</span>

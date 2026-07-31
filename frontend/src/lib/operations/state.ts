@@ -30,10 +30,17 @@ export const PRESET_MS: Record<Exclude<TimePreset, 'custom'>, number> = {
   '30d': 2_592_000_000,
 };
 
-/** The deployment's own hard ceiling on one window (`FKST_POSTHOG_ACTIVITY_
- *  MAX_RANGE_DAYS`, default 30 days). Enforced client-side too so a custom range
- *  the server will refuse is refused before the request. */
-export const MAX_RANGE_MS = 30 * 86_400_000;
+export const DAY_MS = 86_400_000;
+
+/** The ceiling assumed until a page states this deployment's own.
+ *
+ *  The real bound is `FKST_POSTHOG_ACTIVITY_MAX_RANGE_DAYS`, which every
+ *  successful page reports as `max_range_days`; this is only the documented
+ *  DEFAULT, used before the first response has arrived. Hard-coding it as if it
+ *  were the bound is what makes a UI refuse windows a widened deployment would
+ *  have answered — and issue windows a narrowed one is guaranteed to refuse. */
+export const DEFAULT_MAX_RANGE_DAYS = 30;
+const DEFAULT_MAX_RANGE_MS = DEFAULT_MAX_RANGE_DAYS * DAY_MS;
 
 export interface ActivityFilters {
   preset: TimePreset;
@@ -167,31 +174,61 @@ export function parseInstant(value: string): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
-/** Whether a custom window is usable: ordered, non-empty, and within the
- *  deployment's ceiling. A window that fails this is never sent. */
-export function isUsableRange(from: number | null, to: number | null): boolean {
-  if (from === null || to === null) return false;
-  return to > from && to - from <= MAX_RANGE_MS;
+/**
+ * Why a filter set's window cannot be queried, or `null` when it can.
+ *
+ * Each member mirrors one refusal in `backend/src/operations/filters.rs`
+ * (`check_range`), so a window this returns `null` for is a window that
+ * deployment's validator accepts:
+ *
+ * - `incomplete` — a `custom` preset with a bound still missing. The UI's own
+ *   state, not a server rule: there is nothing to send yet.
+ * - `unordered` — `from >= to` (`from must be strictly before to`).
+ * - `too_wide` — wider than `max_range_days`.
+ * - `future` — `from` after now. A window that has not happened can only ever be
+ *   empty, and answering it with a confident empty page would be a lie.
+ */
+export type WindowProblem = 'incomplete' | 'unordered' | 'too_wide' | 'future';
+
+/** The problem with the window a filter set names at instant `now`, if any.
+ *  A preset can only ever be `too_wide` (against a deployment that configured a
+ *  ceiling narrower than the preset); every other problem needs explicit bounds. */
+export function windowProblem(
+  filters: ActivityFilters,
+  maxRangeMs: number = DEFAULT_MAX_RANGE_MS,
+  now: number = Date.now()
+): WindowProblem | null {
+  if (filters.preset !== 'custom') {
+    return PRESET_MS[filters.preset] > maxRangeMs ? 'too_wide' : null;
+  }
+  const { from, to } = filters;
+  if (from === null || to === null) return 'incomplete';
+  if (to <= from) return 'unordered';
+  if (to - from > maxRangeMs) return 'too_wide';
+  if (from > now) return 'future';
+  return null;
 }
 
-/** Whether a filter set names a window that can actually be queried. Only a
- *  `custom` preset can fail this — the presets are always well-formed. Checked
- *  without a clock so it can gate a render without making it time-dependent. */
-export function hasUsableWindow(filters: ActivityFilters): boolean {
-  return filters.preset !== 'custom' || isUsableRange(filters.from, filters.to);
+/** Whether a filter set names a window that can actually be queried. */
+export function hasUsableWindow(
+  filters: ActivityFilters,
+  maxRangeMs?: number,
+  now?: number
+): boolean {
+  return windowProblem(filters, maxRangeMs, now) === null;
 }
 
 /** The concrete `[from, to)` window a filter set means at instant `now`.
- *  `null` for a `custom` preset whose bounds are unusable — the caller must not
- *  issue a request in that state. */
+ *  `null` whenever the window is unusable — the caller must not issue a request
+ *  in that state. */
 export function resolveWindow(
   filters: ActivityFilters,
-  now: number
+  now: number,
+  maxRangeMs?: number
 ): { from: number; to: number } | null {
+  if (windowProblem(filters, maxRangeMs, now) !== null) return null;
   if (filters.preset === 'custom') {
-    return isUsableRange(filters.from, filters.to)
-      ? { from: filters.from as number, to: filters.to as number }
-      : null;
+    return { from: filters.from as number, to: filters.to as number };
   }
   return { from: now - PRESET_MS[filters.preset], to: now };
 }

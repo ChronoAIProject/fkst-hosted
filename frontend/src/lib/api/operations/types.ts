@@ -233,6 +233,10 @@ export interface ActivityPage {
   items: ActivityRow[];
   next_cursor?: string | null;
   source_status: SourceStatus;
+  /** This deployment's configured `to - from` ceiling, in days. The filter
+   *  controls validate against it so a window the server would refuse is refused
+   *  at the control instead of becoming a `400`. */
+  max_range_days: number;
 }
 
 /** The caller's own normalized sandbox filters, echoed back. */

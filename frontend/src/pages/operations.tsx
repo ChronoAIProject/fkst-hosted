@@ -6,9 +6,12 @@ import { isScopeDenied, isUnauthenticated } from '@/lib/api/operations';
 import type { ActivityScope, SandboxScope } from '@/lib/api/operations';
 import { activityCacheKey, sandboxCacheKey } from '@/lib/operations/keys';
 import {
+  DAY_MS,
   DEFAULT_ACTIVITY_FILTERS,
+  DEFAULT_MAX_RANGE_DAYS,
   DEFAULT_SANDBOX_FILTERS,
   needsSessionId,
+  windowProblem,
 } from '@/lib/operations/state';
 import type { ActivityFilters, OperationsState, SandboxFilters } from '@/lib/operations/state';
 import { clearCrossActorFilters, decodeState, encodeState, personalScope } from '@/lib/operations/url';
@@ -71,6 +74,10 @@ export function Operations() {
   // switch back to `Mine` is never undone.
   const scopeResolvedRef = useRef<number | null>(null);
   const [scopeReset, setScopeReset] = useState(false);
+  // This deployment's own window ceiling, as the last page stated it. It is
+  // deployment policy rather than a client constant: guessing it would either
+  // refuse windows this deployment answers, or send windows it always refuses.
+  const [maxRangeDays, setMaxRangeDays] = useState(DEFAULT_MAX_RANGE_DAYS);
 
   useEffect(() => {
     document.title = t.metaTitle;
@@ -104,7 +111,12 @@ export function Operations() {
   const sandboxScope: SandboxScope | null =
     state.tab === 'sandboxes' ? (isGlobal ? 'all' : 'accessible') : null;
 
-  const blocked = needsSessionId(state.activity, activityScope);
+  // The two reasons the UI deliberately withholds a request. Neither is a
+  // failure and neither is an empty result: no query ran, so the panel states
+  // which one piece is missing instead of claiming that nothing matched. Both
+  // are re-derived by the feed hook, which is what actually withholds.
+  const sessionRequired = needsSessionId(state.activity, activityScope);
+  const windowIssue = windowProblem(state.activity, maxRangeDays * DAY_MS);
   const authed = isAuthenticated && configured;
 
   const activityFeed = useOperationsActivity({
@@ -113,6 +125,7 @@ export function Operations() {
     scope: activityScope,
     filters: state.activity,
     enabled: authed && state.tab === 'activity' && state.scope !== null,
+    maxRangeDays,
   });
 
   const sandboxFeed = useOperationsSandboxes({
@@ -122,6 +135,14 @@ export function Operations() {
     filters: state.sandbox,
     enabled: authed && state.tab === 'sandboxes' && state.scope !== null,
   });
+
+  // Adopt the bound the deployment states, so the controls refuse exactly what
+  // its validator would.
+  const answeredMaxRange = activityFeed.page?.max_range_days;
+  useEffect(() => {
+    if (answeredMaxRange === undefined) return;
+    setMaxRangeDays((prev) => (prev === answeredMaxRange ? prev : answeredMaxRange));
+  }, [answeredMaxRange]);
 
   // Adopt the capability every successful response states, and upgrade a global
   // administrator to their documented default scope exactly once.
@@ -309,7 +330,9 @@ export function Operations() {
             feed={activityFeed}
             filters={state.activity}
             showActorFilters={isGlobal}
-            blocked={blocked}
+            sessionRequired={sessionRequired}
+            windowIssue={windowIssue}
+            maxRangeDays={maxRangeDays}
             onFiltersChange={onActivityFilters}
             onReset={() => writeState({ ...state, activity: DEFAULT_ACTIVITY_FILTERS })}
           />

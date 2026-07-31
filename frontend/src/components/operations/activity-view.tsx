@@ -3,7 +3,7 @@ import { ArrowDownToLine } from 'lucide-react';
 import { useContent } from '@/i18n';
 import { describeError } from '@/lib/api/operations';
 import type { ActivityFeed } from '@/lib/hooks/use-operations-activity';
-import type { ActivityFilters } from '@/lib/operations/state';
+import type { ActivityFilters, WindowProblem } from '@/lib/operations/state';
 import { ActivityDetails } from './activity-details';
 import { ActivityFiltersBar } from './activity-filters';
 import { ActivityTable } from './activity-table';
@@ -16,30 +16,44 @@ import { ActivityStatusLine } from './status-line';
  *
  * It renders exactly one body state, chosen in this order:
  *
- * 1. **blocked** — a personal lifecycle query with no session named. No request
- *    was issued, and the panel says which one piece is missing.
+ * 1. **withheld** — no request was issued at all, because the query names no
+ *    session or names an unqueryable window. The panel states the one missing
+ *    piece. This must NOT fall through to the empty state: "nothing matched"
+ *    would report a result for a query that never ran.
  * 2. **error with no data** — the failure, its localized code copy, and a retry.
- * 3. **complete and empty** — a plain sentence, no spinner. This is a RESULT.
- * 4. **rows** — with a partial banner above them when a source could not answer,
+ * 3. **incomplete and empty** — zero rows on a page a source could not fill.
+ *    Distinct copy and a distinct test id, because it is not a result.
+ * 4. **complete and empty** — a plain sentence, no spinner. This IS a result.
+ * 5. **rows** — with a partial banner above them when a source could not answer,
  *    so an incomplete page is never mistaken for a complete one.
  *
  * A failure that arrives while rows are on screen keeps them and adds a banner:
  * the rows are still true, they are just no longer fresh, and blanking them
- * would destroy the investigation in progress.
+ * would destroy the investigation in progress. The exception is a failure that
+ * invalidates them outright (`clearsLastGood`), which drops the rows in the poll
+ * engine before this component ever sees them.
  */
 export function ActivityView({
   feed,
   filters,
   showActorFilters,
-  blocked,
+  sessionRequired,
+  windowIssue,
+  maxRangeDays,
   onFiltersChange,
   onReset,
 }: {
   feed: ActivityFeed;
   filters: ActivityFilters;
   showActorFilters: boolean;
-  /** True when the UI is deliberately withholding the request. */
-  blocked: boolean;
+  /** True when a personal lifecycle query has named no session, so no request
+   *  was issued. */
+  sessionRequired: boolean;
+  /** Why the named window cannot be queried, when it cannot. Also means no
+   *  request was issued. */
+  windowIssue: WindowProblem | null;
+  /** This deployment's stated `to - from` ceiling, in days. */
+  maxRangeDays: number;
   onFiltersChange: (next: ActivityFilters) => void;
   onReset: () => void;
 }) {
@@ -60,6 +74,8 @@ export function ActivityView({
         filters={filters}
         showActorFilters={showActorFilters}
         refreshing={feed.refreshing}
+        windowIssue={windowIssue}
+        maxRangeDays={maxRangeDays}
         onChange={onFiltersChange}
         onReset={onReset}
         onRefresh={feed.refresh}
@@ -75,16 +91,18 @@ export function ActivityView({
 
       <div className="flex-1 min-h-0 flex gap-3 max-[1100px]:flex-col">
         <div className="flex-1 min-w-0 min-h-0 flex flex-col border border-line rounded-panel bg-bg overflow-hidden">
-          {blocked ? (
-            <div
-              data-testid="activity-session-required"
-              className="flex-1 flex flex-col items-center justify-center gap-2 px-6 py-10 text-center"
-            >
-              <p className="font-ui font-semibold text-[13px] text-fg">{t.sessionRequiredTitle}</p>
-              <p className="font-mono text-[11.5px] text-dim max-w-[52ch]">
-                {t.sessionRequiredBody}
-              </p>
-            </div>
+          {sessionRequired ? (
+            <Withheld
+              testId="activity-session-required"
+              title={t.sessionRequiredTitle}
+              body={t.sessionRequiredBody}
+            />
+          ) : windowIssue !== null ? (
+            <Withheld
+              testId="activity-window-required"
+              title={t.windowRequiredTitle}
+              body={t.rangeProblem[windowIssue].replace('{days}', String(maxRangeDays))}
+            />
           ) : failure && feed.rows.length === 0 ? (
             <ErrorState
               title={t.errorTitle}
@@ -95,7 +113,13 @@ export function ActivityView({
               onRetry={feed.refresh}
             />
           ) : feed.rows.length === 0 && !feed.loading ? (
-            <EmptyState message={t.emptyActivity} />
+            // A page a source could not fill is NOT an empty result, and must
+            // never borrow the copy that says nothing matched.
+            feed.page?.source_status.partial ? (
+              <EmptyState testId="operations-incomplete" message={t.emptyActivityIncomplete} />
+            ) : (
+              <EmptyState message={t.emptyActivity} />
+            )
           ) : (
             <>
               {/* The ONE scroll region: the table scrolls inside it in both axes
@@ -134,6 +158,20 @@ export function ActivityView({
 
         {selected && <ActivityDetails row={selected} onClose={() => setSelectedId(null)} />}
       </div>
+    </div>
+  );
+}
+
+/** The panel shown when the UI deliberately issued no request. It states the one
+ *  missing piece — never a result, never a spinner. */
+function Withheld({ testId, title, body }: { testId: string; title: string; body: string }) {
+  return (
+    <div
+      data-testid={testId}
+      className="flex-1 flex flex-col items-center justify-center gap-2 px-6 py-10 text-center"
+    >
+      <p className="font-ui font-semibold text-[13px] text-fg">{title}</p>
+      <p className="font-mono text-[11.5px] text-dim max-w-[52ch]">{body}</p>
     </div>
   );
 }

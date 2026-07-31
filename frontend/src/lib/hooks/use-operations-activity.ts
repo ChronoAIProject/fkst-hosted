@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ApiFetch } from '@/lib/api/canvas';
-import { getActivity, OperationsError } from '@/lib/api/operations';
+import { clearsLastGood, getActivity, OperationsError } from '@/lib/api/operations';
 import type { ActivityPage, ActivityRow, ActivityScope } from '@/lib/api/operations';
 import type { ActivityFilters } from '@/lib/operations/state';
-import { hasUsableWindow, needsSessionId, resolveWindow } from '@/lib/operations/state';
+import {
+  DAY_MS,
+  DEFAULT_MAX_RANGE_DAYS,
+  hasUsableWindow,
+  needsSessionId,
+  resolveWindow,
+} from '@/lib/operations/state';
 import { useScopedPoll } from './use-scoped-poll';
 
 /** Activity refreshes every 15 seconds while its view is visible (epic
@@ -46,6 +52,9 @@ export interface ActivityFeedOptions {
   filters: ActivityFilters;
   /** False while another view is showing, or while the page cannot query. */
   enabled: boolean;
+  /** This deployment's own `to - from` ceiling, as the last page stated it.
+   *  Defaults to the documented default until one has. */
+  maxRangeDays?: number;
 }
 
 /**
@@ -62,7 +71,9 @@ export function useOperationsActivity({
   scope,
   filters,
   enabled,
+  maxRangeDays = DEFAULT_MAX_RANGE_DAYS,
 }: ActivityFeedOptions): ActivityFeed {
+  const maxRangeMs = maxRangeDays * DAY_MS;
   const [older, setOlder] = useState<{ key: string; pages: ActivityPage[] }>({
     key: cacheKey,
     pages: [],
@@ -75,8 +86,10 @@ export function useOperationsActivity({
 
   // A regular caller asking for lifecycle rows without an exact session id would
   // be asking for a global scan; the request is withheld rather than issued and
-  // refused (see `needsSessionId`).
-  const canQuery = enabled && !needsSessionId(filters, scope) && hasUsableWindow(filters);
+  // refused (see `needsSessionId`). A window this deployment's own validator
+  // would reject is withheld for the same reason.
+  const canQuery =
+    enabled && !needsSessionId(filters, scope) && hasUsableWindow(filters, maxRangeMs);
 
   const fetchPage = useCallback(
     (cursor: string | undefined, signal: AbortSignal) => {
@@ -84,7 +97,8 @@ export function useOperationsActivity({
       // clock. A CURSOR page deliberately states no window: the server keeps the
       // one its cursor was issued for, and restating a drifted `now` would make
       // the two disagree and get the cursor refused.
-      const resolved = cursor === undefined ? resolveWindow(filters, Date.now()) : null;
+      const resolved =
+        cursor === undefined ? resolveWindow(filters, Date.now(), maxRangeMs) : null;
       return getActivity(
         apiFetch,
         {
@@ -108,7 +122,7 @@ export function useOperationsActivity({
         signal
       );
     },
-    [apiFetch, scope, filters]
+    [apiFetch, scope, filters, maxRangeMs]
   );
 
   const pages = older.key === cacheKey ? older.pages : [];
@@ -121,6 +135,7 @@ export function useOperationsActivity({
     // because discarding it is exactly what the pause exists to prevent.
     pollEnabled: pages.length === 0,
     fetcher: (signal) => fetchPage(undefined, signal),
+    clearsData: clearsLastGood,
   });
 
   // Any key change invalidates every cursor that was issued under the old one.
@@ -129,6 +144,22 @@ export function useOperationsActivity({
     setOlderState({ loading: false, error: null });
     olderRequestRef.current += 1;
   }, [cacheKey]);
+
+  // A failure that invalidated the FIRST page invalidates every older page too:
+  // they were all fetched under the same authorization and the same answered
+  // scope, and re-attaching them to a later successful page would splice rows of
+  // two different provenances into one table. `rows` is already empty this
+  // render (it is derived from the first page); this drops the cursors so a
+  // recovery cannot resurrect them.
+  const pollError = poll.error;
+  useEffect(() => {
+    if (!clearsLastGood(pollError)) return;
+    olderRequestRef.current += 1;
+    setOlder((prev) => (prev.pages.length === 0 ? prev : { key: prev.key, pages: [] }));
+    setOlderState((prev) =>
+      prev.loading || prev.error !== null ? { loading: false, error: null } : prev
+    );
+  }, [pollError]);
   const lastPage = pages.length > 0 ? pages[pages.length - 1] : poll.data;
   const nextCursor = lastPage?.next_cursor ?? null;
 

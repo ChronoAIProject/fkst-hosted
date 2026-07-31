@@ -36,6 +36,9 @@ function isAbort(error: unknown): boolean {
  * - **Errors never silently keep stale data.** A failure keeps the last-good
  *   frame ONLY under an unchanged key, and always alongside the error, so the
  *   caller can render "this is what we last saw, and here is why it stopped".
+ *   Some failures are not "no longer fresh" but "no longer trustworthy" — the
+ *   caller names those through `clearsData`, and they drop the frame in the same
+ *   state update that records the error.
  */
 export interface ScopedPollResult<T> {
   /** The last successful payload for the CURRENT key, or `null`. */
@@ -79,6 +82,19 @@ export interface ScopedPollOptions<T> {
   pollEnabled?: boolean;
   /** Perform one request. Must reject on failure and honour the signal. */
   fetcher: (signal: AbortSignal) => Promise<T>;
+  /**
+   * Whether a failure invalidates the last-good frame rather than merely
+   * ageing it. Defaults to "never".
+   *
+   * The distinction is the whole point: a timeout means the rows on screen are
+   * still what was last observed, while an authorization or validation failure
+   * means we can no longer say the rows belong to this caller in this scope at
+   * all. Keeping the second kind on screen is precisely the "stale data crossed
+   * a permission change" failure this surface must not have, so those clear
+   * SYNCHRONOUSLY — in the same state update that records the error, not in a
+   * follow-up effect that lands a paint later.
+   */
+  clearsData?: (error: unknown) => boolean;
 }
 
 export function useScopedPoll<T>({
@@ -87,6 +103,7 @@ export function useScopedPoll<T>({
   enabled,
   pollEnabled,
   fetcher,
+  clearsData,
 }: ScopedPollOptions<T>): ScopedPollResult<T> {
   const [snapshot, setSnapshot] = useState<Snapshot<T>>({
     key,
@@ -104,6 +121,8 @@ export function useScopedPoll<T>({
   fetcherRef.current = fetcher;
   const enabledRef = useRef(enabled);
   enabledRef.current = enabled;
+  const clearsDataRef = useRef(clearsData);
+  clearsDataRef.current = clearsData;
 
   const requestIdRef = useRef(0);
   const activeRef = useRef<{ key: string; abort: AbortController } | null>(null);
@@ -139,9 +158,11 @@ export function useScopedPoll<T>({
         if (isAbort(error)) return;
         if (!isCurrent()) return;
         // Keep the last-good frame for THIS key alongside the error; a key
-        // change would already have dropped it.
+        // change would already have dropped it, and a failure the caller
+        // declared invalidating drops it here.
+        const invalidates = clearsDataRef.current?.(error) === true;
         setSnapshot((prev) =>
-          prev.key === forKey
+          prev.key === forKey && !invalidates
             ? { ...prev, error }
             : { key: forKey, data: null, error, updatedAt: null }
         );

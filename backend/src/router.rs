@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::{Request, State};
-use axum::http::{Method, StatusCode};
+use axum::http::{HeaderName, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::Router;
@@ -88,6 +88,13 @@ fn cors_layer() -> CorsLayer {
             Method::DELETE,
         ])
         .allow_headers(Any)
+        // `X-Request-Id` is not a CORS-safelisted response header, so without
+        // this a cross-origin caller — which the prescribed deployment topology
+        // makes the NORMAL case (`app.` and `api.` are different origins) — sees
+        // `null` from `response.headers.get('x-request-id')`. The frontend shows
+        // that id on every failure so a user can quote it to support; promising
+        // it while the browser filters it out is a promise that never lands.
+        .expose_headers([HeaderName::from_static(audit_request::REQUEST_ID_HEADER)])
 }
 
 /// Build the application router.

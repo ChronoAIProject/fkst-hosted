@@ -245,6 +245,28 @@ test.describe('independent failure states', () => {
     await expect(page.getByTestId('activity-partial')).toHaveCount(0);
     await shot(page, 'operations-activity-empty');
   });
+
+  test('an incomplete page with no rows never claims a complete empty result', async ({ page }) => {
+    await open(page, { viewer: ALICE, activityPartial: true, empty: true });
+    await expect(page.getByTestId('operations-incomplete')).toContainText('This page is incomplete');
+    // The one thing that must NOT be on screen: "no records match".
+    await expect(page.getByTestId('operations-empty')).toHaveCount(0);
+    await shot(page, 'operations-activity-incomplete');
+  });
+
+  test('a snapshot older than the staleness bound is marked, and keeps its rows', async ({
+    page,
+  }) => {
+    await open(
+      page,
+      { viewer: ALICE, runtimeObservedSecondsAgo: 40 },
+      '?tab=sandboxes&scope=accessible'
+    );
+    await expect(page.getByTestId('sandbox-stale')).toBeVisible();
+    // Last-good rows survive: they are still what was last observed.
+    await expect(sandboxRows(page)).toHaveCount(1);
+    await shot(page, 'operations-sandboxes-stale');
+  });
 });
 
 test.describe('polling', () => {

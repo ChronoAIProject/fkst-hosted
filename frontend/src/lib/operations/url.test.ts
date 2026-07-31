@@ -7,11 +7,12 @@ import {
   scopeWords,
 } from './url';
 import {
+  DAY_MS,
   DEFAULT_ACTIVITY_FILTERS,
   DEFAULT_SANDBOX_FILTERS,
   hasUsableWindow,
-  isUsableRange,
   needsSessionId,
+  windowProblem,
   parseLogin,
   parsePositiveInt,
   parseRepoFullName,
@@ -62,25 +63,51 @@ describe('value grammars', () => {
 });
 
 describe('time windows', () => {
+  const NOW = Date.parse('2026-08-01T12:00:00.000Z');
+  const custom = (from: number | null, to: number | null) => ({
+    ...DEFAULT_ACTIVITY_FILTERS,
+    preset: 'custom' as const,
+    from,
+    to,
+  });
+
   it('resolves a preset relative to the given instant', () => {
-    const now = Date.parse('2026-08-01T12:00:00.000Z');
-    expect(resolveWindow({ ...DEFAULT_ACTIVITY_FILTERS, preset: '1h' }, now)).toEqual({
-      from: now - 3_600_000,
-      to: now,
+    expect(resolveWindow({ ...DEFAULT_ACTIVITY_FILTERS, preset: '1h' }, NOW)).toEqual({
+      from: NOW - 3_600_000,
+      to: NOW,
     });
   });
 
-  it('refuses a custom window that is inverted, empty, or too wide', () => {
-    const from = Date.parse('2026-08-01T00:00:00.000Z');
-    expect(isUsableRange(from, from)).toBe(false);
-    expect(isUsableRange(from + 1000, from)).toBe(false);
-    expect(isUsableRange(from, from + 31 * 86_400_000)).toBe(false);
-    expect(isUsableRange(from, from + 86_400_000)).toBe(true);
+  it('names each reason a window cannot be queried', () => {
+    const from = NOW - 2 * DAY_MS;
+    expect(windowProblem(custom(null, NOW), undefined, NOW)).toBe('incomplete');
+    expect(windowProblem(custom(from, null), undefined, NOW)).toBe('incomplete');
+    expect(windowProblem(custom(NOW, from), undefined, NOW)).toBe('unordered');
+    expect(windowProblem(custom(from, from), undefined, NOW)).toBe('unordered');
+    expect(windowProblem(custom(NOW - 31 * DAY_MS, NOW), undefined, NOW)).toBe('too_wide');
+    // The backend refuses a window that STARTS in the future (`check_range`);
+    // one that merely ends there is how a live view is written.
+    expect(windowProblem(custom(NOW + DAY_MS, NOW + 2 * DAY_MS), undefined, NOW)).toBe('future');
+    expect(windowProblem(custom(from, NOW + DAY_MS), undefined, NOW)).toBeNull();
+    expect(windowProblem(custom(from, NOW), undefined, NOW)).toBeNull();
   });
 
-  it('reports an unusable custom window without needing a clock', () => {
-    expect(hasUsableWindow({ ...DEFAULT_ACTIVITY_FILTERS, preset: 'custom' })).toBe(false);
-    expect(hasUsableWindow(DEFAULT_ACTIVITY_FILTERS)).toBe(true);
+  it('measures width against the DEPLOYMENT ceiling, not a client constant', () => {
+    const from = NOW - 10 * DAY_MS;
+    // Narrower than the 30-day default: a preset the client would otherwise
+    // allow becomes unqueryable.
+    expect(windowProblem(custom(from, NOW), 7 * DAY_MS, NOW)).toBe('too_wide');
+    expect(windowProblem({ ...DEFAULT_ACTIVITY_FILTERS, preset: '30d' }, 7 * DAY_MS, NOW)).toBe(
+      'too_wide'
+    );
+    // Wider than it: a window the default would have refused is accepted.
+    expect(windowProblem(custom(NOW - 45 * DAY_MS, NOW), 90 * DAY_MS, NOW)).toBeNull();
+  });
+
+  it('withholds the request for any unusable window', () => {
+    expect(hasUsableWindow(custom(null, null), undefined, NOW)).toBe(false);
+    expect(hasUsableWindow(DEFAULT_ACTIVITY_FILTERS, undefined, NOW)).toBe(true);
+    expect(resolveWindow(custom(NOW + DAY_MS, NOW + 2 * DAY_MS), NOW)).toBeNull();
   });
 });
 

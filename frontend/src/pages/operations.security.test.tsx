@@ -177,6 +177,56 @@ describe('a scope mismatch is a hard failure', () => {
     expect(screen.queryByText('@bob')).not.toBeInTheDocument();
   });
 
+  it('clears rows that were already on screen when a later poll mismatches', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let mismatch = false;
+    stubOperations({
+      activity: () =>
+        jsonResponse(
+          mismatch
+            ? // Same request (`mine`), an answer claiming the global scope.
+              globalPage({ items: [ALICE_ROW, BOB_ROW] })
+            : activityPage({ items: [ALICE_ROW] })
+        ),
+    });
+    seedUrl('?tab=activity&scope=mine');
+    renderOperations();
+    await screen.findByTestId('activity-row');
+
+    mismatch = true;
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    // A hard validation failure is not a staleness banner over surviving rows:
+    // the rows go, because we can no longer say whose they are.
+    await waitFor(() => expect(screen.queryByTestId('activity-row')).not.toBeInTheDocument());
+    expect(screen.getByTestId('operations-error')).toHaveTextContent('answered a different scope');
+    expect(screen.queryByTestId('activity-stale')).not.toBeInTheDocument();
+    expect(screen.queryByText('@bob')).not.toBeInTheDocument();
+  });
+
+  it('clears an already-loaded sandbox snapshot the same way', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let mismatch = false;
+    stubOperations({
+      sandboxes: () =>
+        jsonResponse(
+          mismatch
+            ? sandboxSnapshot({ effective_scope: 'all', can_view_all: true })
+            : sandboxSnapshot()
+        ),
+    });
+    seedUrl('?tab=sandboxes&scope=accessible');
+    renderOperations();
+    await screen.findByTestId('sandbox-row');
+
+    mismatch = true;
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await waitFor(() => expect(screen.queryByTestId('sandbox-row')).not.toBeInTheDocument());
+    expect(screen.getByTestId('operations-error')).toHaveTextContent('answered a different scope');
+    expect(screen.queryByTestId('sandbox-refresh-failed')).not.toBeInTheDocument();
+  });
+
   it('rejects a global page that does not itself claim the capability', async () => {
     stubOperations({
       activity: () =>

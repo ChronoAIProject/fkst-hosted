@@ -96,11 +96,16 @@ describe('activity view', () => {
     expect(within(row).getAllByText('—').length).toBeGreaterThanOrEqual(3);
   });
 
-  it('opens typed details by keyboard and exposes the immutable actor id', async () => {
+  it('opens typed details from a real control inside the row', async () => {
     stubOperations({ activity: () => jsonResponse(activityPage()) });
     renderOperations();
     const row = await screen.findByTestId('activity-row');
-    fireEvent.keyDown(row, { key: 'Enter' });
+    // The row itself keeps its native `row` role so the column headers stay
+    // associated with its cells; the affordance is a button inside a cell, which
+    // is what makes the details keyboard-openable.
+    expect(row).not.toHaveAttribute('role');
+    const open = within(row).getByRole('button', { name: /Details$/ });
+    fireEvent.click(open);
     const details = await screen.findByTestId('operations-details');
     expect(within(details).getByText('Actor id')).toBeInTheDocument();
     expect(within(details).getByText('7')).toBeInTheDocument();
@@ -368,6 +373,45 @@ describe('empty, partial, and outage states are distinguishable', () => {
     expect(await screen.findByTestId('activity-partial')).toHaveTextContent(
       'The analytics source could not answer'
     );
+    // A page a source could not fill has ZERO rows for a reason that is not "no
+    // records matched" — it must never borrow the complete-empty copy.
+    expect(screen.getByTestId('operations-incomplete')).toHaveTextContent(
+      'This page is incomplete'
+    );
+    expect(screen.queryByTestId('operations-empty')).not.toBeInTheDocument();
+    expect(screen.queryByText('No records match these filters in this window.')).not.toBeInTheDocument();
+  });
+
+  it('explains a withheld custom-range query instead of claiming nothing matched', async () => {
+    const { calls } = stubOperations({ activity: () => jsonResponse(activityPage()) });
+    seedUrl('?tab=activity&scope=mine&range=custom');
+    renderOperations();
+    // Selecting the custom preset before naming both bounds issues no request…
+    expect(await screen.findByTestId('activity-window-required')).toHaveTextContent(
+      'Enter both UTC bounds'
+    );
+    // …so the panel must not report a result the deployment never produced.
+    expect(screen.queryByTestId('operations-empty')).not.toBeInTheDocument();
+    expect(calls).toHaveLength(0);
+  });
+
+  it('refuses a window this deployment says is too wide, before the request', async () => {
+    // The deployment states a 7-day ceiling; the 30d preset is now unqueryable
+    // even though the client's own default would have allowed it.
+    const { calls } = stubOperations({
+      activity: () => jsonResponse(activityPage({ max_range_days: 7 })),
+    });
+    renderOperations();
+    await screen.findByTestId('activity-row');
+    const issued = calls.length;
+
+    fireEvent.change(screen.getByLabelText('Time range'), { target: { value: '30d' } });
+    expect(await screen.findByTestId('activity-window-required')).toHaveTextContent(
+      'wider than the 7 days this deployment allows'
+    );
+    expect(screen.queryByTestId('operations-empty')).not.toBeInTheDocument();
+    // Not one request the server was guaranteed to answer with a 400.
+    expect(calls.length).toBe(issued);
   });
 
   it('reports a cold session-visibility projection as a failure, not an empty fleet', async () => {

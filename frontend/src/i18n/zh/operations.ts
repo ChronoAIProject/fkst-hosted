@@ -51,8 +51,13 @@ export const operations: OperationsSlice = {
   },
   fFrom: '起始（UTC）',
   fTo: '结束（UTC）',
-  rangeHint: '自定义区间使用 UTC，最长 30 天。',
-  rangeInvalid: '请设置一个先后有序、不超过 30 天的 UTC 区间后再查询。',
+  rangeHint: '自定义区间使用 UTC，最长 {days} 天。',
+  rangeProblem: {
+    incomplete: '请填写起止两个 UTC 时间后再查询。',
+    unordered: '起始时间必须早于结束时间。',
+    too_wide: '该时间窗口超过了本部署允许的 {days} 天上限。',
+    future: '起始时间在未来，该时间窗口目前不可能有任何记录。',
+  },
   fRecordKind: '记录类型',
   recordKindFilter: {
     api_request: 'API 请求',
@@ -81,6 +86,7 @@ export const operations: OperationsSlice = {
   sessionRequiredTitle: '请指定一个会话',
   sessionRequiredBody:
     '生命周期记录只针对你有权访问的单个会话。请输入准确的会话 id，或从「沙箱」视图中打开一个会话。',
+  windowRequiredTitle: '请调整时间窗口',
 
   fStatus: '状态',
   fBackend: '后端',
@@ -234,6 +240,8 @@ export const operations: OperationsSlice = {
   inventoryWarnings: '快照警告',
 
   emptyActivity: '该时间窗口内没有符合筛选条件的记录。',
+  emptyActivityIncomplete:
+    '本页数据不完整——有数据源未能应答，因此无法列出记录。这并不表示结果为空。',
   emptySandboxes: '没有符合筛选条件的运行中沙箱。',
   errorTitle: '加载失败',
   errorRequestId: '请求 id {id}',

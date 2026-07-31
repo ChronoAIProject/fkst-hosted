@@ -1,4 +1,5 @@
 import type { OperationsErrorCode } from '@/lib/api/operations';
+import type { WindowProblem } from '@/lib/operations/state';
 
 /**
  * The `/operations` workspace.
@@ -65,8 +66,12 @@ export interface OperationsContent {
   rangePreset: Record<'1h' | '24h' | '7d' | '30d' | 'custom', string>;
   fFrom: string;
   fTo: string;
+  /** `{days}` = this deployment's own `max_range_days`, as the page stated it. */
   rangeHint: string;
-  rangeInvalid: string;
+  /** Why the named window cannot be queried, keyed by the problem. `too_wide`
+   *  carries `{days}`. Used both beside the controls and as the body of the
+   *  blocking state, so the reason is stated once. */
+  rangeProblem: Record<WindowProblem, string>;
   fRecordKind: string;
   recordKindFilter: Record<'api_request' | 'sandbox_lifecycle' | 'all', string>;
   fActorId: string;
@@ -87,6 +92,9 @@ export interface OperationsContent {
   /** Blocking state when a personal lifecycle query names no session. */
   sessionRequiredTitle: string;
   sessionRequiredBody: string;
+  /** Blocking state when the named window itself cannot be queried. The body is
+   *  the matching `rangeProblem` entry. */
+  windowRequiredTitle: string;
 
   /** Sandbox filter labels. */
   fStatus: string;
@@ -231,6 +239,10 @@ export interface OperationsContent {
 
   /** Empty and failure states. */
   emptyActivity: string;
+  /** The same "no rows" shape when a SOURCE could not answer. It must never
+   *  reuse `emptyActivity`: "nothing matched" is a result, and stating it over a
+   *  page a source could not fill is a false statement about the deployment. */
+  emptyActivityIncomplete: string;
   emptySandboxes: string;
   errorTitle: string;
   /** `{id}` = the propagated request id, when one was exposed. */
