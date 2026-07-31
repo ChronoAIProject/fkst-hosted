@@ -145,6 +145,23 @@ pub(crate) fn webhook_event(sender_id: Option<i64>) -> ApiRequestCompletedV1 {
     )
 }
 
+/// An anonymous record with an arbitrary terminal status/outcome pair, for
+/// sweeping the contract's status/outcome matrix.
+pub(crate) fn event_with(status_code: u16, outcome: AuditOutcome) -> ApiRequestCompletedV1 {
+    ApiRequestCompletedV1::new(
+        identity(),
+        timing(),
+        Actor::anonymous(),
+        Principal::new(PrincipalKind::Anonymous, None),
+        RequestResult {
+            status_code: Some(status_code),
+            outcome,
+            error_code: None,
+        },
+        service(),
+    )
+}
+
 /// Merge `extra` over `base`, replacing any key already present.
 ///
 /// envy rejects a duplicated variable outright, so a test that overrides one

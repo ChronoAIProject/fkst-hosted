@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! product request
-//!   -> (later) outer audit middleware
+//!   -> outer audit middleware           [request]    one terminal record per request
 //!   -> ApiRequestCompletedV1            [event]      the versioned contract
 //!   -> AuditHandle::submit              [mod]        non-blocking admission
 //!        -> AuditSink                   [sink]       the swappable boundary
@@ -25,11 +25,13 @@
 //! - [`identity`] carries the credential-free actor/principal pair from whoever
 //!   proved it to the middleware that writes the record, so no route has to
 //!   invent its own notion of "who is calling";
+//! - [`request`] owns the HTTP lifecycle — request-id normalization, the verified
+//!   OpenAPI operation catalog, the per-request context, terminal-outcome
+//!   derivation, and the outermost middleware — so no handler ever calls a sink;
 //! - [`metrics`] keeps delivery telemetry closed-enum-labelled (epic `OPS-04`).
 //!
-//! This issue deliberately implements the contract and the delivery path only:
-//! there is no request middleware, no argument extraction, no query API, and no
-//! durable relay yet — each is a separate issue that plugs into these seams.
+//! Still separate issues plugging into these seams: the endpoint-specific safe
+//! argument contract, the scoped query API, and the durable relay.
 
 use std::sync::Arc;
 
@@ -41,6 +43,7 @@ pub mod identity;
 pub mod metrics;
 pub mod posthog;
 pub mod projection;
+pub mod request;
 pub mod sink;
 pub mod validate;
 pub mod worker;
@@ -59,6 +62,10 @@ pub use event::{
 pub use identity::{AuditActor, AuditIdentity, AuditIdentitySlot, AuditPrincipal};
 pub use metrics::{AuditMetrics, AuditMetricsSnapshot};
 pub use projection::{CaptureEvent, EventLimits};
+pub use request::{
+    audit_requests, AuditMiddleware, AuditRequestContext, CatalogError, OperationCatalog,
+    OperationPolicy, SafeHttpSpan,
+};
 pub use sink::{AuditSink, DisabledSink, DrainReport, RecordingSink, SubmitError};
 pub use validate::EventError;
 
@@ -141,6 +148,15 @@ impl AuditHandle {
                 Err(SubmitError::ShuttingDown)
             }
         }
+    }
+
+    /// Count conflicting writes to one request's audit context.
+    ///
+    /// The slot that rejected the write already logged the offending FIELD name;
+    /// this is the bounded, unlabelled counter that makes the mistake visible on
+    /// a dashboard without turning a field name into a Prometheus label.
+    pub fn record_context_conflicts(&self, count: u64) {
+        self.metrics.record_context_conflicts(count);
     }
 
     /// Whether events actually go anywhere.

@@ -234,7 +234,10 @@ fn render_audit_metrics(audit: &AuditMetricsSnapshot) -> String {
          fkst_audit_events_dropped_total{{reason=\"shutdown\"}} {}\n\
          # HELP fkst_audit_shutdown_remaining_events Events still undelivered when the last drain ended.\n\
          # TYPE fkst_audit_shutdown_remaining_events gauge\n\
-         fkst_audit_shutdown_remaining_events {}\n",
+         fkst_audit_shutdown_remaining_events {}\n\
+         # HELP fkst_audit_context_conflicts_total Conflicting write-once writes to a request's audit context.\n\
+         # TYPE fkst_audit_context_conflicts_total counter\n\
+         fkst_audit_context_conflicts_total {}\n",
         audit.queue_depth,
         audit.enqueued_accepted,
         audit.enqueued_full,
@@ -254,6 +257,7 @@ fn render_audit_metrics(audit: &AuditMetricsSnapshot) -> String {
         audit.dropped_permanent,
         audit.dropped_shutdown,
         audit.shutdown_remaining,
+        audit.context_conflicts,
     )
 }
 
@@ -371,6 +375,7 @@ mod tests {
         metrics.record_dropped(DropReason::QueueFull, 2);
         metrics.record_dropped(DropReason::Oversized, 1);
         metrics.set_shutdown_remaining(3);
+        metrics.record_context_conflicts(5);
 
         let body = render_metrics(
             &crate::recovery::RecoveryMonitor::new(false).snapshot(),
@@ -390,6 +395,9 @@ mod tests {
         assert!(body.contains("fkst_audit_events_dropped_total{reason=\"queue_full\"} 2"));
         assert!(body.contains("fkst_audit_events_dropped_total{reason=\"oversized\"} 1"));
         assert!(body.contains("fkst_audit_shutdown_remaining_events 3"));
+        // Unlabelled on purpose: the offending FIELD is named in the structured
+        // log, never turned into an unbounded Prometheus label.
+        assert!(body.contains("fkst_audit_context_conflicts_total 5"));
         // Capture success is named `accepted`, never `delivered`/`persisted`:
         // a PostHog 200 is acceptance, not proof of query visibility. Only the
         // series lines are checked — the HELP prose may still say "undelivered"

@@ -34,6 +34,7 @@
 //! credential-derived value and is equally forbidden — matching a fingerprint is
 //! enough to correlate a person across records.
 
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use axum::http::Extensions;
@@ -159,6 +160,10 @@ impl AuditIdentity {
 #[derive(Clone, Default)]
 pub struct AuditIdentitySlot {
     inner: Arc<OnceLock<AuditIdentity>>,
+    /// Second writes that disagreed with the first. A request has exactly one
+    /// initiating identity, so a disagreement is a programmer error the audit
+    /// middleware surfaces as a bounded metric rather than resolving silently.
+    conflicts: Arc<AtomicU32>,
 }
 
 impl AuditIdentitySlot {
@@ -170,14 +175,31 @@ impl AuditIdentitySlot {
     /// Record the verified identity. First write wins; later writes are dropped
     /// because a request has exactly one initiating identity.
     pub fn record(&self, identity: AuditIdentity) {
-        // `set` returns the rejected value on a second write; discarding it is
-        // the intended behaviour, not a swallowed error.
-        let _ = self.inner.set(identity);
+        // `set` returns the rejected value on a second write; keeping the first
+        // is the intended behaviour, not a swallowed error. A rejected write of
+        // the SAME identity is two layers agreeing and is not a conflict.
+        if let Err(rejected) = self.inner.set(identity) {
+            if self.inner.get() != Some(&rejected) {
+                self.conflicts.fetch_add(1, Ordering::Relaxed);
+                // The actor KINDS are bounded enum labels; ids and logins are
+                // deliberately absent from this line.
+                tracing::error!(
+                    kept = self.inner.get().map(|held| held.actor.kind.as_str()),
+                    rejected = rejected.actor.kind.as_str(),
+                    "conflicting verified identity for one request; keeping the first"
+                );
+            }
+        }
     }
 
     /// The recorded identity, if anything proved one.
     pub fn get(&self) -> Option<AuditIdentity> {
         self.inner.get().cloned()
+    }
+
+    /// How many later writes disagreed with the recorded identity.
+    pub fn conflicts(&self) -> u32 {
+        self.conflicts.load(Ordering::Relaxed)
     }
 }
 
@@ -194,6 +216,7 @@ impl std::fmt::Debug for AuditIdentitySlot {
                     .get()
                     .map(|identity| identity.actor.kind.as_str()),
             )
+            .field("conflicts", &self.conflicts())
             .finish()
     }
 }

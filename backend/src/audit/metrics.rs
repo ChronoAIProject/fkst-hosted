@@ -115,6 +115,7 @@ struct Counters {
     dropped_permanent: AtomicU64,
     dropped_shutdown: AtomicU64,
     shutdown_remaining: AtomicU64,
+    context_conflicts: AtomicU64,
 }
 
 /// Cheaply clonable writer/reader handle.
@@ -181,6 +182,20 @@ impl AuditMetrics {
         counter.fetch_add(count, Ordering::Relaxed);
     }
 
+    /// Record conflicting writes to a request's audit context.
+    ///
+    /// A conflict means two places each believed they owned one field, which is
+    /// a programmer error rather than a runtime condition: the request still
+    /// succeeds with the first verified value, and this counter (plus the
+    /// field-named log the slot emits) is how the mistake becomes visible.
+    /// Unlabelled on purpose — the field name is high-signal but would be an
+    /// unbounded label as the argument contract grows (epic `OPS-04`).
+    pub fn record_context_conflicts(&self, count: u64) {
+        self.counters
+            .context_conflicts
+            .fetch_add(count, Ordering::Relaxed);
+    }
+
     /// Publish how many events were still queued when the drain deadline expired.
     pub fn set_shutdown_remaining(&self, remaining: u64) {
         self.counters
@@ -212,6 +227,7 @@ impl AuditMetrics {
             dropped_permanent: load(&c.dropped_permanent),
             dropped_shutdown: load(&c.dropped_shutdown),
             shutdown_remaining: load(&c.shutdown_remaining),
+            context_conflicts: load(&c.context_conflicts),
         }
     }
 }
@@ -238,6 +254,7 @@ pub struct AuditMetricsSnapshot {
     pub dropped_permanent: u64,
     pub dropped_shutdown: u64,
     pub shutdown_remaining: u64,
+    pub context_conflicts: u64,
 }
 
 #[cfg(test)]

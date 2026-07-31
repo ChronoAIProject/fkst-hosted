@@ -38,6 +38,14 @@ pub const EVENT_NAME: &str = "fkst api request completed";
 /// The raw path/query is deliberately never recorded in its place.
 pub const UNMATCHED_OPERATION_ID: &str = "<unmatched>";
 
+/// The `route_template` recorded when routing produced no matched template at
+/// all (a `404` on an unknown path). It is a sentinel rather than a path so an
+/// unrouted `/api/v1/auth/github/callback?code=…` cannot smuggle OAuth material
+/// into the analytics store — the whole reason the raw URI is never recorded.
+/// [`super::validate`] admits this exact string as the one template that does
+/// not begin with `/`.
+pub const UNMATCHED_ROUTE_TEMPLATE: &str = "<unmatched>";
+
 /// Namespace for the deterministic UUIDv5 event id. A fixed random constant, so
 /// the same terminal request always derives the same id in every replica and on
 /// every retry — which is what makes PostHog's UUID deduplication work for

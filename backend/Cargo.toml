@@ -26,7 +26,10 @@ tokio-stream = "0.1"
 # `util` carries `ServiceExt::oneshot`, which the chat tool layer uses to drive
 # this process's own router in-process (previously a dev-only need).
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["trace", "cors", "timeout", "request-id", "util"] }
+# No `request-id`: the audit middleware owns `X-Request-Id` end to end (accept a
+# well-formed client value, replace anything else, echo the normalized id), so a
+# second set/propagate layer would only be able to disagree with it.
+tower-http = { version = "0.6", features = ["trace", "cors", "timeout", "util"] }
 # Collects the body of a router-dispatched response (chat tool results).
 http-body-util = "0.1"
 # Percent-encodes dynamic path segments and query values in the URLs the chat
@@ -78,8 +81,11 @@ once_cell = "1"
 # nonces and the per-write environment-profile AES-GCM nonce.
 rand = "0.8"
 # Deterministic per-session ids (UUIDv5 over installation+repo+issue) so a
-# webhook redelivery maps to the same session/Job (at-most-one-Job idempotency).
-uuid = { version = "1", features = ["v5"] }
+# webhook redelivery maps to the same session/Job (at-most-one-Job idempotency),
+# the same v5 derivation for a terminal audit record's dedupe id, and v4 for the
+# generated `X-Request-Id` the audit middleware substitutes for a missing or
+# malformed client value.
+uuid = { version = "1", features = ["v4", "v5"] }
 # Stream combinators for the kube-runtime Job watch.
 futures = "0.3"
 # Kubernetes client for spawning one Job per substrate session (milestone #9).

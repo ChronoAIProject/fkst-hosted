@@ -1,5 +1,6 @@
 //! Router composition with the cross-cutting tower-http middleware stack.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::{Request, State};
@@ -9,12 +10,13 @@ use axum::response::{IntoResponse, Response};
 use axum::Router;
 use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
-use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use crate::audit::event::ServiceIdentity;
+use crate::audit::request::{self as audit_request, AuditMiddleware, OperationCatalog};
 use crate::error::AppError;
 use crate::openapi;
 use crate::recovery::RecoveryMonitor;
@@ -43,7 +45,13 @@ async fn require_ready_leader(
     next: Next,
 ) -> Response {
     if gate.enabled && !gate.recovery.snapshot().ready {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        // A gate answer is a POLICY short-circuit, not a handler outcome: it is
+        // tagged so the audit record says `rejected` with the real 503 and a
+        // stable code, instead of looking like a dependency outage.
+        return audit_request::with_rejection(
+            StatusCode::SERVICE_UNAVAILABLE.into_response(),
+            audit_request::codes::LEADER_NOT_READY,
+        );
     }
     next.run(request).await
 }
@@ -187,14 +195,42 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
     // `/openapi.json` route, merged back onto the concrete axum router.
     let (router, spec) = top.merge(env).split_for_parts();
 
+    // The audit catalog is built from the SAME document that is served, so an
+    // operation's recorded id is by construction the id clients read in the
+    // contract. A missing/duplicate operation id — or a documented operation with
+    // no explicit audit policy — fails the build rather than producing an audit
+    // trail with a silent hole in it.
+    let audit = AuditMiddleware::new(
+        Arc::new(OperationCatalog::from_openapi(&spec).map_err(|error| {
+            AppError::Config(format!("audit operation catalog is invalid: {error}"))
+        })?),
+        state.audit.clone(),
+        ServiceIdentity {
+            version: state.config.audit.service_version.clone(),
+            environment: state.config.audit.environment.clone(),
+        },
+    );
+
     let router = router
         .merge(openapi::spec_route(spec)?)
         .with_state(state)
         .layer(
             ServiceBuilder::new()
-                .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
-                .layer(TraceLayer::new_for_http())
-                .layer(PropagateRequestIdLayer::x_request_id())
+                // OUTERMOST on purpose: CORS preflights, the trace span, the
+                // route-scoped timeouts, the leader gate, extractor rejections,
+                // `AppError` conversion, and axum's own 404/405 are all inside
+                // it, which is what makes "exactly one terminal record per
+                // request" (epic `AUD-01`) true rather than aspirational. It also
+                // owns `X-Request-Id` end to end — accepting a well-formed client
+                // value, replacing anything else, and echoing the normalized id —
+                // so there is one source of truth for request correlation.
+                .layer(middleware::from_fn_with_state(
+                    audit,
+                    audit_request::audit_requests,
+                ))
+                // The default span records the RAW uri (query included); this one
+                // records only the method and the normalized request id.
+                .layer(TraceLayer::new_for_http().make_span_with(audit_request::SafeHttpSpan))
                 .layer(cors_layer()),
         );
 

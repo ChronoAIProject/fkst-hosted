@@ -255,6 +255,21 @@ impl IntoResponse for AppError {
         });
         let mut response = (status, json).into_response();
 
+        // Carry the STABLE code to the outer audit middleware as a typed
+        // extension. It is the same `&'static str` the envelope already holds, so
+        // the record can never contain error text, and the middleware never has to
+        // parse — let alone buffer — a response body to learn why a call failed.
+        crate::audit::request::tag_error_code(&mut response, code);
+        // An identity/authorization answer is a POLICY short-circuit wherever it
+        // is produced, so it is recorded as `rejected` with its real status rather
+        // than as an ordinary client error.
+        if matches!(
+            self,
+            AppError::Unauthorized(_) | AppError::Forbidden(_) | AppError::ScopeForbidden(_)
+        ) {
+            crate::audit::request::tag_rejected(&mut response);
+        }
+
         if www_authenticate {
             response
                 .headers_mut()

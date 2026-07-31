@@ -36,11 +36,13 @@ mod verify;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{Extensions, HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
 use secrecy::ExposeSecret;
 use serde::Deserialize;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use crate::audit::request::{codes, with_error_code, with_rejection};
 use crate::models::RepoRef;
 use crate::state::AppState;
 
@@ -163,19 +165,28 @@ async fn webhook(
     extensions: Extensions,
     headers: HeaderMap,
     body: Bytes,
-) -> StatusCode {
+) -> Response {
     // The secret must be configured for this route to do anything; the router
     // only mounts the route when it is set, so this is a defensive 503.
     let Some(secret) = &state.github_app_webhook_secret else {
         tracing::warn!("github webhook received but no webhook secret configured");
-        return StatusCode::SERVICE_UNAVAILABLE;
+        return with_error_code(
+            StatusCode::SERVICE_UNAVAILABLE.into_response(),
+            codes::WEBHOOK_NOT_CONFIGURED,
+        );
     };
 
     // STEP 1+2: verify the HMAC over the RAW bytes BEFORE any JSON parse.
     if !verify_signature(secret.expose_secret().as_bytes(), &headers, &body) {
         // Do not distinguish missing vs mismatched: both are 401, no detail.
         tracing::warn!("github webhook signature verification failed");
-        return StatusCode::UNAUTHORIZED;
+        // A signature failure is an identity rejection, so the audit record says
+        // `rejected` — never `client_error` — and never names the sender the
+        // unverified body claims.
+        return with_rejection(
+            StatusCode::UNAUTHORIZED.into_response(),
+            codes::WEBHOOK_SIGNATURE_INVALID,
+        );
     }
 
     // STEP 3: the body is now PROVEN to be GitHub's, so — and only now — its
@@ -195,14 +206,14 @@ async fn webhook(
     match result {
         Ok(handled) => {
             tracing::info!(event = %event, outcome = handled.as_str(), "github webhook handled");
-            StatusCode::OK
+            StatusCode::OK.into_response()
         }
         Err(detail) => {
             // A processing failure (e.g. a malformed body or a store error) is
             // logged; we still return 202 so GitHub does not hammer redeliveries
             // for a payload we cannot act on. The detail never contains a secret.
             tracing::error!(event = %event, detail = %detail, "github webhook processing failed");
-            StatusCode::ACCEPTED
+            StatusCode::ACCEPTED.into_response()
         }
     }
 }

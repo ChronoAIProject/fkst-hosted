@@ -149,7 +149,9 @@ fn validate_route_template(route: &str) -> Result<(), EventError> {
             "must be the normalized matched route, not a raw query-bearing URI",
         ));
     }
-    if !route.starts_with('/') {
+    // Exactly one non-path value is legal: the sentinel a request that matched
+    // no route carries, precisely BECAUSE its real path must not be recorded.
+    if route != super::event::UNMATCHED_ROUTE_TEMPLATE && !route.starts_with('/') {
         return Err(EventError::invalid("route_template", "must start with `/`"));
     }
     Ok(())

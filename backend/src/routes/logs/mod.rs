@@ -446,12 +446,17 @@ fn html_error(status: StatusCode, message: &str) -> Response {
          <body><h1>{code}</h1><p>{message}</p></body></html>",
         code = status.as_u16()
     );
-    (
-        status,
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        body,
+    // No JSON envelope on the browser paths, so the stable audit code travels as
+    // a typed response extension instead (see `crate::audit::request::response`).
+    crate::audit::request::with_error_code(
+        (
+            status,
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            body,
+        )
+            .into_response(),
+        crate::audit::request::codes::for_browser_status(status),
     )
-        .into_response()
 }
 
 /// Map an [`AppError`] to a browser-friendly HTML error page (the browser paths never
