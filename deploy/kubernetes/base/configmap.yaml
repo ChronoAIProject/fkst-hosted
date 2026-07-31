@@ -74,3 +74,36 @@ data:
   # truncated and the frame flags it, while the model still receives the whole
   # result either way.
   # FKST_CHAT_DETAIL_MAX_BYTES: "0"
+  # ---- user activity trace (PostHog capture sink) ----
+  # Dark by default, like the chat block above: with FKST_POSTHOG_ENABLED
+  # unset/false the control plane installs the no-op sink, starts no delivery
+  # worker, and makes no network call, so every other FKST_POSTHOG_* value is
+  # inert. An environment overlay opts in, so deployment-wide capture is always
+  # a deliberate per-deployment act rather than something a base bump switches
+  # on everywhere.
+  #
+  # The project (write) token is a SECRET: it belongs in the
+  # fkst-control-plane-secret record as FKST_POSTHOG_PROJECT_TOKEN, never here.
+  # The host is required when enabled, must be https outside an explicitly
+  # test/local FKST_DEPLOYMENT_ENVIRONMENT, and may never embed userinfo
+  # credentials — that is refused at startup whether the feature is on or off.
+  #
+  # The numeric knobs are validated even while disabled, so a typo fails the
+  # deploy that introduces it rather than the one that flips the feature on.
+  FKST_POSTHOG_ENABLED: "false"
+  # FKST_POSTHOG_HOST: <https base url of the self-hosted PostHog>
+  # FKST_POSTHOG_CAPTURE_TIMEOUT_MS: "2000"
+  # FKST_POSTHOG_BATCH_SIZE: "100"
+  # FKST_POSTHOG_FLUSH_INTERVAL_MS: "1000"
+  # FKST_POSTHOG_QUEUE_CAPACITY: "10000"
+  # FKST_POSTHOG_MAX_RETRIES: "5"
+  # FKST_POSTHOG_RETRY_INITIAL_MS: "100"
+  # FKST_POSTHOG_RETRY_MAX_MS: "5000"
+  # FKST_POSTHOG_SHUTDOWN_FLUSH_SECS: "10"
+  # FKST_POSTHOG_MAX_EVENT_BYTES: "65536"
+  # Deployment environment name stamped on every audit event, and the switch
+  # that permits a plaintext http:// PostHog host (only "test"/"local" do).
+  # Deliberately UNSET in base: a value inherited from here would silently relax
+  # that HTTPS gate for any overlay that forgot to patch it, so each environment
+  # overlay sets its own.
+  # FKST_DEPLOYMENT_ENVIRONMENT: <production|staging|local|test>

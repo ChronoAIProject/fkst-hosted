@@ -167,6 +167,37 @@ fn embedded_userinfo_is_rejected() {
     assert!(err.to_string().contains("userinfo"), "{err}");
 }
 
+#[test]
+fn embedded_userinfo_is_rejected_even_while_disabled() {
+    // A staged credential is still a credential: it sits in the ConfigMap and
+    // would be copied verbatim into `Debug` output, whether or not anything
+    // ever dials the host. The unparseable form is covered too, because that is
+    // exactly what a URL-parsed check would wave through.
+    for staged in [
+        "https://user:pass@posthog.example/",
+        "user:pass@posthog.example",
+    ] {
+        let err = AuditConfig::from_vars(&vars(&[("FKST_POSTHOG_HOST", staged)]))
+            .expect_err("a staged credential must fail closed");
+        assert!(err.to_string().contains("userinfo"), "{staged}: {err}");
+    }
+}
+
+#[test]
+fn a_credential_in_a_staged_host_can_never_reach_debug_output() {
+    // The canary can only be absent because the value was refused at load: the
+    // config type never holds it, so no `{:?}` anywhere can spill it.
+    let error = AuditConfig::from_vars(&vars(&[(
+        "FKST_POSTHOG_HOST",
+        "https://user:phc_canary_do_not_leak@posthog.example",
+    )]))
+    .expect_err("a staged credential must fail closed");
+    assert!(
+        !format!("{error:?}").contains("phc_canary_do_not_leak"),
+        "the rejection message leaked the credential: {error:?}"
+    );
+}
+
 /// Assert the load failed, naming the case in the panic message.
 fn expect_rejected(result: Result<AuditConfig, AppError>, case: &str) -> AppError {
     match result {
@@ -240,8 +271,9 @@ fn a_non_numeric_knob_fails_closed_naming_the_block() {
 
 #[test]
 fn a_staged_host_does_not_fail_a_disabled_deploy() {
-    // Feature off: the host is kept (normalized) but never judged, so a
-    // half-prepared rollout cannot break an unrelated deploy.
+    // Feature off: the host is kept (normalized) and its SHAPE is never judged —
+    // plaintext, a private name, no scheme — so a half-prepared rollout cannot
+    // break an unrelated deploy. Only an embedded credential is refused.
     let config = AuditConfig::from_vars(&vars(&[
         ("FKST_POSTHOG_HOST", "http://posthog.internal/"),
         ("FKST_DEPLOYMENT_ENVIRONMENT", "production"),

@@ -181,10 +181,14 @@ fn validate_status_and_outcome(
     outcome: AuditOutcome,
 ) -> Result<(), EventError> {
     let Some(status) = status_code else {
-        // Only a record that genuinely never produced a response may omit the
-        // status; a timeout that DID return 504 carries it.
+        // A null status is reserved for the ONE outcome that means "no response
+        // was ever produced". A timeout is a completed outcome — the matrix
+        // below requires it to carry 408 or 504 — so a status-less timeout is
+        // really an incomplete record and must be recorded as one. Anything
+        // looser would put null-status rows that are not `incomplete` in front
+        // of the read side's fixed HogQL and the activity UI.
         return match outcome {
-            AuditOutcome::Incomplete | AuditOutcome::Timeout => Ok(()),
+            AuditOutcome::Incomplete => Ok(()),
             other => Err(EventError::invalid(
                 "status_code",
                 format!("is required for outcome `{other}`"),

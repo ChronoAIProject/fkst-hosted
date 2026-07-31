@@ -103,6 +103,25 @@ pub(crate) fn system_event() -> ApiRequestCompletedV1 {
     )
 }
 
+/// A credentialed machine caller that is not a GitHub person (deployment
+/// tooling, a monitored probe). It carries a LABEL, never an identity: the label
+/// must not become the distinct id and must not become an actor id.
+pub(crate) fn service_event() -> ApiRequestCompletedV1 {
+    ApiRequestCompletedV1::new(
+        identity(),
+        timing(),
+        Actor {
+            kind: ActorKind::Service,
+            id: None,
+            login: Some("fkst-probe".to_string()),
+            authentication: AuthenticationMethod::Internal,
+        },
+        Principal::new(PrincipalKind::None, Some("deployment-probe".to_string())),
+        ok(),
+        service(),
+    )
+}
+
 /// A signature-verified webhook. `sender_id` is `None` when GitHub's payload
 /// carried no resolvable numeric id.
 pub(crate) fn webhook_event(sender_id: Option<i64>) -> ApiRequestCompletedV1 {

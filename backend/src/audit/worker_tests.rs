@@ -330,7 +330,8 @@ async fn the_drain_closes_admission() {
 #[tokio::test]
 async fn an_undeliverable_drain_reports_its_residue() {
     // PostHog down at shutdown: the drain must state what it could not deliver
-    // rather than reporting a clean exit.
+    // rather than reporting a clean exit. This is the exact outage the shutdown
+    // report exists for, so `remaining` must NOT read zero.
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .respond_with(ResponseTemplate::new(500))
@@ -346,15 +347,53 @@ async fn an_undeliverable_drain_reports_its_residue() {
             ("FKST_POSTHOG_SHUTDOWN_FLUSH_SECS", "1"),
         ],
     );
-    sink.submit(human_event()).expect("admitted");
+    // Neither send trigger can fire before the drain (batch 100, interval 60s),
+    // so all three events are in the drain's own batch.
+    for index in 0..3 {
+        let mut event = human_event();
+        event.request_id = format!("req-{index}");
+        sink.submit(event).expect("admitted");
+    }
 
     let report = sink.drain().await;
-    // The batch is abandoned inside the drain budget, so nothing is left queued
-    // — but the loss itself is counted, never silent.
-    assert_eq!(report.remaining, 0);
+    assert_eq!(
+        report.remaining, 3,
+        "events the drain could not deliver are remaining, not delivered"
+    );
     let snapshot = metrics.snapshot();
+    assert_eq!(snapshot.shutdown_remaining, 3, "the metric agrees");
     assert_eq!(snapshot.batches_retryable, 1);
-    assert_eq!(snapshot.dropped_retryable, 1);
+    // Counted once, under the reason that names WHEN they were lost; a second
+    // count under `retryable` would double-report the same events.
+    assert_eq!(snapshot.dropped_shutdown, 3);
+    assert_eq!(snapshot.dropped_retryable, 0);
+}
+
+#[test]
+fn the_retry_delay_never_exceeds_the_configured_maximum() {
+    // The cap is a real ceiling: jitter may shorten a maxed-out wait, never
+    // stretch it past FKST_POSTHOG_RETRY_MAX_MS.
+    let max = Duration::from_millis(5_000);
+    for _ in 0..256 {
+        // A server hint far above the cap.
+        let hinted = retry_delay(Some(Duration::from_secs(3_600)), max, max);
+        assert!(hinted <= max, "Retry-After must be capped, got {hinted:?}");
+        assert!(hinted >= Duration::from_millis(4_000), "{hinted:?}");
+
+        // Backoff already at the ceiling.
+        let backed_off = retry_delay(None, max, max);
+        assert!(
+            backed_off <= max,
+            "backoff must be capped, got {backed_off:?}"
+        );
+
+        // A hint below the cap is honoured (jittered), not raised to it.
+        let short = retry_delay(Some(Duration::from_millis(100)), max, max);
+        assert!(
+            short >= Duration::from_millis(80) && short <= Duration::from_millis(120),
+            "{short:?}"
+        );
+    }
 }
 
 #[tokio::test]

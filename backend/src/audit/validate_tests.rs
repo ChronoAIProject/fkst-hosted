@@ -5,7 +5,7 @@ use crate::audit::event::{
     Actor, ActorKind, ApiRequestCompletedV1, AuthenticationMethod, Principal, PrincipalKind,
 };
 use crate::audit::test_support::{
-    anonymous_event, human_event, instant, system_event, webhook_event,
+    anonymous_event, human_event, instant, service_event, system_event, webhook_event,
 };
 
 /// Assert the record is rejected and the failure names `field`.
@@ -24,6 +24,7 @@ fn the_canonical_fixtures_are_valid() {
     for event in [
         human_event(),
         anonymous_event(),
+        service_event(),
         system_event(),
         webhook_event(Some(583_231)),
         webhook_event(None),
@@ -111,6 +112,9 @@ fn every_invalid_status_outcome_pair_is_rejected() {
         (Some(200), AuditOutcome::Rejected),
         // An incomplete record by definition never produced a status.
         (Some(200), AuditOutcome::Incomplete),
+        // …and a null status is reserved for `incomplete`: a timeout is a
+        // completed outcome that must carry its 408/504.
+        (None, AuditOutcome::Timeout),
     ] {
         let mut event = human_event();
         event.status_code = status;
@@ -139,7 +143,7 @@ fn every_valid_status_outcome_pair_is_accepted() {
         (Some(401), AuditOutcome::Rejected),
         // The leader-readiness gate rejects with 503 before the handler runs.
         (Some(503), AuditOutcome::Rejected),
-        (None, AuditOutcome::Timeout),
+        // The only outcome that may omit the status.
         (None, AuditOutcome::Incomplete),
     ] {
         let mut event = human_event();

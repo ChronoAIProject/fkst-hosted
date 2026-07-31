@@ -65,11 +65,18 @@ The provider exposes three logical records:
 | `fkst-opensandbox-tenant` | `chronoai-fkst/opensandbox-fkst-api-key` and `opensandbox-system/opensandbox-api-key` | `opensandbox-fkst-api-key` |
 | `fkst-ingress-tls` | `chronoai-fkst/fkst-ingress-tls` | `tls.crt`, `tls.key` |
 
-Optional broader-OAuth and log-storage deployments put
-`FKST_GITHUB_BROADER_OAUTH_CLIENT_SECRET` and `FKST_NYXID_CLIENT_SECRET` in the
-control-plane record. Their non-secret client IDs, endpoints, and bucket names
-belong in the environment ConfigMap patch. ExternalSecret status and Secret key
-names are safe to inspect; Secret values are not.
+Optional broader-OAuth, log-storage, and activity-trace deployments put
+`FKST_GITHUB_BROADER_OAUTH_CLIENT_SECRET`, `FKST_NYXID_CLIENT_SECRET`, and
+`FKST_POSTHOG_PROJECT_TOKEN` in the control-plane record. Their non-secret
+client IDs, endpoints, bucket names, and the PostHog host belong in the
+environment ConfigMap patch. ExternalSecret status and Secret key names are safe
+to inspect; Secret values are not.
+
+`FKST_POSTHOG_PROJECT_TOKEN` is the PostHog **write** (capture) token and is
+read only when `FKST_POSTHOG_ENABLED=true`. It never crosses the backend
+boundary: no frontend build argument, response body, or log line carries it, and
+the control plane's own `Debug` output renders it as `<redacted>`. A deployment
+with capture disabled omits the key entirely.
 
 `FKST_ENV_STORE_NAMESPACE` selects the namespace-independent profile store. It
 persists each profile as one AES-256-GCM encrypted Secret whose data keys are

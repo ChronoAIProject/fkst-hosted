@@ -45,6 +45,18 @@ const RETRY_JITTER_PERCENT: u64 = 20;
 /// worker may be finishing exactly as the budget expires.
 const DRAIN_GRACE: Duration = Duration::from_secs(2);
 
+/// The wait before the next attempt on a retryable failure.
+///
+/// A server-supplied `Retry-After` wins over the local backoff — but is capped,
+/// because an hour-long hint would otherwise pin the whole queue behind one
+/// batch. The cap is applied *after* the jitter, so `FKST_POSTHOG_RETRY_MAX_MS`
+/// is a true ceiling on the delay: the ±spread can only ever shorten a wait that
+/// already sits at the maximum, never push it past it.
+fn retry_delay(retry_after: Option<Duration>, backoff: Duration, max: Duration) -> Duration {
+    let base = retry_after.unwrap_or(backoff).min(max);
+    jittered_delay(base, RETRY_JITTER_PERCENT).min(max)
+}
+
 /// Capped exponential backoff parameters for one batch.
 #[derive(Clone, Copy, Debug)]
 struct RetryPolicy {
@@ -64,6 +76,17 @@ enum BatchOutcome {
     Retryable,
     /// Rejected permanently (payload/auth/configuration).
     Permanent,
+}
+
+/// What [`Worker::flush`] left in the buffer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FlushOutcome {
+    /// The buffer is empty: the batch was accepted, or it was abandoned and
+    /// already counted as dropped.
+    Settled,
+    /// The batch is still buffered and belongs to the shutdown residual —
+    /// either shutdown interrupted it or the drain could not deliver it.
+    Retained,
 }
 
 /// The queue-side handle installed on the application state.
@@ -214,13 +237,17 @@ impl Worker {
                         self.note_received();
                         self.accept(event);
                         if self.buffer.len() >= self.batch_size {
-                            self.flush(None).await;
+                            // Steady state: a batch either lands or is dropped
+                            // loudly, so the outcome carries no further work.
+                            let _ = self.flush(None).await;
                         }
                     }
                     // Every sink handle was dropped: nothing more can arrive.
                     None => break,
                 },
-                _ = ticker.tick() => self.flush(None).await,
+                _ = ticker.tick() => {
+                    let _ = self.flush(None).await;
+                }
             }
         }
         let residual = self.final_drain().await;
@@ -268,21 +295,45 @@ impl Worker {
     }
 
     /// Send the buffered batch. `deadline` bounds retries during the drain.
-    async fn flush(&mut self, deadline: Option<Instant>) {
+    ///
+    /// A batch that is still failing retryably is treated differently on the two
+    /// paths, because the two losses mean different things:
+    ///
+    /// - **steady state** (`deadline` is `None`): the retry budget is spent, the
+    ///   process keeps running, and the events are gone — counted as
+    ///   `events_dropped_total{reason="retryable"}`;
+    /// - **during the drain** (`deadline` is `Some`): the events are exactly what
+    ///   the shutdown report exists to surface, so they stay buffered and are
+    ///   counted once by [`Worker::final_drain`] as the shutdown residual.
+    ///   Dropping them here instead would make `DrainReport::remaining` — and
+    ///   `fkst_audit_shutdown_remaining_events` — report a clean shutdown during
+    ///   precisely the PostHog outage they exist to reveal.
+    async fn flush(&mut self, deadline: Option<Instant>) -> FlushOutcome {
         if self.buffer.is_empty() {
-            return;
+            return FlushOutcome::Settled;
         }
         let batch = std::mem::take(&mut self.buffer);
         let count = u64::try_from(batch.len()).unwrap_or(u64::MAX);
-        match self.deliver(&batch, deadline).await {
+        let outcome = match self.deliver(&batch, deadline).await {
             BatchOutcome::Accepted => {
                 self.metrics.record_batch(DeliveryResult::Accepted);
                 tracing::debug!(events = batch.len(), "audit batch accepted by capture");
+                FlushOutcome::Settled
             }
             BatchOutcome::Interrupted => {
                 // Shutdown arrived mid-retry: keep the batch so the bounded
                 // final drain gets one more chance at it.
                 self.buffer = batch;
+                FlushOutcome::Retained
+            }
+            BatchOutcome::Retryable if deadline.is_some() => {
+                self.metrics.record_batch(DeliveryResult::Retryable);
+                tracing::error!(
+                    events = count,
+                    "audit batch still undeliverable inside the drain budget"
+                );
+                self.buffer = batch;
+                FlushOutcome::Retained
             }
             BatchOutcome::Retryable => {
                 self.metrics.record_batch(DeliveryResult::Retryable);
@@ -291,14 +342,21 @@ impl Worker {
                     events = count,
                     "audit batch abandoned after exhausting retries"
                 );
+                FlushOutcome::Settled
             }
             BatchOutcome::Permanent => {
                 self.metrics.record_batch(DeliveryResult::Permanent);
                 self.metrics.record_dropped(DropReason::Permanent, count);
                 tracing::error!(events = count, "audit batch permanently rejected");
+                FlushOutcome::Settled
             }
+        };
+        // Only re-reserve once the buffer is actually empty; a retained batch
+        // already owns its capacity.
+        if self.buffer.is_empty() {
+            self.buffer.reserve(self.batch_size);
         }
-        self.buffer.reserve(self.batch_size);
+        outcome
     }
 
     /// Attempt one batch with capped, jittered exponential backoff.
@@ -325,12 +383,7 @@ impl Worker {
             if attempt >= self.retry.max_retries {
                 return BatchOutcome::Retryable;
             }
-            // A server-supplied `Retry-After` wins, but is capped: an hour-long
-            // hint would otherwise pin the whole queue behind one batch.
-            let wait = jittered_delay(
-                error.retry_after().unwrap_or(backoff).min(self.retry.max),
-                RETRY_JITTER_PERCENT,
-            );
+            let wait = retry_delay(error.retry_after(), backoff, self.retry.max);
             if let Some(deadline) = deadline {
                 if deadline.saturating_duration_since(Instant::now()) <= wait {
                     return BatchOutcome::Retryable;
@@ -349,17 +402,26 @@ impl Worker {
 
     /// Drain what is still queued within the configured budget and report the
     /// residue. Admission is already closed by [`PostHogSink::drain`].
+    ///
+    /// The residue is `buffered + still queued`: a batch the drain could not
+    /// deliver stays in the buffer (see [`Worker::flush`]) and whatever is still
+    /// in the channel is counted through the depth gauge, so `remaining` names
+    /// every admitted event that did not reach capture.
     async fn final_drain(&mut self) -> u64 {
         let deadline = Instant::now()
             .checked_add(self.drain_budget)
             .unwrap_or_else(Instant::now);
-        while Instant::now() < deadline {
+        let mut retained = false;
+        while !retained && Instant::now() < deadline {
             match self.rx.try_recv() {
                 Ok(event) => {
                     self.note_received();
                     self.accept(event);
                     if self.buffer.len() >= self.batch_size {
-                        self.flush(Some(deadline)).await;
+                        // A batch the destination would not take means the next
+                        // one will not fare better: stop pulling work off the
+                        // queue and let the residual accounting report it.
+                        retained = self.flush(Some(deadline)).await == FlushOutcome::Retained;
                     }
                 }
                 // Empty means admission is closed and the queue is exhausted;
@@ -368,15 +430,16 @@ impl Worker {
                 | Err(mpsc::error::TryRecvError::Disconnected) => break,
             }
         }
-        self.flush(Some(deadline)).await;
+        if !retained {
+            self.flush(Some(deadline)).await;
+        }
         let unsent = u64::try_from(self.buffer.len()).unwrap_or(u64::MAX);
         let residual = unsent.saturating_add(self.depth.load(Ordering::Relaxed));
         if residual > 0 {
+            // Counted here and only here, so an event lost at shutdown appears
+            // exactly once across the drop reasons.
             self.metrics.record_dropped(DropReason::Shutdown, residual);
-            tracing::error!(
-                residual,
-                "audit drain deadline elapsed with undelivered events"
-            );
+            tracing::error!(residual, "audit drain finished with undelivered events");
         }
         residual
     }

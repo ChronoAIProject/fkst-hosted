@@ -3,7 +3,9 @@
 
 use super::*;
 use crate::audit::event::{ArgumentsParseStatus, AuditOutcome};
-use crate::audit::test_support::{anonymous_event, human_event, system_event, webhook_event};
+use crate::audit::test_support::{
+    anonymous_event, human_event, service_event, system_event, webhook_event,
+};
 
 /// A generous cap, so size never interferes with a content assertion.
 fn limits() -> EventLimits {
@@ -182,6 +184,31 @@ fn a_system_record_uses_the_system_distinct_id() {
         captured.properties["actor_kind"],
         serde_json::json!("system")
     );
+}
+
+#[test]
+fn a_service_record_uses_the_service_distinct_id() {
+    let captured = service_event()
+        .to_capture_event(limits())
+        .expect("projects");
+    assert_eq!(captured.distinct_id, "fkst:service");
+    // A machine caller must never create a PostHog person profile.
+    assert_eq!(
+        captured.properties["$process_person_profile"],
+        serde_json::json!(false)
+    );
+    assert_eq!(
+        captured.properties["actor_kind"],
+        serde_json::json!("service")
+    );
+    // Its label is displayed but is not an identity: no actor id, and the label
+    // never leaks into the distinct id.
+    assert_eq!(captured.properties["actor_id"], serde_json::Value::Null);
+    assert_eq!(
+        captured.properties["actor_login"],
+        serde_json::json!("fkst-probe")
+    );
+    assert!(!captured.distinct_id.contains("fkst-probe"));
 }
 
 #[test]

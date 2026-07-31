@@ -88,6 +88,9 @@ pub enum AuditOutcome {
     Redirect,
     ClientError,
     ServerError,
+    /// A deadline was exceeded AND the request answered (408 or 504). A timeout
+    /// that never produced any response is [`AuditOutcome::Incomplete`]: a null
+    /// `status_code` belongs to exactly one outcome.
     Timeout,
     /// Rejected before the product handler ran (auth or leader-readiness gate).
     Rejected,
