@@ -77,6 +77,13 @@ impl RuntimeBackendKind {
         }
     }
 
+    /// Parse the closed wire spelling back. `None` for anything else — used by
+    /// the public filter layer, which must REJECT an unrecognized value rather
+    /// than silently widening a query.
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.as_str() == value)
+    }
+
     /// Dense index for the fixed-size metric counter arrays.
     pub(crate) fn index(self) -> usize {
         match self {
@@ -150,6 +157,16 @@ pub enum AttributionSource {
 }
 
 impl AttributionSource {
+    /// Every variant, so a downstream filter or renderer can enumerate the closed
+    /// set without restating it.
+    pub const ALL: [AttributionSource; 5] = [
+        AttributionSource::LaunchMetadata,
+        AttributionSource::BackfilledCurrentTrigger,
+        AttributionSource::PartialMetadata,
+        AttributionSource::UnknownLegacy,
+        AttributionSource::Conflict,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             AttributionSource::LaunchMetadata => "launch_metadata",
@@ -158,6 +175,15 @@ impl AttributionSource {
             AttributionSource::UnknownLegacy => "unknown_legacy",
             AttributionSource::Conflict => "conflict",
         }
+    }
+
+    /// Parse the closed wire spelling back. `None` for anything else — used by
+    /// the public filter layer, which must REJECT an unrecognized value rather
+    /// than silently widening a query.
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|source| source.as_str() == value)
     }
 }
 

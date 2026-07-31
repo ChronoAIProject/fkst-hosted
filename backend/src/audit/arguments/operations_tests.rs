@@ -98,7 +98,10 @@ fn a_sandbox_query_records_its_effective_scope_and_normalized_filters() {
         repo_full_name: filter_repo_full_name("acme", "site"),
         trigger_issue: Some(7),
         status: Some("running".to_string()),
-        limit: 100,
+        backend: Some("kubernetes".to_string()),
+        creator_id: Some(101),
+        creator_login: Some("alice".to_string()),
+        attribution_source: Some("launch_metadata".to_string()),
     };
     assert_within_allowlist(&safe);
     let values = properties(&safe);

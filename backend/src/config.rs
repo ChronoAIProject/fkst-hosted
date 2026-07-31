@@ -20,7 +20,7 @@ use crate::env_config::EnvConfig;
 use crate::error::AppError;
 use crate::leader_config::LeaderElectionConfig;
 use crate::log_config::LogConfig;
-use crate::operations::ActivityQueryConfig;
+use crate::operations::{ActivityQueryConfig, SandboxInventoryConfig};
 use crate::osb_config::OpensandboxConfig;
 use crate::reconcile_config::ReconcileConfig;
 use crate::storage::ChronoStorageConfig;
@@ -469,6 +469,10 @@ pub struct Config {
     /// blast radii and the ingestion token may never stand in for the read key.
     /// See [`crate::operations::config`].
     pub activity_query: ActivityQueryConfig,
+    /// Live sandbox inventory config (`FKST_OPERATIONS_SANDBOX_*`). Always
+    /// present; whether a deployment can answer depends on the runtime backend,
+    /// not on this block. See [`crate::operations::sandbox::config`].
+    pub sandbox: SandboxInventoryConfig,
 }
 
 impl Default for Config {
@@ -494,6 +498,7 @@ impl Default for Config {
             chat: None,
             audit: AuditConfig::default(),
             activity_query: ActivityQueryConfig::default(),
+            sandbox: SandboxInventoryConfig::default(),
         }
     }
 }
@@ -749,6 +754,25 @@ impl Config {
         // at the moment an operator flips it on. Shares the same `vars` snapshot.
         let audit = AuditConfig::from_vars(&vars)?;
         let activity_query = ActivityQueryConfig::from_vars(&vars)?;
+        // Live-inventory ceilings + route budget. Validated unconditionally for
+        // the same reason: a zero ceiling would silently take the operations
+        // sandbox view down at the first request, not at deploy time.
+        let sandbox = SandboxInventoryConfig::from_vars(&vars)?;
+        // The inventory budget is meant to sit BELOW the global request ceiling,
+        // so a slow fleet read fails as an explicit `503` rather than as a bare
+        // request timeout the caller cannot interpret. This is a warning, not a
+        // startup failure: the two knobs are legitimately tuned independently,
+        // and refusing to boot over an ordering an operator may have chosen
+        // deliberately would be a worse outcome than saying so.
+        if sandbox.timeout_ms >= http.request_timeout_secs.saturating_mul(1_000) {
+            tracing::warn!(
+                sandbox_timeout_ms = sandbox.timeout_ms,
+                request_timeout_secs = http.request_timeout_secs,
+                "FKST_OPERATIONS_SANDBOX_TIMEOUT_MS is not below \
+                 FKST_HOSTED_REQUEST_TIMEOUT_SECS; a slow runtime backend will time \
+                 the whole request out instead of answering sandbox_inventory_unavailable"
+            );
+        }
 
         // Deployment-wide access policy (FKST_ACCESS_ALLOWED_USERS +
         // FKST_ACCESS_BLOCKED_USERS + FKST_GLOBAL_ADMINS + FKST_AUTH_MODEL).
@@ -781,6 +805,7 @@ impl Config {
             chat,
             audit,
             activity_query,
+            sandbox,
         })
     }
 

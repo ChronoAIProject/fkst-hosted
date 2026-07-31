@@ -6,12 +6,16 @@
 //! (epic `AUTH-01`). Only selecting the global scope, naming another actor, or
 //! reaching for an unauthorized session is refused.
 //!
-//! [`activity`] serves the historical trace; issue #5675 adds the live sandbox
-//! inventory alongside it.
+//! [`activity`] serves the historical trace and [`sandboxes`] the live runtime
+//! inventory. They are deliberately independent: a PostHog outage must never hide
+//! live sandbox state, and a runtime-backend outage must never falsify history.
 
 pub mod activity;
 pub mod dto;
 pub mod query;
+pub mod sandbox_dto;
+pub mod sandbox_query;
+pub mod sandboxes;
 
 use utoipa_axum::router::OpenApiRouter;
 
@@ -19,5 +23,5 @@ use crate::state::AppState;
 
 /// The operations router, merged into the `/api/v1` subtree.
 pub fn router() -> OpenApiRouter<AppState> {
-    activity::router()
+    activity::router().merge(sandboxes::router())
 }

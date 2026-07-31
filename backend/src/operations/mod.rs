@@ -45,6 +45,10 @@ pub mod metrics;
 pub mod posthog;
 pub mod record;
 pub mod rows;
+/// The row-authorized live sandbox inventory (issue #5675). Independent of the
+/// activity query by design: a PostHog outage must never hide live runtime state,
+/// and a runtime outage must never falsify history.
+pub mod sandbox;
 pub mod service;
 pub mod source;
 
@@ -62,6 +66,7 @@ pub use metrics::{ActivityMetrics, ActivityMetricsSnapshot, QueryResult, Rejecti
 pub use record::{
     ActivityRecord, ActivitySourceKind, ApiRequestRecord, DeliveryState, SandboxLifecycleRecord,
 };
+pub use sandbox::{SandboxInventoryConfig, SandboxMetrics, SandboxMetricsSnapshot};
 pub use service::{run, ActivityQueryRequest};
 pub use source::{ActivitySource, SourceError, SourcePage, SourceQuery};
 
@@ -87,6 +92,12 @@ pub struct OperationsState {
     pub concurrency: ActivityConcurrency,
     /// Bounded, closed-label query telemetry rendered by `/metrics`.
     pub metrics: ActivityMetrics,
+    /// Bounded, closed-label live-inventory telemetry rendered by `/metrics`
+    /// (issue #5675). It sits beside the activity counters rather than in a
+    /// separate state field for the same reason they do: every operations route
+    /// needs the whole block, and one bundle keeps the application state from
+    /// growing a field per counter family.
+    pub sandbox_metrics: SandboxMetrics,
 }
 
 impl OperationsState {

@@ -57,9 +57,10 @@ fn the_product_surface_is_audited_including_webhook_chat_and_oauth() {
 
 #[test]
 fn an_unknown_operation_has_no_policy() {
-    // `operations_list_sandboxes` is still RESERVED: its DTO is reviewed, but its
-    // route does not exist, so the live table must not name it.
-    assert_eq!(policy_for("operations_list_sandboxes"), None);
+    // There is deliberately no default: an id the table does not name has NO
+    // policy, which is what makes the catalog's build-time guard fire instead of
+    // silently waving a new endpoint through.
+    assert_eq!(policy_for("operations_list_nothing"), None);
     assert_eq!(policy_for(""), None);
 }
 
@@ -155,17 +156,13 @@ fn the_default_status_distinguishes_unavailable_from_not_applicable() {
     );
 }
 
-/// The reserved entries are exactly the operations whose ROUTES do not exist yet,
-/// and they stay OUT of the live table until they do. `operations_list_activity`
-/// graduated with its route (issue #5672); `operations_list_sandboxes` follows in
-/// #5675.
+/// A reserved entry names an operation whose ROUTE does not exist yet, so it must
+/// never ALSO be live — that would be two policies for one operation. Both
+/// milestone #22 operations have now graduated (issue #5672, then #5675), so the
+/// reserved table is empty and the invariant holds vacuously; the loop stays so a
+/// future reservation is checked the moment it is declared.
 #[test]
-fn the_reserved_operations_are_declared_but_not_yet_live() {
-    let reserved: Vec<&str> = RESERVED_ARGUMENT_POLICIES
-        .iter()
-        .map(|operation| operation.operation_id)
-        .collect();
-    assert_eq!(reserved, vec!["operations_list_sandboxes"]);
+fn no_reserved_operation_is_also_live() {
     for operation in RESERVED_ARGUMENT_POLICIES {
         assert!(operation.policy.is_audited());
         assert!(operation.arguments.spec().is_some());
@@ -174,6 +171,24 @@ fn the_reserved_operations_are_declared_but_not_yet_live() {
             None,
             "{} must not be live until its route exists",
             operation.operation_id
+        );
+    }
+}
+
+/// The graduated operations are in the LIVE table with their reviewed DTOs — the
+/// other half of the reservation contract.
+#[test]
+fn both_operations_surfaces_are_live_with_their_reviewed_dtos() {
+    for (operation_id, dto) in [
+        ("operations_list_activity", "SafeOperationsListActivity"),
+        ("operations_list_sandboxes", "SafeOperationsListSandboxes"),
+    ] {
+        let operation = operation_for(operation_id).expect("the operation is live");
+        assert!(operation.policy.is_audited());
+        assert_eq!(
+            operation.arguments.spec().map(|spec| spec.dto),
+            Some(dto),
+            "{operation_id} must keep the DTO its argument boundary was reviewed as"
         );
     }
 }

@@ -289,7 +289,15 @@ fn the_normative_webhook_chat_and_operations_field_sets_match_the_issue_catalog(
             "repo_full_name",
             "trigger_issue",
             "status",
-            "limit"
+            "backend",
+            "creator_id",
+            "creator_login",
+            // Every filter the endpoint accepts is recorded, because every one of
+            // them NARROWS an already-authorized row set: a record naming only
+            // some of them would describe a wider query than the one that ran.
+            // There is no `limit` — the endpoint returns the complete authorized
+            // snapshot or an explicit capacity failure.
+            "attribution_source"
         ]
     );
 }

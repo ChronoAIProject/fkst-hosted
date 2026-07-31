@@ -138,11 +138,12 @@ async fn every_documented_operation_has_exactly_one_explicit_policy() {
 #[tokio::test]
 async fn the_audited_surface_is_the_expected_size_and_shape() {
     let operations = live_operations().await;
-    // 29 before milestone #22's scoped activity query (issue #5672) added
-    // `operations_list_activity`; #5675 adds `operations_list_sandboxes` next.
+    // 29 before milestone #22: the scoped activity query (issue #5672) added
+    // `operations_list_activity` and the live sandbox inventory (#5675) added
+    // `operations_list_sandboxes`.
     assert_eq!(
         operations.len(),
-        30,
+        31,
         "the full surface changed; update this baseline deliberately: {:?}",
         operations.keys().collect::<Vec<_>>()
     );

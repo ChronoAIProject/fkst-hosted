@@ -13,7 +13,7 @@
 
 use crate::audit::lifecycle::LifecycleAction;
 use crate::audit::AuditMetricsSnapshot;
-use crate::operations::ActivityMetricsSnapshot;
+use crate::operations::{ActivityMetricsSnapshot, SandboxMetricsSnapshot};
 use crate::runtime_identity::metrics::{
     IdentityOperationResult, LifecycleEmitResult, RuntimeTelemetrySnapshot,
 };
@@ -232,6 +232,58 @@ pub(super) fn render_activity_metrics(activity: &ActivityMetricsSnapshot) -> Str
     for (reason, count) in activity.rejections() {
         body.push_str(&format!(
             "fkst_operations_activity_scope_rejections_total{{reason=\"{reason}\"}} {count}\n"
+        ));
+    }
+    body
+}
+
+/// Render the live sandbox-inventory series.
+///
+/// Every label is a closed enum: the three backend states (including the
+/// deployment that configures none), the two scopes, the documented result set,
+/// and the bounded rejection reasons. The item gauge is the size of the last
+/// AUTHORIZED result aggregated by scope — never a per-requester series, and
+/// never a fleet total, because a number derived from rows a caller cannot see is
+/// itself a hidden-row signal (epic `AUTH-06` / `OPS-04`).
+pub(super) fn render_sandbox_metrics(sandbox: &SandboxMetricsSnapshot) -> String {
+    let mut body = String::from(
+        "# HELP fkst_operations_sandbox_inventory_requests_total Live sandbox inventory requests by bounded backend, scope, and result.\n\
+         # TYPE fkst_operations_sandbox_inventory_requests_total counter\n",
+    );
+    for (backend, scope, result, count) in sandbox.requests() {
+        body.push_str(&format!(
+            "fkst_operations_sandbox_inventory_requests_total{{backend=\"{backend}\",scope=\"{scope}\",result=\"{result}\"}} {count}\n"
+        ));
+    }
+    body.push_str(
+        "# HELP fkst_operations_sandbox_inventory_duration_seconds Time spent serving a live sandbox inventory request.\n\
+         # TYPE fkst_operations_sandbox_inventory_duration_seconds summary\n",
+    );
+    for (backend, result, sum_millis, count) in sandbox.durations() {
+        // Rendered in SECONDS (the Prometheus convention) from millisecond
+        // counters; three decimals is the resolution actually measured.
+        body.push_str(&format!(
+            "fkst_operations_sandbox_inventory_duration_seconds_sum{{backend=\"{backend}\",result=\"{result}\"}} {:.3}\n\
+             fkst_operations_sandbox_inventory_duration_seconds_count{{backend=\"{backend}\",result=\"{result}\"}} {count}\n",
+            sum_millis as f64 / 1000.0
+        ));
+    }
+    body.push_str(
+        "# HELP fkst_operations_sandbox_inventory_items Size of the last authorized inventory result, by bounded backend and scope.\n\
+         # TYPE fkst_operations_sandbox_inventory_items gauge\n",
+    );
+    for (backend, scope, items) in sandbox.items() {
+        body.push_str(&format!(
+            "fkst_operations_sandbox_inventory_items{{backend=\"{backend}\",scope=\"{scope}\"}} {items}\n"
+        ));
+    }
+    body.push_str(
+        "# HELP fkst_operations_sandbox_scope_rejections_total Inventory requests refused before the runtime backend was touched, by bounded reason.\n\
+         # TYPE fkst_operations_sandbox_scope_rejections_total counter\n",
+    );
+    for (reason, count) in sandbox.rejections() {
+        body.push_str(&format!(
+            "fkst_operations_sandbox_scope_rejections_total{{reason=\"{reason}\"}} {count}\n"
         ));
     }
     body

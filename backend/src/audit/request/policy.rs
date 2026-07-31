@@ -302,23 +302,26 @@ pub const OPERATION_POLICIES: &[AuditOperation] = &[
         "SafeOperationsListActivity",
         arguments::OPERATIONS_LIST_ACTIVITY_FIELDS,
     ),
+    audited(
+        "operations_list_sandboxes",
+        "SafeOperationsListSandboxes",
+        arguments::OPERATIONS_LIST_SANDBOXES_FIELDS,
+    ),
 ];
 
 /// Argument policies for operations whose ROUTES do not exist yet.
 ///
-/// `operations_list_activity` graduated into [`OPERATION_POLICIES`] with its
-/// route (issue #5672); `operations_list_sandboxes` follows in #5675. Its safe
-/// DTO (see [`crate::audit::arguments::operations`]) is reviewed and tested here
-/// so that issue attaches an existing boundary instead of inventing one, and it
-/// moves its entry into the live table in the same pull request as its route.
-/// Keeping it OUT until then is deliberate: the coverage guard requires every
-/// table entry to match a live operation, so a reserved id parked in the main
-/// table would look like an operation that had silently disappeared.
-pub const RESERVED_ARGUMENT_POLICIES: &[AuditOperation] = &[audited(
-    "operations_list_sandboxes",
-    "SafeOperationsListSandboxes",
-    arguments::OPERATIONS_LIST_SANDBOXES_FIELDS,
-)];
+/// Empty today: both milestone #22 operations have graduated into
+/// [`OPERATION_POLICIES`] with their routes — `operations_list_activity` with
+/// issue #5672 and `operations_list_sandboxes` with #5675.
+///
+/// The mechanism is kept because it is the ONLY way to review an argument
+/// boundary ahead of its handler: the coverage guard requires every entry in the
+/// live table to match a live operation, so an id parked there early would look
+/// exactly like an operation that had silently disappeared. A future endpoint
+/// whose DTO lands before its route declares it here and moves it across in the
+/// same pull request as its handler.
+pub const RESERVED_ARGUMENT_POLICIES: &[AuditOperation] = &[];
 
 /// Routes that are served but carry no OpenAPI operation, with their policy.
 ///

@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::audit::lifecycle::LifecycleAction;
-use crate::operations::ActivityMetricsSnapshot;
+use crate::operations::{ActivityMetricsSnapshot, SandboxMetricsSnapshot};
 use crate::runtime_identity::metrics::{IdentityOperationResult, LifecycleEmitResult};
 use crate::runtime_identity::RuntimeBackendKind;
 use crate::session_access::{ScopeMetrics, SessionAccessRegistry};
@@ -26,6 +26,7 @@ fn renders_liveness_and_bounded_recovery_metrics() {
         &ScopeMetrics::new().snapshot(),
         &RuntimeTelemetrySnapshot::default(),
         &ActivityMetricsSnapshot::default(),
+        &SandboxMetricsSnapshot::default(),
     );
     assert!(body.contains("# TYPE fkst_up gauge"));
     assert!(body.contains("\nfkst_up 1\n") || body.starts_with("fkst_up 1\n"));
@@ -58,6 +59,7 @@ fn renders_leader_identity_transitions_and_failure_metrics() {
         &ScopeMetrics::new().snapshot(),
         &RuntimeTelemetrySnapshot::default(),
         &ActivityMetricsSnapshot::default(),
+        &SandboxMetricsSnapshot::default(),
     );
     assert!(body.contains("fkst_leader 1"));
     assert!(body.contains("fkst_leader_ready 1"));
@@ -94,6 +96,7 @@ fn renders_every_audit_series_with_closed_enum_labels() {
         &ScopeMetrics::new().snapshot(),
         &RuntimeTelemetrySnapshot::default(),
         &ActivityMetricsSnapshot::default(),
+        &SandboxMetricsSnapshot::default(),
     );
     assert!(body.contains("fkst_audit_queue_depth 4"), "{body}");
     assert!(body.contains("fkst_audit_events_enqueued_total{result=\"accepted\"} 1"));
@@ -151,6 +154,7 @@ fn renders_the_runtime_attribution_and_lifecycle_series() {
         &ScopeMetrics::new().snapshot(),
         &telemetry.snapshot(),
         &ActivityMetricsSnapshot::default(),
+        &SandboxMetricsSnapshot::default(),
     );
     assert!(body.contains(
         "fkst_runtime_identity_operations_total{backend=\"kubernetes\",result=\"backfilled\"} 1"
@@ -210,6 +214,7 @@ fn renders_the_session_access_projection_and_scope_series() {
         &scope.snapshot(),
         &RuntimeTelemetrySnapshot::default(),
         &ActivityMetricsSnapshot::default(),
+        &SandboxMetricsSnapshot::default(),
     );
     assert!(
         body.contains("fkst_session_access_registry_sessions 0"),
@@ -258,6 +263,7 @@ fn renders_the_session_access_projection_and_scope_series() {
         &scope.snapshot(),
         &RuntimeTelemetrySnapshot::default(),
         &ActivityMetricsSnapshot::default(),
+        &SandboxMetricsSnapshot::default(),
     );
     assert!(
         body.contains("fkst_session_access_registry_sessions 1"),

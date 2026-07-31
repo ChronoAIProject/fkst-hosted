@@ -191,7 +191,12 @@ pub const OPERATIONS_LIST_ACTIVITY_FIELDS: &[&str] = &[
     "outcome",
 ];
 
-/// Reserved for `GET /api/v1/operations/sandboxes` (issue #5675).
+/// `GET /api/v1/operations/sandboxes` (issue #5675).
+///
+/// Exactly the endpoint's normalized filters plus the scope decision. The
+/// endpoint has no page size — it returns the complete authorized snapshot or an
+/// explicit capacity failure — so there is no `limit` to record, and the
+/// configured ceilings are deployment configuration rather than request input.
 pub const OPERATIONS_LIST_SANDBOXES_FIELDS: &[&str] = &[
     "scope",
     "requested_scope",
@@ -199,7 +204,10 @@ pub const OPERATIONS_LIST_SANDBOXES_FIELDS: &[&str] = &[
     "repo_full_name",
     "trigger_issue",
     "status",
-    "limit",
+    "backend",
+    "creator_id",
+    "creator_login",
+    "attribution_source",
 ];
 
 #[cfg(test)]

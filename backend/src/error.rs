@@ -71,6 +71,29 @@ pub enum AppError {
     /// token is never used in its place.
     #[error("unavailable: {0}")]
     AuditQueryNotConfigured(String),
+    /// An exact `session_id` on the sandbox inventory is either unknown or not
+    /// visible to the caller. Renders as 404 with ONE stable code for both, so an
+    /// exact probe can never become a session-existence oracle (epic `SBOX-06`).
+    #[error("not found: {0}")]
+    SandboxNotFound(String),
+    /// The deployment configures no runtime backend, so there is no live fleet to
+    /// read. Renders as 503 with its own stable code: "this deployment cannot
+    /// answer" and "the backend failed" call for completely different operator
+    /// responses.
+    #[error("unavailable: {0}")]
+    SandboxInventoryDisabled(String),
+    /// The runtime backend failed or exceeded the route's bounded budget. Renders
+    /// as 503 with its own stable code and NEVER a raw backend message, status, or
+    /// URL.
+    #[error("unavailable: {0}")]
+    SandboxInventoryUnavailable(String),
+    /// A live-inventory read could not be answered COMPLETELY within a configured
+    /// ceiling — the backend fleet exceeded the source ceiling, its page walk was
+    /// clipped, or the authorized result exceeded the public result ceiling.
+    /// Renders as 503 with its own stable code and deliberately carries no count:
+    /// a number here would itself be a hidden-row signal (epic `AUTH-06`).
+    #[error("unavailable: {0}")]
+    SandboxInventoryTooLarge(String),
     /// The request cannot be processed due to a semantic issue (e.g. a
     /// dependent resource is missing or in an invalid state). Renders as 422.
     #[error("unprocessable: {0}")]
@@ -95,10 +118,12 @@ pub enum AppError {
 /// Public + `ToSchema` so the generated OpenAPI spec can reference it as the
 /// body of every documented 4xx/5xx response. `error` is one of the fixed code
 /// strings (`invalid_request`, `invalid_activity_cursor`, `not_found`,
-/// `activity_session_not_found`, `conflict`, `unauthorized`, `forbidden`,
-/// `operations_scope_forbidden`, `unprocessable`, `rate_limited`,
-/// `upstream_error`, `unavailable`, `session_visibility_unavailable`,
-/// `audit_query_not_configured`, `internal`); `message` is a client-safe human
+/// `activity_session_not_found`, `sandbox_not_found`, `conflict`,
+/// `unauthorized`, `forbidden`, `operations_scope_forbidden`, `unprocessable`,
+/// `rate_limited`, `upstream_error`, `unavailable`,
+/// `session_visibility_unavailable`, `audit_query_not_configured`,
+/// `sandbox_inventory_disabled`, `sandbox_inventory_unavailable`,
+/// `sandbox_inventory_too_large`, `internal`); `message` is a client-safe human
 /// description.
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct ErrorEnvelope {
@@ -242,6 +267,34 @@ impl IntoResponse for AppError {
             AppError::AuditQueryNotConfigured(msg) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "audit_query_not_configured",
+                msg.clone(),
+                false,
+                None,
+            ),
+            AppError::SandboxNotFound(msg) => (
+                StatusCode::NOT_FOUND,
+                "sandbox_not_found",
+                msg.clone(),
+                false,
+                None,
+            ),
+            AppError::SandboxInventoryDisabled(msg) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "sandbox_inventory_disabled",
+                msg.clone(),
+                false,
+                None,
+            ),
+            AppError::SandboxInventoryUnavailable(msg) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "sandbox_inventory_unavailable",
+                msg.clone(),
+                false,
+                None,
+            ),
+            AppError::SandboxInventoryTooLarge(msg) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "sandbox_inventory_too_large",
                 msg.clone(),
                 false,
                 None,

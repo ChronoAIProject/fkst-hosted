@@ -17,7 +17,9 @@ use crate::runtime_identity::{
     RuntimeBackendKind, RuntimeIdentityMetadata, RuntimeIdentityOutcome, RuntimeIncarnation,
 };
 
-use super::inventory::{RuntimeInventoryItem, RuntimeInventorySnapshot, RuntimeLifetimePolicy};
+use super::inventory::{
+    BoundedInventoryWarning, RuntimeInventoryItem, RuntimeInventorySnapshot, RuntimeLifetimePolicy,
+};
 use super::{
     BackendError, DeliveryOutcome, EnsureOutcome, RuntimeStatus, SessionBackend, SessionHandle,
     ValidationOutcome, ValidationRequest,
@@ -65,6 +67,17 @@ pub(crate) struct FakeSessionBackend {
     stop_error: bool,
     /// The items `list_runtime_inventory` reports.
     inventory: Vec<RuntimeInventoryItem>,
+    /// The snapshot-level warnings `list_runtime_inventory` reports alongside
+    /// them.
+    inventory_warnings: Vec<BoundedInventoryWarning>,
+    /// A scripted `list_runtime_inventory` failure. `Some(None)` is a generic
+    /// backend error; `Some(Some(limit))` is the oversize refusal.
+    inventory_failure: Option<Option<usize>>,
+    /// How long `list_runtime_inventory` sleeps before answering, so a caller's
+    /// bounded budget can actually be exercised.
+    inventory_delay: Option<std::time::Duration>,
+    /// The instant the snapshot reports. `None` uses the wall clock.
+    inventory_observed_at: Option<k8s_openapi::chrono::DateTime<k8s_openapi::chrono::Utc>>,
     /// Every policy `list_runtime_inventory` was called with, so a caller can be
     /// held to "exactly one inventory read per request".
     pub(crate) inventory_calls: Mutex<Vec<RuntimeLifetimePolicy>>,
@@ -169,12 +182,46 @@ impl FakeSessionBackend {
     }
 
     /// Script the fleet `list_runtime_inventory` reports.
-    #[allow(
-        dead_code,
-        reason = "consumed by the scoped sandbox API in issue #5675"
-    )]
     pub(crate) fn with_inventory(mut self, items: Vec<RuntimeInventoryItem>) -> Self {
         self.inventory = items;
+        self
+    }
+
+    /// Script the snapshot-level warnings reported alongside the fleet.
+    pub(crate) fn with_inventory_warnings(
+        mut self,
+        warnings: Vec<BoundedInventoryWarning>,
+    ) -> Self {
+        self.inventory_warnings = warnings;
+        self
+    }
+
+    /// Make `list_runtime_inventory` fail with a generic backend error.
+    pub(crate) fn with_inventory_error(mut self) -> Self {
+        self.inventory_failure = Some(None);
+        self
+    }
+
+    /// Make `list_runtime_inventory` refuse as oversize against `limit`.
+    pub(crate) fn with_inventory_too_large(mut self, limit: usize) -> Self {
+        self.inventory_failure = Some(Some(limit));
+        self
+    }
+
+    /// Make `list_runtime_inventory` take `delay` to answer, so a caller's
+    /// bounded budget is exercised rather than assumed.
+    pub(crate) fn with_inventory_delay(mut self, delay: std::time::Duration) -> Self {
+        self.inventory_delay = Some(delay);
+        self
+    }
+
+    /// Pin the instant the snapshot reports, so a caller can be held to
+    /// returning the backend's own `observed_at` verbatim.
+    pub(crate) fn with_inventory_observed_at(
+        mut self,
+        observed_at: k8s_openapi::chrono::DateTime<k8s_openapi::chrono::Utc>,
+    ) -> Self {
+        self.inventory_observed_at = Some(observed_at);
         self
     }
 
@@ -310,11 +357,25 @@ impl SessionBackend for FakeSessionBackend {
         policy: &RuntimeLifetimePolicy,
     ) -> Result<RuntimeInventorySnapshot, BackendError> {
         self.inventory_calls.lock().unwrap().push(*policy);
+        if let Some(delay) = self.inventory_delay {
+            tokio::time::sleep(delay).await;
+        }
+        match self.inventory_failure {
+            Some(Some(limit)) => return Err(BackendError::InventoryTooLarge { limit }),
+            Some(None) => {
+                return Err(BackendError::Other(anyhow::anyhow!(
+                    "scripted inventory failure"
+                )))
+            }
+            None => {}
+        }
         Ok(RuntimeInventorySnapshot {
-            observed_at: k8s_openapi::chrono::Utc::now(),
+            observed_at: self
+                .inventory_observed_at
+                .unwrap_or_else(k8s_openapi::chrono::Utc::now),
             backend: RuntimeBackendKind::Kubernetes,
             items: self.inventory.clone(),
-            warnings: Vec::new(),
+            warnings: self.inventory_warnings.clone(),
         })
     }
 

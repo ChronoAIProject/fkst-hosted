@@ -1,19 +1,12 @@
-//! RESERVED safe arguments for the `/api/v1/operations/*` surface.
+//! Safe arguments for the `/api/v1/operations/*` surface.
 //!
-//! Neither route exists yet: issue #5672 adds `operations_list_activity` and
-//! #5675 adds `operations_list_sandboxes`. Their DTOs live here now so those
-//! issues attach an already-reviewed argument boundary to their routes rather
-//! than inventing one under delivery pressure — the DTO, its allowlist, and its
-//! unit tests land with the contract, not with the handler.
-//!
-//! Attaching one is two lines: add the operation to
-//! [`crate::audit::request::policy::OPERATION_POLICIES`] with the matching
-//! [`SafeArgumentSpec`], and call [`super::record`] from the handler once the
-//! scope decision is made. Until then the ids are deliberately absent from that
-//! table, so the coverage guard keeps reporting them as undocumented if a route
-//! ever appears without its policy.
-//!
-//! [`SafeArgumentSpec`]: super::SafeArgumentSpec
+//! Both DTOs were written and reviewed with the audit contract (#5671), ahead of
+//! the routes that record them, so each route attached an already-reviewed
+//! argument boundary instead of inventing one under delivery pressure. Both are
+//! now live: `operations_list_activity` graduated with issue #5672 and
+//! `operations_list_sandboxes` with #5675, each moving its
+//! [`crate::audit::request::policy::OPERATION_POLICIES`] entry in the same pull
+//! request as its handler.
 //!
 //! ## The two rules these DTOs already encode
 //!
@@ -134,6 +127,13 @@ impl BoundedAuditArguments for SafeOperationsListActivity {
 }
 
 /// `operations_list_sandboxes` — the scoped live runtime inventory.
+///
+/// Every field is either the scope decision or ONE normalized filter. There is no
+/// page size to record: the endpoint returns the complete authorized snapshot or
+/// an explicit capacity failure, and its ceilings are deployment configuration
+/// rather than request input. Nothing here can carry a hidden-row signal — the
+/// filters are the caller's own stated narrowing, recorded only in the validated
+/// form the query actually ran with.
 #[derive(Clone, Debug, Serialize)]
 pub struct SafeOperationsListSandboxes {
     pub scope: SandboxScope,
@@ -148,7 +148,20 @@ pub struct SafeOperationsListSandboxes {
     /// A normalized runtime-status filter (the inventory's own closed set).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
-    pub limit: u32,
+    /// A runtime-backend filter (`kubernetes` / `opensandbox`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+    /// An exact creator id. Recorded because it is a NARROWING filter applied
+    /// after authorization — it can never widen a caller's authorized row set,
+    /// so it names a query, not a probe.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub creator_id: Option<i64>,
+    /// A creator login snapshot, in its validated form.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub creator_login: Option<String>,
+    /// An attribution-source filter (#5673's closed set).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attribution_source: Option<String>,
 }
 
 impl BoundedAuditArguments for SafeOperationsListSandboxes {
