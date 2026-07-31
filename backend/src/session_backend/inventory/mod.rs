@@ -154,6 +154,12 @@ pub struct RuntimeInventorySnapshot {
     pub items: Vec<RuntimeInventoryItem>,
     /// Bounded, closed-code notes about data that was missing, malformed, or
     /// clock-skewed. Never free text, never a backend error message.
+    ///
+    /// This is the SNAPSHOT-scope, operator-facing list: it is capped, so it is
+    /// authoritative only for warnings that concern no single runtime (a clipped
+    /// page walk, its own truncation marker). Per-row codes are authoritative on
+    /// [`RuntimeInventoryItem::warnings`] instead — see that field for why the
+    /// distinction is load-bearing rather than cosmetic.
     pub warnings: Vec<BoundedInventoryWarning>,
 }
 
@@ -234,6 +240,19 @@ pub struct RuntimeInventoryItem {
     pub restart_count: Option<u32>,
     pub last_transition_at: Option<DateTime<Utc>>,
     pub deletion_timestamp: Option<DateTime<Utc>>,
+
+    /// THIS row's own data-quality codes, in emission order.
+    ///
+    /// The same codes also reach [`RuntimeInventorySnapshot::warnings`], but that
+    /// list is a bounded, shared, FIFO operator diagnostic: once it is full every
+    /// further warning folds into one marker, so which rows are represented there
+    /// depends on the fleet's list order and on runtimes an eventual caller may
+    /// not be allowed to see. Carrying the codes on the row removes that coupling
+    /// — a row's warnings are a function of the row alone — which is what lets
+    /// #5675 promise that a hidden runtime cannot change an authorized caller's
+    /// response. Bounded by construction: [`build_item`] emits at most one code
+    /// per closed variant per runtime.
+    pub warnings: Vec<InventoryWarningCode>,
 }
 
 #[cfg(test)]

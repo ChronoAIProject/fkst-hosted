@@ -6,14 +6,18 @@
 //! half lives in `service_capacity_tests.rs`.
 
 use super::super::test_support::{
-    ids, instant, lifetime, mixed_fleet, run_for, scope, viewer, with_status, Fixture, ALICE, ERIN,
-    GRACE, MINE, THEIRS,
+    ids, instant, lifetime, mixed_fleet, run_for, scope, viewer, with_status, with_warnings,
+    Fixture, ALICE, ERIN, GRACE, MINE, THEIRS,
 };
 use super::*;
 use crate::session_backend::inventory::{
-    BoundedInventoryWarning, InventoryWarningCode, RuntimeInventoryStatus,
+    BoundedInventoryWarning, InventoryWarningCode, RuntimeInventoryStatus, DEFAULT_MAX_WARNINGS,
 };
 use crate::session_backend::test_support::FakeSessionBackend;
+
+/// More warning-emitting hidden rows than one snapshot's shared warning budget
+/// can hold, so the isolation claim is stressed rather than merely stated.
+const HIDDEN_OVER_THE_WARNING_CEILING: usize = DEFAULT_MAX_WARNINGS + 50;
 
 #[tokio::test]
 async fn a_regular_caller_receives_only_their_authorized_rows_in_the_documented_order() {
@@ -60,14 +64,20 @@ async fn mutating_the_hidden_rows_changes_nothing_about_an_authorized_result() {
     .await
     .expect("the read succeeds");
 
-    // A completely different hidden population: more rows, different states,
-    // different ids, different order, and warnings of their own.
-    let mut mutated: Vec<RuntimeInventoryItem> = (0..40)
-        .map(|index| {
-            with_status(
-                &format!("aaa-hidden-{index:02}"),
+    // A completely different hidden population: more rows than the snapshot's
+    // warning ceiling admits, different states, different ids, different order,
+    // and a warning on every one of them. The count is deliberately ABOVE
+    // `DEFAULT_MAX_WARNINGS` — a shared, order-dependent warning budget would be
+    // exhausted by these rows and would silently strip Alice's own row of its
+    // codes, which is exactly the coupling this assertion exists to forbid.
+    let mut mutated: Vec<RuntimeInventoryItem> = (0..HIDDEN_OVER_THE_WARNING_CEILING)
+        .map(|index| RuntimeInventoryItem {
+            status: RuntimeInventoryStatus::Pending,
+            raw_status: RuntimeInventoryStatus::Pending.as_str().to_string(),
+            ..with_warnings(
+                &format!("aaa-hidden-{index:03}"),
                 Some(THEIRS),
-                RuntimeInventoryStatus::Pending,
+                vec![InventoryWarningCode::MalformedIdentity],
             )
         })
         .collect();
@@ -81,13 +91,11 @@ async fn mutating_the_hidden_rows_changes_nothing_about_an_authorized_result() {
         Some(MINE),
         RuntimeInventoryStatus::Failed,
     ));
-    let warnings: Vec<BoundedInventoryWarning> = (0..40)
-        .map(|index| BoundedInventoryWarning {
-            code: InventoryWarningCode::MalformedIdentity,
-            runtime_id: Some(format!("aaa-hidden-{index:02}")),
-            session_id: Some(THEIRS.to_string()),
-        })
-        .collect();
+    // What a real adapter would report once that many rows had warned: a clipped
+    // snapshot-scope diagnostic. It must not reach Alice in any form.
+    let warnings = vec![BoundedInventoryWarning::snapshot(
+        InventoryWarningCode::WarningsTruncated,
+    )];
 
     let after = run_for(
         ALICE,
@@ -204,7 +212,8 @@ async fn the_backends_own_observed_at_is_returned_verbatim() {
     assert_eq!(inventory.observed_at, observed_at);
 }
 
-/// Warnings reach a caller only when they name a row that caller is receiving.
+/// Warnings reach a caller only when they belong to a row that caller is
+/// receiving.
 #[tokio::test]
 async fn a_warning_about_a_hidden_row_never_reaches_a_regular_caller() {
     let inventory = run_for(
@@ -212,20 +221,21 @@ async fn a_warning_about_a_hidden_row_never_reaches_a_regular_caller() {
         false,
         SandboxFilters::default(),
         FakeSessionBackend::default()
-            .with_inventory(mixed_fleet())
-            .with_inventory_warnings(vec![
-                BoundedInventoryWarning {
-                    code: InventoryWarningCode::AttributionConflict,
-                    runtime_id: Some("mine-running".to_string()),
-                    session_id: Some(MINE.to_string()),
-                },
-                BoundedInventoryWarning {
-                    code: InventoryWarningCode::MalformedIdentity,
-                    runtime_id: Some("hidden-failed".to_string()),
-                    session_id: Some(THEIRS.to_string()),
-                },
-                BoundedInventoryWarning::snapshot(InventoryWarningCode::WarningsTruncated),
-            ]),
+            .with_inventory(vec![
+                with_warnings(
+                    "mine-running",
+                    Some(MINE),
+                    vec![InventoryWarningCode::AttributionConflict],
+                ),
+                with_warnings(
+                    "hidden-failed",
+                    Some(THEIRS),
+                    vec![InventoryWarningCode::MalformedIdentity],
+                ),
+            ])
+            .with_inventory_warnings(vec![BoundedInventoryWarning::snapshot(
+                InventoryWarningCode::WarningsTruncated,
+            )]),
     )
     .await
     .expect("the read succeeds");
@@ -244,6 +254,52 @@ async fn a_warning_about_a_hidden_row_never_reaches_a_regular_caller() {
         vec![SandboxWarningCode::AttributionConflict],
         "the response summarizes the returned rows; a snapshot-scope code would \
          let a hidden runtime change a regular caller's answer"
+    );
+}
+
+/// The row-level half of the isolation claim: a returned row's codes are the
+/// ROW's own, so a hidden population large enough to exhaust the snapshot's
+/// shared warning budget cannot strip them — and the clipping marker that budget
+/// emits still never reaches a regular caller.
+#[tokio::test]
+async fn a_hidden_population_that_exhausts_the_warning_budget_keeps_a_visible_rows_codes() {
+    let mut fleet: Vec<RuntimeInventoryItem> = (0..HIDDEN_OVER_THE_WARNING_CEILING)
+        .map(|index| {
+            with_warnings(
+                &format!("aaa-hidden-{index:03}"),
+                Some(THEIRS),
+                vec![InventoryWarningCode::MalformedIdentity],
+            )
+        })
+        .collect();
+    fleet.push(with_warnings(
+        "mine-running",
+        Some(MINE),
+        vec![InventoryWarningCode::ClockSkew],
+    ));
+
+    let inventory = run_for(
+        ALICE,
+        false,
+        SandboxFilters::default(),
+        FakeSessionBackend::default()
+            .with_inventory(fleet)
+            .with_inventory_warnings(vec![BoundedInventoryWarning::snapshot(
+                InventoryWarningCode::WarningsTruncated,
+            )]),
+    )
+    .await
+    .expect("the read succeeds");
+
+    assert_eq!(ids(&inventory), vec!["mine-running"]);
+    assert_eq!(
+        inventory.items[0].warning_codes,
+        vec![SandboxWarningCode::ClockSkew]
+    );
+    assert_eq!(
+        inventory.warning_codes,
+        vec![SandboxWarningCode::ClockSkew],
+        "a clipped fleet-wide diagnostic is deployment health, not this caller's"
     );
 }
 

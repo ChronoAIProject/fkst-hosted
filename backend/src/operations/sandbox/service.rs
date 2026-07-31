@@ -10,7 +10,7 @@
 //! 2. incomplete source read?        -> 503 sandbox_inventory_too_large
 //! 3. authorize EVERY row            -> drop the hidden ones
 //! 4. apply the user filters         -> to the authorized survivors only
-//! 5. project warnings               -> onto the surviving rows only
+//! 5. project warnings               -> from each surviving row's OWN codes
 //! 6. sort                           -> a total order over each row's own keys
 //! 7. item_count + result ceiling    -> counted from the surviving rows only
 //! ```
@@ -18,6 +18,14 @@
 //! Steps 1–2 are the only place the complete fleet exists. It lives in a local
 //! variable inside this trusted process: it is never logged, never cached, never
 //! counted for a caller, and never serialized.
+//!
+//! Step 5 reads
+//! [`RuntimeInventoryItem::warnings`](crate::session_backend::inventory::RuntimeInventoryItem::warnings)
+//! rather than searching the snapshot's warning list for this runtime's id. That
+//! list is bounded FIFO across the whole fleet, so a lookup would make a visible
+//! row's warnings depend on how many warning-emitting rows preceded it — rows the
+//! caller may not see. Every step above therefore reads only from data belonging
+//! to the row it is about.
 //!
 //! ## The failure taxonomy, and why it has four codes
 //!
@@ -47,7 +55,7 @@ use crate::session_backend::inventory::{
 };
 use crate::session_backend::{BackendError, SessionBackend};
 
-use super::authorize::RowAuthorizer;
+use super::authorize::{HiddenTally, RowAuthorizer};
 use super::filters::SandboxFilters;
 use super::order;
 use super::warning::{self, SandboxWarningCode};
@@ -110,20 +118,24 @@ pub async fn run(
         request.legacy_log_admins,
     );
     let mut visible: Vec<RuntimeInventoryItem> = Vec::new();
+    let mut hidden = HiddenTally::default();
     for item in snapshot.items {
-        if authorizer.decide_row(&item)?.is_none() {
-            visible.push(item);
+        match authorizer.decide_row(&item)? {
+            None => visible.push(item),
+            Some(reason) => hidden.record(reason),
         }
     }
+    // Operator diagnostics only, aggregated and id-free — see [`HiddenTally`].
+    hidden.trace();
 
     // Step 4: the caller's own filters, on the authorized survivors only.
     visible.retain(|item| request.filters.matches(item));
 
-    // Step 5: warnings, attached only to rows that are being returned.
+    // Step 5: warnings, taken from each returned row's OWN codes.
     let mut items: Vec<AuthorizedRuntime> = visible
         .into_iter()
         .map(|item| {
-            let warning_codes = warning::normalize(item_warnings(&snapshot.warnings, &item));
+            let warning_codes = warning::normalize(item_warnings(&item));
             AuthorizedRuntime {
                 item,
                 warning_codes,
@@ -206,15 +218,19 @@ fn reject_incomplete_source(snapshot: &RuntimeInventorySnapshot) -> Result<(), A
     Err(too_large())
 }
 
-/// The public codes of the warnings naming exactly this runtime.
-fn item_warnings(
-    warnings: &[crate::session_backend::inventory::BoundedInventoryWarning],
-    item: &RuntimeInventoryItem,
-) -> Vec<SandboxWarningCode> {
-    warnings
+/// The public codes of one runtime's OWN warnings.
+///
+/// Read from the row rather than looked up in the snapshot's warning list on
+/// purpose. That list is bounded FIFO across the whole fleet, so a lookup would
+/// make this row's codes depend on how many warning-emitting runtimes happened to
+/// precede it — including runtimes this caller is not allowed to see. The row's
+/// own list is bounded by the closed code set and cannot be displaced by anything
+/// outside the row.
+fn item_warnings(item: &RuntimeInventoryItem) -> Vec<SandboxWarningCode> {
+    item.warnings
         .iter()
-        .filter(|warning| warning.runtime_id.as_deref() == Some(item.runtime_id.as_str()))
-        .filter_map(|warning| warning::public_code(warning.code))
+        .copied()
+        .filter_map(warning::public_code)
         .collect()
 }
 

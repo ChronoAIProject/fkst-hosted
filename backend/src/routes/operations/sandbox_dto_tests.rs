@@ -177,14 +177,14 @@ fn every_closed_enum_renders_its_snake_case_wire_value() {
 /// without the server ever repeating a value it refused.
 #[test]
 fn the_filter_echo_reports_the_normalized_values() {
-    let request =
-        super::super::sandbox_query::normalize(&super::super::sandbox_query::SandboxQueryParams {
+    let filters =
+        super::super::sandbox_query::filters(&super::super::sandbox_query::SandboxQueryParams {
             creator_login: Some("@Alice".to_string()),
             status: Some("failed".to_string()),
             ..Default::default()
         })
         .expect("normalizes");
-    let view = filters_view(&request);
+    let view = filters_view(&filters);
     assert_eq!(view.creator_login.as_deref(), Some("Alice"));
     assert_eq!(view.status, Some(SandboxStatus::Failed));
     assert_eq!(view.session_id, None);

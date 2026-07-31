@@ -4,8 +4,8 @@
 //!
 //! ```text
 //! 1. AuthenticatedViewer         401 missing/invalid identity, 403 not admitted
-//! 2. normalize the filters       400  (pure; no registry, no backend)
-//! 3. resolve the scope           403 operations_scope_forbidden
+//! 2. resolve the requested scope 400 unknown scope word / 403 operations_scope_forbidden
+//! 3. normalize the filters       400  (pure; no registry, no backend)
 //! 4. record the safe arguments   (once, on BOTH the allowed and refused paths)
 //! 5. preauthorize an exact id    404 sandbox_not_found  (accessible only)
 //! 6. require registry readiness  503 session_visibility_unavailable (accessible)
@@ -15,6 +15,15 @@
 //!
 //! Steps 2–7 all complete before a single backend call, so a refused request
 //! costs the deployment nothing and a caller learns nothing from timing.
+//!
+//! ## Why the scope gate precedes filter validation
+//!
+//! Both gates are pure and both run before the backend, so the ordering is not a
+//! cost question — it is a legibility one, and the issue states it as normative.
+//! A regular caller sending `?scope=all` with a malformed `status` is stopped by
+//! the scope decision, and telling them their filter is malformed would describe
+//! a request that was never going to run. Only the `scope` word itself is read in
+//! step 2; every other parameter stays untouched until step 3.
 //!
 //! ## Why step 6 is not "return an empty list"
 //!
@@ -52,8 +61,8 @@ use crate::audit::arguments::operations::{SafeOperationsListSandboxes, SandboxSc
 use crate::audit::arguments::{record_safe, AuditedQuery};
 use crate::error::{AppError, ErrorEnvelope};
 use crate::operations::sandbox::{
-    self, BackendLabel, InventoryResult, SandboxInventoryRequest, SandboxRejectionReason,
-    ScopeLabel,
+    self, BackendLabel, InventoryResult, SandboxFilters, SandboxInventoryRequest,
+    SandboxRejectionReason, ScopeLabel,
 };
 use crate::runtime_identity::RuntimeBackendKind;
 use crate::session_access::{
@@ -66,7 +75,7 @@ use crate::state::AppState;
 use super::sandbox_dto::{
     filters_view, response_from_inventory, SandboxEffectiveScope, SandboxInventoryResponse,
 };
-use super::sandbox_query::{normalize, NormalizedSandboxRequest, SandboxQueryParams};
+use super::sandbox_query::{self, SandboxQueryParams};
 
 /// Fixed client text for an unresolvable session. Identical whether the id is
 /// unknown or merely not this caller's — see [`preauthorize_session`].
@@ -125,32 +134,55 @@ async fn operations_list_sandboxes(
         started,
     };
 
-    let request = normalize(&params).inspect_err(|_| {
+    // Step 2: the scope word, then the scope DECISION — before any other
+    // parameter is read (see the module doc).
+    let requested_scope = sandbox_query::requested_scope(&params).inspect_err(|_| {
         telemetry.reject(
             natural_scope(&viewer),
             InventoryResult::InvalidRequest,
             SandboxRejectionReason::InvalidFilter,
         );
     })?;
-
-    let resolved = resolve_operations_scope(
+    let scope = match resolve_operations_scope(
         &viewer,
-        ScopeRequest::new(request.requested_scope),
+        ScopeRequest::new(requested_scope),
         &state.session_access.scope_metrics,
-    );
-    // Recorded on BOTH paths, exactly once: a refused probe is as much a fact
-    // worth auditing as an allowed read.
-    record_safe(&extensions, &safe_arguments(&request, &resolved, &viewer));
-    let scope = resolved.inspect_err(|_| {
+    ) {
+        Ok(scope) => scope,
+        Err(error) => {
+            // A refused probe is as much a fact worth auditing as an allowed
+            // read. Its remaining filters were never validated, because the
+            // pipeline stops at this gate — so the record states the scope pair
+            // and nothing it did not actually apply.
+            record_safe(
+                &extensions,
+                &safe_arguments(&SandboxFilters::default(), requested_scope, None, &viewer),
+            );
+            telemetry.reject(
+                natural_scope(&viewer),
+                InventoryResult::Forbidden,
+                SandboxRejectionReason::GlobalScope,
+            );
+            return Err(error);
+        }
+    };
+
+    // Step 3: the remaining filters, now that the caller's scope stands.
+    let filters = sandbox_query::filters(&params).inspect_err(|_| {
         telemetry.reject(
-            natural_scope(&viewer),
-            InventoryResult::Forbidden,
-            SandboxRejectionReason::GlobalScope,
+            scope_label(&scope),
+            InventoryResult::InvalidRequest,
+            SandboxRejectionReason::InvalidFilter,
         );
     })?;
+    // Step 4: recorded exactly once on the path that reached it.
+    record_safe(
+        &extensions,
+        &safe_arguments(&filters, requested_scope, Some(&scope), &viewer),
+    );
     let scope_label = scope_label(&scope);
 
-    preauthorize_session(&state, &viewer, &scope, &request, &telemetry)?;
+    preauthorize_session(&state, &viewer, &scope, &filters, &telemetry)?;
     require_visibility(&state, &scope, &telemetry)?;
 
     let Some(backend) = state.session_backend.as_ref() else {
@@ -171,7 +203,7 @@ async fn operations_list_sandboxes(
             access: &state.config.access,
             legacy_log_admins: &state.config.log.admins,
             registry: &state.session_access.registry,
-            filters: &request.filters,
+            filters: &filters,
             lifetime: RuntimeLifetimePolicy::from_reconcile_config(&state.config.reconcile),
             max_result_items: state.config.sandbox.max_result_items,
             timeout: state.config.sandbox.timeout(),
@@ -188,7 +220,7 @@ async fn operations_list_sandboxes(
             &inventory,
             effective_scope(&scope),
             viewer.is_global_admin(),
-            filters_view(&request),
+            filters_view(&filters),
         )),
     ))
 }
@@ -209,13 +241,13 @@ fn preauthorize_session(
     state: &AppState,
     viewer: &AuthenticatedViewer,
     scope: &ViewerScope,
-    request: &NormalizedSandboxRequest,
+    filters: &SandboxFilters,
     telemetry: &Telemetry,
 ) -> Result<(), AppError> {
     if scope.is_global() {
         return Ok(());
     }
-    let Some(session_id) = request.session_id() else {
+    let Some(session_id) = filters.session_id() else {
         return Ok(());
     };
     authorize_session_visibility(
@@ -336,27 +368,27 @@ fn result_of(error: &AppError) -> InventoryResult {
 
 /// Project the normalized request onto its reviewed safe-argument boundary.
 ///
-/// The EFFECTIVE scope is the resolved one when the request was allowed, and the
-/// caller's natural scope when it was refused — so a denial reads as "this
-/// caller, whose scope is `accessible`, asked for `all`". Nothing here is a raw
-/// value: every filter was validated before it became a property, and an invalid
-/// one never reached this function at all.
+/// The EFFECTIVE scope is the resolved one (`Some`) when the request was allowed,
+/// and the caller's natural scope when it was refused (`None`) — so a denial
+/// reads as "this caller, whose scope is `accessible`, asked for `all`". A
+/// refused caller's filters were never validated, so the caller passes the empty
+/// set rather than anything raw: nothing here is ever an unvalidated value.
 fn safe_arguments(
-    request: &NormalizedSandboxRequest,
-    resolved: &Result<ViewerScope, AppError>,
+    filters: &SandboxFilters,
+    requested_scope: Option<RequestedScope>,
+    resolved: Option<&ViewerScope>,
     viewer: &AuthenticatedViewer,
 ) -> SafeOperationsListSandboxes {
     let effective = match resolved {
-        Ok(scope) if scope.is_global() => SandboxScope::All,
-        Ok(_) => SandboxScope::Accessible,
-        Err(_) if viewer.is_global_admin() => SandboxScope::All,
-        Err(_) => SandboxScope::Accessible,
+        Some(scope) if scope.is_global() => SandboxScope::All,
+        Some(_) => SandboxScope::Accessible,
+        None if viewer.is_global_admin() => SandboxScope::All,
+        None => SandboxScope::Accessible,
     };
-    let requested = request.requested_scope.map(|requested| match requested {
+    let requested = requested_scope.map(|requested| match requested {
         RequestedScope::Global => SandboxScope::All,
         RequestedScope::Personal => SandboxScope::Accessible,
     });
-    let filters = &request.filters;
     SafeOperationsListSandboxes {
         scope: effective,
         // Recorded only when it DIFFERS from the effective scope: an identical

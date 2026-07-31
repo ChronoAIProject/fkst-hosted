@@ -29,6 +29,25 @@ use crate::state::AppState;
 /// descriptive `422` (a timed-out verdict) wins the race over a bare `408`.
 const ENV_PUT_TIMEOUT_BUFFER_SECS: u64 = 60;
 
+/// The request ceiling the WHOLE `/api/v1` nest runs under.
+///
+/// Every route under `/api/v1` — not just the environments PUT — inherits this
+/// subtree's `TimeoutLayer`, so `FKST_HOSTED_REQUEST_TIMEOUT_SECS` (the top-level
+/// ceiling) bounds `/health`, `/metrics`, and the webhook but bounds none of the
+/// API. It is a function rather than an inline expression because a route budget
+/// that must sit "below the request ceiling" needs to be compared against the
+/// ceiling that actually applies to it (see
+/// [`crate::operations::sandbox::SandboxInventoryConfig::warn_unless_below`]);
+/// two independent derivations of the same number is how such a check ends up
+/// measuring the wrong knob.
+pub(crate) fn api_subtree_timeout(env: &crate::env_config::EnvConfig) -> Duration {
+    Duration::from_secs(
+        u64::try_from(env.validate_deadline_secs)
+            .unwrap_or(0)
+            .saturating_add(ENV_PUT_TIMEOUT_BUFFER_SECS),
+    )
+}
+
 #[derive(Clone)]
 struct LeadershipGate {
     enabled: bool,
@@ -97,13 +116,9 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
     };
     // The named-environment PUT runs the isolated install-validation pod for up to
     // `env.validate_deadline_secs` — far beyond the short global timeout. So the
-    // environments surface carries its OWN, much longer timeout; every OTHER route
-    // keeps the short one. See `ENV_PUT_TIMEOUT_BUFFER_SECS`.
-    let env_timeout = Duration::from_secs(
-        u64::try_from(state.config.env.validate_deadline_secs)
-            .unwrap_or(0)
-            .saturating_add(ENV_PUT_TIMEOUT_BUFFER_SECS),
-    );
+    // `/api/v1` subtree carries its OWN, much longer timeout; the top level keeps
+    // the short one. See `api_subtree_timeout`.
+    let env_timeout = api_subtree_timeout(&state.config.env);
 
     // The named-environment REST API (issue #338) under `/api/v1`. It is open at
     // the app layer: identity is the per-request GitHub token verified by the

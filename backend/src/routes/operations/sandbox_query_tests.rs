@@ -18,25 +18,40 @@ fn params(scope: Option<&str>) -> SandboxQueryParams {
 
 #[test]
 fn an_omitted_scope_stays_unstated_so_the_server_resolves_the_default() {
-    let request = normalize(&params(None)).expect("normalizes");
-    assert_eq!(request.requested_scope, None);
-    assert_eq!(request.filters, SandboxFilters::default());
+    assert_eq!(requested_scope(&params(None)).expect("normalizes"), None);
+    assert_eq!(
+        filters(&params(None)).expect("normalizes"),
+        SandboxFilters::default()
+    );
 }
 
 #[test]
 fn the_route_vocabulary_maps_onto_the_shared_scope_request() {
     assert_eq!(
-        normalize(&params(Some("accessible")))
-            .expect("normalizes")
-            .requested_scope,
+        requested_scope(&params(Some("accessible"))).expect("normalizes"),
         Some(RequestedScope::Personal)
     );
     assert_eq!(
-        normalize(&params(Some(" all ")))
-            .expect("normalizes")
-            .requested_scope,
+        requested_scope(&params(Some(" all "))).expect("normalizes"),
         Some(RequestedScope::Global)
     );
+}
+
+/// The two halves are independent entry points, which is what lets the route
+/// decide the scope before it validates anything else: a malformed filter must
+/// not make the scope question unanswerable.
+#[test]
+fn a_malformed_filter_does_not_prevent_the_scope_from_resolving() {
+    let hostile = SandboxQueryParams {
+        scope: Some("all".to_string()),
+        status: Some("melted".to_string()),
+        ..SandboxQueryParams::default()
+    };
+    assert_eq!(
+        requested_scope(&hostile).expect("the scope word is well formed"),
+        Some(RequestedScope::Global)
+    );
+    assert!(filters(&hostile).is_err());
 }
 
 /// The activity endpoint's `mine` is deliberately NOT accepted here: two closed
@@ -44,14 +59,14 @@ fn the_route_vocabulary_maps_onto_the_shared_scope_request() {
 #[test]
 fn an_unknown_scope_is_rejected_by_name() {
     for value in ["mine", "everything", ""] {
-        let error = normalize(&params(Some(value))).expect_err("rejected");
+        let error = requested_scope(&params(Some(value))).expect_err("rejected");
         assert!(format!("{error}").contains("scope must be accessible or all"));
     }
 }
 
 #[test]
 fn every_filter_is_normalized_into_its_stored_form() {
-    let request = normalize(&SandboxQueryParams {
+    let normalized = filters(&SandboxQueryParams {
         scope: Some("accessible".to_string()),
         status: Some("running".to_string()),
         backend: Some("opensandbox".to_string()),
@@ -63,16 +78,15 @@ fn every_filter_is_normalized_into_its_stored_form() {
         attribution_source: Some("unknown_legacy".to_string()),
     })
     .expect("normalizes");
-    let filters = &request.filters;
-    assert_eq!(filters.status, Some(RuntimeInventoryStatus::Running));
-    assert_eq!(filters.backend, Some(RuntimeBackendKind::OpenSandbox));
-    assert_eq!(filters.creator_id, Some(101));
-    assert_eq!(filters.creator_login.as_deref(), Some("Alice"));
-    assert_eq!(filters.repo_full_name.as_deref(), Some("acme/site"));
-    assert_eq!(request.session_id(), Some("sess-alice"));
-    assert_eq!(filters.trigger_issue, Some(7));
+    assert_eq!(normalized.status, Some(RuntimeInventoryStatus::Running));
+    assert_eq!(normalized.backend, Some(RuntimeBackendKind::OpenSandbox));
+    assert_eq!(normalized.creator_id, Some(101));
+    assert_eq!(normalized.creator_login.as_deref(), Some("Alice"));
+    assert_eq!(normalized.repo_full_name.as_deref(), Some("acme/site"));
+    assert_eq!(normalized.session_id(), Some("sess-alice"));
+    assert_eq!(normalized.trigger_issue, Some(7));
     assert_eq!(
-        filters.attribution_source,
+        normalized.attribution_source,
         Some(AttributionSource::UnknownLegacy)
     );
 }
@@ -138,7 +152,7 @@ fn every_invalid_filter_is_rejected_and_names_its_own_parameter() {
         ),
     ];
     for (params, expected) in cases {
-        let error = normalize(&params).expect_err("rejected");
+        let error = filters(&params).expect_err("rejected");
         assert!(format!("{error}").contains(expected), "{error}");
     }
 }
@@ -147,7 +161,7 @@ fn every_invalid_filter_is_rejected_and_names_its_own_parameter() {
 /// the rejection cannot echo the id that failed.
 #[test]
 fn a_rejection_never_echoes_the_value_that_failed() {
-    let error = normalize(&SandboxQueryParams {
+    let error = filters(&SandboxQueryParams {
         session_id: Some("canary-session/../escape".to_string()),
         ..SandboxQueryParams::default()
     })

@@ -758,21 +758,11 @@ impl Config {
         // the same reason: a zero ceiling would silently take the operations
         // sandbox view down at the first request, not at deploy time.
         let sandbox = SandboxInventoryConfig::from_vars(&vars)?;
-        // The inventory budget is meant to sit BELOW the global request ceiling,
-        // so a slow fleet read fails as an explicit `503` rather than as a bare
-        // request timeout the caller cannot interpret. This is a warning, not a
-        // startup failure: the two knobs are legitimately tuned independently,
-        // and refusing to boot over an ordering an operator may have chosen
-        // deliberately would be a worse outcome than saying so.
-        if sandbox.timeout_ms >= http.request_timeout_secs.saturating_mul(1_000) {
-            tracing::warn!(
-                sandbox_timeout_ms = sandbox.timeout_ms,
-                request_timeout_secs = http.request_timeout_secs,
-                "FKST_OPERATIONS_SANDBOX_TIMEOUT_MS is not below \
-                 FKST_HOSTED_REQUEST_TIMEOUT_SECS; a slow runtime backend will time \
-                 the whole request out instead of answering sandbox_inventory_unavailable"
-            );
-        }
+        // The inventory budget is meant to sit BELOW the ceiling the route runs
+        // under, so a slow fleet read fails as an explicit `503` rather than as a
+        // bare request timeout the caller cannot interpret. That ceiling is the
+        // `/api/v1` subtree's, not the top-level one — see `api_subtree_timeout`.
+        sandbox.warn_unless_below(crate::router::api_subtree_timeout(&env));
 
         // Deployment-wide access policy (FKST_ACCESS_ALLOWED_USERS +
         // FKST_ACCESS_BLOCKED_USERS + FKST_GLOBAL_ADMINS + FKST_AUTH_MODEL).

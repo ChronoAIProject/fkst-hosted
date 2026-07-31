@@ -68,7 +68,16 @@ pub struct RawRuntimeFacts {
 }
 
 /// Normalize one runtime's raw facts into an inventory item, recording every
-/// data-quality problem into `warnings`.
+/// data-quality problem BOTH on the row and into the snapshot's `warnings`.
+///
+/// The double record is deliberate and the two lists are not interchangeable.
+/// `warnings` is the operator diagnostic: it carries correlation ids and is
+/// bounded FIFO across the whole fleet, so a metadata regression on the first two
+/// hundred runtimes can crowd out the two-hundred-and-first. The row's own
+/// [`RuntimeInventoryItem::warnings`] is bounded by the closed code set instead,
+/// so it can never be displaced by another runtime — which is the property #5675
+/// serves a caller from, since a row the caller cannot see must not be able to
+/// change the warnings on a row they can.
 ///
 /// This function NEVER returns `None` and never skips a runtime: a managed runtime
 /// missing every stamp still becomes a row, because an orphan invisible to a
@@ -82,39 +91,41 @@ pub fn build_item(
 ) -> RuntimeInventoryItem {
     let runtime_id = facts.runtime_id;
     let session_id = facts.session_id;
-    let warn = |warnings: &mut WarningSink, code| {
+    let mut row_warnings: Vec<InventoryWarningCode> = Vec::new();
+    let mut warn = |code| {
+        row_warnings.push(code);
         warnings.push(code, Some(runtime_id.as_str()), session_id.as_deref());
     };
 
     if session_id.is_none() {
-        warn(warnings, InventoryWarningCode::MissingSessionId);
+        warn(InventoryWarningCode::MissingSessionId);
     }
     if facts.identity.malformed {
-        warn(warnings, InventoryWarningCode::MalformedIdentity);
+        warn(InventoryWarningCode::MalformedIdentity);
     }
     if facts.identity.conflicting {
-        warn(warnings, InventoryWarningCode::AttributionConflict);
+        warn(InventoryWarningCode::AttributionConflict);
     }
     if facts.created_at_malformed {
-        warn(warnings, InventoryWarningCode::MalformedCreatedAt);
+        warn(InventoryWarningCode::MalformedCreatedAt);
     }
     if facts.last_pending_malformed {
-        warn(warnings, InventoryWarningCode::MalformedLastPending);
+        warn(InventoryWarningCode::MalformedLastPending);
     }
     if facts.status == RuntimeInventoryStatus::Unknown {
-        warn(warnings, InventoryWarningCode::UnknownStatus);
+        warn(InventoryWarningCode::UnknownStatus);
     }
 
     let (installation_id, installation_malformed) = parse_id(facts.installation_id_raw.as_deref());
     let (trigger_issue, trigger_malformed) = parse_id(facts.trigger_issue_raw.as_deref());
     if installation_malformed || trigger_malformed {
-        warn(warnings, InventoryWarningCode::MalformedCorrelation);
+        warn(InventoryWarningCode::MalformedCorrelation);
     }
 
     let (timing, timing_codes) =
         timing::compute(observed_at, facts.created_at, facts.last_pending_at, policy);
     for code in timing_codes {
-        warn(warnings, code);
+        warn(code);
     }
 
     // Zero is the reconciler's "unknown trigger" sentinel everywhere else, so it
@@ -187,6 +198,7 @@ pub fn build_item(
 
         runtime_id,
         session_id,
+        warnings: row_warnings,
     }
 }
 

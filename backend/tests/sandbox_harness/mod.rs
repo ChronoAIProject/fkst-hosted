@@ -31,18 +31,23 @@
 pub mod backend;
 /// The runtime fixtures every test's fleet is built from.
 pub mod fleet;
+/// An in-memory `tracing` sink, for the log half of the canary sweep.
+pub mod logs;
 
 pub use backend::{InventoryScript, ScriptedBackend};
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use axum::body::Body;
 use axum::http::{Request, Response, StatusCode};
 use fkst_control_plane::audit::sink::RecordingSink;
 use fkst_control_plane::audit::AuditHandle;
 use fkst_control_plane::config::Config;
 use fkst_control_plane::models::RepoRef;
-use fkst_control_plane::operations::OperationsState;
+use fkst_control_plane::operations::{
+    ActivitySource, ActivitySourceKind, OperationsState, SourceError, SourcePage, SourceQuery,
+};
 use fkst_control_plane::reconcile::creator::SessionCreator;
 use fkst_control_plane::router::build_router;
 use fkst_control_plane::session_access::{
@@ -54,6 +59,33 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+/// A stand-in historical-activity source.
+///
+/// It exists so the two operations surfaces can be failed INDEPENDENTLY. Proving
+/// "a runtime outage does not change the activity answer" needs an activity
+/// source that can actually succeed; with no source configured at all, both
+/// directions collapse into the same `503 audit_query_not_configured`, and the
+/// property is then asserted only in the degenerate case.
+#[derive(Debug)]
+pub struct ScriptedActivitySource {
+    healthy: bool,
+}
+
+#[async_trait]
+impl ActivitySource for ScriptedActivitySource {
+    fn kind(&self) -> ActivitySourceKind {
+        ActivitySourceKind::Posthog
+    }
+
+    async fn fetch(&self, _query: &SourceQuery) -> Result<SourcePage, SourceError> {
+        if self.healthy {
+            Ok(SourcePage::default())
+        } else {
+            Err(SourceError::Transient { kind: "timeout" })
+        }
+    }
+}
 
 /// The session Alice created.
 pub const SESSION: &str = "sess-alice";
@@ -102,6 +134,10 @@ pub struct HarnessSpec {
     pub max_result_items: usize,
     /// `FKST_OPERATIONS_SANDBOX_TIMEOUT_MS`.
     pub timeout_ms: u64,
+    /// The historical-activity source, if any. `None` is the deployment that
+    /// configured no read credentials; `Some(healthy)` scripts a source that
+    /// answers or fails on its own, independently of the runtime backend.
+    pub activity: Option<bool>,
 }
 
 impl HarnessSpec {
@@ -113,6 +149,7 @@ impl HarnessSpec {
             opensandbox: false,
             max_result_items: 5_000,
             timeout_ms: 2_000,
+            activity: None,
         }
     }
 
@@ -124,7 +161,14 @@ impl HarnessSpec {
             opensandbox: false,
             max_result_items: 5_000,
             timeout_ms: 2_000,
+            activity: None,
         }
+    }
+
+    /// Configure the historical-activity source: healthy, or failing on its own.
+    pub fn activity(mut self, healthy: bool) -> Self {
+        self.activity = Some(healthy);
+        self
     }
 
     pub fn cold_registry(mut self) -> Self {
@@ -206,7 +250,12 @@ pub async fn harness(spec: HarnessSpec) -> Harness {
             ScriptedBackend::new(script)
         }
     });
-    let operations = OperationsState::default();
+    let operations = match spec.activity {
+        None => OperationsState::default(),
+        Some(healthy) => {
+            OperationsState::with_sources(Some(Arc::new(ScriptedActivitySource { healthy })), None)
+        }
+    };
     let (audit, sink) = AuditHandle::recording();
     let router = build_router(AppState {
         config,

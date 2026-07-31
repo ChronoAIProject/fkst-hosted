@@ -28,13 +28,13 @@ use k8s_openapi::chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use crate::operations::sandbox::{AuthorizedInventory, AuthorizedRuntime, SandboxWarningCode};
+use crate::operations::sandbox::{
+    AuthorizedInventory, AuthorizedRuntime, SandboxFilters, SandboxWarningCode,
+};
 use crate::runtime_identity::{AttributionSource, RuntimeBackendKind};
 use crate::session_backend::inventory::{
     RuntimeInventoryItem, RuntimeInventoryStatus, RuntimeMetadataState,
 };
-
-use super::sandbox_query::NormalizedSandboxRequest;
 
 /// Which runtime backend produced a snapshot.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, ToSchema)]
@@ -274,8 +274,7 @@ pub struct SandboxInventoryResponse {
 }
 
 /// Project the caller's normalized filters.
-pub fn filters_view(request: &NormalizedSandboxRequest) -> SandboxFiltersView {
-    let filters = &request.filters;
+pub fn filters_view(filters: &SandboxFilters) -> SandboxFiltersView {
     SandboxFiltersView {
         status: filters.status.map(SandboxStatus::of),
         backend: filters.backend.map(SandboxBackend::of),

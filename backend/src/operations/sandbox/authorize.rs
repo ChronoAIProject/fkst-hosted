@@ -52,11 +52,68 @@ pub enum HiddenReason {
 }
 
 impl HiddenReason {
+    /// Every variant, in the fixed order [`HiddenTally`] reports them.
+    pub const ALL: [HiddenReason; 3] = [
+        HiddenReason::UnusableSessionId,
+        HiddenReason::UnknownContext,
+        HiddenReason::NotAuthorized,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             HiddenReason::UnusableSessionId => "unusable_session_id",
             HiddenReason::UnknownContext => "unknown_context",
             HiddenReason::NotAuthorized => "not_authorized",
+        }
+    }
+
+    /// This reason's slot in [`HiddenTally`].
+    fn slot(self) -> usize {
+        match self {
+            HiddenReason::UnusableSessionId => 0,
+            HiddenReason::UnknownContext => 1,
+            HiddenReason::NotAuthorized => 2,
+        }
+    }
+}
+
+/// How many rows one request withheld, per reason.
+///
+/// Aggregated rather than logged row by row: a five-thousand-runtime fleet must
+/// not be able to turn one inventory read into five thousand log lines. It holds
+/// counts and closed reasons ONLY — never a runtime id, a session id, or the
+/// probed filter — so an operator answering "why is my sandbox not listed?" can
+/// see which gate withheld it, while the trail never becomes the enumeration
+/// oracle the response refuses to be. These numbers are operator diagnostics and
+/// reach no caller, no response field, and no metric label.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct HiddenTally {
+    counts: [u64; HiddenReason::ALL.len()],
+}
+
+impl HiddenTally {
+    /// Count one withheld row.
+    pub fn record(&mut self, reason: HiddenReason) {
+        self.counts[reason.slot()] = self.counts[reason.slot()].saturating_add(1);
+    }
+
+    /// How many rows this reason withheld.
+    pub fn count(&self, reason: HiddenReason) -> u64 {
+        self.counts[reason.slot()]
+    }
+
+    /// Emit at most one line per reason, and nothing at all when the caller was
+    /// shown everything the fleet holds.
+    pub fn trace(&self) {
+        for reason in HiddenReason::ALL {
+            let count = self.count(reason);
+            if count > 0 {
+                tracing::debug!(
+                    reason = reason.as_str(),
+                    count,
+                    "operations: inventory rows withheld from this caller"
+                );
+            }
         }
     }
 }

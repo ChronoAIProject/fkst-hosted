@@ -2,10 +2,17 @@
 //!
 //! A warning exists so that "this runtime's data is incomplete" is VISIBLE rather
 //! than silently smoothed over. It therefore carries no free text and no backend
-//! error message — only a closed code plus the correlation ids #5675 needs to
-//! attach it to an already-authorized row (attaching it to an UNauthorized row
-//! would leak the existence of a hidden runtime, so the code/ids are the entire
-//! payload and the caller decides what a viewer may see).
+//! error message — only a closed code plus the correlation ids that make the
+//! affected runtime findable.
+//!
+//! The [`WarningSink`] here is the SNAPSHOT-scope, operator-facing list: bounded
+//! FIFO across the whole fleet, with overflow announced rather than dropped. It is
+//! deliberately NOT what a per-row projection reads — a shared, order-dependent
+//! budget would make one runtime's warnings a function of how many other runtimes
+//! warned first, including runtimes a given caller may not see. Each row therefore
+//! also carries its own copy of its codes on
+//! [`super::RuntimeInventoryItem::warnings`], which is bounded by the closed code
+//! set and cannot be displaced.
 
 /// What went wrong with one runtime's data, or with the snapshot as a whole.
 ///
@@ -47,8 +54,10 @@ pub enum InventoryWarningCode {
     /// The backend page walk stopped at its safety cap, so the item list may be
     /// short. Never silent.
     SourceTruncated,
-    /// More warnings occurred than one snapshot may carry. Emitted exactly once,
-    /// as the LAST warning, so a caller knows the list is not exhaustive.
+    /// More warnings occurred than this snapshot-scope list may carry. Emitted
+    /// exactly once, as the LAST warning, so a reader knows the list is not
+    /// exhaustive. It says nothing about any individual row: every item keeps its
+    /// own complete codes on [`super::RuntimeInventoryItem::warnings`].
     WarningsTruncated,
 }
 

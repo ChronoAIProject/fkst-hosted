@@ -318,3 +318,61 @@ fn a_drifted_managed_marker_is_reported_rather_than_assumed() {
     let mut warnings = WarningSink::default();
     assert!(!build(facts, &mut warnings).managed);
 }
+
+/// A row's codes also land on the ROW, not only in the shared sink — the two
+/// records exist for different readers and the row's is the one #5675 serves.
+#[test]
+fn every_recorded_warning_also_lands_on_the_row_that_caused_it() {
+    let mut facts = complete_facts();
+    facts.session_id = None;
+    facts.installation_id_raw = Some("not-a-number".to_string());
+    let mut warnings = WarningSink::default();
+    let item = build(facts, &mut warnings);
+
+    let sink_codes: Vec<_> = warnings.into_warnings().iter().map(|w| w.code).collect();
+    assert_eq!(item.warnings, sink_codes);
+    assert!(item
+        .warnings
+        .contains(&InventoryWarningCode::MissingSessionId));
+    assert!(item
+        .warnings
+        .contains(&InventoryWarningCode::MalformedCorrelation));
+}
+
+/// The sink is bounded FIFO across the whole fleet, so a metadata regression on
+/// earlier runtimes can fill it. A runtime built after that point must still
+/// carry its OWN codes: #5675 reads them from the row precisely so that rows a
+/// caller cannot see are unable to strip warnings from rows they can.
+#[test]
+fn a_full_warning_sink_never_costs_a_later_runtime_its_own_codes() {
+    // Two slots: one warning plus the reserved truncation marker.
+    let mut warnings = WarningSink::new(2);
+    for index in 0..4 {
+        let mut facts = complete_facts();
+        facts.runtime_id = format!("fkst-early-{index}");
+        facts.session_id = None;
+        build(facts, &mut warnings);
+    }
+
+    let mut late = complete_facts();
+    late.runtime_id = "fkst-late".to_string();
+    late.session_id = None;
+    let item = build(late, &mut warnings);
+    assert_eq!(
+        item.warnings,
+        vec![InventoryWarningCode::MissingSessionId],
+        "the row's own codes are complete regardless of the shared budget"
+    );
+
+    let recorded = warnings.into_warnings();
+    assert!(
+        recorded
+            .iter()
+            .all(|w| w.runtime_id.as_deref() != Some("fkst-late")),
+        "the shared list is exhausted, which is exactly the starvation the row \
+         copy exists to survive: {recorded:?}"
+    );
+    assert!(recorded
+        .iter()
+        .any(|w| w.code == InventoryWarningCode::WarningsTruncated));
+}

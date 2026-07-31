@@ -8,7 +8,8 @@
 
 use fkst_control_plane::runtime_identity::{AttributionSource, RuntimeBackendKind};
 use fkst_control_plane::session_backend::inventory::{
-    BoundedInventoryWarning, RuntimeInventoryItem, RuntimeInventoryStatus, RuntimeMetadataState,
+    BoundedInventoryWarning, InventoryWarningCode, RuntimeInventoryItem, RuntimeInventoryStatus,
+    RuntimeMetadataState,
 };
 use k8s_openapi::chrono::{DateTime, TimeZone, Utc};
 
@@ -66,6 +67,20 @@ pub fn item(runtime_id: &str, session: Option<&str>) -> Item {
         restart_count: Some(0),
         last_transition_at: None,
         deletion_timestamp: None,
+        warnings: Vec::new(),
+    }
+}
+
+/// The same runtime carrying its OWN data-quality codes, which is what a real
+/// adapter records on the row (see `RuntimeInventoryItem::warnings`).
+pub fn with_warnings(
+    runtime_id: &str,
+    session: Option<&str>,
+    warnings: Vec<InventoryWarningCode>,
+) -> Item {
+    RuntimeInventoryItem {
+        warnings,
+        ..item(runtime_id, session)
     }
 }
 
@@ -103,6 +118,7 @@ pub fn orphan(runtime_id: &str) -> Item {
         trigger_issue: None,
         metadata_state: RuntimeMetadataState::Partial,
         attribution_source: AttributionSource::UnknownLegacy,
+        warnings: vec![InventoryWarningCode::MissingSessionId],
         ..item(runtime_id, None)
     }
 }
@@ -113,14 +129,18 @@ pub fn malformed(runtime_id: &str) -> Item {
         session_id: Some("not a session id".to_string()),
         metadata_state: RuntimeMetadataState::Malformed,
         attribution_source: AttributionSource::PartialMetadata,
+        warnings: vec![InventoryWarningCode::MalformedIdentity],
         ..item(runtime_id, None)
     }
 }
 
-/// A runtime whose stamped attribution disagrees with its trigger.
+/// A runtime whose stamped attribution disagrees with its trigger. The stamp is
+/// reported verbatim and the disagreement is carried as the row's own warning —
+/// that pair is how a global administrator finds the disputed row.
 pub fn conflicted(runtime_id: &str, session: Option<&str>) -> Item {
     RuntimeInventoryItem {
         attribution_source: AttributionSource::Conflict,
+        warnings: vec![InventoryWarningCode::AttributionConflict],
         ..item(runtime_id, session)
     }
 }

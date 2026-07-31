@@ -21,11 +21,18 @@
 //! ## The bounded route budget
 //!
 //! `FKST_OPERATIONS_SANDBOX_TIMEOUT_MS` bounds the one backend list. It sits
-//! below the deployment's global request ceiling
-//! (`FKST_HOSTED_REQUEST_TIMEOUT_SECS`) on purpose: an inventory read that
-//! outlives the request it serves would burn a backend round trip for a client
-//! that has already gone, and the honest answer to a slow fleet read is an
-//! explicit `503`, not a hung request.
+//! below the request ceiling the route actually runs under on purpose: an
+//! inventory read that outlives the request it serves would burn a backend round
+//! trip for a client that has already gone, and the honest answer to a slow fleet
+//! read is an explicit `503`, not a hung request.
+//!
+//! That ceiling is the `/api/v1` subtree's own timeout
+//! ([`crate::router::api_subtree_timeout`]), NOT
+//! `FKST_HOSTED_REQUEST_TIMEOUT_SECS` — the top-level ceiling bounds `/health`,
+//! `/metrics`, and the webhook, while the whole API nest is wrapped by the
+//! longer environments-PUT budget. [`SandboxInventoryConfig::warn_unless_below`]
+//! is handed the real number so the advisory cannot end up measuring a knob the
+//! route never sees.
 
 use std::time::Duration;
 
@@ -135,6 +142,42 @@ impl SandboxInventoryConfig {
     pub fn timeout(&self) -> Duration {
         Duration::from_millis(self.timeout_ms)
     }
+
+    /// Warn — but do not fail — when the budget does not sit below the request
+    /// ceiling the route runs under.
+    ///
+    /// A warning rather than a startup error because the two knobs are
+    /// legitimately tuned independently, and refusing to boot over an ordering an
+    /// operator may have chosen deliberately would be the worse outcome. The
+    /// ceiling is passed in rather than read here so there is exactly one
+    /// derivation of it — the router's — and this check can never drift onto a
+    /// timeout the route is not actually subject to.
+    pub fn warn_unless_below(&self, route_ceiling: Duration) {
+        if self.is_below(route_ceiling) {
+            return;
+        }
+        tracing::warn!(
+            sandbox_timeout_ms = self.timeout_ms,
+            route_ceiling_ms = ceiling_millis(route_ceiling),
+            "FKST_OPERATIONS_SANDBOX_TIMEOUT_MS is not below the /api/v1 request \
+             ceiling (FKST_ENV_VALIDATE_DEADLINE_SECS + 60s); a slow runtime backend \
+             will time the whole request out instead of answering \
+             sandbox_inventory_unavailable"
+        );
+    }
+
+    /// Whether the budget strictly precedes the ceiling — the pure half of
+    /// [`Self::warn_unless_below`], so the boundary is assertable without
+    /// capturing a log line.
+    pub fn is_below(&self, route_ceiling: Duration) -> bool {
+        self.timeout_ms < ceiling_millis(route_ceiling)
+    }
+}
+
+/// A route ceiling in whole milliseconds, saturating rather than wrapping: a
+/// ceiling too large to represent is unambiguously above every valid budget.
+fn ceiling_millis(route_ceiling: Duration) -> u64 {
+    u64::try_from(route_ceiling.as_millis()).unwrap_or(u64::MAX)
 }
 
 /// Reject an out-of-range numeric setting, naming the variable.

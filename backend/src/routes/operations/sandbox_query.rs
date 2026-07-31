@@ -16,6 +16,16 @@
 //! arguments, the post-authorization filter predicate, and the response's
 //! `filters_applied` echo — so the record, the query, and the echo can never
 //! describe different requests.
+//!
+//! ## Why `scope` is parsed separately from the rest
+//!
+//! The issue's authorization pipeline is normative and puts "resolve the
+//! requested scope" BEFORE "validate filter syntax". Splitting the two entry
+//! points is what makes the route able to honour that: a regular caller sending
+//! `?scope=all` alongside a malformed `status` is told they may not select the
+//! global scope (`403`), rather than being handed a `400` that never mentions the
+//! decision that actually stopped them. Both halves remain pure and both still
+//! run before any registry or backend call.
 
 use serde::Deserialize;
 use utoipa::IntoParams;
@@ -55,24 +65,18 @@ pub struct SandboxQueryParams {
     pub attribution_source: Option<String>,
 }
 
-/// The validated form of one sandbox request, before authorization.
-#[derive(Clone, Debug, Default)]
-pub struct NormalizedSandboxRequest {
-    /// `None` when the caller omitted `scope`.
-    pub requested_scope: Option<RequestedScope>,
-    pub filters: SandboxFilters,
+/// Step 1 of the normative pipeline: the scope the caller asked for.
+///
+/// `Ok(None)` means the caller stated none, which the server resolves to their
+/// natural default. Parsed on its own so the scope DECISION can be made before
+/// any other parameter is looked at.
+pub fn requested_scope(params: &SandboxQueryParams) -> Result<Option<RequestedScope>, AppError> {
+    params.scope.as_deref().map(parse_scope).transpose()
 }
 
-impl NormalizedSandboxRequest {
-    /// The exact session id the caller named, if any.
-    pub fn session_id(&self) -> Option<&str> {
-        self.filters.session_id()
-    }
-}
-
-/// Validate and normalize the raw parameters.
-pub fn normalize(params: &SandboxQueryParams) -> Result<NormalizedSandboxRequest, AppError> {
-    let requested_scope = params.scope.as_deref().map(parse_scope).transpose()?;
+/// Step 2 of the normative pipeline: every remaining filter, validated and
+/// normalized into the single form the record, the predicate, and the echo share.
+pub fn filters(params: &SandboxQueryParams) -> Result<SandboxFilters, AppError> {
     let filters = SandboxFilters {
         status: params
             .status
@@ -113,10 +117,7 @@ pub fn normalize(params: &SandboxQueryParams) -> Result<NormalizedSandboxRequest
             .map(filters::parse_attribution_source)
             .transpose()?,
     };
-    Ok(NormalizedSandboxRequest {
-        requested_scope,
-        filters,
-    })
+    Ok(filters)
 }
 
 /// Map the route's `accessible`/`all` vocabulary onto the shared scope request.

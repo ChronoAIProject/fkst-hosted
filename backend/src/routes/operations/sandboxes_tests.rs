@@ -8,7 +8,7 @@
 use super::*;
 use crate::access_policy::AccessPolicy;
 use crate::github_identity::GithubUser;
-use crate::routes::operations::sandbox_query::{normalize, SandboxQueryParams};
+use crate::routes::operations::sandbox_query::{filters, requested_scope, SandboxQueryParams};
 use crate::session_access::test_support::policy_with_admins;
 
 fn viewer(id: i64, login: &str, access: &AccessPolicy) -> AuthenticatedViewer {
@@ -21,8 +21,12 @@ fn viewer(id: i64, login: &str, access: &AccessPolicy) -> AuthenticatedViewer {
     )
 }
 
-fn request(params: SandboxQueryParams) -> NormalizedSandboxRequest {
-    normalize(&params).expect("the fixture normalizes")
+/// The normalized pair the handler works with, in the order it produces them.
+fn normalized(params: SandboxQueryParams) -> (Option<RequestedScope>, SandboxFilters) {
+    (
+        requested_scope(&params).expect("the fixture scope parses"),
+        filters(&params).expect("the fixture filters normalize"),
+    )
 }
 
 #[test]
@@ -42,7 +46,7 @@ fn a_regular_callers_natural_scope_is_accessible_and_an_admins_is_global() {
 fn an_allowed_read_records_its_effective_scope_and_normalized_filters() {
     let access = policy_with_admins("");
     let alice = viewer(101, "alice", &access);
-    let normalized = request(SandboxQueryParams {
+    let (requested, filters) = normalized(SandboxQueryParams {
         session_id: Some("sess-alice".to_string()),
         repo_full_name: Some("acme/site".to_string()),
         trigger_issue: Some(7),
@@ -54,9 +58,9 @@ fn an_allowed_read_records_its_effective_scope_and_normalized_filters() {
         ..SandboxQueryParams::default()
     });
     let resolved = alice
-        .resolve_scope(ScopeRequest::new(normalized.requested_scope))
-        .map_err(|_| AppError::ScopeForbidden("unreachable in this fixture".to_string()));
-    let safe = safe_arguments(&normalized, &resolved, &alice);
+        .resolve_scope(ScopeRequest::new(requested))
+        .expect("a regular caller may read their own scope");
+    let safe = safe_arguments(&filters, requested, Some(&resolved), &alice);
 
     assert_eq!(safe.scope, SandboxScope::Accessible);
     assert!(
@@ -79,16 +83,18 @@ fn an_allowed_read_records_its_effective_scope_and_normalized_filters() {
 fn a_denied_scope_probe_records_both_scopes_and_nothing_else() {
     let access = policy_with_admins("grace");
     let alice = viewer(101, "alice", &access);
-    let normalized = request(SandboxQueryParams {
+    let (requested, _filters) = normalized(SandboxQueryParams {
         scope: Some("all".to_string()),
         ..SandboxQueryParams::default()
     });
-    let resolved = alice
-        .resolve_scope(ScopeRequest::new(normalized.requested_scope))
-        .map_err(|_| AppError::ScopeForbidden("refused".to_string()));
-    assert!(resolved.is_err(), "a regular caller may not do this");
+    assert!(
+        alice.resolve_scope(ScopeRequest::new(requested)).is_err(),
+        "a regular caller may not do this"
+    );
 
-    let safe = safe_arguments(&normalized, &resolved, &alice);
+    // A refused caller's filters were never validated, so the record carries the
+    // empty set — exactly what the handler passes on that path.
+    let safe = safe_arguments(&SandboxFilters::default(), requested, None, &alice);
     assert_eq!(
         safe.scope,
         SandboxScope::Accessible,
@@ -103,18 +109,20 @@ fn a_denied_scope_probe_records_both_scopes_and_nothing_else() {
     assert!(!rendered.contains("grace"), "{rendered}");
 }
 
+/// An administrator narrowing to `accessible` gets the same record shape as a
+/// regular caller: the scope that APPLIED, and no redundant second copy of it.
 #[test]
-fn an_administrator_selecting_the_accessible_scope_records_both_scopes() {
+fn an_administrator_selecting_the_accessible_scope_records_only_the_effective_one() {
     let access = policy_with_admins("grace");
     let grace = viewer(900, "grace", &access);
-    let normalized = request(SandboxQueryParams {
+    let (requested, filters) = normalized(SandboxQueryParams {
         scope: Some("accessible".to_string()),
         ..SandboxQueryParams::default()
     });
     let resolved = grace
-        .resolve_scope(ScopeRequest::new(normalized.requested_scope))
-        .map_err(|_| AppError::ScopeForbidden("unreachable".to_string()));
-    let safe = safe_arguments(&normalized, &resolved, &grace);
+        .resolve_scope(ScopeRequest::new(requested))
+        .expect("an administrator may narrow their own scope");
+    let safe = safe_arguments(&filters, requested, Some(&resolved), &grace);
     assert_eq!(
         safe.scope,
         SandboxScope::Accessible,

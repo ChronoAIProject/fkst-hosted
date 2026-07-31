@@ -7,12 +7,17 @@
 //! which is precisely what epic `AUTH-06` forbids. So the projection is:
 //!
 //! ```text
-//! snapshot warnings
-//!   -> keep only those naming an AUTHORIZED, filter-matching runtime
-//!        -> attach the public code to THAT item
-//!   -> snapshot-scope warnings (naming no runtime)
+//! each AUTHORIZED, filter-matching row's OWN codes
+//!        -> attach the public codes to THAT item
+//! snapshot-scope warnings (naming no runtime)
 //!        -> global scope only
 //! ```
+//!
+//! The per-row half deliberately reads the ROW's codes
+//! ([`crate::session_backend::inventory::RuntimeInventoryItem::warnings`]) rather
+//! than filtering the snapshot's list by runtime id: that list is capped FIFO
+//! across the whole fleet, so a row's codes would otherwise depend on how many
+//! warning-emitting runtimes — visible or hidden — happened to precede it.
 //!
 //! ## Why snapshot-scope warnings are administrator-only
 //!
@@ -61,8 +66,9 @@ pub enum SandboxWarningCode {
     /// The backend reported a state this build does not map; `raw_status` carries
     /// it verbatim.
     UnknownStatus,
-    /// The snapshot hit its warning ceiling, so per-item warnings may be
-    /// incomplete. Snapshot scope: global administrators only.
+    /// The snapshot's operator-facing warning list hit its ceiling, so the
+    /// deployment-wide diagnostic is not exhaustive. Returned rows keep their own
+    /// complete codes. Snapshot scope: global administrators only.
     WarningsIncomplete,
 }
 

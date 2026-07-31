@@ -56,3 +56,35 @@ fn a_non_numeric_value_fails_closed_naming_the_family() {
         "{error}"
     );
 }
+
+/// The advisory must be measured against the ceiling the ROUTE runs under. The
+/// `/api/v1` nest carries the environments-PUT budget, so a deployment with the
+/// default 5s inventory budget is comfortably below it — and the check must fire
+/// only when the budget genuinely reaches or exceeds that number.
+#[test]
+fn the_route_budget_is_compared_against_the_api_subtree_ceiling() {
+    let ceiling = crate::router::api_subtree_timeout(&crate::env_config::EnvConfig::default());
+    assert!(
+        SandboxInventoryConfig::default().is_below(ceiling),
+        "the shipped defaults must not warn: budget {:?} vs ceiling {ceiling:?}",
+        SandboxInventoryConfig::default().timeout()
+    );
+
+    let ceiling_ms = u64::try_from(ceiling.as_millis()).expect("a representable ceiling");
+    let exactly_at = SandboxInventoryConfig {
+        timeout_ms: ceiling_ms,
+        ..SandboxInventoryConfig::default()
+    };
+    assert!(
+        !exactly_at.is_below(ceiling),
+        "a budget EQUAL to the ceiling can never be observed, so it warns too"
+    );
+    let just_under = SandboxInventoryConfig {
+        timeout_ms: ceiling_ms - 1,
+        ..SandboxInventoryConfig::default()
+    };
+    assert!(just_under.is_below(ceiling));
+    // The emitting half must stay total over both answers.
+    exactly_at.warn_unless_below(ceiling);
+    just_under.warn_unless_below(ceiling);
+}

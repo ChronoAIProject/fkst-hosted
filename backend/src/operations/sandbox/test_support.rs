@@ -9,7 +9,7 @@ use k8s_openapi::chrono::{DateTime, TimeZone, Utc};
 
 use crate::runtime_identity::{AttributionSource, RuntimeBackendKind};
 use crate::session_backend::inventory::{
-    RuntimeInventoryItem, RuntimeInventoryStatus, RuntimeMetadataState,
+    InventoryWarningCode, RuntimeInventoryItem, RuntimeInventoryStatus, RuntimeMetadataState,
 };
 
 /// A fixed instant every fixture is anchored to.
@@ -55,6 +55,19 @@ pub(crate) fn item(runtime_id: &str, session: Option<&str>) -> RuntimeInventoryI
         restart_count: Some(0),
         last_transition_at: None,
         deletion_timestamp: None,
+        warnings: Vec::new(),
+    }
+}
+
+/// The same runtime carrying its own data-quality codes.
+pub(crate) fn with_warnings(
+    runtime_id: &str,
+    session: Option<&str>,
+    warnings: Vec<InventoryWarningCode>,
+) -> RuntimeInventoryItem {
+    RuntimeInventoryItem {
+        warnings,
+        ..item(runtime_id, session)
     }
 }
 

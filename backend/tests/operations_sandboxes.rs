@@ -19,14 +19,16 @@ use sandbox_harness::{
     BOB, CAROL, DANA, ERIN, FRANK, GRACE, OTHER_SESSION, SESSION, UNKNOWN_SESSION,
 };
 
-/// A fleet with one runtime for Alice's session, one for a stranger's, plus the
-/// three shapes only a global administrator may ever see.
+/// A fleet with one runtime for Alice's session, one for a stranger's, plus every
+/// shape only a global administrator may ever see: an orphan, a malformed stamp,
+/// a disputed (conflict) attribution, and a session no registry generation knows.
 fn mixed_fleet() -> Vec<fleet::Item> {
     vec![
         fleet::item("mine", Some(SESSION)),
         fleet::item("theirs", Some(OTHER_SESSION)),
         fleet::orphan("orphan"),
         fleet::malformed("malformed"),
+        fleet::conflicted("conflicted", Some(OTHER_SESSION)),
         fleet::item("unknown-ctx", Some(UNKNOWN_SESSION)),
     ]
 }
@@ -73,8 +75,13 @@ async fn a_legacy_log_admin_keeps_their_cross_session_grant_but_not_the_admin_vi
     let snapshot = harness.snapshot(DANA, "").await;
     let mut ids = item_ids(&snapshot);
     ids.sort();
-    assert_eq!(ids, vec!["mine", "theirs"]);
-    assert_eq!(snapshot["item_count"], 2);
+    assert_eq!(
+        ids,
+        vec!["conflicted", "mine", "theirs"],
+        "a disputed ATTRIBUTION is not an unattributable row: its session has \
+         registry context, so the cross-session grant covers it"
+    );
+    assert_eq!(snapshot["item_count"], 3);
     assert_eq!(snapshot["effective_scope"], "accessible");
     assert_eq!(snapshot["can_view_all"], false);
 }
@@ -101,9 +108,16 @@ async fn a_global_admin_defaults_to_the_complete_fleet_including_unattributable_
     let snapshot = harness.snapshot(GRACE, "").await;
     assert_eq!(snapshot["effective_scope"], "all");
     assert_eq!(snapshot["can_view_all"], true);
-    assert_eq!(snapshot["item_count"], 5);
+    assert_eq!(snapshot["item_count"], 6);
     let ids = item_ids(&snapshot);
-    for expected in ["mine", "theirs", "orphan", "malformed", "unknown-ctx"] {
+    for expected in [
+        "mine",
+        "theirs",
+        "orphan",
+        "malformed",
+        "conflicted",
+        "unknown-ctx",
+    ] {
         assert!(ids.contains(&expected.to_string()), "{expected} missing");
     }
     // The unattributable rows carry their state EXPLICITLY rather than being
@@ -121,6 +135,43 @@ async fn a_global_admin_defaults_to_the_complete_fleet_including_unattributable_
         .find(|item| item["runtime_id"] == "malformed")
         .expect("the malformed row");
     assert_eq!(malformed["metadata_state"], "malformed");
+    // A disputed attribution reports its stamp VERBATIM — it is never silently
+    // rewritten — and the disagreement travels as the row's own warning, which is
+    // how an administrator finds the row without reading every stamp by eye.
+    let conflicted = items
+        .iter()
+        .find(|item| item["runtime_id"] == "conflicted")
+        .expect("the conflict row");
+    assert_eq!(conflicted["attribution_source"], "conflict");
+    assert_eq!(conflicted["creator_login"], "alice");
+    assert_eq!(conflicted["creator_id"], 101);
+    assert_eq!(conflicted["warning_codes"][0], "attribution_conflict");
+}
+
+/// Conflict is a first-class, filterable attribution state for a regular caller
+/// too — on a session they may see, it behaves like any other row.
+#[tokio::test]
+async fn a_conflicted_row_is_filterable_within_a_regular_callers_own_session() {
+    let harness = harness_with(vec![
+        fleet::item("mine-clean", Some(SESSION)),
+        fleet::conflicted("mine-disputed", Some(SESSION)),
+    ])
+    .await;
+
+    let all = harness.snapshot(ALICE, "").await;
+    assert_eq!(all["item_count"], 2);
+
+    let filtered = harness
+        .snapshot(ALICE, "?attribution_source=conflict")
+        .await;
+    assert_eq!(item_ids(&filtered), vec!["mine-disputed"]);
+    let item = &filtered["items"][0];
+    assert_eq!(item["attribution_source"], "conflict");
+    assert_eq!(item["warning_codes"][0], "attribution_conflict");
+    assert_eq!(
+        filtered["filters_applied"]["attribution_source"],
+        "conflict"
+    );
 }
 
 /// The whole reason `accessible` exists for an administrator: inspect only what
@@ -150,12 +201,36 @@ async fn a_regular_caller_requesting_the_global_scope_is_refused_before_the_back
     );
 }
 
+/// The pipeline's order is normative: the scope is resolved BEFORE any other
+/// filter is validated, so a caller who may not select `all` is told exactly
+/// that rather than being handed a `400` about a filter that was never going to
+/// be applied.
+#[tokio::test]
+async fn a_refused_scope_wins_over_a_malformed_filter_in_the_same_request() {
+    let harness = harness_with(mixed_fleet()).await;
+    let response = harness.get(ALICE, "?scope=all&status=melted").await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(error_code(response).await, "operations_scope_forbidden");
+    assert_eq!(harness.inventory_calls(), 0);
+
+    // The same malformed filter WITHOUT the refused scope is still a `400`: the
+    // filter gate did not disappear, it merely runs second.
+    let response = harness.get(ALICE, "?status=melted").await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(error_code(response).await, "invalid_request");
+
+    // And an administrator, whose scope stands, reaches the filter gate.
+    let response = harness.get(GRACE, "?scope=all&status=melted").await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(harness.inventory_calls(), 0);
+}
+
 #[tokio::test]
 async fn an_administrator_may_state_the_global_scope_explicitly() {
     let harness = harness_with(mixed_fleet()).await;
     let snapshot = harness.snapshot(GRACE, "?scope=all").await;
     assert_eq!(snapshot["effective_scope"], "all");
-    assert_eq!(snapshot["item_count"], 5);
+    assert_eq!(snapshot["item_count"], 6);
 }
 
 /// The anti-enumeration contract: an exact session id that is unknown and one
@@ -221,7 +296,7 @@ async fn a_cold_projection_blocks_the_accessible_scope_with_a_stable_503() {
 async fn a_cold_projection_does_not_block_the_global_fleet_view() {
     let harness = harness(HarnessSpec::new(fleet::snapshot(mixed_fleet())).cold_registry()).await;
     let snapshot = harness.snapshot(GRACE, "").await;
-    assert_eq!(snapshot["item_count"], 5);
+    assert_eq!(snapshot["item_count"], 6);
     assert_eq!(harness.inventory_calls(), 1);
 }
 

@@ -220,13 +220,69 @@ fn a_cold_projection_fails_the_request_instead_of_hiding_every_row() {
     assert!(matches!(error, AppError::SessionVisibilityUnavailable(_)));
 }
 
+/// The tally is what an operator actually reads, so it must count each reason
+/// independently and label each with its own distinct wire value.
 #[test]
-fn every_hidden_reason_renders_a_bounded_wire_value() {
-    for reason in [
-        HiddenReason::UnusableSessionId,
-        HiddenReason::UnknownContext,
-        HiddenReason::NotAuthorized,
+fn the_hidden_tally_counts_each_reason_under_its_own_distinct_label() {
+    let mut tally = HiddenTally::default();
+    tally.record(HiddenReason::UnknownContext);
+    tally.record(HiddenReason::UnknownContext);
+    tally.record(HiddenReason::NotAuthorized);
+
+    assert_eq!(tally.count(HiddenReason::UnknownContext), 2);
+    assert_eq!(tally.count(HiddenReason::NotAuthorized), 1);
+    assert_eq!(
+        tally.count(HiddenReason::UnusableSessionId),
+        0,
+        "a reason nothing was withheld for must stay silent"
+    );
+
+    let labels: Vec<&str> = HiddenReason::ALL.iter().map(|r| r.as_str()).collect();
+    let mut unique = labels.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(unique.len(), labels.len(), "{labels:?}");
+    // `trace` is the only production consumer; exercising it keeps the emission
+    // path compiled and proves it is total over the closed reason set.
+    tally.trace();
+}
+
+/// The counting must be driven by real decisions, not only by hand-recorded
+/// values — otherwise the tally could count the wrong gate and still pass.
+#[test]
+fn a_mixed_fleet_tallies_the_gate_that_actually_withheld_each_row() {
+    const THEIRS: &str = "sess-stranger";
+    let access = policy_with_admins(GRACE.1);
+    let alice = viewer(ALICE, &access);
+    let scope = scope(&alice, false);
+    // A projection that knows Alice's session AND a stranger's, so "the registry
+    // never heard of it" and "the tiers said no" are two distinct rows.
+    let registry = ready_registry();
+    registry.replace_repo(
+        2,
+        &RepoRef {
+            owner: "acme".to_string(),
+            name: "other".to_string(),
+        },
+        vec![(THEIRS.to_string(), context(Some(707), "stranger", &[], &[]))],
+    );
+    let authorizer = RowAuthorizer::new(&registry, &alice, &scope, &access, &[]);
+
+    let mut tally = HiddenTally::default();
+    for row in [
+        item("fkst-orphan", None),
+        item("fkst-foreign", Some("sess-foreign")),
+        item("fkst-theirs", Some(THEIRS)),
+        item("fkst-mine", Some(SESSION)),
     ] {
-        assert!(!reason.as_str().is_empty());
+        if let Some(reason) = authorizer
+            .decide_row(&row)
+            .expect("the projection is ready")
+        {
+            tally.record(reason);
+        }
     }
+    assert_eq!(tally.count(HiddenReason::UnusableSessionId), 1);
+    assert_eq!(tally.count(HiddenReason::UnknownContext), 1);
+    assert_eq!(tally.count(HiddenReason::NotAuthorized), 1);
 }

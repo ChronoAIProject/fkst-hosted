@@ -39,15 +39,23 @@ fn visible_and_hidden() -> Vec<fleet::Item> {
     ]
 }
 
-/// A completely different hidden population: forty more rows, different ids,
-/// different states, a different order, and forty warnings of their own.
+/// More warning-emitting hidden rows than one snapshot's shared warning budget
+/// can hold. Deliberately above the ceiling: a budget consumed in fleet-list
+/// order would otherwise strip Alice's own row of its codes, which is a hidden
+/// runtime changing a regular caller's response.
+const HIDDEN_OVER_THE_WARNING_CEILING: usize = 306;
+
+/// A completely different hidden population: three hundred more rows, different
+/// ids, different states, a different order, and a warning on every one of them.
 fn mutated_hidden_fleet() -> Vec<fleet::Item> {
-    let mut fleet: Vec<fleet::Item> = (0..40)
-        .map(|index| {
-            fleet::with_status(
-                &format!("aaa-hidden-{index:02}"),
+    let mut fleet: Vec<fleet::Item> = (0..HIDDEN_OVER_THE_WARNING_CEILING)
+        .map(|index| fleet::Item {
+            status: RuntimeInventoryStatus::Pending,
+            raw_status: RuntimeInventoryStatus::Pending.as_str().to_string(),
+            ..fleet::with_warnings(
+                &format!("aaa-hidden-{index:03}"),
                 Some(OTHER_SESSION),
-                RuntimeInventoryStatus::Pending,
+                vec![InventoryWarningCode::MalformedIdentity],
             )
         })
         .collect();
@@ -65,14 +73,12 @@ fn mutated_hidden_fleet() -> Vec<fleet::Item> {
     fleet
 }
 
+/// What a real adapter reports once that many rows have warned: a clipped
+/// snapshot-scope diagnostic, and nothing per-row left to say.
 fn hidden_warnings() -> Vec<BoundedInventoryWarning> {
-    (0..40)
-        .map(|index| BoundedInventoryWarning {
-            code: InventoryWarningCode::MalformedIdentity,
-            runtime_id: Some(format!("aaa-hidden-{index:02}")),
-            session_id: Some(OTHER_SESSION.to_string()),
-        })
-        .collect()
+    vec![BoundedInventoryWarning::snapshot(
+        InventoryWarningCode::WarningsTruncated,
+    )]
 }
 
 /// The claim: authorization runs before filters, ordering, `item_count`, warning
@@ -209,6 +215,8 @@ async fn every_filter_narrows_within_the_authorized_set() {
             vec!["mine-failed", "mine-running"],
         ),
         ("?attribution_source=unknown_legacy", vec![]),
+        ("?attribution_source=conflict", vec![]),
+        ("?attribution_source=partial_metadata", vec![]),
         (
             "?status=running&creator_id=101&repo_full_name=acme/site",
             vec!["mine-running"],
@@ -245,25 +253,27 @@ async fn every_invalid_filter_is_a_400_before_the_backend_is_touched() {
     );
 }
 
-/// A warning naming a hidden runtime must not reach a regular caller — not on an
-/// item, and not on the response.
+/// A warning belonging to a hidden runtime must not reach a regular caller — not
+/// on an item, and not on the response.
 #[tokio::test]
 async fn warnings_reach_a_caller_only_for_rows_that_caller_receives() {
     let harness = harness(HarnessSpec::new(fleet::snapshot_with_warnings(
-        visible_and_hidden(),
         vec![
-            BoundedInventoryWarning {
-                code: InventoryWarningCode::AttributionConflict,
-                runtime_id: Some("mine-running".to_string()),
-                session_id: Some(SESSION.to_string()),
-            },
-            BoundedInventoryWarning {
-                code: InventoryWarningCode::MalformedIdentity,
-                runtime_id: Some("hidden-a".to_string()),
-                session_id: Some(OTHER_SESSION.to_string()),
-            },
-            BoundedInventoryWarning::snapshot(InventoryWarningCode::WarningsTruncated),
+            fleet::with_warnings(
+                "hidden-a",
+                Some(OTHER_SESSION),
+                vec![InventoryWarningCode::MalformedIdentity],
+            ),
+            fleet::with_warnings(
+                "mine-running",
+                Some(SESSION),
+                vec![InventoryWarningCode::AttributionConflict],
+            ),
+            fleet::orphan("hidden-orphan"),
         ],
+        vec![BoundedInventoryWarning::snapshot(
+            InventoryWarningCode::WarningsTruncated,
+        )],
     )))
     .await;
 
@@ -290,6 +300,35 @@ async fn warnings_reach_a_caller_only_for_rows_that_caller_receives() {
     let codes = admin["warning_codes"].to_string();
     assert!(codes.contains("warnings_incomplete"), "{codes}");
     assert!(codes.contains("malformed_identity"), "{codes}");
+}
+
+/// The sharpest form of the warning half: a hidden population big enough to
+/// exhaust the snapshot's shared warning budget must not cost the ONE row Alice
+/// can see its own codes.
+#[tokio::test]
+async fn a_warning_flood_from_hidden_rows_cannot_strip_a_visible_rows_codes() {
+    let mut hidden = mutated_hidden_fleet();
+    hidden.retain(|item| !item.runtime_id.starts_with("mine-"));
+    hidden.push(fleet::with_warnings(
+        "mine-running",
+        Some(SESSION),
+        vec![InventoryWarningCode::ClockSkew],
+    ));
+
+    let harness = harness(HarnessSpec::new(fleet::snapshot_with_warnings(
+        hidden,
+        hidden_warnings(),
+    )))
+    .await;
+    let snapshot = harness.snapshot(ALICE, "").await;
+    assert_eq!(item_ids(&snapshot), vec!["mine-running"]);
+    assert_eq!(snapshot["items"][0]["warning_codes"][0], "clock_skew");
+    assert_eq!(snapshot["warning_codes"][0], "clock_skew");
+    assert_eq!(
+        snapshot["warning_codes"].as_array().expect("array").len(),
+        1,
+        "the clipped fleet-wide diagnostic stays out of a regular response"
+    );
 }
 
 /// A clipped page walk means the fleet read was INCOMPLETE, so no answer derived
@@ -421,16 +460,9 @@ async fn the_metric_families_are_rendered_with_closed_labels_only() {
 
 use tower::ServiceExt;
 
-/// The two operations surfaces are independent by construction: the activity
-/// query has no source configured in this harness, and the live inventory neither
-/// notices nor cares. A PostHog outage must never hide live runtime state.
-#[tokio::test]
-async fn an_unavailable_activity_source_does_not_affect_the_live_inventory() {
-    let harness = harness_with(visible_and_hidden()).await;
-    let snapshot = harness.snapshot(ALICE, "").await;
-    assert_eq!(snapshot["item_count"], 2);
-
-    let activity = harness
+/// One activity request through the same router the sandbox tests drive.
+async fn activity(harness: &sandbox_harness::Harness) -> axum::http::Response<axum::body::Body> {
+    harness
         .router
         .clone()
         .oneshot(
@@ -444,39 +476,68 @@ async fn an_unavailable_activity_source_does_not_affect_the_live_inventory() {
                 .expect("request builds"),
         )
         .await
-        .expect("router responds");
-    assert_eq!(activity.status(), StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(error_code(activity).await, "audit_query_not_configured");
+        .expect("router responds")
 }
 
-/// And the converse: a runtime-backend failure must not change what the activity
-/// surface answers. Neither endpoint may become the other's dependency.
+/// A PostHog outage must never hide live runtime state: the activity source is
+/// configured here and FAILING, while the runtime backend is healthy.
+#[tokio::test]
+async fn a_failing_activity_source_does_not_affect_the_live_inventory() {
+    let harness = harness(
+        HarnessSpec::new(fleet::snapshot(visible_and_hidden())).activity(/* healthy */ false),
+    )
+    .await;
+
+    let response = activity(&harness).await;
+    assert_eq!(
+        response.status(),
+        StatusCode::SERVICE_UNAVAILABLE,
+        "the fixture's activity source really is down"
+    );
+    assert_eq!(error_code(response).await, "unavailable");
+
+    let snapshot = harness.snapshot(ALICE, "").await;
+    assert_eq!(snapshot["item_count"], 2);
+}
+
+/// And the converse, in the non-degenerate direction: the runtime backend is down
+/// while the activity source is healthy, and the activity surface still answers
+/// `200`. Neither endpoint may become the other's dependency.
 #[tokio::test]
 async fn a_failing_runtime_backend_does_not_change_the_activity_answer() {
-    let harness = harness(HarnessSpec::new(sandbox_harness::InventoryScript::Failure)).await;
+    let harness = harness(
+        HarnessSpec::new(sandbox_harness::InventoryScript::Failure)
+            .activity(/* healthy */ true),
+    )
+    .await;
+
     let sandboxes = harness.get(ALICE, "").await;
     assert_eq!(sandboxes.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(error_code(sandboxes).await, "sandbox_inventory_unavailable");
 
-    let activity = harness
-        .router
-        .clone()
-        .oneshot(
-            axum::http::Request::get("/api/v1/operations/activity")
-                .header("host", "test")
-                .header(
-                    "authorization",
-                    format!("Bearer {}", sandbox_harness::token(ALICE)),
-                )
-                .body(axum::body::Body::empty())
-                .expect("request builds"),
-        )
-        .await
-        .expect("router responds");
-    assert_eq!(activity.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let response = activity(&harness).await;
     assert_eq!(
-        error_code(activity).await,
-        "audit_query_not_configured",
-        "the activity surface reports ITS own health, never the runtime's"
+        response.status(),
+        StatusCode::OK,
+        "the activity surface reports ITS own health, never the runtime's: {}",
+        String::from_utf8_lossy(
+            &http_body_util::BodyExt::collect(response.into_body())
+                .await
+                .expect("collect body")
+                .to_bytes()
+        )
     );
+}
+
+/// The deployment that configured no read credentials at all still says so, and
+/// still serves live inventory.
+#[tokio::test]
+async fn an_unconfigured_activity_source_does_not_affect_the_live_inventory() {
+    let harness = harness_with(visible_and_hidden()).await;
+    let snapshot = harness.snapshot(ALICE, "").await;
+    assert_eq!(snapshot["item_count"], 2);
+
+    let response = activity(&harness).await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(error_code(response).await, "audit_query_not_configured");
 }
