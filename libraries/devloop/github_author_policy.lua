@@ -14,7 +14,10 @@ function M.from_logins(logins)
   return content_filter.author_policy_from_logins(logins or {})
 end
 
-function M.from_env(exec)
+--- `extra_logins` lets a caller widen the set without reaching for
+--- content_filter itself -- keeping the forge dependency in this module, which
+--- is the one already declared to have it.
+function M.from_env(exec, extra_logins)
   local bot_login = nil
   if type(devloop_base.configured_trusted_bot_login) == "function" then
     bot_login = devloop_base.configured_trusted_bot_login()
@@ -33,6 +36,9 @@ function M.from_env(exec)
     if ok then
       append_csv_logins(logins, raw)
     end
+  end
+  for _, login in ipairs(extra_logins or {}) do
+    table.insert(logins, login)
   end
   return M.from_logins(logins)
 end
