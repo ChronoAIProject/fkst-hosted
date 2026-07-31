@@ -434,15 +434,17 @@ pub(super) fn html_error(status: StatusCode, message: &str) -> Response {
     // The browser paths render HTML rather than the JSON envelope, so they carry
     // no `error` field — the stable audit code is attached as a typed extension
     // instead, keeping OAuth failures correlatable without the message (which may
-    // describe caller-supplied state) ever reaching a record.
-    crate::audit::request::with_error_code(
+    // describe caller-supplied state) ever reaching a record. A 401/403 page is
+    // additionally marked a policy rejection, so a sign-in denial classifies the
+    // same here as it does on the JSON surface.
+    crate::audit::request::with_browser_error(
         (
             status,
             [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
             body,
         )
             .into_response(),
-        crate::audit::request::codes::for_browser_status(status),
+        status,
     )
 }
 

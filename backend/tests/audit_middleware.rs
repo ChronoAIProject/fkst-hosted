@@ -1,96 +1,19 @@
-//! Router-level tests for the outer audit middleware, against the REAL
-//! [`build_router`].
+//! Router-level tests for the outer audit middleware's request lifecycle,
+//! against the REAL [`fkst_control_plane::router::build_router`].
 //!
-//! The point of driving the real router is that the middleware's position
-//! relative to every inner layer — CORS, the route-scoped timeouts, the
-//! leader-readiness gate, the identity extractors, `AppError` conversion, and
-//! axum's own routing answers — is *proven* rather than inferred from the order
-//! the layers happen to be declared in.
+//! This suite covers what the middleware does with a request *as a request*:
+//! which traffic is in scope, how a route resolves to an operation, and how the
+//! `X-Request-Id` is accepted, replaced, and propagated. How a request's
+//! identity is attributed and classified lives in the sibling `audit_identity`
+//! suite; outcome derivation across the full status surface lives in
+//! `audit_outcomes`.
 
+mod audit_router;
+
+use audit_router::Harness;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use fkst_control_plane::audit::sink::RecordingSink;
-use fkst_control_plane::audit::{ApiRequestCompletedV1, AuditHandle, AuditOutcome};
-use fkst_control_plane::config::Config;
-use fkst_control_plane::recovery::RecoveryMonitor;
-use fkst_control_plane::router::build_router;
-use fkst_control_plane::state::{empty_self_router, AppState};
-use tower::ServiceExt;
-
-/// A signature that cannot verify against any secret.
-const BOGUS_SIGNATURE: &str =
-    "sha256=00000000000000000000000000000000000000000000000000000000000000ff";
-
-struct Harness {
-    router: axum::Router,
-    sink: RecordingSink,
-}
-
-impl Harness {
-    fn new() -> Self {
-        Self::build(Config::default(), RecoveryMonitor::new(false), true)
-    }
-
-    /// An election-enabled replica that has NOT completed its acquisition resync,
-    /// so every gated route short-circuits before any handler.
-    fn follower() -> Self {
-        let mut config = Config::default();
-        config.leader.enabled = true;
-        config.leader.identity = Some("pod-follower".to_string());
-        let recovery = RecoveryMonitor::new(true);
-        recovery.enable_leader_election("pod-follower".to_string());
-        Self::build(config, recovery, true)
-    }
-
-    fn build(config: Config, recovery: RecoveryMonitor, webhook: bool) -> Self {
-        let (audit, sink) = AuditHandle::recording();
-        let router = build_router(AppState {
-            config,
-            recovery,
-            github_app: None,
-            github_app_webhook_secret: webhook
-                .then(|| secrecy::SecretString::from("audit-test-secret".to_string())),
-            reconciler: None,
-            session_backend: None,
-            storage: None,
-            session_access: Default::default(),
-            log_bundle_cache: Default::default(),
-            disposable_environments: Default::default(),
-            self_router: empty_self_router(),
-            chat: None,
-            audit,
-        })
-        .expect("router builds");
-        Self { router, sink }
-    }
-
-    async fn call(&self, request: Request<Body>) -> axum::response::Response {
-        self.router
-            .clone()
-            .oneshot(request)
-            .await
-            .expect("router responds")
-    }
-
-    async fn get(&self, path: &str) -> axum::response::Response {
-        self.call(
-            Request::get(path)
-                .body(Body::empty())
-                .expect("request builds"),
-        )
-        .await
-    }
-
-    fn only_event(&self) -> ApiRequestCompletedV1 {
-        let events = self.sink.events();
-        assert_eq!(
-            events.len(),
-            1,
-            "exactly one terminal record per request, got {events:#?}"
-        );
-        events.into_iter().next().expect("one event")
-    }
-}
+use fkst_control_plane::audit::AuditOutcome;
 
 /// Probe, scrape, contract, and preflight traffic must never reach the sink —
 /// and must still be answered exactly as before.
@@ -120,6 +43,28 @@ async fn excluded_traffic_produces_no_records() {
     assert!(
         harness.sink.is_empty(),
         "probe/scrape/contract/preflight traffic must be excluded, got {:#?}",
+        harness.sink.events()
+    );
+}
+
+/// axum answers HEAD from the GET handler, so a HEAD uptime probe or
+/// load-balancer check reaches the very same operations — and must inherit the
+/// very same exclusions. Without that, every HEAD-based monitor would pump
+/// probe/scrape noise into the trail.
+#[tokio::test]
+async fn head_probes_are_excluded_exactly_like_their_get_counterparts() {
+    let harness = Harness::new();
+    for path in ["/health", "/ready", "/metrics", "/openapi.json"] {
+        let response = harness.head(path).await;
+        assert!(
+            response.status().is_success(),
+            "HEAD {path} must still answer: {}",
+            response.status()
+        );
+    }
+    assert!(
+        harness.sink.is_empty(),
+        "HEAD probe/scrape/contract traffic must be excluded, got {:#?}",
         harness.sink.events()
     );
 }
@@ -184,85 +129,6 @@ async fn a_leader_gate_rejection_is_recorded_as_rejected_with_its_real_status() 
         event.actor_id, None,
         "a gated request has no verified actor"
     );
-}
-
-/// An extractor rejection never reaches a handler, and must still be recorded.
-#[tokio::test]
-async fn a_missing_bearer_token_is_recorded_as_a_rejection() {
-    let harness = Harness::new();
-    let response = harness.get("/api/v1/users/me/environment-profiles").await;
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-
-    let event = harness.only_event();
-    assert_eq!(event.operation_id, "list_user_environment_profiles");
-    assert_eq!(
-        event.route_template,
-        "/api/v1/users/me/environment-profiles"
-    );
-    assert_eq!(event.outcome, AuditOutcome::Rejected);
-    assert_eq!(event.error_code.as_deref(), Some("unauthorized"));
-    assert_eq!(event.actor_id, None);
-}
-
-/// A forged delivery is an identity rejection, and the sender its unverified
-/// body claims must never become the record's actor.
-#[tokio::test]
-async fn a_webhook_signature_rejection_is_recorded_without_the_claimed_sender() {
-    let harness = Harness::new();
-    let body = r#"{"action":"opened","sender":{"login":"mallory-canary","id":9999}}"#;
-    let response = harness
-        .call(
-            Request::post("/api/v1/github/app/webhook")
-                .header("content-type", "application/json")
-                .header("x-github-event", "issues")
-                .header("x-hub-signature-256", BOGUS_SIGNATURE)
-                .body(Body::from(body))
-                .expect("request builds"),
-        )
-        .await;
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-
-    let event = harness.only_event();
-    assert_eq!(event.operation_id, "github_app_webhook");
-    assert_eq!(event.outcome, AuditOutcome::Rejected);
-    assert_eq!(
-        event.error_code.as_deref(),
-        Some("webhook_signature_invalid")
-    );
-    assert_eq!(event.actor_id, None);
-    assert!(!format!("{event:#?}").contains("mallory-canary"));
-}
-
-/// The browser OAuth callback is the highest-risk path for redaction: its query
-/// carries the authorization `code` and CSRF `state`.
-#[tokio::test]
-async fn the_oauth_callback_records_its_template_and_never_its_query() {
-    let harness = Harness::new();
-    let response = harness
-        .get("/api/v1/auth/github/callback?code=canary-code&state=canary-state")
-        .await;
-    // Login is unconfigured in this fixture, so the browser path renders its HTML
-    // error page — the interesting part is what the RECORD contains.
-    assert!(response.status().is_client_error() || response.status().is_server_error());
-
-    let event = harness.only_event();
-    assert_eq!(event.operation_id, "github_login_callback");
-    assert_eq!(event.route_template, "/api/v1/auth/github/callback");
-    assert!(
-        event
-            .error_code
-            .as_deref()
-            .is_some_and(|code| code.starts_with("oauth_")),
-        "the HTML path must still carry a bounded code, got {:?}",
-        event.error_code
-    );
-    let rendered = format!("{event:#?}");
-    for canary in ["canary-code", "canary-state", "?"] {
-        assert!(
-            !rendered.contains(canary),
-            "{canary} leaked into {rendered}"
-        );
-    }
 }
 
 #[tokio::test]

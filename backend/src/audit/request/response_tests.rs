@@ -90,6 +90,7 @@ fn a_validation_or_dependency_failure_is_not_a_rejection() {
 #[test]
 fn every_declared_code_is_a_valid_stable_error_code() {
     let mut declared = vec![
+        codes::INSTALL_VALIDATION_FAILED,
         codes::REQUEST_TIMEOUT,
         codes::LEADER_NOT_READY,
         codes::ROUTE_NOT_FOUND,
@@ -142,5 +143,39 @@ fn browser_statuses_map_onto_bounded_oauth_codes() {
         (StatusCode::BAD_REQUEST, codes::OAUTH_INVALID_REQUEST),
     ] {
         assert_eq!(codes::for_browser_status(status), expected, "{status}");
+    }
+}
+
+/// The HTML surface must classify an identity/authorization answer exactly as
+/// the JSON surface does: one policy decision cannot produce two outcomes.
+#[test]
+fn a_browser_identity_or_authorization_page_is_a_rejection() {
+    for (status, code) in [
+        (StatusCode::UNAUTHORIZED, codes::OAUTH_UNAUTHORIZED),
+        (StatusCode::FORBIDDEN, codes::OAUTH_FORBIDDEN),
+    ] {
+        let response = with_browser_error(plain(status), status);
+        assert_eq!(error_code_of(&response), Some(code));
+        assert!(is_rejected(&response), "{status} must be a rejection");
+    }
+}
+
+/// Everything else on the browser surface is an ordinary failure: a missing
+/// OAuth state is a malformed request, not a denial, and an unconfigured login
+/// is a dependency gap.
+#[test]
+fn other_browser_pages_carry_a_code_without_the_rejection_marker() {
+    for (status, code) in [
+        (StatusCode::BAD_REQUEST, codes::OAUTH_INVALID_REQUEST),
+        (StatusCode::NOT_FOUND, codes::OAUTH_NOT_FOUND),
+        (StatusCode::SERVICE_UNAVAILABLE, codes::OAUTH_UNAVAILABLE),
+        (StatusCode::BAD_GATEWAY, codes::OAUTH_UPSTREAM),
+    ] {
+        let response = with_browser_error(plain(status), status);
+        assert_eq!(error_code_of(&response), Some(code));
+        assert!(
+            !is_rejected(&response),
+            "{status} is not a policy rejection"
+        );
     }
 }

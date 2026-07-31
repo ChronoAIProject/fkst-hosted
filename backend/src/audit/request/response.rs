@@ -21,6 +21,7 @@
 //! argument for `error_code` (epic `AUD-03`), enforced by the type system rather
 //! than by review.
 
+use axum::http::StatusCode;
 use axum::response::Response;
 
 /// The stable machine-readable error code for a response.
@@ -37,9 +38,10 @@ pub struct AuditRejection;
 /// [`crate::error::AppError`].
 ///
 /// `AppError` carries its own codes (`invalid_request`, `not_found`, …); this
-/// module is only for the hand-built responses the spec names: the browser OAuth
-/// HTML pages, the leader gate, the webhook's signature rejection, and axum's
-/// own routing/timeout answers.
+/// module is for the hand-built responses: the browser OAuth HTML pages, the
+/// leader gate, the webhook's signature rejection, axum's own routing/timeout
+/// answers, and the one product endpoint that renders a detailed failure body of
+/// its own instead of the shared envelope.
 pub mod codes {
     /// The route-scoped `TimeoutLayer` answered before the handler returned.
     pub const REQUEST_TIMEOUT: &str = "request_timeout";
@@ -65,6 +67,15 @@ pub mod codes {
     pub const OAUTH_UNAVAILABLE: &str = "oauth_unavailable";
     /// A browser page's upstream dependency failed.
     pub const OAUTH_UPSTREAM: &str = "oauth_upstream";
+    /// An environment profile's install commands failed their validation run.
+    ///
+    /// `PUT /users/me/environment-profiles/{name}` answers this one failure with
+    /// a bespoke body (which command failed, its exit code, a stderr tail)
+    /// rather than the shared envelope, so it is the single product response
+    /// that must state its stable code here. The literal matches that body's
+    /// `error` field, so the client-visible code and the recorded one are the
+    /// same string.
+    pub const INSTALL_VALIDATION_FAILED: &str = "install_validation_failed";
 
     /// The code for a hand-built browser (HTML) response of `status`.
     ///
@@ -105,6 +116,26 @@ pub fn with_rejection(mut response: Response, code: &'static str) -> Response {
     tag_error_code(&mut response, code);
     tag_rejected(&mut response);
     response
+}
+
+/// Tag a hand-built browser (HTML) error page: its bounded stable code, plus the
+/// rejection marker when the status is an identity/authorization answer.
+///
+/// The browser surfaces (the log-download OAuth round-trip and the dashboard
+/// login) render HTML instead of the JSON envelope, so they cannot reuse
+/// [`crate::error::AppError::into_response`]'s tagging. Doing only half of it
+/// would make ONE policy decision produce TWO outcomes: a denied log download
+/// would record as `rejected` when a Bearer caller hits it and as a plain
+/// `client_error` when a browser does — and the epic's `rejected` filtering
+/// would silently miss every browser-surface denial. The mapped statuses mirror
+/// exactly the `AppError` arms marked as rejections (`Unauthorized`,
+/// `Forbidden`, `ScopeForbidden`).
+pub fn with_browser_error(response: Response, status: StatusCode) -> Response {
+    let code = codes::for_browser_status(status);
+    match status {
+        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => with_rejection(response, code),
+        _ => with_error_code(response, code),
+    }
 }
 
 /// The stable code attached to a response, if any.

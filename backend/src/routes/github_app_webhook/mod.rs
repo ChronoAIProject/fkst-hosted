@@ -11,8 +11,9 @@
 //!    against the `sha256=<hex>` value in `X-Hub-Signature-256`. A missing or
 //!    mismatched signature is `401` (never reveals which check failed).
 //! 3. Only then trust the body's `sender`/`installation` as the delivery's audit
-//!    identity (see [`sender`]) — in an unverified body those fields are
-//!    attacker-controlled — and parse `X-GitHub-Event` to dispatch.
+//!    identity, and record the delivery's correlation handles (see [`sender`]) —
+//!    in an unverified body those fields are attacker-controlled — and parse
+//!    `X-GitHub-Event` to dispatch.
 //!
 //! Stateless cache-bust hint (#141). The handler keeps signature verification,
 //! parses the event to derive the affected `owner/name` set and installer login,
@@ -126,9 +127,10 @@ async fn webhook(
     }
 
     // STEP 3: the body is now PROVEN to be GitHub's, so — and only now — its
-    // `sender`/`installation` fields may be trusted as identity. A rejected
-    // delivery never reaches this line, so a forged sender is never recorded.
-    sender::record_verified_sender(&extensions, &body);
+    // `sender`/`installation` fields may be trusted as identity, and the
+    // delivery's own correlation handles may be recorded. A rejected delivery
+    // never reaches this line, so a forged sender is never recorded.
+    sender::record_verified_delivery(&extensions, &headers, &body);
 
     // STEP 4: parse the event type, then dispatch on the verified body.
     let event = headers

@@ -55,7 +55,7 @@ pub use middleware::{audit_requests, AuditMiddleware};
 pub use outcome::{derive_outcome, framework_error_code};
 pub use policy::{declared_operation_ids, policy_for, ExclusionReason, OperationPolicy};
 pub use response::{
-    codes, tag_error_code, tag_rejected, with_error_code, with_rejection, AuditErrorCode,
-    AuditRejection,
+    codes, tag_error_code, tag_rejected, with_browser_error, with_error_code, with_rejection,
+    AuditErrorCode, AuditRejection,
 };
 pub use trace::SafeHttpSpan;

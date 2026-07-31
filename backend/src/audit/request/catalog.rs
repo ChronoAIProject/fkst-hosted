@@ -181,26 +181,54 @@ impl OperationCatalog {
             };
         };
         let template = normalize_matched_path(matched);
-        if let Some(entry) = self.lookup(method, &template) {
-            return match entry.policy {
-                OperationPolicy::Audited => RouteDecision::Record {
-                    operation_id: entry.operation_id.clone(),
-                    route_template: Arc::from(template.as_str()),
-                },
-                OperationPolicy::Excluded(reason) => RouteDecision::Skip(reason),
-            };
+        if let Some(decision) = self.declared_decision(method, &template) {
+            return decision;
         }
-        // A matched route with no documented operation: either an explicitly
-        // excluded non-OpenAPI route, or a method axum matched the path for but
-        // no handler serves (the `405` path). The template is a documented
-        // constant, so it is safe to keep even though the operation is unknown.
-        match undocumented_route_policy(method.as_str(), &template) {
-            Some(OperationPolicy::Excluded(reason)) => RouteDecision::Skip(reason),
-            Some(OperationPolicy::Audited) | None => RouteDecision::Record {
+        // axum answers HEAD from the GET handler unless a route registers its own
+        // (`MethodRouter::get` installs both), so a HEAD request must resolve to
+        // the SAME policy as the GET it is actually served by. Without this
+        // fall-back a HEAD uptime probe or load-balancer check against `/health`,
+        // `/ready`, `/metrics`, or `/openapi.json` would miss its exclusion entry
+        // and be recorded as unknown traffic — exactly the probe/scrape noise the
+        // exclusions exist to keep out.
+        if *method == Method::HEAD {
+            if let Some(decision) = self.declared_decision(&Method::GET, &template) {
+                return decision;
+            }
+        }
+        // A matched route with no documented operation for this method or its GET
+        // fall-back: a method axum matched the path for but no handler serves (the
+        // `405` path). The template is a documented constant, so it is safe to
+        // keep even though the operation is unknown.
+        RouteDecision::Record {
+            operation_id: self.unmatched_operation.clone(),
+            route_template: Arc::from(template.as_str()),
+        }
+    }
+
+    /// The decision that a documented operation — or an explicitly policed route
+    /// that carries no OpenAPI operation — dictates for `method`, or `None` when
+    /// neither names this `(method, template)` pair.
+    fn declared_decision(&self, method: &Method, template: &str) -> Option<RouteDecision> {
+        let policy = match self.lookup(method, template) {
+            Some(entry) => {
+                return Some(match entry.policy {
+                    OperationPolicy::Audited => RouteDecision::Record {
+                        operation_id: entry.operation_id.clone(),
+                        route_template: Arc::from(template),
+                    },
+                    OperationPolicy::Excluded(reason) => RouteDecision::Skip(reason),
+                })
+            }
+            None => undocumented_route_policy(method.as_str(), template)?,
+        };
+        Some(match policy {
+            OperationPolicy::Excluded(reason) => RouteDecision::Skip(reason),
+            OperationPolicy::Audited => RouteDecision::Record {
                 operation_id: self.unmatched_operation.clone(),
-                route_template: Arc::from(template.as_str()),
+                route_template: Arc::from(template),
             },
-        }
+        })
     }
 }
 

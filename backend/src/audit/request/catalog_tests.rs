@@ -139,6 +139,48 @@ fn a_matched_path_without_an_operation_keeps_the_template() {
     }
 }
 
+/// axum serves HEAD from the GET handler, so a HEAD probe must inherit the GET
+/// operation's policy — otherwise a HEAD-based uptime check against `/health`
+/// would pump exactly the noise the exclusions exist to keep out.
+#[test]
+fn a_head_request_inherits_the_get_operations_policy() {
+    let catalog = catalog(&[
+        (HttpMethod::Get, "/health", Some("health")),
+        (HttpMethod::Get, "/api/v1/overview", Some("canvas_overview")),
+    ]);
+    assert_eq!(
+        catalog.resolve(&Method::HEAD, Some("/health")),
+        RouteDecision::Skip(ExclusionReason::Probe)
+    );
+    // The undocumented-route table is keyed the same way.
+    assert_eq!(
+        catalog.resolve(&Method::HEAD, Some("/openapi.json")),
+        RouteDecision::Skip(ExclusionReason::Contract)
+    );
+    // An audited GET stays audited under HEAD, recorded as the same operation.
+    match catalog.resolve(&Method::HEAD, Some("/api/v1/overview")) {
+        RouteDecision::Record { operation_id, .. } => {
+            assert_eq!(&*operation_id, "canvas_overview")
+        }
+        other => panic!("expected the GET operation, got {other:?}"),
+    }
+}
+
+/// The fall-back is HEAD-only and one-directional: no other method may borrow a
+/// GET operation's identity or its exclusion.
+#[test]
+fn no_other_method_borrows_the_get_operations_policy() {
+    let catalog = catalog(&[(HttpMethod::Get, "/health", Some("health"))]);
+    for method in [Method::POST, Method::PUT, Method::DELETE, Method::PATCH] {
+        match catalog.resolve(&method, Some("/health")) {
+            RouteDecision::Record { operation_id, .. } => {
+                assert_eq!(&*operation_id, "<unmatched>", "{method}")
+            }
+            other => panic!("{method} must not inherit the GET policy, got {other:?}"),
+        }
+    }
+}
+
 #[test]
 fn an_operation_without_an_operation_id_fails_the_build() {
     let error = OperationCatalog::from_openapi(&doc(&[(HttpMethod::Get, "/thing", None)]))

@@ -30,6 +30,7 @@ use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use crate::audit::request::{codes, with_error_code};
 use crate::config::Config;
 use crate::environment_profile::{default_store, EnvironmentProfileStore};
 use crate::environment_validation::validate_entries;
@@ -113,6 +114,21 @@ pub struct InstallValidationError {
     pub timed_out: bool,
     /// Trailing bytes of the failing command's stderr (bounded by config).
     pub stderr_tail: String,
+}
+
+/// Render the detailed install-validation `422`.
+///
+/// This is the ONE product response built without [`AppError`], so it is also the
+/// one that has to attach its own stable audit code: without it the record for a
+/// real, client-visible failure would carry no `error_code` at all while the
+/// client reads one in the body. It is not a policy rejection — the caller was
+/// authenticated and authorized; their commands failed — so it carries no
+/// rejection marker and classifies as an ordinary `client_error`.
+fn install_validation_failed(body: InstallValidationError) -> Response {
+    with_error_code(
+        (StatusCode::UNPROCESSABLE_ENTITY, Json(body)).into_response(),
+        codes::INSTALL_VALIDATION_FAILED,
+    )
 }
 
 /// Anchored environment-NAME pattern: DNS-1123-label-ish, lower-case only, so the
@@ -283,7 +299,7 @@ async fn put_user_environment(
             };
             tracing::info!(github_user_id = user.id, env = %name, timed_out, "env put: install validation failed; nothing persisted");
             let body = InstallValidationError {
-                error: "install_validation_failed".to_string(),
+                error: codes::INSTALL_VALIDATION_FAILED.to_string(),
                 message,
                 failed_command_index,
                 failed_command,
@@ -291,7 +307,7 @@ async fn put_user_environment(
                 timed_out,
                 stderr_tail,
             };
-            return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(body)).into_response());
+            return Ok(install_validation_failed(body));
         }
     }
 
