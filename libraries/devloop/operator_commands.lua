@@ -10,7 +10,6 @@ local forge_validators = require("devloop.forge_validators")
 local devloop_logging = require("devloop.logging")
 local source_refs = require("contract.source_ref")
 local github_author_policy = require("devloop.github_author_policy")
-local content_filter = require("forge.github.content_filter")
 local devloop_config = require("devloop.config")
 
 local ai_sentinel = "⟦AI:FKST⟧"
@@ -78,38 +77,28 @@ end
 -- session. Returning nil keeps the bot-only behaviour for callers that pass no
 -- policy.
 function C.operator_author_policy(exec)
-  local ok, policy = pcall(github_author_policy.from_env, exec)
+  local extra = {}
+  local creator = devloop_config.session_creator(exec)
+  if creator ~= nil and tostring(creator) ~= "" then
+    table.insert(extra, creator)
+  end
+  local ok, policy = pcall(github_author_policy.from_env, exec, extra)
   if not ok then
     return nil
   end
-  local whitelist = content_filter.policy_whitelist(policy)
-  if whitelist == nil then
-    return policy
-  end
-  local logins = {}
-  for login in pairs(whitelist) do
-    table.insert(logins, login)
-  end
-  local creator = devloop_config.session_creator(exec)
-  if creator ~= nil and tostring(creator) ~= "" then
-    table.insert(logins, creator)
-  end
-  return github_author_policy.from_logins(logins)
+  return policy
 end
 
 --- Is this comment's author allowed to command the loop?
 --
 -- Canonicalization matters: the whitelist stores folded logins, so a raw
 -- `trust_set[author]` lookup would reject `Chronoai-Shining` and every
--- `<slug>[bot]` spelling. Route through is_authorized, which folds first.
+-- `<slug>[bot]` spelling. is_authorized folds first.
 local function is_trusted_operator(comment, policy)
   if policy == nil then
     return parsers_misc._is_trusted_comment(comment)
   end
-  return content_filter.is_authorized(
-    parsers_misc._comment_author_login(comment),
-    content_filter.policy_whitelist(policy)
-  )
+  return github_author_policy.is_authorized(policy, parsers_misc._comment_author_login(comment))
 end
 
 function C.operator_command_fact(comments, command_name, policy)
