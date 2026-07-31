@@ -145,6 +145,11 @@ pub async fn validate_environment(
         BackendError::InvalidMetadata => {
             AppError::Internal(anyhow::anyhow!("env validation backend rejected metadata"))
         }
+        // Only the live-inventory read can raise this; validation never lists a
+        // fleet. Mapped explicitly so a future refactor cannot let it pass.
+        BackendError::InventoryTooLarge { .. } => AppError::Internal(anyhow::anyhow!(
+            "env validation backend reported an inventory ceiling"
+        )),
     })
 }
 

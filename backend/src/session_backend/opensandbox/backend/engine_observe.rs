@@ -72,6 +72,11 @@ impl OsbBackend {
             BackendError::InvalidMetadata => {
                 ObserveError::Failed("session backend metadata value rejected".to_string())
             }
+            // Resolving ONE sandbox never trips the fleet inventory ceiling; the
+            // arm exists so the taxonomy stays exhaustive, never a silent pass.
+            BackendError::InventoryTooLarge { .. } => {
+                ObserveError::Failed("session backend inventory ceiling reached".to_string())
+            }
         })?;
         let execd = (self.execd_factory)(&view.id, session_id);
 

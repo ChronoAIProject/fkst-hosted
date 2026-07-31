@@ -22,6 +22,7 @@ fn view_with(
         metadata,
         extensions: BTreeMap::new(),
         created_at: created_at.map(str::to_string),
+        last_transition_at: None,
     }
 }
 

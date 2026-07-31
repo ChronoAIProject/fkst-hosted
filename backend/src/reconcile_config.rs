@@ -134,6 +134,14 @@ mod defaults {
         0
     }
 
+    pub(super) fn sandbox_inventory_max_source_items() -> usize {
+        // Defensive ceiling on ONE live-inventory read (issue #5674). Sized far
+        // above any realistic fleet: it exists to stop a runaway/foreign backend
+        // from making the control plane allocate without bound, not to shape a
+        // normal response. Exceeding it is a loud error, never a silent clip.
+        5000
+    }
+
     pub(super) fn health_scrape_secs() -> u64 {
         // How often the package-agnostic session-health scrape reads each live
         // pod's status + recent framework logs to flag/clear a degraded session.
@@ -177,6 +185,8 @@ struct ReconcileVars {
     pod_token_refresh_secs: u64,
     #[serde(default = "defaults::pod_session_max_lifetime_secs")]
     pod_session_max_lifetime_secs: u64,
+    #[serde(default = "defaults::sandbox_inventory_max_source_items")]
+    sandbox_inventory_max_source_items: usize,
     #[serde(default = "defaults::health_scrape_secs")]
     health_scrape_secs: u64,
     /// Auto-create a seed trigger issue when the App is installed on a repo.
@@ -238,6 +248,12 @@ pub struct ReconcileConfig {
     /// Hard ceiling on one session pod's wall-clock lifetime, seconds. Env:
     /// `FKST_POD_SESSION_MAX_LIFETIME_SECS`. Default 0 = unbounded.
     pub pod_session_max_lifetime_secs: u64,
+    /// Defensive ceiling on the runtimes ONE live-inventory read may return. Env:
+    /// `FKST_SANDBOX_INVENTORY_MAX_SOURCE_ITEMS`. Default 5000; must be >= 1.
+    /// Exceeding it fails the read explicitly
+    /// ([`crate::session_backend::BackendError::InventoryTooLarge`]) rather than
+    /// returning a shortened list that would read as a complete fleet.
+    pub sandbox_inventory_max_source_items: usize,
     /// Session-health scrape cadence, seconds. Env: `FKST_HEALTH_SCRAPE_SECS`.
     /// Default 150; must be >= 1. How often the package-agnostic health scrape
     /// reads each live pod's status + recent framework logs to flag/clear a
@@ -289,6 +305,7 @@ impl Default for ReconcileConfig {
             pod_termination_grace_secs: defaults::pod_termination_grace_secs(),
             pod_token_refresh_secs: defaults::pod_token_refresh_secs(),
             pod_session_max_lifetime_secs: defaults::pod_session_max_lifetime_secs(),
+            sandbox_inventory_max_source_items: defaults::sandbox_inventory_max_source_items(),
             health_scrape_secs: defaults::health_scrape_secs(),
         }
     }
@@ -346,6 +363,14 @@ impl ReconcileConfig {
         if env.health_scrape_secs == 0 {
             return Err(AppError::Config(
                 "FKST_HEALTH_SCRAPE_SECS must be at least 1".to_string(),
+            ));
+        }
+        // A zero ceiling would make every live-inventory read fail as oversize,
+        // silently disabling the operations sandbox view — reject it outright
+        // rather than let an empty ConfigMap value take the feature down.
+        if env.sandbox_inventory_max_source_items == 0 {
+            return Err(AppError::Config(
+                "FKST_SANDBOX_INVENTORY_MAX_SOURCE_ITEMS must be at least 1".to_string(),
             ));
         }
         // The token refresh must fire strictly inside the 1-hour installation-token
@@ -419,6 +444,7 @@ impl ReconcileConfig {
             pod_termination_grace_secs: env.pod_termination_grace_secs,
             pod_token_refresh_secs: env.pod_token_refresh_secs,
             pod_session_max_lifetime_secs: env.pod_session_max_lifetime_secs,
+            sandbox_inventory_max_source_items: env.sandbox_inventory_max_source_items,
             health_scrape_secs: env.health_scrape_secs,
             seed_trigger_issue_on_install: env.seed_trigger_issue_on_install,
             seed_packages,

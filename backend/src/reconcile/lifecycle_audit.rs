@@ -228,7 +228,12 @@ pub(crate) fn failure_reason(error: &BackendError) -> LifecycleReason {
     match error {
         BackendError::InvalidMetadata => LifecycleReason::InvalidMetadata,
         BackendError::NotFound => LifecycleReason::RuntimeNotFound,
-        BackendError::Other(_) => LifecycleReason::BackendUnavailable,
+        // Inventory is a read-only operations verb; no reconcile EFFECT can
+        // produce this, but the mapping must exist and must not claim a metadata
+        // rejection. "Backend could not serve the call" is the truthful bucket.
+        BackendError::InventoryTooLarge { .. } | BackendError::Other(_) => {
+            LifecycleReason::BackendUnavailable
+        }
     }
 }
 

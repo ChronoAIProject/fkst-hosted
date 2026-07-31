@@ -52,6 +52,7 @@ pub mod correlate;
 mod engine_observe;
 mod fleet;
 mod health;
+mod inventory;
 mod logs;
 mod observe;
 mod rotation;
@@ -282,6 +283,13 @@ impl SessionBackend for OsbBackend {
         self.list_fleet_impl().await
     }
 
+    async fn list_runtime_inventory(
+        &self,
+        policy: &crate::session_backend::inventory::RuntimeLifetimePolicy,
+    ) -> Result<crate::session_backend::inventory::RuntimeInventorySnapshot, BackendError> {
+        self.list_runtime_inventory_impl(policy).await
+    }
+
     // --- The five fleet verbs #419 completes (credential heal, health reads, env
     // validation). Each delegates to its `*_impl` in a sibling submodule; the taxonomy
     // + verdict contracts are shared with the Kubernetes backend, never re-derived.
@@ -320,9 +328,12 @@ impl SessionBackend for OsbBackend {
     }
 }
 
+// `pub(crate)` under cfg(test) so the cross-adapter contract tests in
+// `session_backend::inventory` can drive a REAL `OsbBackend` through the same
+// scaffolding the sibling tests use, instead of maintaining a second fixture.
 #[cfg(test)]
 #[path = "backend_test_support.rs"]
-mod backend_test_support;
+pub(crate) mod backend_test_support;
 
 #[cfg(test)]
 #[path = "mod_tests.rs"]

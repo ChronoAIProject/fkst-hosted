@@ -17,6 +17,7 @@ use crate::runtime_identity::{
     RuntimeBackendKind, RuntimeIdentityMetadata, RuntimeIdentityOutcome, RuntimeIncarnation,
 };
 
+use super::inventory::{RuntimeInventoryItem, RuntimeInventorySnapshot, RuntimeLifetimePolicy};
 use super::{
     BackendError, DeliveryOutcome, EnsureOutcome, RuntimeStatus, SessionBackend, SessionHandle,
     ValidationOutcome, ValidationRequest,
@@ -62,6 +63,11 @@ pub(crate) struct FakeSessionBackend {
     stop_not_found: bool,
     /// Whether `stop_session` fails with a non-404 backend error.
     stop_error: bool,
+    /// The items `list_runtime_inventory` reports.
+    inventory: Vec<RuntimeInventoryItem>,
+    /// Every policy `list_runtime_inventory` was called with, so a caller can be
+    /// held to "exactly one inventory read per request".
+    pub(crate) inventory_calls: Mutex<Vec<RuntimeLifetimePolicy>>,
 }
 
 impl FakeSessionBackend {
@@ -159,6 +165,16 @@ impl FakeSessionBackend {
     /// Make `ensure_runtime_identity` fail, so the executor's error path runs.
     pub(crate) fn with_identity_error(mut self) -> Self {
         self.identity_error = true;
+        self
+    }
+
+    /// Script the fleet `list_runtime_inventory` reports.
+    #[allow(
+        dead_code,
+        reason = "consumed by the scoped sandbox API in issue #5675"
+    )]
+    pub(crate) fn with_inventory(mut self, items: Vec<RuntimeInventoryItem>) -> Self {
+        self.inventory = items;
         self
     }
 
@@ -287,6 +303,19 @@ impl SessionBackend for FakeSessionBackend {
             }
         }
         Ok(self.fleet.clone())
+    }
+
+    async fn list_runtime_inventory(
+        &self,
+        policy: &RuntimeLifetimePolicy,
+    ) -> Result<RuntimeInventorySnapshot, BackendError> {
+        self.inventory_calls.lock().unwrap().push(*policy);
+        Ok(RuntimeInventorySnapshot {
+            observed_at: k8s_openapi::chrono::Utc::now(),
+            backend: RuntimeBackendKind::Kubernetes,
+            items: self.inventory.clone(),
+            warnings: Vec::new(),
+        })
     }
 
     async fn deliver_credential(

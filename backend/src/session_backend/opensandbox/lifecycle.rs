@@ -71,6 +71,12 @@ const MAX_LIST_PAGES: u32 = 1_000;
 #[derive(Debug)]
 pub struct OsbLifecycleClient {
     base_url: String,
+    /// The bounded `host[:port]` label of the configured server, derived ONCE at
+    /// construction. The live inventory reports it as each sandbox's
+    /// `backend_location`; deriving it from the parsed URL (rather than echoing
+    /// the base URL) is what guarantees no userinfo, path, or query — and
+    /// therefore no credential — can ever ride along.
+    server_label: Option<String>,
     api_key: SecretString,
     http: reqwest::Client,
     timeouts: LifecycleTimeouts,
@@ -82,12 +88,23 @@ impl OsbLifecycleClient {
     /// never double up. Request budgets are the production
     /// [`LifecycleTimeouts::default`].
     pub fn new(base_url: reqwest::Url, api_key: SecretString, http: reqwest::Client) -> Self {
+        let server_label = base_url.host_str().map(|host| match base_url.port() {
+            Some(port) => format!("{host}:{port}"),
+            None => host.to_string(),
+        });
         Self {
             base_url: base_url.as_str().trim_end_matches('/').to_string(),
+            server_label,
             api_key,
             http,
             timeouts: LifecycleTimeouts::default(),
         }
+    }
+
+    /// The bounded, credential-free `host[:port]` label of the configured server.
+    /// `None` for a base URL with no host (a shape the config layer rejects).
+    pub fn server_label(&self) -> Option<&str> {
+        self.server_label.as_deref()
     }
 
     /// Test-only budget override (milliseconds-scale stall tests).
@@ -152,6 +169,20 @@ impl OsbLifecycleClient {
         &self,
         metadata_filter: &[(String, String)],
     ) -> Result<Vec<SandboxView>, OsbError> {
+        Ok(self.list_sandboxes_paged(metadata_filter).await?.0)
+    }
+
+    /// [`Self::list_sandboxes`] plus whether the walk stopped at
+    /// [`MAX_LIST_PAGES`] with pages still outstanding.
+    ///
+    /// The flag exists for the live inventory (issue #5674), which must never
+    /// present a clipped fleet as a complete one; the reconciler's callers keep
+    /// the simpler signature because a truncated walk there self-corrects on the
+    /// next sweep.
+    pub async fn list_sandboxes_paged(
+        &self,
+        metadata_filter: &[(String, String)],
+    ) -> Result<(Vec<SandboxView>, bool), OsbError> {
         let path = "/v1/sandboxes";
         let method = reqwest::Method::GET;
         // Assemble the filter once; reqwest owns the percent-encoding.
@@ -164,6 +195,7 @@ impl OsbLifecycleClient {
         });
 
         let mut aggregated = Vec::new();
+        let mut truncated = false;
         let mut page: u32 = 1;
         loop {
             let mut query: Vec<(&str, String)> = vec![
@@ -191,11 +223,12 @@ impl OsbLifecycleClient {
                     pages = page,
                     "opensandbox list page-walk hit the safety cap; returning a truncated fleet"
                 );
+                truncated = true;
                 break;
             }
             page += 1;
         }
-        Ok(aggregated)
+        Ok((aggregated, truncated))
     }
 
     /// `PATCH /v1/sandboxes/{id}/metadata` — RFC 7396 merge-patch the metadata map.

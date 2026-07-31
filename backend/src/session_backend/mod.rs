@@ -22,6 +22,10 @@ use crate::runtime_identity::{
     RuntimeBackendKind, RuntimeIdentityMetadata, RuntimeIdentityOutcome, RuntimeIncarnation,
 };
 
+/// Backend-neutral live runtime inventory (issue #5674): the domain shape of one
+/// one-pass fleet read, deliberately OUTSIDE the backend-specific modules so no
+/// `kube::Pod` and no OpenSandbox wire DTO can reach the operations surface.
+pub mod inventory;
 pub mod k8s;
 pub mod opensandbox;
 /// Shared, kube-free env-validation verdict parsing (issue #419). Both backends parse
@@ -64,6 +68,15 @@ pub enum BackendError {
     /// logged at the rejection site; the error itself carries no value.
     #[error("session backend metadata value rejected")]
     InvalidMetadata,
+    /// A live-inventory read found more runtimes than the operator-configured
+    /// ceiling allows one snapshot to carry (issue #5674). Kept apart from
+    /// [`Other`](BackendError::Other) because the honest response is "this answer
+    /// would not have been complete", not "the backend failed": returning a
+    /// shortened list would let a caller mistake it for the whole fleet. Carries
+    /// the ceiling only — never the observed count, which would itself be a
+    /// hidden-row signal.
+    #[error("runtime inventory exceeds the configured ceiling of {limit} items")]
+    InventoryTooLarge { limit: usize },
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -235,6 +248,32 @@ pub trait SessionBackend: Send + Sync {
     /// Enumerate every live session runtime as a kube-free [`SessionHandle`]. The
     /// fleet-wide loops (sweep, token rotation, health scrape) iterate this.
     async fn list_fleet(&self) -> Result<Vec<SessionHandle>, BackendError>;
+
+    /// Read the COMPLETE FKST-managed runtime inventory in ONE backend list
+    /// operation (issue #5674, epic `SBOX-01`..`SBOX-05`).
+    ///
+    /// This is the operations surface's only live source. Implementations must
+    /// perform exactly one logical list — one namespace-scoped Pod LIST, or one
+    /// paginated sandbox list walk — and project every field in memory. A
+    /// per-runtime GET or [`SessionBackend::status_summary`] call is a contract
+    /// violation: the fleet is read on a user request path, and N round trips per
+    /// snapshot is how an operations view becomes a denial-of-service on its own
+    /// backend.
+    ///
+    /// `policy` supplies the lifetime/idle knobs each runtime is rendered against
+    /// and the defensive item ceiling. The read is STRICTLY read-only: it must not
+    /// touch last-pending, refresh a timestamp, or influence reconciliation in any
+    /// way — an operator opening a dashboard may not extend a session's life.
+    ///
+    /// It deliberately accepts NO viewer, actor, access list, or selector: it
+    /// returns the whole managed fleet to the trusted service layer, which
+    /// authorizes each row against [`crate::session_access`] before anything is
+    /// filtered, counted, sorted, or serialized (#5675). Runtime metadata is
+    /// untrusted display/correlation data and never an access grant.
+    async fn list_runtime_inventory(
+        &self,
+        policy: &inventory::RuntimeLifetimePolicy,
+    ) -> Result<inventory::RuntimeInventorySnapshot, BackendError>;
 
     /// Deliver `contents` into a live session's mounted credential file `file`
     /// (in-place). [`DeliveryOutcome::SessionGone`] is the benign 404-equivalent (the

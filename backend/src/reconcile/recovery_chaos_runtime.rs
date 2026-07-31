@@ -19,6 +19,10 @@ use crate::runtime_identity::{
     plan as plan_identity, read as read_identity, stamp_pairs, IdentityPlan, RuntimeBackendKind,
     RuntimeIdentityMetadata, RuntimeIdentityOutcome, RuntimeIncarnation, K8S_IDENTITY_KEYS,
 };
+use crate::session_backend::inventory::build::{build_item, RawRuntimeFacts};
+use crate::session_backend::inventory::status::RuntimeInventoryStatus;
+use crate::session_backend::inventory::warning::WarningSink;
+use crate::session_backend::inventory::{RuntimeInventorySnapshot, RuntimeLifetimePolicy};
 use crate::session_backend::{
     BackendError, DeliveryOutcome, EnsureOutcome, ObserveError, RuntimeStatus, SessionBackend,
     SessionHandle, ValidationOutcome, ValidationRequest,
@@ -291,6 +295,48 @@ impl SessionBackend for ChaosBackend {
                 trigger_issue: Some(runtime.trigger_issue as u64),
             })
             .collect())
+    }
+
+    /// Project the fixture's runtimes through the SAME shared builder the real
+    /// adapters use, so a chaos restart exercises the real normalization rather
+    /// than a hand-written approximation of it.
+    async fn list_runtime_inventory(
+        &self,
+        policy: &RuntimeLifetimePolicy,
+    ) -> Result<RuntimeInventorySnapshot, BackendError> {
+        let observed_at = Utc::now();
+        let mut warnings = WarningSink::default();
+        let backend = self.backend_kind();
+        let items = self
+            .runtimes
+            .lock()
+            .unwrap()
+            .values()
+            .map(|runtime| {
+                let facts = RawRuntimeFacts {
+                    runtime_id: format!("fkst-sess-{}", runtime.session_id),
+                    session_id: Some(runtime.session_id.clone()),
+                    managed: true,
+                    identity: read_identity(&K8S_IDENTITY_KEYS, &runtime.metadata),
+                    owner: Some(runtime.repo.owner.clone()),
+                    repo: Some(runtime.repo.name.clone()),
+                    installation_id_raw: Some(runtime.installation_id.to_string()),
+                    trigger_issue_raw: Some(runtime.trigger_issue.to_string()),
+                    status: RuntimeInventoryStatus::Running,
+                    raw_status: "Running".to_string(),
+                    created_at: Some(runtime.created_at),
+                    last_pending_at: runtime.last_pending_at,
+                    ..RawRuntimeFacts::default()
+                };
+                build_item(facts, backend, observed_at, policy, &mut warnings)
+            })
+            .collect();
+        Ok(RuntimeInventorySnapshot {
+            observed_at,
+            backend,
+            items,
+            warnings: warnings.into_warnings(),
+        })
     }
 
     async fn deliver_credential(

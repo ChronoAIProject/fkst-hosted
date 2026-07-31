@@ -37,6 +37,7 @@ use super::{
 mod credential;
 mod engine_observe;
 mod fleet;
+mod inventory;
 mod lifecycle;
 mod status;
 mod validation;
@@ -171,6 +172,13 @@ impl SessionBackend for K8sBackend {
 
     async fn list_fleet(&self) -> Result<Vec<SessionHandle>, BackendError> {
         self.list_fleet_impl().await
+    }
+
+    async fn list_runtime_inventory(
+        &self,
+        policy: &crate::session_backend::inventory::RuntimeLifetimePolicy,
+    ) -> Result<crate::session_backend::inventory::RuntimeInventorySnapshot, BackendError> {
+        self.list_runtime_inventory_impl(policy).await
     }
 
     async fn deliver_credential(
