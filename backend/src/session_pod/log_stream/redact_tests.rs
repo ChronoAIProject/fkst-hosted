@@ -276,3 +276,58 @@ fn shannon_entropy_orders_random_above_repetitive() {
         "a single-char run has ~zero entropy: {repeated}"
     );
 }
+
+/// A real regression: `github-devloop-intake` scores 3.916 against the 3.9 base64
+/// threshold, so the entropy layer masked it and turned a health report's most useful
+/// line into `«REDACTED:high-entropy».devloop_intake_candidate` — destroying the one
+/// identifier a reader needs to locate the failure.
+#[test]
+fn package_and_queue_identifiers_survive_the_entropy_layer() {
+    let redactor = Redactor::new(&[]);
+    for identifier in [
+        "github-devloop-intake",
+        "github-devloop-workflow",
+        "github-devloop-intake.devloop_intake_candidate",
+        "fkst-dev-chronoai-fkst-cloud-test",
+        "github-devloop-workflow.workflow_select",
+    ] {
+        let out = redactor.redact_line(identifier);
+        assert_eq!(
+            out, identifier,
+            "a package/queue identifier must not be masked as a secret"
+        );
+    }
+}
+
+/// ...but the exemption must not become a hole. Anything carrying the shape of a real
+/// credential still falls through to the entropy check (and, for known secrets, to the
+/// exact-match layer that runs before it).
+#[test]
+fn the_kebab_exemption_does_not_shelter_secret_shaped_runs() {
+    let redactor = Redactor::new(&[]);
+    for secret_shaped in [
+        "ghp_A9fK2LmQ7xZ0pR4tY6uI1oP3sD5fG8hJ0kL2",
+        "AKIAIOSFODNN7EXAMPLE1234567890AB",
+        "c3VwZXJzZWNyZXR2YWx1ZXdpdGhlbnRyb3B5MTIz",
+        "Xk7Qp2Rm9Zt4Yw1Nb6Vc3Hj8Lf5Gd0Sa",
+    ] {
+        let out = redactor.redact_line(secret_shaped);
+        assert_ne!(
+            out, secret_shaped,
+            "a credential-shaped run must still be masked: {secret_shaped}"
+        );
+    }
+}
+
+/// An exact known secret is masked no matter what shape it has — the exemption sits
+/// AFTER the exact-secret layer, so it can never expose a seeded credential.
+#[test]
+fn a_seeded_secret_is_masked_even_if_it_looks_like_an_identifier() {
+    let redactor = Redactor::new(&[("llm-key", "totally-ordinary-looking-identifier")]);
+    let out = redactor.redact_line("value=totally-ordinary-looking-identifier");
+    assert!(
+        !out.contains("totally-ordinary-looking-identifier"),
+        "{out}"
+    );
+    assert!(out.contains("«REDACTED:llm-key»"), "{out}");
+}
