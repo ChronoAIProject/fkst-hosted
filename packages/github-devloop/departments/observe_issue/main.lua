@@ -606,6 +606,14 @@ local function process_issue_event(event)
       devloop_logging.log_cas_decision("observe_issue", proposal_id, { state = nil, version = nil }, "unmanaged", "thinking", "skip-work-label-scope", scope_reason)
       return
     end
+    -- Label family is not identity: a second session in this deployment resolves
+    -- its logical label to the SAME effective label, so the scope check above
+    -- passes for entities it does not own (#5750).
+    local owned, owner_reason = m_claims.issue_owned_by_session(current.assignees)
+    if not owned then
+      devloop_logging.log_cas_decision("observe_issue", proposal_id, { state = nil, version = nil }, "unmanaged", "thinking", "skip-foreign-session", owner_reason)
+      return
+    end
     if not devloop_base.is_opted_in(current.labels) then
       devloop_logging.log_cas_decision("observe_issue", proposal_id, { state = nil, version = nil }, "unmanaged", "thinking", "skip-not-opted-in", "fkst-dev:enabled label is absent")
       return

@@ -58,6 +58,14 @@ local function should_reinject_issue(repo, issue, limits, deadline)
     devloop_logging.log_cas_decision("liveness_scan", proposal_id, { state = nil, version = nil }, "tick", "observe", "skip-work-label-scope", scope_reason)
     return false
   end
+  -- The redrive this scan can trigger RESTARTS an in-flight codex run. Doing that
+  -- to another session's entity is how a foreign session interrupted consensus in
+  -- prod (#5750): it sees no liveness because the run is not its own.
+  local owned, owner_reason = m_claims.issue_owned_by_session(current.assignees)
+  if not owned then
+    devloop_logging.log_cas_decision("liveness_scan", proposal_id, { state = nil, version = nil }, "tick", "observe", "skip-foreign-session", owner_reason)
+    return false
+  end
   local trusted_author_policy = github_author_policy.from_env()
   if not github_author_policy.is_authorized(trusted_author_policy, current.author_login) then
     devloop_logging.log_cas_decision("liveness_scan", proposal_id, { state = nil, version = nil }, "tick", "observe", "skip-non-whitelisted-author", "issue author is not authorized for GitHub content")

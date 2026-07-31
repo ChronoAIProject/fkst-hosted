@@ -135,6 +135,30 @@ function C.effective_claimed_label(exec)
   return config.effective_work_label(claimed_label, exec)
 end
 
+--- Does this session OWN the entity, or does it merely share its label family?
+--
+-- The effective work label is NOT an identity. Two sessions in one deployment
+-- namespace map their logical labels through the same FKST_WORK_LABEL_NAMESPACE,
+-- so `fkst-dev` from either resolves to `fkst-dev-<ns>` and a family match cannot
+-- tell them apart. In prod that let a foreign session issue timeout redrives
+-- against issues assigned to another session's creator, restarting in-flight
+-- consensus runs it did not own (#5750).
+--
+-- Ownership is the creator routing claim admission already enforces; applying it
+-- here closes the observe and liveness paths, which check the label family and
+-- then act. Returns true when no creator is configured -- that is the standalone
+-- single-session deployment contract, where there is nobody to collide with.
+function C.issue_owned_by_session(assignees, exec)
+  local creator = config.session_creator(exec)
+  if creator == nil then
+    return true, nil
+  end
+  if not C.is_routed_to_session(assignees, creator) then
+    return false, "entity is not routed to this session's creator " .. tostring(creator)
+  end
+  return true, nil
+end
+
 function C.issue_in_session_scope(labels, exec)
   if not config.work_label_family_isolation_active(exec) then
     return true, nil
