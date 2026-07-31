@@ -75,6 +75,7 @@ const SELECT_COLUMNS: &str = "\
     properties.repo_full_name AS repo_full_name, \
     properties.installation_id AS installation_id, \
     properties.trigger_issue AS trigger_issue, \
+    properties.webhook_delivery_id AS webhook_delivery_id, \
     properties.lifecycle_action AS lifecycle_action, \
     properties.backend AS backend, \
     properties.runtime_id AS runtime_id, \

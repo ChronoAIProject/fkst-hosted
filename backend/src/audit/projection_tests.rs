@@ -57,6 +57,7 @@ fn a_human_record_projects_every_contract_field_under_its_exact_name() {
             "operation_id",
             "outcome",
             "principal",
+            "principal_id",
             "principal_kind",
             "repo_full_name",
             "request_id",
@@ -100,6 +101,10 @@ fn a_human_record_projects_every_contract_field_under_its_exact_name() {
     assert_eq!(p["actor_id"], serde_json::json!(583_231));
     assert_eq!(p["actor_login"], serde_json::json!("octocat"));
     assert_eq!(p["principal_kind"], serde_json::json!("github_user_token"));
+    // Flat as well as nested: the activity read surface projects `principal.id`
+    // from this column, so a value living only inside the structured object
+    // below would be absent from every API-request row a user ever sees.
+    assert_eq!(p["principal_id"], serde_json::json!("github_user_token"));
     assert_eq!(p["session_id"], serde_json::json!("sess-abc"));
     assert_eq!(p["repo_full_name"], serde_json::json!("acme/site"));
     assert_eq!(p["trigger_issue"], serde_json::json!(77));

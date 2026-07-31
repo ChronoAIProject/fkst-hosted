@@ -324,13 +324,34 @@ pub fn resolve_range(
         Some(raw) => parse_instant("from", raw)?,
         None => to - Duration::hours(DEFAULT_RANGE_HOURS),
     };
-    if from >= to {
+    let range = TimeRange { from, to };
+    check_range(&range, now, max_range_days)?;
+    Ok(range)
+}
+
+/// Apply the deployment's window bounds to an ALREADY-ASSEMBLED range.
+///
+/// Split out of [`resolve_range`] because a range reaches the query by two
+/// routes, and both must be bounded identically. The second route is a resumed
+/// page: its window comes out of the caller's cursor payload, and the cursor's
+/// digest is a plain SHA-256 over public data — explicitly not a MAC (see
+/// [`super::cursor`]). Every other digest component is re-derived server-side
+/// from the current request, which makes the window the one input a caller can
+/// choose freely and still produce a matching digest. Re-checking it here is
+/// what keeps `FKST_POSTHOG_ACTIVITY_MAX_RANGE_DAYS` a real bound instead of a
+/// bound on the non-cursor path only (epic `OPS-02`).
+pub fn check_range(
+    range: &TimeRange,
+    now: DateTime<Utc>,
+    max_range_days: u64,
+) -> Result<(), AppError> {
+    if range.from >= range.to {
         return Err(AppError::Validation(
             "from must be strictly before to".to_string(),
         ));
     }
     let max = Duration::days(i64::try_from(max_range_days).unwrap_or(i64::MAX));
-    if to - from > max {
+    if range.to - range.from > max {
         return Err(AppError::Validation(format!(
             "the requested range exceeds this deployment's maximum of {max_range_days} days"
         )));
@@ -339,12 +360,12 @@ pub fn resolve_range(
     // is a client bug worth naming rather than answering with a confident empty
     // page. A window that merely ENDS in the future is fine — "up to now-ish" is
     // how a live view is written.
-    if from > now {
+    if range.from > now {
         return Err(AppError::Validation(
             "from must not be in the future".to_string(),
         ));
     }
-    Ok(TimeRange { from, to })
+    Ok(())
 }
 
 /// Parse one RFC3339 bound into UTC, naming the parameter that failed.

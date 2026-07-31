@@ -25,6 +25,8 @@ fn activity() -> SafeOperationsListActivity {
         method: Some("GET".to_string()),
         operation_id: Some("canvas_overview".to_string()),
         status: Some(403),
+        status_class: Some("4xx".to_string()),
+        outcome: Some("client_error".to_string()),
     }
 }
 
@@ -66,6 +68,12 @@ fn a_denied_probe_records_the_attempt_and_not_the_probe() {
         string(&values, "record_kind").as_deref(),
         Some("api_request")
     );
+    // Every ACCEPTED filter that becomes a source predicate must be
+    // reconstructable from the record: a reader given a query narrowed by
+    // status family and outcome must not see a record with no constraint at all.
+    assert_eq!(values.get("status").and_then(|v| v.as_u64()), Some(403));
+    assert_eq!(string(&values, "status_class").as_deref(), Some("4xx"));
+    assert_eq!(string(&values, "outcome").as_deref(), Some("client_error"));
 }
 
 /// The verified actor is already the record's `actor_id`; duplicating it inside

@@ -46,6 +46,28 @@ fn assert_before_limit(text: &str, needle: &str) {
     );
 }
 
+/// The projection is an allowlist, so a field the response contract documents
+/// but the SELECT never asks for is a field that is structurally always absent.
+#[test]
+fn every_correlation_and_identity_column_the_dtos_document_is_projected() {
+    let built = build(&query(RecordKind::All, all(900, "root")));
+    for column in [
+        "properties.principal_id AS principal_id",
+        "properties.session_id AS session_id",
+        "properties.repo_full_name AS repo_full_name",
+        "properties.installation_id AS installation_id",
+        "properties.trigger_issue AS trigger_issue",
+        "properties.webhook_delivery_id AS webhook_delivery_id",
+        "properties.request_id AS request_id",
+    ] {
+        assert!(
+            built.query.contains(column),
+            "{column} missing from:\n{}",
+            built.query
+        );
+    }
+}
+
 #[test]
 fn the_personal_actor_predicate_is_in_the_outbound_query_before_limit() {
     let built = build(&query(

@@ -1,9 +1,11 @@
-//! Source-level, pagination, and failure-mode tests for
-//! `/api/v1/operations/activity`.
+//! Source-level and failure-mode tests for `/api/v1/operations/activity`.
 //!
 //! The theme is the one the epic keeps returning to: authorization happens at
 //! the SOURCE, before any limit or cursor, and a source that cannot answer is
 //! reported rather than rounded down to an empty page.
+//!
+//! Keyset pagination and the cursor's own contract live in
+//! `operations_activity_paging.rs`.
 
 mod operations_harness;
 
@@ -11,6 +13,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use axum::http::StatusCode;
+
 use fkst_control_plane::operations::record::{
     ActivityRecord, ActivitySourceKind, ApiRequestRecord, DeliveryState, RecordActor,
     RecordCorrelation, RecordPrincipal,
@@ -61,10 +64,25 @@ async fn the_authorized_session_predicate_reaches_the_source_before_the_limit() 
         .expect("the session predicate reached the source");
     assert!(session_at < limit_at, "{text}");
     // The union is parenthesized, so the lifecycle branch cannot escape the
-    // actor predicate that guards the API branch.
+    // actor predicate that guards the API branch. Asserted as the EXACT grouping
+    // on the recorded outbound body, not as "an OR appears somewhere": the
+    // generator's own unit test can only prove what `build()` returned, and the
+    // claim this endpoint rests on is about what PostHog was actually sent.
+    let api_branch = "(event IN ({event_request_completed}, {event_request_incomplete}) \
+                      AND properties.actor_id = {viewer_actor_id} \
+                      AND properties.session_id = {authorized_session_id})";
+    let lifecycle_branch =
+        "(event = {event_sandbox_lifecycle} AND properties.session_id = {authorized_session_id})";
     assert!(
-        text.contains(" OR ") && text.contains("AND properties.actor_id = {viewer_actor_id}"),
-        "{text}"
+        text.contains(&format!("({api_branch} OR {lifecycle_branch})")),
+        "the outbound union must be fully parenthesized with the actor predicate \
+         INSIDE the api branch; got:\n{text}"
+    );
+    assert_eq!(
+        text.matches("properties.actor_id = {viewer_actor_id}")
+            .count(),
+        1,
+        "the actor predicate must appear exactly once, inside the api branch:\n{text}"
     );
 }
 
@@ -83,93 +101,6 @@ async fn a_hostile_filter_value_is_refused_or_parameterized_never_interpolated()
     let text = harness.last_query_text().await;
     assert!(text.contains("{filter_request_id}"), "{text}");
     assert!(!text.contains("req-0001"), "{text}");
-}
-
-#[tokio::test]
-async fn pages_tile_with_a_keyset_cursor_and_never_repeat_a_row() {
-    let harness = harness(Sources::Posthog(dataset()), true).await;
-    let first = harness.page(ALICE, "?limit=2").await;
-    assert_eq!(item_ids(&first), vec!["ev-0", "ev-1"]);
-    let cursor = first["next_cursor"].as_str().expect("another page exists");
-
-    let second = harness
-        .page(ALICE, &format!("?limit=2&cursor={cursor}"))
-        .await;
-    assert_eq!(item_ids(&second), vec!["ev-2", "ev-3"]);
-
-    let third = harness
-        .page(
-            ALICE,
-            &format!(
-                "?limit=2&cursor={}",
-                second["next_cursor"].as_str().expect("a third page")
-            ),
-        )
-        .await;
-    assert_eq!(item_ids(&third), vec!["ev-4"]);
-    assert!(
-        third["next_cursor"].is_null(),
-        "the final page carries no cursor"
-    );
-}
-
-/// A cursor is bound to its query: reusing it under a different viewer, scope,
-/// or filter is a stable `400`, never a silent reset to page one.
-#[tokio::test]
-async fn a_cursor_from_another_query_is_refused_rather_than_silently_reset() {
-    let harness = harness(Sources::Posthog(dataset()), true).await;
-    let first = harness.page(ALICE, "?limit=2").await;
-    let cursor = first["next_cursor"]
-        .as_str()
-        .expect("another page exists")
-        .to_string();
-
-    for query in [
-        format!("?limit=2&cursor={cursor}&method=GET"),
-        format!("?limit=2&cursor={cursor}&record_kind=all&session_id={SESSION}"),
-        format!("?limit=2&cursor={cursor}&from=2026-07-30T00:00:00Z&to=2026-07-30T01:00:00Z"),
-    ] {
-        let response = harness.get(ALICE, &query).await;
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{query}");
-        assert_eq!(error_code(response).await, "invalid_activity_cursor");
-    }
-
-    // Another VIEWER cannot resume this page either.
-    let foreign = harness
-        .get(ROOT, &format!("?scope=mine&limit=2&cursor={cursor}"))
-        .await;
-    assert_eq!(foreign.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(error_code(foreign).await, "invalid_activity_cursor");
-
-    // The page SIZE is deliberately not part of the query's identity: resuming
-    // the same query with a different page size is a legitimate client choice.
-    let resized = harness
-        .page(ALICE, &format!("?limit=3&cursor={cursor}"))
-        .await;
-    assert_eq!(item_ids(&resized), vec!["ev-2", "ev-3", "ev-4"]);
-}
-
-#[tokio::test]
-async fn a_malformed_or_oversized_cursor_is_the_same_stable_four_hundred() {
-    let harness = harness(Sources::Posthog(dataset()), true).await;
-    for cursor in ["abc", "!!!!", &"A".repeat(600)] {
-        let response = harness.get(ALICE, &format!("?cursor={cursor}")).await;
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{cursor}");
-        assert_eq!(error_code(response).await, "invalid_activity_cursor");
-    }
-}
-
-/// Rows sharing a timestamp still page deterministically on the event id.
-#[tokio::test]
-async fn identical_timestamps_page_deterministically() {
-    let shared = minutes_ago(7);
-    let rows: Vec<Row> = ["ev-a", "ev-b", "ev-c"]
-        .into_iter()
-        .map(|id| Row::api(id, ALICE.0, &shared))
-        .collect();
-    let harness = harness(Sources::Posthog(rows), true).await;
-    let page = harness.page(ALICE, "?limit=3").await;
-    assert_eq!(item_ids(&page), vec!["ev-c", "ev-b", "ev-a"]);
 }
 
 /// A malformed row is dropped and the page marked partial; the rest still

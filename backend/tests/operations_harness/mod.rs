@@ -49,8 +49,15 @@ pub const OTHER_SESSION: &str = "sess-stranger";
 
 pub const ALICE: (i64, &str) = (101, "alice");
 pub const BOB: (i64, &str) = (102, "bob");
+/// Named in the session's own `### Log Access Allowlist`.
+pub const CAROL: (i64, &str) = (103, "carol");
+/// A deployment-wide `FKST_LOG_ADMINS` entry — the legacy cross-session grant.
+pub const DANA: (i64, &str) = (104, "dana");
 /// A verified user with no relationship to the session at all.
 pub const ERIN: (i64, &str) = (105, "erin");
+/// The repository OWNER's login. Repository role is deliberately not a session
+/// tier, so this identity must be refused exactly like an unrelated stranger.
+pub const REPO_ADMIN: (i64, &str) = (106, "acme");
 /// A deployment global administrator.
 pub const ROOT: (i64, &str) = (900, "root");
 
@@ -100,7 +107,7 @@ pub enum Sources {
 /// Build a harness. `registry_ready` false leaves the visibility projection cold.
 pub async fn harness(sources: Sources, registry_ready: bool) -> Harness {
     let github = MockServer::start().await;
-    for who in [ALICE, BOB, ERIN, ROOT] {
+    for who in [ALICE, BOB, CAROL, DANA, ERIN, REPO_ADMIN, ROOT] {
         Mock::given(method("GET"))
             .and(path("/user"))
             .and(header(
@@ -126,6 +133,9 @@ pub async fn harness(sources: Sources, registry_ready: bool) -> Harness {
     // environment would produce.
     let config = Config::from_vars([
         ("FKST_GLOBAL_ADMINS".to_string(), ROOT.1.to_string()),
+        // The legacy cross-session observability grant, so the route-level
+        // matrix exercises that tier rather than only the pure policy's.
+        ("FKST_LOG_ADMINS".to_string(), DANA.1.to_string()),
         ("FKST_POSTHOG_PROJECT_ID".to_string(), "42".to_string()),
         (
             "FKST_POSTHOG_QUERY_API_KEY".to_string(),
@@ -204,7 +214,8 @@ fn posthog_source(server: &MockServer) -> Arc<dyn ActivitySource> {
     Arc::new(PosthogActivitySource::new(client))
 }
 
-/// The visibility projection: Alice created `SESSION`, Bob is a collaborator.
+/// The visibility projection: Alice created `SESSION`, Bob is a collaborator,
+/// Carol holds a per-session log grant.
 fn registry(ready: bool) -> SessionAccessRegistry {
     let repo = RepoRef {
         owner: "acme".to_string(),
@@ -228,7 +239,7 @@ fn registry(ready: bool) -> SessionAccessRegistry {
                         id: Some(ALICE.0),
                     },
                     collaborators: vec![BOB.1.to_string()],
-                    log_access: Vec::new(),
+                    log_access: vec![CAROL.1.to_string()],
                 },
             )],
         );

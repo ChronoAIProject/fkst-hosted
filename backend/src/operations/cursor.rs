@@ -36,10 +36,18 @@
 //! over shifting boundaries — silently dropping rows at one end and repeating
 //! them at the other — and the range component of the digest could never match.
 //!
-//! So the resolved window travels in the payload and a resumed page uses it
-//! verbatim. It is still inside the digest, so a tampered window fails the same
-//! check as any other mutation; and a caller who states an EXPLICIT `from`/`to`
-//! that disagrees with the cursor is refused rather than quietly re-windowed.
+//! So the resolved window travels in the payload and a resumed page uses it.
+//! It is inside the digest, so a tampered window fails the same check as any
+//! other mutation; and a caller who states an EXPLICIT `from`/`to` that
+//! disagrees with the cursor is refused rather than quietly re-windowed.
+//!
+//! The window is nonetheless the ONE component a caller can choose freely and
+//! still produce a matching digest — every other component is re-derived
+//! server-side from the current request — so a resumed window is additionally
+//! re-checked against the deployment's own bounds before it is adopted. That
+//! check lives with the range rules it enforces
+//! ([`super::filters::check_range`]), not here, because the digest is not the
+//! thing keeping the query bounded.
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -183,9 +191,10 @@ pub fn encode(key: &CursorKey, binding: &CursorBinding) -> Result<String, AppErr
 /// Read the window a cursor was issued for, WITHOUT trusting anything else about
 /// it.
 ///
-/// The value is only used to rebuild the binding the digest is then checked
-/// against, so a forged window cannot widen a query: it changes the digest, and
-/// the digest check refuses it.
+/// This checks the window's SYNTAX and internal ordering only. The caller must
+/// still apply the deployment's range bounds to the result — see the module docs
+/// and [`super::filters::check_range`] — because the digest binds the window
+/// without making it unforgeable.
 pub fn peek_range(raw: &str) -> Result<TimeRange, AppError> {
     let payload = parse_payload(raw)?;
     let from = parse_instant(&payload.f)?;

@@ -114,9 +114,18 @@ pub struct SafeOperationsListActivity {
     /// An `operationId` filter, valid only when the catalog declares it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operation_id: Option<String>,
-    /// A status or status-class filter.
+    /// An exact status-code filter.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<u16>,
+    /// A status-FAMILY filter (`2xx`..`5xx`). Recorded separately from `status`
+    /// because both are accepted and both become source predicates: folding one
+    /// into the other would leave an audit reader unable to reconstruct which
+    /// constraint actually ran.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_class: Option<String>,
+    /// An audit-outcome filter from the contract's closed set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
 }
 
 impl BoundedAuditArguments for SafeOperationsListActivity {

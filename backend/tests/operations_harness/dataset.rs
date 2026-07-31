@@ -71,7 +71,7 @@ impl Row {
 
 /// The column list the responder answers with, in a deliberately NON-select
 /// order so the decoder's name addressing is exercised on every request.
-pub const COLUMNS: [&str; 11] = [
+pub const COLUMNS: [&str; 13] = [
     "operation_id",
     "event",
     "event_id",
@@ -83,6 +83,11 @@ pub const COLUMNS: [&str; 11] = [
     "outcome",
     "lifecycle_action",
     "backend",
+    // Carried so the response's `principal.id` and correlation delivery id are
+    // proven end to end rather than only in the row decoder: a column the fixed
+    // SELECT never asks for is a documented field nobody ever sees.
+    "principal_id",
+    "webhook_delivery_id",
 ];
 
 /// A PostHog stand-in that applies the request's own predicates.
@@ -202,6 +207,18 @@ fn render_row(row: &Row) -> Value {
             json!("kubernetes")
         } else {
             Value::Null
+        },
+        // The executing identity and the webhook delivery a request was
+        // correlated to. A lifecycle row is system-driven and has neither.
+        if row.event == fkst_control_plane::audit::lifecycle::LIFECYCLE_EVENT_NAME {
+            json!("reconciler")
+        } else {
+            json!("github_user_token")
+        },
+        if row.event == fkst_control_plane::audit::lifecycle::LIFECYCLE_EVENT_NAME {
+            Value::Null
+        } else {
+            json!("d-9f3a")
         },
     ])
 }

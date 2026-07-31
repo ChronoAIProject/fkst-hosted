@@ -187,6 +187,8 @@ pub const OPERATIONS_LIST_ACTIVITY_FIELDS: &[&str] = &[
     "method",
     "operation_id",
     "status",
+    "status_class",
+    "outcome",
 ];
 
 /// Reserved for `GET /api/v1/operations/sandboxes` (issue #5675).

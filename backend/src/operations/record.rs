@@ -94,6 +94,10 @@ pub struct RecordCorrelation {
     pub installation_id: Option<i64>,
     pub trigger_issue: Option<i64>,
     pub request_id: Option<String>,
+    /// The GitHub delivery id a webhook-driven record was correlated to. Present
+    /// on API-request rows only; `AUD-05` names it as a correlation key, so it
+    /// travels all the way to the response rather than stopping at capture.
+    pub webhook_delivery_id: Option<String>,
 }
 
 /// One recorded API request.

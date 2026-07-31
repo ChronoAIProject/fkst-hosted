@@ -30,10 +30,12 @@ fn api_row() -> (Vec<String>, Vec<serde_json::Value>) {
         ("actor_id", json!(101)),
         ("actor_login", json!("alice")),
         ("principal_kind", json!("github_user_token")),
+        ("principal_id", json!("github_user_token")),
         ("session_id", json!("sess-1")),
         ("repo_full_name", json!("acme/site")),
         ("installation_id", json!(4242)),
         ("trigger_issue", json!(7)),
+        ("webhook_delivery_id", json!("d-9f3a")),
     ];
     (
         pairs.iter().map(|(name, _)| (*name).to_string()).collect(),
@@ -83,8 +85,20 @@ fn a_complete_api_row_decodes_into_the_neutral_record() {
     assert_eq!(record.status_code, Some(200));
     assert_eq!(record.duration_ms, Some(12));
     assert_eq!(record.actor.id, Some(101));
+    assert_eq!(
+        record.principal.id.as_deref(),
+        Some("github_user_token"),
+        "the executing identity must survive the round trip; a structurally \
+         always-absent principal id would be a documented field nobody ever sees"
+    );
     assert_eq!(record.correlation.session_id.as_deref(), Some("sess-1"));
     assert_eq!(record.correlation.installation_id, Some(4242));
+    assert_eq!(
+        record.correlation.webhook_delivery_id.as_deref(),
+        Some("d-9f3a"),
+        "AUD-05 names the delivery id a correlation key, so it must reach the \
+         response rather than stopping at capture"
+    );
     assert_eq!(
         record.arguments.get("broader_visibility_requested"),
         Some(&json!(false))

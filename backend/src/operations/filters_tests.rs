@@ -145,6 +145,51 @@ fn an_inverted_equal_oversized_or_future_range_is_refused() {
     }
 }
 
+/// The same bounds must apply to a window that did NOT come from `from`/`to` —
+/// a resumed page's window arrives inside a cursor payload, whose digest is not
+/// a MAC.
+#[test]
+fn an_already_assembled_range_is_bounded_exactly_like_a_stated_one() {
+    let now = anchor();
+    let day = Duration::days(1);
+    check_range(
+        &TimeRange {
+            from: now - day * 7,
+            to: now,
+        },
+        now,
+        30,
+    )
+    .expect("a window inside the deployment maximum is accepted");
+
+    for (label, range) in [
+        (
+            "a window wider than the configured maximum",
+            TimeRange {
+                from: now - day * 90,
+                to: now,
+            },
+        ),
+        (
+            "an inverted window",
+            TimeRange {
+                from: now,
+                to: now - day,
+            },
+        ),
+        (
+            "a window entirely in the future",
+            TimeRange {
+                from: now + day,
+                to: now + day * 2,
+            },
+        ),
+    ] {
+        let error = check_range(&range, now, 30).expect_err(label);
+        assert!(matches!(error, AppError::Validation(_)), "{label}");
+    }
+}
+
 #[test]
 fn a_malformed_bound_names_its_own_parameter_without_echoing_the_value() {
     let now = anchor();

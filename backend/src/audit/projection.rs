@@ -143,6 +143,12 @@ impl ApiRequestCompletedV1 {
         put("actor_id", json!(self.actor_id));
         put("actor_login", json!(self.actor.login));
         put("principal_kind", json!(self.principal.kind.as_str()));
+        // Flat as well as nested: the read surface projects `principal.id` from
+        // this column (`operations/hogql.rs`), and a value that exists only
+        // inside the structured `principal` object below would be silently
+        // absent from every API-request row a user ever sees. The lifecycle
+        // contract already writes it flat; these two must not disagree.
+        put("principal_id", json!(self.principal.id));
 
         // --- correlation (canonical) ---------------------------------------
         put("session_id", json!(self.session_id));

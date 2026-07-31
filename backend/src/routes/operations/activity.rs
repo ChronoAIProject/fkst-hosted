@@ -39,7 +39,7 @@ use crate::audit::arguments::operations::{
 use crate::audit::arguments::{record_safe, AuditedQuery};
 use crate::error::{AppError, ErrorEnvelope};
 use crate::operations::cursor::{self, CursorBinding, CursorKey};
-use crate::operations::filters::{RecordKind, TimeRange};
+use crate::operations::filters::{self, RecordKind, TimeRange};
 use crate::operations::metrics::{QueryResult, RejectionReason};
 use crate::operations::{self, ActivityQueryRequest};
 use crate::session_access::{
@@ -77,8 +77,13 @@ const SESSION_NOT_FOUND: &str = "no such session";
 async fn operations_list_activity(
     State(state): State<AppState>,
     extensions: Extensions,
-    AuditedQuery(params): AuditedQuery<ActivityQueryParams>,
+    // Identity is extracted FIRST so the documented gate order is the order axum
+    // actually runs: extractors execute in declaration order, so a query-parse
+    // rejection declared ahead of the viewer would answer `400` to a request that
+    // carries no identity at all — which contradicts `AUTH-01` and makes the
+    // parameter grammar probeable without a token.
     viewer: AuthenticatedViewer,
+    AuditedQuery(params): AuditedQuery<ActivityQueryParams>,
 ) -> Result<Json<ActivityPage>, AppError> {
     let config = &state.config.activity_query;
     let now = Utc::now();
@@ -123,7 +128,13 @@ async fn operations_list_activity(
     let constraint = ActivityVisibilityConstraint::for_scope(&scope, session.clone());
     // A resumed page keeps the window its cursor was issued for, so consecutive
     // pages tile over ONE window instead of a `now` that moves between requests.
-    let range = resumed_range(&state, &scope, &request)?;
+    let range = resumed_range(
+        &state,
+        &scope,
+        &request,
+        now,
+        config.activity_max_range_days,
+    )?;
     let binding = CursorBinding {
         scope: scope.as_str(),
         viewer_id: (!scope.is_global()).then(|| viewer.id()),
@@ -222,10 +233,20 @@ fn lifecycle_session(
 /// cursor was issued for — and if the caller ALSO stated an explicit `from`/`to`
 /// that disagrees, that is a different query and the cursor is refused rather
 /// than quietly re-windowed.
+///
+/// A cursor's window is re-checked against the deployment's own bounds before it
+/// is adopted. The digest that binds a cursor to its query is deliberately not a
+/// MAC, and every other component of it — scope, viewer id, authorized session,
+/// record kind, filters — is re-derived server-side from the current request. The
+/// window is the one component a caller supplies, so trusting it verbatim would
+/// make `FKST_POSTHOG_ACTIVITY_MAX_RANGE_DAYS` a bound on the FIRST page only and
+/// hand any admitted caller a full-table scan per request.
 fn resumed_range(
     state: &AppState,
     scope: &ViewerScope,
     request: &NormalizedActivityRequest,
+    now: k8s_openapi::chrono::DateTime<Utc>,
+    max_range_days: u64,
 ) -> Result<TimeRange, AppError> {
     let Some(raw) = request.cursor.as_deref() else {
         return Ok(request.range);
@@ -239,11 +260,18 @@ fn resumed_range(
         );
         error
     };
-    let range = cursor::peek_range(raw).map_err(refuse)?;
-    if request.range_explicit && range != request.range {
-        return Err(refuse(AppError::InvalidActivityCursor(
+    let invalid_cursor = || {
+        AppError::InvalidActivityCursor(
             "cursor is not valid for this query; start a new page".to_string(),
-        )));
+        )
+    };
+    let range = cursor::peek_range(raw).map_err(refuse)?;
+    // Reported as an invalid CURSOR rather than as an invalid range: the caller
+    // stated no range, so naming the window would only describe a payload they
+    // are not supposed to be authoring in the first place.
+    filters::check_range(&range, now, max_range_days).map_err(|_| refuse(invalid_cursor()))?;
+    if request.range_explicit && range != request.range {
+        return Err(refuse(invalid_cursor()));
     }
     Ok(range)
 }
@@ -339,6 +367,14 @@ fn safe_arguments(
         method: request.filters.method.clone(),
         operation_id: request.filters.operation_id.clone(),
         status: request.filters.status_code,
+        status_class: request
+            .filters
+            .status_class
+            .map(|class| class.as_str().to_string()),
+        outcome: request
+            .filters
+            .outcome
+            .map(|outcome| outcome.as_str().to_string()),
     }
 }
 

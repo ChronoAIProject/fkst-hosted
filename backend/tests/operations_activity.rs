@@ -11,8 +11,8 @@ mod operations_harness;
 
 use axum::http::StatusCode;
 use operations_harness::{
-    error_code, harness, item_ids, minutes_ago, Row, Sources, ALICE, BOB, ERIN, OTHER_SESSION,
-    ROOT, SESSION,
+    error_code, harness, item_ids, minutes_ago, Row, Sources, ALICE, BOB, CAROL, DANA, ERIN,
+    OTHER_SESSION, REPO_ADMIN, ROOT, SESSION,
 };
 
 /// The shared dataset: two humans' calls, a system lifecycle row, an anonymous
@@ -44,6 +44,31 @@ async fn a_missing_or_invalid_identity_is_unauthorized() {
     );
 }
 
+/// Identity is the FIRST gate, ahead of parameter parsing. A caller with no
+/// token and a type-level query error gets `401`, not a `400` that would let the
+/// parameter grammar be probed without ever presenting a credential.
+#[tokio::test]
+async fn identity_is_checked_before_the_parameters_are_parsed() {
+    let harness = harness(Sources::Posthog(dataset()), true).await;
+    for query in [
+        "?limit=abc",
+        "?actor_id=not-a-number",
+        "?trigger_issue=x",
+        "?status_code=foo",
+        "?scope=everyone",
+    ] {
+        let response = harness.request(None, query).await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{query}");
+    }
+    // The SAME queries are a `400` once an admitted identity is proven, so the
+    // ordering costs no validation fidelity.
+    for query in ["?limit=abc", "?scope=everyone"] {
+        let response = harness.get(ALICE, query).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{query}");
+    }
+    assert_eq!(harness.source_calls().await, 0);
+}
+
 #[tokio::test]
 async fn an_admitted_regular_user_sees_only_their_own_api_rows() {
     let harness = harness(Sources::Posthog(dataset()), true).await;
@@ -55,6 +80,14 @@ async fn an_admitted_regular_user_sees_only_their_own_api_rows() {
     assert_eq!(page["source_status"]["relay"], "not_configured");
     assert_eq!(page["source_status"]["partial"], false);
     assert!(page.get("total").is_none(), "no total count is returned");
+
+    // The identity and correlation keys `AUD-05` names must actually reach the
+    // body. A field the fixed SELECT never asks for, or that capture only ever
+    // wrote inside a nested object, is documented in the schema and absent from
+    // every row a user sees — which is worse than not offering it.
+    let item = &page["items"][0];
+    assert_eq!(item["principal"]["id"], "github_user_token");
+    assert_eq!(item["correlation"]["webhook_delivery_id"], "d-9f3a");
 }
 
 /// Two collaborators on one session each see only their OWN calls.
@@ -152,11 +185,13 @@ async fn a_global_admin_may_narrow_by_actor() {
 }
 
 /// A regular caller asking for lifecycle rows must name ONE exact authorized
-/// session; the creator and a collaborator both qualify.
+/// session. All four allowing tiers are exercised through the ROUTE, not only
+/// through the pure policy: creator, collaborator, per-session log grantee, and
+/// the deployment-wide legacy log admin.
 #[tokio::test]
-async fn the_creator_and_a_collaborator_can_read_the_sessions_lifecycle_rows() {
+async fn every_allowing_tier_can_read_the_sessions_lifecycle_rows() {
     let harness = harness(Sources::Posthog(dataset()), true).await;
-    for who in [ALICE, BOB] {
+    for who in [ALICE, BOB, CAROL, DANA] {
         let page = harness
             .page(
                 who,
@@ -165,6 +200,22 @@ async fn the_creator_and_a_collaborator_can_read_the_sessions_lifecycle_rows() {
             .await;
         assert_eq!(item_ids(&page), vec!["ev-life-1"], "{}", who.1);
     }
+}
+
+/// A log grant is a LIFECYCLE tier, not a licence to read the session's humans.
+/// Carol's own timeline for the session is empty because she made no calls —
+/// the grant never surfaces Alice's or Bob's API-request rows.
+#[tokio::test]
+async fn a_log_grantee_gains_lifecycle_rows_but_no_other_humans_api_rows() {
+    let harness = harness(Sources::Posthog(dataset()), true).await;
+    let page = harness
+        .page(CAROL, &format!("?record_kind=all&session_id={SESSION}"))
+        .await;
+    assert_eq!(
+        item_ids(&page),
+        vec!["ev-life-1"],
+        "shared session access adds lifecycle rows only"
+    );
 }
 
 /// The timeline of an authorized session: the caller's OWN calls plus the
@@ -214,16 +265,25 @@ async fn an_unauthorized_missing_or_unknown_lifecycle_session_is_one_stable_404(
     assert_eq!(harness.source_calls().await, 0);
 }
 
-/// Repository role is not a session tier: an unrelated verified user with no
-/// grant sees the same `404`.
+/// Repository role is not a session tier. An unrelated verified user and the
+/// repository's own owner/admin get the SAME `404` — the policy is pure and
+/// never looks a repository role up, so there is nothing for an admin of
+/// `acme/site` to inherit here.
 #[tokio::test]
-async fn an_unrelated_user_cannot_reach_the_sessions_lifecycle_rows() {
+async fn neither_an_unrelated_user_nor_a_repository_admin_reaches_the_lifecycle_rows() {
     let harness = harness(Sources::Posthog(dataset()), true).await;
-    let response = harness
-        .get(ERIN, &format!("?record_kind=all&session_id={SESSION}"))
-        .await;
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    assert_eq!(error_code(response).await, "activity_session_not_found");
+    for who in [ERIN, REPO_ADMIN] {
+        let response = harness
+            .get(who, &format!("?record_kind=all&session_id={SESSION}"))
+            .await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{}", who.1);
+        assert_eq!(
+            error_code(response).await,
+            "activity_session_not_found",
+            "{}",
+            who.1
+        );
+    }
 }
 
 /// A regular caller's non-lifecycle history must not depend on the session

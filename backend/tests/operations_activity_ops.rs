@@ -22,7 +22,11 @@ fn dataset() -> Vec<Row> {
 async fn an_allowed_query_records_its_normalized_safe_arguments() {
     let harness = harness(Sources::Posthog(dataset()), true).await;
     harness
-        .page(ALICE, "?record_kind=all&session_id=sess-alice&limit=25")
+        .page(
+            ALICE,
+            "?record_kind=all&session_id=sess-alice&limit=25\
+             &status_class=4xx&outcome=client_error",
+        )
         .await;
 
     let events = harness.audit.events();
@@ -43,6 +47,11 @@ async fn an_allowed_query_records_its_normalized_safe_arguments() {
     assert_eq!(arguments["actor_filter_present"], false);
     assert_eq!(arguments["session_id"], "sess-alice");
     assert!(arguments.contains_key("from") && arguments.contains_key("to"));
+    // Both narrowing filters DID become source predicates, so both must be
+    // reconstructable from the record — an audit reader must never see a query
+    // recorded as unconstrained when it was not.
+    assert_eq!(arguments["status_class"], "4xx");
+    assert_eq!(arguments["outcome"], "client_error");
 }
 
 /// A refused cross-user probe is recorded as the ATTEMPT, never as the probe.

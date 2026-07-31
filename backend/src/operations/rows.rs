@@ -147,6 +147,7 @@ impl<'a> RowView<'a> {
             installation_id: self.integer("installation_id"),
             trigger_issue: self.integer("trigger_issue"),
             request_id: self.string("request_id"),
+            webhook_delivery_id: self.string("webhook_delivery_id"),
         }
     }
 }

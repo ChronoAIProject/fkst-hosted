@@ -76,6 +76,11 @@ pub struct CorrelationView {
     pub trigger_issue: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
+    /// The GitHub delivery id, when the record was driven by a webhook. Without
+    /// it a webhook-triggered request cannot be traced back to the delivery that
+    /// caused it (epic `AUD-05`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webhook_delivery_id: Option<String>,
 }
 
 /// One recorded API request.
@@ -308,6 +313,7 @@ fn correlation(value: &crate::operations::record::RecordCorrelation) -> Correlat
         installation_id: value.installation_id,
         trigger_issue: value.trigger_issue,
         request_id: value.request_id.clone(),
+        webhook_delivery_id: value.webhook_delivery_id.clone(),
     }
 }
 

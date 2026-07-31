@@ -272,7 +272,12 @@ fn the_normative_webhook_chat_and_operations_field_sets_match_the_issue_catalog(
             "request_id",
             "method",
             "operation_id",
-            "status"
+            "status",
+            // Both accepted status/outcome filters become source predicates, so
+            // both are recorded: a record naming only `status` would describe a
+            // narrower query than the one that ran.
+            "status_class",
+            "outcome"
         ]
     );
     assert_eq!(
