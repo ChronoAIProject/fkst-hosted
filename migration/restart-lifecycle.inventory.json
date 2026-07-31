@@ -1,5 +1,5 @@
 {
-  "artifact_sha256": "343ec61bcf6e81d596f3c3c57454777dc048427cbc8b51c034a7570c330adc2d",
+  "artifact_sha256": "6c4f1954db873ac243634e52cde1781bd87a698df2eb539385628eeff536c7ce",
   "consumer_entry_acceptors": [
     {
       "ordinal": "consumes:consensus.consensus_converge",
@@ -10912,6 +10912,12 @@
             "effect_id": "label:issue:reconcile-blocked",
             "ordinal": 2,
             "sink_kind": "label"
+          },
+          {
+            "authority_class": "lifecycle-authoritative",
+            "effect_id": "queue:devloop_refine",
+            "ordinal": 3,
+            "sink_kind": "queue"
           }
         ],
         "handoff_direct_lookup_count": 0,
@@ -10919,7 +10925,7 @@
           {
             "effect_id": "comment:issue:reconcile-blocked",
             "payload": {
-              "body": "github-devloop reconcile action: drop\n\nReason:\nno-semantic-progress-after-3-rounds\n\n<!-- fkst:github-devloop:state:v1 proposal=\"github-devloop/issue/owner/repo/42\" state=\"blocked\" version=\"consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3\" stage_rank=\"800\" marker_order_key=\"2026-06-03T01-02-03Z/000000000003/000000000000/000000000000/000000000000/000000000000/000000000000/000000000000/000000000800\" -->\n<!-- fkst:github-devloop:reconcile:v1 proposal=\"github-devloop/issue/owner/repo/42\" version=\"consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3\" round=\"3\" action=\"drop\" terminal_cause=\"no-semantic-progress\" dedup=\"reconcile:consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3\" -->\n⟦AI:FKST⟧",
+              "body": "github-devloop reconcile action: re-design\n\nReason:\nno-semantic-progress-after-3-rounds; auto-refinement 1/100 re-entering intake\n\n<!-- fkst:github-devloop:state:v1 proposal=\"github-devloop/issue/owner/repo/42\" state=\"blocked\" version=\"consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3\" stage_rank=\"800\" marker_order_key=\"2026-06-03T01-02-03Z/000000000003/000000000000/000000000000/000000000000/000000000000/000000000000/000000000000/000000000800\" -->\n<!-- fkst:github-devloop:reconcile:v1 proposal=\"github-devloop/issue/owner/repo/42\" version=\"consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3\" round=\"3\" action=\"re-design\" terminal_cause=\"no-semantic-progress\" dedup=\"reconcile:consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3\" -->\n⟦AI:FKST⟧",
               "claim": {
                 "owner": "fkst-test-bot",
                 "source_ref": {
@@ -10981,6 +10987,24 @@
               "target_number": "42"
             },
             "queue": "github-proxy.github_issue_label_request"
+          },
+          {
+            "effect_id": "queue:devloop_refine",
+            "payload": {
+              "base_version": "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+              "budget": 100,
+              "dedup_key": "refine/github-devloop/issue/owner/repo/42/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/3/1",
+              "proposal_id": "github-devloop/issue/owner/repo/42",
+              "refine_round": 1,
+              "round": 3,
+              "schema": "github-devloop.refine.v1",
+              "source_ref": {
+                "kind": "external",
+                "ref": "owner/repo#issue/42"
+              },
+              "terminal_cause": "no-semantic-progress"
+            },
+            "queue": "devloop_refine"
           }
         ],
         "reason_code": "apply",
