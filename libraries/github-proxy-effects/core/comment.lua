@@ -4,6 +4,7 @@ function S.install(M, deps)
 local shared = deps or M
 local strings = require("contract.strings")
 local forge_strings = require("forge.strings")
+local session_attribution = require("github-proxy-effects.core.session_attribution")
 local max_runtime_id_len = 180
 local stale_comment_target_error_class = "stale-comment-target"
 
@@ -414,6 +415,14 @@ function M.write_comment_request(payload, target)
     if stale_round_marker_replace(existing, body, replace_marker) then
       log.info("github-proxy: round-marker replacement is stale; keeping newer visible marker")
       return
+    end
+    -- After the stale-marker comparison above (which must see the body the
+    -- previous write produced) and before the debug stamp, so the attribution
+    -- reads as the last human-visible line. Never the FIRST line: parse_command
+    -- reads that one, and a refinement comment leads with `fkst: reintake`.
+    local attribution = session_attribution.build(M.read_env, repo)
+    if attribution ~= nil then
+      body = body .. "\n" .. attribution .. "\n"
     end
     body = M.with_github_debug_stamp(body, {
       emitter = "github-proxy.comment",
