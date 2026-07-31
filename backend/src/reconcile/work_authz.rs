@@ -40,15 +40,12 @@ pub fn is_work_author_allowed(
 ) -> bool {
     work_authority_tier(
         facts(reg),
-        VerifiedCaller {
-            id: author_id,
-            login: author_login,
-        },
+        VerifiedCaller::from_github_metadata(author_id, author_login),
         access,
         // No system principal: this signature is the HUMAN authority question.
         None,
     )
-    .allowed
+    .allowed()
 }
 
 /// Apply the human authority tiers plus the configured FKST App system principal.
@@ -65,14 +62,11 @@ pub fn is_work_author_allowed_with_bot(
 ) -> bool {
     work_authority_tier(
         facts(reg),
-        VerifiedCaller {
-            id: author_id,
-            login: author_login,
-        },
+        VerifiedCaller::from_github_metadata(author_id, author_login),
         access,
         github_bot_login,
     )
-    .allowed
+    .allowed()
 }
 
 #[cfg(test)]

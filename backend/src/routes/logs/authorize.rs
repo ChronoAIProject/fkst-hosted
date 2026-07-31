@@ -36,10 +36,7 @@ pub(crate) fn authorize(
     // the whole reason the policy is capability-aware rather than one boolean.
     let decision = session_access::decide(&SessionAccessRequest::new(
         SessionCapability::LogDownload,
-        VerifiedCaller {
-            id: user.id,
-            login: &user.login,
-        },
+        VerifiedCaller::from_verified_user(user),
         context.facts(),
         PolicyEnvironment {
             access: &state.config.access,
@@ -47,12 +44,12 @@ pub(crate) fn authorize(
             github_bot_login: None,
         },
     ));
-    if decision.allowed {
+    if decision.allowed() {
         tracing::info!(
             session_id = %session_id,
             requester_id = user.id,
             requester_login = %user.login,
-            basis = decision.basis.as_str(),
+            basis = decision.basis().as_str(),
             "log download authorized"
         );
         Ok(())

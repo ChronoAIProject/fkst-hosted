@@ -6,7 +6,8 @@
 //! link need:
 //!
 //! - `FKST_LOG_ADMINS` — comma-separated GitHub logins/ids that may pull ANY
-//!   session's logs (tier 3 of [`crate::reconcile::log_authz`]).
+//!   session's logs (the legacy log-admin tier of
+//!   [`crate::session_access::policy`]).
 //! - `FKST_PUBLIC_BASE_URL` — the externally-reachable base URL the announce comment
 //!   builds the download link from (e.g. `https://fkst.example`). When unset, the
 //!   announce comment omits the log line (there is no reachable URL to advertise).

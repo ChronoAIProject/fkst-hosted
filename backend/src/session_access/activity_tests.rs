@@ -2,8 +2,10 @@
 
 use super::*;
 use crate::github_identity::GithubUser;
-use crate::session_access::policy::AccessBasis;
-use crate::session_access::test_support::policy_with_admins;
+use crate::session_access::policy::{
+    decide, PolicyEnvironment, SessionAccessRequest, SessionCapability, VerifiedCaller,
+};
+use crate::session_access::test_support::{context, policy_with_admins};
 use crate::session_access::viewer::{AuthenticatedViewer, RequestedScope, ScopeRequest};
 
 /// Resolve a scope through the only path that exists: a verified viewer.
@@ -21,18 +23,36 @@ fn scope(id: i64, login: &str, admins: &str, requested: Option<RequestedScope>) 
         .expect("scope resolves")
 }
 
+/// A decision minted the ONLY way one can be: by running the real policy.
+///
+/// There is deliberately no way to hand-write `SessionAccessDecision { allowed:
+/// true, .. }` — that is the seal these tests exist to protect. `caller_id` 101 is
+/// the fixture session's creator, so it is allowed; any other id is not.
+fn verdict(caller_id: i64) -> SessionAccessDecision {
+    let ctx = context(Some(101), "alice", &[], &[]);
+    let access = policy_with_admins("");
+    decide(&SessionAccessRequest::new(
+        SessionCapability::OperationsVisibility,
+        VerifiedCaller::from_github_metadata(caller_id, "alice"),
+        ctx.facts(),
+        PolicyEnvironment {
+            access: &access,
+            legacy_log_admins: &[],
+            github_bot_login: None,
+        },
+    ))
+}
+
 fn allowed() -> SessionAccessDecision {
-    SessionAccessDecision {
-        allowed: true,
-        basis: AccessBasis::Creator,
-    }
+    let decision = verdict(101);
+    assert!(decision.allowed(), "the creator is allowed");
+    decision
 }
 
 fn denied() -> SessionAccessDecision {
-    SessionAccessDecision {
-        allowed: false,
-        basis: AccessBasis::None,
-    }
+    let decision = verdict(999);
+    assert!(!decision.allowed(), "a stranger is denied");
+    decision
 }
 
 #[test]

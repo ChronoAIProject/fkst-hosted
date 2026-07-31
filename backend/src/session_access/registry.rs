@@ -43,6 +43,25 @@
 //!   cold generation is staged, `replace_repo` writes into the staging buffer and
 //!   publication happens exactly once, when the last expected repository lands.
 //!
+//! ## Why a staged generation can always be degraded
+//!
+//! Staging only pays off if it ends. A repository that can never report — its
+//! Issues tab disabled (`410` from the issues API), its installation revoked, or
+//! simply an enqueue dropped by a full queue — would otherwise hold `pending`
+//! non-empty forever, and since every subsequent `replace_repo` is diverted into
+//! that buffer, the LIVE map would freeze: new sessions permanently invisible to
+//! the shipped log/observe routes, retired ones permanently granted. Each
+//! subsequent full resync would re-open the same doomed generation.
+//!
+//! So a generation that is known never to complete is DEGRADED
+//! ([`SessionAccessRegistry::record_repo_failure`],
+//! [`SessionAccessRegistry::abandon_generation`], and a superseding
+//! `begin_generation`): its collected contexts are folded into the live map — each
+//! one is an authoritative per-repository replacement in its own right, exactly
+//! what the steady-state path applies — and writes go live again. Only the
+//! COMPLETENESS claim is lost, and that is expressed by readiness: a projection
+//! that was never complete stays [`RegistryState::Cold`] and keeps failing closed.
+//!
 //! Nothing sensitive lives here: the lists are the public trigger-issue content
 //! and the ids are public GitHub numeric ids — never a token, body, or secret.
 
@@ -116,6 +135,11 @@ pub struct RegistrySnapshot {
 struct Staging {
     /// Repositories whose contexts this generation still expects.
     pending: HashSet<RepoKey>,
+    /// Repositories that HAVE reported into this generation. Needed to degrade it:
+    /// a repository that reported an empty set contributes no context, yet its
+    /// live entries must still be dropped — "reported nothing" and "said nothing"
+    /// are opposite instructions.
+    reported: HashSet<RepoKey>,
     /// Contexts collected so far. Invisible to every reader.
     contexts: HashMap<String, SessionAccessContext>,
 }
@@ -126,6 +150,28 @@ struct RegistryInner {
     staging: Option<Staging>,
     state: RegistryState,
     generation: u64,
+}
+
+impl RegistryInner {
+    /// Fold the staged generation (if any) into the live map and drop the buffer,
+    /// so per-repository writes are immediately visible again.
+    ///
+    /// Every staged entry arrived as one repository's complete, authoritative set,
+    /// so applying them is the same operation the steady-state path performs — no
+    /// half-built generation is published, because there is no generation left to
+    /// publish. Returns whether anything was staged.
+    fn degrade_staging(&mut self) -> bool {
+        let Some(staged) = self.staging.take() else {
+            return false;
+        };
+        self.contexts.retain(|_, ctx| {
+            !staged
+                .reported
+                .contains(&(ctx.installation_id, ctx.repo.clone()))
+        });
+        self.contexts.extend(staged.contexts);
+        true
+    }
 }
 
 /// A shared, in-memory session authorization projection. Cloning shares the one
@@ -169,19 +215,32 @@ impl SessionAccessRegistry {
     /// An already-ready registry keeps serving its published generation while the
     /// new one is collected: readiness is about knowing the set is complete, and
     /// that knowledge is not lost by a refresh.
+    ///
+    /// A generation left staged by the previous pass is degraded first: it can
+    /// never complete now that its successor owns the expected set, and its
+    /// collected per-repository sets are worth more folded into the live map than
+    /// discarded. This is also the periodic backstop for a repository that vanished
+    /// from the queue without failing (a dropped enqueue), which no error path can
+    /// report.
     pub fn begin_generation(&self, expected: HashSet<RepoKey>) {
         let mut inner = self.write();
+        if inner.degrade_staging() {
+            tracing::warn!(
+                generation = inner.generation,
+                "session access registry: a previous generation never completed; folding it into the live projection"
+            );
+        }
         inner.generation = inner.generation.saturating_add(1);
         if expected.is_empty() {
             // An App installed nowhere is an authoritatively empty projection,
             // not an unknown one.
             inner.contexts.clear();
-            inner.staging = None;
             inner.state = RegistryState::Ready;
             return;
         }
         inner.staging = Some(Staging {
             pending: expected,
+            reported: HashSet::new(),
             contexts: HashMap::new(),
         });
         if !inner.state.is_ready() {
@@ -189,17 +248,60 @@ impl SessionAccessRegistry {
         }
     }
 
-    /// Drop a staged generation without publishing it.
+    /// Give up on the staged generation without publishing it as complete.
     ///
-    /// Used when discovery could not complete. The previously published
-    /// generation (if any) stays exactly as it was — a failed refresh must never
-    /// downgrade a projection that is already known complete, and must never
-    /// publish a half-built one.
+    /// Used when discovery could not complete. Nothing half-built is ever
+    /// published: the generation is degraded (its authoritative per-repository sets
+    /// fold into the live map, see [`RegistryInner::degrade_staging`]) and the
+    /// COMPLETENESS claim is dropped. A projection that was already known complete
+    /// keeps its readiness — a failed refresh must never flap a healthy deployment
+    /// into `503` — while one that never completed stays fail-closed.
     pub fn abandon_generation(&self) {
         let mut inner = self.write();
-        if inner.staging.take().is_some() && !inner.state.is_ready() {
+        Self::degrade(&mut inner, "discovery could not complete");
+    }
+
+    /// Record that one repository could not be reconciled this pass.
+    ///
+    /// The reconcile loop calls this on every per-repository failure. If that
+    /// repository is one the staged generation is waiting for, the generation can
+    /// never complete — a repository whose Issues tab is disabled, or whose
+    /// installation was revoked, fails every single pass — so the projection
+    /// degrades to incremental maintenance instead of freezing the live map behind
+    /// a buffer that will never be published. A failure outside the expected set is
+    /// ignored: the generation is still on track.
+    pub fn record_repo_failure(&self, installation_id: i64, repo: &RepoRef) {
+        let mut inner = self.write();
+        let expected = inner
+            .staging
+            .as_ref()
+            .is_some_and(|staging| staging.pending.contains(&(installation_id, repo.clone())));
+        if !expected {
+            return;
+        }
+        Self::degrade(
+            &mut inner,
+            "a repository of the staged generation could not report",
+        );
+    }
+
+    /// Fold the staged generation into the live map and drop its completeness
+    /// claim. `reason` is a fixed, bounded string — never a repository or session
+    /// value.
+    fn degrade(inner: &mut RegistryInner, reason: &'static str) {
+        if !inner.degrade_staging() {
+            return;
+        }
+        if !inner.state.is_ready() {
             inner.state = RegistryState::Cold;
         }
+        tracing::warn!(
+            generation = inner.generation,
+            sessions = inner.contexts.len(),
+            state = inner.state.as_str(),
+            reason,
+            "session access registry: staged generation degraded to incremental maintenance"
+        );
     }
 
     /// Publish one repository's complete context set.
@@ -220,7 +322,9 @@ impl SessionAccessRegistry {
                 .contexts
                 .retain(|_, ctx| !ctx.belongs_to(installation_id, repo));
             staging.contexts.extend(contexts);
-            staging.pending.remove(&(installation_id, repo.clone()));
+            let key = (installation_id, repo.clone());
+            staging.pending.remove(&key);
+            staging.reported.insert(key);
             if staging.pending.is_empty() {
                 // The swap: readers see the previous generation until this
                 // assignment and the new one after it — never a mixture.

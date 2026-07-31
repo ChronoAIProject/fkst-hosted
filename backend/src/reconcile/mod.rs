@@ -31,10 +31,6 @@ pub mod effective_packages;
 pub mod execute;
 mod execute_comments;
 pub mod hashing;
-// Pure three-tier authorization for on-demand session-log downloads (author /
-// per-issue `### Log Access Allowlist` allow-list / global admins). No I/O; consumed by the
-// identity-gated `/api/v1/logs/{session_id}` endpoint.
-pub mod log_authz;
 mod loops;
 // Fetch + validate a fkst-manifest JSON (referenced as `owner/repo@ref:path`) into
 // its package list. FAIL-CLOSED (a manifest is a required, complete set): any fetch,

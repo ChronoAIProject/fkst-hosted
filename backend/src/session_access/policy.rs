@@ -12,21 +12,30 @@
 //! | capability | creator | collaborators | log access / legacy log admins | global admin | base `AccessPolicy` |
 //! |---|---|---|---|---|---|
 //! | [`SessionCapability::OperationsVisibility`] | yes | yes | yes | yes | enforced |
-//! | [`SessionCapability::LogDownload`] | yes | **no** | yes | yes | not consulted |
-//! | [`SessionCapability::Observe`] | yes | **no** | yes | yes | not consulted |
+//! | [`SessionCapability::LogDownload`] | yes | **no** | yes | yes | enforced |
+//! | [`SessionCapability::Observe`] | yes | **no** | yes | yes | enforced |
 //! | [`SessionCapability::WorkAuthority`] | yes | yes | **no** | yes | enforced |
 //!
 //! A session collaborator must not gain the redacted log bundle just because a
 //! new surface needed a broader tier, and a log-allowlist entry must not gain the
 //! right to raise work. Those two "no"s are the entire reason this type exists.
 //!
-//! `LogDownload` and `Observe` deliberately do NOT consult the deployment
-//! `AccessPolicy`: their routes resolve identity outside the
+//! ## The deployment gate applies to every capability
+//!
+//! `AccessPolicy` is consulted for ALL four, per the milestone contract: "the base
+//! `AccessPolicy` must admit an ordinary human before a session capability is
+//! considered". `LogDownload`/`Observe` previously skipped it because their routes
+//! resolve identity outside the
 //! [`GithubUser`](crate::github_identity::GithubUser) extractor (a raw bearer
-//! token, or a browser OAuth round-trip) and have never applied it. Adding the
-//! gate here would be a silent NARROWING of shipped behaviour, which is just as
-//! much a regression as a widening; the deployment gate for those routes stays
-//! where it is today.
+//! token, or a browser OAuth round-trip), so nothing had ever applied it there.
+//!
+//! That gap is now closed rather than preserved: a `FKST_ACCESS_BLOCKED_USERS`
+//! entry is documented to lose EVERY gate — its trigger issues are ignored and its
+//! running sessions are torn down — and a blocked human who could still pull the
+//! session's log bundle would contradict that in the one place it matters most.
+//! Global-admin precedence is unchanged: an administrator passes
+//! [`AccessPolicy::allows`] by construction, including one also (mis)listed as
+//! blocked.
 //!
 //! ## Repository role is not a tier
 //!
@@ -100,13 +109,34 @@ impl AccessBasis {
 }
 
 /// The verdict for one `(capability, caller, session)` triple.
+///
+/// The fields are private and the two mints ([`Self::allow`] / [`Self::deny`]) are
+/// module-private, so this type is a PROOF: holding an allowing decision means the
+/// tier table above actually ran on real session facts. That matters because
+/// [`super::activity::authorize_lifecycle_session`] turns an allowing decision into
+/// an [`AuthorizedSessionId`](super::activity::AuthorizedSessionId), the token the
+/// personal-activity constraint trusts. If a query/DTO layer could write
+/// `SessionAccessDecision { allowed: true, .. }` it would mint that token for any
+/// session id it liked, and the whole row-level authorization argument would
+/// collapse (epic `AUTH-03`).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SessionAccessDecision {
-    pub allowed: bool,
-    pub basis: AccessBasis,
+    allowed: bool,
+    basis: AccessBasis,
 }
 
 impl SessionAccessDecision {
+    /// Whether the capability is granted.
+    pub fn allowed(self) -> bool {
+        self.allowed
+    }
+
+    /// Which tier decided it. Diagnostics only; a denial always reports
+    /// [`AccessBasis::None`].
+    pub fn basis(self) -> AccessBasis {
+        self.basis
+    }
+
     fn allow(basis: AccessBasis) -> Self {
         Self {
             allowed: true,
@@ -124,14 +154,51 @@ impl SessionAccessDecision {
     }
 }
 
-/// The verified caller. Constructed only from a server-verified identity — never
-/// from a path, body, query, or header value.
+/// The verified caller.
+///
+/// The fields are private so a caller cannot be assembled from a struct literal
+/// anywhere in the crate: every construction goes through one of the two named
+/// constructors below, each of which states WHERE its identity came from. That is
+/// as far as the type system can go — this value is an input to the policy, not a
+/// proof like [`SessionAccessDecision`] — but it makes "who claims this identity is
+/// verified?" a one-line grep instead of a whole-crate audit.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct VerifiedCaller<'a> {
     /// The immutable GitHub numeric id.
-    pub id: i64,
+    id: i64,
     /// The login snapshot, used only for list-entry matching.
-    pub login: &'a str,
+    login: &'a str,
+}
+
+impl<'a> VerifiedCaller<'a> {
+    /// The request path: an identity the
+    /// [`GithubUser`](crate::github_identity::GithubUser) extractor resolved by
+    /// calling GitHub `/user` with the caller's bearer token.
+    pub fn from_verified_user(user: &'a crate::github_identity::GithubUser) -> Self {
+        Self {
+            id: user.id,
+            login: &user.login,
+        }
+    }
+
+    /// The reconcile path: an identity GitHub itself reported in issue metadata
+    /// (an author, an assignee) over an authenticated App call.
+    ///
+    /// Never call this with a value that reached the process as request-controlled
+    /// input — a path segment, a body field, a query parameter, or a header.
+    pub fn from_github_metadata(id: i64, login: &'a str) -> Self {
+        Self { id, login }
+    }
+
+    /// The immutable GitHub numeric id.
+    pub fn id(self) -> i64 {
+        self.id
+    }
+
+    /// The login snapshot.
+    pub fn login(self) -> &'a str {
+        self.login
+    }
 }
 
 /// The deployment-level inputs a decision may consult.
@@ -227,10 +294,17 @@ fn operations_visibility(request: &SessionAccessRequest<'_>) -> SessionAccessDec
 }
 
 /// Log download and engine observe: creator + per-issue log access + legacy log
-/// admins + global admins. A collaborator alone is NOT a tier here.
+/// admins + global admins, gated by the deployment access policy. A collaborator
+/// alone is NOT a tier here.
 fn session_observability(request: &SessionAccessRequest<'_>) -> SessionAccessDecision {
     let env = &request.environment;
     let caller = request.caller;
+    // The deployment gate first, exactly as the other two human capabilities do.
+    // A global admin passes `allows` by construction, so the existing precedence
+    // over a conflicting blocked-users entry survives the ordering.
+    if !env.access.allows(caller.id, caller.login) {
+        return SessionAccessDecision::deny();
+    }
     if request.allow_global_admin && env.access.is_global_admin(caller.id, caller.login) {
         return SessionAccessDecision::allow(AccessBasis::GlobalAdmin);
     }
@@ -273,12 +347,9 @@ fn matches_any(entries: &[String], caller_id: &str, caller_login: &str) -> bool 
         .any(|entry| entry_matches(entry, caller_id, caller_login))
 }
 
-/// The pure log/observe tier decision WITHOUT the global-admin bypass.
-///
-/// Also the implementation behind [`crate::reconcile::log_authz::is_authorized`],
-/// whose route-level caller adds the global-admin tier on top — one
-/// implementation, so the shipped log-download matrix cannot drift.
-pub(crate) fn log_download_tier(
+/// The pure log/observe tier decision WITHOUT the deployment gate and WITHOUT the
+/// global-admin bypass — [`session_observability`] applies both around it.
+fn log_download_tier(
     facts: SessionAuthorizationFacts<'_>,
     caller: VerifiedCaller<'_>,
     legacy_log_admins: &[String],
@@ -319,3 +390,7 @@ pub(crate) fn work_authority_tier(
 #[cfg(test)]
 #[path = "policy_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "policy_log_download_tests.rs"]
+mod log_download_tests;

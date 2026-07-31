@@ -54,7 +54,7 @@ pub fn authorize_lifecycle_session(
     decision: &SessionAccessDecision,
 ) -> Option<AuthorizedSessionId> {
     decision
-        .allowed
+        .allowed()
         .then(|| AuthorizedSessionId(session_id.to_string()))
 }
 

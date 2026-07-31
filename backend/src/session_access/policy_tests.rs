@@ -35,10 +35,7 @@ fn legacy_admins() -> Vec<String> {
 }
 
 fn caller(who: (i64, &str)) -> VerifiedCaller<'_> {
-    VerifiedCaller {
-        id: who.0,
-        login: who.1,
-    }
+    VerifiedCaller::from_github_metadata(who.0, who.1)
 }
 
 /// Decide `capability` for `who` against the cast fixture.
@@ -78,8 +75,8 @@ fn operations_visibility_admits_every_explicit_tier_and_no_one_else() {
             &access,
             &legacy,
         );
-        assert!(decision.allowed, "{} must be admitted", who.1);
-        assert_eq!(decision.basis, basis, "{} basis", who.1);
+        assert!(decision.allowed(), "{} must be admitted", who.1);
+        assert_eq!(decision.basis(), basis, "{} basis", who.1);
     }
     for who in [ERIN, FRANK] {
         let decision = verdict(
@@ -88,9 +85,9 @@ fn operations_visibility_admits_every_explicit_tier_and_no_one_else() {
             &access,
             &legacy,
         );
-        assert!(!decision.allowed, "{} must be rejected", who.1);
+        assert!(!decision.allowed(), "{} must be rejected", who.1);
         assert_eq!(
-            decision.basis,
+            decision.basis(),
             AccessBasis::None,
             "a denial never names a near-miss tier"
         );
@@ -123,13 +120,13 @@ fn a_collaborator_alone_cannot_download_logs_or_observe() {
     let legacy = legacy_admins();
     for capability in [SessionCapability::LogDownload, SessionCapability::Observe] {
         assert!(
-            !verdict(capability, BOB, &access, &legacy).allowed,
+            !verdict(capability, BOB, &access, &legacy).allowed(),
             "collaborator must not gain {capability:?}"
         );
         // The tiers that DO grant it still do.
         for who in [ALICE, CAROL, DANA, GRACE] {
             assert!(
-                verdict(capability, who, &access, &legacy).allowed,
+                verdict(capability, who, &access, &legacy).allowed(),
                 "{} must keep {capability:?}",
                 who.1
             );
@@ -143,14 +140,14 @@ fn a_log_grantee_or_legacy_log_admin_alone_cannot_raise_work() {
     let legacy = legacy_admins();
     for who in [CAROL, DANA] {
         assert!(
-            !verdict(SessionCapability::WorkAuthority, who, &access, &legacy).allowed,
+            !verdict(SessionCapability::WorkAuthority, who, &access, &legacy).allowed(),
             "{} must not gain work authority",
             who.1
         );
     }
     for who in [ALICE, BOB, GRACE] {
         assert!(
-            verdict(SessionCapability::WorkAuthority, who, &access, &legacy).allowed,
+            verdict(SessionCapability::WorkAuthority, who, &access, &legacy).allowed(),
             "{} keeps work authority",
             who.1
         );
@@ -163,15 +160,15 @@ fn the_configured_app_is_a_work_system_principal_and_nothing_more() {
     let legacy = legacy_admins();
     let bot = (9000, "fkst-app[bot]");
     let work = verdict(SessionCapability::WorkAuthority, bot, &access, &legacy);
-    assert!(work.allowed);
-    assert_eq!(work.basis, AccessBasis::AppSystem);
+    assert!(work.allowed());
+    assert_eq!(work.basis(), AccessBasis::AppSystem);
     for capability in [
         SessionCapability::OperationsVisibility,
         SessionCapability::LogDownload,
         SessionCapability::Observe,
     ] {
         assert!(
-            !verdict(capability, bot, &access, &legacy).allowed,
+            !verdict(capability, bot, &access, &legacy).allowed(),
             "the App is not a human observability tier ({capability:?})"
         );
     }
@@ -187,14 +184,8 @@ fn creator_numeric_id_wins_over_a_stale_matching_login() {
         github_bot_login: None,
     };
     // A different account that happens to now hold the creator's old login.
-    let impostor = VerifiedCaller {
-        id: 999,
-        login: ALICE.1,
-    };
-    let renamed_creator = VerifiedCaller {
-        id: ALICE.0,
-        login: "alice-renamed",
-    };
+    let impostor = VerifiedCaller::from_github_metadata(999, ALICE.1);
+    let renamed_creator = VerifiedCaller::from_github_metadata(ALICE.0, "alice-renamed");
     for capability in [
         SessionCapability::OperationsVisibility,
         SessionCapability::LogDownload,
@@ -207,7 +198,7 @@ fn creator_numeric_id_wins_over_a_stale_matching_login() {
                 ctx.facts(),
                 env
             ))
-            .allowed,
+            .allowed(),
             "a stale login with a different id must not inherit the session ({capability:?})"
         );
         assert!(
@@ -217,7 +208,7 @@ fn creator_numeric_id_wins_over_a_stale_matching_login() {
                 ctx.facts(),
                 env
             ))
-            .allowed,
+            .allowed(),
             "the immutable id survives a rename ({capability:?})"
         );
     }
@@ -232,32 +223,22 @@ fn a_missing_creator_id_uses_the_verified_login_fallback_only() {
         legacy_log_admins: &[],
         github_bot_login: None,
     };
-    let assignee = VerifiedCaller {
-        id: 555,
-        login: "seed-owner",
-    };
-    assert!(
-        decide(&SessionAccessRequest::new(
-            SessionCapability::OperationsVisibility,
-            assignee,
-            ctx.facts(),
-            env
-        ))
-        .allowed
-    );
-    let someone_else = VerifiedCaller {
-        id: 556,
-        login: "someone-else",
-    };
-    assert!(
-        !decide(&SessionAccessRequest::new(
-            SessionCapability::OperationsVisibility,
-            someone_else,
-            ctx.facts(),
-            env
-        ))
-        .allowed
-    );
+    let assignee = VerifiedCaller::from_github_metadata(555, "seed-owner");
+    assert!(decide(&SessionAccessRequest::new(
+        SessionCapability::OperationsVisibility,
+        assignee,
+        ctx.facts(),
+        env
+    ))
+    .allowed());
+    let someone_else = VerifiedCaller::from_github_metadata(556, "someone-else");
+    assert!(!decide(&SessionAccessRequest::new(
+        SessionCapability::OperationsVisibility,
+        someone_else,
+        ctx.facts(),
+        env
+    ))
+    .allowed());
 }
 
 #[test]
@@ -267,10 +248,7 @@ fn a_trigger_author_differing_from_the_creator_gets_no_implicit_tier() {
     // way — an id that only ever appeared as the trigger author is a stranger.
     let access = policy_with_admins("");
     let ctx = context(None, "Seed-Owner", &[], &[]);
-    let trigger_author = VerifiedCaller {
-        id: 9000,
-        login: "fkst-app[bot]",
-    };
+    let trigger_author = VerifiedCaller::from_github_metadata(9000, "fkst-app[bot]");
     let decision = decide(&SessionAccessRequest::new(
         SessionCapability::OperationsVisibility,
         trigger_author,
@@ -281,39 +259,45 @@ fn a_trigger_author_differing_from_the_creator_gets_no_implicit_tier() {
             github_bot_login: Some("fkst-app[bot]"),
         },
     ));
-    assert!(!decision.allowed);
+    assert!(!decision.allowed());
 }
 
 #[test]
-fn a_blocked_ordinary_user_loses_the_gated_capabilities() {
-    // Under a denylist, an ordinary blocked human loses operations visibility and
-    // work authority (both consult the deployment gate). Log download and observe
-    // are deliberately untouched: their routes have never applied that gate, and
-    // silently narrowing them here would be just as much a regression.
+fn a_blocked_ordinary_user_loses_every_capability() {
+    // "Blocked users lose every gate" is the deployment contract, and the base
+    // AccessPolicy is consulted before ANY session tier — including log download
+    // and observe, whose routes resolve identity outside the GithubUser extractor.
     let access = denylist(BOB.1, "");
     let legacy = legacy_admins();
-    assert!(
-        !verdict(
-            SessionCapability::OperationsVisibility,
-            BOB,
-            &access,
-            &legacy
-        )
-        .allowed
-    );
-    assert!(!verdict(SessionCapability::WorkAuthority, BOB, &access, &legacy).allowed);
+    for capability in [
+        SessionCapability::OperationsVisibility,
+        SessionCapability::WorkAuthority,
+        SessionCapability::LogDownload,
+        SessionCapability::Observe,
+    ] {
+        let decision = verdict(capability, BOB, &access, &legacy);
+        assert!(!decision.allowed(), "{capability:?}");
+        assert_eq!(decision.basis(), AccessBasis::None);
+    }
 
-    let blocked_grantee = denylist(CAROL.1, "");
-    assert!(
-        verdict(
+    // The tier itself is irrelevant: a blocked LOG-ACCESS grantee and a blocked
+    // LEGACY log admin lose the bundle too, not only a blocked collaborator.
+    for who in [CAROL, DANA] {
+        let blocked = denylist(who.1, "");
+        assert!(
+            !verdict(SessionCapability::LogDownload, who, &blocked, &legacy).allowed(),
+            "{} must not keep the log bundle while blocked",
+            who.1
+        );
+        // ...and the same identity keeps it once the deployment admits them again.
+        assert!(verdict(
             SessionCapability::LogDownload,
-            CAROL,
-            &blocked_grantee,
+            who,
+            &policy_with_admins(""),
             &legacy
         )
-        .allowed,
-        "log download must keep its shipped, un-gated matrix"
-    );
+        .allowed());
+    }
 }
 
 #[test]
@@ -328,7 +312,7 @@ fn global_admin_precedence_over_the_blocklist_is_preserved() {
         SessionCapability::LogDownload,
     ] {
         assert!(
-            verdict(capability, GRACE, &access, &legacy).allowed,
+            verdict(capability, GRACE, &access, &legacy).allowed(),
             "{capability:?}"
         );
     }
@@ -351,13 +335,13 @@ fn the_accessible_scope_evaluates_a_global_admin_on_direct_tiers_only() {
     )
     .without_global_admin();
     assert!(
-        !decide(&request).allowed,
+        !decide(&request).allowed(),
         "scope=accessible shows what the admin directly owns or was granted"
     );
     // Alice, who IS the creator, is unaffected by the bypass being disabled.
     let mut alice = request;
     alice.caller = caller(ALICE);
-    assert!(decide(&alice).allowed);
+    assert!(decide(&alice).allowed());
 }
 
 #[test]
@@ -372,12 +356,12 @@ fn blank_and_malformed_list_entries_never_match() {
     for login in ["", " ", "@"] {
         let decision = decide(&SessionAccessRequest::new(
             SessionCapability::OperationsVisibility,
-            VerifiedCaller { id: 999, login },
+            VerifiedCaller::from_github_metadata(999, login),
             ctx.facts(),
             env,
         ));
         assert!(
-            !decision.allowed,
+            !decision.allowed(),
             "login {login:?} must not match a blank entry"
         );
     }
@@ -395,11 +379,11 @@ fn list_entries_match_by_numeric_id_or_case_insensitive_login() {
     let allowed = |id: i64, login: &str| {
         decide(&SessionAccessRequest::new(
             SessionCapability::OperationsVisibility,
-            VerifiedCaller { id, login },
+            VerifiedCaller::from_github_metadata(id, login),
             ctx.facts(),
             env,
         ))
-        .allowed
+        .allowed()
     };
     assert!(allowed(BOB.0, "bob"), "leading @ and casing are ignored");
     assert!(allowed(31337, "renamed"), "numeric entry matches the id");
@@ -420,8 +404,8 @@ fn every_capability_denies_a_stranger_with_an_empty_environment() {
         SessionCapability::WorkAuthority,
     ] {
         let decision = verdict(capability, ERIN, &access, &[]);
-        assert!(!decision.allowed, "{capability:?}");
-        assert_eq!(decision.basis, AccessBasis::None);
+        assert!(!decision.allowed(), "{capability:?}");
+        assert_eq!(decision.basis(), AccessBasis::None);
     }
 }
 

@@ -126,6 +126,127 @@ fn abandoning_a_refresh_keeps_the_published_generation_ready() {
 }
 
 #[test]
+fn a_repo_that_never_reports_does_not_wedge_the_live_projection() {
+    // The wedge this guards: `web` fails every pass (Issues disabled), so the
+    // generation's pending set never empties. Without degradation every later
+    // `replace_repo` would be swallowed by the staging buffer and the live map —
+    // the one the shipped log/observe routes read — would freeze forever.
+    let registry = SessionAccessRegistry::new(true);
+    registry.begin_generation([(1, repo("site")), (1, repo("web"))].into_iter().collect());
+    registry.replace_repo(1, &repo("site"), vec![entry("sess-site", "site", 42)]);
+    assert!(registry.get("sess-site").is_none(), "still staged");
+
+    registry.record_repo_failure(1, &repo("web"));
+    assert_eq!(
+        registry.snapshot().pending_repositories,
+        0,
+        "the doomed generation is no longer holding writes"
+    );
+    assert!(
+        registry.get("sess-site").is_some(),
+        "the collected set is folded into the live map, not thrown away"
+    );
+    assert_eq!(
+        registry.snapshot().state,
+        RegistryState::Cold,
+        "a projection that was never complete keeps failing closed"
+    );
+    assert_eq!(registry.lookup("sess-site"), ContextLookup::Unavailable);
+
+    // The live map is maintained again: a newly registered session is immediately
+    // visible to the routes that read it without readiness.
+    registry.replace_repo(
+        1,
+        &repo("site"),
+        vec![
+            entry("sess-site", "site", 42),
+            entry("sess-new", "site", 43),
+        ],
+    );
+    assert!(registry.get("sess-new").is_some());
+
+    // And a later complete generation still recovers readiness.
+    registry.begin_generation([(1, repo("site"))].into_iter().collect());
+    registry.replace_repo(1, &repo("site"), vec![entry("sess-site", "site", 42)]);
+    assert!(registry.is_ready());
+    assert_eq!(
+        registry.lookup("sess-new"),
+        ContextLookup::Unknown,
+        "the complete generation is authoritative again"
+    );
+}
+
+#[test]
+fn a_repo_failure_outside_the_staged_set_leaves_the_generation_alone() {
+    let registry = SessionAccessRegistry::new(true);
+    registry.begin_generation([(1, repo("site"))].into_iter().collect());
+    // A webhook-driven repository that is not part of this generation failing says
+    // nothing about the generation's completability.
+    registry.record_repo_failure(1, &repo("other"));
+    assert_eq!(registry.snapshot().pending_repositories, 1);
+    registry.replace_repo(1, &repo("site"), vec![entry("sess-site", "site", 42)]);
+    assert!(registry.is_ready(), "the generation still published");
+}
+
+#[test]
+fn degrading_a_refresh_keeps_a_ready_projection_ready_and_fresh() {
+    let registry = SessionAccessRegistry::new(false);
+    registry.replace_repo(
+        1,
+        &repo("site"),
+        vec![entry("sess-old", "site", 1), entry("sess-keep", "site", 2)],
+    );
+    registry.begin_generation([(1, repo("site")), (1, repo("web"))].into_iter().collect());
+    // `site` reports a set in which `sess-old` retired; `web` then fails forever.
+    registry.replace_repo(1, &repo("site"), vec![entry("sess-keep", "site", 2)]);
+    registry.record_repo_failure(1, &repo("web"));
+
+    assert!(
+        registry.is_ready(),
+        "a failed refresh must never flap a healthy deployment into 503"
+    );
+    assert!(matches!(
+        registry.lookup("sess-keep"),
+        ContextLookup::Found(_)
+    ));
+    assert_eq!(
+        registry.lookup("sess-old"),
+        ContextLookup::Unknown,
+        "the folded per-repository set is a replacement, so a retired grant still dies"
+    );
+}
+
+#[test]
+fn a_repo_reporting_an_empty_set_still_retires_its_grants_when_degraded() {
+    // "Reported nothing" is the opposite instruction to "said nothing": the folded
+    // generation must drop the repository's live entries even though it
+    // contributed no context of its own.
+    let registry = SessionAccessRegistry::new(false);
+    registry.replace_repo(1, &repo("site"), vec![entry("sess-gone", "site", 1)]);
+    registry.begin_generation([(1, repo("site")), (1, repo("web"))].into_iter().collect());
+    registry.replace_repo(1, &repo("site"), vec![]);
+    registry.record_repo_failure(1, &repo("web"));
+    assert_eq!(registry.lookup("sess-gone"), ContextLookup::Unknown);
+}
+
+#[test]
+fn a_superseding_generation_folds_the_one_that_never_completed() {
+    // The backstop for a repository that vanished from the queue WITHOUT failing
+    // (a dropped enqueue): no error path reports it, so the next full resync's
+    // `begin_generation` is what unfreezes the live map.
+    let registry = SessionAccessRegistry::new(true);
+    registry.begin_generation([(1, repo("site")), (1, repo("web"))].into_iter().collect());
+    registry.replace_repo(1, &repo("site"), vec![entry("sess-site", "site", 42)]);
+    assert!(registry.get("sess-site").is_none(), "still staged");
+
+    registry.begin_generation([(1, repo("site")), (1, repo("web"))].into_iter().collect());
+    assert!(
+        registry.get("sess-site").is_some(),
+        "the abandoned generation's work survives in the live map"
+    );
+}
+
+#[test]
 fn a_successful_repo_sweep_removes_that_repos_retired_sessions_only() {
     let registry = SessionAccessRegistry::new(false);
     registry.replace_repo(

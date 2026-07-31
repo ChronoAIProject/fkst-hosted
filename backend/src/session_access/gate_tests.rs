@@ -54,7 +54,7 @@ fn the_creator_is_authorized_in_accessible_scope() {
         "sess-alice",
     )
     .expect("the creator sees their own session");
-    assert!(decision.allowed);
+    assert!(decision.allowed());
 }
 
 #[test]
@@ -133,7 +133,7 @@ fn the_global_scope_is_the_explicit_administrator_bypass() {
         "sess-alice",
     )
     .expect("scope=all is the explicit bypass");
-    assert!(all.allowed);
+    assert!(all.allowed());
 }
 
 #[test]
@@ -149,5 +149,5 @@ fn a_legacy_log_admin_reaches_the_session_in_accessible_scope() {
         "sess-alice",
     )
     .expect("FKST_LOG_ADMINS keeps its explicit cross-session grant");
-    assert!(decision.allowed);
+    assert!(decision.allowed());
 }

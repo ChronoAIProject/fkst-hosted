@@ -53,10 +53,7 @@ pub fn authorize_session_visibility(
 
     let mut request = SessionAccessRequest::new(
         SessionCapability::OperationsVisibility,
-        VerifiedCaller {
-            id: viewer.id(),
-            login: viewer.login(),
-        },
+        VerifiedCaller::from_verified_user(viewer.user()),
         context.facts(),
         PolicyEnvironment {
             access,
@@ -69,7 +66,7 @@ pub fn authorize_session_visibility(
     }
 
     let decision = decide(&request);
-    if decision.allowed {
+    if decision.allowed() {
         Ok(decision)
     } else {
         // Same status and text as an unknown id: an exact probe must not become
