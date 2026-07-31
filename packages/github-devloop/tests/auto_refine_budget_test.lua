@@ -47,17 +47,19 @@ return {
     t.eq(rounds.auto_refine_budget_remaining(spent, pid, 2), false)
   end,
 
-  test_refinement_is_off_unless_the_session_asks_for_it = function()
-    -- The default is what a session gets when its trigger says nothing, and it
-    -- must be OFF: consensus blocks and a human resolves it, exactly as before
-    -- self-refinement existed. Turning it on is the session owner's decision.
+  test_refinement_is_on_by_default_and_a_session_can_switch_it_off = function()
+    -- The default is what a session gets when its trigger says nothing. It is ON,
+    -- so an unattended deployment keeps amending rather than waiting for a human.
     local rounds = require("devloop.convergence.rounds")
     local pid = "github-devloop/issue/acme/site/42"
 
-    t.eq(rounds.DEFAULT_MAX_AUTO_REFINEMENTS, 0)
+    t.eq(rounds.DEFAULT_MAX_AUTO_REFINEMENTS, 100)
+    t.eq(rounds.auto_refine_budget_remaining({}, pid, rounds.DEFAULT_MAX_AUTO_REFINEMENTS), true)
+    -- An explicit 0 is how a session asks for the stop-for-a-human behaviour.
     t.eq(rounds.auto_refine_budget_remaining({}, pid, 0), false)
-    -- An unresolvable budget is read as the default, never as "unlimited".
-    t.eq(rounds.auto_refine_budget_remaining({}, pid, nil), false)
+    -- An unresolvable budget still reads as the default rather than "unlimited",
+    -- so a bad value can never remove the bound entirely.
+    t.eq(rounds.auto_refine_budget_remaining({}, pid, nil), true)
   end,
 
   test_a_configured_budget_is_bounded_and_typo_tolerant = function()
@@ -67,7 +69,8 @@ return {
     -- A budget only bounds if it is itself bounded.
     t.eq(rounds.auto_refine_budget_remaining({ marker(pid, 1) }, pid, 1), false)
     t.eq(rounds.auto_refine_budget_remaining({ marker(pid, 1) }, pid, 5), true)
-    t.is_true(rounds.MAX_AUTO_REFINEMENTS_CEILING > 0)
+    -- The ceiling matches the default so a session can request the full budget.
+    t.eq(rounds.MAX_AUTO_REFINEMENTS_CEILING, rounds.DEFAULT_MAX_AUTO_REFINEMENTS)
   end,
 
   test_another_proposals_refinements_do_not_spend_this_budget = function()
