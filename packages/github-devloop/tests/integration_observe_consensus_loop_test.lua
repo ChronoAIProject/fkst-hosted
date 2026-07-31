@@ -860,21 +860,18 @@ return {
 
     local result = run_reconcile(event, opts("reconcile-drop"))
     t.eq(result.exit_code, 0)
-    -- 2 effects: the reconcile comment and the label write. Self-refinement is
-    -- OPT-IN and this fixture does not enable it, so a refinable terminal cause
-    -- still ends here and waits for a human -- the behaviour a session gets
-    -- unless its trigger asks for something else. The opt-in path (a third raise
-    -- onto the refine queue) is covered by the budget and refine unit tests.
-    t.eq(#result.raises, 2)
+    -- 3 effects: the reconcile comment, the label write, and the refine request.
+    -- Refinement runs by default, so a refinable terminal cause re-enters instead
+    -- of ending here.
+    t.eq(#result.raises, 3)
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
     local version = conv_reconcile.reconcile_terminal_state_version(default_marker_version, event.round)
-    t.is_true(comment.body:find("github-devloop reconcile action: drop", 1, true) ~= nil)
+    t.is_true(comment.body:find("github-devloop reconcile action: re-design", 1, true) ~= nil)
     t.is_true(comment.body:find("no-semantic-progress-after-3-rounds", 1, true) ~= nil)
-    -- With refinement off the reason must not promise a lap that will not happen.
-    t.eq(comment.body:find("auto-refinement", 1, true), nil)
+    t.is_true(comment.body:find("auto-refinement 1/100 re-entering intake", 1, true) ~= nil)
     t.is_true(comment.body:find(core.state_marker(event.proposal_id, "blocked", version), 1, true) ~= nil)
-    t.is_true(comment.body:find(conv_reconcile.reconcile_marker(event.proposal_id, event.base_version, event.round, "drop", event.terminal_cause), 1, true) ~= nil)
+    t.is_true(comment.body:find(conv_reconcile.reconcile_marker(event.proposal_id, event.base_version, event.round, "re-design", event.terminal_cause), 1, true) ~= nil)
 
     t.eq(label.add_labels[1], "fkst-dev:blocked")
     t.eq(label.remove_labels[1], "fkst-dev:thinking")
