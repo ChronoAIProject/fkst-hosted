@@ -305,3 +305,49 @@ describe('TabHealth against the live control plane payload', () => {
     );
   });
 });
+
+/// Layout invariants that were reported as real usability faults: the two panes were
+/// different heights, the right pane's overflow escaped to the whole tab, and the rail
+/// truncated the very timestamps it is navigated by.
+describe('TabHealth layout', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('fkst-gh-access', 'ghu_x');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(report()))
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('gives each pane its own scroll container so the tab itself does not scroll', () => {
+    const { container } = renderTab(loaded(listing()));
+
+    const rail = screen.getByRole('list', { name: 'Health report history' });
+    expect(rail.className).toContain('overflow-y-auto');
+
+    const detail = screen.getByRole('region', { name: 'Selected health report' });
+    expect(detail.className).toContain('overflow-y-auto');
+
+    // Both panes are children of ONE grid, which is what makes them equal height.
+    const grid = container.querySelector('.grid');
+    expect(grid).not.toBeNull();
+    expect(grid!.className).toMatch(/md:h-\[/);
+    expect(grid!.contains(rail)).toBe(true);
+    expect(grid!.contains(detail)).toBe(true);
+  });
+
+  it('never truncates a rail timestamp', () => {
+    renderTab(loaded(listing()));
+    const entries = within(
+      screen.getByRole('list', { name: 'Health report history' })
+    ).getAllByRole('button');
+
+    for (const entry of entries) {
+      // The stamp is what distinguishes two entries; clipping it defeats the rail.
+      expect(entry.querySelector('.truncate')).toBeNull();
+      // ...and the exact value stays reachable on hover.
+      expect(entry).toHaveAttribute('title');
+      expect(entry.getAttribute('title')!.length).toBeGreaterThan(0);
+    }
+  });
+});

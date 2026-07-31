@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useContent, useLang } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
 import { cn } from '@/lib/utils';
-import { formatIsoSgt } from '@/lib/format';
+import { formatAbsolute, formatTimeShort } from '@/lib/format';
 import { getHealthReport, type HealthReport, type SessionHealth } from '@/lib/api/health';
 import { Chip } from '@/components/ui/chip';
 import { MarkdownPreview } from '@/components/ui/markdown-preview';
@@ -152,39 +152,43 @@ export function TabHealth({
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-[12.5rem_minmax(0,1fr)] items-start">
+      {/* ONE shared height for both panes, so they are the same size and each
+          scrolls its OWN content. Without it the columns size to their own content
+          (unequal), and the right pane's overflow escapes to the tab panel — so the
+          reader scrolls the whole tab to read one report, losing the rail. Matches
+          the viewport-relative sizing the log viewer already uses. */}
+      <div className="grid gap-4 md:grid-cols-[11.5rem_minmax(0,1fr)] md:h-[52vh] md:min-h-[20rem]">
         {/* ---- master: one entry per report, newest first, keyed by time ---- */}
-        <nav className="flex flex-col gap-1.5 min-w-0">
+        <nav className="flex flex-col gap-1.5 min-w-0 min-h-0">
           <SectionLabel>{t.healthHistory}</SectionLabel>
           <ul
             aria-label={t.healthHistoryAria}
-            className="flex flex-col gap-1 max-h-[24rem] overflow-y-auto pr-0.5"
+            className="flex flex-col gap-1 min-h-0 flex-1 overflow-y-auto pr-1 max-h-[14rem] md:max-h-none"
           >
             {reports.map((entry) => {
-              const when = formatIsoSgt(entry.generated_at, lang);
               const active = entry.id === activeId;
               return (
                 <li key={entry.id}>
+                  {/* Stacked, not side by side: a stamp and a chip on one 11.5rem row
+                      forces one of them to truncate, and the truncated part of a
+                      timestamp is exactly what tells two entries apart. */}
                   <button
                     type="button"
                     aria-current={active}
+                    title={formatAbsolute(entry.generated_at, lang)}
                     onClick={() => setSelected(entry.id)}
                     className={cn(
                       'w-full text-left rounded-control border px-2.5 py-1.5',
-                      'flex items-center justify-between gap-2 min-w-0',
-                      active
-                        ? 'border-line-2 bg-raise-2'
-                        : 'border-line hover:bg-raise-1'
+                      'flex flex-col items-start gap-1 min-w-0',
+                      active ? 'border-line-2 bg-raise-2' : 'border-line hover:bg-raise-1'
                     )}
                   >
-                    <span className="text-[11px] font-mono text-dim truncate">
-                      {when ?? entry.generated_at}
+                    <span className="text-[11px] font-mono text-dim">
+                      {formatTimeShort(entry.generated_at, lang)}
                     </span>
-                    <span className="flex-none">
-                      <Chip tone={HEALTH_TONE[entry.status] ?? 'neutral'}>
-                        {t.healthStatus[entry.status] ?? entry.status_raw}
-                      </Chip>
-                    </span>
+                    <Chip tone={HEALTH_TONE[entry.status] ?? 'neutral'}>
+                      {t.healthStatus[entry.status] ?? entry.status_raw}
+                    </Chip>
                   </button>
                 </li>
               );
@@ -193,14 +197,20 @@ export function TabHealth({
         </nav>
 
         {/* ---- detail: everything about the selected report ---- */}
-        <section aria-label={t.healthDetailAria} className="flex flex-col gap-3.5 min-w-0">
+        <section
+          aria-label={t.healthDetailAria}
+          className="flex flex-col gap-3.5 min-w-0 min-h-0 overflow-y-auto pr-1"
+        >
           <StatusCard label={t.healthCurrent}>
             <div className="flex items-center gap-2 flex-wrap">
               <Chip tone={HEALTH_TONE[activeSummary.status] ?? 'neutral'}>
                 {t.healthStatus[activeSummary.status] ?? activeSummary.status_raw}
               </Chip>
-              <span className="text-[11.5px] font-mono text-ghost">
-                {formatIsoSgt(activeSummary.generated_at, lang) ?? activeSummary.generated_at}
+              <span
+                className="text-[11.5px] font-mono text-ghost"
+                title={formatAbsolute(activeSummary.generated_at, lang)}
+              >
+                {formatTimeShort(activeSummary.generated_at, lang)}
               </span>
             </div>
             <p className="text-[13px] text-fg leading-[1.55] break-words">
