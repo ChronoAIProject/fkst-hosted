@@ -24,18 +24,25 @@
 //!
 //! ## Correlation
 //!
-//! The same verified seam also publishes the two correlation handles a delivery
+//! The same verified seam also publishes the correlation handles a delivery
 //! carries (epic `AUD-05`): GitHub's `X-GitHub-Delivery` id — the value an
 //! operator types into the App's *Recent Deliveries* page to find the exact
-//! delivery a record describes — and the installation the delivery belongs to.
-//! The delivery id comes from a header rather than the signed body, so it is
+//! delivery a record describes — the installation the delivery belongs to, and,
+//! for the event shapes that name them, the repository and the issue. The
+//! delivery id comes from a header rather than the signed body, so it is
 //! *accepted*, never trusted: only after the HMAC verified, and only when it is
 //! short and drawn from the same safe character set as an inbound request id.
+//!
+//! The parsed values are also RETURNED, because the safe-argument record for the
+//! delivery cannot be written until the dispatch below decided how it was
+//! handled. Returning them keeps the body parsed exactly once, in the one place
+//! that is allowed to trust it.
 
 use axum::http::{Extensions, HeaderMap};
 
 use serde::Deserialize;
 
+use crate::audit::arguments::bounds::safe_repo_full_name;
 use crate::audit::request::{id::is_acceptable, with_context};
 use crate::audit::validate::limits::WEBHOOK_DELIVERY_ID;
 use crate::audit::{identity::record_identity, AuditIdentity};
@@ -43,13 +50,51 @@ use crate::audit::{identity::record_identity, AuditIdentity};
 /// Header carrying GitHub's per-delivery UUID.
 const DELIVERY_HEADER: &str = "x-github-delivery";
 
-/// The shape shared by every App delivery. `serde` ignores everything else.
-#[derive(Debug, Deserialize)]
+/// The shape shared by every App delivery. `serde` ignores everything else —
+/// notably the issue title/body and the repository lists, which are never read.
+#[derive(Debug, Default, Deserialize)]
 struct SenderEnvelope {
     #[serde(default)]
     sender: Option<SenderIdentity>,
     #[serde(default)]
     installation: Option<InstallationRef>,
+    #[serde(default)]
+    action: Option<String>,
+    #[serde(default)]
+    repository: Option<RepositoryRef>,
+    #[serde(default)]
+    issue: Option<IssueRef>,
+}
+
+/// The delivery's repository, when the event shape names one.
+#[derive(Debug, Deserialize)]
+struct RepositoryRef {
+    owner: RepositoryOwner,
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RepositoryOwner {
+    login: String,
+}
+
+/// The delivery's issue NUMBER. Its title and body are deliberately not fields
+/// here: a type that cannot hold them cannot leak them.
+#[derive(Debug, Deserialize)]
+struct IssueRef {
+    number: i64,
+}
+
+/// What a verified delivery said about itself, for the safe-argument record the
+/// handler writes once dispatch has decided how it was handled.
+#[derive(Debug, Default)]
+pub(super) struct VerifiedDelivery {
+    pub action: Option<String>,
+    pub installation_id: Option<i64>,
+    pub repo_owner: Option<String>,
+    pub repo_name: Option<String>,
+    pub issue_number: Option<i64>,
+    pub delivery_id: Option<String>,
 }
 
 /// The delivery's sender. `id` is optional purely defensively — GitHub sends it,
@@ -75,11 +120,12 @@ struct InstallationRef {
 /// that does not parse yields an anonymous webhook sender rather than an error:
 /// the delivery was authentic, it just did not name anyone this deployment can
 /// attribute.
-pub(super) fn record_verified_delivery(extensions: &Extensions, headers: &HeaderMap, body: &[u8]) {
-    let envelope = serde_json::from_slice::<SenderEnvelope>(body).unwrap_or(SenderEnvelope {
-        sender: None,
-        installation: None,
-    });
+pub(super) fn record_verified_delivery(
+    extensions: &Extensions,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> VerifiedDelivery {
+    let envelope = serde_json::from_slice::<SenderEnvelope>(body).unwrap_or_default();
     let (sender_id, sender_login) = match envelope.sender {
         Some(sender) => (
             sender.id,
@@ -89,6 +135,11 @@ pub(super) fn record_verified_delivery(extensions: &Extensions, headers: &Header
     };
     let installation_id = envelope.installation.map(|installation| installation.id);
     let delivery_id = accepted_delivery_id(headers);
+    let (repo_owner, repo_name) = match envelope.repository {
+        Some(repository) => (Some(repository.owner.login), Some(repository.name)),
+        None => (None, None),
+    };
+    let issue_number = envelope.issue.map(|issue| issue.number);
     tracing::debug!(
         sender_id,
         installation_id,
@@ -99,14 +150,35 @@ pub(super) fn record_verified_delivery(extensions: &Extensions, headers: &Header
         extensions,
         AuditIdentity::webhook_sender(sender_id, sender_login, installation_id),
     );
+    let repo_full_name = repo_owner
+        .as_deref()
+        .zip(repo_name.as_deref())
+        .and_then(|(owner, name)| safe_repo_full_name(owner, name));
     with_context(extensions, |context| {
-        if let Some(delivery_id) = delivery_id {
-            context.record_webhook_delivery_id(delivery_id);
+        if let Some(delivery_id) = &delivery_id {
+            context.record_webhook_delivery_id(delivery_id.clone());
         }
         if let Some(installation_id) = installation_id {
             context.record_installation_id(installation_id);
         }
+        // The repository is recorded only in the validated `owner/name` form the
+        // correlation contract requires; the issue number is a plain integer, so
+        // it needs no narrowing.
+        if let Some(repo_full_name) = repo_full_name {
+            context.record_repo_full_name(repo_full_name);
+        }
+        if let Some(issue_number) = issue_number {
+            context.record_trigger_issue(issue_number);
+        }
     });
+    VerifiedDelivery {
+        action: envelope.action,
+        installation_id,
+        repo_owner,
+        repo_name,
+        issue_number,
+        delivery_id,
+    }
 }
 
 /// GitHub's `X-GitHub-Delivery` value, when it is safe to record.

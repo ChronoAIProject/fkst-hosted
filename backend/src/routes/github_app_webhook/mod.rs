@@ -43,6 +43,11 @@ use secrecy::ExposeSecret;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use crate::audit::arguments::record;
+use crate::audit::arguments::record_safe;
+use crate::audit::arguments::webhook::{
+    SafeGithubAppWebhook, VerifiedDeliveryInput, WebhookHandling,
+};
 use crate::audit::request::{codes, with_error_code, with_rejection};
 use crate::state::AppState;
 
@@ -107,6 +112,9 @@ async fn webhook(
     // only mounts the route when it is set, so this is a defensive 503.
     let Some(secret) = &state.github_app_webhook_secret else {
         tracing::warn!("github webhook received but no webhook secret configured");
+        // Nothing about this delivery has been verified, so it records exactly
+        // what an unverified delivery may say about itself.
+        record_safe(&extensions, &SafeGithubAppWebhook::rejected());
         return with_error_code(
             StatusCode::SERVICE_UNAVAILABLE.into_response(),
             codes::WEBHOOK_NOT_CONFIGURED,
@@ -117,6 +125,10 @@ async fn webhook(
     if !verify_signature(secret.expose_secret().as_bytes(), &headers, &body) {
         // Do not distinguish missing vs mismatched: both are 401, no detail.
         tracing::warn!("github webhook signature verification failed");
+        // The ONLY property a rejected delivery contributes. Its claimed sender,
+        // installation, repository, and issue are attacker-controlled until the
+        // HMAC verifies, so none of them is recorded — nor is the signature.
+        record_safe(&extensions, &SafeGithubAppWebhook::rejected());
         // A signature failure is an identity rejection, so the audit record says
         // `rejected` — never `client_error` — and never names the sender the
         // unverified body claims.
@@ -130,7 +142,7 @@ async fn webhook(
     // `sender`/`installation` fields may be trusted as identity, and the
     // delivery's own correlation handles may be recorded. A rejected delivery
     // never reaches this line, so a forged sender is never recorded.
-    sender::record_verified_delivery(&extensions, &headers, &body);
+    let delivery = sender::record_verified_delivery(&extensions, &headers, &body);
 
     // STEP 4: parse the event type, then dispatch on the verified body.
     let event = headers
@@ -140,6 +152,26 @@ async fn webhook(
         .to_string();
 
     let result = dispatch_event(&state, event.as_str(), &body).await;
+
+    // Recorded after dispatch because `handling` is part of the safe argument
+    // set, and only dispatch knows it. Everything else comes from the verified
+    // body; the issue title/body and the repository lists never do.
+    record(
+        &extensions,
+        &VerifiedDeliveryInput {
+            event: event.as_str(),
+            action: delivery.action.as_deref(),
+            installation_id: delivery.installation_id,
+            repo_owner: delivery.repo_owner.as_deref(),
+            repo_name: delivery.repo_name.as_deref(),
+            issue_number: delivery.issue_number,
+            delivery_id: delivery.delivery_id.as_deref(),
+            handling: match &result {
+                Ok(handled) => handled.audit_handling(),
+                Err(_) => WebhookHandling::ParseFailed,
+            },
+        },
+    );
 
     match result {
         Ok(handled) => {
@@ -182,6 +214,19 @@ impl Handled {
             Handled::CacheBusted => "cache_busted",
             Handled::Ignored => "ignored",
             Handled::Reconciled => "reconciled",
+        }
+    }
+
+    /// The audit contract's closed `handling` value for this outcome.
+    ///
+    /// Mapped rather than reused so the log string and the analytics property
+    /// can evolve independently — a log line is read by a human, a property by a
+    /// dashboard that must never see an unbounded value.
+    fn audit_handling(&self) -> WebhookHandling {
+        match self {
+            Handled::CacheBusted => WebhookHandling::CacheBusted,
+            Handled::Ignored => WebhookHandling::Ignored,
+            Handled::Reconciled => WebhookHandling::Reconciled,
         }
     }
 }

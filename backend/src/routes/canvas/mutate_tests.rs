@@ -2,7 +2,7 @@
 //! with the USER token, run the work-label-collision pre-flight, and map GitHub's
 //! refusals onto the error envelope. (Stop-session lives in `mutate_stop_tests`.)
 
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use wiremock::matchers::{body_partial_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -120,10 +120,11 @@ async fn create_session_opens_the_trigger_issue_as_the_user() {
     state.config.reconcile.work_label_namespace = Some("chronoai-fkst-cloud".to_string());
     let (status, Json(created)) = create_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
-        Json(create_request()),
+        crate::audit::arguments::AuditedJson(create_request()),
     )
     .await
     .expect("201");
@@ -139,10 +140,11 @@ async fn create_session_rejects_an_invalid_spec_before_any_github_write() {
     let state = test_state(&server.uri(), None);
     let err = create_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
-        Json(CreateSessionRequest {
+        crate::audit::arguments::AuditedJson(CreateSessionRequest {
             packages: vec!["broken".to_string()],
             ..create_request()
         }),
@@ -176,10 +178,11 @@ async fn create_session_maps_a_github_403_to_forbidden() {
     let state = state_with_creator_role(&server, "acme", "site", 200, Some("maintain")).await;
     let err = create_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
-        Json(create_request()),
+        crate::audit::arguments::AuditedJson(create_request()),
     )
     .await
     .expect_err("403 maps");
@@ -207,10 +210,11 @@ async fn create_session_maps_a_github_404_to_not_found() {
     let state = state_with_creator_role(&server, "acme", "gone", 200, Some("maintain")).await;
     let err = create_session(
         State(state),
-        Path(("acme".to_string(), "gone".to_string())),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "gone".to_string())),
         viewer_user(),
         auth_headers(),
-        Json(create_request()),
+        crate::audit::arguments::AuditedJson(create_request()),
     )
     .await
     .expect_err("404 maps");
@@ -233,10 +237,11 @@ async fn create_session_rejects_a_colliding_work_label_before_creating() {
     let state = state_with_creator_role(&server, "acme", "site", 200, Some("maintain")).await;
     let err = create_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
-        Json(create_request()),
+        crate::audit::arguments::AuditedJson(create_request()),
     )
     .await
     .expect_err("a colliding explicit work label is a 409");
@@ -268,10 +273,11 @@ async fn create_session_allows_a_distinct_work_label() {
     let state = state_with_creator_role(&server, "acme", "site", 200, Some("maintain")).await;
     let (status, Json(created)) = create_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
-        Json(create_request()),
+        crate::audit::arguments::AuditedJson(create_request()),
     )
     .await
     .expect("201");
@@ -297,10 +303,11 @@ async fn create_session_allows_when_no_existing_sessions() {
     let state = state_with_creator_role(&server, "acme", "site", 200, Some("admin")).await;
     let (status, Json(created)) = create_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
-        Json(create_request()),
+        crate::audit::arguments::AuditedJson(create_request()),
     )
     .await
     .expect("201");
@@ -332,10 +339,11 @@ async fn create_session_from_a_manifest_with_no_work_label_succeeds() {
     let state = state_with_creator_role(&server, "acme", "site", 200, Some("maintain")).await;
     let (status, Json(created)) = create_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
-        Json(CreateSessionRequest {
+        crate::audit::arguments::AuditedJson(CreateSessionRequest {
             packages: Vec::new(),
             manifests: vec!["acme/manifests@main:bundles/site".to_string()],
             work_label: None,
@@ -368,10 +376,11 @@ async fn create_session_without_explicit_work_label_skips_the_preflight() {
     let state = state_with_creator_role(&server, "acme", "site", 200, Some("maintain")).await;
     let (status, Json(created)) = create_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
-        Json(CreateSessionRequest {
+        crate::audit::arguments::AuditedJson(CreateSessionRequest {
             work_label: None,
             ..create_request()
         }),
@@ -395,10 +404,11 @@ async fn create_session_rejects_a_write_only_creator() {
     let state = state_with_creator_role(&server, "acme", "site", 200, Some("write")).await;
     let err = create_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
-        Json(create_request()),
+        crate::audit::arguments::AuditedJson(create_request()),
     )
     .await
     .expect_err("write is below the creator threshold");
@@ -416,10 +426,11 @@ async fn create_session_fails_closed_when_role_lookup_is_unavailable() {
     let state = state_with_creator_role(&server, "acme", "site", 500, None).await;
     let err = create_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
-        Json(create_request()),
+        crate::audit::arguments::AuditedJson(create_request()),
     )
     .await
     .expect_err("role lookup failure must be retryable");
@@ -432,10 +443,11 @@ async fn create_session_requires_the_github_app_for_a_non_admin_creator() {
     let state = test_state(&server.uri(), None);
     let err = create_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
-        Json(create_request()),
+        crate::audit::arguments::AuditedJson(create_request()),
     )
     .await
     .expect_err("missing App cannot establish the repo role");
@@ -460,10 +472,11 @@ async fn create_session_global_admin_short_circuits_the_repo_role_lookup() {
 
     let (status, _) = create_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
-        Json(create_request()),
+        crate::audit::arguments::AuditedJson(create_request()),
     )
     .await
     .expect("global admin does not require an App role read");
@@ -493,10 +506,11 @@ async fn create_session_allows_another_creators_overlapping_label() {
 
     let (status, Json(created)) = create_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
-        Json(create_request()),
+        crate::audit::arguments::AuditedJson(create_request()),
     )
     .await
     .expect("collision keys include creator");
@@ -510,10 +524,11 @@ async fn create_session_rejects_an_invalid_branch_with_422_before_github() {
     let state = test_state(&server.uri(), None);
     let err = create_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
-        Json(CreateSessionRequest {
+        crate::audit::arguments::AuditedJson(CreateSessionRequest {
             source_branch: Some("bad branch".to_string()),
             ..create_request()
         }),
@@ -562,10 +577,11 @@ async fn disposable_environment_is_handed_off_without_leaking_into_github() {
 
     let (status, Json(created)) = create_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
-        Json(request),
+        crate::audit::arguments::AuditedJson(request),
     )
     .await
     .expect("created");
@@ -624,10 +640,11 @@ async fn disposable_environment_requires_a_local_reconciler_before_github_write(
     let state = test_state(&server.uri(), None);
     let err = create_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
-        Json(request),
+        crate::audit::arguments::AuditedJson(request),
     )
     .await
     .expect_err("no private consumer");

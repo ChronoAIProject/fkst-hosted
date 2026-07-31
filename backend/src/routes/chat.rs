@@ -17,10 +17,9 @@
 //! `/openapi.json`, and the orchestrator emits them for this route to serialize.
 
 use axum::extract::{DefaultBodyLimit, State};
-use axum::http::HeaderMap;
+use axum::http::{Extensions, HeaderMap};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::IntoResponse;
-use axum::Json;
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -29,6 +28,8 @@ use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use crate::audit::arguments::chat::ChatTurnInput;
+use crate::audit::arguments::{record, AuditedJson};
 use crate::chat::actions::ActionProposal;
 use crate::chat::dispatch::SelfDispatch;
 use crate::chat::orchestrator;
@@ -232,10 +233,23 @@ fn validate(request: &ChatRequest) -> Result<(), AppError> {
 )]
 pub(super) async fn post_chat(
     State(state): State<AppState>,
+    extensions: Extensions,
     user: GithubUser,
     headers: HeaderMap,
-    Json(request): Json<ChatRequest>,
+    AuditedJson(request): AuditedJson<ChatRequest>,
 ) -> Result<impl IntoResponse, AppError> {
+    // The body is the visible transcript — the user's prompt plus every
+    // assistant answer the client is displaying — and the response is the
+    // model's reply. Neither is a valid audit property, so the record carries
+    // shape only: counts, sizes, and one closed header flag.
+    record(
+        &extensions,
+        &ChatTurnInput {
+            request: &request,
+            broader_visibility_requested: headers
+                .contains_key(crate::routes::canvas::BROADER_TOKEN_HEADER),
+        },
+    );
     // Unreachable in practice — the route is only mounted when the runtime exists —
     // but a 503 is the honest answer if that ever changes, rather than a panic.
     let runtime = state.chat.clone().ok_or_else(|| {

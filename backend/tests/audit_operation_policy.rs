@@ -2,14 +2,23 @@
 //! must carry exactly one EXPLICIT audit policy.
 //!
 //! This is the test that makes a new endpoint fail CI until someone decides
-//! whether it is audited. It reads the live document (with both conditionally
-//! mounted operations enabled) rather than a checked-in list, so it tracks the
-//! code the way the spec itself does.
+//! whether it is audited AND what its record may contain. It reads the live
+//! document (with both conditionally mounted operations enabled) rather than a
+//! checked-in list, so it tracks the code the way the spec itself does.
+//!
+//! The guard fires for five distinct mistakes:
+//!
+//! - an audited operation with no safe-argument DTO;
+//! - two DTOs mapped onto one operation (or one DTO onto two);
+//! - a DTO whose allowlist is not the documented one;
+//! - a route reaching for a generic/raw capture helper instead of the typed one;
+//! - drift in an operation id without the table following it.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fkst_control_plane::audit::request::policy::{
-    declared_operation_ids, policy_for, ExclusionReason, OperationPolicy,
+    arguments_policy_for, declared_operation_ids, policy_for, ArgumentsPolicy, ExclusionReason,
+    OperationPolicy, OPERATION_POLICIES, RESERVED_ARGUMENT_POLICIES,
 };
 use fkst_control_plane::config::Config;
 use fkst_control_plane::router::build_router;
@@ -218,4 +227,147 @@ async fn a_minimal_deployment_still_builds_its_catalog() {
         .await
         .expect("router responds");
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+/// The safe-argument half of the guard: an audited operation must have decided
+/// what its record may contain, not merely that it has one.
+#[tokio::test]
+async fn every_audited_operation_has_exactly_one_named_safe_argument_policy() {
+    let operations = live_operations().await;
+    let mut missing = Vec::new();
+    for (operation_id, route) in &operations {
+        if policy_for(operation_id) != Some(OperationPolicy::Audited) {
+            continue;
+        }
+        match arguments_policy_for(operation_id) {
+            Some(ArgumentsPolicy::Safe(_)) | Some(ArgumentsPolicy::None) => {}
+            _ => missing.push(format!("{operation_id} ({route})")),
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "these audited operations declare no safe-argument policy; give each an \
+         ArgumentsPolicy::Safe(..) naming its DTO, or ArgumentsPolicy::None when it \
+         genuinely takes no arguments: {missing:?}"
+    );
+}
+
+/// One DTO, one operation — in both directions. A shared DTO would make the
+/// recorded shape depend on which call site ran last, and a second policy on one
+/// operation would make the allowlist ambiguous.
+#[tokio::test]
+async fn no_dto_is_mapped_onto_more_than_one_operation() {
+    let mut owners: BTreeMap<&str, &str> = BTreeMap::new();
+    for operation in OPERATION_POLICIES.iter().chain(RESERVED_ARGUMENT_POLICIES) {
+        let Some(spec) = operation.arguments.spec() else {
+            continue;
+        };
+        if let Some(previous) = owners.insert(spec.dto, operation.operation_id) {
+            panic!(
+                "the DTO {} is mapped onto both {previous} and {}",
+                spec.dto, operation.operation_id
+            );
+        }
+    }
+    assert!(!owners.is_empty(), "the table declares no DTOs at all");
+}
+
+/// Every declared allowlist is non-empty, snake_case, and free of the property
+/// names that are forbidden everywhere on this surface.
+#[tokio::test]
+async fn no_declared_allowlist_names_a_forbidden_property() {
+    const FORBIDDEN: &[&str] = &[
+        "token",
+        "access_token",
+        "refresh_token",
+        "authorization",
+        "cookie",
+        "code",
+        "state",
+        "signature",
+        "body",
+        "title",
+        "description",
+        "message",
+        "path",
+        "query",
+        "url",
+        "content",
+        "cursor",
+    ];
+    for operation in OPERATION_POLICIES.iter().chain(RESERVED_ARGUMENT_POLICIES) {
+        let Some(spec) = operation.arguments.spec() else {
+            continue;
+        };
+        assert!(
+            !spec.fields.is_empty(),
+            "{} declares an empty allowlist",
+            operation.operation_id
+        );
+        for field in spec.fields {
+            assert!(
+                !FORBIDDEN.contains(field),
+                "{} declares the forbidden property {field}",
+                operation.operation_id
+            );
+            assert!(
+                field
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+                "{} declares the non-snake_case property {field}",
+                operation.operation_id
+            );
+        }
+    }
+}
+
+/// A route must not reach past the typed contract into the raw context API.
+///
+/// `AuditRequestContext::record_arguments` accepts an arbitrary property map, so
+/// a handler calling it directly could record anything at all — which is exactly
+/// the "generic/raw JSON capture helper" the argument contract exists to
+/// prevent. The check is a source scan because the alternative (making the
+/// method unreachable) would also block the `arguments` module that legitimately
+/// owns it.
+#[test]
+fn no_route_uses_a_raw_or_generic_argument_capture_helper() {
+    const FORBIDDEN: &[(&str, &str)] = &[
+        (
+            "record_arguments(",
+            "call crate::audit::arguments::record/record_safe with a typed DTO instead",
+        ),
+        (
+            "ArgumentsParseStatus",
+            "the parse status comes from the DTO or the audited extractor, never a route",
+        ),
+        (
+            "serde_json::to_value(&req",
+            "a request DTO is never serialized into an audit record",
+        ),
+    ];
+    let routes = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/routes");
+    let mut offenders = Vec::new();
+    let mut scanned = 0usize;
+    let mut stack = vec![routes];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).expect("routes directory is readable") {
+            let path = entry.expect("directory entry").path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("route source is readable");
+            scanned += 1;
+            for (needle, why) in FORBIDDEN {
+                if source.contains(needle) {
+                    offenders.push(format!("{}: {needle} — {why}", path.display()));
+                }
+            }
+        }
+    }
+    assert!(scanned > 10, "the route scan found almost nothing to read");
+    assert!(offenders.is_empty(), "{offenders:#?}");
 }

@@ -110,7 +110,7 @@ fn broader_success_url_carries_the_token_in_the_fragment() {
 #[tokio::test]
 async fn connect_redirects_to_github_with_repo_read_org_scope() {
     let state = broader_state("https://github.com");
-    let resp = github_broader(State(state)).await;
+    let resp = github_broader(State(state), axum::http::Extensions::new()).await;
     assert_eq!(resp.status(), StatusCode::FOUND);
     let loc = location(&resp);
     assert!(loc.starts_with("https://github.com/login/oauth/authorize?"));
@@ -129,7 +129,7 @@ async fn connect_redirects_to_github_with_repo_read_org_scope() {
 
 #[tokio::test]
 async fn connect_is_503_when_unconfigured() {
-    let resp = github_broader(State(unconfigured_state())).await;
+    let resp = github_broader(State(unconfigured_state()), axum::http::Extensions::new()).await;
     assert_eq!(
         resp.status(),
         StatusCode::SERVICE_UNAVAILABLE,

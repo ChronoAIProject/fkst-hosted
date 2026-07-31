@@ -58,6 +58,9 @@ use utoipa_axum::routes;
 
 pub(crate) use authorize::authorize;
 
+use crate::audit::arguments::logs::{LogDownloadMode, SafeDownloadSessionLogs};
+use crate::audit::arguments::record_safe;
+use crate::audit::request::with_context;
 use crate::error::{AppError, ErrorEnvelope};
 use crate::session_pod::log_stream::runs;
 use crate::state::AppState;
@@ -119,6 +122,18 @@ async fn download_session_logs(
     Query(query): Query<RunQuery>,
     headers: HeaderMap,
 ) -> Response {
+    let mode = match bearer_token(&headers) {
+        Some(_) => LogDownloadMode::Bearer,
+        None => LogDownloadMode::BrowserRedirect,
+    };
+    // Recorded before identity resolution and before any storage read, so a 401,
+    // a 403, and a 404 all describe the same request shape. The bundle bytes and
+    // the internal presigned URL are never arguments.
+    record_safe(
+        &extensions,
+        &SafeDownloadSessionLogs::new(&session_id, query.run.as_deref(), mode),
+    );
+    record_session_correlation(&extensions, &session_id);
     match bearer_token(&headers) {
         // API mode: a Bearer token is present — resolve identity + serve the bundle
         // for the requested run (absent → latest).
@@ -255,6 +270,18 @@ pub(super) async fn stream_download(
 }
 
 // ---- Small helpers ----------------------------------------------------------
+
+/// Publish a request's session id as the record's top-level correlation handle,
+/// once it is in the validated form the audit contract bounds.
+///
+/// An unvalidated path segment is deliberately dropped rather than recorded:
+/// `session_id` is a query key on the read side, and a forged one would attach a
+/// caller's request to a session they merely guessed at.
+pub(crate) fn record_session_correlation(extensions: &axum::http::Extensions, session_id: &str) {
+    if let Some(session_id) = crate::audit::arguments::bounds::safe_session_id(session_id) {
+        with_context(extensions, |context| context.record_session_id(session_id));
+    }
+}
 
 /// Extract a non-empty bearer token from the `Authorization` header (either casing of
 /// the scheme). `None` when the header is absent, non-bearer, or empty — that steers

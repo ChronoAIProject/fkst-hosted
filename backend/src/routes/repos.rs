@@ -11,13 +11,15 @@
 //! user-scoped GitHub writes.
 
 use axum::extract::{Path, State};
-use axum::http::HeaderMap;
+use axum::http::{Extensions, HeaderMap};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use crate::audit::arguments::repos::{CreateRepoInput, SafeUninstallAccount};
+use crate::audit::arguments::{record, record_safe, AuditedJson};
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
 use crate::routes::dashboard::{bearer_token, DashboardGithub};
@@ -84,9 +86,10 @@ pub struct CreateRepoRequest {
 )]
 async fn create_repo(
     State(state): State<AppState>,
+    extensions: Extensions,
     user: GithubUser,
     headers: HeaderMap,
-    Json(req): Json<CreateRepoRequest>,
+    AuditedJson(req): AuditedJson<CreateRepoRequest>,
 ) -> Result<(axum::http::StatusCode, Json<RepoStatus>), AppError> {
     let name = req.name.trim();
     let valid = !name.is_empty()
@@ -106,19 +109,28 @@ async fn create_repo(
         .map(str::trim)
         .filter(|o| !o.is_empty() && !o.eq_ignore_ascii_case(&user.login));
 
+    let description = req
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty());
+    // Recorded after the name validated and before the GitHub write. A
+    // description is free text a person typed, so only its presence and byte
+    // size are arguments; GitHub's response body never becomes one.
+    record(
+        &extensions,
+        &CreateRepoInput {
+            owner: org.unwrap_or(&user.login),
+            name,
+            private: req.private,
+            description,
+        },
+    );
+
     let token = bearer_token(&headers)?;
     let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
     let created = gh
-        .create_repo(
-            &token,
-            org,
-            name,
-            req.private,
-            req.description
-                .as_deref()
-                .map(str::trim)
-                .filter(|d| !d.is_empty()),
-        )
+        .create_repo(&token, org, name, req.private, description)
         .await?;
 
     Ok((
@@ -166,10 +178,12 @@ async fn find_installation(
 )]
 async fn uninstall_account(
     State(state): State<AppState>,
+    extensions: Extensions,
     _user: GithubUser,
     headers: HeaderMap,
     Path(owner): Path<String>,
 ) -> Result<axum::http::StatusCode, AppError> {
+    record_safe(&extensions, &SafeUninstallAccount::new(&owner));
     let token = bearer_token(&headers)?;
     let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
     let inst = find_installation(&gh, &token, &owner).await?;

@@ -36,6 +36,8 @@ use std::time::Duration;
 use utoipa::IntoParams;
 
 use super::{authorize, identity, oauth, stream_download};
+use crate::audit::arguments::auth::{OauthResult, SessionLogsCallbackInput};
+use crate::audit::arguments::record;
 use crate::error::AppError;
 use crate::log_config::LogConfig;
 use crate::state::AppState;
@@ -78,35 +80,80 @@ pub(super) async fn oauth_callback(
     extensions: Extensions,
     Query(query): Query<OAuthCallbackQuery>,
 ) -> Response {
+    let (response, session_id, result) = log_oauth_callback(&state, &extensions, query).await;
+    // `session_id` is `Some` only once the state's HMAC verified: a tampered
+    // state names no session, and extracting one from it would let anyone attach
+    // their failed callback to a session they never had access to.
+    record(
+        &extensions,
+        &SessionLogsCallbackInput {
+            verified_session_id: session_id.as_deref(),
+            result,
+        },
+    );
+    if let Some(session_id) = &session_id {
+        super::record_session_correlation(&extensions, session_id);
+    }
+    response
+}
+
+/// The callback's real body, returning the VERIFIED session id and the outcome
+/// alongside the response so the single recording site above cannot be missed on
+/// a new early return.
+async fn log_oauth_callback(
+    state: &AppState,
+    extensions: &Extensions,
+    query: OAuthCallbackQuery,
+) -> (Response, Option<String>, OauthResult) {
     let log = &state.config.log;
     // Browser login must be configured to have issued the redirect in the first place.
     let Some((client_id, secret)) = oauth_creds(log) else {
-        return html_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Browser login is not configured.",
+        return (
+            html_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Browser login is not configured.",
+            ),
+            None,
+            OauthResult::UpstreamError,
         );
     };
     let Some(base) = log.public_base_url.as_deref() else {
-        return html_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Browser login is not configured.",
+        return (
+            html_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Browser login is not configured.",
+            ),
+            None,
+            OauthResult::UpstreamError,
         );
     };
 
     // The user denied the authorization on GitHub's consent screen.
     if query.error.is_some() {
-        return html_error(StatusCode::FORBIDDEN, "GitHub authorization was denied.");
+        return (
+            html_error(StatusCode::FORBIDDEN, "GitHub authorization was denied."),
+            None,
+            OauthResult::Denied,
+        );
     }
     let (Some(code), Some(state_param)) = (
         query.code.filter(|c| !c.is_empty()),
         query.state.filter(|s| !s.is_empty()),
     ) else {
-        return html_error(StatusCode::BAD_REQUEST, "Missing OAuth code or state.");
+        return (
+            html_error(StatusCode::BAD_REQUEST, "Missing OAuth code or state."),
+            None,
+            OauthResult::Invalid,
+        );
     };
     // Verify the signed state (CSRF/tamper guard) and recover the session id.
     let Some(session_id) = oauth::verify_state(secret.expose_secret().as_bytes(), &state_param)
     else {
-        return html_error(StatusCode::BAD_REQUEST, "Invalid or tampered OAuth state.");
+        return (
+            html_error(StatusCode::BAD_REQUEST, "Invalid or tampered OAuth state."),
+            None,
+            OauthResult::Invalid,
+        );
     };
 
     let redirect_uri = callback_redirect_uri(base);
@@ -121,7 +168,13 @@ pub(super) async fn oauth_callback(
     .await
     {
         Ok(token) => token,
-        Err(err) => return browser_error(err),
+        Err(err) => {
+            return (
+                browser_error(err),
+                Some(session_id),
+                OauthResult::UpstreamError,
+            )
+        }
     };
 
     // The exchanged token is not an identity until `GET /user` names its owner: a
@@ -130,26 +183,30 @@ pub(super) async fn oauth_callback(
         match identity::resolve(&state.config.github_api_base_url, token.expose_secret()).await {
             Ok(user) => user,
             Err(_) => {
-                return html_error(
-                    StatusCode::UNAUTHORIZED,
-                    "Could not verify your GitHub identity.",
+                return (
+                    html_error(
+                        StatusCode::UNAUTHORIZED,
+                        "Could not verify your GitHub identity.",
+                    ),
+                    Some(session_id),
+                    OauthResult::UpstreamError,
                 )
             }
         };
     crate::audit::identity::record_identity(
-        &extensions,
+        extensions,
         crate::audit::AuditIdentity::github_oauth(user.id, user.login.clone()),
     );
 
     // Authorize, then stream the latest bundle; render every failure as HTML. The
     // browser path serves the latest bundle only (the run selector is not carried
     // through the OAuth round-trip).
-    if let Err(err) = authorize(&state, &session_id, &user) {
-        return browser_error(err);
+    if let Err(err) = authorize(state, &session_id, &user) {
+        return (browser_error(err), Some(session_id), OauthResult::Success);
     }
-    match stream_download(&state, &session_id, None).await {
-        Ok(response) => response,
-        Err(err) => browser_error(err),
+    match stream_download(state, &session_id, None).await {
+        Ok(response) => (response, Some(session_id), OauthResult::Success),
+        Err(err) => (browser_error(err), Some(session_id), OauthResult::Success),
     }
 }
 

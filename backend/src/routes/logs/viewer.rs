@@ -20,12 +20,15 @@
 
 use std::io::{Cursor, Read};
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
+use axum::http::Extensions;
 use axum::Json;
 use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+use crate::audit::arguments::logs::{SafeSessionLogManifest, SessionLogFileInput};
+use crate::audit::arguments::{record, record_safe, AuditedQuery};
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
 use crate::state::AppState;
@@ -108,10 +111,18 @@ pub struct LogFileQuery {
 )]
 pub(super) async fn log_manifest(
     State(state): State<AppState>,
+    extensions: Extensions,
     Path(session_id): Path<String>,
-    Query(query): Query<super::RunQuery>,
+    AuditedQuery(query): AuditedQuery<super::RunQuery>,
     user: GithubUser,
 ) -> Result<Json<LogManifest>, AppError> {
+    // The returned manifest lists every path in the bundle; none of it is an
+    // argument. Only which session and which run were asked for.
+    record_safe(
+        &extensions,
+        &SafeSessionLogManifest::new(&session_id, query.run.as_deref()),
+    );
+    super::record_session_correlation(&extensions, &session_id);
     super::authorize(&state, &session_id, &user)?;
     let bytes = super::fetch_bundle(&state, &session_id, query.run.as_deref()).await?;
 
@@ -154,10 +165,25 @@ pub(super) async fn log_manifest(
 )]
 pub(super) async fn log_file(
     State(state): State<AppState>,
+    extensions: Extensions,
     Path(session_id): Path<String>,
-    Query(query): Query<LogFileQuery>,
+    AuditedQuery(query): AuditedQuery<LogFileQuery>,
     user: GithubUser,
 ) -> Result<Json<LogFileContent>, AppError> {
+    // The requested PATH is caller-supplied text matched against the archive —
+    // an unmatched one is a probe string. It is reduced to the bundle's own
+    // bounded class before anything is recorded, and the file's CONTENT (the
+    // whole point of the response) is never an argument at all.
+    record(
+        &extensions,
+        &SessionLogFileInput {
+            session_id: &session_id,
+            run: query.run.as_deref(),
+            file_label: classify_bundle_path(&query.path),
+            tail_bytes: query.tail_bytes,
+        },
+    );
+    super::record_session_correlation(&extensions, &session_id);
     super::authorize(&state, &session_id, &user)?;
     let bytes = super::fetch_bundle(&state, &session_id, query.run.as_deref()).await?;
 

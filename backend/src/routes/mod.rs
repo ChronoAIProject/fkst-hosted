@@ -5,6 +5,9 @@ pub mod auth;
 // credential (`repo` + `read:org`) used only to enumerate the caller's repos/orgs.
 // Merged into the auth router; inert unless the broader OAuth pair is configured.
 pub mod auth_broader;
+// The pure signed-state / redirect-URI / token-shaping helpers both OAuth login
+// flows share. Split out so `auth.rs` stays within the source line budget.
+pub mod auth_oauth_state;
 // The canvas dashboard's live REST surface: whole-account overview + per-repo
 // session detail/create/stop, all computed from live GitHub reads (stateless).
 pub mod canvas;

@@ -173,7 +173,7 @@ async fn a_successful_refresh_is_attributed_to_a_verified_identity() {
     let response = github_refresh_token(
         State(login_state(&server.uri())),
         extensions,
-        Json(RefreshRequest {
+        crate::audit::arguments::AuditedJson(RefreshRequest {
             refresh_token: "ghr_old".to_string(),
         }),
     )
@@ -196,7 +196,7 @@ async fn a_refresh_whose_identity_check_fails_is_a_401() {
     let response = github_refresh_token(
         State(login_state(&server.uri())),
         Extensions::new(),
-        Json(RefreshRequest {
+        crate::audit::arguments::AuditedJson(RefreshRequest {
             refresh_token: "ghr_old".to_string(),
         }),
     )

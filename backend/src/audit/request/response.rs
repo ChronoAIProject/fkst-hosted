@@ -45,6 +45,16 @@ pub struct AuditRejection;
 pub mod codes {
     /// The route-scoped `TimeoutLayer` answered before the handler returned.
     pub const REQUEST_TIMEOUT: &str = "request_timeout";
+    /// An audited extractor rejected malformed path/query/body input. Matches
+    /// [`crate::error::AppError::Validation`]'s code so one client-visible
+    /// failure class reads the same however it was produced.
+    pub const INVALID_REQUEST: &str = "invalid_request";
+    /// A syntactically valid body that did not fit the operation's schema.
+    pub const UNPROCESSABLE: &str = "unprocessable";
+    /// The request body exceeded the route's `DefaultBodyLimit`.
+    pub const PAYLOAD_TOO_LARGE: &str = "payload_too_large";
+    /// The body was not the JSON media type the operation documents.
+    pub const UNSUPPORTED_MEDIA_TYPE: &str = "unsupported_media_type";
     /// This election-enabled replica is not the resync-complete leader.
     pub const LEADER_NOT_READY: &str = "leader_not_ready";
     /// No route matched the request path.

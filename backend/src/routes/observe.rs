@@ -18,13 +18,16 @@
 //! Secret hygiene: the snapshot carries no credentials; error envelopes carry
 //! fixed, generic messages (backend failure detail stays in the logs).
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
+use axum::http::Extensions;
 use axum::Json;
 use serde::Deserialize;
 use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use crate::audit::arguments::logs::SafeObserveSession;
+use crate::audit::arguments::{record_safe, AuditedQuery};
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
 use crate::session_backend::ObserveError;
@@ -65,10 +68,22 @@ pub struct ObserveQuery {
 )]
 async fn observe_session(
     State(state): State<AppState>,
+    extensions: Extensions,
     Path(session_id): Path<String>,
-    Query(query): Query<ObserveQuery>,
+    AuditedQuery(query): AuditedQuery<ObserveQuery>,
     user: GithubUser,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    // The CLAMPED limit is recorded, not the requested one: the record then
+    // describes what the handler executed rather than what an untrusted query
+    // asked for. The engine snapshot itself — queue ids, delivery ids, codex run
+    // records — is never an argument.
+    let limit = query
+        .limit
+        .unwrap_or(DEFAULT_LIMIT)
+        .clamp(MIN_LIMIT, MAX_LIMIT);
+    record_safe(&extensions, &SafeObserveSession::new(&session_id, limit));
+    crate::routes::logs::record_session_correlation(&extensions, &session_id);
+
     // Same deny-by-default gate as the log download (404 for an
     // unknown session, 403 for an unauthorized caller).
     crate::routes::logs::authorize(&state, &session_id, &user)?;
@@ -78,10 +93,6 @@ async fn observe_session(
             "session dispatch is disabled on this deployment".to_string(),
         ));
     };
-    let limit = query
-        .limit
-        .unwrap_or(DEFAULT_LIMIT)
-        .clamp(MIN_LIMIT, MAX_LIMIT);
 
     let raw = backend
         .engine_observe(&session_id, limit)

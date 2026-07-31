@@ -15,6 +15,20 @@
 //! redirects, authentication failures, the signature-verified webhook, and the
 //! operations surface's own polling calls — is audited. The UI may hide its own
 //! polling visually, but capture is never allowed to skip it (epic `AUD-01`).
+//!
+//! ## Why an [`AuditOperation`] object rather than a string table
+//!
+//! An operation's audit decision is TWO decisions: is it recorded, and what may
+//! its record contain. Keeping them apart invites the second to be forgotten —
+//! an audited operation with no argument policy still builds, still records, and
+//! quietly emits nothing. Pairing them in one struct makes the omission
+//! impossible to express: the catalog rejects an audited operation whose
+//! [`ArgumentsPolicy`] is [`ArgumentsPolicy::NotRecorded`], so a new endpoint
+//! fails the router build until BOTH decisions exist.
+
+use crate::audit::arguments::catalog as arguments;
+use crate::audit::arguments::SafeArgumentSpec;
+use crate::audit::event::ArgumentsParseStatus;
 
 /// Why an operation is kept out of the audit trail.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -61,6 +75,81 @@ impl OperationPolicy {
     }
 }
 
+/// What an operation's record may carry under `arguments`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ArgumentsPolicy {
+    /// The operation is excluded from the audit trail entirely, so the question
+    /// does not arise. Legal ONLY alongside [`OperationPolicy::Excluded`].
+    NotRecorded,
+    /// The operation takes no arguments at all. Its records say
+    /// `not_applicable` rather than pretending something was unavailable.
+    None,
+    /// Exactly one named safe DTO produces this operation's arguments.
+    Safe(SafeArgumentSpec),
+}
+
+impl ArgumentsPolicy {
+    /// The named DTO spec, when there is one.
+    pub fn spec(self) -> Option<SafeArgumentSpec> {
+        match self {
+            Self::Safe(spec) => Some(spec),
+            _ => None,
+        }
+    }
+
+    /// The status a record carries when nothing was ever recorded.
+    ///
+    /// An operation that HAS arguments but recorded none was rejected before its
+    /// safe parse could run (authentication, the leader gate, a timeout), which
+    /// is `unavailable`. One that has none by definition is `not_applicable`.
+    /// Deriving it here is what keeps every rejection site free of the question.
+    pub fn default_status(self) -> ArgumentsParseStatus {
+        match self {
+            Self::Safe(_) => ArgumentsParseStatus::Unavailable,
+            Self::None | Self::NotRecorded => ArgumentsParseStatus::NotApplicable,
+        }
+    }
+}
+
+/// One operation's complete audit decision.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AuditOperation {
+    pub operation_id: &'static str,
+    pub policy: OperationPolicy,
+    pub arguments: ArgumentsPolicy,
+}
+
+/// Declare an audited operation with its named safe-argument DTO.
+const fn audited(
+    operation_id: &'static str,
+    dto: &'static str,
+    fields: &'static [&'static str],
+) -> AuditOperation {
+    AuditOperation {
+        operation_id,
+        policy: OperationPolicy::Audited,
+        arguments: ArgumentsPolicy::Safe(SafeArgumentSpec::new(dto, fields)),
+    }
+}
+
+/// Declare an audited operation that takes no arguments at all.
+const fn audited_without_arguments(operation_id: &'static str) -> AuditOperation {
+    AuditOperation {
+        operation_id,
+        policy: OperationPolicy::Audited,
+        arguments: ArgumentsPolicy::None,
+    }
+}
+
+/// Declare an operation kept out of the trail, for a stated bounded reason.
+const fn excluded(operation_id: &'static str, reason: ExclusionReason) -> AuditOperation {
+    AuditOperation {
+        operation_id,
+        policy: OperationPolicy::Excluded(reason),
+        arguments: ArgumentsPolicy::NotRecorded,
+    }
+}
+
 /// The complete policy table, keyed by the `operation_id` declared on each
 /// `#[utoipa::path]`.
 ///
@@ -69,51 +158,163 @@ impl OperationPolicy {
 /// chat concierge configured) — so an entry may legitimately be absent from a
 /// given deployment's document. The reverse is what must never happen, and is
 /// what the catalog enforces: a documented operation with no entry here.
-pub const OPERATION_POLICIES: &[(&str, OperationPolicy)] = &[
+pub const OPERATION_POLICIES: &[AuditOperation] = &[
     // --- system surface: the only exclusions --------------------------------
-    ("health", OperationPolicy::Excluded(ExclusionReason::Probe)),
-    (
-        "readiness",
-        OperationPolicy::Excluded(ExclusionReason::Probe),
-    ),
-    (
-        "metrics",
-        OperationPolicy::Excluded(ExclusionReason::Scrape),
-    ),
+    excluded("health", ExclusionReason::Probe),
+    excluded("readiness", ExclusionReason::Probe),
+    excluded("metrics", ExclusionReason::Scrape),
     // --- inbound webhook ----------------------------------------------------
-    ("github_app_webhook", OperationPolicy::Audited),
+    audited(
+        "github_app_webhook",
+        "SafeGithubAppWebhook",
+        arguments::GITHUB_APP_WEBHOOK_FIELDS,
+    ),
     // --- chat concierge (conditionally mounted) -----------------------------
-    ("chat_turn", OperationPolicy::Audited),
+    audited("chat_turn", "SafeChatTurn", arguments::CHAT_TURN_FIELDS),
     // --- named environment profiles ----------------------------------------
-    ("list_user_environment_profiles", OperationPolicy::Audited),
-    ("put_user_environment_profile", OperationPolicy::Audited),
-    ("get_user_environment_profile", OperationPolicy::Audited),
-    ("delete_user_environment_profile", OperationPolicy::Audited),
+    audited_without_arguments("list_user_environment_profiles"),
+    audited(
+        "put_user_environment_profile",
+        "SafePutEnvironmentProfile",
+        arguments::PUT_USER_ENVIRONMENT_PROFILE_FIELDS,
+    ),
+    audited(
+        "get_user_environment_profile",
+        "SafeGetEnvironmentProfile",
+        arguments::GET_USER_ENVIRONMENT_PROFILE_FIELDS,
+    ),
+    audited(
+        "delete_user_environment_profile",
+        "SafeDeleteEnvironmentProfile",
+        arguments::DELETE_USER_ENVIRONMENT_PROFILE_FIELDS,
+    ),
     // --- session logs -------------------------------------------------------
-    ("download_session_logs", OperationPolicy::Audited),
-    ("session_logs_oauth_callback", OperationPolicy::Audited),
-    ("session_log_manifest", OperationPolicy::Audited),
-    ("session_log_file", OperationPolicy::Audited),
-    ("list_session_runs", OperationPolicy::Audited),
+    audited(
+        "download_session_logs",
+        "SafeDownloadSessionLogs",
+        arguments::DOWNLOAD_SESSION_LOGS_FIELDS,
+    ),
+    audited(
+        "session_logs_oauth_callback",
+        "SafeSessionLogsOauthCallback",
+        arguments::SESSION_LOGS_OAUTH_CALLBACK_FIELDS,
+    ),
+    audited(
+        "session_log_manifest",
+        "SafeSessionLogManifest",
+        arguments::SESSION_LOG_MANIFEST_FIELDS,
+    ),
+    audited(
+        "session_log_file",
+        "SafeSessionLogFile",
+        arguments::SESSION_LOG_FILE_FIELDS,
+    ),
+    audited(
+        "list_session_runs",
+        "SafeListSessionRuns",
+        arguments::LIST_SESSION_RUNS_FIELDS,
+    ),
     // --- browser authentication --------------------------------------------
-    ("github_login", OperationPolicy::Audited),
-    ("github_login_callback", OperationPolicy::Audited),
-    ("github_refresh_token", OperationPolicy::Audited),
-    ("github_broader_connect", OperationPolicy::Audited),
-    ("github_broader_callback", OperationPolicy::Audited),
+    audited(
+        "github_login",
+        "SafeGithubLogin",
+        arguments::GITHUB_LOGIN_FIELDS,
+    ),
+    audited(
+        "github_login_callback",
+        "SafeGithubLoginCallback",
+        arguments::GITHUB_LOGIN_CALLBACK_FIELDS,
+    ),
+    audited(
+        "github_refresh_token",
+        "SafeGithubRefreshToken",
+        arguments::GITHUB_REFRESH_TOKEN_FIELDS,
+    ),
+    audited(
+        "github_broader_connect",
+        "SafeGithubBroaderConnect",
+        arguments::GITHUB_BROADER_CONNECT_FIELDS,
+    ),
+    audited(
+        "github_broader_callback",
+        "SafeGithubBroaderCallback",
+        arguments::GITHUB_BROADER_CALLBACK_FIELDS,
+    ),
     // --- repositories and installations ------------------------------------
-    ("create_repo", OperationPolicy::Audited),
-    ("uninstall_account", OperationPolicy::Audited),
+    audited(
+        "create_repo",
+        "SafeCreateRepo",
+        arguments::CREATE_REPO_FIELDS,
+    ),
+    audited(
+        "uninstall_account",
+        "SafeUninstallAccount",
+        arguments::UNINSTALL_ACCOUNT_FIELDS,
+    ),
     // --- canvas dashboard ---------------------------------------------------
-    ("canvas_overview", OperationPolicy::Audited),
-    ("canvas_repo_sessions", OperationPolicy::Audited),
-    ("canvas_create_session", OperationPolicy::Audited),
-    ("canvas_stop_session", OperationPolicy::Audited),
-    ("canvas_create_work_item", OperationPolicy::Audited),
-    ("canvas_session_outcomes", OperationPolicy::Audited),
-    ("canvas_outcome_blob", OperationPolicy::Audited),
+    audited(
+        "canvas_overview",
+        "SafeCanvasOverview",
+        arguments::CANVAS_OVERVIEW_FIELDS,
+    ),
+    audited(
+        "canvas_repo_sessions",
+        "SafeCanvasRepoSessions",
+        arguments::CANVAS_REPO_SESSIONS_FIELDS,
+    ),
+    audited(
+        "canvas_create_session",
+        "SafeCanvasCreateSession",
+        arguments::CANVAS_CREATE_SESSION_FIELDS,
+    ),
+    audited(
+        "canvas_stop_session",
+        "SafeCanvasStopSession",
+        arguments::CANVAS_STOP_SESSION_FIELDS,
+    ),
+    audited(
+        "canvas_create_work_item",
+        "SafeCanvasCreateWorkItem",
+        arguments::CANVAS_CREATE_WORK_ITEM_FIELDS,
+    ),
+    audited(
+        "canvas_session_outcomes",
+        "SafeCanvasSessionOutcomes",
+        arguments::CANVAS_SESSION_OUTCOMES_FIELDS,
+    ),
+    audited(
+        "canvas_outcome_blob",
+        "SafeCanvasOutcomeBlob",
+        arguments::CANVAS_OUTCOME_BLOB_FIELDS,
+    ),
     // --- engine observe -----------------------------------------------------
-    ("observe_session", OperationPolicy::Audited),
+    audited(
+        "observe_session",
+        "SafeObserveSession",
+        arguments::OBSERVE_SESSION_FIELDS,
+    ),
+];
+
+/// Argument policies for operations whose ROUTES do not exist yet.
+///
+/// The `/api/v1/operations/*` surface is delivered by issues #5672 and #5675.
+/// Their safe DTOs (see [`crate::audit::arguments::operations`]) are reviewed and
+/// tested here so those issues attach an existing boundary instead of inventing
+/// one; each moves its entry into [`OPERATION_POLICIES`] in the same pull request
+/// as its route. Keeping them OUT until then is deliberate: the coverage guard
+/// requires every table entry to match a live operation, so a reserved id parked
+/// in the main table would look like an operation that had silently disappeared.
+pub const RESERVED_ARGUMENT_POLICIES: &[AuditOperation] = &[
+    audited(
+        "operations_list_activity",
+        "SafeOperationsListActivity",
+        arguments::OPERATIONS_LIST_ACTIVITY_FIELDS,
+    ),
+    audited(
+        "operations_list_sandboxes",
+        "SafeOperationsListSandboxes",
+        arguments::OPERATIONS_LIST_SANDBOXES_FIELDS,
+    ),
 ];
 
 /// Routes that are served but carry no OpenAPI operation, with their policy.
@@ -127,13 +328,33 @@ const UNDOCUMENTED_ROUTE_POLICIES: &[(&str, &str, OperationPolicy)] = &[(
     OperationPolicy::Excluded(ExclusionReason::Contract),
 )];
 
-/// The declared policy for an `operation_id`, or `None` when the table does not
-/// name it (a build error for the catalog, never a silent default).
-pub fn policy_for(operation_id: &str) -> Option<OperationPolicy> {
+/// The complete declaration for an `operation_id`, or `None` when the table does
+/// not name it (a build error for the catalog, never a silent default).
+pub fn operation_for(operation_id: &str) -> Option<&'static AuditOperation> {
     OPERATION_POLICIES
         .iter()
-        .find(|(id, _)| *id == operation_id)
-        .map(|(_, policy)| *policy)
+        .find(|operation| operation.operation_id == operation_id)
+}
+
+/// The declared audit policy for an `operation_id`.
+pub fn policy_for(operation_id: &str) -> Option<OperationPolicy> {
+    operation_for(operation_id).map(|operation| operation.policy)
+}
+
+/// The declared safe-argument policy for an `operation_id`.
+pub fn arguments_policy_for(operation_id: &str) -> Option<ArgumentsPolicy> {
+    operation_for(operation_id).map(|operation| operation.arguments)
+}
+
+/// The `arguments_parse_status` a record carries when no safe arguments were
+/// recorded for `operation_id`.
+///
+/// An unknown operation — the `<unmatched>` sentinel — has no declared arguments
+/// and so reports `not_applicable`: there was no argument contract to run.
+pub fn default_arguments_status(operation_id: &str) -> ArgumentsParseStatus {
+    arguments_policy_for(operation_id)
+        .map(ArgumentsPolicy::default_status)
+        .unwrap_or(ArgumentsParseStatus::NotApplicable)
 }
 
 /// The declared policy for a served route that has no OpenAPI operation.
@@ -146,7 +367,9 @@ pub fn undocumented_route_policy(method: &str, route_template: &str) -> Option<O
 
 /// Every `operation_id` the table names, for coverage guards.
 pub fn declared_operation_ids() -> impl Iterator<Item = &'static str> {
-    OPERATION_POLICIES.iter().map(|(id, _)| *id)
+    OPERATION_POLICIES
+        .iter()
+        .map(|operation| operation.operation_id)
 }
 
 #[cfg(test)]

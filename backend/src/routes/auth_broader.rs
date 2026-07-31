@@ -32,11 +32,13 @@ use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use crate::error::{AppError, ErrorEnvelope};
-use crate::routes::auth::{
-    html_error, http_client, redirect_302, resolve_oauth_identity, signed_state_message,
-    state_is_fresh_for,
+use crate::audit::arguments::auth::{
+    OauthResult, SafeGithubBroaderCallback, SafeGithubBroaderConnect,
 };
+use crate::audit::arguments::record_safe;
+use crate::error::{AppError, ErrorEnvelope};
+use crate::routes::auth::{html_error, http_client, redirect_302, resolve_oauth_identity};
+use crate::routes::auth_oauth_state::{signed_state_message, state_is_fresh_for};
 use crate::routes::logs::oauth;
 use crate::state::AppState;
 
@@ -80,7 +82,10 @@ pub struct BroaderCallbackQuery {
         (status = 503, description = "The broader-visibility OAuth flow is not configured", body = ErrorEnvelope),
     )
 )]
-async fn github_broader(State(state): State<AppState>) -> Response {
+async fn github_broader(State(state): State<AppState>, extensions: Extensions) -> Response {
+    // Only the flow: the redirect target carries the broader client id, the
+    // requested scopes, and the signed state, none of which belong in a record.
+    record_safe(&extensions, &SafeGithubBroaderConnect::new());
     let log = &state.config.log;
     let (Some((client_id, secret)), Some(public_base), Some(_frontend)) = (
         log.broader_oauth(),
@@ -130,41 +135,70 @@ async fn github_broader_callback(
     extensions: Extensions,
     Query(query): Query<BroaderCallbackQuery>,
 ) -> Response {
+    let (response, result) = broader_callback(&state, &extensions, query).await;
+    record_safe(&extensions, &SafeGithubBroaderCallback::new(result));
+    response
+}
+
+/// The callback's real body, returning its outcome alongside the response so the
+/// single recording site above cannot be missed on a new early return. The
+/// classic access token this flow mints is handed to the SPA in a URL fragment
+/// and is never an argument, a log line, or a response body.
+async fn broader_callback(
+    state: &AppState,
+    extensions: &Extensions,
+    query: BroaderCallbackQuery,
+) -> (Response, OauthResult) {
     let log = &state.config.log;
     let (Some((client_id, secret)), Some(public_base), Some(frontend)) = (
         log.broader_oauth(),
         log.public_base_url.as_deref(),
         log.frontend_url.as_deref(),
     ) else {
-        return html_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Broader GitHub access is not configured.",
+        return (
+            html_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Broader GitHub access is not configured.",
+            ),
+            OauthResult::UpstreamError,
         );
     };
 
     // The user declined the authorization on GitHub — bounce back to the frontend
     // with a flag (never a token).
     if query.error.is_some() {
-        return redirect_302(&format!(
-            "{}#broader_error=access_denied",
-            frontend.trim_end_matches('#')
-        ));
+        return (
+            redirect_302(&format!(
+                "{}#broader_error=access_denied",
+                frontend.trim_end_matches('#')
+            )),
+            OauthResult::Denied,
+        );
     }
 
     let (Some(code), Some(state_param)) = (
         query.code.filter(|c| !c.is_empty()),
         query.state.filter(|s| !s.is_empty()),
     ) else {
-        return html_error(StatusCode::BAD_REQUEST, "Missing OAuth code or state.");
+        return (
+            html_error(StatusCode::BAD_REQUEST, "Missing OAuth code or state."),
+            OauthResult::Invalid,
+        );
     };
     // Verify the signed state (CSRF/tamper) and its freshness (replay bound).
     let Some(message) = oauth::verify_state(secret.expose_secret().as_bytes(), &state_param) else {
-        return html_error(StatusCode::BAD_REQUEST, "Invalid or tampered OAuth state.");
+        return (
+            html_error(StatusCode::BAD_REQUEST, "Invalid or tampered OAuth state."),
+            OauthResult::Invalid,
+        );
     };
     if !state_is_fresh_for(BROADER_STATE_KIND, &message) {
-        return html_error(
-            StatusCode::BAD_REQUEST,
-            "This link has expired. Please try again.",
+        return (
+            html_error(
+                StatusCode::BAD_REQUEST,
+                "This link has expired. Please try again.",
+            ),
+            OauthResult::Invalid,
         );
     }
 
@@ -183,9 +217,12 @@ async fn github_broader_callback(
     {
         Ok(tokens) => tokens,
         Err(_) => {
-            return html_error(
-                StatusCode::UNAUTHORIZED,
-                "GitHub rejected the authorization. Please try again.",
+            return (
+                html_error(
+                    StatusCode::UNAUTHORIZED,
+                    "GitHub rejected the authorization. Please try again.",
+                ),
+                OauthResult::UpstreamError,
             )
         }
     };
@@ -193,17 +230,23 @@ async fn github_broader_callback(
     // `GET /user` before the connect is treated as successful, so the terminal
     // record names a verified id. A `/user` failure fails closed rather than
     // handing the SPA an unattributable token.
-    if resolve_oauth_identity(&state, &tokens.access_token, &extensions)
+    if resolve_oauth_identity(state, &tokens.access_token, extensions)
         .await
         .is_err()
     {
-        return html_error(
-            StatusCode::UNAUTHORIZED,
-            "Could not verify your GitHub identity.",
+        return (
+            html_error(
+                StatusCode::UNAUTHORIZED,
+                "Could not verify your GitHub identity.",
+            ),
+            OauthResult::UpstreamError,
         );
     }
     // Hand the broader token to the SPA in the fragment (never a query string / log).
-    redirect_302(&broader_success_url(frontend, &tokens.access_token))
+    (
+        redirect_302(&broader_success_url(frontend, &tokens.access_token)),
+        OauthResult::Success,
+    )
 }
 
 // ---- Helpers ----------------------------------------------------------------

@@ -14,8 +14,11 @@
 //! keeps working for them.
 
 use axum::extract::{Path, State};
+use axum::http::Extensions;
 use axum::Json;
 
+use crate::audit::arguments::logs::SafeListSessionRuns;
+use crate::audit::arguments::record_safe;
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
 use crate::session_pod::log_stream::runs::{self, LogRun};
@@ -40,9 +43,14 @@ use crate::storage::StorageError;
 )]
 pub(super) async fn list_session_runs(
     State(state): State<AppState>,
+    extensions: Extensions,
     Path(session_id): Path<String>,
     user: GithubUser,
 ) -> Result<Json<Vec<LogRun>>, AppError> {
+    // Recorded before authorization, so a denied read still describes which
+    // session was asked for. The run index's object keys never leave storage.
+    record_safe(&extensions, &SafeListSessionRuns::new(&session_id));
+    super::record_session_correlation(&extensions, &session_id);
     // Same deny-by-default authorization as the download + viewer paths (unknown
     // session → 404, unauthorized caller → 403).
     super::authorize(&state, &session_id, &user)?;

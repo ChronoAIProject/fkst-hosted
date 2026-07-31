@@ -13,13 +13,15 @@
 //! The same anti-mistake pre-flight as stop-session guards the trigger number —
 //! a PR or a non-trigger issue is refused before anything is created.
 
-use axum::extract::{Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::extract::State;
+use axum::http::{Extensions, HeaderMap, StatusCode};
 use axum::Json;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::audit::arguments::canvas_write::CreateWorkItemInput;
+use crate::audit::arguments::{record, AuditedJson, AuditedPath};
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_app::listing::IssueMetadata;
 use crate::github_identity::GithubUser;
@@ -212,11 +214,19 @@ impl DashboardGithub {
 )]
 pub(super) async fn create_work_item(
     State(state): State<AppState>,
-    Path((owner, name, issue_number)): Path<(String, String, u64)>,
+    extensions: Extensions,
+    AuditedPath((owner, name, issue_number)): AuditedPath<(String, String, u64)>,
     user: GithubUser,
     headers: HeaderMap,
-    Json(req): Json<CreateWorkItemRequest>,
+    AuditedJson(req): AuditedJson<CreateWorkItemRequest>,
 ) -> Result<(StatusCode, Json<CreateWorkItemResponse>), AppError> {
+    let trigger_issue = i64::try_from(issue_number).unwrap_or(i64::MAX);
+    // Correlation is published up front so an authorization refusal still points
+    // at the session it was refused for; the ARGUMENTS wait until the effective
+    // label is resolved, because the caller's requested label may name nothing
+    // and the record must describe what the handler actually used.
+    super::record_repo_correlation(&extensions, &owner, &name);
+    super::record_trigger_correlation(&extensions, trigger_issue);
     validate_repo_segment(&owner, "owner")?;
     validate_repo_segment(&name, "name")?;
     if issue_number == 0 {
@@ -373,6 +383,21 @@ pub(super) async fn create_work_item(
                 applicable.effective.join(", ")
             ))
         })?;
+
+    // Recorded immediately before the GitHub write — the operation's only side
+    // effect — with the RESOLVED label. The title and body are free-form issue
+    // text and contribute only their byte sizes.
+    record(
+        &extensions,
+        &CreateWorkItemInput {
+            owner: &owner,
+            repo: &name,
+            trigger_issue,
+            selected_label: &work_label,
+            title,
+            body,
+        },
+    );
 
     let labels = vec![work_label.clone()];
     let assignees = vec![reg.creator_login.clone()];

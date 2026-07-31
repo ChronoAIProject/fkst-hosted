@@ -509,10 +509,16 @@ fn invalid_session_detail(
 )]
 pub(super) async fn repo_sessions(
     State(state): State<AppState>,
+    extensions: axum::http::Extensions,
     Path((owner, name)): Path<(String, String)>,
     user: GithubUser,
     headers: HeaderMap,
 ) -> Result<Json<RepoSessionsResponse>, AppError> {
+    crate::audit::arguments::record_safe(
+        &extensions,
+        &crate::audit::arguments::canvas::SafeCanvasRepoSessions::new(&owner, &name),
+    );
+    super::record_repo_correlation(&extensions, &owner, &name);
     validate_repo_segment(&owner, "owner")?;
     validate_repo_segment(&name, "name")?;
     let token = bearer_token(&headers)?;

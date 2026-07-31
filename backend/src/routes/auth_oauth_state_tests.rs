@@ -1,9 +1,11 @@
-//! Unit tests for the frontend GitHub-OAuth login helpers (`crate::routes::auth`).
+//! Unit tests for the pure GitHub-OAuth state/URL helpers.
 //!
-//! Split out of `auth.rs` to keep that module under the file-size budget; `super`
-//! resolves to the `auth` module, so these reach its private helpers directly.
+//! Split out of the module file to keep it under the file-size budget; `super`
+//! resolves to `crate::routes::auth_oauth_state`, so these reach its
+//! crate-private helpers directly.
 
 use super::*;
+use secrecy::SecretString;
 
 #[test]
 fn callback_redirect_uri_appends_the_path_and_trims_slash() {

@@ -39,6 +39,7 @@ use super::catalog::{OperationCatalog, RouteDecision};
 use super::context::AuditRequestContext;
 use super::id::{normalize_request_id, REQUEST_ID_HEADER};
 use super::outcome::{derive_outcome, framework_error_code};
+use super::policy::default_arguments_status;
 use super::response::{codes, error_code_of, is_rejected};
 use crate::audit::event::{
     derive_event_id, ApiRequestCompletedV1, RequestIdentity, RequestResult, RequestTiming,
@@ -148,7 +149,13 @@ pub async fn audit_requests(
     let explicit_code = error_code_of(&response);
 
     // --- 6/7. freeze, then derive the terminal classification ---------------
-    let frozen = context.freeze();
+    // The default classifies a request that recorded no arguments: `unavailable`
+    // when the operation HAS a safe-argument contract that never got to run (an
+    // authentication, leader-gate, or timeout rejection), `not_applicable` when
+    // it genuinely takes none. Deriving it from the operation's own declaration
+    // keeps every rejection site free of the question.
+    let frozen =
+        context.freeze_with_default(default_arguments_status(&audited.identity.operation_id));
     let outcome = derive_outcome(
         status,
         rejected,

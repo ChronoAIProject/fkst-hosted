@@ -12,7 +12,10 @@
 //!   record as `<unmatched>` and look like unknown traffic);
 //! - **ids are globally unique** (a duplicate would merge two endpoints into one
 //!   row set in every dashboard and scoped query);
-//! - **every id has an explicit audit policy** (see [`super::policy`]).
+//! - **every id has an explicit audit policy AND, when audited, an explicit
+//!   safe-argument policy** (see [`super::policy`]) — the two halves of the
+//!   decision travel together, so an endpoint cannot be recorded without anyone
+//!   having decided what its record may contain.
 //!
 //! The lookup key is the *normalized* template. axum's matcher speaks `:param` /
 //! `*wildcard` while OpenAPI speaks `{param}`, so [`normalize_matched_path`]
@@ -26,7 +29,9 @@ use axum::http::Method;
 use utoipa::openapi::path::Operation;
 use utoipa::openapi::OpenApi;
 
-use super::policy::{policy_for, undocumented_route_policy, ExclusionReason, OperationPolicy};
+use super::policy::{
+    operation_for, undocumented_route_policy, ArgumentsPolicy, ExclusionReason, OperationPolicy,
+};
 use crate::audit::event::{UNMATCHED_OPERATION_ID, UNMATCHED_ROUTE_TEMPLATE};
 
 /// Why a catalog cannot be built. Every variant names a documented template or
@@ -44,6 +49,12 @@ pub enum CatalogError {
          Audited or Excluded entry to audit::request::policy::OPERATION_POLICIES"
     )]
     UnpolicedOperation { operation_id: String },
+    #[error(
+        "openapi operationId `{operation_id}` is audited but declares no safe-argument \
+         policy; give it an ArgumentsPolicy::Safe(..) naming its DTO, or \
+         ArgumentsPolicy::None when it genuinely takes no arguments"
+    )]
+    MissingArgumentPolicy { operation_id: String },
 }
 
 /// One documented operation and its audit policy.
@@ -124,13 +135,22 @@ impl OperationCatalog {
                 if seen_ids.insert(operation_id.clone(), ()).is_some() {
                     return Err(CatalogError::DuplicateOperationId { operation_id });
                 }
-                let policy =
-                    policy_for(&operation_id).ok_or_else(|| CatalogError::UnpolicedOperation {
+                let declared = operation_for(&operation_id).ok_or_else(|| {
+                    CatalogError::UnpolicedOperation {
                         operation_id: operation_id.clone(),
-                    })?;
+                    }
+                })?;
+                // The second half of the decision. An audited operation that
+                // never chose an argument boundary would record an empty
+                // `arguments` object forever and nobody would notice.
+                if declared.policy.is_audited()
+                    && declared.arguments == ArgumentsPolicy::NotRecorded
+                {
+                    return Err(CatalogError::MissingArgumentPolicy { operation_id });
+                }
                 let entry = CatalogEntry {
                     operation_id: Arc::from(operation_id.as_str()),
-                    policy,
+                    policy: declared.policy,
                 };
                 if entries.insert((method, path.clone()), entry).is_some() {
                     return Err(CatalogError::DuplicateRoute {

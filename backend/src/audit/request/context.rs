@@ -213,8 +213,25 @@ impl AuditRequestContext {
     }
 
     /// Take an immutable snapshot for the terminal record.
+    ///
+    /// Uses the neutral `not_applicable` default; the middleware calls
+    /// [`Self::freeze_with_default`] with the operation's own declared default so
+    /// a request rejected before its safe parse could run is classified as
+    /// `unavailable` rather than as an operation that has no arguments.
     pub fn freeze(&self) -> FrozenRequestContext {
-        let arguments = self.inner.arguments.get().unwrap_or_default();
+        self.freeze_with_default(ArgumentsParseStatus::NotApplicable)
+    }
+
+    /// Take an immutable snapshot, classifying "nothing was recorded" as
+    /// `default_status`.
+    pub fn freeze_with_default(
+        &self,
+        default_status: ArgumentsParseStatus,
+    ) -> FrozenRequestContext {
+        let arguments = self.inner.arguments.get().unwrap_or(AuditArguments {
+            values: serde_json::Map::new(),
+            status: default_status,
+        });
         FrozenRequestContext {
             identity: self
                 .inner

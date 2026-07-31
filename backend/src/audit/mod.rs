@@ -28,6 +28,9 @@
 //! - [`request`] owns the HTTP lifecycle — request-id normalization, the verified
 //!   OpenAPI operation catalog, the per-request context, terminal-outcome
 //!   derivation, and the outermost middleware — so no handler ever calls a sink;
+//! - [`arguments`] owns the per-operation redaction boundary: one sealed, typed,
+//!   allowlisted safe DTO per operation, so a record's `arguments` can only ever
+//!   contain properties someone deliberately named;
 //! - [`metrics`] keeps delivery telemetry closed-enum-labelled (epic `OPS-04`).
 //!
 //! Still separate issues plugging into these seams: the endpoint-specific safe
@@ -37,6 +40,7 @@ use std::sync::Arc;
 
 use crate::error::AppError;
 
+pub mod arguments;
 pub mod config;
 pub mod event;
 pub mod identity;
@@ -53,6 +57,7 @@ pub mod worker;
 #[path = "test_support.rs"]
 mod test_support;
 
+pub use arguments::{BoundedAuditArguments, InvalidInput, SafeArgumentSpec, ToSafeAuditArguments};
 pub use config::AuditConfig;
 pub use event::{
     Actor, ActorKind, ApiRequestCompletedV1, ArgumentsParseStatus, AuditOutcome,
