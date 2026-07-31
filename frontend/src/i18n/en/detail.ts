@@ -218,4 +218,5 @@ export const detail: DetailSlice = {
   healthError: 'Could not load this session’s health.',
   healthRetry: 'Try again',
   healthHistoryAria: 'Health report history',
+  healthDetailAria: 'Selected health report',
 };

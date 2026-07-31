@@ -214,4 +214,5 @@ export const detail: DetailSlice = {
   healthError: '无法加载该会话的健康信息。',
   healthRetry: '重试',
   healthHistoryAria: '健康报告历史',
+  healthDetailAria: '所选健康报告',
 };

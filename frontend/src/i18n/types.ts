@@ -583,6 +583,8 @@ export interface SiteContent {
       healthRetry: string;
       /** aria-label on the report-history list. */
       healthHistoryAria: string;
+      /** aria-label on the selected-report detail pane. */
+      healthDetailAria: string;
       // ---- Outcomes tab ----
       outcomesLoading: string;
       outcomesError: string;

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AuthProvider } from '@/lib/auth/github-auth';
 import type { HealthReport, SessionHealth, StalenessState } from '@/lib/api/health';
@@ -173,13 +173,38 @@ describe('TabHealth', () => {
     expect(screen.queryByText('Evidence')).not.toBeInTheDocument();
   });
 
-  it('loads the selected history entry into the body panel', async () => {
+  it('selecting a sidebar entry swaps the whole detail pane to that report', async () => {
     const user = userEvent.setup();
     renderTab(loaded(listing()));
-    expect(await screen.findByText('What this session is doing')).toBeInTheDocument();
 
-    await user.click(screen.getByText('was working earlier'));
+    // Opens on the newest report.
+    expect(await screen.findByText('What this session is doing')).toBeInTheDocument();
+    expect(screen.getByText('nothing moved in 10m', { selector: 'p' })).toBeInTheDocument();
+
+    // The sidebar is keyed by timestamp, newest first; pick the older entry.
+    const entries = within(
+      screen.getByRole('list', { name: 'Health report history' })
+    ).getAllByRole('button');
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toHaveAttribute('aria-current', 'true');
+
+    await user.click(entries[1]!);
+
+    // Detail pane follows: body AND headline both become the older report's.
     await waitFor(() => expect(screen.getByText('older body')).toBeInTheDocument());
+    expect(screen.getByText('was working earlier', { selector: 'p' })).toBeInTheDocument();
+    expect(entries[1]!).toHaveAttribute('aria-current', 'true');
+    expect(entries[0]!).toHaveAttribute('aria-current', 'false');
+  });
+
+  it('lists one sidebar entry per report, newest first', async () => {
+    renderTab(loaded(listing()));
+    const entries = within(
+      screen.getByRole('list', { name: 'Health report history' })
+    ).getAllByRole('button');
+    // Newest first: the first entry is the one the detail pane opened on.
+    expect(entries[0]).toHaveAttribute('aria-current', 'true');
+    expect(entries).toHaveLength(listing().reports.length);
   });
 
   it('renders injected HTML in the report body as inert text', async () => {

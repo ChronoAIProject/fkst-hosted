@@ -106,45 +106,38 @@ export function TabHealth({
   const staleness = health!.staleness;
   const ageMinutes = minutes(staleness.age_secs);
   const expectedMinutes = minutes(staleness.expected_interval_secs);
+  const reports = health!.reports;
+  // The right pane reflects the SELECTED report, not always the newest one. The
+  // summary renders immediately from the listing; the full report enriches it once
+  // its fetch lands, so switching entries never blanks the pane.
+  const activeSummary = reports.find((entry) => entry.id === activeId) ?? latest;
+  const loaded = report.status === 'loaded' ? report.report : null;
+  const detail = loaded && loaded.id === activeId ? loaded : null;
+
+  if (!activeSummary) {
+    return staleness.state === 'not_running' ? (
+      <Note>{t.healthNotRunning}</Note>
+    ) : (
+      <Note>{t.healthNeverReported}</Note>
+    );
+  }
 
   return (
-    <div className="flex flex-col gap-3.5">
-      {/* 1. Current assessment. */}
-      {latest ? (
-        <StatusCard label={t.healthCurrent}>
-          <div className="flex items-center gap-2 flex-wrap">
-            <Chip tone={HEALTH_TONE[latest.status] ?? 'neutral'}>
-              {t.healthStatus[latest.status] ?? latest.status_raw}
-            </Chip>
-            <span className="text-[12px] font-mono text-ghost">
-              {t.healthStaleness[staleness.state]}
-            </span>
-          </div>
-          <p className="text-[13px] text-fg leading-[1.55] break-words">{latest.headline}</p>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11.5px] font-mono text-ghost">
-            <dt>{t.healthProducer}</dt>
-            <dd className="text-dim break-all">{latest.producer}</dd>
-            {report.status === 'loaded' && report.report.confidence ? (
-              <>
-                <dt>{t.healthConfidence}</dt>
-                <dd className="text-dim">{report.report.confidence}</dd>
-              </>
-            ) : null}
-          </dl>
-          <p className="text-[11.5px] font-mono text-ghost">
-            {ageMinutes == null
-              ? t.healthLastReportUnknown
-              : t.healthLastReport.replace('{n}', String(ageMinutes))}
-          </p>
-        </StatusCard>
-      ) : staleness.state === 'not_running' ? (
-        <Note>{t.healthNotRunning}</Note>
-      ) : (
-        <Note>{t.healthNeverReported}</Note>
-      )}
+    <div className="flex flex-col gap-3">
+      {/* Session-level heartbeat line: about the SESSION, not the selected report,
+          so it sits above the master/detail split rather than inside either pane. */}
+      <div className="flex items-center gap-2 flex-wrap text-[11.5px] font-mono text-ghost">
+        <span>{t.healthStaleness[staleness.state]}</span>
+        <span aria-hidden="true">·</span>
+        <span>
+          {ageMinutes == null
+            ? t.healthLastReportUnknown
+            : t.healthLastReport.replace('{n}', String(ageMinutes))}
+        </span>
+      </div>
 
-      {/* 2. The heartbeat callout — ONLY when stale. Never for not_running, which
-             is the normal end of a session's work. */}
+      {/* Only when stale. Never for not_running, which is the normal end of a
+          session's work. Session-level, so it stays above the split. */}
       {showsStaleNotice(health) && (
         <div
           role="status"
@@ -159,75 +152,108 @@ export function TabHealth({
         </div>
       )}
 
-      {/* 3. Evidence — omitted entirely when there is none. */}
-      {report.status === 'loaded' && report.report.evidence.length > 0 && (
-        <section className="flex flex-col gap-1.5">
-          <SectionLabel>{t.healthEvidence}</SectionLabel>
-          <dl className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-3 gap-y-1 text-[11.5px] font-mono">
-            {report.report.evidence.map((item) => (
-              <div key={item.key} className="contents">
-                <dt className="text-ghost break-all">{item.key}</dt>
-                <dd className="text-dim break-all">{item.value}</dd>
-              </div>
-            ))}
-          </dl>
-        </section>
-      )}
-
-      {/* 4. The producer's narrative. UNTRUSTED — MarkdownPreview emits React
-             elements only (no raw HTML) and protocol-allowlists links. */}
-      {report.status === 'loading' && (
-        <div className="flex items-center gap-2 text-ghost text-[12.5px]">
-          <Spinner />
-          {t.healthLoading}
-        </div>
-      )}
-      {report.status === 'error' && <Note>{t.healthError}</Note>}
-      {report.status === 'loaded' && report.report.body_markdown.trim().length > 0 && (
-        <section className="flex flex-col gap-1.5">
-          <SectionLabel>{t.healthBody}</SectionLabel>
-          <MarkdownPreview
-            markdown={report.report.body_markdown}
-            ariaLabel={t.healthBodyAria}
-            variant="flow"
-          />
-        </section>
-      )}
-
-      {/* 5. History — newest first; selecting one loads it into the body panel. */}
-      {health!.reports.length > 0 && (
-        <section className="flex flex-col gap-1.5">
+      <div className="grid gap-4 md:grid-cols-[12.5rem_minmax(0,1fr)] items-start">
+        {/* ---- master: one entry per report, newest first, keyed by time ---- */}
+        <nav className="flex flex-col gap-1.5 min-w-0">
           <SectionLabel>{t.healthHistory}</SectionLabel>
-          <ul aria-label={t.healthHistoryAria} className="flex flex-col gap-1">
-            {health!.reports.map((entry) => {
+          <ul
+            aria-label={t.healthHistoryAria}
+            className="flex flex-col gap-1 max-h-[24rem] overflow-y-auto pr-0.5"
+          >
+            {reports.map((entry) => {
               const when = formatIsoSgt(entry.generated_at, lang);
+              const active = entry.id === activeId;
               return (
                 <li key={entry.id}>
                   <button
                     type="button"
-                    aria-current={entry.id === activeId}
+                    aria-current={active}
                     onClick={() => setSelected(entry.id)}
                     className={cn(
-                      'w-full text-left rounded-control border px-2.5 py-1.5 flex items-center gap-2 min-w-0',
-                      entry.id === activeId
+                      'w-full text-left rounded-control border px-2.5 py-1.5',
+                      'flex items-center justify-between gap-2 min-w-0',
+                      active
                         ? 'border-line-2 bg-raise-2'
                         : 'border-line hover:bg-raise-1'
                     )}
                   >
-                    <span className="text-[11px] font-mono text-ghost flex-none">
+                    <span className="text-[11px] font-mono text-dim truncate">
                       {when ?? entry.generated_at}
                     </span>
-                    <Chip tone={HEALTH_TONE[entry.status] ?? 'neutral'}>
-                      {t.healthStatus[entry.status] ?? entry.status_raw}
-                    </Chip>
-                    <span className="text-[12px] text-dim truncate min-w-0">{entry.headline}</span>
+                    <span className="flex-none">
+                      <Chip tone={HEALTH_TONE[entry.status] ?? 'neutral'}>
+                        {t.healthStatus[entry.status] ?? entry.status_raw}
+                      </Chip>
+                    </span>
                   </button>
                 </li>
               );
             })}
           </ul>
+        </nav>
+
+        {/* ---- detail: everything about the selected report ---- */}
+        <section aria-label={t.healthDetailAria} className="flex flex-col gap-3.5 min-w-0">
+          <StatusCard label={t.healthCurrent}>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Chip tone={HEALTH_TONE[activeSummary.status] ?? 'neutral'}>
+                {t.healthStatus[activeSummary.status] ?? activeSummary.status_raw}
+              </Chip>
+              <span className="text-[11.5px] font-mono text-ghost">
+                {formatIsoSgt(activeSummary.generated_at, lang) ?? activeSummary.generated_at}
+              </span>
+            </div>
+            <p className="text-[13px] text-fg leading-[1.55] break-words">
+              {activeSummary.headline}
+            </p>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11.5px] font-mono text-ghost">
+              <dt>{t.healthProducer}</dt>
+              <dd className="text-dim break-all">{activeSummary.producer}</dd>
+              {detail?.confidence ? (
+                <>
+                  <dt>{t.healthConfidence}</dt>
+                  <dd className="text-dim">{detail.confidence}</dd>
+                </>
+              ) : null}
+            </dl>
+          </StatusCard>
+
+          {report.status === 'loading' && (
+            <div className="flex items-center gap-2 text-ghost text-[12.5px]">
+              <Spinner />
+              {t.healthLoading}
+            </div>
+          )}
+          {report.status === 'error' && <Note>{t.healthError}</Note>}
+
+          {detail && detail.evidence.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <SectionLabel>{t.healthEvidence}</SectionLabel>
+              <dl className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-3 gap-y-1 text-[11.5px] font-mono">
+                {detail.evidence.map((item) => (
+                  <div key={item.key} className="contents">
+                    <dt className="text-ghost break-all">{item.key}</dt>
+                    <dd className="text-dim break-all">{item.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+
+          {/* UNTRUSTED: authored by an LLM inside a session pod. MarkdownPreview emits
+              React elements only (never raw HTML) and protocol-allowlists links. */}
+          {detail && detail.body_markdown.trim().length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <SectionLabel>{t.healthBody}</SectionLabel>
+              <MarkdownPreview
+                markdown={detail.body_markdown}
+                ariaLabel={t.healthBodyAria}
+                variant="flow"
+              />
+            </div>
+          )}
         </section>
-      )}
+      </div>
     </div>
   );
 }
