@@ -23,7 +23,7 @@
 //! [`crate::routes::auth`]; the signed-state + authorize-URL + token-exchange
 //! primitives come from [`crate::routes::logs::oauth`].
 
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::http::{Extensions, StatusCode};
 use axum::response::{IntoResponse, Response};
 use secrecy::ExposeSecret;
@@ -35,7 +35,7 @@ use utoipa_axum::routes;
 use crate::audit::arguments::auth::{
     OauthResult, SafeGithubBroaderCallback, SafeGithubBroaderConnect,
 };
-use crate::audit::arguments::record_safe;
+use crate::audit::arguments::{record_safe, AuditedQuery};
 use crate::error::{AppError, ErrorEnvelope};
 use crate::routes::auth::{html_error, http_client, redirect_302, resolve_oauth_identity};
 use crate::routes::auth_oauth_state::{signed_state_message, state_is_fresh_for};
@@ -133,7 +133,7 @@ async fn github_broader(State(state): State<AppState>, extensions: Extensions) -
 async fn github_broader_callback(
     State(state): State<AppState>,
     extensions: Extensions,
-    Query(query): Query<BroaderCallbackQuery>,
+    AuditedQuery(query): AuditedQuery<BroaderCallbackQuery>,
 ) -> Response {
     let (response, result) = broader_callback(&state, &extensions, query).await;
     record_safe(&extensions, &SafeGithubBroaderCallback::new(result));

@@ -195,6 +195,62 @@ async fn an_over_limit_body_records_only_its_declared_metadata() {
     );
 }
 
+/// A request that is BOTH over-limit and wrong-media-type must answer exactly
+/// what plain `axum::Json` answers. The wrapper buffers a step earlier than axum
+/// does, so this pins the one ordering that difference could have changed —
+/// against the real extractor rather than against a remembered status code.
+#[tokio::test]
+async fn a_wrong_content_type_outranks_the_body_limit_exactly_as_axum_does() {
+    let body = r#"{"value":123456789}"#;
+    let captured: Captured = Arc::default();
+    let audited = app(
+        captured.clone(),
+        Router::new()
+            .route(
+                "/json",
+                post(|AuditedJson(_): AuditedJson<Payload>| async { StatusCode::OK }),
+            )
+            .layer(DefaultBodyLimit::max(8)),
+    );
+    let plain = Router::new()
+        .route(
+            "/json",
+            post(|Json(_): Json<Payload>| async { StatusCode::OK }),
+        )
+        .layer(DefaultBodyLimit::max(8));
+
+    let audited_status = audited
+        .oneshot(json_request("text/plain", body))
+        .await
+        .expect("router responds")
+        .status();
+    let plain_status = plain
+        .oneshot(json_request("text/plain", body))
+        .await
+        .expect("router responds")
+        .status();
+
+    assert_eq!(audited_status, plain_status);
+    assert_eq!(audited_status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    // …and the refused media type cost nothing: no body was read to find out.
+    let frozen = frozen(&captured);
+    assert_eq!(frozen.arguments_parse_status, ArgumentsParseStatus::Invalid);
+    assert!(
+        !frozen.arguments.contains_key("body_bytes_observed"),
+        "a refused media type must not buffer the body"
+    );
+}
+
+/// The `+json` suffix forms are JSON to axum, and so must reach the parser here
+/// rather than being turned away by a restated media-type rule.
+#[tokio::test]
+async fn a_suffixed_json_media_type_still_reaches_the_parser() {
+    let (response, frozen) =
+        json_call(json_request("application/vnd.api+json", r#"{"value":5}"#)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(frozen.arguments.is_empty());
+}
+
 /// A query rejection knows only the query string, which is the one thing that
 /// may never be recorded — so the record carries the status and nothing else.
 #[tokio::test]

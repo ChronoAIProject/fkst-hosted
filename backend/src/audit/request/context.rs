@@ -99,6 +99,31 @@ impl<T: Clone + PartialEq> Slot<T> {
         self.lock().clone()
     }
 
+    /// Record `value` when it only ADDS to what is already there.
+    ///
+    /// The write-once rule above governs the first description of a call and
+    /// every disagreement with it. This is the one shape that is not a
+    /// disagreement: a handler that must publish what it knows before an
+    /// authorization gate and can resolve one more property only after it would
+    /// otherwise have to choose between arguments on the rejection paths and a
+    /// complete argument set on the happy path. Anything that changes or drops
+    /// an already-recorded value is still a conflict, resolved fail-closed in
+    /// favour of the first write.
+    fn refine(&self, field: &'static str, value: T, extends: impl Fn(&T, &T) -> bool) {
+        let mut guard = self.lock();
+        match guard.as_ref() {
+            None => *guard = Some(value),
+            Some(existing) if extends(existing, &value) => *guard = Some(value),
+            Some(_) => {
+                self.conflicts.fetch_add(1, Ordering::Relaxed);
+                tracing::error!(
+                    field = field,
+                    "audit request context received a contradicting refinement; keeping the first value"
+                );
+            }
+        }
+    }
+
     fn conflicts(&self) -> u32 {
         self.conflicts.load(Ordering::Relaxed)
     }
@@ -171,6 +196,30 @@ impl AuditRequestContext {
         self.inner
             .arguments
             .record("arguments", AuditArguments { values, status });
+    }
+
+    /// Record arguments that REFINE an earlier write, adding a property the
+    /// handler could only resolve later.
+    ///
+    /// Kept only when every earlier property survives unchanged and the parse
+    /// status agrees; a refinement that contradicts the first write is counted
+    /// and dropped like any other conflicting write.
+    pub fn refine_arguments(
+        &self,
+        values: serde_json::Map<String, serde_json::Value>,
+        status: ArgumentsParseStatus,
+    ) {
+        self.inner.arguments.refine(
+            "arguments",
+            AuditArguments { values, status },
+            |earlier, next| {
+                earlier.status == next.status
+                    && earlier
+                        .values
+                        .iter()
+                        .all(|(key, value)| next.values.get(key) == Some(value))
+            },
+        );
     }
 
     /// A stable snake_case application code. Never error text: the event

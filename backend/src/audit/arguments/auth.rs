@@ -36,13 +36,17 @@ pub const FLOW_SESSION_LOGS: &str = "session_logs";
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OauthResult {
-    /// The exchange completed and the identity behind the token resolved.
+    /// The flow completed: the identity resolved AND what the flow existed to do
+    /// was done.
     Success,
-    /// The user declined consent on GitHub's screen.
+    /// Access was refused. The user declined consent on GitHub's screen, or the
+    /// verified identity is not authorized for what the flow was for (the
+    /// session-logs flow's own authorization gate).
     Denied,
     /// Missing, tampered, expired, or replayed request material.
     Invalid,
-    /// GitHub rejected the exchange, or the deployment could not reach it.
+    /// GitHub rejected the exchange, the deployment could not reach it, or a
+    /// dependency the flow finishes through failed.
     UpstreamError,
 }
 

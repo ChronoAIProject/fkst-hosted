@@ -87,12 +87,24 @@ fn every_property_name_is_a_stable_snake_case_identifier() {
     }
 }
 
-/// The exact catalog from the issue, transcribed once more here so a silent
-/// edit to the table fails rather than redefining the normative contract.
+/// The exact catalog from the issue, transcribed once more here so a silent edit
+/// to the table fails rather than redefining the normative contract.
+///
+/// EVERY set is pinned, not a sample of them. A DTO's `ALLOWED_FIELDS` IS the
+/// catalog constant, so [`super::super::test_support::assert_policy_matches`]
+/// compares a constant with itself and can never notice a widening; these
+/// literals are the only thing standing between a newly invented property name
+/// and a production record, so a set left unpinned is a set with no guard at all.
+///
+/// The four tests below are split by area purely so a failure names the area
+/// that drifted.
 #[test]
-fn the_normative_field_sets_match_the_issue_catalog() {
+fn the_normative_auth_and_repository_field_sets_match_the_issue_catalog() {
     assert_eq!(GITHUB_LOGIN_FIELDS, &["flow"]);
     assert_eq!(GITHUB_LOGIN_CALLBACK_FIELDS, &["flow", "result"]);
+    assert_eq!(GITHUB_REFRESH_TOKEN_FIELDS, &["flow", "result"]);
+    assert_eq!(GITHUB_BROADER_CONNECT_FIELDS, &["flow"]);
+    assert_eq!(GITHUB_BROADER_CALLBACK_FIELDS, &["flow", "result"]);
     assert_eq!(
         SESSION_LOGS_OAUTH_CALLBACK_FIELDS,
         &["flow", "session_id", "result"]
@@ -107,7 +119,56 @@ fn the_normative_field_sets_match_the_issue_catalog() {
             "description_bytes"
         ]
     );
+    assert_eq!(UNINSTALL_ACCOUNT_FIELDS, &["owner"]);
+    assert_eq!(
+        INVALID_INPUT_FIELDS,
+        &[
+            "content_type",
+            "content_length_declared",
+            "body_bytes_observed"
+        ]
+    );
+}
+
+/// The canvas sets. `canvas_create_session` is the widest and most
+/// content-adjacent set in the table — the request it describes carries a
+/// session name, install commands, and disposable variable/secret keys and
+/// values — which is precisely why its property list is pinned literally.
+///
+/// `*_refs_truncated` are the issue's required truncation markers rather than
+/// additional table columns (see the module docs).
+#[test]
+fn the_normative_canvas_field_sets_match_the_issue_catalog() {
     assert_eq!(CANVAS_OVERVIEW_FIELDS, &["broader_visibility_requested"]);
+    assert_eq!(CANVAS_REPO_SESSIONS_FIELDS, &["owner", "repo"]);
+    assert_eq!(
+        CANVAS_CREATE_SESSION_FIELDS,
+        &[
+            "owner",
+            "repo",
+            "package_refs",
+            "package_count",
+            "package_refs_truncated",
+            "manifest_refs",
+            "manifest_count",
+            "manifest_refs_truncated",
+            "work_label",
+            "environment_name",
+            "disposable_environment_present",
+            "disposable_variable_count",
+            "disposable_secret_count",
+            "source_branch",
+            "target_branch",
+            "auto_merge",
+            "log_access_count",
+            "collaborator_count",
+            "output_language"
+        ]
+    );
+    assert_eq!(
+        CANVAS_STOP_SESSION_FIELDS,
+        &["owner", "repo", "trigger_issue"]
+    );
     assert_eq!(
         CANVAS_CREATE_WORK_ITEM_FIELDS,
         &[
@@ -121,9 +182,18 @@ fn the_normative_field_sets_match_the_issue_catalog() {
         ]
     );
     assert_eq!(
+        CANVAS_SESSION_OUTCOMES_FIELDS,
+        &["owner", "repo", "trigger_issue"]
+    );
+    assert_eq!(
         CANVAS_OUTCOME_BLOB_FIELDS,
         &["owner", "repo", "blob_sha", "download"]
     );
+}
+
+/// The environment-profile, log, and observe sets.
+#[test]
+fn the_normative_environment_and_log_field_sets_match_the_issue_catalog() {
     assert_eq!(
         PUT_USER_ENVIRONMENT_PROFILE_FIELDS,
         &[
@@ -133,18 +203,103 @@ fn the_normative_field_sets_match_the_issue_catalog() {
             "secret_count"
         ]
     );
+    assert_eq!(GET_USER_ENVIRONMENT_PROFILE_FIELDS, &["environment_name"]);
+    assert_eq!(
+        DELETE_USER_ENVIRONMENT_PROFILE_FIELDS,
+        &["environment_name"]
+    );
+    assert_eq!(
+        DOWNLOAD_SESSION_LOGS_FIELDS,
+        &["session_id", "run_id_or_latest", "mode"]
+    );
+    assert_eq!(LIST_SESSION_RUNS_FIELDS, &["session_id"]);
+    assert_eq!(
+        SESSION_LOG_MANIFEST_FIELDS,
+        &["session_id", "run_id_or_latest"]
+    );
     assert_eq!(
         SESSION_LOG_FILE_FIELDS,
         &["session_id", "run_id_or_latest", "file_class", "tail_bytes"]
     );
     assert_eq!(OBSERVE_SESSION_FIELDS, &["session_id", "effective_limit"]);
+}
+
+/// The webhook set, the chat turn, and the two reserved operations sets.
+///
+/// The webhook's is the other set worth pinning literally: everything but
+/// `signature_valid` is populated from a request body an unauthenticated caller
+/// composed, which only a verified HMAC makes trustworthy.
+#[test]
+fn the_normative_webhook_chat_and_operations_field_sets_match_the_issue_catalog() {
     assert_eq!(
-        INVALID_INPUT_FIELDS,
+        GITHUB_APP_WEBHOOK_FIELDS,
         &[
-            "content_type",
-            "content_length_declared",
-            "body_bytes_observed"
+            "signature_valid",
+            "event_type",
+            "action",
+            "installation_id",
+            "repo_full_name",
+            "trigger_issue",
+            "delivery_id",
+            "handling"
         ]
+    );
+    assert_eq!(
+        CHAT_TURN_FIELDS,
+        &[
+            "message_count",
+            "user_message_count",
+            "assistant_message_count",
+            "total_content_bytes",
+            "last_message_bytes",
+            "broader_visibility_requested"
+        ]
+    );
+    assert_eq!(
+        OPERATIONS_LIST_ACTIVITY_FIELDS,
+        &[
+            "scope",
+            "requested_scope",
+            "record_kind",
+            "from",
+            "to",
+            "limit",
+            "cursor_present",
+            "actor_filter_present",
+            "session_id",
+            "repo_full_name",
+            "trigger_issue",
+            "request_id",
+            "method",
+            "operation_id",
+            "status"
+        ]
+    );
+    assert_eq!(
+        OPERATIONS_LIST_SANDBOXES_FIELDS,
+        &[
+            "scope",
+            "requested_scope",
+            "session_id",
+            "repo_full_name",
+            "trigger_issue",
+            "status",
+            "limit"
+        ]
+    );
+}
+
+/// The pinning tests above are only complete while they cover the whole table:
+/// a set added to [`all_field_sets`] without a literal above would be guarded by
+/// nothing. This count is the reminder to add both.
+#[test]
+fn every_declared_field_set_is_pinned_by_the_tests_above() {
+    const PINNED: usize = 28;
+    assert_eq!(
+        all_field_sets().len(),
+        PINNED,
+        "a field set was added or removed: pin it literally in the matching \
+         the_normative_*_field_sets_match_the_issue_catalog test too"
     );
 }
 

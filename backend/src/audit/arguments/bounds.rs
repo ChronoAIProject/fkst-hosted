@@ -58,11 +58,13 @@ pub const RUN_LATEST: &str = "latest";
 /// business request" means in practice.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct BoundedList {
-    /// The retained prefix, at most `limit` entries.
+    /// The retained entries, at most `limit` of them.
     pub items: Vec<String>,
     /// The TRUE number of entries, before any bound was applied.
     pub count: usize,
-    /// True when `items` is a prefix rather than the whole list.
+    /// True when `items` is not the whole list — because the cap clipped it, or
+    /// because `accept` refused an entry. A reader comparing `items` against
+    /// `count` needs the same warning either way.
     pub truncated: bool,
 }
 

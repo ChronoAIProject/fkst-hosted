@@ -10,7 +10,7 @@
 //! enforces the deployment allowlist); the SAME bearer token then drives the
 //! user-scoped GitHub writes.
 
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::{Extensions, HeaderMap};
 use axum::Json;
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::audit::arguments::repos::{CreateRepoInput, SafeUninstallAccount};
-use crate::audit::arguments::{record, record_safe, AuditedJson};
+use crate::audit::arguments::{record, record_safe, AuditedJson, AuditedPath};
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
 use crate::routes::dashboard::{bearer_token, DashboardGithub};
@@ -117,15 +117,22 @@ async fn create_repo(
     // Recorded after the name validated and before the GitHub write. A
     // description is free text a person typed, so only its presence and byte
     // size are arguments; GitHub's response body never becomes one.
+    let owner = org.unwrap_or(&user.login);
     record(
         &extensions,
         &CreateRepoInput {
-            owner: org.unwrap_or(&user.login),
+            owner,
             name,
             private: req.private,
             description,
         },
     );
+    // The same validated pair, published as the record's top-level correlation
+    // handle: `repo_full_name` is a query key on the read side, so a repository
+    // route that only described the repository inside its arguments would be
+    // invisible to every by-repository lookup. Published BEFORE the write, so a
+    // refused or failed creation correlates exactly like a successful one.
+    record_repo_full_name(&extensions, owner, name);
 
     let token = bearer_token(&headers)?;
     let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
@@ -181,7 +188,7 @@ async fn uninstall_account(
     extensions: Extensions,
     _user: GithubUser,
     headers: HeaderMap,
-    Path(owner): Path<String>,
+    AuditedPath(owner): AuditedPath<String>,
 ) -> Result<axum::http::StatusCode, AppError> {
     record_safe(&extensions, &SafeUninstallAccount::new(&owner));
     let token = bearer_token(&headers)?;
@@ -196,6 +203,20 @@ async fn uninstall_account(
         .map_err(|e| AppError::Internal(anyhow::anyhow!("app jwt mint: {e}")))?;
     gh.delete_installation(&jwt, inst.id).await?;
     Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
+/// Publish `owner/name` as the record's top-level `repo_full_name`, in the
+/// bounded form the audit contract accepts.
+///
+/// A pair that does not survive that normalization is dropped rather than
+/// recorded: a malformed correlation handle matches nothing on the read side,
+/// and the arguments already describe the request.
+fn record_repo_full_name(extensions: &Extensions, owner: &str, name: &str) {
+    if let Some(repo) = crate::audit::arguments::bounds::safe_repo_full_name(owner, name) {
+        crate::audit::request::with_context(extensions, |context| {
+            context.record_repo_full_name(repo)
+        });
+    }
 }
 
 /// The repos router (nested under `/api/v1`). GitHub-token authenticated via

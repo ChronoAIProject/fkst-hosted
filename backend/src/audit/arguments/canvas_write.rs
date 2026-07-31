@@ -55,7 +55,9 @@ pub struct SafeCanvasCreateSession {
     repo: Option<String>,
     package_refs: Vec<String>,
     package_count: usize,
-    /// Emitted only when the reference list was clipped to its cap.
+    /// Emitted when `package_refs` is not the whole request: the list hit its
+    /// cap, or the strict parser refused an entry. Either way `package_count`
+    /// still reports what the caller sent.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     package_refs_truncated: bool,
     manifest_refs: Vec<String>,

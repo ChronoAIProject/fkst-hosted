@@ -4,7 +4,8 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use crate::audit::arguments::AuditedPath;
+use axum::extract::State;
 use k8s_openapi::chrono::Utc;
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -205,7 +206,7 @@ async fn repo_sessions_assembles_the_full_detail() {
     let Json(view) = repo_sessions(
         State(state),
         axum::http::Extensions::new(),
-        Path(("acme".to_string(), "site".to_string())),
+        AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
     )
@@ -421,7 +422,7 @@ acme/manifests@main:bundles/default.json\n";
     let Json(view) = repo_sessions(
         State(state),
         axum::http::Extensions::new(),
-        Path(("acme".to_string(), "site".to_string())),
+        AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
     )
@@ -486,7 +487,7 @@ async fn repo_sessions_canonicalizes_a_case_variant_path() {
     let Json(view) = repo_sessions(
         State(state),
         axum::http::Extensions::new(),
-        Path(("ACME".to_string(), "Site".to_string())),
+        AuditedPath(("ACME".to_string(), "Site".to_string())),
         viewer_user(),
         auth_headers(),
     )
@@ -520,7 +521,7 @@ async fn repo_sessions_outside_the_callers_installations_is_not_installed() {
     let Json(view) = repo_sessions(
         State(state),
         axum::http::Extensions::new(),
-        Path(("acme".to_string(), "site".to_string())),
+        AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
     )
@@ -577,7 +578,7 @@ async fn global_admin_can_read_a_repo_outside_user_installations() {
     let Json(view) = repo_sessions(
         State(state),
         axum::http::Extensions::new(),
-        Path(("ACME".to_string(), "Site".to_string())),
+        AuditedPath(("ACME".to_string(), "Site".to_string())),
         viewer_user(),
         auth_headers(),
     )
@@ -603,7 +604,7 @@ async fn repo_sessions_without_an_app_is_unavailable() {
     let err = repo_sessions(
         State(state),
         axum::http::Extensions::new(),
-        Path(("acme".to_string(), "site".to_string())),
+        AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
     )
@@ -625,7 +626,7 @@ async fn repo_sessions_propagates_a_github_failure() {
     let err = repo_sessions(
         State(state),
         axum::http::Extensions::new(),
-        Path(("acme".to_string(), "site".to_string())),
+        AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
     )
@@ -641,7 +642,7 @@ async fn repo_sessions_rejects_a_malformed_owner() {
     let err = repo_sessions(
         State(state),
         axum::http::Extensions::new(),
-        Path(("bad owner".to_string(), "site".to_string())),
+        AuditedPath(("bad owner".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
     )

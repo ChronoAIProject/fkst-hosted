@@ -129,6 +129,31 @@ pub fn record_safe<A: BoundedAuditArguments>(extensions: &Extensions, safe: &A) 
     });
 }
 
+/// Project `input` and record it as a REFINEMENT of an earlier write.
+///
+/// For the one handler shape the write-once rule does not fit: everything the
+/// record needs is known up front except a single property the handler can only
+/// resolve after reading something external, and the reads that resolve it are
+/// also the ones that can refuse the request. Recording early and refining keeps
+/// the argument set on every rejection path AND completes it on the happy path;
+/// recording once, late, would keep it on neither.
+///
+/// The refinement may only ADD (see
+/// [`crate::audit::request::AuditRequestContext::refine_arguments`]), so this is
+/// not a way to overwrite a recorded value.
+pub fn refine<T: ToSafeAuditArguments>(extensions: &Extensions, input: &T) {
+    refine_safe(extensions, &input.to_safe_audit_arguments());
+}
+
+/// Record an already-built safe DTO as a refinement of an earlier write.
+pub fn refine_safe<A: BoundedAuditArguments>(extensions: &Extensions, safe: &A) {
+    let status = safe.parse_status();
+    let values = allowlisted(safe);
+    with_context(extensions, |context| {
+        context.refine_arguments(values, status)
+    });
+}
+
 /// Record that a parser rejected the input, keeping only bounded transport
 /// metadata.
 pub fn record_invalid(extensions: &Extensions, invalid: &InvalidInput) {

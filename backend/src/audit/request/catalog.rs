@@ -30,7 +30,8 @@ use utoipa::openapi::path::Operation;
 use utoipa::openapi::OpenApi;
 
 use super::policy::{
-    operation_for, undocumented_route_policy, ArgumentsPolicy, ExclusionReason, OperationPolicy,
+    operation_in, undocumented_route_policy, ArgumentsPolicy, AuditOperation, ExclusionReason,
+    OperationPolicy, OPERATION_POLICIES,
 };
 use crate::audit::event::{UNMATCHED_OPERATION_ID, UNMATCHED_ROUTE_TEMPLATE};
 
@@ -119,6 +120,20 @@ fn operations(item: &utoipa::openapi::path::PathItem) -> [(&'static str, &Option
 impl OperationCatalog {
     /// Build and validate the catalog from the assembled document.
     pub fn from_openapi(doc: &OpenApi) -> Result<Self, CatalogError> {
+        Self::from_openapi_with(doc, OPERATION_POLICIES)
+    }
+
+    /// The same build against an explicit policy table.
+    ///
+    /// The table is a parameter for exactly one reason: the guards below must be
+    /// testable. [`OPERATION_POLICIES`]'s const constructors pair each decision
+    /// with its argument policy, so no entry in the real table can reach the
+    /// [`CatalogError::MissingArgumentPolicy`] branch — a test has to hand in a
+    /// declaration that can.
+    fn from_openapi_with(
+        doc: &OpenApi,
+        policies: &'static [AuditOperation],
+    ) -> Result<Self, CatalogError> {
         let mut catalog = Self::default();
         let entries = &mut catalog.entries;
         let mut seen_ids: HashMap<String, ()> = HashMap::new();
@@ -135,7 +150,7 @@ impl OperationCatalog {
                 if seen_ids.insert(operation_id.clone(), ()).is_some() {
                     return Err(CatalogError::DuplicateOperationId { operation_id });
                 }
-                let declared = operation_for(&operation_id).ok_or_else(|| {
+                let declared = operation_in(policies, &operation_id).ok_or_else(|| {
                     CatalogError::UnpolicedOperation {
                         operation_id: operation_id.clone(),
                     }

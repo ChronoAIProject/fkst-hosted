@@ -122,6 +122,104 @@ async fn the_log_file_record_keeps_its_class_and_session_correlation() {
     );
 }
 
+/// A work item refused before its label could resolve still describes the
+/// request: the arguments are recorded up front and only the label — which the
+/// refused GitHub reads were what resolved — is missing.
+#[tokio::test]
+async fn a_refused_work_item_still_records_its_safe_arguments() {
+    let canary = Canary::start().await;
+    // The canary GitHub answers every non-`/user` call with a 500, so the
+    // trigger pre-flight fails and the handler never reaches its write.
+    let response = canary
+        .call(canary.authenticated_json(
+            Request::post("/api/v1/repos/acme/site/sessions/42/work-items"),
+            serde_json::json!({
+                "title": "canary-work-item-title",
+                "body": "canary-work-item-body",
+                "label": "fkst:work",
+            }),
+        ))
+        .await;
+    assert!(
+        response.status().is_client_error() || response.status().is_server_error(),
+        "the fixture must refuse the call, got {}",
+        response.status()
+    );
+
+    let event = canary.event("canvas_create_work_item");
+    assert_eq!(event.arguments_parse_status, ArgumentsParseStatus::Parsed);
+    let arguments = arguments(&event);
+    assert_eq!(arguments["owner"], serde_json::json!("acme"));
+    assert_eq!(arguments["repo"], serde_json::json!("site"));
+    assert_eq!(arguments["trigger_issue"], serde_json::json!(42));
+    assert_eq!(
+        arguments["title_bytes"],
+        serde_json::json!("canary-work-item-title".len())
+    );
+    assert_eq!(arguments["body_present"], serde_json::json!(true));
+    assert_eq!(
+        arguments["body_bytes"],
+        serde_json::json!("canary-work-item-body".len())
+    );
+    assert!(
+        arguments.get("selected_label").is_none(),
+        "the caller's requested label is never recorded as the selected one"
+    );
+    assert_eq!(
+        event.correlation.repo_full_name.as_deref(),
+        Some("acme/site")
+    );
+    assert_eq!(event.correlation.trigger_issue, Some(42));
+    let rendered = rendered(&event);
+    assert!(!rendered.contains("canary-work-item-title"), "{rendered}");
+    assert!(!rendered.contains("canary-work-item-body"), "{rendered}");
+}
+
+/// Creating a repository correlates by repository, not only inside its
+/// arguments: `repo_full_name` is a query key on the read side.
+#[tokio::test]
+async fn the_create_repo_record_correlates_by_repository() {
+    let canary = Canary::start().await;
+    canary
+        .call(canary.authenticated_json(
+            Request::post("/api/v1/repos"),
+            serde_json::json!({
+                "owner": null,
+                "name": "site",
+                "private": true,
+                "description": "canary-repository-description",
+            }),
+        ))
+        .await;
+
+    let event = canary.event("create_repo");
+    assert_eq!(arguments(&event)["name"], serde_json::json!("site"));
+    assert_eq!(
+        event.correlation.repo_full_name.as_deref(),
+        Some("octocat/site"),
+        "the owner defaults to the verified caller's own account"
+    );
+}
+
+/// A path segment that does not fit its type is `invalid` — the class of
+/// rejection an operator can act on — and never `unavailable`, which is what an
+/// authentication failure means.
+#[tokio::test]
+async fn a_malformed_path_segment_records_invalid_arguments() {
+    let canary = Canary::start().await;
+    let response = canary
+        .call(canary.authenticated(Request::get(
+            "/api/v1/repos/acme/site/sessions/canary-bad-issue/outcomes",
+        )))
+        .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let event = canary.event("canvas_session_outcomes");
+    assert_eq!(event.arguments_parse_status, ArgumentsParseStatus::Invalid);
+    assert_eq!(event.error_code.as_deref(), Some("invalid_request"));
+    assert!(!rendered(&event).contains("canary-bad-issue"));
+}
+
 /// A verified delivery records the closed event/action, the correlation handles,
 /// and how it was handled — and none of the payload's free text.
 #[tokio::test]

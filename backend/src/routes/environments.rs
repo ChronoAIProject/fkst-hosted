@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::{Extensions, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -33,7 +33,9 @@ use utoipa_axum::routes;
 use crate::audit::arguments::environments::{
     PutEnvironmentProfileInput, SafeDeleteEnvironmentProfile, SafeGetEnvironmentProfile,
 };
-use crate::audit::arguments::{record, record_not_applicable, record_safe, AuditedJson};
+use crate::audit::arguments::{
+    record, record_not_applicable, record_safe, AuditedJson, AuditedPath,
+};
 use crate::audit::request::{codes, with_error_code};
 use crate::config::Config;
 use crate::environment_profile::{default_store, EnvironmentProfileStore};
@@ -221,7 +223,7 @@ async fn env_store(state: &AppState) -> Result<Arc<dyn EnvironmentProfileStore>,
 async fn put_user_environment(
     State(state): State<AppState>,
     extensions: Extensions,
-    Path(name): Path<String>,
+    AuditedPath(name): AuditedPath<String>,
     user: GithubUser,
     AuditedJson(spec): AuditedJson<EnvironmentProfileSpec>,
 ) -> Result<Response, AppError> {
@@ -418,7 +420,7 @@ async fn list_user_environments(
 async fn get_user_environment(
     State(state): State<AppState>,
     extensions: Extensions,
-    Path(name): Path<String>,
+    AuditedPath(name): AuditedPath<String>,
     user: GithubUser,
 ) -> Result<Json<EnvironmentProfileView>, AppError> {
     record_safe(&extensions, &SafeGetEnvironmentProfile::new(&name));
@@ -447,7 +449,7 @@ async fn get_user_environment(
 async fn delete_user_environment(
     State(state): State<AppState>,
     extensions: Extensions,
-    Path(name): Path<String>,
+    AuditedPath(name): AuditedPath<String>,
     user: GithubUser,
 ) -> Result<StatusCode, AppError> {
     record_safe(&extensions, &SafeDeleteEnvironmentProfile::new(&name));

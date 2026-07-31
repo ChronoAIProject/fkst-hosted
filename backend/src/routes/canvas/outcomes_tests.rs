@@ -115,7 +115,7 @@ async fn session_outcomes_groups_files_by_pr() {
     let Json(view) = session_outcomes(
         State(state),
         axum::http::Extensions::new(),
-        Path(("acme".to_string(), "site".to_string(), 5)),
+        AuditedPath(("acme".to_string(), "site".to_string(), 5)),
         viewer_user(),
         auth_headers(),
     )
@@ -204,7 +204,7 @@ async fn global_admin_can_read_outcomes_and_blobs_outside_user_installations() {
     let Json(view) = session_outcomes(
         State(state.clone()),
         axum::http::Extensions::new(),
-        Path(("acme".to_string(), "site".to_string(), 5)),
+        AuditedPath(("acme".to_string(), "site".to_string(), 5)),
         viewer_user(),
         auth_headers(),
     )
@@ -216,7 +216,7 @@ async fn global_admin_can_read_outcomes_and_blobs_outside_user_installations() {
     let response = outcome_blob(
         State(state),
         axum::http::Extensions::new(),
-        Path(("acme".to_string(), "site".to_string(), "abc123".to_string())),
+        AuditedPath(("acme".to_string(), "site".to_string(), "abc123".to_string())),
         crate::audit::arguments::AuditedQuery(BlobQuery {
             name: Some("report.txt".to_string()),
             download: None,
@@ -315,7 +315,7 @@ acme/manifests@main:bundles/default.json\n";
     let Json(view) = session_outcomes(
         State(state),
         axum::http::Extensions::new(),
-        Path(("acme".to_string(), "site".to_string(), 2)),
+        AuditedPath(("acme".to_string(), "site".to_string(), 2)),
         viewer_user(),
         auth_headers(),
     )
@@ -347,7 +347,7 @@ async fn session_outcomes_flags_files_error_but_keeps_the_pr() {
     let Json(view) = session_outcomes(
         State(state),
         axum::http::Extensions::new(),
-        Path(("acme".to_string(), "site".to_string(), 5)),
+        AuditedPath(("acme".to_string(), "site".to_string(), 5)),
         viewer_user(),
         auth_headers(),
     )
@@ -374,7 +374,7 @@ async fn session_outcomes_unknown_trigger_is_404() {
     let err = session_outcomes(
         State(state),
         axum::http::Extensions::new(),
-        Path(("acme".to_string(), "site".to_string(), 5)),
+        AuditedPath(("acme".to_string(), "site".to_string(), 5)),
         viewer_user(),
         auth_headers(),
     )
@@ -398,7 +398,7 @@ async fn session_outcomes_repo_not_visible_is_404() {
     let err = session_outcomes(
         State(state),
         axum::http::Extensions::new(),
-        Path(("acme".to_string(), "site".to_string(), 5)),
+        AuditedPath(("acme".to_string(), "site".to_string(), 5)),
         viewer_user(),
         auth_headers(),
     )
@@ -414,7 +414,7 @@ async fn session_outcomes_rejects_a_malformed_owner() {
     let err = session_outcomes(
         State(state),
         axum::http::Extensions::new(),
-        Path(("bad owner".to_string(), "site".to_string(), 5)),
+        AuditedPath(("bad owner".to_string(), "site".to_string(), 5)),
         viewer_user(),
         auth_headers(),
     )
@@ -440,7 +440,7 @@ async fn outcome_blob_streams_bytes_with_guessed_content_type() {
     let response = outcome_blob(
         State(state),
         axum::http::Extensions::new(),
-        Path(("acme".to_string(), "site".to_string(), "abc123".to_string())),
+        AuditedPath(("acme".to_string(), "site".to_string(), "abc123".to_string())),
         crate::audit::arguments::AuditedQuery(BlobQuery {
             name: Some("logo.svg".to_string()),
             download: None,
@@ -481,7 +481,7 @@ async fn outcome_blob_download_sets_attachment_filename() {
     let response = outcome_blob(
         State(state),
         axum::http::Extensions::new(),
-        Path(("acme".to_string(), "site".to_string(), "def456".to_string())),
+        AuditedPath(("acme".to_string(), "site".to_string(), "def456".to_string())),
         crate::audit::arguments::AuditedQuery(BlobQuery {
             name: Some("notes.txt".to_string()),
             download: Some(1),
@@ -516,7 +516,7 @@ async fn outcome_blob_over_cap_is_413() {
     let response = outcome_blob(
         State(state),
         axum::http::Extensions::new(),
-        Path(("acme".to_string(), "site".to_string(), "beef99".to_string())),
+        AuditedPath(("acme".to_string(), "site".to_string(), "beef99".to_string())),
         crate::audit::arguments::AuditedQuery(BlobQuery {
             name: Some("video.mp4".to_string()),
             download: None,
@@ -535,7 +535,7 @@ async fn outcome_blob_rejects_a_non_hex_sha() {
     let response = outcome_blob(
         State(state),
         axum::http::Extensions::new(),
-        Path((
+        AuditedPath((
             "acme".to_string(),
             "site".to_string(),
             "../etc/passwd".to_string(),
@@ -566,7 +566,7 @@ async fn outcome_blob_repo_not_visible_is_404() {
     let response = outcome_blob(
         State(state),
         axum::http::Extensions::new(),
-        Path(("acme".to_string(), "site".to_string(), "abc123".to_string())),
+        AuditedPath(("acme".to_string(), "site".to_string(), "abc123".to_string())),
         crate::audit::arguments::AuditedQuery(BlobQuery {
             name: None,
             download: None,

@@ -18,12 +18,13 @@
 
 use std::collections::{HashMap, HashSet};
 
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::audit::arguments::AuditedPath;
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_app::listing::IssueSummary;
 use crate::github_identity::GithubUser;
@@ -510,7 +511,7 @@ fn invalid_session_detail(
 pub(super) async fn repo_sessions(
     State(state): State<AppState>,
     extensions: axum::http::Extensions,
-    Path((owner, name)): Path<(String, String)>,
+    AuditedPath((owner, name)): AuditedPath<(String, String)>,
     user: GithubUser,
     headers: HeaderMap,
 ) -> Result<Json<RepoSessionsResponse>, AppError> {

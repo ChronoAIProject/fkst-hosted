@@ -26,7 +26,7 @@
 //! key and never leaves this process; and no presigned storage URL is ever
 //! handed to the caller — the bytes are fetched server-side.
 
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::http::{header, Extensions, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use secrecy::ExposeSecret;
@@ -37,7 +37,7 @@ use utoipa::IntoParams;
 
 use super::{authorize, identity, oauth, stream_download};
 use crate::audit::arguments::auth::{OauthResult, SessionLogsCallbackInput};
-use crate::audit::arguments::record;
+use crate::audit::arguments::{record, AuditedQuery};
 use crate::error::AppError;
 use crate::log_config::LogConfig;
 use crate::state::AppState;
@@ -78,7 +78,7 @@ pub struct OAuthCallbackQuery {
 pub(super) async fn oauth_callback(
     State(state): State<AppState>,
     extensions: Extensions,
-    Query(query): Query<OAuthCallbackQuery>,
+    AuditedQuery(query): AuditedQuery<OAuthCallbackQuery>,
 ) -> Response {
     let (response, session_id, result) = log_oauth_callback(&state, &extensions, query).await;
     // `session_id` is `Some` only once the state's HMAC verified: a tampered
@@ -201,12 +201,23 @@ async fn log_oauth_callback(
     // Authorize, then stream the latest bundle; render every failure as HTML. The
     // browser path serves the latest bundle only (the run selector is not carried
     // through the OAuth round-trip).
+    // The recorded `result` describes the FLOW, not just its OAuth leg: a
+    // refused or failed download is not a successful session-logs flow, and
+    // `result` is a dashboard facet where "success" on a denied log download
+    // would be actively misleading. An authorization refusal is `denied` (the
+    // same word GitHub's own consent refusal earns — both mean "this caller
+    // does not get this"); a bundle read that could not be served is
+    // `upstream_error`. The HTTP status each renders is unchanged.
     if let Err(err) = authorize(state, &session_id, &user) {
-        return (browser_error(err), Some(session_id), OauthResult::Success);
+        return (browser_error(err), Some(session_id), OauthResult::Denied);
     }
     match stream_download(state, &session_id, None).await {
         Ok(response) => (response, Some(session_id), OauthResult::Success),
-        Err(err) => (browser_error(err), Some(session_id), OauthResult::Success),
+        Err(err) => (
+            browser_error(err),
+            Some(session_id),
+            OauthResult::UpstreamError,
+        ),
     }
 }
 

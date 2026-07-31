@@ -331,7 +331,21 @@ const UNDOCUMENTED_ROUTE_POLICIES: &[(&str, &str, OperationPolicy)] = &[(
 /// The complete declaration for an `operation_id`, or `None` when the table does
 /// not name it (a build error for the catalog, never a silent default).
 pub fn operation_for(operation_id: &str) -> Option<&'static AuditOperation> {
-    OPERATION_POLICIES
+    operation_in(OPERATION_POLICIES, operation_id)
+}
+
+/// The same lookup against an explicit table.
+///
+/// Exists so the catalog's build-time guards can be driven against a
+/// deliberately broken declaration in a test: [`OPERATION_POLICIES`] is built
+/// from const constructors that CANNOT express an audited operation without an
+/// argument policy, and a guard whose failure path nothing can reach is a guard
+/// nobody has ever seen work.
+pub(super) fn operation_in(
+    table: &'static [AuditOperation],
+    operation_id: &str,
+) -> Option<&'static AuditOperation> {
+    table
         .iter()
         .find(|operation| operation.operation_id == operation_id)
 }

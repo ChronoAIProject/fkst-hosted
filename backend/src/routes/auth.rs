@@ -22,7 +22,7 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::http::{header, Extensions, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -35,7 +35,7 @@ use utoipa_axum::routes;
 use crate::audit::arguments::auth::{
     OauthResult, SafeGithubLogin, SafeGithubLoginCallback, SafeGithubRefreshToken,
 };
-use crate::audit::arguments::{record_safe, AuditedJson};
+use crate::audit::arguments::{record_safe, AuditedJson, AuditedQuery};
 use crate::audit::AuditIdentity;
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
@@ -164,7 +164,7 @@ async fn github_login(State(state): State<AppState>, extensions: Extensions) -> 
 async fn github_login_callback(
     State(state): State<AppState>,
     extensions: Extensions,
-    Query(query): Query<LoginCallbackQuery>,
+    AuditedQuery(query): AuditedQuery<LoginCallbackQuery>,
 ) -> Response {
     // One record per outcome, written by the inner function as it decides. The
     // `code`, the `state`, the exchanged tokens, and GitHub's own error slug are

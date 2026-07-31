@@ -178,7 +178,7 @@ async fn callback_exchanges_code_and_redirects_with_broader_token_fragment() {
         state: Some(signed_broader_state()),
         error: None,
     };
-    let resp = github_broader_callback(State(state), Extensions::new(), Query(query)).await;
+    let resp = github_broader_callback(State(state), Extensions::new(), AuditedQuery(query)).await;
     assert_eq!(resp.status(), StatusCode::FOUND);
     let loc = location(&resp);
     assert_eq!(
@@ -198,7 +198,7 @@ async fn callback_rejects_a_tampered_state() {
         state: Some("broader:1700000000.deadbeef".to_string()),
         error: None,
     };
-    let resp = github_broader_callback(State(state), Extensions::new(), Query(query)).await;
+    let resp = github_broader_callback(State(state), Extensions::new(), AuditedQuery(query)).await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -210,7 +210,7 @@ async fn callback_rejects_missing_code_or_state() {
         state: Some(signed_broader_state()),
         error: None,
     };
-    let resp = github_broader_callback(State(state), Extensions::new(), Query(query)).await;
+    let resp = github_broader_callback(State(state), Extensions::new(), AuditedQuery(query)).await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -222,7 +222,7 @@ async fn callback_bounces_to_the_frontend_on_user_denial() {
         state: None,
         error: Some("access_denied".to_string()),
     };
-    let resp = github_broader_callback(State(state), Extensions::new(), Query(query)).await;
+    let resp = github_broader_callback(State(state), Extensions::new(), AuditedQuery(query)).await;
     assert_eq!(resp.status(), StatusCode::FOUND);
     assert_eq!(
         location(&resp),
@@ -245,7 +245,7 @@ async fn callback_maps_a_rejected_exchange_to_401_html() {
         state: Some(signed_broader_state()),
         error: None,
     };
-    let resp = github_broader_callback(State(state), Extensions::new(), Query(query)).await;
+    let resp = github_broader_callback(State(state), Extensions::new(), AuditedQuery(query)).await;
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
@@ -256,8 +256,12 @@ async fn callback_is_503_when_unconfigured() {
         state: Some("s".to_string()),
         error: None,
     };
-    let resp =
-        github_broader_callback(State(unconfigured_state()), Extensions::new(), Query(query)).await;
+    let resp = github_broader_callback(
+        State(unconfigured_state()),
+        Extensions::new(),
+        AuditedQuery(query),
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
 
@@ -281,7 +285,7 @@ async fn callback_fails_closed_when_the_identity_check_fails_after_a_good_exchan
         state: Some(signed_broader_state()),
         error: None,
     };
-    let resp = github_broader_callback(State(state), Extensions::new(), Query(query)).await;
+    let resp = github_broader_callback(State(state), Extensions::new(), AuditedQuery(query)).await;
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     assert!(
         resp.headers().get(header::LOCATION).is_none(),
@@ -314,7 +318,7 @@ async fn callback_records_the_verified_identity_without_the_token() {
     let resp = github_broader_callback(
         State(broader_state(&server.uri())),
         extensions,
-        Query(query),
+        AuditedQuery(query),
     )
     .await;
     assert_eq!(resp.status(), StatusCode::FOUND);

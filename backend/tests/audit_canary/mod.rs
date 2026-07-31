@@ -13,6 +13,8 @@
 
 #![allow(dead_code)]
 
+pub mod log_bundle;
+
 use axum::body::Body;
 use axum::http::Request;
 use fkst_control_plane::audit::projection::EventLimits;
@@ -30,6 +32,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// The verified caller every authenticated canary request acts as.
 pub const LOGIN: &str = "octocat";
+/// That caller's immutable GitHub id, as the mocked `/user` reports it.
+pub const USER_ID: i64 = 583_231;
 /// The webhook secret the harness signs deliveries with.
 pub const WEBHOOK_SECRET: &str = "canary-webhook-secret";
 /// A signature that cannot verify against any secret.
@@ -89,14 +93,17 @@ pub fn sign(body: &str) -> String {
 pub struct Canary {
     router: axum::Router,
     sink: RecordingSink,
-    /// Kept alive for the duration of the harness: dropping it stops the mock.
+    /// Kept alive for the duration of the harness: dropping either stops that
+    /// mock, and every canary request needs both.
     _github: MockServer,
+    _storage: MockServer,
 }
 
 impl Canary {
     /// A deployment whose identity checks resolve `LOGIN`, whose access policy
-    /// admits only that login, and whose browser-login + webhook surfaces are
-    /// configured so their canary paths reach real handlers.
+    /// admits only that login, whose browser-login + webhook surfaces are
+    /// configured so their canary paths reach real handlers, and whose log
+    /// storage really serves a bundle to that caller (see [`log_bundle`]).
     ///
     /// Every OTHER GitHub call the handlers make lands on the same mock and gets
     /// a body carrying an upstream canary — proving an upstream response can
@@ -107,7 +114,7 @@ impl Canary {
             .and(path("/user"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "login": LOGIN,
-                "id": 583_231,
+                "id": USER_ID,
             })))
             .mount(&github)
             .await;
@@ -135,6 +142,7 @@ impl Canary {
         config.log.public_base_url = Some("https://api.example.test".to_string());
         config.log.frontend_url = Some("https://app.example.test".to_string());
 
+        let (storage, storage_server) = log_bundle::storage().await;
         let (audit, sink) = AuditHandle::recording();
         let router = build_router(AppState {
             config,
@@ -145,8 +153,8 @@ impl Canary {
             )),
             reconciler: None,
             session_backend: None,
-            storage: None,
-            session_access: Default::default(),
+            storage: Some(storage),
+            session_access: log_bundle::access(LOGIN, USER_ID),
             log_bundle_cache: Default::default(),
             disposable_environments: Default::default(),
             self_router: empty_self_router(),
@@ -159,6 +167,7 @@ impl Canary {
             router,
             sink,
             _github: github,
+            _storage: storage_server,
         }
     }
 
@@ -226,14 +235,20 @@ impl Canary {
                     .expect("request builds"),
             )
             .await;
-        let bytes = response
-            .into_body()
-            .collect()
-            .await
-            .expect("collect metrics body")
-            .to_bytes();
-        String::from_utf8_lossy(&bytes).into_owned()
+        body_text(response).await
     }
+}
+
+/// A response body as text, for the assertions that must prove a canary really
+/// was served before proving it was not recorded.
+pub async fn body_text(response: axum::response::Response) -> String {
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect response body")
+        .to_bytes();
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 /// A create-session body carrying a canary in every free-text location.
@@ -343,11 +358,25 @@ pub async fn plant_every_canary(canary: &Canary) {
 
     // A requested log PATH (the archive is matched on it, so an unmatched one is
     // a probe string).
+    let session = log_bundle::SESSION;
     canary
-        .call(canary.authenticated(Request::get(
-            "/api/v1/logs/8f0a1c22-6b1e-11ee-9d0e-2f7a1b3c4d5e/file\
-             ?path=canary-log-path&tail_bytes=4096",
-        )))
+        .call(canary.authenticated(Request::get(format!(
+            "/api/v1/logs/{session}/file?path=canary-log-path&tail_bytes=4096"
+        ))))
+        .await;
+
+    // A log file that really EXISTS: the bundle is fetched, decompressed, and
+    // its canary-bearing content written into the response.
+    canary
+        .call(canary.authenticated(Request::get(format!(
+            "/api/v1/logs/{session}/file?path={}&tail_bytes=4096",
+            log_bundle::FILE_PATH
+        ))))
+        .await;
+
+    // …and the whole bundle, streamed as an attachment carrying the same bytes.
+    canary
+        .call(canary.authenticated(Request::get(format!("/api/v1/logs/{session}"))))
         .await;
 
     // A rejected webhook delivery: everything it claims is attacker-controlled.

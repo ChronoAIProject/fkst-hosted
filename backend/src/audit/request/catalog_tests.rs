@@ -222,6 +222,54 @@ fn an_operation_without_an_explicit_policy_fails_the_build() {
     );
 }
 
+/// The OTHER half of the decision, guarded on its own: an operation that is
+/// recorded but never chose an argument boundary must fail the build too.
+///
+/// The real table cannot express this — [`audited`] always pairs `Audited` with
+/// a named DTO — so the declaration is written out by hand here. Without this
+/// case the branch would be code nobody has ever seen execute.
+#[test]
+fn an_audited_operation_without_an_argument_policy_fails_the_build() {
+    const NO_ARGUMENT_POLICY: &[AuditOperation] = &[AuditOperation {
+        operation_id: "audited_but_undecided",
+        policy: OperationPolicy::Audited,
+        arguments: ArgumentsPolicy::NotRecorded,
+    }];
+    let error = OperationCatalog::from_openapi_with(
+        &doc(&[(HttpMethod::Get, "/new", Some("audited_but_undecided"))]),
+        NO_ARGUMENT_POLICY,
+    )
+    .expect_err("an audited operation with no argument policy must fail the build");
+    assert_eq!(
+        error,
+        CatalogError::MissingArgumentPolicy {
+            operation_id: "audited_but_undecided".to_string()
+        }
+    );
+    // The message has to name the fix, because it is read by whoever added the
+    // endpoint, in CI, with no other context.
+    let rendered = error.to_string();
+    assert!(rendered.contains("audited_but_undecided"), "{rendered}");
+    assert!(rendered.contains("ArgumentsPolicy::Safe"), "{rendered}");
+}
+
+/// The same declaration, with the argument half supplied, builds — so the case
+/// above fails for the stated reason and not because the fixture was broken.
+#[test]
+fn the_same_operation_builds_once_it_declares_an_argument_policy() {
+    const DECIDED: &[AuditOperation] = &[AuditOperation {
+        operation_id: "audited_but_undecided",
+        policy: OperationPolicy::Audited,
+        arguments: ArgumentsPolicy::None,
+    }];
+    let catalog = OperationCatalog::from_openapi_with(
+        &doc(&[(HttpMethod::Get, "/new", Some("audited_but_undecided"))]),
+        DECIDED,
+    )
+    .expect("both halves of the decision exist");
+    assert_eq!(catalog.len(), 1);
+}
+
 #[test]
 fn lookup_reports_the_declared_operations() {
     let catalog = catalog(&[

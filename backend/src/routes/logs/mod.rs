@@ -48,7 +48,7 @@ mod run_list;
 // decompressed (optionally tailed) file, both identity-gated by `authorize`.
 mod viewer;
 
-use axum::extract::{Path, Query, State};
+use axum::extract::State;
 use axum::http::{header, Extensions, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
@@ -59,7 +59,7 @@ use utoipa_axum::routes;
 pub(crate) use authorize::authorize;
 
 use crate::audit::arguments::logs::{LogDownloadMode, SafeDownloadSessionLogs};
-use crate::audit::arguments::record_safe;
+use crate::audit::arguments::{record_safe, AuditedPath, AuditedQuery};
 use crate::audit::request::with_context;
 use crate::error::{AppError, ErrorEnvelope};
 use crate::session_pod::log_stream::runs;
@@ -118,8 +118,8 @@ pub struct RunQuery {
 async fn download_session_logs(
     State(state): State<AppState>,
     extensions: Extensions,
-    Path(session_id): Path<String>,
-    Query(query): Query<RunQuery>,
+    AuditedPath(session_id): AuditedPath<String>,
+    AuditedQuery(query): AuditedQuery<RunQuery>,
     headers: HeaderMap,
 ) -> Response {
     let mode = match bearer_token(&headers) {

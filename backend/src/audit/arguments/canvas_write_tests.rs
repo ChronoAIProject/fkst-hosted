@@ -284,6 +284,41 @@ fn a_work_item_record_carries_the_resolved_label_and_only_text_sizes() {
     );
 }
 
+/// The handler records this shape BEFORE the reads that resolve the session's
+/// effective label — and can therefore refuse the request. Everything else is
+/// present; the label is simply absent until the refinement supplies it, which
+/// is what makes the later write a pure addition.
+#[test]
+fn a_work_item_recorded_before_its_label_resolves_omits_only_the_label() {
+    let values = properties(
+        &CreateWorkItemInput {
+            owner: "acme",
+            repo: "site",
+            trigger_issue: 42,
+            selected_label: "",
+            title: "canary-work-item-title",
+            body: "canary-work-item-body",
+        }
+        .to_safe_audit_arguments(),
+    );
+    assert!(
+        !values.contains_key("selected_label"),
+        "an unresolved label is omitted, never guessed from the request"
+    );
+    assert_eq!(string(&values, "owner").as_deref(), Some("acme"));
+    assert_eq!(string(&values, "repo").as_deref(), Some("site"));
+    assert_eq!(
+        values
+            .get("title_bytes")
+            .and_then(serde_json::Value::as_u64),
+        Some("canary-work-item-title".len() as u64)
+    );
+    assert_eq!(
+        values.get("body_present").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+}
+
 #[test]
 fn a_body_less_work_item_reports_a_zero_size() {
     let values = properties(

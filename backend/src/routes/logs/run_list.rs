@@ -13,12 +13,12 @@
 //! `latest.tar.gz` is surfaced as one synthetic run with id `latest`, so `?run=latest`
 //! keeps working for them.
 
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::Extensions;
 use axum::Json;
 
 use crate::audit::arguments::logs::SafeListSessionRuns;
-use crate::audit::arguments::record_safe;
+use crate::audit::arguments::{record_safe, AuditedPath};
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
 use crate::session_pod::log_stream::runs::{self, LogRun};
@@ -44,7 +44,7 @@ use crate::storage::StorageError;
 pub(super) async fn list_session_runs(
     State(state): State<AppState>,
     extensions: Extensions,
-    Path(session_id): Path<String>,
+    AuditedPath(session_id): AuditedPath<String>,
     user: GithubUser,
 ) -> Result<Json<Vec<LogRun>>, AppError> {
     // Recorded before authorization, so a denied read still describes which

@@ -19,7 +19,7 @@
 
 use std::collections::HashSet;
 
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::{header, Extensions, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::audit::arguments::canvas::{OutcomeBlobInput, SafeCanvasSessionOutcomes};
-use crate::audit::arguments::{record, record_safe, AuditedQuery};
+use crate::audit::arguments::{record, record_safe, AuditedPath, AuditedQuery};
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_app::GithubAppError;
 use crate::github_identity::GithubUser;
@@ -132,7 +132,7 @@ pub struct BlobQuery {
 pub(super) async fn session_outcomes(
     State(state): State<AppState>,
     extensions: Extensions,
-    Path((owner, name, issue_number)): Path<(String, String, i64)>,
+    AuditedPath((owner, name, issue_number)): AuditedPath<(String, String, i64)>,
     user: GithubUser,
     headers: HeaderMap,
 ) -> Result<Json<SessionOutcomes>, AppError> {
@@ -285,7 +285,7 @@ pub(super) async fn session_outcomes(
 pub(super) async fn outcome_blob(
     State(state): State<AppState>,
     extensions: Extensions,
-    Path((owner, name, sha)): Path<(String, String, String)>,
+    AuditedPath((owner, name, sha)): AuditedPath<(String, String, String)>,
     AuditedQuery(query): AuditedQuery<BlobQuery>,
     user: GithubUser,
     headers: HeaderMap,

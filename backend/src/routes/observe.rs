@@ -18,7 +18,7 @@
 //! Secret hygiene: the snapshot carries no credentials; error envelopes carry
 //! fixed, generic messages (backend failure detail stays in the logs).
 
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::Extensions;
 use axum::Json;
 use serde::Deserialize;
@@ -27,7 +27,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::audit::arguments::logs::SafeObserveSession;
-use crate::audit::arguments::{record_safe, AuditedQuery};
+use crate::audit::arguments::{record_safe, AuditedPath, AuditedQuery};
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
 use crate::session_backend::ObserveError;
@@ -69,7 +69,7 @@ pub struct ObserveQuery {
 async fn observe_session(
     State(state): State<AppState>,
     extensions: Extensions,
-    Path(session_id): Path<String>,
+    AuditedPath(session_id): AuditedPath<String>,
     AuditedQuery(query): AuditedQuery<ObserveQuery>,
     user: GithubUser,
 ) -> Result<Json<serde_json::Value>, AppError> {

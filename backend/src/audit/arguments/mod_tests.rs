@@ -188,6 +188,72 @@ fn recording_without_a_context_is_harmless() {
     record_invalid(&extensions, &InvalidInput::default());
 }
 
+/// A DTO with an optional late-resolved property, mirroring the one handler
+/// shape [`refine_safe`] exists for.
+#[derive(Serialize)]
+struct LateArguments {
+    allowed: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    late: Option<&'static str>,
+}
+
+impl BoundedAuditArguments for LateArguments {
+    const OPERATION_ID: &'static str = "test_late_operation";
+    const ALLOWED_FIELDS: &'static [&'static str] = &["allowed", "late"];
+}
+
+/// Recording early and refining late keeps the early properties AND adds the one
+/// the handler could only resolve afterwards.
+#[test]
+fn a_refinement_completes_an_early_record() {
+    let (context, extensions) = context();
+    record_safe(
+        &extensions,
+        &LateArguments {
+            allowed: "kept",
+            late: None,
+        },
+    );
+    refine_safe(
+        &extensions,
+        &LateArguments {
+            allowed: "kept",
+            late: Some("resolved"),
+        },
+    );
+    let frozen = context.freeze();
+    assert_eq!(
+        frozen.arguments.get("allowed").and_then(|v| v.as_str()),
+        Some("kept")
+    );
+    assert_eq!(
+        frozen.arguments.get("late").and_then(|v| v.as_str()),
+        Some("resolved")
+    );
+    assert_eq!(frozen.conflicts, 0);
+}
+
+/// A refinement is still filtered by the allowlist: it is not a side door around
+/// the one control that makes the boundary checkable.
+#[test]
+fn a_refinement_is_allowlisted_like_any_other_write() {
+    let (context, extensions) = context();
+    refine_safe(
+        &extensions,
+        &LeakyArguments {
+            allowed: "kept",
+            undocumented: "canary-undocumented-value",
+        },
+    );
+    let frozen = context.freeze();
+    assert_eq!(frozen.arguments.len(), 1);
+    let rendered = serde_json::to_string(&frozen.arguments).expect("serializes");
+    assert!(
+        !rendered.contains("canary-undocumented-value"),
+        "{rendered}"
+    );
+}
+
 /// Two writers disagreeing about one request's arguments is a programmer error:
 /// the FIRST value is kept and the conflict is counted, never merged.
 #[test]

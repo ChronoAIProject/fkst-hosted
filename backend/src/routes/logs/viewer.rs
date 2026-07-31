@@ -20,7 +20,7 @@
 
 use std::io::{Cursor, Read};
 
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::Extensions;
 use axum::Json;
 use flate2::read::GzDecoder;
@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::audit::arguments::logs::{SafeSessionLogManifest, SessionLogFileInput};
-use crate::audit::arguments::{record, record_safe, AuditedQuery};
+use crate::audit::arguments::{record, record_safe, AuditedPath, AuditedQuery};
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
 use crate::state::AppState;
@@ -112,7 +112,7 @@ pub struct LogFileQuery {
 pub(super) async fn log_manifest(
     State(state): State<AppState>,
     extensions: Extensions,
-    Path(session_id): Path<String>,
+    AuditedPath(session_id): AuditedPath<String>,
     AuditedQuery(query): AuditedQuery<super::RunQuery>,
     user: GithubUser,
 ) -> Result<Json<LogManifest>, AppError> {
@@ -166,7 +166,7 @@ pub(super) async fn log_manifest(
 pub(super) async fn log_file(
     State(state): State<AppState>,
     extensions: Extensions,
-    Path(session_id): Path<String>,
+    AuditedPath(session_id): AuditedPath<String>,
     AuditedQuery(query): AuditedQuery<LogFileQuery>,
     user: GithubUser,
 ) -> Result<Json<LogFileContent>, AppError> {

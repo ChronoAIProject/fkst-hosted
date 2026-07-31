@@ -6,7 +6,8 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use crate::audit::arguments::AuditedPath;
+use axum::extract::State;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use secrecy::SecretString;
@@ -161,7 +162,7 @@ async fn manifest_lists_files_with_labels() {
     let Json(manifest) = log_manifest(
         State(st),
         axum::http::Extensions::new(),
-        Path(SESSION_ID.to_string()),
+        AuditedPath(SESSION_ID.to_string()),
         crate::audit::arguments::AuditedQuery(RunQuery { run: None }),
         author(),
     )
@@ -201,7 +202,7 @@ async fn file_returns_full_content_untruncated() {
     let Json(file) = log_file(
         State(st),
         axum::http::Extensions::new(),
-        Path(SESSION_ID.to_string()),
+        AuditedPath(SESSION_ID.to_string()),
         crate::audit::arguments::AuditedQuery(LogFileQuery {
             path: "fkst-substrate/codex/codex.log".to_string(),
             tail_bytes: None,
@@ -232,7 +233,7 @@ async fn file_tail_snaps_to_a_line_boundary() {
     let Json(file) = log_file(
         State(st),
         axum::http::Extensions::new(),
-        Path(SESSION_ID.to_string()),
+        AuditedPath(SESSION_ID.to_string()),
         crate::audit::arguments::AuditedQuery(LogFileQuery {
             path: "fkst-substrate/codex/codex.log".to_string(),
             tail_bytes: Some(7),
@@ -261,7 +262,7 @@ async fn file_tail_larger_than_file_returns_all() {
     let Json(file) = log_file(
         State(st),
         axum::http::Extensions::new(),
-        Path(SESSION_ID.to_string()),
+        AuditedPath(SESSION_ID.to_string()),
         crate::audit::arguments::AuditedQuery(LogFileQuery {
             path: "fkst-substrate/codex/codex.log".to_string(),
             tail_bytes: Some(9999),
@@ -288,7 +289,7 @@ async fn file_unknown_path_is_404() {
     let err = log_file(
         State(st),
         axum::http::Extensions::new(),
-        Path(SESSION_ID.to_string()),
+        AuditedPath(SESSION_ID.to_string()),
         crate::audit::arguments::AuditedQuery(LogFileQuery {
             path: "../../etc/passwd".to_string(),
             tail_bytes: None,
@@ -319,7 +320,7 @@ async fn manifest_unauthorized_is_403() {
     let err = log_manifest(
         State(st),
         axum::http::Extensions::new(),
-        Path(SESSION_ID.to_string()),
+        AuditedPath(SESSION_ID.to_string()),
         crate::audit::arguments::AuditedQuery(RunQuery { run: None }),
         stranger,
     )
@@ -341,7 +342,7 @@ async fn manifest_unknown_session_is_404() {
     let err = log_manifest(
         State(st),
         axum::http::Extensions::new(),
-        Path("does-not-exist".to_string()),
+        AuditedPath("does-not-exist".to_string()),
         crate::audit::arguments::AuditedQuery(RunQuery { run: None }),
         author(),
     )
@@ -361,7 +362,7 @@ async fn manifest_storage_not_configured_is_503() {
     let err = log_manifest(
         State(st),
         axum::http::Extensions::new(),
-        Path(SESSION_ID.to_string()),
+        AuditedPath(SESSION_ID.to_string()),
         crate::audit::arguments::AuditedQuery(RunQuery { run: None }),
         author(),
     )
@@ -391,7 +392,7 @@ async fn file_reads_the_requested_run_bundle_not_latest() {
     let Json(run_file) = log_file(
         State(st.clone()),
         axum::http::Extensions::new(),
-        Path(SESSION_ID.to_string()),
+        AuditedPath(SESSION_ID.to_string()),
         crate::audit::arguments::AuditedQuery(LogFileQuery {
             path: "fkst-hosted/driver.log".to_string(),
             tail_bytes: None,
@@ -407,7 +408,7 @@ async fn file_reads_the_requested_run_bundle_not_latest() {
     let Json(latest_file) = log_file(
         State(st),
         axum::http::Extensions::new(),
-        Path(SESSION_ID.to_string()),
+        AuditedPath(SESSION_ID.to_string()),
         crate::audit::arguments::AuditedQuery(LogFileQuery {
             path: "fkst-hosted/driver.log".to_string(),
             tail_bytes: None,

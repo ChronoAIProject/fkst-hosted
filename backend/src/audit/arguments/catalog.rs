@@ -19,9 +19,12 @@
 //!
 //! The spec's table names `package_refs[]` / `package_count`; the same spec
 //! separately requires an over-long list to keep `count`, a bounded prefix, and
-//! `truncated=true`. The `*_truncated` keys are that marker, emitted only when a
-//! list really was clipped, so a reader can never mistake a prefix for the whole
-//! request.
+//! `truncated=true`. The `*_truncated` keys are that marker: they say the
+//! recorded list is NOT the whole request, so a reader can never mistake a
+//! partial list for the complete one. "Not the whole request" covers both ways
+//! that happens — the list was clipped to its cap, or the strict parser refused
+//! an entry (see [`super::bounds::bounded_list`]) — because a reader comparing
+//! the list against `count` needs the same warning in either case.
 
 /// One operation's safe-argument policy: the DTO that produces it, and the exact
 /// property names it may emit.

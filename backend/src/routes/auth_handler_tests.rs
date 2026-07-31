@@ -92,7 +92,7 @@ async fn a_successful_callback_verifies_the_identity_before_redirecting() {
     let response = github_login_callback(
         State(login_state(&server.uri())),
         extensions,
-        Query(callback_query(signed_login_state())),
+        AuditedQuery(callback_query(signed_login_state())),
     )
     .await;
     assert_eq!(response.status(), StatusCode::FOUND);
@@ -126,7 +126,7 @@ async fn a_callback_whose_identity_check_fails_hands_the_spa_nothing() {
     let response = github_login_callback(
         State(login_state(&server.uri())),
         Extensions::new(),
-        Query(callback_query(signed_login_state())),
+        AuditedQuery(callback_query(signed_login_state())),
     )
     .await;
     assert_eq!(
@@ -148,7 +148,7 @@ async fn a_tampered_state_never_reaches_the_exchange_or_the_identity_check() {
     let response = github_login_callback(
         State(login_state(&server.uri())),
         Extensions::new(),
-        Query(callback_query("login:1700000000.deadbeef".to_string())),
+        AuditedQuery(callback_query("login:1700000000.deadbeef".to_string())),
     )
     .await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);

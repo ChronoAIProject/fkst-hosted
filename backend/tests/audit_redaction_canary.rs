@@ -65,6 +65,43 @@ async fn no_canary_reaches_a_record_or_its_posthog_payload() {
     assert_no_canaries(&canary);
 }
 
+/// The CONTENT half of the log canary, which only means something if the read
+/// really happened: the served response must carry the canary, and the record
+/// must carry the file's CLASS instead.
+#[tokio::test]
+async fn a_served_log_file_keeps_its_content_out_of_the_record() {
+    let canary = Canary::start().await;
+    let response = canary
+        .call(canary.authenticated(axum::http::Request::get(format!(
+            "/api/v1/logs/{}/file?path={}&tail_bytes=4096",
+            audit_canary::log_bundle::SESSION,
+            audit_canary::log_bundle::FILE_PATH
+        ))))
+        .await;
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let served = audit_canary::body_text(response).await;
+    assert!(
+        served.contains(audit_canary::log_bundle::FILE_CONTENT),
+        "the fixture must actually serve the canary, or this test proves nothing: {served}"
+    );
+
+    let event = canary.event("session_log_file");
+    let rendered = audit_canary::rendered(&event);
+    assert!(
+        !rendered.contains(audit_canary::log_bundle::FILE_CONTENT),
+        "log content reached the record:\n{rendered}"
+    );
+    assert!(
+        !rendered.contains(audit_canary::log_bundle::FILE_PATH),
+        "the requested path reached the record:\n{rendered}"
+    );
+    // What it DOES carry: the bundle's own bounded class for that path.
+    assert_eq!(
+        event.arguments.get("file_class"),
+        Some(&serde_json::json!("codex"))
+    );
+}
+
 /// The metrics exposition is a separate surface with its own label rules (epic
 /// `OPS-04`): no request value may become a label there either.
 #[tokio::test]
@@ -84,22 +121,29 @@ async fn no_canary_reaches_the_metrics_exposition() {
     }
 }
 
-/// Two canaries reach an APPLICATION log line by existing, deliberate design,
+/// Three canaries reach an APPLICATION log line by existing, deliberate design,
 /// and are therefore excluded from the trace assertion below rather than
 /// silently passing:
 ///
 /// - `canary-upstream-body` — a GitHub error body the handlers surface at `warn`
 ///   so an operator can diagnose a GitHub outage;
-/// - `canary-invalid-branch` — part of an `AppError` message, which
-///   [`fkst_control_plane::error`] logs at `debug`. The message quotes the
+/// - `canary-invalid-branch` and `canary-log-path` — part of an `AppError`
+///   message ("branch `…` is invalid", "no such log file: …"), which
+///   [`fkst_control_plane::error`] logs at `debug`. Each message quotes the
 ///   CALLER'S OWN rejected input back to them; it is neither a credential nor
 ///   another user's data.
 ///
-/// Neither is an audit property: both are covered — and asserted absent — by
-/// [`no_canary_reaches_a_record_or_its_posthog_payload`], which excludes
-/// nothing. What this test proves is the narrower, harder property: no request
-/// value reaches the request SPAN or the audit pipeline's own log lines.
-const TRACED_BY_DESIGN: &[&str] = &["canary-upstream-body", "canary-invalid-branch"];
+/// None of them is an audit property: all three are covered — and asserted
+/// absent — by [`no_canary_reaches_a_record_or_its_posthog_payload`], which
+/// excludes nothing, and the log path is separately proven to be replaced by its
+/// class in `audit_safe_arguments`. What this test proves is the narrower,
+/// harder property: no request value reaches the request SPAN or the audit
+/// pipeline's own log lines.
+const TRACED_BY_DESIGN: &[&str] = &[
+    "canary-upstream-body",
+    "canary-invalid-branch",
+    "canary-log-path",
+];
 
 /// Structured logging at TRACE, the most verbose level anything is ever run at.
 #[tokio::test]
