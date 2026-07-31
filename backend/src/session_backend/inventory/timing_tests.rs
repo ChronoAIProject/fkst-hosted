@@ -18,6 +18,7 @@ fn policy(max: u64) -> RuntimeLifetimePolicy {
         minimum_lifetime_seconds: 120,
         idle_grace_seconds: 300,
         max_items: 5000,
+        max_warnings: 256,
     }
 }
 

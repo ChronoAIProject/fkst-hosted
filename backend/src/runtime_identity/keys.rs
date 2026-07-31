@@ -47,8 +47,37 @@ pub const SOURCE_LAUNCH_METADATA: &str = "launch_metadata";
 /// being current.
 pub const SOURCE_BACKFILLED_CURRENT_TRIGGER: &str = "backfilled_current_trigger";
 
+/// Which attribution fact disagreed, in a BACKEND-NEUTRAL spelling.
+///
+/// The conflict marker's VALUE cannot be the offending backend key string: a
+/// Kubernetes annotation key (`fkst.chrono-ai.fun/creator-id`) contains a `/`,
+/// which OpenSandbox metadata — bound by the Kubernetes label-VALUE contract —
+/// rejects, and a per-backend spelling would make the same disagreement read
+/// differently depending on where the session happened to run. These four names
+/// are label-value-safe and identical on both backends.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IdentityField {
+    Schema,
+    CreatorId,
+    CreatorLogin,
+    TriggerAuthorId,
+    TriggerAuthorLogin,
+}
+
+impl IdentityField {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            IdentityField::Schema => "identity-schema",
+            IdentityField::CreatorId => "creator-id",
+            IdentityField::CreatorLogin => "creator-login",
+            IdentityField::TriggerAuthorId => "trigger-author-id",
+            IdentityField::TriggerAuthorLogin => "trigger-author-login",
+        }
+    }
+}
+
 /// The metadata keys one backend spells its identity stamp with: the five
-/// attribution keys plus the provenance marker that says where they came from.
+/// attribution keys plus the two markers that describe the stamp itself.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct IdentityKeys {
     pub schema: &'static str,
@@ -60,12 +89,24 @@ pub struct IdentityKeys {
     /// / [`SOURCE_BACKFILLED_CURRENT_TRIGGER`]. Never an attribution value, so
     /// it never participates in the conflict comparison.
     pub source: &'static str,
+    /// The DURABLE record that this runtime's stamp was observed to disagree
+    /// with its trigger, holding the [`IdentityField`] that disagreed.
+    ///
+    /// It exists because a disagreement is otherwise knowable only to the process
+    /// that compared the stamp against a freshly parsed registration — and the
+    /// operations inventory ([`crate::session_backend::inventory`]) deliberately
+    /// reads runtimes ALONE, with no registration to compare against. Without a
+    /// durable marker a conflicted runtime would report `launch_metadata` to
+    /// exactly the global admin the epic promises can identify it. Written only
+    /// by the backfill sweep, only when absent, and never alongside an
+    /// attribution value.
+    pub conflict: &'static str,
 }
 
 impl IdentityKeys {
     /// Every key, in stamp order. Used by the round-trip tests and by the
     /// backfill planner, so a key added to the struct cannot be forgotten.
-    pub fn all(&self) -> [&'static str; 6] {
+    pub fn all(&self) -> [&'static str; 7] {
         [
             self.schema,
             self.creator_id,
@@ -73,6 +114,7 @@ impl IdentityKeys {
             self.trigger_author_id,
             self.trigger_author_login,
             self.source,
+            self.conflict,
         ]
     }
 }
@@ -86,6 +128,7 @@ pub const K8S_IDENTITY_KEYS: IdentityKeys = IdentityKeys {
     trigger_author_id: "fkst.chrono-ai.fun/trigger-author-id",
     trigger_author_login: "fkst.chrono-ai.fun/trigger-author-login",
     source: "fkst.chrono-ai.fun/identity-source",
+    conflict: "fkst.chrono-ai.fun/identity-conflict",
 };
 
 /// OpenSandbox sandbox METADATA keys, sharing the flat `fkst-` convention of the
@@ -97,6 +140,7 @@ pub const OSB_IDENTITY_KEYS: IdentityKeys = IdentityKeys {
     trigger_author_id: "fkst-trigger-author-id",
     trigger_author_login: "fkst-trigger-author-login",
     source: "fkst-identity-source",
+    conflict: "fkst-identity-conflict",
 };
 
 /// Render `identity` into `(key, value)` pairs for `keys`.
@@ -105,6 +149,10 @@ pub const OSB_IDENTITY_KEYS: IdentityKeys = IdentityKeys {
 /// placeholder string: an absent `creator-id` key is the explicit, recoverable
 /// representation of an assignee-derived creator, and an empty string would be
 /// both an invalid Kubernetes label value and a lie about what is known.
+///
+/// [`IdentityKeys::conflict`] is never rendered here: a launch stamp is the
+/// first word on a runtime's attribution and therefore cannot disagree with
+/// anything yet.
 pub fn stamp_pairs(
     keys: &IdentityKeys,
     identity: &RuntimeIdentityMetadata,
@@ -140,6 +188,10 @@ pub fn stamp_pairs(
 /// [`ObservedRuntimeIdentity::malformed`] instead of silently reading as absent:
 /// a corrupted stamp must never be mistaken for the legitimate "assignee-derived
 /// creator has no id" state, which the backfill planner treats very differently.
+///
+/// [`ObservedRuntimeIdentity::conflicting`] comes from the durable conflict
+/// marker, which is what lets a reader holding ONLY the runtime — the operations
+/// inventory — report a disagreement that a long-gone reconcile pass detected.
 pub fn read(keys: &IdentityKeys, metadata: &BTreeMap<String, String>) -> ObservedRuntimeIdentity {
     let mut malformed = false;
     let mut id = |key: &str| -> Option<i64> {
@@ -161,7 +213,7 @@ pub fn read(keys: &IdentityKeys, metadata: &BTreeMap<String, String>) -> Observe
         trigger_author_id,
         trigger_author_login: non_empty(metadata.get(keys.trigger_author_login)),
         source: non_empty(metadata.get(keys.source)),
-        conflicting: false,
+        conflicting: non_empty(metadata.get(keys.conflict)).is_some(),
         malformed,
     }
 }

@@ -12,8 +12,22 @@
 //! metadata was tampered with. Neither is resolved by writing the OTHER keys:
 //! that would produce a runtime whose attribution is half from launch and half
 //! from now, with nothing recording which half is which. So a conflict yields
-//! [`IdentityPlan::Conflict`], writes nothing, and is surfaced as
+//! [`IdentityPlan::Conflict`], writes no ATTRIBUTION value, and is surfaced as
 //! [`AttributionSource::Conflict`](super::AttributionSource::Conflict).
+//!
+//! ## Why a conflict nevertheless writes one key
+//!
+//! "Writes nothing at all" would make the disagreement live and die inside the
+//! process that noticed it. The operations inventory reads runtimes ALONE — it
+//! holds no registration to compare against — so it could only ever report the
+//! stamp at face value, and a global admin would see `launch_metadata` on
+//! precisely the runtime whose attribution is disputed. The conflict therefore
+//! writes ONE marker key ([`IdentityKeys::conflict`]), holding the neutral name
+//! of the field that disagreed and never either value. It is additive (no
+//! attribution value is touched), written once (an existing marker is left
+//! exactly as it is, so a repeating sweep cannot re-patch), and STICKY: an
+//! observed disagreement is a fact about that runtime incarnation, and an audit
+//! trail does not un-record one because the trigger was later edited back.
 //!
 //! ## Why a missing desired value never conflicts
 //!
@@ -35,7 +49,9 @@
 
 use std::collections::BTreeMap;
 
-use super::keys::{IdentityKeys, IDENTITY_SCHEMA_VERSION, SOURCE_BACKFILLED_CURRENT_TRIGGER};
+use super::keys::{
+    IdentityField, IdentityKeys, IDENTITY_SCHEMA_VERSION, SOURCE_BACKFILLED_CURRENT_TRIGGER,
+};
 use super::{ObservedRuntimeIdentity, RuntimeIdentityMetadata};
 
 /// What a backfill attempt should do to one runtime.
@@ -45,10 +61,17 @@ pub enum IdentityPlan {
     Complete,
     /// Absent keys that may be added. Never contains a key already present.
     Backfill(Vec<(&'static str, String)>),
-    /// A present value disagrees with the registration. Carries the offending
-    /// KEY NAME — a bounded, non-secret string safe for a log line, and never
-    /// the two values themselves.
-    Conflict { key: &'static str },
+    /// A present value disagrees with the registration.
+    Conflict {
+        /// The offending KEY NAME — a bounded, non-secret string safe for a log
+        /// line, and never the two values themselves.
+        key: &'static str,
+        /// The durable conflict marker to write, or `None` when the runtime
+        /// already carries one. Writing it is what lets a later reader holding
+        /// only the runtime report the disagreement (see the module docs); it
+        /// is the ONLY key a conflict ever writes.
+        marker: Option<(&'static str, String)>,
+    },
 }
 
 /// Decide what, if anything, to write onto a runtime whose metadata is
@@ -59,11 +82,13 @@ pub fn plan(
     desired: &RuntimeIdentityMetadata,
 ) -> IdentityPlan {
     // Every stampable key with the value the registration would write, in the
-    // same order `stamp_pairs` uses. `None` means "the registration makes no
+    // same order `stamp_pairs` uses, each paired with its backend-neutral field
+    // name (the conflict marker's value). `None` means "the registration makes no
     // claim about this key" — which can never conflict and can never backfill.
-    let claims: [(&'static str, Option<String>, Comparison); 5] = [
+    let claims: [(&'static str, IdentityField, Option<String>, Comparison); 5] = [
         (
             keys.schema,
+            IdentityField::Schema,
             Some(IDENTITY_SCHEMA_VERSION.to_string()),
             // A schema version stamped by a different (future) contract version
             // is not an attribution disagreement: it says the runtime was
@@ -72,33 +97,44 @@ pub fn plan(
         ),
         (
             keys.creator_id,
+            IdentityField::CreatorId,
             desired.creator_id.map(|id| id.to_string()),
             Comparison::Exact,
         ),
         (
             keys.creator_login,
+            IdentityField::CreatorLogin,
             non_empty(&desired.creator_login),
             Comparison::CaseInsensitive,
         ),
         (
             keys.trigger_author_id,
+            IdentityField::TriggerAuthorId,
             Some(desired.trigger_author_id.to_string()),
             Comparison::Exact,
         ),
         (
             keys.trigger_author_login,
+            IdentityField::TriggerAuthorLogin,
             non_empty(&desired.trigger_author_login),
             Comparison::CaseInsensitive,
         ),
     ];
 
     let mut backfill = Vec::new();
-    for (key, claim, comparison) in claims {
+    for (key, field, claim, comparison) in claims {
         match (observed.get(key), claim) {
             // Present on both sides: the only place a conflict can arise.
             (Some(existing), Some(claimed)) => {
                 if comparison.disagrees(existing, &claimed) {
-                    return IdentityPlan::Conflict { key };
+                    return IdentityPlan::Conflict {
+                        key,
+                        // Recorded once and never rewritten: the FIRST observed
+                        // disagreement is the one worth keeping, and re-patching
+                        // every sweep would be an unbounded write loop.
+                        marker: (!observed.contains_key(keys.conflict))
+                            .then(|| (keys.conflict, field.as_str().to_string())),
+                    };
                 }
             }
             // Absent on the runtime and claimed by the registration: fill it.

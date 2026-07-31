@@ -305,7 +305,7 @@ impl SessionBackend for ChaosBackend {
         policy: &RuntimeLifetimePolicy,
     ) -> Result<RuntimeInventorySnapshot, BackendError> {
         let observed_at = Utc::now();
-        let mut warnings = WarningSink::default();
+        let mut warnings = WarningSink::new(policy.max_warnings);
         let backend = self.backend_kind();
         let items = self
             .runtimes

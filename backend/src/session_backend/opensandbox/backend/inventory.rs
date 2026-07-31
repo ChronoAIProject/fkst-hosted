@@ -50,7 +50,7 @@ impl OsbBackend {
         // ONE clock for the whole snapshot, taken after the walk so a slow page
         // traversal cannot make the first page's runtimes look negatively aged.
         let observed_at = Utc::now();
-        let mut warnings = WarningSink::default();
+        let mut warnings = WarningSink::new(policy.max_warnings);
         if page_walk_truncated {
             // The walk stopped short: say so rather than let a clipped fleet read
             // as the complete one.
@@ -141,5 +141,11 @@ fn parse_rfc3339(raw: &str) -> Option<DateTime<Utc>> {
 }
 
 #[cfg(test)]
+#[path = "inventory_safety_tests.rs"]
+mod inventory_safety_tests;
+#[cfg(test)]
+#[path = "inventory_test_fixtures.rs"]
+mod inventory_test_fixtures;
+#[cfg(test)]
 #[path = "inventory_tests.rs"]
-mod tests;
+mod inventory_tests;

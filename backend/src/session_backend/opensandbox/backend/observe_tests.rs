@@ -300,10 +300,40 @@ async fn a_disagreeing_stamp_is_reported_and_left_exactly_as_it_is() {
         .await
         .expect("a conflict is a decision, not an error");
     assert_eq!(outcome, RuntimeIdentityOutcome::Conflict);
-    assert!(
-        patched_metadata(&server).await.is_none(),
+    // The ONE key a conflict writes is the durable marker — which is what lets
+    // the fleet inventory, holding no registration, still report the dispute.
+    let body = patched_metadata(&server).await.expect("a marker patch");
+    let obj = body.as_object().expect("object body");
+    assert_eq!(obj["fkst-identity-conflict"], "creator-id");
+    assert_eq!(
+        obj.len(),
+        1,
         "a conflicting runtime must not be half-rewritten"
     );
+}
+
+#[tokio::test]
+async fn an_already_marked_conflict_is_not_patched_again() {
+    // The marker is sticky and written once; a sweep that keeps re-deciding the
+    // same unresolvable conflict must not keep writing.
+    let server = identity_server(sbx_with_identity(
+        "sbx-1",
+        SESSION_ID,
+        json!({
+            "fkst-identity-schema": "1",
+            "fkst-creator-id": "999999",
+            "fkst-trigger-author-id": "4242",
+            "fkst-identity-conflict": "creator-id",
+        }),
+    ))
+    .await;
+
+    let outcome = backend(&server.uri(), osb_config())
+        .ensure_runtime_identity_impl(SESSION_ID, &desired_identity())
+        .await
+        .expect("a conflict is a decision, not an error");
+    assert_eq!(outcome, RuntimeIdentityOutcome::Conflict);
+    assert!(patched_metadata(&server).await.is_none());
 }
 
 #[tokio::test]

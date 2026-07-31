@@ -92,6 +92,9 @@ pub fn build_item(
     if facts.identity.malformed {
         warn(warnings, InventoryWarningCode::MalformedIdentity);
     }
+    if facts.identity.conflicting {
+        warn(warnings, InventoryWarningCode::AttributionConflict);
+    }
     if facts.created_at_malformed {
         warn(warnings, InventoryWarningCode::MalformedCreatedAt);
     }

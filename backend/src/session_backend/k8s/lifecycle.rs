@@ -137,7 +137,7 @@ impl K8sBackend {
         let annotations = pod.metadata.annotations.clone().unwrap_or_default();
         let missing = match plan_identity(&K8S_IDENTITY_KEYS, &annotations, identity) {
             IdentityPlan::Complete => return Ok(RuntimeIdentityOutcome::Unchanged),
-            IdentityPlan::Conflict { key } => {
+            IdentityPlan::Conflict { key, marker } => {
                 // The KEY is a bounded constant; the two disagreeing VALUES are
                 // deliberately absent from the line.
                 tracing::warn!(
@@ -145,6 +145,10 @@ impl K8sBackend {
                     key = key,
                     "kubernetes runtime identity: stamped attribution disagrees with the current registration; leaving it untouched"
                 );
+                if let Some(marker) = marker {
+                    self.record_identity_conflict(session_id, &name, marker)
+                        .await;
+                }
                 return Ok(RuntimeIdentityOutcome::Conflict);
             }
             IdentityPlan::Backfill(missing) => missing,
@@ -166,6 +170,41 @@ impl K8sBackend {
             }
             Err(kube::Error::Api(e)) if e.code == 404 => Ok(RuntimeIdentityOutcome::NotFound),
             Err(error) => Err(BackendError::Other(anyhow::Error::new(error))),
+        }
+    }
+
+    /// Record the durable conflict marker on the named Pod.
+    ///
+    /// Best-effort by design: the CONFLICT is the true outcome of the operation
+    /// and must still be reported (and audited) even if this one additive
+    /// annotation cannot be written. A failure is logged, never propagated —
+    /// turning it into an error would replace a precise "attribution disputed"
+    /// lifecycle event with a generic patch failure. The gate's cooldown bounds
+    /// the retry: the next sweep after it expires re-plans and tries again.
+    async fn record_identity_conflict(
+        &self,
+        session_id: &str,
+        name: &str,
+        marker: (&'static str, String),
+    ) {
+        let (key, value) = marker;
+        let patch = identity_merge_patch(&[(key, value.clone())]);
+        match self
+            .pods_api()
+            .patch(name, &PatchParams::default(), &Patch::Merge(patch))
+            .await
+        {
+            Ok(_) => tracing::info!(
+                session_id = %session_id,
+                field = %value,
+                "kubernetes runtime identity: recorded a durable attribution-conflict marker"
+            ),
+            Err(error) => tracing::warn!(
+                session_id = %session_id,
+                error = %error,
+                "kubernetes runtime identity: could not record the attribution-conflict marker; \
+                 the conflict is still reported for this pass"
+            ),
         }
     }
 }

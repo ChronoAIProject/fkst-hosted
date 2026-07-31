@@ -21,6 +21,11 @@ pub enum InventoryWarningCode {
     MalformedCorrelation,
     /// The attribution stamp holds a non-integer id.
     MalformedIdentity,
+    /// The runtime carries a durable marker saying its stamped attribution was
+    /// observed to disagree with its trigger. The stamp is reported verbatim (it
+    /// is never silently rewritten); the warning is how a global admin finds the
+    /// disputed row without reading every attribution source by eye.
+    AttributionConflict,
     /// The runtime reports no creation timestamp, so age/expiry/idle cannot be
     /// derived. Substituting `now` is forbidden — it would make an old runtime
     /// look new.
@@ -53,6 +58,7 @@ impl InventoryWarningCode {
             InventoryWarningCode::MissingSessionId => "missing_session_id",
             InventoryWarningCode::MalformedCorrelation => "malformed_correlation",
             InventoryWarningCode::MalformedIdentity => "malformed_identity",
+            InventoryWarningCode::AttributionConflict => "attribution_conflict",
             InventoryWarningCode::MissingCreatedAt => "missing_created_at",
             InventoryWarningCode::MalformedCreatedAt => "malformed_created_at",
             InventoryWarningCode::MalformedLastPending => "malformed_last_pending",
@@ -95,13 +101,19 @@ impl BoundedInventoryWarning {
     }
 }
 
-/// The defensive ceiling on warnings per snapshot.
+/// The DEFAULT defensive ceiling on warnings per snapshot
+/// (`FKST_SANDBOX_INVENTORY_MAX_WARNINGS`).
 ///
 /// Warnings are per-runtime, so a fleet-wide metadata regression could otherwise
 /// produce one allocation per runtime per code. The cap keeps a snapshot's memory
 /// bounded independently of the item ceiling, and overflow is announced with
 /// [`InventoryWarningCode::WarningsTruncated`] rather than dropped.
-pub const MAX_WARNINGS: usize = 256;
+///
+/// It is only the default because the item ceiling it complements is operator-
+/// configured and far larger: a deployment that raises
+/// `FKST_SANDBOX_INVENTORY_MAX_SOURCE_ITEMS` and then hits a fleet-wide metadata
+/// regression must be able to see more than the first 256 affected runtimes.
+pub const DEFAULT_MAX_WARNINGS: usize = 256;
 
 /// A bounded warning collector.
 ///
@@ -117,7 +129,7 @@ pub struct WarningSink {
 
 impl Default for WarningSink {
     fn default() -> Self {
-        Self::new(MAX_WARNINGS)
+        Self::new(DEFAULT_MAX_WARNINGS)
     }
 }
 

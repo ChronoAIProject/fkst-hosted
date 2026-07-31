@@ -9,8 +9,8 @@ use k8s_openapi::api::core::v1::{
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 
-use crate::k8s::session_launcher::ANNOTATION_LAST_PENDING_AT;
-use crate::runtime_identity::AttributionSource;
+use crate::k8s::session_launcher::{ANNOTATION_LAST_PENDING_AT, COMPONENT_LABEL_KEY};
+use crate::runtime_identity::{AttributionSource, K8S_IDENTITY_KEYS};
 use crate::session_backend::inventory::status::RuntimeInventoryStatus;
 
 use super::inventory_test_fixtures::{container, sample_pod, ts};
@@ -234,8 +234,23 @@ fn a_status_free_pod_reports_no_transition_rather_than_guessing() {
     pod.status = None;
     let facts = facts_from_pod(&pod, "ns");
     assert_eq!(facts.last_transition_at, None);
-    assert_eq!(facts.restart_count, Some(0));
+    assert_eq!(
+        facts.restart_count, None,
+        "the kubelet has reported nothing, so `Some(0)` would assert 'never restarted' on no evidence"
+    );
     assert_eq!(facts.status, RuntimeInventoryStatus::Unknown);
+}
+
+#[test]
+fn a_reported_status_with_no_containers_is_a_genuine_zero() {
+    // The distinction the case above turns on: a Pod the kubelet HAS reported on,
+    // whose containers have simply not started, really has restarted zero times.
+    let mut pod = sample_pod(Some("Pending"), false);
+    pod.status = Some(PodStatus {
+        phase: Some("Pending".to_string()),
+        ..Default::default()
+    });
+    assert_eq!(facts_from_pod(&pod, "ns").restart_count, Some(0));
 }
 
 #[test]
@@ -284,7 +299,43 @@ fn an_orphan_pod_with_no_session_label_is_still_projected() {
     let facts = facts_from_pod(&pod, "ns");
     assert_eq!(facts.session_id, None);
     assert_eq!(facts.runtime_id, "fkst-sess-sess-1");
-    assert!(facts.managed);
+    // Every stamp is gone, including the component marker — reported as drift
+    // rather than assumed true from the selector that fetched the object.
+    assert!(!facts.managed);
+}
+
+#[test]
+fn a_drifted_component_label_is_reported_rather_than_assumed() {
+    let mut pod = sample_pod(Some("Running"), false);
+    pod.metadata.labels.as_mut().expect("labels").insert(
+        COMPONENT_LABEL_KEY.to_string(),
+        "something-else".to_string(),
+    );
+    let facts = facts_from_pod(&pod, "ns");
+    assert!(!facts.managed);
+    // Still projected: a drifted marker is exactly what an operator must see.
+    assert_eq!(facts.session_id.as_deref(), Some("sess-1"));
+}
+
+#[test]
+fn a_durable_conflict_annotation_reads_back_as_a_conflict() {
+    // The whole point of the marker: this projection sees ONLY the Pod — no
+    // registration to compare against — yet must still report the disagreement a
+    // long-finished reconcile pass detected.
+    let mut pod = sample_pod(Some("Running"), false);
+    pod.metadata
+        .annotations
+        .as_mut()
+        .expect("annotations")
+        .insert(K8S_IDENTITY_KEYS.conflict.to_string(), "creator-id".into());
+    let facts = facts_from_pod(&pod, "ns");
+    assert!(facts.identity.conflicting);
+    assert_eq!(
+        facts.identity.attribution_source(),
+        AttributionSource::Conflict
+    );
+    // The stamped attribution itself is reported verbatim, never rewritten.
+    assert_eq!(facts.identity.creator_id, Some(11));
 }
 
 #[test]

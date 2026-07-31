@@ -182,13 +182,12 @@ async fn apply_identity(
 /// Classify what a runtime's stamp says about itself, folding in the
 /// disagreement the backend just reported.
 ///
-/// The `conflicting` flag is set HERE rather than at read time on purpose: a
-/// stamp read in isolation cannot know it disagrees with anything — only a
-/// comparison against a current registration can, and the backend is the one
-/// that performed it against the runtime's live metadata.
+/// The flag is OR-ed, never replaced: the observation may already carry a
+/// durable conflict marker written by an earlier pass, and `false` here means
+/// only "this pass found no disagreement" — never "the runtime has none".
 fn observed_source(observed: &ObservedRuntimeIdentity, conflicting: bool) -> AttributionSource {
     ObservedRuntimeIdentity {
-        conflicting,
+        conflicting: conflicting || observed.conflicting,
         ..observed.clone()
     }
     .attribution_source()

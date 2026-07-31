@@ -231,6 +231,28 @@ fn a_pod_projection_recovers_its_identity_stamp() {
 }
 
 #[test]
+fn a_pod_carrying_the_durable_conflict_marker_projects_a_conflict() {
+    // The marker survives the process that wrote it, so a pass that never
+    // compared this stamp against anything still reports the dispute.
+    let keys = crate::runtime_identity::K8S_IDENTITY_KEYS;
+    let mut pod = sample_pod(Some("Running"), false);
+    let annotations = pod.metadata.annotations.as_mut().expect("annotations");
+    annotations.insert(keys.schema.to_string(), "1".to_string());
+    annotations.insert(keys.creator_id.to_string(), "4242".to_string());
+    annotations.insert(keys.creator_login.to_string(), "alice".to_string());
+    annotations.insert(keys.trigger_author_id.to_string(), "77".to_string());
+    annotations.insert(keys.trigger_author_login.to_string(), "octocat".to_string());
+    annotations.insert(keys.conflict.to_string(), "creator-id".to_string());
+
+    let live = pod_to_live(&pod).expect("maps");
+    assert!(live.identity.conflicting);
+    assert_eq!(
+        live.identity.attribution_source(),
+        crate::runtime_identity::AttributionSource::Conflict
+    );
+}
+
+#[test]
 fn a_pod_predating_the_stamp_projects_an_unknown_legacy_identity() {
     let live = pod_to_live(&sample_pod(Some("Running"), false)).expect("maps");
     assert!(live.identity.is_empty());

@@ -12,7 +12,7 @@ use wiremock::MockServer;
 use crate::config::PodConfig;
 use crate::k8s::session_launcher::{
     ANNOTATION_INSTALLATION, ANNOTATION_LAST_PENDING_AT, ANNOTATION_OWNER, ANNOTATION_REPO,
-    ANNOTATION_TRIGGER_ISSUE, SESSION_ID_LABEL,
+    ANNOTATION_TRIGGER_ISSUE, COMPONENT_LABEL_KEY, COMPONENT_LABEL_VALUE, SESSION_ID_LABEL,
 };
 use crate::k8s::KubeClient;
 use crate::runtime_identity::{stamp_pairs, RuntimeIdentityMetadata, K8S_IDENTITY_KEYS};
@@ -32,6 +32,7 @@ pub(super) fn policy() -> RuntimeLifetimePolicy {
         minimum_lifetime_seconds: 120,
         idle_grace_seconds: 300,
         max_items: 5000,
+        max_warnings: 256,
     }
 }
 
@@ -55,10 +56,16 @@ pub(super) fn sample_pod(phase: Option<&str>, terminating: bool) -> Pod {
         metadata: ObjectMeta {
             name: Some("fkst-sess-sess-1".to_string()),
             uid: Some("uid-1".to_string()),
-            labels: Some(BTreeMap::from([(
-                SESSION_ID_LABEL.to_string(),
-                "sess-1".to_string(),
-            )])),
+            // Both labels a real substrate-session Pod carries: the session id
+            // the reconciler correlates on, and the component marker the LIST
+            // selector matches (and the inventory reads back as `managed`).
+            labels: Some(BTreeMap::from([
+                (SESSION_ID_LABEL.to_string(), "sess-1".to_string()),
+                (
+                    COMPONENT_LABEL_KEY.to_string(),
+                    COMPONENT_LABEL_VALUE.to_string(),
+                ),
+            ])),
             annotations: Some(annotations),
             creation_timestamp: Some(Time(ts("2026-07-01T09:00:00Z"))),
             deletion_timestamp: terminating.then(|| Time(ts("2026-07-01T11:45:00Z"))),

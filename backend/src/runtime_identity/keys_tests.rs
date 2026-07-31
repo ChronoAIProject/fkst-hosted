@@ -30,6 +30,7 @@ fn the_kubernetes_annotation_keys_are_the_documented_ones() {
             "fkst.chrono-ai.fun/trigger-author-id",
             "fkst.chrono-ai.fun/trigger-author-login",
             "fkst.chrono-ai.fun/identity-source",
+            "fkst.chrono-ai.fun/identity-conflict",
         ]
     );
 }
@@ -45,6 +46,7 @@ fn the_opensandbox_metadata_keys_are_the_documented_ones() {
             "fkst-trigger-author-id",
             "fkst-trigger-author-login",
             "fkst-identity-source",
+            "fkst-identity-conflict",
         ]
     );
 }
@@ -113,6 +115,70 @@ fn a_non_numeric_id_reads_as_malformed_rather_than_absent() {
         observed.malformed,
         "a corrupted id must be distinguishable from the legitimate missing one"
     );
+}
+
+#[test]
+fn a_launch_stamp_never_claims_a_conflict() {
+    // The first word on a runtime's attribution cannot disagree with anything, so
+    // the marker key must be absent — and therefore read back as no conflict.
+    for keys in [&K8S_IDENTITY_KEYS, &OSB_IDENTITY_KEYS] {
+        let metadata = stamped(keys, &identity(Some(1)));
+        assert!(!metadata.contains_key(keys.conflict));
+        assert!(!read(keys, &metadata).conflicting);
+    }
+}
+
+#[test]
+fn a_durable_conflict_marker_round_trips_through_both_key_sets() {
+    // The gap the marker closes: a reader holding ONLY the runtime — no
+    // registration to compare against — still learns the stamp is disputed.
+    for keys in [&K8S_IDENTITY_KEYS, &OSB_IDENTITY_KEYS] {
+        let mut metadata = stamped(keys, &identity(Some(1)));
+        metadata.insert(keys.conflict.to_string(), "creator-id".to_string());
+        let observed = read(keys, &metadata);
+        assert!(observed.conflicting);
+        assert_eq!(
+            observed.attribution_source(),
+            crate::runtime_identity::AttributionSource::Conflict
+        );
+        // The stamped attribution is still reported verbatim: a conflict is
+        // surfaced, never healed by discarding what the runtime says.
+        assert_eq!(observed.creator_id, Some(1));
+    }
+}
+
+#[test]
+fn a_blank_conflict_marker_is_not_a_conflict() {
+    // Same rule as every other stamped value: a blank annotation says nothing.
+    let mut metadata = stamped(&K8S_IDENTITY_KEYS, &identity(Some(1)));
+    metadata.insert(K8S_IDENTITY_KEYS.conflict.to_string(), "  ".to_string());
+    assert!(!read(&K8S_IDENTITY_KEYS, &metadata).conflicting);
+}
+
+#[test]
+fn every_conflict_field_name_is_a_valid_kubernetes_label_value() {
+    // The marker's VALUE is stamped into OpenSandbox metadata, which the server
+    // validates as a label value — a name with a `/` or a `[` would fail the
+    // patch at exactly the moment the conflict most needs recording.
+    for field in [
+        IdentityField::Schema,
+        IdentityField::CreatorId,
+        IdentityField::CreatorLogin,
+        IdentityField::TriggerAuthorId,
+        IdentityField::TriggerAuthorLogin,
+    ] {
+        let value = field.as_str();
+        assert!(!value.is_empty() && value.len() <= 63, "{value}");
+        let bytes = value.as_bytes();
+        assert!(bytes[0].is_ascii_alphanumeric(), "{value}");
+        assert!(bytes[bytes.len() - 1].is_ascii_alphanumeric(), "{value}");
+        assert!(
+            bytes
+                .iter()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')),
+            "{value}"
+        );
+    }
 }
 
 #[test]

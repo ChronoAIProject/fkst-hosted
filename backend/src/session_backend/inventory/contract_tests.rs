@@ -18,7 +18,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use crate::config::PodConfig;
 use crate::k8s::session_launcher::{
     ANNOTATION_INSTALLATION, ANNOTATION_LAST_PENDING_AT, ANNOTATION_OWNER, ANNOTATION_REPO,
-    ANNOTATION_TRIGGER_ISSUE, SESSION_ID_LABEL,
+    ANNOTATION_TRIGGER_ISSUE, COMPONENT_LABEL_KEY, COMPONENT_LABEL_VALUE, SESSION_ID_LABEL,
 };
 use crate::k8s::KubeClient;
 use crate::runtime_identity::{
@@ -50,6 +50,7 @@ fn policy() -> RuntimeLifetimePolicy {
         minimum_lifetime_seconds: 120,
         idle_grace_seconds: 300,
         max_items: 5000,
+        max_warnings: 256,
     }
 }
 
@@ -75,10 +76,13 @@ fn pod() -> Pod {
     Pod {
         metadata: ObjectMeta {
             name: Some(format!("fkst-sess-{SESSION}")),
-            labels: Some(BTreeMap::from([(
-                SESSION_ID_LABEL.to_string(),
-                SESSION.to_string(),
-            )])),
+            labels: Some(BTreeMap::from([
+                (SESSION_ID_LABEL.to_string(), SESSION.to_string()),
+                (
+                    COMPONENT_LABEL_KEY.to_string(),
+                    COMPONENT_LABEL_VALUE.to_string(),
+                ),
+            ])),
             annotations: Some(annotations),
             creation_timestamp: Some(Time(parse_utc(CREATED_AT))),
             ..Default::default()

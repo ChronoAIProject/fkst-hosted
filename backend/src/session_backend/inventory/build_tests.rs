@@ -22,6 +22,7 @@ fn policy() -> RuntimeLifetimePolicy {
         minimum_lifetime_seconds: 120,
         idle_grace_seconds: 300,
         max_items: 5000,
+        max_warnings: 256,
     }
 }
 
@@ -127,11 +128,34 @@ fn a_partial_stamp_is_partial_metadata() {
 
 #[test]
 fn a_conflicting_stamp_round_trips_its_conflict_state() {
+    // Read back from a real metadata map carrying the durable conflict marker,
+    // not a hand-set flag: the point of the marker is that a reader holding only
+    // the runtime can reach this state at all.
+    let identity = RuntimeIdentityMetadata::new(Some(11), "alice", 22, "carol");
+    let mut stamped: BTreeMap<String, String> = stamp_pairs(&K8S_IDENTITY_KEYS, &identity)
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value))
+        .collect();
+    stamped.insert(
+        K8S_IDENTITY_KEYS.conflict.to_string(),
+        "creator-id".to_string(),
+    );
+
     let mut facts = complete_facts();
-    facts.identity.conflicting = true;
+    facts.identity = crate::runtime_identity::read(&K8S_IDENTITY_KEYS, &stamped);
     let mut warnings = WarningSink::default();
     let item = build(facts, &mut warnings);
     assert_eq!(item.attribution_source, AttributionSource::Conflict);
+    // Disputed attribution is not a COMPLETE stamp: something about it is known
+    // to be wrong, even though nothing is malformed.
+    assert_eq!(item.metadata_state, RuntimeMetadataState::Partial);
+    // Reported verbatim — a conflict is surfaced, never healed.
+    assert_eq!(item.creator_id, Some(11));
+    let codes: Vec<_> = warnings.into_warnings().iter().map(|w| w.code).collect();
+    assert!(
+        codes.contains(&InventoryWarningCode::AttributionConflict),
+        "{codes:?}"
+    );
 }
 
 #[test]

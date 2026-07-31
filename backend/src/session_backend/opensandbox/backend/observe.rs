@@ -86,7 +86,7 @@ impl OsbBackend {
         };
         let missing = match plan_identity(&OSB_IDENTITY_KEYS, &view.metadata, identity) {
             IdentityPlan::Complete => return Ok(RuntimeIdentityOutcome::Unchanged),
-            IdentityPlan::Conflict { key } => {
+            IdentityPlan::Conflict { key, marker } => {
                 // The KEY is a bounded constant; the disagreeing VALUES are not
                 // logged.
                 tracing::warn!(
@@ -94,6 +94,10 @@ impl OsbBackend {
                     key = key,
                     "opensandbox runtime identity: stamped attribution disagrees with the current registration; leaving it untouched"
                 );
+                if let Some(marker) = marker {
+                    self.record_identity_conflict(session_id, &view.id, marker)
+                        .await;
+                }
                 return Ok(RuntimeIdentityOutcome::Conflict);
             }
             IdentityPlan::Backfill(missing) => missing,
@@ -116,6 +120,44 @@ impl OsbBackend {
                 Ok(RuntimeIdentityOutcome::NotFound)
             }
             Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Record the durable conflict marker on the sandbox.
+    ///
+    /// Best-effort for the same reason as the Kubernetes twin: the CONFLICT is
+    /// the operation's true outcome and must be reported and audited even when
+    /// this one additive metadata key cannot be written. The value still passes
+    /// the shared label-value validator, so a marker the server would reject
+    /// fails here rather than on the wire.
+    async fn record_identity_conflict(
+        &self,
+        session_id: &str,
+        sandbox_id: &str,
+        marker: (&'static str, String),
+    ) {
+        let (key, value) = marker;
+        let mut patch = BTreeMap::new();
+        if let Err(error) = correlate::put_metadata(&mut patch, key, value.clone()) {
+            tracing::warn!(
+                session_id = %session_id,
+                error = %error,
+                "opensandbox runtime identity: attribution-conflict marker rejected by the metadata validator"
+            );
+            return;
+        }
+        match self.lifecycle.patch_metadata(sandbox_id, &patch).await {
+            Ok(()) => tracing::info!(
+                session_id = %session_id,
+                field = %value,
+                "opensandbox runtime identity: recorded a durable attribution-conflict marker"
+            ),
+            Err(error) => tracing::warn!(
+                session_id = %session_id,
+                error = %error,
+                "opensandbox runtime identity: could not record the attribution-conflict marker; \
+                 the conflict is still reported for this pass"
+            ),
         }
     }
 }

@@ -142,6 +142,15 @@ mod defaults {
         5000
     }
 
+    pub(super) fn sandbox_inventory_max_warnings() -> usize {
+        // The companion ceiling on ONE snapshot's warnings (issue #5674). It is
+        // deliberately far BELOW the item ceiling: warnings are diagnostic, and
+        // a fleet-wide metadata regression should cost bounded memory. Overflow
+        // is announced by a truncation marker, never silent — and a deployment
+        // that raised the item ceiling can raise this one to match.
+        crate::session_backend::inventory::DEFAULT_MAX_WARNINGS
+    }
+
     pub(super) fn health_scrape_secs() -> u64 {
         // How often the package-agnostic session-health scrape reads each live
         // pod's status + recent framework logs to flag/clear a degraded session.
@@ -187,6 +196,8 @@ struct ReconcileVars {
     pod_session_max_lifetime_secs: u64,
     #[serde(default = "defaults::sandbox_inventory_max_source_items")]
     sandbox_inventory_max_source_items: usize,
+    #[serde(default = "defaults::sandbox_inventory_max_warnings")]
+    sandbox_inventory_max_warnings: usize,
     #[serde(default = "defaults::health_scrape_secs")]
     health_scrape_secs: u64,
     /// Auto-create a seed trigger issue when the App is installed on a repo.
@@ -254,6 +265,14 @@ pub struct ReconcileConfig {
     /// ([`crate::session_backend::BackendError::InventoryTooLarge`]) rather than
     /// returning a shortened list that would read as a complete fleet.
     pub sandbox_inventory_max_source_items: usize,
+    /// Defensive ceiling on the warnings ONE live-inventory read may carry. Env:
+    /// `FKST_SANDBOX_INVENTORY_MAX_WARNINGS`. Default 256; must be >= 1.
+    /// Exceeding it appends one
+    /// [`crate::session_backend::inventory::InventoryWarningCode::WarningsTruncated`]
+    /// marker rather than failing the read: a snapshot whose diagnostics are
+    /// clipped is still a correct fleet listing, which is the opposite trade-off
+    /// from the item ceiling above.
+    pub sandbox_inventory_max_warnings: usize,
     /// Session-health scrape cadence, seconds. Env: `FKST_HEALTH_SCRAPE_SECS`.
     /// Default 150; must be >= 1. How often the package-agnostic health scrape
     /// reads each live pod's status + recent framework logs to flag/clear a
@@ -306,6 +325,7 @@ impl Default for ReconcileConfig {
             pod_token_refresh_secs: defaults::pod_token_refresh_secs(),
             pod_session_max_lifetime_secs: defaults::pod_session_max_lifetime_secs(),
             sandbox_inventory_max_source_items: defaults::sandbox_inventory_max_source_items(),
+            sandbox_inventory_max_warnings: defaults::sandbox_inventory_max_warnings(),
             health_scrape_secs: defaults::health_scrape_secs(),
         }
     }
@@ -371,6 +391,13 @@ impl ReconcileConfig {
         if env.sandbox_inventory_max_source_items == 0 {
             return Err(AppError::Config(
                 "FKST_SANDBOX_INVENTORY_MAX_SOURCE_ITEMS must be at least 1".to_string(),
+            ));
+        }
+        // A zero warning ceiling leaves no room even for the truncation marker,
+        // so a snapshot would silently claim it had nothing to report.
+        if env.sandbox_inventory_max_warnings == 0 {
+            return Err(AppError::Config(
+                "FKST_SANDBOX_INVENTORY_MAX_WARNINGS must be at least 1".to_string(),
             ));
         }
         // The token refresh must fire strictly inside the 1-hour installation-token
@@ -445,6 +472,7 @@ impl ReconcileConfig {
             pod_token_refresh_secs: env.pod_token_refresh_secs,
             pod_session_max_lifetime_secs: env.pod_session_max_lifetime_secs,
             sandbox_inventory_max_source_items: env.sandbox_inventory_max_source_items,
+            sandbox_inventory_max_warnings: env.sandbox_inventory_max_warnings,
             health_scrape_secs: env.health_scrape_secs,
             seed_trigger_issue_on_install: env.seed_trigger_issue_on_install,
             seed_packages,

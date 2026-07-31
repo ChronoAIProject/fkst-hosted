@@ -29,6 +29,7 @@ fn defaults_apply_when_nothing_is_set() {
     assert_eq!(config.pod_token_refresh_secs, 2700);
     assert_eq!(config.pod_session_max_lifetime_secs, 0);
     assert_eq!(config.sandbox_inventory_max_source_items, 5000);
+    assert_eq!(config.sandbox_inventory_max_warnings, 256);
     assert_eq!(config.health_scrape_secs, 150);
     // I9: install-time seeding is ON by default (behaviour change) and points
     // at the default-workflows manifest.
@@ -139,6 +140,10 @@ fn default_impl_matches_env_defaults() {
         from_default.sandbox_inventory_max_source_items,
         from_env.sandbox_inventory_max_source_items
     );
+    assert_eq!(
+        from_default.sandbox_inventory_max_warnings,
+        from_env.sandbox_inventory_max_warnings
+    );
     assert_eq!(from_default.health_scrape_secs, from_env.health_scrape_secs);
     assert_eq!(
         from_default.seed_trigger_issue_on_install,
@@ -165,6 +170,7 @@ fn every_knob_is_overridable() {
         ("FKST_POD_TOKEN_REFRESH_SECS", "1800"),
         ("FKST_POD_SESSION_MAX_LIFETIME_SECS", "86400"),
         ("FKST_SANDBOX_INVENTORY_MAX_SOURCE_ITEMS", "250"),
+        ("FKST_SANDBOX_INVENTORY_MAX_WARNINGS", "64"),
         ("FKST_HEALTH_SCRAPE_SECS", "90"),
     ]))
     .expect("overrides should deserialize");
@@ -185,6 +191,7 @@ fn every_knob_is_overridable() {
     assert_eq!(config.pod_token_refresh_secs, 1800);
     assert_eq!(config.pod_session_max_lifetime_secs, 86400);
     assert_eq!(config.sandbox_inventory_max_source_items, 250);
+    assert_eq!(config.sandbox_inventory_max_warnings, 64);
     assert_eq!(config.health_scrape_secs, 90);
 }
 
@@ -227,6 +234,9 @@ fn zero_cadence_bounds_are_config_errors_naming_the_var() {
         // A zero ceiling would fail every live-inventory read, silently taking
         // the operations sandbox view down.
         "FKST_SANDBOX_INVENTORY_MAX_SOURCE_ITEMS",
+        // A zero warning ceiling leaves no room for the truncation marker, so a
+        // snapshot would claim it had nothing to report.
+        "FKST_SANDBOX_INVENTORY_MAX_WARNINGS",
     ] {
         let err = ReconcileConfig::from_vars(&vars(&[(var, "0")])).expect_err("zero must fail");
         assert!(matches!(err, AppError::Config(_)));

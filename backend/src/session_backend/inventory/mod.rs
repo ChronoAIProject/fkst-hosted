@@ -54,7 +54,9 @@ pub use text::{
     MAX_STATUS_REASON_BYTES,
 };
 pub use timing::RuntimeTiming;
-pub use warning::{BoundedInventoryWarning, InventoryWarningCode, WarningSink, MAX_WARNINGS};
+pub use warning::{
+    BoundedInventoryWarning, InventoryWarningCode, WarningSink, DEFAULT_MAX_WARNINGS,
+};
 
 /// The lifetime/idle policy an inventory read renders each runtime against, plus
 /// the defensive ceiling on how much a single snapshot may return.
@@ -80,6 +82,13 @@ pub struct RuntimeLifetimePolicy {
     /// [`crate::session_backend::BackendError::InventoryTooLarge`], never a
     /// silently shortened list that would read as a complete fleet.
     pub max_items: usize,
+    /// Defensive ceiling on the warnings ONE snapshot may carry
+    /// (`FKST_SANDBOX_INVENTORY_MAX_WARNINGS`). Configurable alongside
+    /// [`Self::max_items`] so a deployment that raised the item ceiling can still
+    /// see every affected runtime during a fleet-wide metadata regression.
+    /// Overflow is announced with
+    /// [`InventoryWarningCode::WarningsTruncated`], never silently dropped.
+    pub max_warnings: usize,
 }
 
 impl RuntimeLifetimePolicy {
@@ -90,6 +99,7 @@ impl RuntimeLifetimePolicy {
             minimum_lifetime_seconds: config.pod_min_lifetime_secs,
             idle_grace_seconds: config.session_idle_grace_secs,
             max_items: config.sandbox_inventory_max_source_items,
+            max_warnings: config.sandbox_inventory_max_warnings,
         }
     }
 }

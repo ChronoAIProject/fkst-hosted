@@ -86,18 +86,70 @@ fn a_partially_stamped_runtime_backfills_only_the_absent_keys() {
 }
 
 #[test]
-fn a_differing_creator_id_is_a_conflict_and_writes_nothing() {
+fn a_differing_creator_id_is_a_conflict_and_writes_no_attribution() {
     let mut metadata = complete_stamp(&identity(Some(4242)));
     metadata.remove(K8S_IDENTITY_KEYS.creator_login);
     // The runtime was launched for a different person. Filling in the missing
-    // login here would produce a half-old, half-new attribution.
+    // login here would produce a half-old, half-new attribution — so the ONLY
+    // key the plan writes is the durable conflict marker.
     let plan = plan(&K8S_IDENTITY_KEYS, &metadata, &identity(Some(9999)));
     assert_eq!(
         plan,
         IdentityPlan::Conflict {
-            key: K8S_IDENTITY_KEYS.creator_id
+            key: K8S_IDENTITY_KEYS.creator_id,
+            marker: Some((K8S_IDENTITY_KEYS.conflict, "creator-id".to_string())),
         }
     );
+}
+
+#[test]
+fn an_already_marked_conflict_is_reported_without_writing_again() {
+    // The marker records the FIRST observed disagreement; re-patching it every
+    // sweep would be an unbounded write loop against an unresolvable state.
+    let mut metadata = complete_stamp(&identity(Some(4242)));
+    metadata.insert(
+        K8S_IDENTITY_KEYS.conflict.to_string(),
+        "creator-id".to_string(),
+    );
+    assert_eq!(
+        plan(&K8S_IDENTITY_KEYS, &metadata, &identity(Some(9999))),
+        IdentityPlan::Conflict {
+            key: K8S_IDENTITY_KEYS.creator_id,
+            marker: None,
+        }
+    );
+}
+
+#[test]
+fn a_conflict_marker_never_appears_in_a_backfill() {
+    // A runtime that merely has gaps is not disputed, and must never be labelled
+    // as such.
+    let identity = identity(Some(4242));
+    let IdentityPlan::Backfill(pairs) = plan(&K8S_IDENTITY_KEYS, &BTreeMap::new(), &identity)
+    else {
+        panic!("an empty runtime must backfill");
+    };
+    assert!(pairs
+        .iter()
+        .all(|(key, _)| *key != K8S_IDENTITY_KEYS.conflict));
+}
+
+#[test]
+fn an_existing_conflict_marker_does_not_block_an_unrelated_backfill() {
+    // Sticky, but inert: a marked runtime whose remaining gaps agree with the
+    // registration still gets those gaps filled.
+    let identity = identity(Some(4242));
+    let mut metadata = complete_stamp(&identity);
+    metadata.remove(K8S_IDENTITY_KEYS.creator_login);
+    metadata.insert(
+        K8S_IDENTITY_KEYS.conflict.to_string(),
+        "creator-login".to_string(),
+    );
+    let IdentityPlan::Backfill(pairs) = plan(&K8S_IDENTITY_KEYS, &metadata, &identity) else {
+        panic!("a missing login must still backfill");
+    };
+    let keys: Vec<&str> = pairs.iter().map(|(key, _)| *key).collect();
+    assert_eq!(keys, vec![K8S_IDENTITY_KEYS.creator_login]);
 }
 
 #[test]
@@ -122,7 +174,8 @@ fn a_differing_login_is_a_conflict_but_a_case_variant_is_not() {
     assert_eq!(
         plan(&K8S_IDENTITY_KEYS, &metadata, &identity),
         IdentityPlan::Conflict {
-            key: K8S_IDENTITY_KEYS.creator_login
+            key: K8S_IDENTITY_KEYS.creator_login,
+            marker: Some((K8S_IDENTITY_KEYS.conflict, "creator-login".to_string())),
         }
     );
 }

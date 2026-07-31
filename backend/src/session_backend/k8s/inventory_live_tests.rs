@@ -1,6 +1,7 @@
 //! The live wiring: exactly ONE namespace-scoped LIST, no per-Pod GET, one clock
 //! per snapshot, and explicit failure instead of a fabricated empty fleet.
 
+use k8s_openapi::api::core::v1::{Container, EnvVar, PodSpec};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -112,6 +113,64 @@ async fn a_list_failure_propagates_instead_of_reporting_an_empty_fleet() {
         .await
         .expect_err("must not fabricate an empty snapshot");
     assert!(matches!(error, BackendError::Other(_)), "{error:?}");
+}
+
+/// A secret canary planted in every part of a Pod the projection is NOT allowed
+/// to read must be absent from the snapshot.
+///
+/// The projection is structurally safe today — it reads five named annotation
+/// keys, the identity key set, two labels, and status reason/message strings —
+/// but "structurally safe" is a property of the current code, and an adapter that
+/// later started copying annotations or container fields wholesale would land
+/// green without this. Debug is the assertion surface because it is the widest:
+/// anything reachable in the item, including a field a future change adds, is
+/// rendered by it.
+#[tokio::test]
+async fn a_secret_planted_outside_the_projected_fields_never_reaches_the_snapshot() {
+    const CANARY: &str = "ghp_canary000111222333444555666777888999";
+    let server = MockServer::start().await;
+    let mut pod = sample_pod(Some("Running"), false);
+    pod.metadata
+        .annotations
+        .as_mut()
+        .expect("annotations")
+        .insert(
+            "kubectl.kubernetes.io/last-applied-configuration".to_string(),
+            format!("{{\"env\":\"FKST_LLM_API_KEY={CANARY}\"}}"),
+        );
+    pod.metadata.labels.as_mut().expect("labels").insert(
+        "example.com/unrelated".to_string(),
+        format!("token-{CANARY}"),
+    );
+    pod.spec = Some(PodSpec {
+        containers: vec![Container {
+            name: "fkst-session".to_string(),
+            // An image reference, an env value, and a command are all things an
+            // operations row must never carry.
+            image: Some(format!("registry.example.com/fkst@sha256:{CANARY}")),
+            command: Some(vec![format!("--token={CANARY}")]),
+            env: Some(vec![EnvVar {
+                name: "FKST_GITHUB_TOKEN".to_string(),
+                value: Some(CANARY.to_string()),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(pod_list_body(vec![pod])))
+        .mount(&server)
+        .await;
+
+    let snapshot = backend_against(&server)
+        .list_runtime_inventory(&policy())
+        .await
+        .expect("snapshot");
+    assert_eq!(snapshot.items.len(), 1);
+    let rendered = format!("{snapshot:?}");
+    assert!(!rendered.contains(CANARY), "{rendered}");
+    assert!(!rendered.contains("FKST_GITHUB_TOKEN"), "{rendered}");
 }
 
 #[tokio::test]

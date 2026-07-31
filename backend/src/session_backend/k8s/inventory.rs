@@ -24,7 +24,7 @@ use k8s_openapi::chrono::{DateTime, Utc};
 
 use crate::k8s::session_launcher::{
     ANNOTATION_INSTALLATION, ANNOTATION_LAST_PENDING_AT, ANNOTATION_OWNER, ANNOTATION_REPO,
-    ANNOTATION_TRIGGER_ISSUE, SESSION_ID_LABEL,
+    ANNOTATION_TRIGGER_ISSUE, COMPONENT_LABEL_KEY, COMPONENT_LABEL_VALUE, SESSION_ID_LABEL,
 };
 use crate::runtime_identity::{RuntimeBackendKind, K8S_IDENTITY_KEYS};
 use crate::session_backend::inventory::build::{build_item, RawRuntimeFacts};
@@ -63,7 +63,7 @@ impl K8sBackend {
         // ONE clock for the whole snapshot, taken after the list so no item can
         // report a negative age purely because the list took a moment.
         let observed_at = Utc::now();
-        let mut warnings = WarningSink::default();
+        let mut warnings = WarningSink::new(policy.max_warnings);
         let namespace = self.kube.namespace().to_string();
         let items = pods
             .iter()
@@ -127,8 +127,18 @@ fn facts_from_pod(pod: &Pod, namespace: &str) -> RawRuntimeFacts {
             .as_ref()
             .and_then(|l| l.get(SESSION_ID_LABEL))
             .cloned(),
-        // The LIST selector already restricts the result set to FKST session pods.
-        managed: true,
+        // Read back from the object rather than assumed from the selector that
+        // fetched it. The two agree on every response a healthy apiserver can
+        // return — which is exactly why reading it is free — but assuming it
+        // would make the field incapable of ever reporting the drift it exists
+        // for, and would leave the Kubernetes adapter the only one that cannot.
+        managed: pod
+            .metadata
+            .labels
+            .as_ref()
+            .and_then(|labels| labels.get(COMPONENT_LABEL_KEY))
+            .map(String::as_str)
+            == Some(COMPONENT_LABEL_VALUE),
         identity,
 
         owner: annotation(pod, ANNOTATION_OWNER).map(str::to_string),
@@ -151,7 +161,12 @@ fn facts_from_pod(pod: &Pod, namespace: &str) -> RawRuntimeFacts {
         // means the session has never reported pending.
         last_pending_malformed: last_pending_raw.is_some() && last_pending_at.is_none(),
 
-        restart_count: Some(total_restarts(pod)),
+        // Only when the object HAS a status. A Pod the kubelet has not reported
+        // on yet knows nothing about its containers, and `Some(0)` there would
+        // assert "never restarted" on no evidence — the same zero-as-guess the
+        // OpenSandbox adapter is forbidden to make. A present status with no
+        // container statuses is a genuine report of zero restarts.
+        restart_count: pod.status.as_ref().map(|_| total_restarts(pod)),
         last_transition_at: latest_transition(pod),
         deletion_timestamp: pod.metadata.deletion_timestamp.as_ref().map(|Time(t)| *t),
     }

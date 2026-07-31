@@ -11,6 +11,7 @@ fn the_policy_mirrors_the_deployment_configuration() {
         pod_min_lifetime_secs: 240,
         session_idle_grace_secs: 600,
         sandbox_inventory_max_source_items: 1234,
+        sandbox_inventory_max_warnings: 77,
         ..ReconcileConfig::default()
     };
     assert_eq!(
@@ -20,6 +21,7 @@ fn the_policy_mirrors_the_deployment_configuration() {
             minimum_lifetime_seconds: 240,
             idle_grace_seconds: 600,
             max_items: 1234,
+            max_warnings: 77,
         }
     );
 }
@@ -34,6 +36,7 @@ fn the_default_deployment_policy_is_unlimited_lifetime() {
     assert_eq!(policy.minimum_lifetime_seconds, 120);
     assert_eq!(policy.idle_grace_seconds, 300);
     assert_eq!(policy.max_items, 5000);
+    assert_eq!(policy.max_warnings, DEFAULT_MAX_WARNINGS);
 }
 
 #[test]

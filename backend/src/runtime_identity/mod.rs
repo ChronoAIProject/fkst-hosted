@@ -47,8 +47,8 @@ pub mod metrics;
 
 pub use gate::IdentityGate;
 pub use keys::{
-    read, stamp_pairs, IdentityKeys, IDENTITY_SCHEMA_VERSION, K8S_IDENTITY_KEYS, OSB_IDENTITY_KEYS,
-    SOURCE_BACKFILLED_CURRENT_TRIGGER, SOURCE_LAUNCH_METADATA,
+    read, stamp_pairs, IdentityField, IdentityKeys, IDENTITY_SCHEMA_VERSION, K8S_IDENTITY_KEYS,
+    OSB_IDENTITY_KEYS, SOURCE_BACKFILLED_CURRENT_TRIGGER, SOURCE_LAUNCH_METADATA,
 };
 pub use merge::{is_settled, plan, IdentityPlan};
 pub use metrics::{
@@ -274,8 +274,10 @@ pub fn normalize_identity_login(login: &str) -> String {
 ///
 /// Every field is optional because a legacy runtime predates the stamp entirely,
 /// and because `creator_id` is legitimately absent for an assignee-derived
-/// creator. `conflicting` is set by the caller that compared this against a
-/// current registration — the read itself never decides authority.
+/// creator. `conflicting` comes from the runtime's DURABLE conflict marker, so a
+/// reader holding only the runtime still learns of a disagreement an earlier
+/// pass detected; a caller that has just compared the stamp against a current
+/// registration may additionally set it. The read itself never decides authority.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ObservedRuntimeIdentity {
     /// The stamped schema version, verbatim. Its PRESENCE is what distinguishes
@@ -290,7 +292,9 @@ pub struct ObservedRuntimeIdentity {
     /// Absent on a runtime stamped before the marker existed, and on a legacy
     /// runtime with no stamp at all.
     pub source: Option<String>,
-    /// A stamped value disagrees with the current registration.
+    /// A stamped value was observed to disagree with the trigger — read from the
+    /// runtime's durable conflict marker ([`IdentityKeys::conflict`]), so it
+    /// survives the process that detected it.
     pub conflicting: bool,
     /// A stamped id key held a value that is not a decimal integer. Kept
     /// distinct from "absent" so a corrupted stamp is never mistaken for the
