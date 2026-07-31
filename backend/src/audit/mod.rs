@@ -39,11 +39,17 @@
 use std::sync::Arc;
 
 use crate::error::AppError;
+use crate::runtime_identity::metrics::{
+    LifecycleEmitResult, RuntimeTelemetry, RuntimeTelemetrySnapshot,
+};
+use crate::runtime_identity::RuntimeBackendKind;
 
 pub mod arguments;
 pub mod config;
 pub mod event;
 pub mod identity;
+pub mod lifecycle;
+pub mod lifecycle_validate;
 pub mod metrics;
 pub mod posthog;
 pub mod projection;
@@ -65,6 +71,11 @@ pub use event::{
     RequestTiming, ServiceIdentity,
 };
 pub use identity::{AuditActor, AuditIdentity, AuditIdentitySlot, AuditPrincipal};
+pub use lifecycle::{
+    LifecycleAction, LifecycleAttribution, LifecycleCorrelation, LifecycleReason, LifecycleRuntime,
+    SandboxLifecycleV1,
+};
+pub use lifecycle_validate::validate_lifecycle;
 pub use metrics::{AuditMetrics, AuditMetricsSnapshot};
 pub use projection::{CaptureEvent, EventLimits};
 pub use request::{
@@ -79,16 +90,29 @@ pub use validate::EventError;
 /// It owns the admission decision plus the telemetry, so the [`AuditSink`]
 /// implementations stay pure transport and every sink gets identical, bounded
 /// observability for free.
+///
+/// It also carries the runtime attribution/lifecycle telemetry
+/// ([`RuntimeTelemetry`]). Those two series describe exactly the effects the
+/// lifecycle records capture, their sole writer is the reconciler — which needs
+/// this handle anyway to emit those records — and their sole reader is
+/// `/metrics`, which already renders from this handle. Giving them a separate
+/// application-state field would add a second thing to thread through every
+/// construction site to describe one thing.
 #[derive(Clone, Debug)]
 pub struct AuditHandle {
     sink: Arc<dyn AuditSink>,
     metrics: AuditMetrics,
+    runtime: RuntimeTelemetry,
 }
 
 impl AuditHandle {
     /// Wrap an arbitrary sink (used by the constructors below and by tests).
     pub fn new(sink: Arc<dyn AuditSink>, metrics: AuditMetrics) -> Self {
-        Self { sink, metrics }
+        Self {
+            sink,
+            metrics,
+            runtime: RuntimeTelemetry::new(),
+        }
     }
 
     /// The no-op handle: no worker, no network, no per-event allocation.
@@ -153,6 +177,59 @@ impl AuditHandle {
                 Err(SubmitError::ShuttingDown)
             }
         }
+    }
+
+    /// Admit one runtime lifecycle transition.
+    ///
+    /// Counted by backend and action either way, so a transition lost to a full
+    /// queue leaves a visible hole rather than a silent one — a lifecycle
+    /// history with unrecorded gaps is worse than one that says where the gaps
+    /// are (epic `AUD-06`).
+    pub fn submit_lifecycle(&self, event: SandboxLifecycleV1) -> Result<(), SubmitError> {
+        let backend = event.backend;
+        let action = event.action;
+        match self.sink.submit_lifecycle(event) {
+            Ok(()) => {
+                self.runtime
+                    .record_lifecycle(backend, action, LifecycleEmitResult::Emitted);
+                self.metrics.record_enqueued(if self.sink.is_delivering() {
+                    metrics::EnqueueResult::Accepted
+                } else {
+                    metrics::EnqueueResult::Disabled
+                });
+                Ok(())
+            }
+            Err(error) => {
+                self.runtime
+                    .record_lifecycle(backend, action, LifecycleEmitResult::Dropped);
+                let reason = match error {
+                    SubmitError::QueueFull => metrics::DropReason::QueueFull,
+                    SubmitError::ShuttingDown => metrics::DropReason::Shutdown,
+                };
+                self.metrics.record_dropped(reason, 1);
+                tracing::warn!(
+                    backend = backend.as_str(),
+                    lifecycle_action = action.as_str(),
+                    reason = reason.as_str(),
+                    "dropping a sandbox lifecycle event"
+                );
+                Err(error)
+            }
+        }
+    }
+
+    /// Count one runtime identity operation by bounded backend and result.
+    pub fn record_identity_operation(
+        &self,
+        backend: RuntimeBackendKind,
+        result: crate::runtime_identity::IdentityOperationResult,
+    ) {
+        self.runtime.record_identity(backend, result);
+    }
+
+    /// The bounded runtime attribution/lifecycle projection for `/metrics`.
+    pub fn runtime_snapshot(&self) -> RuntimeTelemetrySnapshot {
+        self.runtime.snapshot()
     }
 
     /// Count conflicting writes to one request's audit context.

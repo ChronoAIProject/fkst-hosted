@@ -492,6 +492,8 @@ impl ChaosHarness {
             ensured_templates: new_ensured_templates(),
             session_access: SessionAccessRegistry::new(false),
             disposable_environments: Default::default(),
+            audit: crate::audit::AuditHandle::disabled(),
+            identity_gate: crate::runtime_identity::IdentityGate::new(),
         }
     }
 

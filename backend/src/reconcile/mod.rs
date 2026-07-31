@@ -30,7 +30,15 @@ pub mod desired;
 pub mod effective_packages;
 pub mod execute;
 mod execute_comments;
+// The three runtime effect verbs (refresh-pending, stop, terminal cleanup) plus
+// the lifecycle records they write. Split from the executor because these are the
+// only effects that change whether a runtime exists.
+pub(crate) mod execute_runtime;
 pub mod hashing;
+// Emission of sandbox lifecycle audit records at the reconciler's effect
+// boundary (issue #5673). Kept beside the executor, not inside it: a change here
+// changes what the deployment's permanent history says happened.
+pub(crate) mod lifecycle_audit;
 mod loops;
 // Fetch + validate a fkst-manifest JSON (referenced as `owner/repo@ref:path`) into
 // its package list. FAIL-CLOSED (a manifest is a required, complete set): any fetch,
@@ -45,6 +53,10 @@ pub mod repo;
 // concern, kept out of the reconcile planner).
 pub mod retire;
 pub mod routing;
+// Backfill of durable creator/trigger attribution onto legacy runtimes, from the
+// registration this pass just parsed (issue #5673). Never part of the lifecycle
+// planner: attribution can neither spawn nor kill anything.
+pub(crate) mod runtime_identity;
 pub mod seed_issue;
 pub mod session_contexts;
 pub mod templates;

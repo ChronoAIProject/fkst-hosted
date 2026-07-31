@@ -5,8 +5,13 @@ use axum::response::IntoResponse;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use crate::audit::lifecycle::LifecycleAction;
 use crate::audit::AuditMetricsSnapshot;
 use crate::recovery::RecoverySnapshot;
+use crate::runtime_identity::metrics::{
+    IdentityOperationResult, LifecycleEmitResult, RuntimeTelemetrySnapshot,
+};
+use crate::runtime_identity::RuntimeBackendKind;
 use crate::session_access::{RegistrySnapshot, RegistryState, ScopeMetricsSnapshot, ScopeOutcome};
 use crate::state::AppState;
 
@@ -20,6 +25,7 @@ fn render_metrics(
     audit: &AuditMetricsSnapshot,
     registry: &RegistrySnapshot,
     scope: &ScopeMetricsSnapshot,
+    runtime: &RuntimeTelemetrySnapshot,
 ) -> String {
     let complete = u8::from(recovery.startup_resync_complete);
     let ready = u8::from(recovery.ready);
@@ -141,6 +147,48 @@ fn render_metrics(
     }
     body.push_str(&render_audit_metrics(audit));
     body.push_str(&render_session_access_metrics(registry, scope));
+    body.push_str(&render_runtime_metrics(runtime));
+    body
+}
+
+/// Render the runtime attribution and sandbox-lifecycle series.
+///
+/// Every label is a closed Rust enum, so the series count is finite by
+/// construction: backends × identity results, and backends × lifecycle actions ×
+/// emission results. Session ids, runtime ids, repositories, creators, and
+/// trigger issues never appear (epic `OPS-04`).
+fn render_runtime_metrics(runtime: &RuntimeTelemetrySnapshot) -> String {
+    let mut body = String::from(
+        "# HELP fkst_runtime_identity_operations_total Runtime attribution operations by bounded backend and result.\n\
+         # TYPE fkst_runtime_identity_operations_total counter\n",
+    );
+    for backend in RuntimeBackendKind::ALL {
+        for result in IdentityOperationResult::ALL {
+            body.push_str(&format!(
+                "fkst_runtime_identity_operations_total{{backend=\"{}\",result=\"{}\"}} {}\n",
+                backend.as_str(),
+                result.as_str(),
+                runtime.identity(backend, result),
+            ));
+        }
+    }
+    body.push_str(
+        "# HELP fkst_sandbox_lifecycle_events_total Sandbox lifecycle events by bounded backend, action, and emission result.\n\
+         # TYPE fkst_sandbox_lifecycle_events_total counter\n",
+    );
+    for backend in RuntimeBackendKind::ALL {
+        for action in LifecycleAction::ALL {
+            for result in LifecycleEmitResult::ALL {
+                body.push_str(&format!(
+                    "fkst_sandbox_lifecycle_events_total{{backend=\"{}\",action=\"{}\",result=\"{}\"}} {}\n",
+                    backend.as_str(),
+                    action.as_str(),
+                    result.as_str(),
+                    runtime.lifecycle(backend, action, result),
+                ));
+            }
+        }
+    }
     body
 }
 
@@ -291,6 +339,7 @@ async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
             &state.audit.metrics_snapshot(),
             &state.session_access.registry.snapshot(),
             &state.session_access.scope_metrics.snapshot(),
+            &state.audit.runtime_snapshot(),
         ),
     )
 }
@@ -318,6 +367,7 @@ mod tests {
             &AuditMetricsSnapshot::default(),
             &SessionAccessRegistry::new(false).snapshot(),
             &ScopeMetrics::new().snapshot(),
+            &RuntimeTelemetrySnapshot::default(),
         );
         assert!(body.contains("# TYPE fkst_up gauge"));
         assert!(body.contains("\nfkst_up 1\n") || body.starts_with("fkst_up 1\n"));
@@ -348,6 +398,7 @@ mod tests {
             &AuditMetricsSnapshot::default(),
             &SessionAccessRegistry::new(false).snapshot(),
             &ScopeMetrics::new().snapshot(),
+            &RuntimeTelemetrySnapshot::default(),
         );
         assert!(body.contains("fkst_leader 1"));
         assert!(body.contains("fkst_leader_ready 1"));
@@ -382,6 +433,7 @@ mod tests {
             &metrics.snapshot(),
             &SessionAccessRegistry::new(false).snapshot(),
             &ScopeMetrics::new().snapshot(),
+            &RuntimeTelemetrySnapshot::default(),
         );
         assert!(body.contains("fkst_audit_queue_depth 4"), "{body}");
         assert!(body.contains("fkst_audit_events_enqueued_total{result=\"accepted\"} 1"));
@@ -405,6 +457,66 @@ mod tests {
         for line in body.lines().filter(|line| !line.starts_with('#')) {
             assert!(!line.contains("delivered"), "{line}");
             assert!(!line.contains("persisted"), "{line}");
+        }
+    }
+
+    #[test]
+    fn renders_the_runtime_attribution_and_lifecycle_series() {
+        use crate::runtime_identity::metrics::RuntimeTelemetry;
+
+        let telemetry = RuntimeTelemetry::new();
+        telemetry.record_identity(
+            RuntimeBackendKind::Kubernetes,
+            IdentityOperationResult::Backfilled,
+        );
+        telemetry.record_identity(
+            RuntimeBackendKind::OpenSandbox,
+            IdentityOperationResult::Conflict,
+        );
+        telemetry.record_lifecycle(
+            RuntimeBackendKind::Kubernetes,
+            LifecycleAction::Created,
+            LifecycleEmitResult::Emitted,
+        );
+        telemetry.record_lifecycle(
+            RuntimeBackendKind::OpenSandbox,
+            LifecycleAction::DeleteFailed,
+            LifecycleEmitResult::Dropped,
+        );
+
+        let body = render_metrics(
+            &crate::recovery::RecoveryMonitor::new(false).snapshot(),
+            &AuditMetricsSnapshot::default(),
+            &SessionAccessRegistry::new(false).snapshot(),
+            &ScopeMetrics::new().snapshot(),
+            &telemetry.snapshot(),
+        );
+        assert!(body.contains(
+            "fkst_runtime_identity_operations_total{backend=\"kubernetes\",result=\"backfilled\"} 1"
+        ), "{body}");
+        assert!(body.contains(
+            "fkst_runtime_identity_operations_total{backend=\"opensandbox\",result=\"conflict\"} 1"
+        ));
+        assert!(body.contains(
+            "fkst_sandbox_lifecycle_events_total{backend=\"kubernetes\",action=\"created\",result=\"emitted\"} 1"
+        ));
+        assert!(body.contains(
+            "fkst_sandbox_lifecycle_events_total{backend=\"opensandbox\",action=\"delete_failed\",result=\"dropped\"} 1"
+        ));
+        // Every label tuple is rendered, so a zero is a series that exists and
+        // is quiet rather than a series that silently disappeared.
+        assert!(body.contains(
+            "fkst_sandbox_lifecycle_events_total{backend=\"kubernetes\",action=\"identity_conflict\",result=\"emitted\"} 0"
+        ));
+        // The label set is closed: no id, login, session, or repository value
+        // may appear anywhere in the exposition.
+        for line in body.lines().filter(|line| {
+            line.contains("fkst_runtime_identity") || line.contains("fkst_sandbox_lifecycle")
+        }) {
+            assert!(
+                !line.contains("session") && !line.contains("sess-"),
+                "{line}"
+            );
         }
     }
 
@@ -435,6 +547,7 @@ mod tests {
             &AuditMetricsSnapshot::default(),
             &registry.snapshot(),
             &scope.snapshot(),
+            &RuntimeTelemetrySnapshot::default(),
         );
         assert!(
             body.contains("fkst_session_access_registry_sessions 0"),
@@ -483,6 +596,7 @@ mod tests {
             &AuditMetricsSnapshot::default(),
             &registry.snapshot(),
             &scope.snapshot(),
+            &RuntimeTelemetrySnapshot::default(),
         );
         assert!(
             body.contains("fkst_session_access_registry_sessions 1"),

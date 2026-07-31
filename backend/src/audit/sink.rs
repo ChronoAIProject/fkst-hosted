@@ -20,6 +20,7 @@
 use std::sync::{Arc, Mutex};
 
 use super::event::ApiRequestCompletedV1;
+use super::lifecycle::SandboxLifecycleV1;
 
 /// Why an event could not be admitted.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
@@ -42,10 +43,19 @@ pub struct DrainReport {
 }
 
 /// A destination for completed audit records.
+///
+/// The two record kinds get two admission methods rather than one enum
+/// parameter because they have genuinely different producers — the outer HTTP
+/// middleware and the reconciler's effect boundary — and a sink implementation
+/// may legitimately treat them differently (a relay stores an in-flight request
+/// before its handler runs; a lifecycle transition has no such "before").
 #[async_trait::async_trait]
 pub trait AuditSink: Send + Sync + std::fmt::Debug {
-    /// Non-blocking admission of one completed record.
+    /// Non-blocking admission of one completed request record.
     fn submit(&self, event: ApiRequestCompletedV1) -> Result<(), SubmitError>;
+
+    /// Non-blocking admission of one runtime lifecycle transition.
+    fn submit_lifecycle(&self, event: SandboxLifecycleV1) -> Result<(), SubmitError>;
 
     /// Current bounded-queue depth (0 for sinks without a queue).
     fn queue_depth(&self) -> u64 {
@@ -75,6 +85,10 @@ impl AuditSink for DisabledSink {
         Ok(())
     }
 
+    fn submit_lifecycle(&self, _event: SandboxLifecycleV1) -> Result<(), SubmitError> {
+        Ok(())
+    }
+
     fn is_delivering(&self) -> bool {
         false
     }
@@ -93,25 +107,33 @@ impl AuditSink for DisabledSink {
 #[derive(Clone, Debug)]
 pub struct RecordingSink {
     events: Arc<Mutex<Vec<ApiRequestCompletedV1>>>,
-    /// Bounded like the real queue, so overflow behaviour is testable.
+    lifecycle: Arc<Mutex<Vec<SandboxLifecycleV1>>>,
+    /// Bounded like the real queue, so overflow behaviour is testable. Applied
+    /// per record kind, so a full request buffer never masks a lifecycle test.
     capacity: usize,
 }
 
 impl RecordingSink {
-    /// A recording sink holding at most `capacity` events.
+    /// A recording sink holding at most `capacity` events of each kind.
     pub fn new(capacity: usize) -> Self {
         Self {
             events: Arc::new(Mutex::new(Vec::new())),
+            lifecycle: Arc::new(Mutex::new(Vec::new())),
             capacity: capacity.max(1),
         }
     }
 
-    /// Every event admitted so far, in submission order.
+    /// Every request event admitted so far, in submission order.
     pub fn events(&self) -> Vec<ApiRequestCompletedV1> {
         self.lock().clone()
     }
 
-    /// How many events were admitted.
+    /// Every lifecycle event admitted so far, in submission order.
+    pub fn lifecycle_events(&self) -> Vec<SandboxLifecycleV1> {
+        self.lock_lifecycle().clone()
+    }
+
+    /// How many request events were admitted.
     pub fn len(&self) -> usize {
         self.lock().len()
     }
@@ -124,6 +146,10 @@ impl RecordingSink {
     /// recorded events are still readable, so recover rather than double-panic.
     fn lock(&self) -> std::sync::MutexGuard<'_, Vec<ApiRequestCompletedV1>> {
         self.events.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn lock_lifecycle(&self) -> std::sync::MutexGuard<'_, Vec<SandboxLifecycleV1>> {
+        self.lifecycle.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 
@@ -144,8 +170,17 @@ impl AuditSink for RecordingSink {
         Ok(())
     }
 
+    fn submit_lifecycle(&self, event: SandboxLifecycleV1) -> Result<(), SubmitError> {
+        let mut events = self.lock_lifecycle();
+        if events.len() >= self.capacity {
+            return Err(SubmitError::QueueFull);
+        }
+        events.push(event);
+        Ok(())
+    }
+
     fn queue_depth(&self) -> u64 {
-        u64::try_from(self.len()).unwrap_or(u64::MAX)
+        u64::try_from(self.len().saturating_add(self.lock_lifecycle().len())).unwrap_or(u64::MAX)
     }
 
     fn is_delivering(&self) -> bool {

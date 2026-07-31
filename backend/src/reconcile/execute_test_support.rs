@@ -331,6 +331,11 @@ pub(crate) fn test_ctx_with_github(
         ensured_templates: crate::reconcile::new_ensured_templates(),
         session_access: SessionAccessRegistry::new(false),
         disposable_environments: Default::default(),
+        // A recording audit handle so lifecycle emission is observable without a
+        // network sink; `recording_audit` hands the recorder back where a test
+        // needs to assert on the emitted transitions.
+        audit: crate::audit::AuditHandle::recording().0,
+        identity_gate: crate::runtime_identity::IdentityGate::new(),
     }
 }
 

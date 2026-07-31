@@ -233,6 +233,19 @@ impl From<OsbError> for BackendError {
 
 #[async_trait]
 impl SessionBackend for OsbBackend {
+    fn backend_kind(&self) -> crate::runtime_identity::RuntimeBackendKind {
+        crate::runtime_identity::RuntimeBackendKind::OpenSandbox
+    }
+
+    async fn ensure_runtime_identity(
+        &self,
+        session_id: &str,
+        identity: &crate::runtime_identity::RuntimeIdentityMetadata,
+    ) -> Result<crate::runtime_identity::RuntimeIdentityOutcome, BackendError> {
+        self.ensure_runtime_identity_impl(session_id, identity)
+            .await
+    }
+
     async fn check_reachable(&self) -> Result<String, BackendError> {
         self.check_reachable_impl().await
     }

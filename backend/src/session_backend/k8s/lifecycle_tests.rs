@@ -173,3 +173,70 @@ fn last_pending_patch_sets_the_annotation_key_to_now() {
     let value = &patch["metadata"]["annotations"][ANNOTATION_LAST_PENDING_AT];
     assert_eq!(value.as_str().unwrap(), now.to_rfc3339());
 }
+
+// --- Durable creator/trigger attribution (issue #5673) -----------------------
+
+#[test]
+fn the_identity_merge_patch_touches_metadata_annotations_and_nothing_else() {
+    // Attribution must never be able to restart a session, so the patch may not
+    // name a single field outside `metadata.annotations`.
+    let keys = crate::runtime_identity::K8S_IDENTITY_KEYS;
+    let patch = identity_merge_patch(&[
+        (keys.schema, "1".to_string()),
+        (keys.creator_login, "alice".to_string()),
+    ]);
+    let object = patch.as_object().expect("an object patch");
+    assert_eq!(object.len(), 1);
+    let metadata = patch["metadata"].as_object().expect("metadata");
+    assert_eq!(metadata.len(), 1);
+    assert_eq!(patch["metadata"]["annotations"][keys.schema], "1");
+    assert_eq!(
+        patch["metadata"]["annotations"][keys.creator_login],
+        "alice"
+    );
+    assert!(patch.get("spec").is_none());
+}
+
+#[test]
+fn the_identity_merge_patch_carries_only_the_absent_keys() {
+    // A JSON merge patch replaces every key it names, so naming a key that is
+    // already present is how an accidental overwrite happens.
+    let keys = crate::runtime_identity::K8S_IDENTITY_KEYS;
+    let patch = identity_merge_patch(&[(keys.creator_id, "42".to_string())]);
+    let annotations = patch["metadata"]["annotations"]
+        .as_object()
+        .expect("annotations");
+    assert_eq!(annotations.len(), 1);
+    assert!(!annotations.contains_key(keys.creator_login));
+}
+
+#[test]
+fn a_pod_projection_recovers_its_identity_stamp() {
+    let keys = crate::runtime_identity::K8S_IDENTITY_KEYS;
+    let mut pod = sample_pod(Some("Running"), false);
+    let annotations = pod.metadata.annotations.as_mut().expect("annotations");
+    annotations.insert(keys.schema.to_string(), "1".to_string());
+    annotations.insert(keys.creator_id.to_string(), "4242".to_string());
+    annotations.insert(keys.creator_login.to_string(), "alice".to_string());
+    annotations.insert(keys.trigger_author_id.to_string(), "77".to_string());
+    annotations.insert(keys.trigger_author_login.to_string(), "octocat".to_string());
+
+    let live = pod_to_live(&pod).expect("maps");
+    assert_eq!(live.identity.creator_id, Some(4242));
+    assert_eq!(live.identity.creator_login.as_deref(), Some("alice"));
+    assert_eq!(
+        live.identity.attribution_source(),
+        crate::runtime_identity::AttributionSource::LaunchMetadata
+    );
+}
+
+#[test]
+fn a_pod_predating_the_stamp_projects_an_unknown_legacy_identity() {
+    let live = pod_to_live(&sample_pod(Some("Running"), false)).expect("maps");
+    assert!(live.identity.is_empty());
+    assert_eq!(
+        live.identity.attribution_source(),
+        crate::runtime_identity::AttributionSource::UnknownLegacy,
+        "a legacy runtime is honestly unknown, never guessed from the repository"
+    );
+}

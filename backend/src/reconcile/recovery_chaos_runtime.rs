@@ -15,6 +15,10 @@ use crate::k8s::env_store::{EnvRecord, EnvSummary};
 use crate::k8s::SessionPodSpec;
 use crate::models::RepoRef;
 use crate::reconcile::desired::{KillReason, LivePod, PodLiveness};
+use crate::runtime_identity::{
+    plan as plan_identity, read as read_identity, stamp_pairs, IdentityPlan, RuntimeBackendKind,
+    RuntimeIdentityMetadata, RuntimeIdentityOutcome, K8S_IDENTITY_KEYS,
+};
 use crate::session_backend::{
     BackendError, DeliveryOutcome, EnsureOutcome, ObserveError, RuntimeStatus, SessionBackend,
     SessionHandle, ValidationOutcome, ValidationRequest,
@@ -115,6 +119,10 @@ pub(super) struct RuntimeRecord {
     work_labels: Vec<String>,
     created_at: DateTime<Utc>,
     last_pending_at: Option<DateTime<Utc>>,
+    /// The runtime's stamped metadata, so the fixture exercises the REAL
+    /// attribution round trip (stamp on create, read back on observe, merge on
+    /// backfill) instead of a hand-written approximation of it.
+    metadata: BTreeMap<String, String>,
 }
 
 #[derive(Default)]
@@ -132,6 +140,34 @@ pub(super) struct ChaosBackend {
 
 #[async_trait]
 impl SessionBackend for ChaosBackend {
+    fn backend_kind(&self) -> RuntimeBackendKind {
+        match self.profile {
+            BackendProfile::Kubernetes => RuntimeBackendKind::Kubernetes,
+            BackendProfile::OpenSandbox => RuntimeBackendKind::OpenSandbox,
+        }
+    }
+
+    async fn ensure_runtime_identity(
+        &self,
+        session_id: &str,
+        identity: &RuntimeIdentityMetadata,
+    ) -> Result<RuntimeIdentityOutcome, BackendError> {
+        let mut runtimes = self.runtimes.lock().unwrap();
+        let Some(runtime) = runtimes.get_mut(session_id) else {
+            return Ok(RuntimeIdentityOutcome::NotFound);
+        };
+        match plan_identity(&K8S_IDENTITY_KEYS, &runtime.metadata, identity) {
+            IdentityPlan::Complete => Ok(RuntimeIdentityOutcome::Unchanged),
+            IdentityPlan::Conflict { .. } => Ok(RuntimeIdentityOutcome::Conflict),
+            IdentityPlan::Backfill(missing) => {
+                for (key, value) in missing {
+                    runtime.metadata.insert(key.to_string(), value);
+                }
+                Ok(RuntimeIdentityOutcome::Backfilled)
+            }
+        }
+    }
+
     async fn check_reachable(&self) -> Result<String, BackendError> {
         Ok("chaos-fixture".to_string())
     }
@@ -156,6 +192,10 @@ impl SessionBackend for ChaosBackend {
                     work_labels: crate::k8s::work_label_wire::split_work_labels(&spec.work_label),
                     created_at: Utc::now(),
                     last_pending_at: None,
+                    metadata: stamp_pairs(&K8S_IDENTITY_KEYS, &spec.identity())
+                        .into_iter()
+                        .map(|(key, value)| (key.to_string(), value))
+                        .collect(),
                 },
             );
         }
@@ -202,6 +242,7 @@ impl SessionBackend for ChaosBackend {
                 last_pending_at: runtime.last_pending_at,
                 config_hash: Some(runtime.config_hash.clone()),
                 work_labels: runtime.work_labels.clone(),
+                identity: read_identity(&K8S_IDENTITY_KEYS, &runtime.metadata),
             })
             .collect())
     }

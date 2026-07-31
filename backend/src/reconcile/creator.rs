@@ -32,7 +32,12 @@ pub enum CreatorResolution {
 /// REST may return `slug[bot]`, GraphQL may return `slug`, and `gh` may render
 /// `app/slug`. Strip one leading `app/` and one trailing `[bot]`, matching the
 /// packages' `github-issue.scopes.normalize_login` behavior.
-fn normalize_login(login: &str) -> String {
+///
+/// `pub(crate)` so the runtime attribution stamp
+/// ([`crate::runtime_identity::normalize_identity_login`]) writes the SAME form
+/// this module compares against — a second normalizer would be a second answer
+/// to "is this the same person".
+pub(crate) fn normalize_login(login: &str) -> String {
     let folded = login.to_ascii_lowercase();
     let without_app = folded.strip_prefix("app/").unwrap_or(&folded);
     without_app

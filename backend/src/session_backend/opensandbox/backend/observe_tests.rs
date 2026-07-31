@@ -11,6 +11,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::models::RepoRef;
 use crate::reconcile::desired::PodLiveness;
+use crate::runtime_identity::{RuntimeIdentityMetadata, RuntimeIdentityOutcome};
 use crate::session_backend::BackendError;
 
 use super::super::backend_test_support::{
@@ -180,4 +181,159 @@ async fn mark_pending_is_not_found_when_no_sandbox_resolves() {
         .await
         .expect_err("not found");
     assert!(matches!(err, BackendError::NotFound), "got {err:?}");
+}
+
+// --- Attribution backfill (issue #5673) --------------------------------------
+
+/// The attribution the standard `spec()` fixture would have stamped at launch.
+fn desired_identity() -> RuntimeIdentityMetadata {
+    RuntimeIdentityMetadata::new(Some(4242), "author-login", 4242, "author-login")
+}
+
+/// A sandbox whose correlation metadata carries the extra `identity` entries.
+fn sbx_with_identity(id: &str, session: &str, identity: Value) -> Value {
+    let mut metadata = correlation_metadata(session, "acme", "site", WORK_LABEL_HEX);
+    let merged = metadata.as_object_mut().expect("metadata object");
+    for (key, value) in identity.as_object().expect("identity object") {
+        merged.insert(key.clone(), value.clone());
+    }
+    sandbox_json(id, "Running", "2026-07-09T00:00:00Z", metadata)
+}
+
+/// Mount the list + patch pair around `sandbox` and return the started server.
+async fn identity_server(sandbox: Value) -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/sandboxes"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(list_page(json!([sandbox]))))
+        .mount(&server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path("/v1/sandboxes/sbx-1/metadata"))
+        .and(header("OPEN-SANDBOX-API-KEY", API_KEY))
+        .respond_with(ResponseTemplate::new(200).set_body_json(sandbox_json(
+            "sbx-1",
+            "Running",
+            "2026-07-09T00:00:00Z",
+            json!({}),
+        )))
+        .mount(&server)
+        .await;
+    server
+}
+
+/// The recorded metadata merge-patch body, or `None` when nothing was patched.
+async fn patched_metadata(server: &MockServer) -> Option<Value> {
+    let requests = server.received_requests().await.expect("recorded requests");
+    requests
+        .iter()
+        .find(|r| r.url.path() == "/v1/sandboxes/sbx-1/metadata")
+        .map(|r| serde_json::from_slice(&r.body).expect("json body"))
+}
+
+#[tokio::test]
+async fn a_legacy_sandbox_is_backfilled_through_the_metadata_merge_patch() {
+    let server = identity_server(sbx_with_identity("sbx-1", SESSION_ID, json!({}))).await;
+
+    let outcome = backend(&server.uri(), osb_config())
+        .ensure_runtime_identity_impl(SESSION_ID, &desired_identity())
+        .await
+        .expect("patched");
+    assert_eq!(outcome, RuntimeIdentityOutcome::Backfilled);
+
+    let body = patched_metadata(&server).await.expect("a metadata patch");
+    let obj = body.as_object().expect("object body");
+    assert_eq!(obj["fkst-identity-schema"], "1");
+    assert_eq!(obj["fkst-creator-id"], "4242");
+    assert_eq!(obj["fkst-creator-login"], "author-login");
+    assert_eq!(obj["fkst-trigger-author-id"], "4242");
+    assert_eq!(obj["fkst-trigger-author-login"], "author-login");
+    assert_eq!(
+        obj.len(),
+        5,
+        "the patch carries ONLY the identity keys; every other correlation value is untouched"
+    );
+}
+
+#[tokio::test]
+async fn an_already_stamped_sandbox_is_never_patched() {
+    let server = identity_server(sbx_with_identity(
+        "sbx-1",
+        SESSION_ID,
+        json!({
+            "fkst-identity-schema": "1",
+            "fkst-creator-id": "4242",
+            "fkst-creator-login": "author-login",
+            "fkst-trigger-author-id": "4242",
+            "fkst-trigger-author-login": "author-login",
+        }),
+    ))
+    .await;
+
+    let outcome = backend(&server.uri(), osb_config())
+        .ensure_runtime_identity_impl(SESSION_ID, &desired_identity())
+        .await
+        .expect("no patch needed");
+    assert_eq!(outcome, RuntimeIdentityOutcome::Unchanged);
+    assert!(patched_metadata(&server).await.is_none());
+}
+
+#[tokio::test]
+async fn a_disagreeing_stamp_is_reported_and_left_exactly_as_it_is() {
+    let server = identity_server(sbx_with_identity(
+        "sbx-1",
+        SESSION_ID,
+        json!({
+            "fkst-identity-schema": "1",
+            "fkst-creator-id": "999999",
+            "fkst-trigger-author-id": "4242",
+        }),
+    ))
+    .await;
+
+    let outcome = backend(&server.uri(), osb_config())
+        .ensure_runtime_identity_impl(SESSION_ID, &desired_identity())
+        .await
+        .expect("a conflict is a decision, not an error");
+    assert_eq!(outcome, RuntimeIdentityOutcome::Conflict);
+    assert!(
+        patched_metadata(&server).await.is_none(),
+        "a conflicting runtime must not be half-rewritten"
+    );
+}
+
+#[tokio::test]
+async fn a_vanished_sandbox_is_a_benign_not_found() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/sandboxes"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(list_page(json!([]))))
+        .mount(&server)
+        .await;
+
+    let outcome = backend(&server.uri(), osb_config())
+        .ensure_runtime_identity_impl(SESSION_ID, &desired_identity())
+        .await
+        .expect("an absent runtime is not an error");
+    assert_eq!(outcome, RuntimeIdentityOutcome::NotFound);
+}
+
+#[tokio::test]
+async fn a_label_unsafe_backfill_value_fails_before_the_request_is_issued() {
+    let server = identity_server(sbx_with_identity("sbx-1", SESSION_ID, json!({}))).await;
+    let unsafe_identity = RuntimeIdentityMetadata {
+        creator_id: Some(1),
+        creator_login: "not a label".to_string(),
+        trigger_author_id: 2,
+        trigger_author_login: "octocat".to_string(),
+    };
+
+    backend(&server.uri(), osb_config())
+        .ensure_runtime_identity_impl(SESSION_ID, &unsafe_identity)
+        .await
+        .expect_err("an unstampable value is a bounded error, never a rejected request");
+    assert!(
+        patched_metadata(&server).await.is_none(),
+        "the validator runs before the wire, so the server never sees the bad value"
+    );
 }

@@ -6,6 +6,7 @@
 //! named environment) so `execute` reaches `ensure_session`.
 
 use super::*;
+use crate::reconcile::desired::KillReason;
 use crate::reconcile::execute_test_support::*;
 
 #[tokio::test]

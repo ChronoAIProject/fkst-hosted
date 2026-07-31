@@ -19,6 +19,7 @@ use secrecy::{ExposeSecret, SecretString};
 use zeroize::Zeroize;
 
 use crate::access_policy::AccessPolicy;
+use crate::audit::lifecycle::{LifecycleAction, LifecycleReason};
 use crate::config::Config;
 use crate::disposable_environment::{
     DisposableEnvironmentLookup, DisposableEnvironmentRegistry, DISPOSABLE_ENVIRONMENT_MARKER,
@@ -30,17 +31,17 @@ use crate::k8s::{session_github_token_json, SessionPodSpec};
 use crate::models::RepoRef;
 use crate::reconcile::announce::announce_session_comment;
 use crate::reconcile::branches::DEFAULT_TARGET_BRANCH;
-use crate::reconcile::desired::{
-    runtime_config_hash, KillReason, ReconcileAction, SessionRegistration,
-};
+use crate::reconcile::desired::{runtime_config_hash, ReconcileAction, SessionRegistration};
 use crate::reconcile::execute_comments::{
     config_rejected_comment, env_not_ready_comment, env_verify_failed_comment,
     flag_invalid_comment, invalid_refs_comment, trigger_unauthorized_comment,
 };
+use crate::reconcile::execute_runtime;
+use crate::reconcile::lifecycle_audit::{self, SessionLifecycleFacts};
 use crate::reconcile::reachability;
 use crate::reconcile::retire::retire_work_issues;
 use crate::reconcile::work_labels::{apply_work_label_namespace, WorkLabelError};
-use crate::session_backend::{BackendError, EnsureOutcome, SessionBackend};
+use crate::session_backend::{EnsureOutcome, SessionBackend};
 use crate::session_spec::creds::{credential_secret_data, StorageWriterCreds};
 
 use super::{
@@ -92,6 +93,14 @@ pub struct ReconcileCtx {
     /// creator-bound and entries are removed only after the backend accepts the
     /// complete sandbox credential bundle.
     pub disposable_environments: DisposableEnvironmentRegistry,
+    /// The audit sink every runtime lifecycle transition is recorded through, and
+    /// the home of the bounded attribution/lifecycle counters. A no-op handle when
+    /// capture is disabled, so an unaudited deployment behaves exactly as before.
+    pub audit: crate::audit::AuditHandle,
+    /// Bounded suppression of repeated attribution backfills, so a runtime whose
+    /// stamp can never be completed costs one decision per cooldown rather than
+    /// one per sweep.
+    pub identity_gate: crate::runtime_identity::IdentityGate,
 }
 
 /// Execute ONE action for the repo it belongs to. Best-effort: logs and swallows
@@ -108,13 +117,19 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
             reg,
             detected_work_labels,
         } => spawn_session(reg, detected_work_labels, ctx).await,
-        ReconcileAction::TouchPending { session_id } => touch_pending(&session_id, ctx).await,
+        ReconcileAction::TouchPending { session_id } => {
+            execute_runtime::touch_pending(&session_id, ctx).await
+        }
         ReconcileAction::RecoverCredentials {
             reg,
             detected_work_labels,
         } => recover_credentials(reg, detected_work_labels, ctx).await,
-        ReconcileAction::Kill { session_id, reason } => kill(&session_id, reason, ctx).await,
-        ReconcileAction::CleanupTerminal { session_id } => cleanup_terminal(&session_id, ctx).await,
+        ReconcileAction::Kill { session_id, reason } => {
+            execute_runtime::kill(&session_id, reason, ctx).await
+        }
+        ReconcileAction::CleanupTerminal { session_id } => {
+            execute_runtime::cleanup_terminal(&session_id, ctx).await
+        }
         ReconcileAction::RetireWorkIssues { work_labels } => {
             // Retire the still-open work issues across EVERY label the retired session
             // claimed (its full effective set, recovered from the pod annotation). An
@@ -299,16 +314,34 @@ async fn spawn_session(
     // 6. Ensure the session runtime exists (409 = already-live no-op). The backend
     //    builds + creates the pod and its owner-referenced creds Secret; on failure it
     //    has already logged the specific error, so an `Err` here is a swallowed no-op.
+    //    The lifecycle record is written on BOTH sides of this call: the request
+    //    before it, the concrete outcome after it, so a create that never returns
+    //    still leaves evidence that it was attempted.
+    let facts = SessionLifecycleFacts::from_registration(&reg, spec.config_hash.clone());
+    lifecycle_audit::emit_pending_create(ctx, LifecycleAction::CreateRequested, &facts, None);
     match ctx.backend.ensure_session(&spec, creds).await {
         Ok(EnsureOutcome::Created) => {
             complete_disposable_handoff(&reg, ctx);
+            // `created` only once a concrete runtime exists — which is exactly
+            // what `Created` means; the runtime handle rides the record when the
+            // backend names its runtimes deterministically.
+            lifecycle_audit::emit(ctx, LifecycleAction::Created, &facts, None);
             tracing::info!(session_id = %spec.session_id, owner = %reg.repo.owner, "reconcile spawn: session pod created")
         }
         Ok(EnsureOutcome::AlreadyLive) => {
             complete_disposable_handoff(&reg, ctx);
+            // Deliberately NOT a `created` record: nothing was created, and an
+            // idempotent no-op observed on every pending sweep is not a
+            // transition. The `create_requested` above already deduplicates to
+            // one row per incarnation.
             tracing::info!(session_id = %spec.session_id, "reconcile spawn: session pod already live (no-op)")
         }
-        Err(_) => {}
+        Err(_) => lifecycle_audit::emit_pending_create(
+            ctx,
+            LifecycleAction::CreateFailed,
+            &facts,
+            Some(LifecycleReason::BackendUnavailable),
+        ),
     }
 }
 
@@ -477,6 +510,15 @@ async fn recover_credentials(
     match ctx.backend.ensure_session(&spec, creds).await {
         Ok(EnsureOutcome::Created) => {
             complete_disposable_handoff(&reg, ctx);
+            // The recovery path normally ADOPTS an existing runtime, so it emits
+            // no lifecycle record; `Created` here means the runtime had actually
+            // vanished and this call recreated it, which is a real transition.
+            lifecycle_audit::emit(
+                ctx,
+                LifecycleAction::Created,
+                &SessionLifecycleFacts::from_registration(&reg, spec.config_hash.clone()),
+                None,
+            );
             tracing::warn!(
                 session_id = %session_id,
                 "reconcile credential recovery: runtime vanished after observation; recreated with complete credentials"
@@ -660,6 +702,14 @@ fn session_pod_spec_from(
         output_lang: reg.def.output_lang.clone(),
         engine_config: reg.def.engine_config.clone(),
         creator_login: reg.creator_login.clone(),
+        // Attribution the runtime is stamped with. Threaded verbatim from the
+        // registration and deliberately EXCLUDED from `config_hash` /
+        // `full_config_hash` (see `crate::reconcile::hashing`): re-attributing an
+        // issue must never look like a configuration change and respawn a
+        // running session.
+        creator_id: reg.creator_id,
+        trigger_author_id: reg.trigger_author_id,
+        trigger_author_login: reg.trigger_author_login.clone(),
         contributors: session_contributors(reg, access),
         upstream_branch: branches.upstream.clone(),
         target_branch: branches.integration.clone(),
@@ -714,47 +764,6 @@ fn storage_writer_creds(config: &Config) -> Option<StorageWriterCreds<'_>> {
         base_url: &storage.base_url,
         bucket: &storage.bucket,
     })
-}
-
-// --- Pod lifecycle effects ---------------------------------------------------
-
-/// Refresh a live pod's `last-pending-at` annotation to now (via the backend).
-/// 404-tolerant: a pod deleted between the plan and the patch is a benign no-op.
-async fn touch_pending(session_id: &str, ctx: &ReconcileCtx) {
-    match ctx.backend.mark_pending(session_id).await {
-        Ok(()) => tracing::debug!(session_id = %session_id, "reconcile: touched last-pending-at"),
-        Err(BackendError::NotFound) => {}
-        Err(error) => {
-            tracing::warn!(session_id = %session_id, error = %error, "reconcile: touch last-pending-at failed")
-        }
-    }
-}
-
-/// Stop a pod for `reason`, honouring the configured termination grace (via the
-/// backend). 404-tolerant (already gone).
-async fn kill(session_id: &str, reason: KillReason, ctx: &ReconcileCtx) {
-    tracing::info!(session_id = %session_id, ?reason, "reconcile: killing session pod");
-    match ctx.backend.stop_session(session_id, reason).await {
-        Ok(()) => {}
-        Err(BackendError::NotFound) => {}
-        Err(error) => {
-            tracing::warn!(session_id = %session_id, error = %error, "reconcile: kill delete failed")
-        }
-    }
-}
-
-/// GC a terminal pod (its owner-referenced Secret cascades away in the background,
-/// via the backend). 404-tolerant.
-async fn cleanup_terminal(session_id: &str, ctx: &ReconcileCtx) {
-    match ctx.backend.remove_terminal(session_id).await {
-        Ok(()) => {
-            tracing::info!(session_id = %session_id, "reconcile: cleaned up terminal session pod")
-        }
-        Err(BackendError::NotFound) => {}
-        Err(error) => {
-            tracing::warn!(session_id = %session_id, error = %error, "reconcile: terminal cleanup failed")
-        }
-    }
 }
 
 // --- GitHub issue effects (testable against a fake transport) -----------------

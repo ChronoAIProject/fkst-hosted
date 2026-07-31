@@ -262,3 +262,109 @@ fn to_live_pod_defaults_created_at_to_now_on_absent_or_malformed_timestamp() {
         );
     }
 }
+
+// --- Durable creator/trigger attribution (issue #5673) -----------------------
+
+#[test]
+fn the_identity_stamp_round_trips_through_the_shared_key_set() {
+    let spec = spec();
+    let meta = stamp(&spec).expect("stamp emits only label-safe values");
+    let keys = crate::runtime_identity::OSB_IDENTITY_KEYS;
+
+    assert_eq!(meta[keys.schema], "1");
+    assert_eq!(meta[keys.creator_id], "4242");
+    assert_eq!(meta[keys.creator_login], "author-login");
+    assert_eq!(meta[keys.trigger_author_id], "4242");
+    assert_eq!(meta[keys.trigger_author_login], "author-login");
+
+    let recovered = recover_identity(&view_with(meta, SandboxState::Running, None));
+    assert_eq!(recovered.creator_id, Some(4242));
+    assert_eq!(recovered.creator_login.as_deref(), Some("author-login"));
+    assert_eq!(recovered.trigger_author_id, Some(4242));
+    assert_eq!(
+        recovered.attribution_source(),
+        crate::runtime_identity::AttributionSource::LaunchMetadata
+    );
+}
+
+#[test]
+fn an_assignee_derived_creator_stamps_no_creator_id_key() {
+    let mut spec = spec();
+    spec.creator_id = None;
+    spec.creator_login = "assignee".to_string();
+    let meta = stamp(&spec).expect("stamp succeeds without a creator id");
+    let keys = crate::runtime_identity::OSB_IDENTITY_KEYS;
+    assert!(!meta.contains_key(keys.creator_id));
+    assert_eq!(meta[keys.creator_login], "assignee");
+
+    let recovered = recover_identity(&view_with(meta, SandboxState::Running, None));
+    assert_eq!(recovered.creator_id, None);
+    assert_eq!(
+        recovered.attribution_source(),
+        crate::runtime_identity::AttributionSource::LaunchMetadata,
+        "a missing assignee id is a recorded fact, not an incomplete stamp"
+    );
+}
+
+#[test]
+fn an_app_authored_trigger_stamps_a_label_safe_normalized_login() {
+    // `fkst-cloud[bot]` is NOT a valid label value; without normalization every
+    // App-seeded session's sandbox create would fail.
+    let mut spec = spec();
+    spec.trigger_author_login = "fkst-cloud[bot]".to_string();
+    let meta = stamp(&spec).expect("a normalized App login is label-safe");
+    assert_eq!(
+        meta[crate::runtime_identity::OSB_IDENTITY_KEYS.trigger_author_login],
+        "fkst-cloud"
+    );
+}
+
+#[test]
+fn a_label_unsafe_login_fails_the_create_loudly() {
+    // Normalization strips the App markers but nothing else; a pathological
+    // value must stop the create rather than produce a request the server
+    // rejects or, worse, an untraceable sandbox.
+    let mut spec = spec();
+    spec.creator_login = "not a valid label".to_string();
+    assert!(
+        stamp(&spec).is_err(),
+        "an unstampable identity prevents creation with a bounded error"
+    );
+}
+
+#[test]
+fn to_live_pod_carries_the_recovered_identity() {
+    let meta = stamp(&spec()).expect("stamp");
+    let pod = to_live_pod(&view_with(meta, SandboxState::Running, None)).expect("live pod");
+    assert_eq!(pod.identity.creator_id, Some(4242));
+}
+
+#[test]
+fn a_sandbox_predating_the_stamp_recovers_as_unknown_legacy() {
+    let mut meta = stamp(&spec()).expect("stamp");
+    for key in crate::runtime_identity::OSB_IDENTITY_KEYS.all() {
+        meta.remove(key);
+    }
+    let recovered = recover_identity(&view_with(meta, SandboxState::Running, None));
+    assert!(recovered.is_empty());
+    assert_eq!(
+        recovered.attribution_source(),
+        crate::runtime_identity::AttributionSource::UnknownLegacy
+    );
+}
+
+#[test]
+fn the_identity_stamp_does_not_disturb_the_pre_existing_correlation_keys() {
+    // A fixture guard: the keys the reconciler already depends on must keep
+    // their exact values now that attribution shares the map.
+    let spec = spec();
+    let meta = stamp(&spec).expect("stamp");
+    assert_eq!(meta[KEY_MANAGED], "true");
+    assert_eq!(meta[KEY_SESSION_ID], spec.session_id);
+    assert_eq!(meta[KEY_OWNER], "acme");
+    assert_eq!(meta[KEY_REPO], "site");
+    assert_eq!(
+        format!("{}{}", meta[KEY_CONFIG_HASH], meta[KEY_CONFIG_HASH_2]),
+        spec.config_hash
+    );
+}

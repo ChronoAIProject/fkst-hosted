@@ -80,6 +80,7 @@ pub(super) fn pod(
         last_pending_at,
         config_hash: config_hash.map(str::to_string),
         work_labels: Vec::new(),
+        identity: Default::default(),
     }
 }
 

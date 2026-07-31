@@ -51,6 +51,7 @@ use crate::k8s::work_label_wire::split_work_labels;
 use crate::k8s::SessionPodSpec;
 use crate::models::RepoRef;
 use crate::reconcile::desired::{LivePod, PodLiveness};
+use crate::runtime_identity::{ObservedRuntimeIdentity, OSB_IDENTITY_KEYS};
 use crate::session_backend::opensandbox::dto::{SandboxState, SandboxView};
 use crate::session_backend::{BackendError, SessionHandle};
 
@@ -138,7 +139,22 @@ pub fn stamp(spec: &SessionPodSpec) -> Result<BTreeMap<String, String>, BackendE
     {
         put(&mut meta, &work_label_chunk_key(index), chunk)?;
     }
+    // Durable creator/trigger attribution (issue #5673). Rendered by the SHARED
+    // key module so the OpenSandbox and Kubernetes stamps cannot drift, and put
+    // through the same validator as everything else: a login or id that violates
+    // the label-value contract fails the create loudly instead of producing an
+    // untraceable sandbox. Logins arrive already normalized, so the App-author
+    // form `slug[bot]` — which the validator would reject — never reaches here.
+    for (key, value) in crate::runtime_identity::stamp_pairs(&OSB_IDENTITY_KEYS, &spec.identity()) {
+        put(&mut meta, key, value)?;
+    }
     Ok(meta)
+}
+
+/// Recover the durable attribution stamp from a sandbox's metadata. The exact
+/// inverse of the identity half of [`stamp`], through the same shared key set.
+pub fn recover_identity(view: &SandboxView) -> ObservedRuntimeIdentity {
+    crate::runtime_identity::read(&OSB_IDENTITY_KEYS, &view.metadata)
 }
 
 /// Hex-encode the work-label SET and split it into ≤[`WORK_LABEL_HEX_CHUNK`]-char pieces,
@@ -225,6 +241,7 @@ pub fn to_live_pod(view: &SandboxView) -> Option<LivePod> {
         last_pending_at,
         config_hash,
         work_labels,
+        identity: recover_identity(view),
     })
 }
 
@@ -251,6 +268,18 @@ pub fn state_to_liveness(state: &SandboxState) -> PodLiveness {
             PodLiveness::Starting
         }
     }
+}
+
+/// Insert `key`=`value` into a metadata map after validating it, for callers
+/// outside this module (the attribution backfill patch). Re-exported rather than
+/// re-implemented so a merge-patch can never write a value the create path would
+/// have refused.
+pub fn put_metadata(
+    meta: &mut BTreeMap<String, String>,
+    key: &str,
+    value: String,
+) -> Result<(), BackendError> {
+    put(meta, key, value)
 }
 
 /// Insert `key`=`value` into `meta` after validating `value` against the K8s

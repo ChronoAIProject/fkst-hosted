@@ -187,6 +187,12 @@ pub struct LivePod {
     /// when the annotation is absent/blank (an older pod predating the annotation), in
     /// which case no retire-notify is emitted.
     pub work_labels: Vec<String>,
+    /// The durable creator/trigger attribution stamped on the runtime, read back as part of
+    /// THIS observation (issue #5673). Carried here so the backfill decision costs no extra
+    /// per-runtime API call: a runtime whose stamp is already complete is never patched, and
+    /// a legacy runtime is patched only from a registration observed in the same pass. All
+    /// fields absent for a runtime that predates the stamp.
+    pub identity: crate::runtime_identity::ObservedRuntimeIdentity,
 }
 
 /// Why a pod is being killed. Carried on [`ReconcileAction::Kill`] so the executor

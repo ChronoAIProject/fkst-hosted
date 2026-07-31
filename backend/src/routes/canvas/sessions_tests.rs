@@ -200,6 +200,7 @@ async fn repo_sessions_assembles_the_full_detail() {
             last_pending_at: None,
             config_hash: None,
             work_labels: vec!["site-build".to_string()],
+            identity: Default::default(),
         },
     ])));
 

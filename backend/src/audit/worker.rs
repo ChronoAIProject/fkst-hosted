@@ -31,11 +31,47 @@ use tokio_util::sync::CancellationToken;
 
 use super::config::AuditConfig;
 use super::event::ApiRequestCompletedV1;
+use super::lifecycle::SandboxLifecycleV1;
 use super::metrics::{AuditMetrics, DeliveryResult, DropReason};
 use super::posthog::PostHogClient;
 use super::projection::{CaptureEvent, EventLimits};
 use super::sink::{AuditSink, DrainReport, SubmitError};
 use crate::retry::jittered_delay;
+
+/// One queued record of either contract.
+///
+/// The two kinds share ONE bounded queue on purpose: they share a destination, a
+/// batch, a retry budget, and a shutdown drain, and a second queue would mean a
+/// second set of every bound to reason about — plus a shutdown in which one
+/// queue can be empty while the other is not.
+#[derive(Debug)]
+enum QueuedRecord {
+    ApiRequest(Box<ApiRequestCompletedV1>),
+    SandboxLifecycle(Box<SandboxLifecycleV1>),
+}
+
+impl QueuedRecord {
+    /// Project onto the capture wire format, or report why it cannot be sent.
+    fn to_capture_event(&self, limits: EventLimits) -> Result<CaptureEvent, super::EventError> {
+        match self {
+            QueuedRecord::ApiRequest(event) => event.to_capture_event(limits),
+            QueuedRecord::SandboxLifecycle(event) => event.to_capture_event(limits),
+        }
+    }
+
+    /// Bounded identifiers for the rejection log: never the record itself, which
+    /// may hold values that are safe for PostHog but not for a log line.
+    fn rejection_context(&self) -> (String, &'static str) {
+        match self {
+            QueuedRecord::ApiRequest(event) => {
+                (event.event_id.to_string(), "api_request_completed")
+            }
+            QueuedRecord::SandboxLifecycle(event) => {
+                (event.event_id.to_string(), "sandbox_lifecycle")
+            }
+        }
+    }
+}
 
 /// Spread applied to every retry delay (±%), so replicas do not synchronise.
 const RETRY_JITTER_PERCENT: u64 = 20;
@@ -92,7 +128,7 @@ enum FlushOutcome {
 /// The queue-side handle installed on the application state.
 #[derive(Debug)]
 pub struct PostHogSink {
-    tx: mpsc::Sender<ApiRequestCompletedV1>,
+    tx: mpsc::Sender<QueuedRecord>,
     /// Events admitted but not yet received by the worker.
     depth: Arc<AtomicU64>,
     /// Admission gate: set by [`PostHogSink::drain`] before cancellation, so no
@@ -149,18 +185,11 @@ pub fn spawn(config: &AuditConfig, client: PostHogClient, metrics: AuditMetrics)
 #[async_trait::async_trait]
 impl AuditSink for PostHogSink {
     fn submit(&self, event: ApiRequestCompletedV1) -> Result<(), SubmitError> {
-        if self.closed.load(Ordering::Acquire) {
-            return Err(SubmitError::ShuttingDown);
-        }
-        match self.tx.try_send(event) {
-            Ok(()) => {
-                let depth = self.depth.fetch_add(1, Ordering::Relaxed).saturating_add(1);
-                self.metrics.set_queue_depth(depth);
-                Ok(())
-            }
-            Err(mpsc::error::TrySendError::Full(_)) => Err(SubmitError::QueueFull),
-            Err(mpsc::error::TrySendError::Closed(_)) => Err(SubmitError::ShuttingDown),
-        }
+        self.admit(QueuedRecord::ApiRequest(Box::new(event)))
+    }
+
+    fn submit_lifecycle(&self, event: SandboxLifecycleV1) -> Result<(), SubmitError> {
+        self.admit(QueuedRecord::SandboxLifecycle(Box::new(event)))
     }
 
     fn queue_depth(&self) -> u64 {
@@ -201,9 +230,27 @@ impl AuditSink for PostHogSink {
     }
 }
 
+impl PostHogSink {
+    /// The one bounded, non-blocking admission both record kinds go through.
+    fn admit(&self, record: QueuedRecord) -> Result<(), SubmitError> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(SubmitError::ShuttingDown);
+        }
+        match self.tx.try_send(record) {
+            Ok(()) => {
+                let depth = self.depth.fetch_add(1, Ordering::Relaxed).saturating_add(1);
+                self.metrics.set_queue_depth(depth);
+                Ok(())
+            }
+            Err(mpsc::error::TrySendError::Full(_)) => Err(SubmitError::QueueFull),
+            Err(mpsc::error::TrySendError::Closed(_)) => Err(SubmitError::ShuttingDown),
+        }
+    }
+}
+
 /// The delivery task. Owns everything mutable, so the request path is lock-free.
 struct Worker {
-    rx: mpsc::Receiver<ApiRequestCompletedV1>,
+    rx: mpsc::Receiver<QueuedRecord>,
     client: PostHogClient,
     metrics: AuditMetrics,
     depth: Arc<AtomicU64>,
@@ -272,8 +319,8 @@ impl Worker {
     }
 
     /// Project one record into the buffer, or drop it loudly.
-    fn accept(&mut self, event: ApiRequestCompletedV1) {
-        match event.to_capture_event(self.limits) {
+    fn accept(&mut self, record: QueuedRecord) {
+        match record.to_capture_event(self.limits) {
             Ok(projected) => self.buffer.push(projected),
             Err(error) => {
                 let reason = match error {
@@ -281,13 +328,12 @@ impl Worker {
                     _ => DropReason::Invalid,
                 };
                 self.metrics.record_dropped(reason, 1);
-                // Identifiers only: the record itself may hold data that is safe
-                // for PostHog but not for a log line.
+                let (event_id, kind) = record.rejection_context();
                 tracing::error!(
                     reason = reason.as_str(),
                     error = %error,
-                    event_id = %event.event_id,
-                    operation_id = %event.operation_id,
+                    event_id = %event_id,
+                    record_kind = kind,
                     "audit event rejected before delivery"
                 );
             }

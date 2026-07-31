@@ -18,6 +18,9 @@ use secrecy::SecretString;
 use crate::k8s::SessionPodSpec;
 use crate::models::RepoRef;
 use crate::reconcile::desired::{KillReason, LivePod};
+use crate::runtime_identity::{
+    RuntimeBackendKind, RuntimeIdentityMetadata, RuntimeIdentityOutcome,
+};
 
 pub mod k8s;
 pub mod opensandbox;
@@ -140,9 +143,44 @@ pub enum ValidationOutcome {
 /// (Kubernetes today) is touched.
 #[async_trait]
 pub trait SessionBackend: Send + Sync {
+    /// Which runtime this implementation drives. A closed enum, so it is the one
+    /// value safe to use as the `backend` label on a bounded metric and as the
+    /// `backend` field of a lifecycle audit record.
+    fn backend_kind(&self) -> RuntimeBackendKind;
+
+    /// The runtime identifier for `session_id`, when this backend derives it from
+    /// the session id alone rather than having it assigned by a server.
+    ///
+    /// Kubernetes names its Pod deterministically, so the handle is knowable
+    /// without a round trip; OpenSandbox assigns a sandbox id server-side and its
+    /// create response is not plumbed through [`SessionBackend::ensure_session`],
+    /// so it reports `None` and the lifecycle record correlates by session id
+    /// alone. Never a network call — an unknown handle is `None`, not an error.
+    fn deterministic_runtime_id(&self, _session_id: &str) -> Option<String> {
+        None
+    }
+
     /// Probe the backend is reachable, returning its reported status string (for the
     /// Kubernetes backend, the apiserver `major.minor` version).
     async fn check_reachable(&self) -> Result<String, BackendError>;
+
+    /// Idempotently ensure the runtime for `session_id` carries `identity`.
+    ///
+    /// It may FILL an absent key and may never overwrite a differing one: the
+    /// first complete stamp is authoritative for that runtime incarnation, and a
+    /// later trigger edit must not silently rewrite historical attribution. A
+    /// disagreement returns [`RuntimeIdentityOutcome::Conflict`] having written
+    /// nothing; a runtime that vanished returns
+    /// [`RuntimeIdentityOutcome::NotFound`], which is a benign no-op.
+    ///
+    /// Implementations patch METADATA ONLY (a Kubernetes metadata merge patch, an
+    /// OpenSandbox metadata merge-patch call) and never touch a runtime's spec —
+    /// attribution must never be able to restart a session.
+    async fn ensure_runtime_identity(
+        &self,
+        session_id: &str,
+        identity: &RuntimeIdentityMetadata,
+    ) -> Result<RuntimeIdentityOutcome, BackendError>;
 
     /// Ensure a session runtime exists for `spec`, injecting the assembled `creds`.
     /// Idempotent: an already-live session returns [`EnsureOutcome::AlreadyLive`]; a

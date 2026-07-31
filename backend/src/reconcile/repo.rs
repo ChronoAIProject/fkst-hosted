@@ -548,6 +548,14 @@ pub async fn reconcile_repo(
     for action in actions {
         execute(action, repo, ctx).await;
     }
+
+    // 6. Backfill durable creator/trigger attribution onto any live runtime this
+    //    pass matched to a registration but that predates the launch stamp. Uses
+    //    the stamp already read in step 3, so a settled runtime costs no API call;
+    //    a conflict or a permanent failure is parked by the bounded gate rather
+    //    than re-decided every sweep. Runs AFTER the actions so a runtime this
+    //    pass just killed is not patched on its way out.
+    crate::reconcile::runtime_identity::backfill_runtime_identities(ctx, &regs, &live).await;
     Ok(())
 }
 

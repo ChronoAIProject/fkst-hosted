@@ -71,6 +71,10 @@ pub mod reconcile;
 // Shared startup/full-resync recovery projection. The serialized reconciler is
 // the sole writer; readiness and metrics consume snapshots.
 pub mod recovery;
+// Durable creator/trigger attribution stamped onto every session runtime, plus
+// the pure backfill decision, the bounded retry gate, and the runtime
+// attribution/lifecycle telemetry both session backends share.
+pub mod runtime_identity;
 // Bounded exponential backoff + jitter, shared by every long-lived loop that must
 // retry a failed or partial pass instead of waiting out its periodic cadence.
 mod retry;

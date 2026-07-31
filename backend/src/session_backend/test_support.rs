@@ -13,6 +13,9 @@ use secrecy::SecretString;
 use crate::k8s::SessionPodSpec;
 use crate::models::RepoRef;
 use crate::reconcile::desired::{KillReason, LivePod};
+use crate::runtime_identity::{
+    RuntimeBackendKind, RuntimeIdentityMetadata, RuntimeIdentityOutcome,
+};
 
 use super::{
     BackendError, DeliveryOutcome, EnsureOutcome, RuntimeStatus, SessionBackend, SessionHandle,
@@ -46,6 +49,16 @@ pub(crate) struct FakeSessionBackend {
     deliver_failures: Mutex<HashMap<String, usize>>,
     /// How many more `list_fleet` calls must fail before the fleet is served.
     list_failures: Mutex<usize>,
+    /// Every `ensure_runtime_identity` call as `(session_id, identity)`.
+    pub(crate) identity_calls: Mutex<Vec<(String, RuntimeIdentityMetadata)>>,
+    /// The outcome `ensure_runtime_identity` reports (default `Backfilled`).
+    identity_outcome: Option<RuntimeIdentityOutcome>,
+    /// Whether `ensure_runtime_identity` fails instead of reporting an outcome.
+    identity_error: bool,
+    /// Whether `stop_session` reports the runtime as already gone.
+    stop_not_found: bool,
+    /// Whether `stop_session` fails with a non-404 backend error.
+    stop_error: bool,
 }
 
 impl FakeSessionBackend {
@@ -106,6 +119,35 @@ impl FakeSessionBackend {
         self
     }
 
+    /// A fake whose `stop_session` reports the runtime as already gone (the
+    /// idempotent 404-equivalent the executor swallows).
+    pub(crate) fn with_stop_not_found() -> Self {
+        Self {
+            stop_not_found: true,
+            ..Default::default()
+        }
+    }
+
+    /// A fake whose `stop_session` fails with a non-404 backend error.
+    pub(crate) fn with_stop_error() -> Self {
+        Self {
+            stop_error: true,
+            ..Default::default()
+        }
+    }
+
+    /// Script the outcome `ensure_runtime_identity` reports.
+    pub(crate) fn with_identity_outcome(mut self, outcome: RuntimeIdentityOutcome) -> Self {
+        self.identity_outcome = Some(outcome);
+        self
+    }
+
+    /// Make `ensure_runtime_identity` fail, so the executor's error path runs.
+    pub(crate) fn with_identity_error(mut self) -> Self {
+        self.identity_error = true;
+        self
+    }
+
     /// [`Self::with_deliver_failures`] applied to a fake that is already running, so a
     /// test can start a session failing PART-WAY through a loop's lifetime.
     pub(crate) fn fail_next_deliveries(&self, session_id: &str, count: usize) {
@@ -118,6 +160,33 @@ impl FakeSessionBackend {
 
 #[async_trait]
 impl SessionBackend for FakeSessionBackend {
+    fn backend_kind(&self) -> RuntimeBackendKind {
+        RuntimeBackendKind::Kubernetes
+    }
+
+    fn deterministic_runtime_id(&self, session_id: &str) -> Option<String> {
+        Some(format!("fkst-sess-{session_id}"))
+    }
+
+    async fn ensure_runtime_identity(
+        &self,
+        session_id: &str,
+        identity: &RuntimeIdentityMetadata,
+    ) -> Result<RuntimeIdentityOutcome, BackendError> {
+        self.identity_calls
+            .lock()
+            .unwrap()
+            .push((session_id.to_string(), identity.clone()));
+        if self.identity_error {
+            return Err(BackendError::Other(anyhow::anyhow!(
+                "scripted identity failure"
+            )));
+        }
+        Ok(self
+            .identity_outcome
+            .unwrap_or(RuntimeIdentityOutcome::Backfilled))
+    }
+
     async fn check_reachable(&self) -> Result<String, BackendError> {
         Ok("fake".to_string())
     }
@@ -167,6 +236,14 @@ impl SessionBackend for FakeSessionBackend {
             .lock()
             .unwrap()
             .push((session_id.to_string(), reason));
+        if self.stop_not_found {
+            return Err(BackendError::NotFound);
+        }
+        if self.stop_error {
+            return Err(BackendError::Other(anyhow::anyhow!(
+                "scripted stop failure"
+            )));
+        }
         Ok(())
     }
 

@@ -516,3 +516,60 @@ fn storage_creds_carry_the_single_nyxid_sa_into_the_session_secret() {
     assert_eq!(data["storage-base-url"], "https://storage.example/proxy");
     assert_eq!(data["storage-bucket"], "fkst-logs");
 }
+
+// ---- Durable attribution + lifecycle records (issue #5673) ------------------
+
+/// Build the launch spec for `reg` with the standard single-label fixture.
+fn spec_for(reg: &SessionRegistration) -> SessionPodSpec {
+    session_pod_spec_from(
+        reg,
+        &["fkst-run".to_string()],
+        &branch_topology(),
+        Some("fkst-bot".to_string()),
+        &crate::access_policy::AccessPolicy::default(),
+        None,
+        None,
+    )
+    .expect("valid labels")
+}
+
+#[test]
+fn the_launch_spec_threads_every_attribution_field_from_the_registration() {
+    let spec = spec_for(&registration());
+    assert_eq!(spec.creator_id, Some(583231));
+    assert_eq!(spec.creator_login, "author-login");
+    assert_eq!(spec.trigger_author_id, 583231);
+    assert_eq!(spec.trigger_author_login, "author-login");
+}
+
+#[test]
+fn an_assignee_derived_creator_survives_into_the_launch_spec_without_an_id() {
+    let mut reg = registration();
+    reg.creator_id = None;
+    reg.creator_login = "assignee".to_string();
+    reg.trigger_author_login = "fkst-cloud[bot]".to_string();
+    let spec = spec_for(&reg);
+    assert_eq!(spec.creator_id, None);
+    assert_eq!(spec.creator_login, "assignee");
+    assert_eq!(
+        spec.trigger_author_login, "fkst-cloud[bot]",
+        "the spec carries the raw login; normalization happens at the stamp"
+    );
+    // The stamp is what both runtimes write, and it is normalized there.
+    assert_eq!(spec.identity().trigger_author_login, "fkst-cloud");
+    assert_eq!(spec.identity().creator_id, None);
+}
+
+#[test]
+fn re_attributing_a_trigger_never_moves_the_runtime_config_hash() {
+    // The drift check compares this exact value, so if attribution entered it,
+    // editing an issue's assignee would delete and respawn a running session.
+    let base = spec_for(&registration()).config_hash;
+
+    let mut reg = registration();
+    reg.creator_id = Some(999_999);
+    reg.creator_login = "someone-else".to_string();
+    reg.trigger_author_id = 999_999;
+    reg.trigger_author_login = "another-author".to_string();
+    assert_eq!(spec_for(&reg).config_hash, base);
+}

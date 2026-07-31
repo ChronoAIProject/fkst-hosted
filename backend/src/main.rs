@@ -284,6 +284,20 @@ async fn main() -> ExitCode {
         }
     };
 
+    // The audit sink (milestone #22). Starts the bounded delivery worker only
+    // when capture is enabled; otherwise it is the no-op sink and no task exists.
+    // A build failure here is a genuine misconfiguration (bad host / unbuildable
+    // HTTP client), so it is fatal rather than a silently degraded audit trail.
+    let audit = match fkst_control_plane::audit::AuditHandle::from_config(&config.audit) {
+        Ok(audit) => audit,
+        Err(error) => {
+            tracing::error!(error = %error, "failed to initialize the audit sink");
+            return ExitCode::FAILURE;
+        }
+    };
+    // A clone for the post-serve drain: `AppState` moves into the router below.
+    let audit_drain = audit.clone();
+
     let recovery = RecoveryMonitor::new(pod_dispatch);
     let reconciler = if pod_dispatch {
         match session_backend.clone() {
@@ -296,6 +310,7 @@ async fn main() -> ExitCode {
                     recovery.clone(),
                     initialized_env_store.clone(),
                     disposable_environments.clone(),
+                    audit.clone(),
                 )
                 .await
             }
@@ -319,20 +334,6 @@ async fn main() -> ExitCode {
         .chat
         .clone()
         .map(|cfg| std::sync::Arc::new(fkst_control_plane::chat::ChatRuntime::from_config(cfg)));
-
-    // The audit sink (milestone #22). Starts the bounded delivery worker only
-    // when capture is enabled; otherwise it is the no-op sink and no task exists.
-    // A build failure here is a genuine misconfiguration (bad host / unbuildable
-    // HTTP client), so it is fatal rather than a silently degraded audit trail.
-    let audit = match fkst_control_plane::audit::AuditHandle::from_config(&config.audit) {
-        Ok(audit) => audit,
-        Err(error) => {
-            tracing::error!(error = %error, "failed to initialize the audit sink");
-            return ExitCode::FAILURE;
-        }
-    };
-    // A clone for the post-serve drain: `AppState` moves into the router below.
-    let audit_drain = audit.clone();
 
     let app = match build_router(AppState {
         config,
@@ -542,6 +543,10 @@ async fn build_osb_backend(
 /// session backend is passed in (built once, un-gated). Every failure is a WARN,
 /// never fatal: a misconfigured/unreachable reconciler must not stop the API server
 /// (Model A stays fully functional).
+// Each argument is one already-constructed process-wide dependency the reconcile
+// context needs a handle to. Bundling them would only rename the same fields at
+// the single call site, so the list is allowed to grow with the context.
+#[allow(clippy::too_many_arguments)]
 async fn spawn_reconciler(
     config: &Config,
     github_app: Option<fkst_control_plane::github_app::GithubAppTokens>,
@@ -552,6 +557,7 @@ async fn spawn_reconciler(
         Arc<dyn fkst_control_plane::environment_profile::EnvironmentProfileStore>,
     >,
     disposable_environments: fkst_control_plane::disposable_environment::DisposableEnvironmentRegistry,
+    audit: fkst_control_plane::audit::AuditHandle,
 ) -> Option<ReconcileDispatcher> {
     let Some(github) = github_app else {
         tracing::warn!("pod dispatch on but github app not configured; reconciler not started");
@@ -608,6 +614,7 @@ async fn spawn_reconciler(
         config: config.clone(),
         session_registry,
         disposable_environments,
+        audit,
         routing: None,
     };
     let dispatcher = ReconcileDispatcher::new();
@@ -693,6 +700,7 @@ struct ReconcileWorkerFactory {
     session_registry: fkst_control_plane::session_access::SessionAccessRegistry,
     disposable_environments:
         fkst_control_plane::disposable_environment::DisposableEnvironmentRegistry,
+    audit: fkst_control_plane::audit::AuditHandle,
     routing: Option<fkst_control_plane::leader_routing::LeaderServiceRouter>,
 }
 
@@ -709,6 +717,11 @@ impl ReconcileWorkerFactory {
             ensured_templates: fkst_control_plane::reconcile::new_ensured_templates(),
             session_access: self.session_registry.clone(),
             disposable_environments: self.disposable_environments.clone(),
+            audit: self.audit.clone(),
+            // Rebuilt per leader generation: the gate is a bounded, purely
+            // process-local cooldown set, so a new generation simply re-decides
+            // any parked session on its first sweep.
+            identity_gate: fkst_control_plane::runtime_identity::IdentityGate::new(),
         }
     }
 }
