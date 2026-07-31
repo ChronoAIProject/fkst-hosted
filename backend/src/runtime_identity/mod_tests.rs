@@ -15,6 +15,7 @@ fn stamped(
         creator_login: creator_login.map(str::to_string),
         trigger_author_id: Some(9),
         trigger_author_login: Some("octocat".to_string()),
+        source: Some(SOURCE_LAUNCH_METADATA.to_string()),
         conflicting: false,
         malformed: false,
     }
@@ -60,6 +61,31 @@ fn a_complete_stamp_reads_as_launch_metadata_with_or_without_a_creator_id() {
     // recorded fact, not a gap.
     assert_eq!(
         stamped(true, None, Some("alice")).attribution_source(),
+        AttributionSource::LaunchMetadata
+    );
+}
+
+#[test]
+fn a_backfilled_stamp_never_claims_launch_provenance() {
+    // The two write identical attribution keys, so only the durable marker can
+    // separate them — and unlike the reconciler's in-memory knowledge, the
+    // marker survives a restart.
+    let mut observed = stamped(true, Some(1), Some("alice"));
+    observed.source = Some(SOURCE_BACKFILLED_CURRENT_TRIGGER.to_string());
+    assert_eq!(
+        observed.attribution_source(),
+        AttributionSource::BackfilledCurrentTrigger
+    );
+}
+
+#[test]
+fn a_stamp_with_no_marker_at_all_reads_as_launch_metadata() {
+    // Only a launch writer can produce that shape: the backfill path has always
+    // written a marker.
+    let mut observed = stamped(true, Some(1), Some("alice"));
+    observed.source = None;
+    assert_eq!(
+        observed.attribution_source(),
         AttributionSource::LaunchMetadata
     );
 }

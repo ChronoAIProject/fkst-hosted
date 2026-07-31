@@ -23,12 +23,35 @@ fn an_unstamped_runtime_backfills_every_key_the_registration_can_supply() {
     let IdentityPlan::Backfill(pairs) = plan else {
         panic!("an empty runtime must backfill, got {plan:?}");
     };
-    assert_eq!(pairs.len(), 5);
+    assert_eq!(pairs.len(), 6);
     let filled: BTreeMap<String, String> = pairs
         .into_iter()
         .map(|(key, value)| (key.to_string(), value))
         .collect();
-    assert_eq!(filled, complete_stamp(&identity));
+    // Everything a launch stamp writes, EXCEPT that the provenance marker tells
+    // the truth about where the values came from: the trigger as it reads now.
+    let mut expected = complete_stamp(&identity);
+    expected.insert(
+        K8S_IDENTITY_KEYS.source.to_string(),
+        SOURCE_BACKFILLED_CURRENT_TRIGGER.to_string(),
+    );
+    assert_eq!(filled, expected);
+}
+
+#[test]
+fn a_backfill_never_rewrites_an_existing_provenance_marker() {
+    // A runtime stamped at launch that later gains one absent key keeps saying
+    // `launch_metadata`: that is where its stamp originated, and overwriting it
+    // would be the same silent rewrite the conflict rule forbids for attribution.
+    let identity = identity(Some(4242));
+    let mut metadata = complete_stamp(&identity);
+    metadata.remove(K8S_IDENTITY_KEYS.creator_id);
+
+    let IdentityPlan::Backfill(pairs) = plan(&K8S_IDENTITY_KEYS, &metadata, &identity) else {
+        panic!("a missing creator id must backfill");
+    };
+    let keys: Vec<&str> = pairs.iter().map(|(key, _)| *key).collect();
+    assert_eq!(keys, vec![K8S_IDENTITY_KEYS.creator_id]);
 }
 
 #[test]

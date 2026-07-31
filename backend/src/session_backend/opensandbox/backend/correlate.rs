@@ -286,6 +286,11 @@ pub fn put_metadata(
 /// label-value contract. An invalid value is a loud error — logged + returned — never
 /// silently dropped or emitted (which the server would reject on create). The value is
 /// non-secret correlation data (owner/repo/label/hash), so logging it aids debugging.
+///
+/// The error is the CLASSIFIED [`BackendError::InvalidMetadata`], not an opaque
+/// `Other`: this rejection is permanent and self-inflicted, and the lifecycle
+/// record that follows must say `invalid_metadata` rather than blame the
+/// backend's availability.
 fn put(meta: &mut BTreeMap<String, String>, key: &str, value: String) -> Result<(), BackendError> {
     if !is_valid_label_value(&value) {
         tracing::error!(
@@ -294,9 +299,7 @@ fn put(meta: &mut BTreeMap<String, String>, key: &str, value: String) -> Result<
             "opensandbox correlate: metadata value violates the K8s label-value contract \
              ([A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?, <=63 chars); refusing to stamp"
         );
-        return Err(BackendError::Other(anyhow::anyhow!(
-            "opensandbox metadata value for `{key}` is not a valid Kubernetes label value"
-        )));
+        return Err(BackendError::InvalidMetadata);
     }
     meta.insert(key.to_string(), value);
     Ok(())

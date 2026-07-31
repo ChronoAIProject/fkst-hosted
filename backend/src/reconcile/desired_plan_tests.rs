@@ -148,6 +148,7 @@ fn valid_live_idle_past_both_clocks_kills_idle() {
         vec![ReconcileAction::Kill {
             session_id: "s1".to_string(),
             reason: KillReason::Idle,
+            audit: reg_audit(&regs[0], &live[0]),
         }]
     );
 }
@@ -240,6 +241,7 @@ fn config_mismatch_kills_config_changed_regardless_of_pending() {
             vec![ReconcileAction::Kill {
                 session_id: "s1".to_string(),
                 reason: KillReason::ConfigChanged,
+                audit: reg_audit(&regs[0], &live[0]),
             }],
             "drift with pending={is_pending} must Kill(ConfigChanged)"
         );
@@ -278,6 +280,7 @@ fn provider_namespace_change_replaces_the_runtime_without_editing_trigger_config
         vec![ReconcileAction::Kill {
             session_id: "s1".to_string(),
             reason: KillReason::ConfigChanged,
+            audit: reg_audit(&regs[0], &old_runtime[0]),
         }]
     );
 
@@ -336,6 +339,7 @@ fn config_drift_kill_beats_idle() {
         vec![ReconcileAction::Kill {
             session_id: "s1".to_string(),
             reason: KillReason::ConfigChanged,
+            audit: reg_audit(&regs[0], &live[0]),
         }]
     );
 }
@@ -400,7 +404,8 @@ fn valid_terminal_cleans_up() {
     assert_eq!(
         actions,
         vec![ReconcileAction::CleanupTerminal {
-            session_id: "s1".to_string()
+            session_id: "s1".to_string(),
+            audit: reg_audit(&regs[0], &live[0]),
         }]
     );
 }
@@ -455,6 +460,7 @@ fn orphan_live_pod_is_killed_trigger_closed() {
             vec![ReconcileAction::Kill {
                 session_id: "orphan".to_string(),
                 reason: KillReason::TriggerClosed,
+                audit: orphan_audit(&live[0]),
             }],
             "orphan {liveness:?} pod must Kill(TriggerClosed)"
         );
@@ -480,7 +486,8 @@ fn orphan_terminal_pod_is_cleaned_up() {
     assert_eq!(
         actions,
         vec![ReconcileAction::CleanupTerminal {
-            session_id: "orphan".to_string()
+            session_id: "orphan".to_string(),
+            audit: orphan_audit(&live[0]),
         }]
     );
 }

@@ -8,50 +8,42 @@
 //! aborts the caller — every failure is logged with context and swallowed at THIS
 //! boundary so one bad action never stalls the reconcile of the rest of the repo.
 //!
+//! This file is the ACTION ROUTER plus the GitHub issue effects. The effects that
+//! change whether a runtime exists live next door, one file per direction, because
+//! each is paired with the lifecycle records that make the change part of the
+//! deployment's permanent history:
+//!
+//! - [`super::execute_spawn`] — create side (spawn, credential recovery), with the
+//!   launch arguments it needs assembled in [`super::execute_launch_spec`];
+//! - [`super::execute_runtime`] — touch-pending, stop, terminal cleanup.
+//!
 //! Secret hygiene: the minted installation token is serialized into the
 //! `github-token` Secret value and never logged; comments/labels carry only public
 //! metadata (the offending refs / the parser's 422 message).
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use secrecy::{ExposeSecret, SecretString};
-use zeroize::Zeroize;
-
-use crate::access_policy::AccessPolicy;
-use crate::audit::lifecycle::{LifecycleAction, LifecycleReason};
 use crate::config::Config;
-use crate::disposable_environment::{
-    DisposableEnvironmentLookup, DisposableEnvironmentRegistry, DISPOSABLE_ENVIRONMENT_MARKER,
-};
+use crate::disposable_environment::DisposableEnvironmentRegistry;
 use crate::environment_profile::EnvironmentProfileStore;
 use crate::github_app::listing::GithubListing;
-use crate::github_app::{session_permissions, GithubAppError, GithubAppTokens};
-use crate::k8s::{session_github_token_json, SessionPodSpec};
+use crate::github_app::{GithubAppError, GithubAppTokens};
 use crate::models::RepoRef;
 use crate::reconcile::announce::announce_session_comment;
-use crate::reconcile::branches::DEFAULT_TARGET_BRANCH;
-use crate::reconcile::desired::{runtime_config_hash, ReconcileAction, SessionRegistration};
+use crate::reconcile::desired::ReconcileAction;
 use crate::reconcile::execute_comments::{
-    config_rejected_comment, env_not_ready_comment, env_verify_failed_comment,
-    flag_invalid_comment, invalid_refs_comment, trigger_unauthorized_comment,
+    config_rejected_comment, flag_invalid_comment, trigger_unauthorized_comment,
 };
 use crate::reconcile::execute_runtime;
-use crate::reconcile::lifecycle_audit::{self, SessionLifecycleFacts};
-use crate::reconcile::reachability;
+use crate::reconcile::execute_spawn::{recover_credentials, spawn_session};
 use crate::reconcile::retire::retire_work_issues;
-use crate::reconcile::work_labels::{apply_work_label_namespace, WorkLabelError};
-use crate::session_backend::{EnsureOutcome, SessionBackend};
-use crate::session_spec::creds::{credential_secret_data, StorageWriterCreds};
+use crate::reconcile::work_labels::apply_work_label_namespace;
+use crate::session_backend::SessionBackend;
 
 use super::{
     SUBSTRATE_ANNOUNCED_LABEL, SUBSTRATE_CONFIG_REJECTED_LABEL, SUBSTRATE_INVALID_LABEL,
     TRIGGER_UNAUTHORIZED_LABEL,
 };
-
-/// The `validation-status` annotation value a fully-written environment carries;
-/// only a `ready` environment is injected into a session (mirrors Model A).
-const ENV_STATUS_READY: &str = "ready";
 
 /// Everything the executor needs, bundled so the per-repo driver + the loops can
 /// share ONE cheap-to-clone context: the Kubernetes client, the GitHub App token
@@ -124,11 +116,13 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
             reg,
             detected_work_labels,
         } => recover_credentials(reg, detected_work_labels, ctx).await,
-        ReconcileAction::Kill { session_id, reason } => {
-            execute_runtime::kill(&session_id, reason, ctx).await
-        }
-        ReconcileAction::CleanupTerminal { session_id } => {
-            execute_runtime::cleanup_terminal(&session_id, ctx).await
+        ReconcileAction::Kill {
+            session_id,
+            reason,
+            audit,
+        } => execute_runtime::kill(&session_id, reason, repo, &audit, ctx).await,
+        ReconcileAction::CleanupTerminal { session_id, audit } => {
+            execute_runtime::cleanup_terminal(&session_id, repo, &audit, ctx).await
         }
         ReconcileAction::RetireWorkIssues { work_labels } => {
             // Retire the still-open work issues across EVERY label the retired session
@@ -234,544 +228,17 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
     }
 }
 
-// --- Spawn -------------------------------------------------------------------
-
-/// Spawn a session pod for a desired-but-absent registration: reachability →
-/// environment → token → pod. Any gate that fails posts issue feedback and skips
-/// the spawn (never a partial pod). `detected_work_labels` is the session's FULL
-/// effective work-label set — the reconciler rejects a label-less session upstream, so
-/// this is always non-empty here (the pod's comma-joined work label is built from it).
-async fn spawn_session(
-    reg: SessionRegistration,
-    detected_work_labels: Vec<String>,
-    ctx: &ReconcileCtx,
-) {
-    let owner_repo = format!("{}/{}", reg.repo.owner, reg.repo.name);
-
-    // 1. Reachability: every EFFECTIVE package ref (explicit ∪ manifest-expanded, I7)
-    //    must resolve on public GitHub. A failure flags the trigger issue (comment +
-    //    latch label) and skips the spawn. The probe is authenticated with the repo's
-    //    installation token (best-effort mint; falls back to unauthenticated) so a large
-    //    package closure across repeated reconciles rides the 5000/hour token budget, not
-    //    the 60/hour per-IP one.
-    let reach_token = ctx.github.token_for_repo(&owner_repo, None).await.ok();
-    if let Err(bad) = reachability::check_reachable(
-        &reg.effective_packages,
-        &ctx.http,
-        &ctx.config.github_api_base_url,
-        reach_token.as_ref().map(|t| t.expose_secret()),
-    )
-    .await
-    {
-        tracing::info!(
-            session_id = %reg.session_id,
-            unreachable = bad.len(),
-            "reconcile spawn: package refs unreachable; flagging invalid, not spawning"
-        );
-        flag_invalid(
-            &ctx.github,
-            &owner_repo,
-            reg.trigger_issue,
-            &invalid_refs_comment(&bad),
-        )
-        .await;
-        return;
-    }
-
-    // Provision the target ref before constructing a runtime. This is retried on
-    // every spawn pass, never resets an existing target, and deliberately emits
-    // logs only: the spawn path has no durable comment-dedupe latch.
-    let Some(branches) = ensure_branch_topology(&reg, ctx).await else {
-        return;
-    };
-
-    // 2-5. Rebuild the launch spec + complete credential bundle from authoritative
-    // sources. The same resolver drives live-runtime recovery, so spawn and restart
-    // healing cannot drift to different credential layouts.
-    let (spec, creds) = match resolve_session_credentials(
-        &reg,
-        &detected_work_labels,
-        &branches,
-        ctx,
-    )
-    .await
-    {
-        Ok(ready) => ready,
-        Err(CredentialResolutionError::EnvironmentBlocked { comment }) => {
-            post_comment_best_effort(&ctx.github, &owner_repo, reg.trigger_issue, &comment).await;
-            return;
-        }
-        Err(CredentialResolutionError::TokenMintFailed(error)) => {
-            tracing::error!(session_id = %reg.session_id, error = %error, "reconcile spawn: token mint failed; not spawning");
-            return;
-        }
-        Err(CredentialResolutionError::WorkLabelsInvalid(error)) => {
-            tracing::error!(session_id = %reg.session_id, error = %error, "reconcile spawn: effective work labels invalid; not spawning");
-            return;
-        }
-    };
-
-    // 6. Ensure the session runtime exists (409 = already-live no-op). The backend
-    //    builds + creates the pod and its owner-referenced creds Secret; on failure it
-    //    has already logged the specific error, so an `Err` here is a swallowed no-op.
-    //    The lifecycle record is written on BOTH sides of this call: the request
-    //    before it, the concrete outcome after it, so a create that never returns
-    //    still leaves evidence that it was attempted.
-    let facts = SessionLifecycleFacts::from_registration(&reg, spec.config_hash.clone());
-    lifecycle_audit::emit_pending_create(ctx, LifecycleAction::CreateRequested, &facts, None);
-    match ctx.backend.ensure_session(&spec, creds).await {
-        Ok(EnsureOutcome::Created) => {
-            complete_disposable_handoff(&reg, ctx);
-            // `created` only once a concrete runtime exists — which is exactly
-            // what `Created` means; the runtime handle rides the record when the
-            // backend names its runtimes deterministically.
-            lifecycle_audit::emit(ctx, LifecycleAction::Created, &facts, None);
-            tracing::info!(session_id = %spec.session_id, owner = %reg.repo.owner, "reconcile spawn: session pod created")
-        }
-        Ok(EnsureOutcome::AlreadyLive) => {
-            complete_disposable_handoff(&reg, ctx);
-            // Deliberately NOT a `created` record: nothing was created, and an
-            // idempotent no-op observed on every pending sweep is not a
-            // transition. The `create_requested` above already deduplicates to
-            // one row per incarnation.
-            tracing::info!(session_id = %spec.session_id, "reconcile spawn: session pod already live (no-op)")
-        }
-        Err(_) => lifecycle_audit::emit_pending_create(
-            ctx,
-            LifecycleAction::CreateFailed,
-            &facts,
-            Some(LifecycleReason::BackendUnavailable),
-        ),
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ResolvedBranchTopology {
-    upstream: String,
-    integration: String,
-}
-
-/// Resolve the source/upstream branch and ensure the target/integration branch
-/// exists. The source remains load-bearing after target creation: github-devloop
-/// promotes completed integration work back into it.
-async fn ensure_branch_topology(
-    reg: &SessionRegistration,
-    ctx: &ReconcileCtx,
-) -> Option<ResolvedBranchTopology> {
-    let owner_repo = format!("{}/{}", reg.repo.owner, reg.repo.name);
-    let upstream = match &reg.def.source_branch {
-        Some(source) => source.clone(),
-        None => match ctx.github.repo_default_branch(&owner_repo).await {
-            Ok(source) => source,
-            Err(error) => {
-                tracing::warn!(
-                    session_id = %reg.session_id,
-                    error = %error,
-                    "reconcile spawn: default source branch lookup failed; retrying next pass"
-                );
-                return None;
-            }
-        },
-    };
-    let integration = reg
-        .def
-        .target_branch
-        .clone()
-        .unwrap_or_else(|| DEFAULT_TARGET_BRANCH.to_string());
-    let topology = ResolvedBranchTopology {
-        upstream,
-        integration,
-    };
-
-    match ctx
-        .github
-        .branch_head_sha(&owner_repo, &topology.integration)
-        .await
-    {
-        Ok(Some(_)) => return Some(topology),
-        Ok(None) => {}
-        Err(error) => {
-            tracing::warn!(
-                session_id = %reg.session_id,
-                target_branch = %topology.integration,
-                error = %error,
-                "reconcile spawn: target branch lookup failed; retrying next pass"
-            );
-            return None;
-        }
-    }
-
-    let source_sha = match ctx
-        .github
-        .branch_head_sha(&owner_repo, &topology.upstream)
-        .await
-    {
-        Ok(Some(sha)) => sha,
-        Ok(None) => {
-            tracing::warn!(
-                session_id = %reg.session_id,
-                source_branch = %topology.upstream,
-                "reconcile spawn: source branch disappeared before target provisioning; retrying next pass"
-            );
-            return None;
-        }
-        Err(error) => {
-            tracing::warn!(
-                session_id = %reg.session_id,
-                source_branch = %topology.upstream,
-                error = %error,
-                "reconcile spawn: source branch lookup failed; retrying next pass"
-            );
-            return None;
-        }
-    };
-    match ctx
-        .github
-        .create_ref(&owner_repo, &topology.integration, &source_sha)
-        .await
-    {
-        Ok(()) | Err(GithubAppError::RefExists) => Some(topology),
-        Err(error) => {
-            tracing::warn!(
-                session_id = %reg.session_id,
-                source_branch = %topology.upstream,
-                target_branch = %topology.integration,
-                error = %error,
-                "reconcile spawn: target branch creation failed; retrying next pass"
-            );
-            None
-        }
-    }
-}
-
-/// Rebuild and adopt the complete credential bundle for a live pending runtime.
-/// `ensure_session` remains the single idempotent backend boundary: Kubernetes keeps
-/// its already-live no-op, while OpenSandbox uses the supplied bundle to reconstruct
-/// its process-local cache and restore a missing sentinel without replacing the
-/// deterministically identified runtime.
-async fn recover_credentials(
-    reg: SessionRegistration,
-    detected_work_labels: Vec<String>,
-    ctx: &ReconcileCtx,
-) {
-    let session_id = reg.session_id.clone();
-    match ctx.backend.credential_recovery_needed(&session_id).await {
-        Ok(false) => return,
-        Ok(true) => {}
-        Err(error) => {
-            tracing::warn!(
-                session_id = %session_id,
-                error = %error,
-                "reconcile credential recovery: need probe failed; retrying next reconcile"
-            );
-            return;
-        }
-    }
-    // A backend may report recovery needed and then discover the runtime vanished
-    // at `ensure_session`. Apply the same branch precondition as the ordinary
-    // spawn path before that race can recreate a runtime.
-    let Some(branches) = ensure_branch_topology(&reg, ctx).await else {
-        return;
-    };
-    let (spec, creds) = match resolve_session_credentials(
-        &reg,
-        &detected_work_labels,
-        &branches,
-        ctx,
-    )
-    .await
-    {
-        Ok(ready) => ready,
-        Err(CredentialResolutionError::EnvironmentBlocked { .. }) => {
-            tracing::warn!(
-                session_id = %session_id,
-                "reconcile credential recovery: environment unavailable; retrying next reconcile"
-            );
-            return;
-        }
-        Err(CredentialResolutionError::TokenMintFailed(error)) => {
-            tracing::warn!(
-                session_id = %session_id,
-                error = %error,
-                "reconcile credential recovery: token mint failed; retrying next reconcile"
-            );
-            return;
-        }
-        Err(CredentialResolutionError::WorkLabelsInvalid(error)) => {
-            tracing::error!(
-                session_id = %session_id,
-                error = %error,
-                "reconcile credential recovery: effective work labels invalid"
-            );
-            return;
-        }
-    };
-
-    match ctx.backend.ensure_session(&spec, creds).await {
-        Ok(EnsureOutcome::Created) => {
-            complete_disposable_handoff(&reg, ctx);
-            // The recovery path normally ADOPTS an existing runtime, so it emits
-            // no lifecycle record; `Created` here means the runtime had actually
-            // vanished and this call recreated it, which is a real transition.
-            lifecycle_audit::emit(
-                ctx,
-                LifecycleAction::Created,
-                &SessionLifecycleFacts::from_registration(&reg, spec.config_hash.clone()),
-                None,
-            );
-            tracing::warn!(
-                session_id = %session_id,
-                "reconcile credential recovery: runtime vanished after observation; recreated with complete credentials"
-            )
-        }
-        Ok(EnsureOutcome::AlreadyLive) => {
-            complete_disposable_handoff(&reg, ctx);
-            tracing::debug!(
-                session_id = %session_id,
-                "reconcile credential recovery: complete credential bundle adopted"
-            )
-        }
-        Err(error) => tracing::warn!(
-            session_id = %session_id,
-            error = %error,
-            "reconcile credential recovery: backend ensure failed; retrying next reconcile"
-        ),
-    }
-}
-
-enum CredentialResolutionError {
-    EnvironmentBlocked { comment: String },
-    TokenMintFailed(GithubAppError),
-    WorkLabelsInvalid(WorkLabelError),
-}
-
-/// Resolve the current full session credential bundle from durable/control-plane
-/// sources: the registration, environment store, static service configuration, and a
-/// repository-scoped GitHub token. No bundle is persisted in GitHub or logs.
-///
-/// The GitHub token is FORCE-minted (#3410): see the call site for why a session may
-/// never be handed a cached one.
-async fn resolve_session_credentials(
-    reg: &SessionRegistration,
-    detected_work_labels: &[String],
-    branches: &ResolvedBranchTopology,
-    ctx: &ReconcileCtx,
-) -> Result<(SessionPodSpec, BTreeMap<String, SecretString>), CredentialResolutionError> {
-    let environment = match resolve_environment(reg, ctx).await {
-        EnvResolution::Proceed(environment) => environment,
-        EnvResolution::Blocked { comment } => {
-            return Err(CredentialResolutionError::EnvironmentBlocked { comment });
-        }
-    };
-
-    let owner_repo = format!("{}/{}", reg.repo.owner, reg.repo.name);
-    // FORCED re-mint (#3410). A session is a LONG-LIVED consumer of this token, and the
-    // control plane only revisits it every `pod_token_refresh_secs` (default 45 min).
-    // The cached variant may legally serve a token with as little as the shared
-    // `EXPIRY_BUFFER` (5 min) of life left — harmless for the reconciler's own
-    // millisecond read calls, fatal here: the session's `gh`/`git` would start returning
-    // `Bad credentials` minutes after spawn and stay broken until the next rotation tick.
-    // Nor is the poisoning entry rare: the cache is keyed on `(repo, permissions)` and
-    // `session_permissions()` is structurally equal to `default_permissions()`, so ANY
-    // App call on the repo — the reachability probe a few lines up, a branch lookup, an
-    // issue comment — leaves behind the entry this mint would otherwise read.
-    // Forcing the mint makes the delivered life a full token TTL, which
-    // [`ReconcileConfig`] already bounds strictly above `pod_token_refresh_secs`, so the
-    // next rotation always lands before expiry. This is the same reasoning the rotation
-    // sweep applies (`k8s::token_rotation::rotate_one`); delivery — spawn AND
-    // crash-recovery, on both session backends — needs it just as much.
-    let implementation_repos = ctx
-        .config
-        .delivery_grants
-        .implementation_repos_for(&reg.repo);
-    let mint_result = if implementation_repos.is_empty() {
-        ctx.github
-            .token_with_expiry_for_repo_forced(&owner_repo, Some(session_permissions()))
-            .await
-    } else {
-        ctx.github
-            .token_with_expiry_for_repositories_forced(
-                &owner_repo,
-                &implementation_repos,
-                Some(session_permissions()),
-            )
-            .await
-    };
-    let (token, expires_at) = match mint_result {
-        Ok(pair) => pair,
-        Err(error) => return Err(CredentialResolutionError::TokenMintFailed(error)),
-    };
-    let github_token_json = session_github_token_json(&token, expires_at);
-    let spec = session_pod_spec_from(
-        reg,
-        detected_work_labels,
-        branches,
-        ctx.config.reconcile.github_bot_login.clone(),
-        &ctx.config.access,
-        ctx.config.delivery_grants.session_json_for(&reg.repo),
-        ctx.config.reconcile.work_label_namespace.as_deref(),
-    )
-    .map_err(CredentialResolutionError::WorkLabelsInvalid)?;
-    let storage = storage_writer_creds(&ctx.config);
-    let creds = credential_secret_data(
-        &github_token_json,
-        ctx.config.llm_api_key.expose_secret(),
-        environment
-            .user_env
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str())),
-        &environment.install,
-        &environment.secret_keys,
-        storage,
-    )
-    .into_iter()
-    .map(|(key, value)| (key, SecretString::from(value)))
-    .collect();
-
-    Ok((spec, creds))
-}
-
-/// The transient registry is only an API-to-reconciler handoff. Once the
-/// backend confirms it accepted the complete bundle, the sandbox/backend owns
-/// the material and the control plane forgets it.
-fn complete_disposable_handoff(reg: &SessionRegistration, ctx: &ReconcileCtx) {
-    if reg.def.environment.as_deref() != Some(DISPOSABLE_ENVIRONMENT_MARKER) {
-        return;
-    }
-    let Some(creator_id) = reg.creator_id else {
-        return;
-    };
-    if ctx.disposable_environments.remove(
-        &reg.repo.owner,
-        &reg.repo.name,
-        reg.trigger_issue,
-        creator_id,
-    ) {
-        tracing::info!(
-            session_id = %reg.session_id,
-            "reconcile spawn: disposable environment handoff consumed"
-        );
-    }
-}
-
-/// Build the launch spec from a registration + its effective work-label set (pure;
-/// unit-tested). `package_roots` are the EFFECTIVE package refs (explicit ∪
-/// manifest-expanded, I7) rendered back to `owner/repo@ref:path` — so the pod clones a
-/// manifest's packages too (`FKST_SESSION_PACKAGE_ROOTS`). The pod's `work_label` is the
-/// comma-joined `detected_work_labels` (the explicit `### Work Label` ∪ package-discovered
-/// labels — the set that actually wakes the session), NOT just the explicit label, so a
-/// `### Work Label`-less session runs on its packages' auto-declared labels (epic #594
-/// I4). `bot_login` falls back to empty when unset.
-fn session_pod_spec_from(
-    reg: &SessionRegistration,
-    detected_work_labels: &[String],
-    branches: &ResolvedBranchTopology,
-    bot_login: Option<String>,
-    access: &AccessPolicy,
-    delivery_grants_json: Option<String>,
-    work_label_namespace: Option<&str>,
-) -> Result<SessionPodSpec, WorkLabelError> {
-    let labels = apply_work_label_namespace(detected_work_labels, work_label_namespace)?;
-    Ok(SessionPodSpec {
-        session_id: reg.session_id.clone(),
-        installation_id: reg.installation_id,
-        repo: reg.repo.clone(),
-        trigger_issue_number: reg.trigger_issue,
-        package_roots: reg
-            .effective_packages
-            .iter()
-            .map(reachability::render_ref)
-            .collect(),
-        work_label: crate::k8s::work_label_wire::join_work_labels(&labels.effective),
-        work_label_map_json: labels.map_json(),
-        // Serialized only when the session configures at least one package, so an
-        // unconfigured session renders no key. BTreeMap ordering makes the JSON
-        // deterministic, which matters because this value feeds the runtime config
-        // hash: a non-deterministic rendering would look like config drift and
-        // respawn the pod on every pass.
-        package_env_json: if reg.effective_package_env.is_empty() {
-            None
-        } else {
-            Some(
-                serde_json::to_string(&reg.effective_package_env)
-                    .expect("a BTreeMap of strings always serializes"),
-            )
-        },
-        bot_login: bot_login.unwrap_or_default(),
-        config_hash: runtime_config_hash(&reg.config_hash, work_label_namespace),
-        output_lang: reg.def.output_lang.clone(),
-        engine_config: reg.def.engine_config.clone(),
-        creator_login: reg.creator_login.clone(),
-        // Attribution the runtime is stamped with. Threaded verbatim from the
-        // registration and deliberately EXCLUDED from `config_hash` /
-        // `full_config_hash` (see `crate::reconcile::hashing`): re-attributing an
-        // issue must never look like a configuration change and respawn a
-        // running session.
-        creator_id: reg.creator_id,
-        trigger_author_id: reg.trigger_author_id,
-        trigger_author_login: reg.trigger_author_login.clone(),
-        contributors: session_contributors(reg, access),
-        upstream_branch: branches.upstream.clone(),
-        target_branch: branches.integration.clone(),
-        delivery_grants_json,
-    })
-}
-
-/// Package-side work authors: creator first, then Session Collaborators, then
-/// login-shaped deployment admins. Log-access/FKST-Contributor entries are not
-/// work authority and deliberately do not feed this environment contract.
-fn session_contributors(reg: &SessionRegistration, access: &AccessPolicy) -> Vec<String> {
-    let mut contributors: Vec<String> = Vec::new();
-    let mut seen: Vec<String> = Vec::new();
-    let creator = reg.creator_login.trim();
-    let admin_logins: Vec<&str> = access.global_admin_login_entries().collect();
-    let excluded_admins = access
-        .global_admin_count()
-        .saturating_sub(admin_logins.len());
-    if excluded_admins > 0 {
-        tracing::debug!(
-            excluded_global_admin_entries = excluded_admins,
-            "session env: numeric global-admin entries omitted from login-only author policy"
-        );
-    }
-    for token in std::iter::once(creator)
-        .chain(reg.collaborators.iter().map(String::as_str))
-        .chain(admin_logins)
-    {
-        if token.is_empty() {
-            continue;
-        }
-        let folded = token.to_ascii_lowercase();
-        if !seen.contains(&folded) {
-            seen.push(folded);
-            contributors.push(token.to_string());
-        }
-    }
-    contributors
-}
-
-/// Resolve the chrono-storage SA creds to inject into a session Secret, or `None`
-/// when the control plane has no storage config (the in-pod uploader then fails
-/// closed — no bundle). The single configured NyxID SA serves both the control
-/// plane's own storage calls and the in-pod uploader. Borrows the config, exposing
-/// the client secret only to copy it into the Secret builder.
-fn storage_writer_creds(config: &Config) -> Option<StorageWriterCreds<'_>> {
-    let storage = config.storage.as_ref()?;
-    Some(StorageWriterCreds {
-        client_id: &storage.nyxid_client_id,
-        client_secret: storage.nyxid_client_secret.expose_secret(),
-        token_url: &storage.nyxid_token_url,
-        base_url: &storage.base_url,
-        bucket: &storage.bucket,
-    })
-}
-
 // --- GitHub issue effects (testable against a fake transport) -----------------
 
 /// Flag an invalid trigger issue: post `comment`, then latch the invalid label.
 /// Both are best-effort + idempotent (label add is additive; the planner emits
 /// this only on the FIRST observation of an invalid issue).
-async fn flag_invalid(github: &GithubAppTokens, owner_repo: &str, issue: i64, comment: &str) {
+pub(crate) async fn flag_invalid(
+    github: &GithubAppTokens,
+    owner_repo: &str,
+    issue: i64,
+    comment: &str,
+) {
     post_comment_best_effort(github, owner_repo, issue, comment).await;
     if let Err(error) = github
         .add_issue_labels(
@@ -880,7 +347,7 @@ async fn clear_trigger_unauthorized(github: &GithubAppTokens, owner_repo: &str, 
 }
 
 /// Post a comment, logging (never propagating) any failure.
-async fn post_comment_best_effort(
+pub(crate) async fn post_comment_best_effort(
     github: &GithubAppTokens,
     owner_repo: &str,
     issue: i64,
@@ -894,194 +361,12 @@ async fn post_comment_best_effort(
     }
 }
 
-// --- Environment resolution (mirrors the Model-A webhook pre-flight) ----------
-
-/// The outcome of pre-flighting the issue's named environment.
-struct ResolvedEnvironment {
-    user_env: BTreeMap<String, String>,
-    install: Vec<String>,
-    secret_keys: Vec<String>,
-}
-
-impl Drop for ResolvedEnvironment {
-    fn drop(&mut self) {
-        for command in &mut self.install {
-            command.zeroize();
-        }
-        for key in &mut self.secret_keys {
-            key.zeroize();
-        }
-        for (mut key, mut value) in std::mem::take(&mut self.user_env) {
-            key.zeroize();
-            value.zeroize();
-        }
-    }
-}
-
-enum EnvResolution {
-    /// Launch with the merged variables/secret VALUES to inject, the ordered install
-    /// commands to run in the pod, and the NAMES of the env vars that are secrets
-    /// (so the pod can keep them out of the codex config). All empty when the issue
-    /// declared no environment.
-    Proceed(ResolvedEnvironment),
-    /// Do NOT launch; post `comment` on the trigger issue explaining why.
-    Blocked { comment: String },
-}
-
-/// Resolve either the exact disposable marker through the private handoff, or a
-/// normal saved profile through the durable environment store.
-async fn resolve_environment(reg: &SessionRegistration, ctx: &ReconcileCtx) -> EnvResolution {
-    if reg.def.environment.as_deref() != Some(DISPOSABLE_ENVIRONMENT_MARKER) {
-        return resolve_named_environment(
-            ctx.env_store.as_ref(),
-            reg.creator_id,
-            &reg.creator_login,
-            reg.def.environment.as_deref(),
-        )
-        .await;
-    }
-
-    let Some(creator_id) = reg.creator_id else {
-        tracing::warn!(
-            session_id = %reg.session_id,
-            "reconcile spawn: disposable environment has no numeric creator; blocking"
-        );
-        return EnvResolution::Blocked {
-            comment: disposable_environment_unavailable_comment(),
-        };
-    };
-    match ctx.disposable_environments.resolve(
-        &reg.repo.owner,
-        &reg.repo.name,
-        reg.trigger_issue,
-        creator_id,
-    ) {
-        DisposableEnvironmentLookup::Found(material) => {
-            tracing::info!(
-                session_id = %reg.session_id,
-                install_commands = material.install.len(),
-                env_vars = material.user_env.len(),
-                secret_env_vars = material.secret_keys.len(),
-                "reconcile spawn: disposable environment resolved"
-            );
-            EnvResolution::Proceed(ResolvedEnvironment {
-                user_env: material.user_env,
-                install: material.install,
-                secret_keys: material.secret_keys,
-            })
-        }
-        DisposableEnvironmentLookup::Missing => {
-            tracing::warn!(
-                session_id = %reg.session_id,
-                "reconcile spawn: disposable environment handoff missing; blocking"
-            );
-            EnvResolution::Blocked {
-                comment: disposable_environment_unavailable_comment(),
-            }
-        }
-        DisposableEnvironmentLookup::CreatorMismatch => {
-            tracing::warn!(
-                session_id = %reg.session_id,
-                "reconcile spawn: disposable environment creator mismatch; blocking"
-            );
-            EnvResolution::Blocked {
-                comment: disposable_environment_unavailable_comment(),
-            }
-        }
-    }
-}
-
-fn disposable_environment_unavailable_comment() -> String {
-    "This session's disposable one-time environment is unavailable. Close this trigger and create a new session to submit the environment again."
-        .to_string()
-}
-
-/// Pre-flight the issue's named environment against the CREATOR's store (keyed by
-/// the signed numeric GitHub id). An assignee-derived creator has no id in issue
-/// metadata, so environment resolution is unavailable and the session proceeds
-/// without an environment (auto-seeded triggers never select one). `None` → an
-/// empty session. A named selection for an id-bearing creator must exist and be
-/// `ready`; otherwise the launch is blocked with feedback — fail closed.
-async fn resolve_named_environment(
-    env_store: &dyn EnvironmentProfileStore,
-    creator_id: Option<i64>,
-    creator_login: &str,
-    environment: Option<&str>,
-) -> EnvResolution {
-    let Some(creator_id) = creator_id else {
-        tracing::info!(
-            creator = %creator_login,
-            requested_environment = environment.unwrap_or_default(),
-            "reconcile spawn: creator has no numeric id; resolving no environment"
-        );
-        return EnvResolution::Proceed(ResolvedEnvironment {
-            user_env: BTreeMap::new(),
-            install: Vec::new(),
-            secret_keys: Vec::new(),
-        });
-    };
-
-    let name = match environment {
-        None => {
-            return EnvResolution::Proceed(ResolvedEnvironment {
-                user_env: BTreeMap::new(),
-                install: Vec::new(),
-                secret_keys: Vec::new(),
-            })
-        }
-        Some(name) => name,
-    };
-
-    match env_store.get_environment(creator_id, name).await {
-        Ok(Some(record)) if record.status == ENV_STATUS_READY => {
-            match env_store
-                .load_environment_for_session(creator_id, name)
-                .await
-            {
-                Ok(Some((install, user_env, secret_keys))) => {
-                    tracing::info!(
-                        github_user_id = creator_id,
-                        environment = %name,
-                        install_commands = install.len(),
-                        env_vars = user_env.len(),
-                        secret_env_vars = secret_keys.len(),
-                        "reconcile spawn: named environment resolved"
-                    );
-                    EnvResolution::Proceed(ResolvedEnvironment {
-                        user_env,
-                        install,
-                        secret_keys,
-                    })
-                }
-                Ok(None) => EnvResolution::Blocked {
-                    comment: env_not_ready_comment(name),
-                },
-                Err(error) => {
-                    tracing::error!(environment = %name, error = %error, "reconcile spawn: environment load failed");
-                    EnvResolution::Blocked {
-                        comment: env_verify_failed_comment(name),
-                    }
-                }
-            }
-        }
-        Ok(_) => EnvResolution::Blocked {
-            comment: env_not_ready_comment(name),
-        },
-        Err(error) => {
-            tracing::error!(environment = %name, error = %error, "reconcile spawn: environment pre-flight read failed");
-            EnvResolution::Blocked {
-                comment: env_verify_failed_comment(name),
-            }
-        }
-    }
-}
-
+#[cfg(test)]
+#[path = "execute_lifecycle_tests.rs"]
+mod lifecycle_tests;
 #[cfg(test)]
 #[path = "execute_routing_tests.rs"]
 mod routing_tests;
 #[cfg(test)]
 #[path = "execute_tests.rs"]
 mod tests;
-#[cfg(test)]
-#[path = "execute_token_tests.rs"]
-mod token_tests;

@@ -618,9 +618,15 @@ fn pod_owner_reference(pod: &Pod) -> Option<OwnerReference> {
 
 /// What a create did: a freshly created Pod, or an idempotent no-op because the
 /// deterministically-named Pod already existed (the session is already live).
+///
+/// `Created` carries the apiserver's `creationTimestamp` for the Pod it just
+/// made. The Pod NAME is derived from the session id and therefore identical
+/// across a kill/respawn cycle, so the timestamp is the only thing that
+/// distinguishes a session's second runtime from its first — which the lifecycle
+/// audit trail needs in order not to deduplicate them into one row.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SessionPodOutcome {
-    Created,
+    Created { created_at: Option<DateTime<Utc>> },
     AlreadyLive,
 }
 
@@ -681,9 +687,18 @@ pub async fn create_session_pod(
         namespace = %namespace,
         "session pod create: pod created"
     );
-    Ok(SessionPodOutcome::Created)
+    Ok(SessionPodOutcome::Created {
+        created_at: created
+            .metadata
+            .creation_timestamp
+            .as_ref()
+            .map(|k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(at)| *at),
+    })
 }
 
+#[cfg(test)]
+#[path = "session_launcher_identity_tests.rs"]
+mod identity_tests;
 #[cfg(test)]
 #[path = "session_launcher_tests.rs"]
 mod tests;

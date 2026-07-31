@@ -10,9 +10,14 @@
 //! Every verb keeps the executor's discipline: idempotent, 404-tolerant, and
 //! never propagating — one failed effect must not stall the rest of the repo's
 //! reconcile.
+//!
+//! Both delete verbs take the planner's [`RuntimeAudit`] and the repository they
+//! are executing for: a deletion must be as correlatable as the creation it
+//! undoes, and none of that evidence survives the runtime it describes.
 
 use crate::audit::lifecycle::{LifecycleAction, LifecycleReason};
-use crate::reconcile::desired::KillReason;
+use crate::models::RepoRef;
+use crate::reconcile::desired::{KillReason, RuntimeAudit};
 use crate::reconcile::execute::ReconcileCtx;
 use crate::reconcile::lifecycle_audit::{self, SessionLifecycleFacts};
 use crate::session_backend::BackendError;
@@ -37,9 +42,15 @@ pub(crate) async fn touch_pending(session_id: &str, ctx: &ReconcileCtx) {
 /// `deleted` is recorded for BOTH a successful delete and an already-absent
 /// runtime: the contract is confirmed absence, and an idempotent no-op confirms
 /// it just as well as a delete does.
-pub(crate) async fn kill(session_id: &str, reason: KillReason, ctx: &ReconcileCtx) {
+pub(crate) async fn kill(
+    session_id: &str,
+    reason: KillReason,
+    repo: &RepoRef,
+    audit: &RuntimeAudit,
+    ctx: &ReconcileCtx,
+) {
     tracing::info!(session_id = %session_id, ?reason, "reconcile: killing session pod");
-    let facts = SessionLifecycleFacts::from_session_id(session_id);
+    let facts = SessionLifecycleFacts::from_runtime_audit(session_id, repo, audit);
     let reason_code = lifecycle_audit::kill_reason(reason);
     lifecycle_audit::emit(
         ctx,
@@ -60,7 +71,7 @@ pub(crate) async fn kill(session_id: &str, reason: KillReason, ctx: &ReconcileCt
                 ctx,
                 LifecycleAction::DeleteFailed,
                 &facts,
-                Some(LifecycleReason::BackendUnavailable),
+                Some(lifecycle_audit::failure_reason(&error)),
             );
             tracing::warn!(session_id = %session_id, error = %error, "reconcile: kill delete failed")
         }
@@ -69,8 +80,13 @@ pub(crate) async fn kill(session_id: &str, reason: KillReason, ctx: &ReconcileCt
 
 /// GC a terminal pod (its owner-referenced Secret cascades away in the background,
 /// via the backend). 404-tolerant.
-pub(crate) async fn cleanup_terminal(session_id: &str, ctx: &ReconcileCtx) {
-    let facts = SessionLifecycleFacts::from_session_id(session_id);
+pub(crate) async fn cleanup_terminal(
+    session_id: &str,
+    repo: &RepoRef,
+    audit: &RuntimeAudit,
+    ctx: &ReconcileCtx,
+) {
+    let facts = SessionLifecycleFacts::from_runtime_audit(session_id, repo, audit);
     lifecycle_audit::emit(
         ctx,
         LifecycleAction::DeleteRequested,
@@ -98,7 +114,7 @@ pub(crate) async fn cleanup_terminal(session_id: &str, ctx: &ReconcileCtx) {
                 ctx,
                 LifecycleAction::DeleteFailed,
                 &facts,
-                Some(LifecycleReason::BackendUnavailable),
+                Some(lifecycle_audit::failure_reason(&error)),
             );
             tracing::warn!(session_id = %session_id, error = %error, "reconcile: terminal cleanup failed")
         }

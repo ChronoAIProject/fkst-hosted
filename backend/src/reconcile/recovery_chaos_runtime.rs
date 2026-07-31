@@ -17,7 +17,7 @@ use crate::models::RepoRef;
 use crate::reconcile::desired::{KillReason, LivePod, PodLiveness};
 use crate::runtime_identity::{
     plan as plan_identity, read as read_identity, stamp_pairs, IdentityPlan, RuntimeBackendKind,
-    RuntimeIdentityMetadata, RuntimeIdentityOutcome, K8S_IDENTITY_KEYS,
+    RuntimeIdentityMetadata, RuntimeIdentityOutcome, RuntimeIncarnation, K8S_IDENTITY_KEYS,
 };
 use crate::session_backend::{
     BackendError, DeliveryOutcome, EnsureOutcome, ObserveError, RuntimeStatus, SessionBackend,
@@ -212,7 +212,10 @@ impl SessionBackend for ChaosBackend {
             credential_keys: keys.into_iter().collect(),
         });
         Ok(if created {
-            EnsureOutcome::Created
+            EnsureOutcome::Created(RuntimeIncarnation::from_handle(format!(
+                "fake-{}",
+                spec.session_id
+            )))
         } else {
             EnsureOutcome::AlreadyLive
         })

@@ -29,6 +29,7 @@ fn the_kubernetes_annotation_keys_are_the_documented_ones() {
             "fkst.chrono-ai.fun/creator-login",
             "fkst.chrono-ai.fun/trigger-author-id",
             "fkst.chrono-ai.fun/trigger-author-login",
+            "fkst.chrono-ai.fun/identity-source",
         ]
     );
 }
@@ -43,6 +44,7 @@ fn the_opensandbox_metadata_keys_are_the_documented_ones() {
             "fkst-creator-login",
             "fkst-trigger-author-id",
             "fkst-trigger-author-login",
+            "fkst-identity-source",
         ]
     );
 }

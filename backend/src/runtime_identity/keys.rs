@@ -31,7 +31,24 @@ use super::{ObservedRuntimeIdentity, RuntimeIdentityMetadata};
 /// legacy one.
 pub const IDENTITY_SCHEMA_VERSION: &str = "1";
 
-/// The five metadata keys one backend spells its identity stamp with.
+/// The provenance value a LAUNCH stamp records.
+///
+/// It exists because the schema/attribution keys alone cannot answer the
+/// question the epic insists be answered honestly: a backfill writes byte-for-
+/// byte the same five keys a launch does, so without a durable marker a
+/// legacy runtime patched from the trigger as it reads TODAY would later be
+/// read back as "this is who launched it" — and, unlike the reconciler's
+/// in-memory knowledge, that misreading survives a process restart.
+pub const SOURCE_LAUNCH_METADATA: &str = "launch_metadata";
+
+/// The provenance value a BACKFILL patch records. Deliberately not called
+/// original/historical: a legacy runtime's trigger may have been edited or
+/// re-assigned since launch, so evidence recovered now is honest only about
+/// being current.
+pub const SOURCE_BACKFILLED_CURRENT_TRIGGER: &str = "backfilled_current_trigger";
+
+/// The metadata keys one backend spells its identity stamp with: the five
+/// attribution keys plus the provenance marker that says where they came from.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct IdentityKeys {
     pub schema: &'static str,
@@ -39,18 +56,23 @@ pub struct IdentityKeys {
     pub creator_login: &'static str,
     pub trigger_author_id: &'static str,
     pub trigger_author_login: &'static str,
+    /// Where this runtime's stamp came from — one of [`SOURCE_LAUNCH_METADATA`]
+    /// / [`SOURCE_BACKFILLED_CURRENT_TRIGGER`]. Never an attribution value, so
+    /// it never participates in the conflict comparison.
+    pub source: &'static str,
 }
 
 impl IdentityKeys {
     /// Every key, in stamp order. Used by the round-trip tests and by the
     /// backfill planner, so a key added to the struct cannot be forgotten.
-    pub fn all(&self) -> [&'static str; 5] {
+    pub fn all(&self) -> [&'static str; 6] {
         [
             self.schema,
             self.creator_id,
             self.creator_login,
             self.trigger_author_id,
             self.trigger_author_login,
+            self.source,
         ]
     }
 }
@@ -63,6 +85,7 @@ pub const K8S_IDENTITY_KEYS: IdentityKeys = IdentityKeys {
     creator_login: "fkst.chrono-ai.fun/creator-login",
     trigger_author_id: "fkst.chrono-ai.fun/trigger-author-id",
     trigger_author_login: "fkst.chrono-ai.fun/trigger-author-login",
+    source: "fkst.chrono-ai.fun/identity-source",
 };
 
 /// OpenSandbox sandbox METADATA keys, sharing the flat `fkst-` convention of the
@@ -73,6 +96,7 @@ pub const OSB_IDENTITY_KEYS: IdentityKeys = IdentityKeys {
     creator_login: "fkst-creator-login",
     trigger_author_id: "fkst-trigger-author-id",
     trigger_author_login: "fkst-trigger-author-login",
+    source: "fkst-identity-source",
 };
 
 /// Render `identity` into `(key, value)` pairs for `keys`.
@@ -85,7 +109,11 @@ pub fn stamp_pairs(
     keys: &IdentityKeys,
     identity: &RuntimeIdentityMetadata,
 ) -> Vec<(&'static str, String)> {
-    let mut pairs = vec![(keys.schema, IDENTITY_SCHEMA_VERSION.to_string())];
+    let mut pairs = vec![
+        (keys.schema, IDENTITY_SCHEMA_VERSION.to_string()),
+        // Written at launch, by the only writer that can truthfully claim it.
+        (keys.source, SOURCE_LAUNCH_METADATA.to_string()),
+    ];
     if let Some(creator_id) = identity.creator_id {
         pairs.push((keys.creator_id, creator_id.to_string()));
     }
@@ -132,6 +160,7 @@ pub fn read(keys: &IdentityKeys, metadata: &BTreeMap<String, String>) -> Observe
         creator_login: non_empty(metadata.get(keys.creator_login)),
         trigger_author_id,
         trigger_author_login: non_empty(metadata.get(keys.trigger_author_login)),
+        source: non_empty(metadata.get(keys.source)),
         conflicting: false,
         malformed,
     }

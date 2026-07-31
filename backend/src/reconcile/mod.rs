@@ -30,6 +30,11 @@ pub mod desired;
 pub mod effective_packages;
 pub mod execute;
 mod execute_comments;
+// Assembly of a session's branch topology, pod spec, and credential bundle —
+// shared by both create-side verbs so spawn and recovery can never drift.
+pub(crate) mod execute_launch_spec;
+// The create-side runtime effects (spawn + credential recovery).
+pub(crate) mod execute_spawn;
 // The three runtime effect verbs (refresh-pending, stop, terminal cleanup) plus
 // the lifecycle records they write. Split from the executor because these are the
 // only effects that change whether a runtime exists.
@@ -53,6 +58,8 @@ pub mod repo;
 // concern, kept out of the reconcile planner).
 pub mod retire;
 pub mod routing;
+// The delete-side audit facts the planner captures before a runtime disappears.
+pub mod runtime_audit;
 // Backfill of durable creator/trigger attribution onto legacy runtimes, from the
 // registration this pass just parsed (issue #5673). Never part of the lifecycle
 // planner: attribution can neither spawn nor kill anything.

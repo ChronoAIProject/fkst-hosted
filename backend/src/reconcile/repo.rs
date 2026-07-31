@@ -553,8 +553,15 @@ pub async fn reconcile_repo(
     //    pass matched to a registration but that predates the launch stamp. Uses
     //    the stamp already read in step 3, so a settled runtime costs no API call;
     //    a conflict or a permanent failure is parked by the bounded gate rather
-    //    than re-decided every sweep. Runs AFTER the actions so a runtime this
-    //    pass just killed is not patched on its way out.
+    //    than re-decided every sweep.
+    //
+    //    It runs after the actions, but works from the PRE-action `live`
+    //    snapshot, so a runtime an action just killed still reads as `Live` here
+    //    and is patched on its way out. That is harmless by construction: the
+    //    patch re-reads the runtime and a deleted one answers 404 →
+    //    `RuntimeIdentityOutcome::NotFound`, which writes nothing and emits
+    //    nothing. Re-observing after the actions purely to avoid that no-op would
+    //    cost one extra backend LIST per repo per sweep.
     crate::reconcile::runtime_identity::backfill_runtime_identities(ctx, &regs, &live).await;
     Ok(())
 }

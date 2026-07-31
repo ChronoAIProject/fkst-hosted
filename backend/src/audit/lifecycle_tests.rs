@@ -87,6 +87,26 @@ fn a_create_with_no_runtime_yet_keys_on_the_supplied_incarnation_hint() {
 }
 
 #[test]
+fn a_creation_instant_discriminates_even_with_no_handle_at_all() {
+    // The OpenSandbox delete path: the backend assigns its sandbox id server-side
+    // and `ensure_session` does not carry it into the delete, so the only
+    // incarnation evidence is the observed creation instant. It must still
+    // separate two runtimes of one session, or every deletion after the first
+    // would be discarded as a duplicate.
+    let first = event(LifecycleAction::Deleted).with_runtime(LifecycleRuntime {
+        runtime_id: None,
+        created_at: Utc.timestamp_opt(1_700_000_000, 0).single(),
+        incarnation_hint: None,
+    });
+    let second = event(LifecycleAction::Deleted).with_runtime(LifecycleRuntime {
+        runtime_id: None,
+        created_at: Utc.timestamp_opt(1_700_009_999, 0).single(),
+        incarnation_hint: None,
+    });
+    assert_ne!(first.event_id, second.event_id);
+}
+
+#[test]
 fn distinct_actions_and_backends_never_collide() {
     let created = event(LifecycleAction::Created).with_runtime(runtime(Some("r"), None));
     let deleted = event(LifecycleAction::Deleted).with_runtime(runtime(Some("r"), None));

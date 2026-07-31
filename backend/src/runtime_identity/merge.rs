@@ -21,10 +21,21 @@
 //! registration does not, the registration is simply making no claim — it is not
 //! asserting a different value, so there is nothing to disagree with. The stamp
 //! stands and the id is never borrowed from the trigger author.
+//!
+//! ## Why a backfill also writes a provenance marker
+//!
+//! A backfill writes byte-for-byte what a launch stamp writes, so without a
+//! durable marker the patched runtime would later read back as
+//! [`AttributionSource::LaunchMetadata`](super::AttributionSource::LaunchMetadata)
+//! — a claim about who launched it that this code cannot make. The marker is
+//! therefore added whenever a patch fills anything AND the runtime does not
+//! already carry one, and it is deliberately conservative: it says "at least
+//! part of this stamp came from the trigger as it read later", never the
+//! reverse.
 
 use std::collections::BTreeMap;
 
-use super::keys::{IdentityKeys, IDENTITY_SCHEMA_VERSION};
+use super::keys::{IdentityKeys, IDENTITY_SCHEMA_VERSION, SOURCE_BACKFILLED_CURRENT_TRIGGER};
 use super::{ObservedRuntimeIdentity, RuntimeIdentityMetadata};
 
 /// What a backfill attempt should do to one runtime.
@@ -99,10 +110,15 @@ pub fn plan(
     }
 
     if backfill.is_empty() {
-        IdentityPlan::Complete
-    } else {
-        IdentityPlan::Backfill(backfill)
+        return IdentityPlan::Complete;
     }
+    // Provenance, recorded exactly once. An existing marker is never rewritten:
+    // a runtime stamped at launch that later gains one absent key keeps saying
+    // `launch_metadata`, which is where its stamp originated.
+    if !observed.contains_key(keys.source) {
+        backfill.push((keys.source, SOURCE_BACKFILLED_CURRENT_TRIGGER.to_string()));
+    }
+    IdentityPlan::Backfill(backfill)
 }
 
 /// Whether an ALREADY-READ stamp states everything the registration can, so no

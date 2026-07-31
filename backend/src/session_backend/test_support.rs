@@ -14,7 +14,7 @@ use crate::k8s::SessionPodSpec;
 use crate::models::RepoRef;
 use crate::reconcile::desired::{KillReason, LivePod};
 use crate::runtime_identity::{
-    RuntimeBackendKind, RuntimeIdentityMetadata, RuntimeIdentityOutcome,
+    RuntimeBackendKind, RuntimeIdentityMetadata, RuntimeIdentityOutcome, RuntimeIncarnation,
 };
 
 use super::{
@@ -36,6 +36,9 @@ pub(crate) struct FakeSessionBackend {
     pub(crate) delivered: Mutex<Vec<(String, String)>>,
     mark_pending_not_found: bool,
     ensure_error: bool,
+    /// Whether the scripted `ensure_session` failure is a metadata rejection
+    /// rather than a generic transport error.
+    ensure_metadata_rejected: bool,
     /// The fleet `list_fleet` returns.
     fleet: Vec<SessionHandle>,
     /// The pods `observe_repo` returns (regardless of repo).
@@ -72,6 +75,17 @@ impl FakeSessionBackend {
     pub(crate) fn with_ensure_error() -> Self {
         Self {
             ensure_error: true,
+            ..Default::default()
+        }
+    }
+
+    /// A fake whose `ensure_session` fails because the runtime's metadata
+    /// contract rejected a value — a permanent, self-inflicted failure that must
+    /// be reported differently from an unreachable backend.
+    pub(crate) fn with_ensure_metadata_rejected() -> Self {
+        Self {
+            ensure_error: true,
+            ensure_metadata_rejected: true,
             ..Default::default()
         }
     }
@@ -198,17 +212,24 @@ impl SessionBackend for FakeSessionBackend {
     ) -> Result<EnsureOutcome, BackendError> {
         // Record the session id + the assembled creds KEYS (never their values).
         let keys: Vec<String> = creds.keys().cloned().collect();
-        self.ensured
-            .lock()
-            .unwrap()
-            .push((spec.session_id.clone(), keys));
+        let ordinal = {
+            let mut ensured = self.ensured.lock().unwrap();
+            let ordinal = ensured.len();
+            ensured.push((spec.session_id.clone(), keys));
+            ordinal
+        };
         if self.ensure_error {
-            Err(BackendError::Other(anyhow::anyhow!(
-                "scripted ensure failure"
-            )))
-        } else {
-            Ok(EnsureOutcome::Created)
+            return Err(match self.ensure_metadata_rejected {
+                true => BackendError::InvalidMetadata,
+                false => BackendError::Other(anyhow::anyhow!("scripted ensure failure")),
+            });
         }
+        // Each create reports a distinct incarnation, exactly as a real backend
+        // does — a fake that reused one handle would hide the very collision the
+        // lifecycle event id exists to prevent.
+        Ok(EnsureOutcome::Created(RuntimeIncarnation::from_handle(
+            format!("fake-{}-{ordinal}", spec.session_id),
+        )))
     }
 
     async fn credential_recovery_needed(&self, _session_id: &str) -> Result<bool, BackendError> {

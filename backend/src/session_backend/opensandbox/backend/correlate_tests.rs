@@ -136,7 +136,13 @@ fn stamp_rejects_label_unsafe_values_loudly() {
         ("too-long repo", long_repo),
     ] {
         let err = stamp(&s).expect_err(case);
-        assert!(matches!(err, BackendError::Other(_)), "{case}: {err:?}");
+        // Classified, not opaque: a label-value rejection is permanent and
+        // self-inflicted, and the lifecycle record must say so rather than
+        // blaming the backend's availability.
+        assert!(
+            matches!(err, BackendError::InvalidMetadata),
+            "{case}: {err:?}"
+        );
     }
 }
 
@@ -276,6 +282,7 @@ fn the_identity_stamp_round_trips_through_the_shared_key_set() {
     assert_eq!(meta[keys.creator_login], "author-login");
     assert_eq!(meta[keys.trigger_author_id], "4242");
     assert_eq!(meta[keys.trigger_author_login], "author-login");
+    assert_eq!(meta[keys.source], "launch_metadata");
 
     let recovered = recover_identity(&view_with(meta, SandboxState::Running, None));
     assert_eq!(recovered.creator_id, Some(4242));
@@ -316,6 +323,25 @@ fn an_app_authored_trigger_stamps_a_label_safe_normalized_login() {
     assert_eq!(
         meta[crate::runtime_identity::OSB_IDENTITY_KEYS.trigger_author_login],
         "fkst-cloud"
+    );
+}
+
+#[test]
+fn a_backfilled_stamp_reads_back_as_backfilled_not_launched() {
+    // The recovery side of the provenance contract: a runtime patched from the
+    // trigger as it reads NOW must never later be presented as evidence of who
+    // launched it.
+    let mut meta = stamp(&spec()).expect("stamp");
+    meta.insert(
+        crate::runtime_identity::OSB_IDENTITY_KEYS
+            .source
+            .to_string(),
+        crate::runtime_identity::SOURCE_BACKFILLED_CURRENT_TRIGGER.to_string(),
+    );
+    let recovered = recover_identity(&view_with(meta, SandboxState::Running, None));
+    assert_eq!(
+        recovered.attribution_source(),
+        crate::runtime_identity::AttributionSource::BackfilledCurrentTrigger
     );
 }
 

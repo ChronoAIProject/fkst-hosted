@@ -19,7 +19,7 @@ use crate::k8s::SessionPodSpec;
 use crate::models::RepoRef;
 use crate::reconcile::desired::{KillReason, LivePod};
 use crate::runtime_identity::{
-    RuntimeBackendKind, RuntimeIdentityMetadata, RuntimeIdentityOutcome,
+    RuntimeBackendKind, RuntimeIdentityMetadata, RuntimeIdentityOutcome, RuntimeIncarnation,
 };
 
 pub mod k8s;
@@ -34,9 +34,16 @@ pub(crate) mod test_support;
 
 /// What ensuring a session did: a freshly created runtime, or an idempotent reconcile
 /// of the deterministically identified runtime that already existed.
+///
+/// [`Created`](EnsureOutcome::Created) carries the new runtime's
+/// [`RuntimeIncarnation`] because the lifecycle audit trail needs to tell a
+/// session's second runtime from its first: the session id and (on Kubernetes)
+/// the Pod name are both stable across kill/respawn, so without this the
+/// respawn's `created` row would derive the SAME deterministic event id as its
+/// predecessor's and be discarded as a duplicate.
 #[derive(Debug, PartialEq, Eq)]
 pub enum EnsureOutcome {
-    Created,
+    Created(RuntimeIncarnation),
     AlreadyLive,
 }
 
@@ -48,6 +55,15 @@ pub enum EnsureOutcome {
 pub enum BackendError {
     #[error("session backend resource not found")]
     NotFound,
+    /// A value the runtime's metadata contract rejects (an OpenSandbox metadata
+    /// value that is not a valid Kubernetes label value). Kept apart from
+    /// [`Other`](BackendError::Other) so the lifecycle record can carry the
+    /// closed `invalid_metadata` reason instead of flattening a permanent,
+    /// self-inflicted rejection into "the backend was unavailable" — the two
+    /// call for completely different operator responses. The offending key is
+    /// logged at the rejection site; the error itself carries no value.
+    #[error("session backend metadata value rejected")]
+    InvalidMetadata,
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }

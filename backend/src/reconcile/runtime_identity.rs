@@ -38,7 +38,8 @@ use crate::reconcile::lifecycle_audit::{self, SessionLifecycleFacts};
 use crate::runtime_identity::gate::{PERMANENT_COOLDOWN, SETTLE_COOLDOWN};
 use crate::runtime_identity::merge::is_settled;
 use crate::runtime_identity::{
-    IdentityOperationResult, RuntimeIdentityMetadata, RuntimeIdentityOutcome,
+    AttributionSource, IdentityOperationResult, ObservedRuntimeIdentity, RuntimeIdentityMetadata,
+    RuntimeIdentityOutcome, RuntimeIncarnation,
 };
 
 /// Backfill missing attribution on every live runtime this pass matched to a
@@ -78,7 +79,7 @@ pub(crate) async fn backfill_runtime_identities(
         if is_settled(&pod.identity, &desired) {
             continue;
         }
-        apply_identity(ctx, reg, &desired).await;
+        apply_identity(ctx, reg, pod, &desired).await;
     }
 }
 
@@ -86,6 +87,7 @@ pub(crate) async fn backfill_runtime_identities(
 async fn apply_identity(
     ctx: &ReconcileCtx,
     reg: &SessionRegistration,
+    pod: &LivePod,
     desired: &RuntimeIdentityMetadata,
 ) {
     let backend = ctx.backend.backend_kind();
@@ -95,7 +97,11 @@ async fn apply_identity(
         return;
     }
 
-    let facts = SessionLifecycleFacts::from_registration(reg, reg.config_hash.clone());
+    // An identity decision belongs to the runtime it was taken against, not to
+    // the session id — a respawned session must be able to be backfilled again
+    // without its record colliding with its predecessor's.
+    let facts = SessionLifecycleFacts::from_registration(reg, reg.config_hash.clone())
+        .for_incarnation(RuntimeIncarnation::at(pod.created_at));
     match ctx
         .backend
         .ensure_runtime_identity(&reg.session_id, desired)
@@ -111,6 +117,11 @@ async fn apply_identity(
                     lifecycle_audit::emit(ctx, LifecycleAction::IdentityBackfilled, &facts, None);
                     tracing::info!(
                         session_id = %reg.session_id,
+                        // The runtime now says `backfilled_current_trigger`, and
+                        // this line says the same thing, because a legacy
+                        // trigger may have changed since launch: what was
+                        // written is current evidence, never original evidence.
+                        attribution_source = AttributionSource::BackfilledCurrentTrigger.as_str(),
                         "reconcile identity: backfilled legacy runtime attribution from the current trigger"
                     );
                 }
@@ -128,13 +139,21 @@ async fn apply_identity(
                     );
                     tracing::warn!(
                         session_id = %reg.session_id,
+                        attribution_source = observed_source(&pod.identity, true).as_str(),
                         "reconcile identity: runtime attribution disagrees with the current trigger; keeping the stamped values"
                     );
                 }
                 // Unchanged means the observation was merely stale; NotFound
                 // means the runtime vanished between the two. Neither is a
-                // transition, so neither emits an event.
-                RuntimeIdentityOutcome::Unchanged | RuntimeIdentityOutcome::NotFound => {}
+                // transition, so neither emits an event — but a stale-but-settled
+                // runtime is still worth naming its source for, since that is
+                // the value a later read of the same stamp will report.
+                RuntimeIdentityOutcome::Unchanged => tracing::debug!(
+                    session_id = %reg.session_id,
+                    attribution_source = observed_source(&pod.identity, false).as_str(),
+                    "reconcile identity: runtime attribution already complete"
+                ),
+                RuntimeIdentityOutcome::NotFound => {}
             }
         }
         Err(error) => {
@@ -145,13 +164,34 @@ async fn apply_identity(
             // bounded either way, which is what the cooldown buys.
             ctx.identity_gate
                 .suppress(&reg.session_id, PERMANENT_COOLDOWN);
+            // `reason` is the bounded classification an operator can dashboard
+            // on; `error` is the operator-facing detail, carried at the same
+            // level and in the same shape as every other backend failure the
+            // executor logs. It is deliberately NOT propagated into the
+            // lifecycle event, which stays closed reason codes only.
             tracing::warn!(
                 session_id = %reg.session_id,
+                reason = lifecycle_audit::failure_reason(&error).as_str(),
                 error = %error,
                 "reconcile identity: attribution patch failed; suppressing retries for a bounded window"
             );
         }
     }
+}
+
+/// Classify what a runtime's stamp says about itself, folding in the
+/// disagreement the backend just reported.
+///
+/// The `conflicting` flag is set HERE rather than at read time on purpose: a
+/// stamp read in isolation cannot know it disagrees with anything — only a
+/// comparison against a current registration can, and the backend is the one
+/// that performed it against the runtime's live metadata.
+fn observed_source(observed: &ObservedRuntimeIdentity, conflicting: bool) -> AttributionSource {
+    ObservedRuntimeIdentity {
+        conflicting,
+        ..observed.clone()
+    }
+    .attribution_source()
 }
 
 #[cfg(test)]

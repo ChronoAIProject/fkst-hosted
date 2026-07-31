@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 use k8s_openapi::chrono::{DateTime, Utc};
 
-use super::{LivePod, PodLiveness, SessionDef, SessionRegistration};
+use super::{LivePod, PodLiveness, RuntimeAudit, SessionDef, SessionRegistration};
 use crate::goals::trigger_parse::PackageRef;
 use crate::models::RepoRef;
 use crate::reconcile_config::ReconcileConfig;
@@ -130,6 +130,19 @@ pub(super) fn pod_with_work_label(
         config_hash,
         &[work_label],
     )
+}
+
+/// The delete-side audit facts the planner attaches when a runtime still has a
+/// matching registration (creator/installation/trigger from the registration,
+/// the incarnation from the observation).
+pub(super) fn reg_audit(reg: &SessionRegistration, pod: &LivePod) -> RuntimeAudit {
+    RuntimeAudit::from_registration(reg, Some(pod))
+}
+
+/// The delete-side audit facts an ORPHAN runtime supplies: only what its own
+/// durable stamp says.
+pub(super) fn orphan_audit(pod: &LivePod) -> RuntimeAudit {
+    RuntimeAudit::from_observed(pod)
 }
 
 pub(super) fn pending(entries: &[(&str, bool)]) -> HashMap<String, bool> {

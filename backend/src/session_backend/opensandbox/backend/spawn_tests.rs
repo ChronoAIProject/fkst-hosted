@@ -169,7 +169,14 @@ async fn ensure_session_creates_with_null_timeout_stamped_metadata_and_execd_tok
         .ensure_session_impl(&spec(), one_cred())
         .await
         .expect("created");
-    assert_eq!(outcome, EnsureOutcome::Created);
+    assert_eq!(
+        outcome,
+        EnsureOutcome::Created(crate::runtime_identity::RuntimeIncarnation::from_handle(
+            "sbx-1"
+        )),
+        "the server-assigned sandbox id identifies THIS incarnation, so a respawn of the \
+         same session gets its own lifecycle rows"
+    );
 }
 
 #[tokio::test]
@@ -219,7 +226,14 @@ async fn ensure_session_renders_operator_rate_pools_on_the_create_env() {
         .ensure_session_impl(&spec(), one_cred())
         .await
         .expect("created");
-    assert_eq!(outcome, EnsureOutcome::Created);
+    assert_eq!(
+        outcome,
+        EnsureOutcome::Created(crate::runtime_identity::RuntimeIncarnation::from_handle(
+            "sbx-1"
+        )),
+        "the server-assigned sandbox id identifies THIS incarnation, so a respawn of the \
+         same session gets its own lifecycle rows"
+    );
 }
 
 #[tokio::test]

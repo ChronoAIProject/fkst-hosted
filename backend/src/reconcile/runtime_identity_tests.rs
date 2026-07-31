@@ -25,11 +25,20 @@ fn ctx_with(backend: Arc<FakeSessionBackend>) -> (ReconcileCtx, RecordingSink) {
 }
 
 fn pod(session_id: &str, liveness: PodLiveness, identity: ObservedRuntimeIdentity) -> LivePod {
+    pod_created_at(session_id, liveness, identity, Utc::now())
+}
+
+fn pod_created_at(
+    session_id: &str,
+    liveness: PodLiveness,
+    identity: ObservedRuntimeIdentity,
+    created_at: k8s_openapi::chrono::DateTime<Utc>,
+) -> LivePod {
     LivePod {
         session_id: session_id.to_string(),
         trigger_issue: 7,
         liveness,
-        created_at: Utc::now(),
+        created_at,
         last_pending_at: None,
         config_hash: None,
         work_labels: Vec::new(),
@@ -99,6 +108,37 @@ async fn a_legacy_runtime_is_backfilled_from_the_current_registration() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].action, LifecycleAction::IdentityBackfilled);
     assert_eq!(events[0].session_id, reg.session_id);
+}
+
+#[tokio::test]
+async fn a_backfill_of_a_new_incarnation_is_its_own_transition() {
+    // A session id survives a kill/respawn, so without the incarnation key the
+    // replacement runtime's backfill would derive the same event id as its
+    // predecessor's and be discarded as a duplicate — the history would claim
+    // the replacement was never stamped.
+    let backend = Arc::new(FakeSessionBackend::default());
+    let (mut ctx, sink) = ctx_with(backend.clone());
+    let reg = registration();
+    for created_at in [1_000_000, 2_000_000] {
+        let live = [pod_created_at(
+            &reg.session_id,
+            PodLiveness::Live,
+            ObservedRuntimeIdentity::default(),
+            k8s_openapi::chrono::DateTime::from_timestamp(created_at, 0).expect("valid timestamp"),
+        )];
+        // A replacement runtime is decided after its predecessor's settle
+        // cooldown has expired; a fresh gate is that state without a sleep.
+        ctx.identity_gate = crate::runtime_identity::IdentityGate::new();
+        backfill_runtime_identities(&ctx, std::slice::from_ref(&reg), &live).await;
+    }
+
+    let ids: Vec<String> = sink
+        .lifecycle_events()
+        .into_iter()
+        .map(|event| event.event_id.to_string())
+        .collect();
+    assert_eq!(ids.len(), 2);
+    assert_ne!(ids[0], ids[1]);
 }
 
 #[tokio::test]

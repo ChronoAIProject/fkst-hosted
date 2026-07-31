@@ -249,8 +249,12 @@ async fn a_legacy_sandbox_is_backfilled_through_the_metadata_merge_patch() {
     assert_eq!(obj["fkst-trigger-author-id"], "4242");
     assert_eq!(obj["fkst-trigger-author-login"], "author-login");
     assert_eq!(
+        obj["fkst-identity-source"], "backfilled_current_trigger",
+        "a backfilled runtime must never later read back as a launch stamp"
+    );
+    assert_eq!(
         obj.len(),
-        5,
+        6,
         "the patch carries ONLY the identity keys; every other correlation value is untouched"
     );
 }

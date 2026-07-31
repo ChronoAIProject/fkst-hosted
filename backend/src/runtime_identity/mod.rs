@@ -48,6 +48,7 @@ pub mod metrics;
 pub use gate::IdentityGate;
 pub use keys::{
     read, stamp_pairs, IdentityKeys, IDENTITY_SCHEMA_VERSION, K8S_IDENTITY_KEYS, OSB_IDENTITY_KEYS,
+    SOURCE_BACKFILLED_CURRENT_TRIGGER, SOURCE_LAUNCH_METADATA,
 };
 pub use merge::{is_settled, plan, IdentityPlan};
 pub use metrics::{
@@ -88,6 +89,42 @@ impl RuntimeBackendKind {
 impl std::fmt::Display for RuntimeBackendKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+/// Which concrete runtime an effect concerns — the discriminator that keeps a
+/// session's SECOND runtime from being mistaken for its first.
+///
+/// A session id is stable across kill/respawn by design (it is derived from the
+/// trigger issue), and Kubernetes names its Pod from that session id, so neither
+/// distinguishes incarnations on its own. The backend-assigned handle
+/// (OpenSandbox's sandbox id) or the runtime's creation instant does. Both are
+/// optional because neither is knowable before a runtime exists.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RuntimeIncarnation {
+    /// A handle only this incarnation has, when the backend assigns one.
+    pub runtime_id: Option<String>,
+    /// When this incarnation came into existence.
+    pub created_at: Option<k8s_openapi::chrono::DateTime<k8s_openapi::chrono::Utc>>,
+}
+
+impl RuntimeIncarnation {
+    /// The incarnation identified by a backend-assigned handle alone (the handle
+    /// is unique per incarnation, so no timestamp is needed).
+    pub fn from_handle(runtime_id: impl Into<String>) -> Self {
+        Self {
+            runtime_id: Some(runtime_id.into()),
+            created_at: None,
+        }
+    }
+
+    /// The incarnation identified by its creation instant — used where the
+    /// handle is derived from the session id and therefore constant.
+    pub fn at(created_at: k8s_openapi::chrono::DateTime<k8s_openapi::chrono::Utc>) -> Self {
+        Self {
+            runtime_id: None,
+            created_at: Some(created_at),
+        }
     }
 }
 
@@ -221,6 +258,14 @@ impl RuntimeIdentityMetadata {
 /// This mirrors [`crate::reconcile::creator`]'s login normalization, which is
 /// already the repository's canonical identity-comparison form; the immutable
 /// numeric id remains the authoritative identifier either way.
+///
+/// **Accepted consequence:** an App-authored trigger stamps `fkst-cloud`, not
+/// `fkst-cloud[bot]`, so the stamped LOGIN of a bot-seeded session no longer
+/// reads as visibly bot-authored. That is a deliberate trade: the alternative is
+/// an OpenSandbox create that the server rejects outright for every seeded
+/// session. The distinction is not lost — `trigger_author_id` is the App's
+/// immutable numeric id, which is what any caller must compare on anyway, and
+/// the trigger issue itself remains the authority on who wrote it.
 pub fn normalize_identity_login(login: &str) -> String {
     crate::reconcile::creator::normalize_login(login.trim())
 }
@@ -240,6 +285,11 @@ pub struct ObservedRuntimeIdentity {
     pub creator_login: Option<String>,
     pub trigger_author_id: Option<i64>,
     pub trigger_author_login: Option<String>,
+    /// The stamped provenance marker, verbatim
+    /// ([`SOURCE_LAUNCH_METADATA`] / [`SOURCE_BACKFILLED_CURRENT_TRIGGER`]).
+    /// Absent on a runtime stamped before the marker existed, and on a legacy
+    /// runtime with no stamp at all.
+    pub source: Option<String>,
     /// A stamped value disagrees with the current registration.
     pub conflicting: bool,
     /// A stamped id key held a value that is not a decimal integer. Kept
@@ -260,10 +310,11 @@ impl ObservedRuntimeIdentity {
 
     /// How this runtime's attribution should be labelled for display.
     ///
-    /// A successful backfill overrides the result with
-    /// [`AttributionSource::BackfilledCurrentTrigger`] at the call site: only the
-    /// patching code knows that the values came from the trigger as it reads
-    /// *now* rather than as it read at launch.
+    /// The stamped provenance marker is what separates a launch stamp from a
+    /// later backfill — the two write identical attribution keys, so without the
+    /// marker a backfilled runtime would claim launch provenance forever, and
+    /// the reconciler's in-memory knowledge that it backfilled does not survive
+    /// a restart.
     pub fn attribution_source(&self) -> AttributionSource {
         if self.conflicting {
             return AttributionSource::Conflict;
@@ -276,10 +327,15 @@ impl ObservedRuntimeIdentity {
             && self.trigger_author_id.is_some()
             && self.trigger_author_login.is_some()
             && !self.malformed;
-        if stamped_by_contract {
-            AttributionSource::LaunchMetadata
-        } else {
-            AttributionSource::PartialMetadata
+        if !stamped_by_contract {
+            return AttributionSource::PartialMetadata;
+        }
+        match self.source.as_deref() {
+            Some(SOURCE_BACKFILLED_CURRENT_TRIGGER) => AttributionSource::BackfilledCurrentTrigger,
+            // An absent marker means the stamp predates it, which only a launch
+            // writer could have produced: the backfill path has always written
+            // one.
+            _ => AttributionSource::LaunchMetadata,
         }
     }
 }

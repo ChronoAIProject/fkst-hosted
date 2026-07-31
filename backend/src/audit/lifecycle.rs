@@ -30,15 +30,27 @@
 //! writing a second row for one transition (epic `AUD-07`).
 //!
 //! The key includes an INCARNATION discriminator so a session that is killed and
-//! respawned does not collapse into one row. When a concrete runtime handle
-//! exists it IS the incarnation, which is exact. Before one exists — a
-//! `create_requested`, or a create that failed — there is nothing runtime-shaped
-//! to key on, so the caller supplies the session's runtime config hash instead:
-//! retries of one spawn dedupe, and a spawn of a changed configuration does not.
-//! Two spawns of the SAME configuration therefore share a `create_requested`
-//! row; the `created` rows that follow remain distinct, and those are what a
-//! timeline reads. This is the strongest determinism available before a runtime
-//! exists, and it is stated here rather than hidden.
+//! respawned does not collapse into one row. Getting that discriminator right is
+//! the whole difficulty: a session id is derived from its trigger issue and
+//! repeats verbatim across a respawn, and Kubernetes names its Pod from that
+//! session id, so NEITHER identifies an incarnation on its own. What does:
+//!
+//! - a backend-assigned handle that is unique per runtime (an OpenSandbox
+//!   sandbox id), or
+//! - the runtime's creation instant, which the caller supplies alongside a
+//!   repeating handle (a Kubernetes Pod's `creationTimestamp`).
+//!
+//! Whichever is present is folded into the key, and a `created_at` always
+//! contributes even when there is no handle at all.
+//!
+//! Before a runtime exists — a `create_requested`, or a create that failed —
+//! there is nothing runtime-shaped to key on, so the caller supplies the
+//! session's runtime config hash instead: retries of one spawn dedupe, and a
+//! spawn of a changed configuration does not. Two spawns of the SAME
+//! configuration therefore share a `create_requested` row; the `created` rows
+//! that follow remain distinct, and those are what a timeline reads. This is the
+//! strongest determinism available before a runtime exists, and it is stated
+//! here rather than hidden.
 //!
 //! ## What may never appear on this event
 //!
@@ -146,8 +158,6 @@ pub enum LifecycleReason {
     TriggerClosed,
     /// A terminal runtime was garbage-collected.
     TerminalCleanup,
-    /// The deterministically identified runtime already existed.
-    AlreadyLive,
     /// The runtime was already absent when the effect ran.
     RuntimeNotFound,
     /// The backend could not be reached or refused the call.
@@ -165,7 +175,6 @@ impl LifecycleReason {
             LifecycleReason::ConfigChanged => "config_changed",
             LifecycleReason::TriggerClosed => "trigger_closed",
             LifecycleReason::TerminalCleanup => "terminal_cleanup",
-            LifecycleReason::AlreadyLive => "already_live",
             LifecycleReason::RuntimeNotFound => "runtime_not_found",
             LifecycleReason::BackendUnavailable => "backend_unavailable",
             LifecycleReason::InvalidMetadata => "invalid_metadata",
@@ -209,9 +218,11 @@ pub struct LifecycleCorrelation {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LifecycleRuntime {
     /// The backend's own identifier (pod name, sandbox id). `None` before a
-    /// runtime exists.
+    /// runtime exists. NOT necessarily unique per incarnation — a Kubernetes Pod
+    /// name is derived from the session id and repeats across a respawn.
     pub runtime_id: Option<String>,
-    /// When the runtime was created, when the backend reports it.
+    /// When the runtime was created, when the backend reports it. This is what
+    /// distinguishes incarnations behind a repeating handle.
     pub created_at: Option<DateTime<Utc>>,
     /// Discriminator used when no `runtime_id` exists yet — the session's
     /// runtime config hash. See the module docs for why.
@@ -384,24 +395,28 @@ impl SandboxLifecycleV1 {
 
 /// Derive the deterministic lifecycle event id.
 ///
-/// The incarnation component is the runtime handle when one exists (exact), and
-/// otherwise the caller's hint — see the module docs for what that trades away.
+/// The incarnation component is the runtime handle when one exists, the caller's
+/// hint otherwise — and, either way, the runtime's creation instant when it is
+/// known. The timestamp is what carries the discrimination for a backend whose
+/// handle is derived from the session id and therefore repeats across a
+/// respawn; see the module docs.
 pub fn derive_lifecycle_event_id(
     action: LifecycleAction,
     backend: RuntimeBackendKind,
     session_id: &str,
     runtime: &LifecycleRuntime,
 ) -> Uuid {
-    let incarnation = match (&runtime.runtime_id, &runtime.incarnation_hint) {
-        (Some(runtime_id), _) => match runtime.created_at {
-            Some(created_at) => format!(
-                "{runtime_id}@{}",
-                created_at.to_rfc3339_opts(SecondsFormat::Millis, true)
-            ),
-            None => runtime_id.clone(),
-        },
+    let handle = match (&runtime.runtime_id, &runtime.incarnation_hint) {
+        (Some(runtime_id), _) => runtime_id.clone(),
         (None, Some(hint)) => hint.clone(),
         (None, None) => NO_RUNTIME_INCARNATION.to_string(),
+    };
+    let incarnation = match runtime.created_at {
+        Some(created_at) => format!(
+            "{handle}@{}",
+            created_at.to_rfc3339_opts(SecondsFormat::Millis, true)
+        ),
+        None => handle,
     };
     let key = format!(
         "{LIFECYCLE_SCHEMA_VERSION}|{}|{}|{session_id}|{incarnation}",

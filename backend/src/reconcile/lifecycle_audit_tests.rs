@@ -2,11 +2,24 @@
 //! shapes (with and without a runtime handle).
 
 use crate::audit::AuditHandle;
+use crate::models::RepoRef;
 use crate::reconcile::execute_test_support::{registration, test_ctx};
 use crate::session_backend::test_support::FakeSessionBackend;
+use k8s_openapi::chrono::{DateTime, Utc};
 use std::sync::Arc;
 
 use super::*;
+
+fn repo() -> RepoRef {
+    RepoRef {
+        owner: "acme".to_string(),
+        name: "site".to_string(),
+    }
+}
+
+fn at(epoch_secs: i64) -> DateTime<Utc> {
+    DateTime::from_timestamp(epoch_secs, 0).expect("valid fixed timestamp")
+}
 
 fn ctx_with_recorder() -> (ReconcileCtx, crate::audit::RecordingSink) {
     let (audit, sink) = AuditHandle::recording();
@@ -49,23 +62,33 @@ fn an_assignee_derived_creator_keeps_an_absent_id_on_the_record() {
 }
 
 #[test]
-fn session_only_facts_state_nothing_they_cannot_know() {
-    // An orphan kill has no registration left. Guessing the repository owner or
-    // the App identity as "the creator" is exactly what `unknown_legacy` exists
-    // to prevent.
-    let facts = SessionLifecycleFacts::from_session_id("sess-abc");
+fn delete_side_facts_state_nothing_they_cannot_know() {
+    // An orphan kill has no registration left and its runtime carried no stamp.
+    // Guessing the repository owner or the App identity as "the creator" is
+    // exactly what `unknown_legacy` exists to prevent — but the REPOSITORY is
+    // known at the effect boundary and is always recorded.
+    let facts = SessionLifecycleFacts::from_runtime_audit(
+        "sess-abc",
+        &repo(),
+        &RuntimeAudit {
+            created_at: Some(at(100)),
+            ..RuntimeAudit::default()
+        },
+    );
     assert_eq!(facts.session_id, "sess-abc");
     assert_eq!(facts.installation_id, None);
-    assert_eq!(facts.repo_full_name, None);
+    assert_eq!(facts.repo_full_name.as_deref(), Some("acme/site"));
     assert_eq!(facts.trigger_issue, None);
     assert_eq!(facts.attribution, LifecycleAttribution::default());
     assert_eq!(facts.incarnation_hint, None);
+    assert_eq!(facts.incarnation.created_at, Some(at(100)));
 }
 
 #[tokio::test]
 async fn an_emitted_record_carries_the_backend_the_runtime_lives_in() {
     let (ctx, sink) = ctx_with_recorder();
-    let facts = SessionLifecycleFacts::from_session_id("sess-abc");
+    let facts =
+        SessionLifecycleFacts::from_runtime_audit("sess-abc", &repo(), &RuntimeAudit::default());
     emit(
         &ctx,
         LifecycleAction::Deleted,
@@ -85,6 +108,63 @@ async fn an_emitted_record_carries_the_backend_the_runtime_lives_in() {
         events[0].runtime.runtime_id.as_deref(),
         Some("fkst-sess-sess-abc"),
         "a backend that names its runtimes deterministically supplies the handle"
+    );
+}
+
+#[tokio::test]
+async fn a_backend_confirmed_incarnation_outranks_the_deterministic_handle() {
+    // A Kubernetes Pod name repeats across a respawn; a sandbox id does not. When
+    // the backend hands back a concrete handle it must be the one recorded.
+    let (ctx, sink) = ctx_with_recorder();
+    let facts = SessionLifecycleFacts::from_registration(&registration(), "cfg-1".to_string())
+        .for_incarnation(crate::runtime_identity::RuntimeIncarnation::from_handle(
+            "sbx-77",
+        ));
+    emit(&ctx, LifecycleAction::Created, &facts, None);
+
+    let events = sink.lifecycle_events();
+    assert_eq!(events[0].runtime.runtime_id.as_deref(), Some("sbx-77"));
+}
+
+#[tokio::test]
+async fn two_incarnations_of_one_session_never_share_an_event_id() {
+    let (ctx, sink) = ctx_with_recorder();
+    for created_at in [100, 900] {
+        let facts = SessionLifecycleFacts::from_runtime_audit(
+            "sess-abc",
+            &repo(),
+            &RuntimeAudit {
+                created_at: Some(at(created_at)),
+                ..RuntimeAudit::default()
+            },
+        );
+        emit(&ctx, LifecycleAction::Deleted, &facts, None);
+    }
+
+    let events = sink.lifecycle_events();
+    assert_ne!(
+        events[0].event_id, events[1].event_id,
+        "the deterministic handle repeats across a respawn; the creation instant does not"
+    );
+}
+
+#[test]
+fn a_metadata_rejection_is_never_reported_as_an_unavailable_backend() {
+    // The two need completely different operator responses, and the raw upstream
+    // message can quote the rejected value, so it is never a substitute.
+    assert_eq!(
+        failure_reason(&crate::session_backend::BackendError::InvalidMetadata),
+        LifecycleReason::InvalidMetadata
+    );
+    assert_eq!(
+        failure_reason(&crate::session_backend::BackendError::Other(
+            anyhow::anyhow!("connection reset")
+        )),
+        LifecycleReason::BackendUnavailable
+    );
+    assert_eq!(
+        failure_reason(&crate::session_backend::BackendError::NotFound),
+        LifecycleReason::RuntimeNotFound
     );
 }
 

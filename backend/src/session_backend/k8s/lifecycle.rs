@@ -22,7 +22,7 @@ use crate::models::RepoRef;
 use crate::reconcile::desired::{LivePod, PodLiveness};
 use crate::runtime_identity::{
     plan as plan_identity, IdentityPlan, RuntimeIdentityMetadata, RuntimeIdentityOutcome,
-    K8S_IDENTITY_KEYS,
+    RuntimeIncarnation, K8S_IDENTITY_KEYS,
 };
 
 use super::super::{BackendError, EnsureOutcome, KillReason};
@@ -44,7 +44,14 @@ impl K8sBackend {
             }
         };
         match create_session_pod(self.kube.client(), spec, pod, creds).await {
-            Ok(SessionPodOutcome::Created) => Ok(EnsureOutcome::Created),
+            // The Pod name repeats across a respawn; its creationTimestamp does
+            // not, so that is what identifies THIS incarnation.
+            Ok(SessionPodOutcome::Created { created_at }) => {
+                Ok(EnsureOutcome::Created(RuntimeIncarnation {
+                    runtime_id: Some(session_object_name(&spec.session_id)),
+                    created_at,
+                }))
+            }
             Ok(SessionPodOutcome::AlreadyLive) => Ok(EnsureOutcome::AlreadyLive),
             Err(error) => {
                 tracing::error!(session_id = %spec.session_id, error = %error, "reconcile spawn: session pod create failed");

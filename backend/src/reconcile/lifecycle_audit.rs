@@ -17,13 +17,24 @@
 //!
 //! ## Where the incarnation discriminator comes from
 //!
-//! Create-side effects have no runtime handle yet, so they key on the session's
-//! runtime config hash; delete-side effects key on the backend's deterministic
-//! runtime handle when it has one. Kubernetes names its Pod from the session id,
-//! so its handle is always available; OpenSandbox assigns a sandbox id
-//! server-side that `ensure_session` does not return, so its delete rows dedupe
-//! per session rather than per incarnation. That limit is honest and bounded —
-//! see [`crate::audit::lifecycle`] for the full reasoning.
+//! Neither the session id nor (on Kubernetes) the Pod name distinguishes a
+//! session's second runtime from its first: both are derived from the trigger
+//! issue and repeat verbatim across a kill/respawn. So every effect site supplies
+//! the discriminator it actually has:
+//!
+//! - a CREATE that succeeded carries the backend-confirmed
+//!   [`RuntimeIncarnation`] — the OpenSandbox sandbox id, or the Kubernetes
+//!   Pod's `creationTimestamp`;
+//! - a DELETE carries the observed runtime's `created_at`, captured by the
+//!   planner in [`RuntimeAudit`] before the runtime went away;
+//! - a create REQUEST (and a create that failed) has no runtime at all, so it
+//!   keys on the session's runtime config hash: retries of one spawn dedupe,
+//!   and a spawn of a changed configuration does not. Two spawns of the SAME
+//!   configuration therefore share a `create_requested` row; the `created` rows
+//!   that follow stay distinct, and those are what a timeline reads.
+//!
+//! See [`crate::audit::lifecycle`] for how the discriminator becomes the event
+//! id.
 
 use crate::audit::event::ServiceIdentity;
 use crate::audit::identity::AuditIdentity;
@@ -31,8 +42,11 @@ use crate::audit::lifecycle::{
     LifecycleAction, LifecycleAttribution, LifecycleCorrelation, LifecycleReason, LifecycleRuntime,
     SandboxLifecycleV1,
 };
-use crate::reconcile::desired::{KillReason, SessionRegistration};
+use crate::models::RepoRef;
+use crate::reconcile::desired::{KillReason, RuntimeAudit, SessionRegistration};
 use crate::reconcile::execute::ReconcileCtx;
+use crate::runtime_identity::RuntimeIncarnation;
+use crate::session_backend::BackendError;
 
 /// The identifying facts a lifecycle record needs about one session, gathered
 /// once so the effect sites stay one line each.
@@ -42,9 +56,12 @@ pub(crate) struct SessionLifecycleFacts {
     pub repo_full_name: Option<String>,
     pub trigger_issue: Option<i64>,
     pub attribution: LifecycleAttribution,
-    /// Discriminator for effects with no runtime handle (the session's runtime
+    /// Discriminator for effects with no runtime at all (the session's runtime
     /// config hash).
     pub incarnation_hint: Option<String>,
+    /// The concrete runtime this effect concerns, when the caller knows which
+    /// incarnation it is.
+    pub incarnation: RuntimeIncarnation,
 }
 
 impl SessionLifecycleFacts {
@@ -68,21 +85,46 @@ impl SessionLifecycleFacts {
                 trigger_author_login: non_empty(identity.trigger_author_login),
             },
             incarnation_hint: Some(incarnation_hint),
+            incarnation: RuntimeIncarnation::default(),
         }
     }
 
-    /// What is known about a session addressed only by id — an orphan kill or a
-    /// terminal cleanup, where the registration is already gone. Attribution is
-    /// deliberately absent rather than guessed from the repository.
-    pub(crate) fn from_session_id(session_id: &str) -> Self {
+    /// The DELETE-side view: whatever the planner captured about the runtime
+    /// being removed, plus the repository the effect is executing for.
+    ///
+    /// `repo` is always known at the effect boundary — the executor is driving
+    /// one repository's actions — so a deletion is never less filterable by
+    /// repository than the creation it undoes. Attribution is whatever the
+    /// registration or the runtime's own stamp supplied and is never invented.
+    pub(crate) fn from_runtime_audit(
+        session_id: &str,
+        repo: &RepoRef,
+        audit: &RuntimeAudit,
+    ) -> Self {
         Self {
             session_id: session_id.to_string(),
-            installation_id: None,
-            repo_full_name: None,
-            trigger_issue: None,
-            attribution: LifecycleAttribution::default(),
+            installation_id: audit.installation_id,
+            repo_full_name: Some(format!("{}/{}", repo.owner, repo.name)),
+            trigger_issue: audit.trigger_issue,
+            attribution: LifecycleAttribution {
+                creator_id: audit.creator_id,
+                creator_login: audit.creator_login.clone(),
+                trigger_author_id: audit.trigger_author_id,
+                trigger_author_login: audit.trigger_author_login.clone(),
+            },
             incarnation_hint: None,
+            incarnation: RuntimeIncarnation {
+                runtime_id: None,
+                created_at: audit.created_at,
+            },
         }
+    }
+
+    /// Pin the concrete runtime an effect concerns (a backend-confirmed create,
+    /// or a live runtime an identity decision was taken against).
+    pub(crate) fn for_incarnation(mut self, incarnation: RuntimeIncarnation) -> Self {
+        self.incarnation = incarnation;
+        self
     }
 }
 
@@ -99,10 +141,49 @@ pub(crate) fn emit(
     reason: Option<LifecycleReason>,
 ) {
     let runtime = LifecycleRuntime {
-        runtime_id: ctx.backend.deterministic_runtime_id(&facts.session_id),
+        // The backend's deterministic handle NAMES the runtime, which is worth
+        // recording, but it repeats across incarnations — `created_at` is what
+        // separates them, so both ride the record.
+        runtime_id: facts
+            .incarnation
+            .runtime_id
+            .clone()
+            .or_else(|| ctx.backend.deterministic_runtime_id(&facts.session_id)),
+        created_at: facts.incarnation.created_at,
+        incarnation_hint: facts.incarnation_hint.clone(),
+    };
+    submit(ctx, action, facts, reason, runtime);
+}
+
+/// Emit a `create_requested`/`create_failed` record, whose runtime handle must
+/// NOT be used as the incarnation key.
+///
+/// These name a runtime that does not exist yet, so keying them on the
+/// deterministic Pod name would make two spawns of one session share a row even
+/// when they are genuinely different incarnations. The config-hash hint is the
+/// honest discriminator; [`emit`] already prefers a handle when there is one, so
+/// this variant suppresses it explicitly.
+pub(crate) fn emit_pending_create(
+    ctx: &ReconcileCtx,
+    action: LifecycleAction,
+    facts: &SessionLifecycleFacts,
+    reason: Option<LifecycleReason>,
+) {
+    let runtime = LifecycleRuntime {
+        runtime_id: None,
         created_at: None,
         incarnation_hint: facts.incarnation_hint.clone(),
     };
+    submit(ctx, action, facts, reason, runtime);
+}
+
+fn submit(
+    ctx: &ReconcileCtx,
+    action: LifecycleAction,
+    facts: &SessionLifecycleFacts,
+    reason: Option<LifecycleReason>,
+    runtime: LifecycleRuntime,
+) {
     let mut event = SandboxLifecycleV1::new(
         action,
         ctx.backend.backend_kind(),
@@ -117,46 +198,9 @@ pub(crate) fn emit(
         installation_id: facts.installation_id,
         trigger_issue: facts.trigger_issue,
         // Autonomous reconcile effects are not caused by one audited request, so
-        // the field stays absent rather than carrying a fabricated id.
-        request_id: None,
-    });
-    if let Some(reason) = reason {
-        event = event.with_reason(reason);
-    }
-    let _ = ctx.audit.submit_lifecycle(event);
-}
-
-/// Emit a `create_requested`/`created`/`create_failed` record whose runtime
-/// handle should NOT be used as the incarnation key.
-///
-/// A `create_requested` names a runtime that does not exist yet, so keying it on
-/// the deterministic Pod name would make two spawns of one session share a row
-/// even when they are genuinely different incarnations. The config-hash hint is
-/// the honest discriminator; [`emit`] already prefers a handle when there is
-/// one, so this variant suppresses it explicitly.
-pub(crate) fn emit_pending_create(
-    ctx: &ReconcileCtx,
-    action: LifecycleAction,
-    facts: &SessionLifecycleFacts,
-    reason: Option<LifecycleReason>,
-) {
-    let mut event = SandboxLifecycleV1::new(
-        action,
-        ctx.backend.backend_kind(),
-        facts.session_id.clone(),
-        AuditIdentity::reconciler(facts.installation_id),
-        service_identity(ctx),
-    )
-    .with_runtime(LifecycleRuntime {
-        runtime_id: None,
-        created_at: None,
-        incarnation_hint: facts.incarnation_hint.clone(),
-    })
-    .with_attribution(facts.attribution.clone())
-    .with_correlation(LifecycleCorrelation {
-        repo_full_name: facts.repo_full_name.clone(),
-        installation_id: facts.installation_id,
-        trigger_issue: facts.trigger_issue,
+        // the field stays absent rather than carrying a fabricated id. It is
+        // part of the contract for the day an API/webhook call drives a runtime
+        // effect directly.
         request_id: None,
     });
     if let Some(reason) = reason {
@@ -171,6 +215,20 @@ pub(crate) fn kill_reason(reason: KillReason) -> LifecycleReason {
         KillReason::Idle => LifecycleReason::Idle,
         KillReason::ConfigChanged => LifecycleReason::ConfigChanged,
         KillReason::TriggerClosed => LifecycleReason::TriggerClosed,
+    }
+}
+
+/// The closed reason code a failed backend effect carries.
+///
+/// A metadata rejection is permanent and caused by a value WE tried to write, so
+/// it must not be reported as the backend being unavailable: the two need
+/// completely different operator responses, and the raw upstream message is
+/// never a substitute (it may quote the rejected value).
+pub(crate) fn failure_reason(error: &BackendError) -> LifecycleReason {
+    match error {
+        BackendError::InvalidMetadata => LifecycleReason::InvalidMetadata,
+        BackendError::NotFound => LifecycleReason::RuntimeNotFound,
+        BackendError::Other(_) => LifecycleReason::BackendUnavailable,
     }
 }
 
