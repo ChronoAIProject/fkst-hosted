@@ -34,6 +34,16 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// The PostHog event name. Stable: dashboards, HogQL, and the relay all key on it.
 pub const EVENT_NAME: &str = "fkst api request completed";
 
+/// The event name of a request that never produced a response — a start record
+/// the durable relay (issue #5678) closes as `incomplete` after its deadline.
+///
+/// It is declared HERE, with its sibling, because the read side's fixed HogQL
+/// allowlists request event names by value: leaving the name to be invented by
+/// whoever writes the relay would let the query and the writer drift, and a
+/// timeline that silently omitted crash records is precisely the "apparently
+/// complete empty result" the epic forbids. Nothing emits it yet.
+pub const INCOMPLETE_EVENT_NAME: &str = "fkst api request incomplete";
+
 /// The `operation_id` recorded for a request that matched no documented route.
 /// The raw path/query is deliberately never recorded in its place.
 pub const UNMATCHED_OPERATION_ID: &str = "<unmatched>";

@@ -293,29 +293,32 @@ pub const OPERATION_POLICIES: &[AuditOperation] = &[
         "SafeObserveSession",
         arguments::OBSERVE_SESSION_FIELDS,
     ),
-];
-
-/// Argument policies for operations whose ROUTES do not exist yet.
-///
-/// The `/api/v1/operations/*` surface is delivered by issues #5672 and #5675.
-/// Their safe DTOs (see [`crate::audit::arguments::operations`]) are reviewed and
-/// tested here so those issues attach an existing boundary instead of inventing
-/// one; each moves its entry into [`OPERATION_POLICIES`] in the same pull request
-/// as its route. Keeping them OUT until then is deliberate: the coverage guard
-/// requires every table entry to match a live operation, so a reserved id parked
-/// in the main table would look like an operation that had silently disappeared.
-pub const RESERVED_ARGUMENT_POLICIES: &[AuditOperation] = &[
+    // --- operations surface -------------------------------------------------
+    // Audited like any other product call: the operations UI polls this route,
+    // and the UI may hide its own polling visually, but capture is never allowed
+    // to skip it (epic `AUD-01`).
     audited(
         "operations_list_activity",
         "SafeOperationsListActivity",
         arguments::OPERATIONS_LIST_ACTIVITY_FIELDS,
     ),
-    audited(
-        "operations_list_sandboxes",
-        "SafeOperationsListSandboxes",
-        arguments::OPERATIONS_LIST_SANDBOXES_FIELDS,
-    ),
 ];
+
+/// Argument policies for operations whose ROUTES do not exist yet.
+///
+/// `operations_list_activity` graduated into [`OPERATION_POLICIES`] with its
+/// route (issue #5672); `operations_list_sandboxes` follows in #5675. Its safe
+/// DTO (see [`crate::audit::arguments::operations`]) is reviewed and tested here
+/// so that issue attaches an existing boundary instead of inventing one, and it
+/// moves its entry into the live table in the same pull request as its route.
+/// Keeping it OUT until then is deliberate: the coverage guard requires every
+/// table entry to match a live operation, so a reserved id parked in the main
+/// table would look like an operation that had silently disappeared.
+pub const RESERVED_ARGUMENT_POLICIES: &[AuditOperation] = &[audited(
+    "operations_list_sandboxes",
+    "SafeOperationsListSandboxes",
+    arguments::OPERATIONS_LIST_SANDBOXES_FIELDS,
+)];
 
 /// Routes that are served but carry no OpenAPI operation, with their policy.
 ///

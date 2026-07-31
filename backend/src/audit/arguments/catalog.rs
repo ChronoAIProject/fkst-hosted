@@ -166,9 +166,11 @@ pub const CHAT_TURN_FIELDS: &[&str] = &[
     "broader_visibility_requested",
 ];
 
-// --- operations surface (reserved) -------------------------------------------
+// --- operations surface -------------------------------------------------------
 
-/// Reserved for `GET /api/v1/operations/activity` (issue #5672).
+/// `GET /api/v1/operations/activity` (issue #5672). `cursor_present` is a
+/// boolean, never the cursor text: a cursor carries sort keys and a binding
+/// digest, none of which belongs in an analytics store.
 pub const OPERATIONS_LIST_ACTIVITY_FIELDS: &[&str] = &[
     "scope",
     "requested_scope",

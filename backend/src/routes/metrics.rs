@@ -9,13 +9,15 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::audit::AuditMetricsSnapshot;
+use crate::operations::ActivityMetricsSnapshot;
 use crate::recovery::RecoverySnapshot;
 use crate::runtime_identity::metrics::RuntimeTelemetrySnapshot;
 use crate::session_access::{RegistrySnapshot, ScopeMetricsSnapshot};
 use crate::state::AppState;
 
 use self::metrics_series::{
-    render_audit_metrics, render_runtime_metrics, render_session_access_metrics,
+    render_activity_metrics, render_audit_metrics, render_runtime_metrics,
+    render_session_access_metrics,
 };
 
 #[path = "metrics_series.rs"]
@@ -32,6 +34,7 @@ fn render_metrics(
     registry: &RegistrySnapshot,
     scope: &ScopeMetricsSnapshot,
     runtime: &RuntimeTelemetrySnapshot,
+    activity: &ActivityMetricsSnapshot,
 ) -> String {
     let complete = u8::from(recovery.startup_resync_complete);
     let ready = u8::from(recovery.ready);
@@ -154,6 +157,7 @@ fn render_metrics(
     body.push_str(&render_audit_metrics(audit));
     body.push_str(&render_session_access_metrics(registry, scope));
     body.push_str(&render_runtime_metrics(runtime));
+    body.push_str(&render_activity_metrics(activity));
     body
 }
 
@@ -188,6 +192,7 @@ async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
             &state.session_access.registry.snapshot(),
             &state.session_access.scope_metrics.snapshot(),
             &state.audit.runtime_snapshot(),
+            &state.operations.metrics.snapshot(),
         ),
     )
 }

@@ -298,6 +298,22 @@ async fn main() -> ExitCode {
     // A clone for the post-serve drain: `AppState` moves into the router below.
     let audit_drain = audit.clone();
 
+    // The READ side of the same audit pipeline (milestone #22). Absent read
+    // credentials are NOT fatal — capture must keep working while an operator
+    // stages the query secret — so the endpoint answers its own stable
+    // `503 audit_query_not_configured` instead. Only an unbuildable HTTP client
+    // fails the boot.
+    let operations = match fkst_control_plane::operations::OperationsState::from_config(
+        &config.audit,
+        &config.activity_query,
+    ) {
+        Ok(operations) => operations,
+        Err(error) => {
+            tracing::error!(error = %error, "failed to initialize the activity query source");
+            return ExitCode::FAILURE;
+        }
+    };
+
     let recovery = RecoveryMonitor::new(pod_dispatch);
     let reconciler = if pod_dispatch {
         match session_backend.clone() {
@@ -346,6 +362,7 @@ async fn main() -> ExitCode {
         session_access: fkst_control_plane::session_access::SessionAccessState::new(
             session_registry,
         ),
+        operations,
         log_bundle_cache: fkst_control_plane::log_bundle_cache::LogBundleCache::new(),
         disposable_environments,
         // Filled by `build_router` with the router it returns, so chat tools can

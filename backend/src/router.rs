@@ -126,7 +126,10 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
         .merge(routes::canvas::router())
         // The identity-gated engine observe read-model (issue #473); authorizes
         // in-handler with the SAME three-tier check as the log download.
-        .merge(routes::observe::router());
+        .merge(routes::observe::router())
+        // The operations surface (milestone #22): available to every admitted
+        // user, with row-level authorization decided server-side.
+        .merge(routes::operations::router());
 
     // The chat concierge (`POST /api/v1/chat`), mounted only when the feature is
     // configured — the same "the spec reflects what is actually served" treatment as

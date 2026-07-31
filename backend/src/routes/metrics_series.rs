@@ -13,6 +13,7 @@
 
 use crate::audit::lifecycle::LifecycleAction;
 use crate::audit::AuditMetricsSnapshot;
+use crate::operations::ActivityMetricsSnapshot;
 use crate::runtime_identity::metrics::{
     IdentityOperationResult, LifecycleEmitResult, RuntimeTelemetrySnapshot,
 };
@@ -175,4 +176,63 @@ pub(super) fn render_audit_metrics(audit: &AuditMetricsSnapshot) -> String {
         audit.shutdown_remaining,
         audit.context_conflicts,
     )
+}
+
+/// Render the scoped activity-query series.
+///
+/// Every label is a closed enum: two scopes, three record kinds, the documented
+/// result set, the two sources, the row fates, and the bounded rejection reasons.
+/// No viewer, actor, filter, session, repository, request, event, or cursor value
+/// is ever a label OR a value here (epic `OPS-04`).
+pub(super) fn render_activity_metrics(activity: &ActivityMetricsSnapshot) -> String {
+    let mut body = String::from(
+        "# HELP fkst_operations_activity_queries_total Activity queries by bounded scope, record kind, and result.\n\
+         # TYPE fkst_operations_activity_queries_total counter\n",
+    );
+    for (scope, record_kind, result, count) in activity.queries() {
+        body.push_str(&format!(
+            "fkst_operations_activity_queries_total{{scope=\"{scope}\",record_kind=\"{record_kind}\",result=\"{result}\"}} {count}\n"
+        ));
+    }
+    body.push_str(
+        "# HELP fkst_operations_activity_query_duration_seconds Time spent in activity source reads.\n\
+         # TYPE fkst_operations_activity_query_duration_seconds summary\n",
+    );
+    for (source, result, sum_millis, count) in activity.source_durations() {
+        // Rendered in SECONDS (the Prometheus convention) from millisecond
+        // counters; three decimals is the resolution actually measured.
+        body.push_str(&format!(
+            "fkst_operations_activity_query_duration_seconds_sum{{source=\"{source}\",result=\"{result}\"}} {:.3}\n\
+             fkst_operations_activity_query_duration_seconds_count{{source=\"{source}\",result=\"{result}\"}} {count}\n",
+            sum_millis as f64 / 1000.0
+        ));
+    }
+    body.push_str(
+        "# HELP fkst_operations_activity_rows_total Already-authorized candidate rows by bounded fate.\n\
+         # TYPE fkst_operations_activity_rows_total counter\n",
+    );
+    for (result, count) in activity.rows() {
+        body.push_str(&format!(
+            "fkst_operations_activity_rows_total{{result=\"{result}\"}} {count}\n"
+        ));
+    }
+    body.push_str(
+        "# HELP fkst_operations_activity_source_partial_total Pages marked partial, by bounded source.\n\
+         # TYPE fkst_operations_activity_source_partial_total counter\n",
+    );
+    for (source, count) in activity.partial() {
+        body.push_str(&format!(
+            "fkst_operations_activity_source_partial_total{{source=\"{source}\"}} {count}\n"
+        ));
+    }
+    body.push_str(
+        "# HELP fkst_operations_activity_scope_rejections_total Activity requests refused before any source call, by bounded reason.\n\
+         # TYPE fkst_operations_activity_scope_rejections_total counter\n",
+    );
+    for (reason, count) in activity.rejections() {
+        body.push_str(&format!(
+            "fkst_operations_activity_scope_rejections_total{{reason=\"{reason}\"}} {count}\n"
+        ));
+    }
+    body
 }

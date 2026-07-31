@@ -20,6 +20,7 @@ use crate::env_config::EnvConfig;
 use crate::error::AppError;
 use crate::leader_config::LeaderElectionConfig;
 use crate::log_config::LogConfig;
+use crate::operations::ActivityQueryConfig;
 use crate::osb_config::OpensandboxConfig;
 use crate::reconcile_config::ReconcileConfig;
 use crate::storage::ChronoStorageConfig;
@@ -462,6 +463,12 @@ pub struct Config {
     /// Always present; `enabled == false` (the default) installs the no-op sink
     /// and starts no delivery worker. See [`crate::audit::config`].
     pub audit: AuditConfig,
+    /// Activity-QUERY config (`FKST_POSTHOG_PROJECT_ID` / `FKST_POSTHOG_QUERY_*`
+    /// / `FKST_POSTHOG_ACTIVITY_*`). Always present; deliberately separate from
+    /// [`Config::audit`] because capture and query are two credentials with two
+    /// blast radii and the ingestion token may never stand in for the read key.
+    /// See [`crate::operations::config`].
+    pub activity_query: ActivityQueryConfig,
 }
 
 impl Default for Config {
@@ -486,6 +493,7 @@ impl Default for Config {
             log: LogConfig::default(),
             chat: None,
             audit: AuditConfig::default(),
+            activity_query: ActivityQueryConfig::default(),
         }
     }
 }
@@ -740,6 +748,7 @@ impl Config {
         // validated unconditionally so a typo surfaces at deploy time instead of
         // at the moment an operator flips it on. Shares the same `vars` snapshot.
         let audit = AuditConfig::from_vars(&vars)?;
+        let activity_query = ActivityQueryConfig::from_vars(&vars)?;
 
         // Deployment-wide access policy (FKST_ACCESS_ALLOWED_USERS +
         // FKST_ACCESS_BLOCKED_USERS + FKST_GLOBAL_ADMINS + FKST_AUTH_MODEL).
@@ -771,6 +780,7 @@ impl Config {
             log,
             chat,
             audit,
+            activity_query,
         })
     }
 

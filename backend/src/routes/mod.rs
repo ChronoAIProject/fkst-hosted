@@ -24,4 +24,7 @@ pub mod health;
 pub mod logs;
 pub mod metrics;
 pub mod observe;
+// The authenticated operations surface (`/api/v1/operations/*`, milestone #22):
+// the scoped historical activity trace, row-authorized server-side.
+pub mod operations;
 pub mod repos;

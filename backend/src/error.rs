@@ -54,6 +54,23 @@ pub enum AppError {
     /// rather than a misleading empty result (epic `AUTH-04`).
     #[error("unavailable: {0}")]
     SessionVisibilityUnavailable(String),
+    /// An exact lifecycle `session_id` on the activity query is either unknown or
+    /// not visible to the caller. Renders as 404 with ONE stable code for both, so
+    /// an exact probe can never become a session-existence oracle (epic `AUTH-06`).
+    #[error("not found: {0}")]
+    ActivitySessionNotFound(String),
+    /// A keyset cursor failed its version, syntax, length, or binding-digest
+    /// check. Renders as 400 with its own stable code, never a silent reset —
+    /// silently starting over would hand a caller a page they did not ask for and
+    /// hide a cursor forged for another viewer/scope/session/filter.
+    #[error("invalid request: {0}")]
+    InvalidActivityCursor(String),
+    /// The historical activity query has no configured PostHog read credentials.
+    /// Renders as 503 with its own stable code so an operator can tell a missing
+    /// deployment secret apart from an upstream outage; the ingestion project
+    /// token is never used in its place.
+    #[error("unavailable: {0}")]
+    AuditQueryNotConfigured(String),
     /// The request cannot be processed due to a semantic issue (e.g. a
     /// dependent resource is missing or in an invalid state). Renders as 422.
     #[error("unprocessable: {0}")]
@@ -77,10 +94,12 @@ pub enum AppError {
 ///
 /// Public + `ToSchema` so the generated OpenAPI spec can reference it as the
 /// body of every documented 4xx/5xx response. `error` is one of the fixed code
-/// strings (`invalid_request`, `not_found`, `conflict`, `unauthorized`,
-/// `forbidden`, `operations_scope_forbidden`, `unprocessable`, `rate_limited`,
+/// strings (`invalid_request`, `invalid_activity_cursor`, `not_found`,
+/// `activity_session_not_found`, `conflict`, `unauthorized`, `forbidden`,
+/// `operations_scope_forbidden`, `unprocessable`, `rate_limited`,
 /// `upstream_error`, `unavailable`, `session_visibility_unavailable`,
-/// `internal`); `message` is a client-safe human description.
+/// `audit_query_not_configured`, `internal`); `message` is a client-safe human
+/// description.
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct ErrorEnvelope {
     /// Stable machine-readable error code.
@@ -202,6 +221,27 @@ impl IntoResponse for AppError {
             AppError::SessionVisibilityUnavailable(msg) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "session_visibility_unavailable",
+                msg.clone(),
+                false,
+                None,
+            ),
+            AppError::ActivitySessionNotFound(msg) => (
+                StatusCode::NOT_FOUND,
+                "activity_session_not_found",
+                msg.clone(),
+                false,
+                None,
+            ),
+            AppError::InvalidActivityCursor(msg) => (
+                StatusCode::BAD_REQUEST,
+                "invalid_activity_cursor",
+                msg.clone(),
+                false,
+                None,
+            ),
+            AppError::AuditQueryNotConfigured(msg) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "audit_query_not_configured",
                 msg.clone(),
                 false,
                 None,

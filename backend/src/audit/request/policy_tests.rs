@@ -57,7 +57,9 @@ fn the_product_surface_is_audited_including_webhook_chat_and_oauth() {
 
 #[test]
 fn an_unknown_operation_has_no_policy() {
-    assert_eq!(policy_for("operations_list_activity"), None);
+    // `operations_list_sandboxes` is still RESERVED: its DTO is reviewed, but its
+    // route does not exist, so the live table must not name it.
+    assert_eq!(policy_for("operations_list_sandboxes"), None);
     assert_eq!(policy_for(""), None);
 }
 
@@ -153,18 +155,17 @@ fn the_default_status_distinguishes_unavailable_from_not_applicable() {
     );
 }
 
-/// The reserved entries are exactly the two operations the sibling issues own,
-/// and they stay OUT of the live table until their routes exist.
+/// The reserved entries are exactly the operations whose ROUTES do not exist yet,
+/// and they stay OUT of the live table until they do. `operations_list_activity`
+/// graduated with its route (issue #5672); `operations_list_sandboxes` follows in
+/// #5675.
 #[test]
 fn the_reserved_operations_are_declared_but_not_yet_live() {
     let reserved: Vec<&str> = RESERVED_ARGUMENT_POLICIES
         .iter()
         .map(|operation| operation.operation_id)
         .collect();
-    assert_eq!(
-        reserved,
-        vec!["operations_list_activity", "operations_list_sandboxes"]
-    );
+    assert_eq!(reserved, vec!["operations_list_sandboxes"]);
     for operation in RESERVED_ARGUMENT_POLICIES {
         assert!(operation.policy.is_audited());
         assert!(operation.arguments.spec().is_some());

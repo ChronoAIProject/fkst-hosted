@@ -92,6 +92,7 @@ pub(crate) fn app_state(
         session_backend: None,
         storage: None,
         session_access: super::SessionAccessState::new(registry),
+        operations: Default::default(),
         log_bundle_cache: Default::default(),
         disposable_environments: Default::default(),
         self_router: empty_self_router(),

@@ -59,6 +59,7 @@ fn full_surface_router() -> axum::Router {
         session_backend: None,
         storage: None,
         session_access: Default::default(),
+        operations: Default::default(),
         log_bundle_cache: Default::default(),
         disposable_environments: Default::default(),
         self_router: empty_self_router(),
@@ -137,9 +138,11 @@ async fn every_documented_operation_has_exactly_one_explicit_policy() {
 #[tokio::test]
 async fn the_audited_surface_is_the_expected_size_and_shape() {
     let operations = live_operations().await;
+    // 29 before milestone #22's scoped activity query (issue #5672) added
+    // `operations_list_activity`; #5675 adds `operations_list_sandboxes` next.
     assert_eq!(
         operations.len(),
-        29,
+        30,
         "the full surface changed; update this baseline deliberately: {:?}",
         operations.keys().collect::<Vec<_>>()
     );
@@ -211,6 +214,7 @@ async fn a_minimal_deployment_still_builds_its_catalog() {
         session_backend: None,
         storage: None,
         session_access: Default::default(),
+        operations: Default::default(),
         log_bundle_cache: Default::default(),
         disposable_environments: Default::default(),
         self_router: empty_self_router(),

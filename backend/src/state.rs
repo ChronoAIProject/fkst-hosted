@@ -7,6 +7,7 @@ use crate::config::Config;
 use crate::disposable_environment::DisposableEnvironmentRegistry;
 use crate::github_app::GithubAppTokens;
 use crate::log_bundle_cache::LogBundleCache;
+use crate::operations::OperationsState;
 use crate::reconcile::ReconcileDispatcher;
 use crate::recovery::RecoveryMonitor;
 use crate::session_access::SessionAccessState;
@@ -57,6 +58,13 @@ pub struct AppState {
     /// recover the trigger context), plus the bounded operations-scope counters.
     /// Cheap `Arc`-backed handles.
     pub session_access: SessionAccessState,
+    /// The operations surface's query engine (milestone #22): the configured
+    /// activity sources, their bounded admission budget, and their closed-label
+    /// telemetry. Default (no source configured) makes
+    /// `GET /api/v1/operations/activity` answer a stable
+    /// `503 audit_query_not_configured`, so a deployment without PostHog read
+    /// credentials behaves exactly as it did before. A cheap `Arc`-backed handle.
+    pub operations: OperationsState,
     /// TTL-bounded cache of each session's redacted log bundle (the gzip'd `tar.gz`
     /// fetched from chrono-storage). Lets the log viewer's manifest + per-file reads
     /// and the whole-bundle download share one storage fetch per ~30s window instead

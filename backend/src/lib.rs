@@ -55,6 +55,11 @@ pub mod leader_election;
 // Leader-only Pod label publication for the public Service selector.
 pub mod leader_routing;
 pub mod models;
+// The scoped historical-activity query engine behind `/api/v1/operations/*`
+// (milestone #22): fixed parameterized HogQL with the viewer predicate injected
+// at the SOURCE, keyset pagination, bounded concurrency, and the source boundary
+// the durable relay plugs into.
+pub mod operations;
 // OpenSandbox session-backend config knobs (`FKST_OSB_*`, issue #420). Validated
 // only when pod dispatch is on AND `FKST_POD_MODE=opensandbox`; `main.rs` maps the
 // resolved config into the backend's launch config when it builds `OsbBackend`.

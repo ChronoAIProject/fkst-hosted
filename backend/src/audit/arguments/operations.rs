@@ -47,6 +47,17 @@ pub enum ActivityScope {
     All,
 }
 
+impl ActivityScope {
+    /// The stable wire string. Shared with the closed-enum metric label so the
+    /// record and the counter can never disagree about which scope ran.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ActivityScope::Mine => "mine",
+            ActivityScope::All => "all",
+        }
+    }
+}
+
 /// The scope a sandbox inventory query ran under.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
