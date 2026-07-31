@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 use secrecy::SecretString;
 use serde::Deserialize;
 
+use crate::audit::AuditConfig;
 use crate::env_config::EnvConfig;
 use crate::error::AppError;
 use crate::leader_config::LeaderElectionConfig;
@@ -457,6 +458,10 @@ pub struct Config {
     /// not true — the feature is then entirely dark (no route mounted, no provider
     /// credential required). See [`crate::chat::config::from_vars`].
     pub chat: Option<crate::chat::config::ChatConfig>,
+    /// Audit capture config (`FKST_POSTHOG_*` + `FKST_DEPLOYMENT_ENVIRONMENT`).
+    /// Always present; `enabled == false` (the default) installs the no-op sink
+    /// and starts no delivery worker. See [`crate::audit::config`].
+    pub audit: AuditConfig,
 }
 
 impl Default for Config {
@@ -480,6 +485,7 @@ impl Default for Config {
             storage: None,
             log: LogConfig::default(),
             chat: None,
+            audit: AuditConfig::default(),
         }
     }
 }
@@ -729,6 +735,12 @@ impl Config {
         // exact variable. Shares the same `vars` snapshot.
         let chat = crate::chat::config::from_vars(&vars)?;
 
+        // Audit capture (FKST_POSTHOG_* + FKST_DEPLOYMENT_ENVIRONMENT). Always
+        // resolved: the feature is off by default, but its numeric bounds are
+        // validated unconditionally so a typo surfaces at deploy time instead of
+        // at the moment an operator flips it on. Shares the same `vars` snapshot.
+        let audit = AuditConfig::from_vars(&vars)?;
+
         // Deployment-wide access policy (FKST_ACCESS_ALLOWED_USERS +
         // FKST_ACCESS_BLOCKED_USERS + FKST_GLOBAL_ADMINS + FKST_AUTH_MODEL).
         // Derived default: no list = open, allowed list = enforced allowlist
@@ -758,6 +770,7 @@ impl Config {
             storage,
             log,
             chat,
+            audit,
         })
     }
 
@@ -1543,5 +1556,47 @@ mod tests {
         assert!(err
             .to_string()
             .contains("FKST_GITHUB_BROADER_OAUTH_CLIENT_SECRET"));
+    }
+
+    #[test]
+    fn audit_capture_is_off_by_default_and_wired_through_config_from_vars() {
+        // Unset → the audit pipeline is inert (no worker, no network) and the
+        // documented defaults apply.
+        let config = Config::from_vars(vars(&[])).expect("defaults");
+        assert!(!config.audit.enabled);
+        assert!(config.audit.host.is_none());
+        assert_eq!(config.audit.batch_size, 100);
+        assert_eq!(config.audit.queue_capacity, 10_000);
+
+        // Set → the resolved block rides on Config, normalized.
+        let config = Config::from_vars(vars(&[
+            ("FKST_POSTHOG_ENABLED", "true"),
+            ("FKST_POSTHOG_HOST", "https://posthog.example/"),
+            ("FKST_POSTHOG_PROJECT_TOKEN", "phc_token"),
+            ("FKST_DEPLOYMENT_ENVIRONMENT", "production"),
+        ]))
+        .expect("enabled audit config loads");
+        assert!(config.audit.enabled);
+        assert_eq!(
+            config.audit.host.as_deref(),
+            Some("https://posthog.example")
+        );
+        assert_eq!(config.audit.environment, "production");
+    }
+
+    #[test]
+    fn an_invalid_audit_block_fails_closed_through_config_from_vars() {
+        // Enabled without a host: the whole process must refuse to start rather
+        // than boot with a silently disabled audit trail.
+        let err = Config::from_vars(vars(&[("FKST_POSTHOG_ENABLED", "true")]))
+            .expect_err("enabled audit without a host must fail closed");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(err.to_string().contains("FKST_POSTHOG_HOST"));
+
+        // A nonsensical bound fails even while the feature is off, so a typo
+        // surfaces at deploy time instead of at the flip.
+        let err = Config::from_vars(vars(&[("FKST_POSTHOG_QUEUE_CAPACITY", "0")]))
+            .expect_err("a zero queue must fail closed");
+        assert!(err.to_string().contains("FKST_POSTHOG_QUEUE_CAPACITY"));
     }
 }

@@ -57,6 +57,7 @@ fn app_with(webhook_secret: bool, chat: bool) -> axum::Router {
         disposable_environments: Default::default(),
         self_router: empty_self_router(),
         chat,
+        audit: Default::default(),
     })
     .expect("router builds")
 }

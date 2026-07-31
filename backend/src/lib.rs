@@ -5,6 +5,11 @@
 //! the application without a real TCP bind.
 
 pub mod access_policy;
+// Versioned audit event contract + the swappable delivery sink (milestone #22):
+// the typed record every audited request produces, its PostHog capture
+// projection, and the bounded batching/retry worker behind `AuditSink`. Request
+// middleware, argument extraction, and the read API are separate issues.
+pub mod audit;
 // The chat concierge (milestone `fkst-chat-interface`): the conversational surface
 // users drive fkst-hosted through. Config + LLM client here; it acts strictly as a
 // client of the public API with the calling user's own token.

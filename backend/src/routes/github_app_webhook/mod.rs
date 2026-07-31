@@ -823,6 +823,7 @@ mod tests {
             disposable_environments: Default::default(),
             self_router: crate::state::empty_self_router(),
             chat: None,
+            audit: Default::default(),
         };
         (state, rx)
     }
@@ -909,6 +910,7 @@ mod tests {
             disposable_environments: Default::default(),
             self_router: crate::state::empty_self_router(),
             chat: None,
+            audit: Default::default(),
         };
         let handled = handle_installation(&state, body).await.expect("dispatch");
         assert_eq!(handled.as_str(), "cache_busted");

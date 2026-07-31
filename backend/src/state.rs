@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::audit::AuditHandle;
 use crate::config::Config;
 use crate::disposable_environment::DisposableEnvironmentRegistry;
 use crate::github_app::GithubAppTokens;
@@ -79,6 +80,12 @@ pub struct AppState {
     /// `None` when `FKST_CHAT_ENABLED` is not true — `POST /api/v1/chat` is then not
     /// mounted at all, and is likewise absent from `/openapi.json`.
     pub chat: Option<Arc<crate::chat::ChatRuntime>>,
+    /// The cloneable audit sink handle (milestone #22). Always present: with
+    /// `FKST_POSTHOG_ENABLED` unset it is the no-op sink, which starts no worker
+    /// and makes no network call, so a deployment with auditing off behaves
+    /// exactly as it did before. `/metrics` renders its bounded delivery
+    /// telemetry.
+    pub audit: AuditHandle,
 }
 
 /// Deferred handle to the assembled router (see [`AppState::self_router`]).

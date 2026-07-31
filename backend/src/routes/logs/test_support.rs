@@ -98,6 +98,7 @@ pub(crate) fn state(
         disposable_environments: Default::default(),
         self_router: empty_self_router(),
         chat: None,
+        audit: Default::default(),
     }
 }
 

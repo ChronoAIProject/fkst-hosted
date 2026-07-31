@@ -34,6 +34,7 @@ fn test_router(recovery: RecoveryMonitor) -> axum::Router {
         disposable_environments: Default::default(),
         self_router: empty_self_router(),
         chat: None,
+        audit: Default::default(),
     })
     .expect("router")
 }
@@ -196,6 +197,7 @@ async fn follower_rejects_api_and_signed_webhook_before_side_effects() {
         disposable_environments: Default::default(),
         self_router: empty_self_router(),
         chat: None,
+        audit: Default::default(),
     })
     .expect("router");
 

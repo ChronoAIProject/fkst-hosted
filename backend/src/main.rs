@@ -317,6 +317,20 @@ async fn main() -> ExitCode {
         .clone()
         .map(|cfg| std::sync::Arc::new(fkst_control_plane::chat::ChatRuntime::from_config(cfg)));
 
+    // The audit sink (milestone #22). Starts the bounded delivery worker only
+    // when capture is enabled; otherwise it is the no-op sink and no task exists.
+    // A build failure here is a genuine misconfiguration (bad host / unbuildable
+    // HTTP client), so it is fatal rather than a silently degraded audit trail.
+    let audit = match fkst_control_plane::audit::AuditHandle::from_config(&config.audit) {
+        Ok(audit) => audit,
+        Err(error) => {
+            tracing::error!(error = %error, "failed to initialize the audit sink");
+            return ExitCode::FAILURE;
+        }
+    };
+    // A clone for the post-serve drain: `AppState` moves into the router below.
+    let audit_drain = audit.clone();
+
     let app = match build_router(AppState {
         config,
         recovery,
@@ -332,6 +346,7 @@ async fn main() -> ExitCode {
         // dispatch through it (see `AppState::self_router`).
         self_router: fkst_control_plane::state::empty_self_router(),
         chat,
+        audit,
     }) {
         Ok(router) => router,
         Err(error) => {
@@ -351,10 +366,24 @@ async fn main() -> ExitCode {
     };
     tracing::info!(addr = %addr, "server listening");
 
-    if let Err(error) = axum::serve(listener, app.into_make_service())
+    let serve_result = axum::serve(listener, app.into_make_service())
         .with_graceful_shutdown(shutdown_signal())
-        .await
-    {
+        .await;
+
+    // Drain the audit sink AFTER axum finished draining in-flight requests, so
+    // the last request's record is admitted before admission closes. Bounded by
+    // FKST_POSTHOG_SHUTDOWN_FLUSH_SECS; the residue is reported, never hidden.
+    // Runs on both the clean and the failed serve path — a server error must not
+    // discard already-admitted records silently.
+    let drained = audit_drain.drain().await;
+    if drained.remaining > 0 {
+        tracing::warn!(
+            remaining = drained.remaining,
+            "audit sink shut down with undelivered events"
+        );
+    }
+
+    if let Err(error) = serve_result {
         tracing::error!(error = %error, "server error");
         return ExitCode::FAILURE;
     }

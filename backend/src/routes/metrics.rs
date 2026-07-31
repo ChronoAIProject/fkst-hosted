@@ -5,6 +5,7 @@ use axum::response::IntoResponse;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use crate::audit::AuditMetricsSnapshot;
 use crate::recovery::RecoverySnapshot;
 use crate::state::AppState;
 
@@ -13,7 +14,7 @@ const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8"
 
 /// Render the exposition body. Split out so it is unit-testable without an HTTP
 /// request.
-fn render_metrics(recovery: &RecoverySnapshot) -> String {
+fn render_metrics(recovery: &RecoverySnapshot, audit: &AuditMetricsSnapshot) -> String {
     let complete = u8::from(recovery.startup_resync_complete);
     let ready = u8::from(recovery.ready);
     let election_enabled = u8::from(recovery.leader_election_enabled);
@@ -132,7 +133,72 @@ fn render_metrics(recovery: &RecoverySnapshot) -> String {
             prometheus_label(holder)
         ));
     }
+    body.push_str(&render_audit_metrics(audit));
     body
+}
+
+/// Render the audit-delivery series.
+///
+/// Every label is a closed enum (`accepted` / `full` / `retryable` / `permanent`
+/// / `disabled`, and the bounded drop reasons): actor, session, repository,
+/// request, and event ids are structured-log fields only, never labels (epic
+/// `OPS-04`). Capture success is `accepted` — a PostHog `200` means accepted by
+/// capture, never proven query-visible.
+fn render_audit_metrics(audit: &AuditMetricsSnapshot) -> String {
+    format!(
+        "# HELP fkst_audit_queue_depth Events admitted to the audit queue but not yet batched.\n\
+         # TYPE fkst_audit_queue_depth gauge\n\
+         fkst_audit_queue_depth {}\n\
+         # HELP fkst_audit_events_enqueued_total Audit events by bounded admission result.\n\
+         # TYPE fkst_audit_events_enqueued_total counter\n\
+         fkst_audit_events_enqueued_total{{result=\"accepted\"}} {}\n\
+         fkst_audit_events_enqueued_total{{result=\"full\"}} {}\n\
+         fkst_audit_events_enqueued_total{{result=\"disabled\"}} {}\n\
+         # HELP fkst_audit_batches_total Audit batches by bounded terminal result.\n\
+         # TYPE fkst_audit_batches_total counter\n\
+         fkst_audit_batches_total{{result=\"accepted\"}} {}\n\
+         fkst_audit_batches_total{{result=\"retryable\"}} {}\n\
+         fkst_audit_batches_total{{result=\"permanent\"}} {}\n\
+         # HELP fkst_audit_delivery_attempts_total Individual capture attempts by bounded result.\n\
+         # TYPE fkst_audit_delivery_attempts_total counter\n\
+         fkst_audit_delivery_attempts_total{{result=\"accepted\"}} {}\n\
+         fkst_audit_delivery_attempts_total{{result=\"retryable\"}} {}\n\
+         fkst_audit_delivery_attempts_total{{result=\"permanent\"}} {}\n\
+         # HELP fkst_audit_delivery_duration_seconds Time spent in capture attempts.\n\
+         # TYPE fkst_audit_delivery_duration_seconds summary\n\
+         fkst_audit_delivery_duration_seconds_sum {}\n\
+         fkst_audit_delivery_duration_seconds_count {}\n\
+         # HELP fkst_audit_events_dropped_total Audit events that will never reach capture, by bounded reason.\n\
+         # TYPE fkst_audit_events_dropped_total counter\n\
+         fkst_audit_events_dropped_total{{reason=\"queue_full\"}} {}\n\
+         fkst_audit_events_dropped_total{{reason=\"invalid\"}} {}\n\
+         fkst_audit_events_dropped_total{{reason=\"oversized\"}} {}\n\
+         fkst_audit_events_dropped_total{{reason=\"retryable\"}} {}\n\
+         fkst_audit_events_dropped_total{{reason=\"permanent\"}} {}\n\
+         fkst_audit_events_dropped_total{{reason=\"shutdown\"}} {}\n\
+         # HELP fkst_audit_shutdown_remaining_events Events still undelivered when the last drain ended.\n\
+         # TYPE fkst_audit_shutdown_remaining_events gauge\n\
+         fkst_audit_shutdown_remaining_events {}\n",
+        audit.queue_depth,
+        audit.enqueued_accepted,
+        audit.enqueued_full,
+        audit.enqueued_disabled,
+        audit.batches_accepted,
+        audit.batches_retryable,
+        audit.batches_permanent,
+        audit.attempts_accepted,
+        audit.attempts_retryable,
+        audit.attempts_permanent,
+        audit.delivery_duration_seconds_sum,
+        audit.delivery_duration_count,
+        audit.dropped_queue_full,
+        audit.dropped_invalid,
+        audit.dropped_oversized,
+        audit.dropped_retryable,
+        audit.dropped_permanent,
+        audit.dropped_shutdown,
+        audit.shutdown_remaining,
+    )
 }
 
 fn prometheus_label(value: &str) -> String {
@@ -160,7 +226,7 @@ fn prometheus_label(value: &str) -> String {
 async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     (
         [(axum::http::header::CONTENT_TYPE, PROMETHEUS_CONTENT_TYPE)],
-        render_metrics(&state.recovery.snapshot()),
+        render_metrics(&state.recovery.snapshot(), &state.audit.metrics_snapshot()),
     )
 }
 
@@ -181,7 +247,7 @@ mod tests {
             std::time::Duration::from_millis(250),
             3,
         );
-        let body = render_metrics(&monitor.snapshot());
+        let body = render_metrics(&monitor.snapshot(), &AuditMetricsSnapshot::default());
         assert!(body.contains("# TYPE fkst_up gauge"));
         assert!(body.contains("\nfkst_up 1\n") || body.starts_with("fkst_up 1\n"));
         assert!(body.contains("fkst_startup_resync_attempts_total{result=\"partial\"} 1"));
@@ -206,7 +272,7 @@ mod tests {
             2,
         );
         monitor.record_leader_routing(true);
-        let body = render_metrics(&monitor.snapshot());
+        let body = render_metrics(&monitor.snapshot(), &AuditMetricsSnapshot::default());
         assert!(body.contains("fkst_leader 1"));
         assert!(body.contains("fkst_leader_ready 1"));
         assert!(body.contains("fkst_leader_state{state=\"ready\"} 1"));
@@ -214,5 +280,49 @@ mod tests {
         assert!(body.contains("fkst_leader_lease_failures_total{operation=\"renew\"} 1"));
         assert!(body.contains("fkst_leader_observed_lease_transitions 7"));
         assert!(body.contains("identity=\"pod-\\\\\\\"a\""));
+    }
+
+    #[test]
+    fn renders_every_audit_series_with_closed_enum_labels() {
+        use crate::audit::metrics::{AuditMetrics, DeliveryResult, DropReason, EnqueueResult};
+
+        let metrics = AuditMetrics::new();
+        metrics.set_queue_depth(4);
+        metrics.record_enqueued(EnqueueResult::Accepted);
+        metrics.record_enqueued(EnqueueResult::Full);
+        metrics.record_enqueued(EnqueueResult::Disabled);
+        metrics.record_batch(DeliveryResult::Accepted);
+        metrics.record_delivery_attempt(
+            DeliveryResult::Retryable,
+            std::time::Duration::from_millis(250),
+        );
+        metrics.record_dropped(DropReason::QueueFull, 2);
+        metrics.record_dropped(DropReason::Oversized, 1);
+        metrics.set_shutdown_remaining(3);
+
+        let body = render_metrics(
+            &crate::recovery::RecoveryMonitor::new(false).snapshot(),
+            &metrics.snapshot(),
+        );
+        assert!(body.contains("fkst_audit_queue_depth 4"), "{body}");
+        assert!(body.contains("fkst_audit_events_enqueued_total{result=\"accepted\"} 1"));
+        assert!(body.contains("fkst_audit_events_enqueued_total{result=\"full\"} 1"));
+        assert!(body.contains("fkst_audit_events_enqueued_total{result=\"disabled\"} 1"));
+        assert!(body.contains("fkst_audit_batches_total{result=\"accepted\"} 1"));
+        assert!(body.contains("fkst_audit_batches_total{result=\"permanent\"} 0"));
+        assert!(body.contains("fkst_audit_delivery_attempts_total{result=\"retryable\"} 1"));
+        assert!(body.contains("fkst_audit_delivery_duration_seconds_sum 0.25"));
+        assert!(body.contains("fkst_audit_delivery_duration_seconds_count 1"));
+        assert!(body.contains("fkst_audit_events_dropped_total{reason=\"queue_full\"} 2"));
+        assert!(body.contains("fkst_audit_events_dropped_total{reason=\"oversized\"} 1"));
+        assert!(body.contains("fkst_audit_shutdown_remaining_events 3"));
+        // Capture success is named `accepted`, never `delivered`/`persisted`:
+        // a PostHog 200 is acceptance, not proof of query visibility. Only the
+        // series lines are checked — the HELP prose may still say "undelivered"
+        // when that is the accurate description.
+        for line in body.lines().filter(|line| !line.starts_with('#')) {
+            assert!(!line.contains("delivered"), "{line}");
+            assert!(!line.contains("persisted"), "{line}");
+        }
     }
 }

@@ -64,6 +64,7 @@ pub(crate) fn test_state(server_uri: &str, github_app: Option<GithubAppTokens>) 
         disposable_environments: Default::default(),
         self_router: empty_self_router(),
         chat: None,
+        audit: Default::default(),
     }
 }
 

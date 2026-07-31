@@ -134,6 +134,7 @@ mod tests {
             disposable_environments: Default::default(),
             self_router: crate::state::empty_self_router(),
             chat: None,
+            audit: Default::default(),
         }
     }
 
