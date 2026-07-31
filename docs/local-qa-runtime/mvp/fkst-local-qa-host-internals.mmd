@@ -1,0 +1,65 @@
+flowchart TB
+  PROFILE["Current Target MVP<br/>local_qa_agent_mvp / trusted inputs only"]
+
+  subgraph INGRESS["NyxID-reachable Local Interface"]
+    direction LR
+    API["Five REST endpoints"]
+    AUTH["Ingress/Auth Adapter<br/>local credential + signed request authorization"]
+    API --> AUTH
+  end
+
+  subgraph CORE["Local QA Host Process"]
+    direction TB
+    COORD["Run Coordinator<br/>state and outcome separation"]
+    JOURNAL[("Small SQLite Journal<br/>request / run / event / resource / attempts")]
+    SOURCE["Source + Workspace Manager<br/>immutable SHA / per-run workspace"]
+    ENV["Container Controller<br/>project / network / volume / ports"]
+    READY["Readiness Controller<br/>typed conditional probes"]
+    RUNNER["testing-runner Adapter<br/>Observation → Assertion → CaseResult"]
+    BROWSER["Host Chrome Controller<br/>dedicated process / profile / downloads"]
+    STAGE["Evidence Stager<br/>bounded quarantine / redaction / digest"]
+    CLEAN["Cleanup Manager<br/>execution resources then staging"]
+    UPLOAD["Upload Client<br/>grant exchange / upload / reconcile"]
+
+    AUTH --> COORD
+    COORD <--> JOURNAL
+    COORD --> SOURCE --> ENV --> READY --> RUNNER
+    COORD --> BROWSER
+    RUNNER --> STAGE
+    BROWSER --> STAGE
+    STAGE --> CLEAN
+    STAGE --> UPLOAD
+    CLEAN --> JOURNAL
+    UPLOAD --> JOURNAL
+  end
+
+  NODE["NyxID Node<br/>local credential injection"]
+  HOSTED["Hosted Control Plane<br/>authorization / artifact ingestion / report"]
+  CONTAINERS["Per-run Containers<br/>App / DB / Middleware"]
+  CHROME["System Chrome<br/>temporary profile"]
+
+  PROFILE --> API
+  NODE --> API
+  API --> NODE
+  HOSTED -->|"control request through NyxID"| NODE
+  ENV --> CONTAINERS
+  BROWSER --> CHROME
+  UPLOAD -->|"sanitized bytes + per-object grant"| HOSTED
+  JOURNAL -->|"snapshot / event batch / receipts"| API
+
+  DENY["MVP Reject Gate<br/>external fork / unknown scripts / arbitrary shell /<br/>high-value secrets / strong browser egress requirements"]
+  DENY -.-> AUTH
+
+  classDef ingress fill:#E6F4F1,stroke:#17857E,color:#123C39,stroke-width:2px;
+  classDef core fill:#EAF5E7,stroke:#4C9445,color:#173C16,stroke-width:2px;
+  classDef data fill:#E8F0FE,stroke:#3367D6,color:#102A43,stroke-width:2px;
+  classDef resource fill:#FFF4E2,stroke:#D58A20,color:#4A2A00,stroke-width:2px;
+  classDef gate fill:#FCE8E6,stroke:#C5221F,color:#5F1613,stroke-width:2px;
+  classDef profile fill:#F5F7F8,stroke:#607D8B,color:#263238,stroke-width:2px;
+
+  class API,AUTH,NODE ingress;
+  class COORD,SOURCE,ENV,READY,RUNNER,BROWSER,STAGE,CLEAN,UPLOAD core;
+  class JOURNAL,HOSTED data;
+  class CONTAINERS,CHROME resource;
+  class DENY gate;
+  class PROFILE profile;
