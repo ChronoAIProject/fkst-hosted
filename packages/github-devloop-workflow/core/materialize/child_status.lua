@@ -14,6 +14,23 @@ local M = {}
 M.ISSUE_VIEW_TIMEOUT_SECONDS = 30
 M.PR_VIEW_TIMEOUT_SECONDS = 30
 
+
+--- Did this child stop on a cause a refinement could actually address?
+--
+-- Read from the reconcile marker's terminal_cause rather than the blocked label,
+-- because the label alone cannot tell a convergence block from a PR block.
+local function has_refinable_terminal(comments)
+  for _, comment in ipairs(comments or {}) do
+    local body = tostring((type(comment) == "table" and comment.body) or comment or "")
+    for cause in body:gmatch('terminal_cause="([%a%-]+)"') do
+      if conv_rounds.is_refinable_cause(cause) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 local function child_issue_view(core, repo, issue_number)
   local result = commands.gh_issue_view(
     repo,
@@ -183,8 +200,13 @@ local function production_child_status_deps(core, repo)
         --
         -- Gated on the resolved budget so the default (0, refinement off) keeps the
         -- previous behaviour exactly: with no refinement possible, blocked is fatal.
+        -- ...but ONLY a convergence block can be refined. A child blocked for any
+        -- other reason -- a PR that cannot merge, say -- will never refine, and
+        -- treating it as transient would hang the parent forever waiting for a lap
+        -- that is never coming.
         local budget = conv_rounds.max_auto_refinements()
         if budget > 0
+          and has_refinable_terminal(child.comments)
           and conv_rounds.auto_refine_budget_remaining(child.comments, child_ref.proposal_id, budget)
         then
           return false

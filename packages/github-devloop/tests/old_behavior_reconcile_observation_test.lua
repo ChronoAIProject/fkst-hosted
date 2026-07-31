@@ -67,6 +67,13 @@ local EFFECTS = {
     sink_kind = "label",
     authority_class = "lifecycle-authoritative",
   },
+  -- The refine dispatch raised alongside the terminal write when a refinable
+  -- cause still has budget.
+  ["devloop_refine"] = {
+    effect_id = "queue:devloop_refine",
+    sink_kind = "queue",
+    authority_class = "lifecycle-authoritative",
+  },
 }
 
 local function outcome_status(probe, decision, apply)
