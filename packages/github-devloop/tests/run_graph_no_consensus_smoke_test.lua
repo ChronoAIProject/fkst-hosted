@@ -72,6 +72,16 @@ local function mock_runtime_and_context()
       exit_code = 0,
     })
   end
+  -- The refine department reads the issue under lock, once before dispatching the
+  -- amendment and once after, so it can re-gate on a state that may have moved.
+  for _ = 1, 2 do
+    t.mock_command("gh issue view 42 --repo owner/repo", {
+      stdout = '{"title":"t","updatedAt":"2026-07-04T00:00:00Z","labels":[{"name":"fkst-dev:blocked"}],'
+        .. '"comments":[],"state":"OPEN","author":{"login":"fkst-test-bot"}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+  end
 end
 
 local function mock_github_proxy_writes()
