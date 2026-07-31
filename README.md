@@ -2,8 +2,8 @@
 
 **fkst-hosted** contains ChronoAI's user-facing products for the **fkst**
 project. Its hosted control plane gives you a managed home for fkst packages and
-the engine sessions that run them, while the Local QA Runtime provides the
-repository boundary for local QA tooling.
+the engine sessions that run them, while `apps/local-qa-runtime/` provides the
+product boundary for the future user-facing **Local QA Host**.
 
 ## What you can do
 
@@ -25,9 +25,12 @@ repository boundary for local QA tooling.
 
 - `backend/`, `frontend/`, and `deploy/` own the hosted control plane and web
   experience.
-- `apps/local-qa-runtime/` owns the user-facing Local QA Runtime. It is currently
-  an inert, independently buildable scaffold; runtime protocols and behavior
-  belong to later, separately reviewed changes.
+- `apps/local-qa-runtime/` is the single physical product and build boundary for
+  Local QA Host. It is currently an inert scaffold; a future separately reviewed
+  change may add `host/` with package and executable `fkst-local-qa-host`.
+  Hardened Local QA Runtime remains a separate future Profile, and no runtime
+  protocol or behavior is implemented yet. See
+  [`apps/local-qa-runtime/README.md`](apps/local-qa-runtime/README.md).
 - Kernel-engine code remains upstream in `fkst-substrate`. Shared fkst packages
   remain upstream in `fkst-packages`; both repositories are reference-only from
   this checkout.

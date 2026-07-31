@@ -1,8 +1,9 @@
 # FKST Local QA Host：经 NyxID 执行用户本地自动化 QA 的 MVP 实现设计
 
-> **状态：** `local_qa_agent_mvp` 当前实施设计，尚未表示对应能力已经实现。
-> **命名：** 产品、进程和本文统一称为 **Local QA Host**；既有部署路径、Profile、Schema 和类型中的 `Agent` 保留为兼容标识。
-> **日期：** 2026-07-30。
+> **状态：** `local_qa_host_mvp` 当前实施设计，尚未表示对应能力已经实现。
+> **命名：** 产品、进程、Profile、Schema、类型、字段和 audience 的 canonical 命名统一使用 **Local QA Host / Host**；旧草案标识不保留为兼容别名。
+> **命名决策：** [ChronoAIProject/fkst-hosted#5729](https://github.com/ChronoAIProject/fkst-hosted/issues/5729)。
+> **日期：** 2026-07-31。
 > **系统设计：** [DESIGN.zh-CN.md](../baseline/v1/DESIGN.zh-CN.md)。
 > **字段与协议规范：** [SPEC.zh-CN.md](../baseline/v1/SPEC.zh-CN.md)。
 > **未来安全 Profile：** [LOCAL-QA-RUNTIME-DESIGN.zh-CN.md](../baseline/v1/LOCAL-QA-RUNTIME-DESIGN.zh-CN.md)。
@@ -31,7 +32,7 @@ Local QA Host 不能由 NyxID Node、SSH exec 或 testing-runner 单独替代。
 - 取消、超时、重启后的 Cleanup 与 reconciliation。
 - Raw Evidence 的 quarantine、redaction 和 upload handoff。
 
-为避免把产品命名调整误解为协议迁移，以下兼容标识保持不变：`fkst-hosted/apps/local-qa-agent`、`local_qa_agent_mvp`、`LocalQAAgentService`、`LocalAgentHealth`、`agent_instance_id` 和 audience `fkst-local-qa-agent`。新文档和面向人的界面使用 Local QA Host。
+Canonical 标识统一为 `local_qa_host_mvp`、`LocalQAHostService`、`LocalHostHealth`、`host_instance_id` 和 audience `fkst-local-qa-host`。物理产品根保持 `apps/local-qa-runtime/`；未来 Host 实现位于 `apps/local-qa-runtime/host/`，package 与 executable 使用 `fkst-local-qa-host`，不创建第二个 Local QA 产品根。
 
 ### 1.1 文档权威关系
 
@@ -39,7 +40,7 @@ Local QA Host 不能由 NyxID Node、SSH exec 或 testing-runner 单独替代。
 | --- | --- |
 | [SPEC.zh-CN.md](../baseline/v1/SPEC.zh-CN.md) | 跨进程字段、严格枚举、签名对象、摘要、Interface、状态机和 wire error。 |
 | [DESIGN.zh-CN.md](../baseline/v1/DESIGN.zh-CN.md) | 系统级职责、信任边界、部署拓扑和完整 QA Run 生命周期。 |
-| 本文 | `local_qa_agent_mvp` 的内部 Module、执行顺序、最小持久化和恢复算法。 |
+| 本文 | `local_qa_host_mvp` 的内部 Module、执行顺序、最小持久化和恢复算法。 |
 | [LOCAL-QA-RUNTIME-DESIGN.zh-CN.md](../baseline/v1/LOCAL-QA-RUNTIME-DESIGN.zh-CN.md) | 未来 `hardened_untrusted_code` 的 authority、隔离、fencing 和 signed recovery。 |
 
 本文不重新定义 SPEC 中的 Schema。示例字段和表名只用于解释实现语义；若与 SPEC 冲突，以 SPEC 为准。
@@ -83,7 +84,7 @@ PoC 没有证明生产请求认证、Source materialization、Docker Compose、R
 
 ### 2.3 MVP 必须拒绝的输入
 
-以下任一条件成立时，Host 必须拒绝 `local_qa_agent_mvp`，不能静默降级执行：
+以下任一条件成立时，Host 必须拒绝 `local_qa_host_mvp`，不能静默降级执行：
 
 - 外部 fork、未知仓库或无法信任的 dependency/lifecycle scripts。
 - 开放式 Shell、Codex/Agent Action 或动态扩大文件、网络、Secret、Browser 权限。
@@ -186,7 +187,7 @@ Host 是用户级部署目标，可由 LaunchAgent、桌面应用 helper 或同�
 | 6. Prepare | Host + environment package | 创建 Compose project、network、volume、port；执行必要 readiness | prepared environment / readiness receipts |
 | 7. Execute | Host + testing packages | 调用 runner/Backend；需要时启动专用 Chrome；生成 Observation、AssertionResult、CaseResult | structured test result refs |
 | 8. Stage | Host + test-artifacts | 收集 raw Evidence；quarantine、redaction、validation、post-redaction digest | EvidenceStagingManifest / RedactionReceipt |
-| 9. Cleanup execution | Host | 关闭 Chrome、runner、App/Middleware；释放 container、port、network、volume、workspace | LocalAgentCleanupReceipt / residual refs |
+| 9. Cleanup execution | Host | 关闭 Chrome、runner、App/Middleware；释放 container、port、network、volume、workspace | LocalHostCleanupReceipt / residual refs |
 | 10. Upload | Host + Hosted ingestion | 按对象申请短 TTL upload grant；上传或按 digest/object key 对账 | ArtifactUploadReceipt / ingest refs |
 | 11. Finalize local | Host | 删除或按 TTL 保留 sanitized staging；固定本地 Outcomes | final local Snapshot / CleanupSummary |
 | 12. Evaluate and settle | Hosted | ingest Artifact；冻结 ReportInputSet；Quality；Report；Publication；Settlement | ArtifactPointer、QualityEvaluation、ReportRecord、RunSettlement |
@@ -405,7 +406,7 @@ Host 输出本地执行事实：
 
 - StructuredTestResult / CaseResult refs。
 - EvidenceStagingManifest、RedactionReceipt 和 ArtifactUploadReceipt。
-- LocalAgentCleanupReceipt 与 profile-neutral CleanupSummary。
+- LocalHostCleanupReceipt 与 profile-neutral CleanupSummary。
 - execution/evidence/upload/cleanup Outcomes。
 
 Hosted 完成：
@@ -538,7 +539,7 @@ Secret 应通过 opaque ref 或面向精确动作的短期 material 使用。Hos
 - Hosted audit：Workflow、authorization、Policy、Quality、Report、Publication、Settlement。
 - Host journal/audit：request、state、event、resource、runner attempt、upload、cleanup。
 
-三侧使用 `run_id + request_id + request_digest + node_id + agent_instance_id` 关联。NyxID transport success 不能作为 Host 已接受 Run 或本地副作用已完成的 Receipt。
+三侧使用 `run_id + request_id + request_digest + node_id + host_instance_id` 关联。NyxID transport success 不能作为 Host 已接受 Run 或本地副作用已完成的 Receipt。
 
 ### 9.4 Health、升级与卸载
 
