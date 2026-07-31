@@ -151,6 +151,16 @@ impl FromRequestParts<AppState> for GithubUser {
                     .to_string(),
             ));
         }
+        // Publish the VERIFIED, credential-free identity for the audit record
+        // (epic `AUTH-02`). A no-op unless an outer middleware installed a slot,
+        // and deliberately after the access gate: an identity the deployment does
+        // not admit never becomes the record's actor. The bearer token stays out
+        // of the extensions entirely — not even as a hash, which would still be a
+        // cross-record correlation handle.
+        crate::audit::identity::record_identity(
+            &parts.extensions,
+            crate::audit::AuditIdentity::github_bearer(user.id, user.login.clone()),
+        );
         Ok(user)
     }
 }
@@ -187,7 +197,7 @@ mod tests {
             reconciler: None,
             session_backend: None,
             storage: None,
-            log_registry: Default::default(),
+            session_access: Default::default(),
             log_bundle_cache: Default::default(),
             disposable_environments: Default::default(),
             self_router: crate::state::empty_self_router(),

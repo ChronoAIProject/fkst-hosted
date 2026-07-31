@@ -129,7 +129,7 @@ mod tests {
             reconciler: reconciler.map(|handle| ReconcileDispatcher::from_handle(&handle)),
             session_backend: None,
             storage: None,
-            log_registry: Default::default(),
+            session_access: Default::default(),
             log_bundle_cache: Default::default(),
             disposable_environments: Default::default(),
             self_router: crate::state::empty_self_router(),

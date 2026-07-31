@@ -19,9 +19,9 @@
 //!   user token, resolves `/user`, and — on authorization — STREAMS the bundle back as
 //!   an attachment (the download starts).
 //!
-//! Authorization (both modes) applies
-//! [`crate::reconcile::log_authz::is_authorized`] to the session's trigger context,
-//! looked up in the reconciler-maintained [`crate::log_access`] registry. The
+//! Authorization (both modes) asks the shared capability policy
+//! ([`crate::session_access`]) the `LogDownload` question against the session's
+//! trigger context, looked up in the reconciler-maintained projection. The
 //! session id is a one-way hash, so this reverse map recovers the author id and
 //! `### Log Access Allowlist`; the route also grants the deployment-wide
 //! `FKST_GLOBAL_ADMINS` role. Deny → 403. Unknown session / missing object → 404.
@@ -35,6 +35,9 @@
 pub(crate) mod identity;
 // Shared with `crate::routes::auth` (the frontend login flow reuses the signed-state
 // + authorize-URL + token-exchange primitives).
+/// The shared session-scoped authorization gate, applied by both modes and reused
+/// by the engine-observe route.
+mod authorize;
 pub(crate) mod oauth;
 // The per-run listing endpoint (`GET /logs/{sid}/runs`), identity-gated by `authorize`.
 mod run_list;
@@ -43,7 +46,7 @@ mod run_list;
 mod viewer;
 
 use axum::extract::{Path, Query, State};
-use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::http::{header, Extensions, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use secrecy::ExposeSecret;
 use serde::Deserialize;
@@ -53,10 +56,10 @@ use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+pub(crate) use authorize::authorize;
+
 use crate::error::{AppError, ErrorEnvelope};
-use crate::github_identity::GithubUser;
 use crate::log_config::LogConfig;
-use crate::reconcile::log_authz;
 use crate::session_pod::log_stream::runs;
 use crate::state::AppState;
 use crate::storage::StorageError;
@@ -127,6 +130,7 @@ pub struct OAuthCallbackQuery {
 )]
 async fn download_session_logs(
     State(state): State<AppState>,
+    extensions: Extensions,
     Path(session_id): Path<String>,
     Query(query): Query<RunQuery>,
     headers: HeaderMap,
@@ -134,7 +138,16 @@ async fn download_session_logs(
     match bearer_token(&headers) {
         // API mode: a Bearer token is present — resolve identity + serve the bundle
         // for the requested run (absent → latest).
-        Some(token) => api_mode(&state, &session_id, &token, query.run.as_deref()).await,
+        Some(token) => {
+            api_mode(
+                &state,
+                &extensions,
+                &session_id,
+                &token,
+                query.run.as_deref(),
+            )
+            .await
+        }
         // Browser mode: no token — redirect into the GitHub OAuth flow. The run
         // selector is not carried across the OAuth round-trip (the signed state holds
         // only the session id); browser downloads always serve the latest bundle.
@@ -162,6 +175,7 @@ async fn download_session_logs(
 )]
 async fn oauth_callback(
     State(state): State<AppState>,
+    extensions: Extensions,
     Query(query): Query<OAuthCallbackQuery>,
 ) -> Response {
     let log = &state.config.log;
@@ -210,6 +224,8 @@ async fn oauth_callback(
         Err(err) => return browser_error(err),
     };
 
+    // The exchanged token is not an identity until `GET /user` names its owner: a
+    // failure here is a stable authentication failure, never an invented actor.
     let user =
         match identity::resolve(&state.config.github_api_base_url, token.expose_secret()).await {
             Ok(user) => user,
@@ -220,6 +236,10 @@ async fn oauth_callback(
                 )
             }
         };
+    crate::audit::identity::record_identity(
+        &extensions,
+        crate::audit::AuditIdentity::github_oauth(user.id, user.login.clone()),
+    );
 
     // Authorize, then stream the latest bundle; render every failure as HTML. The
     // browser path serves the latest bundle only (the run selector is not carried
@@ -239,11 +259,21 @@ async fn oauth_callback(
 /// redacted bundle back as a gzip attachment — identical to the browser path, so NO
 /// presigned S3 URL is ever handed to a caller (the presigned URL is used server-side
 /// only, inside [`stream_download`]). Every failure renders the JSON [`AppError`] envelope.
-async fn api_mode(state: &AppState, session_id: &str, token: &str, run: Option<&str>) -> Response {
+async fn api_mode(
+    state: &AppState,
+    extensions: &Extensions,
+    session_id: &str,
+    token: &str,
+    run: Option<&str>,
+) -> Response {
     let user = match identity::resolve(&state.config.github_api_base_url, token).await {
         Ok(user) => user,
         Err(err) => return err.into_response(),
     };
+    crate::audit::identity::record_identity(
+        extensions,
+        crate::audit::AuditIdentity::github_bearer(user.id, user.login.clone()),
+    );
     if let Err(err) = authorize(state, session_id, &user) {
         return err.into_response();
     }
@@ -281,51 +311,7 @@ fn browser_redirect(state: &AppState, session_id: &str) -> Response {
     }
 }
 
-// ---- Shared authorize + serve -----------------------------------------------
-
-/// Authorize `user` against the session's trigger context. Looks the context up in
-/// the reconciler-maintained registry (a one-way `session_id` cannot yield it
-/// otherwise); an unknown session → 404 (never reveals more), an unauthorized caller
-/// → 403. The token is NEVER referenced here; only the resolved (public) identity is.
-pub(crate) fn authorize(
-    state: &AppState,
-    session_id: &str,
-    user: &GithubUser,
-) -> Result<(), AppError> {
-    let Some(context) = state.log_registry.get(session_id) else {
-        // Deny-by-default: with no context we cannot authorize, so we do not serve.
-        return Err(AppError::NotFound(
-            "no logs available for this session".to_string(),
-        ));
-    };
-    if state.config.access.is_global_admin(user.id, &user.login)
-        || log_authz::is_authorized(
-            user.id,
-            &user.login,
-            &context.creator,
-            &context.log_access,
-            &state.config.log.admins,
-        )
-    {
-        tracing::info!(
-            session_id = %session_id,
-            requester_id = user.id,
-            requester_login = %user.login,
-            "log download authorized"
-        );
-        Ok(())
-    } else {
-        tracing::info!(
-            session_id = %session_id,
-            requester_id = user.id,
-            requester_login = %user.login,
-            "log download denied (not authorized)"
-        );
-        Err(AppError::Forbidden(
-            "not authorized to access these logs".to_string(),
-        ))
-    }
-}
+// ---- Serve ------------------------------------------------------------------
 
 /// Fetch a session's redacted bundle from chrono-storage (server-side, gzip'd tar).
 /// Shared by the whole-bundle download and the in-bundle log viewer ([`viewer`]),

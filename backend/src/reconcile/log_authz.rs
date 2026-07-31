@@ -23,6 +23,9 @@
 //! author may list either form. A leading `@` on an entry is ignored so `@alice` and
 //! `alice` are equivalent. An empty/whitespace entry never matches anything.
 
+use crate::session_access::policy::{log_download_tier, VerifiedCaller};
+use crate::session_access::SessionAuthorizationFacts;
+
 /// Decide whether the verified caller `(requester_id, requester_login)` may download
 /// the logs of a session owned by `creator` and
 /// whose `### Log Access Allowlist` allow-list is `per_issue_allow`, given the operator's
@@ -30,6 +33,12 @@
 ///
 /// Returns `true` iff the caller satisfies AT LEAST ONE of the three tiers described
 /// in the module docs; `false` (deny) otherwise. Purely a function of its inputs.
+///
+/// The tiers themselves live in [`crate::session_access::policy`], which the
+/// operations surfaces also decide from — one table, so the shipped log-download
+/// matrix can neither widen nor narrow when a new capability is added. This
+/// signature stays because it is the shape every existing caller (and its test
+/// suite) is written against.
 pub fn is_authorized(
     requester_id: i64,
     requester_login: &str,
@@ -37,29 +46,22 @@ pub fn is_authorized(
     per_issue_allow: &[String],
     legacy_log_admins: &[String],
 ) -> bool {
-    // Tier 1: the effective creator. Prefer the immutable id for human-authored
-    // triggers; App-authored triggers have only the assignee login available.
-    let creator_matches = match creator.id {
-        Some(creator_id) => requester_id == creator_id,
-        None => {
-            !creator.login.trim().is_empty() && requester_login.eq_ignore_ascii_case(&creator.login)
-        }
-    };
-    if creator_matches {
-        return true;
-    }
-    // Tiers 2 + 3: any per-issue OR any global-admin entry that matches the caller by
-    // numeric id (as a string) OR by case-insensitive login.
-    let requester_id_str = requester_id.to_string();
-    per_issue_allow
-        .iter()
-        .chain(legacy_log_admins.iter())
-        .any(|entry| entry_matches(entry, &requester_id_str, requester_login))
+    log_download_tier(
+        SessionAuthorizationFacts {
+            creator_id: creator.id,
+            creator_login: &creator.login,
+            // Session collaborators are deliberately NOT a log-download tier.
+            collaborators: &[],
+            log_access: per_issue_allow,
+        },
+        VerifiedCaller {
+            id: requester_id,
+            login: requester_login,
+        },
+        legacy_log_admins,
+    )
+    .allowed
 }
-
-// The entry matcher is shared with the deployment-wide access policy so the two
-// allowlist syntaxes can never drift — see `crate::access_policy::entry_matches`.
-use crate::access_policy::entry_matches;
 
 #[cfg(test)]
 #[path = "log_authz_tests.rs"]

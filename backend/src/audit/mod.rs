@@ -22,6 +22,9 @@
 //!   depends on PostHog;
 //! - [`worker`] and [`posthog`] hold everything that can fail at runtime, behind
 //!   bounded queues, bounded retries, and bounded logs;
+//! - [`identity`] carries the credential-free actor/principal pair from whoever
+//!   proved it to the middleware that writes the record, so no route has to
+//!   invent its own notion of "who is calling";
 //! - [`metrics`] keeps delivery telemetry closed-enum-labelled (epic `OPS-04`).
 //!
 //! This issue deliberately implements the contract and the delivery path only:
@@ -34,6 +37,7 @@ use crate::error::AppError;
 
 pub mod config;
 pub mod event;
+pub mod identity;
 pub mod metrics;
 pub mod posthog;
 pub mod projection;
@@ -52,6 +56,7 @@ pub use event::{
     AuthenticationMethod, Correlation, Principal, PrincipalKind, RequestIdentity, RequestResult,
     RequestTiming, ServiceIdentity,
 };
+pub use identity::{AuditActor, AuditIdentity, AuditIdentitySlot, AuditPrincipal};
 pub use metrics::{AuditMetrics, AuditMetricsSnapshot};
 pub use projection::{CaptureEvent, EventLimits};
 pub use sink::{AuditSink, DisabledSink, DrainReport, RecordingSink, SubmitError};

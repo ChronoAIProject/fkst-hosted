@@ -243,10 +243,13 @@ async fn main() -> ExitCode {
     // Capture the reconciler gate before `config` moves into `AppState`.
     let pod_dispatch = config.pod.dispatch;
 
-    // The shared `session_id -> log-access context` registry the reconciler writes
-    // each sweep and the log-download endpoint reads. Built here so ONE registry is
-    // shared between the background loops and the API router.
-    let log_registry = fkst_control_plane::log_access::LogAccessRegistry::new();
+    // The shared `session_id -> access context` projection the reconciler
+    // publishes each sweep and every session-scoped route authorizes against.
+    // Built here so ONE projection is shared between the background loops and the
+    // API router. Dispatch-aware: with the reconciler off there is nothing to
+    // discover, so the projection is authoritatively empty rather than cold.
+    let session_registry =
+        fkst_control_plane::session_access::SessionAccessRegistry::new(pod_dispatch);
     let disposable_environments =
         fkst_control_plane::disposable_environment::DisposableEnvironmentRegistry::new();
 
@@ -288,7 +291,7 @@ async fn main() -> ExitCode {
                 spawn_reconciler(
                     &config,
                     github_app.clone(),
-                    log_registry.clone(),
+                    session_registry.clone(),
                     backend,
                     recovery.clone(),
                     initialized_env_store.clone(),
@@ -339,7 +342,9 @@ async fn main() -> ExitCode {
         reconciler,
         session_backend,
         storage,
-        log_registry,
+        session_access: fkst_control_plane::session_access::SessionAccessState::new(
+            session_registry,
+        ),
         log_bundle_cache: fkst_control_plane::log_bundle_cache::LogBundleCache::new(),
         disposable_environments,
         // Filled by `build_router` with the router it returns, so chat tools can
@@ -540,7 +545,7 @@ async fn build_osb_backend(
 async fn spawn_reconciler(
     config: &Config,
     github_app: Option<fkst_control_plane::github_app::GithubAppTokens>,
-    log_registry: fkst_control_plane::log_access::LogAccessRegistry,
+    session_registry: fkst_control_plane::session_access::SessionAccessRegistry,
     backend: Arc<dyn fkst_control_plane::session_backend::SessionBackend>,
     recovery: RecoveryMonitor,
     initialized_env_store: Option<
@@ -601,7 +606,7 @@ async fn spawn_reconciler(
         listing,
         http,
         config: config.clone(),
-        log_registry,
+        session_registry,
         disposable_environments,
         routing: None,
     };
@@ -685,7 +690,7 @@ struct ReconcileWorkerFactory {
     listing: Arc<dyn fkst_control_plane::github_app::GithubListing>,
     http: reqwest::Client,
     config: Config,
-    log_registry: fkst_control_plane::log_access::LogAccessRegistry,
+    session_registry: fkst_control_plane::session_access::SessionAccessRegistry,
     disposable_environments:
         fkst_control_plane::disposable_environment::DisposableEnvironmentRegistry,
     routing: Option<fkst_control_plane::leader_routing::LeaderServiceRouter>,
@@ -702,7 +707,7 @@ impl ReconcileWorkerFactory {
             config: self.config.clone(),
             active_repos: fkst_control_plane::reconcile::new_active_repos(),
             ensured_templates: fkst_control_plane::reconcile::new_ensured_templates(),
-            log_registry: self.log_registry.clone(),
+            session_access: self.session_registry.clone(),
             disposable_environments: self.disposable_environments.clone(),
         }
     }

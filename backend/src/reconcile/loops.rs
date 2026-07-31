@@ -253,6 +253,10 @@ async fn full_resync_once(
         installations_total: installations.len(),
         ..FullResyncSummary::default()
     };
+    // Discovery order is preserved (a `Vec`) while a companion set dedups, so the
+    // queue is fed in a stable order and the generation's expected set is exact.
+    let mut discovered: Vec<RepoKey> = Vec::new();
+    let mut seen: HashSet<RepoKey> = HashSet::new();
     for inst in installations {
         let token = match ctx.github.installation_wide_token(inst.id).await {
             Ok(token) => token,
@@ -265,8 +269,10 @@ async fn full_resync_once(
         match ctx.listing.list_installation_repos(&token).await {
             Ok(repos) => {
                 for repo in repos {
-                    handle.enqueue((inst.id, repo));
-                    summary.repositories_enqueued += 1;
+                    let key = (inst.id, repo);
+                    if seen.insert(key.clone()) {
+                        discovered.push(key);
+                    }
                 }
             }
             Err(error) => {
@@ -274,6 +280,25 @@ async fn full_resync_once(
                 tracing::warn!(installation = inst.id, error = %error, "full-resync: list repos failed; skipping installation")
             }
         }
+    }
+    summary.repositories_enqueued = discovered.len();
+
+    // Open the session-access generation BEFORE enqueuing, and only for a
+    // complete enumeration. Two orderings matter here:
+    //
+    // 1. A partial pass is not authoritative — an unreachable installation's
+    //    repositories are missing from `discovered`, so publishing that set as a
+    //    complete generation would silently drop every session it owns.
+    // 2. The generation must be opened before the queue is fed, or the consumer
+    //    could reconcile (and publish) a repository before the projection knows
+    //    to expect it, leaving the generation permanently one repository short.
+    if summary.is_complete() {
+        ctx.session_access.begin_generation(seen);
+    } else {
+        ctx.session_access.abandon_generation();
+    }
+    for key in discovered {
+        handle.enqueue(key);
     }
     Ok(summary)
 }

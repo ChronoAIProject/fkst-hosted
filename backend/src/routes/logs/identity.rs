@@ -47,7 +47,7 @@ fn token_key(token: &str) -> String {
 ///
 /// - A rejected token (`/user` 401/403) → [`AppError::Unauthorized`] (deny).
 /// - An unreachable/misbehaving GitHub → [`AppError::Unavailable`].
-pub(super) async fn resolve(api_base: &str, token: &str) -> Result<GithubUser, AppError> {
+pub(crate) async fn resolve(api_base: &str, token: &str) -> Result<GithubUser, AppError> {
     let key = token_key(token);
 
     if let Some(user) = cache_get(&key) {

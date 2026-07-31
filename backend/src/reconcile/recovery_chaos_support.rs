@@ -15,12 +15,12 @@ use crate::github_app::api::{
 };
 use crate::github_app::listing::{GithubListing, InstallationSummary, IssueSummary};
 use crate::github_app::{GithubAppError, GithubAppTokens};
-use crate::log_access::LogAccessRegistry;
 use crate::models::{GithubActor, RepoRef};
 use crate::reconcile::desired::KillReason;
 use crate::reconcile::{
     new_active_repos, new_ensured_templates, reconcile_channel, reconcile_repo,
 };
+use crate::session_access::SessionAccessRegistry;
 
 #[path = "recovery_chaos_runtime.rs"]
 mod runtime;
@@ -490,7 +490,7 @@ impl ChaosHarness {
             config,
             active_repos: new_active_repos(),
             ensured_templates: new_ensured_templates(),
-            log_registry: LogAccessRegistry::new(),
+            session_access: SessionAccessRegistry::new(false),
             disposable_environments: Default::default(),
         }
     }

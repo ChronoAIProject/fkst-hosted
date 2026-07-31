@@ -35,11 +35,6 @@ pub mod github_app;
 // that keys the per-user environment/secret store.
 pub mod github_identity;
 pub mod goals;
-// In-memory `session_id -> log-access context` registry: the reverse map the
-// identity-gated `/api/v1/logs/{session_id}` endpoint needs (session_id is a one-way
-// hash) but cannot itself yield. The reconciler writes it each sweep; the endpoint
-// reads it.
-pub mod log_access;
 // TTL-bounded in-memory cache of each session's redacted log bundle, so the log
 // viewer's manifest + per-file reads (and the whole-bundle download) do not
 // re-download + re-gunzip the whole `tar.gz` from chrono-storage on every request.
@@ -94,6 +89,12 @@ pub mod router;
 pub mod routes;
 pub mod schedule;
 pub mod session_backend;
+// Session-scoped identity, visibility, and capability policy: the credential-free
+// authenticated viewer + server-resolved scope, the readiness-aware
+// `session_id -> context` projection the reconciler publishes each sweep, and the
+// ONE pure tier table log download, engine observe, work authority, and operations
+// visibility all decide from.
+pub mod session_access;
 // Optional chrono-storage object-store client + its NyxID service-account token
 // provider (log-streaming Wave 1). Self-contained + wiremock-tested; disabled
 // (resolves to `None`) unless the `FKST_STORAGE_*` / `FKST_NYXID_*` vars are set.

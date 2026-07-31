@@ -87,7 +87,7 @@ pub struct ReconcileCtx {
     /// The shared `session_id -> log-access context` registry the reconciler upserts
     /// each sweep so the identity-gated log-download endpoint can reverse a
     /// `session_id` to its authorization context. A cheap `Arc`-backed handle.
-    pub log_registry: crate::log_access::LogAccessRegistry,
+    pub session_access: crate::session_access::SessionAccessRegistry,
     /// Private create-request handoff for disposable environments. Resolution is
     /// creator-bound and entries are removed only after the backend accepts the
     /// complete sandbox credential bundle.

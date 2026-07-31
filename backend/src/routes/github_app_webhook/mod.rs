@@ -10,7 +10,9 @@
 //! 2. Compute `HMAC-SHA256(secret, raw_body)` and compare it in CONSTANT TIME
 //!    against the `sha256=<hex>` value in `X-Hub-Signature-256`. A missing or
 //!    mismatched signature is `401` (never reveals which check failed).
-//! 3. Only then parse `X-GitHub-Event` and dispatch.
+//! 3. Only then trust the body's `sender`/`installation` as the delivery's audit
+//!    identity (see [`sender`]) — in an unverified body those fields are
+//!    attacker-controlled — and parse `X-GitHub-Event` to dispatch.
 //!
 //! Stateless cache-bust hint (#141). The handler keeps signature verification,
 //! parses the event to derive the affected `owner/name` set and installer login,
@@ -28,11 +30,12 @@
 //! only for the non-secret installation, repository, and sender fields used below.
 
 mod issue_trigger;
+mod sender;
 mod verify;
 
 use axum::body::Bytes;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{Extensions, HeaderMap, StatusCode};
 use secrecy::ExposeSecret;
 use serde::Deserialize;
 use utoipa_axum::router::OpenApiRouter;
@@ -155,7 +158,12 @@ enum Handled {
         (status = 503, description = "Webhook secret not configured, or this election-enabled replica is not the ready leader")
     )
 )]
-async fn webhook(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> StatusCode {
+async fn webhook(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode {
     // The secret must be configured for this route to do anything; the router
     // only mounts the route when it is set, so this is a defensive 503.
     let Some(secret) = &state.github_app_webhook_secret else {
@@ -170,7 +178,12 @@ async fn webhook(State(state): State<AppState>, headers: HeaderMap, body: Bytes)
         return StatusCode::UNAUTHORIZED;
     }
 
-    // STEP 3: parse the event type, then dispatch on the verified body.
+    // STEP 3: the body is now PROVEN to be GitHub's, so — and only now — its
+    // `sender`/`installation` fields may be trusted as identity. A rejected
+    // delivery never reaches this line, so a forged sender is never recorded.
+    sender::record_verified_sender(&extensions, &body);
+
+    // STEP 4: parse the event type, then dispatch on the verified body.
     let event = headers
         .get(EVENT_HEADER)
         .and_then(|v| v.to_str().ok())
@@ -818,7 +831,7 @@ mod tests {
             reconciler: Some(ReconcileDispatcher::from_handle(&handle)),
             session_backend: None,
             storage: None,
-            log_registry: Default::default(),
+            session_access: Default::default(),
             log_bundle_cache: Default::default(),
             disposable_environments: Default::default(),
             self_router: crate::state::empty_self_router(),
@@ -905,7 +918,7 @@ mod tests {
             reconciler: None,
             session_backend: None,
             storage: None,
-            log_registry: Default::default(),
+            session_access: Default::default(),
             log_bundle_cache: Default::default(),
             disposable_environments: Default::default(),
             self_router: crate::state::empty_self_router(),

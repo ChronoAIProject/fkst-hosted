@@ -24,7 +24,7 @@
 //! primitives come from [`crate::routes::logs::oauth`].
 
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::http::{Extensions, StatusCode};
 use axum::response::{IntoResponse, Response};
 use secrecy::ExposeSecret;
 use serde::Deserialize;
@@ -34,7 +34,8 @@ use utoipa_axum::routes;
 
 use crate::error::{AppError, ErrorEnvelope};
 use crate::routes::auth::{
-    html_error, http_client, redirect_302, signed_state_message, state_is_fresh_for,
+    html_error, http_client, redirect_302, resolve_oauth_identity, signed_state_message,
+    state_is_fresh_for,
 };
 use crate::routes::logs::oauth;
 use crate::state::AppState;
@@ -126,6 +127,7 @@ async fn github_broader(State(state): State<AppState>) -> Response {
 )]
 async fn github_broader_callback(
     State(state): State<AppState>,
+    extensions: Extensions,
     Query(query): Query<BroaderCallbackQuery>,
 ) -> Response {
     let log = &state.config.log;
@@ -187,6 +189,19 @@ async fn github_broader_callback(
             )
         }
     };
+    // The broader credential is only useful once we know WHOSE it is: resolve
+    // `GET /user` before the connect is treated as successful, so the terminal
+    // record names a verified id. A `/user` failure fails closed rather than
+    // handing the SPA an unattributable token.
+    if resolve_oauth_identity(&state, &tokens.access_token, &extensions)
+        .await
+        .is_err()
+    {
+        return html_error(
+            StatusCode::UNAUTHORIZED,
+            "Could not verify your GitHub identity.",
+        );
+    }
     // Hand the broader token to the SPA in the fragment (never a query string / log).
     redirect_302(&broader_success_url(frontend, &tokens.access_token))
 }

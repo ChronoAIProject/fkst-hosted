@@ -18,11 +18,11 @@ use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::config::Config;
-use crate::log_access::{LogAccessRegistry, LogSessionContext};
 use crate::log_config::LogConfig;
 use crate::models::RepoRef;
 use crate::reconcile::creator::SessionCreator;
 use crate::router::build_router;
+use crate::session_access::{SessionAccessContext, SessionAccessRegistry, SessionAccessState};
 use crate::state::{empty_self_router, AppState};
 use crate::storage::{ChronoStorageClient, ChronoStorageConfig};
 
@@ -40,20 +40,38 @@ fn repo() -> RepoRef {
 }
 
 /// A registry pre-populated with SESSION_ID's context (author + allow-list).
-pub(crate) fn registry(allow: &[&str]) -> LogAccessRegistry {
-    let reg = LogAccessRegistry::new();
-    reg.upsert(
-        SESSION_ID.to_string(),
-        LogSessionContext {
-            installation_id: 1,
-            repo: repo(),
-            trigger_issue: 7,
-            creator: SessionCreator {
-                login: "author".to_string(),
-                id: Some(AUTHOR_ID),
+///
+/// `collaborators` stays empty on purpose: a session collaborator must not gain
+/// the log bundle, and the fixture would hide that if it seeded one.
+pub(crate) fn registry(allow: &[&str]) -> SessionAccessRegistry {
+    registry_with_collaborators(allow, &[])
+}
+
+/// The same fixture with explicit `### Session Collaborators` entries, so the
+/// "a collaborator alone cannot download logs" regression guard has something to
+/// assert against.
+pub(crate) fn registry_with_collaborators(
+    allow: &[&str],
+    collaborators: &[&str],
+) -> SessionAccessRegistry {
+    let reg = SessionAccessRegistry::new(false);
+    reg.replace_repo(
+        1,
+        &repo(),
+        vec![(
+            SESSION_ID.to_string(),
+            SessionAccessContext {
+                installation_id: 1,
+                repo: repo(),
+                trigger_issue: 7,
+                creator: SessionCreator {
+                    login: "author".to_string(),
+                    id: Some(AUTHOR_ID),
+                },
+                collaborators: collaborators.iter().map(|s| s.to_string()).collect(),
+                log_access: allow.iter().map(|s| s.to_string()).collect(),
             },
-            log_access: allow.iter().map(|s| s.to_string()).collect(),
-        },
+        )],
     );
     reg
 }
@@ -78,7 +96,7 @@ pub(crate) fn state(
     github_base: String,
     storage: Option<Arc<ChronoStorageClient>>,
     log: LogConfig,
-    registry: LogAccessRegistry,
+    registry: SessionAccessRegistry,
 ) -> AppState {
     let config = Config {
         github_api_base_url: github_base,
@@ -93,7 +111,7 @@ pub(crate) fn state(
         reconciler: None,
         session_backend: None,
         storage,
-        log_registry: registry,
+        session_access: SessionAccessState::new(registry),
         log_bundle_cache: Default::default(),
         disposable_environments: Default::default(),
         self_router: empty_self_router(),

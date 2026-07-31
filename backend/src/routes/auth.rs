@@ -23,7 +23,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Query, State};
-use axum::http::{header, HeaderValue, StatusCode};
+use axum::http::{header, Extensions, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use secrecy::{ExposeSecret, SecretString};
@@ -32,9 +32,11 @@ use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use crate::audit::AuditIdentity;
 use crate::error::{AppError, ErrorEnvelope};
+use crate::github_identity::GithubUser;
 use crate::log_config::LogConfig;
-use crate::routes::logs::oauth;
+use crate::routes::logs::{identity, oauth};
 use crate::state::AppState;
 
 /// Freshness window for a login `state`: a callback presenting a signed state older
@@ -154,6 +156,7 @@ async fn github_login(State(state): State<AppState>) -> Response {
 )]
 async fn github_login_callback(
     State(state): State<AppState>,
+    extensions: Extensions,
     Query(query): Query<LoginCallbackQuery>,
 ) -> Response {
     let log = &state.config.log;
@@ -223,6 +226,20 @@ async fn github_login_callback(
             )
         }
     };
+    // An exchanged token is not yet an identity. Resolve `GET /user` BEFORE the
+    // sign-in is treated as successful, so the terminal record is attributed to a
+    // verified numeric id rather than to an invented actor. A `/user` failure is a
+    // stable authentication failure: fail closed instead of handing the SPA a
+    // session whose owner we could not name.
+    if resolve_oauth_identity(&state, &tokens.access_token, &extensions)
+        .await
+        .is_err()
+    {
+        return html_error(
+            StatusCode::UNAUTHORIZED,
+            "Could not verify your GitHub identity.",
+        );
+    }
     // Hand the token set to the SPA in the fragment (never a query string / log).
     redirect_302(&frontend_success_url(frontend, &tokens))
 }
@@ -248,6 +265,7 @@ async fn github_login_callback(
 )]
 async fn github_refresh_token(
     State(state): State<AppState>,
+    extensions: Extensions,
     Json(req): Json<RefreshRequest>,
 ) -> Response {
     let log = &state.config.log;
@@ -267,9 +285,36 @@ async fn github_refresh_token(
     )
     .await
     {
-        Ok(tokens) => Json(token_response(&tokens)).into_response(),
+        Ok(tokens) => {
+            // Same rule as the callback: a refreshed session is attributed only
+            // after `GET /user` names its owner.
+            match resolve_oauth_identity(&state, &tokens.access_token, &extensions).await {
+                Ok(_) => Json(token_response(&tokens)).into_response(),
+                Err(err) => err.into_response(),
+            }
+        }
         Err(err) => err.into_response(),
     }
+}
+
+/// Resolve the verified identity behind a freshly exchanged/refreshed OAuth token
+/// and publish it as this request's audit actor.
+///
+/// Shared with the broader-visibility connect flow. The token is used for the one
+/// `GET /user` call and never stored, logged, or placed in the extensions — the
+/// recorded identity is the numeric id plus a login snapshot and nothing else.
+pub(super) async fn resolve_oauth_identity(
+    state: &AppState,
+    token: &SecretString,
+    extensions: &Extensions,
+) -> Result<GithubUser, AppError> {
+    let user = identity::resolve(&state.config.github_api_base_url, token.expose_secret()).await?;
+    crate::audit::identity::record_identity(
+        extensions,
+        AuditIdentity::github_oauth(user.id, user.login.clone()),
+    );
+    tracing::info!(user_id = user.id, "oauth identity verified after exchange");
+    Ok(user)
 }
 
 // ---- Helpers ----------------------------------------------------------------
@@ -437,6 +482,9 @@ pub fn router() -> OpenApiRouter<AppState> {
         .merge(crate::routes::auth_broader::router())
 }
 
+#[cfg(test)]
+#[path = "auth_handler_tests.rs"]
+mod handler_tests;
 #[cfg(test)]
 #[path = "auth_tests.rs"]
 mod tests;

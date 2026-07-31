@@ -7,6 +7,7 @@ use utoipa_axum::routes;
 
 use crate::audit::AuditMetricsSnapshot;
 use crate::recovery::RecoverySnapshot;
+use crate::session_access::{RegistrySnapshot, RegistryState, ScopeMetricsSnapshot, ScopeOutcome};
 use crate::state::AppState;
 
 /// The Prometheus text content type (version 0.0.4 exposition format).
@@ -14,7 +15,12 @@ const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8"
 
 /// Render the exposition body. Split out so it is unit-testable without an HTTP
 /// request.
-fn render_metrics(recovery: &RecoverySnapshot, audit: &AuditMetricsSnapshot) -> String {
+fn render_metrics(
+    recovery: &RecoverySnapshot,
+    audit: &AuditMetricsSnapshot,
+    registry: &RegistrySnapshot,
+    scope: &ScopeMetricsSnapshot,
+) -> String {
     let complete = u8::from(recovery.startup_resync_complete);
     let ready = u8::from(recovery.ready);
     let election_enabled = u8::from(recovery.leader_election_enabled);
@@ -134,6 +140,56 @@ fn render_metrics(recovery: &RecoverySnapshot, audit: &AuditMetricsSnapshot) -> 
         ));
     }
     body.push_str(&render_audit_metrics(audit));
+    body.push_str(&render_session_access_metrics(registry, scope));
+    body
+}
+
+/// Render the session-access projection and operations-scope series.
+///
+/// Every label is a closed enum: the registry's three lifecycle states and the
+/// fixed `(scope, result, reason)` triples. Session ids, repositories, actor ids,
+/// logins, and configured entries are never labels and never values here — only
+/// bounded counts (epic `OPS-04`).
+fn render_session_access_metrics(
+    registry: &RegistrySnapshot,
+    scope: &ScopeMetricsSnapshot,
+) -> String {
+    let mut body = format!(
+        "# HELP fkst_session_access_registry_sessions Sessions in the published visibility generation.\n\
+         # TYPE fkst_session_access_registry_sessions gauge\n\
+         fkst_session_access_registry_sessions {}\n\
+         # HELP fkst_session_access_registry_pending_repositories Repositories a staged generation still expects.\n\
+         # TYPE fkst_session_access_registry_pending_repositories gauge\n\
+         fkst_session_access_registry_pending_repositories {}\n\
+         # HELP fkst_session_access_registry_generation Published generation number of the visibility projection.\n\
+         # TYPE fkst_session_access_registry_generation gauge\n\
+         fkst_session_access_registry_generation {}\n\
+         # HELP fkst_session_access_registry_generation_state Current bounded readiness state of the projection.\n\
+         # TYPE fkst_session_access_registry_generation_state gauge\n",
+        registry.sessions, registry.pending_repositories, registry.generation,
+    );
+    for state in [
+        RegistryState::Cold,
+        RegistryState::Recovering,
+        RegistryState::Ready,
+    ] {
+        body.push_str(&format!(
+            "fkst_session_access_registry_generation_state{{state=\"{}\"}} {}\n",
+            state.as_str(),
+            u8::from(registry.state == state),
+        ));
+    }
+    body.push_str(
+        "# HELP fkst_operations_scope_decisions_total Operations scope selections by bounded outcome.\n\
+         # TYPE fkst_operations_scope_decisions_total counter\n",
+    );
+    for outcome in ScopeOutcome::ALL {
+        let (scope_label, result, reason) = outcome.labels();
+        body.push_str(&format!(
+            "fkst_operations_scope_decisions_total{{scope=\"{scope_label}\",result=\"{result}\",reason=\"{reason}\"}} {}\n",
+            scope.count(outcome),
+        ));
+    }
     body
 }
 
@@ -226,7 +282,12 @@ fn prometheus_label(value: &str) -> String {
 async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     (
         [(axum::http::header::CONTENT_TYPE, PROMETHEUS_CONTENT_TYPE)],
-        render_metrics(&state.recovery.snapshot(), &state.audit.metrics_snapshot()),
+        render_metrics(
+            &state.recovery.snapshot(),
+            &state.audit.metrics_snapshot(),
+            &state.session_access.registry.snapshot(),
+            &state.session_access.scope_metrics.snapshot(),
+        ),
     )
 }
 
@@ -238,6 +299,7 @@ pub fn router() -> OpenApiRouter<AppState> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session_access::{ScopeMetrics, SessionAccessRegistry};
 
     #[test]
     fn renders_liveness_and_bounded_recovery_metrics() {
@@ -247,7 +309,12 @@ mod tests {
             std::time::Duration::from_millis(250),
             3,
         );
-        let body = render_metrics(&monitor.snapshot(), &AuditMetricsSnapshot::default());
+        let body = render_metrics(
+            &monitor.snapshot(),
+            &AuditMetricsSnapshot::default(),
+            &SessionAccessRegistry::new(false).snapshot(),
+            &ScopeMetrics::new().snapshot(),
+        );
         assert!(body.contains("# TYPE fkst_up gauge"));
         assert!(body.contains("\nfkst_up 1\n") || body.starts_with("fkst_up 1\n"));
         assert!(body.contains("fkst_startup_resync_attempts_total{result=\"partial\"} 1"));
@@ -272,7 +339,12 @@ mod tests {
             2,
         );
         monitor.record_leader_routing(true);
-        let body = render_metrics(&monitor.snapshot(), &AuditMetricsSnapshot::default());
+        let body = render_metrics(
+            &monitor.snapshot(),
+            &AuditMetricsSnapshot::default(),
+            &SessionAccessRegistry::new(false).snapshot(),
+            &ScopeMetrics::new().snapshot(),
+        );
         assert!(body.contains("fkst_leader 1"));
         assert!(body.contains("fkst_leader_ready 1"));
         assert!(body.contains("fkst_leader_state{state=\"ready\"} 1"));
@@ -303,6 +375,8 @@ mod tests {
         let body = render_metrics(
             &crate::recovery::RecoveryMonitor::new(false).snapshot(),
             &metrics.snapshot(),
+            &SessionAccessRegistry::new(false).snapshot(),
+            &ScopeMetrics::new().snapshot(),
         );
         assert!(body.contains("fkst_audit_queue_depth 4"), "{body}");
         assert!(body.contains("fkst_audit_events_enqueued_total{result=\"accepted\"} 1"));
@@ -323,6 +397,92 @@ mod tests {
         for line in body.lines().filter(|line| !line.starts_with('#')) {
             assert!(!line.contains("delivered"), "{line}");
             assert!(!line.contains("persisted"), "{line}");
+        }
+    }
+
+    #[test]
+    fn renders_the_session_access_projection_and_scope_series() {
+        use crate::models::RepoRef;
+        use crate::session_access::{ScopeOutcome, SessionAccessContext};
+
+        let registry = SessionAccessRegistry::new(true);
+        registry.begin_generation(
+            [(
+                1,
+                RepoRef {
+                    owner: "acme".to_string(),
+                    name: "site".to_string(),
+                },
+            )]
+            .into_iter()
+            .collect(),
+        );
+        let scope = ScopeMetrics::new();
+        scope.record(ScopeOutcome::MineDefault);
+        scope.record(ScopeOutcome::AllForbidden);
+
+        // Mid-generation: recovering, nothing published.
+        let body = render_metrics(
+            &crate::recovery::RecoveryMonitor::new(false).snapshot(),
+            &AuditMetricsSnapshot::default(),
+            &registry.snapshot(),
+            &scope.snapshot(),
+        );
+        assert!(
+            body.contains("fkst_session_access_registry_sessions 0"),
+            "{body}"
+        );
+        assert!(body.contains("fkst_session_access_registry_pending_repositories 1"));
+        assert!(body.contains("fkst_session_access_registry_generation 1"));
+        assert!(
+            body.contains("fkst_session_access_registry_generation_state{state=\"recovering\"} 1")
+        );
+        assert!(body.contains("fkst_session_access_registry_generation_state{state=\"ready\"} 0"));
+        assert!(body.contains(
+            "fkst_operations_scope_decisions_total{scope=\"mine\",result=\"allowed\",reason=\"resolved_default\"} 1"
+        ));
+        assert!(body.contains(
+            "fkst_operations_scope_decisions_total{scope=\"all\",result=\"forbidden\",reason=\"global_scope_forbidden\"} 1"
+        ));
+
+        // After publication: ready, one session, and still no unbounded label.
+        registry.replace_repo(
+            1,
+            &RepoRef {
+                owner: "acme".to_string(),
+                name: "site".to_string(),
+            },
+            vec![(
+                "sess-secret".to_string(),
+                SessionAccessContext {
+                    installation_id: 1,
+                    repo: RepoRef {
+                        owner: "acme".to_string(),
+                        name: "site".to_string(),
+                    },
+                    trigger_issue: 7,
+                    creator: crate::reconcile::creator::SessionCreator {
+                        login: "alice".to_string(),
+                        id: Some(42),
+                    },
+                    collaborators: vec!["bob".to_string()],
+                    log_access: vec!["carol".to_string()],
+                },
+            )],
+        );
+        let body = render_metrics(
+            &crate::recovery::RecoveryMonitor::new(false).snapshot(),
+            &AuditMetricsSnapshot::default(),
+            &registry.snapshot(),
+            &scope.snapshot(),
+        );
+        assert!(
+            body.contains("fkst_session_access_registry_sessions 1"),
+            "{body}"
+        );
+        assert!(body.contains("fkst_session_access_registry_generation_state{state=\"ready\"} 1"));
+        for leak in ["sess-secret", "alice", "bob", "carol", "acme"] {
+            assert!(!body.contains(leak), "{leak} leaked into /metrics: {body}");
         }
     }
 }

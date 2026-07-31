@@ -45,9 +45,12 @@ pub mod pending;
 pub mod reachability;
 pub mod registry;
 pub mod repo;
+// Publication of each repository's session-access contexts (an authorization
+// concern, kept out of the reconcile planner).
 pub mod retire;
 pub mod routing;
 pub mod seed_issue;
+pub mod session_contexts;
 pub mod templates;
 pub mod trigger_authz;
 pub mod work_ack;
