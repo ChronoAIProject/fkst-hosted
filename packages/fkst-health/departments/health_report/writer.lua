@@ -173,7 +173,14 @@ function W.new(handles)
     if line == "" then
       return nil
     end
-    return line:sub(1, W.fault_reason_ceiling), path
+    -- Return a GLOB, not the exact filename. The exact name ends in
+    -- `<dept>-<epoch>-<nanos>-<seq>.log`, and that trailing run is long, mixed
+    -- alphanumeric and underscore-bearing -- which the control plane's entropy
+    -- redactor masks as a suspected secret, turning the single most actionable line
+    -- of the report into `«REDACTED».«REDACTED».log`. Every component of the glob is
+    -- either short or a kebab identifier, so it survives redaction intact and still
+    -- points a reader at exactly the right file.
+    return line:sub(1, W.fault_reason_ceiling), directory .. "/" .. dept .. "-*.log"
   end
 
   --- Write `text` to `<directory>/<name>` atomically. Returns ok, why.
