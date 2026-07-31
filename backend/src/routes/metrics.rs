@@ -8,6 +8,7 @@ use axum::response::IntoResponse;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use crate::audit::relay::RelayClientMetricsSnapshot;
 use crate::audit::AuditMetricsSnapshot;
 use crate::operations::{ActivityMetricsSnapshot, SandboxMetricsSnapshot};
 use crate::recovery::RecoverySnapshot;
@@ -16,8 +17,8 @@ use crate::session_access::{RegistrySnapshot, ScopeMetricsSnapshot};
 use crate::state::AppState;
 
 use self::metrics_series::{
-    render_activity_metrics, render_audit_metrics, render_runtime_metrics, render_sandbox_metrics,
-    render_session_access_metrics,
+    render_activity_metrics, render_audit_metrics, render_relay_metrics, render_runtime_metrics,
+    render_sandbox_metrics, render_session_access_metrics,
 };
 
 #[path = "metrics_series.rs"]
@@ -26,17 +27,36 @@ mod metrics_series;
 /// The Prometheus text content type (version 0.0.4 exposition format).
 const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
 
+/// Everything one exposition is rendered from.
+///
+/// Grouped rather than passed positionally because the list grows with every
+/// subsystem that publishes a series, and eight anonymous `&…Snapshot`s at a
+/// call site is a swap waiting to happen — two of them already differ only in
+/// the word before `Snapshot`.
+pub(super) struct MetricsSources<'a> {
+    pub recovery: &'a RecoverySnapshot,
+    pub audit: &'a AuditMetricsSnapshot,
+    pub registry: &'a RegistrySnapshot,
+    pub scope: &'a ScopeMetricsSnapshot,
+    pub runtime: &'a RuntimeTelemetrySnapshot,
+    pub activity: &'a ActivityMetricsSnapshot,
+    pub sandbox: &'a SandboxMetricsSnapshot,
+    pub relay: &'a RelayClientMetricsSnapshot,
+}
+
 /// Render the exposition body. Split out so it is unit-testable without an HTTP
 /// request.
-fn render_metrics(
-    recovery: &RecoverySnapshot,
-    audit: &AuditMetricsSnapshot,
-    registry: &RegistrySnapshot,
-    scope: &ScopeMetricsSnapshot,
-    runtime: &RuntimeTelemetrySnapshot,
-    activity: &ActivityMetricsSnapshot,
-    sandbox: &SandboxMetricsSnapshot,
-) -> String {
+fn render_metrics(sources: MetricsSources<'_>) -> String {
+    let MetricsSources {
+        recovery,
+        audit,
+        registry,
+        scope,
+        runtime,
+        activity,
+        sandbox,
+        relay,
+    } = sources;
     let complete = u8::from(recovery.startup_resync_complete);
     let ready = u8::from(recovery.ready);
     let election_enabled = u8::from(recovery.leader_election_enabled);
@@ -160,6 +180,7 @@ fn render_metrics(
     body.push_str(&render_runtime_metrics(runtime));
     body.push_str(&render_activity_metrics(activity));
     body.push_str(&render_sandbox_metrics(sandbox));
+    body.push_str(&render_relay_metrics(relay));
     body
 }
 
@@ -188,15 +209,16 @@ fn prometheus_label(value: &str) -> String {
 async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     (
         [(axum::http::header::CONTENT_TYPE, PROMETHEUS_CONTENT_TYPE)],
-        render_metrics(
-            &state.recovery.snapshot(),
-            &state.audit.metrics_snapshot(),
-            &state.session_access.registry.snapshot(),
-            &state.session_access.scope_metrics.snapshot(),
-            &state.audit.runtime_snapshot(),
-            &state.operations.metrics.snapshot(),
-            &state.operations.sandbox_metrics.snapshot(),
-        ),
+        render_metrics(MetricsSources {
+            recovery: &state.recovery.snapshot(),
+            audit: &state.audit.metrics_snapshot(),
+            registry: &state.session_access.registry.snapshot(),
+            scope: &state.session_access.scope_metrics.snapshot(),
+            runtime: &state.audit.runtime_snapshot(),
+            activity: &state.operations.metrics.snapshot(),
+            sandbox: &state.operations.sandbox_metrics.snapshot(),
+            relay: &state.audit.relay_snapshot(),
+        }),
     )
 }
 

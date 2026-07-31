@@ -295,6 +295,29 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+
+    // The durable audit relay (milestone #22, issue #5678). ONE client serves the
+    // two consumers wired here — the lifecycle queue and the activity source
+    // below — instead of two pools for one internal service. The request
+    // middleware is not one of them: it resolves its own delivery policy inside
+    // `build_router`, for the reason documented on `audit::relay::bootstrap`.
+    // A misconfiguration is FATAL: a `required` deployment that quietly ran
+    // without a relay would make its central durability claim false.
+    let relay_client = match fkst_control_plane::audit::relay::bootstrap::client(
+        &config.audit_delivery,
+        audit.relay_metrics(),
+    ) {
+        Ok(client) => client,
+        Err(error) => {
+            tracing::error!(error = %error, "failed to initialize the audit relay client");
+            return ExitCode::FAILURE;
+        }
+    };
+    let audit = fkst_control_plane::audit::relay::bootstrap::with_lifecycle_relay(
+        audit,
+        relay_client.as_ref(),
+        &config.audit_delivery,
+    );
     // A clone for the post-serve drain: `AppState` moves into the router below.
     let audit_drain = audit.clone();
 
@@ -303,7 +326,7 @@ async fn main() -> ExitCode {
     // stages the query secret — so the endpoint answers its own stable
     // `503 audit_query_not_configured` instead. Only an unbuildable HTTP client
     // fails the boot.
-    let operations = match fkst_control_plane::operations::OperationsState::from_config(
+    let mut operations = match fkst_control_plane::operations::OperationsState::from_config(
         &config.audit,
         &config.activity_query,
     ) {
@@ -313,6 +336,21 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    // The relay's scoped read joins the merge whenever the READ half is
+    // configured, independently of the delivery mode: a `best_effort` deployment
+    // still benefits from seeing its not-yet-verified, incomplete, and
+    // dead-letter rows while PostHog catches up.
+    if config.audit_delivery.read_configured() {
+        if let Some(client) = relay_client.clone() {
+            operations.relay = Some(Arc::new(
+                fkst_control_plane::operations::relay::RelayActivitySource::new(
+                    client,
+                    Duration::from_millis(config.activity_query.query_timeout_ms),
+                ),
+            ));
+            tracing::info!("operations: the durable audit relay joined the activity merge");
+        }
+    }
 
     let recovery = RecoveryMonitor::new(pod_dispatch);
     let reconciler = if pod_dispatch {

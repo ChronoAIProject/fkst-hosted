@@ -41,7 +41,8 @@ pub const EVENT_NAME: &str = "fkst api request completed";
 /// allowlists request event names by value: leaving the name to be invented by
 /// whoever writes the relay would let the query and the writer drift, and a
 /// timeline that silently omitted crash records is precisely the "apparently
-/// complete empty result" the epic forbids. Nothing emits it yet.
+/// complete empty result" the epic forbids. The relay's projection layer
+/// (`audit_relay::projection`) is what emits it.
 pub const INCOMPLETE_EVENT_NAME: &str = "fkst api request incomplete";
 
 /// The `operation_id` recorded for a request that matched no documented route.
@@ -134,6 +135,19 @@ macro_rules! as_str_impl {
             pub fn as_str(self) -> &'static str {
                 match self {
                     $(<$ty>::$variant => $text),+
+                }
+            }
+
+            /// Parse the stable wire string back.
+            ///
+            /// `None` for anything else, never a lenient fallback: the durable
+            /// relay re-validates every event it is handed, and quietly mapping
+            /// an unknown spelling onto a default would let a malformed record
+            /// enter the audit trail wearing a classification nobody wrote.
+            pub fn parse(value: &str) -> Option<Self> {
+                match value {
+                    $($text => Some(<$ty>::$variant),)+
+                    _ => None,
                 }
             }
         }

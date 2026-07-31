@@ -73,14 +73,11 @@ pub fn validate(event: &ApiRequestCompletedV1) -> Result<(), EventError> {
             format!("expected {}", super::event::SCHEMA_VERSION),
         ));
     }
-    bounded("request_id", &event.request_id, limits::REQUEST_ID, true)?;
-    validate_method(&event.method)?;
-    validate_route_template(&event.route_template)?;
-    bounded(
-        "operation_id",
+    validate_request_identity(
+        &event.request_id,
+        &event.method,
+        &event.route_template,
         &event.operation_id,
-        limits::OPERATION_ID,
-        true,
     )?;
     validate_timestamps(event)?;
     validate_status_and_outcome(event.status_code, event.outcome)?;
@@ -88,15 +85,38 @@ pub fn validate(event: &ApiRequestCompletedV1) -> Result<(), EventError> {
     validate_actor(event)?;
     validate_principal(event)?;
     validate_correlation(event)?;
-    bounded(
-        "service.version",
-        &event.service.version,
-        limits::SERVICE_VERSION,
-        true,
-    )?;
+    validate_service_identity(&event.service.version, &event.service.environment)?;
+    Ok(())
+}
+
+/// The four immutable request fields, validated identically wherever they appear.
+///
+/// They are shared by a completed record and by the durable relay's request-START
+/// registration, which arrives BEFORE any record exists. Both are untrusted at
+/// the relay's trust boundary, and the route-template rule below is the one that
+/// keeps a raw query-bearing URI out of durable storage — a start that skipped it
+/// would smuggle the URI in and the synthesized `incomplete` projection would
+/// copy it straight back out to the read API.
+pub fn validate_request_identity(
+    request_id: &str,
+    method: &str,
+    route_template: &str,
+    operation_id: &str,
+) -> Result<(), EventError> {
+    bounded("request_id", request_id, limits::REQUEST_ID, true)?;
+    validate_method(method)?;
+    validate_route_template(route_template)?;
+    bounded("operation_id", operation_id, limits::OPERATION_ID, true)?;
+    Ok(())
+}
+
+/// The emitting deployment's identity. The environment may legitimately be empty
+/// (an unconfigured local run); the version may not.
+pub fn validate_service_identity(version: &str, environment: &str) -> Result<(), EventError> {
+    bounded("service.version", version, limits::SERVICE_VERSION, true)?;
     bounded(
         "service.environment",
-        &event.service.environment,
+        environment,
         limits::SERVICE_ENVIRONMENT,
         false,
     )?;

@@ -43,6 +43,9 @@ pub mod id;
 pub mod middleware;
 pub mod outcome;
 pub mod policy;
+/// The two `required`-delivery refusals and the operational trade-off they
+/// encode (issue #5678).
+pub mod required;
 pub mod response;
 pub mod trace;
 

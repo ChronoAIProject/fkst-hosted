@@ -10,6 +10,12 @@ pub mod access_policy;
 // projection, and the bounded batching/retry worker behind `AuditSink`. Request
 // middleware, argument extraction, and the read API are separate issues.
 pub mod audit;
+// The `fkst-audit-relay` deployable (issue #5678): a separate PROCESS in the
+// same crate. It owns the internal relay protocol, the SQLite-WAL outbox, the
+// PostHog capture/verification state machine, and the scoped relay read. It
+// shares the audit CONTRACTS above and nothing else — it never constructs
+// `AppState` and never builds the control plane's router.
+pub mod audit_relay;
 // The chat concierge (milestone `fkst-chat-interface`): the conversational surface
 // users drive fkst-hosted through. Config + LLM client here; it acts strictly as a
 // client of the public API with the calling user's own token.

@@ -53,6 +53,9 @@ pub mod lifecycle_validate;
 pub mod metrics;
 pub mod posthog;
 pub mod projection;
+/// The control plane's half of the durable audit relay (issue #5678): delivery
+/// mode, client, telemetry, and the policy the outer middleware applies.
+pub mod relay;
 pub mod request;
 pub mod sink;
 pub mod validate;
@@ -103,6 +106,16 @@ pub struct AuditHandle {
     sink: Arc<dyn AuditSink>,
     metrics: AuditMetrics,
     runtime: RuntimeTelemetry,
+    /// The durable path for lifecycle transitions (issue #5678). `None` keeps
+    /// the sink as the only destination, which is what a deployment without a
+    /// relay has always done.
+    lifecycle_relay: Option<relay::LifecycleRelayQueue>,
+    /// Bounded telemetry for the relay conversation (issue #5678). It rides this
+    /// handle for the same reason the runtime series do: its sole readers are
+    /// `/metrics` and the middleware, both of which already hold the handle, and
+    /// a separate application-state field would add one more thing to thread
+    /// through every construction site to describe one thing.
+    relay_metrics: relay::RelayClientMetrics,
 }
 
 impl AuditHandle {
@@ -112,7 +125,29 @@ impl AuditHandle {
             sink,
             metrics,
             runtime: RuntimeTelemetry::new(),
+            lifecycle_relay: None,
+            relay_metrics: relay::RelayClientMetrics::new(),
         }
+    }
+
+    /// Route lifecycle transitions through the durable relay.
+    ///
+    /// Only lifecycle events take this path: a request's terminal record is
+    /// committed synchronously by the outer middleware, which can await. The
+    /// reconciler cannot — it produces effects on a non-async boundary — so its
+    /// transitions go through a bounded queue whose drop behaviour is safe
+    /// precisely because their event ids are deterministic and level-triggered
+    /// (see [`relay::LifecycleRelayQueue`]).
+    pub fn with_lifecycle_relay(mut self, queue: relay::LifecycleRelayQueue) -> Self {
+        self.lifecycle_relay = Some(queue);
+        self
+    }
+
+    /// Whether lifecycle transitions take the durable relay path. The startup
+    /// wiring in [`relay::bootstrap`] and its tests are the only readers; it
+    /// exists so neither has to reach into a private field to answer it.
+    pub fn lifecycle_relay_attached(&self) -> bool {
+        self.lifecycle_relay.is_some()
     }
 
     /// The no-op handle: no worker, no network, no per-event allocation.
@@ -188,6 +223,23 @@ impl AuditHandle {
     pub fn submit_lifecycle(&self, event: SandboxLifecycleV1) -> Result<(), SubmitError> {
         let backend = event.backend;
         let action = event.action;
+        // The durable path wins when one is configured. A full queue falls back
+        // to the sink rather than dropping outright: two destinations for one
+        // deterministic event id deduplicate, whereas a hole does not heal.
+        if let Some(queue) = &self.lifecycle_relay {
+            if queue.submit(&event) {
+                self.runtime
+                    .record_lifecycle(backend, action, LifecycleEmitResult::Emitted);
+                self.metrics
+                    .record_enqueued(metrics::EnqueueResult::Accepted);
+                return Ok(());
+            }
+            tracing::warn!(
+                backend = backend.as_str(),
+                lifecycle_action = action.as_str(),
+                "audit relay lifecycle queue is full; falling back to the local sink"
+            );
+        }
         match self.sink.submit_lifecycle(event) {
             Ok(()) => {
                 self.runtime
@@ -225,6 +277,16 @@ impl AuditHandle {
         result: crate::runtime_identity::IdentityOperationResult,
     ) {
         self.runtime.record_identity(backend, result);
+    }
+
+    /// The bounded relay-conversation telemetry handle.
+    pub fn relay_metrics(&self) -> relay::RelayClientMetrics {
+        self.relay_metrics.clone()
+    }
+
+    /// The bounded relay-conversation projection for `/metrics`.
+    pub fn relay_snapshot(&self) -> relay::RelayClientMetricsSnapshot {
+        self.relay_metrics.snapshot()
     }
 
     /// The bounded runtime attribution/lifecycle projection for `/metrics`.

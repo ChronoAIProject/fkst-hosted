@@ -12,6 +12,9 @@
 //! rather than silently absent.
 
 use crate::audit::lifecycle::LifecycleAction;
+use crate::audit::relay::{
+    RelayCallResult, RelayClientMetricsSnapshot, RelayPhase, RequiredRejection,
+};
 use crate::audit::AuditMetricsSnapshot;
 use crate::operations::{ActivityMetricsSnapshot, SandboxMetricsSnapshot};
 use crate::runtime_identity::metrics::{
@@ -284,6 +287,58 @@ pub(super) fn render_sandbox_metrics(sandbox: &SandboxMetricsSnapshot) -> String
     for (reason, count) in sandbox.rejections() {
         body.push_str(&format!(
             "fkst_operations_sandbox_scope_rejections_total{{reason=\"{reason}\"}} {count}\n"
+        ));
+    }
+    body
+}
+
+/// Render the durable-relay conversation series (issue #5678).
+///
+/// Three families, every label a closed Rust enum: the per-phase call counter,
+/// its duration sum, and the emergency `required`-mode rejection counter. The
+/// last one is the series that matters most in an incident — it counts requests
+/// the deployment refused because it could not promise to record them, and
+/// requests whose outcome could not be confirmed durable. Neither can itself be
+/// recorded as an audit event, which is exactly why they need a metric.
+/// Request, actor, session, and event ids never appear (epic `OPS-04`).
+pub(super) fn render_relay_metrics(relay: &RelayClientMetricsSnapshot) -> String {
+    let mut body = String::from(
+        "# HELP fkst_audit_relay_requests_total Durable-relay calls by bounded phase and result.\n\
+         # TYPE fkst_audit_relay_requests_total counter\n",
+    );
+    for phase in RelayPhase::ALL {
+        for result in RelayCallResult::ALL {
+            body.push_str(&format!(
+                "fkst_audit_relay_requests_total{{phase=\"{}\",result=\"{}\"}} {}\n",
+                phase.as_str(),
+                result.as_str(),
+                relay.calls(phase, result)
+            ));
+        }
+    }
+    body.push_str(
+        "# HELP fkst_audit_relay_request_duration_seconds Total durable-relay call time by bounded phase and result.\n\
+         # TYPE fkst_audit_relay_request_duration_seconds counter\n",
+    );
+    for phase in RelayPhase::ALL {
+        for result in RelayCallResult::ALL {
+            body.push_str(&format!(
+                "fkst_audit_relay_request_duration_seconds{{phase=\"{}\",result=\"{}\"}} {:.3}\n",
+                phase.as_str(),
+                result.as_str(),
+                relay.duration_seconds(phase, result)
+            ));
+        }
+    }
+    body.push_str(
+        "# HELP fkst_audit_required_rejections_total Requests refused or unconfirmed under required delivery, by bounded reason.\n\
+         # TYPE fkst_audit_required_rejections_total counter\n",
+    );
+    for reason in RequiredRejection::ALL {
+        body.push_str(&format!(
+            "fkst_audit_required_rejections_total{{reason=\"{}\"}} {}\n",
+            reason.as_str(),
+            relay.rejections(reason)
         ));
     }
     body

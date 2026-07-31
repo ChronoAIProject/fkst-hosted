@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::audit::lifecycle::LifecycleAction;
+use crate::audit::relay::RelayClientMetricsSnapshot;
 use crate::operations::{ActivityMetricsSnapshot, SandboxMetricsSnapshot};
 use crate::runtime_identity::metrics::{IdentityOperationResult, LifecycleEmitResult};
 use crate::runtime_identity::RuntimeBackendKind;
@@ -19,15 +20,16 @@ fn renders_liveness_and_bounded_recovery_metrics() {
         std::time::Duration::from_millis(250),
         3,
     );
-    let body = render_metrics(
-        &monitor.snapshot(),
-        &AuditMetricsSnapshot::default(),
-        &SessionAccessRegistry::new(false).snapshot(),
-        &ScopeMetrics::new().snapshot(),
-        &RuntimeTelemetrySnapshot::default(),
-        &ActivityMetricsSnapshot::default(),
-        &SandboxMetricsSnapshot::default(),
-    );
+    let body = render_metrics(MetricsSources {
+        recovery: &monitor.snapshot(),
+        audit: &AuditMetricsSnapshot::default(),
+        registry: &SessionAccessRegistry::new(false).snapshot(),
+        scope: &ScopeMetrics::new().snapshot(),
+        runtime: &RuntimeTelemetrySnapshot::default(),
+        activity: &ActivityMetricsSnapshot::default(),
+        sandbox: &SandboxMetricsSnapshot::default(),
+        relay: &RelayClientMetricsSnapshot::default(),
+    });
     assert!(body.contains("# TYPE fkst_up gauge"));
     assert!(body.contains("\nfkst_up 1\n") || body.starts_with("fkst_up 1\n"));
     assert!(body.contains("fkst_startup_resync_attempts_total{result=\"partial\"} 1"));
@@ -52,15 +54,16 @@ fn renders_leader_identity_transitions_and_failure_metrics() {
         2,
     );
     monitor.record_leader_routing(true);
-    let body = render_metrics(
-        &monitor.snapshot(),
-        &AuditMetricsSnapshot::default(),
-        &SessionAccessRegistry::new(false).snapshot(),
-        &ScopeMetrics::new().snapshot(),
-        &RuntimeTelemetrySnapshot::default(),
-        &ActivityMetricsSnapshot::default(),
-        &SandboxMetricsSnapshot::default(),
-    );
+    let body = render_metrics(MetricsSources {
+        recovery: &monitor.snapshot(),
+        audit: &AuditMetricsSnapshot::default(),
+        registry: &SessionAccessRegistry::new(false).snapshot(),
+        scope: &ScopeMetrics::new().snapshot(),
+        runtime: &RuntimeTelemetrySnapshot::default(),
+        activity: &ActivityMetricsSnapshot::default(),
+        sandbox: &SandboxMetricsSnapshot::default(),
+        relay: &RelayClientMetricsSnapshot::default(),
+    });
     assert!(body.contains("fkst_leader 1"));
     assert!(body.contains("fkst_leader_ready 1"));
     assert!(body.contains("fkst_leader_state{state=\"ready\"} 1"));
@@ -89,15 +92,16 @@ fn renders_every_audit_series_with_closed_enum_labels() {
     metrics.set_shutdown_remaining(3);
     metrics.record_context_conflicts(5);
 
-    let body = render_metrics(
-        &crate::recovery::RecoveryMonitor::new(false).snapshot(),
-        &metrics.snapshot(),
-        &SessionAccessRegistry::new(false).snapshot(),
-        &ScopeMetrics::new().snapshot(),
-        &RuntimeTelemetrySnapshot::default(),
-        &ActivityMetricsSnapshot::default(),
-        &SandboxMetricsSnapshot::default(),
-    );
+    let body = render_metrics(MetricsSources {
+        recovery: &crate::recovery::RecoveryMonitor::new(false).snapshot(),
+        audit: &metrics.snapshot(),
+        registry: &SessionAccessRegistry::new(false).snapshot(),
+        scope: &ScopeMetrics::new().snapshot(),
+        runtime: &RuntimeTelemetrySnapshot::default(),
+        activity: &ActivityMetricsSnapshot::default(),
+        sandbox: &SandboxMetricsSnapshot::default(),
+        relay: &RelayClientMetricsSnapshot::default(),
+    });
     assert!(body.contains("fkst_audit_queue_depth 4"), "{body}");
     assert!(body.contains("fkst_audit_events_enqueued_total{result=\"accepted\"} 1"));
     assert!(body.contains("fkst_audit_events_enqueued_total{result=\"full\"} 1"));
@@ -147,15 +151,16 @@ fn renders_the_runtime_attribution_and_lifecycle_series() {
         LifecycleEmitResult::Dropped,
     );
 
-    let body = render_metrics(
-        &crate::recovery::RecoveryMonitor::new(false).snapshot(),
-        &AuditMetricsSnapshot::default(),
-        &SessionAccessRegistry::new(false).snapshot(),
-        &ScopeMetrics::new().snapshot(),
-        &telemetry.snapshot(),
-        &ActivityMetricsSnapshot::default(),
-        &SandboxMetricsSnapshot::default(),
-    );
+    let body = render_metrics(MetricsSources {
+        recovery: &crate::recovery::RecoveryMonitor::new(false).snapshot(),
+        audit: &AuditMetricsSnapshot::default(),
+        registry: &SessionAccessRegistry::new(false).snapshot(),
+        scope: &ScopeMetrics::new().snapshot(),
+        runtime: &telemetry.snapshot(),
+        activity: &ActivityMetricsSnapshot::default(),
+        sandbox: &SandboxMetricsSnapshot::default(),
+        relay: &RelayClientMetricsSnapshot::default(),
+    });
     assert!(body.contains(
         "fkst_runtime_identity_operations_total{backend=\"kubernetes\",result=\"backfilled\"} 1"
     ), "{body}");
@@ -207,15 +212,16 @@ fn renders_the_session_access_projection_and_scope_series() {
     scope.record(ScopeOutcome::AllForbidden);
 
     // Mid-generation: recovering, nothing published.
-    let body = render_metrics(
-        &crate::recovery::RecoveryMonitor::new(false).snapshot(),
-        &AuditMetricsSnapshot::default(),
-        &registry.snapshot(),
-        &scope.snapshot(),
-        &RuntimeTelemetrySnapshot::default(),
-        &ActivityMetricsSnapshot::default(),
-        &SandboxMetricsSnapshot::default(),
-    );
+    let body = render_metrics(MetricsSources {
+        recovery: &crate::recovery::RecoveryMonitor::new(false).snapshot(),
+        audit: &AuditMetricsSnapshot::default(),
+        registry: &registry.snapshot(),
+        scope: &scope.snapshot(),
+        runtime: &RuntimeTelemetrySnapshot::default(),
+        activity: &ActivityMetricsSnapshot::default(),
+        sandbox: &SandboxMetricsSnapshot::default(),
+        relay: &RelayClientMetricsSnapshot::default(),
+    });
     assert!(
         body.contains("fkst_session_access_registry_sessions 0"),
         "{body}"
@@ -256,15 +262,16 @@ fn renders_the_session_access_projection_and_scope_series() {
             },
         )],
     );
-    let body = render_metrics(
-        &crate::recovery::RecoveryMonitor::new(false).snapshot(),
-        &AuditMetricsSnapshot::default(),
-        &registry.snapshot(),
-        &scope.snapshot(),
-        &RuntimeTelemetrySnapshot::default(),
-        &ActivityMetricsSnapshot::default(),
-        &SandboxMetricsSnapshot::default(),
-    );
+    let body = render_metrics(MetricsSources {
+        recovery: &crate::recovery::RecoveryMonitor::new(false).snapshot(),
+        audit: &AuditMetricsSnapshot::default(),
+        registry: &registry.snapshot(),
+        scope: &scope.snapshot(),
+        runtime: &RuntimeTelemetrySnapshot::default(),
+        activity: &ActivityMetricsSnapshot::default(),
+        sandbox: &SandboxMetricsSnapshot::default(),
+        relay: &RelayClientMetricsSnapshot::default(),
+    });
     assert!(
         body.contains("fkst_session_access_registry_sessions 1"),
         "{body}"

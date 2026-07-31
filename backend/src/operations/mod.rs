@@ -44,6 +44,9 @@ pub mod merge;
 pub mod metrics;
 pub mod posthog;
 pub mod record;
+/// The durable relay's implementation of the source boundary (issue #5678):
+/// scoped SQL behind an internal HTTP call, carrying the SAME typed constraint.
+pub mod relay;
 pub mod rows;
 /// The row-authorized live sandbox inventory (issue #5675). Independent of the
 /// activity query by design: a PostHog outage must never hide live runtime state,
@@ -85,8 +88,12 @@ pub struct OperationsState {
     /// no read credentials, which is what the endpoint's stable
     /// `503 audit_query_not_configured` is derived from.
     pub posthog: Option<Arc<dyn ActivitySource>>,
-    /// The durable audit relay (issue #5678). `None` today; the merge contract
-    /// and its partial-page semantics are already implemented against this slot.
+    /// The durable audit relay (issue #5678), populated by the startup wiring
+    /// whenever the relay's READ half is configured — independently of the
+    /// delivery mode, since a `best_effort` deployment still benefits from
+    /// seeing its not-yet-verified, incomplete, and dead-letter rows. `None`
+    /// leaves PostHog as the only source and the merge's partial-page semantics
+    /// carry that fact to the caller.
     pub relay: Option<Arc<dyn ActivitySource>>,
     /// Bounded global + per-principal query admission.
     pub concurrency: ActivityConcurrency,

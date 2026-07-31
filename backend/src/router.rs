@@ -218,6 +218,15 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
     // contract. A missing/duplicate operation id — or a documented operation with
     // no explicit audit policy — fails the build rather than producing an audit
     // trail with a silent hole in it.
+    // The delivery policy is resolved from configuration HERE rather than carried
+    // on the application state, because the middleware is the only consumer and
+    // its telemetry already rides `state.audit`. A `required` deployment whose
+    // relay coordinates are missing fails the build — silently degrading to
+    // best-effort would make the deployment's central durability claim false.
+    let delivery = crate::audit::relay::AuditDelivery::from_config(
+        &state.config.audit_delivery,
+        state.audit.relay_metrics(),
+    )?;
     let audit = AuditMiddleware::new(
         Arc::new(OperationCatalog::from_openapi(&spec).map_err(|error| {
             AppError::Config(format!("audit operation catalog is invalid: {error}"))
@@ -227,7 +236,8 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
             version: state.config.audit.service_version.clone(),
             environment: state.config.audit.environment.clone(),
         },
-    );
+    )
+    .with_delivery(delivery);
 
     let router = router
         .merge(openapi::spec_route(spec)?)

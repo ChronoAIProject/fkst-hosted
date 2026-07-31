@@ -86,6 +86,13 @@ pub mod codes {
     /// `error` field, so the client-visible code and the recorded one are the
     /// same string.
     pub const INSTALL_VALIDATION_FAILED: &str = "install_validation_failed";
+    /// `required` delivery mode could not durably register the request start, so
+    /// the product handler was never invoked and nothing happened.
+    pub const AUDIT_INGRESS_UNAVAILABLE: &str = "audit_ingress_unavailable";
+    /// The product handler RAN, but its terminal event could not be confirmed
+    /// durable. The side effect may have happened; the deployment refuses to
+    /// claim the returned status was recorded.
+    pub const AUDIT_COMPLETION_UNCONFIRMED: &str = "audit_completion_unconfirmed";
 
     /// The code for a hand-built browser (HTML) response of `status`.
     ///

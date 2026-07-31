@@ -469,6 +469,11 @@ pub struct Config {
     /// blast radii and the ingestion token may never stand in for the read key.
     /// See [`crate::operations::config`].
     pub activity_query: ActivityQueryConfig,
+    /// Audit DELIVERY config (`FKST_AUDIT_DELIVERY_MODE`, `FKST_AUDIT_RELAY_*`,
+    /// `FKST_AUDIT_INCOMPLETE_GRACE_SECS`). Always present; the default mode is
+    /// `disabled`, which preserves the pre-relay behaviour exactly. See
+    /// [`crate::audit::relay::config`].
+    pub audit_delivery: crate::audit::relay::AuditDeliveryConfig,
     /// Live sandbox inventory config (`FKST_OPERATIONS_SANDBOX_*`). Always
     /// present; whether a deployment can answer depends on the runtime backend,
     /// not on this block. See [`crate::operations::sandbox::config`].
@@ -498,6 +503,7 @@ impl Default for Config {
             chat: None,
             audit: AuditConfig::default(),
             activity_query: ActivityQueryConfig::default(),
+            audit_delivery: crate::audit::relay::AuditDeliveryConfig::default(),
             sandbox: SandboxInventoryConfig::default(),
         }
     }
@@ -754,6 +760,10 @@ impl Config {
         // at the moment an operator flips it on. Shares the same `vars` snapshot.
         let audit = AuditConfig::from_vars(&vars)?;
         let activity_query = ActivityQueryConfig::from_vars(&vars)?;
+        // Audit DELIVERY (FKST_AUDIT_*). Fails closed when a mode that promises
+        // durability has no relay to talk to: a `required` deployment that
+        // silently degraded to best-effort would make its central claim false.
+        let audit_delivery = crate::audit::relay::AuditDeliveryConfig::from_vars(&vars)?;
         // Live-inventory ceilings + route budget. Validated unconditionally for
         // the same reason: a zero ceiling would silently take the operations
         // sandbox view down at the first request, not at deploy time.
@@ -763,6 +773,16 @@ impl Config {
         // bare request timeout the caller cannot interpret. That ceiling is the
         // `/api/v1` subtree's, not the top-level one — see `api_subtree_timeout`.
         sandbox.warn_unless_below(crate::router::api_subtree_timeout(&env));
+        // The incomplete grace must OUTLAST the longest audited request, or the
+        // relay force-closes a request that is still running. The widest ceiling
+        // is whichever is larger: the `/api/v1` subtree's budget (which bounds
+        // every audited route) or the top-level request timeout (which bounds the
+        // handful of routes outside that nest). Fail-closed rather than a warning
+        // — the failure mode is a fabricated terminal state, not slow reads.
+        audit_delivery.ensure_grace_covers(std::cmp::max(
+            crate::router::api_subtree_timeout(&env),
+            std::time::Duration::from_secs(http.request_timeout_secs),
+        ))?;
 
         // Deployment-wide access policy (FKST_ACCESS_ALLOWED_USERS +
         // FKST_ACCESS_BLOCKED_USERS + FKST_GLOBAL_ADMINS + FKST_AUTH_MODEL).
@@ -795,6 +815,7 @@ impl Config {
             chat,
             audit,
             activity_query,
+            audit_delivery,
             sandbox,
         })
     }

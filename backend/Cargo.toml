@@ -7,6 +7,18 @@ edition = "2021"
 # change resolution.
 resolver = "2"
 
+# Two deployables, one crate (the backend is deliberately not a workspace). The
+# control plane and the durable audit relay are separate PROCESSES with separate
+# module trees; declaring both targets explicitly keeps `cargo build --bins`
+# honest about what ships.
+[[bin]]
+name = "fkst-control-plane"
+path = "src/main.rs"
+
+[[bin]]
+name = "fkst-audit-relay"
+path = "src/bin/audit_relay.rs"
+
 [dependencies]
 async-trait = "0.1"
 axum = "0.7"
@@ -101,6 +113,17 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 # `flate2` was already present transitively).
 tar = { version = "0.4", default-features = false }
 flate2 = "1"
+# The durable audit relay's outbox (issue #5678). SQLite is the spec-mandated
+# store: one writer, WAL, `synchronous=FULL`, on the relay's own PVC. `bundled`
+# compiles SQLite from source so the deployable needs no system libsqlite3 and
+# the pinned version is a property of the build rather than of the base image.
+# Linked into the single crate; only the `fkst-audit-relay` binary opens a
+# database.
+rusqlite = { version = "0.32", features = ["bundled"] }
+# Constant-time byte comparison for the relay's write/read bearer tokens. Already
+# in the tree via aes-gcm; named explicitly because a hand-rolled comparison is
+# exactly the kind of primitive that must not be reinvented.
+subtle = "2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }

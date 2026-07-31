@@ -1,4 +1,13 @@
-//! Decoding one PostHog result row into a source-neutral [`ActivityRecord`].
+//! Decoding one source row into a source-neutral [`ActivityRecord`].
+//!
+//! Two sources, ONE decoder. PostHog answers with a `(columns, results)`
+//! envelope; the durable relay answers with the stored wire body. They are
+//! adapted to the same [`RowCells`] view ([`RowView`] and
+//! [`json::JsonRowView`]) so the typed row contract — which fields are required,
+//! which coercions are allowed, which rows are rejected — is written once. A
+//! second decoder would be a second definition of what an activity row IS, and
+//! the first time they diverged the difference would surface as a subtly
+//! different timeline rather than as a failing build.
 //!
 //! Three rules, each of which exists because the alternative silently corrupts
 //! the timeline:
@@ -44,24 +53,21 @@ pub enum RowError {
     UnknownEvent,
 }
 
-/// A name-addressed view over one result row.
-pub struct RowView<'a> {
-    columns: &'a HashMap<String, usize>,
-    values: &'a [Value],
+/// A name-addressed view over one row, whatever its source's wire shape.
+///
+/// The one method every source must provide. `None` means "absent or null" —
+/// the two are deliberately identical here, because a source that renders a
+/// missing property as JSON null and one that omits it entirely are describing
+/// the same fact.
+pub trait RowCells {
+    fn cell(&self, column: &str) -> Option<&Value>;
 }
 
-impl<'a> RowView<'a> {
-    /// Bind a row to its column index.
-    pub fn new(columns: &'a HashMap<String, usize>, values: &'a [Value]) -> Self {
-        Self { columns, values }
-    }
-
-    /// The raw cell, or `None` when the column is absent or the row is short.
-    fn cell(&self, column: &str) -> Option<&'a Value> {
-        let index = *self.columns.get(column)?;
-        self.values.get(index).filter(|value| !value.is_null())
-    }
-
+/// The typed accessors every decoder uses, derived from [`RowCells`] alone.
+///
+/// Blanket-implemented, so adding a source means implementing ONE method and
+/// inheriting the whole contract — including the rejections.
+pub trait RowFields: RowCells {
     fn string(&self, column: &str) -> Option<String> {
         match self.cell(column)? {
             Value::String(text) => Some(text.clone()),
@@ -152,6 +158,29 @@ impl<'a> RowView<'a> {
     }
 }
 
+impl<T: RowCells + ?Sized> RowFields for T {}
+
+/// A view over one PostHog result row, addressed by column NAME so a source that
+/// reorders or adds a column cannot re-map every field onto the wrong one.
+pub struct RowView<'a> {
+    columns: &'a HashMap<String, usize>,
+    values: &'a [Value],
+}
+
+impl<'a> RowView<'a> {
+    /// Bind a row to its column index.
+    pub fn new(columns: &'a HashMap<String, usize>, values: &'a [Value]) -> Self {
+        Self { columns, values }
+    }
+}
+
+impl RowCells for RowView<'_> {
+    fn cell(&self, column: &str) -> Option<&Value> {
+        let index = *self.columns.get(column)?;
+        self.values.get(index).filter(|value| !value.is_null())
+    }
+}
+
 /// Accept both the millisecond RFC3339 form the audit contract writes and the
 /// `YYYY-MM-DD HH:MM:SS(.fff)` form ClickHouse renders a `DateTime64` in.
 fn parse_timestamp(text: &str) -> Option<DateTime<Utc>> {
@@ -175,7 +204,7 @@ fn parse_timestamp(text: &str) -> Option<DateTime<Utc>> {
 /// `delivery_state` is supplied by the adapter: a row read back OUT of PostHog is
 /// by definition query-visible, while a relay row carries its own outbox state.
 pub fn decode(
-    row: &RowView<'_>,
+    row: &dyn RowCells,
     source: ActivitySourceKind,
     delivery_state: DeliveryState,
 ) -> Result<ActivityRecord, RowError> {
@@ -206,7 +235,7 @@ pub fn decode(
 }
 
 fn decode_api_request(
-    row: &RowView<'_>,
+    row: &dyn RowCells,
     _source: ActivitySourceKind,
     _delivery_state: DeliveryState,
 ) -> Result<ApiRequestRecord, RowError> {
@@ -237,7 +266,7 @@ fn decode_api_request(
     })
 }
 
-fn decode_lifecycle(row: &RowView<'_>) -> Result<SandboxLifecycleRecord, RowError> {
+fn decode_lifecycle(row: &dyn RowCells) -> Result<SandboxLifecycleRecord, RowError> {
     let occurred_at = row
         .timestamp("occurred_at")
         .map(Ok)
@@ -269,6 +298,10 @@ pub fn column_index(columns: &[String]) -> HashMap<String, usize> {
         .map(|(index, name)| (name.clone(), index))
         .collect()
 }
+
+/// The relay's row adapter: the stored wire body, presented through the same
+/// [`RowCells`] view as a PostHog result row.
+pub mod json;
 
 #[cfg(test)]
 #[path = "rows_tests.rs"]

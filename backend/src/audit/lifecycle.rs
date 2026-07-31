@@ -124,6 +124,14 @@ impl LifecycleAction {
         }
     }
 
+    /// Parse the stable wire string back; `None` for anything else. Used by the
+    /// durable relay when it re-validates a submitted lifecycle event.
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|action| action.as_str() == value)
+    }
+
     /// Dense index for the fixed-size metric counter arrays.
     pub(crate) fn index(self) -> usize {
         match self {
@@ -169,6 +177,26 @@ pub enum LifecycleReason {
 }
 
 impl LifecycleReason {
+    /// Every variant, so the relay's parser and any exhaustive renderer share
+    /// one list.
+    pub const ALL: [LifecycleReason; 8] = [
+        LifecycleReason::Idle,
+        LifecycleReason::ConfigChanged,
+        LifecycleReason::TriggerClosed,
+        LifecycleReason::TerminalCleanup,
+        LifecycleReason::RuntimeNotFound,
+        LifecycleReason::BackendUnavailable,
+        LifecycleReason::InvalidMetadata,
+        LifecycleReason::AttributionConflict,
+    ];
+
+    /// Parse the stable wire string back; `None` for anything else.
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|reason| reason.as_str() == value)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             LifecycleReason::Idle => "idle",

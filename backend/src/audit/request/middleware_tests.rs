@@ -210,3 +210,13 @@ async fn a_cors_preflight_is_excluded() {
     let _response = call(&router, request).await;
     assert!(sink.is_empty(), "preflights must never be recorded");
 }
+
+// ---------------------------------------------------------------------------
+// Required delivery mode (issue #5678)
+// ---------------------------------------------------------------------------
+// The `required` delivery-mode matrix lives in its own file: it is a second,
+// self-contained set of fixtures, and one file holding both crossed the
+// repository's size limit.
+
+#[path = "middleware_required_tests.rs"]
+mod required_delivery;
