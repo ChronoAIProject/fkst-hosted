@@ -206,6 +206,45 @@ export interface RouteOptions {
    *  Staleness is measured against the backend's own `observed_at`, so it is
    *  the only thing a fixture has to move. */
   runtimeObservedSecondsAgo?: number;
+  /** Pad every authorized answer out to this many rows, by cloning the viewer's
+   *  own records under fresh ids. Used by the capacity check: a page that stays
+   *  interactive with one row proves nothing about one with a thousand. */
+  padAuthorizedRowsTo?: number;
+  /** Replace the free-text-ish fields with worst-case long strings. The row
+   *  contents are still the viewer's own; only their LENGTH changes, so the
+   *  layout claim is tested without weakening the authorization claim. */
+  longStrings?: boolean;
+}
+
+/** A worst-case value: long, unbroken, and with no space to wrap at. */
+const LONG = `${'z'.repeat(180)}-${'\u4f60\u597d'.repeat(40)}`;
+
+/** Clone `rows` until there are `target` of them, giving each a unique id. */
+function pad<T extends { event_id?: string; runtime_id?: string }>(rows: T[], target?: number): T[] {
+  if (!target || rows.length === 0 || rows.length >= target) return rows;
+  const out: T[] = [];
+  for (let index = 0; index < target; index += 1) {
+    const source = rows[index % rows.length];
+    const clone = { ...source } as T;
+    if (clone.event_id) clone.event_id = `${source.event_id}-${index}`;
+    if (clone.runtime_id) clone.runtime_id = `${source.runtime_id}-${index}`;
+    out.push(clone);
+  }
+  return out;
+}
+
+/** Stretch the bounded display fields of a row to their worst case. */
+function stretch(row: Record<string, unknown>): Record<string, unknown> {
+  const stretched: Record<string, unknown> = { ...row };
+  if ('route_template' in stretched) stretched.route_template = `/api/v1/${LONG}`;
+  if ('operation_id' in stretched) stretched.operation_id = LONG;
+  if ('arguments' in stretched) stretched.arguments = { owner: LONG, name: LONG };
+  if ('status_message' in stretched) stretched.status_message = LONG;
+  if ('status_reason' in stretched) stretched.status_reason = LONG;
+  if ('repo_full_name' in stretched && stretched.repo_full_name) {
+    stretched.repo_full_name = `${LONG}/${LONG}`;
+  }
+  return stretched;
 }
 
 function json(route: Route, body: unknown, status = 200) {
@@ -260,13 +299,18 @@ export async function installOperationsRoutes(page: Page, opts: RouteOptions) {
             return row.actor.id === viewer.id;
           });
 
+      const activityItems = pad(
+        opts.longStrings ? items.map((row) => stretch(row)) : items,
+        opts.padAuthorizedRowsTo
+      );
+
       return json(route, {
         queried_at: iso('2026-08-01T10:00:05Z'),
         from: iso('2026-07-31T10:00:00Z'),
         to: iso('2026-08-01T10:00:05Z'),
         effective_scope: scope === 'all' ? 'all' : 'mine',
         can_view_all: viewer.globalAdmin,
-        items,
+        items: activityItems,
         source_status: opts.activityPartial
           ? {
               posthog: 'unavailable',
@@ -307,6 +351,11 @@ export async function installOperationsRoutes(page: Page, opts: RouteOptions) {
             return item.session_id !== null && viewer.sessions.includes(item.session_id);
           }).filter((item) => !sessionFilter || item.session_id === sessionFilter);
 
+      const sandboxItems = pad(
+        opts.longStrings ? items.map((row) => stretch(row)) : items,
+        opts.padAuthorizedRowsTo
+      );
+
       return json(route, {
         observed_at: new Date(
           Date.now() - (opts.runtimeObservedSecondsAgo ?? 0) * 1000
@@ -314,9 +363,9 @@ export async function installOperationsRoutes(page: Page, opts: RouteOptions) {
         backend: 'kubernetes',
         effective_scope: scope === 'all' ? 'all' : 'accessible',
         can_view_all: viewer.globalAdmin,
-        item_count: items.length,
+        item_count: sandboxItems.length,
         filters_applied: {},
-        items,
+        items: sandboxItems,
         warning_codes: [],
       });
     }

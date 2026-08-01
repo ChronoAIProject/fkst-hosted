@@ -6,6 +6,10 @@
 //! actual socket and an actual restart. The tokens are obvious canaries so a
 //! leak into a response or the database file is trivially detectable.
 
+// Shared by several acceptance suites, each of which drives a different subset
+// of the surface below.
+#![allow(dead_code)]
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -38,6 +42,11 @@ pub struct Relay {
     /// Kept so the temporary directory outlives the relay.
     dir: Arc<TempDir>,
     db_path: PathBuf,
+    /// A second handle on the SAME database, so a test can drive the relay's own
+    /// maintenance sweep without going through the HTTP surface (the sweep has
+    /// no endpoint — it is a timer inside the process).
+    db: Database,
+    config: Arc<RelayConfig>,
     base_url: String,
     http: reqwest::Client,
     /// Fires the server's graceful shutdown. Taken by [`Relay::restart`].
@@ -88,11 +97,9 @@ impl Relay {
             },
         )
         .expect("the relay database opens");
-        let state = RelayState::new(
-            database,
-            Arc::new(config(db_path.clone())),
-            RelayMetrics::new(),
-        );
+        let settings = Arc::new(config(db_path.clone()));
+        let db = database.clone();
+        let state = RelayState::new(database, settings.clone(), RelayMetrics::new());
         let router = build_router(state);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -109,11 +116,52 @@ impl Relay {
         Self {
             dir,
             db_path,
+            db,
+            config: settings,
             base_url: format!("http://{addr}"),
             http: reqwest::Client::new(),
             shutdown: Some(shutdown),
             server,
         }
+    }
+
+    /// Run the relay's own maintenance sweep once, as its timer would.
+    ///
+    /// With no PostHog configured the sweep reduces to exactly one behaviour:
+    /// closing starts whose completion deadline plus grace has passed. That is
+    /// the only way an abandoned request becomes an `incomplete` terminal, and
+    /// it has no HTTP surface to drive it from.
+    pub async fn sweep(&self, now: DateTime<Utc>) {
+        let state = RelayState::new(self.db.clone(), self.config.clone(), RelayMetrics::new());
+        fkst_control_plane::audit_relay::RelayWorker::new(&state)
+            .expect("the worker builds")
+            .sweep(now)
+            .await;
+    }
+
+    /// Every record in a window wide enough to hold a synthesized terminal,
+    /// whose instant is `now` rather than the fixture anchor.
+    pub async fn read_all_recent(&self) -> Vec<RecordRowV1> {
+        self.client()
+            .read_records(
+                &RecordsQueryV1 {
+                    scope: "all".to_string(),
+                    record_kind: "api_request".to_string(),
+                    from: format_instant(anchor() - Duration::days(7)),
+                    to: format_instant(Utc::now() + Duration::days(7)),
+                    limit: 100,
+                    ..RecordsQueryV1::default()
+                },
+                std::time::Duration::from_secs(5),
+            )
+            .await
+            .expect("the relay answers")
+            .rows
+    }
+
+    /// The loopback base URL this relay is listening on.
+    pub fn base_url(&self) -> &str {
+        &self.base_url
     }
 
     /// A control-plane client for this relay. Each call models one replica.

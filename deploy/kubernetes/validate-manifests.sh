@@ -125,6 +125,11 @@ render "$script_dir/base" >"$base_first"
 render "$script_dir/base" >"$base_second"
 cmp "$base_first" "$base_second" >/dev/null
 ruby "$script_dir/validate-monitoring.rb" "$monitoring_first" "$base_first" "$first"
+# Every alert is additionally EXECUTED against synthetic metric fixtures, so a
+# rule that can no longer fire (or one that fires on a healthy fixture) fails
+# here rather than in an incident.
+ruby "$script_dir/validate-alert-rules.rb" "$monitoring_first" \
+  "$script_dir/monitoring/alert-fixtures.yaml"
 
 # The audit relay and the composed required-delivery shape. The relay render is
 # checked twice for determinism like the others, and the composed overlay is put
@@ -156,6 +161,7 @@ sh -n "$script_dir/tests/audit-relay-verify-test.sh"
 ruby -c "$script_dir/render-recovery-evidence.rb" >/dev/null
 ruby -c "$script_dir/validate-monitoring.rb" >/dev/null
 ruby -c "$script_dir/validate-audit-relay.rb" >/dev/null
+ruby -c "$script_dir/validate-alert-rules.rb" >/dev/null
 if command -v shellcheck >/dev/null 2>&1; then
   shellcheck "$script_dir/migrate-environment-store.sh" \
     "$script_dir/restore-namespace.sh" \
