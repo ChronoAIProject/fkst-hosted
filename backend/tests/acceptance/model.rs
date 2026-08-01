@@ -30,6 +30,14 @@ pub struct Requirement {
     pub id: String,
     pub area: String,
     pub summary: String,
+    /// The component that answers for this requirement when its evidence breaks.
+    ///
+    /// A COMPONENT rather than a person on purpose: a personal name in a
+    /// checked-in file goes stale the moment somebody changes team, and the
+    /// question an on-call reviewer actually has is "whose code is this", which
+    /// the component answers durably. The vocabulary is closed ([`OWNERS`]) so
+    /// the field cannot decay into free text.
+    pub owner: String,
 }
 
 /// One named automated test claimed as evidence for one requirement.
@@ -52,6 +60,21 @@ pub const TIERS: [&str; 3] = ["pr", "integration", "staging"];
 
 /// The statuses the matrix may declare.
 pub const STATUSES: [&str; 2] = ["verified", "gated"];
+
+/// The components a requirement may be owned by.
+///
+/// One per top-level area of this repository, so "who fixes this" resolves to a
+/// directory a reviewer can open.
+pub const OWNERS: [&str; 4] = [
+    // `backend/src/audit`, `backend/src/audit_relay`
+    "control-plane-audit",
+    // `backend/src/operations`, `backend/src/session_access`, `session_backend`
+    "control-plane-operations",
+    // `frontend/`
+    "frontend",
+    // `deploy/kubernetes/`
+    "deployment",
+];
 
 /// Every requirement id in epic #5665's normative table.
 ///

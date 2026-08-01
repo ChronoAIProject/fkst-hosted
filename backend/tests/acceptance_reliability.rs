@@ -83,14 +83,14 @@ async fn two_replicas_racing_one_duplicate_event_id_leave_exactly_one_record() {
     );
 }
 
-/// Storage the relay cannot use must be an explicit startup failure.
+/// A damaged or absent database must be an explicit startup failure.
 ///
-/// This is the storage-side half of `OPS-01`. The control plane's contract is
-/// "no durable start, no handler"; it only holds if a relay over unwritable or
-/// damaged storage refuses to come up at all, rather than starting and
-/// acknowledging writes it will lose. Both failures are asserted at
-/// `Database::open`, which is where the schema is applied and therefore the
-/// first moment either is detectable.
+/// This is one half of `OPS-01`'s storage side. The control plane's contract is
+/// "no durable start, no handler"; it only holds if a relay over unusable
+/// storage refuses to come up at all, rather than starting and acknowledging
+/// writes it will lose. Both failures are asserted at `Database::open`, which is
+/// where the schema is applied and therefore the first moment either is
+/// detectable.
 ///
 /// A read-only DIRECTORY is deliberately not one of them: the relay's own
 /// `prepare_directory` chmods its data directory to `0700` before opening, and a
@@ -100,7 +100,7 @@ async fn two_replicas_racing_one_duplicate_event_id_leave_exactly_one_record() {
 /// hits, is a damaged file and a path that is not a file at all (the classic
 /// "the volume did not mount, so the mount point is an empty directory").
 #[tokio::test]
-async fn a_read_only_database_refuses_ingress_instead_of_losing_a_record() {
+async fn a_damaged_or_unmounted_database_refuses_to_open_instead_of_losing_records() {
     let dir = tempfile::TempDir::new().expect("temp dir");
 
     let corrupt = dir.path().join("corrupt.sqlite3");
@@ -121,6 +121,113 @@ async fn a_read_only_database_refuses_ingress_instead_of_losing_a_record() {
     // The positive control: the same settings over healthy storage DO open, so
     // the two refusals above are about the storage rather than the settings.
     assert!(open_relay_database(&dir.path().join("healthy.sqlite3")).is_ok());
+}
+
+/// A read-only database never ACKNOWLEDGES a record it cannot store.
+///
+/// This is the scenario the previous name claimed and its body never staged, and
+/// staging it turns out to be more interesting than "open must fail". What this
+/// deployment does with an owner-owned read-only file is deliberate and layered:
+/// `Database::open` calls `restrict_file_permissions`, which chmods the MAIN
+/// file back to `0600` — so a restored backup copied with restrictive modes
+/// heals rather than wedging the relay — while SQLite's `-wal` and `-shm`
+/// sidecars inherit the mode the main file had when they were created, and are
+/// not repaired.
+///
+/// Asserting "open fails" would therefore be asserting a behaviour the code does
+/// not have; asserting "ingress works" would be asserting one it does not have
+/// either. The property that actually matters for `OPS-01` holds in both worlds
+/// and is what is asserted here: whichever way the platform lands, a record is
+/// never acknowledged and then lost. Either the write succeeds and the row is
+/// readable, or it fails loudly and no row exists.
+///
+/// The variants that cannot be repaired at all — a `readOnly: true` volume
+/// mount, or a file owned by another uid — are not stageable inside a test
+/// process without root, and are deliberately left to the deployment gate: the
+/// relay's Pod spec and its bound claim are checked by
+/// `deploy/kubernetes/tests/audit-relay-verify-test.sh`.
+#[tokio::test]
+async fn a_read_only_database_never_acknowledges_a_record_it_cannot_store() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let path = dir.path().join("read-only.sqlite3");
+    drop(open_relay_database(&path).expect("the healthy database opens"));
+
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444))
+        .expect("the database file is made read-only");
+    assert!(
+        std::fs::OpenOptions::new().write(true).open(&path).is_err(),
+        "this process can write a 0444 file, so the scenario was never staged"
+    );
+
+    let database = open_relay_database(&path).expect("the relay repairs and opens the main file");
+    let mode = std::fs::metadata(&path)
+        .expect("the database file is readable")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(
+        mode, 0o600,
+        "the relay opened the file without restoring its own permissions"
+    );
+    drop(database);
+
+    let node = relay::Relay::start_at(dir, path).await;
+    let event_id = "d0d0d0d0-1111-4111-8111-d0d0d0d0d0d0";
+    let acknowledged = node
+        .client()
+        .register_start(&relay::Relay::start_body(event_id))
+        .await
+        .is_ok();
+    if acknowledged {
+        node.client()
+            .complete(&relay::Relay::completion_body(event_id, Some(relay::ALICE)))
+            .await
+            .expect("a relay that acknowledged the start must accept its completion");
+        assert!(
+            node.read_all()
+                .await
+                .iter()
+                .any(|row| row.event_id == event_id),
+            "the relay acknowledged a record it did not store"
+        );
+    } else {
+        assert!(
+            node.read_all().await.is_empty(),
+            "the relay refused the write and stored something anyway"
+        );
+    }
+}
+
+/// A database from a NEWER build must refuse to open, not be downgraded.
+///
+/// This is the migration failure an operator actually hits: a newer relay
+/// migrated the volume, the deployment was rolled back, and the older binary now
+/// meets a schema it does not understand. Refusing is the only safe answer — a
+/// relay that started anyway would write rows the newer schema's constraints
+/// never sanctioned into the one durable copy of the history.
+#[tokio::test]
+async fn a_database_from_a_newer_build_refuses_to_open() {
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let path = dir.path().join("from-the-future.sqlite3");
+    drop(open_relay_database(&path).expect("the healthy database opens"));
+
+    {
+        let future = rusqlite::Connection::open(&path).expect("the database re-opens");
+        future
+            .execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
+                rusqlite::params![9_999_i64, "2099-01-01T00:00:00Z"],
+            )
+            .expect("the future migration marker is recorded");
+    }
+
+    assert!(
+        open_relay_database(&path).is_err(),
+        "a relay opened a database migrated by a newer build and would have \
+         written into a schema it does not understand"
+    );
 }
 
 /// Open a relay database with the same settings the harness uses.

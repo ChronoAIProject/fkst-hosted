@@ -10,6 +10,7 @@
 
 #![allow(dead_code)]
 
+pub mod ci;
 pub mod discovery;
 pub mod lint;
 pub mod model;
@@ -24,6 +25,29 @@ pub fn repo_root() -> std::path::PathBuf {
         .parent()
         .expect("the backend crate always has a parent directory")
         .to_path_buf()
+}
+
+/// Compose a synthetic matrix document: the real preamble and requirement list,
+/// with a caller-supplied evidence block.
+///
+/// Keeping the preamble real means every negative test exercises the same
+/// parser, the same requirement set, and the same owner vocabulary as the gate,
+/// so a rule that only fires on a toy document cannot pass for a working one.
+pub fn synthetic(evidence: &str) -> String {
+    let requirements = model::EPIC_REQUIREMENTS
+        .iter()
+        .map(|id| {
+            format!(
+                "  {{ id = \"{id}\", area = \"test\", summary = \"synthetic\", \
+                 owner = \"control-plane-audit\" }},"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "schema_version = 1\nepic = 5665\ngate_issue = 5683\nmilestone = 22\n\
+         \nrequirement = [\n{requirements}\n]\n{evidence}"
+    )
 }
 
 /// Where generated evidence lands.

@@ -121,27 +121,40 @@ async fn no_canary_reaches_the_metrics_exposition() {
     }
 }
 
-/// Three canaries reach an APPLICATION log line by existing, deliberate design,
+/// Some canaries reach an APPLICATION log line by existing, deliberate design,
 /// and are therefore excluded from the trace assertion below rather than
-/// silently passing:
+/// silently passing. They fall into exactly two families:
 ///
-/// - `canary-upstream-body` — a GitHub error body the handlers surface at `warn`
-///   so an operator can diagnose a GitHub outage;
-/// - `canary-invalid-branch` and `canary-log-path` — part of an `AppError`
-///   message ("branch `…` is invalid", "no such log file: …"), which
-///   [`fkst_control_plane::error`] logs at `debug`. Each message quotes the
-///   CALLER'S OWN rejected input back to them; it is neither a credential nor
-///   another user's data.
+/// - **an upstream error body, surfaced at `warn` so an operator can diagnose a
+///   GitHub outage**: `canary-upstream-body` and the `canary-stack-frame` beside
+///   it in the same body. The body is logged verbatim, so anything an upstream
+///   puts in it is logged; that is the diagnostic value and also its limit.
+/// - **the caller's OWN rejected input, quoted back inside an `AppError`
+///   message** which [`fkst_control_plane::error`] logs at `debug`:
+///   `canary-invalid-branch` ("branch `…` is invalid"),
+///   `canary-invalid-package-ref` ("lists an invalid package reference `…`"),
+///   and `canary-log-path` ("no such log file: …"). None is a credential, and
+///   none is another user's data — quoting the rejected value is what makes the
+///   error actionable.
 ///
-/// None of them is an audit property: all three are covered — and asserted
-/// absent — by [`no_canary_reaches_a_record_or_its_posthog_payload`], which
-/// excludes nothing, and the log path is separately proven to be replaced by its
-/// class in `audit_safe_arguments`. What this test proves is the narrower,
-/// harder property: no request value reaches the request SPAN or the audit
-/// pipeline's own log lines.
+/// None of them is an audit property: all are covered — and asserted absent — by
+/// [`no_canary_reaches_a_record_or_its_posthog_payload`], which excludes nothing,
+/// and the log path is separately proven to be replaced by its class in
+/// `audit_safe_arguments`. What this test proves is the narrower, harder
+/// property: no request value reaches the request SPAN or the audit pipeline's
+/// own log lines.
+///
+/// Every CREDENTIAL canary is deliberately absent from this list. A token in a
+/// log line is a leak whatever level it was written at, so the assertion below
+/// covers `canary-access-token`, `canary-refresh-token`,
+/// `canary-rotated-refresh-token`, `canary-llm-api-key`,
+/// `canary-posthog-query-key`, `canary-storage-client-secret`, and the two URL
+/// canaries with no exception at all.
 const TRACED_BY_DESIGN: &[&str] = &[
     "canary-upstream-body",
+    "canary-stack-frame",
     "canary-invalid-branch",
+    "canary-invalid-package-ref",
     "canary-log-path",
 ];
 

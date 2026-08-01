@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use super::discovery::{self, Missing};
-use super::model::{Matrix, EPIC_REQUIREMENTS, STATUSES, TIERS};
+use super::model::{Matrix, EPIC_REQUIREMENTS, OWNERS, STATUSES, TIERS};
 
 /// Everything wrong with a matrix, in a stable order.
 pub fn violations(matrix: &Matrix, repo_root: &Path) -> Vec<String> {
@@ -18,6 +18,7 @@ pub fn violations(matrix: &Matrix, repo_root: &Path) -> Vec<String> {
     found.extend(coverage(matrix));
     found.extend(contradictions(matrix));
     found.extend(existence(matrix, repo_root));
+    found.extend(super::ci::violations(matrix, repo_root));
     found.sort();
     found
 }
@@ -39,6 +40,15 @@ fn structure(matrix: &Matrix) -> Vec<String> {
         }
         if requirement.summary.trim().is_empty() {
             found.push(format!("{} declares an empty summary", requirement.id));
+        }
+        // The issue asks for an owner beside the test mapping. An owner nobody
+        // can look up is worse than none, so the vocabulary is closed to the
+        // component teams this repository actually has.
+        if !OWNERS.contains(&requirement.owner.as_str()) {
+            found.push(format!(
+                "{} names the unknown owner {:?}; use one of {OWNERS:?}",
+                requirement.id, requirement.owner
+            ));
         }
     }
     for row in &matrix.evidence {
@@ -146,6 +156,11 @@ fn existence(matrix: &Matrix, repo_root: &Path) -> Vec<String> {
             Err(Missing::Test) => found.push(format!(
                 "{}: {} defines no test named {:?}",
                 row.requirement, row.suite, row.test
+            )),
+            Err(Missing::UnknownSuiteKind) => found.push(format!(
+                "{}: {} has no known test-definition form, so its evidence cannot \
+                 be checked; claim a real test file instead",
+                row.requirement, row.suite
             )),
         }
     }

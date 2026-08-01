@@ -115,21 +115,57 @@ async fn live_operations() -> BTreeMap<String, String> {
     operations
 }
 
+/// The operations in `surface` that carry no explicit policy.
+///
+/// Split out of the guard so the guard's FAILURE direction is testable: with the
+/// check written inline over `live_operations()`, a synthetic unpoliced operation
+/// could not be injected, and nothing proved the assertion would actually fire.
+/// A guard whose negative direction is never exercised is indistinguishable from
+/// a guard that silently stopped working.
+fn unpoliced(surface: &BTreeMap<String, String>) -> Vec<String> {
+    surface
+        .iter()
+        .filter(|(operation_id, _)| policy_for(operation_id).is_none())
+        .map(|(operation_id, route)| format!("{operation_id} ({route})"))
+        .collect()
+}
+
 /// The guard itself: adding a product endpoint without an audit policy fails
 /// here (and, because the catalog is built at router assembly, at startup too).
 #[tokio::test]
 async fn every_documented_operation_has_exactly_one_explicit_policy() {
-    let operations = live_operations().await;
-    let mut unpoliced = Vec::new();
-    for (operation_id, route) in &operations {
-        if policy_for(operation_id).is_none() {
-            unpoliced.push(format!("{operation_id} ({route})"));
-        }
-    }
+    let unpoliced = unpoliced(&live_operations().await);
     assert!(
         unpoliced.is_empty(),
         "these operations have no explicit audit policy; add an Audited or \
          Excluded entry to audit::request::policy::OPERATION_POLICIES: {unpoliced:?}"
+    );
+}
+
+/// The same guard, driven the other way: a synthetic operation that nobody gave
+/// a policy MUST be reported.
+///
+/// The issue asks for exactly this ("adding a synthetic operation without policy
+/// fails the guard"), and it cannot be shown by the positive test — a green run
+/// there is equally consistent with "everything is policed" and with "the check
+/// examines nothing". Injecting the operation into the surface map, rather than
+/// into the router, keeps the proof deterministic and costs no fake endpoint.
+#[tokio::test]
+async fn a_synthetic_operation_without_a_policy_fails_the_guard() {
+    let mut surface = live_operations().await;
+    assert!(
+        unpoliced(&surface).is_empty(),
+        "the real surface must be clean before the injection means anything"
+    );
+    surface.insert(
+        "synthetic_operation_nobody_policed".to_string(),
+        "GET /api/v1/synthetic".to_string(),
+    );
+    let reported = unpoliced(&surface);
+    assert_eq!(
+        reported,
+        vec!["synthetic_operation_nobody_policed (GET /api/v1/synthetic)".to_string()],
+        "the coverage guard did not fire on an unpoliced operation"
     );
 }
 

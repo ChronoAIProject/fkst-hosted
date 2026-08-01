@@ -1,0 +1,71 @@
+name: Acceptance gates
+
+# The milestone #22 acceptance matrix (`acceptance/requirement-matrix.toml`)
+# declares a row `tier = "pr", status = "verified"` to mean "the named test runs
+# and passes in the tier's CI". `rust-ci.yml` only ever made that true for the
+# Rust suites: nothing executed Vitest, Playwright, or the deployment
+# validators, so a broken frontend or a broken monitoring assertion could not
+# fail the gate.
+#
+# This workflow closes that hole. `backend/tests/acceptance/ci.rs` reads the
+# workflow files in this directory and FAILS when a `pr`/`verified` row names a
+# suite no workflow executes, so the two stay in step: adding a matrix row for a
+# suite family nobody runs is a build failure, not a silent aspiration.
+#
+# Kept separate from `rust-ci.yml` deliberately — these jobs need Node, browsers,
+# and Ruby, and a Rust-only change should not wait on a browser download.
+
+on:
+  pull_request:
+    branches: [develop, develop-auto]
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: frontend gates
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: install
+        run: npm ci
+      - name: lint
+        run: npm run lint
+      - name: typecheck
+        run: npm run typecheck
+      - name: unit tests (vitest)
+        run: npm test
+      - name: install browsers
+        run: npx playwright install --with-deps chromium
+      - name: end-to-end tests (playwright)
+        run: npm run test:e2e
+
+  deployment:
+    name: deployment gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - uses: azure/setup-kubectl@v4
+      - name: render and policy validation
+        # Renders every overlay locally and runs validate-render.rb,
+        # validate-monitoring.rb, validate-audit-relay.rb and
+        # validate-alert-rules.rb over the result. Contacts no cluster.
+        run: deploy/kubernetes/validate-manifests.sh
+      - name: audit-relay verifier decisions
+        run: deploy/kubernetes/tests/audit-relay-verify-test.sh
+      - name: audit runbook smoke
+        run: deploy/kubernetes/tests/audit-runbook-smoke.sh
+      - name: disaster-drill decisions
+        run: deploy/kubernetes/tests/disaster-drill-test.sh

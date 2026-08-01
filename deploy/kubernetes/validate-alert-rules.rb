@@ -10,12 +10,19 @@
 #
 # ## Why an evaluator lives here
 #
-# `promtool test rules` is the obvious tool and is used when it is installed (see
-# the tail of this file). It is not a dependency this repository can require: it
-# ships inside the Prometheus release tarball, and the deployment validators must
-# run on a machine with nothing but Ruby and kubectl. An unverifiable fixture file
-# would be worse than none — so the fixtures are executable HERE, deterministically,
-# and promtool is an additional confirmation when present.
+# `promtool test rules` is the obvious tool, and this repository deliberately does
+# NOT use it — there is no promtool invocation here or anywhere else in the tree.
+# It is not a dependency that can be required: it ships inside the Prometheus
+# release tarball, and the deployment validators must run on a machine with
+# nothing but Ruby and kubectl. An unverifiable fixture file would be worse than
+# none, so the fixtures are executable HERE, deterministically, by the evaluator
+# below.
+#
+# The trade-off is stated plainly because it bounds what a green run means: this
+# evaluator understands only the grammar the checked-in rules use (below), and
+# proves each rule fires and clears against the fixtures. It is not a
+# general-purpose PromQL implementation, and a rule written outside the grammar
+# is a hard error rather than an unverified pass.
 #
 # ## The grammar this evaluator supports
 #

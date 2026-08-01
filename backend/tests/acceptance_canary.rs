@@ -1,28 +1,54 @@
 //! Milestone acceptance: the canary sweep across every TEST-OWNED output at
-//! once, plus the two things a per-surface sweep cannot do.
+//! once, plus the things a per-surface sweep cannot do.
 //!
 //! `audit_redaction_canary.rs` proves each surface individually. What it cannot
 //! prove is the union: that no single canary escapes through ANY of the outputs
 //! a milestone reviewer actually reads — the records, their exact PostHog
-//! payloads, the metrics exposition, the operations API's own JSON, and the
-//! generated evidence artifact. A value that is scrubbed from four surfaces and
-//! present in the fifth is still a leak, and a per-surface suite has no place to
-//! notice it.
+//! payloads, the metrics exposition, the durable relay's own SQLite file and
+//! WAL, the relay's read responses, an authorized operations API answer, the
+//! checked-in alert labels and annotations, and the generated evidence artifact.
+//! A value that is scrubbed from seven surfaces and present in the eighth is
+//! still a leak, and a per-surface suite has no place to notice it.
+//!
+//! ## Every surface here can actually carry a canary
+//!
+//! That is not a given, and an earlier version of this suite got it wrong twice:
+//! it scanned a sandbox response built from clean fixtures (no canary existed to
+//! find) and an evidence artifact read off disk with `unwrap_or_default()` (an
+//! empty string whenever the suite that writes it had not run first, which test
+//! -binary ordering never guarantees). Both assertions were vacuous. Now the
+//! sandbox fleet carries a canary in a HIDDEN row — so a pass means authorization
+//! removed it, not that nothing was there — and the artifact is rendered in this
+//! process from the same matrix the gate reads.
 //!
 //! The suite also carries two assertions that only make sense at this level:
 //!
-//! - a POSITIVE control, so an implementation that recorded nothing at all could
-//!   not pass by being empty;
+//! - POSITIVE controls, so an implementation that recorded nothing at all could
+//!   not pass by being empty. They assert VALUES, not field names: a `Debug`
+//!   rendering always prints its field names, so "the output contains
+//!   `operation_id`" holds for a completely blank record.
 //! - a cardinality scan of the RENDERED exposition, rather than of the Rust
 //!   label constants. The constants being bounded is necessary; it is not
 //!   sufficient, because a metric family could still interpolate a value into a
 //!   label at render time.
 
+#[path = "acceptance/mod.rs"]
+mod acceptance;
 mod audit_canary;
+#[path = "audit_relay_harness/mod.rs"]
+mod relay;
 mod sandbox_harness;
 
 use audit_canary::{plant_every_canary, rendered, Canary, CANARIES};
 use sandbox_harness::{fleet, harness_with};
+
+/// A canary planted in a runtime row the viewer is NOT authorized to see.
+const HIDDEN_RUNTIME_CANARY: &str = "canary-hidden-session-name";
+
+/// The relay credentials, which are canaries by construction (see the relay
+/// harness). They belong in the union corpus because the relay's storage and its
+/// read responses are surfaces the per-request corpus never touches.
+const RELAY_CANARIES: [&str; 2] = [relay::WRITE_TOKEN, relay::READ_TOKEN];
 
 /// One canary escaping through ANY test-owned output fails here.
 #[tokio::test]
@@ -41,28 +67,36 @@ async fn no_canary_survives_into_any_test_owned_output() {
         surfaces.push(("audit record + posthog payload", rendered(event)));
     }
     surfaces.push(("metrics exposition", canary.metrics_text().await));
-    surfaces.push(("operations sandbox api", operations_sandbox_json().await));
-    surfaces.push((
-        "acceptance evidence artifact",
-        std::fs::read_to_string(evidence_path()).unwrap_or_default(),
-    ));
+    surfaces.push(("operations sandbox api", hidden_row_sandbox_json().await));
+    surfaces.push(("acceptance evidence artifact", evidence_artifact()));
+    surfaces.push(("alert labels and annotations", alert_rule_text()));
+
+    let (storage, read_response) = relay_surfaces().await;
+    surfaces.push(("relay sqlite file and wal", storage));
+    surfaces.push(("relay scoped read response", read_response));
 
     let mut escapes = Vec::new();
     for (surface, text) in &surfaces {
-        for planted in CANARIES {
+        for planted in CANARIES.iter().chain(RELAY_CANARIES.iter()) {
             if text.contains(planted) {
                 escapes.push(format!("{planted} reached the {surface}"));
             }
+        }
+        if text.contains(HIDDEN_RUNTIME_CANARY) {
+            escapes.push(format!("{HIDDEN_RUNTIME_CANARY} reached the {surface}"));
         }
     }
     assert!(escapes.is_empty(), "{escapes:#?}");
 }
 
 /// The positive control: the safe identifiers, counts, and flags the epic
-/// deliberately KEEPS are still there.
+/// deliberately KEEPS are still there — asserted as VALUES.
 ///
 /// Without this, an implementation that recorded an empty argument map for every
-/// operation would sail through the sweep above.
+/// operation would sail through the sweep above. And without the value-level
+/// form, an implementation that recorded a record of entirely empty fields would
+/// sail through this one: `format!("{event:#?}")` prints `operation_id: ""`,
+/// which contains the string `operation_id`.
 #[tokio::test]
 async fn the_intended_safe_identifiers_are_still_present() {
     let canary = Canary::start().await;
@@ -77,10 +111,41 @@ async fn the_intended_safe_identifiers_are_still_present() {
         all.contains(&audit_canary::USER_ID.to_string()),
         "the verified actor id is absent from every record"
     );
-    // Route templates and operation ids are the correlation vocabulary.
-    for expected in ["operation_id", "route_template", "request_id", "event_id"] {
-        assert!(all.contains(expected), "no record carries {expected}");
+
+    // The correlation vocabulary, asserted by the VALUES it must carry.
+    // `operation_id` and `route_template` are the normalized names the audited
+    // surface actually uses, so naming three of them pins the projection rather
+    // than the struct's field list.
+    for operation_id in ["canvas_overview", "create_repo", "github_app_webhook"] {
+        assert!(
+            events
+                .iter()
+                .any(|event| event.operation_id == operation_id),
+            "no record carries the operation id {operation_id}"
+        );
     }
+    assert!(
+        events
+            .iter()
+            .any(|event| event.route_template == "/api/v1/logs/{session_id}/file"),
+        "no record carries a normalized route template"
+    );
+    // Every record carries a non-empty request id and a real event id — the two
+    // correlation handles the operations API pages and de-duplicates on.
+    for event in &events {
+        assert!(
+            !event.request_id.trim().is_empty(),
+            "a {} record carries an empty request id",
+            event.operation_id
+        );
+        assert_ne!(
+            event.event_id,
+            uuid::Uuid::nil(),
+            "a {} record carries a nil event id",
+            event.operation_id
+        );
+    }
+
     // At least one record must carry a non-empty safe-argument map, or the
     // allowlist is doing nothing at all.
     let with_arguments = events
@@ -170,28 +235,79 @@ fn is_bounded_label_value(value: &str) -> bool {
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '-' | '.' | '/'))
 }
 
-/// One authorized operations sandbox response, as JSON text.
+/// One operations sandbox response, served to a viewer who may NOT see the row
+/// that carries the canary.
 ///
-/// Included in the sweep because it is the only test-owned output that is
-/// SERVED to a browser: everything else here is internal telemetry.
-async fn operations_sandbox_json() -> String {
+/// This is the only test-owned output that is SERVED to a browser, and the
+/// canary is in the hidden row on purpose: a clean fleet would make the scan
+/// vacuous, while a canary in a VISIBLE row would make it wrong (the API is
+/// supposed to return that row's fields). What the sweep proves here is that
+/// authorization removed the hidden row before serialization — the same property
+/// `operations_sandboxes_isolation.rs` proves byte-for-byte, restated as part of
+/// the union.
+async fn hidden_row_sandbox_json() -> String {
     let harness = harness_with(vec![
         fleet::item("rt-alice", Some(sandbox_harness::SESSION)),
-        fleet::orphan("rt-orphan"),
+        // A row belonging to a session in nobody's fixture, whose identity text
+        // is the canary.
+        fleet::Item {
+            session_id: Some(HIDDEN_RUNTIME_CANARY.to_string()),
+            creator_login: Some(HIDDEN_RUNTIME_CANARY.to_string()),
+            raw_status: HIDDEN_RUNTIME_CANARY.to_string(),
+            ..fleet::item("rt-hidden", Some(sandbox_harness::OTHER_SESSION))
+        },
     ])
     .await;
-    let bytes = harness
-        .snapshot_bytes(sandbox_harness::GRACE, "?scope=all")
-        .await;
+    // Alice is a regular user: she is authorized for her own session and for
+    // nothing else, so the hidden row must not appear at all.
+    let bytes = harness.snapshot_bytes(sandbox_harness::ALICE, "").await;
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
-/// Where `acceptance_matrix` writes the evidence artifact. Absent until that
-/// suite has run, which is fine — an absent artifact carries no canary.
-fn evidence_path() -> std::path::PathBuf {
-    let target = match std::env::var_os("CARGO_TARGET_DIR") {
-        Some(dir) => std::path::PathBuf::from(dir),
-        None => std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target"),
-    };
-    target.join("acceptance").join("requirement-report.md")
+/// A real relay's stored bytes and one scoped read response.
+///
+/// The relay's own write and read credentials are canaries, so a token that
+/// reached a row, the WAL, or an answer shows up here. The spec names "relay
+/// SQLite rows/WAL-aware logical export" as a hostile location precisely because
+/// it is the one durable store this deployment owns.
+async fn relay_surfaces() -> (String, String) {
+    let node = relay::Relay::start().await;
+    node.seed_cross_user_fixture().await;
+    let stored = String::from_utf8_lossy(&node.database_bytes()).into_owned();
+    let rows = node.read_all().await;
+    let response = serde_json::to_string(&rows)
+        .unwrap_or_else(|error| panic!("the relay's rows must serialize for the scan: {error}"));
+    (stored, response)
+}
+
+/// The evidence artifact, rendered HERE from the same matrix the gate reads.
+///
+/// Rendering rather than reading is deliberate: reading the file makes the scan
+/// depend on whether `acceptance_matrix` happened to run first, which nothing
+/// guarantees across test binaries — and an absent file read as an empty string
+/// is a scan that asserts nothing while looking like it passed.
+fn evidence_artifact() -> String {
+    let root = acceptance::repo_root();
+    let matrix = acceptance::model::Matrix::load(&root).expect("the checked-in matrix parses");
+    acceptance::report::render(&matrix, &acceptance::report::build_commit(&root))
+}
+
+/// The checked-in alert rules, whose labels and annotations reach an operator's
+/// pager and an incident channel.
+fn alert_rule_text() -> String {
+    let monitoring = acceptance::repo_root().join("deploy/kubernetes/monitoring");
+    let mut text = String::new();
+    for name in ["audit-prometheus-rules.yaml", "prometheus-rules.yaml"] {
+        let path = monitoring.join(name);
+        text.push_str(
+            &std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display())),
+        );
+        text.push('\n');
+    }
+    assert!(
+        text.contains("annotations:"),
+        "the alert rules carry no annotations; the scan would prove nothing"
+    );
+    text
 }

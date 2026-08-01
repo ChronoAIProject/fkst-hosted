@@ -19,8 +19,8 @@
 mod acceptance;
 
 use acceptance::lint::violations;
-use acceptance::model::{Matrix, EPIC_REQUIREMENTS};
-use acceptance::{artifact_dir, repo_root, report};
+use acceptance::model::{Matrix, EPIC_REQUIREMENTS, OWNERS};
+use acceptance::{artifact_dir, repo_root, report, synthetic};
 
 fn matrix() -> Matrix {
     Matrix::load(&repo_root()).expect("the checked-in matrix parses")
@@ -188,17 +188,38 @@ fn the_evidence_artifact_names_every_requirement_and_no_payload() {
     assert_eq!(written, rendered);
 }
 
-/// Compose a synthetic document: the real preamble and requirement list, with a
-/// caller-supplied evidence block. Keeping the preamble real means the negative
-/// tests exercise the same parser and the same requirement set as the gate.
-fn synthetic(evidence: &str) -> String {
-    let requirements = EPIC_REQUIREMENTS
-        .iter()
-        .map(|id| format!("  {{ id = \"{id}\", area = \"test\", summary = \"synthetic\" }},"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!(
-        "schema_version = 1\nepic = 5665\ngate_issue = 5683\nmilestone = 22\n\
-         \nrequirement = [\n{requirements}\n]\n{evidence}"
+/// Every requirement names an owner from the closed vocabulary, and an unknown
+/// owner is reported rather than accepted as free text.
+///
+/// The issue asks the matrix to map each requirement "to at least one named
+/// automated test AND OWNER". An owner field nobody validates decays into a
+/// stale personal name, so the vocabulary is closed to the components this
+/// repository has, and the linter proves a value outside it fails.
+#[test]
+fn every_requirement_names_a_known_owner_and_an_unknown_one_is_refused() {
+    for requirement in &matrix().requirement {
+        assert!(
+            OWNERS.contains(&requirement.owner.as_str()),
+            "{} names the unknown owner {:?}",
+            requirement.id,
+            requirement.owner
+        );
+    }
+
+    let stranger = Matrix::parse(
+        &synthetic(
+            r#"
+        evidence = [
+          { requirement = "AUTH-01", tier = "pr", suite = "backend/tests/audit_outcomes.rs", test = "a_route_scoped_timeout_is_recorded_as_a_timeout", status = "verified" },
+        ]
+        "#,
+        )
+        .replace("owner = \"control-plane-audit\"", "owner = \"somebody\""),
     )
+    .expect("the synthetic document parses");
+    let problems = violations(&stranger, &repo_root());
+    assert!(
+        problems.iter().any(|p| p.contains("unknown owner")),
+        "{problems:?}"
+    );
 }

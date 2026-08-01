@@ -1,12 +1,23 @@
 //! Renders the milestone evidence artifact.
 //!
 //! The artifact exists so a reviewer can see, in one page, which requirement is
-//! held up by which named test, at which tier, and against which build — without
-//! reading 200 test files. It deliberately contains no request payload, no event
-//! arguments, no user id, and no credential: it is generated FROM the matrix,
-//! which only ever names files and tests, so there is nothing sensitive for it
-//! to leak. The forbidden-substring assertion in the gate proves that stays true
-//! rather than assuming it.
+//! held up by which named test, at which tier, owned by which component, and
+//! against which build — without reading 200 test files. It deliberately
+//! contains no request payload, no event arguments, no user id, and no
+//! credential: it is generated FROM the matrix, which only ever names files and
+//! tests, so there is nothing sensitive for it to leak. The forbidden-substring
+//! assertion in the gate proves that stays true rather than assuming it.
+//!
+//! ## What the `result` column means, and what it does not
+//!
+//! It says which gate ENFORCES the row, not that this process watched the named
+//! test pass. A test binary cannot observe another binary's result, and printing
+//! `pass` for a row whose only evidence is "the matrix says so" is precisely the
+//! self-certification this milestone is supposed to remove. The enforcement
+//! chain is real instead: `acceptance::ci` proves a pull-request workflow runs
+//! the command that executes the suite, `acceptance::discovery` proves the named
+//! test still exists inside it, and that job fails when the test fails. So
+//! `enforced:pr` is a checkable claim, where `pass` was not.
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -46,23 +57,37 @@ pub fn render(matrix: &Matrix, build_commit: &str) -> String {
     let _ = writeln!(out);
     let _ = writeln!(
         out,
-        "This artifact names requirement ids, suites, and test names only. It \
-         carries no request payload, event argument, user id, or credential."
+        "This artifact names requirement ids, owners, suites, and test names \
+         only. It carries no request payload, event argument, user id, or \
+         credential."
     );
     let _ = writeln!(out);
-    let _ = writeln!(out, "| requirement | tier | result | suite | test |");
-    let _ = writeln!(out, "|---|---|---|---|---|");
+    let _ = writeln!(
+        out,
+        "`result` states which gate enforces the row. `enforced:<tier>` means a \
+         pull-request workflow runs the command that executes that suite (proven \
+         by acceptance::ci) and the named test still exists inside it (proven by \
+         acceptance::discovery), so the job fails if the test fails. \
+         `gated:<VAR>` means the tier only runs when that variable is set, and \
+         skips with a stated reason otherwise."
+    );
+    let _ = writeln!(out);
+    let _ = writeln!(
+        out,
+        "| requirement | owner | tier | result | suite | test |"
+    );
+    let _ = writeln!(out, "|---|---|---|---|---|---|");
     for requirement in &matrix.requirement {
         for row in matrix.evidence_for(&requirement.id) {
             let result = match row.status.as_str() {
-                "verified" => "pass".to_string(),
+                "verified" => format!("enforced:{}", row.tier),
                 "gated" => format!("gated:{}", row.gate_env.as_deref().unwrap_or("unspecified")),
                 other => other.to_string(),
             };
             let _ = writeln!(
                 out,
-                "| {} | {} | {} | {} | {} |",
-                requirement.id, row.tier, result, row.suite, row.test
+                "| {} | {} | {} | {} | {} | {} |",
+                requirement.id, requirement.owner, row.tier, result, row.suite, row.test
             );
         }
     }

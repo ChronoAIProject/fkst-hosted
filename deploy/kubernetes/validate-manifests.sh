@@ -158,6 +158,8 @@ sh -n "$script_dir/run-disaster-drill.sh"
 sh -n "$script_dir/verify-audit-relay.sh"
 sh -n "$script_dir/tests/disaster-drill-test.sh"
 sh -n "$script_dir/tests/audit-relay-verify-test.sh"
+sh -n "$script_dir/tests/audit-runbook-smoke.sh"
+sh -n "$script_dir/tests/fake-cluster.sh"
 ruby -c "$script_dir/render-recovery-evidence.rb" >/dev/null
 ruby -c "$script_dir/validate-monitoring.rb" >/dev/null
 ruby -c "$script_dir/validate-audit-relay.rb" >/dev/null
@@ -171,11 +173,14 @@ if command -v shellcheck >/dev/null 2>&1; then
     "$script_dir/run-disaster-drill.sh" \
     "$script_dir/tests/disaster-drill-test.sh" \
     "$script_dir/tests/audit-relay-verify-test.sh" \
+    "$script_dir/tests/audit-runbook-smoke.sh" \
+    "$script_dir/tests/fake-cluster.sh" \
     "$script_dir/validate-manifests.sh"
 fi
 
 "$script_dir/tests/disaster-drill-test.sh"
 "$script_dir/tests/audit-relay-verify-test.sh"
+"$script_dir/tests/audit-runbook-smoke.sh"
 
 if command -v kubeconform >/dev/null 2>&1; then
   kubeconform -strict -summary -ignore-missing-schemas - <"$first"

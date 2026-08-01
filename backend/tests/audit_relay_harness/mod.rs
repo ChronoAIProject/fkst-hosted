@@ -10,16 +10,16 @@
 // of the surface below.
 #![allow(dead_code)]
 
+/// The wire bodies and the seeded cross-user dataset.
+mod fixtures;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use fkst_control_plane::audit::relay::{
     AuditDeliveryConfig, AuditDeliveryMode, AuditRelayClient, RelayClientMetrics,
 };
-use fkst_control_plane::audit_relay::protocol::{
-    format_instant, ActorV1, CorrelationV1, LifecycleEventV1, PrincipalV1, RequestCompletionV1,
-    RequestStartV1, PROTOCOL_SCHEMA_VERSION,
-};
+use fkst_control_plane::audit_relay::protocol::format_instant;
 use fkst_control_plane::audit_relay::query::{RecordRowV1, RecordsQueryV1};
 use fkst_control_plane::audit_relay::{
     build_router, Database, DatabaseSettings, RelayConfig, RelayMetrics, RelayState,
@@ -63,6 +63,37 @@ impl Relay {
         let dir = Arc::new(TempDir::new().expect("temp dir"));
         let db_path = dir.path().join("audit.sqlite3");
         Self::serve(dir, db_path).await
+    }
+
+    /// Start a relay over an EXISTING database file, taking ownership of the
+    /// temporary directory holding it.
+    ///
+    /// Used by the storage-failure suite, which has to put a file into a
+    /// particular state (wrong mode, foreign schema) BEFORE a relay ever sees
+    /// it, and then prove what the relay does with it.
+    pub async fn start_at(dir: TempDir, db_path: PathBuf) -> Self {
+        Self::serve(Arc::new(dir), db_path).await
+    }
+
+    /// Stop this relay COMPLETELY and hand back the pieces needed to start it
+    /// again over the same file.
+    ///
+    /// Separate from [`Relay::restart`] because a kill-point test has to observe
+    /// the world WHILE the relay is down — a client submitting into a closed
+    /// socket is the whole scenario — and `restart` never exposes that window.
+    pub async fn stop(self) -> StoppedRelay {
+        let dir = self.dir.clone();
+        let db_path = self.db_path.clone();
+        let mut this = self;
+        if let Some(shutdown) = this.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        let _ = (&mut this.server).await;
+        // The base URL is retained so a client built before the stop keeps
+        // pointing at a port nothing is listening on, which is exactly the
+        // shape a killed relay presents to an in-flight caller.
+        drop(this);
+        StoppedRelay { dir, db_path }
     }
 
     /// Stop this relay COMPLETELY, then start a new one over the same file.
@@ -276,152 +307,22 @@ impl Relay {
             .expect("the relay answers");
         axum::http::StatusCode::from_u16(response.status().as_u16()).expect("a valid status")
     }
+}
 
-    /// Two of Alice's calls (one inside `sess-1`), one of Bob's inside the same
-    /// session, one unattributed call, and one system lifecycle row.
-    pub async fn seed_cross_user_fixture(&self) {
-        let client = self.client();
-        let fixture: [(&str, Option<i64>, Option<&str>); 4] = [
-            ("a1111111-1111-4111-8111-111111111111", Some(ALICE), None),
-            (
-                "a2222222-2222-4222-8222-222222222222",
-                Some(ALICE),
-                Some("sess-1"),
-            ),
-            (
-                "b1111111-1111-4111-8111-111111111111",
-                Some(BOB),
-                Some("sess-1"),
-            ),
-            ("c1111111-1111-4111-8111-111111111111", None, None),
-        ];
-        for (index, (event_id, actor_id, session_id)) in fixture.into_iter().enumerate() {
-            client
-                .register_start(&Self::start_body(event_id))
-                .await
-                .expect("the start is acknowledged");
-            let mut completion = Self::completion_body(event_id, actor_id);
-            // Distinct completion instants so pagination has a total order.
-            let completed_at = anchor() + Duration::seconds(index as i64);
-            completion.completed_at = format_instant(completed_at);
-            completion.duration_ms =
-                u64::try_from((completed_at - anchor()).num_milliseconds()).unwrap_or(0);
-            if let Some(session_id) = session_id {
-                completion.session_id = Some(session_id.to_string());
-                completion.correlation.session_id = Some(session_id.to_string());
-            }
-            client
-                .complete(&completion)
-                .await
-                .expect("the completion is acknowledged");
-        }
-        client
-            .submit_lifecycle(&Self::lifecycle_body(
-                "d1111111-1111-4111-8111-111111111111",
-                "sess-1",
-            ))
-            .await
-            .expect("the lifecycle event is acknowledged");
-    }
+/// A relay that has been stopped, holding only its durable state.
+///
+/// It deliberately exposes nothing but [`StoppedRelay::resume`]: while a relay is
+/// down there is no socket to talk to, and a handle that pretended otherwise
+/// would let a test assert against a process that does not exist.
+pub struct StoppedRelay {
+    dir: Arc<TempDir>,
+    db_path: PathBuf,
+}
 
-    /// A start body for `event_id`.
-    pub fn start_body(event_id: &str) -> RequestStartV1 {
-        RequestStartV1 {
-            schema_version: PROTOCOL_SCHEMA_VERSION,
-            event_id: event_id.to_string(),
-            request_id: format!("req-{event_id}"),
-            started_at: format_instant(anchor()),
-            method: "GET".to_string(),
-            route_template: "/api/v1/overview".to_string(),
-            operation_id: "canvas_overview".to_string(),
-            service_version: "0.2.3".to_string(),
-            deployment_environment: "test".to_string(),
-            completion_deadline_at: format_instant(anchor() + Duration::seconds(60)),
-        }
-    }
-
-    /// The terminal body matching [`Relay::start_body`].
-    pub fn completion_body(event_id: &str, actor_id: Option<i64>) -> RequestCompletionV1 {
-        let start = Self::start_body(event_id);
-        RequestCompletionV1 {
-            schema_version: PROTOCOL_SCHEMA_VERSION,
-            event_id: start.event_id.clone(),
-            request_id: start.request_id.clone(),
-            started_at: start.started_at.clone(),
-            completed_at: format_instant(anchor()),
-            method: start.method.clone(),
-            route_template: start.route_template.clone(),
-            operation_id: start.operation_id.clone(),
-            arguments: serde_json::Map::new(),
-            arguments_parse_status: "parsed".to_string(),
-            actor_id,
-            actor: match actor_id {
-                Some(id) => ActorV1 {
-                    kind: "github_user".to_string(),
-                    id: Some(id),
-                    login: Some(format!("user-{id}")),
-                    authentication: "bearer".to_string(),
-                },
-                None => ActorV1 {
-                    kind: "anonymous".to_string(),
-                    id: None,
-                    login: None,
-                    authentication: "none".to_string(),
-                },
-            },
-            principal: PrincipalV1 {
-                kind: "github_user_token".to_string(),
-                id: None,
-            },
-            status_code: Some(200),
-            outcome: "success".to_string(),
-            error_code: None,
-            duration_ms: 0,
-            session_id: None,
-            correlation: CorrelationV1::default(),
-            service_version: "0.2.3".to_string(),
-            deployment_environment: "test".to_string(),
-        }
-    }
-
-    /// A system lifecycle transition for `session_id`.
-    pub fn lifecycle_body(event_id: &str, session_id: &str) -> LifecycleEventV1 {
-        LifecycleEventV1 {
-            schema_version: PROTOCOL_SCHEMA_VERSION,
-            event_id: event_id.to_string(),
-            occurred_at: format_instant(anchor()),
-            lifecycle_action: "created".to_string(),
-            actor: ActorV1 {
-                kind: "system".to_string(),
-                id: None,
-                login: None,
-                authentication: "internal".to_string(),
-            },
-            principal: PrincipalV1 {
-                kind: "reconciler".to_string(),
-                id: Some("reconciler".to_string()),
-            },
-            session_id: session_id.to_string(),
-            backend: "opensandbox".to_string(),
-            runtime_id: Some("sbx-1".to_string()),
-            runtime_created_at: Some(format_instant(anchor())),
-            incarnation_hint: None,
-            creator_id: Some(ALICE),
-            creator_login: Some("alice".to_string()),
-            trigger_author_id: Some(ALICE),
-            trigger_author_login: Some("alice".to_string()),
-            correlation: CorrelationV1 {
-                session_id: Some(session_id.to_string()),
-                repo_full_name: Some("acme/site".to_string()),
-                installation_id: Some(4242),
-                trigger_issue: Some(7),
-                webhook_delivery_id: None,
-                request_id: None,
-            },
-            reason_code: None,
-            service_version: "0.2.3".to_string(),
-            deployment_environment: "test".to_string(),
-        }
+impl StoppedRelay {
+    /// Start a fresh relay process over the same database file.
+    pub async fn resume(self) -> Relay {
+        Relay::serve(self.dir, self.db_path).await
     }
 }
 

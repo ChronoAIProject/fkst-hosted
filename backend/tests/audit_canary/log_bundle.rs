@@ -64,6 +64,16 @@ fn bundle() -> Vec<u8> {
     encoder.finish().expect("finish gzip")
 }
 
+/// Insert canary userinfo into an `http://host:port` URL.
+fn with_userinfo(uri: &str) -> String {
+    match uri.split_once("://") {
+        Some((scheme, rest)) => {
+            format!("{scheme}://canary-url-userinfo:canary-url-query@{rest}")
+        }
+        None => uri.to_string(),
+    }
+}
+
 /// A chrono-storage mock that mints a token and serves the bundle at the
 /// session's `latest` object key.
 pub async fn storage() -> (Arc<ChronoStorageClient>, MockServer) {
@@ -82,12 +92,22 @@ pub async fn storage() -> (Arc<ChronoStorageClient>, MockServer) {
         .respond_with(ResponseTemplate::new(200).set_body_bytes(bundle()))
         .mount(&server)
         .await;
+    // The token URL carries USERINFO and a QUERY value, both canaries. A backend
+    // URL is one of the places a credential hides in plain sight: it is a plain
+    // `String` in configuration, it is logged by well-meaning diagnostics, and
+    // `reqwest` turns the userinfo into an `Authorization` header without anyone
+    // naming it a secret. The mock matches on the path alone, so both survive the
+    // round trip without changing what the endpoint does.
+    let token_url = format!(
+        "{}/oauth/token?probe=canary-url-query",
+        with_userinfo(&server.uri())
+    );
     let config = ChronoStorageConfig {
         base_url: server.uri(),
         bucket: "logs".to_string(),
-        nyxid_token_url: format!("{}/oauth/token", server.uri()),
+        nyxid_token_url: token_url,
         nyxid_client_id: "sa-client".to_string(),
-        nyxid_client_secret: SecretString::from("sa-secret".to_string()),
+        nyxid_client_secret: SecretString::from("canary-storage-client-secret".to_string()),
     };
     (
         Arc::new(ChronoStorageClient::new(reqwest::Client::new(), config)),
