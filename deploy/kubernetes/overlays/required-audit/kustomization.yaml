@@ -40,9 +40,18 @@ patches:
       - op: replace
         path: /data/FKST_AUDIT_DELIVERY_MODE
         value: required
-      # The read side. The numeric project id is public; its Query-Read-only key
-      # is a secret and arrives through the control-plane record. `0` is a
-      # placeholder every environment overlay replaces with its real project id.
+      # The read side, which needs BOTH halves. The host is the same variable
+      # capture uses and is easy to forget here, because this control plane does
+      # not capture — the relay does. Without it the activity API is silently
+      # disabled and `/operations` answers 503 forever, so the control plane now
+      # refuses to boot on a project id + query key with no host. Same `.invalid`
+      # placeholder as the relay's, for the same reason.
+      - op: add
+        path: /data/FKST_POSTHOG_HOST
+        value: https://posthog.example.invalid
+      # The numeric project id is public; its Query-Read-only key is a secret and
+      # arrives through the control-plane record. `0` is a placeholder every
+      # environment overlay replaces with its real project id.
       - op: add
         path: /data/FKST_POSTHOG_PROJECT_ID
         value: "0"

@@ -32,6 +32,7 @@ Three rules hold everywhere below:
 | `FKSTAuditIngressUnavailable` | critical | [audit ingress unavailable](#audit-ingress-unavailable) |
 | `FKSTAuditRelayNotReady` | critical | [relay or PVC outage](#relay-or-pvc-outage) |
 | `FKSTAuditDeadLetters` | critical | [replay and dead-letter remediation](#replay-and-dead-letter-remediation) |
+| `FKSTAuditRelayCapacityPressure` | warning / critical | [disk pressure and emergency purge](#disk-pressure-and-emergency-purge) |
 | `FKSTAuditRelayDiskPressure` | warning / critical | [disk pressure and emergency purge](#disk-pressure-and-emergency-purge) |
 | `FKSTAuditBacklogGrowing` | warning | [PostHog outage](#posthog-outage) |
 | `FKSTAuditPostHogUnverified` | warning | [PostHog outage](#posthog-outage) |
@@ -62,12 +63,31 @@ Add `FKST_AUDIT_RELAY_WRITE_TOKEN`, `FKST_AUDIT_RELAY_READ_TOKEN`, and
 `FKST_POSTHOG_QUERY_API_KEY` — the same three values — to the existing
 `fkst-control-plane` record. Do **not** add `FKST_POSTHOG_PROJECT_TOKEN` there.
 
-**2. Set the non-secret configuration.** In the environment overlay: the relay's
-`FKST_POSTHOG_HOST`, `FKST_POSTHOG_PROJECT_ID`, and
-`FKST_DEPLOYMENT_ENVIRONMENT`; the control plane's `FKST_POSTHOG_PROJECT_ID`;
-the PVC's storage class. Leave `FKST_AUDIT_DELIVERY_MODE` at `disabled` for now.
+**2. Set the non-secret configuration.** In the environment overlay, in **both**
+ConfigMaps:
 
-**3. Render, validate, then apply the relay.**
+| ConfigMap | Keys |
+|---|---|
+| `fkst-audit-relay-config` | `FKST_POSTHOG_HOST`, `FKST_POSTHOG_PROJECT_ID`, `FKST_DEPLOYMENT_ENVIRONMENT` |
+| `fkst-control-plane-config` | `FKST_POSTHOG_HOST`, `FKST_POSTHOG_PROJECT_ID`, `FKST_DEPLOYMENT_ENVIRONMENT` |
+
+plus the PVC's storage class. Leave `FKST_AUDIT_DELIVERY_MODE` at `disabled` for
+now.
+
+**The control plane's `FKST_POSTHOG_HOST` is the one people leave off**, because
+this control plane does not capture — the relay does. But the activity query
+reads the *same* host, so without it `/operations` is permanently unconfigured
+and answers `503`. The control plane refuses to boot on a project id plus a
+query key with no host, so a missed host is a crash-loop naming the variable
+rather than a silently dead read path. `overlays/required-audit/` shows the
+whole set. Leave `FKST_POSTHOG_ENABLED` false: with the relay capturing, a
+control plane that also captured would be a second writer into the same project,
+and that combination is refused at startup too.
+
+**3. Render, validate, then apply the relay.** The validator contacts no cluster
+— it renders, diffs, and lints local files — so `--context` is optional and the
+whole check runs on a laptop or a CI runner with no kubeconfig, before anything
+reaches a cluster.
 
 ```bash
 deploy/kubernetes/validate-manifests.sh --context "$FKST_CONTEXT"
@@ -80,11 +100,28 @@ kubectl --context "$FKST_CONTEXT" --namespace chronoai-fkst rollout status \
 five `no` least-privilege answers, four credential key names present and none in
 the ConfigMap, a `Bound` claim with an explicit class and capacity, one
 `Recreate` replica, agreeing grace values, durable ingress ready, the frontend
-blocked, and bounded metrics with no identity token.
+resolving the relay and being refused at the port, and eight bounded relay metric
+families — including a non-zero `fkst_audit_relay_max_records`, without which the
+headroom alert cannot evaluate — with no identity token.
 
 ```bash
 deploy/kubernetes/verify-audit-relay.sh --context "$FKST_CONTEXT"
 ```
+
+**In a disposable cluster, add the two drills.** They mutate the relay
+Deployment and briefly stop durable ingress, so each repeats the namespace as
+confirmation, and neither belongs on a deployment serving required-mode traffic:
+
+```bash
+deploy/kubernetes/verify-audit-relay.sh --context "$FKST_CONTEXT" \
+  --restart-check chronoai-fkst --outage-drill chronoai-fkst
+```
+
+`--restart-check` proves the PVC survives a roll. `--outage-drill` scales the
+relay to zero and back, and asserts the three behavioural claims a healthy
+cluster cannot show you: that live sandbox inventory keeps publishing while the
+relay is gone, that the outage drains without losing a record or dead-lettering
+one, and that a PostHog it cannot reach never takes durable ingress down.
 
 **5. Verify capture, query, and inventory separately.** They fail for different
 reasons and must be proved one at a time.
@@ -95,7 +132,13 @@ reasons and must be proved one at a time.
   increases. If it stays zero while capture succeeds, the query key or project
   id is wrong — capture and query use different credentials.
 - *Inventory:* `GET /api/v1/operations/sandboxes` answers even with the relay
-  scaled to zero. That independence is a requirement, not an accident.
+  scaled to zero. That independence is a requirement, not an accident, and
+  `--outage-drill` above is what checks it rather than asserting it.
+- *Activity:* `GET /api/v1/operations/activity` must not answer
+  `503 audit_query_not_configured`. If it does, the control plane is missing one
+  of `FKST_POSTHOG_HOST` / `FKST_POSTHOG_PROJECT_ID` /
+  `FKST_POSTHOG_QUERY_API_KEY` — and a missing host would have crash-looped the
+  Pod, so check the other two first.
 
 **6. Trace one harmless request end to end.** Issue an authenticated request
 with a request id you choose, then follow it through all three layers:
@@ -252,9 +295,10 @@ Alerts: `FKSTAuditBacklogGrowing`, `FKSTAuditPostHogUnverified`.
    to verified. Confirm no duplicate logical events — capture is deduplicated on
    a deterministic uuid, so a drained retry storm must not double any event.
 
-## Relay or PVC outage or corruption
+## Relay or PVC outage
 
-Alert: `FKSTAuditRelayNotReady`.
+Alert: `FKSTAuditRelayNotReady`. Covers an unreachable relay, an unbound or
+failed claim, and a corrupted database or migration.
 
 **Expected product behaviour first:** in `required` mode, product traffic fails
 closed with `503`. That is the design — the deployment refuses to serve a request
@@ -308,16 +352,29 @@ carry no verified actor.
 
 ## Disk pressure and emergency purge
 
-Alert: `FKSTAuditRelayDiskPressure` (warning at 70% of the claim, critical at
-85%).
+Alerts: `FKSTAuditRelayCapacityPressure` (70% / 85% of
+`FKST_AUDIT_RELAY_MAX_RECORDS`) and `FKSTAuditRelayDiskPressure` (70% / 85% of
+the claim).
+
+**Read which one fired first — they are different ceilings.** The record guard
+refuses ingress at a row count; the volume refuses writes at a byte count. At the
+worksheet's assumed ~1 KiB row the guard binds first, at roughly a third of the
+claim, so `FKSTAuditRelayCapacityPressure` is normally the alert that arrives.
+`FKSTAuditRelayDiskPressure` arriving first means rows are fatter than the
+worksheet assumes — recheck the average event size before resizing anything, or
+the new numbers will be wrong the same way.
+
+Reaching either ceiling is not a degradation: at the record guard ingress is
+refused, readiness drops, and required mode fails every product request closed.
 
 **Preferred remedies, in order:**
 
 1. Fix delivery. Pressure almost always means a backlog that is not draining —
    go to [PostHog outage](#posthog-outage).
 2. Grow the volume, if the storage class allows expansion. Recompute
-   `FKST_AUDIT_RELAY_MAX_RECORDS` and the two alert thresholds in the same
-   change.
+   `FKST_AUDIT_RELAY_MAX_RECORDS` and the byte thresholds in the same change;
+   the record thresholds are ratios against the published guard and follow it
+   automatically.
 3. Shorten `FKST_AUDIT_RELAY_VERIFIED_RETENTION_DAYS` — but see
    [retention change](#backup-restore-and-retention-change): it also shortens the
    deduplication and backlog-merge window.

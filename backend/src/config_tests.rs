@@ -820,3 +820,56 @@ fn an_invalid_audit_block_fails_closed_through_config_from_vars() {
         .expect_err("a zero queue must fail closed");
     assert!(err.to_string().contains("FKST_POSTHOG_QUEUE_CAPACITY"));
 }
+
+#[test]
+fn direct_capture_and_relay_delivery_are_mutually_exclusive() {
+    // Both on: two writers into one project, and a control plane that must hold
+    // the capture token it is not supposed to have. Refused, naming both knobs.
+    for mode in ["best_effort", "required"] {
+        let err = Config::from_vars(vars(&[
+            ("FKST_POSTHOG_ENABLED", "true"),
+            ("FKST_POSTHOG_HOST", "https://posthog.example"),
+            ("FKST_POSTHOG_PROJECT_TOKEN", "phc_token"),
+            ("FKST_AUDIT_DELIVERY_MODE", mode),
+            (
+                "FKST_AUDIT_RELAY_URL",
+                "http://fkst-audit-relay.chronoai-fkst.svc.cluster.local",
+            ),
+            ("FKST_AUDIT_RELAY_WRITE_TOKEN", "relay-write"),
+            ("FKST_AUDIT_INCOMPLETE_GRACE_SECS", "420"),
+        ]))
+        .expect_err("two capture writers must fail closed");
+        let message = err.to_string();
+        assert!(
+            message.contains("FKST_POSTHOG_ENABLED"),
+            "{mode}: {message}"
+        );
+        assert!(
+            message.contains("FKST_AUDIT_DELIVERY_MODE"),
+            "{mode}: {message}"
+        );
+    }
+
+    // Either one alone is the supported shape. The relay captures...
+    let relayed = Config::from_vars(vars(&[
+        ("FKST_AUDIT_DELIVERY_MODE", "required"),
+        (
+            "FKST_AUDIT_RELAY_URL",
+            "http://fkst-audit-relay.chronoai-fkst.svc.cluster.local",
+        ),
+        ("FKST_AUDIT_RELAY_WRITE_TOKEN", "relay-write"),
+        ("FKST_AUDIT_INCOMPLETE_GRACE_SECS", "420"),
+    ]))
+    .expect("relay-only delivery loads");
+    assert!(!relayed.audit.enabled);
+
+    // ...or the control plane does, with no relay in the picture.
+    let direct = Config::from_vars(vars(&[
+        ("FKST_POSTHOG_ENABLED", "true"),
+        ("FKST_POSTHOG_HOST", "https://posthog.example"),
+        ("FKST_POSTHOG_PROJECT_TOKEN", "phc_token"),
+    ]))
+    .expect("direct-capture delivery loads");
+    assert!(direct.audit.enabled);
+    assert!(!direct.audit_delivery.mode.uses_relay());
+}

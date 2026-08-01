@@ -26,6 +26,20 @@ fn every_label_tuple_is_rendered_even_when_zero() {
 }
 
 #[test]
+fn the_capacity_guard_is_published_as_the_headroom_denominator() {
+    let metrics = RelayMetrics::new();
+    // Before the worker sets it the series still exists, so an alert expression
+    // referencing it is never a parse-time surprise — it simply cannot fire.
+    assert!(metrics
+        .render(true)
+        .contains("fkst_audit_relay_max_records 0"));
+    metrics.set_max_records(5_000_000);
+    assert!(metrics
+        .render(true)
+        .contains("fkst_audit_relay_max_records 5000000"));
+}
+
+#[test]
 fn counters_increment_under_their_own_labels() {
     let metrics = RelayMetrics::new();
     metrics.record_ingress(IngressKind::RequestStart, IngressResult::Created);

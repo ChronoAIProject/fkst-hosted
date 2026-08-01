@@ -33,7 +33,10 @@
 # Conversely a deployment that has NOT adopted the relay — direct capture, the
 # `FKST_POSTHOG_ENABLED=true` sink with `FKST_AUDIT_DELIVERY_MODE=disabled` —
 # keeps the project token here and omits the two relay tokens. The two shapes are
-# mutually exclusive; running both means two writers into one project.
+# mutually exclusive; running both means two writers into one project. That is
+# ENFORCED, not merely documented: the control plane refuses to start on
+# `FKST_POSTHOG_ENABLED=true` together with a relay delivery mode, and
+# `validate-audit-relay.rb` refuses the composed render.
 #
 # The query key is a Query-Read-only credential and is never sent to a browser,
 # never logged, and never rendered in `Debug` output. See AUDIT-RUNBOOK.md for

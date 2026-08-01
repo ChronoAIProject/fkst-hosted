@@ -90,6 +90,10 @@ impl RelayWorker {
                 None
             }
         };
+        // Published before the first sweep so the headroom alert has a
+        // denominator from process start, including on a relay that is failing
+        // to make progress.
+        state.metrics.set_max_records(config.max_records);
         Ok(Self {
             db: state.db.clone(),
             metrics: state.metrics.clone(),

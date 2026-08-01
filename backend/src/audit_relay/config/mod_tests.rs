@@ -133,6 +133,43 @@ fn capture_and_verification_are_configured_independently() {
 }
 
 #[test]
+fn the_delivery_host_is_judged_by_the_shared_rule() {
+    // Plaintext ships the project capture token in the clear, so it needs the
+    // same explicit test/local opt-in the control plane demands.
+    let error = RelayConfig::from_vars(&vars(&[
+        ("FKST_POSTHOG_HOST", "http://posthog.internal"),
+        ("FKST_DEPLOYMENT_ENVIRONMENT", "production"),
+    ]))
+    .expect_err("a plaintext production host must fail closed");
+    assert!(error.to_string().contains("https"), "{error}");
+
+    let local = RelayConfig::from_vars(&vars(&[
+        ("FKST_POSTHOG_HOST", "http://127.0.0.1:8000/"),
+        ("FKST_DEPLOYMENT_ENVIRONMENT", "local"),
+    ]))
+    .expect("an explicitly local deployment may use plaintext");
+    assert_eq!(local.posthog_host.as_deref(), Some("http://127.0.0.1:8000"));
+
+    // Userinfo would put a credential in the relay ConfigMap, which is the one
+    // object in this deployment guaranteed to hold none.
+    let error = RelayConfig::from_vars(&vars(&[(
+        "FKST_POSTHOG_HOST",
+        "https://svc:phc_canary_do_not_leak@posthog.example",
+    )]))
+    .expect_err("an embedded credential must fail closed");
+    assert!(error.to_string().contains("userinfo"), "{error}");
+    assert!(
+        !format!("{error:?}").contains("phc_canary_do_not_leak"),
+        "the rejection leaked the credential"
+    );
+
+    // No host at all stays the supported outbox-only shape.
+    let outbox_only = RelayConfig::from_vars(&vars(&[])).expect("an unset host is not an error");
+    assert_eq!(outbox_only.posthog_host, None);
+    assert!(!outbox_only.capture_configured());
+}
+
+#[test]
 fn debug_output_redacts_every_credential() {
     let config = RelayConfig::from_vars(&vars(&[
         ("FKST_POSTHOG_PROJECT_TOKEN", "phc_write_canary"),

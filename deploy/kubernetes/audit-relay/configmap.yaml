@@ -51,6 +51,14 @@ data:
   # operator sees them. That is the correct NON-PRODUCTION shape, and it means
   # applying this directory alone can never start shipping a deployment's audit
   # trail to a host nobody reviewed. `overlays/required-audit/` sets both.
+  # A configured host is always about to be dialled — the relay has no "staged"
+  # state — so it goes through the SAME rule the control plane applies: a
+  # parseable http(s) URL with a host, never embedded userinfo, and https unless
+  # FKST_DEPLOYMENT_ENVIRONMENT below explicitly names a test/local deployment.
+  # The relay is the process that carries the project capture token on every
+  # batch, so a plaintext host here would ship that credential in the clear and a
+  # `https://user:token@…` host would park it in THIS object. Both are refused at
+  # startup.
   # FKST_POSTHOG_HOST: <https base url of the self-hosted PostHog>
   # FKST_POSTHOG_PROJECT_ID: <numeric project id from the PostHog project URL>
   # Stamped on every event, and the switch that permits a plaintext http:// host

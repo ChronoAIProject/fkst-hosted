@@ -91,8 +91,15 @@ holds it is the access boundary.** A relay deployment puts it ONLY in
 `fkst-audit-relay` — capture is the relay's job, so a control-plane compromise
 can read history but never fabricate it. A deployment capturing directly
 (`FKST_POSTHOG_ENABLED=true`, `FKST_AUDIT_DELIVERY_MODE=disabled`) keeps it in
-the control-plane record instead. The two shapes are mutually exclusive, and a
-deployment using neither omits the key entirely.
+the control-plane record instead. The two shapes are mutually exclusive — the
+control plane refuses to start with both selected, and `validate-audit-relay.rb`
+refuses a render that selects both — and a deployment using neither omits the key
+entirely.
+
+`FKST_POSTHOG_HOST` is **not** a capture-only value. The activity query reads the
+same host, so a control plane that captures through the relay still needs it, in
+its own ConfigMap, or `/operations` is permanently unconfigured. A project id and
+a query key with no host is refused at startup for exactly that reason.
 
 `FKST_ENV_STORE_NAMESPACE` selects the namespace-independent profile store. It
 persists each profile as one AES-256-GCM encrypted Secret whose data keys are
@@ -288,10 +295,18 @@ credential in any URL, a `minAvailable: 1` PDB, and a NetworkPolicy admitting
 only the control plane and a labelled scraper.
 
 Read [AUDIT-TRACE.md](AUDIT-TRACE.md) before provisioning — it carries the
-PostHog prerequisites checklist, the capacity worksheet the 20Gi claim and the
-disk-pressure thresholds come from, and the purge rules. Then follow
-[AUDIT-RUNBOOK.md](AUDIT-RUNBOOK.md) for provisioning, the cross-user
-authorization smoke test, and the staged rollout to `required`.
+PostHog prerequisites checklist (including the one HogQL capability probe that
+stands in for a version floor), the capacity worksheet the 20Gi claim, the
+container's requests/limits, and both pressure ladders come from, and the purge
+rules. Then follow [AUDIT-RUNBOOK.md](AUDIT-RUNBOOK.md) for provisioning, the
+cross-user authorization smoke test, and the staged rollout to `required`.
+
+`verify-audit-relay.sh` proves the live half. Its default run is read-only;
+`--restart-check NAMESPACE` and `--outage-drill NAMESPACE` additionally roll and
+then scale the relay to prove PVC persistence, live-inventory independence, and
+outage drain, so both belong in a disposable cluster only.
+`tests/audit-relay-verify-test.sh` drives the verifier against a fake cluster and
+asserts each of its decisions, pass and fail.
 
 ## Disposable recovery drill
 
@@ -343,11 +358,13 @@ than copy their objects. It must patch, at minimum:
 - provider-specific Workload Identity annotations;
 - runtime class, placement, resources, and replica policy appropriate to the
   environment;
-- when the activity trace is adopted: `FKST_AUDIT_DELIVERY_MODE`, the relay's
-  PostHog host and numeric project id, `FKST_DEPLOYMENT_ENVIRONMENT`, and the
-  audit claim's storage class — see `overlays/required-audit/` for the exact
-  patch set and [AUDIT-RUNBOOK.md](AUDIT-RUNBOOK.md#staged-rollout) for the
-  order in which to apply it.
+- when the activity trace is adopted: `FKST_AUDIT_DELIVERY_MODE`, **both**
+  ConfigMaps' `FKST_POSTHOG_HOST`, `FKST_POSTHOG_PROJECT_ID` and
+  `FKST_DEPLOYMENT_ENVIRONMENT` (the control plane needs the host to READ even
+  though the relay is what captures), and the audit claim's storage class — see
+  `overlays/required-audit/` for the exact patch set and
+  [AUDIT-RUNBOOK.md](AUDIT-RUNBOOK.md#staged-rollout) for the order in which to
+  apply it.
 
 Any overlay changing leader timings must preserve
 `retry period < renew deadline < lease duration`. The holder cancels its worker

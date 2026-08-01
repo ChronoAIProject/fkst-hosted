@@ -83,14 +83,23 @@ data:
   # on everywhere.
   #
   # The project (write) token is a SECRET: it belongs in the
-  # fkst-control-plane-secret record as FKST_POSTHOG_PROJECT_TOKEN, never here.
-  # The host is required when enabled, must be https outside an explicitly
-  # test/local FKST_DEPLOYMENT_ENVIRONMENT, and may never embed userinfo
-  # credentials — that is refused at startup whether the feature is on or off.
+  # fkst-control-plane-secret record as FKST_POSTHOG_PROJECT_TOKEN, never here —
+  # and only when this direct sink is the capture path at all.
   #
   # The numeric knobs are validated even while disabled, so a typo fails the
   # deploy that introduces it rather than the one that flips the feature on.
+  #
+  # ENABLED is mutually exclusive with a relay delivery mode below: with the
+  # relay capturing, a control plane that also captured would be a SECOND writer
+  # into the same project and would need the project token it is deliberately
+  # denied. Setting both is refused at startup.
   FKST_POSTHOG_ENABLED: "false"
+  # The host is shared by capture AND by the activity query, so a control plane
+  # that captures through the relay still needs it set to READ (see the activity
+  # query block below). Required when ENABLED, must be https outside an
+  # explicitly test/local FKST_DEPLOYMENT_ENVIRONMENT, and may never embed
+  # userinfo credentials — refused at startup whether the feature is on or off,
+  # in this process and in the relay, by the same shared rule.
   # FKST_POSTHOG_HOST: <https base url of the self-hosted PostHog>
   # FKST_POSTHOG_CAPTURE_TIMEOUT_MS: "2000"
   # FKST_POSTHOG_BATCH_SIZE: "100"
@@ -150,11 +159,18 @@ data:
   # fkst-control-plane record (FKST_AUDIT_RELAY_WRITE_TOKEN /
   # FKST_AUDIT_RELAY_READ_TOKEN). They never appear here.
   # ---- activity query (GET /api/v1/operations/activity) ----
-  # The read side of the trace. The numeric project id is NOT a secret (it is in
-  # every PostHog project URL); the Query-Read-only key that goes with it is, and
-  # is delivered as FKST_POSTHOG_QUERY_API_KEY in the control-plane secret
-  # record. Without both, the activity API reports itself unconfigured instead of
-  # returning an apparently complete empty result.
+  # The read side of the trace. It needs THREE values, and the easiest one to
+  # forget is FKST_POSTHOG_HOST above: it is shared with capture, so a control
+  # plane that captures through the relay (and therefore leaves
+  # FKST_POSTHOG_ENABLED false) still has to be told which host to READ. Setting
+  # a project id and a query key without it is refused at startup rather than
+  # left as a permanently 503-ing activity API.
+  #
+  # The numeric project id is NOT a secret (it is in every PostHog project URL);
+  # the Query-Read-only key that goes with it is, and is delivered as
+  # FKST_POSTHOG_QUERY_API_KEY in the control-plane secret record. Without both,
+  # the activity API reports itself unconfigured instead of returning an
+  # apparently complete empty result.
   # FKST_POSTHOG_PROJECT_ID: <numeric project id from the PostHog project URL>
   # FKST_POSTHOG_QUERY_TIMEOUT_MS: "5000"
   # FKST_POSTHOG_ACTIVITY_DEFAULT_LIMIT: "100"

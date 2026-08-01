@@ -28,6 +28,25 @@
 # Every number below comes from the capacity worksheet in AUDIT-TRACE.md.
 # Changing the PVC size, the retention windows, or the assumed request rate
 # means recomputing them in the same change.
+#
+# ## Two ceilings bind the outbox, and each needs its own ladder
+#
+# `FKST_AUDIT_RELAY_MAX_RECORDS` refuses ingress at a ROW count, and the PVC
+# refuses writes at a BYTE count. Whichever is reached first is the one that
+# fails required-mode traffic closed, and which that is depends on the average
+# row size the deployment actually produces:
+#
+#   at the worksheet's ~1 KiB rows, 5,000,000 rows is ~7 GiB — the record guard
+#   binds first, at about a third of the 20Gi claim;
+#   at the worksheet's ~4 KiB p99 rows, the claim binds first, long before the
+#   row count gets near the guard.
+#
+# So `FKSTAuditRelayCapacityPressure` watches records against the configured
+# guard (published as `fkst_audit_relay_max_records`, so the ratio follows an
+# operator who resizes it) and `FKSTAuditRelayDiskPressure` watches bytes against
+# the claim. A byte ladder alone would have given no warning at all in the sized
+# configuration, because the relay would already be refusing ingress at half the
+# warning threshold.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -120,8 +139,38 @@ spec:
             summary: FKST audit requests are closing as incomplete
             description: More requests than expected ended with no terminal outcome in the last thirty minutes.
             runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/AUDIT-RUNBOOK.md#incomplete-records
-        # 70% of the 20Gi claim (15032385536 bytes). Warning: plan a retention
-        # or capacity change while there is still runway.
+        # 70% of the configured record guard. This is the ceiling that binds
+        # FIRST at the worksheet's assumed row size, and reaching it is not a
+        # degradation: ingress is refused outright and required mode fails every
+        # product request closed. Warning early enough to grow the claim, raise
+        # the guard, or drain a backlog.
+        - alert: FKSTAuditRelayCapacityPressure
+          expr: sum(fkst_audit_relay_records{namespace="chronoai-fkst",service="fkst-audit-relay-metrics"}) / max(fkst_audit_relay_max_records{namespace="chronoai-fkst",service="fkst-audit-relay-metrics"}) > 0.7
+          for: 15m
+          labels:
+            component: audit-relay
+            severity: warning
+          annotations:
+            summary: FKST audit outbox is approaching its record capacity guard
+            description: Stored records passed the warning fraction of the configured capacity guard, past which ingress is refused.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/AUDIT-RUNBOOK.md#disk-pressure-and-emergency-purge
+        # 85% of the same guard. Critical: at 100% the relay stops accepting
+        # records and required-mode traffic fails closed, so this must page
+        # before FKSTAuditRelayNotReady does.
+        - alert: FKSTAuditRelayCapacityPressure
+          expr: sum(fkst_audit_relay_records{namespace="chronoai-fkst",service="fkst-audit-relay-metrics"}) / max(fkst_audit_relay_max_records{namespace="chronoai-fkst",service="fkst-audit-relay-metrics"}) > 0.85
+          for: 5m
+          labels:
+            component: audit-relay
+            severity: critical
+          annotations:
+            summary: FKST audit outbox is close to refusing ingress
+            description: Stored records passed the critical fraction of the configured capacity guard; at the guard the relay stops accepting records.
+            runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/AUDIT-RUNBOOK.md#disk-pressure-and-emergency-purge
+        # 70% of the 20Gi claim (15032385536 bytes). The BYTE ceiling, which
+        # binds first only when rows are fatter than the worksheet assumes.
+        # Warning: plan a retention or capacity change while there is still
+        # runway.
         - alert: FKSTAuditRelayDiskPressure
           expr: max(fkst_audit_relay_db_bytes{namespace="chronoai-fkst",service="fkst-audit-relay-metrics"}) > 15032385536
           for: 15m
@@ -132,9 +181,8 @@ spec:
             summary: FKST audit outbox is consuming most of its volume
             description: The outbox database has passed the warning fraction of the provisioned claim.
             runbook_url: https://github.com/ChronoAIProject/fkst-hosted/blob/main/deploy/kubernetes/AUDIT-RUNBOOK.md#disk-pressure-and-emergency-purge
-        # 85% of the 20Gi claim (18253611008 bytes). Critical: at the capacity
-        # guard the relay refuses ingress and required mode fails closed, so
-        # escalate BEFORE exhaustion rather than after.
+        # 85% of the 20Gi claim (18253611008 bytes). Critical: a full volume
+        # stops the writer, so escalate BEFORE exhaustion rather than after.
         - alert: FKSTAuditRelayDiskPressure
           expr: max(fkst_audit_relay_db_bytes{namespace="chronoai-fkst",service="fkst-audit-relay-metrics"}) > 18253611008
           for: 5m

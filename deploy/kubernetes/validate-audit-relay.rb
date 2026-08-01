@@ -93,6 +93,29 @@ abort "the relay ConfigMap must select a database path" if config_data["FKST_AUD
 relay_grace = config_data["FKST_AUDIT_INCOMPLETE_GRACE_SECS"].to_s
 abort "the relay ConfigMap must pin the shared incomplete grace" if relay_grace.empty?
 
+# The delivery host is a ConfigMap value, so a mistake in it is committed, and
+# the relay is the process that carries the project capture token on every
+# batch: `http://` ships that credential in cleartext and `https://user:token@…`
+# parks it in this very object. The relay refuses both at startup; this refuses
+# them at review time, where the fix is free. Rendering-time checks cannot know
+# FKST_DEPLOYMENT_ENVIRONMENT's runtime value, so plaintext is judged against
+# the environment the SAME ConfigMap declares.
+check_posthog_host = lambda do |data, label|
+  host = data["FKST_POSTHOG_HOST"].to_s
+  next if host.empty?
+  unless host.start_with?("http://", "https://")
+    abort "#{label} FKST_POSTHOG_HOST must be an http(s) URL"
+  end
+  authority = host.split("://", 2).fetch(1).split(%r{[/?#]}, 2).fetch(0)
+  abort "#{label} FKST_POSTHOG_HOST must not embed userinfo credentials" if authority.include?("@")
+  next unless host.start_with?("http://")
+  environment = data["FKST_DEPLOYMENT_ENVIRONMENT"].to_s.downcase
+  unless %w[test local].include?(environment)
+    abort "#{label} FKST_POSTHOG_HOST may only be plaintext in a test/local deployment"
+  end
+end
+check_posthog_host.call(config_data, "the relay ConfigMap's")
+
 external_secret = fetch.call(relay, "ExternalSecret", "fkst-audit-relay", "audit-relay")
 target = external_secret.dig("spec", "target") || {}
 unless target["creationPolicy"] == "Orphan" && target["deletionPolicy"] == "Retain"
@@ -260,6 +283,38 @@ unless required_data["FKST_AUDIT_INCOMPLETE_GRACE_SECS"].to_s == relay_grace
 end
 SECRET_VARS.each do |var|
   abort "#{var} must never be rendered into the control-plane ConfigMap" if required_data.key?(var)
+end
+
+# Two capture writers into one project. Asserted here as well as at startup
+# because an overlay that turns both on also legitimises putting
+# FKST_POSTHOG_PROJECT_TOKEN back into the control-plane record, which is the
+# credential boundary the whole relay exists to draw (epic `OPS-02`).
+if required_data["FKST_POSTHOG_ENABLED"].to_s == "true"
+  abort "FKST_POSTHOG_ENABLED must stay false where the relay captures; two writers, one project"
+end
+
+# The activity READ path needs the host as well as the project id, and this is
+# the composition where forgetting it is invisible: the control plane here does
+# not capture, so nothing else would want a host. Without it /operations answers
+# 503 forever.
+if required_data["FKST_POSTHOG_PROJECT_ID"].to_s.empty?
+  abort "the required-audit overlay must select a PostHog project id for the activity query"
+end
+if required_data["FKST_POSTHOG_HOST"].to_s.empty?
+  abort "the required-audit overlay must set FKST_POSTHOG_HOST for the control plane's activity query"
+end
+check_posthog_host.call(required_data, "the control-plane ConfigMap's")
+
+# The COMPOSED relay ConfigMap is where an environment overlay actually supplies
+# the delivery host, so it is judged again after the patch — the standalone relay
+# render legitimately carries no host at all.
+required_relay_data = fetch.call(required, "ConfigMap", "fkst-audit-relay-config", "required-audit")["data"] || {}
+if required_relay_data["FKST_POSTHOG_HOST"].to_s.empty?
+  abort "the required-audit overlay must give the relay a PostHog delivery host"
+end
+check_posthog_host.call(required_relay_data, "the composed relay ConfigMap's")
+SECRET_VARS.each do |var|
+  abort "#{var} must never be rendered into the composed relay ConfigMap" if required_relay_data.key?(var)
 end
 
 # The control plane stays stateless: no claim, no outbox mount, no relay volume.

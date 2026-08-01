@@ -783,6 +783,21 @@ impl Config {
             crate::router::api_subtree_timeout(&env),
             std::time::Duration::from_secs(http.request_timeout_secs),
         ))?;
+        // The two capture shapes are mutually exclusive, and until now that was
+        // only asserted in the deployment docs. Running both means two writers
+        // into one PostHog project — duplicated logical events whose dedup uuid
+        // only covers ONE of the writers — and, worse, it legitimises putting
+        // FKST_POSTHOG_PROJECT_TOKEN back into the control-plane record, which
+        // is the exact credential boundary the relay exists to draw (epic
+        // `OPS-02`). Fail closed naming both variables; the operator picks one.
+        if audit.enabled && audit_delivery.mode.uses_relay() {
+            return Err(AppError::Config(format!(
+                "FKST_POSTHOG_ENABLED=true and FKST_AUDIT_DELIVERY_MODE={} are mutually \
+                 exclusive: the relay is then the capture writer, so the control plane must \
+                 not also capture directly (and must not hold FKST_POSTHOG_PROJECT_TOKEN)",
+                audit_delivery.mode.as_str()
+            )));
+        }
 
         // Deployment-wide access policy (FKST_ACCESS_ALLOWED_USERS +
         // FKST_ACCESS_BLOCKED_USERS + FKST_GLOBAL_ADMINS + FKST_AUTH_MODEL).

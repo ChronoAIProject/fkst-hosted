@@ -14,7 +14,8 @@
 //!   that must surface at deploy time, not at the moment someone flips
 //!   `FKST_POSTHOG_ENABLED=true` in production (the same reasoning as
 //!   `FKST_POD_RATE_POOLS`/`FKST_POD_MODE` in [`crate::config`]).
-//! - **Host/token shape is validated only when enabled**, because the spec's
+//! - **Host/token shape is validated only when enabled** (through
+//!   [`super::host`], the one rule both deployables share), because the spec's
 //!   contract is "when enabled, host and project token are required": a deploy
 //!   that never talks to PostHog must not be blocked by a half-staged host value.
 //!   The ONE exception is embedded userinfo, which is rejected whether the
@@ -42,19 +43,10 @@ const POSTHOG_ENV_PREFIX: &str = "FKST_POSTHOG_";
 /// Bare `FKST_`, shared with the other bare passes; envy ignores the rest.
 const DEPLOYMENT_ENV_PREFIX: &str = "FKST_";
 
-/// The deployment environments in which a plaintext `http://` PostHog host is
-/// tolerated. Everywhere else the capture request carries the project token, so
-/// TLS is mandatory. Matched ASCII-case-insensitively after trimming.
-const PLAINTEXT_HOST_ENVIRONMENTS: [&str; 2] = ["test", "local"];
-
 /// Hard ceiling on `FKST_POSTHOG_MAX_RETRIES`. Worst-case delivery latency is
 /// `max_retries * retry_max_ms`; an unbounded value would let one sick batch
 /// monopolise the worker far past any shutdown deadline.
 const MAX_RETRIES_CEILING: u32 = 20;
-
-/// One message for both host paths (enabled and staged), so an operator sees the
-/// same instruction whichever check caught the credential.
-const USERINFO_REJECTED: &str = "FKST_POSTHOG_HOST must not embed userinfo credentials";
 
 /// Floor for `FKST_POSTHOG_MAX_EVENT_BYTES`. A cap below this could not hold even
 /// a minimal record's mandatory identifiers, so every event would be rejected as
@@ -311,12 +303,12 @@ impl AuditConfig {
                         .to_string(),
                 ));
             }
-            Some(normalize_host(&host, &environment)?)
+            Some(super::host::normalize(&host, &environment)?)
         } else {
             // Disabled: keep whatever was staged without judging its shape, so a
             // half-prepared rollout cannot fail an unrelated deploy — except for
             // an embedded credential, which is never acceptable at rest.
-            host.map(|h| stage_host(&h)).transpose()?
+            host.map(|h| super::host::stage(&h)).transpose()?
         };
 
         Ok(Self {
@@ -366,80 +358,6 @@ fn at_least(var: &str, value: u64, floor: u64) -> Result<(), AppError> {
         )));
     }
     Ok(())
-}
-
-/// Keep a staged (feature-off) `FKST_POSTHOG_HOST` without judging its shape,
-/// minus the one thing that is never acceptable: embedded userinfo.
-///
-/// The retained value is copied into `Debug` output and any config dump, so a
-/// credential parked here would leak exactly the way the enabled-path check
-/// exists to prevent — even though nothing ever dials it.
-fn stage_host(raw: &str) -> Result<String, AppError> {
-    let staged = raw.trim_end_matches('/').to_string();
-    if authority(&staged).contains('@') {
-        return Err(AppError::Config(USERINFO_REJECTED.to_string()));
-    }
-    Ok(staged)
-}
-
-/// The authority component of a host value: everything after `scheme://` and
-/// before the path. Deliberately textual rather than URL-parsed — a staged value
-/// that does not parse at all can still carry a credential, and that is exactly
-/// the case a parsed check would wave through.
-fn authority(host: &str) -> &str {
-    let after_scheme = host.split_once("://").map_or(host, |(_, rest)| rest);
-    let end = after_scheme
-        .find(['/', '?', '#'])
-        .unwrap_or(after_scheme.len());
-    &after_scheme[..end]
-}
-
-/// Normalize + validate `FKST_POSTHOG_HOST`: strip trailing slashes, require a
-/// parseable `http`/`https` URL with a host, forbid embedded userinfo, and
-/// require HTTPS outside a `test`/`local` deployment environment.
-fn normalize_host(raw: &str, environment: &str) -> Result<String, AppError> {
-    let trimmed = raw.trim_end_matches('/');
-    if trimmed.is_empty() {
-        return Err(AppError::Config(
-            "FKST_POSTHOG_HOST must not be blank when FKST_POSTHOG_ENABLED=true".to_string(),
-        ));
-    }
-    let url = reqwest::Url::parse(trimmed).map_err(|e| {
-        AppError::Config(format!(
-            "FKST_POSTHOG_HOST must be a valid URL when FKST_POSTHOG_ENABLED=true ({e})"
-        ))
-    })?;
-    if url.host_str().is_none() {
-        return Err(AppError::Config(
-            "FKST_POSTHOG_HOST must include a host when FKST_POSTHOG_ENABLED=true".to_string(),
-        ));
-    }
-    // A credential embedded in the URL would be copied into every reqwest error,
-    // proxy access log, and metric label derived from the host.
-    if !url.username().is_empty() || url.password().is_some() {
-        return Err(AppError::Config(USERINFO_REJECTED.to_string()));
-    }
-    let plaintext_allowed = PLAINTEXT_HOST_ENVIRONMENTS
-        .iter()
-        .any(|allowed| allowed.eq_ignore_ascii_case(environment));
-    match url.scheme() {
-        "https" => {}
-        "http" if plaintext_allowed => {}
-        "http" => {
-            return Err(AppError::Config(format!(
-                "FKST_POSTHOG_HOST must use https outside a {} deployment \
-                 (FKST_DEPLOYMENT_ENVIRONMENT={environment:?}); the project token \
-                 rides every capture request",
-                PLAINTEXT_HOST_ENVIRONMENTS.join("/")
-            )))
-        }
-        other => {
-            return Err(AppError::Config(format!(
-                "FKST_POSTHOG_HOST must use http(s) (got scheme {other:?})"
-            )))
-        }
-    }
-    Ok(trimmed.to_string())
 }
 
 #[cfg(test)]

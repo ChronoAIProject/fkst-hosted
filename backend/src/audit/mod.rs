@@ -47,6 +47,9 @@ use crate::runtime_identity::RuntimeBackendKind;
 pub mod arguments;
 pub mod config;
 pub mod event;
+/// The `FKST_POSTHOG_HOST` rule, shared with the `fkst-audit-relay` binary so
+/// the two processes can never disagree about whether a host is safe to dial.
+pub mod host;
 pub mod identity;
 pub mod lifecycle;
 pub mod lifecycle_validate;

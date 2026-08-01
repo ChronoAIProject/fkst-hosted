@@ -160,8 +160,8 @@ At-least-once with stable deduplication — never exactly-once:
 | `FKST_AUDIT_INCOMPLETE_GRACE_SECS` | `420` | **shared with the relay; must match** |
 | `FKST_AUDIT_RELAY_START_TIMEOUT_MS` | `1000` | pre-handler acknowledgement budget |
 | `FKST_AUDIT_RELAY_COMPLETION_TIMEOUT_MS` | `5000` | terminal commit budget |
-| `FKST_POSTHOG_ENABLED` | `false` | direct capture sink (off when the relay captures) |
-| `FKST_POSTHOG_HOST` | unset | HTTPS outside `test`/`local`; never userinfo |
+| `FKST_POSTHOG_ENABLED` | `false` | direct capture sink; **mutually exclusive** with a relay delivery mode |
+| `FKST_POSTHOG_HOST` | unset | **required by the activity query, not only by capture**; HTTPS outside `test`/`local`; never userinfo |
 | `FKST_POSTHOG_PROJECT_ID` | unset | numeric id; not a secret |
 | `FKST_POSTHOG_QUERY_TIMEOUT_MS` | `5000` | per-query HTTP budget |
 | `FKST_POSTHOG_ACTIVITY_DEFAULT_LIMIT` | `100` | page size when unspecified |
@@ -170,6 +170,17 @@ At-least-once with stable deduplication — never exactly-once:
 | `FKST_OPERATIONS_SANDBOX_MAX_RESULT_ITEMS` | `5000` | largest authorized inventory response |
 | `FKST_OPERATIONS_SANDBOX_TIMEOUT_MS` | `5000` | budget for the one backend list |
 | `FKST_DEPLOYMENT_ENVIRONMENT` | unset | stamped on events; gates plaintext hosts |
+
+Two combinations are refused at startup rather than left to fail quietly:
+
+- **a project id and a query key with no `FKST_POSTHOG_HOST`.** The host is
+  shared with capture and easy to omit on a control plane that captures through
+  the relay; without it the activity API is disabled and its `503` is
+  indistinguishable from an unconfigured key.
+- **`FKST_POSTHOG_ENABLED=true` together with a relay delivery mode.** That is
+  two capture writers into one project, and it would put
+  `FKST_POSTHOG_PROJECT_TOKEN` back into the control-plane record — the exact
+  boundary the relay exists to draw.
 
 ### Control plane — secret (`fkst-control-plane` record)
 
@@ -202,6 +213,13 @@ annotation, a command argument, a probe URL, a log line, a metric, or an API
 response. `validate-audit-relay.rb` enforces the manifest half of that claim and
 `verify-audit-relay.sh` the live half.
 
+`FKST_POSTHOG_HOST` is a ConfigMap value in both processes and is the one place a
+credential could re-enter through the front door, so it is validated the same way
+everywhere: the relay applies the control plane's rule (no userinfo, TLS unless
+the deployment names itself `test`/`local`) rather than a lenient trim, and
+`validate-audit-relay.rb` refuses a render that carries a plaintext or
+userinfo-bearing host in either ConfigMap.
+
 ## Self-hosted PostHog prerequisites
 
 Only PostHog's **public** capture and query APIs are supported: `POST
@@ -210,6 +228,34 @@ Only PostHog's **public** capture and query APIs are supported: `POST
 Kafka, Redis, ClickHouse, or relational schema, and no deployment may introduce
 such a coupling — those are internal implementation details that change between
 releases and carry no compatibility promise.
+
+### API and version assumptions
+
+The exact contract, and all of it:
+
+| Call | Credential | Used by |
+|---|---|---|
+| `POST <host>/capture/`, `POST <host>/batch/` | project capture token, in the body | relay delivery |
+| `POST <host>/api/projects/<id>/query/` with `{"query":{"kind":"HogQLQuery","query":…}}` | query key, `Authorization: Bearer` | activity API + relay verification |
+
+Responses are consumed by `columns` and `results` only; `hogql`, `types`,
+`timings`, `hasMore`, and anything a future release adds are ignored, so a
+richer response is compatible by construction.
+
+**No numeric version floor is asserted here, deliberately.** Self-hosted PostHog
+ships as dated releases, PostHog documents these endpoints without a version
+gate, and a number copied into this file would be wrong for somebody's build and
+unverifiable for everybody's. The floor is a **capability**: the deployment's
+build must accept the `HogQLQuery` kind on the project query endpoint. Establish
+that once, during provisioning (checklist item 4 below), and record the version
+you established it against in the deployment's own record — that recorded value,
+not a number in this repository, is what a later upgrade is compared against.
+
+A build old enough to predate HogQL rejects the probe with a `4xx` naming the
+`kind`, at provisioning time rather than at the first `/operations` page. That
+is also why checklist item 3's "Query Read only" scope is qualified with "where
+the version supports it": older builds expose only personal API keys, and the
+probe is what tells you which kind of identity you are on.
 
 Operator checklist, once per deployment:
 
@@ -226,10 +272,25 @@ Operator checklist, once per deployment:
       identity. **Never a human's general admin key.** It goes in both the
       `fkst-control-plane` record (the activity API) and the `fkst-audit-relay`
       record (verification) as `FKST_POSTHOG_QUERY_API_KEY`.
-- [ ] **4. Reachability and TLS.** From the relay and the control plane, confirm
-      `<host>/capture/` (or batch capture) and `<host>/api/projects/<id>/query/`
-      are reachable over TLS the cluster trusts. A plaintext host is refused
-      unless `FKST_DEPLOYMENT_ENVIRONMENT` is `test` or `local`.
+- [ ] **4. Reachability, TLS, and the HogQL capability.** From the relay and the
+      control plane, confirm `<host>/capture/` (or batch capture) and
+      `<host>/api/projects/<id>/query/` are reachable over TLS the cluster
+      trusts. A plaintext host is refused unless `FKST_DEPLOYMENT_ENVIRONMENT` is
+      `test` or `local`, in the control plane and in the relay alike. Then probe
+      the one capability this milestone depends on, and record the PostHog
+      version it answered from:
+
+      ```bash
+      curl -sS -o /dev/null -w '%{http_code}\n' \
+        -H "Authorization: Bearer $POSTHOG_QUERY_KEY" \
+        -H 'Content-Type: application/json' \
+        -d '{"query":{"kind":"HogQLQuery","query":"SELECT 1"}}' \
+        '<host>/api/projects/<id>/query/'
+      ```
+
+      `200` is the contract. A `4xx` naming the query `kind` means the build
+      predates HogQL and must be upgraded before this deployment can read its own
+      history; `401`/`403` means the key or its scope, not the version.
 - [ ] **5. Retention.** Configure or confirm event retention at least as long as
       the required audit window — **target 90 days** — and write the actual
       configured value into the deployment's own record. PostHog retention is
@@ -270,6 +331,10 @@ alert thresholds in the same change.**
 | activity query concurrency, personal scope | ~1 per active browser tab / 15 s | `FKST_POSTHOG_ACTIVITY_*` |
 | activity query concurrency, global-admin scope | a small constant | same |
 | sandbox poll concurrency | ~1 per active browser tab / 5 s | `FKST_OPERATIONS_SANDBOX_TIMEOUT_MS` |
+| capture batch size | 100 records | `FKST_AUDIT_RELAY_CAPTURE_BATCH_SIZE` |
+| verification batch size | 200 event ids | `FKST_AUDIT_RELAY_VERIFICATION_BATCH_SIZE` |
+| max accepted record body | 64 KiB | `FKST_AUDIT_RELAY_MAX_BODY_BYTES` |
+| writer queue depth | 512 | `FKST_AUDIT_RELAY_WRITER_QUEUE_CAPACITY` |
 
 Derivation for the checked-in 20Gi claim:
 
@@ -286,7 +351,35 @@ x 2 safety factor                             ~= 11.6 GiB  -> provision 20Gi
 `FKST_AUDIT_RELAY_MAX_RECORDS = 5_000_000` is the capacity guard: past it,
 ingress is refused with a bounded error and readiness goes false, so required
 mode fails closed rather than filling the volume. At the assumed row size that
-is roughly 7 GiB — inside the claim with room for the WAL and a vacuum.
+is roughly 7 GiB — inside the claim with room for the WAL and a vacuum, which
+also means **the guard is the ceiling that binds first** in this configuration.
+`FKSTAuditRelayCapacityPressure` watches records against it and
+`FKSTAuditRelayDiskPressure` watches bytes against the claim, because which one
+binds depends on the row size the deployment actually produces.
+
+Derivation for the relay container's requests and limits:
+
+```text
+memory
+  one capture batch, worst case   100 x 64 KiB (MAX_BODY_BYTES)  ~= 6.4 MiB
+  one verification batch          200 event ids + response      ~= 1 MiB
+  writer queue at full depth      512 x 64 KiB                  ~= 32 MiB
+  SQLite page cache + WAL frames  default cache, one writer     ~= 8 MiB
+  tokio + reqwest + TLS + rustls  fixed process floor           ~= 40 MiB
+  subtotal                                                      ~= 88 MiB
+  request 128Mi (subtotal + slack), limit 512Mi (~4x headroom for a
+  vacuum/checkpoint that transiently doubles working set)
+
+cpu
+  steady state    5 rows/s of insert + one sweep every 5 s      << 100m
+  request 100m (steady state with room for a burst), limit 1 CPU (bounds a
+  vacuum/checkpoint or a drain of the 24 h backlog envelope, which is the only
+  work here that is CPU-bound at all)
+```
+
+A deployment that changes `MAX_BODY_BYTES`, either batch size, or the writer
+queue depth recomputes the memory line in the same change; the CPU line follows
+the row rate.
 
 Startup validation refuses internally impossible combinations, notably an audit
 retention shorter than the verified overlap and any out-of-range budget, so a

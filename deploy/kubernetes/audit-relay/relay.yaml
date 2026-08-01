@@ -106,10 +106,16 @@ spec:
             periodSeconds: 10
             failureThreshold: 3
             timeoutSeconds: 3
-          # From the capacity worksheet in AUDIT-TRACE.md: the steady cost is one
-          # SQLite writer plus a five-second delivery sweep. The CPU limit exists
-          # to bound a vacuum/checkpoint burst, and the memory limit to bound the
-          # verification batch plus one capture body.
+          # Derived in AUDIT-TRACE.md's capacity worksheet ("Derivation for the
+          # relay container's requests and limits"): the memory request is the
+          # worst-case capture batch, verification batch, full writer queue,
+          # SQLite cache, and process floor summed (~88 MiB); the limit leaves
+          # ~4x for a vacuum/checkpoint that transiently doubles the working set.
+          # The steady cost is one SQLite writer plus a five-second sweep, well
+          # under the CPU request; the CPU limit bounds a vacuum or a backlog
+          # drain, the only CPU-bound work here. Changing MAX_BODY_BYTES, either
+          # batch size, or the writer queue depth means recomputing the memory
+          # line in the same change.
           resources:
             requests:
               cpu: 100m

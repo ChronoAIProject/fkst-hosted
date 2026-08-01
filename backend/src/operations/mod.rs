@@ -114,8 +114,25 @@ impl OperationsState {
     /// A missing read credential is not a startup failure: capture must keep
     /// working while an operator stages the query secret, and the endpoint's own
     /// `503 audit_query_not_configured` is the honest answer in the meantime.
+    ///
+    /// The REVERSE combination is a startup failure. `FKST_POSTHOG_HOST` is the
+    /// one variable capture and this read path share, and it is easy to leave
+    /// off a control plane that captures through the relay — at which point the
+    /// deployment has a project id, a Query-Read-only key, and a permanently
+    /// disabled activity API whose `503` is indistinguishable from an
+    /// unconfigured key and which no alert covers. Failing the deploy that
+    /// introduces it is the only place that mistake is cheap.
     pub fn from_config(audit: &AuditConfig, query: &ActivityQueryConfig) -> Result<Self, AppError> {
         let Some(host) = audit.host.as_deref() else {
+            if query.is_configured() {
+                return Err(AppError::Config(
+                    "FKST_POSTHOG_HOST must be set when FKST_POSTHOG_PROJECT_ID and \
+                     FKST_POSTHOG_QUERY_API_KEY are configured: the activity query reads \
+                     the same host capture writes to, and without it /operations is \
+                     permanently unavailable"
+                        .to_string(),
+                ));
+            }
             tracing::info!("operations: activity query disabled (no FKST_POSTHOG_HOST)");
             return Ok(Self::default());
         };
@@ -162,3 +179,7 @@ impl OperationsState {
         self.posthog.is_some() || self.relay.is_some()
     }
 }
+
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;

@@ -207,6 +207,7 @@ validate_group.call(find.call("PrometheusRule", "fkst-recovery"), "fkst.recovery
                     recovery_alerts, recovery_metrics, Set["control-plane"], 9)
 
 audit_metrics = {
+  "fkst_audit_relay_max_records" => RELAY_SERVICE,
   "fkst_audit_required_rejections_total" => CONTROL_PLANE_SERVICE,
   "fkst_operations_activity_queries_total" => CONTROL_PLANE_SERVICE,
   "fkst_operations_activity_source_partial_total" => CONTROL_PLANE_SERVICE,
@@ -226,12 +227,60 @@ audit_alerts = Set[
   "FKSTAuditPostHogUnverified",
   "FKSTAuditDeadLetters",
   "FKSTAuditIncompleteRequests",
+  "FKSTAuditRelayCapacityPressure",
   "FKSTAuditRelayDiskPressure",
   "FKSTOperationsActivityQueryFailures",
   "FKSTSandboxInventoryFailures",
   "FKSTSessionVisibilityNotReady"
 ]
 validate_group.call(find.call("PrometheusRule", "fkst-audit"), "fkst.audit",
-                    audit_alerts, audit_metrics, Set["control-plane", "audit-relay"], 11)
+                    audit_alerts, audit_metrics, Set["control-plane", "audit-relay"], 13)
 
-puts "validated optional recovery/audit monitoring and local-only disposable boundary"
+# ------------------------------------------------------------ runbook anchors
+#
+# An alert whose runbook_url points at a heading that does not exist sends the
+# on-call operator to the top of a 500-line document at exactly the moment they
+# needed one procedure. Slugs are derived by GitHub from the heading text, so
+# renaming a heading silently breaks every link to it; nothing else in the repo
+# would notice. The same check covers the two documents' links to each other.
+DOC_DIR = __dir__
+RUNBOOKS = %w[AUDIT-RUNBOOK.md RECOVERY-RUNBOOK.md AUDIT-TRACE.md].freeze
+
+# GitHub's rule: downcase, drop everything that is not a word character, a
+# space, or a hyphen, then turn spaces into hyphens.
+slugify = lambda do |heading|
+  heading.downcase.gsub(/[^\w\s-]/, "").strip.gsub(/\s+/, "-")
+end
+
+anchors = RUNBOOKS.to_h do |name|
+  path = File.join(DOC_DIR, name)
+  abort "runbook #{name} is missing" unless File.file?(path)
+  headings = File.readlines(path).grep(/\A#{'#'}{1,6} /).map { |line| slugify.call(line.sub(/\A#+ /, "")) }
+  [name, headings.to_set]
+end
+
+check_anchor = lambda do |source, document, anchor|
+  return if anchor.nil? || anchor.empty?
+  known = anchors[document]
+  abort "#{source} links an unknown document #{document}" unless known
+  abort "#{source} links #{document}##{anchor}, which is not a heading" unless known.include?(anchor)
+end
+
+monitoring.each do |object|
+  next unless object["kind"] == "PrometheusRule"
+  (object.dig("spec", "groups") || []).each do |group|
+    group.fetch("rules").each do |rule|
+      url = rule.dig("annotations", "runbook_url").to_s
+      document, anchor = url.split("#", 2)
+      check_anchor.call("alert #{rule['alert']}", File.basename(document), anchor)
+    end
+  end
+end
+
+RUNBOOKS.each do |name|
+  File.read(File.join(DOC_DIR, name)).scan(/\]\(([A-Z][A-Za-z-]+\.md)?#([a-z0-9-]+)\)/) do |document, anchor|
+    check_anchor.call("#{name} link", document || name, anchor)
+  end
+end
+
+puts "validated optional recovery/audit monitoring, runbook anchors, and the local-only disposable boundary"

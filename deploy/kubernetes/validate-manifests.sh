@@ -1,8 +1,20 @@
 #!/bin/sh
 set -eu
 
+# Renders every checked-in Kustomization twice, proves the renders are identical,
+# and puts them through the structural/security policy validators plus the shell
+# and Ruby linters.
+#
+# It contacts NO cluster: `kubectl kustomize` is a local render, and every other
+# step reads files. `--context` is therefore OPTIONAL and exists only so an
+# operator following a runbook keeps naming the context they are working against
+# — the value is passed through to `kubectl` and changes nothing. Omitting it is
+# what makes this runnable on a machine (or a CI runner) with no kubeconfig at
+# all, which is the only way the checks below can guard a change before it
+# reaches a cluster.
+
 usage() {
-  echo "usage: $0 --context CONTEXT [--overlay PATH] [--migration-overlay PATH] [--monitoring-overlay PATH] [--audit-relay-overlay PATH] [--required-audit-overlay PATH]" >&2
+  echo "usage: $0 [--context CONTEXT] [--overlay PATH] [--migration-overlay PATH] [--monitoring-overlay PATH] [--audit-relay-overlay PATH] [--required-audit-overlay PATH]" >&2
   exit 2
 }
 
@@ -50,7 +62,6 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-[ -n "$context" ] || usage
 [ -f "$overlay/kustomization.yaml" ] || {
   echo "overlay has no kustomization.yaml: $overlay" >&2
   exit 1
@@ -72,6 +83,15 @@ done
   exit 1
 }
 
+# One render entry point, so the context stays optional in exactly one place.
+render() {
+  if [ -n "$context" ]; then
+    kubectl --context "$context" kustomize "$@"
+  else
+    kubectl kustomize "$@"
+  fi
+}
+
 first=$(mktemp "${TMPDIR:-/tmp}/fkst-render.XXXXXX")
 second=$(mktemp "${TMPDIR:-/tmp}/fkst-render.XXXXXX")
 migration_first=$(mktemp "${TMPDIR:-/tmp}/fkst-migration-render.XXXXXX")
@@ -88,21 +108,21 @@ secrets_first=$(mktemp "${TMPDIR:-/tmp}/fkst-secrets-render.XXXXXX")
 secrets_second=$(mktemp "${TMPDIR:-/tmp}/fkst-secrets-render.XXXXXX")
 trap 'rm -f "$first" "$second" "$migration_first" "$migration_second" "$monitoring_first" "$monitoring_second" "$base_first" "$base_second" "$relay_first" "$relay_second" "$required_first" "$required_second" "$secrets_first" "$secrets_second"' EXIT HUP INT TERM
 
-kubectl --context "$context" kustomize "$overlay" >"$first"
-kubectl --context "$context" kustomize "$overlay" >"$second"
+render "$overlay" >"$first"
+render "$overlay" >"$second"
 cmp "$first" "$second" >/dev/null
 ruby "$script_dir/validate-render.rb" "$first" steady
 
-kubectl --context "$context" kustomize "$migration_overlay" >"$migration_first"
-kubectl --context "$context" kustomize "$migration_overlay" >"$migration_second"
+render "$migration_overlay" >"$migration_first"
+render "$migration_overlay" >"$migration_second"
 cmp "$migration_first" "$migration_second" >/dev/null
 ruby "$script_dir/validate-render.rb" "$migration_first" migration
 
-kubectl --context "$context" kustomize "$monitoring_overlay" >"$monitoring_first"
-kubectl --context "$context" kustomize "$monitoring_overlay" >"$monitoring_second"
+render "$monitoring_overlay" >"$monitoring_first"
+render "$monitoring_overlay" >"$monitoring_second"
 cmp "$monitoring_first" "$monitoring_second" >/dev/null
-kubectl --context "$context" kustomize "$script_dir/base" >"$base_first"
-kubectl --context "$context" kustomize "$script_dir/base" >"$base_second"
+render "$script_dir/base" >"$base_first"
+render "$script_dir/base" >"$base_second"
 cmp "$base_first" "$base_second" >/dev/null
 ruby "$script_dir/validate-monitoring.rb" "$monitoring_first" "$base_first" "$first"
 
@@ -110,19 +130,19 @@ ruby "$script_dir/validate-monitoring.rb" "$monitoring_first" "$base_first" "$fi
 # checked twice for determinism like the others, and the composed overlay is put
 # through BOTH validators: the steady namespace policy (it is a superset of the
 # local overlay) and the relay-specific policy.
-kubectl --context "$context" kustomize "$audit_relay_overlay" >"$relay_first"
-kubectl --context "$context" kustomize "$audit_relay_overlay" >"$relay_second"
+render "$audit_relay_overlay" >"$relay_first"
+render "$audit_relay_overlay" >"$relay_second"
 cmp "$relay_first" "$relay_second" >/dev/null
-kubectl --context "$context" kustomize "$required_audit_overlay" >"$required_first"
-kubectl --context "$context" kustomize "$required_audit_overlay" >"$required_second"
+render "$required_audit_overlay" >"$required_first"
+render "$required_audit_overlay" >"$required_second"
 cmp "$required_first" "$required_second" >/dev/null
 ruby "$script_dir/validate-render.rb" "$required_first" steady
 ruby "$script_dir/validate-audit-relay.rb" "$relay_first" "$required_first" "$base_first"
 
 # The provider-neutral credential bindings, rendered on their own: they are
 # applied before workloads during a restore, so they must stand alone.
-kubectl --context "$context" kustomize "$script_dir/external-secrets" >"$secrets_first"
-kubectl --context "$context" kustomize "$script_dir/external-secrets" >"$secrets_second"
+render "$script_dir/external-secrets" >"$secrets_first"
+render "$script_dir/external-secrets" >"$secrets_second"
 cmp "$secrets_first" "$secrets_second" >/dev/null
 
 sh -n "$script_dir/migrate-environment-store.sh"

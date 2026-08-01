@@ -237,6 +237,11 @@ struct Counters {
     recaptures: AtomicU64,
     purged: AtomicU64,
     writer_queue_depth: AtomicU64,
+    /// `FKST_AUDIT_RELAY_MAX_RECORDS`, published so an alert can express
+    /// headroom as a RATIO. Set once at startup rather than per sweep, because
+    /// an alert that only became expressible after the first sweep would be
+    /// absent exactly when a relay is failing to start.
+    max_records: AtomicU64,
     gauges: Mutex<StorageGauges>,
 }
 
@@ -283,6 +288,15 @@ impl RelayMetrics {
         self.counters
             .writer_queue_depth
             .store(depth, Ordering::Relaxed);
+    }
+
+    /// Publish the configured capacity guard so headroom alerting is a ratio
+    /// against the deployment's own limit rather than a number copied into a
+    /// Prometheus rule and left behind when the claim is resized.
+    pub fn set_max_records(&self, max_records: u64) {
+        self.counters
+            .max_records
+            .store(max_records, Ordering::Relaxed);
     }
 
     /// Publish the sweep's gauge block.
@@ -343,11 +357,15 @@ impl RelayMetrics {
              # HELP fkst_audit_relay_writer_queue_depth Records queued for the single writer.\n\
              # TYPE fkst_audit_relay_writer_queue_depth gauge\n\
              fkst_audit_relay_writer_queue_depth {}\n\
+             # HELP fkst_audit_relay_max_records Configured record capacity guard; ingress is refused at it.\n\
+             # TYPE fkst_audit_relay_max_records gauge\n\
+             fkst_audit_relay_max_records {}\n\
              # HELP fkst_audit_relay_records Stored records by bounded delivery state.\n\
              # TYPE fkst_audit_relay_records gauge\n",
             u8::from(ingress_ready),
             gauges.db_bytes,
             self.counters.writer_queue_depth.load(Ordering::Relaxed),
+            self.counters.max_records.load(Ordering::Relaxed),
         );
         for (index, state) in RecordState::ALL.into_iter().enumerate() {
             body.push_str(&format!(

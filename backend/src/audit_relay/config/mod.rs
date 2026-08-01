@@ -30,6 +30,16 @@
 //! `FKST_AUDIT_RELAY_AUDIT_RETENTION_DAYS` is the documented floor an operator
 //! must keep them for before remediating by hand, and is validated to be at
 //! least the verified window so the two can never be configured inside out.
+//!
+//! ## The delivery host is judged by the same rule the control plane uses
+//!
+//! `FKST_POSTHOG_HOST` goes through [`crate::audit::host::normalize`], the
+//! shared rule, rather than a local trim. The relay is the process that carries
+//! the project capture token on every batch, so a `http://` host here ships that
+//! credential in cleartext and a `https://svc:<token>@…` host puts it in the
+//! ConfigMap that exists to hold no credential (epic `OPS-02`). Unlike the
+//! control plane there is no lenient "staged" path: an unset host is the
+//! outbox-only shape, so a host that IS set is always about to be dialled.
 
 mod bounds;
 mod vars;
@@ -189,6 +199,16 @@ impl RelayConfig {
             ));
         }
 
+        let environment = non_blank(raw.deployment.deployment_environment).unwrap_or_default();
+        // The relay has no "staged host" state: a configured host IS the
+        // delivery target, so it gets the full shared rule (TLS unless the
+        // deployment names itself test/local, and never embedded userinfo). The
+        // relay is the process that actually carries the project capture token
+        // on every batch, which is precisely why it may not be the lenient one.
+        let posthog_host = non_blank(raw.posthog.host)
+            .map(|host| crate::audit::host::normalize(&host, &environment))
+            .transpose()?;
+
         Ok(Self {
             bind_addr,
             db_path: raw.relay.db_path,
@@ -212,8 +232,7 @@ impl RelayConfig {
             retry_max_secs: raw.relay.retry_max_secs,
             worker_interval_secs: raw.relay.worker_interval_secs,
             verification_batch_size: raw.relay.verification_batch_size,
-            posthog_host: non_blank(raw.posthog.host)
-                .map(|host| host.trim_end_matches('/').to_string()),
+            posthog_host,
             posthog_project_token: SecretString::from(
                 non_blank(raw.posthog.project_token).unwrap_or_default(),
             ),
@@ -221,7 +240,7 @@ impl RelayConfig {
             posthog_query_api_key: SecretString::from(
                 non_blank(raw.posthog.query_api_key).unwrap_or_default(),
             ),
-            environment: non_blank(raw.deployment.deployment_environment).unwrap_or_default(),
+            environment,
         })
     }
 
