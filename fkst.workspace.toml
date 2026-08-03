@@ -82,3 +82,8 @@ version = "workspace"
 name = "git-branch-detector"
 source = "workspace"
 version = "workspace"
+
+[[package]]
+name = "fkst-health"
+source = "workspace"
+version = "workspace"

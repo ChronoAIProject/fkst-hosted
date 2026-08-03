@@ -1,0 +1,116 @@
+# Declarative conformance pack OWNED BY the fkst-health package.
+# Interpreted by the engine's generic DeclarativeRulePack (no arbitrary code).
+# Scope is fenced to this package's own tree; it cannot read host or sibling files.
+#
+# These rules exist because fkst-health ships in manifests/default-workflows.json and
+# therefore rides EVERY session on the platform: a well-meaning future edit here
+# changes behaviour fleet-wide, so the invariants that make the package safe to
+# default-enable are asserted mechanically rather than left to review.
+schema = 1
+runner_protocol = "fkst-declarative-rulepack@1"
+owner_package = "fkst-health"
+
+[[rules]]
+id = "source.max-lines"
+severity = "error"
+kind = "max_line_count"
+include = ["**/*.lua"]
+exclude = ["tests/**", "**/*_test.lua"]
+max = 500
+message = "fkst-health source files must stay under the 500-line limit"
+
+# THE invariant that makes default-enabling this package safe. The control plane
+# folds a package's [github].work_labels into the session's effective work-label set,
+# and two active triggers owned by one creator may not share a label -- so a label
+# declared here would widen every session's set at once and could collide a user's
+# unrelated trigger. This package is driven purely by its own cron raiser.
+[[rules]]
+id = "github.no-work-labels"
+severity = "error"
+kind = "text_forbid_regex"
+include = ["fkst.toml"]
+pattern = "(?m)^\\s*(\\[github\\]|work_labels\\s*=)"
+message = "fkst-health must declare no [github].work_labels: it ships in the default manifest, so a label here widens EVERY session's effective work-label set"
+
+# The raiser and the department must agree on the queue name, or the tick routes
+# nowhere and every session silently stops reporting.
+[[rules]]
+id = "raiser.produces-health-tick"
+severity = "error"
+kind = "text_require_regex"
+include = ["raisers/health_poll.lua"]
+pattern = "produces\\s*=\\s*\"health_tick\""
+message = "the health_poll cron raiser must produce the health_tick queue the health_report department consumes"
+
+[[rules]]
+id = "department.consumes-health-tick"
+severity = "error"
+kind = "text_require_regex"
+include = ["departments/health_report/main.lua"]
+pattern = "consumes\\s*=\\s*\\{\\s*\"health_tick\"\\s*\\}"
+message = "the health_report department must consume the health_tick queue the health_poll raiser produces"
+
+# The emitted status vocabulary is the v1 contract's, byte for byte. The control
+# plane maps anything it does not recognise to `unknown`, so a typo here degrades
+# every report on the platform into an unusable verdict.
+[[rules]]
+id = "core.v1-status-taxonomy"
+severity = "error"
+kind = "text_require_regex"
+include = ["health.lua"]
+pattern = "H\\.statuses\\s*=\\s*\\{\\s*\"working\",\\s*\"idle\",\\s*\"blocked\",\\s*\"stalled\",\\s*\"failing\",\\s*\"unknown\"\\s*\\}"
+message = "health.lua must declare exactly the v1 status taxonomy: working, idle, blocked, stalled, failing, unknown"
+
+# The evidence core decides the verdict, so it must stay free of I/O: no ports, no
+# process execution, no filesystem, no queue effects. Anything fallible belongs in
+# the department, where a failure degrades a signal instead of a verdict.
+[[rules]]
+id = "core.stays-pure"
+severity = "error"
+kind = "text_forbid_regex"
+include = ["health.lua"]
+pattern = "os\\.execute|io\\.open|io\\.popen|exec_sync|exec_argv|spawn_codex|\\braise\\s*\\(|file\\.(write|read|list|exists)|fkst\\.observe"
+message = "health.lua is the pure evidence core: I/O, process execution, and queue effects belong in the department"
+
+# The judgment codex must stay read-only. It runs inside a live session pod alongside
+# that session's own work codex, and a write-capable health reporter could mutate the
+# very repository it is reporting on.
+[[rules]]
+id = "codex.read-only-judgment"
+severity = "error"
+kind = "text_require_regex"
+include = ["departments/health_report/main.lua"]
+pattern = "codex_lib\\.judgment_codex_opts\\("
+message = "the health narrative must be spawned through workflow.codex.judgment_codex_opts, which pins sandbox = \"read-only\""
+
+[[rules]]
+id = "codex.no-write-capable-sandbox"
+severity = "error"
+kind = "text_forbid_regex"
+include = ["**/*.lua"]
+exclude = ["tests/**", "**/*_test.lua"]
+pattern = "unrestricted_codex_opts|workspace-write|danger-full-access"
+message = "fkst-health observes and reports; it must never spawn a write-capable codex"
+
+# The reporter is a read-only observer of the session it rides. It performs no git
+# write, no push, and no issue mutation -- the only GitHub call it makes is the
+# read-only work-item query, and its only writes land under the health directory.
+[[rules]]
+id = "department.no-mutation"
+severity = "error"
+kind = "text_forbid_regex"
+include = ["**/*.lua"]
+exclude = ["tests/**", "**/*_test.lua"]
+pattern = "issue_create|issue_comment|issue_edit_labels|commit_tree|push_ref_update|forge\\.git\\b"
+message = "fkst-health must not mutate the repository or its issues: it observes and writes one report file"
+
+# The report is written through the atomic publish path, never straight to its final
+# name: the control-plane collector polls this directory roughly twice a second and
+# would copy a half-written file and publish it as a corrupt report.
+[[rules]]
+id = "writer.atomic-publish"
+severity = "error"
+kind = "text_require_regex"
+include = ["departments/health_report/writer.lua"]
+pattern = "\"mv\", \"-f\", partial, final"
+message = "the report must be written under a temporary name and renamed into place, so the collector never observes a partial file"

@@ -1,0 +1,26 @@
+kind = "package"
+name = "fkst-health"
+persistence_class = "stateless_adapter"
+
+[code]
+root = "."
+
+[lib_deps]
+libraries = ["contract", "workflow", "testkit", "forge"]
+
+# Package-owned conformance: these rules travel WITH this package, so a host repo
+# that references fkst-health enforces them without a harness rebuild. The pack
+# also asserts the ABSENCE of [github].work_labels below -- see conformance/pack.toml.
+[conformance]
+pack = "conformance/pack.toml"
+
+# DELIBERATELY NO [github] SECTION.
+#
+# fkst-health ships in manifests/default-workflows.json, so it rides EVERY session
+# on the platform. The control plane folds a package's declared
+# [github].work_labels into that session's effective work-label set, and two active
+# triggers owned by the same creator may not share a label. A label declared here
+# would therefore widen every session's set at once and could collide a user's
+# unrelated trigger. This package is driven purely by its own cron raiser and needs
+# no label; conformance rule `github.no-work-labels` fails the build if one is ever
+# added back.
