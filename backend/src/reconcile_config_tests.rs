@@ -344,3 +344,24 @@ fn non_numeric_interval_is_a_config_error() {
         .expect_err("non-numeric must fail");
     assert!(matches!(err, AppError::Config(_)));
 }
+
+/// The refs actually shipped in deploy/kubernetes/base/configmap.yaml must satisfy
+/// the startup validator -- otherwise the control plane fails closed on boot after
+/// a deploy, which is the worst place to discover a typo.
+#[test]
+fn the_deployed_mandatory_list_is_accepted() {
+    let deployed = "ChronoAIProject/fkst-hosted@packages:packages/github-proxy \
+                    ChronoAIProject/fkst-hosted@packages:packages/workflow-dev \
+                    ChronoAIProject/fkst-hosted@packages:packages/workflow-writer \
+                    ChronoAIProject/fkst-hosted@packages:packages/idle-detector \
+                    ChronoAIProject/fkst-hosted@packages:packages/fkst-health";
+    let config = ReconcileConfig::from_vars(&vars(&[("FKST_MANDATORY_PACKAGES", deployed)]))
+        .expect("the deployed list must be valid");
+    assert_eq!(config.mandatory_packages.len(), 5);
+    assert!(config
+        .mandatory_packages
+        .iter()
+        .all(|r| r.owner == "ChronoAIProject"
+            && r.repo == "fkst-hosted"
+            && r.git_ref == "packages"));
+}

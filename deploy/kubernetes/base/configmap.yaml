@@ -36,6 +36,11 @@ data:
   #                   workflow-dev without contending for intake.
   #   idle-detector   cost control: emits system_idle so a session with no work
   #                   idles its pod down. In neither closure otherwise.
+  #   fkst-health     session health reports (cron-raised). Deliberately declares NO
+  #                   [github] work_labels -- enforced by its own conformance rule --
+  #                   so it rides every session without widening any label set. Already
+  #                   in default-workflows.json; listed here so a session that declares
+  #                   packages explicitly (no manifest) still reports health.
   #
   # NOTE: workflow-dev declares [github].work_labels = ["fkst-dev"], so every
   # session auto-declares fkst-dev and label sharing becomes the norm. That is the
@@ -46,6 +51,7 @@ data:
     ChronoAIProject/fkst-hosted@packages:packages/workflow-dev
     ChronoAIProject/fkst-hosted@packages:packages/workflow-writer
     ChronoAIProject/fkst-hosted@packages:packages/idle-detector
+    ChronoAIProject/fkst-hosted@packages:packages/fkst-health
   FKST_STARTUP_RESYNC_RETRY_INITIAL_SECS: "5"
   FKST_STARTUP_RESYNC_RETRY_MAX_SECS: "60"
   FKST_STARTUP_RESYNC_RETRY_JITTER_PERCENT: "20"
