@@ -374,6 +374,36 @@ fn admission_precedence_and_order_match_typescript() {
                 path: "/".into(),
             },
         ),
+        (
+            "duplicate-precedes-later-lone-surrogate",
+            br#"{"a":1,"a":2,"x":"\uD800"}"#.as_slice(),
+            ExpectedRejection {
+                category: "canonicalization".into(),
+                code: Some("canonicalization.duplicate_member".into()),
+                reason: "duplicate_member".into(),
+                path: "/".into(),
+            },
+        ),
+        (
+            "duplicate-key-precedes-invalid-second-value",
+            br#"{"a":1,"a":"\uD800"}"#.as_slice(),
+            ExpectedRejection {
+                category: "canonicalization".into(),
+                code: Some("canonicalization.duplicate_member".into()),
+                reason: "duplicate_member".into(),
+                path: "/".into(),
+            },
+        ),
+        (
+            "lone-surrogate-precedes-later-duplicate",
+            br#"{"x":"\uD800","a":1,"a":2}"#.as_slice(),
+            ExpectedRejection {
+                category: "canonicalization".into(),
+                code: Some("canonicalization.invalid_unicode_scalar".into()),
+                reason: "invalid_unicode_scalar".into(),
+                path: "/".into(),
+            },
+        ),
     ] {
         let error = match admit_json(raw) {
             Ok(_) => panic!("{case_id}: expected rejection"),

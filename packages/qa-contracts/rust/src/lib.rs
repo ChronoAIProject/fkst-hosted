@@ -160,11 +160,10 @@ pub fn admit_json(raw: &[u8]) -> Result<AdmittedJson, ContractError> {
     preflight_depth(text)?;
     preflight_numbers(text)?;
     validate_json_syntax(text)?;
-    preflight_unicode_scalars(text)?;
     let mut deserializer = serde_json::Deserializer::from_str(text);
     deserializer.disable_recursion_limit();
     let value = StrictValue::deserialize(&mut deserializer)
-        .map_err(classify_json_error)?
+        .map_err(|error| classify_strict_json_error(error, text))?
         .0;
     deserializer.end().map_err(classify_json_error)?;
     ensure_depth(&value, 0)?;
@@ -1010,6 +1009,19 @@ fn valid_json_number(token: &str) -> bool {
     index == bytes.len()
 }
 
+fn classify_strict_json_error(error: serde_json::Error, text: &str) -> ContractError {
+    if error.to_string().contains("duplicate member") {
+        return ContractError(Rejection::canonical(
+            "canonicalization.duplicate_member",
+            "duplicate_member",
+        ));
+    }
+    if let Err(error) = preflight_unicode_scalars(text) {
+        return error;
+    }
+    classify_json_error(error)
+}
+
 fn classify_json_error(error: serde_json::Error) -> ContractError {
     let message = error.to_string();
     if message.contains("duplicate member") {
@@ -1120,10 +1132,11 @@ impl<'de> Visitor<'de> for StrictValueVisitor {
         A: MapAccess<'de>,
     {
         let mut values = Map::new();
-        while let Some((key, value)) = map.next_entry::<String, StrictValue>()? {
+        while let Some(key) = map.next_key::<String>()? {
             if values.contains_key(&key) {
                 return Err(serde::de::Error::custom("duplicate member"));
             }
+            let value = map.next_value::<StrictValue>()?;
             values.insert(key, value.0);
         }
         Ok(StrictValue(Value::Object(values)))
