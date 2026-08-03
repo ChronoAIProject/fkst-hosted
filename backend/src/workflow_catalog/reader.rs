@@ -54,16 +54,13 @@ pub async fn read_repo_catalog(
         }
 
         let Some(remote) = api
-            .content_file(
-                token,
-                &repo.owner,
-                &repo.name,
-                &entry.path,
-                Some(git_ref),
-            )
+            .content_file(token, &repo.owner, &repo.name, &entry.path, Some(git_ref))
             .await?
         else {
-            rejected.push(problem(entry.path, "file disappeared before it could be read"));
+            rejected.push(problem(
+                entry.path,
+                "file disappeared before it could be read",
+            ));
             continue;
         };
         let compact: String = remote
