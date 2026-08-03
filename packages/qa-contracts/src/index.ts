@@ -14,7 +14,7 @@ import {
 const MAX_DEPTH = 128;
 const MAX_SAFE_INTEGER = 9_007_199_254_740_991n;
 const FOUNDATION_SCHEMA_NAME = "qa.contract-foundation/v1";
-const FOUNDATION_TYPE_NAMES = [
+const FOUNDATION_TYPE_NAMES = Object.freeze([
   "ContractMeta",
   "HostScopedMeta",
   "ResourceRef",
@@ -23,7 +23,7 @@ const FOUNDATION_TYPE_NAMES = [
   "SignatureBlock",
   "ProjectionSpecimen",
   "StrictUnionSpecimen",
-] as const;
+] as const);
 
 export type FoundationType = (typeof FOUNDATION_TYPE_NAMES)[number];
 

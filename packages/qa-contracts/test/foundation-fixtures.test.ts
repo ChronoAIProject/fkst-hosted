@@ -96,6 +96,7 @@ test("contract registry and fixture metadata", () => {
   assert.equal(registry.types.ProjectionSpecimen?.fixture_only, true);
   assert.equal(registry.types.StrictUnionSpecimen?.fixture_only, true);
   assert.equal(registry.types.ContractMeta?.fixture_only, undefined);
+  assert.ok(Object.isFrozen(foundationTypeNames()));
   assert.equal(rfcFixture.schema_version, "qa.rfc8785-fixtures/v1");
   assert.equal(foundationFixture.schema_version, "qa.contract-foundation-fixtures/v1");
   assert.equal(rfcFixture.gate_id, "P0-02-CONTRACT-FOUNDATION");
