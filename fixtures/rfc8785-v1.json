@@ -1,0 +1,111 @@
+{
+  "schema_version": "qa.rfc8785-fixtures/v1",
+  "gate_id": "P0-02-CONTRACT-FOUNDATION",
+  "valid_cases": [
+    {
+      "case_id": "rfc8785-object-order",
+      "source_utf8_base64": "eyAiYiI6IDIsICJhIjogMSB9",
+      "expected_canonical_utf8_base64": "eyJhIjoxLCJiIjoyfQ==",
+      "expected_sha256": "sha256:43258cff783fe7036d8a43033f830adfc60ec037382473548ac742b888292777"
+    },
+    {
+      "case_id": "rfc8785-negative-zero",
+      "source_utf8_base64": "eyJuIjotMH0=",
+      "expected_canonical_utf8_base64": "eyJuIjowfQ==",
+      "expected_sha256": "sha256:f3013f933b9fb80ab6d995e7ad9da36f683837ba1d81e950c943d40111eac2f0"
+    },
+    {
+      "case_id": "rfc8785-exponent-formatting",
+      "source_utf8_base64": "eyJuIjoxZSszMCwic21hbGwiOjFlLTcsInBsYWluIjowLjAwMDAwMX0=",
+      "expected_canonical_utf8_base64": "eyJuIjoxZSszMCwicGxhaW4iOjAuMDAwMDAxLCJzbWFsbCI6MWUtN30=",
+      "expected_sha256": "sha256:1f198c521b6ca57d50824e713a6d0c062ab23cfac8bddd0f61f4148df3d2962e"
+    },
+    {
+      "case_id": "rfc8785-utf16-member-order",
+      "source_utf8_base64": "eyLugIAiOjEsIvCfmIAiOjJ9",
+      "expected_canonical_utf8_base64": "eyLwn5iAIjoyLCLugIAiOjF9",
+      "expected_sha256": "sha256:28c95d1bbb2209223307e62f489020e8f9e0cfa16adf2daf6d88127a1e8dd22a"
+    },
+    {
+      "case_id": "rfc8785-no-unicode-normalization",
+      "source_utf8_base64": "eyLDqSI6IsOpIiwiZcyBIjoiZcyBIn0=",
+      "expected_canonical_utf8_base64": "eyJlzIEiOiJlzIEiLCLDqSI6IsOpIn0=",
+      "expected_sha256": "sha256:2b8599359615227d4bffe298511d6d9520d9cf98c59adf9541e6e023e41ffe7b"
+    },
+    {
+      "case_id": "rfc8785-safe-integer-boundaries",
+      "source_utf8_base64": "eyJtYXgiOjkwMDcxOTkyNTQ3NDA5OTEsIm1pbiI6LTkwMDcxOTkyNTQ3NDA5OTF9",
+      "expected_canonical_utf8_base64": "eyJtYXgiOjkwMDcxOTkyNTQ3NDA5OTEsIm1pbiI6LTkwMDcxOTkyNTQ3NDA5OTF9",
+      "expected_sha256": "sha256:63546eb60913dcb1cdd5118f7bf4885beed344af930c8a9d5f38fad243fd4819"
+    },
+    {
+      "case_id": "rfc8785-array-order",
+      "source_utf8_base64": "eyJhIjpbMywyLDFdLCJ6Ijp0cnVlfQ==",
+      "expected_canonical_utf8_base64": "eyJhIjpbMywyLDFdLCJ6Ijp0cnVlfQ==",
+      "expected_sha256": "sha256:ed85afbb5215b66cb5d054a76f7bc928392145cf33318c95ad7a0821088b1946"
+    },
+    {
+      "case_id": "rfc8785-depth-128-boundary",
+      "source_utf8_base64": "W1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1swXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV0=",
+      "expected_canonical_utf8_base64": "W1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1swXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV0=",
+      "expected_sha256": "sha256:a87f12d34d179c4dd058f06d205b96585bd84797eab5360fe32bc414d56028ba"
+    }
+  ],
+  "invalid_cases": [
+    {
+      "case_id": "rfc8785-duplicate-root",
+      "source_utf8_base64": "eyJhIjoxLCJhIjoyfQ==",
+      "expected": { "category": "canonicalization", "code": "canonicalization.duplicate_member", "reason": "duplicate_member", "path": "/" }
+    },
+    {
+      "case_id": "rfc8785-duplicate-escaped-equivalent",
+      "source_utf8_base64": "eyJhIjoxLCJcdTAwNjEiOjJ9",
+      "expected": { "category": "canonicalization", "code": "canonicalization.duplicate_member", "reason": "duplicate_member", "path": "/" }
+    },
+    {
+      "case_id": "rfc8785-duplicate-nested",
+      "source_utf8_base64": "eyJvdXRlciI6eyJ4IjoxLCJ4IjoyfX0=",
+      "expected": { "category": "canonicalization", "code": "canonicalization.duplicate_member", "reason": "duplicate_member", "path": "/" }
+    },
+    {
+      "case_id": "rfc8785-invalid-utf8",
+      "source_utf8_base64": "eyJ4Ijoi/yJ9",
+      "expected": { "category": "canonicalization", "code": "canonicalization.invalid_utf8", "reason": "invalid_utf8", "path": "/" }
+    },
+    {
+      "case_id": "rfc8785-lone-surrogate",
+      "source_utf8_base64": "eyJ4IjoiXHVkODAwIn0=",
+      "expected": { "category": "canonicalization", "code": "canonicalization.invalid_unicode_scalar", "reason": "invalid_unicode_scalar", "path": "/" }
+    },
+    {
+      "case_id": "rfc8785-invalid-number-nan",
+      "source_utf8_base64": "eyJ4IjpOYU59",
+      "expected": { "category": "canonicalization", "code": "canonicalization.invalid_json_number", "reason": "invalid_json_number", "path": "/" }
+    },
+    {
+      "case_id": "rfc8785-invalid-number-leading-zero",
+      "source_utf8_base64": "eyJ4IjowMX0=",
+      "expected": { "category": "canonicalization", "code": "canonicalization.invalid_json_number", "reason": "invalid_json_number", "path": "/" }
+    },
+    {
+      "case_id": "rfc8785-invalid-number-non-finite-exponent",
+      "source_utf8_base64": "eyJ4IjoxZTQwMH0=",
+      "expected": { "category": "canonicalization", "code": "canonicalization.invalid_json_number", "reason": "invalid_json_number", "path": "/" }
+    },
+    {
+      "case_id": "rfc8785-unsafe-integer-positive",
+      "source_utf8_base64": "eyJ4Ijo5MDA3MTk5MjU0NzQwOTkyfQ==",
+      "expected": { "category": "canonicalization", "code": "canonicalization.unsafe_integer", "reason": "unsafe_integer", "path": "/" }
+    },
+    {
+      "case_id": "rfc8785-unsafe-integer-negative",
+      "source_utf8_base64": "eyJ4IjotOTAwNzE5OTI1NDc0MDk5Mn0=",
+      "expected": { "category": "canonicalization", "code": "canonicalization.unsafe_integer", "reason": "unsafe_integer", "path": "/" }
+    },
+    {
+      "case_id": "rfc8785-depth-129-overflow",
+      "source_utf8_base64": "W1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbMF1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXQ==",
+      "expected": { "category": "validation", "reason": "depth_overflow", "path": "/" }
+    }
+  ]
+}
