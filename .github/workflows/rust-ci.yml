@@ -35,6 +35,18 @@ jobs:
       - name: Local QA Runtime clippy -D warnings
         working-directory: apps/local-qa-runtime
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: packages/qa-contracts/package-lock.json
+      - name: Install QA contracts
+        working-directory: packages/qa-contracts
+        run: npm ci --ignore-scripts
+      - name: Type-check QA contracts
+        working-directory: packages/qa-contracts
+        run: npm run --ignore-scripts typecheck
 
   build:
     name: rust build
@@ -67,7 +79,15 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: apps/local-qa-runtime/workers/package-lock.json
+          cache-dependency-path: |
+            apps/local-qa-runtime/workers/package-lock.json
+            packages/qa-contracts/package-lock.json
+      - name: Install QA contracts
+        working-directory: packages/qa-contracts
+        run: npm ci --ignore-scripts
+      - name: Build QA contracts
+        working-directory: packages/qa-contracts
+        run: npm run --ignore-scripts build
       - name: Install Local QA workers
         working-directory: apps/local-qa-runtime/workers
         run: npm ci --ignore-scripts
@@ -98,4 +118,16 @@ jobs:
         run: cargo test --workspace --locked
       - name: Test Local QA Runtime
         working-directory: apps/local-qa-runtime
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked -- --nocapture
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: packages/qa-contracts/package-lock.json
+      - name: Install QA contracts
+        working-directory: packages/qa-contracts
+        run: npm ci --ignore-scripts
+      - name: Test QA contracts
+        working-directory: packages/qa-contracts
+        run: npm run --ignore-scripts test

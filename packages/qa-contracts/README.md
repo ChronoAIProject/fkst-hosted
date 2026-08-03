@@ -4,8 +4,9 @@
 shared by Hosted and the trusted-input Local QA Host profile. JSON Schema Draft
 2020-12 under `contracts/` is the language-neutral source of truth, and
 `contracts/registry.json` is the only supported local name-to-schema mapping.
-Rust and TypeScript conformance implementations are intentionally deferred to
-dependent issues after this source wave merges.
+The checked-in TypeScript package and Rust crate consume these same sources and
+shared fixture corpus; neither implementation maintains language-specific
+golden values.
 
 The immutable hardened Local QA Runtime v1 baseline retains
 `RuntimeScopedMeta` and `runtime_instance_id`. Human decision #5729 approved the
@@ -33,7 +34,38 @@ The checked-in conformance sources are:
 - `fixtures/qa/contract-foundation-v1.json` for foundation validation,
   exact-object/union behavior, and root-only digest projection vectors.
 
-Canonicalization and digest implementations must accept only opaque immutable
-values returned by strict admission and schema validation.
-`contract_content/v1` removes only root `content_digest` and, when present,
-root `signature`; identically named nested fields are preserved.
+The implementations are:
+
+- `src/index.ts`, a private ESM TypeScript package locked by the package-local
+  `package-lock.json`;
+- `rust/src/lib.rs`, the publish-disabled `fkst-qa-contracts` library, built as
+  an external member of the Local QA Runtime workspace and locked by
+  `apps/local-qa-runtime/Cargo.lock`.
+
+Canonicalization and digest functions accept only opaque values returned by
+strict admission or schema validation. `contract_content/v1` removes only root
+`content_digest` and, when present, root `signature`; identically named nested
+fields are preserved.
+
+Run the TypeScript conformance checks from the repository root:
+
+```bash
+npm --prefix packages/qa-contracts ci --ignore-scripts
+npm --prefix packages/qa-contracts run --ignore-scripts typecheck
+npm --prefix packages/qa-contracts run --ignore-scripts build
+npm --prefix packages/qa-contracts run --ignore-scripts test
+```
+
+Run the Rust conformance checks through the Local QA workspace:
+
+```bash
+cargo fmt --manifest-path apps/local-qa-runtime/Cargo.toml --all -- --check
+cargo clippy --manifest-path apps/local-qa-runtime/Cargo.toml \
+  --workspace --all-targets --locked -- -D warnings
+cargo test --manifest-path apps/local-qa-runtime/Cargo.toml \
+  --workspace --locked -- --nocapture
+```
+
+These libraries provide contract validation and deterministic bytes only. They
+do not start a process, expose an endpoint, authorize a request, persist state,
+verify signatures, invoke a worker, or perform any other side effect.

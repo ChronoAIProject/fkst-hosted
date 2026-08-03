@@ -1,5 +1,11 @@
 [workspace]
-members = ["guest-agent", "launcher", "secret-broker", "supervisor"]
+members = [
+  "guest-agent",
+  "launcher",
+  "secret-broker",
+  "supervisor",
+  "../../packages/qa-contracts/rust",
+]
 resolver = "2"
 
 [workspace.package]
