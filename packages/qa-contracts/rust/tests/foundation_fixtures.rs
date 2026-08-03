@@ -334,6 +334,71 @@ fn timestamp_boundaries_match_typescript() {
 }
 
 #[test]
+fn admission_precedence_and_order_match_typescript() {
+    let tiny = admit_json(b"1e-9223372036854775808").expect("extreme negative exponent");
+    assert_eq!(
+        canonical_admitted_bytes(&tiny).expect("canonical tiny number"),
+        b"0"
+    );
+    let escaped_pair = ["\"", "\\", "uD83D", "\\", "uDE00", "\""].concat();
+    admit_json(escaped_pair.as_bytes()).expect("valid escaped surrogate pair");
+
+    for (case_id, raw, expected) in [
+        (
+            "malformed-low-surrogate-is-invalid-json",
+            br#""\uD800\uZZZZ""#.as_slice(),
+            ExpectedRejection {
+                category: "validation".into(),
+                code: None,
+                reason: "invalid_json".into(),
+                path: "/".into(),
+            },
+        ),
+        (
+            "trailing-comma-precedes-duplicate-member",
+            br#"{"a":1,"a":2,}"#.as_slice(),
+            ExpectedRejection {
+                category: "validation".into(),
+                code: None,
+                reason: "invalid_json".into(),
+                path: "/".into(),
+            },
+        ),
+        (
+            "invalid-number-precedes-lone-surrogate",
+            br#"{"x":"\uD800","n":NaN}"#.as_slice(),
+            ExpectedRejection {
+                category: "canonicalization".into(),
+                code: Some("canonicalization.invalid_json_number".into()),
+                reason: "invalid_json_number".into(),
+                path: "/".into(),
+            },
+        ),
+    ] {
+        let error = match admit_json(raw) {
+            Ok(_) => panic!("{case_id}: expected rejection"),
+            Err(error) => error,
+        };
+        assert_rejection(case_id, &error, &expected);
+    }
+
+    let error = match validate_foundation(br#"{"z":1,"a":2}"#, FoundationType::ContractMeta) {
+        Ok(_) => panic!("unknown fields should be rejected"),
+        Err(error) => error,
+    };
+    assert_rejection(
+        "unknown-field-source-order",
+        &error,
+        &ExpectedRejection {
+            category: "contract".into(),
+            code: Some("contract.forbidden_field".into()),
+            reason: "unknown_field".into(),
+            path: "/z".into(),
+        },
+    );
+}
+
+#[test]
 fn admitted_and_validated_values_are_opaque_snapshots() {
     let admitted = admit_json(br#"{"nested":{"value":1}}"#).expect("admitted fixture");
     let admitted_canonical = canonical_admitted_bytes(&admitted).expect("canonical admitted value");

@@ -157,9 +157,10 @@ pub fn admit_json(raw: &[u8]) -> Result<AdmittedJson, ContractError> {
             "invalid_utf8",
         ))
     })?;
-    preflight_unicode_scalars(text)?;
     preflight_depth(text)?;
     preflight_numbers(text)?;
+    validate_json_syntax(text)?;
+    preflight_unicode_scalars(text)?;
     let mut deserializer = serde_json::Deserializer::from_str(text);
     deserializer.disable_recursion_limit();
     let value = StrictValue::deserialize(&mut deserializer)
@@ -711,6 +712,41 @@ fn parse_schema_major(value: &str) -> Option<&str> {
     Some(major)
 }
 
+fn validate_json_syntax(text: &str) -> Result<(), ContractError> {
+    let probe = syntax_probe_text(text);
+    let mut deserializer = serde_json::Deserializer::from_str(&probe);
+    deserializer.disable_recursion_limit();
+    Value::deserialize(&mut deserializer)
+        .map_err(|_| ContractError(Rejection::validation("invalid_json", "/")))?;
+    deserializer
+        .end()
+        .map_err(|_| ContractError(Rejection::validation("invalid_json", "/")))
+}
+
+fn syntax_probe_text(text: &str) -> String {
+    let mut bytes = text.as_bytes().to_vec();
+    let mut index = 0;
+    let mut in_string = false;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'"' => {
+                in_string = !in_string;
+                index += 1;
+            }
+            b'\\' if in_string => {
+                if bytes.get(index + 1) == Some(&b'u') && unicode_escape(&bytes, index).is_some() {
+                    bytes[index + 2..index + 6].fill(b'0');
+                    index += 6;
+                } else {
+                    index += 2;
+                }
+            }
+            _ => index += 1,
+        }
+    }
+    String::from_utf8(bytes).expect("syntax probe preserves UTF-8")
+}
+
 fn preflight_unicode_scalars(text: &str) -> Result<(), ContractError> {
     let bytes = text.as_bytes();
     let mut index = 0;
@@ -909,20 +945,19 @@ fn exact_integer_exceeds_safe(token: &str) -> bool {
     let Some(exponent) = exponent else {
         return false;
     };
-    let scale = fraction.len() as i64 - exponent;
+    let scale = fraction.len() as i128 - i128::from(exponent);
     let integer_digits = if scale <= 0 {
-        let zero_count = (-scale) as usize;
-        if digits.len() + zero_count > MAX_SAFE_INTEGER_TEXT.len() {
+        let zero_count = -scale;
+        if digits.len() as i128 + zero_count > MAX_SAFE_INTEGER_TEXT.len() as i128 {
             return true;
         }
-        digits.extend(std::iter::repeat_n('0', zero_count));
+        digits.extend(std::iter::repeat_n('0', zero_count as usize));
         digits.as_str()
     } else {
-        let scale = scale as usize;
-        if scale >= digits.len() {
+        if scale >= digits.len() as i128 {
             return false;
         }
-        let split = digits.len() - scale;
+        let split = digits.len() - scale as usize;
         if !digits[split..].bytes().all(|byte| byte == b'0') {
             return false;
         }
@@ -1084,12 +1119,13 @@ impl<'de> Visitor<'de> for StrictValueVisitor {
     where
         A: MapAccess<'de>,
     {
-        let mut values = BTreeMap::new();
+        let mut values = Map::new();
         while let Some((key, value)) = map.next_entry::<String, StrictValue>()? {
-            if values.insert(key, value.0).is_some() {
+            if values.contains_key(&key) {
                 return Err(serde::de::Error::custom("duplicate member"));
             }
+            values.insert(key, value.0);
         }
-        Ok(StrictValue(Value::Object(values.into_iter().collect())))
+        Ok(StrictValue(Value::Object(values)))
     }
 }
