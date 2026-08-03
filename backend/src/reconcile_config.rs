@@ -191,6 +191,10 @@ struct ReconcileVars {
     /// Unset → the default-workflows manifest; a blank override → the legacy body.
     #[serde(default = "defaults::default_manifest")]
     default_manifest: Option<String>,
+    /// Whitespace-separated `owner/repo@ref:path` refs EVERY session receives on top
+    /// of what its trigger declares. Unset/blank -> none (feature off).
+    #[serde(default)]
+    mandatory_packages: Option<String>,
 }
 
 /// Model B reconciler configuration (issue #359 §4). Config surface only — no
@@ -268,6 +272,17 @@ pub struct ReconcileConfig {
     /// no `### Work Label`): the manifest supplies the package set and the session's
     /// wake labels auto-discover from those packages' `[github].work_labels`.
     pub default_manifest: Option<String>,
+    /// Package refs EVERY session gets, PREPENDED to whatever its trigger declares.
+    /// Env: `FKST_MANDATORY_PACKAGES` (whitespace-separated `owner/repo@ref:path`).
+    ///
+    /// Deliberately NOT defaulted in code: empty means "feature off, behave exactly
+    /// as before", and the deployed value lives in the ConfigMap so the baseline can
+    /// change without shipping a binary.
+    ///
+    /// This is what makes session isolation structural rather than author-dependent.
+    /// The rule ships in `libraries/devloop`, so a trigger declaring no devloop tree
+    /// would otherwise run with no isolation at all (#5773).
+    pub mandatory_packages: Vec<crate::goals::trigger_parse::PackageRef>,
 }
 
 impl Default for ReconcileConfig {
@@ -279,6 +294,7 @@ impl Default for ReconcileConfig {
             seed_trigger_issue_on_install: defaults::seed_trigger_issue_on_install(),
             seed_packages: defaults::seed_packages(),
             default_manifest: defaults::default_manifest(),
+            mandatory_packages: Vec::new(),
             reconcile_interval_secs: defaults::reconcile_interval_secs(),
             pod_full_resync_interval_secs: defaults::pod_full_resync_interval_secs(),
             startup_resync_retry_initial_secs: defaults::startup_resync_retry_initial_secs(),
@@ -395,6 +411,29 @@ impl ReconcileConfig {
             .filter(|v| !v.is_empty())
             .unwrap_or_else(defaults::seed_packages);
 
+        // Mandatory packages: validated HERE and failed closed. A silently-dropped
+        // mandatory ref would remove the isolation guarantee this knob exists to
+        // provide, which is precisely the failure that must not be quiet. Unset or
+        // blank yields an empty list -- feature off, effective sets unchanged.
+        let mut mandatory_packages: Vec<crate::goals::trigger_parse::PackageRef> = Vec::new();
+        for token in env
+            .mandatory_packages
+            .as_deref()
+            .unwrap_or_default()
+            .split_whitespace()
+        {
+            // Parsed with the TRIGGER parser, so a mandatory ref is held to exactly
+            // the same shape rules as one an author writes -- and so the stored value
+            // is the same PackageRef type the effective-set resolver consumes.
+            let parsed = crate::goals::trigger_parse::parse_package_ref(token).map_err(|e| {
+                AppError::Config(format!(
+                    "FKST_MANDATORY_PACKAGES token {token:?} is invalid: {e}; expected \
+                     whitespace-separated owner/repo@ref:path refs"
+                ))
+            })?;
+            mandatory_packages.push(parsed);
+        }
+
         // Default manifest ref: an absent env value keeps the built-in default (the
         // serde default already put it here); a blank/all-whitespace override is
         // coerced to `None` so a stray empty ConfigMap value cleanly DISABLES the
@@ -422,6 +461,7 @@ impl ReconcileConfig {
             health_scrape_secs: env.health_scrape_secs,
             seed_trigger_issue_on_install: env.seed_trigger_issue_on_install,
             seed_packages,
+            mandatory_packages,
             default_manifest,
         })
     }

@@ -181,6 +181,7 @@ pub(super) async fn session_outcomes(
                 &name,
                 std::slice::from_mut(&mut reg),
                 state.config.reconcile.work_label_namespace.as_deref(),
+                &state.config.reconcile.mandatory_packages,
             )
             .await?;
             let work = projected

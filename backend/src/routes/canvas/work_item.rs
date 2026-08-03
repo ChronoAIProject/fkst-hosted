@@ -316,9 +316,14 @@ pub(super) async fn create_work_item(
     // Resolve the same effective package + label graph as the reconcile
     // wake-gate. The signed-in user's token can read the public package sources
     // and keeps this mutation independent of any client-supplied label list.
-    let effective =
-        resolve_effective_packages(&gh.client, &gh.api_base, &token, std::slice::from_ref(&reg))
-            .await;
+    let effective = resolve_effective_packages(
+        &gh.client,
+        &gh.api_base,
+        &token,
+        std::slice::from_ref(&reg),
+        &state.config.reconcile.mandatory_packages,
+    )
+    .await;
     let Some(packages) = effective.by_session.get(&reg.session_id) else {
         let reason = effective
             .demotions

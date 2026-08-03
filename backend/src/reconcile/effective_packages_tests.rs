@@ -109,7 +109,23 @@ async fn mount_status(server: &MockServer, m: &PackageRef, status: u16) {
 }
 
 async fn resolve(server: &MockServer, regs: &[SessionRegistration]) -> super::EffectivePackages {
-    resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), regs).await
+    resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), regs, &[]).await
+}
+
+/// Same, with a mandatory baseline prepended to every session.
+async fn resolve_with_mandatory(
+    server: &MockServer,
+    regs: &[SessionRegistration],
+    mandatory: &[PackageRef],
+) -> super::EffectivePackages {
+    resolve_effective_packages(
+        &reqwest::Client::new(),
+        &server.uri(),
+        &tok(),
+        regs,
+        mandatory,
+    )
+    .await
 }
 
 #[tokio::test]
@@ -418,7 +434,8 @@ async fn trigger_package_env_overrides_the_manifest_per_key() {
     );
 
     let resolved =
-        resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), &[reg]).await;
+        resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), &[reg], &[])
+            .await;
 
     let env = &resolved.package_env_by_session["s1"]["github-devloop"];
     assert_eq!(
@@ -444,7 +461,8 @@ async fn a_manifest_free_session_keeps_its_trigger_package_env() {
     );
 
     let resolved =
-        resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), &[reg]).await;
+        resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), &[reg], &[])
+            .await;
 
     assert_eq!(
         resolved.package_env_by_session["s1"]["github-devloop"]["FKST_DEVLOOP_AUTO_REFINE_MAX"],
@@ -485,7 +503,8 @@ async fn a_manifest_and_trigger_key_conflict_demotes_instead_of_killing_the_pod(
     );
 
     let resolved =
-        resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), &[reg]).await;
+        resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), &[reg], &[])
+            .await;
 
     assert!(
         !resolved.package_env_by_session.contains_key("s1"),
@@ -533,10 +552,91 @@ async fn the_first_manifest_wins_a_cross_manifest_key_collision() {
 
     let reg = reg("s1", 1, vec![], vec![first, second]);
     let resolved =
-        resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), &[reg]).await;
+        resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), &[reg], &[])
+            .await;
 
     assert_eq!(
         resolved.package_env_by_session["s1"]["github-devloop"]["FKST_DEVLOOP_MAX_INFLIGHT"], "1",
         "the first manifest to set a key must win"
     );
+}
+
+/// Feature off: an empty baseline must leave effective sets byte-identical, so
+/// deploying this change without configuring it cannot alter any session.
+#[tokio::test]
+async fn empty_mandatory_list_changes_nothing() {
+    let server = MockServer::start().await;
+    let a = pkg("acme", "p", "main", "packages/a");
+    let regs = vec![reg("s1", 1, vec![a.clone()], vec![])];
+    let with_empty = resolve_with_mandatory(&server, &regs, &[]).await;
+    let without = resolve(&server, &regs).await;
+    assert_eq!(
+        with_empty.by_session.get("s1"),
+        without.by_session.get("s1")
+    );
+    assert_eq!(with_empty.by_session.get("s1"), Some(&vec![a]));
+}
+
+/// The baseline leads, in configured order, ahead of the author's own packages --
+/// FKST_SESSION_PACKAGE_ROOTS is built from this list, so order is observable.
+#[tokio::test]
+async fn mandatory_packages_are_prepended_in_configured_order() {
+    let server = MockServer::start().await;
+    let proxy = pkg(
+        "ChronoAIProject",
+        "fkst-hosted",
+        "packages",
+        "packages/github-proxy",
+    );
+    let dev = pkg(
+        "ChronoAIProject",
+        "fkst-hosted",
+        "packages",
+        "packages/workflow-dev",
+    );
+    let own = pkg("acme", "p", "main", "packages/own");
+    let regs = vec![reg("s1", 1, vec![own.clone()], vec![])];
+    let got = resolve_with_mandatory(&server, &regs, &[proxy.clone(), dev.clone()]).await;
+    assert_eq!(got.by_session.get("s1"), Some(&vec![proxy, dev, own]));
+}
+
+/// A session that ALSO declares a mandatory ref keeps exactly one copy, in the
+/// mandatory position -- the existing first-occurrence dedup does the work.
+#[tokio::test]
+async fn a_session_declaring_a_mandatory_ref_keeps_one_copy() {
+    let server = MockServer::start().await;
+    let proxy = pkg(
+        "ChronoAIProject",
+        "fkst-hosted",
+        "packages",
+        "packages/github-proxy",
+    );
+    let own = pkg("acme", "p", "main", "packages/own");
+    let regs = vec![reg("s1", 1, vec![own.clone(), proxy.clone()], vec![])];
+    let got = resolve_with_mandatory(&server, &regs, std::slice::from_ref(&proxy)).await;
+    assert_eq!(got.by_session.get("s1"), Some(&vec![proxy, own]));
+}
+
+/// Every session receives the baseline, including one whose packages come only
+/// from a manifest.
+#[tokio::test]
+async fn manifest_only_session_still_receives_the_baseline() {
+    let server = MockServer::start().await;
+    let manifest = pkg("acme", "manifests", "main", "m.json");
+    let from_manifest = pkg("acme", "p", "main", "packages/from-manifest");
+    mount_manifest_json(
+        &server,
+        &manifest,
+        manifest_body(1, &["acme/p@main:packages/from-manifest"]),
+    )
+    .await;
+    let proxy = pkg(
+        "ChronoAIProject",
+        "fkst-hosted",
+        "packages",
+        "packages/github-proxy",
+    );
+    let regs = vec![reg("s1", 1, vec![], vec![manifest])];
+    let got = resolve_with_mandatory(&server, &regs, std::slice::from_ref(&proxy)).await;
+    assert_eq!(got.by_session.get("s1"), Some(&vec![proxy, from_manifest]));
 }
