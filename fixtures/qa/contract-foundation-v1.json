@@ -1,0 +1,247 @@
+{
+  "schema_version": "qa.contract-foundation-fixtures/v1",
+  "gate_id": "P0-02-CONTRACT-FOUNDATION",
+  "valid_cases": [
+    {
+      "case_id": "foundation-contract-meta-valid",
+      "foundation_type": "ContractMeta",
+      "source": {
+        "schema_version": "qa.contract-foundation/v1",
+        "content_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "run_id": "00000000-0000-0000-0000-000000000000",
+        "created_at": "2026-07-31T12:34:56.123Z",
+        "producer_version": "build-1",
+        "correlation_id": "corr-1"
+      },
+      "expected_canonical_utf8_base64": "eyJjb250ZW50X2RpZ2VzdCI6InNoYTI1NjowMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwiY29ycmVsYXRpb25faWQiOiJjb3JyLTEiLCJjcmVhdGVkX2F0IjoiMjAyNi0wNy0zMVQxMjozNDo1Ni4xMjNaIiwicHJvZHVjZXJfdmVyc2lvbiI6ImJ1aWxkLTEiLCJydW5faWQiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDAiLCJzY2hlbWFfdmVyc2lvbiI6InFhLmNvbnRyYWN0LWZvdW5kYXRpb24vdjEifQ==",
+      "expected_sha256": "sha256:1123d7ee7417fbd1bcc7d7912aa2301b00d37a18e2e14e7e4325ae30b5fee386"
+    },
+    {
+      "case_id": "foundation-contract-meta-uuid-shape-valid",
+      "foundation_type": "ContractMeta",
+      "source": {
+        "schema_version": "qa.contract-foundation/v1",
+        "content_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "run_id": "ffffffff-ffff-ffff-0000-ffffffffffff",
+        "created_at": "2024-02-29T23:59:59.1Z",
+        "producer_version": "build-uuid-shape"
+      },
+      "expected_canonical_utf8_base64": "eyJjb250ZW50X2RpZ2VzdCI6InNoYTI1NjowMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwiY3JlYXRlZF9hdCI6IjIwMjQtMDItMjlUMjM6NTk6NTkuMVoiLCJwcm9kdWNlcl92ZXJzaW9uIjoiYnVpbGQtdXVpZC1zaGFwZSIsInJ1bl9pZCI6ImZmZmZmZmZmLWZmZmYtZmZmZi0wMDAwLWZmZmZmZmZmZmZmZiIsInNjaGVtYV92ZXJzaW9uIjoicWEuY29udHJhY3QtZm91bmRhdGlvbi92MSJ9",
+      "expected_sha256": "sha256:cea401a4774b3c38fc0db343178632401fd30ea5ffe99fc8c31a59911e087c54"
+    },
+    {
+      "case_id": "foundation-host-meta-valid",
+      "foundation_type": "HostScopedMeta",
+      "source": {
+        "schema_version": "qa.contract-foundation/v1",
+        "content_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "host_instance_id": "host-local-1",
+        "created_at": "2026-07-31T12:34:56Z",
+        "producer_version": "1.0.0"
+      },
+      "expected_canonical_utf8_base64": "eyJjb250ZW50X2RpZ2VzdCI6InNoYTI1NjowMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwiY3JlYXRlZF9hdCI6IjIwMjYtMDctMzFUMTI6MzQ6NTZaIiwiaG9zdF9pbnN0YW5jZV9pZCI6Imhvc3QtbG9jYWwtMSIsInByb2R1Y2VyX3ZlcnNpb24iOiIxLjAuMCIsInNjaGVtYV92ZXJzaW9uIjoicWEuY29udHJhY3QtZm91bmRhdGlvbi92MSJ9",
+      "expected_sha256": "sha256:6d4260fea01c52e1031bac065b77953f1f98acb208bf2f206e1824ec1a03bdd4"
+    },
+    {
+      "case_id": "foundation-resource-ref-valid",
+      "foundation_type": "ResourceRef",
+      "source": {
+        "kind": "fixture",
+        "id": "fx-1",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "version": "v1"
+      },
+      "expected_canonical_utf8_base64": "eyJkaWdlc3QiOiJzaGEyNTY6MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsImlkIjoiZngtMSIsImtpbmQiOiJmaXh0dXJlIiwidmVyc2lvbiI6InYxIn0=",
+      "expected_sha256": "sha256:20aabdc44755299874c6d20683b3646dfb2faf971a6a1424483d469bdc00ef84"
+    },
+    {
+      "case_id": "foundation-actor-ref-valid",
+      "foundation_type": "ActorRef",
+      "source": { "type": "device", "id": "device-1", "display_name": "Local device" },
+      "expected_canonical_utf8_base64": "eyJkaXNwbGF5X25hbWUiOiJMb2NhbCBkZXZpY2UiLCJpZCI6ImRldmljZS0xIiwidHlwZSI6ImRldmljZSJ9",
+      "expected_sha256": "sha256:b67ac0eb98c90b7d05ece2cc96abc0d5be63113958f16f0c884d87bfc5d013ff"
+    },
+    {
+      "case_id": "foundation-digest-bound-ref-valid",
+      "foundation_type": "DigestBoundRef",
+      "source": {
+        "kind": "plan",
+        "id": "plan-1",
+        "schema_version": "qa.contract-foundation/v1",
+        "content_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "version": "1"
+      },
+      "expected_canonical_utf8_base64": "eyJjb250ZW50X2RpZ2VzdCI6InNoYTI1NjowMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwiaWQiOiJwbGFuLTEiLCJraW5kIjoicGxhbiIsInNjaGVtYV92ZXJzaW9uIjoicWEuY29udHJhY3QtZm91bmRhdGlvbi92MSIsInZlcnNpb24iOiIxIn0=",
+      "expected_sha256": "sha256:f56d5c690cf1070bb5ca88da0ddafa62b34ac7c561f5aa9cce37124a5cf10547"
+    },
+    {
+      "case_id": "foundation-signature-block-valid",
+      "foundation_type": "SignatureBlock",
+      "source": { "algorithm": "ed25519", "key_id": "key-1", "value": "AQID" },
+      "expected_canonical_utf8_base64": "eyJhbGdvcml0aG0iOiJlZDI1NTE5Iiwia2V5X2lkIjoia2V5LTEiLCJ2YWx1ZSI6IkFRSUQifQ==",
+      "expected_sha256": "sha256:2ae70a1c624d354249ce82620b0d0f67c6214ee5e29fe982079543176160b3c2"
+    },
+    {
+      "case_id": "foundation-strict-union-alpha-valid",
+      "foundation_type": "StrictUnionSpecimen",
+      "source": { "kind": "alpha", "common": "shared", "alpha_value": "value" },
+      "expected_canonical_utf8_base64": "eyJhbHBoYV92YWx1ZSI6InZhbHVlIiwiY29tbW9uIjoic2hhcmVkIiwia2luZCI6ImFscGhhIn0=",
+      "expected_sha256": "sha256:d37d6b51d27ca4ea82e69228acd1c675a9448940c96e0f2862e43f0bbfb40b74"
+    },
+    {
+      "case_id": "foundation-strict-union-beta-valid",
+      "foundation_type": "StrictUnionSpecimen",
+      "source": { "kind": "beta", "common": "shared", "beta_count": 3 },
+      "expected_canonical_utf8_base64": "eyJiZXRhX2NvdW50IjozLCJjb21tb24iOiJzaGFyZWQiLCJraW5kIjoiYmV0YSJ9",
+      "expected_sha256": "sha256:ff315df0a2807a71ed217d9818ead4644bab55dd7f8e2572ecbae38b521d9135"
+    }
+  ],
+  "invalid_cases": [
+    {
+      "case_id": "foundation-contract-meta-unknown-field",
+      "foundation_type": "ContractMeta",
+      "source": {
+        "schema_version": "qa.contract-foundation/v1",
+        "content_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "run_id": "00000000-0000-0000-0000-000000000000",
+        "created_at": "2026-07-31T12:34:56Z",
+        "producer_version": "1",
+        "extra": true
+      },
+      "expected": { "category": "contract", "code": "contract.forbidden_field", "reason": "unknown_field", "path": "/extra" }
+    },
+    {
+      "case_id": "foundation-contract-meta-calendar-invalid",
+      "foundation_type": "ContractMeta",
+      "source": {
+        "schema_version": "qa.contract-foundation/v1",
+        "content_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "run_id": "00000000-0000-0000-0000-000000000000",
+        "created_at": "2026-02-31T12:34:56Z",
+        "producer_version": "1"
+      },
+      "expected": { "category": "validation", "reason": "invalid_scalar", "path": "/created_at" }
+    },
+    {
+      "case_id": "foundation-contract-meta-fraction-trailing-zero",
+      "foundation_type": "ContractMeta",
+      "source": {
+        "schema_version": "qa.contract-foundation/v1",
+        "content_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "run_id": "00000000-0000-0000-0000-000000000000",
+        "created_at": "2026-07-31T12:34:56.1230Z",
+        "producer_version": "1"
+      },
+      "expected": { "category": "validation", "reason": "invalid_scalar", "path": "/created_at" }
+    },
+    {
+      "case_id": "foundation-contract-meta-uuid-uppercase",
+      "foundation_type": "ContractMeta",
+      "source": {
+        "schema_version": "qa.contract-foundation/v1",
+        "content_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "run_id": "FFFFFFFF-FFFF-FFFF-0000-FFFFFFFFFFFF",
+        "created_at": "2026-07-31T12:34:56Z",
+        "producer_version": "1"
+      },
+      "expected": { "category": "validation", "reason": "invalid_scalar", "path": "/run_id" }
+    },
+    {
+      "case_id": "foundation-contract-meta-missing-content-digest",
+      "foundation_type": "ContractMeta",
+      "source": {
+        "schema_version": "qa.contract-foundation/v1",
+        "run_id": "00000000-0000-0000-0000-000000000000",
+        "created_at": "2026-07-31T12:34:56Z",
+        "producer_version": "1"
+      },
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "foundation-host-meta-unsupported-version",
+      "foundation_type": "HostScopedMeta",
+      "source": {
+        "schema_version": "qa.contract-foundation/v2",
+        "content_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "host_instance_id": "host-1",
+        "created_at": "2026-07-31T12:34:56Z",
+        "producer_version": "1"
+      },
+      "expected": { "category": "contract", "code": "contract.unsupported_version", "reason": "unsupported_version", "path": "/schema_version" }
+    },
+    {
+      "case_id": "foundation-actor-ref-unsupported-enum",
+      "foundation_type": "ActorRef",
+      "source": { "type": "robot", "id": "actor-1" },
+      "expected": { "category": "contract", "code": "contract.unsupported_enum", "reason": "unsupported_enum", "path": "/type" }
+    },
+    {
+      "case_id": "foundation-signature-invalid-base64url",
+      "foundation_type": "SignatureBlock",
+      "source": { "algorithm": "ed25519", "key_id": "key-1", "value": "AQID=" },
+      "expected": { "category": "contract", "code": "contract.invalid_encoding", "reason": "invalid_encoding", "path": "/value" }
+    },
+    {
+      "case_id": "foundation-strict-union-unknown-discriminator",
+      "foundation_type": "StrictUnionSpecimen",
+      "source": { "kind": "gamma", "common": "shared" },
+      "expected": { "category": "contract", "code": "contract.invalid_variant", "reason": "unknown_discriminator", "path": "/kind" }
+    },
+    {
+      "case_id": "foundation-strict-union-missing-required",
+      "foundation_type": "StrictUnionSpecimen",
+      "source": { "kind": "alpha", "common": "shared" },
+      "expected": { "category": "contract", "code": "contract.invalid_variant", "reason": "missing_required_field", "path": "/alpha_value" }
+    },
+    {
+      "case_id": "foundation-strict-union-mixed-fields",
+      "foundation_type": "StrictUnionSpecimen",
+      "source": { "kind": "alpha", "common": "shared", "alpha_value": "value", "beta_count": 1 },
+      "expected": { "category": "contract", "code": "contract.forbidden_field", "reason": "mixed_variant_fields", "path": "/beta_count" }
+    },
+    {
+      "case_id": "foundation-strict-union-unknown-field",
+      "foundation_type": "StrictUnionSpecimen",
+      "source": { "kind": "beta", "common": "shared", "beta_count": 1, "extra": true },
+      "expected": { "category": "contract", "code": "contract.forbidden_field", "reason": "unknown_field", "path": "/extra" }
+    }
+  ],
+  "projection_cases": [
+    {
+      "case_id": "foundation-contract-content-root-only-removal",
+      "foundation_type": "ProjectionSpecimen",
+      "source": {
+        "schema_version": "qa.contract-foundation/v1",
+        "content_digest": "sha256:0154896a26848e36e05a7ba850c5105e414d11150070a290d760285eb47e5e51",
+        "signature": { "algorithm": "ed25519", "key_id": "key-1", "value": "AQID" },
+        "payload": {
+          "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "signature": { "nested": true },
+          "z": 2,
+          "a": 1
+        }
+      },
+      "expected_projection_utf8_base64": "eyJwYXlsb2FkIjp7ImEiOjEsImNvbnRlbnRfZGlnZXN0Ijoic2hhMjU2OjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJzaWduYXR1cmUiOnsibmVzdGVkIjp0cnVlfSwieiI6Mn0sInNjaGVtYV92ZXJzaW9uIjoicWEuY29udHJhY3QtZm91bmRhdGlvbi92MSJ9",
+      "expected_sha256": "sha256:0154896a26848e36e05a7ba850c5105e414d11150070a290d760285eb47e5e51"
+    }
+  ],
+  "digest_mismatch_cases": [
+    {
+      "case_id": "foundation-contract-content-digest-mismatch",
+      "foundation_type": "ProjectionSpecimen",
+      "source": {
+        "schema_version": "qa.contract-foundation/v1",
+        "content_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "signature": { "algorithm": "ed25519", "key_id": "key-1", "value": "AQID" },
+        "payload": {
+          "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "signature": { "nested": true },
+          "z": 2,
+          "a": 1
+        }
+      },
+      "expected_projection_sha256": "sha256:0154896a26848e36e05a7ba850c5105e414d11150070a290d760285eb47e5e51",
+      "expected": { "category": "contract", "code": "contract.digest_mismatch", "reason": "digest_mismatch", "path": "/content_digest" }
+    }
+  ]
+}

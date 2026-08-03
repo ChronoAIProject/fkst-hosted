@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1",
+  "title": "Local QA contract foundation v1",
+  "$comment": "Executable projection for the trusted-input local_qa_host_mvp profile approved by issue #5729. It does not supersede the immutable hardened Runtime baseline.",
+  "$defs": {
+    "ISO8601": { "type": "string", "format": "date-time", "description": "UTC RFC3339 Z timestamp with a real calendar date; fractional seconds are omitted when zero and never end in zero.", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]*[1-9])?Z$" },
+    "Sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "Base64UrlNoPad": { "type": "string", "pattern": "^[A-Za-z0-9_-]*$" },
+    "UUID": { "type": "string", "description": "Lowercase canonical hyphenated UUID shape; this foundation does not impose a UUID version or variant restriction.", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "SchemaVersion": { "type": "string", "pattern": "^qa\\.[a-z0-9]+(?:-[a-z0-9]+)*/v[1-9][0-9]*$" },
+    "NonEmptyString": { "type": "string", "minLength": 1 },
+    "ContractMeta": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "content_digest", "run_id", "created_at", "producer_version"],
+      "properties": {
+        "schema_version": { "$ref": "#/$defs/SchemaVersion" }, "content_digest": { "$ref": "#/$defs/Sha256" },
+        "run_id": { "$ref": "#/$defs/UUID" }, "created_at": { "$ref": "#/$defs/ISO8601" },
+        "producer_version": { "$ref": "#/$defs/NonEmptyString" }, "correlation_id": { "$ref": "#/$defs/NonEmptyString" }
+      }
+    },
+    "HostScopedMeta": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "content_digest", "host_instance_id", "created_at", "producer_version"],
+      "properties": {
+        "schema_version": { "$ref": "#/$defs/SchemaVersion" }, "content_digest": { "$ref": "#/$defs/Sha256" },
+        "host_instance_id": { "$ref": "#/$defs/NonEmptyString" }, "created_at": { "$ref": "#/$defs/ISO8601" },
+        "producer_version": { "$ref": "#/$defs/NonEmptyString" }, "correlation_id": { "$ref": "#/$defs/NonEmptyString" }
+      }
+    },
+    "ResourceRef": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "id"],
+      "properties": { "kind": { "$ref": "#/$defs/NonEmptyString" }, "id": { "$ref": "#/$defs/NonEmptyString" }, "digest": { "$ref": "#/$defs/Sha256" }, "version": { "$ref": "#/$defs/NonEmptyString" } }
+    },
+    "ActorType": { "enum": ["user", "service", "device", "module"] },
+    "ActorRef": {
+      "type": "object", "additionalProperties": false, "required": ["type", "id"],
+      "properties": { "type": { "$ref": "#/$defs/ActorType" }, "id": { "$ref": "#/$defs/NonEmptyString" }, "display_name": { "$ref": "#/$defs/NonEmptyString" } }
+    },
+    "DigestBoundRef": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "id", "schema_version", "content_digest"],
+      "properties": { "kind": { "$ref": "#/$defs/NonEmptyString" }, "id": { "$ref": "#/$defs/NonEmptyString" }, "schema_version": { "$ref": "#/$defs/SchemaVersion" }, "content_digest": { "$ref": "#/$defs/Sha256" }, "version": { "$ref": "#/$defs/NonEmptyString" } }
+    },
+    "SignatureAlgorithm": { "enum": ["ed25519", "es256"] },
+    "SignatureBlock": {
+      "type": "object", "additionalProperties": false, "required": ["algorithm", "key_id", "value"],
+      "properties": { "algorithm": { "$ref": "#/$defs/SignatureAlgorithm" }, "key_id": { "$ref": "#/$defs/NonEmptyString" }, "value": { "$ref": "#/$defs/Base64UrlNoPad" } }
+    },
+    "ProjectionSpecimen": {
+      "type": "object", "additionalProperties": false, "required": ["schema_version", "content_digest", "payload"],
+      "properties": {
+        "schema_version": { "$ref": "#/$defs/SchemaVersion" },
+        "content_digest": { "$ref": "#/$defs/Sha256" },
+        "signature": { "$ref": "#/$defs/SignatureBlock" },
+        "payload": { "type": "object" }
+      }
+    },
+    "StrictUnionSpecimen": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind", "common", "alpha_value"], "properties": { "kind": { "const": "alpha" }, "common": { "$ref": "#/$defs/NonEmptyString" }, "alpha_value": { "$ref": "#/$defs/NonEmptyString" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "common", "beta_count"], "properties": { "kind": { "const": "beta" }, "common": { "$ref": "#/$defs/NonEmptyString" }, "beta_count": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 } } }
+      ]
+    }
+  }
+}

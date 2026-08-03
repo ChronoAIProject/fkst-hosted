@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "registry_version": "qa.contract-registry/v1",
+  "profile": "local_qa_host_mvp",
+  "schemas": {
+    "qa.contract-foundation/v1": {
+      "path": "contracts/qa.contract-foundation/v1/schema.json",
+      "id": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1",
+      "major": 1
+    }
+  },
+  "types": {
+    "ContractMeta": { "schema": "qa.contract-foundation/v1", "pointer": "#/$defs/ContractMeta" },
+    "HostScopedMeta": { "schema": "qa.contract-foundation/v1", "pointer": "#/$defs/HostScopedMeta" },
+    "ResourceRef": { "schema": "qa.contract-foundation/v1", "pointer": "#/$defs/ResourceRef" },
+    "ActorRef": { "schema": "qa.contract-foundation/v1", "pointer": "#/$defs/ActorRef" },
+    "DigestBoundRef": { "schema": "qa.contract-foundation/v1", "pointer": "#/$defs/DigestBoundRef" },
+    "SignatureBlock": { "schema": "qa.contract-foundation/v1", "pointer": "#/$defs/SignatureBlock" },
+    "ProjectionSpecimen": { "schema": "qa.contract-foundation/v1", "pointer": "#/$defs/ProjectionSpecimen", "fixture_only": true },
+    "StrictUnionSpecimen": { "schema": "qa.contract-foundation/v1", "pointer": "#/$defs/StrictUnionSpecimen", "fixture_only": true }
+  }
+}
