@@ -304,6 +304,7 @@ pub async fn reconcile_repo(
         &ctx.config.github_api_base_url,
         &token,
         &regs,
+        &cfg.mandatory_packages,
     )
     .await;
     if !manifest_demotions.is_empty() {

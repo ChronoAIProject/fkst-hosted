@@ -86,6 +86,7 @@ pub async fn resolve_effective_packages(
     api_base: &str,
     token: &SecretString,
     regs: &[SessionRegistration],
+    mandatory: &[PackageRef],
 ) -> EffectivePackages {
     // Cache each distinct manifest reference's expansion (Ok packages / Err reason) so a
     // manifest shared by two sessions is fetched once. The Err reason is the manifest's
@@ -100,7 +101,7 @@ pub async fn resolve_effective_packages(
     let mut demotions: Vec<(i64, String)> = Vec::new();
 
     for reg in regs {
-        match expand_one(http, api_base, token, reg, &mut cache).await {
+        match expand_one(http, api_base, token, reg, &mut cache, mandatory).await {
             Ok((effective, package_env)) => {
                 by_session.insert(reg.session_id.clone(), effective);
                 package_env_by_session.insert(reg.session_id.clone(), package_env);
@@ -128,10 +129,17 @@ async fn expand_one(
         RefKey,
         Result<crate::reconcile::manifest_expand::ExpandedManifest, String>,
     >,
+    mandatory: &[PackageRef],
 ) -> Result<(Vec<PackageRef>, crate::goals::package_env::PackageEnv), String> {
-    // Explicit packages first (author order); then each manifest's expansion appended in
-    // manifest order (in-file order preserved within each expansion).
-    let mut effective: Vec<PackageRef> = reg.def.packages.clone();
+    // Mandatory packages FIRST, then explicit packages (author order), then each
+    // manifest's expansion in manifest order (in-file order preserved within each).
+    //
+    // Prepended rather than appended so the dedup below -- first occurrence wins by
+    // full (owner, repo, ref, path) -- resolves a session that ALSO declares one of
+    // them to a single copy in the mandatory position. Order matters downstream:
+    // FKST_SESSION_PACKAGE_ROOTS is built from this list.
+    let mut effective: Vec<PackageRef> = mandatory.to_vec();
+    effective.extend(reg.def.packages.iter().cloned());
     // Manifest-supplied configuration, folded in manifest order. The FIRST manifest
     // to set a key wins, matching how the package list keeps its first occurrence.
     let mut manifest_env = crate::goals::package_env::PackageEnv::new();
