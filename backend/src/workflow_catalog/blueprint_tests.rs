@@ -25,11 +25,8 @@ fn parses_the_walking_skeleton_blueprint_without_retaining_prompt_text() {
         }}"#
     );
 
-    let blueprint = parse_blueprint(
-        ".fkst/packages/release-hardening.json",
-        document.as_bytes(),
-    )
-    .expect("valid blueprint");
+    let blueprint = parse_blueprint(".fkst/packages/release-hardening.json", document.as_bytes())
+        .expect("valid blueprint");
 
     assert_eq!(blueprint.id, "release-hardening");
     assert_eq!(blueprint.version, "1.0.0");

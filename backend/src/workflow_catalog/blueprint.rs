@@ -63,7 +63,15 @@ pub fn parse_blueprint(path: &str, bytes: &[u8]) -> Result<WorkflowBlueprint, Bl
     reject_unknown(
         root,
         "$",
-        &["schema", "id", "version", "summary", "applies_when", "selector", "steps"],
+        &[
+            "schema",
+            "id",
+            "version",
+            "summary",
+            "applies_when",
+            "selector",
+            "steps",
+        ],
     )?;
 
     let schema = required_string(root, "schema", "$.schema", None)?;
@@ -78,10 +86,7 @@ pub fn parse_blueprint(path: &str, bytes: &[u8]) -> Result<WorkflowBlueprint, Bl
     let version = required_string(root, "version", "$.version", Some(64))?;
     let summary = optional_string(root, "summary", "$.summary", 512)?;
     let applies_when = optional_string(root, "applies_when", "$.applies_when", 1024)?;
-    let selector = root
-        .get("selector")
-        .map(parse_selector)
-        .transpose()?;
+    let selector = root.get("selector").map(parse_selector).transpose()?;
     let steps_value = root
         .get("steps")
         .ok_or_else(|| BlueprintError::new("$.steps", "is required"))?;
@@ -201,7 +206,10 @@ fn reject_unknown(
     path: &str,
     allowed: &[&str],
 ) -> Result<(), BlueprintError> {
-    if let Some(field) = object.keys().find(|field| !allowed.contains(&field.as_str())) {
+    if let Some(field) = object
+        .keys()
+        .find(|field| !allowed.contains(&field.as_str()))
+    {
         return Err(BlueprintError::new(
             &format!("{path}.{field}"),
             "is not allowed",
