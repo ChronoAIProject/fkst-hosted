@@ -93,6 +93,22 @@ describe('i18n key parity (per-domain split)', () => {
       expect(Object.keys(catalog.dashboard.detail.recoveryState)).toEqual(states);
       expect(Object.keys(catalog.dashboard.detail.recoveryReason)).toEqual(reasons);
       expect(Object.keys(catalog.dashboard.detail.runtimeState)).toEqual(runtimes);
+      // The health taxonomy + heartbeat states, pinned in ORDER so a future enum
+      // change cannot silently leave one language short a label.
+      expect(Object.keys(catalog.dashboard.detail.healthStatus)).toEqual([
+        'working',
+        'idle',
+        'blocked',
+        'stalled',
+        'failing',
+        'unknown',
+      ]);
+      expect(Object.keys(catalog.dashboard.detail.healthStaleness)).toEqual([
+        'not_running',
+        'never_reported',
+        'fresh',
+        'stale',
+      ]);
     }
   });
 });

@@ -116,6 +116,10 @@ async fn paths_are_the_trimmed_v1_surface() {
         "/api/v1/logs/{session_id}",
         // The identity-gated engine observe read-model (issue #473).
         "/api/v1/sessions/{session_id}/observe",
+        // The identity-gated session health reports (milestone "Session health
+        // reports"): the listing + heartbeat verdict, and one full report.
+        "/api/v1/sessions/{session_id}/health",
+        "/api/v1/sessions/{session_id}/health/{report_id}",
         "/api/v1/logs/oauth/callback",
         // The frontend GitHub-OAuth login flow (login → callback → refresh).
         "/api/v1/auth/github/login",
@@ -500,6 +504,19 @@ async fn no_operation_requires_security_the_whole_surface_is_open() {
         assert!(
             paths[route][verb].get("security").is_none(),
             "environment {verb} {route} must NOT carry a security scheme"
+        );
+    }
+    // The session health endpoints authorize in-handler through the same
+    // `routes::logs::authorize` the log path uses, so — like `observe` — they declare
+    // no security scheme. Referencing one here would point at a scheme this document
+    // deliberately does not define.
+    for route in [
+        "/api/v1/sessions/{session_id}/health",
+        "/api/v1/sessions/{session_id}/health/{report_id}",
+    ] {
+        assert!(
+            paths[route]["get"].get("security").is_none(),
+            "{route} must NOT carry a security scheme"
         );
     }
     assert!(

@@ -30,6 +30,16 @@ pub const GITHUB_LABEL_NAME_MAX_CHARS: usize = 50;
 /// The package-side contract carrying the logical-to-effective label mapping.
 pub const SESSION_WORK_LABEL_MAP_JSON_ENV: &str = "FKST_SESSION_WORK_LABEL_MAP_JSON";
 
+/// The deployment's work-label namespace, as both the operator config key
+/// ([`crate::reconcile_config::ReconcileConfig::work_label_namespace`]) and the
+/// session-side variable rendered from it.
+///
+/// One const so the config reader, the platform-owned denylist, and the env writer
+/// cannot drift on the name — the value is load-bearing for artifact naming
+/// ([`crate::session_health`] stamps it into every health report filename), so a
+/// session must not be able to observe or forge a namespace other than its own.
+pub const WORK_LABEL_NAMESPACE_ENV: &str = "FKST_WORK_LABEL_NAMESPACE";
+
 /// Render the GitHub trigger-issue title used by a namespaced hosted provider.
 /// The namespace is already validated as a lowercase hyphenated slug at config
 /// load; its human-facing form is uppercase with each hyphen rendered as a space.

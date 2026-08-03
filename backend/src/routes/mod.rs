@@ -21,4 +21,7 @@ pub mod health;
 pub mod logs;
 pub mod metrics;
 pub mod observe;
+// The identity-gated session health read surface (milestone "Session health
+// reports"): the report listing + heartbeat verdict, and one full report.
 pub mod repos;
+pub mod session_health;

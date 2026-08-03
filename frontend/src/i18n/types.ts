@@ -391,6 +391,7 @@ export interface SiteContent {
       tabPackages: string;
       tabLogs: string;
       tabOutcomes: string;
+      tabHealth: string;
       /** Copy-affordance label on the full session id in the drawer header. */
       sessionIdCopy: string;
       creatorLabel: string;
@@ -546,6 +547,44 @@ export interface SiteContent {
       /** Non-blocking notice when the run list failed to load and the tab fell
        *  back to the latest bundle. */
       runsError: string;
+      // ---- Health tab ----
+      /** Report status labels, keyed by the v1 taxonomy. */
+      healthStatus: Record<
+        'working' | 'idle' | 'blocked' | 'stalled' | 'failing' | 'unknown',
+        string
+      >;
+      /** Heartbeat verdict labels, keyed by the API's staleness state. */
+      healthStaleness: Record<'not_running' | 'never_reported' | 'fresh' | 'stale', string>;
+      /** Header chip label when the heartbeat is stale (overrides the status). */
+      healthStaleChip: string;
+      healthCurrent: string;
+      healthEvidence: string;
+      healthHistory: string;
+      healthBody: string;
+      /** aria-label on the rendered (untrusted) report body region. */
+      healthBodyAria: string;
+      healthProducer: string;
+      healthConfidence: string;
+      /** `{n}` placeholder — whole minutes since the newest report. */
+      healthLastReport: string;
+      /** Shown instead when the age could not be determined. */
+      healthLastReportUnknown: string;
+      /** The stale callout: heading + body with `{expected}` and `{age}` minutes. */
+      healthStaleTitle: string;
+      healthStaleBody: string;
+      healthLoading: string;
+      /** Calm empty state: the first report has not landed yet. */
+      healthNeverReported: string;
+      /** Calm empty state: the session is not running, so it is not reporting. */
+      healthNotRunning: string;
+      /** 503 — health reporting is not configured for this deployment. */
+      healthUnavailable: string;
+      healthError: string;
+      healthRetry: string;
+      /** aria-label on the report-history list. */
+      healthHistoryAria: string;
+      /** aria-label on the selected-report detail pane. */
+      healthDetailAria: string;
       // ---- Outcomes tab ----
       outcomesLoading: string;
       outcomesError: string;

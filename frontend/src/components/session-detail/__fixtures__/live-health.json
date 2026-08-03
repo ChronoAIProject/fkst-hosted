@@ -1,0 +1,158 @@
+{
+  "listing": {
+    "session_id": "12675062-9c39-5017-8640-166cfb3740ba",
+    "reports": [
+      {
+        "id": "chronoai-fkst-cloud-test-12675062-9c39-5017-8640-166cfb3740ba-health-agent-status-report-20260730-141342",
+        "generated_at": "2026-07-30T14:13:42Z",
+        "status": "stalled",
+        "status_raw": "stalled",
+        "headline": "No progress in the last 10m with 1 work item(s) open (consecutive quiet windows: 1).",
+        "producer": "fkst-health@0.1.0"
+      },
+      {
+        "id": "chronoai-fkst-cloud-test-12675062-9c39-5017-8640-166cfb3740ba-health-agent-status-report-20260730-140303",
+        "generated_at": "2026-07-30T14:03:03Z",
+        "status": "stalled",
+        "status_raw": "stalled",
+        "headline": "No progress in the last 10m with 1 work item(s) open (consecutive quiet windows: 1).",
+        "producer": "fkst-health@0.1.0"
+      },
+      {
+        "id": "chronoai-fkst-cloud-test-12675062-9c39-5017-8640-166cfb3740ba-health-agent-status-report-20260730-140003",
+        "generated_at": "2026-07-30T14:00:03Z",
+        "status": "stalled",
+        "status_raw": "stalled",
+        "headline": "No progress in the last 10m with 1 work item(s) open (consecutive quiet windows: 1).",
+        "producer": "fkst-health@0.1.0"
+      },
+      {
+        "id": "chronoai-fkst-cloud-test-12675062-9c39-5017-8640-166cfb3740ba-health-agent-status-report-20260730-134909",
+        "generated_at": "2026-07-30T13:49:09Z",
+        "status": "working",
+        "status_raw": "working",
+        "headline": "Session is making progress: commits=1.",
+        "producer": "fkst-health@0.1.0"
+      }
+    ],
+    "latest": {
+      "id": "chronoai-fkst-cloud-test-12675062-9c39-5017-8640-166cfb3740ba-health-agent-status-report-20260730-141342",
+      "generated_at": "2026-07-30T14:13:42Z",
+      "status": "stalled",
+      "status_raw": "stalled",
+      "headline": "No progress in the last 10m with 1 work item(s) open (consecutive quiet windows: 1).",
+      "producer": "fkst-health@0.1.0"
+    },
+    "staleness": {
+      "state": "fresh",
+      "expected_interval_secs": 600,
+      "age_secs": 117
+    }
+  },
+  "report": {
+    "session_id": "12675062-9c39-5017-8640-166cfb3740ba",
+    "id": "chronoai-fkst-cloud-test-12675062-9c39-5017-8640-166cfb3740ba-health-agent-status-report-20260730-141342",
+    "generated_at": "2026-07-30T14:13:42Z",
+    "window_start": "2026-07-30T14:03:42Z",
+    "status": "stalled",
+    "status_raw": "stalled",
+    "headline": "No progress in the last 10m with 1 work item(s) open (consecutive quiet windows: 1).",
+    "producer": "fkst-health@0.1.0",
+    "confidence": "low",
+    "expected_interval_secs": 600,
+    "evidence": [
+      {
+        "key": "status_rule",
+        "value": "stalled"
+      },
+      {
+        "key": "consecutive_no_progress_windows",
+        "value": "1"
+      },
+      {
+        "key": "deliveries_readable",
+        "value": "true"
+      },
+      {
+        "key": "deliveries_completed_delta",
+        "value": "0"
+      },
+      {
+        "key": "deliveries_in_flight",
+        "value": "12"
+      },
+      {
+        "key": "deliveries_retrying",
+        "value": "0"
+      },
+      {
+        "key": "deliveries_depth",
+        "value": "12"
+      },
+      {
+        "key": "deliveries_dead_letters",
+        "value": "0"
+      },
+      {
+        "key": "deliveries_dead_letter_delta",
+        "value": "0"
+      },
+      {
+        "key": "codex_readable",
+        "value": "true"
+      },
+      {
+        "key": "codex_runs_started",
+        "value": "0"
+      },
+      {
+        "key": "codex_runs_finished",
+        "value": "0"
+      },
+      {
+        "key": "codex_running",
+        "value": "0"
+      },
+      {
+        "key": "repository_readable",
+        "value": "true"
+      },
+      {
+        "key": "repository_commits",
+        "value": "0"
+      },
+      {
+        "key": "work_items_readable",
+        "value": "true"
+      },
+      {
+        "key": "work_items_open",
+        "value": "1"
+      },
+      {
+        "key": "work_items_closed_delta",
+        "value": "0"
+      },
+      {
+        "key": "faults_readable",
+        "value": "true"
+      },
+      {
+        "key": "faults_recurring",
+        "value": "0"
+      },
+      {
+        "key": "faults_framework_erroring",
+        "value": "false"
+      }
+    ],
+    "work_items": [
+      {
+        "number": 145,
+        "state": "open",
+        "progress": "unknown"
+      }
+    ],
+    "body_markdown": "The session is stalled: no progress was observed in the last 10 minutes while one work item remains open. Issue #145 is still open, and 12 deliveries are in flight with none retrying or dead-lettered. No Codex runs started, finished, or remained active during this window. A human should inspect the open work item and in-flight deliveries to determine why work is not advancing; little could be observed about the cause.\n"
+  }
+}

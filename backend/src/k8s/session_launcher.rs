@@ -186,6 +186,21 @@ pub struct SessionPodSpec {
     /// Optional deterministic logical-to-effective work-label mapping for package
     /// discovery and outbound GitHub effects. Absent on unnamespaced deployments.
     pub work_label_map_json: Option<String>,
+    /// The deployment's fkst WORK-LABEL namespace (NOT a Kubernetes namespace),
+    /// rendered into the session as [`crate::reconcile::work_labels::WORK_LABEL_NAMESPACE_ENV`].
+    ///
+    /// It already reaches the session baked INTO every effective label string; this
+    /// carries the value itself, so a package that needs it — the health reporter
+    /// stamps it into each report filename — reads it directly instead of recovering
+    /// it by stripping a suffix off a label, which is fragile the moment a logical
+    /// label contains a hyphen.
+    ///
+    /// `None` on an unnamespaced deployment, and then the variable is ABSENT rather
+    /// than empty: unnamespaced genuinely means "there is no namespace", and a
+    /// consumer must treat absence as that rather than substituting a placeholder.
+    /// Sits beside [`Self::work_label_map_json`] because both are derived from the
+    /// same [`crate::reconcile::work_labels::apply_work_label_namespace`] input.
+    pub work_label_namespace: Option<String>,
     /// Optional per-package configuration, as one JSON object of
     /// `{package: {KEY: value}}` (`### Package Env` merged with the manifest's
     /// `packageEnv`). `None` when the session configures no package, which renders
@@ -359,6 +374,14 @@ pub(crate) fn session_env_pairs(
         env.push((
             crate::reconcile::work_labels::SESSION_WORK_LABEL_MAP_JSON_ENV.to_string(),
             work_label_map_json.clone(),
+        ));
+    }
+    // ABSENT when unset, like every other optional var in this block: an unset
+    // namespace means labels are unnamespaced, so there is nothing to inject.
+    if let Some(work_label_namespace) = &spec.work_label_namespace {
+        env.push((
+            crate::reconcile::work_labels::WORK_LABEL_NAMESPACE_ENV.to_string(),
+            work_label_namespace.clone(),
         ));
     }
     // Per-package configuration travels as ONE variable rather than as flattened

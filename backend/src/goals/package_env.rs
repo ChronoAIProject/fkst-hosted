@@ -50,7 +50,7 @@ pub const PLATFORM_OWNED_SESSION_ENV: &[&str] = &[
     "FKST_SESSION_WORK_LABEL",
     "FKST_SESSION_WORK_LABEL_MAP_JSON",
     "FKST_TRIGGER_ISSUE",
-    "FKST_WORK_LABEL_NAMESPACE",
+    crate::reconcile::work_labels::WORK_LABEL_NAMESPACE_ENV,
 ];
 
 const MAX_BLOCKS: usize = 16;
@@ -335,6 +335,20 @@ mod tests {
             let message = err(&format!("#### pkg\n{key}=x\n"));
             assert!(message.contains("the platform owns"), "{key}: {message}");
         }
+    }
+
+    /// Pinned by name, not only by the loop above: the namespace became load-bearing
+    /// for artifact naming, so a session must never be able to declare one and thereby
+    /// forge another namespace's identity in the artifacts it emits.
+    #[test]
+    fn the_work_label_namespace_cannot_be_set_by_a_trigger_author() {
+        use crate::reconcile::work_labels::WORK_LABEL_NAMESPACE_ENV;
+
+        assert!(PLATFORM_OWNED_SESSION_ENV.contains(&WORK_LABEL_NAMESPACE_ENV));
+        let message = err(&format!(
+            "#### pkg\n{WORK_LABEL_NAMESPACE_ENV}=other-tenant\n"
+        ));
+        assert!(message.contains("the platform owns"), "{message}");
     }
 
     #[test]

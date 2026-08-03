@@ -516,3 +516,44 @@ fn storage_creds_carry_the_single_nyxid_sa_into_the_session_secret() {
     assert_eq!(data["storage-base-url"], "https://storage.example/proxy");
     assert_eq!(data["storage-bucket"], "fkst-logs");
 }
+
+/// The invariant that makes the injected namespace trustworthy for artifact naming:
+/// it is not merely *a* configured string, it is exactly the suffix the session's own
+/// effective work labels carry. Built through the real spec builder so the label and
+/// the variable come from one `apply_work_label_namespace` call, not two fixtures.
+#[test]
+fn the_rendered_namespace_equals_the_suffix_on_every_effective_work_label() {
+    use crate::config::PodConfig;
+    use crate::k8s::session_launcher::session_env_pairs;
+    use crate::reconcile::work_labels::WORK_LABEL_NAMESPACE_ENV;
+
+    let spec = session_pod_spec_from(
+        &registration(),
+        &["fkst-dev".to_string(), "fkst-security".to_string()],
+        &branch_topology(),
+        Some("fkst-bot".to_string()),
+        &crate::access_policy::AccessPolicy::default(),
+        None,
+        Some("chronoai-fkst"),
+    )
+    .expect("valid namespaced labels");
+
+    let rendered = session_env_pairs(&spec, &PodConfig::default());
+    let find = |wanted: &str| {
+        rendered
+            .iter()
+            .find(|(key, _)| key == wanted)
+            .map(|(_, value)| value.clone())
+    };
+
+    let namespace = find(WORK_LABEL_NAMESPACE_ENV).expect("namespace rendered");
+    let work_label = find("FKST_SESSION_WORK_LABEL").expect("work label rendered");
+
+    assert_eq!(namespace, "chronoai-fkst");
+    for label in work_label.split(',') {
+        assert!(
+            label.ends_with(&format!("-{namespace}")),
+            "effective label {label:?} must end with the injected namespace {namespace:?}"
+        );
+    }
+}
