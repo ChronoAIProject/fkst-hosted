@@ -561,26 +561,60 @@ async fn the_first_manifest_wins_a_cross_manifest_key_collision() {
     );
 }
 
-/// Feature off: an empty baseline must leave effective sets byte-identical, so
-/// deploying this change without configuring it cannot alter any session.
+/// Feature off: requiring nothing accepts everything and leaves the set untouched.
 #[tokio::test]
-async fn empty_mandatory_list_changes_nothing() {
+async fn an_empty_mandatory_list_requires_nothing() {
     let server = MockServer::start().await;
     let a = pkg("acme", "p", "main", "packages/a");
     let regs = vec![reg("s1", 1, vec![a.clone()], vec![])];
-    let with_empty = resolve_with_mandatory(&server, &regs, &[]).await;
-    let without = resolve(&server, &regs).await;
-    assert_eq!(
-        with_empty.by_session.get("s1"),
-        without.by_session.get("s1")
-    );
-    assert_eq!(with_empty.by_session.get("s1"), Some(&vec![a]));
+    let got = resolve_with_mandatory(&server, &regs, &[]).await;
+    assert!(got.demotions.is_empty());
+    assert_eq!(got.by_session.get("s1"), Some(&vec![a]));
 }
 
-/// The baseline leads, in configured order, ahead of the author's own packages --
-/// FKST_SESSION_PACKAGE_ROOTS is built from this list, so order is observable.
+/// Declaring the baseline is accepted -- and the effective set is NOT reordered or
+/// added to, which is the whole point of requiring rather than injecting.
 #[tokio::test]
-async fn mandatory_packages_are_prepended_in_configured_order() {
+async fn declaring_every_mandatory_ref_is_accepted_unchanged() {
+    let server = MockServer::start().await;
+    let proxy = pkg(
+        "ChronoAIProject",
+        "fkst-hosted",
+        "packages",
+        "packages/github-proxy",
+    );
+    let own = pkg("acme", "p", "main", "packages/own");
+    let regs = vec![reg("s1", 1, vec![own.clone(), proxy.clone()], vec![])];
+    let got = resolve_with_mandatory(&server, &regs, std::slice::from_ref(&proxy)).await;
+    assert!(got.demotions.is_empty());
+    assert_eq!(got.by_session.get("s1"), Some(&vec![own, proxy]));
+}
+
+#[tokio::test]
+async fn a_missing_mandatory_ref_demotes_and_names_it() {
+    let server = MockServer::start().await;
+    let proxy = pkg(
+        "ChronoAIProject",
+        "fkst-hosted",
+        "packages",
+        "packages/github-proxy",
+    );
+    let own = pkg("acme", "p", "main", "packages/own");
+    let regs = vec![reg("s1", 1, vec![own], vec![])];
+    let got = resolve_with_mandatory(&server, &regs, std::slice::from_ref(&proxy)).await;
+    assert!(!got.by_session.contains_key("s1"));
+    assert_eq!(got.demotions.len(), 1);
+    let (issue, reason) = &got.demotions[0];
+    assert_eq!(*issue, 1);
+    assert!(
+        reason.contains("ChronoAIProject/fkst-hosted@packages:packages/github-proxy"),
+        "{reason}"
+    );
+}
+
+/// ALL misses at once: one round trip per missing package would be a poor refusal.
+#[tokio::test]
+async fn every_missing_mandatory_ref_is_named() {
     let server = MockServer::start().await;
     let proxy = pkg(
         "ChronoAIProject",
@@ -595,48 +629,64 @@ async fn mandatory_packages_are_prepended_in_configured_order() {
         "packages/workflow-dev",
     );
     let own = pkg("acme", "p", "main", "packages/own");
-    let regs = vec![reg("s1", 1, vec![own.clone()], vec![])];
-    let got = resolve_with_mandatory(&server, &regs, &[proxy.clone(), dev.clone()]).await;
-    assert_eq!(got.by_session.get("s1"), Some(&vec![proxy, dev, own]));
+    let regs = vec![reg("s1", 1, vec![own], vec![])];
+    let got = resolve_with_mandatory(&server, &regs, &[proxy, dev]).await;
+    let (_, reason) = &got.demotions[0];
+    assert!(reason.contains("packages/github-proxy"), "{reason}");
+    assert!(reason.contains("packages/workflow-dev"), "{reason}");
+    assert!(reason.contains('2'), "{reason}");
 }
 
-/// A session that ALSO declares a mandatory ref keeps exactly one copy, in the
-/// mandatory position -- the existing first-occurrence dedup does the work.
+/// A manifest carrying the baseline satisfies the requirement -- the check is against
+/// the EFFECTIVE set, so an author need not restate what their manifest already brings.
 #[tokio::test]
-async fn a_session_declaring_a_mandatory_ref_keeps_one_copy() {
+async fn a_manifest_supplying_the_baseline_satisfies_the_requirement() {
     let server = MockServer::start().await;
+    let manifest = pkg("acme", "manifests", "main", "m.json");
     let proxy = pkg(
         "ChronoAIProject",
         "fkst-hosted",
         "packages",
         "packages/github-proxy",
     );
-    let own = pkg("acme", "p", "main", "packages/own");
-    let regs = vec![reg("s1", 1, vec![own.clone(), proxy.clone()], vec![])];
-    let got = resolve_with_mandatory(&server, &regs, std::slice::from_ref(&proxy)).await;
-    assert_eq!(got.by_session.get("s1"), Some(&vec![proxy, own]));
-}
-
-/// Every session receives the baseline, including one whose packages come only
-/// from a manifest.
-#[tokio::test]
-async fn manifest_only_session_still_receives_the_baseline() {
-    let server = MockServer::start().await;
-    let manifest = pkg("acme", "manifests", "main", "m.json");
-    let from_manifest = pkg("acme", "p", "main", "packages/from-manifest");
     mount_manifest_json(
         &server,
         &manifest,
-        manifest_body(1, &["acme/p@main:packages/from-manifest"]),
+        manifest_body(
+            1,
+            &["ChronoAIProject/fkst-hosted@packages:packages/github-proxy"],
+        ),
     )
     .await;
-    let proxy = pkg(
+    let regs = vec![reg("s1", 1, vec![], vec![manifest])];
+    let got = resolve_with_mandatory(&server, &regs, std::slice::from_ref(&proxy)).await;
+    assert!(got.demotions.is_empty(), "{:?}", got.demotions);
+    assert_eq!(got.by_session.get("s1"), Some(&vec![proxy]));
+}
+
+/// The same package at a DIFFERENT ref does not satisfy the requirement: matching on
+/// the full identity is what pins the baseline to the intended branch.
+#[tokio::test]
+async fn the_same_package_at_another_ref_does_not_satisfy_the_requirement() {
+    let server = MockServer::start().await;
+    let required = pkg(
         "ChronoAIProject",
         "fkst-hosted",
         "packages",
         "packages/github-proxy",
     );
-    let regs = vec![reg("s1", 1, vec![], vec![manifest])];
-    let got = resolve_with_mandatory(&server, &regs, std::slice::from_ref(&proxy)).await;
-    assert_eq!(got.by_session.get("s1"), Some(&vec![proxy, from_manifest]));
+    let other_ref = pkg(
+        "ChronoAIProject",
+        "fkst-hosted",
+        "old-branch",
+        "packages/github-proxy",
+    );
+    let regs = vec![reg("s1", 1, vec![other_ref], vec![])];
+    let got = resolve_with_mandatory(&server, &regs, std::slice::from_ref(&required)).await;
+    assert_eq!(got.demotions.len(), 1);
+    assert!(
+        got.demotions[0].1.contains("@packages:"),
+        "{}",
+        got.demotions[0].1
+    );
 }
