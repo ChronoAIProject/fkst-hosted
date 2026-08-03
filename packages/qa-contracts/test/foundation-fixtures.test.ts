@@ -110,6 +110,14 @@ test("contract registry and fixture metadata", () => {
   }, TypeError);
 });
 
+test("published build resolves package-local contract files", async () => {
+  const builtModuleUrl = new URL("../../dist/index.js", import.meta.url);
+  const built = (await import(builtModuleUrl.href)) as typeof import("../src/index.js");
+  assert.equal(built.contractRegistry().profile, "local_qa_host_mvp");
+  const admitted = built.admitJson(Buffer.from('{"b":2,"a":1}'));
+  assert.equal(Buffer.from(built.canonicalAdmittedBytes(admitted)).toString(), '{"a":1,"b":2}');
+});
+
 for (const fixtureCase of rfcFixture.valid_cases) {
   test(fixtureCase.case_id, () => {
     const raw = Buffer.from(fixtureCase.source_utf8_base64, "base64");

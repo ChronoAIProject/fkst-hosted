@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { basename, dirname, resolve, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type { ValidateFunction } from "ajv";
 import { Ajv2020 } from "ajv/dist/2020.js";
@@ -26,6 +28,8 @@ const FOUNDATION_TYPE_NAMES = Object.freeze([
 ] as const);
 
 export type FoundationType = (typeof FOUNDATION_TYPE_NAMES)[number];
+
+const PACKAGE_ROOT = resolvePackageRoot();
 
 interface RegistrySchemaEntry {
   readonly path: string;
@@ -236,6 +240,18 @@ export function verifyContractContentDigest(value: ValidatedValue): void {
   }
 }
 
+function resolvePackageRoot(): string {
+  const moduleDirectory = dirname(fileURLToPath(import.meta.url));
+  if (basename(moduleDirectory) === "dist") {
+    return dirname(moduleDirectory);
+  }
+  const testOutputDirectory = dirname(moduleDirectory);
+  if (basename(moduleDirectory) === "src" && basename(testOutputDirectory) === "dist-test") {
+    return dirname(testOutputDirectory);
+  }
+  throw new Error(`unsupported qa contract module layout: ${moduleDirectory}`);
+}
+
 function resolvePackageFile(relativePath: string): URL {
   if (
     relativePath.startsWith("/") ||
@@ -244,11 +260,11 @@ function resolvePackageFile(relativePath: string): URL {
   ) {
     throw new Error(`invalid qa contract package path: ${relativePath}`);
   }
-  for (const root of [new URL("../", import.meta.url), new URL("../../", import.meta.url)]) {
-    const candidate = new URL(relativePath, root);
-    if (existsSync(candidate)) return candidate;
+  const candidate = resolve(PACKAGE_ROOT, relativePath);
+  if (!candidate.startsWith(`${PACKAGE_ROOT}${sep}`) || !existsSync(candidate)) {
+    throw new Error(`qa contract package file not found: ${relativePath}`);
   }
-  throw new Error(`qa contract package file not found: ${relativePath}`);
+  return pathToFileURL(candidate);
 }
 
 function validateRegistry(registry: ContractRegistry): void {
@@ -379,17 +395,35 @@ function checkNumberToken(token: string): void {
   if (!Number.isFinite(Number(token))) {
     throw canonicalError("canonicalization.invalid_json_number", "invalid_json_number");
   }
-  if (!/[.eE]/.test(token)) {
-    let magnitude: bigint;
-    try {
-      magnitude = BigInt(token.startsWith("-") ? token.slice(1) : token);
-    } catch {
-      throw canonicalError("canonicalization.invalid_json_number", "invalid_json_number");
-    }
-    if (magnitude > MAX_SAFE_INTEGER) {
-      throw canonicalError("canonicalization.unsafe_integer", "unsafe_integer");
-    }
+  const integerMagnitude = exactIntegerMagnitude(token);
+  const plainIntegerToken = !/[.eE]/.test(token);
+  const rendersAsPlainInteger = Math.abs(Number(token)) < 1e21;
+  if (
+    integerMagnitude !== undefined &&
+    integerMagnitude > MAX_SAFE_INTEGER &&
+    (plainIntegerToken || rendersAsPlainInteger)
+  ) {
+    throw canonicalError("canonicalization.unsafe_integer", "unsafe_integer");
   }
+}
+
+function exactIntegerMagnitude(token: string): bigint | undefined {
+  const match = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(token);
+  if (match === null) return undefined;
+  const integerDigits = match[2]!;
+  const fractionDigits = match[3] ?? "";
+  const digits = `${integerDigits}${fractionDigits}`.replace(/^0+/, "");
+  if (digits.length === 0) return 0n;
+  const exponent = Number(match[4] ?? "0");
+  const scale = fractionDigits.length - exponent;
+  if (!Number.isSafeInteger(scale)) return undefined;
+  if (scale <= 0) {
+    return BigInt(digits) * 10n ** BigInt(-scale);
+  }
+  if (scale >= digits.length) return undefined;
+  const fractionalTail = digits.slice(digits.length - scale);
+  if (!/^0+$/.test(fractionalTail)) return undefined;
+  return BigInt(digits.slice(0, digits.length - scale));
 }
 
 function validateSpecialRules(value: unknown, type: FoundationType): void {
@@ -430,10 +464,7 @@ function validateSpecialRules(value: unknown, type: FoundationType): void {
       validateClosedEnum(value, "type", ["user", "service", "device", "module"]);
       break;
     case "SignatureBlock":
-      validateClosedEnum(value, "algorithm", ["ed25519", "es256"]);
-      if (typeof value.value === "string") {
-        validateScalarAt("Base64UrlNoPad", value.value, "/value");
-      }
+      validateSignatureBlock(value, "");
       break;
     case "DigestBoundRef":
       if (typeof value.content_digest === "string") {
@@ -443,6 +474,9 @@ function validateSpecialRules(value: unknown, type: FoundationType): void {
     case "ProjectionSpecimen":
       if (typeof value.content_digest === "string") {
         validateScalarAt("Sha256", value.content_digest, "/content_digest");
+      }
+      if (isRecord(value.signature)) {
+        validateSignatureBlock(value.signature, "/signature");
       }
       break;
     case "ResourceRef":
@@ -547,13 +581,35 @@ function validateScalarAt(
   }
 }
 
+function validateSignatureBlock(value: Record<string, unknown>, pathPrefix: string): void {
+  const allowedFields = new Set(["algorithm", "key_id", "value"]);
+  for (const key of Object.keys(value)) {
+    if (!allowedFields.has(key)) {
+      throw contractError(
+        "contract.forbidden_field",
+        "unknown_field",
+        `${pathPrefix}${pointer(key)}`,
+      );
+    }
+  }
+  validateClosedEnum(value, "algorithm", ["ed25519", "es256"], pathPrefix);
+  if (typeof value.value === "string") {
+    validateScalarAt("Base64UrlNoPad", value.value, `${pathPrefix}/value`);
+  }
+}
+
 function validateClosedEnum(
   value: Record<string, unknown>,
   field: string,
   allowed: readonly string[],
+  pathPrefix = "",
 ): void {
   if (typeof value[field] === "string" && !allowed.includes(value[field])) {
-    throw contractError("contract.unsupported_enum", "unsupported_enum", pointer(field));
+    throw contractError(
+      "contract.unsupported_enum",
+      "unsupported_enum",
+      `${pathPrefix}${pointer(field)}`,
+    );
   }
 }
 
