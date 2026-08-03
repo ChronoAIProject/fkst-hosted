@@ -17,6 +17,7 @@
     "ChronoAIProject/fkst-hosted@packages:packages/github-comment-effect",
     "ChronoAIProject/fkst-hosted@packages:packages/github-issue-effect",
     "ChronoAIProject/fkst-hosted@packages:packages/workflow-writer",
-    "ChronoAIProject/fkst-hosted@packages:packages/fkst-health"
+    "ChronoAIProject/fkst-hosted@packages:packages/fkst-health",
+    "ChronoAIProject/fkst-hosted@packages:packages/idle-detector"
   ]
 }
