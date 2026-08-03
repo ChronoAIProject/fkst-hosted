@@ -35,7 +35,8 @@ use crate::reconcile::desired::{
 };
 use crate::reconcile::execute_comments::{
     config_rejected_comment, env_not_ready_comment, env_verify_failed_comment,
-    flag_invalid_comment, invalid_refs_comment, trigger_unauthorized_comment,
+    flag_invalid_comment, invalid_refs_comment, missing_isolation_comment,
+    trigger_unauthorized_comment,
 };
 use crate::reconcile::isolation_capability;
 use crate::reconcile::reachability;
@@ -287,7 +288,7 @@ async fn spawn_session(
             &ctx.github,
             &owner_repo,
             reg.trigger_issue,
-            &invalid_refs_comment(&bad),
+            &missing_isolation_comment(&bad),
         )
         .await;
         return;
