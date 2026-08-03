@@ -6,6 +6,8 @@ apps/local-qa-runtime/target/
 # Node
 node_modules/
 apps/local-qa-runtime/workers/dist/
+packages/qa-contracts/dist/
+packages/qa-contracts/dist-test/
 
 # Secrets and credentials — never commit these
 .env
