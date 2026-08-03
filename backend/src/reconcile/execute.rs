@@ -37,6 +37,7 @@ use crate::reconcile::execute_comments::{
     config_rejected_comment, env_not_ready_comment, env_verify_failed_comment,
     flag_invalid_comment, invalid_refs_comment, trigger_unauthorized_comment,
 };
+use crate::reconcile::isolation_capability;
 use crate::reconcile::reachability;
 use crate::reconcile::retire::retire_work_issues;
 use crate::reconcile::work_labels::{apply_work_label_namespace, WorkLabelError};
@@ -252,6 +253,35 @@ async fn spawn_session(
             session_id = %reg.session_id,
             unreachable = bad.len(),
             "reconcile spawn: package refs unreachable; flagging invalid, not spawning"
+        );
+        flag_invalid(
+            &ctx.github,
+            &owner_repo,
+            reg.trigger_issue,
+            &invalid_refs_comment(&bad),
+        )
+        .await;
+        return;
+    }
+
+    // 1b. Session isolation: the "only act on entities assigned to my creator" rule
+    //     lives in the `devloop` library the POD fetches, so it only binds a session
+    //     whose refs resolve to a tree that carries it. A trigger pointing at an older
+    //     tree would run with no rule and act on other creators' issues (#5770) --
+    //     which no change to this repository's own tree can prevent. Refuse the spawn
+    //     instead. Reuses the reachability token: same trees, same budget.
+    if let Err(bad) = isolation_capability::check_isolation_capability(
+        &reg.effective_packages,
+        &ctx.http,
+        &ctx.config.github_api_base_url,
+        reach_token.as_ref().map(|t| t.expose_secret()),
+    )
+    .await
+    {
+        tracing::info!(
+            session_id = %reg.session_id,
+            without_isolation = bad.len(),
+            "reconcile spawn: package tree lacks the session-isolation rule; flagging invalid, not spawning"
         );
         flag_invalid(
             &ctx.github,
