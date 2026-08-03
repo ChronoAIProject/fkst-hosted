@@ -182,6 +182,51 @@
       "expected": { "category": "contract", "code": "contract.invalid_encoding", "reason": "invalid_encoding", "path": "/value" }
     },
     {
+      "case_id": "foundation-signature-invalid-length",
+      "foundation_type": "SignatureBlock",
+      "source": { "algorithm": "ed25519", "key_id": "key-1", "value": "A" },
+      "expected": { "category": "contract", "code": "contract.invalid_encoding", "reason": "invalid_encoding", "path": "/value" }
+    },
+    {
+      "case_id": "foundation-signature-noncanonical-trailing-bits",
+      "foundation_type": "SignatureBlock",
+      "source": { "algorithm": "ed25519", "key_id": "key-1", "value": "AB" },
+      "expected": { "category": "contract", "code": "contract.invalid_encoding", "reason": "invalid_encoding", "path": "/value" }
+    },
+    {
+      "case_id": "foundation-projection-signature-invalid-encoding",
+      "foundation_type": "ProjectionSpecimen",
+      "source": {
+        "schema_version": "qa.contract-foundation/v1",
+        "content_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "signature": { "algorithm": "ed25519", "key_id": "key-1", "value": "A" },
+        "payload": {}
+      },
+      "expected": { "category": "contract", "code": "contract.invalid_encoding", "reason": "invalid_encoding", "path": "/signature/value" }
+    },
+    {
+      "case_id": "foundation-projection-signature-unsupported-algorithm",
+      "foundation_type": "ProjectionSpecimen",
+      "source": {
+        "schema_version": "qa.contract-foundation/v1",
+        "content_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "signature": { "algorithm": "rsa", "key_id": "key-1", "value": "AQID" },
+        "payload": {}
+      },
+      "expected": { "category": "contract", "code": "contract.unsupported_enum", "reason": "unsupported_enum", "path": "/signature/algorithm" }
+    },
+    {
+      "case_id": "foundation-projection-signature-unknown-field",
+      "foundation_type": "ProjectionSpecimen",
+      "source": {
+        "schema_version": "qa.contract-foundation/v1",
+        "content_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "signature": { "algorithm": "ed25519", "key_id": "key-1", "value": "AQID", "extra": true },
+        "payload": {}
+      },
+      "expected": { "category": "contract", "code": "contract.forbidden_field", "reason": "unknown_field", "path": "/signature/extra" }
+    },
+    {
       "case_id": "foundation-strict-union-unknown-discriminator",
       "foundation_type": "StrictUnionSpecimen",
       "source": { "kind": "gamma", "common": "shared" },

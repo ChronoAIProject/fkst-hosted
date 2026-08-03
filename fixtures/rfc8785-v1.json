@@ -98,6 +98,16 @@
       "expected": { "category": "canonicalization", "code": "canonicalization.unsafe_integer", "reason": "unsafe_integer", "path": "/" }
     },
     {
+      "case_id": "rfc8785-unsafe-integer-decimal",
+      "source_utf8_base64": "eyJ4Ijo5MDA3MTk5MjU0NzQwOTkzLjB9",
+      "expected": { "category": "canonicalization", "code": "canonicalization.unsafe_integer", "reason": "unsafe_integer", "path": "/" }
+    },
+    {
+      "case_id": "rfc8785-unsafe-integer-exponent",
+      "source_utf8_base64": "eyJ4Ijo5LjAwNzE5OTI1NDc0MDk5M2UxNX0=",
+      "expected": { "category": "canonicalization", "code": "canonicalization.unsafe_integer", "reason": "unsafe_integer", "path": "/" }
+    },
+    {
       "case_id": "rfc8785-unsafe-integer-negative",
       "source_utf8_base64": "eyJ4IjotOTAwNzE5OTI1NDc0MDk5Mn0=",
       "expected": { "category": "canonicalization", "code": "canonicalization.unsafe_integer", "reason": "unsafe_integer", "path": "/" }
