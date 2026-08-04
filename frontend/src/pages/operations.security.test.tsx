@@ -148,7 +148,10 @@ describe('a permission downgrade takes effect immediately', () => {
     seedUrl('?tab=activity&scope=all');
     renderOperations();
     await waitFor(() => expect(screen.getAllByTestId('activity-row')).toHaveLength(2));
-    expect(screen.getByTestId('operations-scope-control')).toBeInTheDocument();
+    // `find*`, not `get*`: the rows and the scope control land from the same
+    // response but not necessarily in the same commit, so a synchronous read
+    // here asserts on render timing rather than on the capability.
+    expect(await screen.findByTestId('operations-scope-control')).toBeInTheDocument();
 
     downgraded = true;
     await vi.advanceTimersByTimeAsync(15_000);

@@ -197,11 +197,16 @@ WORKDIR /app
 #    sources). The stubs compile, so this warm build must succeed. The backend
 #    is one flat crate rooted at `backend/`, so its sources live in `src/`.
 COPY backend/Cargo.toml backend/Cargo.lock ./
+# The stub tree must cover EVERY target the manifest declares, including the
+# second `[[bin]]` (the audit relay): cargo resolves all declared targets before
+# it builds anything, so a missing stub fails this layer outright rather than
+# just skipping that binary.
 RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cp-cargo-registry \
     --mount=type=cache,target=/app/target,id=cp-cargo-target \
-    mkdir -p src \
+    mkdir -p src/bin \
     && echo 'fn main() {}' > src/main.rs \
     && echo '' > src/lib.rs \
+    && echo 'fn main() {}' > src/bin/audit_relay.rs \
     && cargo build --release --locked
 # 2) copy the real sources, build BOTH binaries, then copy them out of the
 #    cache-mounted target into /out (a real layer dir the runtime COPY can

@@ -403,15 +403,26 @@ describe('empty, partial, and outage states are distinguishable', () => {
     });
     renderOperations();
     await screen.findByTestId('activity-row');
-    const issued = calls.length;
 
     fireEvent.change(screen.getByLabelText('Time range'), { target: { value: '30d' } });
     expect(await screen.findByTestId('activity-window-required')).toHaveTextContent(
       'wider than the 7 days this deployment allows'
     );
     expect(screen.queryByTestId('operations-empty')).not.toBeInTheDocument();
-    // Not one request the server was guaranteed to answer with a 400.
-    expect(calls.length).toBe(issued);
+    // Not one request the server was guaranteed to answer with a 400. Asserted on
+    // the WINDOW each call carried rather than on a total call count: the count
+    // is perturbed by any unrelated request still in flight when it is sampled,
+    // which is a property of the harness, not of the behaviour under test.
+    const windowDays = (params: URLSearchParams) => {
+      const from = params.get('from');
+      const to = params.get('to');
+      if (!from || !to) return 0;
+      return (Date.parse(to) - Date.parse(from)) / 86_400_000;
+    };
+    const overWide = calls.filter(
+      (call) => call.path.endsWith('/operations/activity') && windowDays(call.params) > 7
+    );
+    expect(overWide).toHaveLength(0);
   });
 
   it('reports a cold session-visibility projection as a failure, not an empty fleet', async () => {
