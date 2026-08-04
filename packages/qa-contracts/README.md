@@ -20,6 +20,13 @@ canonical bytes, and the `contract_content/v1` SHA-256 projection. It does not
 define endpoints, authorization, state, resources, runtime behavior, signature
 verification, or testing-package behavior.
 
+The first registry-driven non-foundation walking skeleton adds
+`qa.local-lifecycle/v1#/$defs/LocalState` and the narrow
+`validateLocalState`/`validate_local_state` APIs. Local `terminal` means only
+that required local actions are settled or moved to an explicit repair backlog;
+it does not imply Hosted Quality, Report, Publication, or RunSettlement
+completion.
+
 Schema versions use `qa.<lowercase-kebab-name>/v<positive-major>`. Consumers
 must resolve schema and type names through `contracts/registry.json`; runtime
 network fetches, external `$ref` resolution, and schema discovery outside this
@@ -33,6 +40,9 @@ The checked-in conformance sources are:
   bytes, and SHA-256 vectors;
 - `fixtures/qa/contract-foundation-v1.json` for foundation validation,
   exact-object/union behavior, and root-only digest projection vectors.
+- `fixtures/qa/local-lifecycle-v1.json` for the accepted `LocalState` walking
+  skeleton through registry resolution, validation, canonicalization, and
+  digesting.
 
 The implementations are:
 
