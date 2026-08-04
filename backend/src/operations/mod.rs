@@ -143,7 +143,11 @@ impl OperationsState {
             );
             return Ok(Self::default());
         }
-        let Some(url) = query.query_url(host) else {
+        // The query resolves against FKST_POSTHOG_QUERY_HOST when set, else the
+        // capture host. PostHog Cloud splits the two origins (#5813); a self-hosted
+        // deployment leaves it unset and behaves exactly as before.
+        let query_host = audit.query_host.as_deref().unwrap_or(host);
+        let Some(url) = query.query_url(query_host) else {
             return Ok(Self::default());
         };
         let client = posthog::PosthogQueryClient::new(

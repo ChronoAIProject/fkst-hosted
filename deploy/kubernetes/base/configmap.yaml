@@ -136,6 +136,18 @@ data:
   # userinfo credentials — refused at startup whether the feature is on or off,
   # in this process and in the relay, by the same shared rule.
   # FKST_POSTHOG_HOST: <https base url of the self-hosted PostHog>
+  # Origin the ACTIVITY QUERY resolves against, when it differs from the capture
+  # host. Unset falls back to FKST_POSTHOG_HOST, so a self-hosted PostHog -- one
+  # origin for ingestion and API -- needs nothing here.
+  #
+  # PostHog CLOUD splits them, and with a single host only one of the two paths
+  # could ever work (#5813):
+  #   capture  ->  https://us.i.posthog.com   (/capture/, /batch/)
+  #   query    ->  https://us.posthog.com     (/api/projects/<id>/query/)
+  #
+  # Validated by the same rule as the capture host: https outside an explicitly
+  # test/local FKST_DEPLOYMENT_ENVIRONMENT, and never embedded userinfo.
+  # FKST_POSTHOG_QUERY_HOST: <https base url serving /api/projects/.../query/>
   # FKST_POSTHOG_CAPTURE_TIMEOUT_MS: "2000"
   # FKST_POSTHOG_BATCH_SIZE: "100"
   # FKST_POSTHOG_FLUSH_INTERVAL_MS: "1000"

@@ -104,6 +104,8 @@ struct PosthogVars {
     #[serde(default)]
     host: Option<String>,
     #[serde(default)]
+    query_host: Option<String>,
+    #[serde(default)]
     project_token: Option<String>,
     #[serde(default = "defaults::capture_timeout_ms")]
     capture_timeout_ms: u64,
@@ -146,6 +148,18 @@ pub struct AuditConfig {
     /// rejected whether the feature is enabled or not (a credential in a URL
     /// leaks through every error/proxy log, and through `Debug`).
     pub host: Option<String>,
+    /// Origin the ACTIVITY QUERY resolves against, when it differs from
+    /// [`Self::host`]. Env: `FKST_POSTHOG_QUERY_HOST`; absent falls back to
+    /// `host`, so a self-hosted deployment (one origin for ingestion and API)
+    /// needs no new configuration.
+    ///
+    /// Exists because PostHog Cloud SPLITS the two: capture is served by
+    /// `us.i.posthog.com` and HogQL by `us.posthog.com`. With one host, a Cloud
+    /// deployment could only ever have one of the two working (#5813).
+    ///
+    /// Validated by the same shared rule as `host` — HTTPS outside `test`/`local`,
+    /// trailing slash normalized, embedded userinfo always rejected.
+    pub query_host: Option<String>,
     /// PostHog project (write) token, sent as the capture payload's `api_key`.
     /// Env: `FKST_POSTHOG_PROJECT_TOKEN`. Required when enabled. A
     /// [`SecretString`]; never logged, redacted in `Debug`, and never handed to
@@ -193,6 +207,7 @@ impl Default for AuditConfig {
         Self {
             enabled: false,
             host: None,
+            query_host: None,
             project_token: SecretString::from(String::new()),
             capture_timeout_ms: defaults::capture_timeout_ms(),
             batch_size: defaults::batch_size(),
@@ -310,10 +325,24 @@ impl AuditConfig {
             // an embedded credential, which is never acceptable at rest.
             host.map(|h| super::host::stage(&h)).transpose()?
         };
+        // Same treatment as `host`: normalized when enabled, merely staged (so an
+        // embedded credential is still refused) when not.
+        let query_host = if raw.enabled {
+            raw.query_host
+                .as_deref()
+                .map(|h| super::host::normalize(h, &environment))
+                .transpose()?
+        } else {
+            raw.query_host
+                .as_deref()
+                .map(super::host::stage)
+                .transpose()?
+        };
 
         Ok(Self {
             enabled: raw.enabled,
             host,
+            query_host,
             project_token: SecretString::from(project_token.unwrap_or_default()),
             capture_timeout_ms: raw.capture_timeout_ms,
             batch_size: raw.batch_size,
