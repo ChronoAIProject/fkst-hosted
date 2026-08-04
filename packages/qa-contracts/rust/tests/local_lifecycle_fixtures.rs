@@ -35,6 +35,7 @@ enum LifecycleType {
 #[derive(Deserialize)]
 struct LifecycleInvalidCase {
     case_id: String,
+    lifecycle_type: LifecycleType,
     source: Value,
     expected: ExpectedRejection,
 }
@@ -69,6 +70,11 @@ fn local_lifecycle_fixture_walks_the_production_path() {
             (LifecycleType::LocalState, Some("finalizing_local")),
             (LifecycleType::LocalState, Some("terminal")),
             (LifecycleType::ExecutionOutcome, Some("passed")),
+            (LifecycleType::ExecutionOutcome, Some("failed")),
+            (LifecycleType::ExecutionOutcome, Some("cancelled")),
+            (LifecycleType::ExecutionOutcome, Some("timed_out")),
+            (LifecycleType::ExecutionOutcome, Some("lost")),
+            (LifecycleType::ExecutionOutcome, Some("blocked")),
         ]
     );
     let registry = contract_registry().expect("load contract registry");
@@ -88,12 +94,8 @@ fn local_lifecycle_fixture_walks_the_production_path() {
     for fixture_case in &fixture.valid_cases {
         println!("case_id={}", fixture_case.case_id);
         let raw = serde_json::to_vec(&fixture_case.source).expect("serialize fixture source");
-        let validated = validate_lifecycle_case(fixture_case.lifecycle_type, &raw);
-        if fixture_case.case_id == "execution-outcome-passed" {
-            assert_eq!(fixture_case.lifecycle_type, LifecycleType::ExecutionOutcome);
-            assert_eq!(raw, br#""passed""#);
-            assert_eq!(validated.value().as_str(), Some("passed"));
-        }
+        let validated = validate_lifecycle_case(fixture_case.lifecycle_type, &raw)
+            .expect("validate lifecycle fixture");
         assert_eq!(validated.value(), &fixture_case.source);
         let canonical = canonical_bytes(&validated).expect("canonical lifecycle bytes");
         assert_eq!(hex(&canonical), fixture_case.expected_canonical_utf8_hex);
@@ -107,13 +109,15 @@ fn local_lifecycle_fixture_walks_the_production_path() {
     for fixture_case in &fixture.invalid_cases {
         println!("case_id={}", fixture_case.case_id);
         let raw = serde_json::to_vec(&fixture_case.source).expect("serialize fixture source");
-        let error = validate_local_state(&raw).expect_err("reject invalid LocalState");
+        let error = validate_lifecycle_case(fixture_case.lifecycle_type, &raw)
+            .expect_err("reject invalid lifecycle value");
         assert_rejection(&fixture_case.case_id, &error, &fixture_case.expected);
     }
 
-    for (case_id, raw, expected) in [
+    for (case_id, lifecycle_type, raw, expected) in [
         (
             "local-state-malformed-json",
+            LifecycleType::LocalState,
             &[0x22],
             ExpectedRejection {
                 category: "validation".into(),
@@ -124,6 +128,29 @@ fn local_lifecycle_fixture_walks_the_production_path() {
         ),
         (
             "local-state-invalid-utf8",
+            LifecycleType::LocalState,
+            &[0xff],
+            ExpectedRejection {
+                category: "canonicalization".into(),
+                code: Some("canonicalization.invalid_utf8".into()),
+                reason: "invalid_utf8".into(),
+                path: "/".into(),
+            },
+        ),
+        (
+            "execution-outcome-malformed-json",
+            LifecycleType::ExecutionOutcome,
+            &[0x22],
+            ExpectedRejection {
+                category: "validation".into(),
+                code: None,
+                reason: "invalid_json".into(),
+                path: "/".into(),
+            },
+        ),
+        (
+            "execution-outcome-invalid-utf8",
+            LifecycleType::ExecutionOutcome,
             &[0xff],
             ExpectedRejection {
                 category: "canonicalization".into(),
@@ -134,17 +161,25 @@ fn local_lifecycle_fixture_walks_the_production_path() {
         ),
     ] {
         println!("case_id={case_id}");
-        let error = validate_local_state(raw).expect_err("reject invalid LocalState bytes");
+        let error = validate_lifecycle_case(lifecycle_type, raw)
+            .expect_err("reject invalid lifecycle bytes");
         assert_rejection(case_id, &error, &expected);
     }
 }
 
-fn validate_lifecycle_case(lifecycle_type: LifecycleType, raw: &[u8]) -> ValidatedValue {
+#[test]
+fn unknown_lifecycle_fixture_type_fails_closed() {
+    serde_json::from_str::<LifecycleType>(r#""Unknown""#)
+        .expect_err("reject unknown lifecycle fixture type");
+}
+
+fn validate_lifecycle_case(
+    lifecycle_type: LifecycleType,
+    raw: &[u8],
+) -> Result<ValidatedValue, ContractError> {
     match lifecycle_type {
-        LifecycleType::LocalState => validate_local_state(raw).expect("validate LocalState"),
-        LifecycleType::ExecutionOutcome => {
-            validate_execution_outcome(raw).expect("validate ExecutionOutcome")
-        }
+        LifecycleType::LocalState => validate_local_state(raw),
+        LifecycleType::ExecutionOutcome => validate_execution_outcome(raw),
     }
 }
 

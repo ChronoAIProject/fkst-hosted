@@ -80,71 +80,196 @@
       "expected_canonical_utf8_hex": "2270617373656422",
       "expected_canonical_utf8_base64": "InBhc3NlZCI=",
       "expected_sha256": "sha256:559532ad927252eed5d9b6687d55203a96b956d822055f4570f196a93a42bece"
+    },
+    {
+      "case_id": "execution-outcome-failed",
+      "lifecycle_type": "ExecutionOutcome",
+      "source": "failed",
+      "expected_canonical_utf8_hex": "226661696c656422",
+      "expected_canonical_utf8_base64": "ImZhaWxlZCI=",
+      "expected_sha256": "sha256:33d04bd775e7b6c6436742508b41fa693a15bd2c902fcd994253392abd717740"
+    },
+    {
+      "case_id": "execution-outcome-cancelled",
+      "lifecycle_type": "ExecutionOutcome",
+      "source": "cancelled",
+      "expected_canonical_utf8_hex": "2263616e63656c6c656422",
+      "expected_canonical_utf8_base64": "ImNhbmNlbGxlZCI=",
+      "expected_sha256": "sha256:06234c1cf33df85364aedb5de2e65dc2fcb144ff65a249457c5f140fde7ee1d4"
+    },
+    {
+      "case_id": "execution-outcome-timed-out",
+      "lifecycle_type": "ExecutionOutcome",
+      "source": "timed_out",
+      "expected_canonical_utf8_hex": "2274696d65645f6f757422",
+      "expected_canonical_utf8_base64": "InRpbWVkX291dCI=",
+      "expected_sha256": "sha256:548ac56636605ebef26cfa13a33a91764ad001e58957e17a23b43ec0c08da209"
+    },
+    {
+      "case_id": "execution-outcome-lost",
+      "lifecycle_type": "ExecutionOutcome",
+      "source": "lost",
+      "expected_canonical_utf8_hex": "226c6f737422",
+      "expected_canonical_utf8_base64": "Imxvc3Qi",
+      "expected_sha256": "sha256:6f05504f2f99b70fca1854b82ac1e3d904653c88d1a75d47354353b8c6afe526"
+    },
+    {
+      "case_id": "execution-outcome-blocked",
+      "lifecycle_type": "ExecutionOutcome",
+      "source": "blocked",
+      "expected_canonical_utf8_hex": "22626c6f636b656422",
+      "expected_canonical_utf8_base64": "ImJsb2NrZWQi",
+      "expected_sha256": "sha256:7b92de7d08814ff2863dbd0239cdcb3cd107364ebf588b5d95693527f066f106"
     }
   ],
   "invalid_cases": [
     {
       "case_id": "local-state-unknown-string",
+      "lifecycle_type": "LocalState",
       "source": "cancelled",
       "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
     },
     {
       "case_id": "local-state-case-folding-forbidden",
+      "lifecycle_type": "LocalState",
       "source": "Accepted",
       "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
     },
     {
       "case_id": "local-state-leading-whitespace-forbidden",
+      "lifecycle_type": "LocalState",
       "source": " accepted",
       "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
     },
     {
       "case_id": "local-state-trailing-whitespace-forbidden",
+      "lifecycle_type": "LocalState",
       "source": "accepted ",
       "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
     },
     {
       "case_id": "local-state-hyphen-alias-forbidden",
+      "lifecycle_type": "LocalState",
       "source": "staging-evidence",
       "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
     },
     {
       "case_id": "local-state-short-alias-forbidden",
+      "lifecycle_type": "LocalState",
       "source": "cleaning_up",
       "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
     },
     {
       "case_id": "local-state-unicode-compatibility-normalization-forbidden",
+      "lifecycle_type": "LocalState",
       "source": "ａｃｃｅｐｔｅｄ",
       "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
     },
     {
       "case_id": "local-state-object-forbidden",
+      "lifecycle_type": "LocalState",
       "source": { "state": "accepted" },
       "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
     },
     {
       "case_id": "local-state-array-forbidden",
+      "lifecycle_type": "LocalState",
       "source": ["accepted"],
       "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
     },
     {
       "case_id": "local-state-number-forbidden",
+      "lifecycle_type": "LocalState",
       "source": 1,
       "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
     },
     {
       "case_id": "local-state-true-forbidden",
+      "lifecycle_type": "LocalState",
       "source": true,
       "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
     },
     {
       "case_id": "local-state-false-forbidden",
+      "lifecycle_type": "LocalState",
       "source": false,
       "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
     },
     {
       "case_id": "local-state-null-forbidden",
+      "lifecycle_type": "LocalState",
+      "source": null,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "execution-outcome-unknown-string",
+      "lifecycle_type": "ExecutionOutcome",
+      "source": "succeeded",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "execution-outcome-case-folding-forbidden",
+      "lifecycle_type": "ExecutionOutcome",
+      "source": "Passed",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "execution-outcome-leading-whitespace-forbidden",
+      "lifecycle_type": "ExecutionOutcome",
+      "source": " passed",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "execution-outcome-trailing-whitespace-forbidden",
+      "lifecycle_type": "ExecutionOutcome",
+      "source": "passed ",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "execution-outcome-hyphen-alias-forbidden",
+      "lifecycle_type": "ExecutionOutcome",
+      "source": "timed-out",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "execution-outcome-unicode-compatibility-normalization-forbidden",
+      "lifecycle_type": "ExecutionOutcome",
+      "source": "ｐａｓｓｅｄ",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "execution-outcome-object-forbidden",
+      "lifecycle_type": "ExecutionOutcome",
+      "source": { "outcome": "passed" },
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "execution-outcome-array-forbidden",
+      "lifecycle_type": "ExecutionOutcome",
+      "source": ["passed"],
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "execution-outcome-number-forbidden",
+      "lifecycle_type": "ExecutionOutcome",
+      "source": 1,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "execution-outcome-true-forbidden",
+      "lifecycle_type": "ExecutionOutcome",
+      "source": true,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "execution-outcome-false-forbidden",
+      "lifecycle_type": "ExecutionOutcome",
+      "source": false,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "execution-outcome-null-forbidden",
+      "lifecycle_type": "ExecutionOutcome",
       "source": null,
       "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
     }
