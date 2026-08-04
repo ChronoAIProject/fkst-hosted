@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
 use fkst_qa_contracts::{
-    canonical_bytes, sha256_digest, validate_local_state, ContractError, Rejection,
+    canonical_bytes, contract_registry, sha256_digest, validate_execution_outcome,
+    validate_local_state, ContractError, Rejection, ValidatedValue,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -18,10 +19,17 @@ struct LifecycleFixture {
 #[derive(Deserialize)]
 struct LifecycleValidCase {
     case_id: String,
+    lifecycle_type: LifecycleType,
     source: Value,
     expected_canonical_utf8_hex: String,
     expected_canonical_utf8_base64: String,
     expected_sha256: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+enum LifecycleType {
+    LocalState,
+    ExecutionOutcome,
 }
 
 #[derive(Deserialize)]
@@ -48,27 +56,46 @@ fn local_lifecycle_fixture_walks_the_production_path() {
         fixture
             .valid_cases
             .iter()
-            .map(|fixture_case| fixture_case.source.as_str())
+            .map(|fixture_case| (fixture_case.lifecycle_type, fixture_case.source.as_str()))
             .collect::<Vec<_>>(),
         vec![
-            Some("accepted"),
-            Some("preparing"),
-            Some("ready"),
-            Some("executing"),
-            Some("staging_evidence"),
-            Some("cleaning_up_execution"),
-            Some("uploading"),
-            Some("finalizing_local"),
-            Some("terminal"),
+            (LifecycleType::LocalState, Some("accepted")),
+            (LifecycleType::LocalState, Some("preparing")),
+            (LifecycleType::LocalState, Some("ready")),
+            (LifecycleType::LocalState, Some("executing")),
+            (LifecycleType::LocalState, Some("staging_evidence")),
+            (LifecycleType::LocalState, Some("cleaning_up_execution")),
+            (LifecycleType::LocalState, Some("uploading")),
+            (LifecycleType::LocalState, Some("finalizing_local")),
+            (LifecycleType::LocalState, Some("terminal")),
+            (LifecycleType::ExecutionOutcome, Some("passed")),
         ]
+    );
+    let registry = contract_registry().expect("load contract registry");
+    assert_eq!(
+        registry
+            .pointer("/types/ExecutionOutcome/schema")
+            .and_then(Value::as_str),
+        Some("qa.local-lifecycle/v1")
+    );
+    assert_eq!(
+        registry
+            .pointer("/types/ExecutionOutcome/pointer")
+            .and_then(Value::as_str),
+        Some("#/$defs/ExecutionOutcome")
     );
 
     for fixture_case in &fixture.valid_cases {
         println!("case_id={}", fixture_case.case_id);
         let raw = serde_json::to_vec(&fixture_case.source).expect("serialize fixture source");
-        let validated = validate_local_state(&raw).expect("validate LocalState");
+        let validated = validate_lifecycle_case(fixture_case.lifecycle_type, &raw);
+        if fixture_case.case_id == "execution-outcome-passed" {
+            assert_eq!(fixture_case.lifecycle_type, LifecycleType::ExecutionOutcome);
+            assert_eq!(raw, br#""passed""#);
+            assert_eq!(validated.value().as_str(), Some("passed"));
+        }
         assert_eq!(validated.value(), &fixture_case.source);
-        let canonical = canonical_bytes(&validated).expect("canonical LocalState bytes");
+        let canonical = canonical_bytes(&validated).expect("canonical lifecycle bytes");
         assert_eq!(hex(&canonical), fixture_case.expected_canonical_utf8_hex);
         assert_eq!(
             base64::engine::general_purpose::STANDARD.encode(&canonical),
@@ -109,6 +136,15 @@ fn local_lifecycle_fixture_walks_the_production_path() {
         println!("case_id={case_id}");
         let error = validate_local_state(raw).expect_err("reject invalid LocalState bytes");
         assert_rejection(case_id, &error, &expected);
+    }
+}
+
+fn validate_lifecycle_case(lifecycle_type: LifecycleType, raw: &[u8]) -> ValidatedValue {
+    match lifecycle_type {
+        LifecycleType::LocalState => validate_local_state(raw).expect("validate LocalState"),
+        LifecycleType::ExecutionOutcome => {
+            validate_execution_outcome(raw).expect("validate ExecutionOutcome")
+        }
     }
 }
 

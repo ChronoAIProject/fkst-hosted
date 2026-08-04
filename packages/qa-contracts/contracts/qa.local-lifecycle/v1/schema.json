@@ -16,6 +16,17 @@
         "finalizing_local",
         "terminal"
       ]
+    },
+    "ExecutionOutcome": {
+      "type": "string",
+      "enum": [
+        "passed",
+        "failed",
+        "cancelled",
+        "timed_out",
+        "lost",
+        "blocked"
+      ]
     }
   }
 }

@@ -15,11 +15,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   canonicalBytes,
+  contractRegistry,
   ContractError,
   type Rejection,
   sha256Digest,
+  validateExecutionOutcome,
   validateLocalState,
 } from "../src/index.js";
+
+type LifecycleType = "LocalState" | "ExecutionOutcome";
 
 interface LifecycleCase {
   readonly case_id: string;
@@ -29,6 +33,7 @@ interface LifecycleCase {
 interface LifecycleFixture {
   readonly schema_version: string;
   readonly valid_cases: readonly (LifecycleCase & {
+    readonly lifecycle_type: LifecycleType;
     readonly source: string;
     readonly expected_canonical_utf8_hex: string;
     readonly expected_canonical_utf8_base64: string;
@@ -49,25 +54,38 @@ const fixture = JSON.parse(
 test("local lifecycle fixture metadata", () => {
   assert.equal(fixture.schema_version, "qa.local-lifecycle-fixtures/v1");
   assert.deepEqual(
-    fixture.valid_cases.map((fixtureCase) => fixtureCase.source),
+    fixture.valid_cases.map(({ lifecycle_type, source }) => [lifecycle_type, source]),
     [
-      "accepted",
-      "preparing",
-      "ready",
-      "executing",
-      "staging_evidence",
-      "cleaning_up_execution",
-      "uploading",
-      "finalizing_local",
-      "terminal",
+      ["LocalState", "accepted"],
+      ["LocalState", "preparing"],
+      ["LocalState", "ready"],
+      ["LocalState", "executing"],
+      ["LocalState", "staging_evidence"],
+      ["LocalState", "cleaning_up_execution"],
+      ["LocalState", "uploading"],
+      ["LocalState", "finalizing_local"],
+      ["LocalState", "terminal"],
+      ["ExecutionOutcome", "passed"],
     ],
   );
+
+  const executionOutcome = contractRegistry().types.ExecutionOutcome;
+  assert.deepEqual(executionOutcome, {
+    schema: "qa.local-lifecycle/v1",
+    pointer: "#/$defs/ExecutionOutcome",
+  });
 });
 
 for (const fixtureCase of fixture.valid_cases) {
   test(fixtureCase.case_id, () => {
     console.log(`case_id=${fixtureCase.case_id}`);
-    const validated = validateLocalState(Buffer.from(JSON.stringify(fixtureCase.source)));
+    const raw = Buffer.from(JSON.stringify(fixtureCase.source));
+    const validated = validateLifecycleCase(fixtureCase.lifecycle_type, raw);
+    if (fixtureCase.case_id === "execution-outcome-passed") {
+      assert.equal(fixtureCase.lifecycle_type, "ExecutionOutcome");
+      assert.equal(raw.toString("utf8"), '"passed"');
+      assert.equal(validated.value(), "passed");
+    }
     assert.equal(validated.value(), fixtureCase.source);
     const canonical = canonicalBytes(validated);
     assert.equal(Buffer.from(canonical).toString("hex"), fixtureCase.expected_canonical_utf8_hex);
@@ -121,23 +139,26 @@ for (const admissionCase of admissionCases) {
   });
 }
 
-const registryFailures = [
+const registryFailures: readonly (readonly [string, PackageMutation])[] = [
   ["mismatched schema id", (registry: RegistryJson) => {
     registry.schemas["qa.local-lifecycle/v1"]!.id = "urn:example:mismatch";
   }],
   ["unsupported schema major", (registry: RegistryJson) => {
     registry.schemas["qa.local-lifecycle/v1"]!.major = 2;
   }],
-  ["unknown registered type", (registry: RegistryJson) => {
-    delete registry.types.LocalState;
+  ["unknown registered ExecutionOutcome type", (registry: RegistryJson) => {
+    delete registry.types.ExecutionOutcome;
   }],
-  ["unresolved registered pointer", (registry: RegistryJson) => {
-    registry.types.LocalState!.pointer = "#/$defs/Missing";
+  ["unresolved registered ExecutionOutcome pointer", (registry: RegistryJson) => {
+    registry.types.ExecutionOutcome!.pointer = "#/$defs/Missing";
+  }],
+  ["invalid registered ExecutionOutcome schema", (_registry, lifecycleSchema) => {
+    lifecycleSchema.$defs.ExecutionOutcome = { type: "not-a-json-schema-type" };
   }],
   ["escaping registered path", (registry: RegistryJson) => {
     registry.schemas["qa.local-lifecycle/v1"]!.path = "../schema.json";
   }],
-] as const;
+];
 
 for (const [name, mutate] of registryFailures) {
   test(`registry fails closed for ${name}`, async () => {
@@ -150,7 +171,16 @@ interface RegistryJson {
   types: Record<string, { schema: string; pointer: string; fixture_only?: boolean }>;
 }
 
-async function importWithRegistryMutation(mutate: (registry: RegistryJson) => void): Promise<void> {
+interface LifecycleSchemaJson {
+  $defs: Record<string, unknown>;
+}
+
+type PackageMutation = (
+  registry: RegistryJson,
+  lifecycleSchema: LifecycleSchemaJson,
+) => void;
+
+async function importWithRegistryMutation(mutate: PackageMutation): Promise<void> {
   const packageRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
   const temporaryRoot = mkdtempSync(join(tmpdir(), "qa-contracts-registry-"));
   try {
@@ -162,11 +192,35 @@ async function importWithRegistryMutation(mutate: (registry: RegistryJson) => vo
     writeFileSync(join(temporaryRoot, "package.json"), '{"type":"module"}\n');
     const registryPath = join(temporaryRoot, "contracts", "registry.json");
     const registry = JSON.parse(readFileSync(registryPath, "utf8")) as RegistryJson;
-    mutate(registry);
+    const lifecycleSchemaPath = join(
+      temporaryRoot,
+      "contracts",
+      "qa.local-lifecycle",
+      "v1",
+      "schema.json",
+    );
+    const lifecycleSchema = JSON.parse(
+      readFileSync(lifecycleSchemaPath, "utf8"),
+    ) as LifecycleSchemaJson;
+    mutate(registry, lifecycleSchema);
     writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
+    writeFileSync(lifecycleSchemaPath, `${JSON.stringify(lifecycleSchema, null, 2)}\n`);
     await import(`${pathToFileURL(join(moduleDirectory, "index.js")).href}?case=${Date.now()}`);
   } finally {
     rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
+function validateLifecycleCase(lifecycleType: LifecycleType, raw: Uint8Array) {
+  switch (lifecycleType) {
+    case "LocalState":
+      return validateLocalState(raw);
+    case "ExecutionOutcome":
+      return validateExecutionOutcome(raw);
+    default: {
+      const unsupportedType: never = lifecycleType;
+      throw new Error(`unsupported lifecycle fixture type: ${String(unsupportedType)}`);
+    }
   }
 }
 
