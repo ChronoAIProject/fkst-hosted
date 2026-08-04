@@ -157,7 +157,13 @@ export function EnvironmentsDrawer({ open, onClose }: { open: boolean; onClose: 
         </button>
       </div>
 
-      <div className="px-5 py-4">
+      {/* The scroll region. `DrawerShell`'s panel is `overflow-hidden` and lays
+          its children out as a flex column, so a child has to own the
+          scrolling — without `min-h-0` this body would size to its content
+          inside a flex parent and everything past the panel height would be
+          silently CLIPPED, taking the editor's Save button with it on a short
+          viewport. */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
         <FadeSwap k={viewKey}>
           {view.kind === 'list' && (
             <EnvironmentList

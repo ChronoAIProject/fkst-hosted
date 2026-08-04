@@ -246,11 +246,18 @@ test.describe('the intended inner container scrolls', () => {
     await expect(dialog).toBeVisible();
     await dialog.getByRole('button', { name: 'New environment' }).click();
     await expect(dialog.getByText('Install commands')).toBeVisible();
-    // Grow the form well past the drawer height so its body must scroll.
-    for (let i = 0; i < 10; i++) await dialog.getByRole('button', { name: 'Add command' }).click();
-    await settle(page);
-
-    const res = await probeInternalScroll(page, '[role="dialog"]');
+    // Grow the form until the body ACTUALLY overflows, rather than assuming a
+    // fixed row count does it. A row's height depends on the font the host has
+    // resolved, so a count tuned on one machine can leave the body a few pixels
+    // short of overflowing on another — which fails this test for a reason that
+    // has nothing to do with the behaviour it exists to prove. The bound keeps a
+    // genuinely non-scrolling body a failure rather than an infinite loop.
+    let res = await probeInternalScroll(page, '[role="dialog"]');
+    for (let batch = 0; batch < 5 && !res.found; batch++) {
+      for (let i = 0; i < 10; i++) await dialog.getByRole('button', { name: 'Add command' }).click();
+      await settle(page);
+      res = await probeInternalScroll(page, '[role="dialog"]');
+    }
     expect(res.found, 'the drawer body overflows internally').toBe(true);
     expect(res.found && res.moved, 'the drawer body scrollTop moves').toBe(true);
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
