@@ -1,0 +1,16 @@
+[package]
+name = "fkst-local-qa-host"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+name = "fkst_local_qa_host"
+path = "src/lib.rs"
+
+[[bin]]
+name = "fkst-local-qa-host"
+path = "src/main.rs"
+
+[lints]
+workspace = true
