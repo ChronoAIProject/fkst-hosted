@@ -22,10 +22,12 @@ verification, or testing-package behavior.
 
 The first registry-driven non-foundation walking skeleton adds
 `qa.local-lifecycle/v1#/$defs/LocalState` and the narrow
-`validateLocalState`/`validate_local_state` APIs. Local `terminal` means only
-that required local actions are settled or moved to an explicit repair backlog;
-it does not imply Hosted Quality, Report, Publication, or RunSettlement
-completion.
+`validateLocalState`/`validate_local_state` APIs. Its complete ordered vocabulary
+is `accepted`, `preparing`, `ready`, `executing`, `staging_evidence`,
+`cleaning_up_execution`, `uploading`, `finalizing_local`, and `terminal`. Local
+`terminal` means only that required local actions are settled or moved to an
+explicit repair backlog; it does not imply Hosted Quality, Report, Publication,
+RunSettlement completion, or settlement.
 
 Schema versions use `qa.<lowercase-kebab-name>/v<positive-major>`. Consumers
 must resolve schema and type names through `contracts/registry.json`; runtime
@@ -40,9 +42,9 @@ The checked-in conformance sources are:
   bytes, and SHA-256 vectors;
 - `fixtures/qa/contract-foundation-v1.json` for foundation validation,
   exact-object/union behavior, and root-only digest projection vectors.
-- `fixtures/qa/local-lifecycle-v1.json` for the accepted `LocalState` walking
-  skeleton through registry resolution, validation, canonicalization, and
-  digesting.
+- `fixtures/qa/local-lifecycle-v1.json` for the complete `LocalState`
+  conformance matrix through registry resolution, validation, canonicalization,
+  and digesting.
 
 The implementations are:
 

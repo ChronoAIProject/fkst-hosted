@@ -7,6 +7,129 @@
       "expected_canonical_utf8_hex": "22616363657074656422",
       "expected_canonical_utf8_base64": "ImFjY2VwdGVkIg==",
       "expected_sha256": "sha256:d288c584af270151f7b7cd7977b94160ce1d7b501dee2d6308f2ac84ebaacc99"
+    },
+    {
+      "case_id": "local-state-preparing",
+      "source": "preparing",
+      "expected_canonical_utf8_hex": "22707265706172696e6722",
+      "expected_canonical_utf8_base64": "InByZXBhcmluZyI=",
+      "expected_sha256": "sha256:a9c04f9d51fd373f548b23b57b82ab90c48811694d72d8038560ca10f6da67c5"
+    },
+    {
+      "case_id": "local-state-ready",
+      "source": "ready",
+      "expected_canonical_utf8_hex": "22726561647922",
+      "expected_canonical_utf8_base64": "InJlYWR5Ig==",
+      "expected_sha256": "sha256:40ec7f71ea684c8b976e79e8e425f87779e6de57f4821dcfc8066dbcad2defe0"
+    },
+    {
+      "case_id": "local-state-executing",
+      "source": "executing",
+      "expected_canonical_utf8_hex": "22657865637574696e6722",
+      "expected_canonical_utf8_base64": "ImV4ZWN1dGluZyI=",
+      "expected_sha256": "sha256:ea389b300a930476d20d12bfde3d5110b5bf0529cfd108fd9cf97c2a58a3686d"
+    },
+    {
+      "case_id": "local-state-staging-evidence",
+      "source": "staging_evidence",
+      "expected_canonical_utf8_hex": "2273746167696e675f65766964656e636522",
+      "expected_canonical_utf8_base64": "InN0YWdpbmdfZXZpZGVuY2Ui",
+      "expected_sha256": "sha256:f20e06c0725113911581e5fa22ade8d1d93b19a0e68a8d07ffbb630d24941f04"
+    },
+    {
+      "case_id": "local-state-cleaning-up-execution",
+      "source": "cleaning_up_execution",
+      "expected_canonical_utf8_hex": "22636c65616e696e675f75705f657865637574696f6e22",
+      "expected_canonical_utf8_base64": "ImNsZWFuaW5nX3VwX2V4ZWN1dGlvbiI=",
+      "expected_sha256": "sha256:03059b4f2f9e3f5a26a6f4395efd8bc08a437873fb97fbbd100a901cc7050332"
+    },
+    {
+      "case_id": "local-state-uploading",
+      "source": "uploading",
+      "expected_canonical_utf8_hex": "2275706c6f6164696e6722",
+      "expected_canonical_utf8_base64": "InVwbG9hZGluZyI=",
+      "expected_sha256": "sha256:c5488f95eccaaaf98b15604c277c42887ba606a7d9014fdd6232cc5f7384372d"
+    },
+    {
+      "case_id": "local-state-finalizing-local",
+      "source": "finalizing_local",
+      "expected_canonical_utf8_hex": "2266696e616c697a696e675f6c6f63616c22",
+      "expected_canonical_utf8_base64": "ImZpbmFsaXppbmdfbG9jYWwi",
+      "expected_sha256": "sha256:7f1f45158e81097fe056920715f977fa72d85b48224ffd57722b9f96f5f548a0"
+    },
+    {
+      "case_id": "local-state-terminal",
+      "source": "terminal",
+      "expected_canonical_utf8_hex": "227465726d696e616c22",
+      "expected_canonical_utf8_base64": "InRlcm1pbmFsIg==",
+      "expected_sha256": "sha256:c34e20c40cc2581f3184cc0fc5e67f7d5cbebd5365a5ce02a3614f321b6e3e4b"
+    }
+  ],
+  "invalid_cases": [
+    {
+      "case_id": "local-state-unknown-string",
+      "source": "cancelled",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "local-state-case-folding-forbidden",
+      "source": "Accepted",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "local-state-leading-whitespace-forbidden",
+      "source": " accepted",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "local-state-trailing-whitespace-forbidden",
+      "source": "accepted ",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "local-state-hyphen-alias-forbidden",
+      "source": "staging-evidence",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "local-state-short-alias-forbidden",
+      "source": "cleaning_up",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "local-state-unicode-compatibility-normalization-forbidden",
+      "source": "ａｃｃｅｐｔｅｄ",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "local-state-object-forbidden",
+      "source": { "state": "accepted" },
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "local-state-array-forbidden",
+      "source": ["accepted"],
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "local-state-number-forbidden",
+      "source": 1,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "local-state-true-forbidden",
+      "source": true,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "local-state-false-forbidden",
+      "source": false,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "local-state-null-forbidden",
+      "source": null,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
     }
   ]
 }
