@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "guest-agent",
+  "host",
   "launcher",
   "secret-broker",
   "supervisor",

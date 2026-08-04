@@ -180,6 +180,10 @@ name = "fkst-local-qa-guest-agent"
 version = "0.0.0"
 
 [[package]]
+name = "fkst-local-qa-host"
+version = "0.0.0"
+
+[[package]]
 name = "fkst-local-qa-launcher"
 version = "0.0.0"
 
