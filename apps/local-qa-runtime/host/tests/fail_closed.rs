@@ -117,6 +117,16 @@ fn unsupported_inputs_fail_closed_without_filesystem_side_effects() {
         (&["--help"], false),
         (&["--config", "config.toml"], false),
         (&["project"], false),
+        (
+            &[
+                "local-demo",
+                "--listen",
+                "0.0.0.0:0",
+                "--database",
+                "state/non-loopback.sqlite",
+            ],
+            false,
+        ),
     ];
 
     for (arguments, clear_environment) in cases {
