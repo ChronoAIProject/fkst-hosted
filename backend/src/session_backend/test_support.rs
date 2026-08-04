@@ -81,6 +81,11 @@ pub(crate) struct FakeSessionBackend {
     /// Every policy `list_runtime_inventory` was called with, so a caller can be
     /// held to "exactly one inventory read per request".
     pub(crate) inventory_calls: Mutex<Vec<RuntimeLifetimePolicy>>,
+    /// Scripted `status_summary` phase (absent → the default all-`None` status, which
+    /// is what a gone runtime looks like).
+    status_phase: Option<String>,
+    /// When set, `status_summary` fails — drives the fail-open liveness paths.
+    status_error: bool,
 }
 
 impl FakeSessionBackend {
@@ -107,6 +112,18 @@ impl FakeSessionBackend {
             ensure_metadata_rejected: true,
             ..Default::default()
         }
+    }
+
+    /// Script the phase `status_summary` reports (e.g. `"Running"` for a live pod).
+    pub(crate) fn with_status_phase(mut self, phase: &str) -> Self {
+        self.status_phase = Some(phase.to_string());
+        self
+    }
+
+    /// Make `status_summary` fail, so a caller's fail-open behaviour is exercised.
+    pub(crate) fn with_status_error(mut self) -> Self {
+        self.status_error = true;
+        self
     }
 
     /// Script the fleet `list_fleet` returns.
@@ -408,7 +425,15 @@ impl SessionBackend for FakeSessionBackend {
     }
 
     async fn status_summary(&self, _session_id: &str) -> Result<RuntimeStatus, BackendError> {
-        Ok(RuntimeStatus::default())
+        if self.status_error {
+            return Err(BackendError::Other(anyhow::anyhow!(
+                "scripted status failure"
+            )));
+        }
+        Ok(RuntimeStatus {
+            phase: self.status_phase.clone(),
+            ..RuntimeStatus::default()
+        })
     }
 
     async fn recent_output(&self, session_id: &str) -> Option<String> {

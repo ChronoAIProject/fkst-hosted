@@ -214,6 +214,16 @@ pub const OPERATION_POLICIES: &[AuditOperation] = &[
         "SafeListSessionRuns",
         arguments::LIST_SESSION_RUNS_FIELDS,
     ),
+    audited(
+        "session_health",
+        "SafeSessionHealth",
+        arguments::SESSION_HEALTH_FIELDS,
+    ),
+    audited(
+        "session_health_report",
+        "SafeSessionHealthReport",
+        arguments::SESSION_HEALTH_REPORT_FIELDS,
+    ),
     // --- browser authentication --------------------------------------------
     audited(
         "github_login",

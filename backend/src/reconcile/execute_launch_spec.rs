@@ -133,7 +133,7 @@ pub(crate) async fn resolve_session_credentials(
 /// labels — the set that actually wakes the session), NOT just the explicit label, so a
 /// `### Work Label`-less session runs on its packages' auto-declared labels (epic #594
 /// I4). `bot_login` falls back to empty when unset.
-fn session_pod_spec_from(
+pub(crate) fn session_pod_spec_from(
     reg: &SessionRegistration,
     detected_work_labels: &[String],
     branches: &ResolvedBranchTopology,
@@ -155,6 +155,7 @@ fn session_pod_spec_from(
             .collect(),
         work_label: crate::k8s::work_label_wire::join_work_labels(&labels.effective),
         work_label_map_json: labels.map_json(),
+        work_label_namespace: work_label_namespace.map(str::to_string),
         // Serialized only when the session configures at least one package, so an
         // unconfigured session renders no key. BTreeMap ordering makes the JSON
         // deterministic, which matters because this value feeds the runtime config
@@ -191,7 +192,10 @@ fn session_pod_spec_from(
 /// Package-side work authors: creator first, then Session Collaborators, then
 /// login-shaped deployment admins. Log-access/FKST-Contributor entries are not
 /// work authority and deliberately do not feed this environment contract.
-fn session_contributors(reg: &SessionRegistration, access: &AccessPolicy) -> Vec<String> {
+pub(crate) fn session_contributors(
+    reg: &SessionRegistration,
+    access: &AccessPolicy,
+) -> Vec<String> {
     let mut contributors: Vec<String> = Vec::new();
     let mut seen: Vec<String> = Vec::new();
     let creator = reg.creator_login.trim();
@@ -226,7 +230,7 @@ fn session_contributors(reg: &SessionRegistration, access: &AccessPolicy) -> Vec
 /// closed — no bundle). The single configured NyxID SA serves both the control
 /// plane's own storage calls and the in-pod uploader. Borrows the config, exposing
 /// the client secret only to copy it into the Secret builder.
-fn storage_writer_creds(config: &Config) -> Option<StorageWriterCreds<'_>> {
+pub(crate) fn storage_writer_creds(config: &Config) -> Option<StorageWriterCreds<'_>> {
     let storage = config.storage.as_ref()?;
     Some(StorageWriterCreds {
         client_id: &storage.nyxid_client_id,
@@ -240,10 +244,10 @@ fn storage_writer_creds(config: &Config) -> Option<StorageWriterCreds<'_>> {
 // --- Environment resolution (mirrors the Model-A webhook pre-flight) ----------
 
 /// The outcome of pre-flighting the issue's named environment.
-struct ResolvedEnvironment {
-    user_env: BTreeMap<String, String>,
-    install: Vec<String>,
-    secret_keys: Vec<String>,
+pub(crate) struct ResolvedEnvironment {
+    pub(crate) user_env: BTreeMap<String, String>,
+    pub(crate) install: Vec<String>,
+    pub(crate) secret_keys: Vec<String>,
 }
 
 impl Drop for ResolvedEnvironment {
@@ -261,7 +265,7 @@ impl Drop for ResolvedEnvironment {
     }
 }
 
-enum EnvResolution {
+pub(crate) enum EnvResolution {
     /// Launch with the merged variables/secret VALUES to inject, the ordered install
     /// commands to run in the pod, and the NAMES of the env vars that are secrets
     /// (so the pod can keep them out of the codex config). All empty when the issue
@@ -345,7 +349,7 @@ fn disposable_environment_unavailable_comment() -> String {
 /// without an environment (auto-seeded triggers never select one). `None` → an
 /// empty session. A named selection for an id-bearing creator must exist and be
 /// `ready`; otherwise the launch is blocked with feedback — fail closed.
-async fn resolve_named_environment(
+pub(crate) async fn resolve_named_environment(
     env_store: &dyn EnvironmentProfileStore,
     creator_id: Option<i64>,
     creator_login: &str,

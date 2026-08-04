@@ -34,6 +34,7 @@ pub(super) fn spec() -> SessionPodSpec {
         package_roots: vec!["web".to_string(), "api".to_string()],
         work_label: "fkst".to_string(),
         work_label_map_json: None,
+        work_label_namespace: None,
         package_env_json: None,
         bot_login: "fkst-bot[bot]".to_string(),
         config_hash: "cfg-deadbeef".to_string(),
@@ -775,6 +776,7 @@ fn every_platform_rendered_env_key_is_on_the_author_denylist() {
 
     let mut full = spec();
     full.work_label_map_json = Some("{}".to_string());
+    full.work_label_namespace = Some("chronoai-fkst".to_string());
     full.package_env_json = Some("{}".to_string());
     full.delivery_grants_json = Some("[]".to_string());
     full.contributors = vec!["someone".to_string()];
@@ -789,7 +791,7 @@ fn every_platform_rendered_env_key_is_on_the_author_denylist() {
         let policed = key.starts_with("FKST_SESSION_")
             || key.starts_with("FKST_GITHUB_")
             || key == "FKST_TRIGGER_ISSUE"
-            || key == "FKST_WORK_LABEL_NAMESPACE";
+            || key == crate::reconcile::work_labels::WORK_LABEL_NAMESPACE_ENV;
         if policed && !PLATFORM_OWNED_SESSION_ENV.contains(&key.as_str()) {
             missing.push(key.clone());
         }
@@ -799,5 +801,49 @@ fn every_platform_rendered_env_key_is_on_the_author_denylist() {
         missing.is_empty(),
         "rendered by the platform but missing from PLATFORM_OWNED_SESSION_ENV \
          (a trigger author could set these): {missing:?}"
+    );
+}
+
+/// The namespace already reaches a session baked INTO its label strings; rendering it
+/// as its own variable is what lets a package read the value instead of recovering it
+/// by stripping a suffix off a label (fragile the moment a logical label has a hyphen).
+#[test]
+fn session_env_pairs_render_the_work_label_namespace_when_configured() {
+    use crate::reconcile::work_labels::WORK_LABEL_NAMESPACE_ENV;
+
+    let mut namespaced = spec();
+    namespaced.work_label_namespace = Some("chronoai-fkst".to_string());
+
+    let rendered = session_env_pairs(&namespaced, &config());
+    assert_eq!(
+        rendered
+            .iter()
+            .find(|(key, _)| key == WORK_LABEL_NAMESPACE_ENV)
+            .map(|(_, value)| value.as_str()),
+        Some("chronoai-fkst")
+    );
+    assert_eq!(
+        rendered
+            .iter()
+            .filter(|(key, _)| key == WORK_LABEL_NAMESPACE_ENV)
+            .count(),
+        1,
+        "exactly one binding: a duplicate EnvVar name is a kubelet last-wins accident"
+    );
+}
+
+/// ABSENT, not empty. An unset namespace means the deployment's labels are
+/// unnamespaced, so a consumer must see "no namespace" rather than a blank one it
+/// might stamp into an artifact name.
+#[test]
+fn session_env_pairs_omit_the_work_label_namespace_when_unset() {
+    use crate::reconcile::work_labels::WORK_LABEL_NAMESPACE_ENV;
+
+    let rendered = session_env_pairs(&spec(), &config());
+    assert!(
+        !rendered
+            .iter()
+            .any(|(key, _)| key == WORK_LABEL_NAMESPACE_ENV),
+        "an unnamespaced deployment must render no key at all"
     );
 }

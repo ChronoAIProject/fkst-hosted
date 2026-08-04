@@ -122,7 +122,9 @@ export function RepoWorkspace({
             data-testid="session-detail"
             className="grad-border rounded-card shadow-2 flex flex-1 flex-col min-h-0 overflow-hidden"
           >
-            <ScrollArea>
+            {/* Bounds the height only; SessionDetailView owns its own scrolling
+                so the header and tablist stay put while a tab's body scrolls. */}
+            <div className="flex min-h-0 flex-1 flex-col">
               {/* Key by session so selecting a different one gives a FRESH
                   detail (resets to the Status tab + re-fetches observe) rather
                   than inheriting the previous session's tab/observe state. */}
@@ -134,7 +136,7 @@ export function RepoWorkspace({
                 onChanged={onChanged}
                 readOnly={readOnly}
               />
-            </ScrollArea>
+            </div>
           </div>
         ) : (
           <div className="grad-border rounded-card shadow-2 flex flex-1 items-center justify-center p-8">

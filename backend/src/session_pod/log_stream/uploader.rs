@@ -27,12 +27,16 @@
 use axum::body::Bytes;
 use k8s_openapi::chrono::{DateTime, Utc};
 
+use crate::session_health;
 use crate::session_spec::creds::CredsLayout;
 
 use super::bundle_key;
 use super::collector::CollectorConfig;
 use super::runs::{self, LogRun};
-use super::sink::{ChronoStorageSink, LogSink, SinkError};
+use super::sink::{
+    ChronoStorageSink, LogSink, SinkError, BUNDLE_CONTENT_TYPE, JSON_CONTENT_TYPE,
+    MARKDOWN_CONTENT_TYPE,
+};
 
 /// The bundle uploader: a [`LogSink`] + the current-thread runtime it is driven on +
 /// the object keys it writes (latest, this run, the run index).
@@ -79,10 +83,14 @@ impl Uploader {
     /// un-acked (retried next cadence) while `latest` — already written — stays
     /// authoritative regardless.
     pub(super) fn upload(&self, gz: Bytes) -> Result<(), SinkError> {
-        let latest_result = self
-            .runtime
-            .block_on(self.sink.put(&self.latest_key, gz.clone()));
-        let run_result = self.runtime.block_on(self.sink.put(&self.run_key, gz));
+        let latest_result = self.runtime.block_on(self.sink.put(
+            &self.latest_key,
+            gz.clone(),
+            BUNDLE_CONTENT_TYPE,
+        ));
+        let run_result =
+            self.runtime
+                .block_on(self.sink.put(&self.run_key, gz, BUNDLE_CONTENT_TYPE));
         latest_result.and(run_result)
     }
 
@@ -99,8 +107,11 @@ impl Uploader {
                 ended_at: None,
             },
         );
-        self.runtime
-            .block_on(self.sink.put(&self.index_key, Bytes::from(updated)))
+        self.runtime.block_on(self.sink.put(
+            &self.index_key,
+            Bytes::from(updated),
+            JSON_CONTENT_TYPE,
+        ))
     }
 
     /// Stamp this run's end time into the session's run index (read-modify-write),
@@ -118,8 +129,43 @@ impl Uploader {
                 ended_at: Some(runs::rfc3339(ended_at)),
             },
         );
-        self.runtime
-            .block_on(self.sink.put(&self.index_key, Bytes::from(updated)))
+        self.runtime.block_on(self.sink.put(
+            &self.index_key,
+            Bytes::from(updated),
+            JSON_CONTENT_TYPE,
+        ))
+    }
+
+    /// Publish one health report: the report object first, then the session's health
+    /// index (read-modify-write).
+    ///
+    /// Object-before-index is deliberate — an index entry must never point at a key
+    /// that is not there yet, because the read API validates a requested report id
+    /// against the index and would then 404 on a report it just advertised.
+    ///
+    /// The RMW on the index is race-free for the same reason the run index's is: a
+    /// session has exactly ONE live pod at a time (idle-reap → auto-revive is strictly
+    /// sequential), so two collectors never contend for the same index object.
+    ///
+    /// Best-effort — returns the error for the caller to log-swallow and retry.
+    pub(super) fn publish_health_report(
+        &self,
+        session_id: &str,
+        entry: session_health::HealthIndexEntry,
+        redacted: &str,
+    ) -> Result<(), SinkError> {
+        self.runtime.block_on(self.sink.put(
+            &entry.key,
+            Bytes::from(redacted.to_string()),
+            MARKDOWN_CONTENT_TYPE,
+        ))?;
+        let index_key = session_health::health_index_key(session_id);
+        let existing = self.runtime.block_on(self.sink.get(&index_key))?;
+        let updated = session_health::upsert_report(existing.as_deref(), session_id, entry);
+        self.runtime.block_on(
+            self.sink
+                .put(&index_key, Bytes::from(updated), JSON_CONTENT_TYPE),
+        )
     }
 }
 

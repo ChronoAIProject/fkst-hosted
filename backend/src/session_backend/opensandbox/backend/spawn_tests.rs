@@ -600,3 +600,50 @@ async fn ensure_existing_session_does_not_publish_or_cache_a_partial_recovery() 
     assert!(matches!(error, BackendError::Other(_)));
     assert!(b.creds.lock().unwrap().get(SESSION_ID).is_none());
 }
+
+/// Cross-backend equality, asserted as ONE comparison rather than two independent
+/// assertions: the namespace is what a package stamps into artifact names, so the two
+/// backends agreeing is the property that matters, not each one being individually
+/// plausible.
+#[test]
+fn the_work_label_namespace_reaches_both_backends_identically() {
+    use crate::config::PodConfig;
+    use crate::reconcile::work_labels::WORK_LABEL_NAMESPACE_ENV;
+
+    let mut namespaced = spec();
+    namespaced.work_label_namespace = Some("chronoai-fkst".to_string());
+
+    let sandbox_env = backend("http://osb.invalid", osb_config()).create_env(&namespaced);
+    let pod_env: BTreeMap<String, String> =
+        crate::k8s::session_launcher::session_env_pairs(&namespaced, &PodConfig::default())
+            .into_iter()
+            .collect();
+
+    assert_eq!(
+        sandbox_env.get(WORK_LABEL_NAMESPACE_ENV),
+        pod_env.get(WORK_LABEL_NAMESPACE_ENV),
+        "both backends must render the identical binding"
+    );
+    assert_eq!(
+        sandbox_env
+            .get(WORK_LABEL_NAMESPACE_ENV)
+            .map(String::as_str),
+        Some("chronoai-fkst")
+    );
+}
+
+#[test]
+fn an_unnamespaced_deployment_renders_the_key_on_neither_backend() {
+    use crate::config::PodConfig;
+    use crate::reconcile::work_labels::WORK_LABEL_NAMESPACE_ENV;
+
+    let plain = spec();
+    let sandbox_env = backend("http://osb.invalid", osb_config()).create_env(&plain);
+    let pod_env: BTreeMap<String, String> =
+        crate::k8s::session_launcher::session_env_pairs(&plain, &PodConfig::default())
+            .into_iter()
+            .collect();
+
+    assert_eq!(sandbox_env.get(WORK_LABEL_NAMESPACE_ENV), None);
+    assert_eq!(pod_env.get(WORK_LABEL_NAMESPACE_ENV), None);
+}

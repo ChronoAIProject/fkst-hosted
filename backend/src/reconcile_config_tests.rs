@@ -42,6 +42,51 @@ fn defaults_apply_when_nothing_is_set() {
         config.seed_packages,
         vec!["ChronoAIProject/fkst-hosted@packages:packages/github-devloop-workflow".to_string()]
     );
+    // Feature off unless configured: deploying the binary alone changes no session.
+    assert!(config.mandatory_packages.is_empty());
+}
+
+#[test]
+fn mandatory_packages_parse_from_whitespace_separated_refs() {
+    let config = ReconcileConfig::from_vars(&vars(&[(
+        "FKST_MANDATORY_PACKAGES",
+        "ChronoAIProject/fkst-hosted@packages:packages/github-proxy\n  \
+         ChronoAIProject/fkst-hosted@packages:packages/workflow-dev",
+    )]))
+    .expect("valid refs");
+    let rendered: Vec<String> = config
+        .mandatory_packages
+        .iter()
+        .map(|r| format!("{}/{}@{}:{}", r.owner, r.repo, r.git_ref, r.path))
+        .collect();
+    assert_eq!(
+        rendered,
+        vec![
+            "ChronoAIProject/fkst-hosted@packages:packages/github-proxy".to_string(),
+            "ChronoAIProject/fkst-hosted@packages:packages/workflow-dev".to_string(),
+        ]
+    );
+}
+
+/// Fail closed and NAME the token: a silently-dropped mandatory package would
+/// remove the isolation guarantee this knob exists to provide.
+#[test]
+fn a_malformed_mandatory_ref_fails_closed_naming_the_token() {
+    let err = ReconcileConfig::from_vars(&vars(&[(
+        "FKST_MANDATORY_PACKAGES",
+        "ChronoAIProject/fkst-hosted@packages:packages/github-proxy not-a-ref",
+    )]))
+    .expect_err("must reject");
+    let msg = format!("{err}");
+    assert!(msg.contains("not-a-ref"), "{msg}");
+    assert!(msg.contains("FKST_MANDATORY_PACKAGES"), "{msg}");
+}
+
+#[test]
+fn a_blank_mandatory_value_is_feature_off() {
+    let config = ReconcileConfig::from_vars(&vars(&[("FKST_MANDATORY_PACKAGES", "   \n  ")]))
+        .expect("blank");
+    assert!(config.mandatory_packages.is_empty());
 }
 
 #[test]
@@ -318,4 +363,25 @@ fn non_numeric_interval_is_a_config_error() {
     let err = ReconcileConfig::from_vars(&vars(&[("FKST_RECONCILE_INTERVAL_SECS", "soon")]))
         .expect_err("non-numeric must fail");
     assert!(matches!(err, AppError::Config(_)));
+}
+
+/// The refs actually shipped in deploy/kubernetes/base/configmap.yaml must satisfy
+/// the startup validator -- otherwise the control plane fails closed on boot after
+/// a deploy, which is the worst place to discover a typo.
+#[test]
+fn the_deployed_mandatory_list_is_accepted() {
+    let deployed = "ChronoAIProject/fkst-hosted@packages:packages/github-proxy \
+                    ChronoAIProject/fkst-hosted@packages:packages/workflow-dev \
+                    ChronoAIProject/fkst-hosted@packages:packages/workflow-writer \
+                    ChronoAIProject/fkst-hosted@packages:packages/idle-detector \
+                    ChronoAIProject/fkst-hosted@packages:packages/fkst-health";
+    let config = ReconcileConfig::from_vars(&vars(&[("FKST_MANDATORY_PACKAGES", deployed)]))
+        .expect("the deployed list must be valid");
+    assert_eq!(config.mandatory_packages.len(), 5);
+    assert!(config
+        .mandatory_packages
+        .iter()
+        .all(|r| r.owner == "ChronoAIProject"
+            && r.repo == "fkst-hosted"
+            && r.git_ref == "packages"));
 }

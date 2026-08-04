@@ -148,6 +148,76 @@ impl BoundedAuditArguments for SafeListSessionRuns {
     }
 }
 
+/// `session_health` — the session's health reports plus the heartbeat verdict.
+///
+/// Only the validated session id. The reports themselves are package-authored
+/// prose whose `status`/`headline` the control plane relays verbatim, so nothing
+/// about their CONTENT is an audit property.
+#[derive(Clone, Debug, Serialize)]
+pub struct SafeSessionHealth {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_id: Option<String>,
+}
+
+impl SafeSessionHealth {
+    pub fn new(session_id: &str) -> Self {
+        Self {
+            session_id: safe_session_id(session_id),
+        }
+    }
+}
+
+impl BoundedAuditArguments for SafeSessionHealth {
+    const OPERATION_ID: &'static str = "session_health";
+    const ALLOWED_FIELDS: &'static [&'static str] = catalog::SESSION_HEALTH_FIELDS;
+
+    fn parse_status(&self) -> ArgumentsParseStatus {
+        if self.session_id.is_some() {
+            ArgumentsParseStatus::Parsed
+        } else {
+            ArgumentsParseStatus::Invalid
+        }
+    }
+}
+
+/// `session_health_report` — one report out of that list.
+///
+/// `report_id` is caller-supplied and is admitted only in the same bounded ASCII
+/// token shape a session id must take. An id outside that shape is OMITTED and
+/// the record reports `invalid`: the handler answers `404` for anything absent
+/// from the index, and echoing a traversal-shaped selector into the trail is the
+/// exact "never echo invalid material" rule. The report BODY is untrusted
+/// markdown and is never an argument.
+#[derive(Clone, Debug, Serialize)]
+pub struct SafeSessionHealthReport {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    report_id: Option<String>,
+}
+
+impl SafeSessionHealthReport {
+    pub fn new(session_id: &str, report_id: &str) -> Self {
+        Self {
+            session_id: safe_session_id(session_id),
+            report_id: safe_session_id(report_id),
+        }
+    }
+}
+
+impl BoundedAuditArguments for SafeSessionHealthReport {
+    const OPERATION_ID: &'static str = "session_health_report";
+    const ALLOWED_FIELDS: &'static [&'static str] = catalog::SESSION_HEALTH_REPORT_FIELDS;
+
+    fn parse_status(&self) -> ArgumentsParseStatus {
+        if self.session_id.is_some() && self.report_id.is_some() {
+            ArgumentsParseStatus::Parsed
+        } else {
+            ArgumentsParseStatus::Invalid
+        }
+    }
+}
+
 /// `session_log_manifest` — the bundle's file list.
 #[derive(Clone, Debug, Serialize)]
 pub struct SafeSessionLogManifest {

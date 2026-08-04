@@ -130,6 +130,8 @@ pub const DELETE_USER_ENVIRONMENT_PROFILE_FIELDS: &[&str] = &["environment_name"
 
 pub const DOWNLOAD_SESSION_LOGS_FIELDS: &[&str] = &["session_id", "run_id_or_latest", "mode"];
 pub const LIST_SESSION_RUNS_FIELDS: &[&str] = &["session_id"];
+pub const SESSION_HEALTH_FIELDS: &[&str] = &["session_id"];
+pub const SESSION_HEALTH_REPORT_FIELDS: &[&str] = &["session_id", "report_id"];
 pub const SESSION_LOG_MANIFEST_FIELDS: &[&str] = &["session_id", "run_id_or_latest"];
 pub const SESSION_LOG_FILE_FIELDS: &[&str] =
     &["session_id", "run_id_or_latest", "file_class", "tail_bytes"];

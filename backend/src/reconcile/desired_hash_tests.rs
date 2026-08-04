@@ -80,6 +80,20 @@ fn runtime_hash_moves_with_provider_namespace_without_changing_legacy_hash() {
     );
 }
 
+/// A PINNED digest, deliberately brittle: adding `FKST_WORK_LABEL_NAMESPACE` to the
+/// session env must not change what the runtime hash is computed over. If it ever did,
+/// every live session's recomputed hash would move at once and the fleet would respawn
+/// on the next pass — a literal expectation is the only thing that catches that.
+#[test]
+fn runtime_hash_inputs_are_pinned_to_the_authored_hash_and_the_namespace() {
+    let authored = "a".repeat(64);
+    assert_eq!(
+        runtime_config_hash(&authored, Some("chronoai-fkst")),
+        "a0d113e1b9e83efec7be09cd7745adc2c5262b1028a8262b295fd5efcb474279",
+        "the runtime hash must depend on nothing but (authored hash, namespace)"
+    );
+}
+
 #[test]
 fn config_hash_changes_with_each_input() {
     let pkgs = vec![pkg("acme", "tools", "main", "pkg/a")];

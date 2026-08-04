@@ -49,6 +49,7 @@ mod loops;
 // its package list. FAIL-CLOSED (a manifest is a required, complete set): any fetch,
 // parse, schema, or per-ref failure is an error, not best-effort. NOT yet wired into
 // the sweep — a later PR expands a trigger's `### Manifest` refs through this.
+pub mod isolation_capability;
 pub mod manifest_expand;
 pub mod pending;
 pub mod reachability;

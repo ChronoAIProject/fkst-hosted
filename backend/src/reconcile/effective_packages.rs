@@ -86,6 +86,7 @@ pub async fn resolve_effective_packages(
     api_base: &str,
     token: &SecretString,
     regs: &[SessionRegistration],
+    mandatory: &[PackageRef],
 ) -> EffectivePackages {
     // Cache each distinct manifest reference's expansion (Ok packages / Err reason) so a
     // manifest shared by two sessions is fetched once. The Err reason is the manifest's
@@ -100,7 +101,7 @@ pub async fn resolve_effective_packages(
     let mut demotions: Vec<(i64, String)> = Vec::new();
 
     for reg in regs {
-        match expand_one(http, api_base, token, reg, &mut cache).await {
+        match expand_one(http, api_base, token, reg, &mut cache, mandatory).await {
             Ok((effective, package_env)) => {
                 by_session.insert(reg.session_id.clone(), effective);
                 package_env_by_session.insert(reg.session_id.clone(), package_env);
@@ -128,9 +129,15 @@ async fn expand_one(
         RefKey,
         Result<crate::reconcile::manifest_expand::ExpandedManifest, String>,
     >,
+    mandatory: &[PackageRef],
 ) -> Result<(Vec<PackageRef>, crate::goals::package_env::PackageEnv), String> {
     // Explicit packages first (author order); then each manifest's expansion appended in
     // manifest order (in-file order preserved within each expansion).
+    //
+    // The mandatory baseline is NOT added here. Injecting it would silently rewrite what
+    // the author declared, so a trigger's package list would stop describing what the
+    // session actually runs. It is REQUIRED instead -- checked below, once the effective
+    // set is complete (#5780).
     let mut effective: Vec<PackageRef> = reg.def.packages.clone();
     // Manifest-supplied configuration, folded in manifest order. The FIRST manifest
     // to set a key wins, matching how the package list keeps its first occurrence.
@@ -184,6 +191,17 @@ async fn expand_one(
     if deduped.is_empty() {
         return Err(NO_PACKAGES_DETAIL.to_string());
     }
+
+    // Every mandatory ref must already be in the effective set. Checked against the
+    // EFFECTIVE set, not the literal `### Packages` lines, so a `### Manifest` that
+    // carries the baseline satisfies this without the author restating it.
+    //
+    // Matched on the FULL (owner, repo, ref, path) identity: the same package at a
+    // different ref does NOT satisfy the requirement, which is what pins the baseline
+    // to the intended branch rather than merely to a package name.
+    if let Some(missing) = missing_mandatory(&deduped, mandatory) {
+        return Err(missing);
+    }
     tracing::debug!(
         session_id = %reg.session_id,
         explicit = reg.def.packages.len(),
@@ -217,6 +235,40 @@ async fn expand_one(
 /// OPPOSITE precedence, and an unconditional insert silently gave last-wins to both:
 /// manifest over manifest keeps the FIRST value (matching how the effective package
 /// list keeps its first occurrence), while the trigger always overrides.
+/// The demote reason when a session does not declare every mandatory package, or
+/// `None` when it does.
+///
+/// Names EVERY missing ref, not just the first, and renders them as the exact lines
+/// the author can paste into `### Packages` -- a refusal that does not say what to add
+/// costs a round trip per missing package.
+fn missing_mandatory(effective: &[PackageRef], mandatory: &[PackageRef]) -> Option<String> {
+    let present: BTreeSet<RefKey> = effective.iter().map(ref_key).collect();
+    let missing: Vec<String> = mandatory
+        .iter()
+        .filter(|m| !present.contains(&ref_key(m)))
+        .map(render_ref)
+        .collect();
+    if missing.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "this session does not declare {} required package(s). Add {} to `### Packages` \
+         (or use a `### Manifest` that includes {}): {}",
+        missing.len(),
+        if missing.len() == 1 {
+            "this line"
+        } else {
+            "these lines"
+        },
+        if missing.len() == 1 { "it" } else { "them" },
+        missing
+            .iter()
+            .map(|r| format!("`{r}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
+}
+
 fn merge_package_env(
     base: &mut crate::goals::package_env::PackageEnv,
     overlay: crate::goals::package_env::PackageEnv,

@@ -109,7 +109,23 @@ async fn mount_status(server: &MockServer, m: &PackageRef, status: u16) {
 }
 
 async fn resolve(server: &MockServer, regs: &[SessionRegistration]) -> super::EffectivePackages {
-    resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), regs).await
+    resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), regs, &[]).await
+}
+
+/// Same, with a mandatory baseline prepended to every session.
+async fn resolve_with_mandatory(
+    server: &MockServer,
+    regs: &[SessionRegistration],
+    mandatory: &[PackageRef],
+) -> super::EffectivePackages {
+    resolve_effective_packages(
+        &reqwest::Client::new(),
+        &server.uri(),
+        &tok(),
+        regs,
+        mandatory,
+    )
+    .await
 }
 
 #[tokio::test]
@@ -418,7 +434,8 @@ async fn trigger_package_env_overrides_the_manifest_per_key() {
     );
 
     let resolved =
-        resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), &[reg]).await;
+        resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), &[reg], &[])
+            .await;
 
     let env = &resolved.package_env_by_session["s1"]["github-devloop"];
     assert_eq!(
@@ -444,7 +461,8 @@ async fn a_manifest_free_session_keeps_its_trigger_package_env() {
     );
 
     let resolved =
-        resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), &[reg]).await;
+        resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), &[reg], &[])
+            .await;
 
     assert_eq!(
         resolved.package_env_by_session["s1"]["github-devloop"]["FKST_DEVLOOP_AUTO_REFINE_MAX"],
@@ -485,7 +503,8 @@ async fn a_manifest_and_trigger_key_conflict_demotes_instead_of_killing_the_pod(
     );
 
     let resolved =
-        resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), &[reg]).await;
+        resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), &[reg], &[])
+            .await;
 
     assert!(
         !resolved.package_env_by_session.contains_key("s1"),
@@ -533,10 +552,141 @@ async fn the_first_manifest_wins_a_cross_manifest_key_collision() {
 
     let reg = reg("s1", 1, vec![], vec![first, second]);
     let resolved =
-        resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), &[reg]).await;
+        resolve_effective_packages(&reqwest::Client::new(), &server.uri(), &tok(), &[reg], &[])
+            .await;
 
     assert_eq!(
         resolved.package_env_by_session["s1"]["github-devloop"]["FKST_DEVLOOP_MAX_INFLIGHT"], "1",
         "the first manifest to set a key must win"
+    );
+}
+
+/// Feature off: requiring nothing accepts everything and leaves the set untouched.
+#[tokio::test]
+async fn an_empty_mandatory_list_requires_nothing() {
+    let server = MockServer::start().await;
+    let a = pkg("acme", "p", "main", "packages/a");
+    let regs = vec![reg("s1", 1, vec![a.clone()], vec![])];
+    let got = resolve_with_mandatory(&server, &regs, &[]).await;
+    assert!(got.demotions.is_empty());
+    assert_eq!(got.by_session.get("s1"), Some(&vec![a]));
+}
+
+/// Declaring the baseline is accepted -- and the effective set is NOT reordered or
+/// added to, which is the whole point of requiring rather than injecting.
+#[tokio::test]
+async fn declaring_every_mandatory_ref_is_accepted_unchanged() {
+    let server = MockServer::start().await;
+    let proxy = pkg(
+        "ChronoAIProject",
+        "fkst-hosted",
+        "packages",
+        "packages/github-proxy",
+    );
+    let own = pkg("acme", "p", "main", "packages/own");
+    let regs = vec![reg("s1", 1, vec![own.clone(), proxy.clone()], vec![])];
+    let got = resolve_with_mandatory(&server, &regs, std::slice::from_ref(&proxy)).await;
+    assert!(got.demotions.is_empty());
+    assert_eq!(got.by_session.get("s1"), Some(&vec![own, proxy]));
+}
+
+#[tokio::test]
+async fn a_missing_mandatory_ref_demotes_and_names_it() {
+    let server = MockServer::start().await;
+    let proxy = pkg(
+        "ChronoAIProject",
+        "fkst-hosted",
+        "packages",
+        "packages/github-proxy",
+    );
+    let own = pkg("acme", "p", "main", "packages/own");
+    let regs = vec![reg("s1", 1, vec![own], vec![])];
+    let got = resolve_with_mandatory(&server, &regs, std::slice::from_ref(&proxy)).await;
+    assert!(!got.by_session.contains_key("s1"));
+    assert_eq!(got.demotions.len(), 1);
+    let (issue, reason) = &got.demotions[0];
+    assert_eq!(*issue, 1);
+    assert!(
+        reason.contains("ChronoAIProject/fkst-hosted@packages:packages/github-proxy"),
+        "{reason}"
+    );
+}
+
+/// ALL misses at once: one round trip per missing package would be a poor refusal.
+#[tokio::test]
+async fn every_missing_mandatory_ref_is_named() {
+    let server = MockServer::start().await;
+    let proxy = pkg(
+        "ChronoAIProject",
+        "fkst-hosted",
+        "packages",
+        "packages/github-proxy",
+    );
+    let dev = pkg(
+        "ChronoAIProject",
+        "fkst-hosted",
+        "packages",
+        "packages/workflow-dev",
+    );
+    let own = pkg("acme", "p", "main", "packages/own");
+    let regs = vec![reg("s1", 1, vec![own], vec![])];
+    let got = resolve_with_mandatory(&server, &regs, &[proxy, dev]).await;
+    let (_, reason) = &got.demotions[0];
+    assert!(reason.contains("packages/github-proxy"), "{reason}");
+    assert!(reason.contains("packages/workflow-dev"), "{reason}");
+    assert!(reason.contains('2'), "{reason}");
+}
+
+/// A manifest carrying the baseline satisfies the requirement -- the check is against
+/// the EFFECTIVE set, so an author need not restate what their manifest already brings.
+#[tokio::test]
+async fn a_manifest_supplying_the_baseline_satisfies_the_requirement() {
+    let server = MockServer::start().await;
+    let manifest = pkg("acme", "manifests", "main", "m.json");
+    let proxy = pkg(
+        "ChronoAIProject",
+        "fkst-hosted",
+        "packages",
+        "packages/github-proxy",
+    );
+    mount_manifest_json(
+        &server,
+        &manifest,
+        manifest_body(
+            1,
+            &["ChronoAIProject/fkst-hosted@packages:packages/github-proxy"],
+        ),
+    )
+    .await;
+    let regs = vec![reg("s1", 1, vec![], vec![manifest])];
+    let got = resolve_with_mandatory(&server, &regs, std::slice::from_ref(&proxy)).await;
+    assert!(got.demotions.is_empty(), "{:?}", got.demotions);
+    assert_eq!(got.by_session.get("s1"), Some(&vec![proxy]));
+}
+
+/// The same package at a DIFFERENT ref does not satisfy the requirement: matching on
+/// the full identity is what pins the baseline to the intended branch.
+#[tokio::test]
+async fn the_same_package_at_another_ref_does_not_satisfy_the_requirement() {
+    let server = MockServer::start().await;
+    let required = pkg(
+        "ChronoAIProject",
+        "fkst-hosted",
+        "packages",
+        "packages/github-proxy",
+    );
+    let other_ref = pkg(
+        "ChronoAIProject",
+        "fkst-hosted",
+        "old-branch",
+        "packages/github-proxy",
+    );
+    let regs = vec![reg("s1", 1, vec![other_ref], vec![])];
+    let got = resolve_with_mandatory(&server, &regs, std::slice::from_ref(&required)).await;
+    assert_eq!(got.demotions.len(), 1);
+    assert!(
+        got.demotions[0].1.contains("@packages:"),
+        "{}",
+        got.demotions[0].1
     );
 }

@@ -36,8 +36,12 @@ pub(super) async fn work_issues_by_session(
     repo: &str,
     regs: &mut [SessionRegistration],
     work_label_namespace: Option<&str>,
+    mandatory: &[crate::goals::trigger_parse::PackageRef],
 ) -> Result<WorkProjection, AppError> {
-    let effective = resolve_effective_packages(&gh.client, &gh.api_base, token, regs).await;
+    // Same mandatory baseline the reconciler prepends, so this dashboard view cannot
+    // show a different effective package/label set than the wake-gate actually uses.
+    let effective =
+        resolve_effective_packages(&gh.client, &gh.api_base, token, regs, mandatory).await;
     let mut resolved_regs = Vec::with_capacity(regs.len());
     for reg in regs {
         let Some(packages) = effective.by_session.get(&reg.session_id) else {

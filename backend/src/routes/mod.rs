@@ -28,3 +28,6 @@ pub mod observe;
 // the scoped historical activity trace, row-authorized server-side.
 pub mod operations;
 pub mod repos;
+// The identity-gated session health read surface (milestone "Session health
+// reports"): the report listing + heartbeat verdict, and one full report.
+pub mod session_health;

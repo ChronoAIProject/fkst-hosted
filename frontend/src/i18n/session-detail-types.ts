@@ -25,6 +25,7 @@ export interface SessionDetailContent {
   tabPackages: string;
   tabLogs: string;
   tabOutcomes: string;
+  tabHealth: string;
   /** Copy-affordance label on the full session id in the drawer header. */
   sessionIdCopy: string;
   creatorLabel: string;
@@ -209,4 +210,60 @@ export interface SessionDetailContent {
   download: string;
   /** `{name}` placeholder. */
   downloadAria: string;
+  logsNone: string;
+  /** Match count for the in-file find; `{n}` placeholder. */
+  /** Retry affordance on a failed manifest load. */
+  /** Tail notice; `{shown}` / `{total}` placeholders (already formatted). */
+  /** Match count when the shown content is only a tail; `{n}` placeholder.
+   *  Nudges the reader to load the full file to search everything. */
+  /** Action that fetches the whole file (drops the tail window). */
+  /** In-flight label while the full file loads. */
+  /** Shown when a failed Refresh left the last-good content on screen. */
+  /** Copy-affordance label on the shown log file's name. */
+  // ---- Logs tab: per-run picker ----
+  /** Eyebrow / accessible name for the run picker (a session is served by a
+   *  sequence of pod incarnations — "runs"). */
+  /** Label for the current, still-running incarnation; `{start}` = its SGT
+   *  start time. */
+  /** Compact label for a legacy session's single synthetic run (no window). */
+  /** Non-blocking notice when the run list failed to load and the tab fell
+   *  back to the latest bundle. */
+  // ---- Health tab ----
+  /** Report status labels, keyed by the v1 taxonomy. */
+  healthStatus: Record<
+    'working' | 'idle' | 'blocked' | 'stalled' | 'failing' | 'unknown',
+    string
+  >;
+  /** Heartbeat verdict labels, keyed by the API's staleness state. */
+  healthStaleness: Record<'not_running' | 'never_reported' | 'fresh' | 'stale', string>;
+  /** Header chip label when the heartbeat is stale (overrides the status). */
+  healthStaleChip: string;
+  healthCurrent: string;
+  healthEvidence: string;
+  healthHistory: string;
+  healthBody: string;
+  /** aria-label on the rendered (untrusted) report body region. */
+  healthBodyAria: string;
+  healthProducer: string;
+  healthConfidence: string;
+  /** `{n}` placeholder — whole minutes since the newest report. */
+  healthLastReport: string;
+  /** Shown instead when the age could not be determined. */
+  healthLastReportUnknown: string;
+  /** The stale callout: heading + body with `{expected}` and `{age}` minutes. */
+  healthStaleTitle: string;
+  healthStaleBody: string;
+  healthLoading: string;
+  /** Calm empty state: the first report has not landed yet. */
+  healthNeverReported: string;
+  /** Calm empty state: the session is not running, so it is not reporting. */
+  healthNotRunning: string;
+  /** 503 — health reporting is not configured for this deployment. */
+  healthUnavailable: string;
+  healthError: string;
+  healthRetry: string;
+  /** aria-label on the report-history list. */
+  healthHistoryAria: string;
+  /** aria-label on the selected-report detail pane. */
+  healthDetailAria: string;
 }

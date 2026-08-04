@@ -579,6 +579,7 @@ pub(super) async fn repo_sessions(
         &name,
         &mut registrations,
         state.config.reconcile.work_label_namespace.as_deref(),
+        &state.config.reconcile.mandatory_packages,
     )
     .await?;
     let mut registrations_by_issue: HashMap<_, _> = registrations

@@ -151,7 +151,10 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
         .merge(routes::observe::router())
         // The operations surface (milestone #22): available to every admitted
         // user, with row-level authorization decided server-side.
-        .merge(routes::operations::router());
+        .merge(routes::operations::router())
+        // The identity-gated session health reports (milestone "Session health
+        // reports"); authorized identically to the log-download path.
+        .merge(routes::session_health::router());
 
     // The chat concierge (`POST /api/v1/chat`), mounted only when the feature is
     // configured — the same "the spec reflects what is actually served" treatment as

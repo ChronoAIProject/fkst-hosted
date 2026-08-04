@@ -285,9 +285,53 @@ fn apply_entropy(input: &str) -> String {
 }
 
 /// A run that is a legitimate high-entropy identifier we must NOT mask: a 40-hex git
-/// SHA or a canonical UUID.
+/// SHA, a canonical UUID, or a kebab-case identifier.
+///
+/// The kebab-case rule exists because a real one bit: `github-devloop-intake` scores
+/// 3.916 against the 3.9 base64 threshold — it clears it on the strength of being long
+/// and varied, not on being secret — so a session's own package and queue names were
+/// being masked. That turned the single most useful line of a health report,
+/// `faults_top`, into `«REDACTED:high-entropy».devloop_intake_candidate`, destroying
+/// exactly the identifier a reader needs to find the failure.
+///
+/// The exemption is deliberately narrow: lowercase letters and digits in
+/// hyphen-separated groups, nothing else. No secret this codebase handles has that
+/// shape — tokens carry uppercase, underscores, `+`/`/`/`=`, or a `ghs_`-style prefix,
+/// and every one of those still falls through to the entropy check. It is also
+/// strictly narrower than the exact-secret and denylist layers that run BEFORE this
+/// one, so a known credential is already masked regardless of its shape.
 fn is_allowlisted(run: &str) -> bool {
-    git_sha_re().is_match(run) || uuid_re().is_match(run)
+    git_sha_re().is_match(run)
+        || uuid_re().is_match(run)
+        || kebab_identifier_re().is_match(run)
+        || is_identifier_path(run)
+}
+
+/// An ABSOLUTE path whose every segment is an ordinary lowercase identifier.
+///
+/// `/` is part of the base64 alphabet, so a whole path is a SINGLE entropy run:
+/// `/var/lib/fkst/runtime/logs/framework-child/github-devloop-workflow` is one
+/// 65-character candidate and was masked wholesale, which destroyed the health
+/// report's "go read this log" line. No credential this codebase handles is an
+/// absolute path, and every segment must still be a plain lowercase identifier, so
+/// this cannot shelter a token — a base64 blob carries uppercase, `+`, or `=` and
+/// fails the segment test immediately.
+fn is_identifier_path(run: &str) -> bool {
+    let Some(rest) = run.strip_prefix('/') else {
+        return false;
+    };
+    !rest.is_empty()
+        && rest
+            .split('/')
+            .all(|segment| path_segment_re().is_match(segment))
+}
+
+/// One path segment: lowercase alphanumerics in `.`/`_`/`-`-separated groups.
+fn path_segment_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$").expect("path segment regex is valid")
+    })
 }
 
 /// Whether a candidate run's Shannon entropy clears the per-alphabet threshold.
@@ -352,6 +396,16 @@ fn entropy_run_re() -> &'static Regex {
 fn git_sha_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"^[0-9a-fA-F]{40}$").expect("static git-sha regex compiles"))
+}
+
+/// Lowercase kebab-case identifiers (`github-devloop-intake`,
+/// `fkst-dev-chronoai-fkst-cloud-test`): at least two hyphen-separated groups of
+/// lowercase alphanumerics, anchored so a partial match cannot exempt a longer run.
+fn kebab_identifier_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"^[a-z0-9]+(?:-[a-z0-9]+)+$").expect("kebab identifier regex is valid")
+    })
 }
 
 fn uuid_re() -> &'static Regex {

@@ -385,6 +385,29 @@ describe('TabLogs', () => {
     expect(manifestRuns).toEqual([null]);
   });
 
+  // #5765: an empty run list means the session has never flushed a log. It must
+  // render the neutral empty state and issue NO manifest request -- the old
+  // behaviour asked for a manifest that could not exist and showed its 404 as
+  // "Unable to load session logs" with a retry that could never succeed.
+  it('shows the empty state and requests no manifest when there are no runs', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.endsWith('/runs')) return jsonResponse([]);
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+    renderLogs();
+
+    expect(await screen.findByText('No logs yet — this session has not written any.')).toBeInTheDocument();
+    await waitFor(() => expect(calls.some((u) => u.endsWith('/runs'))).toBe(true));
+    expect(calls.filter((u) => u.includes('/manifest'))).toEqual([]);
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+  });
+
   it('shows the no-storage message when the run list returns 503', async () => {
     vi.stubGlobal(
       'fetch',
