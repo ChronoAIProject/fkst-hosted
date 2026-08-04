@@ -137,6 +137,7 @@ export const detail: DetailSlice = {
   logsError: 'Could not load the session logs.',
   logsErrorNoStorage: "Log storage isn't configured for this deployment.",
   logsEmpty: 'The log bundle is empty.',
+  logsNone: 'No logs yet — this session has not written any.',
   logsFilesAria: 'Log files',
   logsSelectFile: 'Select a file to view its contents.',
   logsFileLoading: 'Loading file…',

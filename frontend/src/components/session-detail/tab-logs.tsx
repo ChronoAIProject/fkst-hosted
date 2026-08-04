@@ -22,8 +22,9 @@ type LoadState = 'idle' | 'loading' | 'error' | 'loaded';
 /** Resolution state of the per-run list. `loading` while the runs endpoint is
  *  in flight; `error` only for a 503 (log storage not configured — a terminal
  *  state); `ready` once the picker + manifest can render (either with a real
- *  run list or in the latest-only fallback). */
-type RunsState = 'loading' | 'error' | 'ready';
+ *  run list or in the latest-only fallback); `empty` when the session has no
+ *  logs at all, which is a normal pre-first-flush state and NOT an error. */
+type RunsState = 'loading' | 'error' | 'ready' | 'empty';
 
 /** A single file fetch's options. `full` drops the tail window; `keepOnError`
  *  preserves the last-good content (and flags staleness) instead of wiping it —
@@ -86,8 +87,12 @@ export function TabLogs({ session }: { session: SessionDetail }) {
 
   // Resolve the run list once the tab is shown. Newest-first ⇒ the default
   // selection is the first run. A 503 is terminal (no storage); any other
-  // failure — or an empty list — falls back to the latest bundle so the tab
-  // never hard-breaks.
+  // failure falls back to the latest bundle so the tab never hard-breaks.
+  //
+  // An EMPTY list is not a fallback (#5765): the API now returns [] only when the
+  // session has no run index AND no latest bundle, i.e. nothing has ever been
+  // flushed. Treating that as latest-only made the tab request a manifest that
+  // could not exist and render its 404 as "Unable to load session logs".
   const loadRuns = useCallback(() => {
     if (!sessionId) return;
     setRunsState('loading');
@@ -98,12 +103,13 @@ export function TabLogs({ session }: { session: SessionDetail }) {
         if (list.length > 0) {
           setRuns(list);
           setSelectedRun(list[0]!.run_id);
+          setRunsState('ready');
         } else {
-          // No runs reported — behave exactly like the pre-runs latest view.
+          // Nothing has ever been flushed. Say so, and do not ask for a manifest.
           setRuns(null);
           setSelectedRun(null);
+          setRunsState('empty');
         }
-        setRunsState('ready');
       })
       .catch((err) => {
         if (!mounted.current) return;
@@ -248,6 +254,11 @@ export function TabLogs({ session }: { session: SessionDetail }) {
         {t.logsLoading}
       </span>
     );
+  }
+  if (runsState === 'empty') {
+    // Normal state for a session that has not flushed logs yet — a neutral note,
+    // not the red error, and no manifest request behind it.
+    return <Note>{t.logsNone}</Note>;
   }
   if (runsState === 'error') {
     // Only a 503 lands here (any other runs failure falls back); reuse the
