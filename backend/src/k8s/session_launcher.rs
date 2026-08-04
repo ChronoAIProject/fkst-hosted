@@ -218,8 +218,19 @@ pub struct SessionPodSpec {
     /// Tighten-merged with the operator rate-pool defaults at render time —
     /// see [`crate::k8s::engine_env::engine_tunables_env`].
     pub engine_config: BTreeMap<String, String>,
-    /// Effective session creator, used by package-side assignee routing.
+    /// Effective session creator, used by package-side assignee routing AND
+    /// stamped as durable runtime attribution (see [`SessionPodSpec::identity`]).
     pub creator_login: String,
+    /// The effective creator's immutable GitHub id when available. `None` is
+    /// load-bearing: an App-authored trigger's creator comes from its sole
+    /// assignee, whose id GitHub's issue metadata never exposes. The trigger
+    /// author's id is NEVER substituted for it.
+    pub creator_id: Option<i64>,
+    /// The trigger issue author's immutable GitHub id.
+    pub trigger_author_id: i64,
+    /// The trigger issue author's GitHub login. Stays the historical author even
+    /// when the effective creator is a different person.
+    pub trigger_author_login: String,
     /// The session's allowed work authors (creator, Session Collaborators, and
     /// login-shaped deployment admins), case-insensitively deduped.
     pub contributors: Vec<String>,
@@ -232,6 +243,17 @@ pub struct SessionPodSpec {
     /// Validated grants scoped to this lifecycle repository. `None` is load-bearing:
     /// sessions without an operator grant do not receive a new environment key.
     pub delivery_grants_json: Option<String>,
+}
+
+impl SessionPodSpec {
+    /// The durable attribution this session's runtime is stamped with.
+    ///
+    /// Deliberately DERIVED rather than stored: the identity is a projection of
+    /// four fields the launch spec already carries, and a fifth stored copy is a
+    /// fifth thing that can disagree with the runtime it describes.
+    pub fn identity(&self) -> crate::runtime_identity::RuntimeIdentityMetadata {
+        crate::runtime_identity::RuntimeIdentityMetadata::from_spec(self)
+    }
 }
 
 /// The deterministic Pod/Secret name for a session (`fkst-sess-<session_id>`).
@@ -453,7 +475,26 @@ fn session_labels(spec: &SessionPodSpec) -> BTreeMap<String, String> {
 /// Annotations the reconciler reads (owner/repo can exceed the label charset, so
 /// these are annotations). `last-pending-at` is seeded to now (RFC3339) and stays
 /// settable — the caller/reconciler overwrites it as the session goes pending.
+///
+/// The creator/trigger-author attribution is stamped here too, as ANNOTATIONS
+/// and never labels: it is displayed, not selected on, so promoting it would
+/// grow the apiserver's label index by one value per creator for no query
+/// anyone issues (see [`crate::runtime_identity::keys`]).
 fn session_annotations(spec: &SessionPodSpec) -> BTreeMap<String, String> {
+    let mut annotations = base_session_annotations(spec);
+    annotations.extend(
+        crate::runtime_identity::stamp_pairs(
+            &crate::runtime_identity::K8S_IDENTITY_KEYS,
+            &spec.identity(),
+        )
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value)),
+    );
+    annotations
+}
+
+/// The pre-attribution correlation annotations.
+fn base_session_annotations(spec: &SessionPodSpec) -> BTreeMap<String, String> {
     BTreeMap::from([
         (ANNOTATION_OWNER.to_string(), spec.repo.owner.clone()),
         (ANNOTATION_REPO.to_string(), spec.repo.name.clone()),
@@ -600,9 +641,15 @@ fn pod_owner_reference(pod: &Pod) -> Option<OwnerReference> {
 
 /// What a create did: a freshly created Pod, or an idempotent no-op because the
 /// deterministically-named Pod already existed (the session is already live).
+///
+/// `Created` carries the apiserver's `creationTimestamp` for the Pod it just
+/// made. The Pod NAME is derived from the session id and therefore identical
+/// across a kill/respawn cycle, so the timestamp is the only thing that
+/// distinguishes a session's second runtime from its first — which the lifecycle
+/// audit trail needs in order not to deduplicate them into one row.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SessionPodOutcome {
-    Created,
+    Created { created_at: Option<DateTime<Utc>> },
     AlreadyLive,
 }
 
@@ -663,9 +710,18 @@ pub async fn create_session_pod(
         namespace = %namespace,
         "session pod create: pod created"
     );
-    Ok(SessionPodOutcome::Created)
+    Ok(SessionPodOutcome::Created {
+        created_at: created
+            .metadata
+            .creation_timestamp
+            .as_ref()
+            .map(|k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(at)| *at),
+    })
 }
 
+#[cfg(test)]
+#[path = "session_launcher_identity_tests.rs"]
+mod identity_tests;
 #[cfg(test)]
 #[path = "session_launcher_tests.rs"]
 mod tests;

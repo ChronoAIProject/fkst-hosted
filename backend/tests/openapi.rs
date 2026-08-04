@@ -52,11 +52,13 @@ fn app_with(webhook_secret: bool, chat: bool) -> axum::Router {
         reconciler: None,
         session_backend: None,
         storage: None,
-        log_registry: Default::default(),
+        session_access: Default::default(),
+        operations: Default::default(),
         log_bundle_cache: Default::default(),
         disposable_environments: Default::default(),
         self_router: empty_self_router(),
         chat,
+        audit: Default::default(),
     })
     .expect("router builds")
 }
@@ -142,6 +144,8 @@ async fn paths_are_the_trimmed_v1_surface() {
         "/api/v1/logs/{session_id}/file",
         // Per-run (per-pod-incarnation) log separation: the run listing.
         "/api/v1/logs/{session_id}/runs",
+        // The scoped historical activity query (milestone #22).
+        "/api/v1/operations/activity",
         "/health",
         "/ready",
         "/metrics",
@@ -260,6 +264,13 @@ async fn components_include_the_named_environment_schemas_and_not_the_removed_on
         "LogFileContent",
         // The per-run (per-pod-incarnation) log-separation DTO (issue #568).
         "LogRun",
+        // The scoped activity page and its tagged record union (issue #5672).
+        "ActivityPage",
+        "ActivityItem",
+        "ApiRequestActivityItem",
+        "SandboxLifecycleActivityItem",
+        "SourceStatusView",
+        "EffectiveScope",
         // Recovery readiness is distinct from the unchanged liveness body.
         "ReadinessResponse",
         "ReadinessStatus",
@@ -668,6 +679,7 @@ async fn document_tags_are_exactly_the_live_surface() {
         vec![
             "auth".to_string(),
             "logs".to_string(),
+            "operations".to_string(),
             "system".to_string(),
             "users".to_string(),
             "webhooks".to_string()

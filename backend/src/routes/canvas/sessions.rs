@@ -18,12 +18,13 @@
 
 use std::collections::{HashMap, HashSet};
 
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::audit::arguments::AuditedPath;
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_app::listing::IssueSummary;
 use crate::github_identity::GithubUser;
@@ -509,10 +510,16 @@ fn invalid_session_detail(
 )]
 pub(super) async fn repo_sessions(
     State(state): State<AppState>,
-    Path((owner, name)): Path<(String, String)>,
+    extensions: axum::http::Extensions,
+    AuditedPath((owner, name)): AuditedPath<(String, String)>,
     user: GithubUser,
     headers: HeaderMap,
 ) -> Result<Json<RepoSessionsResponse>, AppError> {
+    crate::audit::arguments::record_safe(
+        &extensions,
+        &crate::audit::arguments::canvas::SafeCanvasRepoSessions::new(&owner, &name),
+    );
+    super::record_repo_correlation(&extensions, &owner, &name);
     validate_repo_segment(&owner, "owner")?;
     validate_repo_segment(&name, "name")?;
     let token = bearer_token(&headers)?;

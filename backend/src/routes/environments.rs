@@ -19,8 +19,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::extract::State;
+use axum::http::{Extensions, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use k8s_openapi::chrono::Utc;
@@ -30,6 +30,13 @@ use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use crate::audit::arguments::environments::{
+    PutEnvironmentProfileInput, SafeDeleteEnvironmentProfile, SafeGetEnvironmentProfile,
+};
+use crate::audit::arguments::{
+    record, record_not_applicable, record_safe, AuditedJson, AuditedPath,
+};
+use crate::audit::request::{codes, with_error_code};
 use crate::config::Config;
 use crate::environment_profile::{default_store, EnvironmentProfileStore};
 use crate::environment_validation::validate_entries;
@@ -113,6 +120,21 @@ pub struct InstallValidationError {
     pub timed_out: bool,
     /// Trailing bytes of the failing command's stderr (bounded by config).
     pub stderr_tail: String,
+}
+
+/// Render the detailed install-validation `422`.
+///
+/// This is the ONE product response built without [`AppError`], so it is also the
+/// one that has to attach its own stable audit code: without it the record for a
+/// real, client-visible failure would carry no `error_code` at all while the
+/// client reads one in the body. It is not a policy rejection — the caller was
+/// authenticated and authorized; their commands failed — so it carries no
+/// rejection marker and classifies as an ordinary `client_error`.
+fn install_validation_failed(body: InstallValidationError) -> Response {
+    with_error_code(
+        (StatusCode::UNPROCESSABLE_ENTITY, Json(body)).into_response(),
+        codes::INSTALL_VALIDATION_FAILED,
+    )
 }
 
 /// Anchored environment-NAME pattern: DNS-1123-label-ish, lower-case only, so the
@@ -200,9 +222,10 @@ async fn env_store(state: &AppState) -> Result<Arc<dyn EnvironmentProfileStore>,
 )]
 async fn put_user_environment(
     State(state): State<AppState>,
-    Path(name): Path<String>,
+    extensions: Extensions,
+    AuditedPath(name): AuditedPath<String>,
     user: GithubUser,
-    Json(spec): Json<EnvironmentProfileSpec>,
+    AuditedJson(spec): AuditedJson<EnvironmentProfileSpec>,
 ) -> Result<Response, AppError> {
     let config = &state.config;
 
@@ -211,6 +234,21 @@ async fn put_user_environment(
     validate_install(&spec.install, config)?;
     validate_entries(&spec.variables, config)?;
     validate_entries(&spec.secrets, config)?;
+
+    // Recorded once the name and the three collections have passed their own
+    // validation, and before the validation Pod (the first side effect). An
+    // install command may embed a registry credential, a variable name leaks
+    // topology, and a secret key/value IS the credential — so only their counts
+    // are ever arguments, and nothing is hashed.
+    record(
+        &extensions,
+        &PutEnvironmentProfileInput {
+            environment_name: &name,
+            install_command_count: spec.install.len(),
+            variable_count: spec.variables.len(),
+            secret_count: spec.secrets.len(),
+        },
+    );
 
     let store = env_store(&state).await?;
 
@@ -283,7 +321,7 @@ async fn put_user_environment(
             };
             tracing::info!(github_user_id = user.id, env = %name, timed_out, "env put: install validation failed; nothing persisted");
             let body = InstallValidationError {
-                error: "install_validation_failed".to_string(),
+                error: codes::INSTALL_VALIDATION_FAILED.to_string(),
                 message,
                 failed_command_index,
                 failed_command,
@@ -291,7 +329,7 @@ async fn put_user_environment(
                 timed_out,
                 stderr_tail,
             };
-            return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(body)).into_response());
+            return Ok(install_validation_failed(body));
         }
     }
 
@@ -349,8 +387,13 @@ async fn put_user_environment(
 )]
 async fn list_user_environments(
     State(state): State<AppState>,
+    extensions: Extensions,
     user: GithubUser,
 ) -> Result<Json<EnvironmentProfileList>, AppError> {
+    // The one operation on this surface that genuinely takes no arguments: the
+    // caller is the verified actor, and the returned profile names are response
+    // data, never request data.
+    record_not_applicable(&extensions);
     let store = env_store(&state).await?;
     let summaries = store.list_environments(user.id).await?;
     let environment_profiles = summaries.into_iter().map(summary_from_record).collect();
@@ -376,9 +419,11 @@ async fn list_user_environments(
 )]
 async fn get_user_environment(
     State(state): State<AppState>,
-    Path(name): Path<String>,
+    extensions: Extensions,
+    AuditedPath(name): AuditedPath<String>,
     user: GithubUser,
 ) -> Result<Json<EnvironmentProfileView>, AppError> {
+    record_safe(&extensions, &SafeGetEnvironmentProfile::new(&name));
     let store = env_store(&state).await?;
     match store.get_environment(user.id, &name).await? {
         Some(record) => Ok(Json(view_from_record(record))),
@@ -403,9 +448,11 @@ async fn get_user_environment(
 )]
 async fn delete_user_environment(
     State(state): State<AppState>,
-    Path(name): Path<String>,
+    extensions: Extensions,
+    AuditedPath(name): AuditedPath<String>,
     user: GithubUser,
 ) -> Result<StatusCode, AppError> {
+    record_safe(&extensions, &SafeDeleteEnvironmentProfile::new(&name));
     let store = env_store(&state).await?;
     let existed = store.delete_environment(user.id, &name).await?;
     tracing::info!(github_user_id = user.id, env = %name, existed, "env delete");

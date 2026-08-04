@@ -52,6 +52,7 @@ pub mod correlate;
 mod engine_observe;
 mod fleet;
 mod health;
+mod inventory;
 mod logs;
 mod observe;
 mod rotation;
@@ -233,6 +234,19 @@ impl From<OsbError> for BackendError {
 
 #[async_trait]
 impl SessionBackend for OsbBackend {
+    fn backend_kind(&self) -> crate::runtime_identity::RuntimeBackendKind {
+        crate::runtime_identity::RuntimeBackendKind::OpenSandbox
+    }
+
+    async fn ensure_runtime_identity(
+        &self,
+        session_id: &str,
+        identity: &crate::runtime_identity::RuntimeIdentityMetadata,
+    ) -> Result<crate::runtime_identity::RuntimeIdentityOutcome, BackendError> {
+        self.ensure_runtime_identity_impl(session_id, identity)
+            .await
+    }
+
     async fn check_reachable(&self) -> Result<String, BackendError> {
         self.check_reachable_impl().await
     }
@@ -267,6 +281,13 @@ impl SessionBackend for OsbBackend {
 
     async fn list_fleet(&self) -> Result<Vec<SessionHandle>, BackendError> {
         self.list_fleet_impl().await
+    }
+
+    async fn list_runtime_inventory(
+        &self,
+        policy: &crate::session_backend::inventory::RuntimeLifetimePolicy,
+    ) -> Result<crate::session_backend::inventory::RuntimeInventorySnapshot, BackendError> {
+        self.list_runtime_inventory_impl(policy).await
     }
 
     // --- The five fleet verbs #419 completes (credential heal, health reads, env
@@ -307,9 +328,12 @@ impl SessionBackend for OsbBackend {
     }
 }
 
+// `pub(crate)` under cfg(test) so the cross-adapter contract tests in
+// `session_backend::inventory` can drive a REAL `OsbBackend` through the same
+// scaffolding the sibling tests use, instead of maintaining a second fixture.
 #[cfg(test)]
 #[path = "backend_test_support.rs"]
-mod backend_test_support;
+pub(crate) mod backend_test_support;
 
 #[cfg(test)]
 #[path = "mod_tests.rs"]

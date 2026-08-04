@@ -197,15 +197,22 @@ WORKDIR /app
 #    sources). The stubs compile, so this warm build must succeed. The backend
 #    is one flat crate rooted at `backend/`, so its sources live in `src/`.
 COPY backend/Cargo.toml backend/Cargo.lock ./
+# The stub tree must cover EVERY target the manifest declares, including the
+# second `[[bin]]` (the audit relay): cargo resolves all declared targets before
+# it builds anything, so a missing stub fails this layer outright rather than
+# just skipping that binary.
 RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cp-cargo-registry \
     --mount=type=cache,target=/app/target,id=cp-cargo-target \
-    mkdir -p src \
+    mkdir -p src/bin \
     && echo 'fn main() {}' > src/main.rs \
     && echo '' > src/lib.rs \
+    && echo 'fn main() {}' > src/bin/audit_relay.rs \
     && cargo build --release --locked
-# 2) copy the real sources, build the control-plane binary, then copy it out of
-#    the cache-mounted target into /out (a real layer dir the runtime COPY can
-#    read).
+# 2) copy the real sources, build BOTH binaries, then copy them out of the
+#    cache-mounted target into /out (a real layer dir the runtime COPY can
+#    read). One crate, two deployables (see backend/Cargo.toml): the control
+#    plane and the durable audit relay. `cargo build` already produces both, so
+#    the only change is which artifacts leave the cache mount.
 # touch: the copied sources keep their (older) context mtimes, so without it
 # cargo's mtime-based freshness check would keep the stub-built binaries.
 COPY backend/ ./
@@ -214,9 +221,12 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cp-cargo-registry \
     touch src/main.rs src/lib.rs \
     && cargo build --release --locked \
     && mkdir -p /out \
-    && cp target/release/fkst-control-plane /out/fkst-control-plane
+    && cp target/release/fkst-control-plane /out/fkst-control-plane \
+    && cp target/release/fkst-audit-relay /out/fkst-audit-relay
 RUN test -x /out/fkst-control-plane \
     || (echo "ERROR: fkst-control-plane binary not produced by the server build" && exit 1)
+RUN test -x /out/fkst-audit-relay \
+    || (echo "ERROR: fkst-audit-relay binary not produced by the server build" && exit 1)
 
 # ---- worker runtime image (engine-laden) ----
 # The WORKER deployable. It carries the engine binaries + codex + nyxid CLI and
@@ -285,3 +295,37 @@ VOLUME ["/var/lib/fkst/runtime"]
 USER fkst
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/fkst-control-plane"]
+
+# ---- audit-relay runtime image (deliberately minimal) ----
+# The durable audit outbox (issue #5678) runs as its own Deployment with its own
+# PVC and its own ServiceAccount, so it gets its own image rather than a
+# `command:` override on the engine-laden image above. That image carries git,
+# bash, python3, codex, and gh — every one of them reachable by anything that
+# ever compromises the relay, and none of them needed to append rows to a SQLite
+# file and POST them to PostHog. A relay that holds the deployment's entire
+# recent audit trail is exactly the workload whose blast radius must be smallest.
+#
+# ca-certificates is the ONLY runtime dependency: the relay speaks HTTPS to the
+# self-hosted PostHog host and nothing else.
+FROM debian:bookworm-slim AS audit-relay-runtime
+ARG PRODUCT_VERSION=0.0.0
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+# Same 10001 uid/gid as the control-plane image so one `fsGroup` convention
+# covers both workloads; the PVC's group ownership in the Deployment matches it.
+RUN groupadd -g 10001 fkst && useradd -m -u 10001 -g 10001 -s /usr/sbin/nologin fkst
+COPY --from=server-builder /out/fkst-audit-relay /usr/local/bin/fkst-audit-relay
+# The DEFAULT database directory. A deployment mounts its PVC here; the mkdir
+# exists so an unmounted run (a local smoke test) still starts instead of
+# failing on a missing parent, and 0700 keeps the trail unreadable to anything
+# else that ever lands in the container.
+ENV FKST_AUDIT_RELAY_DB_PATH=/var/lib/fkst-audit/audit.sqlite3
+RUN mkdir -p /var/lib/fkst-audit \
+    && chown fkst:fkst /var/lib/fkst-audit \
+    && chmod 0700 /var/lib/fkst-audit
+LABEL org.opencontainers.image.title="fkst-audit-relay" \
+      org.opencontainers.image.version="${PRODUCT_VERSION}" \
+      org.opencontainers.image.source="https://github.com/ChronoAIProject/fkst-hosted"
+USER fkst
+EXPOSE 8090
+ENTRYPOINT ["/usr/local/bin/fkst-audit-relay"]

@@ -22,7 +22,7 @@ fn creds_map<'a>(
         .collect()
 }
 
-fn spec() -> SessionPodSpec {
+pub(super) fn spec() -> SessionPodSpec {
     SessionPodSpec {
         session_id: "abc123".to_string(),
         installation_id: 42,
@@ -41,6 +41,9 @@ fn spec() -> SessionPodSpec {
         output_lang: None,
         engine_config: BTreeMap::new(),
         creator_login: "author-login".to_string(),
+        creator_id: Some(4242),
+        trigger_author_id: 4242,
+        trigger_author_login: "author-login".to_string(),
         contributors: vec!["author-login".to_string()],
         upstream_branch: "develop".to_string(),
         target_branch: "fkst-hosted-default".to_string(),
@@ -48,7 +51,7 @@ fn spec() -> SessionPodSpec {
     }
 }
 
-fn config() -> PodConfig {
+pub(super) fn config() -> PodConfig {
     PodConfig {
         dispatch: true,
         mode: crate::config::PodMode::K8sCustomized,

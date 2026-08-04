@@ -5,6 +5,17 @@
 //! the application without a real TCP bind.
 
 pub mod access_policy;
+// Versioned audit event contract + the swappable delivery sink (milestone #22):
+// the typed record every audited request produces, its PostHog capture
+// projection, and the bounded batching/retry worker behind `AuditSink`. Request
+// middleware, argument extraction, and the read API are separate issues.
+pub mod audit;
+// The `fkst-audit-relay` deployable (issue #5678): a separate PROCESS in the
+// same crate. It owns the internal relay protocol, the SQLite-WAL outbox, the
+// PostHog capture/verification state machine, and the scoped relay read. It
+// shares the audit CONTRACTS above and nothing else — it never constructs
+// `AppState` and never builds the control plane's router.
+pub mod audit_relay;
 // The chat concierge (milestone `fkst-chat-interface`): the conversational surface
 // users drive fkst-hosted through. Config + LLM client here; it acts strictly as a
 // client of the public API with the calling user's own token.
@@ -30,11 +41,6 @@ pub mod github_app;
 // that keys the per-user environment/secret store.
 pub mod github_identity;
 pub mod goals;
-// In-memory `session_id -> log-access context` registry: the reverse map the
-// identity-gated `/api/v1/logs/{session_id}` endpoint needs (session_id is a one-way
-// hash) but cannot itself yield. The reconciler writes it each sweep; the endpoint
-// reads it.
-pub mod log_access;
 // TTL-bounded in-memory cache of each session's redacted log bundle, so the log
 // viewer's manifest + per-file reads (and the whole-bundle download) do not
 // re-download + re-gunzip the whole `tar.gz` from chrono-storage on every request.
@@ -55,6 +61,11 @@ pub mod leader_election;
 // Leader-only Pod label publication for the public Service selector.
 pub mod leader_routing;
 pub mod models;
+// The scoped historical-activity query engine behind `/api/v1/operations/*`
+// (milestone #22): fixed parameterized HogQL with the viewer predicate injected
+// at the SOURCE, keyset pagination, bounded concurrency, and the source boundary
+// the durable relay plugs into.
+pub mod operations;
 // OpenSandbox session-backend config knobs (`FKST_OSB_*`, issue #420). Validated
 // only when pod dispatch is on AND `FKST_POD_MODE=opensandbox`; `main.rs` maps the
 // resolved config into the backend's launch config when it builds `OsbBackend`.
@@ -71,6 +82,10 @@ pub mod reconcile;
 // Shared startup/full-resync recovery projection. The serialized reconciler is
 // the sole writer; readiness and metrics consume snapshots.
 pub mod recovery;
+// Durable creator/trigger attribution stamped onto every session runtime, plus
+// the pure backfill decision, the bounded retry gate, and the runtime
+// attribution/lifecycle telemetry both session backends share.
+pub mod runtime_identity;
 // Bounded exponential backoff + jitter, shared by every long-lived loop that must
 // retry a failed or partial pass instead of waiting out its periodic cadence.
 mod retry;
@@ -89,6 +104,12 @@ pub mod router;
 pub mod routes;
 pub mod schedule;
 pub mod session_backend;
+// Session-scoped identity, visibility, and capability policy: the credential-free
+// authenticated viewer + server-resolved scope, the readiness-aware
+// `session_id -> context` projection the reconciler publishes each sweep, and the
+// ONE pure tier table log download, engine observe, work authority, and operations
+// visibility all decide from.
+pub mod session_access;
 // The v1 session **health report** contract (milestone "Session health reports"):
 // the file location, filename shape, and TOML-front-matter schema an in-session
 // package writes and the control plane parses. Pure — no I/O — and deliberately the

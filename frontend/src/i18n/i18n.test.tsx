@@ -4,6 +4,22 @@ import userEvent from '@testing-library/user-event';
 import { LanguageProvider, useContent } from './index';
 import { en } from './en';
 import { zh } from './zh';
+import {
+  ACTOR_KINDS,
+  ATTRIBUTION_SOURCES,
+  DELIVERY_STATES,
+  LIFECYCLE_ACTIONS,
+  OPERATIONS_ERROR_CODES,
+  OUTCOMES,
+  PRINCIPAL_KINDS,
+  RECORD_KINDS,
+  ROW_KINDS,
+  SANDBOX_BACKENDS,
+  SANDBOX_STATUSES,
+  SANDBOX_WARNINGS,
+  SOURCE_HEALTHS,
+  SOURCE_MESSAGES,
+} from '@/lib/api/operations';
 import { LanguageToggle } from '@/components/layout/language-toggle';
 import { Rich } from '@/components/content/rich';
 
@@ -109,6 +125,61 @@ describe('i18n key parity (per-domain split)', () => {
         'fresh',
         'stale',
       ]);
+    }
+  });
+
+  // The operations surface renders a localized name for every value the two
+  // operations APIs can return. A vocabulary that grew server-side without a
+  // catalog entry would render a raw wire string in both languages, so the
+  // wire vocabularies themselves are the assertion.
+  it('names every operations wire vocabulary in both languages', () => {
+    const expected: Array<[keyof typeof en.operations, readonly string[]]> = [
+      ['recordKind', ROW_KINDS],
+      ['recordKindFilter', RECORD_KINDS],
+      ['outcome', OUTCOMES],
+      ['delivery', DELIVERY_STATES],
+      ['actorKind', ACTOR_KINDS],
+      ['principalKind', PRINCIPAL_KINDS],
+      ['lifecycleAction', LIFECYCLE_ACTIONS],
+      ['sandboxStatus', SANDBOX_STATUSES],
+      ['backendKind', SANDBOX_BACKENDS],
+      ['attribution', ATTRIBUTION_SOURCES],
+      ['warning', SANDBOX_WARNINGS],
+      ['sourceHealth', SOURCE_HEALTHS],
+      ['sourceMessage', SOURCE_MESSAGES],
+      ['errorMessage', OPERATIONS_ERROR_CODES],
+    ];
+    for (const catalog of [en, zh]) {
+      for (const [key, vocabulary] of expected) {
+        expect(Object.keys(catalog.operations[key] as Record<string, string>).sort()).toEqual(
+          [...vocabulary].sort()
+        );
+      }
+      // Every string is non-empty: a blank cell is indistinguishable from a
+      // missing key at runtime.
+      expect(
+        Object.values(catalog.operations).flatMap((value) =>
+          typeof value === 'string' ? [value] : Object.values(value as Record<string, string>)
+        )
+      ).not.toContain('');
+    }
+  });
+
+  it('keeps every operations placeholder token identical across languages', () => {
+    // The placeholders are substituted by code, so a translated token would
+    // silently render the literal `{time}` instead of a value.
+    const placeholders = ['ignoredParams', 'queriedAt', 'observedAt', 'remaining', 'errorRequestId'] as const;
+    const tokens: Record<(typeof placeholders)[number], string> = {
+      ignoredParams: '{names}',
+      queriedAt: '{time}',
+      observedAt: '{time}',
+      remaining: '{duration}',
+      errorRequestId: '{id}',
+    };
+    for (const catalog of [en, zh]) {
+      for (const key of placeholders) {
+        expect(catalog.operations[key]).toContain(tokens[key]);
+      }
     }
   });
 });

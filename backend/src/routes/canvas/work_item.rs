@@ -13,13 +13,14 @@
 //! The same anti-mistake pre-flight as stop-session guards the trigger number —
 //! a PR or a non-trigger issue is refused before anything is created.
 
-use axum::extract::{Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::extract::State;
+use axum::http::{Extensions, HeaderMap, StatusCode};
 use axum::Json;
-use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::audit::arguments::canvas_write::CreateWorkItemInput;
+use crate::audit::arguments::{record, refine, AuditedJson, AuditedPath};
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_app::listing::IssueMetadata;
 use crate::github_identity::GithubUser;
@@ -59,132 +60,6 @@ pub struct CreateWorkItemResponse {
     pub html_url: String,
 }
 
-/// The trigger issue as this endpoint reads it: the body (to parse the session's
-/// work label + collaborators out of), the label names (to prove it really is a
-/// trigger), whether the "issue" is actually a pull request (GitHub's issues API
-/// serves PRs too), and the author/assignee metadata used to resolve the same
-/// effective creator as the reconciler.
-struct FetchedTrigger {
-    body: String,
-    labels: Vec<String>,
-    state: String,
-    is_pull_request: bool,
-    /// The trigger author's immutable numeric GitHub id.
-    author_id: i64,
-    /// The trigger author's login (the App bot for seeded triggers).
-    author_login: String,
-    /// Trigger assignee logins. Exactly one identifies the creator when the App
-    /// bot authored the trigger.
-    assignees: Vec<String>,
-}
-
-/// Pull GitHub's own `message` out of an error body without leaking anything
-/// else; falls back to the bare status.
-async fn github_message(response: reqwest::Response) -> String {
-    let status = response.status();
-    response
-        .json::<serde_json::Value>()
-        .await
-        .ok()
-        .and_then(|value| {
-            value
-                .get("message")
-                .and_then(|message| message.as_str())
-                .map(str::to_string)
-        })
-        .unwrap_or_else(|| format!("github returned status {status}"))
-}
-
-/// Map a failed trigger read onto the API error surface. GitHub answers 404 for
-/// both "no such issue" and "no access" (anti-enumeration), so both surface as
-/// not-found here — the same contract stop-session's pre-flight uses.
-fn trigger_read_error(status: reqwest::StatusCode, message: String) -> AppError {
-    match status.as_u16() {
-        401 => AppError::Unauthorized(format!("github rejected the token: {message}")),
-        403 => AppError::Forbidden(format!("GitHub refused the read: {message}")),
-        404 => AppError::NotFound(format!("github get_issue: {message}")),
-        _ => AppError::Unavailable(format!("github get_issue returned status {status}")),
-    }
-}
-
-impl DashboardGithub {
-    /// `GET /repos/{owner}/{repo}/issues/{number}` (user token) returning the
-    /// full BODY — the work-item endpoint parses the session's work label out of
-    /// it. The sibling [`DashboardGithub::get_issue`] deliberately drops the
-    /// body (stop-session's pre-flight needs only labels), so this endpoint owns
-    /// the body-bearing read it uniquely requires.
-    async fn fetch_trigger(
-        &self,
-        user_token: &SecretString,
-        owner: &str,
-        repo: &str,
-        number: u64,
-    ) -> Result<FetchedTrigger, AppError> {
-        let url = format!("{}/repos/{owner}/{repo}/issues/{number}", self.api_base);
-        let response = self
-            .client
-            .get(&url)
-            .bearer_auth(user_token.expose_secret())
-            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-            .send()
-            .await
-            .map_err(|e| {
-                tracing::warn!(error = %e, "github get-trigger transport error");
-                AppError::Unavailable("github get-issue request failed".to_string())
-            })?;
-        let status = response.status();
-        if status.is_success() {
-            #[derive(Deserialize)]
-            struct RawLabel {
-                name: String,
-            }
-            #[derive(Deserialize)]
-            struct RawUser {
-                id: i64,
-                login: String,
-            }
-            #[derive(Deserialize)]
-            struct RawAssignee {
-                login: String,
-            }
-            #[derive(Deserialize)]
-            struct RawIssue {
-                /// GitHub sends `"body": null` for a body-less issue.
-                #[serde(default)]
-                body: Option<String>,
-                #[serde(default)]
-                labels: Vec<RawLabel>,
-                #[serde(default)]
-                state: String,
-                /// Present only when this "issue" is actually a PR.
-                pull_request: Option<serde_json::Value>,
-                /// The trigger author; required on GitHub issue responses.
-                user: RawUser,
-                #[serde(default)]
-                assignees: Vec<RawAssignee>,
-            }
-            let raw: RawIssue = response.json().await.map_err(|e| {
-                tracing::warn!(error = %e, "github get-trigger response did not parse");
-                AppError::Upstream("github get-issue response was malformed".to_string())
-            })?;
-            return Ok(FetchedTrigger {
-                body: raw.body.unwrap_or_default(),
-                labels: raw.labels.into_iter().map(|label| label.name).collect(),
-                state: raw.state,
-                is_pull_request: raw.pull_request.is_some(),
-                author_id: raw.user.id,
-                author_login: raw.user.login,
-                assignees: raw
-                    .assignees
-                    .into_iter()
-                    .map(|assignee| assignee.login)
-                    .collect(),
-            });
-        }
-        Err(trigger_read_error(status, github_message(response).await))
-    }
-}
-
 /// `POST /api/v1/repos/{owner}/{name}/sessions/{issue_number}/work-items` —
 /// open a work issue AS the signed-in user, stamped with the selected applicable
 /// session label so the reconciler claims it for that session.
@@ -212,26 +87,18 @@ impl DashboardGithub {
 )]
 pub(super) async fn create_work_item(
     State(state): State<AppState>,
-    Path((owner, name, issue_number)): Path<(String, String, u64)>,
+    extensions: Extensions,
+    AuditedPath((owner, name, issue_number)): AuditedPath<(String, String, u64)>,
     user: GithubUser,
     headers: HeaderMap,
-    Json(req): Json<CreateWorkItemRequest>,
+    AuditedJson(req): AuditedJson<CreateWorkItemRequest>,
 ) -> Result<(StatusCode, Json<CreateWorkItemResponse>), AppError> {
-    validate_repo_segment(&owner, "owner")?;
-    validate_repo_segment(&name, "name")?;
-    if issue_number == 0 {
-        return Err(AppError::Validation(
-            "issue_number must be a positive issue number".to_string(),
-        ));
-    }
+    let trigger_issue = i64::try_from(issue_number).unwrap_or(i64::MAX);
+    // Correlation is published up front so an authorization refusal still points
+    // at the session it was refused for.
+    super::record_repo_correlation(&extensions, &owner, &name);
+    super::record_trigger_correlation(&extensions, trigger_issue);
     let title = req.title.trim();
-    if title.is_empty() {
-        return Err(AppError::Validation("title must not be blank".to_string()));
-    }
-    let requested_label = req.label.as_deref().map(str::trim).map(str::to_string);
-    if requested_label.as_deref().is_some_and(str::is_empty) {
-        return Err(AppError::Validation("label must not be blank".to_string()));
-    }
     // An omitted or blank body opens a body-less issue. Preserve a populated
     // body's original whitespace because indentation is meaningful Markdown.
     let body = req
@@ -239,6 +106,39 @@ pub(super) async fn create_work_item(
         .as_deref()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_default();
+    // Recorded BEFORE the first thing that can refuse the request, so a 400, a
+    // 403, a 404, and a 409 all describe the same request shape a 201 does.
+    // `selected_label` is deliberately absent here: the effective label is a
+    // property of the SESSION, and resolving it takes the very GitHub reads that
+    // can refuse the call. The caller's requested string is never a substitute —
+    // it may name nothing at all — so the label is filled in by the refinement
+    // below, immediately before the write.
+    record(
+        &extensions,
+        &CreateWorkItemInput {
+            owner: &owner,
+            repo: &name,
+            trigger_issue,
+            selected_label: "",
+            title,
+            body,
+        },
+    );
+
+    validate_repo_segment(&owner, "owner")?;
+    validate_repo_segment(&name, "name")?;
+    if issue_number == 0 {
+        return Err(AppError::Validation(
+            "issue_number must be a positive issue number".to_string(),
+        ));
+    }
+    if title.is_empty() {
+        return Err(AppError::Validation("title must not be blank".to_string()));
+    }
+    let requested_label = req.label.as_deref().map(str::trim).map(str::to_string);
+    if requested_label.as_deref().is_some_and(str::is_empty) {
+        return Err(AppError::Validation("label must not be blank".to_string()));
+    }
 
     let token = bearer_token(&headers)?;
     let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
@@ -379,6 +279,23 @@ pub(super) async fn create_work_item(
             ))
         })?;
 
+    // The same argument set, refined immediately before the GitHub write — the
+    // operation's only side effect — with the RESOLVED label. Every other
+    // property is unchanged, which is the only shape a refinement may take.
+    // The title and body are free-form issue text and contribute only their byte
+    // sizes.
+    refine(
+        &extensions,
+        &CreateWorkItemInput {
+            owner: &owner,
+            repo: &name,
+            trigger_issue,
+            selected_label: &work_label,
+            title,
+            body,
+        },
+    );
+
     let labels = vec![work_label.clone()];
     let assignees = vec![reg.creator_login.clone()];
     let created = gh
@@ -458,6 +375,10 @@ fn work_registration(
         effective_package_env: crate::goals::package_env::PackageEnv::new(),
     }
 }
+
+/// The trigger-issue read this endpoint uniquely needs (the body-bearing one).
+#[path = "work_item_trigger.rs"]
+mod trigger;
 
 #[cfg(test)]
 #[path = "work_item_tests.rs"]

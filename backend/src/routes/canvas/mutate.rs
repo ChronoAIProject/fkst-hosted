@@ -12,13 +12,16 @@
 //! GitHub natively enforces the caller's permission on both writes; its
 //! 403/404 map straight onto the error envelope.
 
-use axum::extract::{Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::extract::State;
+use axum::http::{Extensions, HeaderMap, StatusCode};
 use axum::Json;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::audit::arguments::canvas::SafeCanvasStopSession;
+use crate::audit::arguments::canvas_write::CreateSessionInput;
+use crate::audit::arguments::{record, record_safe, AuditedJson, AuditedPath};
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_app::{GithubListing, HttpGithubListing};
 use crate::github_identity::GithubUser;
@@ -64,19 +67,33 @@ pub struct CreateSessionResponse {
 )]
 pub(super) async fn create_session(
     State(state): State<AppState>,
-    Path((owner, name)): Path<(String, String)>,
+    extensions: Extensions,
+    AuditedPath((owner, name)): AuditedPath<(String, String)>,
     user: GithubUser,
     headers: HeaderMap,
-    Json(req): Json<CreateSessionRequest>,
+    AuditedJson(req): AuditedJson<CreateSessionRequest>,
 ) -> Result<(StatusCode, Json<CreateSessionResponse>), AppError> {
     validate_repo_segment(&owner, "owner")?;
     validate_repo_segment(&name, "name")?;
+    super::record_repo_correlation(&extensions, &owner, &name);
     if let Some(disposable) = &req.disposable_environment {
         disposable.validate(&state.config)?;
     }
     // Validate BEFORE any GitHub write: the rendered body must round-trip
     // through the reconciler's own parser, or the 400 carries its message.
     let body = validated_trigger_body(&req)?;
+    // Recorded only once that round-trip proved every reference parses, and
+    // still before the first GitHub write. The session name, the rendered issue
+    // body, and every disposable-environment key/value/command are reduced to
+    // presence flags and counts.
+    record(
+        &extensions,
+        &CreateSessionInput {
+            owner: &owner,
+            repo: &name,
+            request: &req,
+        },
+    );
     if req.disposable_environment.is_some() && state.reconciler.is_none() {
         return Err(AppError::Unavailable(
             "disposable environment handoff is unavailable because the session reconciler is not running"
@@ -130,6 +147,10 @@ pub(super) async fn create_session(
             .disposable_environments
             .insert(&owner, &name, created.number, user.id, disposable);
     }
+    // The created trigger issue IS this session's issue, so it is the record's
+    // trigger correlation; the session id itself is derived by the reconciler
+    // from an installation id this route never holds.
+    super::record_trigger_correlation(&extensions, created.number);
     tracing::info!(
         owner = %owner,
         name = %name,
@@ -272,10 +293,20 @@ async fn ensure_no_work_label_collision(
 )]
 pub(super) async fn stop_session(
     State(state): State<AppState>,
-    Path((owner, name, issue_number)): Path<(String, String, u64)>,
+    extensions: Extensions,
+    AuditedPath((owner, name, issue_number)): AuditedPath<(String, String, u64)>,
     user: GithubUser,
     headers: HeaderMap,
 ) -> Result<StatusCode, AppError> {
+    let trigger_issue = i64::try_from(issue_number).unwrap_or(i64::MAX);
+    // Recorded before the pre-flight read, so a refused stop still says which
+    // session was addressed. The trigger issue's body and comments never are.
+    record_safe(
+        &extensions,
+        &SafeCanvasStopSession::new(&owner, &name, trigger_issue),
+    );
+    super::record_repo_correlation(&extensions, &owner, &name);
+    super::record_trigger_correlation(&extensions, trigger_issue);
     validate_repo_segment(&owner, "owner")?;
     validate_repo_segment(&name, "name")?;
     if issue_number == 0 {

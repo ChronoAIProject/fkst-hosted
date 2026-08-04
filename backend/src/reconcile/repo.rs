@@ -21,7 +21,6 @@ use secrecy::SecretString;
 use crate::access_policy::AccessPolicy;
 use crate::error::AppError;
 use crate::github_app::listing::{GithubListing, IssueSummary};
-use crate::log_access::LogSessionContext;
 use crate::models::RepoRef;
 use crate::reconcile::announce::parse_config_hash_marker;
 use crate::reconcile::collision::{detect_missing_work_labels, detect_work_label_collisions};
@@ -31,6 +30,7 @@ use crate::reconcile::effective_packages::EffectivePackages;
 use crate::reconcile::execute::{execute, ReconcileCtx};
 use crate::reconcile::pending::{LabelCountPending, PendingWork};
 use crate::reconcile::registry::parse_registration;
+use crate::reconcile::session_contexts::record_session_contexts;
 use crate::reconcile::trigger_authz::{
     check_trigger_creator, TriggerAuthzCache, TriggerGateDecision,
 };
@@ -279,11 +279,11 @@ pub async fn reconcile_repo(
     // it when the last trigger issue is gone so idle repos don't churn the sweep.
     set_active(ctx, installation_id, repo, !regs.is_empty());
 
-    // Record each valid session's log-access context so the identity-gated
-    // log-download endpoint can reverse a `session_id` (a one-way hash) to the
-    // author id + `### Log Access Allowlist` allow-list it authorizes against. Cheap in-memory
-    // upsert; carries only public metadata (ids + the allow-list), never a token.
-    record_log_contexts(ctx, &regs);
+    // Publish this repository's COMPLETE session-access set so every
+    // session-scoped route can reverse a `session_id` (a one-way hash) into the
+    // creator + collaborator + log-access facts it authorizes against. Cheap
+    // in-memory replacement; carries only public metadata, never a token.
+    record_session_contexts(ctx, installation_id, repo, &regs);
 
     // I7 manifest expand pass (epic #594). Resolve each session's EFFECTIVE package set —
     // its explicit `### Packages` followed by every `### Manifest` reference expanded into
@@ -549,29 +549,22 @@ pub async fn reconcile_repo(
     for action in actions {
         execute(action, repo, ctx).await;
     }
-    Ok(())
-}
 
-/// Upsert every valid registration's [`LogSessionContext`] into the shared registry
-/// the log-download endpoint authorizes against. Called every sweep so the map stays
-/// current (a re-registration with an edited allow-list overwrites the old context);
-/// carries only public metadata, never a token.
-fn record_log_contexts(ctx: &ReconcileCtx, regs: &[SessionRegistration]) {
-    for reg in regs {
-        ctx.log_registry.upsert(
-            reg.session_id.clone(),
-            LogSessionContext {
-                installation_id: reg.installation_id,
-                repo: reg.repo.clone(),
-                trigger_issue: reg.trigger_issue,
-                creator: SessionCreator {
-                    login: reg.creator_login.clone(),
-                    id: reg.creator_id,
-                },
-                log_access: reg.log_access.clone(),
-            },
-        );
-    }
+    // 6. Backfill durable creator/trigger attribution onto any live runtime this
+    //    pass matched to a registration but that predates the launch stamp. Uses
+    //    the stamp already read in step 3, so a settled runtime costs no API call;
+    //    a conflict or a permanent failure is parked by the bounded gate rather
+    //    than re-decided every sweep.
+    //
+    //    It runs after the actions, but works from the PRE-action `live`
+    //    snapshot, so a runtime an action just killed still reads as `Live` here
+    //    and is patched on its way out. That is harmless by construction: the
+    //    patch re-reads the runtime and a deleted one answers 404 →
+    //    `RuntimeIdentityOutcome::NotFound`, which writes nothing and emits
+    //    nothing. Re-observing after the actions purely to avoid that no-op would
+    //    cost one extra backend LIST per repo per sweep.
+    crate::reconcile::runtime_identity::backfill_runtime_identities(ctx, &regs, &live).await;
+    Ok(())
 }
 
 /// Insert or remove `(installation, repo)` in the shared active-repos set (present

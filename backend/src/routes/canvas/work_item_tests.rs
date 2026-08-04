@@ -3,7 +3,7 @@
 //! label on a NEW issue created with the USER token, and reject the bad-input
 //! and wrong-target cases before any GitHub write.
 
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use wiremock::matchers::{body_partial_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -143,10 +143,11 @@ async fn create_work_item_stamps_the_sessions_work_label_as_the_user() {
     let state = test_state(&server.uri(), None);
     let (status, Json(created)) = create_work_item(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 21)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 21)),
         viewer_user(),
         auth_headers(),
-        Json(work_item_request()),
+        crate::audit::arguments::AuditedJson(work_item_request()),
     )
     .await
     .expect("201");
@@ -188,10 +189,11 @@ async fn create_work_item_routes_a_bot_authored_trigger_to_its_sole_assignee() {
 
     let (status, Json(created)) = create_work_item(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 21)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 21)),
         viewer_user(),
         auth_headers(),
-        Json(work_item_request()),
+        crate::audit::arguments::AuditedJson(work_item_request()),
     )
     .await
     .expect("the sole assignee is the effective creator");
@@ -246,10 +248,11 @@ async fn create_work_item_rejects_a_blank_title_before_any_github_call() {
     let state = test_state(&server.uri(), None);
     let err = create_work_item(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 21)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 21)),
         viewer_user(),
         auth_headers(),
-        Json(CreateWorkItemRequest {
+        crate::audit::arguments::AuditedJson(CreateWorkItemRequest {
             title: "   ".to_string(),
             label: None,
             body: None,
@@ -266,10 +269,11 @@ async fn create_work_item_rejects_a_populated_but_blank_label_before_github() {
     let state = test_state(&server.uri(), None);
     let err = create_work_item(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 21)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 21)),
         viewer_user(),
         auth_headers(),
-        Json(CreateWorkItemRequest {
+        crate::audit::arguments::AuditedJson(CreateWorkItemRequest {
             title: "task".to_string(),
             label: Some("   ".to_string()),
             body: None,
@@ -296,10 +300,11 @@ async fn create_work_item_maps_a_missing_trigger_to_not_found() {
     let state = test_state(&server.uri(), None);
     let err = create_work_item(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 999)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 999)),
         viewer_user(),
         auth_headers(),
-        Json(work_item_request()),
+        crate::audit::arguments::AuditedJson(work_item_request()),
     )
     .await
     .expect_err("404 maps");
@@ -321,10 +326,11 @@ async fn create_work_item_refuses_a_non_trigger_issue() {
     let state = test_state(&server.uri(), None);
     let err = create_work_item(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 30)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 30)),
         viewer_user(),
         auth_headers(),
-        Json(work_item_request()),
+        crate::audit::arguments::AuditedJson(work_item_request()),
     )
     .await
     .expect_err("missing the trigger label");
@@ -357,10 +363,11 @@ async fn create_work_item_refuses_a_session_without_any_resolved_work_label() {
     let state = test_state(&server.uri(), None);
     let err = create_work_item(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 21)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 21)),
         viewer_user(),
         auth_headers(),
-        Json(work_item_request()),
+        crate::audit::arguments::AuditedJson(work_item_request()),
     )
     .await
     .expect_err("no resolved work label");
@@ -406,10 +413,11 @@ async fn create_work_item_accepts_a_package_discovered_label() {
     request.label = Some("fkst-security".to_string());
     let (status, Json(created)) = create_work_item(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 21)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 21)),
         viewer_user(),
         auth_headers(),
-        Json(request),
+        crate::audit::arguments::AuditedJson(request),
     )
     .await
     .expect("a discovered work label is applicable");
@@ -448,10 +456,11 @@ async fn create_work_item_requires_a_choice_for_discovered_only_labels() {
     let state = test_state(&server.uri(), None);
     let err = create_work_item(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 21)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 21)),
         viewer_user(),
         auth_headers(),
-        Json(work_item_request()),
+        crate::audit::arguments::AuditedJson(work_item_request()),
     )
     .await
     .expect_err("discovered-only sessions require an explicit request choice");
@@ -489,10 +498,11 @@ async fn create_work_item_rejects_a_label_outside_the_sessions_resolved_set() {
     request.label = Some("unrelated".to_string());
     let err = create_work_item(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 21)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 21)),
         viewer_user(),
         auth_headers(),
-        Json(request),
+        crate::audit::arguments::AuditedJson(request),
     )
     .await
     .expect_err("an unrelated label is rejected before the write");
@@ -531,10 +541,11 @@ async fn create_work_item_refuses_a_closed_session() {
     let state = test_state(&server.uri(), None);
     let err = create_work_item(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 21)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 21)),
         viewer_user(),
         auth_headers(),
-        Json(work_item_request()),
+        crate::audit::arguments::AuditedJson(work_item_request()),
     )
     .await
     .expect_err("closed triggers cannot accept work");
@@ -565,10 +576,11 @@ async fn create_work_item_rejects_repo_admin_without_an_explicit_authority_tier(
     let state = test_state(&server.uri(), None);
     let error = create_work_item(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 21)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 21)),
         viewer_user(),
         auth_headers(),
-        Json(work_item_request()),
+        crate::audit::arguments::AuditedJson(work_item_request()),
     )
     .await
     .expect_err("repo role alone does not grant work authority");
@@ -605,10 +617,11 @@ async fn create_work_item_allows_a_deployment_global_admin() {
     grant_global_admin(&mut state, "Shining");
     let (status, Json(created)) = create_work_item(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 21)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 21)),
         viewer_user(),
         auth_headers(),
-        Json(work_item_request()),
+        crate::audit::arguments::AuditedJson(work_item_request()),
     )
     .await
     .expect("a deployment global admin may queue work items");
@@ -648,10 +661,11 @@ async fn create_work_item_allows_a_listed_session_collaborator() {
     let state = test_state(&server.uri(), None);
     let (status, Json(created)) = create_work_item(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 21)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 21)),
         viewer_user(),
         auth_headers(),
-        Json(work_item_request()),
+        crate::audit::arguments::AuditedJson(work_item_request()),
     )
     .await
     .expect("a listed collaborator may queue work items");
@@ -684,10 +698,11 @@ async fn create_work_item_forbids_a_stranger() {
     let state = test_state(&server.uri(), None);
     let err = create_work_item(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 21)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 21)),
         viewer_user(),
         auth_headers(),
-        Json(work_item_request()),
+        crate::audit::arguments::AuditedJson(work_item_request()),
     )
     .await
     .expect_err("a stranger is forbidden");
@@ -700,10 +715,11 @@ async fn create_work_item_rejects_issue_number_zero() {
     let state = test_state(&server.uri(), None);
     let err = create_work_item(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 0)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 0)),
         viewer_user(),
         auth_headers(),
-        Json(work_item_request()),
+        crate::audit::arguments::AuditedJson(work_item_request()),
     )
     .await
     .expect_err("0 is not an issue number");

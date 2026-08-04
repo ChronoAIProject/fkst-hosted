@@ -1,17 +1,27 @@
-//! Unit tests for the executor's GitHub issue effects (flag/clear/announce/reject)
-//! and the pure argument assembly (`session_pod_spec_from`, the token JSON). These
-//! run against a recording fake [`GithubApi`] so no network is touched; the action
-//! routing through the session backend lives in the sibling [`super::routing_tests`],
-//! and the shared fakes/builders live in [`super::execute_test_support`].
-
-use std::time::{Duration, SystemTime};
-
-use k8s_openapi::chrono::DateTime;
+//! Unit tests for the executor's GitHub issue effects (flag / clear / announce /
+//! reject). They run against a recording fake [`GithubApi`] so no network is
+//! touched; the action routing through the session backend lives in the sibling
+//! [`super::routing_tests`], the create-side audit trail in
+//! [`super::lifecycle_tests`], and the shared fakes/builders in
+//! [`super::execute_test_support`].
 
 use super::*;
-use crate::k8s::session_github_token_json;
 use crate::reconcile::announce::announce_session_comment_with_defaults;
+// The spawn/launch helpers these tests drive were extracted out of `execute` (it
+// was well past the file-size budget); they are imported rather than reached
+// through `super::*` so the move stays visible at the use site.
+use crate::k8s::session_github_token_json;
+use crate::reconcile::execute_launch_spec::{
+    resolve_named_environment, session_contributors, session_pod_spec_from, storage_writer_creds,
+    EnvResolution,
+};
+use crate::reconcile::execute_spawn::{ensure_branch_topology, ResolvedBranchTopology};
 use crate::reconcile::execute_test_support::*;
+use crate::reconcile::hashing::runtime_config_hash;
+use crate::session_spec::creds::credential_secret_data;
+use k8s_openapi::chrono::DateTime;
+use secrecy::SecretString;
+use std::time::{Duration, SystemTime};
 
 // ---- GitHub issue effects ---------------------------------------------------
 

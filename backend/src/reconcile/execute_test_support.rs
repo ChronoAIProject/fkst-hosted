@@ -22,9 +22,9 @@ use crate::github_app::listing::{GithubListing, InstallationSummary, IssueSummar
 use crate::github_app::{GithubAppError, GithubAppTokens};
 use crate::goals::trigger_parse::PackageRef;
 use crate::k8s::env_store::EnvStore;
-use crate::log_access::LogAccessRegistry;
 use crate::models::{GithubActor, RepoRef};
 use crate::reconcile::desired::{SessionDef, SessionRegistration};
+use crate::session_access::SessionAccessRegistry;
 use crate::session_backend::SessionBackend;
 
 // ---- recording fake GitHub transport ---------------------------------------
@@ -329,8 +329,13 @@ pub(crate) fn test_ctx_with_github(
         config: Config::default(),
         active_repos: crate::reconcile::new_active_repos(),
         ensured_templates: crate::reconcile::new_ensured_templates(),
-        log_registry: LogAccessRegistry::new(),
+        session_access: SessionAccessRegistry::new(false),
         disposable_environments: Default::default(),
+        // A recording audit handle so lifecycle emission is observable without a
+        // network sink; `recording_audit` hands the recorder back where a test
+        // needs to assert on the emitted transitions.
+        audit: crate::audit::AuditHandle::recording().0,
+        identity_gate: crate::runtime_identity::IdentityGate::new(),
     }
 }
 

@@ -51,6 +51,34 @@ use crate::{
     reconcile::{effective_creator, parse_registration, CreatorResolution, SessionRegistration},
 };
 
+/// Publish a canvas request's repository — and optionally its trigger issue — as
+/// the record's top-level correlation handles.
+///
+/// The values come from the request's own path segments in their validated form:
+/// unvalidated ones are dropped rather than recorded, because `repo_full_name` is
+/// a query key on the read side and a malformed one would be a correlation handle
+/// that matches nothing. GitHub's canonical casing may differ, which is why the
+/// arguments and the correlation are populated from the SAME source rather than
+/// one from the request and the other from a later response.
+pub(super) fn record_repo_correlation(
+    extensions: &axum::http::Extensions,
+    owner: &str,
+    name: &str,
+) {
+    if let Some(repo) = crate::audit::arguments::bounds::safe_repo_full_name(owner, name) {
+        crate::audit::request::with_context(extensions, |context| {
+            context.record_repo_full_name(repo)
+        });
+    }
+}
+
+/// Publish a canvas request's trigger-issue number as a correlation handle.
+pub(super) fn record_trigger_correlation(extensions: &axum::http::Extensions, trigger_issue: i64) {
+    crate::audit::request::with_context(extensions, |context| {
+        context.record_trigger_issue(trigger_issue)
+    });
+}
+
 /// Parse a canvas-visible trigger with the same effective-creator attribution as
 /// the reconciler. The canvas remains a read surface (the reconcile gate owns the
 /// role decision), but registrations it projects must carry the same owner identity.

@@ -20,10 +20,10 @@
 //! [`GithubUser`]: crate::github_identity::GithubUser
 
 use std::sync::OnceLock;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
-use axum::extract::{Query, State};
-use axum::http::{header, HeaderValue, StatusCode};
+use axum::extract::State;
+use axum::http::{header, Extensions, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use secrecy::{ExposeSecret, SecretString};
@@ -32,15 +32,20 @@ use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use crate::audit::arguments::auth::{
+    OauthResult, SafeGithubLogin, SafeGithubLoginCallback, SafeGithubRefreshToken,
+};
+use crate::audit::arguments::{record_safe, AuditedJson, AuditedQuery};
+use crate::audit::AuditIdentity;
 use crate::error::{AppError, ErrorEnvelope};
+use crate::github_identity::GithubUser;
 use crate::log_config::LogConfig;
-use crate::routes::logs::oauth;
+use crate::routes::auth_oauth_state::{
+    callback_redirect_uri, frontend_success_url, login_state_message, post_install_redirect,
+    state_is_fresh, token_response,
+};
+use crate::routes::logs::{identity, oauth};
 use crate::state::AppState;
-
-/// Freshness window for a login `state`: a callback presenting a signed state older
-/// than this (or from the future beyond a small skew) is rejected. Bounds replay
-/// without a server-side session store.
-const STATE_MAX_AGE_SECS: i64 = 600;
 
 /// The OAuth login-callback query (`?code=&state=` on success, `?error=` on denial).
 #[derive(Debug, Deserialize, IntoParams)]
@@ -109,7 +114,11 @@ pub struct TokenResponse {
         (status = 503, description = "Frontend login is not configured", body = ErrorEnvelope),
     )
 )]
-async fn github_login(State(state): State<AppState>) -> Response {
+async fn github_login(State(state): State<AppState>, extensions: Extensions) -> Response {
+    // The flow is the whole safe argument: the response is a redirect whose
+    // target carries the client id and the signed state, none of which a record
+    // may hold.
+    record_safe(&extensions, &SafeGithubLogin::new());
     let log = &state.config.log;
     let (Some((client_id, secret)), Some(public_base), Some(_frontend)) = (
         oauth_creds(log),
@@ -154,23 +163,45 @@ async fn github_login(State(state): State<AppState>) -> Response {
 )]
 async fn github_login_callback(
     State(state): State<AppState>,
-    Query(query): Query<LoginCallbackQuery>,
+    extensions: Extensions,
+    AuditedQuery(query): AuditedQuery<LoginCallbackQuery>,
 ) -> Response {
+    // One record per outcome, written by the inner function as it decides. The
+    // `code`, the `state`, the exchanged tokens, and GitHub's own error slug are
+    // never arguments — the closed result is what makes the flow queryable.
+    let (response, result) = login_callback(&state, &extensions, query).await;
+    record_safe(&extensions, &SafeGithubLoginCallback::new(result));
+    response
+}
+
+/// The callback's real body, returning its outcome alongside the response so the
+/// single recording site above cannot be missed on a new early return.
+async fn login_callback(
+    state: &AppState,
+    extensions: &Extensions,
+    query: LoginCallbackQuery,
+) -> (Response, OauthResult) {
     let log = &state.config.log;
     let (Some((client_id, secret)), Some(public_base), Some(frontend)) = (
         oauth_creds(log),
         log.public_base_url.as_deref(),
         log.frontend_url.as_deref(),
     ) else {
-        return html_error(StatusCode::SERVICE_UNAVAILABLE, "Login is not configured.");
+        return (
+            html_error(StatusCode::SERVICE_UNAVAILABLE, "Login is not configured."),
+            OauthResult::UpstreamError,
+        );
     };
 
     // The user denied consent on GitHub — bounce back to the frontend with a flag.
     if query.error.is_some() {
-        return redirect_302(&format!(
-            "{}#gh_error=access_denied",
-            frontend.trim_end_matches('#')
-        ));
+        return (
+            redirect_302(&format!(
+                "{}#gh_error=access_denied",
+                frontend.trim_end_matches('#')
+            )),
+            OauthResult::Denied,
+        );
     }
     // GitHub's POST-INSTALL redirect: "Request user authorization during
     // installation" routes App installs to this callback with
@@ -184,23 +215,34 @@ async fn github_login_callback(
         query.installation_id.as_deref(),
         frontend,
     ) {
-        return redirect_302(&target);
+        // A stateless install bounce: no OAuth round-trip happened at all, which
+        // is `invalid` login material rather than a denial or an upstream fault.
+        return (redirect_302(&target), OauthResult::Invalid);
     }
 
     let (Some(code), Some(state_param)) = (
         query.code.filter(|c| !c.is_empty()),
         query.state.filter(|s| !s.is_empty()),
     ) else {
-        return html_error(StatusCode::BAD_REQUEST, "Missing OAuth code or state.");
+        return (
+            html_error(StatusCode::BAD_REQUEST, "Missing OAuth code or state."),
+            OauthResult::Invalid,
+        );
     };
     // Verify the signed state (CSRF/tamper) and its freshness (replay bound).
     let Some(message) = oauth::verify_state(secret.expose_secret().as_bytes(), &state_param) else {
-        return html_error(StatusCode::BAD_REQUEST, "Invalid or tampered OAuth state.");
+        return (
+            html_error(StatusCode::BAD_REQUEST, "Invalid or tampered OAuth state."),
+            OauthResult::Invalid,
+        );
     };
     if !state_is_fresh(&message) {
-        return html_error(
-            StatusCode::BAD_REQUEST,
-            "This sign-in link has expired. Please try again.",
+        return (
+            html_error(
+                StatusCode::BAD_REQUEST,
+                "This sign-in link has expired. Please try again.",
+            ),
+            OauthResult::Invalid,
         );
     }
 
@@ -217,14 +259,37 @@ async fn github_login_callback(
     {
         Ok(tokens) => tokens,
         Err(_) => {
-            return html_error(
-                StatusCode::UNAUTHORIZED,
-                "GitHub rejected the sign-in. Please try again.",
+            return (
+                html_error(
+                    StatusCode::UNAUTHORIZED,
+                    "GitHub rejected the sign-in. Please try again.",
+                ),
+                OauthResult::UpstreamError,
             )
         }
     };
+    // An exchanged token is not yet an identity. Resolve `GET /user` BEFORE the
+    // sign-in is treated as successful, so the terminal record is attributed to a
+    // verified numeric id rather than to an invented actor. A `/user` failure is a
+    // stable authentication failure: fail closed instead of handing the SPA a
+    // session whose owner we could not name.
+    if resolve_oauth_identity(state, &tokens.access_token, extensions)
+        .await
+        .is_err()
+    {
+        return (
+            html_error(
+                StatusCode::UNAUTHORIZED,
+                "Could not verify your GitHub identity.",
+            ),
+            OauthResult::UpstreamError,
+        );
+    }
     // Hand the token set to the SPA in the fragment (never a query string / log).
-    redirect_302(&frontend_success_url(frontend, &tokens))
+    (
+        redirect_302(&frontend_success_url(frontend, &tokens)),
+        OauthResult::Success,
+    )
 }
 
 /// `POST /api/v1/auth/github/refresh` — redeem a refresh token for a fresh token set.
@@ -248,15 +313,31 @@ async fn github_login_callback(
 )]
 async fn github_refresh_token(
     State(state): State<AppState>,
-    Json(req): Json<RefreshRequest>,
+    extensions: Extensions,
+    AuditedJson(req): AuditedJson<RefreshRequest>,
 ) -> Response {
+    let (response, result) = refresh_token(&state, &extensions, req).await;
+    record_safe(&extensions, &SafeGithubRefreshToken::new(result));
+    response
+}
+
+/// The refresh body, returning its outcome alongside the response. The refresh
+/// token IS the credential, so nothing about the body is ever an argument.
+async fn refresh_token(
+    state: &AppState,
+    extensions: &Extensions,
+    req: RefreshRequest,
+) -> (Response, OauthResult) {
     let log = &state.config.log;
     let Some((client_id, secret)) = oauth_creds(log) else {
-        return unconfigured();
+        return (unconfigured(), OauthResult::UpstreamError);
     };
     let refresh = req.refresh_token.trim();
     if refresh.is_empty() {
-        return AppError::Validation("refresh_token must not be empty".to_string()).into_response();
+        return (
+            AppError::Validation("refresh_token must not be empty".to_string()).into_response(),
+            OauthResult::Invalid,
+        );
     }
     match oauth::refresh_tokens(
         http_client(),
@@ -267,9 +348,39 @@ async fn github_refresh_token(
     )
     .await
     {
-        Ok(tokens) => Json(token_response(&tokens)).into_response(),
-        Err(err) => err.into_response(),
+        Ok(tokens) => {
+            // Same rule as the callback: a refreshed session is attributed only
+            // after `GET /user` names its owner.
+            match resolve_oauth_identity(state, &tokens.access_token, extensions).await {
+                Ok(_) => (
+                    Json(token_response(&tokens)).into_response(),
+                    OauthResult::Success,
+                ),
+                Err(err) => (err.into_response(), OauthResult::UpstreamError),
+            }
+        }
+        Err(err) => (err.into_response(), OauthResult::UpstreamError),
     }
+}
+
+/// Resolve the verified identity behind a freshly exchanged/refreshed OAuth token
+/// and publish it as this request's audit actor.
+///
+/// Shared with the broader-visibility connect flow. The token is used for the one
+/// `GET /user` call and never stored, logged, or placed in the extensions — the
+/// recorded identity is the numeric id plus a login snapshot and nothing else.
+pub(super) async fn resolve_oauth_identity(
+    state: &AppState,
+    token: &SecretString,
+    extensions: &Extensions,
+) -> Result<GithubUser, AppError> {
+    let user = identity::resolve(&state.config.github_api_base_url, token.expose_secret()).await?;
+    crate::audit::identity::record_identity(
+        extensions,
+        AuditIdentity::github_oauth(user.id, user.login.clone()),
+    );
+    tracing::info!(user_id = user.id, "oauth identity verified after exchange");
+    Ok(user)
 }
 
 // ---- Helpers ----------------------------------------------------------------
@@ -282,81 +393,6 @@ fn oauth_creds(log: &LogConfig) -> Option<(&str, &SecretString)> {
     ) {
         (Some(id), Some(secret)) => Some((id, secret)),
         _ => None,
-    }
-}
-
-/// The OAuth `redirect_uri`: `<public_base>/api/v1/auth/github/callback`.
-fn callback_redirect_uri(public_base: &str) -> String {
-    format!(
-        "{}/api/v1/auth/github/callback",
-        public_base.trim_end_matches('/')
-    )
-}
-
-/// Current Unix time in whole seconds (monotonic-agnostic; only used for the
-/// login-state freshness window, so a small clock wobble is harmless).
-fn now_unix() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
-/// A signed-state payload `"<kind>:<unix-seconds>"` (freshness-checked on return).
-/// `kind` namespaces the flow (`login`, `broader`) so a state minted for one flow can
-/// never be replayed into another — defense in depth on top of the HMAC signature.
-pub(super) fn signed_state_message(kind: &str) -> String {
-    format!("{kind}:{}", now_unix())
-}
-
-/// Whether a recovered `"<kind>:<ts>"` state is within the freshness window (allowing
-/// a small backward clock skew). A message whose prefix is not exactly `"<kind>:"` is
-/// not fresh, so a `login` state does not satisfy a `broader` check and vice versa.
-pub(super) fn state_is_fresh_for(kind: &str, message: &str) -> bool {
-    let Some(ts_str) = message.strip_prefix(&format!("{kind}:")) else {
-        return false;
-    };
-    let Ok(ts) = ts_str.parse::<i64>() else {
-        return false;
-    };
-    let age = now_unix() - ts;
-    (-30..=STATE_MAX_AGE_SECS).contains(&age)
-}
-
-/// The login flow's signed-state payload: `login:<unix-seconds>`.
-fn login_state_message() -> String {
-    signed_state_message("login")
-}
-
-/// Whether a recovered `login:<ts>` state is within the freshness window.
-fn state_is_fresh(message: &str) -> bool {
-    state_is_fresh_for("login", message)
-}
-
-/// Build the frontend redirect URL carrying the token set in the fragment. GitHub
-/// tokens are URL-safe (`[A-Za-z0-9_]`), so no percent-encoding is needed.
-fn frontend_success_url(frontend: &str, tokens: &oauth::TokenSet) -> String {
-    let mut fragment = format!("gh_token={}", tokens.access_token.expose_secret());
-    if let Some(refresh) = &tokens.refresh_token {
-        fragment.push_str(&format!("&gh_refresh={}", refresh.expose_secret()));
-    }
-    if let Some(expires_in) = tokens.expires_in {
-        fragment.push_str(&format!("&gh_expires_in={expires_in}"));
-    }
-    format!("{}#{fragment}", frontend.trim_end_matches('#'))
-}
-
-/// Convert a [`oauth::TokenSet`] into the JSON [`TokenResponse`] for the SPA.
-fn token_response(tokens: &oauth::TokenSet) -> TokenResponse {
-    TokenResponse {
-        access_token: tokens.access_token.expose_secret().to_string(),
-        refresh_token: tokens
-            .refresh_token
-            .as_ref()
-            .map(|t| t.expose_secret().to_string()),
-        expires_in: tokens.expires_in,
-        refresh_token_expires_in: tokens.refresh_token_expires_in,
-        token_type: "bearer",
     }
 }
 
@@ -386,12 +422,21 @@ pub(super) fn html_error(status: StatusCode, message: &str) -> Response {
          <body><h1>{code}</h1><p>{message}</p></body></html>",
         code = status.as_u16()
     );
-    (
+    // The browser paths render HTML rather than the JSON envelope, so they carry
+    // no `error` field — the stable audit code is attached as a typed extension
+    // instead, keeping OAuth failures correlatable without the message (which may
+    // describe caller-supplied state) ever reaching a record. A 401/403 page is
+    // additionally marked a policy rejection, so a sign-in denial classifies the
+    // same here as it does on the JSON surface.
+    crate::audit::request::with_browser_error(
+        (
+            status,
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            body,
+        )
+            .into_response(),
         status,
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        body,
     )
-        .into_response()
 }
 
 /// A pooled HTTP client for the OAuth token exchange/refresh (bounded timeout + UA).
@@ -404,24 +449,6 @@ pub(super) fn http_client() -> &'static reqwest::Client {
             .build()
             .expect("build auth-oauth http client")
     })
-}
-
-/// The dashboard URL a STATELESS GitHub post-install redirect bounces to, or
-/// `None` for a normal login callback (a `state` is present, or no install
-/// markers are). Stateless + `setup_action`/`installation_id` = GitHub sent the
-/// browser here after an App install, not after our login redirect.
-fn post_install_redirect(
-    state: Option<&str>,
-    setup_action: Option<&str>,
-    installation_id: Option<&str>,
-    frontend: &str,
-) -> Option<String> {
-    let stateless = state.map(str::is_empty).unwrap_or(true);
-    if stateless && (setup_action.is_some() || installation_id.is_some()) {
-        Some(format!("{}/dashboard", frontend.trim_end_matches('/')))
-    } else {
-        None
-    }
 }
 
 /// The frontend-login router (nested under `/api/v1`). Open at the app layer: the
@@ -438,5 +465,5 @@ pub fn router() -> OpenApiRouter<AppState> {
 }
 
 #[cfg(test)]
-#[path = "auth_tests.rs"]
-mod tests;
+#[path = "auth_handler_tests.rs"]
+mod handler_tests;

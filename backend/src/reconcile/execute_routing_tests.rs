@@ -6,6 +6,7 @@
 //! named environment) so `execute` reaches `ensure_session`.
 
 use super::*;
+use crate::reconcile::desired::KillReason;
 use crate::reconcile::execute_test_support::*;
 
 #[tokio::test]
@@ -204,6 +205,7 @@ async fn kill_action_routes_to_stop_session_with_reason() {
         ReconcileAction::Kill {
             session_id: "sess-1".to_string(),
             reason: KillReason::Idle,
+            audit: Default::default(),
         },
         &test_repo(),
         &ctx,
@@ -225,6 +227,7 @@ async fn cleanup_terminal_action_routes_to_remove_terminal() {
     execute(
         ReconcileAction::CleanupTerminal {
             session_id: "sess-2".to_string(),
+            audit: Default::default(),
         },
         &test_repo(),
         &ctx,

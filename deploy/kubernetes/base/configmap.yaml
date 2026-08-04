@@ -109,3 +109,112 @@ data:
   # truncated and the frame flags it, while the model still receives the whole
   # result either way.
   # FKST_CHAT_DETAIL_MAX_BYTES: "0"
+  # ---- user activity trace (PostHog capture sink) ----
+  # Dark by default, like the chat block above: with FKST_POSTHOG_ENABLED
+  # unset/false the control plane installs the no-op sink, starts no delivery
+  # worker, and makes no network call, so every other FKST_POSTHOG_* value is
+  # inert. An environment overlay opts in, so deployment-wide capture is always
+  # a deliberate per-deployment act rather than something a base bump switches
+  # on everywhere.
+  #
+  # The project (write) token is a SECRET: it belongs in the
+  # fkst-control-plane-secret record as FKST_POSTHOG_PROJECT_TOKEN, never here —
+  # and only when this direct sink is the capture path at all.
+  #
+  # The numeric knobs are validated even while disabled, so a typo fails the
+  # deploy that introduces it rather than the one that flips the feature on.
+  #
+  # ENABLED is mutually exclusive with a relay delivery mode below: with the
+  # relay capturing, a control plane that also captured would be a SECOND writer
+  # into the same project and would need the project token it is deliberately
+  # denied. Setting both is refused at startup.
+  FKST_POSTHOG_ENABLED: "false"
+  # The host is shared by capture AND by the activity query, so a control plane
+  # that captures through the relay still needs it set to READ (see the activity
+  # query block below). Required when ENABLED, must be https outside an
+  # explicitly test/local FKST_DEPLOYMENT_ENVIRONMENT, and may never embed
+  # userinfo credentials — refused at startup whether the feature is on or off,
+  # in this process and in the relay, by the same shared rule.
+  # FKST_POSTHOG_HOST: <https base url of the self-hosted PostHog>
+  # FKST_POSTHOG_CAPTURE_TIMEOUT_MS: "2000"
+  # FKST_POSTHOG_BATCH_SIZE: "100"
+  # FKST_POSTHOG_FLUSH_INTERVAL_MS: "1000"
+  # FKST_POSTHOG_QUEUE_CAPACITY: "10000"
+  # FKST_POSTHOG_MAX_RETRIES: "5"
+  # FKST_POSTHOG_RETRY_INITIAL_MS: "100"
+  # FKST_POSTHOG_RETRY_MAX_MS: "5000"
+  # FKST_POSTHOG_SHUTDOWN_FLUSH_SECS: "10"
+  # FKST_POSTHOG_MAX_EVENT_BYTES: "65536"
+  # Deployment environment name stamped on every audit event, and the switch
+  # that permits a plaintext http:// PostHog host (only "test"/"local" do).
+  # Deliberately UNSET in base: a value inherited from here would silently relax
+  # that HTTPS gate for any overlay that forgot to patch it, so each environment
+  # overlay sets its own.
+  # FKST_DEPLOYMENT_ENVIRONMENT: <production|staging|local|test>
+  # ---- audit delivery (the durable relay) ----
+  # THIS IS THE NON-PRODUCTION DEFAULT. `disabled` makes no relay call at all:
+  # delivery is whatever the capture sink above is configured to be, which
+  # preserves the behaviour of a deployment that has not adopted the relay.
+  #
+  #   disabled     no relay call. Base and local default.
+  #   best_effort  the relay is called; a failure is counted, logged, and then
+  #                IGNORED, and the record falls back to the local sink. Never
+  #                changes a response. This is the SHADOW mode of the staged
+  #                rollout, and the documented incident rollback target.
+  #   required     production. The start must be durably acknowledged BEFORE the
+  #                handler runs and the terminal event committed before the
+  #                response is released; failures become 503s.
+  #
+  # `overlays/required-audit/` is the reference production composition. Moving
+  # from `required` back to `best_effort` is an explicit, alerted operator
+  # action (see AUDIT-RUNBOOK.md) — never a silent automatic fallback.
+  FKST_AUDIT_DELIVERY_MODE: disabled
+  # In-cluster address of the relay Service from `audit-relay/`. Set even while
+  # the mode is `disabled` so adopting the relay is a one-key patch; it is
+  # validated (http(s), host present, no embedded userinfo) either way, and
+  # unused until the mode changes.
+  FKST_AUDIT_RELAY_URL: http://fkst-audit-relay.chronoai-fkst.svc.cluster.local
+  # SHARED with the relay's own ConfigMap — the two MUST carry the same value.
+  # The control plane writes `completion_deadline_at = started_at + grace`; the
+  # relay closes a start as `incomplete` at `completion_deadline_at + grace`.
+  # It must outlast the LONGEST audited request (the `/api/v1` subtree ceiling,
+  # FKST_ENV_VALIDATE_DEADLINE_SECS + 60s) plus a 30s clock-skew margin, or the
+  # relay force-closes a request that is still running and required mode returns
+  # a 503 for work that succeeded. The control plane refuses to boot on a value
+  # that does not cover it, so raising FKST_ENV_VALIDATE_DEADLINE_SECS means
+  # raising this in BOTH ConfigMaps.
+  FKST_AUDIT_INCOMPLETE_GRACE_SECS: "420"
+  # Pre-handler acknowledgement budget: every audited request pays it before its
+  # handler runs, so it is deliberately short.
+  # FKST_AUDIT_RELAY_START_TIMEOUT_MS: "1000"
+  # Completion budget: the response is held until it elapses.
+  # FKST_AUDIT_RELAY_COMPLETION_TIMEOUT_MS: "5000"
+  #
+  # The relay's WRITE and READ tokens are SECRETS delivered through the
+  # fkst-control-plane record (FKST_AUDIT_RELAY_WRITE_TOKEN /
+  # FKST_AUDIT_RELAY_READ_TOKEN). They never appear here.
+  # ---- activity query (GET /api/v1/operations/activity) ----
+  # The read side of the trace. It needs THREE values, and the easiest one to
+  # forget is FKST_POSTHOG_HOST above: it is shared with capture, so a control
+  # plane that captures through the relay (and therefore leaves
+  # FKST_POSTHOG_ENABLED false) still has to be told which host to READ. Setting
+  # a project id and a query key without it is refused at startup rather than
+  # left as a permanently 503-ing activity API.
+  #
+  # The numeric project id is NOT a secret (it is in every PostHog project URL);
+  # the Query-Read-only key that goes with it is, and is delivered as
+  # FKST_POSTHOG_QUERY_API_KEY in the control-plane secret record. Without both,
+  # the activity API reports itself unconfigured instead of returning an
+  # apparently complete empty result.
+  # FKST_POSTHOG_PROJECT_ID: <numeric project id from the PostHog project URL>
+  # FKST_POSTHOG_QUERY_TIMEOUT_MS: "5000"
+  # FKST_POSTHOG_ACTIVITY_DEFAULT_LIMIT: "100"
+  # FKST_POSTHOG_ACTIVITY_MAX_LIMIT: "200"
+  # FKST_POSTHOG_ACTIVITY_MAX_RANGE_DAYS: "30"
+  # ---- live sandbox inventory (GET /api/v1/operations/sandboxes) ----
+  # Independent of PostHog by design: a capture or query outage must never hide
+  # live runtime state, and a runtime-backend outage must never falsify history.
+  # FKST_OPERATIONS_SANDBOX_MAX_RESULT_ITEMS: "5000"
+  # FKST_OPERATIONS_SANDBOX_TIMEOUT_MS: "5000"
+  # FKST_SANDBOX_INVENTORY_MAX_SOURCE_ITEMS: "5000"
+  # FKST_SANDBOX_INVENTORY_MAX_WARNINGS: "256"

@@ -23,6 +23,9 @@ use crate::reconcile_config::ReconcileConfig;
 // The pure content hashes live in the sibling `hashing` module; re-exported here so
 // the planner (and its attached test modules) reach them as `desired::…` unchanged.
 pub use crate::reconcile::hashing::{config_hash, full_config_hash, runtime_config_hash};
+// The delete-side audit facts the planner attaches to a Kill/CleanupTerminal
+// live in their own module; re-exported so callers reach them as `desired::…`.
+pub use crate::reconcile::runtime_audit::RuntimeAudit;
 
 /// The launch inputs one substrate session needs, distilled from a parsed trigger
 /// issue. This is the non-identifying "what to run" half of a
@@ -187,6 +190,12 @@ pub struct LivePod {
     /// when the annotation is absent/blank (an older pod predating the annotation), in
     /// which case no retire-notify is emitted.
     pub work_labels: Vec<String>,
+    /// The durable creator/trigger attribution stamped on the runtime, read back as part of
+    /// THIS observation (issue #5673). Carried here so the backfill decision costs no extra
+    /// per-runtime API call: a runtime whose stamp is already complete is never patched, and
+    /// a legacy runtime is patched only from a registration observed in the same pass. All
+    /// fields absent for a runtime that predates the stamp.
+    pub identity: crate::runtime_identity::ObservedRuntimeIdentity,
 }
 
 /// Why a pod is being killed. Carried on [`ReconcileAction::Kill`] so the executor
@@ -239,9 +248,16 @@ pub enum ReconcileAction {
     Kill {
         session_id: String,
         reason: KillReason,
+        /// Correlation + attribution for the deletion's lifecycle record. See
+        /// [`RuntimeAudit`] — none of it is recoverable once the runtime is gone.
+        audit: RuntimeAudit,
     },
     /// GC a terminal pod (+ its owned Secret).
-    CleanupTerminal { session_id: String },
+    CleanupTerminal {
+        session_id: String,
+        /// Correlation + attribution for the deletion's lifecycle record.
+        audit: RuntimeAudit,
+    },
     /// Retire-notify the still-OPEN work issues of a session whose trigger issue was
     /// closed (session retired). Emitted from the orphan-pod branch alongside the
     /// `Kill { TriggerClosed }`, carrying the orphan pod's FULL effective `work_labels`
@@ -440,6 +456,7 @@ pub fn plan_repo(
                     actions.push(ReconcileAction::Kill {
                         session_id: reg.session_id.clone(),
                         reason: KillReason::ConfigChanged,
+                        audit: RuntimeAudit::from_registration(reg, Some(pod)),
                     });
                 } else if is_pending {
                     actions.push(ReconcileAction::TouchPending {
@@ -455,6 +472,7 @@ pub fn plan_repo(
                     actions.push(ReconcileAction::Kill {
                         session_id: reg.session_id.clone(),
                         reason: KillReason::Idle,
+                        audit: RuntimeAudit::from_registration(reg, Some(pod)),
                     });
                 }
             }
@@ -464,6 +482,7 @@ pub fn plan_repo(
             PodLiveness::Terminal => {
                 actions.push(ReconcileAction::CleanupTerminal {
                     session_id: reg.session_id.clone(),
+                    audit: RuntimeAudit::from_registration(reg, pod),
                 });
             }
         }
@@ -529,6 +548,9 @@ pub fn plan_repo(
                 actions.push(ReconcileAction::Kill {
                     session_id: pod.session_id.clone(),
                     reason: KillReason::TriggerClosed,
+                    // No registration left: the runtime's own stamp is the only
+                    // attribution evidence, and an unstamped one carries none.
+                    audit: RuntimeAudit::from_observed(pod),
                 });
                 // Same cycle as the kill: retire-notify the still-open work issues so
                 // they no longer look claimed (a retired session is no longer working
@@ -543,6 +565,7 @@ pub fn plan_repo(
             PodLiveness::Terminal => {
                 actions.push(ReconcileAction::CleanupTerminal {
                     session_id: pod.session_id.clone(),
+                    audit: RuntimeAudit::from_observed(pod),
                 });
             }
             PodLiveness::Absent | PodLiveness::Terminating => {}

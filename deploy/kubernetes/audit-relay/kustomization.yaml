@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# The durable audit relay (issue #5678) is an INDEPENDENTLY renderable
+# composition, like `monitoring/`, rather than part of `base/`. Two reasons:
+#
+# 1. It owns persistent state. A deployment that has not adopted the relay
+#    (`FKST_AUDIT_DELIVERY_MODE=disabled`, the base default) must not acquire a
+#    PVC it never writes to, and applying `base/` must never be the act that
+#    creates or resizes a volume holding an audit trail.
+# 2. Its credential record is separate. The relay is the only workload that
+#    holds the PostHog capture token, so its ExternalSecret binding travels with
+#    it (external-secret.yaml here, rather than in `external-secrets/`) — a
+#    deployment that has not adopted the relay must not carry a permanently
+#    unresolvable binding for a remote record nobody created.
+#
+# `overlays/required-audit/` is the reference composition that combines this
+# directory with `base/` and selects required delivery.
+resources:
+  - service-account.yaml
+  - configmap.yaml
+  - external-secret.yaml
+  - persistent-volume-claim.yaml
+  - relay.yaml
+  - network-policy.yaml

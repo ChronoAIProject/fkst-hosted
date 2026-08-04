@@ -1,0 +1,331 @@
+# Requirement-to-test matrix for milestone #22 (epic #5665, gate issue #5683).
+#
+# This file is the machine-readable half of the milestone closure gate. Every
+# normative requirement id in the epic's requirement table appears exactly once
+# in `requirement`, and every one of them is mapped to at least one NAMED
+# automated test in `evidence`.
+#
+# `backend/tests/acceptance_matrix.rs` is the linter. It fails CI when a
+# requirement is unmapped, when an evidence row names a suite or a test that
+# does not exist, when the same test is claimed under two contradictory
+# statuses, when a requirement names an owner outside the closed vocabulary,
+# when a gated row forgets to say which environment variable gates it, or when a
+# `pr`-tier row names a suite family NO pull-request workflow runs. It also
+# renders the evidence artifact that accompanies the milestone.
+#
+# That last rule is what makes `tier` mean something. `acceptance::ci` maps each
+# suite family to the command that executes it (`cargo test`, `npm test`,
+# `npm run test:e2e`, the deployment scripts) and reads
+# `.github/workflows/*.yml`, so a row claiming a deterministic CI run that
+# nothing executes is a build failure rather than a quiet aspiration. It is the
+# reason `.github/workflows/acceptance-gates.yml` exists: before it, every
+# frontend and deployment row here claimed a run that never happened.
+#
+# ## Why a data file rather than a doc comment
+#
+# The traceability claim has to be checkable by a machine, or it decays into a
+# prose table nobody reruns. Keeping it as data means the linter can prove the
+# named tests still exist after a rename, and the report artifact is generated
+# from the same source the gate reads.
+#
+# ## Fields
+#
+# On a `[[requirement]]`:
+#
+#   id           the epic requirement id, e.g. "AUTH-03"
+#   area         the concern it belongs to
+#   summary      one sentence of what it promises
+#   owner        the COMPONENT that answers for it when its evidence breaks, from
+#                the closed vocabulary in `acceptance::model::OWNERS`. A
+#                component rather than a person: a name in a checked-in file goes
+#                stale the moment somebody changes team, while "whose code is
+#                this" stays answerable and resolves to a directory.
+#
+# On an `[[evidence]]` row:
+#
+#   requirement  the epic requirement id it is evidence for
+#   tier         "pr"          deterministic, runs on every pull request
+#                "integration" disposable cluster / built containers
+#                "staging"     self-hosted PostHog staging smoke
+#   suite        repository-relative path of the file that OWNS the test
+#   test         the test's exact name inside that file
+#   status       "verified"  the named test runs, and fails its job when it
+#                            fails, in a pull-request workflow — which the
+#                            linter's CI pass proves rather than assumes
+#                "gated"     the named test is environment-gated and SKIPS with
+#                            an explicit reason when `gate_env` is unset
+#   gate_env     required for "gated", forbidden for "verified"
+#
+# The generated artifact renders a verified row as `enforced:<tier>` rather than
+# `pass`: a test binary cannot observe another binary's result, and printing
+# `pass` for a row whose only evidence is this file would be exactly the
+# self-certification this milestone removes.
+#
+# ## Deterministic identities
+#
+# The cross-user matrix uses fixed identities across every layer. The backend
+# harness names two of them after their ROLE rather than their first name; the
+# mapping is fixed and is asserted by the linter's identity check:
+#
+#   Alice  creator                  operations_harness::ALICE
+#   Bob    collaborator             operations_harness::BOB
+#   Carol  log-access grantee       operations_harness::CAROL
+#   Dana   legacy log admin         operations_harness::DANA
+#   Erin   unrelated                operations_harness::ERIN
+#   Frank  repo admin, no tier      operations_harness::REPO_ADMIN
+#   Grace  global admin             operations_harness::ROOT
+
+schema_version = 1
+epic = 5665
+gate_issue = 5683
+milestone = 22
+
+requirement = [
+  { id = "AUTH-01", area = "authorization", summary = "operations route and API require a verified identity admitted by AccessPolicy; 401 otherwise" , owner = "control-plane-operations" },
+  { id = "AUTH-02", area = "identity", summary = "actor and principal are separate; numeric GitHub id is authoritative, login is a snapshot" , owner = "control-plane-audit" },
+  { id = "AUTH-03", area = "authorization", summary = "a regular user's API-request rows are exactly those whose verified actor_id equals the caller" , owner = "control-plane-operations" },
+  { id = "AUTH-04", area = "authorization", summary = "regular sandbox/lifecycle visibility uses the capability tiers; annotations are never evidence" , owner = "control-plane-operations" },
+  { id = "AUTH-05", area = "authorization", summary = "a global admin sees every actor and every managed runtime, including malformed and legacy" , owner = "control-plane-operations" },
+  { id = "AUTH-06", area = "authorization", summary = "authorization runs before limits, merge, sort, counts, cursors, warnings, and serialization" , owner = "control-plane-operations" },
+  { id = "AUD-01", area = "capture", summary = "every in-scope request produces one terminal record across the whole status surface" , owner = "control-plane-audit" },
+  { id = "AUD-02", area = "capture", summary = "each record carries UTC start/completion, ids, method, route template, operation, status, outcome, code, duration" , owner = "control-plane-audit" },
+  { id = "AUD-03", area = "redaction", summary = "arguments are typed, endpoint-specific, and allowlisted; raw bodies, URLs, headers, and secrets are forbidden" , owner = "control-plane-audit" },
+  { id = "AUD-04", area = "analytics", summary = "records reach the configured PostHog project and are read only through fixed HogQL with keyset pagination" , owner = "control-plane-audit" },
+  { id = "AUD-05", area = "analytics", summary = "activity is correlatable by session, repository, installation, trigger issue, delivery, request, and event id" , owner = "control-plane-audit" },
+  { id = "AUD-06", area = "reliability", summary = "delivery never fails silently: pressure, retries, incompleteness, and partial states have metrics, logs, UI, and alerts" , owner = "control-plane-audit" },
+  { id = "AUD-07", area = "reliability", summary = "at-least-once delivery with deterministic dedup; capture acceptance is distinct from query visibility" , owner = "control-plane-audit" },
+  { id = "SBOX-01", area = "runtime", summary = "live inventory comes from the runtime backend; regular responses contain only authorized sessions" , owner = "control-plane-operations" },
+  { id = "SBOX-02", area = "runtime", summary = "inventory exposes attribution, correlation, creation, age, lifetime, expiry, idle, and last-pending facts" , owner = "control-plane-operations" },
+  { id = "SBOX-03", area = "runtime", summary = "inventory preserves normalized status plus raw backend state, bounded reason/message, restarts, transition, identifiers" , owner = "control-plane-operations" },
+  { id = "SBOX-04", area = "runtime", summary = "inventory costs one backend list operation and no per-runtime status call or GitHub N+1" , owner = "control-plane-operations" },
+  { id = "SBOX-05", area = "runtime", summary = "new runtimes carry immutable attribution; unmatched legacy runtimes are unknown_legacy rather than guessed" , owner = "control-plane-operations" },
+  { id = "SBOX-06", area = "authorization", summary = "access filtering precedes filters, order, counts, warnings, and serialization; unauthorized ids are the same 404" , owner = "control-plane-operations" },
+  { id = "UI-01", area = "frontend", summary = "/operations is available to every authenticated user with URL-addressable filters and responsive layouts" , owner = "frontend" },
+  { id = "UI-02", area = "frontend", summary = "sandboxes poll every 5s and activity every 15s only while visible; last-good data stays and is marked stale" , owner = "frontend" },
+  { id = "UI-03", area = "frontend", summary = "an authorized sandbox opens its timeline; a regular timeline never contains another collaborator's calls" , owner = "frontend" },
+  { id = "UI-04", area = "frontend", summary = "the UI names the effective scope and never substitutes hidden controls for API authorization" , owner = "frontend" },
+  { id = "OPS-01", area = "deployment", summary = "required delivery registers a request durably before the handler runs and fails closed otherwise" , owner = "deployment" },
+  { id = "OPS-02", area = "deployment", summary = "PostHog and relay credentials live in Secrets, never ConfigMaps, bundles, logs, metrics, or responses" , owner = "deployment" },
+  { id = "OPS-03", area = "deployment", summary = "the control plane stays stateless; durable buffering belongs to the separate least-privilege relay and its PVC" , owner = "deployment" },
+  { id = "OPS-04", area = "deployment", summary = "metrics use bounded labels only; actor, repository, session, request, runtime, event, and viewer ids never appear" , owner = "deployment" },
+  { id = "TEST-01", area = "acceptance", summary = "contract, identity, cross-user, canary, outage, retry, runtime, replica, frontend, and e2e suites gate completion" , owner = "control-plane-audit" },
+]
+
+evidence = [
+  # ------------------------------------------------------------------ AUTH-01
+  { requirement = "AUTH-01", tier = "pr", suite = "backend/tests/operations_activity.rs", test = "a_missing_or_invalid_identity_is_unauthorized", status = "verified" },
+  { requirement = "AUTH-01", tier = "pr", suite = "backend/tests/operations_sandboxes.rs", test = "a_request_without_an_identity_is_unauthorized", status = "verified" },
+  { requirement = "AUTH-01", tier = "pr", suite = "backend/src/session_access/viewer_tests.rs", test = "the_viewer_extractor_admits_a_regular_user_and_records_audit_identity", status = "verified" },
+  { requirement = "AUTH-01", tier = "pr", suite = "backend/tests/openapi_operations.rs", test = "activity_operation_documents_its_parameters_and_scope_statuses", status = "verified" },
+  { requirement = "AUTH-01", tier = "pr", suite = "frontend/src/pages/operations.test.tsx", test = "gives a regular authenticated user data, never a denied page", status = "verified" },
+
+  # ------------------------------------------------------------------ AUTH-02
+  { requirement = "AUTH-02", tier = "pr", suite = "backend/src/audit/event_tests.rs", test = "the_canonical_actor_id_mirrors_a_human_actors_nested_id", status = "verified" },
+  { requirement = "AUTH-02", tier = "pr", suite = "backend/src/audit/validate_tests.rs", test = "a_human_actor_whose_ids_disagree_is_rejected", status = "verified" },
+  { requirement = "AUTH-02", tier = "pr", suite = "backend/src/session_access/policy_tests.rs", test = "creator_numeric_id_wins_over_a_stale_matching_login", status = "verified" },
+  { requirement = "AUTH-02", tier = "pr", suite = "backend/src/session_access/policy_tests.rs", test = "a_missing_creator_id_uses_the_verified_login_fallback_only", status = "verified" },
+  { requirement = "AUTH-02", tier = "pr", suite = "backend/tests/audit_identity.rs", test = "a_verified_webhook_records_its_delivery_correlation", status = "verified" },
+  { requirement = "AUTH-02", tier = "pr", suite = "backend/tests/audit_identity.rs", test = "a_webhook_signature_rejection_is_recorded_without_the_claimed_sender", status = "verified" },
+
+  # ------------------------------------------------------------------ AUTH-03
+  { requirement = "AUTH-03", tier = "pr", suite = "backend/tests/operations_activity.rs", test = "an_admitted_regular_user_sees_only_their_own_api_rows", status = "verified" },
+  { requirement = "AUTH-03", tier = "pr", suite = "backend/tests/operations_activity.rs", test = "a_collaborator_never_sees_the_other_collaborators_api_rows", status = "verified" },
+  { requirement = "AUTH-03", tier = "pr", suite = "backend/src/operations/hogql_tests.rs", test = "the_personal_actor_predicate_is_in_the_outbound_query_before_limit", status = "verified" },
+  { requirement = "AUTH-03", tier = "pr", suite = "backend/src/audit_relay/db/read_tests.rs", test = "a_shared_session_never_surfaces_another_humans_calls", status = "verified" },
+  { requirement = "AUTH-03", tier = "pr", suite = "backend/tests/audit_relay_e2e.rs", test = "alice_cannot_reach_bob_through_any_read_shape", status = "verified" },
+  { requirement = "AUTH-03", tier = "pr", suite = "frontend/e2e/operations.spec.ts", test = "Bob cannot see Alice’s rows even though they share one session", status = "verified" },
+
+  # ------------------------------------------------------------------ AUTH-04
+  { requirement = "AUTH-04", tier = "pr", suite = "backend/src/session_access/policy_tests.rs", test = "operations_visibility_admits_every_explicit_tier_and_no_one_else", status = "verified" },
+  { requirement = "AUTH-04", tier = "pr", suite = "backend/src/session_access/policy_tests.rs", test = "repository_administrator_status_never_changes_the_pure_result", status = "verified" },
+  { requirement = "AUTH-04", tier = "pr", suite = "backend/src/operations/sandbox/authorize_tests.rs", test = "a_creator_annotation_alone_never_grants_access", status = "verified" },
+  { requirement = "AUTH-04", tier = "pr", suite = "backend/src/session_access/registry_tests.rs", test = "a_cold_registry_is_unavailable_not_empty", status = "verified" },
+  { requirement = "AUTH-04", tier = "pr", suite = "backend/tests/operations_sandboxes.rs", test = "the_creator_collaborator_and_log_grantee_all_see_exactly_that_session", status = "verified" },
+  { requirement = "AUTH-04", tier = "pr", suite = "backend/tests/operations_activity.rs", test = "neither_an_unrelated_user_nor_a_repository_admin_reaches_the_lifecycle_rows", status = "verified" },
+
+  # ------------------------------------------------------------------ AUTH-05
+  { requirement = "AUTH-05", tier = "pr", suite = "backend/tests/operations_activity.rs", test = "a_global_admin_sees_every_actor_plus_system_and_anonymous_rows", status = "verified" },
+  { requirement = "AUTH-05", tier = "pr", suite = "backend/tests/operations_sandboxes.rs", test = "a_global_admin_defaults_to_the_complete_fleet_including_unattributable_rows", status = "verified" },
+  { requirement = "AUTH-05", tier = "pr", suite = "backend/tests/audit_relay_e2e.rs", test = "a_global_admin_sees_both_users_plus_the_unattributed_row", status = "verified" },
+  { requirement = "AUTH-05", tier = "pr", suite = "backend/src/session_access/viewer_tests.rs", test = "global_admin_matches_by_numeric_id_and_case_insensitive_login", status = "verified" },
+  { requirement = "AUTH-05", tier = "pr", suite = "frontend/e2e/operations.spec.ts", test = "inspects orphan, legacy, and conflicted runtimes", status = "verified" },
+
+  # ------------------------------------------------------------------ AUTH-06
+  { requirement = "AUTH-06", tier = "pr", suite = "backend/src/operations/hogql_tests.rs", test = "the_authorized_session_predicate_is_in_the_outbound_query_before_limit", status = "verified" },
+  { requirement = "AUTH-06", tier = "pr", suite = "backend/src/audit_relay/db/read_tests.rs", test = "the_actor_predicate_is_served_by_its_scoped_index_before_the_limit", status = "verified" },
+  { requirement = "AUTH-06", tier = "pr", suite = "backend/src/operations/cursor_tests.rs", test = "a_cursor_from_another_viewer_is_refused", status = "verified" },
+  { requirement = "AUTH-06", tier = "pr", suite = "backend/tests/operations_sandboxes_isolation.rs", test = "mutating_the_hidden_fleet_cannot_change_one_response_byte", status = "verified" },
+  { requirement = "AUTH-06", tier = "pr", suite = "backend/tests/acceptance_isolation.rs", test = "hidden_rows_before_between_and_after_change_no_page_boundary", status = "verified" },
+  { requirement = "AUTH-06", tier = "pr", suite = "backend/tests/acceptance_isolation.rs", test = "a_hidden_row_never_shifts_a_relay_page_or_its_cursor", status = "verified" },
+
+  # ------------------------------------------------------------------- AUD-01
+  { requirement = "AUD-01", tier = "pr", suite = "backend/tests/audit_outcomes.rs", test = "every_recorded_outcome_satisfies_the_event_contract", status = "verified" },
+  { requirement = "AUD-01", tier = "pr", suite = "backend/tests/audit_middleware.rs", test = "an_unmatched_api_path_records_sentinels_only", status = "verified" },
+  { requirement = "AUD-01", tier = "pr", suite = "backend/tests/audit_middleware.rs", test = "a_leader_gate_rejection_is_recorded_as_rejected_with_its_real_status", status = "verified" },
+  { requirement = "AUD-01", tier = "pr", suite = "backend/tests/acceptance_outcomes.rs", test = "the_whole_terminal_matrix_produces_exactly_one_record_each", status = "verified" },
+  { requirement = "AUD-01", tier = "pr", suite = "backend/tests/acceptance_outcomes.rs", test = "a_retried_request_produces_two_records_and_never_one_duplicate_id", status = "verified" },
+  { requirement = "AUD-01", tier = "pr", suite = "backend/tests/acceptance_outcomes.rs", test = "an_aborted_request_closes_as_incomplete_with_a_null_status", status = "verified" },
+  { requirement = "AUD-01", tier = "pr", suite = "backend/tests/audit_route_drive.rs", test = "every_audited_operation_records_a_real_driven_request", status = "verified" },
+
+  # ------------------------------------------------------------------- AUD-02
+  { requirement = "AUD-02", tier = "pr", suite = "backend/src/audit/validate_tests.rs", test = "the_canonical_fixtures_are_valid", status = "verified" },
+  { requirement = "AUD-02", tier = "pr", suite = "backend/src/audit/validate_tests.rs", test = "inverted_or_inconsistent_timestamps_are_rejected", status = "verified" },
+  { requirement = "AUD-02", tier = "pr", suite = "backend/src/audit/event_tests.rs", test = "the_constructor_stamps_the_schema_version_and_derives_the_duration", status = "verified" },
+  { requirement = "AUD-02", tier = "pr", suite = "backend/tests/audit_middleware.rs", test = "a_malformed_request_id_is_replaced_in_the_response_and_the_record", status = "verified" },
+  { requirement = "AUD-02", tier = "pr", suite = "backend/tests/audit_outcomes.rs", test = "every_app_error_status_is_classified_with_its_stable_code", status = "verified" },
+
+  # ------------------------------------------------------------------- AUD-03
+  { requirement = "AUD-03", tier = "pr", suite = "backend/tests/audit_operation_policy.rs", test = "every_audited_operation_has_exactly_one_named_safe_argument_policy", status = "verified" },
+  { requirement = "AUD-03", tier = "pr", suite = "backend/tests/audit_operation_policy.rs", test = "no_declared_allowlist_names_a_forbidden_property", status = "verified" },
+  { requirement = "AUD-03", tier = "pr", suite = "backend/tests/audit_operation_policy.rs", test = "no_route_uses_a_raw_or_generic_argument_capture_helper", status = "verified" },
+  { requirement = "AUD-03", tier = "pr", suite = "backend/tests/audit_operation_policy.rs", test = "a_synthetic_operation_without_a_policy_fails_the_guard", status = "verified" },
+  { requirement = "AUD-03", tier = "pr", suite = "backend/tests/audit_redaction_canary.rs", test = "no_canary_reaches_a_record_or_its_posthog_payload", status = "verified" },
+  { requirement = "AUD-03", tier = "pr", suite = "backend/tests/audit_tracing.rs", test = "oauth_material_bearer_tokens_and_presigned_urls_never_reach_the_logs", status = "verified" },
+  { requirement = "AUD-03", tier = "pr", suite = "backend/tests/acceptance_canary.rs", test = "no_canary_survives_into_any_test_owned_output", status = "verified" },
+  { requirement = "AUD-03", tier = "pr", suite = "backend/tests/acceptance_canary.rs", test = "the_intended_safe_identifiers_are_still_present", status = "verified" },
+
+  # ------------------------------------------------------------------- AUD-04
+  { requirement = "AUD-04", tier = "pr", suite = "backend/src/audit/posthog_tests.rs", test = "several_events_use_the_batch_endpoint", status = "verified" },
+  { requirement = "AUD-04", tier = "pr", suite = "backend/src/operations/hogql_tests.rs", test = "malicious_filter_values_remain_parameters", status = "verified" },
+  { requirement = "AUD-04", tier = "pr", suite = "backend/src/operations/hogql_tests.rs", test = "the_keyset_predicate_is_a_strict_after_comparison_and_never_an_offset", status = "verified" },
+  { requirement = "AUD-04", tier = "pr", suite = "backend/tests/operations_activity_paging.rs", test = "identical_timestamps_page_deterministically", status = "verified" },
+  { requirement = "AUD-04", tier = "pr", suite = "backend/tests/operations_activity_sources.rs", test = "a_hostile_filter_value_is_refused_or_parameterized_never_interpolated", status = "verified" },
+  { requirement = "AUD-04", tier = "staging", suite = "backend/tests/acceptance_staging.rs", test = "a_real_posthog_project_round_trips_one_safe_record", status = "gated", gate_env = "FKST_ACCEPTANCE_POSTHOG_HOST" },
+
+  # ------------------------------------------------------------------- AUD-05
+  { requirement = "AUD-05", tier = "pr", suite = "backend/src/audit/event_tests.rs", test = "correlation_keeps_the_canonical_session_id_in_step", status = "verified" },
+  { requirement = "AUD-05", tier = "pr", suite = "backend/src/operations/hogql_tests.rs", test = "every_correlation_and_identity_column_the_dtos_document_is_projected", status = "verified" },
+  { requirement = "AUD-05", tier = "pr", suite = "backend/tests/audit_safe_arguments.rs", test = "the_log_file_record_keeps_its_class_and_session_correlation", status = "verified" },
+  { requirement = "AUD-05", tier = "pr", suite = "backend/tests/audit_safe_arguments.rs", test = "the_verified_webhook_record_keeps_its_closed_metadata", status = "verified" },
+  { requirement = "AUD-05", tier = "pr", suite = "backend/src/audit/lifecycle_tests.rs", test = "the_same_effect_derives_the_same_event_id_on_every_retry", status = "verified" },
+
+  # ------------------------------------------------------------------- AUD-06
+  { requirement = "AUD-06", tier = "pr", suite = "backend/src/audit_relay/worker_tests.rs", test = "the_sweep_publishes_the_bounded_state_gauges", status = "verified" },
+  { requirement = "AUD-06", tier = "pr", suite = "backend/src/audit_relay/capture_tests.rs", test = "a_poison_record_dies_alone_and_its_batch_mates_are_accepted", status = "verified" },
+  { requirement = "AUD-06", tier = "pr", suite = "backend/tests/operations_activity_sources.rs", test = "posthog_unavailable_still_returns_authorized_relay_rows_marked_partial", status = "verified" },
+  { requirement = "AUD-06", tier = "pr", suite = "deploy/kubernetes/monitoring/alert-fixtures.yaml", test = "FKSTAuditPostHogUnverified", status = "verified" },
+  { requirement = "AUD-06", tier = "pr", suite = "deploy/kubernetes/monitoring/alert-fixtures.yaml", test = "FKSTAuditDeadLetters", status = "verified" },
+  { requirement = "AUD-06", tier = "pr", suite = "deploy/kubernetes/tests/audit-runbook-smoke.sh", test = "dead-letter replay: a replay that dead-letters instead is refused", status = "verified" },
+  { requirement = "AUD-06", tier = "pr", suite = "deploy/kubernetes/tests/audit-runbook-smoke.sh", test = "posthog outage: an outage that stops durable ingress is refused", status = "verified" },
+  { requirement = "AUD-06", tier = "pr", suite = "deploy/kubernetes/tests/audit-relay-verify-test.sh", test = "an outage that drains without loss verifies", status = "verified" },
+
+  # ------------------------------------------------------------------- AUD-07
+  { requirement = "AUD-07", tier = "pr", suite = "backend/src/audit_relay/verify_tests.rs", test = "a_record_is_verified_only_when_the_query_reads_it_back", status = "verified" },
+  { requirement = "AUD-07", tier = "pr", suite = "backend/src/audit_relay/verify_tests.rs", test = "an_event_absent_past_the_lag_threshold_is_recaptured_with_the_same_id", status = "verified" },
+  { requirement = "AUD-07", tier = "pr", suite = "backend/src/audit_relay/capture_tests.rs", test = "retries_are_exhausted_into_a_retained_dead_letter", status = "verified" },
+  { requirement = "AUD-07", tier = "pr", suite = "backend/tests/audit_relay_e2e.rs", test = "a_replayed_completion_after_a_restart_is_acknowledged_not_duplicated", status = "verified" },
+  { requirement = "AUD-07", tier = "pr", suite = "backend/tests/acceptance_reliability.rs", test = "two_replicas_racing_one_duplicate_event_id_leave_exactly_one_record", status = "verified" },
+  { requirement = "AUD-07", tier = "pr", suite = "backend/tests/acceptance_reliability.rs", test = "a_read_only_database_never_acknowledges_a_record_it_cannot_store", status = "verified" },
+  { requirement = "AUD-07", tier = "pr", suite = "backend/tests/acceptance_reliability.rs", test = "a_damaged_or_unmounted_database_refuses_to_open_instead_of_losing_records", status = "verified" },
+  { requirement = "AUD-07", tier = "pr", suite = "backend/tests/acceptance_reliability.rs", test = "a_database_from_a_newer_build_refuses_to_open", status = "verified" },
+  { requirement = "AUD-07", tier = "pr", suite = "backend/tests/acceptance_kill_points.rs", test = "a_relay_restarted_under_write_pressure_keeps_exactly_the_acknowledged_records", status = "verified" },
+
+  # ------------------------------------------------------------------ SBOX-01
+  { requirement = "SBOX-01", tier = "pr", suite = "backend/src/operations/sandbox/service_tests.rs", test = "a_regular_caller_receives_only_their_authorized_rows_in_the_documented_order", status = "verified" },
+  { requirement = "SBOX-01", tier = "pr", suite = "backend/src/operations/sandbox/service_tests.rs", test = "a_global_admin_receives_the_complete_fleet_including_the_unattributable_rows", status = "verified" },
+  { requirement = "SBOX-01", tier = "pr", suite = "backend/tests/operations_sandboxes.rs", test = "a_deployment_without_a_runtime_backend_reports_the_feature_disabled", status = "verified" },
+  { requirement = "SBOX-01", tier = "pr", suite = "backend/tests/operations_sandboxes_isolation.rs", test = "a_failing_activity_source_does_not_affect_the_live_inventory", status = "verified" },
+
+  # ------------------------------------------------------------------ SBOX-02
+  { requirement = "SBOX-02", tier = "pr", suite = "backend/src/session_backend/k8s/inventory_tests.rs", test = "a_complete_pod_projects_every_correlation_and_attribution_fact", status = "verified" },
+  { requirement = "SBOX-02", tier = "pr", suite = "backend/src/session_backend/k8s/inventory_tests.rs", test = "a_missing_creation_timestamp_is_not_defaulted_to_now", status = "verified" },
+  { requirement = "SBOX-02", tier = "pr", suite = "backend/tests/openapi_operations.rs", test = "the_sandbox_item_schema_documents_every_required_field", status = "verified" },
+  { requirement = "SBOX-02", tier = "pr", suite = "frontend/src/lib/operations/format.test.ts", test = "treats a null maximum as UNLIMITED, never as zero remaining", status = "verified" },
+
+  # ------------------------------------------------------------------ SBOX-03
+  { requirement = "SBOX-03", tier = "pr", suite = "backend/src/session_backend/k8s/inventory_tests.rs", test = "every_phase_maps_and_deletion_wins", status = "verified" },
+  { requirement = "SBOX-03", tier = "pr", suite = "backend/src/session_backend/k8s/inventory_tests.rs", test = "restart_counts_sum_across_app_and_init_containers", status = "verified" },
+  { requirement = "SBOX-03", tier = "pr", suite = "backend/src/session_backend/opensandbox/backend/inventory_safety_tests.rs", test = "reason_and_message_are_bounded_and_secret_safe", status = "verified" },
+  { requirement = "SBOX-03", tier = "pr", suite = "backend/tests/operations_sandboxes.rs", test = "an_opensandbox_snapshot_reports_its_unsupported_fields_as_null", status = "verified" },
+  { requirement = "SBOX-03", tier = "pr", suite = "backend/tests/acceptance_runtime_parity.rs", test = "both_adapters_normalize_one_equivalent_fact_set_identically", status = "verified" },
+
+  # ------------------------------------------------------------------ SBOX-04
+  { requirement = "SBOX-04", tier = "pr", suite = "backend/src/session_backend/k8s/inventory_live_tests.rs", test = "the_inventory_read_costs_exactly_one_list_and_no_per_pod_get", status = "verified" },
+  { requirement = "SBOX-04", tier = "pr", suite = "backend/src/operations/sandbox/service_tests.rs", test = "exactly_one_inventory_read_happens_per_request", status = "verified" },
+  { requirement = "SBOX-04", tier = "pr", suite = "backend/tests/operations_sandboxes.rs", test = "one_inventory_read_happens_and_no_other_backend_verb_is_touched", status = "verified" },
+  { requirement = "SBOX-04", tier = "pr", suite = "backend/tests/acceptance_runtime_parity.rs", test = "the_opensandbox_inventory_walks_pages_and_reads_no_single_sandbox", status = "verified" },
+
+  # ------------------------------------------------------------------ SBOX-05
+  { requirement = "SBOX-05", tier = "pr", suite = "backend/src/k8s/session_launcher_identity_tests.rs", test = "a_session_pod_is_stamped_with_the_identity_annotations_and_its_provenance", status = "verified" },
+  { requirement = "SBOX-05", tier = "pr", suite = "backend/src/session_backend/opensandbox/backend/correlate_tests.rs", test = "a_sandbox_predating_the_stamp_recovers_as_unknown_legacy", status = "verified" },
+  { requirement = "SBOX-05", tier = "pr", suite = "backend/src/session_backend/opensandbox/backend/correlate_tests.rs", test = "a_backfilled_stamp_reads_back_as_backfilled_not_launched", status = "verified" },
+  { requirement = "SBOX-05", tier = "pr", suite = "backend/src/operations/sandbox/authorize_tests.rs", test = "a_stale_login_with_a_different_id_does_not_inherit_the_session", status = "verified" },
+
+  # ------------------------------------------------------------------ SBOX-06
+  { requirement = "SBOX-06", tier = "pr", suite = "backend/src/operations/sandbox/service_tests.rs", test = "mutating_the_hidden_rows_changes_nothing_about_an_authorized_result", status = "verified" },
+  { requirement = "SBOX-06", tier = "pr", suite = "backend/src/session_access/gate_tests.rs", test = "an_unauthorized_exact_session_is_indistinguishable_from_an_unknown_one", status = "verified" },
+  { requirement = "SBOX-06", tier = "pr", suite = "backend/tests/operations_sandboxes.rs", test = "an_unknown_and_an_unauthorized_session_id_are_indistinguishable", status = "verified" },
+  { requirement = "SBOX-06", tier = "pr", suite = "backend/tests/operations_sandboxes_isolation.rs", test = "warnings_reach_a_caller_only_for_rows_that_caller_receives", status = "verified" },
+  { requirement = "SBOX-06", tier = "pr", suite = "backend/tests/acceptance_isolation.rs", test = "a_mutated_hidden_fleet_leaves_the_regular_response_byte_equivalent", status = "verified" },
+
+  # -------------------------------------------------------------------- UI-01
+  { requirement = "UI-01", tier = "pr", suite = "frontend/src/lib/operations/url.test.ts", test = "round-trips a non-default activity state", status = "verified" },
+  { requirement = "UI-01", tier = "pr", suite = "frontend/src/pages/operations.test.tsx", test = "encodes each filter into the request and the URL", status = "verified" },
+  { requirement = "UI-01", tier = "pr", suite = "frontend/e2e/operations.spec.ts", test = "every authenticated user finds Operations in the nav and can open it", status = "verified" },
+  { requirement = "UI-01", tier = "pr", suite = "frontend/e2e/operations-acceptance.spec.ts", test = "worst-case strings never overlap, resize a control, or scroll the body", status = "verified" },
+  { requirement = "UI-01", tier = "pr", suite = "frontend/e2e/operations-acceptance.spec.ts", test = "a thousand authorized rows stay interactive", status = "verified" },
+
+  # -------------------------------------------------------------------- UI-02
+  { requirement = "UI-02", tier = "pr", suite = "frontend/src/pages/operations.security.test.tsx", test = "refreshes activity every 15 seconds while visible and pauses when hidden", status = "verified" },
+  { requirement = "UI-02", tier = "pr", suite = "frontend/src/pages/operations.security.test.tsx", test = "refreshes sandboxes every 5 seconds", status = "verified" },
+  { requirement = "UI-02", tier = "pr", suite = "frontend/src/pages/operations.test.tsx", test = "marks a snapshot stale once it is older than fifteen seconds", status = "verified" },
+  { requirement = "UI-02", tier = "pr", suite = "frontend/e2e/operations.spec.ts", test = "pauses while the tab is hidden and resumes on return", status = "verified" },
+
+  # -------------------------------------------------------------------- UI-03
+  { requirement = "UI-03", tier = "pr", suite = "frontend/src/pages/operations.test.tsx", test = "cross-links a session into an own-plus-lifecycle activity query", status = "verified" },
+  { requirement = "UI-03", tier = "pr", suite = "frontend/e2e/operations.spec.ts", test = "shows the viewer’s own calls plus lifecycle, and no collaborator calls", status = "verified" },
+  { requirement = "UI-03", tier = "pr", suite = "backend/tests/operations_activity.rs", test = "an_authorized_session_timeline_adds_lifecycle_rows_but_no_foreign_calls", status = "verified" },
+  { requirement = "UI-03", tier = "pr", suite = "frontend/e2e/operations-acceptance.spec.ts", test = "the timeline drawer is reachable and announced to assistive technology", status = "verified" },
+
+  # -------------------------------------------------------------------- UI-04
+  { requirement = "UI-04", tier = "pr", suite = "frontend/src/pages/operations.security.test.tsx", test = "offers a regular user no scope control and no actor filters", status = "verified" },
+  { requirement = "UI-04", tier = "pr", suite = "frontend/src/pages/operations.security.test.tsx", test = "upgrades a global admin to the all scope and reveals the actor filters", status = "verified" },
+  { requirement = "UI-04", tier = "pr", suite = "frontend/src/pages/operations.security.test.tsx", test = "drops the rows the moment the viewer signs out", status = "verified" },
+  { requirement = "UI-04", tier = "pr", suite = "frontend/e2e/operations-acceptance.spec.ts", test = "switching identity clears every row and cursor before the next answer", status = "verified" },
+  { requirement = "UI-04", tier = "pr", suite = "frontend/e2e/operations-acceptance.spec.ts", test = "the Chinese catalogue names the same scopes and states", status = "verified" },
+
+  # ------------------------------------------------------------------- OPS-01
+  { requirement = "OPS-01", tier = "pr", suite = "backend/src/audit/request/middleware_required_tests.rs", test = "required_mode_does_not_invoke_the_handler_when_the_start_is_not_durable", status = "verified" },
+  { requirement = "OPS-01", tier = "pr", suite = "backend/src/audit/request/middleware_required_tests.rs", test = "required_mode_refuses_to_report_a_status_it_could_not_record", status = "verified" },
+  { requirement = "OPS-01", tier = "pr", suite = "backend/tests/acceptance_reliability.rs", test = "a_relay_that_dies_after_the_handler_leaves_an_incomplete_not_a_status", status = "verified" },
+  { requirement = "OPS-01", tier = "pr", suite = "backend/tests/acceptance_kill_points.rs", test = "a_control_plane_killed_between_the_start_and_the_handler_leaves_an_incomplete", status = "verified" },
+  { requirement = "OPS-01", tier = "pr", suite = "backend/tests/acceptance_kill_points.rs", test = "a_control_plane_killed_during_the_handler_leaves_an_incomplete_not_a_status", status = "verified" },
+  { requirement = "OPS-01", tier = "pr", suite = "backend/tests/acceptance_kill_points.rs", test = "a_control_plane_killed_after_the_completion_stores_exactly_one_terminal", status = "verified" },
+  { requirement = "OPS-01", tier = "pr", suite = "backend/tests/acceptance_kill_points.rs", test = "a_relay_killed_before_the_commit_refuses_the_write_and_stores_nothing", status = "verified" },
+  { requirement = "OPS-01", tier = "pr", suite = "deploy/kubernetes/tests/audit-runbook-smoke.sh", test = "required-mode switch: a disagreeing incomplete grace is refused", status = "verified" },
+  { requirement = "OPS-01", tier = "integration", suite = "backend/tests/acceptance_integration.rs", test = "a_built_relay_container_serves_required_mode_over_a_real_volume", status = "gated", gate_env = "FKST_ACCEPTANCE_INTEGRATION" },
+
+  # ------------------------------------------------------------------- OPS-02
+  { requirement = "OPS-02", tier = "pr", suite = "backend/tests/operations_activity_ops.rs", test = "the_query_credential_never_reaches_a_record_a_metric_or_a_response", status = "verified" },
+  { requirement = "OPS-02", tier = "pr", suite = "backend/tests/audit_relay_e2e.rs", test = "no_credential_canary_reaches_a_response_or_the_database_file", status = "verified" },
+  { requirement = "OPS-02", tier = "pr", suite = "backend/src/audit/posthog_tests.rs", test = "the_project_token_never_reaches_debug_output", status = "verified" },
+  { requirement = "OPS-02", tier = "pr", suite = "deploy/kubernetes/validate-audit-relay.rb", test = "SECRET_VARS", status = "verified" },
+  { requirement = "OPS-02", tier = "pr", suite = "deploy/kubernetes/tests/audit-runbook-smoke.sh", test = "credential rotation: a credential left in the ConfigMap is refused", status = "verified" },
+  { requirement = "OPS-02", tier = "pr", suite = "deploy/kubernetes/tests/audit-relay-verify-test.sh", test = "a credential in the relay ConfigMap is refused", status = "verified" },
+
+  # ------------------------------------------------------------------- OPS-03
+  { requirement = "OPS-03", tier = "pr", suite = "backend/tests/audit_relay_e2e.rs", test = "two_replicas_write_concurrently_without_loss_or_duplication", status = "verified" },
+  { requirement = "OPS-03", tier = "pr", suite = "backend/src/session_access/registry_tests.rs", test = "a_dispatch_disabled_deployment_is_authoritatively_empty", status = "verified" },
+  { requirement = "OPS-03", tier = "pr", suite = "backend/tests/acceptance_reliability.rs", test = "a_restarted_replica_needs_no_in_process_state_to_serve_history", status = "verified" },
+  { requirement = "OPS-03", tier = "pr", suite = "deploy/kubernetes/tests/audit-runbook-smoke.sh", test = "pvc restore: a restored volume that survives a restart verifies", status = "verified" },
+  { requirement = "OPS-03", tier = "pr", suite = "deploy/kubernetes/tests/audit-relay-verify-test.sh", test = "an unbound audit volume is refused", status = "verified" },
+
+  # ------------------------------------------------------------------- OPS-04
+  { requirement = "OPS-04", tier = "pr", suite = "backend/src/operations/metrics_tests.rs", test = "every_label_value_is_a_bounded_snake_case_constant", status = "verified" },
+  { requirement = "OPS-04", tier = "pr", suite = "backend/src/operations/sandbox/metrics_tests.rs", test = "the_series_count_is_fixed_by_the_closed_label_sets", status = "verified" },
+  { requirement = "OPS-04", tier = "pr", suite = "backend/tests/acceptance_canary.rs", test = "the_whole_exposition_carries_no_unbounded_label_value", status = "verified" },
+  { requirement = "OPS-04", tier = "pr", suite = "deploy/kubernetes/validate-monitoring.rb", test = "FORBIDDEN_IDENTITY_TOKENS", status = "verified" },
+  { requirement = "OPS-04", tier = "pr", suite = "deploy/kubernetes/tests/audit-relay-verify-test.sh", test = "an identity label in the relay exposition is refused", status = "verified" },
+
+  # ------------------------------------------------------------------ TEST-01
+  { requirement = "TEST-01", tier = "pr", suite = "backend/tests/acceptance_matrix.rs", test = "every_requirement_maps_to_at_least_one_existing_named_test", status = "verified" },
+  { requirement = "TEST-01", tier = "pr", suite = "backend/tests/acceptance_matrix.rs", test = "the_linter_rejects_an_unmapped_missing_or_contradictory_entry", status = "verified" },
+  { requirement = "TEST-01", tier = "pr", suite = "backend/tests/acceptance_matrix.rs", test = "the_evidence_artifact_names_every_requirement_and_no_payload", status = "verified" },
+  { requirement = "TEST-01", tier = "pr", suite = "backend/tests/acceptance_performance.rs", test = "the_measured_capacity_numbers_are_recorded_and_within_budget", status = "verified" },
+  { requirement = "TEST-01", tier = "pr", suite = "backend/tests/acceptance_performance_reads.rs", test = "the_activity_query_latency_is_recorded_and_within_budget", status = "verified" },
+  { requirement = "TEST-01", tier = "pr", suite = "backend/tests/acceptance_performance_reads.rs", test = "the_one_pass_inventory_latency_is_recorded_for_representative_fleets", status = "verified" },
+  { requirement = "TEST-01", tier = "pr", suite = "backend/tests/acceptance_matrix.rs", test = "every_requirement_names_a_known_owner_and_an_unknown_one_is_refused", status = "verified" },
+  { requirement = "TEST-01", tier = "pr", suite = "deploy/kubernetes/tests/audit-runbook-smoke.sh", test = "provisioning: a fully provisioned relay verifies", status = "verified" },
+  { requirement = "TEST-01", tier = "staging", suite = "backend/tests/acceptance_staging.rs", test = "a_second_regular_user_cannot_find_the_first_users_staging_record", status = "gated", gate_env = "FKST_ACCEPTANCE_POSTHOG_HOST" },
+  { requirement = "TEST-01", tier = "integration", suite = "backend/tests/acceptance_integration.rs", test = "a_disposable_cluster_serves_both_runtime_modes_from_one_list", status = "gated", gate_env = "FKST_ACCEPTANCE_INTEGRATION" },
+]

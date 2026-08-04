@@ -37,6 +37,7 @@ use super::{
 mod credential;
 mod engine_observe;
 mod fleet;
+mod inventory;
 mod lifecycle;
 mod status;
 mod validation;
@@ -113,6 +114,25 @@ fn annotation<'a>(pod: &'a Pod, key: &str) -> Option<&'a str> {
 
 #[async_trait]
 impl SessionBackend for K8sBackend {
+    fn backend_kind(&self) -> crate::runtime_identity::RuntimeBackendKind {
+        crate::runtime_identity::RuntimeBackendKind::Kubernetes
+    }
+
+    fn deterministic_runtime_id(&self, session_id: &str) -> Option<String> {
+        // The Pod name IS `fkst-sess-<session_id>`, so the handle needs no round
+        // trip — which is what lets a lifecycle record name the created runtime.
+        Some(crate::k8s::session_object_name(session_id))
+    }
+
+    async fn ensure_runtime_identity(
+        &self,
+        session_id: &str,
+        identity: &crate::runtime_identity::RuntimeIdentityMetadata,
+    ) -> Result<crate::runtime_identity::RuntimeIdentityOutcome, BackendError> {
+        self.ensure_runtime_identity_impl(session_id, identity)
+            .await
+    }
+
     async fn check_reachable(&self) -> Result<String, BackendError> {
         self.kube
             .check_reachable()
@@ -152,6 +172,13 @@ impl SessionBackend for K8sBackend {
 
     async fn list_fleet(&self) -> Result<Vec<SessionHandle>, BackendError> {
         self.list_fleet_impl().await
+    }
+
+    async fn list_runtime_inventory(
+        &self,
+        policy: &crate::session_backend::inventory::RuntimeLifetimePolicy,
+    ) -> Result<crate::session_backend::inventory::RuntimeInventorySnapshot, BackendError> {
+        self.list_runtime_inventory_impl(policy).await
     }
 
     async fn deliver_credential(

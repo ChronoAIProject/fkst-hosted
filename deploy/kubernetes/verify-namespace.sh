@@ -165,10 +165,10 @@ replicas=$(kubectl --context "$context" --namespace "$namespace" get \
   deployment fkst-control-plane --output jsonpath='{.spec.replicas}')
 available=$(kubectl --context "$context" --namespace "$namespace" get \
   deployment fkst-control-plane --output jsonpath='{.status.availableReplicas}')
-[ "$replicas" = "2" ] && [ "$available" = "2" ] || {
+if [ "$replicas" != "2" ] || [ "$available" != "2" ]; then
   echo "control plane must have two healthy replicas (desired=$replicas available=$available)" >&2
   exit 1
-}
+fi
 
 # The Pods are health-ready for Deployment convergence, while exactly one
 # resync-complete Lease holder publishes the additional Service selector label.

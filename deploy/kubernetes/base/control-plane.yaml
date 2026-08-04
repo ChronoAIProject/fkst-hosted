@@ -101,6 +101,12 @@ spec:
             - mountPath: /var/secrets
               name: opensandbox-fkst-api-key
               readOnly: true
+      # The control plane is STATELESS and must stay that way: two replicas, one
+      # Lease holder, and nothing here but scratch space and a key file. The
+      # audit trail's durable buffering belongs to the separate `audit-relay/`
+      # workload and its own claim — the control plane receives only the relay's
+      # Service URL (ConfigMap) and its bearer tokens (Secret), never its volume.
+      # `validate-audit-relay.rb` fails the render if a claim appears here.
       volumes:
         - name: runtime
           emptyDir: {}

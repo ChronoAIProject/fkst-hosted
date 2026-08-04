@@ -1,0 +1,25 @@
+# Metrics-only Service for the durable audit relay.
+#
+# Separate from the relay's product Service so the two scrape targets carry
+# distinct `service` labels (`fkst-audit-relay-metrics` vs
+# `fkst-control-plane-metrics`). That distinction is load-bearing: the control
+# plane and the relay both publish `fkst_audit_relay_*` families — the client
+# side of the conversation and the storage side — and every alert expression
+# pins the `service` label so it can never silently aggregate across the two.
+apiVersion: v1
+kind: Service
+metadata:
+  name: fkst-audit-relay-metrics
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/component: audit-monitoring
+    app.kubernetes.io/name: fkst-audit-relay-metrics
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  selector:
+    app.kubernetes.io/name: fkst-audit-relay

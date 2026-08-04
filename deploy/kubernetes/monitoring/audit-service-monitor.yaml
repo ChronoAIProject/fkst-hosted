@@ -1,0 +1,33 @@
+# Scrape definition for the durable audit relay.
+#
+# The relay's `/metrics` is unauthenticated and reachable only from a namespace
+# the operator labelled `fkst.chronoai.io/metrics-scraper=true` (see the relay
+# NetworkPolicy). Every series it exposes has closed-enum labels — bounded
+# delivery states, ingress kinds, capture/verification results, dead-letter
+# reasons — so scraping it reveals nothing about any actor, session, request, or
+# repository (epic `OPS-04`).
+#
+# No `metricRelabelings` drop list is needed here, unlike the control-plane
+# monitor: the relay publishes no info-metric carrying an identity.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: fkst-audit-relay
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/component: audit-monitoring
+    app.kubernetes.io/name: fkst-audit-relay
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  namespaceSelector:
+    matchNames:
+      - chronoai-fkst
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fkst-audit-relay-metrics
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      honorLabels: false

@@ -2,13 +2,15 @@
 
 use std::sync::Arc;
 
+use crate::audit::AuditHandle;
 use crate::config::Config;
 use crate::disposable_environment::DisposableEnvironmentRegistry;
 use crate::github_app::GithubAppTokens;
-use crate::log_access::LogAccessRegistry;
 use crate::log_bundle_cache::LogBundleCache;
+use crate::operations::OperationsState;
 use crate::reconcile::ReconcileDispatcher;
 use crate::recovery::RecoveryMonitor;
+use crate::session_access::SessionAccessState;
 use crate::session_backend::SessionBackend;
 use crate::storage::ChronoStorageClient;
 
@@ -50,10 +52,19 @@ pub struct AppState {
     /// (`FKST_STORAGE_*` unset) — the endpoint then reports the feature disabled.
     /// Shared behind an `Arc` (the client holds a connection pool + token cache).
     pub storage: Option<Arc<ChronoStorageClient>>,
-    /// The in-memory `session_id -> log-access context` registry: the reverse map
-    /// the identity-gated `/api/v1/logs/{session_id}` endpoint authorizes against.
-    /// Populated by the reconciler each sweep; a cheap `Arc`-backed handle.
-    pub log_registry: LogAccessRegistry,
+    /// Session-scoped authorization: the reconciler-published
+    /// `session_id -> context` projection every session route authorizes against
+    /// (a `session_id` is a one-way hash, so this reverse map is the only way to
+    /// recover the trigger context), plus the bounded operations-scope counters.
+    /// Cheap `Arc`-backed handles.
+    pub session_access: SessionAccessState,
+    /// The operations surface's query engine (milestone #22): the configured
+    /// activity sources, their bounded admission budget, and their closed-label
+    /// telemetry. Default (no source configured) makes
+    /// `GET /api/v1/operations/activity` answer a stable
+    /// `503 audit_query_not_configured`, so a deployment without PostHog read
+    /// credentials behaves exactly as it did before. A cheap `Arc`-backed handle.
+    pub operations: OperationsState,
     /// TTL-bounded cache of each session's redacted log bundle (the gzip'd `tar.gz`
     /// fetched from chrono-storage). Lets the log viewer's manifest + per-file reads
     /// and the whole-bundle download share one storage fetch per ~30s window instead
@@ -79,6 +90,12 @@ pub struct AppState {
     /// `None` when `FKST_CHAT_ENABLED` is not true — `POST /api/v1/chat` is then not
     /// mounted at all, and is likewise absent from `/openapi.json`.
     pub chat: Option<Arc<crate::chat::ChatRuntime>>,
+    /// The cloneable audit sink handle (milestone #22). Always present: with
+    /// `FKST_POSTHOG_ENABLED` unset it is the no-op sink, which starts no worker
+    /// and makes no network call, so a deployment with auditing off behaves
+    /// exactly as it did before. `/metrics` renders its bounded delivery
+    /// telemetry.
+    pub audit: AuditHandle,
 }
 
 /// Deferred handle to the assembled router (see [`AppState::self_router`]).

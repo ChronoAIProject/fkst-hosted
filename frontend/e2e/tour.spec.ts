@@ -71,7 +71,11 @@ test.describe('guided product tour', () => {
       await expect(page.getByText(label)).toBeVisible();
     }
     await page.getByRole('button', { name: 'Next' }).click();
-    await expect(page.getByText('Start a session')).toBeVisible();
+    // Addressed by ROLE rather than by text: the chat concierge's suggestion
+    // chips include "How do I start a session?", so a bare text match resolves
+    // to two elements and fails Playwright's strict mode. The step's own title is
+    // a heading, which is both unambiguous and the thing being asserted.
+    await expect(page.getByRole('heading', { name: 'Start a session' })).toBeVisible();
     await expect(page.getByTestId('tour-spotlight')).toBeVisible();
   });
 });

@@ -1,20 +1,22 @@
 //! Router composition with the cross-cutting tower-http middleware stack.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::{Request, State};
-use axum::http::{Method, StatusCode};
+use axum::http::{HeaderName, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::Router;
 use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
-use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use crate::audit::event::ServiceIdentity;
+use crate::audit::request::{self as audit_request, AuditMiddleware, OperationCatalog};
 use crate::error::AppError;
 use crate::openapi;
 use crate::recovery::RecoveryMonitor;
@@ -26,6 +28,25 @@ use crate::state::AppState;
 /// (`deadline + WAIT_BUFFER(30)`) plus pod-setup and log-read overhead, so the
 /// descriptive `422` (a timed-out verdict) wins the race over a bare `408`.
 const ENV_PUT_TIMEOUT_BUFFER_SECS: u64 = 60;
+
+/// The request ceiling the WHOLE `/api/v1` nest runs under.
+///
+/// Every route under `/api/v1` — not just the environments PUT — inherits this
+/// subtree's `TimeoutLayer`, so `FKST_HOSTED_REQUEST_TIMEOUT_SECS` (the top-level
+/// ceiling) bounds `/health`, `/metrics`, and the webhook but bounds none of the
+/// API. It is a function rather than an inline expression because a route budget
+/// that must sit "below the request ceiling" needs to be compared against the
+/// ceiling that actually applies to it (see
+/// [`crate::operations::sandbox::SandboxInventoryConfig::warn_unless_below`]);
+/// two independent derivations of the same number is how such a check ends up
+/// measuring the wrong knob.
+pub(crate) fn api_subtree_timeout(env: &crate::env_config::EnvConfig) -> Duration {
+    Duration::from_secs(
+        u64::try_from(env.validate_deadline_secs)
+            .unwrap_or(0)
+            .saturating_add(ENV_PUT_TIMEOUT_BUFFER_SECS),
+    )
+}
 
 #[derive(Clone)]
 struct LeadershipGate {
@@ -43,7 +64,13 @@ async fn require_ready_leader(
     next: Next,
 ) -> Response {
     if gate.enabled && !gate.recovery.snapshot().ready {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        // A gate answer is a POLICY short-circuit, not a handler outcome: it is
+        // tagged so the audit record says `rejected` with the real 503 and a
+        // stable code, instead of looking like a dependency outage.
+        return audit_request::with_rejection(
+            StatusCode::SERVICE_UNAVAILABLE.into_response(),
+            audit_request::codes::LEADER_NOT_READY,
+        );
     }
     next.run(request).await
 }
@@ -61,6 +88,13 @@ fn cors_layer() -> CorsLayer {
             Method::DELETE,
         ])
         .allow_headers(Any)
+        // `X-Request-Id` is not a CORS-safelisted response header, so without
+        // this a cross-origin caller — which the prescribed deployment topology
+        // makes the NORMAL case (`app.` and `api.` are different origins) — sees
+        // `null` from `response.headers.get('x-request-id')`. The frontend shows
+        // that id on every failure so a user can quote it to support; promising
+        // it while the browser filters it out is a promise that never lands.
+        .expose_headers([HeaderName::from_static(audit_request::REQUEST_ID_HEADER)])
 }
 
 /// Build the application router.
@@ -89,13 +123,9 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
     };
     // The named-environment PUT runs the isolated install-validation pod for up to
     // `env.validate_deadline_secs` — far beyond the short global timeout. So the
-    // environments surface carries its OWN, much longer timeout; every OTHER route
-    // keeps the short one. See `ENV_PUT_TIMEOUT_BUFFER_SECS`.
-    let env_timeout = Duration::from_secs(
-        u64::try_from(state.config.env.validate_deadline_secs)
-            .unwrap_or(0)
-            .saturating_add(ENV_PUT_TIMEOUT_BUFFER_SECS),
-    );
+    // `/api/v1` subtree carries its OWN, much longer timeout; the top level keeps
+    // the short one. See `api_subtree_timeout`.
+    let env_timeout = api_subtree_timeout(&state.config.env);
 
     // The named-environment REST API (issue #338) under `/api/v1`. It is open at
     // the app layer: identity is the per-request GitHub token verified by the
@@ -119,6 +149,9 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
         // The identity-gated engine observe read-model (issue #473); authorizes
         // in-handler with the SAME three-tier check as the log download.
         .merge(routes::observe::router())
+        // The operations surface (milestone #22): available to every admitted
+        // user, with row-level authorization decided server-side.
+        .merge(routes::operations::router())
         // The identity-gated session health reports (milestone "Session health
         // reports"); authorized identically to the log-download path.
         .merge(routes::session_health::router());
@@ -190,14 +223,52 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
     // `/openapi.json` route, merged back onto the concrete axum router.
     let (router, spec) = top.merge(env).split_for_parts();
 
+    // The audit catalog is built from the SAME document that is served, so an
+    // operation's recorded id is by construction the id clients read in the
+    // contract. A missing/duplicate operation id — or a documented operation with
+    // no explicit audit policy — fails the build rather than producing an audit
+    // trail with a silent hole in it.
+    // The delivery policy is resolved from configuration HERE rather than carried
+    // on the application state, because the middleware is the only consumer and
+    // its telemetry already rides `state.audit`. A `required` deployment whose
+    // relay coordinates are missing fails the build — silently degrading to
+    // best-effort would make the deployment's central durability claim false.
+    let delivery = crate::audit::relay::AuditDelivery::from_config(
+        &state.config.audit_delivery,
+        state.audit.relay_metrics(),
+    )?;
+    let audit = AuditMiddleware::new(
+        Arc::new(OperationCatalog::from_openapi(&spec).map_err(|error| {
+            AppError::Config(format!("audit operation catalog is invalid: {error}"))
+        })?),
+        state.audit.clone(),
+        ServiceIdentity {
+            version: state.config.audit.service_version.clone(),
+            environment: state.config.audit.environment.clone(),
+        },
+    )
+    .with_delivery(delivery);
+
     let router = router
         .merge(openapi::spec_route(spec)?)
         .with_state(state)
         .layer(
             ServiceBuilder::new()
-                .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
-                .layer(TraceLayer::new_for_http())
-                .layer(PropagateRequestIdLayer::x_request_id())
+                // OUTERMOST on purpose: CORS preflights, the trace span, the
+                // route-scoped timeouts, the leader gate, extractor rejections,
+                // `AppError` conversion, and axum's own 404/405 are all inside
+                // it, which is what makes "exactly one terminal record per
+                // request" (epic `AUD-01`) true rather than aspirational. It also
+                // owns `X-Request-Id` end to end — accepting a well-formed client
+                // value, replacing anything else, and echoing the normalized id —
+                // so there is one source of truth for request correlation.
+                .layer(middleware::from_fn_with_state(
+                    audit,
+                    audit_request::audit_requests,
+                ))
+                // The default span records the RAW uri (query included); this one
+                // records only the method and the normalized request id.
+                .layer(TraceLayer::new_for_http().make_span_with(audit_request::SafeHttpSpan))
                 .layer(cors_layer()),
         );
 

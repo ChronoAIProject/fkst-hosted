@@ -51,6 +51,7 @@ use crate::k8s::work_label_wire::split_work_labels;
 use crate::k8s::SessionPodSpec;
 use crate::models::RepoRef;
 use crate::reconcile::desired::{LivePod, PodLiveness};
+use crate::runtime_identity::{ObservedRuntimeIdentity, OSB_IDENTITY_KEYS};
 use crate::session_backend::opensandbox::dto::{SandboxState, SandboxView};
 use crate::session_backend::{BackendError, SessionHandle};
 
@@ -138,7 +139,22 @@ pub fn stamp(spec: &SessionPodSpec) -> Result<BTreeMap<String, String>, BackendE
     {
         put(&mut meta, &work_label_chunk_key(index), chunk)?;
     }
+    // Durable creator/trigger attribution (issue #5673). Rendered by the SHARED
+    // key module so the OpenSandbox and Kubernetes stamps cannot drift, and put
+    // through the same validator as everything else: a login or id that violates
+    // the label-value contract fails the create loudly instead of producing an
+    // untraceable sandbox. Logins arrive already normalized, so the App-author
+    // form `slug[bot]` — which the validator would reject — never reaches here.
+    for (key, value) in crate::runtime_identity::stamp_pairs(&OSB_IDENTITY_KEYS, &spec.identity()) {
+        put(&mut meta, key, value)?;
+    }
     Ok(meta)
+}
+
+/// Recover the durable attribution stamp from a sandbox's metadata. The exact
+/// inverse of the identity half of [`stamp`], through the same shared key set.
+pub fn recover_identity(view: &SandboxView) -> ObservedRuntimeIdentity {
+    crate::runtime_identity::read(&OSB_IDENTITY_KEYS, &view.metadata)
 }
 
 /// Hex-encode the work-label SET and split it into ≤[`WORK_LABEL_HEX_CHUNK`]-char pieces,
@@ -225,6 +241,7 @@ pub fn to_live_pod(view: &SandboxView) -> Option<LivePod> {
         last_pending_at,
         config_hash,
         work_labels,
+        identity: recover_identity(view),
     })
 }
 
@@ -253,10 +270,27 @@ pub fn state_to_liveness(state: &SandboxState) -> PodLiveness {
     }
 }
 
+/// Insert `key`=`value` into a metadata map after validating it, for callers
+/// outside this module (the attribution backfill patch). Re-exported rather than
+/// re-implemented so a merge-patch can never write a value the create path would
+/// have refused.
+pub fn put_metadata(
+    meta: &mut BTreeMap<String, String>,
+    key: &str,
+    value: String,
+) -> Result<(), BackendError> {
+    put(meta, key, value)
+}
+
 /// Insert `key`=`value` into `meta` after validating `value` against the K8s
 /// label-value contract. An invalid value is a loud error — logged + returned — never
 /// silently dropped or emitted (which the server would reject on create). The value is
 /// non-secret correlation data (owner/repo/label/hash), so logging it aids debugging.
+///
+/// The error is the CLASSIFIED [`BackendError::InvalidMetadata`], not an opaque
+/// `Other`: this rejection is permanent and self-inflicted, and the lifecycle
+/// record that follows must say `invalid_metadata` rather than blame the
+/// backend's availability.
 fn put(meta: &mut BTreeMap<String, String>, key: &str, value: String) -> Result<(), BackendError> {
     if !is_valid_label_value(&value) {
         tracing::error!(
@@ -265,9 +299,7 @@ fn put(meta: &mut BTreeMap<String, String>, key: &str, value: String) -> Result<
             "opensandbox correlate: metadata value violates the K8s label-value contract \
              ([A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?, <=63 chars); refusing to stamp"
         );
-        return Err(BackendError::Other(anyhow::anyhow!(
-            "opensandbox metadata value for `{key}` is not a valid Kubernetes label value"
-        )));
+        return Err(BackendError::InvalidMetadata);
     }
     meta.insert(key.to_string(), value);
     Ok(())

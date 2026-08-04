@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 use crate::error::AppError;
+use crate::models::RepoRef;
 use crate::reconcile::execute::ReconcileCtx;
 use crate::reconcile::repo::reconcile_repo;
 use crate::recovery::{RecoveryMonitor, ResyncResult};
@@ -36,16 +37,30 @@ pub async fn run_reconcile_loop(mut rx: mpsc::Receiver<RepoKey>, ctx: ReconcileC
             return;
         };
         for (installation, repo) in drain_pending(first, &mut rx) {
-            if let Err(error) = reconcile_repo(installation, &repo, &ctx).await {
-                tracing::warn!(
-                    installation,
-                    owner = %repo.owner,
-                    name = %repo.name,
-                    error = %error,
-                    "reconcile loop: repo reconcile failed (will retry next sweep)"
-                );
-            }
+            reconcile_one(installation, &repo, &ctx).await;
         }
+    }
+}
+
+/// Reconcile one repository, absorbing its failure.
+///
+/// A failed pass never publishes session-access contexts (`reconcile_repo`
+/// `?`-returns before it records them), so the projection must be told: a
+/// repository that fails EVERY pass — Issues disabled, installation revoked —
+/// would otherwise hold a staged full-resync generation open forever, and a staged
+/// generation swallows every other repository's writes. Reporting the failure
+/// degrades that generation to incremental maintenance instead
+/// ([`crate::session_access::SessionAccessRegistry::record_repo_failure`]).
+async fn reconcile_one(installation: i64, repo: &RepoRef, ctx: &ReconcileCtx) {
+    if let Err(error) = reconcile_repo(installation, repo, ctx).await {
+        tracing::warn!(
+            installation,
+            owner = %repo.owner,
+            name = %repo.name,
+            error = %error,
+            "reconcile loop: repo reconcile failed (will retry next sweep)"
+        );
+        ctx.session_access.record_repo_failure(installation, repo);
     }
 }
 
@@ -253,6 +268,10 @@ async fn full_resync_once(
         installations_total: installations.len(),
         ..FullResyncSummary::default()
     };
+    // Discovery order is preserved (a `Vec`) while a companion set dedups, so the
+    // queue is fed in a stable order and the generation's expected set is exact.
+    let mut discovered: Vec<RepoKey> = Vec::new();
+    let mut seen: HashSet<RepoKey> = HashSet::new();
     for inst in installations {
         let token = match ctx.github.installation_wide_token(inst.id).await {
             Ok(token) => token,
@@ -265,8 +284,10 @@ async fn full_resync_once(
         match ctx.listing.list_installation_repos(&token).await {
             Ok(repos) => {
                 for repo in repos {
-                    handle.enqueue((inst.id, repo));
-                    summary.repositories_enqueued += 1;
+                    let key = (inst.id, repo);
+                    if seen.insert(key.clone()) {
+                        discovered.push(key);
+                    }
                 }
             }
             Err(error) => {
@@ -275,89 +296,31 @@ async fn full_resync_once(
             }
         }
     }
+    summary.repositories_enqueued = discovered.len();
+
+    // Open the session-access generation BEFORE enqueuing, and only for a
+    // complete enumeration. Two orderings matter here:
+    //
+    // 1. A partial pass is not authoritative — an unreachable installation's
+    //    repositories are missing from `discovered`, so publishing that set as a
+    //    complete generation would silently drop every session it owns.
+    // 2. The generation must be opened before the queue is fed, or the consumer
+    //    could reconcile (and publish) a repository before the projection knows
+    //    to expect it, leaving the generation permanently one repository short.
+    if summary.is_complete() {
+        ctx.session_access.begin_generation(seen);
+    } else {
+        ctx.session_access.abandon_generation();
+    }
+    for key in discovered {
+        handle.enqueue(key);
+    }
     Ok(summary)
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use super::*;
-    use crate::models::RepoRef;
-    use crate::reconcile::execute_test_support::{test_ctx, FakeSessionBackend};
-    use crate::reconcile::reconcile_channel;
-    use crate::session_backend::SessionHandle;
-
-    fn key(installation: i64, name: &str) -> RepoKey {
-        (
-            installation,
-            RepoRef {
-                owner: "acme".to_string(),
-                name: name.to_string(),
-            },
-        )
-    }
-
-    fn fleet_handle(name: &str, installation: i64, issue: u64) -> SessionHandle {
-        SessionHandle {
-            session_id: format!("sess-{name}-{issue}"),
-            installation_id: installation,
-            repo: RepoRef {
-                owner: "acme".to_string(),
-                name: name.to_string(),
-            },
-            trigger_issue: Some(issue),
-        }
-    }
-
-    #[tokio::test]
-    async fn sweep_once_enqueues_one_key_per_distinct_repo() {
-        // Two live sessions on `site` + one on `web`: the sweep collapses the two
-        // `site` handles into one reconcile key and keeps `web` distinct.
-        let fleet = vec![
-            fleet_handle("site", 1, 7),
-            fleet_handle("site", 1, 9),
-            fleet_handle("web", 1, 3),
-        ];
-        let backend = Arc::new(FakeSessionBackend::default().with_fleet(fleet));
-        let ctx = test_ctx(backend);
-        let (tx, mut rx) = reconcile_channel(16);
-
-        let enqueued = sweep_once(&ctx, &tx).await.expect("sweep ok");
-        assert_eq!(enqueued, 2, "two distinct repos (the duplicate collapsed)");
-
-        let mut got: HashSet<RepoKey> = HashSet::new();
-        while let Ok(k) = rx.try_recv() {
-            got.insert(k);
-        }
-        assert_eq!(got.len(), 2);
-        assert!(got.contains(&key(1, "site")));
-        assert!(got.contains(&key(1, "web")));
-    }
-
-    #[tokio::test]
-    async fn drain_pending_dedups_a_burst_into_one_batch() {
-        let (tx, mut rx) = mpsc::channel::<RepoKey>(16);
-        // Queue the same repo three times + a distinct one.
-        tx.send(key(1, "site")).await.unwrap();
-        tx.send(key(1, "site")).await.unwrap();
-        tx.send(key(2, "other")).await.unwrap();
-        // Pull the first off (as the loop does), then drain the rest.
-        let first = rx.recv().await.unwrap();
-        let batch = drain_pending(first, &mut rx);
-        assert_eq!(batch.len(), 2, "duplicates collapse; distinct kept");
-        assert!(batch.contains(&key(1, "site")));
-        assert!(batch.contains(&key(2, "other")));
-    }
-
-    #[tokio::test]
-    async fn drain_pending_of_a_single_key_is_just_that_key() {
-        let (_tx, mut rx) = mpsc::channel::<RepoKey>(4);
-        let batch = drain_pending(key(9, "solo"), &mut rx);
-        assert_eq!(batch.len(), 1);
-        assert!(batch.contains(&key(9, "solo")));
-    }
-}
+#[path = "loops_tests.rs"]
+mod tests;
 
 #[cfg(test)]
 #[path = "loops_recovery_tests.rs"]

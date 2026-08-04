@@ -9,9 +9,24 @@
 //! child issues. Repository administrator status is intentionally not a human
 //! authority tier.
 
-use crate::access_policy::{entry_matches, AccessPolicy};
-use crate::reconcile::creator::is_expected_bot_login;
+use crate::access_policy::AccessPolicy;
 use crate::reconcile::desired::SessionRegistration;
+use crate::session_access::policy::{work_authority_tier, VerifiedCaller};
+use crate::session_access::SessionAuthorizationFacts;
+
+/// The authorization facts of a live registration, borrowed for one decision.
+///
+/// The reconciler's registration and the routes' registry context describe the
+/// same session, so both feed the SAME tier table rather than each restating it.
+fn facts(reg: &SessionRegistration) -> SessionAuthorizationFacts<'_> {
+    SessionAuthorizationFacts {
+        creator_id: reg.creator_id,
+        creator_login: &reg.creator_login,
+        collaborators: &reg.collaborators,
+        // Log-access entries are deliberately NOT a work-authority tier.
+        log_access: &[],
+    }
+}
 
 /// Whether the verified work-issue author may raise work for `reg`. `access` is
 /// the deployment access policy: it gates every human tier below (a blocked
@@ -23,30 +38,14 @@ pub fn is_work_author_allowed(
     author_id: i64,
     author_login: &str,
 ) -> bool {
-    // Deployment access first: a blocked (or, under an allowlist, unlisted)
-    // author may not raise work through ANY tier — including a `### Session
-    // Collaborators` listing. Global admins always pass `allows`.
-    if !access.allows(author_id, author_login) {
-        return false;
-    }
-    // Human-authored registrations carry the creator's immutable id. App-authored
-    // seeded registrations use the sole assignee's login because issue metadata
-    // does not expose assignee ids.
-    let creator_matches = match reg.creator_id {
-        Some(creator_id) => author_id == creator_id,
-        None => {
-            !reg.creator_login.trim().is_empty()
-                && author_login.eq_ignore_ascii_case(&reg.creator_login)
-        }
-    };
-    if creator_matches || access.is_global_admin(author_id, author_login) {
-        return true;
-    }
-
-    let author_id = author_id.to_string();
-    reg.collaborators
-        .iter()
-        .any(|entry| entry_matches(entry, &author_id, author_login))
+    work_authority_tier(
+        facts(reg),
+        VerifiedCaller::from_github_metadata(author_id, author_login),
+        access,
+        // No system principal: this signature is the HUMAN authority question.
+        None,
+    )
+    .allowed()
 }
 
 /// Apply the human authority tiers plus the configured FKST App system principal.
@@ -61,8 +60,13 @@ pub fn is_work_author_allowed_with_bot(
     author_login: &str,
     github_bot_login: Option<&str>,
 ) -> bool {
-    is_expected_bot_login(author_login, github_bot_login)
-        || is_work_author_allowed(reg, access, author_id, author_login)
+    work_authority_tier(
+        facts(reg),
+        VerifiedCaller::from_github_metadata(author_id, author_login),
+        access,
+        github_bot_login,
+    )
+    .allowed()
 }
 
 #[cfg(test)]

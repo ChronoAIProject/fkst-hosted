@@ -256,3 +256,7 @@ export type ReposModalsSlice = Pick<
   | 'uninstallPending'
   | 'uninstallFailed'
 >;
+
+/** The `/operations` workspace — its own top-level domain, so the operations
+ *  cluster never contends with the dashboard modules on one file. */
+export type OperationsSlice = SiteContent['operations'];

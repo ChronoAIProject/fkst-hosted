@@ -19,14 +19,16 @@
 
 use std::collections::HashSet;
 
-use axum::extract::{Path, Query, State};
-use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::extract::State;
+use axum::http::{header, Extensions, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+use crate::audit::arguments::canvas::{OutcomeBlobInput, SafeCanvasSessionOutcomes};
+use crate::audit::arguments::{record, record_safe, AuditedPath, AuditedQuery};
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_app::GithubAppError;
 use crate::github_identity::GithubUser;
@@ -129,10 +131,19 @@ pub struct BlobQuery {
 )]
 pub(super) async fn session_outcomes(
     State(state): State<AppState>,
-    Path((owner, name, issue_number)): Path<(String, String, i64)>,
+    extensions: Extensions,
+    AuditedPath((owner, name, issue_number)): AuditedPath<(String, String, i64)>,
     user: GithubUser,
     headers: HeaderMap,
 ) -> Result<Json<SessionOutcomes>, AppError> {
+    // The response enumerates pull-request titles, file names, and diffs; none
+    // of that is an argument. Only which session's outcomes were requested.
+    record_safe(
+        &extensions,
+        &SafeCanvasSessionOutcomes::new(&owner, &name, issue_number),
+    );
+    super::record_repo_correlation(&extensions, &owner, &name);
+    super::record_trigger_correlation(&extensions, issue_number);
     validate_repo_segment(&owner, "owner")?;
     validate_repo_segment(&name, "name")?;
     let token = bearer_token(&headers)?;
@@ -274,11 +285,26 @@ pub(super) async fn session_outcomes(
 )]
 pub(super) async fn outcome_blob(
     State(state): State<AppState>,
-    Path((owner, name, sha)): Path<(String, String, String)>,
-    Query(query): Query<BlobQuery>,
+    extensions: Extensions,
+    AuditedPath((owner, name, sha)): AuditedPath<(String, String, String)>,
+    AuditedQuery(query): AuditedQuery<BlobQuery>,
     user: GithubUser,
     headers: HeaderMap,
 ) -> Response {
+    // `?name=` drives the content type and the download filename and is
+    // caller-supplied free text; the blob sha already identifies the object
+    // exactly, in a form validated as a git object id. The bytes themselves are
+    // the response, never an argument.
+    record(
+        &extensions,
+        &OutcomeBlobInput {
+            owner: &owner,
+            repo: &name,
+            blob_sha: &sha,
+            download: query.download == Some(1),
+        },
+    );
+    super::record_repo_correlation(&extensions, &owner, &name);
     match blob_bytes(&state, &user, &owner, &name, &sha, &headers).await {
         Ok(bytes) => blob_response(bytes, query),
         Err(BlobError::TooLarge) => (

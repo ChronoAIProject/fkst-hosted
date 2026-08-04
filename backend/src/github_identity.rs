@@ -55,6 +55,40 @@ fn http_client() -> &'static reqwest::Client {
     })
 }
 
+/// Send the `/user` request, retrying ONCE on a non-timeout transport failure.
+///
+/// The client above pools idle keep-alive connections, and a pooled connection
+/// can be closed by the peer between two requests. Reusing it then fails on the
+/// write rather than during connect — a race the caller has to absorb, because
+/// the request never reached the server and is trivially safe to repeat (a bare
+/// `GET /user`). Left unhandled it surfaces as a spurious `503` on a request
+/// that would have succeeded.
+///
+/// A timeout is deliberately NOT retried: it means the server may well have
+/// received the request, and a second 20s attempt would exceed the caller's own
+/// request budget. Every other transport error fails fast (a refused connection
+/// returns immediately), so the retry cannot meaningfully extend a real outage.
+async fn send_user_request(url: &str, token: &str) -> Result<reqwest::Response, reqwest::Error> {
+    let attempt = || {
+        http_client()
+            .get(url)
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+            .bearer_auth(token)
+            .send()
+    };
+    match attempt().await {
+        Ok(response) => Ok(response),
+        Err(error) if error.is_timeout() => Err(error),
+        Err(error) => {
+            tracing::debug!(
+                error = %error,
+                "github identity check transport error; retrying once on a fresh connection"
+            );
+            attempt().await
+        }
+    }
+}
+
 /// Verify a GitHub token by trading it for the caller's identity.
 ///
 /// Calls `GET {base_url}/user` with `Authorization: Bearer <token>`:
@@ -68,17 +102,11 @@ fn http_client() -> &'static reqwest::Client {
 /// The token is used here and dropped; it is never logged or stored.
 pub async fn verify_token(base_url: &str, token: &str) -> Result<GithubUser, AppError> {
     let url = format!("{}/user", base_url.trim_end_matches('/'));
-    let response = http_client()
-        .get(&url)
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        .bearer_auth(token)
-        .send()
-        .await
-        .map_err(|e| {
-            // Never log the token; only the transport error.
-            tracing::warn!(error = %e, "github identity check transport error");
-            AppError::Unavailable("github identity check failed (upstream unreachable)".to_string())
-        })?;
+    let response = send_user_request(&url, token).await.map_err(|e| {
+        // Never log the token; only the transport error.
+        tracing::warn!(error = %e, "github identity check transport error");
+        AppError::Unavailable("github identity check failed (upstream unreachable)".to_string())
+    })?;
 
     let status = response.status();
     if status == reqwest::StatusCode::UNAUTHORIZED {
@@ -151,6 +179,16 @@ impl FromRequestParts<AppState> for GithubUser {
                     .to_string(),
             ));
         }
+        // Publish the VERIFIED, credential-free identity for the audit record
+        // (epic `AUTH-02`). A no-op unless an outer middleware installed a slot,
+        // and deliberately after the access gate: an identity the deployment does
+        // not admit never becomes the record's actor. The bearer token stays out
+        // of the extensions entirely — not even as a hash, which would still be a
+        // cross-record correlation handle.
+        crate::audit::identity::record_identity(
+            &parts.extensions,
+            crate::audit::AuditIdentity::github_bearer(user.id, user.login.clone()),
+        );
         Ok(user)
     }
 }
@@ -160,6 +198,7 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use axum::http::Request;
+    use std::time::Duration;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -187,11 +226,13 @@ mod tests {
             reconciler: None,
             session_backend: None,
             storage: None,
-            log_registry: Default::default(),
+            session_access: Default::default(),
+            operations: Default::default(),
             log_bundle_cache: Default::default(),
             disposable_environments: Default::default(),
             self_router: crate::state::empty_self_router(),
             chat: None,
+            audit: Default::default(),
         }
     }
 
@@ -272,6 +313,72 @@ mod tests {
         let err = verify_token(&server.uri(), "tok")
             .await
             .expect_err("5xx is a dependency failure");
+        assert!(matches!(err, AppError::Unavailable(_)), "got {err:?}");
+    }
+
+    /// A connection that dies before the response — the shape a stale pooled
+    /// keep-alive connection takes — is retried once rather than surfaced as a
+    /// spurious `503`.
+    ///
+    /// `wiremock` cannot express "drop the connection", so this is a raw
+    /// listener: it accepts the first connection and closes it without writing a
+    /// byte, then serves the second normally. A single-attempt implementation
+    /// could not pass.
+    #[tokio::test]
+    async fn a_transport_failure_is_retried_once() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind an ephemeral port");
+        let base = format!("http://{}", listener.local_addr().expect("local addr"));
+
+        tokio::spawn(async move {
+            // First attempt: accept, then drop the stream so the peer sees the
+            // connection close before any response — exactly what reusing a
+            // dead pooled connection looks like.
+            if let Ok((stream, _)) = listener.accept().await {
+                drop(stream);
+            }
+            // Second attempt: a minimal, well-formed identity response.
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut scratch = [0_u8; 1024];
+                let _ = stream.read(&mut scratch).await;
+                let body = r#"{"login":"alice","id":42}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                     content-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+                let _ = stream.flush().await;
+            }
+        });
+
+        let user = verify_token(&base, "tok")
+            .await
+            .expect("the retry reaches the healthy second attempt");
+        assert_eq!(user.id, 42);
+        assert_eq!(user.login, "alice");
+    }
+
+    /// A timeout is NOT retried: the server may already have the request, and a
+    /// second full-length attempt would blow the caller's own request budget.
+    #[tokio::test]
+    async fn a_timeout_is_not_retried() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/user"))
+            .respond_with(
+                ResponseTemplate::new(200).set_delay(REQUEST_TIMEOUT + Duration::from_secs(5)),
+            )
+            .expect(1) // exactly one attempt, never a second
+            .mount(&server)
+            .await;
+
+        let err = verify_token(&server.uri(), "tok")
+            .await
+            .expect_err("a timeout is a dependency failure");
         assert!(matches!(err, AppError::Unavailable(_)), "got {err:?}");
     }
 

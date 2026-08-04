@@ -3,7 +3,7 @@
 //! the trigger author or a repo admin / org owner — never a work-item
 //! collaborator), and map GitHub's refusals onto the error envelope.
 
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use wiremock::matchers::{body_partial_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -81,7 +81,8 @@ async fn stop_session_closes_the_trigger_issue_as_the_author() {
     );
     let status = stop_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 21)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 21)),
         viewer_user(),
         auth_headers(),
     )
@@ -109,7 +110,8 @@ async fn stop_session_maps_a_github_404_to_not_found() {
     let state = test_state(&server.uri(), None);
     let err = stop_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 999)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 999)),
         viewer_user(),
         auth_headers(),
     )
@@ -133,7 +135,8 @@ async fn stop_session_refuses_a_non_trigger_issue_without_closing_it() {
     let state = test_state(&server.uri(), None);
     let err = stop_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 30)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 30)),
         viewer_user(),
         auth_headers(),
     )
@@ -156,7 +159,8 @@ async fn stop_session_refuses_a_pull_request() {
     let state = test_state(&server.uri(), None);
     let err = stop_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 42)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 42)),
         viewer_user(),
         auth_headers(),
     )
@@ -171,7 +175,8 @@ async fn stop_session_rejects_issue_number_zero() {
     let state = test_state(&server.uri(), None);
     let err = stop_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 0)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 0)),
         viewer_user(),
         auth_headers(),
     )
@@ -201,7 +206,8 @@ async fn stop_session_allows_a_repo_admin_or_org_owner() {
     let state = test_state(&server.uri(), None);
     let status = stop_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 21)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 21)),
         viewer_user(),
         auth_headers(),
     )
@@ -228,7 +234,8 @@ async fn stop_session_forbids_a_stranger_with_write_but_not_admin() {
     let state = test_state(&server.uri(), None);
     let err = stop_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 21)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 21)),
         viewer_user(),
         auth_headers(),
     )
@@ -256,7 +263,8 @@ async fn stop_session_forbids_a_work_item_collaborator() {
     let state = test_state(&server.uri(), None);
     let err = stop_session(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 21)),
+        axum::http::Extensions::new(),
+        crate::audit::arguments::AuditedPath(("acme".to_string(), "site".to_string(), 21)),
         viewer_user(),
         auth_headers(),
     )

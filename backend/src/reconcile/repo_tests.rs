@@ -325,6 +325,7 @@ async fn deferred_announced_trigger_stays_desired_and_live_pod_is_not_orphaned()
         last_pending_at: None,
         config_hash: Some(reg.config_hash.clone()),
         work_labels: vec!["fkst-run".to_string()],
+        identity: Default::default(),
     }];
     assert!(!plan_runtime(&classified, &live, &announced)
         .iter()
@@ -363,6 +364,7 @@ async fn definitive_unauthorized_announced_trigger_orphans_and_retires_live_sess
         last_pending_at: None,
         config_hash: None,
         work_labels: vec!["fkst-run".to_string()],
+        identity: Default::default(),
     }];
     let actions = plan_runtime(&classified, &live, &announced);
     assert!(actions.iter().any(|action| matches!(

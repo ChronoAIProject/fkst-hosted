@@ -59,11 +59,13 @@ pub(crate) fn test_state(server_uri: &str, github_app: Option<GithubAppTokens>) 
         reconciler: None,
         session_backend: None,
         storage: None,
-        log_registry: Default::default(),
+        session_access: Default::default(),
+        operations: Default::default(),
         log_bundle_cache: Default::default(),
         disposable_environments: Default::default(),
         self_router: empty_self_router(),
         chat: None,
+        audit: Default::default(),
     }
 }
 

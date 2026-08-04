@@ -13,11 +13,15 @@
 //! place both delivery paths — spawn and crash-recovery, on either session backend —
 //! funnel through: [`super::resolve_session_credentials`].
 
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use k8s_openapi::chrono::DateTime;
 
 use super::*;
+use crate::github_app::GithubAppTokens;
+use crate::reconcile::desired::ReconcileAction;
+use crate::reconcile::execute::execute;
 use crate::reconcile::execute_test_support::*;
 use crate::session_spec::creds::GITHUB_TOKEN_FILE;
 

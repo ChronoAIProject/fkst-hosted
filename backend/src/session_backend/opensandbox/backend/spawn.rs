@@ -18,6 +18,7 @@ use secrecy::{ExposeSecret, SecretString};
 
 use crate::k8s::session_launcher::session_env_pairs;
 use crate::k8s::SessionPodSpec;
+use crate::runtime_identity::RuntimeIncarnation;
 use crate::session_backend::opensandbox::derive_execd_token;
 use crate::session_backend::opensandbox::dto::{CreateSandboxRequest, OsbError};
 use crate::session_backend::{BackendError, EnsureOutcome};
@@ -148,7 +149,12 @@ impl OsbBackend {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(spec.session_id.clone(), creds);
-        Ok(EnsureOutcome::Created)
+        // The server-assigned sandbox id is unique per incarnation, so it alone
+        // identifies this runtime for the lifecycle audit trail — a respawn of
+        // the same session gets a different id and therefore its own rows.
+        Ok(EnsureOutcome::Created(RuntimeIncarnation::from_handle(
+            sandbox_id,
+        )))
     }
 
     /// A pushed credential directory is ephemeral at the container boundary, while

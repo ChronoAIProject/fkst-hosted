@@ -14,6 +14,11 @@ for each task without operating the session infrastructure yourself.
   truth, or sign in with GitHub for a visual view of repositories and sessions.
 - **Inspect and control sessions.** Start or stop sessions, manage environments
   and GitHub App installations, and review live state, logs, and outcomes.
+- **Review your own activity and sandboxes.** The **Operations** view shows the
+  API calls you made and the live sandboxes you own or were explicitly given
+  access to. It is scoped to you: sharing a session never exposes another
+  person's API activity, and a deployment administrator is the only role that
+  can see across users.
 - **Automate through REST.** Use the dashboard's machine-readable API for
   supported session, work-item, environment, log, and outcome operations.
 
@@ -38,3 +43,9 @@ request and response shapes, and each operation's authentication requirements.
 
 For self-hosting, follow the
 [FKST Local Deployment Guide](CLAUDE.md#fkst-local-deployment-guide).
+
+The activity trace behind the Operations view is optional and operator-owned:
+[AUDIT-TRACE.md](deploy/kubernetes/AUDIT-TRACE.md) documents its architecture,
+data boundaries, authorization model, and retention;
+[AUDIT-RUNBOOK.md](deploy/kubernetes/AUDIT-RUNBOOK.md) documents provisioning,
+rollout, and incident response.

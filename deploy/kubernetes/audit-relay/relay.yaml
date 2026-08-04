@@ -1,0 +1,182 @@
+# The durable audit relay: Deployment, ClusterIP Service, and PodDisruptionBudget.
+#
+# ## One replica, on purpose
+#
+# The outbox is a SQLite database in WAL mode on one ReadWriteOnce volume, which
+# has exactly one writer. `Recreate` (not `RollingUpdate`) guarantees the old Pod
+# has released the volume before the new one opens it; a surge replica would
+# either wedge on the RWO attach or, on a filesystem that permitted it, corrupt
+# the trail. Availability during an update comes from the control plane's bounded
+# start/completion timeouts and, in an incident, from the documented rollback to
+# `best_effort` — never from a second writer.
+#
+# ## No Ingress, no Kubernetes API
+#
+# The relay's read endpoint returns the deployment's entire recent audit trail
+# under one bearer token, so it is reachable only as a ClusterIP Service, only
+# from the control plane and Prometheus (see network-policy.yaml), and never from
+# outside the cluster. Its ServiceAccount is bound to nothing and its token is
+# not mounted (epic `OPS-03`).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fkst-audit-relay
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/component: audit-relay
+    app.kubernetes.io/name: fkst-audit-relay
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fkst-audit-relay
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: audit-relay
+        app.kubernetes.io/name: fkst-audit-relay
+        app.kubernetes.io/part-of: fkst-hosted
+    spec:
+      serviceAccountName: fkst-audit-relay
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # Long enough for the delivery worker to stop mid-sweep and for SQLite to
+      # checkpoint the WAL back into the database file. Cutting this short does
+      # not lose committed rows — WAL recovery replays them — but it leaves a
+      # large WAL that the next start must recover, which is exactly the delay an
+      # operator does not want during an incident restart.
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        # The volume arrives owned by root; fsGroup hands it to the relay's
+        # group. OnRootMismatch keeps a 20Gi recursive chown off the startup path
+        # of every subsequent restart.
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        runAsGroup: 10001
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: fkst-audit-relay
+          image: fkst-audit-relay:local
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: fkst-audit-relay-config
+            - secretRef:
+                name: fkst-audit-relay-secret
+          ports:
+            - containerPort: 8090
+              name: http
+          lifecycle:
+            preStop:
+              exec:
+                # Let the control plane's Endpoints update propagate before the
+                # process starts refusing, so an in-flight required-mode start
+                # is not answered with a connection reset it must turn into 503.
+                command: ["/bin/sh", "-c", "sleep 5"]
+          # `/health` is deliberately dependency-free (process liveness only) and
+          # `/ready` means DURABLE INGRESS: writable disk, completed migration,
+          # capacity remaining. A PostHog outage never makes `/ready` false — an
+          # outbox whose destination is down is doing its job. Neither URL carries
+          # a credential, and neither is authenticated, because a kubelet probe
+          # cannot present a bearer token and neither endpoint exposes a record.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 2
+            failureThreshold: 60
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 5
+            failureThreshold: 2
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 3
+          # Derived in AUDIT-TRACE.md's capacity worksheet ("Derivation for the
+          # relay container's requests and limits"): the memory request is the
+          # worst-case capture batch, verification batch, full writer queue,
+          # SQLite cache, and process floor summed (~88 MiB); the limit leaves
+          # ~4x for a vacuum/checkpoint that transiently doubles the working set.
+          # The steady cost is one SQLite writer plus a five-second sweep, well
+          # under the CPU request; the CPU limit bounds a vacuum or a backlog
+          # drain, the only CPU-bound work here. Changing MAX_BODY_BYTES, either
+          # batch size, or the writer queue depth means recomputing the memory
+          # line in the same change.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - mountPath: /var/lib/fkst-audit
+              name: audit-data
+            - mountPath: /tmp
+              name: tmp
+      volumes:
+        - name: audit-data
+          persistentVolumeClaim:
+            claimName: fkst-audit-relay-data
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fkst-audit-relay
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/component: audit-relay
+    app.kubernetes.io/name: fkst-audit-relay
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  selector:
+    app.kubernetes.io/name: fkst-audit-relay
+---
+# Voluntary disruption of the only replica is a full stop of durable ingress, and
+# in required mode that is a product outage. `minAvailable: 1` therefore blocks
+# an ordinary drain: evicting this Pod must be a decision an operator makes, not
+# something an autoscaler or a routine node upgrade does silently.
+#
+# The consequence is deliberate and documented: a node drain that needs this Pod
+# to move waits for an operator. AUDIT-RUNBOOK.md's "planned node maintenance"
+# path is the supported way through it — never `kubectl delete pdb`.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: fkst-audit-relay
+  namespace: chronoai-fkst
+  labels:
+    app.kubernetes.io/component: audit-relay
+    app.kubernetes.io/name: fkst-audit-relay
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fkst-audit-relay

@@ -18,7 +18,14 @@ use secrecy::SecretString;
 use crate::k8s::SessionPodSpec;
 use crate::models::RepoRef;
 use crate::reconcile::desired::{KillReason, LivePod};
+use crate::runtime_identity::{
+    RuntimeBackendKind, RuntimeIdentityMetadata, RuntimeIdentityOutcome, RuntimeIncarnation,
+};
 
+/// Backend-neutral live runtime inventory (issue #5674): the domain shape of one
+/// one-pass fleet read, deliberately OUTSIDE the backend-specific modules so no
+/// `kube::Pod` and no OpenSandbox wire DTO can reach the operations surface.
+pub mod inventory;
 pub mod k8s;
 pub mod opensandbox;
 /// Shared, kube-free env-validation verdict parsing (issue #419). Both backends parse
@@ -31,9 +38,16 @@ pub(crate) mod test_support;
 
 /// What ensuring a session did: a freshly created runtime, or an idempotent reconcile
 /// of the deterministically identified runtime that already existed.
+///
+/// [`Created`](EnsureOutcome::Created) carries the new runtime's
+/// [`RuntimeIncarnation`] because the lifecycle audit trail needs to tell a
+/// session's second runtime from its first: the session id and (on Kubernetes)
+/// the Pod name are both stable across kill/respawn, so without this the
+/// respawn's `created` row would derive the SAME deterministic event id as its
+/// predecessor's and be discarded as a duplicate.
 #[derive(Debug, PartialEq, Eq)]
 pub enum EnsureOutcome {
-    Created,
+    Created(RuntimeIncarnation),
     AlreadyLive,
 }
 
@@ -45,6 +59,24 @@ pub enum EnsureOutcome {
 pub enum BackendError {
     #[error("session backend resource not found")]
     NotFound,
+    /// A value the runtime's metadata contract rejects (an OpenSandbox metadata
+    /// value that is not a valid Kubernetes label value). Kept apart from
+    /// [`Other`](BackendError::Other) so the lifecycle record can carry the
+    /// closed `invalid_metadata` reason instead of flattening a permanent,
+    /// self-inflicted rejection into "the backend was unavailable" — the two
+    /// call for completely different operator responses. The offending key is
+    /// logged at the rejection site; the error itself carries no value.
+    #[error("session backend metadata value rejected")]
+    InvalidMetadata,
+    /// A live-inventory read found more runtimes than the operator-configured
+    /// ceiling allows one snapshot to carry (issue #5674). Kept apart from
+    /// [`Other`](BackendError::Other) because the honest response is "this answer
+    /// would not have been complete", not "the backend failed": returning a
+    /// shortened list would let a caller mistake it for the whole fleet. Carries
+    /// the ceiling only — never the observed count, which would itself be a
+    /// hidden-row signal.
+    #[error("runtime inventory exceeds the configured ceiling of {limit} items")]
+    InventoryTooLarge { limit: usize },
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -140,9 +172,44 @@ pub enum ValidationOutcome {
 /// (Kubernetes today) is touched.
 #[async_trait]
 pub trait SessionBackend: Send + Sync {
+    /// Which runtime this implementation drives. A closed enum, so it is the one
+    /// value safe to use as the `backend` label on a bounded metric and as the
+    /// `backend` field of a lifecycle audit record.
+    fn backend_kind(&self) -> RuntimeBackendKind;
+
+    /// The runtime identifier for `session_id`, when this backend derives it from
+    /// the session id alone rather than having it assigned by a server.
+    ///
+    /// Kubernetes names its Pod deterministically, so the handle is knowable
+    /// without a round trip; OpenSandbox assigns a sandbox id server-side and its
+    /// create response is not plumbed through [`SessionBackend::ensure_session`],
+    /// so it reports `None` and the lifecycle record correlates by session id
+    /// alone. Never a network call — an unknown handle is `None`, not an error.
+    fn deterministic_runtime_id(&self, _session_id: &str) -> Option<String> {
+        None
+    }
+
     /// Probe the backend is reachable, returning its reported status string (for the
     /// Kubernetes backend, the apiserver `major.minor` version).
     async fn check_reachable(&self) -> Result<String, BackendError>;
+
+    /// Idempotently ensure the runtime for `session_id` carries `identity`.
+    ///
+    /// It may FILL an absent key and may never overwrite a differing one: the
+    /// first complete stamp is authoritative for that runtime incarnation, and a
+    /// later trigger edit must not silently rewrite historical attribution. A
+    /// disagreement returns [`RuntimeIdentityOutcome::Conflict`] having written
+    /// nothing; a runtime that vanished returns
+    /// [`RuntimeIdentityOutcome::NotFound`], which is a benign no-op.
+    ///
+    /// Implementations patch METADATA ONLY (a Kubernetes metadata merge patch, an
+    /// OpenSandbox metadata merge-patch call) and never touch a runtime's spec —
+    /// attribution must never be able to restart a session.
+    async fn ensure_runtime_identity(
+        &self,
+        session_id: &str,
+        identity: &RuntimeIdentityMetadata,
+    ) -> Result<RuntimeIdentityOutcome, BackendError>;
 
     /// Ensure a session runtime exists for `spec`, injecting the assembled `creds`.
     /// Idempotent: an already-live session returns [`EnsureOutcome::AlreadyLive`]; a
@@ -181,6 +248,32 @@ pub trait SessionBackend: Send + Sync {
     /// Enumerate every live session runtime as a kube-free [`SessionHandle`]. The
     /// fleet-wide loops (sweep, token rotation, health scrape) iterate this.
     async fn list_fleet(&self) -> Result<Vec<SessionHandle>, BackendError>;
+
+    /// Read the COMPLETE FKST-managed runtime inventory in ONE backend list
+    /// operation (issue #5674, epic `SBOX-01`..`SBOX-05`).
+    ///
+    /// This is the operations surface's only live source. Implementations must
+    /// perform exactly one logical list — one namespace-scoped Pod LIST, or one
+    /// paginated sandbox list walk — and project every field in memory. A
+    /// per-runtime GET or [`SessionBackend::status_summary`] call is a contract
+    /// violation: the fleet is read on a user request path, and N round trips per
+    /// snapshot is how an operations view becomes a denial-of-service on its own
+    /// backend.
+    ///
+    /// `policy` supplies the lifetime/idle knobs each runtime is rendered against
+    /// and the defensive item ceiling. The read is STRICTLY read-only: it must not
+    /// touch last-pending, refresh a timestamp, or influence reconciliation in any
+    /// way — an operator opening a dashboard may not extend a session's life.
+    ///
+    /// It deliberately accepts NO viewer, actor, access list, or selector: it
+    /// returns the whole managed fleet to the trusted service layer, which
+    /// authorizes each row against [`crate::session_access`] before anything is
+    /// filtered, counted, sorted, or serialized (#5675). Runtime metadata is
+    /// untrusted display/correlation data and never an access grant.
+    async fn list_runtime_inventory(
+        &self,
+        policy: &inventory::RuntimeLifetimePolicy,
+    ) -> Result<inventory::RuntimeInventorySnapshot, BackendError>;
 
     /// Deliver `contents` into a live session's mounted credential file `file`
     /// (in-place). [`DeliveryOutcome::SessionGone`] is the benign 404-equivalent (the

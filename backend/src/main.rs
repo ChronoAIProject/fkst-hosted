@@ -243,10 +243,13 @@ async fn main() -> ExitCode {
     // Capture the reconciler gate before `config` moves into `AppState`.
     let pod_dispatch = config.pod.dispatch;
 
-    // The shared `session_id -> log-access context` registry the reconciler writes
-    // each sweep and the log-download endpoint reads. Built here so ONE registry is
-    // shared between the background loops and the API router.
-    let log_registry = fkst_control_plane::log_access::LogAccessRegistry::new();
+    // The shared `session_id -> access context` projection the reconciler
+    // publishes each sweep and every session-scoped route authorizes against.
+    // Built here so ONE projection is shared between the background loops and the
+    // API router. Dispatch-aware: with the reconciler off there is nothing to
+    // discover, so the projection is authoritatively empty rather than cold.
+    let session_registry =
+        fkst_control_plane::session_access::SessionAccessRegistry::new(pod_dispatch);
     let disposable_environments =
         fkst_control_plane::disposable_environment::DisposableEnvironmentRegistry::new();
 
@@ -281,6 +284,74 @@ async fn main() -> ExitCode {
         }
     };
 
+    // The audit sink (milestone #22). Starts the bounded delivery worker only
+    // when capture is enabled; otherwise it is the no-op sink and no task exists.
+    // A build failure here is a genuine misconfiguration (bad host / unbuildable
+    // HTTP client), so it is fatal rather than a silently degraded audit trail.
+    let audit = match fkst_control_plane::audit::AuditHandle::from_config(&config.audit) {
+        Ok(audit) => audit,
+        Err(error) => {
+            tracing::error!(error = %error, "failed to initialize the audit sink");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // The durable audit relay (milestone #22, issue #5678). ONE client serves the
+    // two consumers wired here — the lifecycle queue and the activity source
+    // below — instead of two pools for one internal service. The request
+    // middleware is not one of them: it resolves its own delivery policy inside
+    // `build_router`, for the reason documented on `audit::relay::bootstrap`.
+    // A misconfiguration is FATAL: a `required` deployment that quietly ran
+    // without a relay would make its central durability claim false.
+    let relay_client = match fkst_control_plane::audit::relay::bootstrap::client(
+        &config.audit_delivery,
+        audit.relay_metrics(),
+    ) {
+        Ok(client) => client,
+        Err(error) => {
+            tracing::error!(error = %error, "failed to initialize the audit relay client");
+            return ExitCode::FAILURE;
+        }
+    };
+    let audit = fkst_control_plane::audit::relay::bootstrap::with_lifecycle_relay(
+        audit,
+        relay_client.as_ref(),
+        &config.audit_delivery,
+    );
+    // A clone for the post-serve drain: `AppState` moves into the router below.
+    let audit_drain = audit.clone();
+
+    // The READ side of the same audit pipeline (milestone #22). Absent read
+    // credentials are NOT fatal — capture must keep working while an operator
+    // stages the query secret — so the endpoint answers its own stable
+    // `503 audit_query_not_configured` instead. Only an unbuildable HTTP client
+    // fails the boot.
+    let mut operations = match fkst_control_plane::operations::OperationsState::from_config(
+        &config.audit,
+        &config.activity_query,
+    ) {
+        Ok(operations) => operations,
+        Err(error) => {
+            tracing::error!(error = %error, "failed to initialize the activity query source");
+            return ExitCode::FAILURE;
+        }
+    };
+    // The relay's scoped read joins the merge whenever the READ half is
+    // configured, independently of the delivery mode: a `best_effort` deployment
+    // still benefits from seeing its not-yet-verified, incomplete, and
+    // dead-letter rows while PostHog catches up.
+    if config.audit_delivery.read_configured() {
+        if let Some(client) = relay_client.clone() {
+            operations.relay = Some(Arc::new(
+                fkst_control_plane::operations::relay::RelayActivitySource::new(
+                    client,
+                    Duration::from_millis(config.activity_query.query_timeout_ms),
+                ),
+            ));
+            tracing::info!("operations: the durable audit relay joined the activity merge");
+        }
+    }
+
     let recovery = RecoveryMonitor::new(pod_dispatch);
     let reconciler = if pod_dispatch {
         match session_backend.clone() {
@@ -288,11 +359,12 @@ async fn main() -> ExitCode {
                 spawn_reconciler(
                     &config,
                     github_app.clone(),
-                    log_registry.clone(),
+                    session_registry.clone(),
                     backend,
                     recovery.clone(),
                     initialized_env_store.clone(),
                     disposable_environments.clone(),
+                    audit.clone(),
                 )
                 .await
             }
@@ -325,13 +397,17 @@ async fn main() -> ExitCode {
         reconciler,
         session_backend,
         storage,
-        log_registry,
+        session_access: fkst_control_plane::session_access::SessionAccessState::new(
+            session_registry,
+        ),
+        operations,
         log_bundle_cache: fkst_control_plane::log_bundle_cache::LogBundleCache::new(),
         disposable_environments,
         // Filled by `build_router` with the router it returns, so chat tools can
         // dispatch through it (see `AppState::self_router`).
         self_router: fkst_control_plane::state::empty_self_router(),
         chat,
+        audit,
     }) {
         Ok(router) => router,
         Err(error) => {
@@ -351,10 +427,24 @@ async fn main() -> ExitCode {
     };
     tracing::info!(addr = %addr, "server listening");
 
-    if let Err(error) = axum::serve(listener, app.into_make_service())
+    let serve_result = axum::serve(listener, app.into_make_service())
         .with_graceful_shutdown(shutdown_signal())
-        .await
-    {
+        .await;
+
+    // Drain the audit sink AFTER axum finished draining in-flight requests, so
+    // the last request's record is admitted before admission closes. Bounded by
+    // FKST_POSTHOG_SHUTDOWN_FLUSH_SECS; the residue is reported, never hidden.
+    // Runs on both the clean and the failed serve path — a server error must not
+    // discard already-admitted records silently.
+    let drained = audit_drain.drain().await;
+    if drained.remaining > 0 {
+        tracing::warn!(
+            remaining = drained.remaining,
+            "audit sink shut down with undelivered events"
+        );
+    }
+
+    if let Err(error) = serve_result {
         tracing::error!(error = %error, "server error");
         return ExitCode::FAILURE;
     }
@@ -508,16 +598,21 @@ async fn build_osb_backend(
 /// session backend is passed in (built once, un-gated). Every failure is a WARN,
 /// never fatal: a misconfigured/unreachable reconciler must not stop the API server
 /// (Model A stays fully functional).
+// Each argument is one already-constructed process-wide dependency the reconcile
+// context needs a handle to. Bundling them would only rename the same fields at
+// the single call site, so the list is allowed to grow with the context.
+#[allow(clippy::too_many_arguments)]
 async fn spawn_reconciler(
     config: &Config,
     github_app: Option<fkst_control_plane::github_app::GithubAppTokens>,
-    log_registry: fkst_control_plane::log_access::LogAccessRegistry,
+    session_registry: fkst_control_plane::session_access::SessionAccessRegistry,
     backend: Arc<dyn fkst_control_plane::session_backend::SessionBackend>,
     recovery: RecoveryMonitor,
     initialized_env_store: Option<
         Arc<dyn fkst_control_plane::environment_profile::EnvironmentProfileStore>,
     >,
     disposable_environments: fkst_control_plane::disposable_environment::DisposableEnvironmentRegistry,
+    audit: fkst_control_plane::audit::AuditHandle,
 ) -> Option<ReconcileDispatcher> {
     let Some(github) = github_app else {
         tracing::warn!("pod dispatch on but github app not configured; reconciler not started");
@@ -572,8 +667,9 @@ async fn spawn_reconciler(
         listing,
         http,
         config: config.clone(),
-        log_registry,
+        session_registry,
         disposable_environments,
+        audit,
         routing: None,
     };
     let dispatcher = ReconcileDispatcher::new();
@@ -656,9 +752,10 @@ struct ReconcileWorkerFactory {
     listing: Arc<dyn fkst_control_plane::github_app::GithubListing>,
     http: reqwest::Client,
     config: Config,
-    log_registry: fkst_control_plane::log_access::LogAccessRegistry,
+    session_registry: fkst_control_plane::session_access::SessionAccessRegistry,
     disposable_environments:
         fkst_control_plane::disposable_environment::DisposableEnvironmentRegistry,
+    audit: fkst_control_plane::audit::AuditHandle,
     routing: Option<fkst_control_plane::leader_routing::LeaderServiceRouter>,
 }
 
@@ -673,8 +770,13 @@ impl ReconcileWorkerFactory {
             config: self.config.clone(),
             active_repos: fkst_control_plane::reconcile::new_active_repos(),
             ensured_templates: fkst_control_plane::reconcile::new_ensured_templates(),
-            log_registry: self.log_registry.clone(),
+            session_access: self.session_registry.clone(),
             disposable_environments: self.disposable_environments.clone(),
+            audit: self.audit.clone(),
+            // Rebuilt per leader generation: the gate is a bounded, purely
+            // process-local cooldown set, so a new generation simply re-decides
+            // any parked session on its first sweep.
+            identity_gate: fkst_control_plane::runtime_identity::IdentityGate::new(),
         }
     }
 }

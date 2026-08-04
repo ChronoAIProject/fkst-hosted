@@ -74,7 +74,11 @@ export function Shell() {
   // panels scroll internally, so it must NOT sit inside the auto-height padded
   // wrapper (that collapses its h-full chain) and carries no marketing footer.
   // Doc/marketing routes keep the padded, footer-terminated scrolling layout.
-  const isApp = location.pathname.startsWith('/dashboard');
+  // `/operations` is a fixed-viewport application route exactly like the
+  // dashboard: it fills <main>, its table region scrolls internally, and it gets
+  // the pinned slim footer rather than the marketing one.
+  const isApp =
+    location.pathname.startsWith('/dashboard') || location.pathname.startsWith('/operations');
   // The v2 landing is a single-viewport centered hero: it fills <main> like the
   // app view (no padding, no scroll) and pairs with the pinned slim footer so
   // nav + hero + footer compose exactly one viewport.
@@ -166,6 +170,21 @@ export function Shell() {
                 <NavLink to="/dashboard" className={navLinkClass}>
                   {c.nav.dashboard}
                 </NavLink>
+                {/* Operations is for EVERY authenticated user, not only global
+                    administrators — a regular user's own request history and
+                    accessible sandboxes are exactly what it is for. The
+                    condition is the locally-known session flag, deliberately:
+                    running a repository overview scan just to decide whether to
+                    draw a link would make the whole shell wait on an API call,
+                    and the route's own API is the real boundary anyway.
+                    Below 721px it moves into the overflow menu with the other
+                    collapsing actions, so a third nav item can never push the
+                    wordmark off a phone screen. */}
+                {isAuthenticated && (
+                  <NavLink to="/operations" className={`${navLinkClass} max-[720px]:hidden`}>
+                    {c.operations.nav}
+                  </NavLink>
+                )}
               </nav>
 
               <div className="flex items-center gap-2 ml-auto">
@@ -262,6 +281,19 @@ export function Shell() {
                   {menuOpen && (
                     <div className="anim-notice-in absolute right-0 top-[calc(100%+6px)] z-50 min-w-[168px] rounded-control border border-line bg-glass backdrop-blur-glass shadow-modal-seat flex flex-col p-1">
                       <div role="menu" className="flex flex-col">
+                        {/* The narrow-width home for the Operations route: the
+                            inline nav link hides below 721px, so the action
+                            stays reachable rather than disappearing. */}
+                        {isAuthenticated && (
+                          <NavLink
+                            role="menuitem"
+                            to="/operations"
+                            onClick={() => setMenuOpen(false)}
+                            className={menuItemClass}
+                          >
+                            {c.operations.nav}
+                          </NavLink>
+                        )}
                         {isAuthenticated && (
                           <button
                             type="button"

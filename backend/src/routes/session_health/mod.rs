@@ -33,7 +33,7 @@
 
 pub mod staleness;
 
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::Json;
 use serde::Serialize;
 use utoipa::ToSchema;
@@ -42,6 +42,8 @@ use utoipa_axum::routes;
 
 use k8s_openapi::chrono::Utc;
 
+use crate::audit::arguments::logs::{SafeSessionHealth, SafeSessionHealthReport};
+use crate::audit::arguments::{record_safe, AuditedPath};
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
 use crate::session_health::{
@@ -156,9 +158,15 @@ pub struct SessionHealthReport {
 )]
 async fn session_health(
     State(state): State<AppState>,
-    Path(session_id): Path<String>,
+    extensions: axum::http::Extensions,
+    AuditedPath(session_id): AuditedPath<String>,
     user: GithubUser,
 ) -> Result<Json<SessionHealth>, AppError> {
+    // Recorded before authorization, so a denied read still describes which
+    // session was asked for. Report bodies are package-authored prose and never
+    // become audit properties.
+    record_safe(&extensions, &SafeSessionHealth::new(&session_id));
+    crate::routes::logs::record_session_correlation(&extensions, &session_id);
     crate::routes::logs::authorize(&state, &session_id, &user)?;
 
     let entries = fetch_index(&state, &session_id).await?;
@@ -196,9 +204,15 @@ async fn session_health(
 )]
 async fn session_health_report(
     State(state): State<AppState>,
-    Path((session_id, report_id)): Path<(String, String)>,
+    extensions: axum::http::Extensions,
+    AuditedPath((session_id, report_id)): AuditedPath<(String, String)>,
     user: GithubUser,
 ) -> Result<Json<SessionHealthReport>, AppError> {
+    record_safe(
+        &extensions,
+        &SafeSessionHealthReport::new(&session_id, &report_id),
+    );
+    crate::routes::logs::record_session_correlation(&extensions, &session_id);
     crate::routes::logs::authorize(&state, &session_id, &user)?;
 
     // THE TRAVERSAL GUARD: an id absent from the index is a 404 and no storage call is
