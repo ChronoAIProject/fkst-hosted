@@ -51,15 +51,17 @@ impl Drop for TempDirectory {
 }
 
 fn write_configuration_decoys(path: &Path) {
-    fs::write(path.join(".env"), b"decoy environment bytes\n")
-        .expect(".env decoy must be written");
+    fs::write(path.join(".env"), b"decoy environment bytes\n").expect(".env decoy must be written");
     fs::write(
         path.join(".fkst-local-qa-host.toml"),
         b"decoy hidden host configuration bytes\n",
     )
     .expect("hidden host configuration decoy must be written");
-    fs::write(path.join("config.toml"), b"decoy generic configuration bytes\n")
-        .expect("generic configuration decoy must be written");
+    fs::write(
+        path.join("config.toml"),
+        b"decoy generic configuration bytes\n",
+    )
+    .expect("generic configuration decoy must be written");
     fs::write(
         path.join("fkst-local-qa-host.toml"),
         b"decoy host configuration bytes\n",
