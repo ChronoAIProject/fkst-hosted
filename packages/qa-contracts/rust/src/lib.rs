@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::path::{Component, Path};
 
 use base64::Engine as _;
 use serde::de::{Deserializer, MapAccess, SeqAccess, Visitor};
@@ -13,9 +14,16 @@ use thiserror::Error;
 const CONTRACT_REGISTRY: &str = include_str!("../../contracts/registry.json");
 const FOUNDATION_SCHEMA: &str =
     include_str!("../../contracts/qa.contract-foundation/v1/schema.json");
-const FOUNDATION_SCHEMA_NAME: &str = "qa.contract-foundation/v1";
 const FOUNDATION_SCHEMA_PATH: &str = "contracts/qa.contract-foundation/v1/schema.json";
-const FOUNDATION_SCHEMA_ID: &str = "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1";
+const LOCAL_LIFECYCLE_SCHEMA: &str =
+    include_str!("../../contracts/qa.local-lifecycle/v1/schema.json");
+const LOCAL_LIFECYCLE_SCHEMA_PATH: &str = "contracts/qa.local-lifecycle/v1/schema.json";
+const EMBEDDED_SCHEMAS: &[(&str, &str)] = &[
+    (FOUNDATION_SCHEMA_PATH, FOUNDATION_SCHEMA),
+    (LOCAL_LIFECYCLE_SCHEMA_PATH, LOCAL_LIFECYCLE_SCHEMA),
+];
+const LOCAL_STATE_TYPE_NAME: &str = "LocalState";
+const SUPPORTED_SCHEMA_MAJOR: u64 = 1;
 const MAX_DEPTH: usize = 128;
 const MAX_SAFE_INTEGER_TEXT: &str = "9007199254740991";
 
@@ -177,13 +185,25 @@ pub fn validate_foundation(
     validate_value(admit_json(raw)?, foundation_type)
 }
 
+pub fn validate_local_state(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    validate_registered_value(admit_json(raw)?, LOCAL_STATE_TYPE_NAME)
+}
+
 pub fn validate_value(
     admitted: AdmittedJson,
     foundation_type: FoundationType,
 ) -> Result<ValidatedValue, ContractError> {
     let value = admitted.0;
     validate_special_rules(&value, foundation_type)?;
-    let schema = schema_for_type(foundation_type)?;
+    validate_registered_value(AdmittedJson(value), foundation_type.definition())
+}
+
+fn validate_registered_value(
+    admitted: AdmittedJson,
+    type_name: &str,
+) -> Result<ValidatedValue, ContractError> {
+    let value = admitted.0;
+    let schema = schema_for_type(type_name)?;
     let validator = jsonschema::draft202012::new(&schema)
         .map_err(|_| ContractError(Rejection::validation("invalid_embedded_schema", "/")))?;
     if let Err(error) = validator.validate(&value) {
@@ -276,6 +296,11 @@ pub fn verify_contract_content_digest(value: &ValidatedValue) -> Result<(), Cont
 fn validate_registry() -> Result<Registry, ContractError> {
     let registry: Registry = serde_json::from_str(CONTRACT_REGISTRY)
         .map_err(|_| ContractError(Rejection::validation("invalid_embedded_registry", "/")))?;
+    validate_registry_value(&registry)?;
+    Ok(registry)
+}
+
+fn validate_registry_value(registry: &Registry) -> Result<(), ContractError> {
     if registry.registry_version != "qa.contract-registry/v1"
         || registry.profile != "local_qa_host_mvp"
     {
@@ -284,73 +309,161 @@ fn validate_registry() -> Result<Registry, ContractError> {
             "/",
         )));
     }
-    let schema = registry
-        .schemas
-        .get(FOUNDATION_SCHEMA_NAME)
-        .ok_or_else(|| {
-            ContractError(Rejection::validation(
-                "invalid_embedded_registry",
-                "/schemas",
-            ))
-        })?;
-    if registry.schemas.len() != 1
-        || schema.path != FOUNDATION_SCHEMA_PATH
-        || schema.id != FOUNDATION_SCHEMA_ID
-        || schema.major != 1
-    {
-        return Err(ContractError(Rejection::validation(
-            "invalid_embedded_registry",
-            "/schemas/qa.contract-foundation~1v1",
-        )));
-    }
-    let expected_types: BTreeSet<_> = FoundationType::ALL
-        .into_iter()
-        .map(FoundationType::definition)
-        .collect();
-    let registered_types: BTreeSet<_> = registry.types.keys().map(String::as_str).collect();
-    if expected_types != registered_types {
-        return Err(ContractError(Rejection::validation(
-            "invalid_embedded_registry",
-            "/types",
-        )));
-    }
     for foundation_type in FoundationType::ALL {
+        schema_for_registered_type(registry, foundation_type.definition(), embedded_schema)?;
         let entry = registry
             .types
             .get(foundation_type.definition())
-            .expect("type sets were compared above");
-        if entry.schema != FOUNDATION_SCHEMA_NAME
-            || entry.pointer != format!("#/$defs/{}", foundation_type.definition())
-            || entry.fixture_only != foundation_type.fixture_only()
-        {
+            .expect("registered type was resolved above");
+        if entry.fixture_only != foundation_type.fixture_only() {
             return Err(ContractError(Rejection::validation(
                 "invalid_embedded_registry",
                 format!("/types/{}", foundation_type.definition()),
             )));
         }
     }
-    Ok(registry)
+    schema_for_registered_type(registry, LOCAL_STATE_TYPE_NAME, embedded_schema)?;
+    let local_state = registry
+        .types
+        .get(LOCAL_STATE_TYPE_NAME)
+        .expect("registered type was resolved above");
+    if local_state.fixture_only {
+        return Err(ContractError(Rejection::validation(
+            "invalid_embedded_registry",
+            "/types/LocalState",
+        )));
+    }
+    Ok(())
 }
 
-fn schema_for_type(foundation_type: FoundationType) -> Result<Value, ContractError> {
+fn schema_for_type(type_name: &str) -> Result<Value, ContractError> {
     let registry = validate_registry()?;
+    schema_for_registered_type(&registry, type_name, embedded_schema)
+}
+
+fn schema_for_registered_type(
+    registry: &Registry,
+    type_name: &str,
+    load_schema: fn(&str) -> Option<&'static str>,
+) -> Result<Value, ContractError> {
     let type_entry = registry
         .types
-        .get(foundation_type.definition())
-        .expect("validated registry covers every foundation type");
-    let mut schema: Value = serde_json::from_str(FOUNDATION_SCHEMA)
+        .get(type_name)
+        .ok_or_else(|| ContractError(Rejection::validation("unknown_registered_type", "/types")))?;
+    let schema_entry = registry.schemas.get(&type_entry.schema).ok_or_else(|| {
+        ContractError(Rejection::validation(
+            "unknown_registered_schema",
+            "/schemas",
+        ))
+    })?;
+    if schema_entry.major != SUPPORTED_SCHEMA_MAJOR {
+        return Err(ContractError(Rejection::validation(
+            "unsupported_schema_major",
+            format!("/schemas/{}/major", pointer_token(&type_entry.schema)),
+        )));
+    }
+    validate_package_path(&schema_entry.path)?;
+    let schema_source = load_schema(&schema_entry.path).ok_or_else(|| {
+        ContractError(Rejection::validation(
+            "invalid_embedded_schema_path",
+            format!("/schemas/{}/path", pointer_token(&type_entry.schema)),
+        ))
+    })?;
+    let mut schema: Value = serde_json::from_str(schema_source)
         .map_err(|_| ContractError(Rejection::validation("invalid_embedded_schema", "/")))?;
-    if schema.get("$id").and_then(Value::as_str) != Some(FOUNDATION_SCHEMA_ID) {
+    if schema.get("$id").and_then(Value::as_str) != Some(schema_entry.id.as_str()) {
         return Err(ContractError(Rejection::validation(
             "invalid_embedded_schema",
             "/$id",
         )));
     }
-    schema
+    validate_local_references(&schema)?;
+    let pointer = type_entry.pointer.strip_prefix('#').ok_or_else(|| {
+        ContractError(Rejection::validation(
+            "unresolved_registered_pointer",
+            "/types",
+        ))
+    })?;
+    if !valid_json_pointer(pointer) || schema.pointer(pointer).is_none() {
+        return Err(ContractError(Rejection::validation(
+            "unresolved_registered_pointer",
+            "/types",
+        )));
+    }
+    let schema_object = schema
         .as_object_mut()
-        .expect("foundation schema is an object")
-        .insert("$ref".into(), Value::String(type_entry.pointer.clone()));
+        .ok_or_else(|| ContractError(Rejection::validation("invalid_embedded_schema", "/")))?;
+    schema_object.remove("$id");
+    schema_object.insert("$ref".into(), Value::String(type_entry.pointer.clone()));
     Ok(schema)
+}
+
+fn embedded_schema(path: &str) -> Option<&'static str> {
+    EMBEDDED_SCHEMAS
+        .iter()
+        .find_map(|(registered_path, schema)| (*registered_path == path).then_some(*schema))
+}
+
+fn validate_package_path(path: &str) -> Result<(), ContractError> {
+    if path.is_empty()
+        || path.contains(':')
+        || Path::new(path).is_absolute()
+        || Path::new(path)
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err(ContractError(Rejection::validation(
+            "invalid_embedded_schema_path",
+            "/schemas",
+        )));
+    }
+    Ok(())
+}
+
+fn validate_local_references(value: &Value) -> Result<(), ContractError> {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                validate_local_references(item)?;
+            }
+        }
+        Value::Object(object) => {
+            if object
+                .get("$ref")
+                .and_then(Value::as_str)
+                .is_some_and(|reference| !reference.starts_with('#'))
+            {
+                return Err(ContractError(Rejection::validation(
+                    "external_schema_reference",
+                    "/$ref",
+                )));
+            }
+            for child in object.values() {
+                validate_local_references(child)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn pointer_token(value: &str) -> String {
+    value.replace('~', "~0").replace('/', "~1")
+}
+
+fn valid_json_pointer(pointer: &str) -> bool {
+    if !pointer.starts_with('/') {
+        return false;
+    }
+    pointer.split('/').skip(1).all(|token| {
+        let mut characters = token.chars();
+        while let Some(character) = characters.next() {
+            if character == '~' && !matches!(characters.next(), Some('0' | '1')) {
+                return false;
+            }
+        }
+        true
+    })
 }
 
 fn canonicalize(value: &Value) -> Result<Vec<u8>, ContractError> {
@@ -1041,6 +1154,69 @@ fn classify_json_error(error: serde_json::Error) -> ContractError {
         ))
     } else {
         ContractError(Rejection::validation("invalid_json", "/"))
+    }
+}
+
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+
+    #[test]
+    fn registry_resolution_fails_closed() {
+        assert_registry_error(
+            |registry| {
+                registry
+                    .schemas
+                    .get_mut("qa.local-lifecycle/v1")
+                    .expect("lifecycle schema")
+                    .id = "urn:example:mismatch".into();
+            },
+            "invalid_embedded_schema",
+        );
+        assert_registry_error(
+            |registry| {
+                registry
+                    .schemas
+                    .get_mut("qa.local-lifecycle/v1")
+                    .expect("lifecycle schema")
+                    .major = 2;
+            },
+            "unsupported_schema_major",
+        );
+        assert_registry_error(
+            |registry| {
+                registry.types.remove(LOCAL_STATE_TYPE_NAME);
+            },
+            "unknown_registered_type",
+        );
+        assert_registry_error(
+            |registry| {
+                registry
+                    .types
+                    .get_mut(LOCAL_STATE_TYPE_NAME)
+                    .expect("LocalState type")
+                    .pointer = "#/$defs/Missing".into();
+            },
+            "unresolved_registered_pointer",
+        );
+        assert_registry_error(
+            |registry| {
+                registry
+                    .schemas
+                    .get_mut("qa.local-lifecycle/v1")
+                    .expect("lifecycle schema")
+                    .path = "../schema.json".into();
+            },
+            "invalid_embedded_schema_path",
+        );
+    }
+
+    fn assert_registry_error(mutate: impl FnOnce(&mut Registry), reason: &str) {
+        let mut registry: Registry =
+            serde_json::from_str(CONTRACT_REGISTRY).expect("parse embedded registry");
+        mutate(&mut registry);
+        let error = validate_registry_value(&registry).expect_err("registry must fail closed");
+        assert_eq!(error.0.reason, reason);
     }
 }
 

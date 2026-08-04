@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:chronoai:fkst:qa-contracts:qa.local-lifecycle:v1",
+  "$comment": "Local terminal means only that required local actions are settled or moved to an explicit repair backlog; it does not imply Hosted Quality, Report, Publication, or RunSettlement completion.",
+  "$defs": {
+    "LocalState": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "preparing",
+        "ready",
+        "executing",
+        "staging_evidence",
+        "cleaning_up_execution",
+        "uploading",
+        "finalizing_local",
+        "terminal"
+      ]
+    }
+  }
+}

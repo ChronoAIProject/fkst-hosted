@@ -116,7 +116,10 @@ fn contract_registry_and_fixture_metadata() {
     let schemas = registry["schemas"]
         .as_object()
         .expect("registry schemas object");
-    assert_eq!(schemas.len(), 1);
+    assert_eq!(
+        schemas.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["qa.contract-foundation/v1", "qa.local-lifecycle/v1"]
+    );
     let schema = &schemas["qa.contract-foundation/v1"];
     assert_eq!(
         schema["path"],
@@ -131,10 +134,12 @@ fn contract_registry_and_fixture_metadata() {
     let types = registry["types"]
         .as_object()
         .expect("registry types object");
-    let expected_types: BTreeSet<_> = FoundationType::ALL
+    let expected_foundation_types: BTreeSet<_> = FoundationType::ALL
         .into_iter()
         .map(|foundation_type| foundation_type.definition().to_owned())
         .collect();
+    let mut expected_types = expected_foundation_types.clone();
+    expected_types.insert("LocalState".to_owned());
     assert_eq!(
         types.keys().cloned().collect::<BTreeSet<_>>(),
         expected_types
@@ -166,10 +171,15 @@ fn contract_registry_and_fixture_metadata() {
         );
     }
 
+    let local_state = &types["LocalState"];
+    assert_eq!(local_state["schema"], "qa.local-lifecycle/v1");
+    assert_eq!(local_state["pointer"], "#/$defs/LocalState");
+    assert!(local_state.get("fixture_only").is_none());
+
     let exercised_types = foundation_fixture_types(&foundation_fixture);
     assert_eq!(
-        exercised_types, expected_types,
-        "fixture coverage matches registry types"
+        exercised_types, expected_foundation_types,
+        "foundation fixture coverage matches foundation registry types"
     );
 
     let mut mutable_registry = registry;

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { basename, dirname, resolve, sep } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type { ValidateFunction } from "ajv";
@@ -15,7 +15,8 @@ import {
 
 const MAX_DEPTH = 128;
 const MAX_SAFE_INTEGER = 9_007_199_254_740_991n;
-const FOUNDATION_SCHEMA_NAME = "qa.contract-foundation/v1";
+const SUPPORTED_SCHEMA_MAJOR = 1;
+const LOCAL_STATE_TYPE_NAME = "LocalState";
 const FOUNDATION_TYPE_NAMES = Object.freeze([
   "ContractMeta",
   "HostScopedMeta",
@@ -29,7 +30,7 @@ const FOUNDATION_TYPE_NAMES = Object.freeze([
 
 export type FoundationType = (typeof FOUNDATION_TYPE_NAMES)[number];
 
-const PACKAGE_ROOT = resolvePackageRoot();
+const PACKAGE_ROOT = realpathSync(resolvePackageRoot());
 
 interface RegistrySchemaEntry {
   readonly path: string;
@@ -54,24 +55,13 @@ export interface ContractRegistry {
 const REGISTRY_URL = resolvePackageFile("contracts/registry.json");
 const REGISTRY = JSON.parse(readFileSync(REGISTRY_URL, "utf8")) as ContractRegistry;
 validateRegistry(REGISTRY);
-const SCHEMA_ENTRY = REGISTRY.schemas[FOUNDATION_SCHEMA_NAME]!;
-const FOUNDATION_SCHEMA_URL = resolvePackageFile(SCHEMA_ENTRY.path);
-const FOUNDATION_SCHEMA = JSON.parse(readFileSync(FOUNDATION_SCHEMA_URL, "utf8")) as Record<
-  string,
-  unknown
->;
-if (FOUNDATION_SCHEMA.$id !== SCHEMA_ENTRY.id) {
-  throw new Error("qa contract registry schema id does not match the referenced schema");
-}
 
 const AJV = new Ajv2020({ allErrors: true, strict: true, validateFormats: false });
-const VALIDATORS = new Map<FoundationType, ValidateFunction>();
+const VALIDATORS = new Map<string, ValidateFunction>();
 for (const type of FOUNDATION_TYPE_NAMES) {
-  const schema = structuredClone(FOUNDATION_SCHEMA);
-  delete schema.$id;
-  schema.$ref = REGISTRY.types[type]!.pointer;
-  VALIDATORS.set(type, AJV.compile(schema));
+  VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
 }
+VALIDATORS.set(LOCAL_STATE_TYPE_NAME, compileRegisteredValidator(REGISTRY, LOCAL_STATE_TYPE_NAME));
 
 export interface Rejection {
   readonly category: "canonicalization" | "contract" | "validation";
@@ -108,7 +98,7 @@ export class ValidatedValue {
 
   constructor(value: unknown, token: symbol) {
     if (token !== VALIDATION_TOKEN) {
-      throw new TypeError("ValidatedValue is created by validateFoundation");
+      throw new TypeError("ValidatedValue is created by a contract validator");
     }
     this.#value = immutableSnapshot(value);
   }
@@ -151,12 +141,21 @@ export function validateFoundation(raw: Uint8Array, type: FoundationType): Valid
   return validateValue(admitJson(raw), type);
 }
 
+export function validateLocalState(raw: Uint8Array): ValidatedValue {
+  return validateRegisteredValue(admitJson(raw), LOCAL_STATE_TYPE_NAME);
+}
+
 export function validateValue(admitted: AdmittedJson, type: FoundationType): ValidatedValue {
   const value = admitted.value();
   validateSpecialRules(value, type);
-  const validator = VALIDATORS.get(type);
+  return validateRegisteredValue(admitted, type);
+}
+
+function validateRegisteredValue(admitted: AdmittedJson, typeName: string): ValidatedValue {
+  const value = admitted.value();
+  const validator = VALIDATORS.get(typeName);
   if (validator === undefined) {
-    throw new ContractError({ category: "validation", reason: "unknown_foundation_type", path: "/" });
+    throw new ContractError({ category: "validation", reason: "unknown_registered_type", path: "/" });
   }
   if (!validator(value)) {
     const path = validator.errors?.[0]?.instancePath || "/";
@@ -253,15 +252,21 @@ function resolvePackageRoot(): string {
 }
 
 function resolvePackageFile(relativePath: string): URL {
-  if (
-    relativePath.startsWith("/") ||
-    relativePath.includes("..") ||
-    relativePath.includes(":")
-  ) {
+  if (relativePath.length === 0 || isAbsolute(relativePath) || relativePath.includes(":")) {
     throw new Error(`invalid qa contract package path: ${relativePath}`);
   }
-  const candidate = resolve(PACKAGE_ROOT, relativePath);
-  if (!candidate.startsWith(`${PACKAGE_ROOT}${sep}`) || !existsSync(candidate)) {
+  const unresolvedCandidate = resolve(PACKAGE_ROOT, relativePath);
+  if (!existsSync(unresolvedCandidate)) {
+    throw new Error(`qa contract package file not found: ${relativePath}`);
+  }
+  const candidate = realpathSync(unresolvedCandidate);
+  const containedPath = relative(PACKAGE_ROOT, candidate);
+  if (
+    containedPath.length === 0 ||
+    containedPath === ".." ||
+    containedPath.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) ||
+    isAbsolute(containedPath)
+  ) {
     throw new Error(`qa contract package file not found: ${relativePath}`);
   }
   return pathToFileURL(candidate);
@@ -274,34 +279,68 @@ function validateRegistry(registry: ContractRegistry): void {
   if (registry.profile !== "local_qa_host_mvp") {
     throw new Error("qa contract registry has the wrong profile authority");
   }
-  const schema = registry.schemas[FOUNDATION_SCHEMA_NAME];
-  if (
-    schema === undefined ||
-    schema.major !== 1 ||
-    schema.path !== "contracts/qa.contract-foundation/v1/schema.json" ||
-    schema.id !== "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1"
-  ) {
-    throw new Error("qa contract foundation registry entry is invalid");
-  }
-  const registeredTypes = Object.keys(registry.types).sort();
-  const implementationTypes = [...FOUNDATION_TYPE_NAMES].sort();
-  if (registeredTypes.join("\n") !== implementationTypes.join("\n")) {
-    throw new Error("qa contract registry and TypeScript foundation types differ");
-  }
   for (const type of FOUNDATION_TYPE_NAMES) {
     const entry = registry.types[type];
-    if (
-      entry === undefined ||
-      entry.schema !== FOUNDATION_SCHEMA_NAME ||
-      entry.pointer !== `#/$defs/${type}`
-    ) {
-      throw new Error(`qa contract registry type entry is invalid: ${type}`);
-    }
     const fixtureOnly = type === "ProjectionSpecimen" || type === "StrictUnionSpecimen";
-    if ((entry.fixture_only === true) !== fixtureOnly) {
+    if (entry !== undefined && (entry.fixture_only === true) !== fixtureOnly) {
       throw new Error(`qa contract fixture-only marker is invalid: ${type}`);
     }
   }
+  const localState = registry.types[LOCAL_STATE_TYPE_NAME];
+  if (localState?.fixture_only !== undefined) {
+    throw new Error("qa contract fixture-only marker is invalid: LocalState");
+  }
+}
+
+function compileRegisteredValidator(registry: ContractRegistry, typeName: string): ValidateFunction {
+  const typeEntry = registry.types[typeName];
+  if (typeEntry === undefined) {
+    throw new Error(`unknown registered qa contract type: ${typeName}`);
+  }
+  const schemaEntry = registry.schemas[typeEntry.schema];
+  if (schemaEntry === undefined) {
+    throw new Error(`unknown registered qa contract schema: ${typeEntry.schema}`);
+  }
+  if (schemaEntry.major !== SUPPORTED_SCHEMA_MAJOR) {
+    throw new Error(`unsupported qa contract schema major: ${schemaEntry.major}`);
+  }
+  const schemaUrl = resolvePackageFile(schemaEntry.path);
+  const schema = JSON.parse(readFileSync(schemaUrl, "utf8")) as Record<string, unknown>;
+  if (schema.$id !== schemaEntry.id) {
+    throw new Error("qa contract registry schema id does not match the referenced schema");
+  }
+  assertLocalReferences(schema);
+  if (resolveJsonPointer(schema, typeEntry.pointer) === undefined) {
+    throw new Error(`unresolved qa contract registry pointer: ${typeEntry.pointer}`);
+  }
+  const validatorSchema = structuredClone(schema);
+  delete validatorSchema.$id;
+  validatorSchema.$ref = typeEntry.pointer;
+  return AJV.compile(validatorSchema);
+}
+
+function resolveJsonPointer(root: unknown, pointerValue: string): unknown {
+  if (!pointerValue.startsWith("#/")) return undefined;
+  let current = root;
+  for (const encodedToken of pointerValue.slice(2).split("/")) {
+    if (/~(?![01])/u.test(encodedToken)) return undefined;
+    const token = encodedToken.replace(/~1/g, "/").replace(/~0/g, "~");
+    if (!isRecord(current) || !(token in current)) return undefined;
+    current = current[token];
+  }
+  return current;
+}
+
+function assertLocalReferences(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) assertLocalReferences(item);
+    return;
+  }
+  if (!isRecord(value)) return;
+  if (typeof value.$ref === "string" && !value.$ref.startsWith("#")) {
+    throw new Error(`external qa contract schema reference is forbidden: ${value.$ref}`);
+  }
+  for (const child of Object.values(value)) assertLocalReferences(child);
 }
 
 function inspectNode(node: JsonNode, text: string, depth: number): void {
