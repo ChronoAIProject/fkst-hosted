@@ -40,6 +40,7 @@ interface LifecycleFixture {
     readonly expected_sha256: string;
   })[];
   readonly invalid_cases: readonly (LifecycleCase & {
+    readonly lifecycle_type: LifecycleType;
     readonly expected: Rejection;
   })[];
 }
@@ -66,6 +67,11 @@ test("local lifecycle fixture metadata", () => {
       ["LocalState", "finalizing_local"],
       ["LocalState", "terminal"],
       ["ExecutionOutcome", "passed"],
+      ["ExecutionOutcome", "failed"],
+      ["ExecutionOutcome", "cancelled"],
+      ["ExecutionOutcome", "timed_out"],
+      ["ExecutionOutcome", "lost"],
+      ["ExecutionOutcome", "blocked"],
     ],
   );
 
@@ -81,11 +87,6 @@ for (const fixtureCase of fixture.valid_cases) {
     console.log(`case_id=${fixtureCase.case_id}`);
     const raw = Buffer.from(JSON.stringify(fixtureCase.source));
     const validated = validateLifecycleCase(fixtureCase.lifecycle_type, raw);
-    if (fixtureCase.case_id === "execution-outcome-passed") {
-      assert.equal(fixtureCase.lifecycle_type, "ExecutionOutcome");
-      assert.equal(raw.toString("utf8"), '"passed"');
-      assert.equal(validated.value(), "passed");
-    }
     assert.equal(validated.value(), fixtureCase.source);
     const canonical = canonicalBytes(validated);
     assert.equal(Buffer.from(canonical).toString("hex"), fixtureCase.expected_canonical_utf8_hex);
@@ -101,7 +102,11 @@ for (const fixtureCase of fixture.invalid_cases) {
   test(fixtureCase.case_id, () => {
     console.log(`case_id=${fixtureCase.case_id}`);
     assert.throws(
-      () => validateLocalState(Buffer.from(JSON.stringify(fixtureCase.source))),
+      () =>
+        validateLifecycleCase(
+          fixtureCase.lifecycle_type,
+          Buffer.from(JSON.stringify(fixtureCase.source)),
+        ),
       (error) => rejectionMatches(error, fixtureCase.expected, fixtureCase.case_id),
     );
   });
@@ -110,11 +115,30 @@ for (const fixtureCase of fixture.invalid_cases) {
 const admissionCases = [
   {
     case_id: "local-state-malformed-json",
+    lifecycle_type: "LocalState",
     raw: Buffer.from([0x22]),
     expected: { category: "validation", reason: "invalid_json", path: "/" },
   },
   {
     case_id: "local-state-invalid-utf8",
+    lifecycle_type: "LocalState",
+    raw: Buffer.from([0xff]),
+    expected: {
+      category: "canonicalization",
+      code: "canonicalization.invalid_utf8",
+      reason: "invalid_utf8",
+      path: "/",
+    },
+  },
+  {
+    case_id: "execution-outcome-malformed-json",
+    lifecycle_type: "ExecutionOutcome",
+    raw: Buffer.from([0x22]),
+    expected: { category: "validation", reason: "invalid_json", path: "/" },
+  },
+  {
+    case_id: "execution-outcome-invalid-utf8",
+    lifecycle_type: "ExecutionOutcome",
     raw: Buffer.from([0xff]),
     expected: {
       category: "canonicalization",
@@ -125,6 +149,7 @@ const admissionCases = [
   },
 ] as const satisfies readonly {
   readonly case_id: string;
+  readonly lifecycle_type: LifecycleType;
   readonly raw: Uint8Array;
   readonly expected: Rejection;
 }[];
@@ -133,11 +158,18 @@ for (const admissionCase of admissionCases) {
   test(admissionCase.case_id, () => {
     console.log(`case_id=${admissionCase.case_id}`);
     assert.throws(
-      () => validateLocalState(admissionCase.raw),
+      () => validateLifecycleCase(admissionCase.lifecycle_type, admissionCase.raw),
       (error) => rejectionMatches(error, admissionCase.expected, admissionCase.case_id),
     );
   });
 }
+
+test("unknown lifecycle fixture type fails closed", () => {
+  assert.throws(
+    () => validateLifecycleCase("Unknown" as LifecycleType, Buffer.from('"passed"')),
+    /unsupported lifecycle fixture type: Unknown/,
+  );
+});
 
 const registryFailures: readonly (readonly [string, PackageMutation])[] = [
   ["mismatched schema id", (registry: RegistryJson) => {
