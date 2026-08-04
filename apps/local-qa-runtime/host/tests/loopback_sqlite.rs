@@ -13,6 +13,13 @@ const CREATED_BODY: &[u8] =
     b"{\"run_id\":\"run-001\",\"state\":\"accepted\",\"event_sequence\":1}\n";
 const CONFLICT_BODY: &[u8] = b"{\"type\":\"about:blank\",\"title\":\"Conflict\",\"status\":409,\"detail\":\"run_id is already accepted under a different Idempotency-Key\"}\n";
 const REQUEST_DIGEST: &str = "c6da30d2cbe81af624c4e364e21cdad9dc2510d2e2ff9a02bb5bd6c325a25428";
+const HEALTH_BODY: &[u8] =
+    b"{\"service\":\"fkst-local-qa-host\",\"version\":\"0.0.0\",\"alive\":true}\n";
+const NOT_FOUND_BODY: &[u8] = b"{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"run not found\"}\n";
+const INVALID_READ_BODY: &[u8] = b"{\"type\":\"about:blank\",\"title\":\"Bad Request\",\"status\":400,\"detail\":\"invalid read request\"}\n";
+const INVALID_CANCEL_BODY: &[u8] = b"{\"type\":\"about:blank\",\"title\":\"Bad Request\",\"status\":400,\"detail\":\"invalid cancel request\"}\n";
+const METHOD_NOT_ALLOWED_BODY: &[u8] = b"{\"type\":\"about:blank\",\"title\":\"Method Not Allowed\",\"status\":405,\"detail\":\"method not allowed\"}\n";
+const ENDPOINT_NOT_FOUND_BODY: &[u8] = b"{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"endpoint not found\"}\n";
 
 struct TempDirectory {
     path: PathBuf,
@@ -99,16 +106,24 @@ struct HttpResponse {
     body: Vec<u8>,
 }
 
-fn submit(port: u16, run_id: &str, idempotency_key: &str) -> HttpResponse {
-    let body = b"{\"kind\":\"inert\"}";
+fn request(
+    port: u16,
+    method: &str,
+    target: &str,
+    headers: &[(&str, &str)],
+    body: &[u8],
+) -> HttpResponse {
     let mut stream =
         TcpStream::connect(("127.0.0.1", port)).expect("loopback host must accept connections");
     write!(
         stream,
-        "PUT /v1/runs/{run_id} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nIdempotency-Key: {idempotency_key}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
+        "{method} {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
     )
-    .expect("request headers must be written");
+    .expect("request line must be written");
+    for (name, value) in headers {
+        write!(stream, "{name}: {value}\r\n").expect("request header must be written");
+    }
+    write!(stream, "Connection: close\r\n\r\n").expect("request terminator must be written");
     stream
         .write_all(body)
         .expect("request body must be written");
@@ -138,6 +153,40 @@ fn submit(port: u16, run_id: &str, idempotency_key: &str) -> HttpResponse {
         content_type,
         body: response[header_end + 4..].to_vec(),
     }
+}
+
+fn submit(port: u16, run_id: &str, idempotency_key: &str) -> HttpResponse {
+    request(
+        port,
+        "PUT",
+        &format!("/v1/runs/{run_id}"),
+        &[
+            ("Content-Type", "application/json"),
+            ("Idempotency-Key", idempotency_key),
+            ("Content-Length", "16"),
+        ],
+        b"{\"kind\":\"inert\"}",
+    )
+}
+
+fn get(port: u16, target: &str) -> HttpResponse {
+    request(port, "GET", target, &[], b"")
+}
+
+fn cancel(port: u16, run_id: &str, key: &str) -> HttpResponse {
+    request(
+        port,
+        "POST",
+        &format!("/v1/runs/{run_id}:cancel"),
+        &[("Idempotency-Key", key), ("Content-Length", "0")],
+        b"",
+    )
+}
+
+fn assert_response(response: HttpResponse, status: &str, content_type: &str, body: &[u8]) {
+    assert_eq!(response.status_line, status);
+    assert_eq!(response.content_type, content_type);
+    assert_eq!(response.body, body);
 }
 
 #[test]
@@ -197,6 +246,323 @@ fn concurrent_different_keys_create_exactly_one_acceptance() {
     host.stop();
 
     assert_exact_journal(&database_path, accepted_key);
+}
+
+#[test]
+fn reads_cancellation_and_restart_match_the_durable_contract() {
+    let temp = TempDirectory::new("reads-cancel-restart");
+    let database_path = temp.database_path();
+    let host = HostProcess::start(&database_path);
+
+    assert_response(
+        get(host.port, "/v1/health"),
+        "HTTP/1.1 200 OK",
+        "application/json",
+        HEALTH_BODY,
+    );
+    assert_response(
+        submit(host.port, "run-001", "idem-001"),
+        "HTTP/1.1 201 Created",
+        "application/json",
+        CREATED_BODY,
+    );
+    assert_response(
+        get(host.port, "/v1/runs/run-001"),
+        "HTTP/1.1 200 OK",
+        "application/json",
+        b"{\"run_id\":\"run-001\",\"state\":\"accepted\",\"latest_event_sequence\":1}\n",
+    );
+    assert_response(
+        get(host.port, "/v1/runs/run-001/events?after=0&limit=100"),
+        "HTTP/1.1 200 OK",
+        "application/json",
+        b"{\"run_id\":\"run-001\",\"after\":0,\"events\":[{\"sequence\":1,\"event_type\":\"run.accepted\",\"event\":{\"run_id\":\"run-001\",\"state\":\"accepted\"}}],\"next_after\":1}\n",
+    );
+    assert_response(
+        get(host.port, "/v1/runs/run-001/events?limit=1&after=1"),
+        "HTTP/1.1 200 OK",
+        "application/json",
+        b"{\"run_id\":\"run-001\",\"after\":1,\"events\":[],\"next_after\":1}\n",
+    );
+    assert_response(
+        cancel(host.port, "run-001", "cancel-001"),
+        "HTTP/1.1 202 Accepted",
+        "application/json",
+        b"{\"run_id\":\"run-001\",\"disposition\":\"accepted\",\"event_sequence\":2}\n",
+    );
+    assert_response(
+        cancel(host.port, "run-001", "cancel-002"),
+        "HTTP/1.1 200 OK",
+        "application/json",
+        b"{\"run_id\":\"run-001\",\"disposition\":\"already_accepted\",\"event_sequence\":2}\n",
+    );
+    assert_response(
+        get(host.port, "/v1/runs/run-001/events?after=1&limit=1"),
+        "HTTP/1.1 200 OK",
+        "application/json",
+        b"{\"run_id\":\"run-001\",\"after\":1,\"events\":[{\"sequence\":2,\"event_type\":\"run.cancel_requested\",\"event\":{\"run_id\":\"run-001\",\"state\":\"accepted\"}}],\"next_after\":2}\n",
+    );
+    host.stop();
+
+    let restarted = HostProcess::start(&database_path);
+    assert_response(
+        submit(restarted.port, "run-001", "idem-001"),
+        "HTTP/1.1 200 OK",
+        "application/json",
+        CREATED_BODY,
+    );
+    assert_response(
+        get(restarted.port, "/v1/runs/run-001"),
+        "HTTP/1.1 200 OK",
+        "application/json",
+        b"{\"run_id\":\"run-001\",\"state\":\"accepted\",\"latest_event_sequence\":2}\n",
+    );
+    assert_response(
+        cancel(restarted.port, "run-001", "cancel-003"),
+        "HTTP/1.1 200 OK",
+        "application/json",
+        b"{\"run_id\":\"run-001\",\"disposition\":\"already_accepted\",\"event_sequence\":2}\n",
+    );
+    restarted.stop();
+
+    let connection = Connection::open(&database_path).expect("journal must open");
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM cancel_requests", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM events", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+}
+
+#[test]
+fn concurrent_cancellation_has_one_winner() {
+    let temp = TempDirectory::new("concurrent-cancel");
+    let database_path = temp.database_path();
+    let host = HostProcess::start(&database_path);
+    assert_eq!(
+        submit(host.port, "run-001", "idem-001").status_line,
+        "HTTP/1.1 201 Created"
+    );
+    let barrier = Arc::new(Barrier::new(5));
+    let mut threads = Vec::new();
+    for index in 0..4 {
+        let barrier = Arc::clone(&barrier);
+        let port = host.port;
+        threads.push(thread::spawn(move || {
+            barrier.wait();
+            cancel(port, "run-001", &format!("cancel-{index}"))
+        }));
+    }
+    barrier.wait();
+    let responses = threads
+        .into_iter()
+        .map(|thread| thread.join().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        responses
+            .iter()
+            .filter(|response| response.status_line == "HTTP/1.1 202 Accepted")
+            .count(),
+        1
+    );
+    assert_eq!(
+        responses
+            .iter()
+            .filter(|response| response.status_line == "HTTP/1.1 200 OK")
+            .count(),
+        3
+    );
+    host.stop();
+    let connection = Connection::open(&database_path).unwrap();
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM cancel_requests", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE event_type = 'run.cancel_requested'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn terminal_absent_and_invalid_requests_are_mutation_free() {
+    let temp = TempDirectory::new("negative-contracts");
+    let database_path = temp.database_path();
+    let host = HostProcess::start(&database_path);
+    assert_eq!(
+        submit(host.port, "run-001", "idem-001").status_line,
+        "HTTP/1.1 201 Created"
+    );
+    host.stop();
+    let connection = Connection::open(&database_path).unwrap();
+    connection
+        .execute(
+            "UPDATE runs SET state = 'terminal' WHERE run_id = 'run-001'",
+            [],
+        )
+        .unwrap();
+    drop(connection);
+
+    let host = HostProcess::start(&database_path);
+    assert_response(
+        cancel(host.port, "run-001", "cancel-terminal"),
+        "HTTP/1.1 200 OK",
+        "application/json",
+        b"{\"run_id\":\"run-001\",\"disposition\":\"terminal\",\"event_sequence\":1}\n",
+    );
+    assert_response(
+        get(host.port, "/v1/runs/missing"),
+        "HTTP/1.1 404 Not Found",
+        "application/problem+json",
+        NOT_FOUND_BODY,
+    );
+    assert_response(
+        cancel(host.port, "missing", "cancel-001"),
+        "HTTP/1.1 404 Not Found",
+        "application/problem+json",
+        NOT_FOUND_BODY,
+    );
+    for target in [
+        "/v1/runs/run-001/events?after_sequence=0&limit=1",
+        "/v1/runs/run-001/events?after=0&limit=0",
+        "/v1/runs/run-001/events?after=0&limit=1&extra=1",
+        "/v1/runs/run-001/events?after=%GG&limit=1",
+    ] {
+        assert_response(
+            get(host.port, target),
+            "HTTP/1.1 400 Bad Request",
+            "application/problem+json",
+            INVALID_READ_BODY,
+        );
+    }
+    assert_response(
+        request(
+            host.port,
+            "POST",
+            "/v1/runs/run-001:cancel",
+            &[("Content-Length", "0")],
+            b"",
+        ),
+        "HTTP/1.1 400 Bad Request",
+        "application/problem+json",
+        INVALID_CANCEL_BODY,
+    );
+    assert_response(
+        request(
+            host.port,
+            "POST",
+            "/v1/runs/run-001:cancel?x=1",
+            &[("Idempotency-Key", "cancel-001"), ("Content-Length", "0")],
+            b"",
+        ),
+        "HTTP/1.1 400 Bad Request",
+        "application/problem+json",
+        INVALID_CANCEL_BODY,
+    );
+    assert_response(
+        request(
+            host.port,
+            "POST",
+            "/v1/runs/run-001:cancel",
+            &[("Idempotency-Key", "cancel-001"), ("Content-Length", "1")],
+            b"x",
+        ),
+        "HTTP/1.1 400 Bad Request",
+        "application/problem+json",
+        INVALID_CANCEL_BODY,
+    );
+    assert_response(
+        request(host.port, "DELETE", "/v1/runs/run-001", &[], b""),
+        "HTTP/1.1 405 Method Not Allowed",
+        "application/problem+json",
+        METHOD_NOT_ALLOWED_BODY,
+    );
+    assert_response(
+        get(host.port, "/v1/unknown"),
+        "HTTP/1.1 404 Not Found",
+        "application/problem+json",
+        ENDPOINT_NOT_FOUND_BODY,
+    );
+    host.stop();
+
+    let connection = Connection::open(&database_path).unwrap();
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM cancel_requests", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM events", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn version_one_database_migrates_without_changing_accepted_bytes() {
+    let temp = TempDirectory::new("v1-migration");
+    let database_path = temp.database_path();
+    let connection = Connection::open(&database_path).unwrap();
+    connection.execute_batch(
+        "CREATE TABLE accepted_requests (run_id TEXT PRIMARY KEY NOT NULL, idempotency_key TEXT NOT NULL, request_digest TEXT NOT NULL, response_json BLOB NOT NULL, UNIQUE (run_id, idempotency_key));
+         CREATE TABLE runs (run_id TEXT PRIMARY KEY NOT NULL, state TEXT NOT NULL);
+         CREATE TABLE events (run_id TEXT NOT NULL, sequence INTEGER NOT NULL, event_type TEXT NOT NULL, event_json TEXT NOT NULL, PRIMARY KEY (run_id, sequence), FOREIGN KEY (run_id) REFERENCES runs(run_id));
+         INSERT INTO accepted_requests VALUES ('run-001', 'idem-001', 'c6da30d2cbe81af624c4e364e21cdad9dc2510d2e2ff9a02bb5bd6c325a25428', X'7B2272756E5F6964223A2272756E2D303031222C227374617465223A226163636570746564222C226576656E745F73657175656E6365223A317D0A');
+         INSERT INTO runs VALUES ('run-001', 'accepted');
+         INSERT INTO events VALUES ('run-001', 1, 'run.accepted', '{\"run_id\":\"run-001\",\"state\":\"accepted\"}');
+         PRAGMA user_version = 1;"
+    ).unwrap();
+    drop(connection);
+
+    let host = HostProcess::start(&database_path);
+    assert_response(
+        submit(host.port, "run-001", "idem-001"),
+        "HTTP/1.1 200 OK",
+        "application/json",
+        CREATED_BODY,
+    );
+    host.stop();
+    let connection = Connection::open(&database_path).unwrap();
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT response_json FROM accepted_requests", [], |row| row
+                .get::<_, Vec<u8>>(0))
+            .unwrap(),
+        CREATED_BODY
+    );
 }
 
 fn assert_exact_journal(database_path: &Path, accepted_key: &str) {
