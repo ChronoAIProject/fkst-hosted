@@ -138,11 +138,20 @@ export function Operations() {
 
   // Adopt the bound the deployment states, so the controls refuse exactly what
   // its validator would.
+  //
+  // Adjusted DURING render rather than in an effect. An effect commits one
+  // render later, which leaves a window where the rows of the first page are on
+  // screen while the ceiling is still the client's optimistic default — and a
+  // range change landing in that window is authorized against the wrong bound
+  // and issues a request the deployment is guaranteed to refuse. React re-runs
+  // this component with the corrected value before any effect fires, so the feed
+  // hook below never sees the stale one. `setState` during render is the
+  // documented way to derive state from a changed input; it is guarded on
+  // inequality, so it cannot loop.
   const answeredMaxRange = activityFeed.page?.max_range_days;
-  useEffect(() => {
-    if (answeredMaxRange === undefined) return;
-    setMaxRangeDays((prev) => (prev === answeredMaxRange ? prev : answeredMaxRange));
-  }, [answeredMaxRange]);
+  if (answeredMaxRange !== undefined && answeredMaxRange !== maxRangeDays) {
+    setMaxRangeDays(answeredMaxRange);
+  }
 
   // Adopt the capability every successful response states, and upgrade a global
   // administrator to their documented default scope exactly once.
