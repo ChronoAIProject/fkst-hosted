@@ -250,7 +250,7 @@ NyxID 负责 Node authentication、request integrity、timestamp/nonce/replay pr
 GET  /v1/health
 PUT  /v1/runs/{run_id}
 GET  /v1/runs/{run_id}
-GET  /v1/runs/{run_id}/events?after_sequence=N&limit=M
+GET  /v1/runs/{run_id}/events?after=N&limit=M
 POST /v1/runs/{run_id}:cancel
 ```
 
@@ -274,7 +274,7 @@ Host 在创建 workspace、container、port 或 Chrome 前，以 `(idempotency_k
 
 ### 5.4 Event 与断线恢复
 
-Hosted 使用 `after_sequence` 拉取 bounded event batch，不依赖无限 SSE 或 Host 主动 push。NyxID 断线不改变 Run authority；Hosted 重连后先读取 Snapshot，再从已知 cursor 继续消费 events。
+Hosted 使用 `after` 拉取 bounded event batch，不依赖无限 SSE 或 Host 主动 push。NyxID 断线不改变 Run authority；Hosted 重连后先读取 Snapshot，再从已知 cursor 继续消费 events。
 
 ---
 
