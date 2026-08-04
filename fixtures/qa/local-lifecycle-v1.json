@@ -3,6 +3,7 @@
   "valid_cases": [
     {
       "case_id": "local-state-accepted",
+      "lifecycle_type": "LocalState",
       "source": "accepted",
       "expected_canonical_utf8_hex": "22616363657074656422",
       "expected_canonical_utf8_base64": "ImFjY2VwdGVkIg==",
@@ -10,6 +11,7 @@
     },
     {
       "case_id": "local-state-preparing",
+      "lifecycle_type": "LocalState",
       "source": "preparing",
       "expected_canonical_utf8_hex": "22707265706172696e6722",
       "expected_canonical_utf8_base64": "InByZXBhcmluZyI=",
@@ -17,6 +19,7 @@
     },
     {
       "case_id": "local-state-ready",
+      "lifecycle_type": "LocalState",
       "source": "ready",
       "expected_canonical_utf8_hex": "22726561647922",
       "expected_canonical_utf8_base64": "InJlYWR5Ig==",
@@ -24,6 +27,7 @@
     },
     {
       "case_id": "local-state-executing",
+      "lifecycle_type": "LocalState",
       "source": "executing",
       "expected_canonical_utf8_hex": "22657865637574696e6722",
       "expected_canonical_utf8_base64": "ImV4ZWN1dGluZyI=",
@@ -31,6 +35,7 @@
     },
     {
       "case_id": "local-state-staging-evidence",
+      "lifecycle_type": "LocalState",
       "source": "staging_evidence",
       "expected_canonical_utf8_hex": "2273746167696e675f65766964656e636522",
       "expected_canonical_utf8_base64": "InN0YWdpbmdfZXZpZGVuY2Ui",
@@ -38,6 +43,7 @@
     },
     {
       "case_id": "local-state-cleaning-up-execution",
+      "lifecycle_type": "LocalState",
       "source": "cleaning_up_execution",
       "expected_canonical_utf8_hex": "22636c65616e696e675f75705f657865637574696f6e22",
       "expected_canonical_utf8_base64": "ImNsZWFuaW5nX3VwX2V4ZWN1dGlvbiI=",
@@ -45,6 +51,7 @@
     },
     {
       "case_id": "local-state-uploading",
+      "lifecycle_type": "LocalState",
       "source": "uploading",
       "expected_canonical_utf8_hex": "2275706c6f6164696e6722",
       "expected_canonical_utf8_base64": "InVwbG9hZGluZyI=",
@@ -52,6 +59,7 @@
     },
     {
       "case_id": "local-state-finalizing-local",
+      "lifecycle_type": "LocalState",
       "source": "finalizing_local",
       "expected_canonical_utf8_hex": "2266696e616c697a696e675f6c6f63616c22",
       "expected_canonical_utf8_base64": "ImZpbmFsaXppbmdfbG9jYWwi",
@@ -59,10 +67,19 @@
     },
     {
       "case_id": "local-state-terminal",
+      "lifecycle_type": "LocalState",
       "source": "terminal",
       "expected_canonical_utf8_hex": "227465726d696e616c22",
       "expected_canonical_utf8_base64": "InRlcm1pbmFsIg==",
       "expected_sha256": "sha256:c34e20c40cc2581f3184cc0fc5e67f7d5cbebd5365a5ce02a3614f321b6e3e4b"
+    },
+    {
+      "case_id": "execution-outcome-passed",
+      "lifecycle_type": "ExecutionOutcome",
+      "source": "passed",
+      "expected_canonical_utf8_hex": "2270617373656422",
+      "expected_canonical_utf8_base64": "InBhc3NlZCI=",
+      "expected_sha256": "sha256:559532ad927252eed5d9b6687d55203a96b956d822055f4570f196a93a42bece"
     }
   ],
   "invalid_cases": [

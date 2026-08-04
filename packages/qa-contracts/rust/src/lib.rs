@@ -23,6 +23,11 @@ const EMBEDDED_SCHEMAS: &[(&str, &str)] = &[
     (LOCAL_LIFECYCLE_SCHEMA_PATH, LOCAL_LIFECYCLE_SCHEMA),
 ];
 const LOCAL_STATE_TYPE_NAME: &str = "LocalState";
+const EXECUTION_OUTCOME_TYPE_NAME: &str = "ExecutionOutcome";
+const LIFECYCLE_TYPE_NAMES: [&str; 2] = [
+    LOCAL_STATE_TYPE_NAME,
+    EXECUTION_OUTCOME_TYPE_NAME,
+];
 const SUPPORTED_SCHEMA_MAJOR: u64 = 1;
 const MAX_DEPTH: usize = 128;
 const MAX_SAFE_INTEGER_TEXT: &str = "9007199254740991";
@@ -189,6 +194,10 @@ pub fn validate_local_state(raw: &[u8]) -> Result<ValidatedValue, ContractError>
     validate_registered_value(admit_json(raw)?, LOCAL_STATE_TYPE_NAME)
 }
 
+pub fn validate_execution_outcome(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    validate_registered_value(admit_json(raw)?, EXECUTION_OUTCOME_TYPE_NAME)
+}
+
 pub fn validate_value(
     admitted: AdmittedJson,
     foundation_type: FoundationType,
@@ -322,16 +331,18 @@ fn validate_registry_value(registry: &Registry) -> Result<(), ContractError> {
             )));
         }
     }
-    schema_for_registered_type(registry, LOCAL_STATE_TYPE_NAME, embedded_schema)?;
-    let local_state = registry
-        .types
-        .get(LOCAL_STATE_TYPE_NAME)
-        .expect("registered type was resolved above");
-    if local_state.fixture_only {
-        return Err(ContractError(Rejection::validation(
-            "invalid_embedded_registry",
-            "/types/LocalState",
-        )));
+    for type_name in LIFECYCLE_TYPE_NAMES {
+        schema_for_registered_type(registry, type_name, embedded_schema)?;
+        let entry = registry
+            .types
+            .get(type_name)
+            .expect("registered type was resolved above");
+        if entry.fixture_only {
+            return Err(ContractError(Rejection::validation(
+                "invalid_embedded_registry",
+                format!("/types/{type_name}"),
+            )));
+        }
     }
     Ok(())
 }
@@ -1284,7 +1295,7 @@ mod registry_tests {
         );
         assert_registry_error(
             |registry| {
-                registry.types.remove(LOCAL_STATE_TYPE_NAME);
+                registry.types.remove(EXECUTION_OUTCOME_TYPE_NAME);
             },
             "unknown_registered_type",
         );
@@ -1292,8 +1303,8 @@ mod registry_tests {
             |registry| {
                 registry
                     .types
-                    .get_mut(LOCAL_STATE_TYPE_NAME)
-                    .expect("LocalState type")
+                    .get_mut(EXECUTION_OUTCOME_TYPE_NAME)
+                    .expect("ExecutionOutcome type")
                     .pointer = "#/$defs/Missing".into();
             },
             "unresolved_registered_pointer",

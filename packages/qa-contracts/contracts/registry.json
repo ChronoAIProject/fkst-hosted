@@ -23,6 +23,7 @@
     "SignatureBlock": { "schema": "qa.contract-foundation/v1", "pointer": "#/$defs/SignatureBlock" },
     "ProjectionSpecimen": { "schema": "qa.contract-foundation/v1", "pointer": "#/$defs/ProjectionSpecimen", "fixture_only": true },
     "StrictUnionSpecimen": { "schema": "qa.contract-foundation/v1", "pointer": "#/$defs/StrictUnionSpecimen", "fixture_only": true },
-    "LocalState": { "schema": "qa.local-lifecycle/v1", "pointer": "#/$defs/LocalState" }
+    "LocalState": { "schema": "qa.local-lifecycle/v1", "pointer": "#/$defs/LocalState" },
+    "ExecutionOutcome": { "schema": "qa.local-lifecycle/v1", "pointer": "#/$defs/ExecutionOutcome" }
   }
 }

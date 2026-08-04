@@ -17,6 +17,11 @@ const MAX_DEPTH = 128;
 const MAX_SAFE_INTEGER = 9_007_199_254_740_991n;
 const SUPPORTED_SCHEMA_MAJOR = 1;
 const LOCAL_STATE_TYPE_NAME = "LocalState";
+const EXECUTION_OUTCOME_TYPE_NAME = "ExecutionOutcome";
+const LIFECYCLE_TYPE_NAMES = Object.freeze([
+  LOCAL_STATE_TYPE_NAME,
+  EXECUTION_OUTCOME_TYPE_NAME,
+] as const);
 const FOUNDATION_TYPE_NAMES = Object.freeze([
   "ContractMeta",
   "HostScopedMeta",
@@ -61,7 +66,9 @@ const VALIDATORS = new Map<string, ValidateFunction>();
 for (const type of FOUNDATION_TYPE_NAMES) {
   VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
 }
-VALIDATORS.set(LOCAL_STATE_TYPE_NAME, compileRegisteredValidator(REGISTRY, LOCAL_STATE_TYPE_NAME));
+for (const type of LIFECYCLE_TYPE_NAMES) {
+  VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
+}
 
 export interface Rejection {
   readonly category: "canonicalization" | "contract" | "validation";
@@ -143,6 +150,10 @@ export function validateFoundation(raw: Uint8Array, type: FoundationType): Valid
 
 export function validateLocalState(raw: Uint8Array): ValidatedValue {
   return validateRegisteredValue(admitJson(raw), LOCAL_STATE_TYPE_NAME);
+}
+
+export function validateExecutionOutcome(raw: Uint8Array): ValidatedValue {
+  return validateRegisteredValue(admitJson(raw), EXECUTION_OUTCOME_TYPE_NAME);
 }
 
 export function validateValue(admitted: AdmittedJson, type: FoundationType): ValidatedValue {
@@ -286,9 +297,11 @@ function validateRegistry(registry: ContractRegistry): void {
       throw new Error(`qa contract fixture-only marker is invalid: ${type}`);
     }
   }
-  const localState = registry.types[LOCAL_STATE_TYPE_NAME];
-  if (localState?.fixture_only !== undefined) {
-    throw new Error("qa contract fixture-only marker is invalid: LocalState");
+  for (const type of LIFECYCLE_TYPE_NAMES) {
+    const entry = registry.types[type];
+    if (entry?.fixture_only !== undefined) {
+      throw new Error(`qa contract fixture-only marker is invalid: ${type}`);
+    }
   }
 }
 
