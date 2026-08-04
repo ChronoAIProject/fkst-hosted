@@ -1157,69 +1157,6 @@ fn classify_json_error(error: serde_json::Error) -> ContractError {
     }
 }
 
-#[cfg(test)]
-mod registry_tests {
-    use super::*;
-
-    #[test]
-    fn registry_resolution_fails_closed() {
-        assert_registry_error(
-            |registry| {
-                registry
-                    .schemas
-                    .get_mut("qa.local-lifecycle/v1")
-                    .expect("lifecycle schema")
-                    .id = "urn:example:mismatch".into();
-            },
-            "invalid_embedded_schema",
-        );
-        assert_registry_error(
-            |registry| {
-                registry
-                    .schemas
-                    .get_mut("qa.local-lifecycle/v1")
-                    .expect("lifecycle schema")
-                    .major = 2;
-            },
-            "unsupported_schema_major",
-        );
-        assert_registry_error(
-            |registry| {
-                registry.types.remove(LOCAL_STATE_TYPE_NAME);
-            },
-            "unknown_registered_type",
-        );
-        assert_registry_error(
-            |registry| {
-                registry
-                    .types
-                    .get_mut(LOCAL_STATE_TYPE_NAME)
-                    .expect("LocalState type")
-                    .pointer = "#/$defs/Missing".into();
-            },
-            "unresolved_registered_pointer",
-        );
-        assert_registry_error(
-            |registry| {
-                registry
-                    .schemas
-                    .get_mut("qa.local-lifecycle/v1")
-                    .expect("lifecycle schema")
-                    .path = "../schema.json".into();
-            },
-            "invalid_embedded_schema_path",
-        );
-    }
-
-    fn assert_registry_error(mutate: impl FnOnce(&mut Registry), reason: &str) {
-        let mut registry: Registry =
-            serde_json::from_str(CONTRACT_REGISTRY).expect("parse embedded registry");
-        mutate(&mut registry);
-        let error = validate_registry_value(&registry).expect_err("registry must fail closed");
-        assert_eq!(error.0.reason, reason);
-    }
-}
-
 fn pointer_or_root(path: &str) -> String {
     if path.is_empty() {
         "/".into()
@@ -1316,5 +1253,68 @@ impl<'de> Visitor<'de> for StrictValueVisitor {
             values.insert(key, value.0);
         }
         Ok(StrictValue(Value::Object(values)))
+    }
+}
+
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+
+    #[test]
+    fn registry_resolution_fails_closed() {
+        assert_registry_error(
+            |registry| {
+                registry
+                    .schemas
+                    .get_mut("qa.local-lifecycle/v1")
+                    .expect("lifecycle schema")
+                    .id = "urn:example:mismatch".into();
+            },
+            "invalid_embedded_schema",
+        );
+        assert_registry_error(
+            |registry| {
+                registry
+                    .schemas
+                    .get_mut("qa.local-lifecycle/v1")
+                    .expect("lifecycle schema")
+                    .major = 2;
+            },
+            "unsupported_schema_major",
+        );
+        assert_registry_error(
+            |registry| {
+                registry.types.remove(LOCAL_STATE_TYPE_NAME);
+            },
+            "unknown_registered_type",
+        );
+        assert_registry_error(
+            |registry| {
+                registry
+                    .types
+                    .get_mut(LOCAL_STATE_TYPE_NAME)
+                    .expect("LocalState type")
+                    .pointer = "#/$defs/Missing".into();
+            },
+            "unresolved_registered_pointer",
+        );
+        assert_registry_error(
+            |registry| {
+                registry
+                    .schemas
+                    .get_mut("qa.local-lifecycle/v1")
+                    .expect("lifecycle schema")
+                    .path = "../schema.json".into();
+            },
+            "invalid_embedded_schema_path",
+        );
+    }
+
+    fn assert_registry_error(mutate: impl FnOnce(&mut Registry), reason: &str) {
+        let mut registry: Registry =
+            serde_json::from_str(CONTRACT_REGISTRY).expect("parse embedded registry");
+        mutate(&mut registry);
+        let error = validate_registry_value(&registry).expect_err("registry must fail closed");
+        assert_eq!(error.0.reason, reason);
     }
 }
