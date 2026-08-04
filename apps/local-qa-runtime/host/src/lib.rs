@@ -33,4 +33,12 @@ mod tests {
             Err(StartupError::NoSupportedConfiguration)
         );
     }
+
+    #[test]
+    fn unsupported_configuration_error_has_exact_display_text() {
+        assert_eq!(
+            StartupError::NoSupportedConfiguration.to_string(),
+            "no supported configuration"
+        );
+    }
 }

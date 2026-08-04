@@ -1,4 +1,3 @@
-use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -6,6 +5,20 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 static TEMP_DIRECTORY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+const EXPECTED_STDERR: &[u8] = b"fkst-local-qa-host: no supported configuration\n";
+
+#[derive(Debug, PartialEq, Eq)]
+enum EntryKind {
+    Directory,
+    File(Vec<u8>),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct EntrySnapshot {
+    relative_path: PathBuf,
+    kind: EntryKind,
+}
 
 struct TempDirectory {
     path: PathBuf,
@@ -37,37 +50,92 @@ impl Drop for TempDirectory {
     }
 }
 
-fn directory_snapshot(path: &Path) -> Vec<OsString> {
-    let mut entries = fs::read_dir(path)
-        .expect("temporary working directory must be readable")
-        .map(|entry| {
-            entry
-                .expect("temporary working directory entry must be readable")
-                .file_name()
-        })
-        .collect::<Vec<_>>();
-    entries.sort();
+fn write_configuration_decoys(path: &Path) {
+    fs::write(path.join(".env"), b"decoy environment bytes\n")
+        .expect(".env decoy must be written");
+    fs::write(
+        path.join(".fkst-local-qa-host.toml"),
+        b"decoy hidden host configuration bytes\n",
+    )
+    .expect("hidden host configuration decoy must be written");
+    fs::write(path.join("config.toml"), b"decoy generic configuration bytes\n")
+        .expect("generic configuration decoy must be written");
+    fs::write(
+        path.join("fkst-local-qa-host.toml"),
+        b"decoy host configuration bytes\n",
+    )
+    .expect("host configuration decoy must be written");
+    fs::create_dir(path.join("state")).expect("state decoy directory must be created");
+    fs::write(path.join("state/sentinel"), b"decoy state sentinel bytes\n")
+        .expect("state sentinel decoy must be written");
+}
+
+fn directory_snapshot(root: &Path) -> Vec<EntrySnapshot> {
+    fn visit(root: &Path, directory: &Path, entries: &mut Vec<EntrySnapshot>) {
+        for entry in fs::read_dir(directory).expect("snapshot directory must be readable") {
+            let entry = entry.expect("snapshot entry must be readable");
+            let path = entry.path();
+            let relative_path = path
+                .strip_prefix(root)
+                .expect("snapshot entry must be inside the root")
+                .to_path_buf();
+            let file_type = entry
+                .file_type()
+                .expect("snapshot entry type must be readable");
+
+            if file_type.is_dir() {
+                entries.push(EntrySnapshot {
+                    relative_path,
+                    kind: EntryKind::Directory,
+                });
+                visit(root, &path, entries);
+            } else if file_type.is_file() {
+                entries.push(EntrySnapshot {
+                    relative_path,
+                    kind: EntryKind::File(
+                        fs::read(&path).expect("snapshot file contents must be readable"),
+                    ),
+                });
+            } else {
+                panic!("snapshot contains an unsupported entry type: {relative_path:?}");
+            }
+        }
+    }
+
+    let mut entries = Vec::new();
+    visit(root, root, &mut entries);
+    entries.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
     entries
 }
 
 #[test]
-fn zero_argument_startup_fails_closed_without_side_effects() {
-    let working_directory = TempDirectory::new();
-    let before = directory_snapshot(working_directory.path());
+fn unsupported_inputs_fail_closed_without_filesystem_side_effects() {
+    let cases: &[(&[&str], bool)] = &[
+        (&[], true),
+        (&["--help"], false),
+        (&["--config", "config.toml"], false),
+        (&["project"], false),
+    ];
 
-    let output = Command::new(env!("CARGO_BIN_EXE_fkst-local-qa-host"))
-        .current_dir(working_directory.path())
-        .output()
-        .expect("fkst-local-qa-host must execute");
+    for (arguments, clear_environment) in cases {
+        let working_directory = TempDirectory::new();
+        write_configuration_decoys(working_directory.path());
+        let before = directory_snapshot(working_directory.path());
 
-    let after = directory_snapshot(working_directory.path());
+        let mut command = Command::new(env!("CARGO_BIN_EXE_fkst-local-qa-host"));
+        command
+            .current_dir(working_directory.path())
+            .args(*arguments);
+        if *clear_environment {
+            command.env_clear();
+        }
 
-    assert_eq!(output.status.code(), Some(1));
-    assert!(output.stdout.is_empty());
-    assert_eq!(
-        output.stderr,
-        b"fkst-local-qa-host: no supported configuration\n"
-    );
-    assert!(before.is_empty());
-    assert_eq!(after, before);
+        let output = command.output().expect("fkst-local-qa-host must execute");
+        let after = directory_snapshot(working_directory.path());
+
+        assert_eq!(output.status.code(), Some(1), "arguments: {arguments:?}");
+        assert!(output.stdout.is_empty(), "arguments: {arguments:?}");
+        assert_eq!(output.stderr, EXPECTED_STDERR, "arguments: {arguments:?}");
+        assert_eq!(after, before, "arguments: {arguments:?}");
+    }
 }

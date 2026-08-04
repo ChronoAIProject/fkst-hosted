@@ -8,7 +8,11 @@ executable name `fkst-local-qa-host`.
 The Host currently implements only a fail-closed startup/configuration seam.
 Because no configuration is supported yet, zero-argument startup exits with
 status `1`, writes `fkst-local-qa-host: no supported configuration` to stderr,
-and performs no runtime side effects.
+followed by one line-feed byte, and performs no runtime side effects.
+Unsupported arguments, including `--help`, `--config config.toml`, and
+`project`, produce that same result. Inherited environment variables and local
+configuration-looking files such as `.env`, `config.toml`, and
+`fkst-local-qa-host.toml` do not activate the Host.
 
 The launcher, supervisor, guest agent, Secret Broker, and TypeScript workers
 remain intentionally inert. They establish repository and build boundaries
