@@ -5,6 +5,7 @@ local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
 local entity_lib = require("devloop.entity")
 local execution_start = require("devloop.execution_start")
+local github_content_filter = require("forge.github.content_filter")
 local m_claims = require("devloop.claims")
 local m_facts = require("devloop.markers.facts")
 local m_shared = require("devloop.markers.shared")
@@ -17,6 +18,8 @@ local v_intake_candidate = require("devloop.validators.intake_candidate")
 local workflow_codex = require("workflow.codex")
 
 local M = {}
+
+local BLOCKED_ORIGIN_REASON = "Mandatory origin title or body is unavailable because GitHub content was blocked; intake terminated before workflow selection or materialization."
 
 local function malformed_decision(reason)
   return {
@@ -31,6 +34,12 @@ end
 
 local function is_tracking(action)
   return action == "track"
+end
+
+local function mandatory_origin_content_is_blocked(current)
+  local marker_prefix = github_content_filter.MARKER_PREFIX
+  return tostring(current and current.title or ""):find(marker_prefix, 1, true) == 1
+    or tostring(current and current.body or ""):find(marker_prefix, 1, true) == 1
 end
 
 local function execution_request_for(candidate, decision_dedup_key)
@@ -317,6 +326,14 @@ function M.act(package_core, event, opts)
     lock_key = lock_key,
     event_ts = event.ts,
   }
+  if mandatory_origin_content_is_blocked(gate.current) then
+    apply_intake_decision(package_core, dept, repo, issue_number, event, candidate, gate, {
+      action = "decline",
+      reason = BLOCKED_ORIGIN_REASON,
+      service_class = m_shared.normalize_intake_service_class(candidate.service_class),
+    })
+    return
+  end
   if type(opts.before_codex) == "function" and opts.before_codex(ctx) then
     return
   end
