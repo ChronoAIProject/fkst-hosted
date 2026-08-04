@@ -55,11 +55,15 @@ the web application for the supported user workflows.
 - `deploy/kubernetes/` — Kubernetes manifests, validation tools, and recovery
   runbooks
 - `skills/fkst-control-plane-manual/` — canonical user and operator contract
-- `apps/local-qa-runtime/` — independently buildable boundary for the future
-  **Local QA Host**
+- `apps/local-qa-runtime/` — independently buildable boundary for **Local QA
+  Host** and the reserved hardened Runtime shells
 
-Local QA Host is currently an inert scaffold. It does not implement a runtime,
-protocol, installation flow, or user-facing behavior yet. See
+Local QA Host is an activated executable application boundary with a
+fail-closed startup contract. It supports no configuration and performs no
+runtime capability: every invocation exits with status `1` and writes
+`fkst-local-qa-host: no supported configuration` followed by one line-feed byte
+to stderr. The launcher, supervisor, guest agent, Secret Broker, and workers
+remain inert scaffolds. See
 [`apps/local-qa-runtime/README.md`](apps/local-qa-runtime/README.md).
 
 Kernel-engine code remains upstream in `fkst-substrate`, and shared fkst
