@@ -97,6 +97,7 @@ test("contract registry and fixture metadata", () => {
   ]);
   assert.deepEqual(Object.keys(registry.types).sort(), [
     ...foundationTypeNames(),
+    "ExecutionOutcome",
     "LocalState",
   ].sort());
   assert.equal(registry.types.ProjectionSpecimen?.fixture_only, true);
