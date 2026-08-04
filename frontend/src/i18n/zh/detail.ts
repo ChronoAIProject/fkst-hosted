@@ -135,6 +135,7 @@ export const detail: DetailSlice = {
   logsError: '无法加载会话日志。',
   logsErrorNoStorage: '该部署未配置日志存储。',
   logsEmpty: '日志包为空。',
+  logsNone: '暂无日志 — 该会话尚未写入任何日志。',
   logsFilesAria: '日志文件',
   logsSelectFile: '选择一个文件查看其内容。',
   logsFileLoading: '正在加载文件…',

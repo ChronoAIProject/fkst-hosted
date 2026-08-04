@@ -12,6 +12,13 @@
 //! Legacy sessions (bundled before per-run separation) have no run index; their single
 //! `latest.tar.gz` is surfaced as one synthetic run with id `latest`, so `?run=latest`
 //! keeps working for them.
+//!
+//! That fallback is conditional on the bundle ACTUALLY EXISTING (#5765). A missing
+//! run index means either "legacy session with a latest bundle" or "session that has
+//! never flushed a log" -- opposite situations that need opposite answers. Advertising
+//! a synthetic run for the second made a brand-new or idle session render as a hard
+//! error: the viewer trusted the descriptor, asked for its manifest, got a 404, and
+//! showed "Unable to load session logs" with a retry that could never succeed.
 
 use axum::extract::{Path, State};
 use axum::Json;
@@ -63,13 +70,35 @@ pub(super) async fn list_session_runs(
             });
             Ok(Json(list))
         }
-        // Legacy session: no run index yet → surface the single latest bundle as one
-        // synthetic run so `?run=latest` still reaches it.
-        Err(StorageError::Status { status: 404 }) => Ok(Json(vec![LogRun {
-            run_id: "latest".to_string(),
-            started_at: String::new(),
-            ended_at: None,
-        }])),
+        // No run index. Legacy session ⇒ surface its single latest bundle as one
+        // synthetic run so `?run=latest` still reaches it. Never-flushed session ⇒
+        // an empty list, which is the honest answer and lets the viewer render its
+        // empty state instead of chasing a manifest that does not exist.
+        //
+        // 404 is deliberately NOT reused for this: on this endpoint it already means
+        // "unknown session", and overloading it would make "no logs yet" and "no such
+        // session" indistinguishable to a caller.
+        Err(StorageError::Status { status: 404 }) => {
+            let bundle = super::object_key_for(&session_id, None);
+            match storage.exists(&bundle).await {
+                Ok(true) => Ok(Json(vec![LogRun {
+                    run_id: "latest".to_string(),
+                    started_at: String::new(),
+                    ended_at: None,
+                }])),
+                Ok(false) => Ok(Json(Vec::new())),
+                // Storage could not answer. Reporting "no logs" here would turn a
+                // transient outage into a confident, wrong empty state.
+                Err(err) => {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        error = %err,
+                        "latest-bundle probe failed while resolving an absent run index"
+                    );
+                    Err(AppError::Upstream("log storage error".to_string()))
+                }
+            }
+        }
         Err(err) => {
             tracing::warn!(session_id = %session_id, error = %err, "runs index download failed");
             Err(AppError::Upstream("log storage error".to_string()))

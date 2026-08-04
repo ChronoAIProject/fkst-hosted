@@ -511,6 +511,7 @@ export interface SiteContent {
        *  this deployment. */
       logsErrorNoStorage: string;
       logsEmpty: string;
+      logsNone: string;
       logsFilesAria: string;
       logsSelectFile: string;
       logsFileLoading: string;
