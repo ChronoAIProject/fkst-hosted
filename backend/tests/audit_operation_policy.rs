@@ -176,10 +176,14 @@ async fn the_audited_surface_is_the_expected_size_and_shape() {
     let operations = live_operations().await;
     // 29 before milestone #22: the scoped activity query (issue #5672) added
     // `operations_list_activity` and the live sandbox inventory (#5675) added
-    // `operations_list_sandboxes`.
+    // `operations_list_sandboxes`, taking it to 31. Merging `develop` brought
+    // the session health-report surface with it — `session_health` and
+    // `session_health_report` — for 33. Both carry explicit audit policies and
+    // safe-argument DTOs; this baseline is the deliberate acknowledgement the
+    // guard demands for that.
     assert_eq!(
         operations.len(),
-        31,
+        33,
         "the full surface changed; update this baseline deliberately: {:?}",
         operations.keys().collect::<Vec<_>>()
     );
