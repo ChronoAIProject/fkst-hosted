@@ -201,29 +201,29 @@ phase=$(read_field persistentvolumeclaim fkst-audit-relay-data '{.status.phase}'
 }
 storage_class=$(read_field persistentvolumeclaim fkst-audit-relay-data '{.spec.storageClassName}')
 capacity=$(read_field persistentvolumeclaim fkst-audit-relay-data '{.status.capacity.storage}')
-[ -n "$storage_class" ] && [ -n "$capacity" ] || {
+if [ -z "$storage_class" ] || [ -z "$capacity" ]; then
   echo "the audit outbox claim must report an explicit storage class and capacity" >&2
   exit 1
-}
+fi
 echo "bound    $capacity on storageClass $storage_class"
 
 echo "== workload =="
 kube rollout status deployment/fkst-audit-relay --timeout="$timeout" >/dev/null
 replicas=$(read_field deployment.apps fkst-audit-relay '{.spec.replicas}')
 strategy=$(read_field deployment.apps fkst-audit-relay '{.spec.strategy.type}')
-[ "$replicas" = "1" ] && [ "$strategy" = "Recreate" ] || {
+if [ "$replicas" != "1" ] || [ "$strategy" != "Recreate" ]; then
   echo "the relay must be one Recreate replica (got $replicas/$strategy)" >&2
   exit 1
-}
+fi
 echo "rollout  1 replica, Recreate"
 
 echo "== shared configuration =="
 relay_grace=$(read_field configmap fkst-audit-relay-config '{.data.FKST_AUDIT_INCOMPLETE_GRACE_SECS}')
 plane_grace=$(read_field configmap fkst-control-plane-config '{.data.FKST_AUDIT_INCOMPLETE_GRACE_SECS}')
-[ -n "$relay_grace" ] && [ "$relay_grace" = "$plane_grace" ] || {
+if [ -z "$relay_grace" ] || [ "$relay_grace" != "$plane_grace" ]; then
   echo "FKST_AUDIT_INCOMPLETE_GRACE_SECS disagrees ('$plane_grace' vs '$relay_grace')" >&2
   exit 1
-}
+fi
 mode=$(read_field configmap fkst-control-plane-config '{.data.FKST_AUDIT_DELIVERY_MODE}')
 configured_url=$(read_field configmap fkst-control-plane-config '{.data.FKST_AUDIT_RELAY_URL}')
 case "$configured_url" in
