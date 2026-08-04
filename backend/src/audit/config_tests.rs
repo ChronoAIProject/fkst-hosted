@@ -299,3 +299,63 @@ fn debug_output_redacts_the_project_token() {
     // Non-secret fields stay visible for diagnostics.
     assert!(debug.contains("posthog.example"), "{debug}");
 }
+
+/// Self-hosted deployments serve ingestion and API from one origin and set no
+/// query host; the query must then resolve against the capture host exactly as
+/// before this option existed.
+#[test]
+fn an_absent_query_host_leaves_the_capture_host_authoritative() {
+    let config = AuditConfig::from_vars(&enabled(&[])).expect("valid");
+    assert_eq!(config.host.as_deref(), Some("https://posthog.example"));
+    assert_eq!(config.query_host, None);
+}
+
+/// PostHog Cloud splits the origins: capture on `us.i.posthog.com`, HogQL on
+/// `us.posthog.com` (#5813). Both must survive independently.
+#[test]
+fn a_query_host_is_kept_separate_from_the_capture_host() {
+    let config = AuditConfig::from_vars(&enabled(&[
+        ("FKST_POSTHOG_HOST", "https://us.i.posthog.com"),
+        ("FKST_POSTHOG_QUERY_HOST", "https://us.posthog.com"),
+    ]))
+    .expect("valid");
+    assert_eq!(config.host.as_deref(), Some("https://us.i.posthog.com"));
+    assert_eq!(config.query_host.as_deref(), Some("https://us.posthog.com"));
+}
+
+#[test]
+fn a_query_host_trailing_slash_is_normalized() {
+    let config = AuditConfig::from_vars(&enabled(&[(
+        "FKST_POSTHOG_QUERY_HOST",
+        "https://us.posthog.com/",
+    )]))
+    .expect("valid");
+    assert_eq!(config.query_host.as_deref(), Some("https://us.posthog.com"));
+}
+
+/// The query host is held to the SAME rule as the capture host — otherwise it
+/// would be a second, unvalidated way to point audit traffic at plaintext.
+#[test]
+fn a_plaintext_query_host_is_rejected_outside_test_environments() {
+    let err = AuditConfig::from_vars(&enabled(&[(
+        "FKST_POSTHOG_QUERY_HOST",
+        "http://us.posthog.com",
+    )]))
+    .expect_err("http must be refused");
+    assert!(format!("{err}").to_lowercase().contains("http"), "{err}");
+}
+
+/// A credential in a URL is refused whether the feature is on or off: it is in
+/// the ConfigMap and in every Debug dump either way.
+#[test]
+fn embedded_userinfo_in_the_query_host_is_rejected_even_when_disabled() {
+    let err = AuditConfig::from_vars(&vars(&[
+        ("FKST_POSTHOG_ENABLED", "false"),
+        (
+            "FKST_POSTHOG_QUERY_HOST",
+            "https://user:pass@us.posthog.com",
+        ),
+    ]))
+    .expect_err("userinfo must be refused");
+    assert!(!format!("{err}").is_empty());
+}
