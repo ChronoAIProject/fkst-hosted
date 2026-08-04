@@ -58,12 +58,12 @@ the web application for the supported user workflows.
 - `apps/local-qa-runtime/` — independently buildable boundary for **Local QA
   Host** and the reserved hardened Runtime shells
 
-Local QA Host is an activated executable application boundary with a
-fail-closed startup contract. It supports no configuration and performs no
-runtime capability: every invocation exits with status `1` and writes
-`fkst-local-qa-host: no supported configuration` followed by one line-feed byte
-to stderr. The launcher, supervisor, guest agent, Secret Broker, and workers
-remain inert scaffolds. See
+Local QA Host is an activated executable application boundary with an explicit
+loopback-only `local-demo` mode. That mode accepts one strict inert Run through
+`PUT /v1/runs/{run_id}` and journals its immutable acceptance atomically in
+SQLite for restart replay. Zero-argument and unsupported invocation remains
+fail-closed with the exact `no supported configuration` error. The launcher,
+supervisor, guest agent, Secret Broker, and workers remain inert scaffolds. See
 [`apps/local-qa-runtime/README.md`](apps/local-qa-runtime/README.md).
 
 Kernel-engine code remains upstream in `fkst-substrate`, and shared fkst
