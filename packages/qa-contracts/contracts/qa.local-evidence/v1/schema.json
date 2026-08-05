@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:chronoai:fkst:qa-contracts:qa.local-evidence:v1",
+  "$defs": {
+    "RunId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+    },
+    "Attempt": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "FixedFixtureUrl": {
+      "type": "string",
+      "pattern": "^http://127\\.0\\.0\\.1:([0-9]+)/fixed-page\\.html$"
+    },
+    "LocalSanitizedObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "run_id",
+        "attempt",
+        "fixture_url",
+        "final_url",
+        "selector",
+        "expected_text",
+        "observed_text"
+      ],
+      "properties": {
+        "schema_version": { "const": "qa.local-evidence/v1" },
+        "run_id": { "$ref": "#/$defs/RunId" },
+        "attempt": { "$ref": "#/$defs/Attempt" },
+        "fixture_url": { "$ref": "#/$defs/FixedFixtureUrl" },
+        "final_url": { "$ref": "#/$defs/FixedFixtureUrl" },
+        "selector": { "const": "[data-local-qa=\"status\"]" },
+        "expected_text": { "const": "READY" },
+        "observed_text": { "const": "READY" }
+      }
+    }
+  }
+}

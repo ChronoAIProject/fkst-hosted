@@ -18,13 +18,18 @@ const FOUNDATION_SCHEMA_PATH: &str = "contracts/qa.contract-foundation/v1/schema
 const LOCAL_LIFECYCLE_SCHEMA: &str =
     include_str!("../../contracts/qa.local-lifecycle/v1/schema.json");
 const LOCAL_LIFECYCLE_SCHEMA_PATH: &str = "contracts/qa.local-lifecycle/v1/schema.json";
+const LOCAL_EVIDENCE_SCHEMA: &str =
+    include_str!("../../contracts/qa.local-evidence/v1/schema.json");
+const LOCAL_EVIDENCE_SCHEMA_PATH: &str = "contracts/qa.local-evidence/v1/schema.json";
 const EMBEDDED_SCHEMAS: &[(&str, &str)] = &[
     (FOUNDATION_SCHEMA_PATH, FOUNDATION_SCHEMA),
     (LOCAL_LIFECYCLE_SCHEMA_PATH, LOCAL_LIFECYCLE_SCHEMA),
+    (LOCAL_EVIDENCE_SCHEMA_PATH, LOCAL_EVIDENCE_SCHEMA),
 ];
 const LOCAL_STATE_TYPE_NAME: &str = "LocalState";
 const EXECUTION_OUTCOME_TYPE_NAME: &str = "ExecutionOutcome";
 const LIFECYCLE_TYPE_NAMES: [&str; 2] = [LOCAL_STATE_TYPE_NAME, EXECUTION_OUTCOME_TYPE_NAME];
+const LOCAL_SANITIZED_OBSERVATION_TYPE_NAME: &str = "LocalSanitizedObservation";
 const SUPPORTED_SCHEMA_MAJOR: u64 = 1;
 const MAX_DEPTH: usize = 128;
 const MAX_SAFE_INTEGER_TEXT: &str = "9007199254740991";
@@ -195,6 +200,17 @@ pub fn validate_execution_outcome(raw: &[u8]) -> Result<ValidatedValue, Contract
     validate_registered_value(admit_json(raw)?, EXECUTION_OUTCOME_TYPE_NAME)
 }
 
+pub fn validate_local_sanitized_observation(
+    raw: &[u8],
+) -> Result<ValidatedValue, ContractError> {
+    let validated = validate_registered_value(
+        admit_json(raw)?,
+        LOCAL_SANITIZED_OBSERVATION_TYPE_NAME,
+    )?;
+    validate_local_sanitized_observation_rules(validated.value())?;
+    Ok(validated)
+}
+
 pub fn validate_value(
     admitted: AdmittedJson,
     foundation_type: FoundationType,
@@ -341,7 +357,72 @@ fn validate_registry_value(registry: &Registry) -> Result<(), ContractError> {
             )));
         }
     }
+    schema_for_registered_type(
+        registry,
+        LOCAL_SANITIZED_OBSERVATION_TYPE_NAME,
+        embedded_schema,
+    )?;
+    let observation_entry = registry
+        .types
+        .get(LOCAL_SANITIZED_OBSERVATION_TYPE_NAME)
+        .expect("registered type was resolved above");
+    if observation_entry.fixture_only {
+        return Err(ContractError(Rejection::validation(
+            "invalid_embedded_registry",
+            format!("/types/{LOCAL_SANITIZED_OBSERVATION_TYPE_NAME}"),
+        )));
+    }
     Ok(())
+}
+
+fn validate_local_sanitized_observation_rules(value: &Value) -> Result<(), ContractError> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| ContractError(Rejection::validation("schema_violation", "/")))?;
+    let fixture_url = object
+        .get("fixture_url")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            ContractError(Rejection::validation("schema_violation", "/fixture_url"))
+        })?;
+    let final_url = object
+        .get("final_url")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ContractError(Rejection::validation("schema_violation", "/final_url")))?;
+    if !is_fixed_fixture_url(fixture_url) {
+        return Err(ContractError(Rejection::validation(
+            "schema_violation",
+            "/fixture_url",
+        )));
+    }
+    if !is_fixed_fixture_url(final_url) {
+        return Err(ContractError(Rejection::validation(
+            "schema_violation",
+            "/final_url",
+        )));
+    }
+    if final_url != fixture_url {
+        return Err(ContractError(Rejection::contract(
+            "contract.invalid_relation",
+            "fixture_url_mismatch",
+            "/final_url",
+        )));
+    }
+    Ok(())
+}
+
+fn is_fixed_fixture_url(value: &str) -> bool {
+    let Some(port) = value
+        .strip_prefix("http://127.0.0.1:")
+        .and_then(|remainder| remainder.strip_suffix("/fixed-page.html"))
+    else {
+        return false;
+    };
+    !port.is_empty()
+        && port.bytes().all(|byte| byte.is_ascii_digit())
+        && port
+            .parse::<u32>()
+            .is_ok_and(|port_number| (1..=65_535).contains(&port_number))
 }
 
 fn schema_for_type(type_name: &str) -> Result<Value, ContractError> {
