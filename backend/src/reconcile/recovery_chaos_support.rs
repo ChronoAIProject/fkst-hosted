@@ -69,6 +69,7 @@ pub(super) fn issue(
         assignees: Vec::new(),
         user_login: login.to_string(),
         user_id,
+        created_at: k8s_openapi::chrono::DateTime::UNIX_EPOCH,
     }
 }
 

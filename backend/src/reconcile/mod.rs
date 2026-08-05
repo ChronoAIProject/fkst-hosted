@@ -56,10 +56,18 @@ pub mod pending;
 pub mod reachability;
 pub mod registry;
 pub mod repo;
+// The registry of platform-owned label names: which labels a session author may
+// not adopt, and which are exempt from work-label collision detection because the
+// deployment shares them by construction.
+pub mod reserved_labels;
 // Publication of each repository's session-access contexts (an authorization
 // concern, kept out of the reconcile planner).
 pub mod retire;
 pub mod routing;
+// The narrow authorized body-read carve-out for scheduled-workflow issues: the
+// only way to reach one of those bodies, and it runs the metadata-only routing +
+// authority predicates first.
+pub mod schedule_authz;
 // The delete-side audit facts the planner captures before a runtime disappears.
 pub mod runtime_audit;
 // Backfill of durable creator/trigger attribution onto legacy runtimes, from the

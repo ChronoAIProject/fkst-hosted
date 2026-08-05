@@ -31,6 +31,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::reconcile::desired::SessionRegistration;
+use crate::reconcile::reserved_labels::is_reserved_label;
 
 /// The feedback detail a label-less session is demoted with (rendered into the
 /// standard invalid-flag comment). Names both remedies: add the section, or use packages
@@ -91,6 +92,16 @@ pub fn detect_missing_work_labels(
 ///
 /// A session with an EMPTY effective label set shares no queue and never collides.
 ///
+/// ## Reserved labels are exempt
+///
+/// A platform-owned label ([`crate::reconcile::reserved_labels`]) is
+/// deployment-wide by construction: every session that can host a scheduled
+/// workflow carries it. Counting it here would make the SECOND session any creator
+/// opens collide with the first and get demoted, taking the fleet down the moment
+/// schedules exist. Reserved labels are therefore skipped on both sides of the
+/// reduction — they are not a queue anyone competes over, because the schedule pass
+/// (not the wake gate) is what reads them.
+///
 /// ## Determinism
 ///
 /// The output depends only on the `(session, creator-login, label-set, issue-number)`
@@ -111,7 +122,7 @@ pub fn detect_work_label_collisions(
             continue;
         };
         let creator_key = reg.creator_login.to_ascii_lowercase();
-        for label in labels {
+        for label in labels.iter().filter(|label| !is_reserved_label(label)) {
             owner_by_label
                 .entry((creator_key.clone(), label.as_str()))
                 .and_modify(|owner| *owner = (*owner).min(reg.trigger_issue))
@@ -129,7 +140,11 @@ pub fn detect_work_label_collisions(
             continue;
         };
         let creator_key = reg.creator_login.to_ascii_lowercase();
-        let sorted: BTreeSet<&str> = labels.iter().map(String::as_str).collect();
+        let sorted: BTreeSet<&str> = labels
+            .iter()
+            .map(String::as_str)
+            .filter(|label| !is_reserved_label(label))
+            .collect();
         for label in sorted {
             match owner_by_label.get(&(creator_key.clone(), label)) {
                 Some(&owner) if owner != reg.trigger_issue => {

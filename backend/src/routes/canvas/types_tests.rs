@@ -12,6 +12,7 @@ fn meta(number: i64, state: &str, closed_at: Option<&str>) -> IssueWithMeta {
             assignees: Vec::new(),
             user_login: "author".to_string(),
             user_id: 9,
+            created_at: k8s_openapi::chrono::DateTime::UNIX_EPOCH,
         },
         html_url: format!("https://github.com/acme/site/issues/{number}"),
         created_at: "2026-07-01T00:00:00Z".to_string(),
