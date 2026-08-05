@@ -151,6 +151,33 @@ mod defaults {
         crate::session_backend::inventory::DEFAULT_MAX_WARNINGS
     }
 
+    pub(super) fn cron_min_interval_secs() -> u64 {
+        // The tightest cadence a scheduled workflow may declare. Every firing
+        // creates a run issue and boots a session pod, so an unbounded cadence is a
+        // cost hazard rather than a feature. 15 minutes.
+        900
+    }
+
+    pub(super) fn cron_max_runtime_secs() -> u64 {
+        // The watchdog budget: how long one run may hold its schedule before the
+        // control plane releases it. This is the ONLY thing that stops a hung run
+        // pinning a schedule forever, so it is deliberately generous but finite.
+        3600
+    }
+
+    pub(super) fn cron_max_jobs_per_creator() -> u32 {
+        // Blast-radius guard on one creator's scheduled workflows per repository.
+        20
+    }
+
+    pub(super) fn cron_history_pages() -> u32 {
+        // How many 100-comment pages of a schedule issue's history the pass reads,
+        // newest first. Two pages cover ~100 run records — far more than the cursor
+        // and in-flight detection need, while bounding the cost of a long-lived
+        // definition to two requests.
+        2
+    }
+
     pub(super) fn health_scrape_secs() -> u64 {
         // How often the package-agnostic session-health scrape reads each live
         // pod's status + recent framework logs to flag/clear a degraded session.
@@ -200,6 +227,14 @@ struct ReconcileVars {
     sandbox_inventory_max_warnings: usize,
     #[serde(default = "defaults::health_scrape_secs")]
     health_scrape_secs: u64,
+    #[serde(default = "defaults::cron_min_interval_secs")]
+    cron_min_interval_secs: u64,
+    #[serde(default = "defaults::cron_max_runtime_secs")]
+    cron_max_runtime_secs: u64,
+    #[serde(default = "defaults::cron_max_jobs_per_creator")]
+    cron_max_jobs_per_creator: u32,
+    #[serde(default = "defaults::cron_history_pages")]
+    cron_history_pages: u32,
     /// Auto-create a seed trigger issue when the App is installed on a repo.
     /// Default TRUE (I9): a fresh install auto-writes a manifest-driven trigger.
     #[serde(default = "defaults::seed_trigger_issue_on_install")]
@@ -282,6 +317,28 @@ pub struct ReconcileConfig {
     /// reads each live pod's status + recent framework logs to flag/clear a
     /// degraded session on its trigger issue.
     pub health_scrape_secs: u64,
+    /// The tightest cadence a `fkst-scheduled-workflow` issue may declare, in
+    /// seconds. Env: `FKST_CRON_MIN_INTERVAL_SECS`. Default 900; must be >= 60.
+    ///
+    /// Every firing creates a run issue and boots a session pod, so a one-minute
+    /// cadence is a cost hazard, not a feature. A schedule tighter than this is
+    /// latched invalid with a message naming the limit rather than silently slowed.
+    pub cron_min_interval_secs: u64,
+    /// The per-run watchdog budget, in seconds. Env: `FKST_CRON_MAX_RUNTIME_SECS`.
+    /// Default 3600; must be >= 60.
+    ///
+    /// The ONLY thing that stops a hung run pinning its schedule forever: on expiry
+    /// the control plane records a `timeout` run and drops the running latch, so the
+    /// next slot can proceed.
+    pub cron_max_runtime_secs: u64,
+    /// Maximum accepted scheduled workflows per creator per repository. Env:
+    /// `FKST_CRON_MAX_JOBS_PER_CREATOR`. Default 20; must be >= 1. Beyond it the
+    /// lowest-numbered definitions win and the rest are latched invalid naming the
+    /// cap — a blast-radius guard, not a licence tier.
+    pub cron_max_jobs_per_creator: u32,
+    /// How many 100-comment pages of a schedule issue's history the pass reads,
+    /// newest first. Env: `FKST_CRON_HISTORY_PAGES`. Default 2; must be >= 1.
+    pub cron_history_pages: u32,
     /// When true, auto-create ONE seed trigger issue the first time the App is
     /// installed on a repo with no open trigger issue. Env:
     /// `FKST_SEED_TRIGGER_ISSUE_ON_INSTALL`. **Default TRUE (epic #594 I9)** — a
@@ -343,6 +400,10 @@ impl Default for ReconcileConfig {
             sandbox_inventory_max_source_items: defaults::sandbox_inventory_max_source_items(),
             sandbox_inventory_max_warnings: defaults::sandbox_inventory_max_warnings(),
             health_scrape_secs: defaults::health_scrape_secs(),
+            cron_min_interval_secs: defaults::cron_min_interval_secs(),
+            cron_max_runtime_secs: defaults::cron_max_runtime_secs(),
+            cron_max_jobs_per_creator: defaults::cron_max_jobs_per_creator(),
+            cron_history_pages: defaults::cron_history_pages(),
         }
     }
 }
@@ -399,6 +460,35 @@ impl ReconcileConfig {
         if env.health_scrape_secs == 0 {
             return Err(AppError::Config(
                 "FKST_HEALTH_SCRAPE_SECS must be at least 1".to_string(),
+            ));
+        }
+        // A cadence bound below a minute would let a schedule fire faster than the
+        // reconcile sweep observes it, so the clock could never keep up with its own
+        // definition — and every firing costs a run issue plus a pod boot.
+        if env.cron_min_interval_secs < 60 {
+            return Err(AppError::Config(
+                "FKST_CRON_MIN_INTERVAL_SECS must be at least 60".to_string(),
+            ));
+        }
+        // A tiny watchdog budget would expire every real run mid-flight, which reads
+        // to an operator as "scheduled workflows randomly time out".
+        if env.cron_max_runtime_secs < 60 {
+            return Err(AppError::Config(
+                "FKST_CRON_MAX_RUNTIME_SECS must be at least 60".to_string(),
+            ));
+        }
+        // Zero would reject every schedule in the deployment, disabling the feature
+        // through what looks like a tuning knob.
+        if env.cron_max_jobs_per_creator == 0 {
+            return Err(AppError::Config(
+                "FKST_CRON_MAX_JOBS_PER_CREATOR must be at least 1".to_string(),
+            ));
+        }
+        // Zero pages would make every schedule recover an empty history and re-fire
+        // its anchor slot on every sweep.
+        if env.cron_history_pages == 0 {
+            return Err(AppError::Config(
+                "FKST_CRON_HISTORY_PAGES must be at least 1".to_string(),
             ));
         }
         // A zero ceiling would make every live-inventory read fail as oversize,
@@ -519,6 +609,10 @@ impl ReconcileConfig {
             sandbox_inventory_max_source_items: env.sandbox_inventory_max_source_items,
             sandbox_inventory_max_warnings: env.sandbox_inventory_max_warnings,
             health_scrape_secs: env.health_scrape_secs,
+            cron_min_interval_secs: env.cron_min_interval_secs,
+            cron_max_runtime_secs: env.cron_max_runtime_secs,
+            cron_max_jobs_per_creator: env.cron_max_jobs_per_creator,
+            cron_history_pages: env.cron_history_pages,
             seed_trigger_issue_on_install: env.seed_trigger_issue_on_install,
             seed_packages,
             mandatory_packages,

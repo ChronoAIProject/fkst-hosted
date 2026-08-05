@@ -647,6 +647,19 @@ async fn spawn_reconciler(
                 return None;
             }
         };
+    // Comment provenance for the schedule pass: separate from `listing` because it
+    // is the only reader that needs a comment's AUTHOR, and it needs it to refuse
+    // forged run records.
+    let comments: Arc<dyn fkst_control_plane::github_app::IssueCommentReader> =
+        match fkst_control_plane::github_app::HttpIssueCommentReader::new(
+            &config.github_api_base_url,
+        ) {
+            Ok(reader) => Arc::new(reader),
+            Err(error) => {
+                tracing::warn!(error = %error, "reconciler comment transport build failed; reconciler not started");
+                return None;
+            }
+        };
     let http = match reqwest::Client::builder()
         .user_agent("fkst-hosted-api")
         .build()
@@ -665,6 +678,7 @@ async fn spawn_reconciler(
         env_store,
         github,
         listing,
+        comments,
         http,
         config: config.clone(),
         session_registry,
@@ -750,6 +764,7 @@ struct ReconcileWorkerFactory {
     env_store: Arc<dyn fkst_control_plane::environment_profile::EnvironmentProfileStore>,
     github: fkst_control_plane::github_app::GithubAppTokens,
     listing: Arc<dyn fkst_control_plane::github_app::GithubListing>,
+    comments: Arc<dyn fkst_control_plane::github_app::IssueCommentReader>,
     http: reqwest::Client,
     config: Config,
     session_registry: fkst_control_plane::session_access::SessionAccessRegistry,
@@ -766,6 +781,7 @@ impl ReconcileWorkerFactory {
             env_store: self.env_store.clone(),
             github: self.github.clone(),
             listing: self.listing.clone(),
+            comments: self.comments.clone(),
             http: self.http.clone(),
             config: self.config.clone(),
             active_repos: fkst_control_plane::reconcile::new_active_repos(),

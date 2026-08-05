@@ -65,6 +65,11 @@ pub struct ReconcileCtx {
     pub github: GithubAppTokens,
     /// Read-side GitHub transport the driver enumerates issues + counts work with.
     pub listing: Arc<dyn GithubListing>,
+    /// Author-and-timestamp-aware comment reads. Separate from `listing` because
+    /// only the schedule pass needs comment PROVENANCE, and it needs it for a
+    /// security reason: run records live on an issue anyone may comment on, so an
+    /// untrusted author's marker must never be read as durable state.
+    pub comments: Arc<dyn crate::github_app::comments::IssueCommentReader>,
     /// Unauthenticated HTTP client for the package-ref reachability pre-flight.
     pub http: reqwest::Client,
     /// The loaded control-plane config (pod knobs, reconciler knobs, LLM key).

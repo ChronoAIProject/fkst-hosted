@@ -68,6 +68,17 @@ pub mod routing;
 // only way to reach one of those bodies, and it runs the metadata-only routing +
 // authority predicates first.
 pub mod schedule_authz;
+// Applying one planned schedule effect to GitHub, including the load-bearing
+// write ORDER of a dispatch.
+pub mod schedule_execute;
+// The per-repository schedule pass: enumerate open definitions, authorize each
+// from metadata, recover its run history, and plan.
+pub mod schedule_pass;
+// Pure per-definition planning: recover the clock's state from GitHub facts and
+// turn one decision into effects.
+pub mod schedule_plan;
+// The run issue a due slot creates — the only channel from the clock to a session.
+pub mod schedule_run_issue;
 // The delete-side audit facts the planner captures before a runtime disappears.
 pub mod runtime_audit;
 // Backfill of durable creator/trigger attribution onto legacy runtimes, from the
