@@ -30,6 +30,15 @@ const LOCAL_STATE_TYPE_NAME: &str = "LocalState";
 const EXECUTION_OUTCOME_TYPE_NAME: &str = "ExecutionOutcome";
 const LIFECYCLE_TYPE_NAMES: [&str; 2] = [LOCAL_STATE_TYPE_NAME, EXECUTION_OUTCOME_TYPE_NAME];
 const LOCAL_SANITIZED_OBSERVATION_TYPE_NAME: &str = "LocalSanitizedObservation";
+const LOCAL_EVIDENCE_OBJECT_TYPE_NAME: &str = "LocalEvidenceObject";
+const LOCAL_SANITIZED_OBSERVATION_REF_TYPE_NAME: &str = "LocalSanitizedObservationRef";
+const LOCAL_EVIDENCE_OBJECT_REF_TYPE_NAME: &str = "LocalEvidenceObjectRef";
+const LOCAL_EVIDENCE_TYPE_NAMES: [&str; 4] = [
+    LOCAL_SANITIZED_OBSERVATION_TYPE_NAME,
+    LOCAL_EVIDENCE_OBJECT_TYPE_NAME,
+    LOCAL_SANITIZED_OBSERVATION_REF_TYPE_NAME,
+    LOCAL_EVIDENCE_OBJECT_REF_TYPE_NAME,
+];
 const SUPPORTED_SCHEMA_MAJOR: u64 = 1;
 const MAX_DEPTH: usize = 128;
 const MAX_SAFE_INTEGER_TEXT: &str = "9007199254740991";
@@ -211,6 +220,20 @@ pub fn validate_local_sanitized_observation(
     Ok(validated)
 }
 
+pub fn validate_local_evidence_object(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    validate_registered_value(admit_json(raw)?, LOCAL_EVIDENCE_OBJECT_TYPE_NAME)
+}
+
+pub fn validate_local_sanitized_observation_ref(
+    raw: &[u8],
+) -> Result<ValidatedValue, ContractError> {
+    validate_registered_value(admit_json(raw)?, LOCAL_SANITIZED_OBSERVATION_REF_TYPE_NAME)
+}
+
+pub fn validate_local_evidence_object_ref(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    validate_registered_value(admit_json(raw)?, LOCAL_EVIDENCE_OBJECT_REF_TYPE_NAME)
+}
+
 pub fn validate_value(
     admitted: AdmittedJson,
     foundation_type: FoundationType,
@@ -357,20 +380,18 @@ fn validate_registry_value(registry: &Registry) -> Result<(), ContractError> {
             )));
         }
     }
-    schema_for_registered_type(
-        registry,
-        LOCAL_SANITIZED_OBSERVATION_TYPE_NAME,
-        embedded_schema,
-    )?;
-    let observation_entry = registry
-        .types
-        .get(LOCAL_SANITIZED_OBSERVATION_TYPE_NAME)
-        .expect("registered type was resolved above");
-    if observation_entry.fixture_only {
-        return Err(ContractError(Rejection::validation(
-            "invalid_embedded_registry",
-            format!("/types/{LOCAL_SANITIZED_OBSERVATION_TYPE_NAME}"),
-        )));
+    for type_name in LOCAL_EVIDENCE_TYPE_NAMES {
+        schema_for_registered_type(registry, type_name, embedded_schema)?;
+        let entry = registry
+            .types
+            .get(type_name)
+            .expect("registered type was resolved above");
+        if entry.fixture_only {
+            return Err(ContractError(Rejection::validation(
+                "invalid_embedded_registry",
+                format!("/types/{type_name}"),
+            )));
+        }
     }
     Ok(())
 }

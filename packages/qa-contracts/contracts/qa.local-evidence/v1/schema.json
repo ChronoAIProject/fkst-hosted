@@ -17,6 +17,25 @@
       "type": "string",
       "pattern": "^http://127\\.0\\.0\\.1:([0-9]+)/fixed-page\\.html$"
     },
+    "EvidenceId": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^evidence/[0-9]+$"
+    },
+    "ObservationId": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^observation/[0-9]+$"
+    },
+    "ContentDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "ReferenceVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
     "LocalSanitizedObservation": {
       "type": "object",
       "additionalProperties": false,
@@ -39,6 +58,81 @@
         "selector": { "const": "[data-local-qa=\"status\"]" },
         "expected_text": { "const": "READY" },
         "observed_text": { "const": "READY" }
+      }
+    },
+    "LocalEvidenceObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "run_id",
+        "attempt",
+        "object_id",
+        "role",
+        "media_type",
+        "byte_length",
+        "sha256",
+        "ownership"
+      ],
+      "properties": {
+        "schema_version": { "const": "qa.local-evidence/v1" },
+        "run_id": { "$ref": "#/$defs/RunId" },
+        "attempt": { "$ref": "#/$defs/Attempt" },
+        "object_id": { "$ref": "#/$defs/EvidenceId" },
+        "role": { "enum": ["browser-screenshot", "runner-log"] },
+        "media_type": { "enum": ["image/png", "text/plain; charset=utf-8"] },
+        "byte_length": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "ownership": { "const": "local-only:not-uploadable" }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["role", "media_type"],
+          "properties": {
+            "role": { "const": "browser-screenshot" },
+            "media_type": { "const": "image/png" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["role", "media_type"],
+          "properties": {
+            "role": { "const": "runner-log" },
+            "media_type": { "const": "text/plain; charset=utf-8" }
+          }
+        }
+      ]
+    },
+    "LocalSanitizedObservationRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "schema_version", "content_digest"],
+      "properties": {
+        "kind": { "const": "local-sanitized-observation" },
+        "id": { "$ref": "#/$defs/ObservationId" },
+        "schema_version": { "const": "qa.local-evidence/v1" },
+        "content_digest": { "$ref": "#/$defs/ContentDigest" },
+        "version": { "$ref": "#/$defs/ReferenceVersion" }
+      }
+    },
+    "LocalEvidenceObjectRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "schema_version", "content_digest"],
+      "properties": {
+        "kind": { "const": "local-evidence-object" },
+        "id": { "$ref": "#/$defs/EvidenceId" },
+        "schema_version": { "const": "qa.local-evidence/v1" },
+        "content_digest": { "$ref": "#/$defs/ContentDigest" },
+        "version": { "$ref": "#/$defs/ReferenceVersion" }
       }
     }
   }

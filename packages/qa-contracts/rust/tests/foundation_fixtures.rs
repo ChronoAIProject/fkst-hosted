@@ -118,7 +118,11 @@ fn contract_registry_and_fixture_metadata() {
         .expect("registry schemas object");
     assert_eq!(
         schemas.keys().map(String::as_str).collect::<Vec<_>>(),
-        ["qa.contract-foundation/v1", "qa.local-lifecycle/v1"]
+        [
+            "qa.contract-foundation/v1",
+            "qa.local-lifecycle/v1",
+            "qa.local-evidence/v1"
+        ]
     );
     let schema = &schemas["qa.contract-foundation/v1"];
     assert_eq!(
@@ -140,6 +144,10 @@ fn contract_registry_and_fixture_metadata() {
         .collect();
     let mut expected_types = expected_foundation_types.clone();
     expected_types.insert("ExecutionOutcome".to_owned());
+    expected_types.insert("LocalEvidenceObject".to_owned());
+    expected_types.insert("LocalEvidenceObjectRef".to_owned());
+    expected_types.insert("LocalSanitizedObservation".to_owned());
+    expected_types.insert("LocalSanitizedObservationRef".to_owned());
     expected_types.insert("LocalState".to_owned());
     assert_eq!(
         types.keys().cloned().collect::<BTreeSet<_>>(),
