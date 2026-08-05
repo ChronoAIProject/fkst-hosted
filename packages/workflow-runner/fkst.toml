@@ -1,0 +1,19 @@
+kind = "package"
+name = "workflow-runner"
+persistence_class = "stateless_adapter"
+
+[code]
+root = "."
+
+[lib_deps]
+libraries = ["contract", "workflow", "testkit", "forge"]
+
+[event_deps]
+packages = ["github-proxy", "github-comment-effect"]
+
+# Deliberately NO [github] work_labels.
+#
+# A scheduled run is woken by the RUN ISSUE the control-plane clock creates, and
+# that issue already carries the session's own work label. Declaring a label here
+# would add it to FKST_SESSION_WORK_LABEL and expose the session to a second,
+# unrelated intake — this package must not change which issues wake a session.

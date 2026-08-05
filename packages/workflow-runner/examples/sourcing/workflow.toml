@@ -1,0 +1,60 @@
+description = "Source candidates from an external API, score them, publish the accepted subset."
+
+# Step 1 — deterministic. Queries the external API, drops entries already in the
+# ledger, enriches the remainder, writes candidates.json.
+#
+# `{{ role }}` is substituted into ONE argv element, so a search parameter
+# containing a quote or a semicolon stays one argument rather than becoming shell
+# syntax.
+[[step]]
+id = "scrape"
+kind = "run"
+command = [
+  "python3",
+  ".fkst/workflows/sourcing/scrape.py",
+  "--role",
+  "{{ role }}",
+  "--ledger",
+  ".fkst/workflows/sourcing/ledger.json",
+  "--out",
+  "candidates.json",
+]
+timeout_secs = 1800
+
+# Step 2 — agentic. Scores each candidate against the criteria supplied as an
+# argument. The prompt asks for a strict JSON payload; step 3's reader is
+# defensive about it anyway, because a model asked for JSON will sometimes wrap
+# it in prose.
+[[step]]
+id = "score"
+kind = "task"
+prompt = """
+Read candidates.json. For each entry, score it 0-10 against these criteria:
+{{ role }}
+
+Emit scored.json as a JSON array whose elements are:
+  {"id": <the entry id>, "score": <0-10>, "rationale": "<one sentence>", "signals": ["<tag>", ...]}
+
+Write nothing else to scored.json.
+"""
+timeout_secs = 3600
+
+# Step 3 — deterministic. Filters by min_score, publishes through the credential
+# broker, appends accepted ids to the ledger, and commits it.
+#
+# Keyed by entry id, so a partial failure here is safely retryable: what landed is
+# in the ledger, what did not is retried next run.
+[[step]]
+id = "publish"
+kind = "run"
+command = [
+  "python3",
+  ".fkst/workflows/sourcing/publish.py",
+  "--scored",
+  "scored.json",
+  "--min-score",
+  "{{ min_score }}",
+  "--ledger",
+  ".fkst/workflows/sourcing/ledger.json",
+]
+timeout_secs = 1800
