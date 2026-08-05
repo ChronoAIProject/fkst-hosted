@@ -1,7 +1,9 @@
 use std::ffi::OsString;
 use std::fmt;
 use std::io::{self, Read, Write};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
+use std::net::{
+    IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, TcpListener, TcpStream,
+};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -12,6 +14,8 @@ const CANONICAL_REQUEST_DIGEST: &str =
     "c6da30d2cbe81af624c4e364e21cdad9dc2510d2e2ff9a02bb5bd6c325a25428";
 const MAX_BODY_BYTES: usize = 64;
 const MAX_HEADER_BYTES: usize = 16 * 1024;
+const MAX_REJECTION_DRAIN_BYTES: usize = MAX_HEADER_BYTES + MAX_BODY_BYTES;
+const REJECTION_DRAIN_TIMEOUT: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartupConfig {
@@ -528,7 +532,7 @@ struct Request {
 fn handle_connection(stream: &mut TcpStream, journal: &mut Journal) -> io::Result<()> {
     let request = match read_request(stream)? {
         Ok(request) => request,
-        Err(response) => return write_response(stream, response),
+        Err(response) => return write_rejection_response(stream, response),
     };
 
     let response = match request.route {
@@ -1087,6 +1091,34 @@ fn write_response(stream: &mut TcpStream, response: Response) -> io::Result<()> 
     )?;
     stream.write_all(&response.body)?;
     stream.flush()
+}
+
+fn write_rejection_response(stream: &mut TcpStream, response: Response) -> io::Result<()> {
+    write_response(stream, response)?;
+    stream.shutdown(Shutdown::Write)?;
+    stream.set_read_timeout(Some(REJECTION_DRAIN_TIMEOUT))?;
+
+    let mut drained = 0;
+    let mut buffer = [0_u8; 1024];
+    while drained < MAX_REJECTION_DRAIN_BYTES {
+        let available = (MAX_REJECTION_DRAIN_BYTES - drained).min(buffer.len());
+        match stream.read(&mut buffer[..available]) {
+            Ok(0) => break,
+            Ok(read) => drained += read,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock
+                        | io::ErrorKind::TimedOut
+                        | io::ErrorKind::ConnectionReset
+                ) =>
+            {
+                break;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
