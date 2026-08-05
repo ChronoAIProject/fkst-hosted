@@ -16,7 +16,7 @@ import {
   type ReleaseAssetRef,
 } from './fingerprints.ts';
 import { contentHash } from './hash.ts';
-import { readTree } from './gittree.ts';
+import { lastCommitTouching, readTree } from './gittree.ts';
 import { log } from './log.ts';
 import {
   manifestProjection, MANIFEST_SCHEMA_VERSION,
@@ -114,17 +114,33 @@ export async function resolveInputs(
   const head = source.observedHead;
   const packages = await Promise.all(
     plan.generator.packages.map(async (pkg) => ({
-      ref: pkg.ref.replace('{commit}', head),
+      ref: await resolveRef(repoRoot, head, pkg.ref),
       treeFingerprint: await directoryTreeFingerprint(repoRoot, head, pkg.directory),
     }))
   );
   const pinned = generatorPinnedFingerprint({
-    manifestRef: plan.generator.manifestRef.replace('{commit}', head),
+    manifestRef: await resolveRef(repoRoot, head, plan.generator.manifestRef),
     packages,
     schemaVersions: SCHEMA_VERSIONS,
     generatorEpoch: config.generatorEpoch,
   });
   return { source, packages, pinned, input: inputFingerprint(source.productRelevant, pinned) };
+}
+
+/**
+ * Resolve a `owner/repo@{commit}:path` reference to an immutable commit
+ * (section 28.4).
+ *
+ * `{commit}` becomes the last commit that touched the referenced PATH, not the
+ * branch head. For a package in another repository the two coincide; for one
+ * inside the source repository — as here — using the head would move the
+ * generator fingerprint on every unrelated commit.
+ */
+export async function resolveRef(repoRoot: string, revision: string, ref: string): Promise<string> {
+  if (!ref.includes('{commit}')) return ref;
+  const path = ref.slice(ref.lastIndexOf(':') + 1);
+  if (!path) throw new Error(`package reference has no path component: ${ref}`);
+  return ref.replace('{commit}', await lastCommitTouching(repoRoot, revision, path));
 }
 
 export interface BuildOptions {

@@ -132,6 +132,31 @@ export async function readTree(
   });
 }
 
+/**
+ * The most recent commit, at or before `revision`, that touched `path`.
+ *
+ * This is what "resolved commit" means for a package reference (section 28.4).
+ * The distinction is invisible when packages live in their own repository —
+ * there, the branch head IS the package's commit — but it is load-bearing when a
+ * package lives inside the source repository, as this proof's generator does.
+ * Substituting the branch head there would move `generatorPinnedFingerprint` on
+ * EVERY commit, including the commit that writes the manifest, so the input
+ * fingerprint could never match the one just recorded and the post-merge no-op
+ * that the whole self-trigger design rests on could never hold.
+ */
+export async function lastCommitTouching(
+  repoRoot: string,
+  revision: string,
+  path: string
+): Promise<string> {
+  const out = await run('git', ['log', '-1', '--format=%H', revision, '--', path], repoRoot);
+  const sha = out.toString('utf8').trim();
+  if (!/^[0-9a-f]{40}$/.test(sha)) {
+    throw new Error(`no commit found for ${path} at ${revision}`);
+  }
+  return sha;
+}
+
 /** Paths changed between two revisions — the section 17.7 condition 5 `treeDiff`. */
 export async function changedPaths(
   repoRoot: string,

@@ -19,7 +19,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { resolveInputs } from '../src/build.ts';
+import { resolveInputs, resolveRef } from '../src/build.ts';
 import { parseConfig } from '../src/config.ts';
 import { parsePlan } from '../src/plan.ts';
 
@@ -48,10 +48,36 @@ test('the generator is resolved at the REVISION being evaluated, not a fixed hea
 
   assert.equal(atHead.source.observedHead, head);
   assert.equal(atParent.source.observedHead, parent);
-  // The resolved package reference embeds the revision, which is what proves the
-  // generator was read at that revision rather than at a remembered one.
-  assert.ok(atHead.packages[0].ref.includes(head));
-  assert.ok(atParent.packages[0].ref.includes(parent));
+  assert.match(atHead.packages[0].ref, /@[0-9a-f]{40}:/, 'the ref must be post-resolution');
+});
+
+test('a package ref resolves to the last commit touching it, not the branch head', async () => {
+  // The property that makes the post-merge no-op reachable: a commit that does
+  // not touch the generator must not move the generator fingerprint. Without it
+  // the very commit that writes the manifest invalidates the manifest.
+  const expected = execFileSync(
+    'git',
+    ['log', '-1', '--format=%H', 'HEAD', '--', 'tools/evolution'],
+    { cwd: REPO, encoding: 'utf8' }
+  ).trim();
+  const resolved = await resolveRef(
+    REPO,
+    'HEAD',
+    'ChronoAIProject/fkst-hosted@{commit}:tools/evolution'
+  );
+  assert.equal(resolved, `ChronoAIProject/fkst-hosted@${expected}:tools/evolution`);
+});
+
+test('a ref carrying no placeholder is already resolved and passes through', async () => {
+  const fixed = 'ChronoAIProject/fkst-packages@abc123:packages/observer';
+  assert.equal(await resolveRef(REPO, 'HEAD', fixed), fixed);
+});
+
+test('a placeholder ref with no path component is rejected', async () => {
+  await assert.rejects(
+    () => resolveRef(REPO, 'HEAD', 'owner/repo@{commit}:'),
+    /no path component/
+  );
 });
 
 test('generatorEpoch moves the pinned and input fingerprints but not the source tree', async () => {
