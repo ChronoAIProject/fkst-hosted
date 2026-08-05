@@ -80,12 +80,12 @@ return {
   test_a_malformed_result_fails_loudly = function()
     local department = require("departments.run_report.main")
     local _, ok = capture(department, { queue = "scheduled_run_result", payload = {} })
-    t.is_false(ok)
+    t.eq(ok, false)
   end,
 
   test_an_unknown_queue_is_refused = function()
     local department = require("departments.run_report.main")
     local _, ok = capture(department, { queue = "something_else", payload = {} })
-    t.is_false(ok)
+    t.eq(ok, false)
   end,
 }

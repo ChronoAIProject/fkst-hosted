@@ -24,7 +24,7 @@ return {
     t.eq(dispatch.schedule_issue, 123)
     t.eq(dispatch.workflow_id, "sourcing")
     t.eq(dispatch.slot, "2026-08-05T01:00:00Z")
-    t.is_false(dispatch.manual)
+    t.eq(dispatch.manual, false)
     t.eq(dispatch.arguments.role, "AI Tools Application Engineer")
     t.eq(dispatch.arguments.min_score, "6")
   end,

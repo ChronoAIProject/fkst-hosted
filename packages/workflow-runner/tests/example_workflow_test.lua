@@ -7,14 +7,15 @@ local t = fkst.test
 -- send every adopter straight into a failed run — so it is parsed and validated
 -- here rather than trusted to be right.
 
+-- The engine runs package tests from the REPOSITORY root, so the path is
+-- repo-relative and `file.read` is the ambient reader for it.
+local EXAMPLE = "packages/workflow-runner/examples/sourcing/workflow.toml"
+
 local function read_example()
-  local path = "examples/sourcing/workflow.toml"
-  local handle = io.open(path, "r")
-  if handle == nil then
-    error("cannot open " .. path, 0)
+  local text = file.read(EXAMPLE)
+  if type(text) ~= "string" or text == "" then
+    error("cannot read " .. EXAMPLE, 0)
   end
-  local text = handle:read("*a")
-  handle:close()
   return text
 end
 
