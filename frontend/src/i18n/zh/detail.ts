@@ -137,6 +137,7 @@ export const detail: DetailSlice = {
   logsEmpty: '日志包为空。',
   logsNone: '暂无日志 — 该会话尚未写入任何日志。',
   logsFilesAria: '日志文件',
+  logsDetailAria: '所选日志文件',
   logsSelectFile: '选择一个文件查看其内容。',
   logsFileLoading: '正在加载文件…',
   logsFileError: '无法加载该日志文件。',

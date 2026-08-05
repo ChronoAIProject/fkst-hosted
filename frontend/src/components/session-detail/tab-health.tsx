@@ -7,7 +7,7 @@ import { getHealthReport, type HealthReport, type SessionHealth } from '@/lib/ap
 import { Chip } from '@/components/ui/chip';
 import { MarkdownPreview } from '@/components/ui/markdown-preview';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Note, SectionLabel, Spinner } from './parts';
+import { MasterDetailSplit, Note, SectionLabel, Spinner } from './parts';
 import { StatusCard } from './status-charts';
 import { HEALTH_TONE, minutes, showsStaleNotice } from './health-state';
 
@@ -158,114 +158,114 @@ export function TabHealth({
           overflow escape to the tab panel — which would scroll the rail out of
           view while reading an entry. The height comes from the panel now, not a
           hardcoded viewport fraction, so every tab is the same size. */}
-      <div className="grid gap-4 md:grid-cols-[11.5rem_minmax(0,1fr)] flex-1 min-h-0">
-        {/* ---- master: one entry per report, newest first, keyed by time ---- */}
-        <nav className="flex flex-col gap-1.5 min-w-0 min-h-0">
-          <SectionLabel>{t.healthHistory}</SectionLabel>
-          <ScrollArea className="pr-1 max-h-[14rem] md:max-h-none">
-          <ul aria-label={t.healthHistoryAria} className="flex flex-col gap-1">
-            {reports.map((entry) => {
-              const active = entry.id === activeId;
-              return (
-                <li key={entry.id}>
-                  {/* Stacked, not side by side: a stamp and a chip on one 11.5rem row
+      <MasterDetailSplit
+        rail={
+          /* ---- master: one entry per report, newest first, keyed by time ---- */
+          <nav className="flex flex-col gap-1.5 min-w-0 min-h-0">
+            <SectionLabel>{t.healthHistory}</SectionLabel>
+            <ScrollArea className="pr-1 max-h-[14rem] md:max-h-none">
+              <ul aria-label={t.healthHistoryAria} className="flex flex-col gap-1">
+                {reports.map((entry) => {
+                  const active = entry.id === activeId;
+                  return (
+                    <li key={entry.id}>
+                      {/* Stacked, not side by side: a stamp and a chip on one 11.5rem row
                       forces one of them to truncate, and the truncated part of a
                       timestamp is exactly what tells two entries apart. */}
-                  <button
-                    type="button"
-                    aria-current={active}
-                    title={formatAbsolute(entry.generated_at, lang)}
-                    onClick={() => setSelected(entry.id)}
-                    className={cn(
-                      'w-full text-left rounded-control border px-2.5 py-1.5',
-                      'flex flex-col items-start gap-1 min-w-0',
-                      active ? 'border-line-2 bg-raise-2' : 'border-line hover:bg-raise-1'
-                    )}
+                      <button
+                        type="button"
+                        aria-current={active}
+                        title={formatAbsolute(entry.generated_at, lang)}
+                        onClick={() => setSelected(entry.id)}
+                        className={cn(
+                          'w-full text-left rounded-control border px-2.5 py-1.5',
+                          'flex flex-col items-start gap-1 min-w-0',
+                          active ? 'border-line-2 bg-raise-2' : 'border-line hover:bg-raise-1'
+                        )}
+                      >
+                        <span className="text-[11px] font-mono text-dim">
+                          {formatTimeShort(entry.generated_at, lang)}
+                        </span>
+                        <Chip tone={HEALTH_TONE[entry.status] ?? 'neutral'}>
+                          {t.healthStatus[entry.status] ?? entry.status_raw}
+                        </Chip>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </ScrollArea>
+          </nav>
+        }
+        detail={
+          /* ---- detail: everything about the selected report ---- */
+          <ScrollArea className="pr-1">
+            <section aria-label={t.healthDetailAria} className="flex flex-col gap-3.5 min-w-0">
+              <StatusCard label={t.healthCurrent}>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Chip tone={HEALTH_TONE[activeSummary.status] ?? 'neutral'}>
+                    {t.healthStatus[activeSummary.status] ?? activeSummary.status_raw}
+                  </Chip>
+                  <span
+                    className="text-[11.5px] font-mono text-ghost"
+                    title={formatAbsolute(activeSummary.generated_at, lang)}
                   >
-                    <span className="text-[11px] font-mono text-dim">
-                      {formatTimeShort(entry.generated_at, lang)}
-                    </span>
-                    <Chip tone={HEALTH_TONE[entry.status] ?? 'neutral'}>
-                      {t.healthStatus[entry.status] ?? entry.status_raw}
-                    </Chip>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-          </ScrollArea>
-        </nav>
+                    {formatTimeShort(activeSummary.generated_at, lang)}
+                  </span>
+                </div>
+                <p className="text-[13px] text-fg leading-[1.55] break-words">
+                  {activeSummary.headline}
+                </p>
+                <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11.5px] font-mono text-ghost">
+                  <dt>{t.healthProducer}</dt>
+                  <dd className="text-dim break-all">{activeSummary.producer}</dd>
+                  {detail?.confidence ? (
+                    <>
+                      <dt>{t.healthConfidence}</dt>
+                      <dd className="text-dim">{detail.confidence}</dd>
+                    </>
+                  ) : null}
+                </dl>
+              </StatusCard>
 
-        {/* ---- detail: everything about the selected report ---- */}
-        <ScrollArea className="pr-1">
-        <section
-          aria-label={t.healthDetailAria}
-          className="flex flex-col gap-3.5 min-w-0"
-        >
-          <StatusCard label={t.healthCurrent}>
-            <div className="flex items-center gap-2 flex-wrap">
-              <Chip tone={HEALTH_TONE[activeSummary.status] ?? 'neutral'}>
-                {t.healthStatus[activeSummary.status] ?? activeSummary.status_raw}
-              </Chip>
-              <span
-                className="text-[11.5px] font-mono text-ghost"
-                title={formatAbsolute(activeSummary.generated_at, lang)}
-              >
-                {formatTimeShort(activeSummary.generated_at, lang)}
-              </span>
-            </div>
-            <p className="text-[13px] text-fg leading-[1.55] break-words">
-              {activeSummary.headline}
-            </p>
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11.5px] font-mono text-ghost">
-              <dt>{t.healthProducer}</dt>
-              <dd className="text-dim break-all">{activeSummary.producer}</dd>
-              {detail?.confidence ? (
-                <>
-                  <dt>{t.healthConfidence}</dt>
-                  <dd className="text-dim">{detail.confidence}</dd>
-                </>
-              ) : null}
-            </dl>
-          </StatusCard>
+              {report.status === 'loading' && (
+                <div className="flex items-center gap-2 text-ghost text-[12.5px]">
+                  <Spinner />
+                  {t.healthLoading}
+                </div>
+              )}
+              {report.status === 'error' && <Note>{t.healthError}</Note>}
 
-          {report.status === 'loading' && (
-            <div className="flex items-center gap-2 text-ghost text-[12.5px]">
-              <Spinner />
-              {t.healthLoading}
-            </div>
-          )}
-          {report.status === 'error' && <Note>{t.healthError}</Note>}
+              {detail && detail.evidence.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  <SectionLabel>{t.healthEvidence}</SectionLabel>
+                  <dl className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-3 gap-y-1 text-[11.5px] font-mono">
+                    {detail.evidence.map((item) => (
+                      <div key={item.key} className="contents">
+                        <dt className="text-ghost break-all">{item.key}</dt>
+                        <dd className="text-dim break-all">{item.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              )}
 
-          {detail && detail.evidence.length > 0 && (
-            <div className="flex flex-col gap-1.5">
-              <SectionLabel>{t.healthEvidence}</SectionLabel>
-              <dl className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-3 gap-y-1 text-[11.5px] font-mono">
-                {detail.evidence.map((item) => (
-                  <div key={item.key} className="contents">
-                    <dt className="text-ghost break-all">{item.key}</dt>
-                    <dd className="text-dim break-all">{item.value}</dd>
-                  </div>
-                ))}
-              </dl>
-            </div>
-          )}
-
-          {/* UNTRUSTED: authored by an LLM inside a session pod. MarkdownPreview emits
+              {/* UNTRUSTED: authored by an LLM inside a session pod. MarkdownPreview emits
               React elements only (never raw HTML) and protocol-allowlists links. */}
-          {detail && detail.body_markdown.trim().length > 0 && (
-            <div className="flex flex-col gap-1.5">
-              <SectionLabel>{t.healthBody}</SectionLabel>
-              <MarkdownPreview
-                markdown={detail.body_markdown}
-                ariaLabel={t.healthBodyAria}
-                variant="flow"
-              />
-            </div>
-          )}
-        </section>
-        </ScrollArea>
-      </div>
+              {detail && detail.body_markdown.trim().length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  <SectionLabel>{t.healthBody}</SectionLabel>
+                  <MarkdownPreview
+                    markdown={detail.body_markdown}
+                    ariaLabel={t.healthBodyAria}
+                    variant="flow"
+                  />
+                </div>
+              )}
+            </section>
+          </ScrollArea>
+        }
+      />
     </div>
   );
 }

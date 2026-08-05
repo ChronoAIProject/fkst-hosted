@@ -139,6 +139,7 @@ export const detail: DetailSlice = {
   logsEmpty: 'The log bundle is empty.',
   logsNone: 'No logs yet — this session has not written any.',
   logsFilesAria: 'Log files',
+  logsDetailAria: 'Selected log file',
   logsSelectFile: 'Select a file to view its contents.',
   logsFileLoading: 'Loading file…',
   logsFileError: 'Could not load this log file.',

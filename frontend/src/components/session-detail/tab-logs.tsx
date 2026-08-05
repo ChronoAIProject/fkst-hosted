@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useContent } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
 import { cn } from '@/lib/utils';
@@ -13,7 +14,8 @@ import {
 import type { LogFileContent, LogManifest, SessionDetail } from '@/lib/api/types';
 import { Chip } from '@/components/ui/chip';
 import { FadeSwap, StaggerItem } from '@/components/ui/motion';
-import { Note, NoticeLine, SectionLabel, Spinner } from './parts';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { MasterDetailSplit, Note, NoticeLine, SectionLabel, Spinner } from './parts';
 import { LogViewer } from './log-viewer';
 import { RunPicker } from './run-picker';
 
@@ -31,11 +33,24 @@ type RunsState = 'loading' | 'error' | 'ready' | 'empty';
  *  used for Refresh / Load-full where a blank screen would be a regression. */
 type LoadOpts = { full?: boolean; keepOnError?: boolean };
 
+/** Every non-split Logs state owns a scroll region. The tab panel hands this tab
+ *  a fixed BOX rather than a scroller, because the loaded state manages two
+ *  scrollers of its own — so each of the short states has to supply one, or a
+ *  long error/notice would be clipped with no way to reach it. */
+function Pane({ children }: { children: ReactNode }) {
+  return <ScrollArea className="pr-1">{children}</ScrollArea>;
+}
+
 /** Logs tab: resolves the session's runs (pod incarnations), lets the reader
  *  pick one via the run picker, then fetches that run's bundle manifest, lists
  *  its files (with the classified label), and renders a selected file's tail in
  *  a searchable mono viewer with a Refresh, a load-full action, and a
- *  whole-bundle download link. */
+ *  whole-bundle download link.
+ *
+ *  Laid out master/detail like the Health tab — files on the left rail, the
+ *  selected file on the right — because that is the shape of the data: pick one
+ *  item, read it. Run-level chrome (the run picker, the bundle download) stays
+ *  above the split; it is about the RUN, not the selected file. */
 export function TabLogs({ session }: { session: SessionDetail }) {
   const t = useContent().dashboard.detail;
   const { apiFetch } = useAuth();
@@ -223,15 +238,18 @@ export function TabLogs({ session }: { session: SessionDetail }) {
     if (selected) runLoad(selected, { full: true, keepOnError: true });
   }, [selected, runLoad]);
 
-  // Arrow-key roving over the file tablist (Left/Right + Home/End).
+  // Arrow-key roving over the file tablist. The list is a VERTICAL tablist now,
+  // so Up/Down are the primary keys per WAI-ARIA; Left/Right stay bound because
+  // dropping a working key would be a silent regression for anyone using them.
   const onTablistKey = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (!manifest || manifest.files.length === 0) return;
       const paths = manifest.files.map((f) => f.path);
       const cur = selected ? paths.indexOf(selected) : 0;
       let next = cur;
-      if (e.key === 'ArrowRight') next = (cur + 1) % paths.length;
-      else if (e.key === 'ArrowLeft') next = (cur - 1 + paths.length) % paths.length;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (cur + 1) % paths.length;
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp')
+        next = (cur - 1 + paths.length) % paths.length;
       else if (e.key === 'Home') next = 0;
       else if (e.key === 'End') next = paths.length - 1;
       else return;
@@ -239,171 +257,222 @@ export function TabLogs({ session }: { session: SessionDetail }) {
       const path = paths[next]!;
       setSelected(path);
       // Move focus to the newly selected tab (roving tabindex convention).
-      const el = e.currentTarget.querySelector<HTMLButtonElement>(`[data-path="${CSS.escape(path)}"]`);
+      const el = e.currentTarget.querySelector<HTMLButtonElement>(
+        `[data-path="${CSS.escape(path)}"]`
+      );
       el?.focus();
     },
     [manifest, selected]
   );
 
-  if (!sessionId) return <Note>{t.logsUnavailable}</Note>;
+  if (!sessionId)
+    return (
+      <Pane>
+        <Note>{t.logsUnavailable}</Note>
+      </Pane>
+    );
   // Runs gate: while the run list loads, and the 503 (no log storage) terminal.
   if (runsState === 'loading') {
     return (
-      <span className="inline-flex items-center gap-2 font-mono text-[11.5px] text-dim">
-        <Spinner />
-        {t.logsLoading}
-      </span>
+      <Pane>
+        <span className="inline-flex items-center gap-2 font-mono text-[11.5px] text-dim">
+          <Spinner />
+          {t.logsLoading}
+        </span>
+      </Pane>
     );
   }
   if (runsState === 'empty') {
     // Normal state for a session that has not flushed logs yet — a neutral note,
     // not the red error, and no manifest request behind it.
-    return <Note>{t.logsNone}</Note>;
+    return (
+      <Pane>
+        <Note>{t.logsNone}</Note>
+      </Pane>
+    );
   }
   if (runsState === 'error') {
     // Only a 503 lands here (any other runs failure falls back); reuse the
     // "no log storage configured" copy with a retry.
     return (
-      <div className="flex items-center gap-2 flex-wrap">
-        <p className="text-[12.5px] text-red">{t.logsErrorNoStorage}</p>
-        <button
-          type="button"
-          onClick={loadRuns}
-          className="inline-flex items-center gap-1.5 font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber transition-[color,border-color,box-shadow] duration-150 cursor-pointer"
-        >
-          {t.logsRetry}
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-3">
-      {/* Run picker sits above the manifest/file view (only when a real run list
-          resolved; the latest-only fallback renders no picker). */}
-      {runs && <RunPicker runs={runs} selectedRun={selectedRun} onSelect={selectRun} />}
-      {runsError && <NoticeLine>{t.runsError}</NoticeLine>}
-
-      {manifestState === 'loading' && (
-        <span className="inline-flex items-center gap-2 font-mono text-[11.5px] text-dim">
-          <Spinner />
-          {t.logsLoading}
-        </span>
-      )}
-
-      {manifestState === 'error' && (
+      <Pane>
         <div className="flex items-center gap-2 flex-wrap">
-          {/* 503 == the deployment has no log storage configured; everything
-              else is a generic failure the reader can retry. */}
-          <p className="text-[12.5px] text-red">
-            {manifestErrorStatus === 503 ? t.logsErrorNoStorage : t.logsError}
-          </p>
+          <p className="text-[12.5px] text-red">{t.logsErrorNoStorage}</p>
           <button
             type="button"
-            onClick={loadManifest}
+            onClick={loadRuns}
             className="inline-flex items-center gap-1.5 font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber transition-[color,border-color,box-shadow] duration-150 cursor-pointer"
           >
             {t.logsRetry}
           </button>
         </div>
-      )}
+      </Pane>
+    );
+  }
 
-      {manifestState === 'loaded' && (!manifest || manifest.files.length === 0) && (
-        <Note>{t.logsEmpty}</Note>
-      )}
+  // The split renders only when there is a file list to navigate; every other
+  // manifest state is a short message that gets the plain scroll region instead.
+  const hasFiles = manifestState === 'loaded' && !!manifest && manifest.files.length > 0;
 
-      {manifestState === 'loaded' && manifest && manifest.files.length > 0 && (
-        <>
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <SectionLabel>{t.logsFilesAria}</SectionLabel>
-            {session.log_url && (
-              <a
-                href={session.log_url}
-                target="_blank"
-                rel="noreferrer"
-                className="hover-underline font-ui font-semibold text-[11.5px] text-amber hover:brightness-[1.1] transition-[filter] cursor-pointer"
-              >
-                {t.logsDownloadBundle}
-              </a>
-            )}
-          </div>
+  return (
+    <div className="flex flex-col gap-3 h-full min-h-0">
+      {/* Run-level chrome, above the split: the picker selects which bundle the
+          whole tab is showing, and the download link takes that whole bundle —
+          neither is about the file selected inside it. (Only when a real run
+          list resolved; the latest-only fallback renders no picker.) */}
+      {runs && <RunPicker runs={runs} selectedRun={selectedRun} onSelect={selectRun} />}
+      {runsError && <NoticeLine>{t.runsError}</NoticeLine>}
 
-          <div
-            className="flex flex-wrap gap-1.5"
-            role="tablist"
-            aria-label={t.logsFilesAria}
-            onKeyDown={onTablistKey}
-            // Roving tabindex lives on the file tabs; -1 here just makes the
-            // container a valid focus target for the delegated arrow-key handler.
-            tabIndex={-1}
-          >
-            {manifest.files.map((entry, i) => {
-              const active = selected === entry.path;
-              return (
-                <StaggerItem key={entry.path} index={i} className="max-w-full">
-                  <button
-                    type="button"
-                    role="tab"
-                    data-path={entry.path}
-                    aria-selected={active}
-                    // Roving tabindex: only the active tab is in the tab order;
-                    // the rest are reached with the arrow keys handled above.
-                    tabIndex={active ? 0 : -1}
-                    onClick={() => setSelected(entry.path)}
-                    title={entry.path}
-                    className={cn(
-                      'inline-flex items-center gap-1.5 font-mono text-[11px] border rounded-control px-2.5 py-1 transition-[color,border-color,background-color,box-shadow] duration-150 cursor-pointer max-w-full',
-                      // Active file: amber-tinted glass surface + a soft amber
-                      // bloom so the selected tab reads at a glance; inactive
-                      // tabs stay quiet and warm their border + a subtle glow on
-                      // hover.
-                      active
-                        ? 'border-[color-mix(in_oklab,var(--amber)_40%,var(--line))] text-fg bg-[color-mix(in_oklab,var(--amber)_12%,var(--raise-2))] shadow-glow-amber'
-                        : 'border-line text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber'
-                    )}
-                  >
-                    <span className="truncate">{entry.path.split('/').pop()}</span>
-                    <Chip tone="neutral">{entry.label}</Chip>
-                  </button>
-                </StaggerItem>
-              );
-            })}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={refresh}
-              disabled={fileState === 'loading' || !selected}
-              className="inline-flex items-center gap-1.5 font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber transition-[color,border-color,box-shadow] duration-150 cursor-pointer disabled:cursor-default disabled:hover:text-dim disabled:hover:border-line disabled:hover:shadow-none"
+      {hasFiles && (
+        <div className="flex items-center justify-between gap-2 flex-wrap flex-none">
+          <SectionLabel>{t.logsFilesAria}</SectionLabel>
+          {session.log_url && (
+            <a
+              href={session.log_url}
+              target="_blank"
+              rel="noreferrer"
+              className="hover-underline font-ui font-semibold text-[11.5px] text-amber hover:brightness-[1.1] transition-[filter] cursor-pointer"
             >
-              {fileState === 'loading' && <Spinner />}
-              {t.logsRefresh}
-            </button>
-          </div>
+              {t.logsDownloadBundle}
+            </a>
+          )}
+        </div>
+      )}
 
-          {fileState === 'idle' && !file && <Note>{t.logsSelectFile}</Note>}
-          {fileState === 'loading' && !file && (
+      {!hasFiles && (
+        <Pane>
+          {manifestState === 'loading' && (
             <span className="inline-flex items-center gap-2 font-mono text-[11.5px] text-dim">
               <Spinner />
-              {t.logsFileLoading}
+              {t.logsLoading}
             </span>
           )}
-          {fileState === 'error' && !file && <p className="text-[12.5px] text-red">{t.logsFileError}</p>}
-          {/* Crossfade the viewer when the shown file changes (keyed on path). A
-              same-file refresh/load-full keeps the key, so content updates in
-              place. */}
-          {file && (
-            <FadeSwap k={file.path}>
-              <LogViewer
-                file={file}
-                stale={stale}
-                loadingFull={loadingFull}
-                onLoadFull={file.truncated ? loadFull : undefined}
-              />
-            </FadeSwap>
+
+          {manifestState === 'error' && (
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* 503 == the deployment has no log storage configured; everything
+                  else is a generic failure the reader can retry. */}
+              <p className="text-[12.5px] text-red">
+                {manifestErrorStatus === 503 ? t.logsErrorNoStorage : t.logsError}
+              </p>
+              <button
+                type="button"
+                onClick={loadManifest}
+                className="inline-flex items-center gap-1.5 font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber transition-[color,border-color,box-shadow] duration-150 cursor-pointer"
+              >
+                {t.logsRetry}
+              </button>
+            </div>
           )}
-        </>
+
+          {manifestState === 'loaded' && <Note>{t.logsEmpty}</Note>}
+        </Pane>
+      )}
+
+      {hasFiles && (
+        <MasterDetailSplit
+          // Wider than Health's rail: these rows carry a file BASENAME plus its
+          // classification chip, and the basename is what the file is picked by.
+          railWidth="13rem"
+          rail={
+            /* ---- master: the bundle's files ---- */
+            <nav className="flex flex-col min-w-0 min-h-0">
+              {/* The rail scrolls INTERNALLY. Without its own region a long file
+                  list would push the split past the panel and scroll the rail
+                  itself out of view — the thing being navigated by. Capped on
+                  narrow screens, where the single column stacks it above the
+                  file body. */}
+              <ScrollArea className="pr-1 max-h-[11rem] md:max-h-none">
+                {/* onKeyDown stays on the element that CONTAINS the buttons:
+                    the roving-focus handler finds its target with a
+                    `[data-path]` query rooted at e.currentTarget. */}
+                <div
+                  className="flex flex-col gap-1.5"
+                  role="tablist"
+                  aria-orientation="vertical"
+                  aria-label={t.logsFilesAria}
+                  onKeyDown={onTablistKey}
+                  // Roving tabindex lives on the file tabs; -1 here just makes the
+                  // container a valid focus target for the delegated arrow-key handler.
+                  tabIndex={-1}
+                >
+                  {manifest.files.map((entry, i) => {
+                    const active = selected === entry.path;
+                    return (
+                      <StaggerItem key={entry.path} index={i} className="min-w-0">
+                        <button
+                          type="button"
+                          role="tab"
+                          data-path={entry.path}
+                          aria-selected={active}
+                          // Roving tabindex: only the active tab is in the tab order;
+                          // the rest are reached with the arrow keys handled above.
+                          tabIndex={active ? 0 : -1}
+                          onClick={() => setSelected(entry.path)}
+                          title={entry.path}
+                          className={cn(
+                            'w-full flex items-center justify-between gap-1.5 text-left font-mono text-[11px] border rounded-control px-2.5 py-1.5 transition-[color,border-color,background-color,box-shadow] duration-150 cursor-pointer min-w-0',
+                            // Active file: amber-tinted glass surface + a soft amber
+                            // bloom so the selected tab reads at a glance; inactive
+                            // tabs stay quiet and warm their border + a subtle glow on
+                            // hover.
+                            active
+                              ? 'border-[color-mix(in_oklab,var(--amber)_40%,var(--line))] text-fg bg-[color-mix(in_oklab,var(--amber)_12%,var(--raise-2))] shadow-glow-amber'
+                              : 'border-line text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber'
+                          )}
+                        >
+                          <span className="truncate">{entry.path.split('/').pop()}</span>
+                          <Chip tone="neutral">{entry.label}</Chip>
+                        </button>
+                      </StaggerItem>
+                    );
+                  })}
+                </div>
+              </ScrollArea>
+            </nav>
+          }
+          detail={
+            /* ---- detail: the selected file ---- */
+            <section aria-label={t.logsDetailAria} className="flex flex-col gap-2 min-w-0 min-h-0">
+              <div className="flex items-center gap-2 flex-none">
+                <button
+                  type="button"
+                  onClick={refresh}
+                  disabled={fileState === 'loading' || !selected}
+                  className="inline-flex items-center gap-1.5 font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber transition-[color,border-color,box-shadow] duration-150 cursor-pointer disabled:cursor-default disabled:hover:text-dim disabled:hover:border-line disabled:hover:shadow-none"
+                >
+                  {fileState === 'loading' && <Spinner />}
+                  {t.logsRefresh}
+                </button>
+              </div>
+
+              {fileState === 'idle' && !file && <Note>{t.logsSelectFile}</Note>}
+              {fileState === 'loading' && !file && (
+                <span className="inline-flex items-center gap-2 font-mono text-[11.5px] text-dim">
+                  <Spinner />
+                  {t.logsFileLoading}
+                </span>
+              )}
+              {fileState === 'error' && !file && (
+                <p className="text-[12.5px] text-red">{t.logsFileError}</p>
+              )}
+              {/* Crossfade the viewer when the shown file changes (keyed on path). A
+                  same-file refresh/load-full keeps the key, so content updates in
+                  place. The frame is a shrinkable flex column so the viewer inside
+                  it can own the pane's remaining height. */}
+              {file && (
+                <FadeSwap k={file.path} className="flex-1 min-h-0 flex flex-col">
+                  <LogViewer
+                    file={file}
+                    stale={stale}
+                    loadingFull={loadingFull}
+                    onLoadFull={file.truncated ? loadFull : undefined}
+                  />
+                </FadeSwap>
+              )}
+            </section>
+          }
+        />
       )}
     </div>
   );
