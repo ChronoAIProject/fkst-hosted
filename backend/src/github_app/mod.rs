@@ -27,7 +27,10 @@ pub mod api;
 pub mod comments;
 pub mod config;
 pub mod contents;
+// Repository bootstrap of the platform-owned label vocabulary, so the one label
+// a human is meant to toggle arrives looking like part of the product.
 pub mod jwt;
+pub mod labels;
 pub mod listing;
 mod template_install;
 pub mod templates;
@@ -481,6 +484,12 @@ impl GithubAppTokens {
         perms: Option<TokenPermissions>,
     ) -> Result<SecretString, GithubAppError> {
         Ok(self.token_with_expiry_for_repo(owner_repo, perms).await?.0)
+    }
+
+    /// The configured GitHub REST base, for the sibling transports that build
+    /// their own request rather than going through `api`.
+    pub(crate) fn rest_api_base(&self) -> &str {
+        &self.inner.api_base
     }
 
     /// Post a comment on `owner/repo`'s issue `number` as the App: mint an

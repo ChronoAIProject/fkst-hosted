@@ -176,13 +176,20 @@ pub async fn reconcile_repo(
     // no-op on the vast majority of reconciles. Placed BEFORE the fallible reads
     // below so a later GitHub/K8s read failure (which `?`-returns) never skips the
     // template ensure; a failure inside the ensure never aborts the reconcile.
-    crate::reconcile::ensure_issue_templates(
+    let templates_installed = crate::reconcile::ensure_issue_templates(
         (installation_id, repo.clone()),
         &owner_repo,
         &ctx.github,
         &ctx.ensured_templates,
     )
     .await;
+    // Ride along with the (rare) template install rather than paying six label
+    // round-trips per repo per sweep. A repository that already has the current
+    // templates already had this run; the version bump that ships a new template
+    // is what carries the bootstrap out to the existing fleet.
+    if templates_installed {
+        crate::github_app::labels::ensure_platform_labels(&ctx.github, &owner_repo).await;
+    }
 
     // 1. One repo-scoped installation token drives every GitHub read below.
     let token = ctx.github.token_for_repo(&owner_repo, None).await?;

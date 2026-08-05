@@ -56,15 +56,17 @@ fn record(ensured: &EnsuredTemplates, key: &RepoKey, version: u32, now: Instant)
 /// Best-effort, NON-failing ensure that `owner_repo`'s issue templates are at the
 /// bundled version. Gated to one GitHub round-trip per repo per `(version, TTL)`.
 /// Never returns an error; never records on failure (so it retries next reconcile).
+/// Returns true when this pass INSTALLED (or updated) the templates, which is the
+/// signal the caller uses to run the equally rare label bootstrap alongside it.
 pub async fn ensure_issue_templates(
     key: RepoKey,
     owner_repo: &str,
     github: &(dyn IssueTemplateGithub + '_),
     ensured: &EnsuredTemplates,
-) {
+) -> bool {
     // Cheap no-op after the first check within the (version, TTL) window.
     if !check_due(ensured, &key, Instant::now()) {
-        return;
+        return false;
     }
 
     let installed = match github.installed_templates_version(owner_repo).await {
@@ -75,7 +77,7 @@ pub async fn ensure_issue_templates(
                 error = %error,
                 "issue-templates: version read failed; will retry next reconcile"
             );
-            return;
+            return false;
         }
     };
 
@@ -86,7 +88,7 @@ pub async fn ensure_issue_templates(
             "issue-templates: already current"
         );
         record(ensured, &key, installed, Instant::now());
-        return;
+        return false;
     }
 
     tracing::info!(
@@ -106,6 +108,7 @@ pub async fn ensure_issue_templates(
                 "issue-templates: installed via merged PR"
             );
             record(ensured, &key, FKST_ISSUE_TEMPLATES_VERSION, Instant::now());
+            return true;
         }
         Ok(TemplateInstallOutcome::Deferred { pull }) => {
             // The install PR is open but this App could not merge it (the base
@@ -121,6 +124,7 @@ pub async fn ensure_issue_templates(
                 "issue-templates: install PR left open; re-checked after TTL"
             );
             record(ensured, &key, FKST_ISSUE_TEMPLATES_VERSION, Instant::now());
+            return false;
         }
         Err(error) => tracing::warn!(
             owner_repo = %owner_repo,
@@ -128,6 +132,7 @@ pub async fn ensure_issue_templates(
             "issue-templates: install failed; NOT recording (retries next reconcile)"
         ),
     }
+    false
 }
 
 #[cfg(test)]

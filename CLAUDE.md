@@ -2305,7 +2305,7 @@ changeset, and a release — if ever cut — is a plain git tag on `main`.
 
 ## CI (pull requests into `develop`)
 
-PRs into `develop` run exactly five checks, all under `.github/workflows/`:
+PRs into `develop` run **seven** checks, all under `.github/workflows/`:
 
 | Check | Workflow | What it does |
 |-------|----------|--------------|
@@ -2314,6 +2314,8 @@ PRs into `develop` run exactly five checks, all under `.github/workflows/`:
 | `rust test` | `rust-ci.yml` | `cargo test --workspace --locked` |
 | `docker build` | `docker-build.yml` | builds `backend/Dockerfile` `--target server-builder` (both binaries) and `--target audit-relay-runtime` |
 | `gitleaks` | `gitleaks.yml` | scans the working tree for committed secrets |
+| `frontend gates` | `acceptance-gates.yml` | frontend lint → typecheck → vitest → playwright |
+| `deployment gates` | `acceptance-gates.yml` | manifest render/policy validation, audit-relay verifier, runbook + disaster-drill decisions |
 
 Keep this set minimal — do not add new PR gates without good reason.
 
@@ -2342,6 +2344,120 @@ The durable status labels explain what happened and prevent duplicate comments a
 | `fkst-config-rejected` | A registered trigger's frozen configuration was edited and ignored. Close it and open a new trigger to change configuration. |
 | `fkst-session-retired` | The trigger closed, its pod was cleaned up, and the still-open work issue is no longer worked. Start a replacement session and assign the issue to that session's creator. |
 
+## Scheduled workflows
+
+A **scheduled workflow** runs a workflow definition from a repository on a
+schedule — once, or on a cron cadence — with no Actions workflow, no CLI, and no
+extra deployable. Declaring one is opening a GitHub issue.
+
+### The three moving parts
+
+| Piece | Where it lives | Who writes it |
+|---|---|---|
+| The **definition** | an open issue labelled `fkst-scheduled-workflow` | you |
+| The **workflow** | `.fkst/workflows/<id>.toml` in the target repository | you |
+| The **run history** | `fkst-cron-run:v1` marker comments on the definition issue | the control plane and the session pod |
+
+There is no datastore. A schedule's cursor, its in-flight run, and its whole
+history are recovered by re-reading those comments, which is what lets any
+replica take over on leader failover and what makes the history survive a
+control-plane rebuild.
+
+### The definition body
+
+```markdown
+### Workflow
+github-candidate-sourcing
+
+### Run Mode
+cron: 0 1 * * 1-5          # or:  once
+
+### Arguments
+role: AI Tools Application Engineer
+min_score: 6
+```
+
+- **Assign exactly one person**: the creator of the fkst session that will run
+  it. That assignee is the routing key — zero or several means no session to run
+  it, and the issue is latched `fkst-schedule-invalid`.
+- **The body stays editable**, unlike a session trigger. Trigger configuration is
+  frozen by its config hash; a cadence nobody could change would not be a
+  feature. Edits take effect on the next reconcile.
+- `### Arguments` values are **data**. They reach a step escaped, never
+  interpolated into a shell command. A credential-shaped value is **rejected** —
+  secrets reach a step through a named environment profile, referenced from the
+  workflow definition by key name, never through an issue body every repository
+  collaborator can read.
+
+### The cron grammar
+
+Standard five fields in **UTC**: `minute hour day-of-month month day-of-week`.
+Each accepts `*`, a value, a range `a-b`, a comma list, and a `/n` step. This is
+NOT the engine's `Ns`/`Nm`/`Nh` interval grammar.
+
+Day-of-week is `0-6` with `0` = Sunday. **`7` is rejected** rather than treated
+as Sunday, because it is far more often a typo in the month field beside it.
+
+When both day-of-month and day-of-week are restricted, a day matches if
+**either** matches (the standard OR rule): `0 0 1 * 1` fires on the 1st of every
+month AND on every Monday.
+
+### How a run happens
+
+1. The reconcile pass evaluates every open definition — it is the clock, and it
+   runs only on the Lease holder, so no extra election and no extra deployable.
+2. On a due slot it creates a **run issue**: App-authored, carrying the session's
+   work label, assigned to exactly the creator.
+3. That run issue is an ordinary routed work issue, so it wakes the session
+   through the gate that already exists. There is no new spawn path.
+4. The pod runs the workflow's steps and writes one `fkst-cron-run:v1` record.
+5. The control plane sees the terminal record and releases the schedule.
+
+**Missed slots are not replayed.** After an outage the clock fires once for the
+most recent due slot and records how many were passed over. Replaying a backlog
+would multiply exactly the load that caused the outage.
+
+**A slot arriving mid-run is skipped, not queued**, and recorded as
+`skipped-overlap` so the gap in the history is explained.
+
+### Labels
+
+The control plane is the single writer of every label below except
+`fkst-cron-paused`, which is what makes the overlap rule and the watchdog
+trustworthy. No package and no session pod ever writes one.
+
+| Label | Meaning |
+|---|---|
+| `fkst-scheduled-workflow` | this issue IS a schedule definition (reserved; a session may not adopt it as its work label) |
+| `fkst-cron-running` | a run is in flight |
+| `fkst-cron-paused` | **you** applied this to pause without closing; remove it to resume |
+| `fkst-schedule-invalid` | the definition was refused — see the comment; clears automatically once fixed |
+| `fkst-cron-failed` | the last run failed |
+| `fkst-cron-timeout` | the last run exceeded its budget and was released by the watchdog |
+
+### Operating one
+
+- **Pause** — add `fkst-cron-paused`, or use the dashboard. No body edit, so no
+  config rejection.
+- **Run now** — from the dashboard. It goes through the same dispatch the clock
+  uses, so the run is indistinguishable downstream apart from `manual = true` in
+  its record.
+- **Change the cadence** — just edit the issue.
+- **Stop for good** — close the issue.
+
+### Deployment knobs
+
+| Variable | Default | What it guards |
+|---|---|---|
+| `FKST_CRON_MIN_INTERVAL_SECS` | `900` | the tightest cadence an author may declare; a tighter one is rejected naming the limit, never silently slowed |
+| `FKST_CRON_MAX_RUNTIME_SECS` | `3600` | the watchdog budget — the only thing that stops a hung run pinning its schedule forever |
+| `FKST_CRON_MAX_JOBS_PER_CREATOR` | `20` | blast radius; past it the lowest-numbered definitions keep running |
+| `FKST_CRON_HISTORY_PAGES` | `2` | how much run history each pass reads, newest first |
+
+The clock does not run at all unless `FKST_GITHUB_BOT_LOGIN` is configured:
+without an App identity no run record could be trusted, so every definition would
+look as if it had never run and would re-fire on every sweep.
+
 ## Quick Rules Summary
 
 - Stay within the user-facing/public-interface scope; never touch the kernel engine.
@@ -2351,6 +2467,7 @@ The durable status labels explain what happened and prevent duplicate comments a
 - Treat the upstream engine and packages repositories as read-only references; the FKST Cloud package catalog resides on this repository's `packages` branch (reference form `ChronoAIProject/fkst-hosted@packages:<path>`).
 - The user-activity trace is opt-in and documented in `deploy/kubernetes/AUDIT-TRACE.md` (reference) and `AUDIT-RUNBOOK.md` (operations), with the workload in `deploy/kubernetes/audit-relay/` — see the deployment guide's **§14.10**. The PostHog capture token lives ONLY in the relay's credential record, the query key is Query-Read-only and never reaches a browser, no Prometheus label may carry an actor/session/repository/request/event id, and `required` delivery may only ever be rolled back to `best_effort` as an explicit, alerted operator action.
 - When filing work issues for a substrate session, **wave the backlog by dependency** (merge foundation before dependent issues), use one feature per issue, keep each creator's trigger-label sets disjoint, and assign every work issue to exactly one matching session creator; different creators may reuse labels. Work authors are limited to the creator, Session Collaborators, and global admins. See **Authoring work issues for a substrate session**.
+- A **scheduled workflow** is an open issue labelled `fkst-scheduled-workflow` naming a workflow, its arguments, and a run mode (`once` or `cron: <5-field UTC expr>`), assigned to exactly the session creator. Its body stays EDITABLE (unlike a trigger's); arguments are escaped data and may never carry a credential; missed slots are never replayed and overlapping slots are skipped, not queued. See **Scheduled workflows**.
 - Keep commits small and self-contained.
 - Never add `Co-Authored-By`; always act under the user's own GitHub identity (never a bot/AI identity).
 - All work goes through a pull request — no direct commits to shared branches.
@@ -2360,5 +2477,5 @@ The durable status labels explain what happened and prevent duplicate comments a
 - Use pull requests into `develop` or `develop-auto`; only `develop` merges into `main`.
 - Never force push `main`, `develop`, or `develop-auto`.
 - For NyxID / IAM work, reference NyxID's latest `main`; for Ornn / agent-skill work, reference Ornn's latest `main`.
-- PRs into `develop` run exactly five checks (rust lint/build/test, docker build, gitleaks); there is no changeset or release-note requirement.
+- PRs into `develop` run seven checks (rust lint/build/test, docker build, gitleaks, frontend gates, deployment gates); there is no changeset or release-note requirement.
 - The product version lives in root `package.json`; there is no automated release pipeline — releases are manual git tags on `main`.
