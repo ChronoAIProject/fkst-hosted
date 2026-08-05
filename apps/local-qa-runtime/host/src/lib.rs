@@ -753,15 +753,13 @@ fn read_request(stream: &mut TcpStream) -> io::Result<Result<Request, Response>>
     if matches!(route, Route::Submit { .. }) && content_lengths.len() != 1 {
         return Ok(Err(invalid_request(&route)));
     }
-    if matches!(route, Route::Submit { .. }) && content_length > MAX_BODY_BYTES {
-        return Ok(Err(problem_response(
-            413,
-            "Payload Too Large",
-            "request body exceeds 64 bytes",
-        )));
-    }
-    if !matches!(route, Route::Submit { .. }) && content_length != 0 {
-        return Ok(Err(invalid_request(&route)));
+    if content_length > MAX_BODY_BYTES {
+        let response = if matches!(route, Route::Submit { .. }) {
+            problem_response(413, "Payload Too Large", "request body exceeds 64 bytes")
+        } else {
+            invalid_request(&route)
+        };
+        return Ok(Err(response));
     }
 
     let body_start = header_end + 4;
@@ -773,6 +771,9 @@ fn read_request(stream: &mut TcpStream) -> io::Result<Result<Request, Response>>
         let mut remaining = vec![0_u8; content_length - body.len()];
         stream.read_exact(&mut remaining)?;
         body.extend_from_slice(&remaining);
+    }
+    if !matches!(route, Route::Submit { .. }) && content_length != 0 {
+        return Ok(Err(invalid_request(&route)));
     }
 
     Ok(Ok(Request {

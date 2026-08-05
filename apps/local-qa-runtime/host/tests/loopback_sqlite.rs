@@ -1,11 +1,11 @@
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpStream;
+use std::net::{Shutdown, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Barrier};
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension};
 
@@ -129,6 +129,10 @@ fn request(
         .expect("request body must be written");
     stream.flush().expect("request must be flushed");
 
+    read_response(&mut stream)
+}
+
+fn read_response(stream: &mut TcpStream) -> HttpResponse {
     let mut response = Vec::new();
     stream
         .read_to_end(&mut response)
@@ -187,6 +191,103 @@ fn assert_response(response: HttpResponse, status: &str, content_type: &str, bod
     assert_eq!(response.status_line, status);
     assert_eq!(response.content_type, content_type);
     assert_eq!(response.body, body);
+}
+
+#[test]
+fn delayed_nonempty_cancel_body_returns_complete_error_without_mutation() {
+    let temp = TempDirectory::new("delayed-cancel-body");
+    let database_path = temp.database_path();
+    let host = HostProcess::start(&database_path);
+    assert_response(
+        submit(host.port, "run-001", "idem-001"),
+        "HTTP/1.1 201 Created",
+        "application/json",
+        CREATED_BODY,
+    );
+
+    let mut stream = TcpStream::connect(("127.0.0.1", host.port))
+        .expect("loopback host must accept connections");
+    write!(
+        stream,
+        "POST /v1/runs/run-001:cancel HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nIdempotency-Key: cancel-001\r\nContent-Length: 1\r\nConnection: close\r\n\r\n",
+        host.port
+    )
+    .expect("cancel request headers must be written");
+    stream
+        .flush()
+        .expect("cancel request headers must be flushed");
+    thread::sleep(Duration::from_millis(100));
+    stream
+        .write_all(b"x")
+        .expect("delayed cancel request body must be written");
+    stream
+        .shutdown(Shutdown::Write)
+        .expect("cancel request write side must close");
+    assert_response(
+        read_response(&mut stream),
+        "HTTP/1.1 400 Bad Request",
+        "application/problem+json",
+        INVALID_CANCEL_BODY,
+    );
+    host.stop();
+
+    let connection = Connection::open(&database_path).unwrap();
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM cancel_requests", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM events", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn oversized_cancel_body_declaration_is_rejected_without_waiting_for_body() {
+    let temp = TempDirectory::new("oversized-cancel-body");
+    let database_path = temp.database_path();
+    let host = HostProcess::start(&database_path);
+
+    let mut stream = TcpStream::connect(("127.0.0.1", host.port))
+        .expect("loopback host must accept connections");
+    write!(
+        stream,
+        "POST /v1/runs/run-001:cancel HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nIdempotency-Key: cancel-001\r\nContent-Length: 65\r\nConnection: close\r\n\r\n",
+        host.port
+    )
+    .expect("oversized cancel request headers must be written");
+    stream
+        .shutdown(Shutdown::Write)
+        .expect("oversized cancel request write side must close");
+    assert_response(
+        read_response(&mut stream),
+        "HTTP/1.1 400 Bad Request",
+        "application/problem+json",
+        INVALID_CANCEL_BODY,
+    );
+    host.stop();
+
+    let connection = Connection::open(&database_path).unwrap();
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM cancel_requests", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM events", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
 }
 
 #[test]
