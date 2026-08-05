@@ -146,6 +146,9 @@ export interface SessionDetailContent {
   logsErrorNoStorage: string;
   logsEmpty: string;
   logsFilesAria: string;
+  /** aria-label on the selected-file detail pane of the Logs master/detail
+   *  split (mirrors `healthDetailAria`). */
+  logsDetailAria: string;
   logsSelectFile: string;
   logsFileLoading: string;
   logsFileError: string;

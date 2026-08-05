@@ -56,6 +56,11 @@ export interface LogViewerProps {
  * ever covers the fetched tail, its count copy is truncation-aware: on a tail
  * it says so and points at the load-full action rather than implying the count
  * is over the whole file.
+ *
+ * The viewer FILLS its pane: the filename, the search row and the notices are
+ * pinned, and the `<pre>` is the one thing that scrolls. It takes its height
+ * from the caller rather than a viewport fraction, so it is the detail pane of
+ * the Logs tab's master/detail split and cannot escape it.
  */
 export function LogViewer({ file, onLoadFull, loadingFull, stale }: LogViewerProps) {
   const t = useContent().dashboard.detail;
@@ -92,15 +97,19 @@ export function LogViewer({ file, onLoadFull, loadingFull, stale }: LogViewerPro
     : t.logsSearchCount.replace('{n}', String(matches));
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
+    <div className="flex flex-col gap-2 h-full min-h-0">
+      <div className="flex items-center justify-between gap-2 flex-wrap flex-none">
         <code className="font-mono text-[11px] text-dim truncate min-w-0">{file.path}</code>
         <CopyButton value={file.path} label={t.logsFilenameCopy} />
       </div>
 
-      {stale && <NoticeLine>{t.logsStale}</NoticeLine>}
+      {stale && (
+        <div className="flex-none">
+          <NoticeLine>{t.logsStale}</NoticeLine>
+        </div>
+      )}
 
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap flex-none">
         <input
           type="search"
           value={search}
@@ -115,31 +124,36 @@ export function LogViewer({ file, onLoadFull, loadingFull, stale }: LogViewerPro
       </div>
 
       {file.truncated && (
-        <NoticeLine>
-          <span className="flex items-center gap-2 flex-wrap">
-            <span>
-              {t.logsTruncated
-                .replace('{shown}', kb(file.returned_bytes))
-                .replace('{total}', kb(file.total_bytes))}
+        <div className="flex-none">
+          <NoticeLine>
+            <span className="flex items-center gap-2 flex-wrap">
+              <span>
+                {t.logsTruncated
+                  .replace('{shown}', kb(file.returned_bytes))
+                  .replace('{total}', kb(file.total_bytes))}
+              </span>
+              {onLoadFull && (
+                <button
+                  type="button"
+                  onClick={onLoadFull}
+                  disabled={loadingFull}
+                  className="hover-underline inline-flex items-center gap-1.5 font-ui font-semibold text-[11px] text-amber hover:brightness-[1.1] transition-[filter] cursor-pointer disabled:cursor-default disabled:opacity-70"
+                >
+                  {loadingFull && <Spinner />}
+                  {loadingFull ? t.logsLoadingFull : t.logsLoadFull}
+                </button>
+              )}
             </span>
-            {onLoadFull && (
-              <button
-                type="button"
-                onClick={onLoadFull}
-                disabled={loadingFull}
-                className="hover-underline inline-flex items-center gap-1.5 font-ui font-semibold text-[11px] text-amber hover:brightness-[1.1] transition-[filter] cursor-pointer disabled:cursor-default disabled:opacity-70"
-              >
-                {loadingFull && <Spinner />}
-                {loadingFull ? t.logsLoadingFull : t.logsLoadFull}
-              </button>
-            )}
-          </span>
-        </NoticeLine>
+          </NoticeLine>
+        </div>
       )}
 
       {/* Elevated console surface: translucent glass on the card shadow with an
           inner top highlight, mirroring the app's code-block treatment. */}
-      <pre className="max-h-[46vh] overflow-auto border border-line rounded-card bg-glass backdrop-blur-glass shadow-[var(--shadow-2),var(--highlight-top)] p-3 font-mono text-[11.5px] leading-relaxed text-dim whitespace-pre-wrap break-words">
+      {/* The pane's single scroller: `flex-1 min-h-0` so it takes the leftover
+          height and shrinks below its content, instead of a viewport fraction
+          that would ignore the pane it actually sits in. */}
+      <pre className="flex-1 min-h-0 overflow-auto border border-line rounded-card bg-glass backdrop-blur-glass shadow-[var(--shadow-2),var(--highlight-top)] p-3 font-mono text-[11.5px] leading-relaxed text-dim whitespace-pre-wrap break-words">
         {lines.map((line, i) => {
           const hit = !!query && line.toLowerCase().includes(query.toLowerCase());
           return (

@@ -402,7 +402,9 @@ describe('TabLogs', () => {
     );
     renderLogs();
 
-    expect(await screen.findByText('No logs yet — this session has not written any.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('No logs yet — this session has not written any.')
+    ).toBeInTheDocument();
     await waitFor(() => expect(calls.some((u) => u.endsWith('/runs'))).toBe(true));
     expect(calls.filter((u) => u.includes('/manifest'))).toEqual([]);
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
@@ -424,5 +426,132 @@ describe('TabLogs', () => {
     ).toBeInTheDocument();
     // No file view is attempted on a 503.
     expect(screen.queryByText('driver.log')).not.toBeInTheDocument();
+  });
+});
+
+/// Layout contract (#5840). The Logs tab is master/detail like Health: files on
+/// the left rail, the selected file on the right. Before this, the run picker,
+/// the file list and the content were stacked, and the tab panel supplied ONE
+/// scroller — so a long file list pushed the content off-screen and scrolling to
+/// it dragged the file list (the thing being navigated by) out of view.
+describe('TabLogs layout', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem('fkst-gh-access', 'ghu_x');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/runs')) return jsonResponse(singleLatestRun);
+        if (url.includes('/manifest')) return jsonResponse(manifest);
+        if (url.includes('/file?')) return jsonResponse(fileContent);
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('puts the files in a rail beside the selected file, in one equal-height grid', async () => {
+    const { container } = renderLogs();
+    const rail = await screen.findByRole('tablist', { name: 'Log files' });
+    const detail = screen.getByRole('region', { name: 'Selected log file' });
+
+    // Both panes fill ONE grid, which is what makes them equal height. The height
+    // comes from the tab panel, so the grid only has to be a shrinkable flex child.
+    const grid = container.querySelector('.grid');
+    expect(grid).not.toBeNull();
+    expect(grid!.className).toContain('min-h-0');
+    expect(grid!.contains(rail)).toBe(true);
+    expect(grid!.contains(detail)).toBe(true);
+    // Single column below `md`, two columns from `md` up — the same breakpoint
+    // and template Health uses, not a new ad-hoc split.
+    expect(grid!.className).toContain('md:grid-cols-[var(--rail-w)_minmax(0,1fr)]');
+
+    // The rail is the LEFT pane: it precedes the detail pane in the grid.
+    expect(
+      grid!.firstElementChild!.contains(rail),
+      'the file rail must be the first grid column'
+    ).toBe(true);
+  });
+
+  it('scrolls the rail internally so it cannot be scrolled out of view', async () => {
+    renderLogs();
+    const rail = await screen.findByRole('tablist', { name: 'Log files' });
+    const detail = screen.getByRole('region', { name: 'Selected log file' });
+
+    // The rail owns a scroll container, so a long file list overflows INSIDE the
+    // rail rather than escaping to the tab panel.
+    const railScroller = rail.closest('.overflow-y-auto');
+    expect(railScroller).not.toBeNull();
+    // ...and it is not the detail pane's scroller: neither pane can scroll the
+    // other away.
+    expect(railScroller!.contains(detail)).toBe(false);
+
+    // The file body is the detail pane's own scroller.
+    await waitFor(() => expect(screen.getByText(/beta line/)).toBeInTheDocument());
+    const pre = detail.querySelector('pre');
+    expect(pre).not.toBeNull();
+    expect(pre!.className).toContain('overflow-auto');
+    // It takes the pane's leftover height instead of a viewport fraction, which
+    // would ignore the pane it actually sits in.
+    expect(pre!.className).toContain('min-h-0');
+    expect(pre!.className).not.toContain('max-h-[46vh]');
+  });
+
+  it('keeps run-level chrome above the split, not inside a pane', async () => {
+    // The run picker and the whole-bundle download are about the RUN, so they
+    // must not sit inside the rail or the file pane.
+    renderLogs();
+    const grid = (await screen.findByRole('tablist', { name: 'Log files' })).closest('.grid');
+    const download = screen.getByRole('link', { name: /Download full bundle/ });
+    expect(grid).not.toBeNull();
+    expect(grid!.contains(download)).toBe(false);
+  });
+
+  it('exposes the rail as a vertical tablist and roves with Up/Down', async () => {
+    const user = userEvent.setup();
+    renderLogs();
+    const rail = await screen.findByRole('tablist', { name: 'Log files' });
+    // A rail is vertical; assistive tech is told so, and the arrow keys that
+    // match the axis have to work.
+    expect(rail).toHaveAttribute('aria-orientation', 'vertical');
+
+    const driver = screen.getByRole('tab', { name: /driver\.log/ });
+    expect(driver).toHaveAttribute('aria-selected', 'true');
+
+    driver.focus();
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('tab', { name: /codex\.log/ })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    await user.keyboard('{ArrowUp}');
+    expect(screen.getByRole('tab', { name: /driver\.log/ })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+  });
+
+  it('renders the #5765 empty state with no split and no manifest request', async () => {
+    // The empty state predates the split and must be untouched by it: a neutral
+    // note, no grid, and crucially no manifest request behind it.
+    const calls: string[] = [];
+    vi.unstubAllGlobals();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.endsWith('/runs')) return jsonResponse([]);
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+    const { container } = renderLogs();
+
+    expect(
+      await screen.findByText('No logs yet — this session has not written any.')
+    ).toBeInTheDocument();
+    expect(container.querySelector('.grid')).toBeNull();
+    expect(calls.filter((u) => u.includes('/manifest'))).toEqual([]);
   });
 });

@@ -305,9 +305,10 @@ export function SessionDetailView({
       >
         {/* The PANEL is the fixed box; each tab owns its own scrollbar inside it.
             Scrolling here instead would drag the header and tablist away with the
-            body, and — for a master/detail tab like Health — slide the navigation
-            rail out of view while reading an entry. Every tab scrolls through the
-            same themed ScrollArea so the scrollbar looks identical across tabs. */}
+            body, and — for a master/detail tab like Logs or Health — slide the
+            navigation rail out of view while reading an entry. Every tab scrolls
+            through the same themed ScrollArea so the scrollbar looks identical
+            across tabs. */}
         <FadeSwap k={tab} className="flex-1 min-h-0 flex flex-col">
           {tab === 'status' && (
             <ScrollArea className="px-5 py-4">
@@ -319,14 +320,16 @@ export function SessionDetailView({
               <TabPackages session={session} observe={observe} />
             </ScrollArea>
           )}
+          {/* Logs and Health are master/detail tabs: each manages TWO scroll
+              regions of its own (rail + detail), so they get the fixed box
+              rather than a scroller — nesting one inside another would give
+              them two competing scrollbars, and the outer one would scroll the
+              navigation rail out of view while reading. */}
           {tab === 'logs' && (
-            <ScrollArea className="px-5 py-4">
+            <div className="flex-1 min-h-0 px-5 py-4">
               <TabLogs session={session} />
-            </ScrollArea>
+            </div>
           )}
-          {/* Health manages TWO scroll regions of its own (rail + detail), so it
-              gets the box rather than a scroller — nesting one inside another
-              would give it two competing scrollbars. */}
           {tab === 'health' && (
             <div className="flex-1 min-h-0 px-5 py-4">
               <TabHealth
