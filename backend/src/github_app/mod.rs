@@ -21,6 +21,10 @@
 //! makes the stateless model safe (a stale mapping is repaired at the next mint).
 
 pub mod api;
+// Author-and-timestamp-aware comment reads. A sibling of `api.rs` rather than
+// another method on it: run records are durable state on an issue anyone may
+// comment on, so the schedule pass must be able to say WHO wrote a marker.
+pub mod comments;
 pub mod config;
 pub mod contents;
 pub mod jwt;
@@ -50,6 +54,10 @@ pub use api::{
 /// Re-export the Contents READ helper types (#179): the `get_contents` result
 /// shapes + the injectable `ContentsReader` abstraction the pre-flight uses.
 pub use contents::{ContentsEntry, ContentsListing, ContentsReader};
+
+/// Re-export the comment-provenance transport the schedule pass authorizes run
+/// records against.
+pub use comments::{HttpIssueCommentReader, IssueComment, IssueCommentReader};
 
 /// Re-export the Model B listing transport (#359 PR1): the injectable
 /// `GithubListing` abstraction + its HTTP impl and result shapes the reconciler
