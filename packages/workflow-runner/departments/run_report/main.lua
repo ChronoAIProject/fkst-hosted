@@ -1,4 +1,4 @@
-local core = require("core")
+local runner = require("runner")
 local saga = require("workflow.saga")
 
 -- Report one run onto its DEFINITION issue.
@@ -52,7 +52,7 @@ return saga.department(spec, {
       schema = "github-proxy.v1",
       repo = payload.repo,
       issue_number = payload.schedule_issue,
-      body = core.render_report(record),
+      body = runner.render_report(record),
       dedup_key = dedup_key(payload),
       source_ref = {
         kind = "external",

@@ -1,4 +1,4 @@
-local core = require("core")
+local runner = require("runner")
 local env = require("workflow.env")
 local codex = require("workflow.codex")
 local error_facts = require("contract.error_facts")
@@ -94,7 +94,7 @@ local function run_step(run_exec, step)
       tail = "",
     }
   end
-  local tail = core.truncate_tail((result.stdout or "") .. (result.stderr or ""))
+  local tail = runner.truncate_tail((result.stdout or "") .. (result.stderr or ""))
   if result.exit_code ~= 0 then
     return {
       status = "failed",
@@ -129,7 +129,7 @@ local function execute(steps, arguments, run_exec, run_codex)
     if status ~= "ok" then
       outcomes[#outcomes + 1] = { index = step.index, id = step.id, status = "skipped" }
     else
-      local resolved, resolve_error = core.resolve_step(step, arguments)
+      local resolved, resolve_error = runner.resolve_step(step, arguments)
       if resolve_error ~= nil then
         status, detail = "failed", resolve_error
         outcomes[#outcomes + 1] = { index = step.index, id = step.id, status = "failed" }
@@ -178,7 +178,7 @@ local function make_department(ports)
     local creator = read_env("FKST_SESSION_CREATOR")
     local listed = github.issue_list_intake(identity.repo, 50, 30)
     local issues = type(listed) == "table" and (listed.issues or listed.value or listed) or {}
-    local issue, dispatch = core.select_run_issue(issues, creator)
+    local issue, dispatch = runner.select_run_issue(issues, creator)
     if issue == nil then
       -- Not a scheduled run: an ordinary session boot must be a clean no-op.
       return
@@ -203,7 +203,7 @@ local function make_department(ports)
       })
     end
 
-    local path, path_error = core.definition_path(dispatch.workflow_id)
+    local path, path_error = runner.definition_path(dispatch.workflow_id)
     if path_error ~= nil then
       return fail(path_error)
     end
@@ -211,11 +211,11 @@ local function make_department(ports)
     if read_error ~= nil then
       return fail(read_error)
     end
-    local decoded, decode_error = require("core.toml").decode(text)
+    local decoded, decode_error = require("runner.toml").decode(text)
     if decode_error ~= nil then
       return fail(("%s: %s"):format(path, decode_error))
     end
-    local steps, definition_error = core.validate_definition(decoded)
+    local steps, definition_error = runner.validate_definition(decoded)
     if definition_error ~= nil then
       return fail(("%s: %s"):format(path, definition_error))
     end

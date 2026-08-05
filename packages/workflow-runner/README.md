@@ -103,7 +103,7 @@ from the environment by the step's own script. Never put a token in
 
 ## The definition-file reader
 
-`core/toml.lua` accepts an **enumerated subset** of TOML — `[[step]]` headers,
+`runner/toml.lua` accepts an **enumerated subset** of TOML — `[[step]]` headers,
 basic strings, non-negative integers, booleans, and single-line string arrays —
 and refuses everything else with a line number. That is deliberate: a definition
 using a TOML feature the reader does not implement gets a clear

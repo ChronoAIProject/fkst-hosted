@@ -1,4 +1,9 @@
--- Pure core of the scheduled-workflow runner.
+-- The scheduled-workflow runner's pure logic.
+--
+-- Named `runner`, deliberately NOT `core`: on this branch `core.lua` means the
+-- composed ambient service-locator table that `install(M)` builds and that
+-- G-DEVLOOP-SERVICE-LOCATOR is driving to zero. This is a plain narrow module
+-- with no ambient surface, so it carries a name that says so.
 --
 -- Every decision lives here so the departments stay thin saga wrappers: reading
 -- the dispatch facts off a run issue, validating a workflow definition,
@@ -17,7 +22,7 @@
 
 local M = {}
 
-local toml = require("core.toml")
+local toml = require("runner.toml")
 
 -- Matched with a Lua pattern, so `-` and `:` are escaped.
 local DISPATCH_MARKER = "fkst%-cron%-dispatch:v1"

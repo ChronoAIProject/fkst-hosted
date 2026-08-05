@@ -1,4 +1,4 @@
-local core = require("core")
+local runner = require("runner")
 local t = fkst.test
 
 local RUN_ISSUE_BODY = table.concat({
@@ -19,7 +19,7 @@ return {
   -- ---- dispatch ----------------------------------------------------------
 
   test_dispatch_marker_carries_the_run_identity = function()
-    local dispatch, err = core.parse_dispatch(RUN_ISSUE_BODY)
+    local dispatch, err = runner.parse_dispatch(RUN_ISSUE_BODY)
     t.is_nil(err)
     t.eq(dispatch.schedule_issue, 123)
     t.eq(dispatch.workflow_id, "sourcing")
@@ -32,7 +32,7 @@ return {
   test_an_ordinary_work_issue_is_a_clean_noop = function()
     -- The pod also boots for ordinary work. Reading that as a scheduled run
     -- would execute something nobody asked for.
-    local dispatch, err = core.parse_dispatch("## What needs doing\n\nFix the bug.\n")
+    local dispatch, err = runner.parse_dispatch("## What needs doing\n\nFix the bug.\n")
     t.is_nil(dispatch)
     t.is_nil(err)
   end,
@@ -40,14 +40,14 @@ return {
   test_a_malformed_marker_is_a_hard_failure_not_a_noop = function()
     -- Silently ignoring it would strand the schedule until its watchdog fired,
     -- with nothing anywhere saying why.
-    local dispatch, err = core.parse_dispatch('<!-- fkst-cron-dispatch:v1 schedule="123" -->')
+    local dispatch, err = runner.parse_dispatch('<!-- fkst-cron-dispatch:v1 schedule="123" -->')
     t.is_nil(dispatch)
     t.is_true(err ~= nil)
   end,
 
   test_a_manual_run_is_distinguishable = function()
     local body = RUN_ISSUE_BODY:gsub('manual="false"', 'manual="true"')
-    t.is_true(core.parse_dispatch(body).manual)
+    t.is_true(runner.parse_dispatch(body).manual)
   end,
 
   -- ---- arguments ---------------------------------------------------------
@@ -58,20 +58,20 @@ return {
     -- wrote.
     local body = '<!-- fkst-cron-dispatch:v1 schedule="1" workflow="w" slot="s" -->\n'
       .. '```toml\nrole = "a \\"quoted\\" role\\nsecond line\\ttabbed"\n```'
-    local dispatch = core.parse_dispatch(body)
+    local dispatch = runner.parse_dispatch(body)
     t.eq(dispatch.arguments.role, 'a "quoted" role\nsecond line\ttabbed')
   end,
 
   test_a_run_with_no_arguments_parses = function()
     local body = '<!-- fkst-cron-dispatch:v1 schedule="1" workflow="w" slot="s" -->\n\n_None._'
-    local dispatch = core.parse_dispatch(body)
+    local dispatch = runner.parse_dispatch(body)
     t.eq(next(dispatch.arguments), nil)
   end,
 
   -- ---- substitution ------------------------------------------------------
 
   test_substitution_puts_values_in_as_data = function()
-    local value, err = core.substitute("--role={{ role }}", { role = "; rm -rf /" })
+    local value, err = runner.substitute("--role={{ role }}", { role = "; rm -rf /" })
     t.is_nil(err)
     -- The value is placed verbatim into ONE argv element; it never becomes shell
     -- syntax, because the caller quotes each element separately.
@@ -81,13 +81,13 @@ return {
   test_an_unsupplied_argument_is_an_error_not_an_empty_string = function()
     -- Running a scrape with a blank search term would produce a plausible,
     -- WRONG result rather than a visible failure.
-    local value, err = core.substitute("--role={{ role }}", {})
+    local value, err = runner.substitute("--role={{ role }}", {})
     t.is_nil(value)
     t.is_true(err:find("role", 1, true) ~= nil)
   end,
 
   test_resolve_step_substitutes_every_argv_element = function()
-    local resolved, err = core.resolve_step({
+    local resolved, err = runner.resolve_step({
       index = 1,
       id = "scrape",
       kind = "run",
@@ -101,7 +101,7 @@ return {
   end,
 
   test_resolve_step_substitutes_a_task_prompt = function()
-    local resolved, err = core.resolve_step({
+    local resolved, err = runner.resolve_step({
       index = 2,
       id = "score",
       kind = "task",
@@ -115,7 +115,7 @@ return {
   -- ---- definition validation ---------------------------------------------
 
   test_a_valid_definition_yields_ordered_steps = function()
-    local steps, err = core.validate_definition({
+    local steps, err = runner.validate_definition({
       step = {
         { id = "scrape", kind = "run", command = { "true" } },
         { id = "score", kind = "task", prompt = "score it", timeout_secs = 1200 },
@@ -149,7 +149,7 @@ return {
         why = "duplicate step id",
       },
     }) do
-      local steps, err = core.validate_definition(case.definition)
+      local steps, err = runner.validate_definition(case.definition)
       t.is_nil(steps)
       t.is_true(
         err:find(case.why, 1, true) ~= nil,
@@ -164,7 +164,7 @@ return {
     -- backend/src/schedule/marker.rs parses this exact string. A drift here
     -- silently breaks completion detection: a finished run would look in-flight
     -- until its watchdog released it.
-    local marker = core.render_run_marker({
+    local marker = runner.render_run_marker({
       slot = "2026-07-27T03:00:00Z",
       manual = false,
       status = "ok",
@@ -186,7 +186,7 @@ return {
   end,
 
   test_absent_optional_attributes_are_omitted_rather_than_emptied = function()
-    local marker = core.render_run_marker({
+    local marker = runner.render_run_marker({
       slot = "2026-07-27T03:00:00Z",
       manual = false,
       status = "failed",
@@ -199,7 +199,7 @@ return {
 
   test_a_step_that_never_ran_carries_an_empty_duration = function()
     t.eq(
-      core.render_steps({
+      runner.render_steps({
         { index = 1, id = "scrape", status = "ok", duration_s = 41 },
         { index = 2, id = "score", status = "failed", duration_s = 9 },
         { index = 3, id = "publish", status = "skipped" },
@@ -211,7 +211,7 @@ return {
   test_a_detail_cannot_break_out_of_the_comment_or_its_attribute = function()
     -- A detail is free text from a failing step: hostile to the enclosing format
     -- by default, not trusted to behave.
-    local marker = core.render_run_marker({
+    local marker = runner.render_run_marker({
       slot = "s",
       manual = false,
       status = "failed",
@@ -223,7 +223,7 @@ return {
   end,
 
   test_an_overlong_detail_is_truncated = function()
-    local marker = core.render_run_marker({
+    local marker = runner.render_run_marker({
       slot = "s",
       manual = false,
       status = "failed",
@@ -236,13 +236,13 @@ return {
   -- ---- output tails ------------------------------------------------------
 
   test_a_short_tail_is_untouched = function()
-    t.eq(core.truncate_tail("all good"), "all good")
+    t.eq(runner.truncate_tail("all good"), "all good")
   end,
 
   test_a_long_tail_keeps_the_END_and_says_how_much_went = function()
     -- The tail, not the head: the interesting part of a failing command's output
     -- is what it said last.
-    local tail = core.truncate_tail(string.rep("a", 100) .. "THE-END", 16)
+    local tail = runner.truncate_tail(string.rep("a", 100) .. "THE-END", 16)
     t.is_true(tail:find("truncated, 91 bytes omitted", 1, true) ~= nil)
     t.is_true(tail:find("THE%-END") ~= nil)
   end,
@@ -250,7 +250,7 @@ return {
   -- ---- path safety -------------------------------------------------------
 
   test_a_workflow_id_resolves_under_the_definitions_directory = function()
-    local path, err = core.definition_path("github-candidate-sourcing")
+    local path, err = runner.definition_path("github-candidate-sourcing")
     t.is_nil(err)
     t.eq(path, ".fkst/workflows/github-candidate-sourcing.toml")
   end,
@@ -259,7 +259,7 @@ return {
     -- This is where the id becomes a filesystem path, so it is re-validated here
     -- even though the control plane already validated it.
     for _, id in ipairs({ "../../etc/passwd", "..", "a/b", "a b", "" }) do
-      local path, err = core.definition_path(id)
+      local path, err = runner.definition_path(id)
       t.is_nil(path)
       t.is_true(err ~= nil)
     end
@@ -274,7 +274,7 @@ return {
       { number = 12, body = RUN_ISSUE_BODY, assignees = {} },
       { number = 13, body = "an ordinary work issue", assignees = { "alice" } },
     }
-    t.is_nil(core.select_run_issue(issues, "alice"))
+    t.is_nil(runner.select_run_issue(issues, "alice"))
   end,
 
   test_the_lowest_numbered_run_issue_is_serviced_first = function()
@@ -282,7 +282,7 @@ return {
       { number = 22, body = RUN_ISSUE_BODY, assignees = { "alice" } },
       { number = 15, body = RUN_ISSUE_BODY, assignees = { "Alice" } },
     }
-    local issue, dispatch = core.select_run_issue(issues, "alice")
+    local issue, dispatch = runner.select_run_issue(issues, "alice")
     t.eq(issue.number, 15)
     t.eq(dispatch.workflow_id, "sourcing")
   end,
@@ -303,7 +303,7 @@ return {
       -- A step that echoed its own environment, which is exactly how this leaks
       -- in practice.
       detail = "step publish exited 1",
-      tail = core.truncate_tail(("padding\n"):rep(2000) .. "TOKEN=" .. secret, 32),
+      tail = runner.truncate_tail(("padding\n"):rep(2000) .. "TOKEN=" .. secret, 32),
       steps = {},
     }
     -- The tail is truncated to its END, so a secret printed early is gone. This
@@ -311,19 +311,19 @@ return {
     -- enters an argument in the first place (the control plane refuses one), and
     -- this test states which of the two is which.
     t.is_true(#record.tail < 200)
-    local marker = core.render_run_marker(record)
+    local marker = runner.render_run_marker(record)
     t.is_true(marker:find("ghp_", 1, true) == nil, "the MARKER must never carry a token")
   end,
 
   test_a_detail_is_sanitized_before_it_becomes_a_marker_attribute = function()
-    local sanitized = core.sanitize_detail('a "quoted" <tag> detail\nwith a newline')
+    local sanitized = runner.sanitize_detail('a "quoted" <tag> detail\nwith a newline')
     t.is_true(sanitized:find('"', 1, true) == nil)
     t.is_true(sanitized:find("<", 1, true) == nil)
     t.is_true(sanitized:find("\n", 1, true) == nil)
   end,
 
   test_the_report_body_carries_the_human_line_the_tail_and_the_record = function()
-    local body = core.render_report({
+    local body = runner.render_report({
       slot = "2026-08-05T01:00:00Z",
       manual = false,
       status = "failed",

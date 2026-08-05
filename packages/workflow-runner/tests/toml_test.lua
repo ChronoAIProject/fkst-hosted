@@ -1,4 +1,4 @@
-local toml = require("core.toml")
+local toml = require("runner.toml")
 local t = fkst.test
 
 local DEFINITION = table.concat({

@@ -1,5 +1,5 @@
-local core = require("core")
-local toml = require("core.toml")
+local runner = require("runner")
+local toml = require("runner.toml")
 local t = fkst.test
 
 -- The shipped example is the first thing an operator copies. A reference
@@ -22,7 +22,7 @@ return {
   test_the_example_definition_decodes_and_validates = function()
     local document, err = toml.decode(read_example())
     t.is_nil(err)
-    local steps, validate_error = core.validate_definition(document)
+    local steps, validate_error = runner.validate_definition(document)
     t.is_nil(validate_error)
     t.eq(#steps, 3)
     t.eq(steps[1].id, "scrape")
@@ -38,10 +38,10 @@ return {
     -- definition referenced a third placeholder, every copy of it would fail at
     -- the first step with "argument not supplied".
     local document = toml.decode(read_example())
-    local steps = core.validate_definition(document)
+    local steps = runner.validate_definition(document)
     local arguments = { role = "AI Tools Application Engineer", min_score = "6" }
     for _, step in ipairs(steps) do
-      local resolved, err = core.resolve_step(step, arguments)
+      local resolved, err = runner.resolve_step(step, arguments)
       t.is_nil(err, ("step %s must resolve: %s"):format(step.id, tostring(err)))
       t.is_true(resolved ~= nil)
     end
@@ -67,8 +67,8 @@ return {
     -- A hostile search parameter must stay one argument rather than becoming
     -- shell syntax — the property the whole argv design exists for.
     local document = toml.decode(read_example())
-    local steps = core.validate_definition(document)
-    local resolved = core.resolve_step(steps[1], {
+    local steps = runner.validate_definition(document)
+    local resolved = runner.resolve_step(steps[1], {
       role = '" ; rm -rf / ; echo "',
       min_score = "6",
     })
