@@ -210,17 +210,22 @@ describe('Shell', () => {
     const home = within(nav).getByRole('link', { name: 'Home' });
     const operations = within(nav).getByRole('link', { name: 'Operations' });
 
+    // toHaveClass asserts CLASS-LIST MEMBERSHIP, which is the whole point here:
+    // a substring check would pass against the stringified function, whose source
+    // text literally contains every one of these class names.
     const shared = ['hover-underline', 'text-nav', 'no-underline', 'rounded-control'];
     for (const cls of shared) {
-      expect(home.className).toContain(cls);
-      expect(operations.className).toContain(cls);
+      expect(home).toHaveClass(cls);
+      expect(operations).toHaveClass(cls);
     }
     // The inactive route styling must be the shared one, not a stringified fn.
-    expect(operations.className).toContain('text-faint');
+    expect(operations).toHaveClass('text-faint');
+    // These two read the raw attribute deliberately: they are the tell-tales of a
+    // stringified function, which is not a class name at all.
     expect(operations.className).not.toContain('isActive');
     expect(operations.className).not.toContain('=>');
     // …while the responsive collapse rule is still composed on top.
-    expect(operations.className).toContain('max-[720px]:hidden');
+    expect(operations).toHaveClass('max-[720px]:hidden');
   });
 
   it('applies the active nav styling to Operations on /operations', () => {
@@ -228,9 +233,9 @@ describe('Shell', () => {
     renderShell({ authenticated: true, initialEntry: '/operations' });
     const nav = screen.getByRole('navigation');
     const operations = within(nav).getByRole('link', { name: 'Operations' });
-    expect(operations.className).toContain('text-fg');
-    expect(operations.className).toContain('bg-raise');
-    expect(operations.className).not.toContain('text-faint');
+    expect(operations).toHaveClass('text-fg');
+    expect(operations).toHaveClass('bg-raise');
+    expect(operations).not.toHaveClass('text-faint');
   });
 
   it('keeps Operations reachable from the overflow menu at narrow widths', () => {
