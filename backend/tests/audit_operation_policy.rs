@@ -178,12 +178,14 @@ async fn the_audited_surface_is_the_expected_size_and_shape() {
     // `operations_list_activity` and the live sandbox inventory (#5675) added
     // `operations_list_sandboxes`, taking it to 31. Merging `develop` brought
     // the session health-report surface with it — `session_health` and
-    // `session_health_report` — for 33. Both carry explicit audit policies and
-    // safe-argument DTOs; this baseline is the deliberate acknowledgement the
-    // guard demands for that.
+    // `session_health_report` — for 33. The scheduled-workflow surface adds six
+    // (list, detail, one run, pause, resume, run-now) for 39. Every one carries
+    // an explicit audit policy and a safe-argument DTO that records only the
+    // repository and the definition issue addressed — never a definition's body;
+    // this baseline is the deliberate acknowledgement the guard demands.
     assert_eq!(
         operations.len(),
-        33,
+        39,
         "the full surface changed; update this baseline deliberately: {:?}",
         operations.keys().collect::<Vec<_>>()
     );

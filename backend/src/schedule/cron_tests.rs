@@ -190,3 +190,26 @@ fn parsing_reads_no_clock_and_performs_no_io() {
          stay distinguishable for round-tripping"
     );
 }
+
+#[test]
+fn common_cadences_describe_readably() {
+    let describe = |expression: &str| CronExpr::parse(expression).expect("parses").describe();
+    assert_eq!(describe("0 3 * * *"), "daily at 03:00 UTC");
+    assert_eq!(describe("30 14 * * *"), "daily at 14:30 UTC");
+    assert_eq!(describe("0 1 * * 1-5"), "weekdays at 01:00 UTC");
+    assert_eq!(describe("0 9 * * 0,6"), "weekends at 09:00 UTC");
+    assert_eq!(describe("0 9 * * 1"), "every Monday at 09:00 UTC");
+    assert_eq!(describe("*/15 * * * *"), "every 15 minutes");
+    assert_eq!(describe("* * * * *"), "every minute");
+}
+
+#[test]
+fn an_expression_with_no_simple_reading_falls_back_to_itself() {
+    // A description that paraphrases a complex expression approximately is worse
+    // than none: an operator would trust it, and the clock would do something else.
+    let describe = |expression: &str| CronExpr::parse(expression).expect("parses").describe();
+    assert_eq!(describe("0,1,30 * * * *"), "cron `0,1,30 * * * *` (UTC)");
+    assert_eq!(describe("0 0 1 * 1"), "cron `0 0 1 * 1` (UTC)");
+    assert_eq!(describe("0 3 1 2 *"), "cron `0 3 1 2 *` (UTC)");
+    assert_eq!(describe("0 3,15 * * *"), "cron `0 3,15 * * *` (UTC)");
+}
