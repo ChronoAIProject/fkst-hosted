@@ -86,6 +86,47 @@ export function releaseAssetName(baseName: string, hash: string, extension: stri
   return `${baseName}.sha256-${hex}${extension}`;
 }
 
+export interface ResolvedInputs {
+  source: Awaited<ReturnType<typeof sourceFingerprints>>;
+  packages: { ref: string; treeFingerprint: string }[];
+  pinned: string;
+  input: string;
+}
+
+/**
+ * Resolve the convergence-bearing inputs at a revision.
+ *
+ * ONE definition, shared by manifest assembly and by convergence condition 1.
+ * They must agree by construction, not by two call sites happening to match: an
+ * earlier version of the verifier computed the generator tree at the MANIFEST's
+ * `observedHead` instead of the current revision, which made the generator half
+ * of the fingerprint trivially self-consistent — a changed generator could never
+ * fail condition 1, and the "generatorPinnedFingerprint moved" full-rebuild
+ * trigger could never fire.
+ */
+export async function resolveInputs(
+  repoRoot: string,
+  config: EvolutionConfig,
+  plan: ArtifactPlan,
+  revision: string
+): Promise<ResolvedInputs> {
+  const source = await sourceFingerprints(repoRoot, config, revision);
+  const head = source.observedHead;
+  const packages = await Promise.all(
+    plan.generator.packages.map(async (pkg) => ({
+      ref: pkg.ref.replace('{commit}', head),
+      treeFingerprint: await directoryTreeFingerprint(repoRoot, head, pkg.directory),
+    }))
+  );
+  const pinned = generatorPinnedFingerprint({
+    manifestRef: plan.generator.manifestRef.replace('{commit}', head),
+    packages,
+    schemaVersions: SCHEMA_VERSIONS,
+    generatorEpoch: config.generatorEpoch,
+  });
+  return { source, packages, pinned, input: inputFingerprint(source.productRelevant, pinned) };
+}
+
 export interface BuildOptions {
   repoRoot: string;
   config: EvolutionConfig;
@@ -100,28 +141,15 @@ export interface BuildOptions {
 export async function buildManifest(options: BuildOptions): Promise<Manifest> {
   const { repoRoot, config, plan, revision, repository, timestamp } = options;
 
-  const source = await sourceFingerprints(repoRoot, config, revision);
+  const { source, packages, pinned, input } = await resolveInputs(repoRoot, config, plan, revision);
   const head = source.observedHead;
 
-  const packages = await Promise.all(
-    plan.generator.packages.map(async (pkg) => ({
-      ref: pkg.ref.replace('{commit}', head),
-      treeFingerprint: await directoryTreeFingerprint(repoRoot, head, pkg.directory),
-    }))
-  );
-  const pinned = generatorPinnedFingerprint({
-    manifestRef: plan.generator.manifestRef.replace('{commit}', head),
-    packages,
-    schemaVersions: SCHEMA_VERSIONS,
-    generatorEpoch: config.generatorEpoch,
-  });
   const toolchain = await detectToolchain();
   const envFingerprint = generatorEnvFingerprint({
     engineVersion: plan.generator.engineVersion,
     model: plan.generator.model,
     toolchain,
   });
-  const input = inputFingerprint(source.productRelevant, pinned);
 
   // Committed artifact bytes come from the Git TREE, not the working directory:
   // an uncommitted edit must not be able to produce a manifest that describes

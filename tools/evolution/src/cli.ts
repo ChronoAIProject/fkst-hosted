@@ -12,20 +12,16 @@ import { execFile } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { buildManifest, presentManagedFiles } from './build.ts';
+import { buildManifest, detectToolchain, presentManagedFiles, resolveInputs } from './build.ts';
 import { parseConfig } from './config.ts';
 import { evaluateConvergence } from './converge.ts';
-import {
-  inputFingerprint, generatorPinnedFingerprint, generatorEnvFingerprint,
-  outputFingerprint, readManagedOutputs, sourceFingerprints, directoryTreeFingerprint,
-} from './fingerprints.ts';
+import { generatorEnvFingerprint, outputFingerprint, readManagedOutputs } from './fingerprints.ts';
 import { GhCliGitHubPort } from './github.ts';
 import { readTree } from './gittree.ts';
 import { log, setLevel, type Level } from './log.ts';
 import { manifestProjection, parseManifest } from './manifest.ts';
 import { parsePlan } from './plan.ts';
 import { CONFIG_PATH } from './selector.ts';
-import { detectToolchain, SCHEMA_VERSIONS } from './build.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -76,19 +72,7 @@ async function loadContext(root: string, rev: string) {
 
 async function cmdFingerprint(root: string, rev: string): Promise<void> {
   const { config, plan } = await loadContext(root, rev);
-  const source = await sourceFingerprints(root, config, rev);
-  const packages = await Promise.all(
-    plan.generator.packages.map(async (pkg) => ({
-      ref: pkg.ref.replace('{commit}', source.observedHead),
-      treeFingerprint: await directoryTreeFingerprint(root, source.observedHead, pkg.directory),
-    }))
-  );
-  const pinned = generatorPinnedFingerprint({
-    manifestRef: plan.generator.manifestRef.replace('{commit}', source.observedHead),
-    packages,
-    schemaVersions: SCHEMA_VERSIONS,
-    generatorEpoch: config.generatorEpoch,
-  });
+  const { source, pinned, input } = await resolveInputs(root, config, plan, rev);
   const toolchain = await detectToolchain();
   const managed = await readManagedOutputs(root, source.observedHead);
 
@@ -104,7 +88,7 @@ async function cmdFingerprint(root: string, rev: string): Promise<void> {
           model: plan.generator.model,
           toolchain,
         }),
-        inputFingerprint: inputFingerprint(source.productRelevant, pinned),
+        inputFingerprint: input,
         productRelevantFileCount: source.productRelevantPaths.length,
         coverageFileCount: source.coveragePaths.length,
         managedOutputFileCount: managed.length,
@@ -145,20 +129,10 @@ async function cmdVerify(root: string, rev: string, useGitHub: boolean): Promise
   const { config, plan } = await loadContext(root, rev);
   const manifest = parseManifest(await readFromTree(root, rev, '.fkst/evolution/manifest.json'));
 
-  const source = await sourceFingerprints(root, config, rev);
-  const packages = await Promise.all(
-    plan.generator.packages.map(async (pkg) => ({
-      ref: pkg.ref.replace('{commit}', manifest.source.observedHead),
-      treeFingerprint: await directoryTreeFingerprint(root, manifest.source.observedHead, pkg.directory),
-    }))
-  );
-  const pinned = generatorPinnedFingerprint({
-    manifestRef: plan.generator.manifestRef.replace('{commit}', manifest.source.observedHead),
-    packages,
-    schemaVersions: SCHEMA_VERSIONS,
-    generatorEpoch: config.generatorEpoch,
-  });
-  const currentInput = inputFingerprint(source.productRelevant, pinned);
+  // Computed at the CURRENT revision, through the same `resolveInputs` the
+  // manifest was built with. Evaluating the generator half at the manifest's own
+  // head would compare the manifest against itself.
+  const { source, input: currentInput } = await resolveInputs(root, config, plan, rev);
 
   // Re-derive the output fingerprint from bytes, never from the manifest field.
   const managed = await readManagedOutputs(root, rev);
