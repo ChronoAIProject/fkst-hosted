@@ -35,7 +35,7 @@ export const tour: TourSlice = {
     },
     sessionDetail: {
       title: 'Session details',
-      body: 'Open any session for four tabs — Status (lifecycle + live engine), Packages (config + queues), Logs (an in-app viewer with search), and Outcomes (pull requests with file previews).',
+      body: 'Open any session for its tabs — Status (lifecycle), Packages (config), Logs (an in-app viewer with search), Health, Engine (the live runtime and its queues), and Outcomes (pull requests with file previews).',
     },
     workItem: {
       title: 'Queue more work',

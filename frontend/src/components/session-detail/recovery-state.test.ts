@@ -113,9 +113,16 @@ describe('fallbackRecovery', () => {
   it('reports an idle session as having no pending work', () => {
     expect(
       fallbackRecovery(
-        session({ work_issues: [issue({ number: 9, state: 'closed' })], liveness: 'absent' })
+        session({ work_issues: [issue({ number: 9, state: 'closed' })], liveness: null })
       )
-    ).toMatchObject({ state: 'idle', reason: 'no_pending_work', open_work_items: 0 });
+    ).toMatchObject({
+      state: 'idle',
+      reason: 'no_pending_work',
+      open_work_items: 0,
+      // A null liveness degrades to the 'unknown' runtime label rather than
+      // asserting anything about a pod nobody observed.
+      runtime: 'unknown',
+    });
   });
 
   it('reports an active session as normal and live', () => {

@@ -26,6 +26,9 @@ export interface SessionDetailContent {
   tabLogs: string;
   tabOutcomes: string;
   tabHealth: string;
+  /** Live runtime-observation tab, split out of Status so the lifecycle view
+   *  issues no pod exec. */
+  tabEngine: string;
   /** Copy-affordance label on the full session id in the drawer header. */
   sessionIdCopy: string;
   creatorLabel: string;

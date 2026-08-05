@@ -10,7 +10,7 @@ import type { ObserveState } from './observe-state';
 
 /** Packages tab: the frozen session configuration (ConfigPanel), then each
  *  declared package decoded to a friendly role + short handle with the full
- *  `owner/repo@ref:path` kept verbatim in a copyable `<code>`. When the Status
+ *  `owner/repo@ref:path` kept verbatim in a copyable `<code>`. When the Engine
  *  tab has already fetched the engine snapshot, the same per-queue activity is
  *  surfaced here too (no second fetch). */
 export function TabPackages({
