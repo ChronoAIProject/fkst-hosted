@@ -1,7 +1,6 @@
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties } from 'react';
 import { useContent } from '@/i18n';
 import { Chip } from '@/components/ui/chip';
-import { FadeSwap } from '@/components/ui/motion';
 import type {
   IssueDetail,
   SessionDetail,
@@ -14,11 +13,10 @@ import {
   type SessionPhase,
   type WorkItemTone,
 } from '@/lib/api/derive';
-import { Note, SectionLabel, Spinner } from './parts';
-import { ObserveView } from './observe-view';
+import { Note, SectionLabel } from './parts';
+import { fallbackRecovery } from './recovery-state';
 import { SessionTimeline } from './session-timeline';
 import { PHASE_TONE, WORK_TONE } from './tones';
-import type { ObserveState } from './observe-state';
 import { ProgressCard, StatusCard, WorkDonut, countWorkItems } from './status-charts';
 
 /** The happy-path lifecycle stages, in order. Off-path phases (degraded /
@@ -178,60 +176,6 @@ const RECOVERY_TONE: Record<SessionRecoveryState, 'neutral' | 'amber' | 'green' 
   invalid: 'red',
 };
 
-function fallbackRecovery(session: SessionDetail): SessionRecoveryProjection {
-  const openWork = session.work_issues.filter((issue) => issue.state === 'open').length;
-  const status = decodeSessionStatus(session);
-  const runtime = session.liveness ?? 'unknown';
-
-  switch (status.phase) {
-    case 'invalid':
-      return {
-        state: 'invalid',
-        reason: session.status_labels.includes('fkst-config-rejected')
-          ? 'configuration_rejected'
-          : 'registration_invalid',
-        open_work_items: 0,
-        runtime,
-      };
-    case 'retired':
-      return { state: 'retired', reason: 'trigger_closed', open_work_items: 0, runtime };
-    case 'degraded':
-      return {
-        state: 'degraded',
-        reason: 'runtime_health_degraded',
-        open_work_items: openWork,
-        runtime,
-      };
-    case 'idle':
-      return { state: 'idle', reason: 'no_pending_work', open_work_items: 0, runtime };
-    case 'active':
-      return { state: 'normal', reason: 'runtime_live', open_work_items: openWork, runtime };
-    default:
-      if (openWork > 0 && session.liveness === 'starting') {
-        return {
-          state: 'recovering',
-          reason: 'runtime_starting',
-          open_work_items: openWork,
-          runtime,
-        };
-      }
-      if (openWork > 0 && session.liveness === 'terminating') {
-        return {
-          state: 'recovering',
-          reason: 'runtime_terminating',
-          open_work_items: openWork,
-          runtime,
-        };
-      }
-      return {
-        state: 'unknown',
-        reason: 'runtime_observation_unavailable',
-        open_work_items: openWork,
-        runtime,
-      };
-  }
-}
-
 /** Bounded operator read model. It deliberately renders enum-backed labels only:
  * provider errors and private issue content never enter this surface. */
 function RecoveryCard({ recovery }: { recovery: SessionRecoveryProjection }) {
@@ -260,39 +204,18 @@ function RecoveryCard({ recovery }: { recovery: SessionRecoveryProjection }) {
   );
 }
 
-/** Status tab: an at-a-glance overview grid (progress meter, work-item
- *  distribution donut, lifecycle), a chronological session timeline, the
- *  promoted per-work-item list, and an on-demand "Live engine details" fetch —
- *  the fetch is only offered while the pod is LIVE (`liveness === 'live'`); when
- *  the session is paused/idle it shows a calm note instead. Fills the wide detail
- *  panel: the overview grid is CSS auto-fit so it lays 2–3 tiles wide and stacks
- *  when narrow; the work items flow into two columns on wider viewports. */
-export function TabStatus({
-  session,
-  observe,
-  onLoadObserve,
-}: {
-  session: SessionDetail;
-  observe: ObserveState;
-  onLoadObserve: () => void;
-}) {
+/** Status tab: where the session is in its LIFECYCLE — an at-a-glance overview
+ *  grid (progress meter, work-item distribution donut, lifecycle, recovery
+ *  diagnostics), a chronological session timeline, and the promoted per-work-item
+ *  list. All of it derives from data already in hand, so opening this tab costs
+ *  no request; live runtime observation is the Engine tab's job (#5841). Fills
+ *  the wide detail panel: the overview grid is CSS auto-fit so it lays 2–3 tiles
+ *  wide and stacks when narrow; the work items flow into two columns on wider
+ *  viewports. */
+export function TabStatus({ session }: { session: SessionDetail }) {
   const t = useContent().dashboard.detail;
   const counts = countWorkItems(session.work_issues);
   const recovery = session.recovery ?? fallbackRecovery(session);
-  // The live-engine observe fetch pod-execs INTO the running pod, so it is only
-  // meaningful — and only permitted — while the runtime is positively live.
-  // Prefer the typed projection when present so stale legacy liveness cannot
-  // enable a pod exec after an authoritative absent/terminal observation.
-  const isLive = session.recovery
-    ? session.recovery.runtime === 'live'
-    : session.liveness === 'live';
-
-  // Hard gate: never let the observe fetch fire unless the pod is live, even if
-  // a stray caller reaches the handler.
-  const handleLoadObserve = () => {
-    if (isLive) onLoadObserve();
-  };
-
   // Inline auto-fit template: the tiles size themselves to the panel width
   // (container-driven), unlike Tailwind's viewport breakpoints — so the grid
   // reflows correctly inside the fluid detail panel, not just at page widths.
@@ -328,76 +251,6 @@ export function TabStatus({
           </div>
         )}
       </section>
-
-      <section className="flex flex-col gap-2">
-        <SectionLabel>{t.liveEngine}</SectionLabel>
-        {isLive ? (
-          // Crossfade the observe states keyed on `status`: the fetched engine
-          // snapshot slides in under the label as loading resolves to loaded,
-          // rather than popping the panel in. Instant under reduced motion.
-          <FadeSwap k={observe.status}>{renderObserve()}</FadeSwap>
-        ) : (
-          // Paused/idle: the pod is gone, so there is nothing to observe. Explain
-          // it calmly instead of offering a fetch that would only error.
-          <Note>
-            {recovery.state === 'recovering'
-              ? t.liveEngineRecovering
-              : recovery.state === 'idle'
-                ? t.liveEnginePaused
-                : t.liveEngineNotLive}
-          </Note>
-        )}
-      </section>
     </div>
   );
-
-  function renderObserve(): ReactNode {
-    switch (observe.status) {
-      case 'idle':
-        return (
-          <button
-            type="button"
-            onClick={handleLoadObserve}
-            className="self-start font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim transition-[color,border-color,box-shadow] duration-150 hover:text-fg hover:border-line-2 hover:shadow-glow-amber cursor-pointer"
-          >
-            {t.liveEngine}
-          </button>
-        );
-      case 'loading':
-        return (
-          <div className="flex flex-col gap-1.5">
-            <span className="inline-flex items-center gap-2 font-mono text-[11.5px] text-dim">
-              <Spinner />
-              {t.liveEngineLoading}
-            </span>
-            <Note>{t.liveEngineSlow}</Note>
-          </div>
-        );
-      case 'error': {
-        // Explain the failure: 409 == no durable delivery store to observe;
-        // anything else is a transient/defensive fallback (the section is
-        // already gated on live, so this is rarely reached). A 409 will not
-        // recover on retry, so only offer the retry for the transient case.
-        const noStore = observe.httpStatus === 409;
-        return (
-          <div className="flex flex-col items-start gap-2">
-            <p className="text-[12.5px] text-red">
-              {noStore ? t.liveEngineErrorNoStore : t.liveEngineNotLive}
-            </p>
-            {!noStore && (
-              <button
-                type="button"
-                onClick={handleLoadObserve}
-                className="font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim transition-[color,border-color,box-shadow] duration-150 hover:text-fg hover:border-line-2 hover:shadow-glow-amber cursor-pointer"
-              >
-                {t.logsRefresh}
-              </button>
-            )}
-          </div>
-        );
-      }
-      case 'loaded':
-        return <ObserveView snapshot={observe.snapshot} />;
-    }
-  }
 }

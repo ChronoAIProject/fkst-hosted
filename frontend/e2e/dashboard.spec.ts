@@ -3,7 +3,7 @@ import { installApiRoutes, seedAuth, PERSONAL, ORG, REPO, recoveryRepoSessions }
 import { drawerTab, openAccount, openRepo, settle, shot, sidebar } from './harness';
 
 // The dashboard's full UI journey against the refactored, fixed-viewport shell:
-// levels 0→1→2, the slide-in session drawer with its four tabs, a degraded
+// levels 0→1→2, the slide-in session drawer with its six tabs, a degraded
 // session, and the i18n toggle.
 //
 // NAVIGATION NOTE: levels are driven through the right "Details panel" sidebar
@@ -23,7 +23,7 @@ test.describe('dashboard full UI journey', () => {
     await installApiRoutes(page);
   });
 
-  test('levels 0→1→2, session drawer, all four tabs, degraded + i18n', async ({ page }) => {
+  test('levels 0→1→2, session drawer, all tabs, degraded + i18n', async ({ page }) => {
     // ---- Level 0: root — sidebar charts, legend, accounts -------------------
     await page.goto('/dashboard');
     await expect(page.getByRole('heading', { name: 'Your fkst sessions' })).toBeVisible();
@@ -117,14 +117,16 @@ test.describe('dashboard full UI journey', () => {
     await expect(dialog.getByText('Ready').first()).toBeVisible();
     await expect(dialog.getByText('Done').first()).toBeVisible();
 
-    // Live engine details → observe queues.
-    await dialog.getByRole('button', { name: 'Live engine details' }).click();
+    // ---- Engine tab: live runtime observation ------------------------------
+    // Opening the tab IS the request — the observe read fires on activation, so
+    // there is no button to press (and Status never triggers it).
+    await drawerTab(page, 'Engine').click();
     await expect(
       dialog.getByText('workflow-writer.workflow_writer_materialization_tick')
     ).toBeVisible();
     await expect(dialog.getByText('github-devloop.reconcile_tick')).toBeVisible();
     await expect(dialog.getByText('2 deliveries pending')).toBeVisible();
-    await shot(page, '05-status-live-engine');
+    await shot(page, '05-engine');
 
     // ---- Packages tab -------------------------------------------------------
     await drawerTab(page, 'Packages').click();
@@ -185,8 +187,9 @@ test.describe('dashboard full UI journey', () => {
     await shot(page, '09-degraded');
 
     // Not live → the live-engine fetch is not offered; the availability notice
-    // renders instead (the lifecycle-aware Status tab gates the button on
-    // liveness === 'live').
+    // renders instead. The gate lives on the Engine tab now, and because it
+    // short-circuits before any request, no observe call is made at all.
+    await drawerTab(page, 'Engine').click();
     await expect(
       degraded.getByText(/Live engine details are available while the session is running/)
     ).toBeVisible();
@@ -237,12 +240,22 @@ test.describe('dashboard full UI journey', () => {
     await expect(diagnostics.getByText('Open work', { exact: true })).toBeVisible();
     await expect(diagnostics.getByText('1', { exact: true })).toBeVisible();
     await expect(diagnostics.getByText('Absent')).toBeVisible();
+    // The live-engine explanation lives on the Engine tab now; Status is the
+    // lifecycle view and says nothing about the runtime observation.
+    await expect(
+      detail.getByText(
+        'Live engine details will be available after the recovering runtime is live.'
+      )
+    ).toHaveCount(0);
+    await detail.getByRole('tab', { name: 'Engine' }).click();
     await expect(
       detail.getByText(
         'Live engine details will be available after the recovering runtime is live.'
       )
     ).toBeVisible();
+    // Not live ⇒ no fetch affordance at all, so the pod exec can never fire.
     await expect(detail.getByRole('button', { name: 'Live engine details' })).toHaveCount(0);
+    await detail.getByRole('tab', { name: 'Status' }).click();
 
     for (const width of [1440, 480]) {
       await page.setViewportSize({ width, height: 900 });

@@ -18,16 +18,19 @@ import { TabPackages } from './tab-packages';
 import { TabLogs } from './tab-logs';
 import { TabOutcomes } from './tab-outcomes';
 import { TabHealth, type HealthState } from './tab-health';
+import { TabEngine } from './tab-engine';
 import { healthChip } from './health-state';
 
-type TabKey = 'status' | 'packages' | 'logs' | 'health' | 'outcomes';
+type TabKey = 'status' | 'packages' | 'logs' | 'health' | 'engine' | 'outcomes';
 
 /** The reusable inner detail surface: a sticky header with the decoded status
- *  pill and a four-tab body (status / packages / logs / outcomes). It renders
- *  identically inside the overlay drawer (SessionDetailDrawer) and an inline
- *  workspace scroll area — the only difference is the header Close button, which
- *  is emitted only when an `onClose` handler is supplied. The observe fetch is
- *  lifted here so the Status and Packages tabs share one slow pod-exec call.
+ *  pill and a six-tab body (status / packages / logs / health / engine /
+ *  outcomes). It renders identically inside the overlay drawer
+ *  (SessionDetailDrawer) and an inline workspace scroll area — the only
+ *  difference is the header Close button, which is emitted only when an
+ *  `onClose` handler is supplied. The observe fetch STATE is lifted here so the
+ *  Engine and Packages tabs share one slow pod-exec call; only Engine triggers
+ *  it.
  *
  *  Tabs follow the WAI-ARIA tabs pattern: each `role="tab"` owns the single
  *  stable `role="tabpanel"` (`aria-controls`), the panel is labelled back by the
@@ -134,6 +137,10 @@ export function SessionDetailView({
     { key: 'packages', label: t.tabPackages },
     { key: 'logs', label: t.tabLogs },
     { key: 'health', label: t.tabHealth },
+    // Engine sits between Health and Outcomes deliberately: it keeps ArrowRight
+    // from Status on Packages and {End} on Outcomes, so the drawer's existing
+    // keyboard contract is unchanged by adding a tab.
+    { key: 'engine', label: t.tabEngine },
     { key: 'outcomes', label: t.tabOutcomes },
   ];
 
@@ -191,9 +198,7 @@ export function SessionDetailView({
               {chip && (
                 <span className="anim-chip-in inline-flex">
                   <Chip tone={chip.tone}>
-                    {chip.kind === 'stale'
-                      ? t.healthStaleChip
-                      : t.healthStatus[chip.status]}
+                    {chip.kind === 'stale' ? t.healthStaleChip : t.healthStatus[chip.status]}
                   </Chip>
                 </span>
               )}
@@ -312,7 +317,7 @@ export function SessionDetailView({
         <FadeSwap k={tab} className="flex-1 min-h-0 flex flex-col">
           {tab === 'status' && (
             <ScrollArea className="px-5 py-4">
-              <TabStatus session={session} observe={observe} onLoadObserve={loadObserve} />
+              <TabStatus session={session} />
             </ScrollArea>
           )}
           {tab === 'packages' && (
@@ -332,12 +337,17 @@ export function SessionDetailView({
           )}
           {tab === 'health' && (
             <div className="flex-1 min-h-0 px-5 py-4">
-              <TabHealth
-                sessionId={session.session_id ?? ''}
-                state={health}
-                onRetry={loadHealth}
-              />
+              <TabHealth sessionId={session.session_id ?? ''} state={health} onRetry={loadHealth} />
             </div>
+          )}
+          {/* The observe fetch is triggered HERE, by opening this tab — never by
+              Status, which must cost no request. The STATE stays lifted above so
+              Packages can surface the same snapshot's per-queue activity without
+              a second pod exec. */}
+          {tab === 'engine' && (
+            <ScrollArea className="px-5 py-4">
+              <TabEngine session={session} observe={observe} onLoadObserve={loadObserve} />
+            </ScrollArea>
           )}
           {tab === 'outcomes' && (
             <ScrollArea className="px-5 py-4">
