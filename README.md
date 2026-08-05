@@ -59,11 +59,27 @@ the web application for the supported user workflows.
   Host** and the reserved hardened Runtime shells
 
 Local QA Host is an activated executable application boundary with an explicit
-loopback-only `local-demo` mode. That mode accepts one strict inert Run through
-`PUT /v1/runs/{run_id}` and journals its immutable acceptance atomically in
-SQLite for restart replay. Zero-argument and unsupported invocation remains
-fail-closed with the exact `no supported configuration` error. The launcher,
-supervisor, guest agent, Secret Broker, and workers remain inert scaffolds. See
+loopback-only `local-demo --listen <loopback> --database <path>` mode. Its
+current HTTP surface is:
+
+- `GET /v1/health`
+- `PUT /v1/runs/{run_id}`
+- `GET /v1/runs/{run_id}`
+- `GET /v1/runs/{run_id}/events?after={cursor}&limit={limit}`
+- `POST /v1/runs/{run_id}:cancel`
+
+The Host persists accepted requests, Runs, ordered Events, and cancellation
+intent in a migrated SQLite WAL journal. Same-key submission replay and
+snapshot/Event reads survive restart; cancellation does not terminate a worker,
+browser, or process. Zero-argument and unsupported invocation remains
+fail-closed with the exact `no supported configuration` error.
+
+The pure TypeScript browser-smoke worker is active production policy code over
+injected session, Evidence-staging, and clock ports, but it is not integrated
+with the Host and does not launch Chrome or access network, filesystem, profile,
+download, or process resources. The launcher, supervisor, guest agent, and
+Secret Broker remain inert scaffolds. See the canonical Local QA capability and
+deferral details in
 [`apps/local-qa-runtime/README.md`](apps/local-qa-runtime/README.md).
 
 Kernel-engine code remains upstream in `fkst-substrate`, and shared fkst
