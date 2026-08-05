@@ -89,7 +89,7 @@ async function cmdFingerprint(root: string, rev: string): Promise<void> {
     schemaVersions: SCHEMA_VERSIONS,
     generatorEpoch: config.generatorEpoch,
   });
-  const toolchain = await detectToolchain(root);
+  const toolchain = await detectToolchain();
   const managed = await readManagedOutputs(root, source.observedHead);
 
   process.stdout.write(

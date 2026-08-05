@@ -7,7 +7,7 @@
 
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
-import { basename, extname, join } from 'node:path';
+import { extname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { requiredClasses, type EvolutionConfig } from './config.ts';
 import {
@@ -42,8 +42,15 @@ async function versionOf(cmd: string, args: string[], pick: (out: string) => str
   }
 }
 
-/** Detect the renderer and media tool versions recorded as provenance (section 17.4). */
-export async function detectToolchain(repoRoot: string): Promise<Record<string, string>> {
+/**
+ * Detect the renderer and media tool versions recorded as provenance (section 17.4).
+ *
+ * Only facts about the TOOLS belong here. Anything describing the machine or the
+ * checkout — a directory name, a hostname, a path — would make
+ * `generatorEnvFingerprint` differ between two clones of the same commit, and
+ * would leak a local path into a file the repository publishes.
+ */
+export async function detectToolchain(): Promise<Record<string, string>> {
   const [ffmpeg, playwright] = await Promise.all([
     versionOf('ffmpeg', ['-version'], (o) => o.split('\n')[0].replace('ffmpeg version ', '').split(' ')[0]),
     versionOf('npx', ['--no-install', 'playwright', '--version'], (o) => o.trim().replace('Version ', '')),
@@ -53,7 +60,6 @@ export async function detectToolchain(repoRoot: string): Promise<Record<string, 
     ffmpeg,
     playwright,
     slideRenderer: `chromium-pdf via playwright ${playwright}`,
-    repoRoot: basename(repoRoot),
   };
 }
 
@@ -109,7 +115,7 @@ export async function buildManifest(options: BuildOptions): Promise<Manifest> {
     schemaVersions: SCHEMA_VERSIONS,
     generatorEpoch: config.generatorEpoch,
   });
-  const toolchain = await detectToolchain(repoRoot);
+  const toolchain = await detectToolchain();
   const envFingerprint = generatorEnvFingerprint({
     engineVersion: plan.generator.engineVersion,
     model: plan.generator.model,
