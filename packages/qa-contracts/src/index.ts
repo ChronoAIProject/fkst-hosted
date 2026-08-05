@@ -22,6 +22,7 @@ const LIFECYCLE_TYPE_NAMES = Object.freeze([
   LOCAL_STATE_TYPE_NAME,
   EXECUTION_OUTCOME_TYPE_NAME,
 ] as const);
+const LOCAL_SANITIZED_OBSERVATION_TYPE_NAME = "LocalSanitizedObservation";
 const FOUNDATION_TYPE_NAMES = Object.freeze([
   "ContractMeta",
   "HostScopedMeta",
@@ -34,6 +35,17 @@ const FOUNDATION_TYPE_NAMES = Object.freeze([
 ] as const);
 
 export type FoundationType = (typeof FOUNDATION_TYPE_NAMES)[number];
+
+export interface LocalSanitizedObservation {
+  readonly schema_version: "qa.local-evidence/v1";
+  readonly run_id: string;
+  readonly attempt: number;
+  readonly fixture_url: string;
+  readonly final_url: string;
+  readonly selector: '[data-local-qa="status"]';
+  readonly expected_text: "READY";
+  readonly observed_text: "READY";
+}
 
 const PACKAGE_ROOT = realpathSync(resolvePackageRoot());
 
@@ -69,6 +81,10 @@ for (const type of FOUNDATION_TYPE_NAMES) {
 for (const type of LIFECYCLE_TYPE_NAMES) {
   VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
 }
+VALIDATORS.set(
+  LOCAL_SANITIZED_OBSERVATION_TYPE_NAME,
+  compileRegisteredValidator(REGISTRY, LOCAL_SANITIZED_OBSERVATION_TYPE_NAME),
+);
 
 export interface Rejection {
   readonly category: "canonicalization" | "contract" | "validation";
@@ -154,6 +170,12 @@ export function validateLocalState(raw: Uint8Array): ValidatedValue {
 
 export function validateExecutionOutcome(raw: Uint8Array): ValidatedValue {
   return validateRegisteredValue(admitJson(raw), EXECUTION_OUTCOME_TYPE_NAME);
+}
+
+export function validateLocalSanitizedObservation(raw: Uint8Array): ValidatedValue {
+  const validated = validateRegisteredValue(admitJson(raw), LOCAL_SANITIZED_OBSERVATION_TYPE_NAME);
+  validateLocalSanitizedObservationRules(validated.value() as LocalSanitizedObservation);
+  return validated;
 }
 
 export function validateValue(admitted: AdmittedJson, type: FoundationType): ValidatedValue {
@@ -303,6 +325,40 @@ function validateRegistry(registry: ContractRegistry): void {
       throw new Error(`qa contract fixture-only marker is invalid: ${type}`);
     }
   }
+  const observationEntry = registry.types[LOCAL_SANITIZED_OBSERVATION_TYPE_NAME];
+  if (observationEntry?.fixture_only !== undefined) {
+    throw new Error(
+      `qa contract fixture-only marker is invalid: ${LOCAL_SANITIZED_OBSERVATION_TYPE_NAME}`,
+    );
+  }
+}
+
+function validateLocalSanitizedObservationRules(value: LocalSanitizedObservation): void {
+  if (!isFixedFixtureUrl(value.fixture_url)) {
+    throw new ContractError({
+      category: "validation",
+      reason: "schema_violation",
+      path: "/fixture_url",
+    });
+  }
+  if (!isFixedFixtureUrl(value.final_url)) {
+    throw new ContractError({
+      category: "validation",
+      reason: "schema_violation",
+      path: "/final_url",
+    });
+  }
+  if (value.final_url !== value.fixture_url) {
+    throw contractError("contract.invalid_relation", "fixture_url_mismatch", "/final_url");
+  }
+}
+
+function isFixedFixtureUrl(value: string): boolean {
+  const match = /^http:\/\/127\.0\.0\.1:([0-9]+)\/fixed-page\.html$/.exec(value);
+  const portText = match?.[1];
+  if (portText === undefined || match[0] !== value) return false;
+  const port = Number(portText);
+  return Number.isSafeInteger(port) && port >= 1 && port <= 65_535;
 }
 
 function compileRegisteredValidator(registry: ContractRegistry, typeName: string): ValidateFunction {
