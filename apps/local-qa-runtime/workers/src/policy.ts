@@ -361,11 +361,11 @@ function validateReference<TSchema extends string>(
   }
   if (
     value.kind !== expectedKind ||
-    typeof value.id !== "string" ||
+    !isNonEmptyString(value.id) ||
     value.schema_version !== expectedSchema ||
     typeof value.content_digest !== "string" ||
-    !/^[0-9a-f]{64}$/.test(value.content_digest) ||
-    ("version" in value && typeof value.version !== "string")
+    !/^sha256:[0-9a-f]{64}$/.test(value.content_digest) ||
+    ("version" in value && !isNonEmptyString(value.version))
   ) {
     throw new BrowserSmokeWorkerError("evidence.invalid_reference");
   }
@@ -420,8 +420,9 @@ function isExactRecord(value: unknown, expectedKeys: readonly string[]): value i
   if (!isRecord(value)) {
     return false;
   }
-  const keys = ownStringKeys(value);
-  return keys.length === expectedKeys.length &&
+  const keys = Reflect.ownKeys(value);
+  return keys.every((key) => typeof key === "string") &&
+    keys.length === expectedKeys.length &&
     expectedKeys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
 }
 
@@ -435,4 +436,8 @@ function ownStringKeys(value: object): string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
 }
