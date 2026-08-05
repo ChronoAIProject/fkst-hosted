@@ -29,7 +29,7 @@ use super::{issue_templates_permissions, GithubAppError, GithubAppTokens};
 /// change to the bundled files below; the bundled `config.yml` marker MUST equal
 /// this (enforced by a unit test). Repos whose installed version is below this
 /// get a merged PR to catch up.
-pub const FKST_ISSUE_TEMPLATES_VERSION: u32 = 12;
+pub const FKST_ISSUE_TEMPLATES_VERSION: u32 = 13;
 
 /// Repo-relative directory the templates live under.
 const TEMPLATE_DIR: &str = ".github/ISSUE_TEMPLATE";
@@ -40,16 +40,18 @@ pub struct TemplateFile {
     pub content: &'static str,
 }
 
-// The three bundled assets are stored as literal files under `templates_assets/`
-// and embedded at compile time so `gitleaks`/reviewers see the exact text and
-// this module stays small.
+// The bundled assets are stored as literal files under `templates_assets/` and
+// embedded at compile time so `gitleaks`/reviewers see the exact text and this
+// module stays small.
 const CONFIG_YML: &str = include_str!("templates_assets/config.yml");
 const SESSION_TEMPLATE: &str = include_str!("templates_assets/fkst-substrate-session.md");
 const WORK_ITEM_TEMPLATE: &str = include_str!("templates_assets/fkst-work-item.md");
+const SCHEDULED_WORKFLOW_TEMPLATE: &str =
+    include_str!("templates_assets/fkst-scheduled-workflow.md");
 
 /// The bundled templates, each with its full repo-relative path. These are the
 /// files the install PR writes.
-pub fn bundled_templates() -> [TemplateFile; 3] {
+pub fn bundled_templates() -> [TemplateFile; 4] {
     [
         TemplateFile {
             path: ".github/ISSUE_TEMPLATE/config.yml",
@@ -62,6 +64,10 @@ pub fn bundled_templates() -> [TemplateFile; 3] {
         TemplateFile {
             path: ".github/ISSUE_TEMPLATE/fkst-work-item.md",
             content: WORK_ITEM_TEMPLATE,
+        },
+        TemplateFile {
+            path: ".github/ISSUE_TEMPLATE/fkst-scheduled-workflow.md",
+            content: SCHEDULED_WORKFLOW_TEMPLATE,
         },
     ]
 }
@@ -249,6 +255,50 @@ mod tests {
             SESSION_TEMPLATE.contains("title: \"[session] \""),
             "session template must carry the [session] title prefix"
         );
+    }
+
+    #[test]
+    fn the_scheduled_workflow_template_round_trips_through_its_own_parser() {
+        // A shipped template that its own parser rejects would send every author
+        // straight into the invalid latch, which is the worst possible first
+        // impression of the feature.
+        let spec = crate::goals::scheduled_workflow_parse::parse_scheduled_workflow(
+            SCHEDULED_WORKFLOW_TEMPLATE,
+        )
+        .expect("the pristine template must parse");
+        assert_eq!(spec.workflow_id, "my-workflow");
+        assert_eq!(spec.run_mode.render(), "cron: 0 3 * * *");
+        assert!(
+            spec.arguments.is_empty(),
+            "the guidance comments must not read as arguments"
+        );
+    }
+
+    #[test]
+    fn the_scheduled_workflow_template_front_matter_carries_the_reserved_label() {
+        // The label IS the selector: without it the schedule pass never sees the
+        // issue, and the author gets no feedback at all.
+        assert!(
+            SCHEDULED_WORKFLOW_TEMPLATE.contains("labels: [\"fkst-scheduled-workflow\"]"),
+            "the template must apply the reserved label"
+        );
+        assert!(SCHEDULED_WORKFLOW_TEMPLATE.contains("title: \"[scheduled] \""));
+    }
+
+    #[test]
+    fn the_scheduled_workflow_template_states_the_rules_an_author_must_know() {
+        for required in [
+            "Assign EXACTLY ONE person",
+            "THIS BODY STAYS EDITABLE",
+            "fkst-cron-paused",
+            "NEVER put a secret",
+            "environment profile",
+        ] {
+            assert!(
+                SCHEDULED_WORKFLOW_TEMPLATE.contains(required),
+                "the template must state {required:?}"
+            );
+        }
     }
 
     #[test]
