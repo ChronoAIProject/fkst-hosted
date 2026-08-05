@@ -3,8 +3,15 @@
   "version": "0.2.3",
   "private": true,
   "description": "Unified product version for fkst-hosted (backend + frontend). The Docker build reads this version.",
+  "//type": "Generated Evolution journeys live under .fkst/evolution/journeys/, whose nearest package.json is THIS one. They are ES modules, so the flag has to be declared here. The repository has no root-level CommonJS for it to affect; backend/ is Rust and frontend/ declares its own.",
+  "type": "module",
   "scripts": {
     "evolution": "node tools/evolution/src/cli.ts",
-    "evolution:test": "node --test tools/evolution/test/*.test.ts"
+    "evolution:test": "node --test tools/evolution/test/*.test.ts",
+    "evolution:journeys": "playwright test --config tools/evolution/playwright.journeys.config.ts"
+  },
+  "//devDependencies": "Pinned EXACTLY, and to the version frontend/ resolves to. A caret here drifts the runner ahead of frontend/, which pulls a second browser revision and a second @playwright/test instance for the fixtures the journeys import.",
+  "devDependencies": {
+    "@playwright/test": "1.60.0"
   }
 }
