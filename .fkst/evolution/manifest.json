@@ -3,12 +3,12 @@
   "source": {
     "repository": "ChronoAIProject/fkst-hosted",
     "branch": "@default",
-    "observedHead": "80312ac662ebf319b31285210f17c4afa365ec04",
-    "previousCoveredHead": "80312ac662ebf319b31285210f17c4afa365ec04",
+    "observedHead": "fc5d473a355c4b1828baef4c9513c047e19f6301",
+    "previousCoveredHead": "fc5d473a355c4b1828baef4c9513c047e19f6301",
     "historyRelation": "fast-forward",
     "productRelevantFingerprint": "sha256:4169943d1005bc9d97b44fefc2010a15e2828d3dac4d05661c253ca2aeef82fe",
-    "coverageFingerprint": "sha256:8847d37c8442f33fda2d8d7752c8998d89f6b4f04fd25fd3d418a884845c538c",
-    "inputFingerprint": "sha256:929bc0af625473b8b4a67732790b4ae28f755029ad6f7ba4e58beb1defc0201b",
+    "coverageFingerprint": "sha256:2fe1391d987ee5541111c7c6b8980f93425a0e0a464e1212086ca9967ad5094f",
+    "inputFingerprint": "sha256:3a023a7a9171def452f220ef669e1fa3bac713a5efbd1b8415c7ede79e18bc0e",
     "lastFullRebuildFor": null
   },
   "artifactRepository": {
@@ -16,12 +16,12 @@
     "branch": "@default"
   },
   "generator": {
-    "manifestRef": "ChronoAIProject/fkst-hosted@80312ac662ebf319b31285210f17c4afa365ec04:tools/evolution/artifact-plan.yaml",
+    "manifestRef": "ChronoAIProject/fkst-hosted@fc5d473a355c4b1828baef4c9513c047e19f6301:tools/evolution/artifact-plan.yaml",
     "packages": [
-      "ChronoAIProject/fkst-hosted@80312ac662ebf319b31285210f17c4afa365ec04:tools/evolution"
+      "ChronoAIProject/fkst-hosted@fc5d473a355c4b1828baef4c9513c047e19f6301:tools/evolution"
     ],
     "generatorEpoch": 1,
-    "pinnedFingerprint": "sha256:82ce77ff8a1f115ab807c4ebc6fb9b644e5947d7b0b2bcbd4144716f6f035317",
+    "pinnedFingerprint": "sha256:da730c682ab3fd990c9109da1c8ed0f2d08b23070027c24fde52a3e91f8003b9",
     "provenanceOnly": [
       "engineVersion",
       "model",
@@ -38,7 +38,7 @@
     },
     "envFingerprint": "sha256:0a763d2993ea8dadd223fe58f908059ca2f71d5b84a5deaa457c85d220cde5f6"
   },
-  "outputFingerprint": "sha256:fa54cbe829f29bfd68d272b85cb21ef4787b9e87e99bb1415d20db4fa4596c6d",
+  "outputFingerprint": "sha256:371648ed848b12e7fb82f229bf278f96bb2038a47f595fd2de4d4a581a3e448d",
   "verification": {
     "status": "passed",
     "verifiedAt": "2026-08-05T09:45:00Z",
@@ -49,7 +49,7 @@
         "evidence": ".fkst/evolution/journeys/queue-work-item.spec.ts",
         "checkRun": {
           "repository": "ChronoAIProject/fkst-hosted",
-          "headSha": "80312ac662ebf319b31285210f17c4afa365ec04",
+          "headSha": "fc5d473a355c4b1828baef4c9513c047e19f6301",
           "id": null,
           "name": "fkst-evolution/journey.jny_2f7c"
         },
@@ -69,9 +69,9 @@
       "journeys": [
         "jny_2f7c"
       ],
-      "sourceCommit": "80312ac662ebf319b31285210f17c4afa365ec04",
-      "inputFingerprint": "sha256:929bc0af625473b8b4a67732790b4ae28f755029ad6f7ba4e58beb1defc0201b",
-      "generatorPinnedFingerprint": "sha256:82ce77ff8a1f115ab807c4ebc6fb9b644e5947d7b0b2bcbd4144716f6f035317",
+      "sourceCommit": "fc5d473a355c4b1828baef4c9513c047e19f6301",
+      "inputFingerprint": "sha256:3a023a7a9171def452f220ef669e1fa3bac713a5efbd1b8415c7ede79e18bc0e",
+      "generatorPinnedFingerprint": "sha256:da730c682ab3fd990c9109da1c8ed0f2d08b23070027c24fde52a3e91f8003b9",
       "repositoryPath": ".fkst/evolution/docs/queue-work-item.md",
       "contentHash": "sha256:12d83ad653cf2f473c42e3ed29ab4b7321adaa1ba7782bfc5b2d0df2694b9c58",
       "status": "current",
@@ -90,9 +90,9 @@
       "journeys": [
         "jny_2f7c"
       ],
-      "sourceCommit": "80312ac662ebf319b31285210f17c4afa365ec04",
-      "inputFingerprint": "sha256:929bc0af625473b8b4a67732790b4ae28f755029ad6f7ba4e58beb1defc0201b",
-      "generatorPinnedFingerprint": "sha256:82ce77ff8a1f115ab807c4ebc6fb9b644e5947d7b0b2bcbd4144716f6f035317",
+      "sourceCommit": "fc5d473a355c4b1828baef4c9513c047e19f6301",
+      "inputFingerprint": "sha256:3a023a7a9171def452f220ef669e1fa3bac713a5efbd1b8415c7ede79e18bc0e",
+      "generatorPinnedFingerprint": "sha256:da730c682ab3fd990c9109da1c8ed0f2d08b23070027c24fde52a3e91f8003b9",
       "repositoryPath": ".fkst/evolution/skills/queue-work-item/SKILL.md",
       "contentHash": "sha256:75696fa01dd51e2d0786802a4a93cf4fe8a1d428b7051a05de95ad82106bc6e9",
       "status": "current",
@@ -111,9 +111,9 @@
       "journeys": [
         "jny_2f7c"
       ],
-      "sourceCommit": "80312ac662ebf319b31285210f17c4afa365ec04",
-      "inputFingerprint": "sha256:929bc0af625473b8b4a67732790b4ae28f755029ad6f7ba4e58beb1defc0201b",
-      "generatorPinnedFingerprint": "sha256:82ce77ff8a1f115ab807c4ebc6fb9b644e5947d7b0b2bcbd4144716f6f035317",
+      "sourceCommit": "fc5d473a355c4b1828baef4c9513c047e19f6301",
+      "inputFingerprint": "sha256:3a023a7a9171def452f220ef669e1fa3bac713a5efbd1b8415c7ede79e18bc0e",
+      "generatorPinnedFingerprint": "sha256:da730c682ab3fd990c9109da1c8ed0f2d08b23070027c24fde52a3e91f8003b9",
       "repositoryPath": ".fkst/evolution/journeys/queue-work-item.spec.ts",
       "contentHash": "sha256:9b64e530a083df8cb6e17b8f10314064bb8255ce27f135c036c6553e0759fd4f",
       "status": "current",
@@ -132,9 +132,9 @@
       "journeys": [
         "jny_2f7c"
       ],
-      "sourceCommit": "80312ac662ebf319b31285210f17c4afa365ec04",
-      "inputFingerprint": "sha256:929bc0af625473b8b4a67732790b4ae28f755029ad6f7ba4e58beb1defc0201b",
-      "generatorPinnedFingerprint": "sha256:82ce77ff8a1f115ab807c4ebc6fb9b644e5947d7b0b2bcbd4144716f6f035317",
+      "sourceCommit": "fc5d473a355c4b1828baef4c9513c047e19f6301",
+      "inputFingerprint": "sha256:3a023a7a9171def452f220ef669e1fa3bac713a5efbd1b8415c7ede79e18bc0e",
+      "generatorPinnedFingerprint": "sha256:da730c682ab3fd990c9109da1c8ed0f2d08b23070027c24fde52a3e91f8003b9",
       "repositoryPath": ".fkst/evolution/screenshots/sessions-level.png",
       "contentHash": "sha256:9cd6d0c8f99ab95ca452452c2ce0bcb0c5a7a35d2fb7b55c4f721d9c99d23bf7",
       "status": "current",
@@ -153,9 +153,9 @@
       "journeys": [
         "jny_2f7c"
       ],
-      "sourceCommit": "80312ac662ebf319b31285210f17c4afa365ec04",
-      "inputFingerprint": "sha256:929bc0af625473b8b4a67732790b4ae28f755029ad6f7ba4e58beb1defc0201b",
-      "generatorPinnedFingerprint": "sha256:82ce77ff8a1f115ab807c4ebc6fb9b644e5947d7b0b2bcbd4144716f6f035317",
+      "sourceCommit": "fc5d473a355c4b1828baef4c9513c047e19f6301",
+      "inputFingerprint": "sha256:3a023a7a9171def452f220ef669e1fa3bac713a5efbd1b8415c7ede79e18bc0e",
+      "generatorPinnedFingerprint": "sha256:da730c682ab3fd990c9109da1c8ed0f2d08b23070027c24fde52a3e91f8003b9",
       "repositoryPath": ".fkst/evolution/screenshots/work-composer.png",
       "contentHash": "sha256:5a99f7864a60330426d82a3d9e836b037f07511eb2e1a51a88b6bbd6fa1b218e",
       "status": "current",
@@ -174,9 +174,9 @@
       "journeys": [
         "jny_2f7c"
       ],
-      "sourceCommit": "80312ac662ebf319b31285210f17c4afa365ec04",
-      "inputFingerprint": "sha256:929bc0af625473b8b4a67732790b4ae28f755029ad6f7ba4e58beb1defc0201b",
-      "generatorPinnedFingerprint": "sha256:82ce77ff8a1f115ab807c4ebc6fb9b644e5947d7b0b2bcbd4144716f6f035317",
+      "sourceCommit": "fc5d473a355c4b1828baef4c9513c047e19f6301",
+      "inputFingerprint": "sha256:3a023a7a9171def452f220ef669e1fa3bac713a5efbd1b8415c7ede79e18bc0e",
+      "generatorPinnedFingerprint": "sha256:da730c682ab3fd990c9109da1c8ed0f2d08b23070027c24fde52a3e91f8003b9",
       "repositoryPath": ".fkst/evolution/screenshots/session-detail.png",
       "contentHash": "sha256:9d9146306b4502809d9907e1e8383ec8d12ae36648fd03d83c0684a86cd3cc39",
       "status": "current",
@@ -195,9 +195,9 @@
       "journeys": [
         "jny_2f7c"
       ],
-      "sourceCommit": "80312ac662ebf319b31285210f17c4afa365ec04",
-      "inputFingerprint": "sha256:929bc0af625473b8b4a67732790b4ae28f755029ad6f7ba4e58beb1defc0201b",
-      "generatorPinnedFingerprint": "sha256:82ce77ff8a1f115ab807c4ebc6fb9b644e5947d7b0b2bcbd4144716f6f035317",
+      "sourceCommit": "fc5d473a355c4b1828baef4c9513c047e19f6301",
+      "inputFingerprint": "sha256:3a023a7a9171def452f220ef669e1fa3bac713a5efbd1b8415c7ede79e18bc0e",
+      "generatorPinnedFingerprint": "sha256:da730c682ab3fd990c9109da1c8ed0f2d08b23070027c24fde52a3e91f8003b9",
       "repositoryPath": ".fkst/evolution/slides/product-intro.md",
       "contentHash": "sha256:5fc39550b1787bb075300eba43e95808dbb5c65bd2e492ffcb8c35ddd4aea8ae",
       "status": "current",
@@ -216,12 +216,12 @@
       "journeys": [
         "jny_2f7c"
       ],
-      "sourceCommit": "80312ac662ebf319b31285210f17c4afa365ec04",
-      "inputFingerprint": "sha256:929bc0af625473b8b4a67732790b4ae28f755029ad6f7ba4e58beb1defc0201b",
-      "generatorPinnedFingerprint": "sha256:82ce77ff8a1f115ab807c4ebc6fb9b644e5947d7b0b2bcbd4144716f6f035317",
+      "sourceCommit": "fc5d473a355c4b1828baef4c9513c047e19f6301",
+      "inputFingerprint": "sha256:3a023a7a9171def452f220ef669e1fa3bac713a5efbd1b8415c7ede79e18bc0e",
+      "generatorPinnedFingerprint": "sha256:da730c682ab3fd990c9109da1c8ed0f2d08b23070027c24fde52a3e91f8003b9",
       "release": {
         "repository": "ChronoAIProject/fkst-hosted",
-        "tag": "fkst-evolution/929bc0af625473b8",
+        "tag": "fkst-evolution/3a023a7a9171def4",
         "asset": "product-intro.sha256-23614e24df4af31e.pdf"
       },
       "contentHash": "sha256:23614e24df4af31e1675d7afbd33ae0d5b2f8e8968fbe9b379d2aabf3e4ccc51",
@@ -241,12 +241,12 @@
       "journeys": [
         "jny_2f7c"
       ],
-      "sourceCommit": "80312ac662ebf319b31285210f17c4afa365ec04",
-      "inputFingerprint": "sha256:929bc0af625473b8b4a67732790b4ae28f755029ad6f7ba4e58beb1defc0201b",
-      "generatorPinnedFingerprint": "sha256:82ce77ff8a1f115ab807c4ebc6fb9b644e5947d7b0b2bcbd4144716f6f035317",
+      "sourceCommit": "fc5d473a355c4b1828baef4c9513c047e19f6301",
+      "inputFingerprint": "sha256:3a023a7a9171def452f220ef669e1fa3bac713a5efbd1b8415c7ede79e18bc0e",
+      "generatorPinnedFingerprint": "sha256:da730c682ab3fd990c9109da1c8ed0f2d08b23070027c24fde52a3e91f8003b9",
       "release": {
         "repository": "ChronoAIProject/fkst-hosted",
-        "tag": "fkst-evolution/929bc0af625473b8",
+        "tag": "fkst-evolution/3a023a7a9171def4",
         "asset": "queue-work-item.sha256-258e093f3cee68f2.mp4"
       },
       "contentHash": "sha256:258e093f3cee68f2c0f19f30c1a7108c41ed13d14a3f23a0b0b41ba174289c63",
