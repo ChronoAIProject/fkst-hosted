@@ -125,6 +125,7 @@ fn issue(body: &str, labels: &[&str]) -> IssueSummary {
         assignees: Vec::new(),
         user_login: "alice".to_string(),
         user_id: 4242,
+        created_at: k8s_openapi::chrono::DateTime::UNIX_EPOCH,
     }
 }
 

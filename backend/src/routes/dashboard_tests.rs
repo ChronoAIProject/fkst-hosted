@@ -16,6 +16,7 @@ fn issue(number: i64, body: &str, labels: &[&str], state: &str) -> IssueSummary 
         assignees: Vec::new(),
         user_login: "author".to_string(),
         user_id: 9,
+        created_at: k8s_openapi::chrono::DateTime::UNIX_EPOCH,
     }
 }
 

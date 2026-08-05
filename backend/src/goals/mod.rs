@@ -16,6 +16,11 @@ pub mod labels;
 // (reader).
 pub mod package_env;
 pub mod package_ref;
+// The SECOND issue grammar: an `fkst-scheduled-workflow` work issue declaring
+// which workflow a registered session runs, with which arguments, and how often.
+// Unlike a trigger body it is deliberately editable — a cadence you cannot change
+// is a broken feature.
+pub mod scheduled_workflow_parse;
 pub mod section_parse;
 pub mod trigger_parse;
 

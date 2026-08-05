@@ -66,6 +66,43 @@ fn same_creator_overlap_demotes_the_higher_issue() {
 }
 
 #[test]
+fn a_reserved_label_shared_by_one_creators_sessions_never_collides() {
+    // Every session that can host a scheduled workflow carries the reserved label,
+    // so counting it here would demote the SECOND session any creator opens —
+    // taking the fleet down the moment schedules exist.
+    let reserved = crate::reconcile::reserved_labels::SCHEDULED_WORKFLOW_LABEL;
+    let regs = vec![
+        reg_for_creator("s1", 1, "alice"),
+        reg_for_creator("s2", 2, "alice"),
+    ];
+    let work = work_labels(&[("s1", &[reserved]), ("s2", &[reserved])]);
+    assert!(
+        detect_work_label_collisions(&regs, &work).is_empty(),
+        "a deployment-wide label is not a queue anyone competes over"
+    );
+}
+
+#[test]
+fn a_reserved_label_does_not_mask_a_real_collision_alongside_it() {
+    // The exemption must be surgical: two sessions that ALSO share a genuine work
+    // label still collide, and the reason cites that label rather than the reserved
+    // one it was carrying next to it.
+    let reserved = crate::reconcile::reserved_labels::SCHEDULED_WORKFLOW_LABEL;
+    let regs = vec![
+        reg_for_creator("s1", 1, "alice"),
+        reg_for_creator("s2", 2, "alice"),
+    ];
+    let work = work_labels(&[("s1", &[reserved, "wl"]), ("s2", &[reserved, "wl"])]);
+    assert_eq!(
+        detect_work_label_collisions(&regs, &work),
+        vec![(
+            2,
+            "work label 'wl' collides with your active session #1".to_string()
+        )],
+    );
+}
+
+#[test]
 fn different_creators_sharing_a_label_never_collide() {
     let regs = vec![
         reg_for_creator("s1", 1, "alice"),

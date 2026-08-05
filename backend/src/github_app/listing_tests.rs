@@ -34,6 +34,7 @@ fn issue_metadata_projection_copies_only_authorization_fields() {
         assignees: vec!["alice".to_string()],
         user_login: "carol".to_string(),
         user_id: 42,
+        created_at: k8s_openapi::chrono::DateTime::UNIX_EPOCH,
     };
 
     assert_eq!(
