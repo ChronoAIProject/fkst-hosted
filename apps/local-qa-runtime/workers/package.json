@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.build.json && node --test test/*.test.mjs"
   },
   "devDependencies": {
     "typescript": "5.9.3"

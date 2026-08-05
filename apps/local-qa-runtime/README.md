@@ -18,19 +18,29 @@ Zero-argument and unsupported startup remains fail-closed: it exits with status
 by one line-feed byte, and performs no runtime side effects. Environment
 variables and configuration-looking files do not activate the Host.
 
-The launcher, supervisor, guest agent, Secret Broker, and TypeScript workers
-remain intentionally inert. They establish repository and build boundaries
-only and remain reserved for a separately reviewed future hardened Local QA
-Runtime Profile.
+The pure TypeScript Browser smoke worker boundary is activated under `workers/`.
+It strictly validates one fixed loopback request, applies the fixed URL and text
+assertions through injected ports, stages only its fixed runner log, and returns
+deterministically serialized Host-attested evidence references. Raw Browser
+output, screenshot bytes, artifact digesting, filesystem persistence, and Host
+cleanup do not cross into worker policy.
+
+The Rust Local QA Host API and journal boundary described above is already
+activated in `host/`. The launcher, supervisor, guest agent, and Secret Broker
+remain intentionally inert hardened-profile shells.
 
 The Host defines no Run lookup, Event lookup, cancellation, execution, runner or
 worker coordination, browser control, Compose or VM execution, Secrets,
 Evidence, Artifacts, NyxID, Hosted transport, cleanup, or terminal recovery
 behavior. Its small journal does not claim hardened Runtime authority or
 compatibility. Those capabilities require separate issues and review.
+
+For the worker slice, the Host Browser Controller, real Chrome discovery and
+lifecycle, Host-worker process integration, profiles, downloads, filesystem
+Evidence persistence, upload, and reporting remain deferred.
 See the
 [Local QA Host MVP design](../../docs/local-qa-runtime/mvp/LOCAL-QA-HOST-DESIGN.zh-CN.md)
 for the target trusted-input design; its presence does not claim implementation.
 
-Verify with the locked Cargo commands, the workers `build` and `typecheck`
-scripts, and `bash tests/scaffold-structure.sh`.
+Verify with the locked Cargo commands, the workers `build`, `typecheck`, and
+`test` scripts, and `bash tests/scaffold-structure.sh`.
