@@ -13,8 +13,12 @@ expected=$(printf '%s\n' \
   apps/local-qa-runtime/launcher/src/main.rs \
   apps/local-qa-runtime/secret-broker/src/main.rs \
   apps/local-qa-runtime/supervisor/src/main.rs \
-  apps/local-qa-runtime/workers/src/index.ts)
-actual=$(find apps/local-qa-runtime -type f \( -name '*.rs' -o -name '*.ts' \) \
+  apps/local-qa-runtime/workers/src/index.ts \
+  apps/local-qa-runtime/workers/src/json.ts \
+  apps/local-qa-runtime/workers/src/policy.ts \
+  apps/local-qa-runtime/workers/src/worker-error.ts \
+  apps/local-qa-runtime/workers/test/browser-smoke.test.mjs)
+actual=$(find apps/local-qa-runtime -type f \( -name '*.rs' -o -name '*.ts' -o -name '*.mjs' \) \
   ! -path '*/node_modules/*' ! -path '*/target/*' ! -path '*/dist/*' | sort)
 [[ "$actual" == "$expected" ]] || { echo 'unexpected Local QA source file' >&2; exit 1; }
 
@@ -70,20 +74,32 @@ done
 
 node - <<'NODE'
 const pkg = require('./apps/local-qa-runtime/workers/package.json');
-const scripts = { build: 'tsc -p tsconfig.build.json', typecheck: 'tsc -p tsconfig.json' };
+const scripts = {
+  build: 'tsc -p tsconfig.build.json',
+  typecheck: 'tsc -p tsconfig.json',
+  test: 'tsc -p tsconfig.build.json && node --test test/*.test.mjs',
+};
 if (pkg.dependencies || JSON.stringify(pkg.scripts) !== JSON.stringify(scripts) ||
     JSON.stringify(pkg.devDependencies) !== JSON.stringify({ typescript: '5.9.3' })) {
-  throw new Error('workers scaffold gained runtime behavior or dependencies');
+  throw new Error('workers package gained unreviewed dependencies or scripts');
 }
 NODE
 
-worker_code=$(grep -Ev '^//|^$' apps/local-qa-runtime/workers/src/index.ts)
-[[ "$worker_code" == 'export {};' ]]
+worker_sources=(apps/local-qa-runtime/workers/src/*.ts)
+! grep -Eq "(playwright|node:(child_process|crypto|fs|http|https|net|os|path)|from[[:space:]]+['\"](child_process|crypto|fs|http|https|net|os|path)['\"]|process\.env|Deno\.|Bun\.)" "${worker_sources[@]}" || {
+  echo 'workers gained a forbidden effect or hashing capability' >&2
+  exit 1
+}
+grep -Fq 'runBrowserSmoke' apps/local-qa-runtime/workers/src/policy.ts
+grep -Fq 'stageGeneratedLog' apps/local-qa-runtime/workers/src/policy.ts
+grep -Fq 'session.close()' apps/local-qa-runtime/workers/src/policy.ts
+grep -Fq 'request.duplicate_key' apps/local-qa-runtime/workers/src/json.ts
 
 unexpected=$(find apps/local-qa-runtime -type f \
   \( -perm -111 -o -name '*.sh' -o -name '*.py' -o -name '*.js' -o -name '*.mjs' \) \
   ! -path 'apps/local-qa-runtime/tests/scaffold-structure.sh' \
+  ! -path 'apps/local-qa-runtime/workers/test/browser-smoke.test.mjs' \
   ! -path '*/node_modules/*' ! -path '*/target/*' ! -path '*/dist/*')
 [[ -z "$unexpected" ]] || { echo 'unexpected executable implementation file' >&2; exit 1; }
 
-echo 'Local QA Host boundary and inert Runtime shells are complete.'
+echo 'Local QA Host, pure worker policy, and inert Runtime shells are complete.'
