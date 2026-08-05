@@ -44,7 +44,13 @@ local function read_env_command(name)
   return 'printf %s "$' .. name .. '"'
 end
 
-local production_read_env = env.read_env(read_env_command, { propagate_exec_errors = true })
+-- `propagate_exec_errors` stays FALSE on purpose. An unreadable environment value
+-- degrades this tick to "no scheduled run to service", which is the correct
+-- answer for the overwhelmingly common case: an ordinary session that composes
+-- this package and simply has no schedule. Propagating instead would turn a
+-- session with no scheduled work — or one transient read hiccup — into an
+-- errored tick, and this package must never cost a session its engine.
+local production_read_env = env.read_env(read_env_command, { propagate_exec_errors = false })
 local github_author_policy_env = { bot_login_env = "FKST_GITHUB_BOT_LOGIN" }
 
 local function production_now()
