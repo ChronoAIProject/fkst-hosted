@@ -1,0 +1,119 @@
+# FKST Evolution configuration for fkst-hosted.
+#
+# OWNER-CONTROLLED (section 12.3). Evolution reads this file and never writes
+# it: the section 25.8 confinement check rejects it in a sync PR unconditionally,
+# and section 13.3.1 makes clear that this file is an INPUT, not the safety
+# boundary — the boundary is a control-plane prefix comparison that nothing here
+# can widen.
+#
+# Spec: docs/evolution_temp_spec.md on branch `evolution-temp-spec`.
+
+schemaVersion: 1
+enabled: true
+
+source:
+  # Section 21.1 dynamic default-branch resolution. NOTE: the control plane
+  # cannot express this yet — `validate_branch_name`
+  # (backend/src/reconcile/branches.rs:43) permits only `[A-Za-z0-9._/-]` and so
+  # rejects `@`. Recorded here as the spec-correct value; see issue #5866.
+  branch: "@default"
+
+  # Paths that can plausibly change the PRODUCT SURFACE. This set drives cycle
+  # admission (section 17.5) and is REQUIRED — section 13.3 rejects an absent or
+  # empty set, and open question 40.16 defers the question of a defensible
+  # default to Phase 1 measurement rather than guessing one here.
+  #
+  # The asymmetry that shaped these entries: a too-broad set is merely expensive
+  # and visibly so, while a too-narrow one fails silently — the artifact that was
+  # never regenerated produces no signal and nobody files a bug for a thing that
+  # did not happen. So this errs wide within the two source trees and narrow
+  # outside them.
+  productRelevant:
+    include:
+      # The control plane: HTTP surface, reconciler, and session lifecycle.
+      - "backend/src/**"
+      # The SPA: every user-facing screen and its API client.
+      - "frontend/src/**"
+      - "frontend/index.html"
+      # Operator-facing skill manuals ship as product surface.
+      - "skills/**"
+    exclude:
+      # Tests describe behaviour but are not themselves product surface, and a
+      # test-only commit must not launch a media-rendering cycle. They remain
+      # COVERED below, and they remain evidence (section 14.2) — exclusion here
+      # is about cycle admission, not about ignoring them.
+      - "**/*_tests.rs"
+      - "**/*.test.ts"
+      - "**/*.test.tsx"
+      - "**/test_support.rs"
+      - "frontend/src/test/**"
+
+  # Everything else reachable on the trusted branch is COVERED for provenance
+  # but does not by itself launch a cycle (section 17.5). `.fkst/evolution/**`
+  # and `.fkst/packages/**` are removed unconditionally by section 17.3; the
+  # `**` below is understood to be taken after that removal.
+  coverage:
+    include:
+      - "**"
+    exclude:
+      - ".git/**"
+
+artifactRepository: "."
+
+intent:
+  product: ".fkst/evolution/intent/product.md"
+  overrides: ".fkst/evolution/intent/overrides.yaml"
+
+# Each entry selects a schema-FIXED subtree beneath .fkst/evolution/. There is no
+# path field: configuration can enable or disable a class, never relocate it
+# (section 13.3).
+managedOutputs:
+  documentation: { enabled: true }        # -> .fkst/evolution/docs/
+  skills:        { enabled: true }        # -> .fkst/evolution/skills/
+  journeys:      { enabled: true }        # -> .fkst/evolution/journeys/
+  screenshots:   { enabled: true }        # -> .fkst/evolution/screenshots/
+  slides:        { enabled: true }        # -> .fkst/evolution/slides/
+  video:         { enabled: true, storage: "github-release" }
+
+# Producer roles this deployment does not run (section 17.7.2). Empty: the first
+# proof exercises every role, so nothing may be excused from the required set.
+absentProducerRoles: []
+
+locales:
+  - "en"
+
+triggers:
+  pullRequestPreview: true
+  defaultBranchPush: true
+  releaseFullRebuild: true
+  debounceSeconds: 60
+
+publication:
+  # Bootstrap default (section 27.1). `automerge-managed` additionally requires
+  # accepting section 17.7.1's trust consequence — that corroboration is a
+  # controller TRANSCRIPTION of a sandbox-produced result, not independent
+  # observation — and that acceptance has not been made.
+  mode: "propose"
+  requireCurrentSource: true
+  requireChecks: true
+  allowDirectPush: false
+  onOwnerClose: "suppress-until-input-changes"
+  suppressionLabel: "fkst-evolution-suppressed"
+  maxRegenerationRounds: 5
+  cycleDeadlineSeconds: 3600
+
+drift:
+  # `block` during bootstrap (section 17.8). `repair` is defensible only after
+  # owners have explicitly accepted managed ownership of these subtrees.
+  policy: "block"
+
+generatorEpoch: 1
+
+retention:
+  renderedSnapshots: 10
+  preserveProductReleases: true
+
+security:
+  runPullRequestCode: false
+  allowProductionData: false
+  allowProductionCredentials: false
