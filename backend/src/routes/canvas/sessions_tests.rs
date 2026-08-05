@@ -44,6 +44,26 @@ fn issue_json(number: i64, body: &str, labels: &[&str], state: &str) -> serde_js
     })
 }
 
+/// A work issue routed to `assignees` under the sole-assignee ownership rule.
+///
+/// The projection attributes an issue to a session only when its ONE assignee is
+/// that session's creator, so a work fixture must state its assignee explicitly —
+/// a plain [`issue_json`] carries none and is therefore deliberately unrouted.
+fn work_issue_json(
+    number: i64,
+    body: &str,
+    labels: &[&str],
+    state: &str,
+    assignees: &[&str],
+) -> serde_json::Value {
+    let mut issue = issue_json(number, body, labels, state);
+    issue["assignees"] = serde_json::json!(assignees
+        .iter()
+        .map(|login| serde_json::json!({ "login": login }))
+        .collect::<Vec<_>>());
+    issue
+}
+
 fn pull_json(
     number: i64,
     author: &str,
@@ -139,8 +159,8 @@ async fn repo_sessions_assembles_the_full_detail() {
         .and(query_param("labels", "site-build"))
         .and(query_param("state", "all"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-            issue_json(8, "work", &["site-build"], "open"),
-            issue_json(9, "done work", &["site-build"], "closed"),
+            work_issue_json(8, "work", &["site-build"], "open", &["shining"]),
+            work_issue_json(9, "done work", &["site-build"], "closed", &["shining"]),
         ])))
         .mount(&server)
         .await;
@@ -378,14 +398,15 @@ acme/manifests@main:bundles/default.json\n";
         .and(path("/repos/acme/site/issues"))
         .and(query_param("labels", "fkst-dev"))
         .and(query_param("state", "all"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!([issue_json(
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            work_issue_json(
                 3,
                 "implemented work",
                 &["fkst-dev", "fkst-security"],
-                "closed"
-            )])),
-        )
+                "closed",
+                &["shining"]
+            )
+        ])))
         .mount(&server)
         .await;
     Mock::given(method("GET"))
@@ -393,13 +414,14 @@ acme/manifests@main:bundles/default.json\n";
         .and(query_param("labels", "fkst-security"))
         .and(query_param("state", "all"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-            issue_json(
+            work_issue_json(
                 3,
                 "implemented work",
                 &["fkst-dev", "fkst-security"],
-                "closed"
+                "closed",
+                &["shining"]
             ),
-            issue_json(4, "security work", &["fkst-security"], "open")
+            work_issue_json(4, "security work", &["fkst-security"], "open", &["shining"])
         ])))
         .mount(&server)
         .await;
