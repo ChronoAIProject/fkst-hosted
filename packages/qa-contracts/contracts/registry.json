@@ -30,6 +30,9 @@
     "StrictUnionSpecimen": { "schema": "qa.contract-foundation/v1", "pointer": "#/$defs/StrictUnionSpecimen", "fixture_only": true },
     "LocalState": { "schema": "qa.local-lifecycle/v1", "pointer": "#/$defs/LocalState" },
     "ExecutionOutcome": { "schema": "qa.local-lifecycle/v1", "pointer": "#/$defs/ExecutionOutcome" },
-    "LocalSanitizedObservation": { "schema": "qa.local-evidence/v1", "pointer": "#/$defs/LocalSanitizedObservation" }
+    "LocalSanitizedObservation": { "schema": "qa.local-evidence/v1", "pointer": "#/$defs/LocalSanitizedObservation" },
+    "LocalEvidenceObject": { "schema": "qa.local-evidence/v1", "pointer": "#/$defs/LocalEvidenceObject" },
+    "LocalSanitizedObservationRef": { "schema": "qa.local-evidence/v1", "pointer": "#/$defs/LocalSanitizedObservationRef" },
+    "LocalEvidenceObjectRef": { "schema": "qa.local-evidence/v1", "pointer": "#/$defs/LocalEvidenceObjectRef" }
   }
 }
