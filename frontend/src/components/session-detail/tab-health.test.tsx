@@ -101,7 +101,10 @@ describe('TabHealth', () => {
   it('states both the expected interval and the actual age in the stale callout', async () => {
     renderTab(loaded(listing({}, 'stale')));
 
-    const notice = await screen.findByRole('status');
+    // Target the callout by test id, not by role: the tab now also renders an
+    // announced LoadingState while a report fetch is in flight, so `role=status`
+    // no longer identifies this element uniquely.
+    const notice = await screen.findByTestId('health-stale-callout');
     expect(notice).toHaveTextContent('This session has stopped reporting');
     expect(notice).toHaveTextContent('every 10 min');
     expect(notice).toHaveTextContent('35 min ago');
@@ -119,7 +122,7 @@ describe('TabHealth', () => {
     );
 
     expect(await screen.findByText('nothing moved in 10m', { selector: 'p' })).toBeInTheDocument();
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('health-stale-callout')).not.toBeInTheDocument();
     expect(screen.queryByText(/stopped reporting/)).not.toBeInTheDocument();
   });
 
@@ -148,7 +151,7 @@ describe('TabHealth', () => {
     expect(
       await screen.findByText(/No health report yet\. The first one is due/)
     ).toBeInTheDocument();
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('health-stale-callout')).not.toBeInTheDocument();
   });
 
   it('renders a calm empty state for a not-running session with no history', async () => {

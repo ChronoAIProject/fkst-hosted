@@ -159,6 +159,8 @@ export interface SessionDetailContent {
   /** Match count for the in-file find; `{n}` placeholder. */
   logsSearchCount: string;
   logsRefresh: string;
+  /** Logs Refresh button label while the re-fetch is in flight. */
+  logsRefreshing: string;
   /** Retry affordance on a failed manifest load. */
   logsRetry: string;
   /** Tail notice; `{shown}` / `{total}` placeholders (already formatted). */
@@ -214,6 +216,8 @@ export interface SessionDetailContent {
   previewBinary: string;
   openOnGithub: string;
   download: string;
+  /** Outcome-file download button label while the blob is being fetched. */
+  downloadPending: string;
   /** `{name}` placeholder. */
   downloadAria: string;
   logsNone: string;

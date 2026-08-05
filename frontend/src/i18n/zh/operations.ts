@@ -123,6 +123,8 @@ export const operations: OperationsSlice = {
 
   loadOlder: '加载更早记录',
   loadingOlder: '正在加载更早记录',
+  loadingActivity: '正在加载活动记录…',
+  loadingSandboxes: '正在加载运行中的沙箱…',
   noMore: '该时间窗口内没有更早的记录。',
   pollPaused: '正在查看更早的记录，实时刷新已暂停。',
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FadeSwap } from '@/components/ui/motion';
+import { Spinner } from '@/components/ui/loading';
 import { useContent } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
 import { useBroaderOAuth } from '@/lib/auth/broader-oauth';
@@ -384,12 +385,7 @@ export function Dashboard() {
           data-tour="refresh"
           className="font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-dim hover:text-fg hover:shadow-glow-amber transition-[color,box-shadow] cursor-pointer disabled:cursor-default disabled:hover:text-dim disabled:hover:shadow-none inline-flex items-center gap-1.5"
         >
-          {overviewRefreshing && (
-            <span
-              aria-hidden="true"
-              className="anim-spin inline-block w-3 h-3 border border-line-2 border-t-amber rounded-full flex-none"
-            />
-          )}
+          {overviewRefreshing && <Spinner />}
           {overviewRefreshing ? d.repos.refreshing : d.repos.refresh}
         </button>
       </div>

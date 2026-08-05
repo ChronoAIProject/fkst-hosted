@@ -8,6 +8,7 @@ export const chat = {
   panelAria: 'FKST Orchestrator',
   linkActive: '连接正常',
   streaming: '生成中',
+  thinking: '正在生成回答…',
   clear: '清空',
   clearAria: '清空对话',
   export: '导出',

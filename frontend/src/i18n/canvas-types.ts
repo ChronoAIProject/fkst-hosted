@@ -78,6 +78,9 @@ export interface CanvasContent {
   sessionsRetry: string;
   /** Spinner label while a manual sessions refresh is in flight. */
   sessionsRefreshing: string;
+  /** Label while a repository's session projection loads for the FIRST time —
+   *  a live GitHub fan-out, so it is not the same as a background refresh. */
+  sessionsLoading: string;
   sessionsLoadFailed: string;
   /** Non-blocking notice when a refresh failed but last-good data shows. */
   sessionsStaleNotice: string;
@@ -159,6 +162,8 @@ export interface CanvasContent {
   createSavedEnvironmentLabel: string;
   createEnvironmentNote: string;
   createEnvironmentLoadFailed: string;
+  /** Label while the caller's saved environment profiles are being fetched. */
+  createEnvironmentLoading: string;
   createDisposablePrivateNote: string;
   createDisposableInstallLabel: string;
   createDisposableInstallPlaceholder: string;

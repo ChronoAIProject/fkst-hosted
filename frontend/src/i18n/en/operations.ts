@@ -120,6 +120,8 @@ export const operations: OperationsSlice = {
 
   loadOlder: 'Load older',
   loadingOlder: 'Loading older',
+  loadingActivity: 'Loading activity…',
+  loadingSandboxes: 'Loading live sandboxes…',
   noMore: 'No older records in this window.',
   pollPaused: 'Live refresh is paused while older records are open.',
 

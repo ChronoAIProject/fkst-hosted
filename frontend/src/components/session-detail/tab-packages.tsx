@@ -3,6 +3,7 @@ import { CopyButton } from '@/components/ui/copy-button';
 import { StaggerItem } from '@/components/ui/motion';
 import type { SessionDetail } from '@/lib/api/types';
 import { packageRole } from '@/lib/api/derive';
+import { LoadingState } from '@/components/ui/loading';
 import { Note, SectionLabel } from './parts';
 import { ConfigPanel } from './config-panel';
 import { ObserveView } from './observe-view';
@@ -75,6 +76,17 @@ export function TabPackages({
           </ul>
         )}
       </section>
+
+      {/* The observe snapshot is SHARED with the Engine tab, so it can already be
+          in flight when this tab is opened. Rendering nothing at all left the
+          section silently missing — indistinguishable from a session that has no
+          queue activity. Same copy as the Engine tab: one wait, one explanation. */}
+      {observe.status === 'loading' && (
+        <section className="flex flex-col gap-2">
+          <SectionLabel>{t.queueActivity}</SectionLabel>
+          <LoadingState label={t.liveEngineLoading} detail={t.liveEngineSlow} />
+        </section>
+      )}
 
       {observe.status === 'loaded' && (
         <section className="flex flex-col gap-2">

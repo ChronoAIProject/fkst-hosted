@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type React from 'react';
 import { Link } from 'react-router-dom';
+import { LoadingState, Spinner } from '@/components/ui/loading';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth/github-auth';
 import { useContent } from '@/i18n';
@@ -151,6 +152,7 @@ function EnvironmentField({
         onChange={(e) => onChange(e.target.value)}
         // Disabled only while the very first fetch is in flight (profiles null).
         disabled={load.profiles === null}
+        aria-busy={load.profiles === null}
         className={cn(FIELD_INPUT, 'font-mono cursor-pointer')}
       >
         <option value="">{cc.createEnvironmentNone}</option>
@@ -160,7 +162,13 @@ function EnvironmentField({
           </option>
         ))}
       </select>
-      <p className="font-mono text-[11px] text-ghost">{cc.createEnvironmentNote}</p>
+      {/* A silently-disabled select is indistinguishable from one the deployment
+          simply does not offer. Say the list is on its way instead. */}
+      {load.profiles === null ? (
+        <LoadingState label={cc.createEnvironmentLoading} />
+      ) : (
+        <p className="font-mono text-[11px] text-ghost">{cc.createEnvironmentNote}</p>
+      )}
     </div>
   );
 }
@@ -425,6 +433,7 @@ export function CreateTriggerModal({
         type="submit"
         form={FORM_ID}
         disabled={submitBlocked}
+        aria-busy={pending}
         className={cn(
           'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-[filter,box-shadow]',
           submitBlocked
@@ -432,6 +441,7 @@ export function CreateTriggerModal({
             : 'bg-grad-accent text-amber-ink shadow-[var(--shadow-1),var(--glow-amber)] anim-sheen hover:brightness-110 cursor-pointer'
         )}
       >
+        {pending && <Spinner className="mr-1.5" />}
         {pending ? cc.createPending : cc.createSubmit}
       </button>
     </div>

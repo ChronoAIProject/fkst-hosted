@@ -6,7 +6,8 @@ import { getSessionOutcomes } from '@/lib/api/outcomes';
 import type { OutcomeFile, PrOutcome, SessionOutcomes } from '@/lib/api/types';
 import { Chip } from '@/components/ui/chip';
 import { Reveal } from '@/components/ui/motion';
-import { Note, SectionLabel, Spinner } from './parts';
+import { LoadingState } from '@/components/ui/loading';
+import { Note, SectionLabel } from './parts';
 import { OutcomeFilePreview } from './outcome-file-preview';
 
 type LoadState = 'loading' | 'error' | 'loaded';
@@ -194,7 +195,8 @@ export function TabOutcomes({
   /** The trigger issue number that identifies the session in-repo. */
   issue: number;
 }) {
-  const d = useContent().dashboard;
+  const c = useContent();
+  const d = c.dashboard;
   const t = d.detail;
   const { apiFetch } = useAuth();
 
@@ -230,12 +232,7 @@ export function TabOutcomes({
   }, []);
 
   if (state === 'loading') {
-    return (
-      <span className="inline-flex items-center gap-2 font-mono text-[11.5px] text-dim">
-        <Spinner />
-        {t.outcomesLoading}
-      </span>
-    );
+    return <LoadingState label={t.outcomesLoading} detail={c.loading.github} />;
   }
   if (state === 'error') {
     return (

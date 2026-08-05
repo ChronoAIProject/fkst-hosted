@@ -383,6 +383,7 @@ export function EnvironmentEditor({
         <button
           type="submit"
           disabled={!canSave}
+          aria-busy={pending}
           className={cn(
             'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-[filter,box-shadow,background-color]',
             !canSave

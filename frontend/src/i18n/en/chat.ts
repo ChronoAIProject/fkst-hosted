@@ -10,6 +10,7 @@ export const chat = {
   panelAria: 'FKST Orchestrator',
   linkActive: 'LINK ACTIVE',
   streaming: 'STREAMING',
+  thinking: 'Working on your answer…',
   clear: 'Clear',
   clearAria: 'Clear the conversation',
   export: 'Export',

@@ -67,6 +67,22 @@ export interface SiteContent {
   intro: IntroContent;
   gs: GetStartedContent;
   chat: ChatContent;
+  /** Shared loading copy. The surface-specific LABEL ("Loading activity…")
+   *  stays in its own domain slice; these are the explanatory second lines an
+   *  API-bound wait pairs with, so the same sentence never drifts between call
+   *  sites. Distinct from `dashboard.loading` / `operations.loading`, which are
+   *  aria-labels for the lazy-route skeletons. */
+  loading: {
+    /** Generic in-flight label where a surface has no more specific one. */
+    working: string;
+    /** Explains a wait that is a live GitHub fan-out — an overview scan, a
+     *  repository's sessions, a session's outcomes, a file blob. Seconds are
+     *  normal here, which is exactly what the reader cannot otherwise tell. */
+    github: string;
+    /** Explains a wait served by the control plane rather than GitHub. */
+    service: string;
+  };
+
   /** Guided product tour: the `?` help launcher, the coachmark controls shared
    *  by every step, and one `{title, body}` card per step. The `steps` keys map
    *  1:1 to the step ids in `components/tour/tour-steps.ts`. */

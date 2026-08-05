@@ -10,6 +10,9 @@ export interface ChatContent {
   linkActive: string;
   /** Streaming status chip text. */
   streaming: string;
+  /** Shown while a turn is pending and NO token has arrived yet — the chat's
+   *  own API-bound wait, which a blinking caret alone does not explain. */
+  thinking: string;
   clear: string;
   clearAria: string;
   /** Download the whole session, including every step's parameters and response. */
