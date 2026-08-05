@@ -27,15 +27,21 @@ export function SplitPanes({
   start,
   end,
   startTrack = '11.5rem',
+  className,
 }: {
   start: ReactNode;
   end: ReactNode;
   startTrack?: string;
+  /** Extra sizing for the grid itself (e.g. a minimum height floor). */
+  className?: string;
 }) {
   return (
     <div
       style={{ '--split-start': startTrack } as CSSProperties}
-      className="grid gap-4 md:grid-cols-[var(--split-start)_minmax(0,1fr)] flex-1 min-h-0"
+      className={cn(
+        'grid gap-4 md:grid-cols-[var(--split-start)_minmax(0,1fr)] flex-1 min-h-0',
+        className
+      )}
     >
       {start}
       {end}

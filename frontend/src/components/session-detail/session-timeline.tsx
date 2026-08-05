@@ -3,6 +3,7 @@ import { formatIsoSgt } from '@/lib/format';
 import { decodeSessionStatus, type SessionPhase } from '@/lib/api/derive';
 import type { SessionDetail } from '@/lib/api/types';
 import { staggerStyle } from '@/components/ui/motion';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { StatusCard } from './status-charts';
 
 // Session timeline — a chronological rail built entirely from the trigger / work
@@ -109,7 +110,11 @@ export function buildTimeline(session: SessionDetail): TimelineNode[] {
   // 3. Pull requests — no wire timestamps, so they park just before "now",
   //    ordered by number, carrying their merged/open/closed state.
   session.prs.forEach((pr, i) => {
-    const kind: TimelineKind = pr.merged ? 'pr-merged' : pr.state === 'open' ? 'pr-opened' : 'pr-closed';
+    const kind: TimelineKind = pr.merged
+      ? 'pr-merged'
+      : pr.state === 'open'
+        ? 'pr-opened'
+        : 'pr-closed';
     nodes.push({
       key: `pr-${pr.number}`,
       kind,
@@ -166,8 +171,19 @@ const TONE_STYLE: Record<NodeTone, { color: string; cls: string }> = {
 
 /** Session timeline card: a vertical status-colored rail with a dot per
  *  lifecycle moment, entrance-staggered (reduced-motion-safe via `.anim-row-in`).
- *  Framed as one full-width tile matching the overview grid's cards. */
-export function SessionTimeline({ session }: { session: SessionDetail }) {
+ *
+ *  Framed as one pane of the Status tab's split, beside the work items it
+ *  narrates. It owns its own scroller so a long history overflows INSIDE the
+ *  pane instead of growing the row and pushing the work items out of view;
+ *  `className` lets the caller hand it the grid item's sizing directly, since an
+ *  extra wrapper div would become the grid item and defeat the min-h-0 chain. */
+export function SessionTimeline({
+  session,
+  className,
+}: {
+  session: SessionDetail;
+  className?: string;
+}) {
   const t = useContent().dashboard.detail;
   const { lang } = useLang();
   const nodes = buildTimeline(session);
@@ -193,49 +209,54 @@ export function SessionTimeline({ session }: { session: SessionDetail }) {
   };
 
   return (
-    <StatusCard label={t.timeline}>
-      <ol className="flex flex-col">
-        {nodes.map((node, i) => {
-          const tone = TONE_STYLE[node.tone];
-          const last = i === nodes.length - 1;
-          const time = formatIsoSgt(node.iso, lang);
-          return (
-            <li
-              key={node.key}
-              className="anim-row-in relative flex gap-3 min-w-0"
-              style={staggerStyle(i)}
-            >
-              {/* Rail column: the status dot + the connector down to the next
+    <StatusCard label={t.timeline} aria-label={t.timeline} className={className}>
+      <ScrollArea className="pr-1 max-h-[18rem] md:max-h-none">
+        <ol className="flex flex-col">
+          {nodes.map((node, i) => {
+            const tone = TONE_STYLE[node.tone];
+            const last = i === nodes.length - 1;
+            const time = formatIsoSgt(node.iso, lang);
+            return (
+              <li
+                key={node.key}
+                className="anim-row-in relative flex gap-3 min-w-0"
+                style={staggerStyle(i)}
+              >
+                {/* Rail column: the status dot + the connector down to the next
                   node (omitted on the last node). */}
-              <div className="flex flex-col items-center flex-none">
-                <span
-                  aria-hidden="true"
-                  className={`w-2.5 h-2.5 rounded-full flex-none mt-1 ${tone.cls}`}
-                  style={{ background: tone.color }}
-                />
-                {!last && (
-                  <span aria-hidden="true" className="w-px flex-1 min-h-4 bg-line mt-1" />
-                )}
-              </div>
-              {/* Content: kind label, the #N — title reference, and the SGT time. */}
-              <div className="flex flex-col gap-0.5 min-w-0 pb-3.5">
-                <span className="text-fg text-[12.5px] font-medium leading-tight">{label(node)}</span>
-                {node.ref && (
-                  <a
-                    href={node.ref.html_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="hover-underline text-dim text-[11.5px] truncate min-w-0 hover:text-amber transition-colors"
-                  >
-                    <span className="font-mono text-ghost">#{node.ref.number}</span> {node.ref.title}
-                  </a>
-                )}
-                {time && <span className="font-mono text-[10.5px] text-ghost">{time}</span>}
-              </div>
-            </li>
-          );
-        })}
-      </ol>
+                <div className="flex flex-col items-center flex-none">
+                  <span
+                    aria-hidden="true"
+                    className={`w-2.5 h-2.5 rounded-full flex-none mt-1 ${tone.cls}`}
+                    style={{ background: tone.color }}
+                  />
+                  {!last && (
+                    <span aria-hidden="true" className="w-px flex-1 min-h-4 bg-line mt-1" />
+                  )}
+                </div>
+                {/* Content: kind label, the #N — title reference, and the SGT time. */}
+                <div className="flex flex-col gap-0.5 min-w-0 pb-3.5">
+                  <span className="text-fg text-[12.5px] font-medium leading-tight">
+                    {label(node)}
+                  </span>
+                  {node.ref && (
+                    <a
+                      href={node.ref.html_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="hover-underline text-dim text-[11.5px] truncate min-w-0 hover:text-amber transition-colors"
+                    >
+                      <span className="font-mono text-ghost">#{node.ref.number}</span>{' '}
+                      {node.ref.title}
+                    </a>
+                  )}
+                  {time && <span className="font-mono text-[10.5px] text-ghost">{time}</span>}
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      </ScrollArea>
     </StatusCard>
   );
 }
