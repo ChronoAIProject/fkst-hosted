@@ -465,7 +465,7 @@ describe('TabLogs layout', () => {
     expect(grid!.contains(detail)).toBe(true);
     // Single column below `md`, two columns from `md` up — the same breakpoint
     // and template Health uses, not a new ad-hoc split.
-    expect(grid!.className).toContain('md:grid-cols-[var(--rail-w)_minmax(0,1fr)]');
+    expect(grid!.className).toContain('md:grid-cols-[var(--split-start)_minmax(0,1fr)]');
 
     // The rail is the LEFT pane: it precedes the detail pane in the grid.
     expect(

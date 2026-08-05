@@ -2,34 +2,43 @@ import type { CSSProperties, ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
 /**
- * The master/detail split the session-detail tabs are built on: pick one item in
- * the left rail, read it on the right.
+ * The two-pane split the session-detail tabs are built on: two panes side by
+ * side from `md`, stacked below it.
  *
- * One grid, so the two panes are always equal height; `flex-1 min-h-0` so the
- * height comes from the tab panel and each pane's overflow is its own job rather
- * than escaping upward — which would scroll the rail out of view while reading.
- * A single column below `md`, where a rail beside content has no room.
+ * One grid, so the panes are always equal height; `flex-1 min-h-0` so the height
+ * comes from the tab panel and each pane's overflow is its own job rather than
+ * escaping upward — which would scroll one pane out of view while reading the
+ * other. A single column below `md`, where two panes have no room.
  *
- * The rail width rides a CSS variable because Tailwind's JIT cannot generate a
- * class from a runtime string: `md:grid-cols-[${w}]` silently produces no CSS,
- * whereas the literal `var(--rail-w)` form below is scanned from this source.
+ * `startTrack` is the FIRST column's grid track, so the same machinery serves
+ * both shapes this surface needs: a fixed-width navigation rail beside a detail
+ * pane (`'11.5rem'`, the default), or two peer panes (`'minmax(0,1fr)'`). It
+ * rides a CSS variable because Tailwind's JIT cannot generate a class from a
+ * runtime string: `md:grid-cols-[${w}]` silently produces no CSS, whereas the
+ * literal `var(--split-start)` form below is scanned from this source.
+ *
+ * Both panes must carry `min-h-0` themselves. A grid item's `min-height`
+ * defaults to `auto`, i.e. its content height, so the row would grow past the
+ * container and the panes' own scrollers would never engage — the tab would
+ * scroll instead, dragging one pane out of view. Passing a pane wrapped in an
+ * extra `<div>` breaks this the same way: the wrapper becomes the grid item.
  */
-export function MasterDetailSplit({
-  rail,
-  detail,
-  railWidth = '11.5rem',
+export function SplitPanes({
+  start,
+  end,
+  startTrack = '11.5rem',
 }: {
-  rail: ReactNode;
-  detail: ReactNode;
-  railWidth?: string;
+  start: ReactNode;
+  end: ReactNode;
+  startTrack?: string;
 }) {
   return (
     <div
-      style={{ '--rail-w': railWidth } as CSSProperties}
-      className="grid gap-4 md:grid-cols-[var(--rail-w)_minmax(0,1fr)] flex-1 min-h-0"
+      style={{ '--split-start': startTrack } as CSSProperties}
+      className="grid gap-4 md:grid-cols-[var(--split-start)_minmax(0,1fr)] flex-1 min-h-0"
     >
-      {rail}
-      {detail}
+      {start}
+      {end}
     </div>
   );
 }
