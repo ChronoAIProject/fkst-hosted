@@ -209,13 +209,9 @@ pub fn validate_execution_outcome(raw: &[u8]) -> Result<ValidatedValue, Contract
     validate_registered_value(admit_json(raw)?, EXECUTION_OUTCOME_TYPE_NAME)
 }
 
-pub fn validate_local_sanitized_observation(
-    raw: &[u8],
-) -> Result<ValidatedValue, ContractError> {
-    let validated = validate_registered_value(
-        admit_json(raw)?,
-        LOCAL_SANITIZED_OBSERVATION_TYPE_NAME,
-    )?;
+pub fn validate_local_sanitized_observation(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    let validated =
+        validate_registered_value(admit_json(raw)?, LOCAL_SANITIZED_OBSERVATION_TYPE_NAME)?;
     validate_local_sanitized_observation_rules(validated.value())?;
     Ok(validated)
 }
@@ -403,9 +399,7 @@ fn validate_local_sanitized_observation_rules(value: &Value) -> Result<(), Contr
     let fixture_url = object
         .get("fixture_url")
         .and_then(Value::as_str)
-        .ok_or_else(|| {
-            ContractError(Rejection::validation("schema_violation", "/fixture_url"))
-        })?;
+        .ok_or_else(|| ContractError(Rejection::validation("schema_violation", "/fixture_url")))?;
     let final_url = object
         .get("final_url")
         .and_then(Value::as_str)
