@@ -37,6 +37,7 @@ fn trigger(number: i64, author: &str, author_id: i64) -> IssueSummary {
         assignees: Vec::new(),
         user_login: author.to_string(),
         user_id: author_id,
+        created_at: k8s_openapi::chrono::DateTime::UNIX_EPOCH,
     }
 }
 
