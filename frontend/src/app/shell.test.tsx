@@ -200,6 +200,39 @@ describe('Shell', () => {
     );
   });
 
+  it('styles Operations with the same nav classes as Home and Dashboard', () => {
+    // Regression guard for the template-literal bug: `${navLinkClass}` inside a
+    // template string stringifies the FUNCTION SOURCE, so the link ends up with
+    // its source text as a className and none of the real nav styling. Asserting
+    // against the classes Home actually carries makes that failure mode fail here.
+    renderShell({ authenticated: true });
+    const nav = screen.getByRole('navigation');
+    const home = within(nav).getByRole('link', { name: 'Home' });
+    const operations = within(nav).getByRole('link', { name: 'Operations' });
+
+    const shared = ['hover-underline', 'text-nav', 'no-underline', 'rounded-control'];
+    for (const cls of shared) {
+      expect(home.className).toContain(cls);
+      expect(operations.className).toContain(cls);
+    }
+    // The inactive route styling must be the shared one, not a stringified fn.
+    expect(operations.className).toContain('text-faint');
+    expect(operations.className).not.toContain('isActive');
+    expect(operations.className).not.toContain('=>');
+    // …while the responsive collapse rule is still composed on top.
+    expect(operations.className).toContain('max-[720px]:hidden');
+  });
+
+  it('applies the active nav styling to Operations on /operations', () => {
+    // isActive is only evaluated when React Router can CALL the className fn.
+    renderShell({ authenticated: true, initialEntry: '/operations' });
+    const nav = screen.getByRole('navigation');
+    const operations = within(nav).getByRole('link', { name: 'Operations' });
+    expect(operations.className).toContain('text-fg');
+    expect(operations.className).toContain('bg-raise');
+    expect(operations.className).not.toContain('text-faint');
+  });
+
   it('keeps Operations reachable from the overflow menu at narrow widths', () => {
     // The inline nav link hides below 721px; without this menu entry the route
     // would simply vanish on a phone.
