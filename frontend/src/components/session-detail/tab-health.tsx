@@ -7,7 +7,7 @@ import { getHealthReport, type HealthReport, type SessionHealth } from '@/lib/ap
 import { Chip } from '@/components/ui/chip';
 import { MarkdownPreview } from '@/components/ui/markdown-preview';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { MasterDetailSplit, Note, SectionLabel, Spinner } from './parts';
+import { Note, SectionLabel, Spinner, SplitPanes } from './parts';
 import { StatusCard } from './status-charts';
 import { HEALTH_TONE, minutes, showsStaleNotice } from './health-state';
 
@@ -158,8 +158,8 @@ export function TabHealth({
           overflow escape to the tab panel — which would scroll the rail out of
           view while reading an entry. The height comes from the panel now, not a
           hardcoded viewport fraction, so every tab is the same size. */}
-      <MasterDetailSplit
-        rail={
+      <SplitPanes
+        start={
           /* ---- master: one entry per report, newest first, keyed by time ---- */
           <nav className="flex flex-col gap-1.5 min-w-0 min-h-0">
             <SectionLabel>{t.healthHistory}</SectionLabel>
@@ -197,7 +197,7 @@ export function TabHealth({
             </ScrollArea>
           </nav>
         }
-        detail={
+        end={
           /* ---- detail: everything about the selected report ---- */
           <ScrollArea className="pr-1">
             <section aria-label={t.healthDetailAria} className="flex flex-col gap-3.5 min-w-0">

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { installApiRoutes, seedAuth } from './fixtures';
+import { installApiRoutes, seedAuth, PERSONAL, REPO } from './fixtures';
 import { openAccount, openRepo, reactFlowZoom, settle, shot } from './harness';
 
 // The headline of the UI refactor: a fixed-viewport shell where the WINDOW/body
@@ -201,9 +201,7 @@ test.describe('the intended inner container scrolls', () => {
   // while <main> stays put: on the app route the shell gives the routed content
   // an h-full wrapper, so the dashboard's h-full chain resolves and the `aside`
   // owns its own overflow instead of growing and pushing <main> to scroll.
-  test('the level-2 workspace rail scrolls internally (rail, not <main>)', async ({
-    page,
-  }) => {
+  test('the level-2 workspace rail scrolls internally (rail, not <main>)', async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await prepareDashboard(page, true);
     await page.goto('/dashboard');
@@ -254,7 +252,8 @@ test.describe('the intended inner container scrolls', () => {
     // genuinely non-scrolling body a failure rather than an infinite loop.
     let res = await probeInternalScroll(page, '[role="dialog"]');
     for (let batch = 0; batch < 5 && !res.found; batch++) {
-      for (let i = 0; i < 10; i++) await dialog.getByRole('button', { name: 'Add command' }).click();
+      for (let i = 0; i < 10; i++)
+        await dialog.getByRole('button', { name: 'Add command' }).click();
       await settle(page);
       res = await probeInternalScroll(page, '[role="dialog"]');
     }
@@ -262,6 +261,43 @@ test.describe('the intended inner container scrolls', () => {
     expect(res.found && res.moved, 'the drawer body scrollTop moves').toBe(true);
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
     await shot(page, 'ls-04-drawer-scroll');
+  });
+
+  test('the Status split scrolls each pane, never the page (#5842)', async ({ page }) => {
+    // Timeline and work items sit side by side. Each pane owns its overflow, so
+    // a long backlog or a long history must scroll INSIDE its own pane — never
+    // by moving the page, and never horizontally.
+    await page.setViewportSize(DESKTOP);
+    await prepareDashboard(page);
+    await page.goto('/dashboard');
+    await expect(page.getByRole('heading', { name: 'Your fkst sessions' })).toBeVisible();
+    await openAccount(page, PERSONAL);
+    await openRepo(page, PERSONAL, REPO);
+    await page.getByRole('button', { name: 'Open details for session feature-auth' }).click();
+
+    const dialog = page.getByTestId('session-detail');
+    await expect(dialog).toBeVisible();
+    const timeline = dialog.getByRole('region', { name: 'Timeline' });
+    const workItems = dialog.getByRole('region', { name: 'Work items' });
+    await expect(timeline).toBeVisible();
+    await expect(workItems).toBeVisible();
+    await settle(page);
+
+    // Side by side: the work items start to the RIGHT of the timeline, and the
+    // two panes share a top edge (one grid row, equal height).
+    const [tBox, wBox] = [await timeline.boundingBox(), await workItems.boundingBox()];
+    expect(tBox && wBox).toBeTruthy();
+    expect(wBox!.x, 'work items sit beside the timeline, not below it').toBeGreaterThan(tBox!.x);
+    expect(Math.abs(wBox!.y - tBox!.y), 'the two panes share a row').toBeLessThanOrEqual(2);
+
+    // Neither the page nor the dialog scrolls horizontally.
+    const overflow = await page.evaluate(() => {
+      const se = document.scrollingElement ?? document.documentElement;
+      return { sx: window.scrollX, sw: se.scrollWidth, cw: se.clientWidth };
+    });
+    expect(overflow.sx, 'window.scrollX stays 0').toBe(0);
+    expect(overflow.sw, 'no horizontal page overflow').toBeLessThanOrEqual(overflow.cw + 1);
+    await shot(page, 'ls-05-status-split');
   });
 
   test('a wheel over the canvas never zooms React Flow and never scrolls the window', async ({

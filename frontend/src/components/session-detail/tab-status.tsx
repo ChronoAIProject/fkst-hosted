@@ -2,36 +2,22 @@ import type { CSSProperties } from 'react';
 import { useContent } from '@/i18n';
 import { Chip } from '@/components/ui/chip';
 import type {
-  IssueDetail,
   SessionDetail,
   SessionRecoveryProjection,
   SessionRecoveryState,
 } from '@/lib/api/types';
-import {
-  decodeSessionStatus,
-  decodeWorkItemStatus,
-  type SessionPhase,
-  type WorkItemTone,
-} from '@/lib/api/derive';
-import { Note, SectionLabel } from './parts';
+import { decodeSessionStatus, type SessionPhase } from '@/lib/api/derive';
+import { SplitPanes } from './parts';
 import { fallbackRecovery } from './recovery-state';
 import { SessionTimeline } from './session-timeline';
-import { PHASE_TONE, WORK_TONE } from './tones';
+import { WorkItemsPane } from './work-items';
+import { PHASE_TONE } from './tones';
 import { ProgressCard, StatusCard, WorkDonut, countWorkItems } from './status-charts';
 
 /** The happy-path lifecycle stages, in order. Off-path phases (degraded /
  *  invalid / picked-up) still surface as the prominent pill above; an idle
  *  (paused) session rests at the 'active' stage (see the paused rendering). */
 const STAGES: SessionPhase[] = ['registered', 'active', 'retired'];
-
-/** CSS-var accent color for a work-item tone. Container-agnostic so a row's left
- *  rule reads the same whether the row sits in a 1- or 2-column grid. */
-const ACCENT: Record<WorkItemTone, string> = {
-  good: 'var(--green)',
-  progress: 'var(--amber)',
-  bad: 'var(--red)',
-  neutral: 'var(--ghost)',
-};
 
 function stageReached(stage: SessionPhase, phase: SessionPhase, liveness: string | null): boolean {
   // `idle` counts as advanced: a paused session ran at least once, so it has
@@ -47,41 +33,6 @@ function stageReached(stage: SessionPhase, phase: SessionPhase, liveness: string
   if (stage === 'registered') return true;
   if (stage === 'active') return advanced;
   return phase === 'retired';
-}
-
-/** One promoted work-item card: a status-colored left accent + the #number link,
- *  the (truncated) title, and the decoded state chip. Laid out to sit in a
- *  responsive 1-/2-column grid. */
-function WorkItemRow({ issue }: { issue: IssueDetail }) {
-  const t = useContent().dashboard.detail;
-  const decoded = decodeWorkItemStatus(issue);
-  return (
-    <div className="relative flex items-center gap-2 rounded-chip bg-glass-2 border border-line pl-3.5 pr-2.5 py-2 min-w-0 overflow-hidden shadow-1">
-      {/* Status-matched left rule — decorative reinforcement of the chip. */}
-      <span
-        aria-hidden="true"
-        className="absolute left-0 top-0 bottom-0 w-1"
-        style={{ background: ACCENT[decoded.tone] }}
-      />
-      <a
-        href={issue.html_url}
-        target="_blank"
-        rel="noreferrer"
-        className="hover-underline font-mono text-[11px] text-ghost hover:text-amber transition-colors flex-none"
-      >
-        #{issue.number}
-      </a>
-      <a
-        href={issue.html_url}
-        target="_blank"
-        rel="noreferrer"
-        className="hover-underline text-fg text-[12.5px] truncate min-w-0 flex-1 hover:text-amber transition-colors"
-      >
-        {issue.title}
-      </a>
-      <Chip tone={WORK_TONE[decoded.tone]}>{t.work[decoded.state]}</Chip>
-    </div>
-  );
 }
 
 /** Lifecycle card: the decoded phase pill + health + the Registered→Active→
@@ -213,7 +164,6 @@ function RecoveryCard({ recovery }: { recovery: SessionRecoveryProjection }) {
  *  wide and stacks when narrow; the work items flow into two columns on wider
  *  viewports. */
 export function TabStatus({ session }: { session: SessionDetail }) {
-  const t = useContent().dashboard.detail;
   const counts = countWorkItems(session.work_issues);
   const recovery = session.recovery ?? fallbackRecovery(session);
   // Inline auto-fit template: the tiles size themselves to the panel width
@@ -224,33 +174,36 @@ export function TabStatus({ session }: { session: SessionDetail }) {
   };
 
   return (
-    <div className="flex flex-col gap-5">
-      <section className="grid gap-3" style={overviewGrid}>
+    <div className="flex flex-col gap-5 md:h-full md:min-h-0">
+      {/* The overview band is session-level and sized by its own content; it must
+          not be squeezed by the split below it. */}
+      <section className="grid gap-3 flex-none" style={overviewGrid}>
         <ProgressCard counts={counts} />
         <WorkDonut counts={counts} />
         <LifecycleCard session={session} />
         <RecoveryCard recovery={recovery} />
       </section>
 
-      <SessionTimeline session={session} />
+      {/* Timeline ‖ work items. The timeline narrates what happened to the very
+          items listed beside it, so reading them together is the point — stacked,
+          the list starts below the fold of the thing that refers to it.
 
-      <section className="flex flex-col gap-2">
-        <SectionLabel>
-          {t.workItems}
-          {session.work_issues.length > 0 && (
-            <span className="ml-2 lowercase">· {session.work_issues.length}</span>
-          )}
-        </SectionLabel>
-        {session.work_issues.length === 0 ? (
-          <Note>{t.noWorkItems}</Note>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            {session.work_issues.map((issue) => (
-              <WorkItemRow key={issue.number} issue={issue} />
-            ))}
-          </div>
-        )}
-      </section>
+          Peer panes, so the first track is `minmax(0,1fr)` rather than a fixed
+          rail; the work items take the wider share because their rows carry a
+          number, a title and a chip. The height comes from the panel (md:h-full
+          on the root → md:flex-1 here), so each pane scrolls its OWN content and
+          neither can scroll the other away.
+
+          `md:min-h-[16rem]` is the graceful-degradation floor, not decoration: if
+          the overview band leaves less than that, the root overflows and the
+          tab's own scroller takes over, instead of flex-1 collapsing both panes
+          to nothing. */}
+      <SplitPanes
+        className="md:min-h-[16rem]"
+        startTrack="minmax(0,1fr)"
+        start={<SessionTimeline session={session} className="min-h-0" />}
+        end={<WorkItemsPane issues={session.work_issues} className="min-h-0" />}
+      />
     </div>
   );
 }

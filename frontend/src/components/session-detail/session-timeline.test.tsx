@@ -141,10 +141,27 @@ describe('SessionTimeline', () => {
     expect(screen.getAllByText(/SGT/).length).toBeGreaterThan(0);
   });
 
+  it('is a pane the caller can size, and scrolls its own history', () => {
+    // Laid beside the work items (#5842), a long history must overflow INSIDE
+    // this pane rather than growing the grid row and pushing the list out of
+    // view. The className goes straight onto the card because an extra wrapper
+    // would become the grid item and defeat the min-h-0 chain.
+    render(<SessionTimeline session={session()} className="min-h-0" />);
+    const card = screen.getByRole('region', { name: 'Timeline' });
+    expect(card).toHaveClass('min-h-0');
+    const list = screen.getByRole('list');
+    expect(list.closest('.overflow-y-auto')).not.toBeNull();
+    expect(card.contains(list)).toBe(true);
+  });
+
   it('names the paused state on the now node for an idle session', () => {
     render(
       <SessionTimeline
-        session={session({ liveness: null, status_labels: ['fkst-substrate-active'], work_issues: [] })}
+        session={session({
+          liveness: null,
+          status_labels: ['fkst-substrate-active'],
+          work_issues: [],
+        })}
       />
     );
     expect(

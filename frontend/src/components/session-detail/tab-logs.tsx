@@ -15,7 +15,7 @@ import type { LogFileContent, LogManifest, SessionDetail } from '@/lib/api/types
 import { Chip } from '@/components/ui/chip';
 import { FadeSwap, StaggerItem } from '@/components/ui/motion';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { MasterDetailSplit, Note, NoticeLine, SectionLabel, Spinner } from './parts';
+import { Note, NoticeLine, SectionLabel, Spinner, SplitPanes } from './parts';
 import { LogViewer } from './log-viewer';
 import { RunPicker } from './run-picker';
 
@@ -370,11 +370,11 @@ export function TabLogs({ session }: { session: SessionDetail }) {
       )}
 
       {hasFiles && (
-        <MasterDetailSplit
+        <SplitPanes
           // Wider than Health's rail: these rows carry a file BASENAME plus its
           // classification chip, and the basename is what the file is picked by.
-          railWidth="13rem"
-          rail={
+          startTrack="13rem"
+          start={
             /* ---- master: the bundle's files ---- */
             <nav className="flex flex-col min-w-0 min-h-0">
               {/* The rail scrolls INTERNALLY. Without its own region a long file
@@ -431,7 +431,7 @@ export function TabLogs({ session }: { session: SessionDetail }) {
               </ScrollArea>
             </nav>
           }
-          detail={
+          end={
             /* ---- detail: the selected file ---- */
             <section aria-label={t.logsDetailAria} className="flex flex-col gap-2 min-w-0 min-h-0">
               <div className="flex items-center gap-2 flex-none">

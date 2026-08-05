@@ -181,3 +181,69 @@ describe('TabStatus', () => {
     expect(screen.getByText('Session started')).toBeInTheDocument();
   });
 });
+
+/// Layout contract (#5842). The timeline narrates what happened to the very work
+/// items listed beside it; stacked, the list started below the fold of the thing
+/// that refers to it. Both panes now share one grid and each scrolls its own
+/// content, so neither can scroll the other away.
+describe('TabStatus layout', () => {
+  it('lays the timeline and the work items side by side in one grid', () => {
+    const { container } = render(<TabStatus session={session()} />);
+    const timeline = screen.getByRole('region', { name: 'Timeline' });
+    const workItems = screen.getByRole('region', { name: 'Work items' });
+
+    const grid = container.querySelector(
+      '.grid.md\\:grid-cols-\\[var\\(--split-start\\)_minmax\\(0\\,1fr\\)\\]'
+    );
+    expect(grid, 'the split must use the shared SplitPanes grid').not.toBeNull();
+    expect(grid!.contains(timeline)).toBe(true);
+    expect(grid!.contains(workItems)).toBe(true);
+    // Peer panes, not a rail: the first track is an equal fraction.
+    expect(grid!.getAttribute('style')).toContain('minmax(0,1fr)');
+    // Timeline first, work items second.
+    expect(grid!.firstElementChild).toBe(timeline);
+  });
+
+  it('shrinks below content so each pane scrolls instead of growing the row', () => {
+    // A grid item's min-height defaults to its content height, so without
+    // `min-h-0` the row would grow past the panel and the panes' own scrollers
+    // would never engage — the whole tab would scroll instead.
+    render(<TabStatus session={session()} />);
+    expect(screen.getByRole('region', { name: 'Timeline' })).toHaveClass('min-h-0');
+    expect(screen.getByRole('region', { name: 'Work items' })).toHaveClass('min-h-0');
+  });
+
+  it('gives each pane its own scroll container', () => {
+    render(
+      <TabStatus
+        session={session({
+          work_issues: [issue({ number: 9 }), issue({ number: 10 }), issue({ number: 11 })],
+        })}
+      />
+    );
+    const timelineScroller = screen
+      .getByRole('region', { name: 'Timeline' })
+      .querySelector('.overflow-y-auto');
+    const workScroller = screen
+      .getByRole('region', { name: 'Work items' })
+      .querySelector('.overflow-y-auto');
+    expect(timelineScroller).not.toBeNull();
+    expect(workScroller).not.toBeNull();
+    expect(timelineScroller).not.toBe(workScroller);
+  });
+
+  it('keeps the overview band out of the split so it is never squeezed', () => {
+    const { container } = render(<TabStatus session={session()} />);
+    const overview = container.querySelector('section.grid.flex-none');
+    expect(overview, 'the overview band must not be a flex-1 sibling').not.toBeNull();
+    expect(screen.getByRole('region', { name: 'Progress' }).closest('.grid')).toBe(overview);
+    // …and it is not inside the split.
+    expect(overview!.contains(screen.getByRole('region', { name: 'Timeline' }))).toBe(false);
+  });
+
+  it('still renders the empty work-item note inside the pane', () => {
+    render(<TabStatus session={session({ work_issues: [] })} />);
+    const pane = screen.getByRole('region', { name: 'Work items' });
+    expect(within(pane).getByText('No work items yet.')).toBeInTheDocument();
+  });
+});
