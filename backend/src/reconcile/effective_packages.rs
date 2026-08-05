@@ -50,6 +50,15 @@ type RefKey = (String, String, String, String);
 pub const NO_PACKAGES_DETAIL: &str =
     "no packages: add a `### Packages` line or a valid `### Manifest` reference";
 
+/// Product-level cap on how many DISTINCT package workspaces one session may clone.
+///
+/// The pod planner clones one checkout per `(owner, repo, git_ref)` and then points
+/// `--package-root` at paths inside those checkouts. Enforcing the same identity here,
+/// after manifest expansion + full-ref dedupe and before pod creation, keeps explicit
+/// packages plus multiple manifests from creating an application-unbounded number of
+/// sequential workspace clones.
+pub const MAX_EFFECTIVE_PACKAGE_WORKSPACES: usize = 64;
+
 /// Project a reference into its dedup/cache key.
 fn ref_key(r: &PackageRef) -> RefKey {
     (
@@ -58,6 +67,23 @@ fn ref_key(r: &PackageRef) -> RefKey {
         r.git_ref.clone(),
         r.path.clone(),
     )
+}
+
+/// Project a package reference into the pod planner's workspace clone identity.
+/// Owner/repo are case-insensitive on GitHub; branch/ref names are not.
+fn workspace_key(r: &PackageRef) -> (String, String, String) {
+    (
+        r.owner.to_ascii_lowercase(),
+        r.repo.to_ascii_lowercase(),
+        r.git_ref.clone(),
+    )
+}
+
+fn workspace_count(refs: &[PackageRef]) -> usize {
+    refs.iter()
+        .map(workspace_key)
+        .collect::<BTreeSet<_>>()
+        .len()
 }
 
 /// The outcome of resolving every registration's effective package set for one pass.
@@ -192,6 +218,13 @@ async fn expand_one(
         return Err(NO_PACKAGES_DETAIL.to_string());
     }
 
+    let workspaces = workspace_count(&deduped);
+    if workspaces > MAX_EFFECTIVE_PACKAGE_WORKSPACES {
+        return Err(format!(
+            "effective package set touches {workspaces} package workspaces, exceeding the maximum of {MAX_EFFECTIVE_PACKAGE_WORKSPACES}"
+        ));
+    }
+
     // Every mandatory ref must already be in the effective set. Checked against the
     // EFFECTIVE set, not the literal `### Packages` lines, so a `### Manifest` that
     // carries the baseline satisfies this without the author restating it.
@@ -207,6 +240,7 @@ async fn expand_one(
         explicit = reg.def.packages.len(),
         manifests = reg.def.manifest_refs.len(),
         effective = deduped.len(),
+        workspaces,
         "reconcile: resolved effective package set"
     );
 

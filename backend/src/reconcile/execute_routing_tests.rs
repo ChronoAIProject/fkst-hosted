@@ -8,6 +8,46 @@
 use super::*;
 use crate::reconcile::desired::KillReason;
 use crate::reconcile::execute_test_support::*;
+use wiremock::matchers::{method, path, query_param};
+use wiremock::{Mock, MockServer, Request, ResponseTemplate};
+
+async fn mount_reachability_with_auth_status(
+    server: &MockServer,
+    r: &crate::goals::trigger_parse::PackageRef,
+    status: u16,
+) {
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/repos/{}/{}/contents/{}/fkst.toml",
+            r.owner, r.repo, r.path
+        )))
+        .and(query_param("ref", r.git_ref.as_str()))
+        .and(|request: &Request| request.headers.contains_key("authorization"))
+        .respond_with(ResponseTemplate::new(status))
+        .expect(1)
+        .mount(server)
+        .await;
+}
+
+async fn mount_reachability_with_auth_fallback(
+    server: &MockServer,
+    r: &crate::goals::trigger_parse::PackageRef,
+    authenticated_status: u16,
+    anonymous_status: u16,
+) {
+    mount_reachability_with_auth_status(server, r, authenticated_status).await;
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/repos/{}/{}/contents/{}/fkst.toml",
+            r.owner, r.repo, r.path
+        )))
+        .and(query_param("ref", r.git_ref.as_str()))
+        .and(|request: &Request| !request.headers.contains_key("authorization"))
+        .respond_with(ResponseTemplate::new(anonymous_status))
+        .expect(1)
+        .mount(server)
+        .await;
+}
 
 #[tokio::test]
 async fn spawn_action_routes_to_ensure_session() {
@@ -47,6 +87,44 @@ async fn spawn_action_routes_to_ensure_session() {
     // The assembled creds carry at least the github-token + llm-api-key files.
     assert!(ensured[0].1.contains(&"github-token".to_string()));
     assert!(ensured[0].1.contains(&"llm-api-key".to_string()));
+}
+
+#[tokio::test]
+async fn spawn_reachability_auth_fallback_reaches_ensure_without_flagging_invalid() {
+    let server = MockServer::start().await;
+    let backend = Arc::new(FakeSessionBackend::default());
+    let api = Arc::new(RecordingApi::default());
+    let mut ctx = test_ctx_with_github(backend.clone(), tokens(api.clone()));
+    ctx.config.github_api_base_url = server.uri();
+
+    let reg = registration();
+    let repo = reg.repo.clone();
+    mount_reachability_with_auth_fallback(&server, &reg.effective_packages[0], 403, 200).await;
+    mount_reachability_with_auth_status(&server, &reg.effective_packages[1], 200).await;
+
+    execute(
+        ReconcileAction::Spawn {
+            reg,
+            detected_work_labels: vec!["fkst-run".to_string()],
+        },
+        &repo,
+        &ctx,
+    )
+    .await;
+
+    assert_eq!(
+        backend.ensured.lock().unwrap().len(),
+        1,
+        "the public package fallback must not block pod creation"
+    );
+    assert!(
+        api.comments.lock().unwrap().is_empty(),
+        "reachability fallback success must not call flag_invalid/comment"
+    );
+    assert!(
+        api.labels_added.lock().unwrap().is_empty(),
+        "reachability fallback success must not latch the invalid label"
+    );
 }
 
 #[tokio::test]
