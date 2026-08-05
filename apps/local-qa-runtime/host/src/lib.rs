@@ -637,14 +637,13 @@ fn read_request(stream: &mut TcpStream) -> io::Result<Result<Request, Response>>
     let mut received = Vec::new();
     let header_end = loop {
         if let Some(position) = find_header_end(&received) {
+            if position + 4 > MAX_HEADER_BYTES {
+                return Ok(Err(oversized_header_response(&received)));
+            }
             break position;
         }
         if received.len() >= MAX_HEADER_BYTES {
-            return Ok(Err(problem_response(
-                400,
-                "Bad Request",
-                "invalid read request",
-            )));
+            return Ok(Err(oversized_header_response(&received)));
         }
         let mut chunk = [0_u8; 1024];
         let read = stream.read(&mut chunk)?;
@@ -769,7 +768,12 @@ fn read_request(stream: &mut TcpStream) -> io::Result<Result<Request, Response>>
     }
     if body.len() < content_length {
         let mut remaining = vec![0_u8; content_length - body.len()];
-        stream.read_exact(&mut remaining)?;
+        if let Err(error) = stream.read_exact(&mut remaining) {
+            if error.kind() == io::ErrorKind::UnexpectedEof {
+                return Ok(Err(invalid_request(&route)));
+            }
+            return Err(error);
+        }
         body.extend_from_slice(&remaining);
     }
     if !matches!(route, Route::Submit { .. }) && content_length != 0 {
@@ -927,6 +931,26 @@ fn hex_value(byte: u8) -> Option<u8> {
 
 fn find_header_end(bytes: &[u8]) -> Option<usize> {
     bytes.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+fn oversized_header_response(bytes: &[u8]) -> Response {
+    let Some(request_line_end) = bytes.windows(2).position(|window| window == b"\r\n") else {
+        return invalid_read();
+    };
+    let Ok(request_line) = std::str::from_utf8(&bytes[..request_line_end]) else {
+        return invalid_read();
+    };
+    let mut request_parts = request_line.split(' ');
+    let method = request_parts.next().unwrap_or_default();
+    let target = request_parts.next().unwrap_or_default();
+    let version = request_parts.next().unwrap_or_default();
+    if request_parts.next().is_some() || !matches!(version, "HTTP/1.0" | "HTTP/1.1") {
+        return invalid_read();
+    }
+    match classify_route(method, target) {
+        Ok(route) => invalid_request(&route),
+        Err(_) => invalid_read(),
+    }
 }
 
 fn valid_run_id(value: &str) -> bool {
