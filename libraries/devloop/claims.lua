@@ -173,12 +173,26 @@ function C.claim_mode_active()
 end
 
 -- assignee-mode (default): ownership is the current single self-assignee.
--- label-mode (opt-in): ownership is the presence of the fkst-dev:claimed label.
--- labels is optional/extra and ignored in assignee-mode, so existing 2-arg
--- callers keep byte-for-byte behavior.
-function C.issue_claim_state(assignees, owner, labels)
-  if config.claim_mode() == "label" then
-    if devloop_state().has_label(labels, claimed_label) then
+-- label-mode (opt-in): ownership is the presence of this session's EFFECTIVE
+-- claimed label.
+-- labels and exec are optional/extra -- labels is ignored in assignee-mode and a
+-- nil exec reads the ambient environment -- so existing 2- and 3-arg callers keep
+-- byte-for-byte behavior.
+--
+-- The effective label is what the claim WRITER adds (see claim_issue_for_management
+-- below, and the registration in github-devloop-ops/core/ensure_repo.lua), so the
+-- reader has to map through the same work-label namespace or the two disagree.
+-- Reading the raw `fkst-dev:claimed` made a FOREIGN namespace's label read as this
+-- session's own claim: a local/standalone substrate writes the unmapped label, and
+-- a namespaced cloud session then believed it had already claimed the issue while
+-- the lifecycle path -- which does map -- saw no claim at all. The item wedged as
+-- `unmanaged` forever, silently: claimed by nobody, advanced by nobody.
+--
+-- Deployments with no namespace configured map the label to itself, so their
+-- behavior is byte-identical.
+function C.issue_claim_state(assignees, owner, labels, exec)
+  if config.claim_mode(exec) == "label" then
+    if devloop_state().has_label(labels, C.effective_claimed_label(exec)) then
       return "self"
     end
     return "unassigned"
