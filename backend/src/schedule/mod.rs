@@ -1,6 +1,7 @@
 //! Pure scheduled-job parsing, UTC slot calculation, decision, and run markers.
 
 mod cron;
+mod cron_field;
 mod decision;
 mod marker;
 mod spec;

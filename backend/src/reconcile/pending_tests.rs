@@ -122,6 +122,7 @@ fn issue(author_id: i64, author_login: &str, assignees: &[&str]) -> IssueSummary
         assignees: assignees.iter().map(|value| value.to_string()).collect(),
         user_login: author_login.to_string(),
         user_id: author_id,
+        created_at: k8s_openapi::chrono::DateTime::UNIX_EPOCH,
     }
 }
 

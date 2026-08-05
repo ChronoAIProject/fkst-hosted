@@ -181,7 +181,14 @@ export function Shell() {
                     collapsing actions, so a third nav item can never push the
                     wordmark off a phone screen. */}
                 {isAuthenticated && (
-                  <NavLink to="/operations" className={`${navLinkClass} max-[720px]:hidden`}>
+                  // navLinkClass is a function of the active state, so it has to
+                  // be CALLED and its result composed. Interpolating it into a
+                  // template literal would stringify the function source instead,
+                  // silently dropping every nav style and the active state.
+                  <NavLink
+                    to="/operations"
+                    className={(props) => `${navLinkClass(props)} max-[720px]:hidden`}
+                  >
                     {c.operations.nav}
                   </NavLink>
                 )}

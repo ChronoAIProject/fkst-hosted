@@ -619,6 +619,14 @@ fn parse_work_label(sections: &[(String, String)]) -> Result<Option<String>, App
              substrate reads a comma-separated env var, so a comma would split it into two labels"
         )));
     }
+    // A platform-owned label selects issues for platform behaviour, so a session
+    // that adopted one could make its ordinary work queue impersonate the schedule
+    // surface. Refused here, at the earliest point the name is known.
+    if let Some(rejection) =
+        crate::reconcile::reserved_labels::reserved_work_label_rejection(&label)
+    {
+        return Err(AppError::Unprocessable(rejection));
+    }
     Ok(Some(label))
 }
 

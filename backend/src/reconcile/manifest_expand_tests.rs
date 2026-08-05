@@ -3,8 +3,8 @@
 
 use secrecy::SecretString;
 use serde_json::json;
-use wiremock::matchers::{method, path, query_param};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::matchers::{header, method, path, query_param};
+use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 use super::{expand_manifest, ManifestError};
 use crate::goals::trigger_parse::PackageRef;
@@ -147,6 +147,92 @@ async fn valid_manifest_expands_all_fourteen_refs() {
     assert_eq!(refs[0].git_ref, "packages");
     assert_eq!(refs[0].path, "packages/workflow-dev");
     assert_eq!(refs[13].path, "packages/log-streamer");
+}
+
+async fn mount_authenticated_status_then_anonymous_body(
+    server: &MockServer,
+    status: u16,
+    body: String,
+) {
+    let m = manifest_ref();
+    let manifest_path = format!("/repos/{}/{}/contents/{}", m.owner, m.repo, m.path);
+
+    Mock::given(method("GET"))
+        .and(path(manifest_path.as_str()))
+        .and(query_param("ref", m.git_ref.as_str()))
+        .and(header(
+            "authorization",
+            format!("Bearer {SECRET_TOKEN}").as_str(),
+        ))
+        .respond_with(ResponseTemplate::new(status))
+        .expect(1)
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(manifest_path))
+        .and(query_param("ref", m.git_ref.as_str()))
+        .and(|request: &Request| !request.headers.contains_key("authorization"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(body))
+        .expect(1)
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn authenticated_fallback_statuses_retry_public_manifest_read() {
+    for status in [401, 403, 404] {
+        let server = MockServer::start().await;
+        mount_authenticated_status_then_anonymous_body(
+            &server,
+            status,
+            manifest_body(
+                1,
+                &["ChronoAIProject/fkst-hosted@packages:packages/workflow-dev".to_string()],
+            ),
+        )
+        .await;
+
+        let refs = expand(&server)
+            .await
+            .unwrap_or_else(|err| panic!("auth {status} should fall back anonymously: {err}"));
+
+        assert_eq!(refs, vec![expected_ref("workflow-dev")]);
+    }
+}
+
+#[tokio::test]
+async fn authenticated_404_followed_by_anonymous_404_is_not_found() {
+    let server = MockServer::start().await;
+    let m = manifest_ref();
+    let manifest_path = format!("/repos/{}/{}/contents/{}", m.owner, m.repo, m.path);
+
+    Mock::given(method("GET"))
+        .and(path(manifest_path.as_str()))
+        .and(query_param("ref", m.git_ref.as_str()))
+        .and(header(
+            "authorization",
+            format!("Bearer {SECRET_TOKEN}").as_str(),
+        ))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(manifest_path))
+        .and(query_param("ref", m.git_ref.as_str()))
+        .and(|request: &Request| !request.headers.contains_key("authorization"))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let err = expand(&server)
+        .await
+        .expect_err("anonymous 404 remains a genuine not-found");
+    assert!(
+        matches!(err, ManifestError::NotFound),
+        "expected NotFound, got {err:?}"
+    );
 }
 
 #[tokio::test]

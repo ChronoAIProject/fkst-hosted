@@ -16,6 +16,7 @@
 //! that reconciler is unit-testable against a fake, mirroring [`super::api::GithubApi`].
 
 use async_trait::async_trait;
+use k8s_openapi::chrono::{DateTime, Utc};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 
@@ -45,6 +46,13 @@ pub struct IssueSummary {
     pub assignees: Vec<String>,
     pub user_login: String,
     pub user_id: i64,
+    /// When GitHub recorded the issue. The schedule pass uses it as a recurrence
+    /// ANCHOR: a definition with no run history yet must not fire for slots that
+    /// predate its own existence, and this is the only durable "start of time" for
+    /// one that GitHub already stores. Defaults to the Unix epoch when a page omits
+    /// it, so one malformed field degrades to "fire from the most recent slot"
+    /// rather than failing the whole decode.
+    pub created_at: DateTime<Utc>,
 }
 
 /// Content-free projection of an issue for authorization decisions.
@@ -123,6 +131,10 @@ struct RawIssue {
     #[serde(default)]
     assignees: Vec<RawLogin>,
     user: RawUser,
+    /// GitHub always sends this; the default keeps one malformed field from
+    /// failing an entire page decode (see [`IssueSummary::created_at`]).
+    #[serde(default)]
+    created_at: Option<DateTime<Utc>>,
     /// Present ONLY when this "issue" is actually a pull request. The issues
     /// endpoint returns PRs too; presence of this field is how they are told
     /// apart and filtered out.
@@ -142,6 +154,7 @@ impl RawIssue {
             assignees: self.assignees.into_iter().map(|a| a.login).collect(),
             user_login: self.user.login,
             user_id: self.user.id,
+            created_at: self.created_at.unwrap_or(DateTime::UNIX_EPOCH),
         }
     }
 }

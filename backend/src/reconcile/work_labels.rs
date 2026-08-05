@@ -22,6 +22,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 
 use crate::goals::trigger_parse::PackageRef;
+use crate::reconcile::auth_fallback::should_retry_without_auth;
 use crate::reconcile::desired::SessionRegistration;
 
 /// GitHub's maximum label-name length, measured in Unicode scalar values.
@@ -310,21 +311,38 @@ async fn fetch_manifest(
     path: &str,
 ) -> Option<Manifest> {
     let url = format!("{base}/repos/{owner}/{repo}/contents/{path}/fkst.toml");
-    let response = http
-        .get(&url)
-        .query(&[("ref", git_ref)])
-        // `raw` returns the file bytes directly rather than the base64 envelope.
-        .header(reqwest::header::ACCEPT, "application/vnd.github.raw")
-        .header(reqwest::header::USER_AGENT, "fkst-hosted-api")
-        .bearer_auth(token.expose_secret())
-        .send()
+    let mut response = package_manifest_request(http, &url, git_ref, Some(token))
         .await
         .ok()?;
+    if should_retry_without_auth(response.status()) {
+        response = package_manifest_request(http, &url, git_ref, None)
+            .await
+            .ok()?;
+    }
     if !response.status().is_success() {
         return None;
     }
     let body = response.text().await.ok()?;
     toml::from_str::<Manifest>(&body).ok()
+}
+
+async fn package_manifest_request(
+    http: &reqwest::Client,
+    url: &str,
+    git_ref: &str,
+    token: Option<&SecretString>,
+) -> Result<reqwest::Response, reqwest::Error> {
+    let request = http
+        .get(url)
+        .query(&[("ref", git_ref)])
+        // `raw` returns the file bytes directly rather than the base64 envelope.
+        .header(reqwest::header::ACCEPT, "application/vnd.github.raw")
+        .header(reqwest::header::USER_AGENT, "fkst-hosted-api");
+    let request = match token {
+        Some(token) => request.bearer_auth(token.expose_secret()),
+        None => request,
+    };
+    request.send().await
 }
 
 #[cfg(test)]

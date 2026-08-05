@@ -59,6 +59,7 @@ fn issue(number: i64, body: &str, user_id: i64) -> IssueSummary {
         assignees: vec![],
         user_login: "carol".to_string(),
         user_id,
+        created_at: k8s_openapi::chrono::DateTime::UNIX_EPOCH,
     }
 }
 

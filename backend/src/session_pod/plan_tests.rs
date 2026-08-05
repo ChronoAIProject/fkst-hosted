@@ -191,35 +191,68 @@ fn plan_clones_groups_one_workspace_and_keeps_paths() {
         "org/pkgs@dev:packages/github-devloop",
         "org/pkgs@dev:packages/github-proxy",
     ]);
-    let plan = plan_clones(&refs).expect("single workspace plans");
+    let plan = plan_clones(&refs, Path::new("/runtime")).expect("single workspace plans");
+    assert_eq!(plan.workspaces.len(), 1);
     assert_eq!(
-        plan.platform_repo,
+        plan.workspaces[0].repo,
         WorkspaceRepo {
             owner: "org".to_string(),
             repo: "pkgs".to_string(),
             git_ref: "dev".to_string(),
         }
     );
+    assert_eq!(plan.workspaces[0].root, PathBuf::from("/runtime/platform"));
     assert_eq!(
-        plan.package_paths,
+        plan.package_roots,
         vec![
-            "packages/github-devloop".to_string(),
-            "packages/github-proxy".to_string()
+            PathBuf::from("/runtime/platform/packages/github-devloop"),
+            PathBuf::from("/runtime/platform/packages/github-proxy")
         ]
     );
 }
 
 #[test]
-fn plan_clones_rejects_refs_from_two_repos() {
+fn plan_clones_groups_refs_from_two_repos() {
     let refs = refs(&["org/pkgs@dev:packages/a", "org/other@dev:packages/b"]);
-    let err = plan_clones(&refs).expect_err("multi-workspace must fail");
-    assert!(err.contains("one workspace repo"), "{err}");
+    let plan = plan_clones(&refs, Path::new("/runtime")).expect("multi-workspace plans");
+    assert_eq!(plan.workspaces.len(), 2);
+    assert_eq!(plan.workspaces[0].root, PathBuf::from("/runtime/platform"));
+    assert!(plan.workspaces[1].root.starts_with("/runtime/platforms"));
+    assert_eq!(
+        plan.package_roots,
+        vec![
+            PathBuf::from("/runtime/platform/packages/a"),
+            plan.workspaces[1].root.join("packages/b")
+        ]
+    );
 }
 
 #[test]
-fn plan_clones_rejects_refs_at_two_git_refs() {
+fn plan_clones_groups_refs_at_two_git_refs() {
     let refs = refs(&["org/pkgs@dev:packages/a", "org/pkgs@main:packages/b"]);
-    assert!(plan_clones(&refs).is_err(), "differing git_ref must fail");
+    let plan = plan_clones(&refs, Path::new("/runtime")).expect("multi-ref workspace plans");
+    assert_eq!(plan.workspaces.len(), 2);
+    assert_eq!(plan.workspaces[0].repo.git_ref, "dev");
+    assert_eq!(plan.workspaces[1].repo.git_ref, "main");
+}
+
+#[test]
+fn plan_clones_preserves_original_package_root_order_across_workspaces() {
+    let refs = refs(&[
+        "org/pkgs@dev:packages/a",
+        "org/market@feat:packages/b",
+        "org/pkgs@dev:packages/c",
+    ]);
+    let plan = plan_clones(&refs, Path::new("/runtime")).expect("multi-workspace plans");
+    let secondary_root = plan.workspaces[1].root.clone();
+    assert_eq!(
+        plan.package_roots,
+        vec![
+            PathBuf::from("/runtime/platform/packages/a"),
+            secondary_root.join("packages/b"),
+            PathBuf::from("/runtime/platform/packages/c"),
+        ]
+    );
 }
 
 fn grant(issue: u64, implementation_repo: &str, implementation_branch: &str) -> DeliveryGrant {
@@ -316,10 +349,9 @@ fn delivery_plan_does_not_reuse_a_checkout_on_the_wrong_branch() {
 fn build_supervise_args_is_the_exact_vector() {
     let args = build_supervise_args(
         "/rt/project",
-        "/rt/platform",
         &[
-            "packages/github-devloop".to_string(),
-            "packages/github-proxy".to_string(),
+            PathBuf::from("/rt/platform/packages/github-devloop"),
+            PathBuf::from("/rt/platforms/abc/packages/x-publisher"),
         ],
         "/usr/local/bin/fkst-framework",
     );
@@ -332,7 +364,7 @@ fn build_supervise_args_is_the_exact_vector() {
             "--package-root",
             "/rt/platform/packages/github-devloop",
             "--package-root",
-            "/rt/platform/packages/github-proxy",
+            "/rt/platforms/abc/packages/x-publisher",
             "--framework-bin",
             "/usr/local/bin/fkst-framework",
         ]

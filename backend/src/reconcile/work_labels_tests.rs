@@ -3,8 +3,8 @@
 //! contents API.
 
 use secrecy::SecretString;
-use wiremock::matchers::{method, path, query_param};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::matchers::{header, method, path, query_param};
+use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 use super::{
     apply_work_label_namespace, provider_session_issue_title, resolve_work_labels,
@@ -75,6 +75,91 @@ async fn unions_declared_labels_across_packages() {
     assert!(labels.contains("fkst-security"));
     assert!(labels.contains("fkst-workflow"));
     assert_eq!(labels.len(), 2);
+}
+
+async fn mount_authenticated_status_then_anonymous_manifest(
+    server: &MockServer,
+    repo_path: &str,
+    git_ref: &str,
+    status: u16,
+    anonymous_status: u16,
+    anonymous_body: Option<&str>,
+) {
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/{repo_path}/fkst.toml")))
+        .and(query_param("ref", git_ref))
+        .and(header("authorization", "Bearer t"))
+        .respond_with(ResponseTemplate::new(status))
+        .expect(1)
+        .mount(server)
+        .await;
+
+    let mut response = ResponseTemplate::new(anonymous_status);
+    if let Some(body) = anonymous_body {
+        response = response.set_body_string(body.to_string());
+    }
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/{repo_path}/fkst.toml")))
+        .and(query_param("ref", git_ref))
+        .and(|request: &Request| !request.headers.contains_key("authorization"))
+        .respond_with(response)
+        .expect(1)
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn authenticated_fallback_statuses_retry_public_package_manifest_read() {
+    for status in [401, 403, 404] {
+        let server = MockServer::start().await;
+        let repo_path = "o/r/contents/packages/workflow-dev";
+
+        mount_authenticated_status_then_anonymous_manifest(
+            &server,
+            repo_path,
+            "main",
+            status,
+            200,
+            Some("[github]\nwork_labels = [\"fkst-dev\"]\n"),
+        )
+        .await;
+
+        let labels = resolve_work_labels(
+            &reqwest::Client::new(),
+            &server.uri(),
+            &tok(),
+            &[pkg("o", "r", "main", "packages/workflow-dev")],
+        )
+        .await;
+
+        assert!(
+            labels.contains("fkst-dev"),
+            "auth {status} should fall back anonymously"
+        );
+        assert_eq!(labels.len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn authenticated_404_followed_by_anonymous_404_contributes_nothing() {
+    let server = MockServer::start().await;
+    let repo_path = "o/r/contents/packages/workflow-dev";
+
+    mount_authenticated_status_then_anonymous_manifest(&server, repo_path, "main", 404, 404, None)
+        .await;
+
+    let labels = resolve_work_labels(
+        &reqwest::Client::new(),
+        &server.uri(),
+        &tok(),
+        &[pkg("o", "r", "main", "packages/workflow-dev")],
+    )
+    .await;
+
+    assert!(
+        labels.is_empty(),
+        "a final anonymous 404 is still a genuine missing package manifest"
+    );
 }
 
 #[tokio::test]

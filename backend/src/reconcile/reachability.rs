@@ -20,13 +20,16 @@
 //! available: an authenticated request reads public content just the same but under
 //! the 5000/hour token budget instead of the 60/hour UNAUTHENTICATED-per-IP budget,
 //! which a session's package closure (many refs) times repeated reconciles would
-//! otherwise exhaust — producing false "unreachable" flags. It falls back to an
-//! unauthenticated probe when no token is supplied (public repos only).
+//! otherwise exhaust — producing false "unreachable" flags. When GitHub returns
+//! 401/403/404 for the authenticated probe, it retries anonymously before classifying
+//! the ref as unreachable; this is required for public packages outside the target
+//! repo installation, where GitHub may hide access with either 403 or 404.
 //!
 //! Secret hygiene: package refs are non-secret public metadata; the token is a
 //! standard bearer credential, sent only as an `Authorization` header, never logged.
 
 use crate::goals::trigger_parse::PackageRef;
+use crate::reconcile::auth_fallback::should_retry_without_auth;
 
 /// The manifest file a valid package directory must contain. Its presence at
 /// `{path}/fkst.toml` is what the `200` proves.
@@ -82,22 +85,10 @@ async fn probe_one(
         "{base}/repos/{}/{}/contents/{}/{PACKAGE_MANIFEST}",
         r.owner, r.repo, r.path
     );
-    let mut request = http
-        .get(&url)
-        .query(&[("ref", r.git_ref.as_str())])
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        // GitHub rejects an API request with no User-Agent (403); set it here so
-        // the probe works regardless of how the shared client was built.
-        .header(reqwest::header::USER_AGENT, "fkst-hosted-api");
-    // Authenticate when a token is available: reads public content the same but
-    // under the 5000/hour token budget instead of the 60/hour per-IP budget.
-    if let Some(token) = token {
-        request = request.bearer_auth(token);
+    let mut response = package_manifest_request(http, &url, &r.git_ref, token).await?;
+    if token.is_some() && should_retry_without_auth(response.status()) {
+        response = package_manifest_request(http, &url, &r.git_ref, None).await?;
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|e| format!("request failed: {e}"))?;
 
     let status = response.status();
     if status.is_success() {
@@ -113,6 +104,30 @@ async fn probe_one(
             "unexpected status {status} probing {PACKAGE_MANIFEST}"
         ))
     }
+}
+
+async fn package_manifest_request(
+    http: &reqwest::Client,
+    url: &str,
+    git_ref: &str,
+    token: Option<&str>,
+) -> Result<reqwest::Response, String> {
+    let mut request = http
+        .get(url)
+        .query(&[("ref", git_ref)])
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        // GitHub rejects an API request with no User-Agent (403); set it here so
+        // the probe works regardless of how the shared client was built.
+        .header(reqwest::header::USER_AGENT, "fkst-hosted-api");
+    // Authenticate when a token is available: reads public content the same but
+    // under the 5000/hour token budget instead of the 60/hour per-IP budget.
+    if let Some(token) = token {
+        request = request.bearer_auth(token);
+    }
+    request
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))
 }
 
 #[cfg(test)]
