@@ -136,6 +136,14 @@ async fn paths_are_the_trimmed_v1_surface() {
         "/api/v1/repos/{owner}/{name}/sessions/{issue_number}",
         // Queue a work item on a session (opens a work-label-stamped issue).
         "/api/v1/repos/{owner}/{name}/sessions/{issue_number}/work-items",
+        // The scheduled-workflow surface: the projection plus the three durable
+        // state changes the dashboard performs.
+        "/api/v1/repos/{owner}/{name}/schedules",
+        "/api/v1/repos/{owner}/{name}/schedules/{schedule_issue}",
+        "/api/v1/repos/{owner}/{name}/schedules/{schedule_issue}/runs/{slot}",
+        "/api/v1/repos/{owner}/{name}/schedules/{schedule_issue}/pause",
+        "/api/v1/repos/{owner}/{name}/schedules/{schedule_issue}/resume",
+        "/api/v1/repos/{owner}/{name}/schedules/{schedule_issue}/run",
         // A session's outcome files grouped by PR + the raw blob-stream.
         "/api/v1/repos/{owner}/{name}/sessions/{issue_number}/outcomes",
         "/api/v1/repos/{owner}/{name}/blob/{sha}",
@@ -170,6 +178,27 @@ async fn paths_are_the_trimmed_v1_surface() {
         ),
         (
             "/api/v1/repos/{owner}/{name}/sessions/{issue_number}/work-items",
+            "post",
+        ),
+        ("/api/v1/repos/{owner}/{name}/schedules", "get"),
+        (
+            "/api/v1/repos/{owner}/{name}/schedules/{schedule_issue}",
+            "get",
+        ),
+        (
+            "/api/v1/repos/{owner}/{name}/schedules/{schedule_issue}/runs/{slot}",
+            "get",
+        ),
+        (
+            "/api/v1/repos/{owner}/{name}/schedules/{schedule_issue}/pause",
+            "post",
+        ),
+        (
+            "/api/v1/repos/{owner}/{name}/schedules/{schedule_issue}/resume",
+            "post",
+        ),
+        (
+            "/api/v1/repos/{owner}/{name}/schedules/{schedule_issue}/run",
             "post",
         ),
     ] {

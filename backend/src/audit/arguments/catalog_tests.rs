@@ -28,6 +28,12 @@ fn all_field_sets() -> Vec<(&'static str, &'static [&'static str])> {
         ("canvas_create_session", CANVAS_CREATE_SESSION_FIELDS),
         ("canvas_stop_session", CANVAS_STOP_SESSION_FIELDS),
         ("canvas_create_work_item", CANVAS_CREATE_WORK_ITEM_FIELDS),
+        ("canvas_repo_schedules", CANVAS_REPO_SCHEDULES_FIELDS),
+        ("canvas_schedule_detail", CANVAS_SCHEDULE_DETAIL_FIELDS),
+        ("canvas_schedule_run", CANVAS_SCHEDULE_RUN_FIELDS),
+        ("canvas_pause_schedule", CANVAS_PAUSE_SCHEDULE_FIELDS),
+        ("canvas_resume_schedule", CANVAS_RESUME_SCHEDULE_FIELDS),
+        ("canvas_run_schedule_now", CANVAS_RUN_SCHEDULE_NOW_FIELDS),
         ("canvas_session_outcomes", CANVAS_SESSION_OUTCOMES_FIELDS),
         ("canvas_outcome_blob", CANVAS_OUTCOME_BLOB_FIELDS),
         (
@@ -169,6 +175,30 @@ fn the_normative_canvas_field_sets_match_the_issue_catalog() {
         CANVAS_STOP_SESSION_FIELDS,
         &["owner", "repo", "trigger_issue"]
     );
+    // The scheduled-workflow surface. Nothing out of a definition's BODY appears
+    // here — not the workflow id, not the arguments, not the cadence — because
+    // that is author-written content, and a record names what was addressed.
+    assert_eq!(CANVAS_REPO_SCHEDULES_FIELDS, &["owner", "repo"]);
+    assert_eq!(
+        CANVAS_SCHEDULE_DETAIL_FIELDS,
+        &["owner", "repo", "schedule_issue"]
+    );
+    assert_eq!(
+        CANVAS_SCHEDULE_RUN_FIELDS,
+        &["owner", "repo", "schedule_issue", "slot"]
+    );
+    assert_eq!(
+        CANVAS_PAUSE_SCHEDULE_FIELDS,
+        &["owner", "repo", "schedule_issue"]
+    );
+    assert_eq!(
+        CANVAS_RESUME_SCHEDULE_FIELDS,
+        &["owner", "repo", "schedule_issue"]
+    );
+    assert_eq!(
+        CANVAS_RUN_SCHEDULE_NOW_FIELDS,
+        &["owner", "repo", "schedule_issue"]
+    );
     assert_eq!(
         CANVAS_CREATE_WORK_ITEM_FIELDS,
         &[
@@ -307,7 +337,7 @@ fn the_normative_webhook_chat_and_operations_field_sets_match_the_issue_catalog(
 /// nothing. This count is the reminder to add both.
 #[test]
 fn every_declared_field_set_is_pinned_by_the_tests_above() {
-    const PINNED: usize = 28;
+    const PINNED: usize = 34;
     assert_eq!(
         all_field_sets().len(),
         PINNED,

@@ -24,6 +24,10 @@ mod overview;
 // Broader-visibility enumeration-token resolution (issue #572): decides whether the
 // overview enumerates with the App token or a caller-supplied broader-OAuth token.
 mod overview_broader;
+// The schedules surface: a pure projection of scheduled workflows plus the
+// three durable state changes (pause, resume, run now) the dashboard performs.
+mod schedule_projection;
+mod schedules;
 mod sessions;
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -110,6 +114,12 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(sessions::repo_sessions, mutate::create_session))
         .routes(routes!(mutate::stop_session))
         .routes(routes!(work_item::create_work_item))
+        .routes(routes!(schedules::repo_schedules))
+        .routes(routes!(schedules::schedule_detail))
+        .routes(routes!(schedules::schedule_run))
+        .routes(routes!(schedules::pause_schedule))
+        .routes(routes!(schedules::resume_schedule))
+        .routes(routes!(schedules::run_schedule_now))
         .routes(routes!(outcomes::session_outcomes))
         .routes(routes!(outcomes::outcome_blob))
 }

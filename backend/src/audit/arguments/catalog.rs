@@ -103,6 +103,15 @@ pub const CANVAS_CREATE_SESSION_FIELDS: &[&str] = &[
     "output_language",
 ];
 pub const CANVAS_STOP_SESSION_FIELDS: &[&str] = &["owner", "repo", "trigger_issue"];
+/// The scheduled-workflow surface. Every record names the repository and the
+/// definition issue the caller addressed — never the workflow id, the arguments,
+/// or anything else out of a schedule's body, which is author-written content.
+pub const CANVAS_REPO_SCHEDULES_FIELDS: &[&str] = &["owner", "repo"];
+pub const CANVAS_SCHEDULE_DETAIL_FIELDS: &[&str] = &["owner", "repo", "schedule_issue"];
+pub const CANVAS_SCHEDULE_RUN_FIELDS: &[&str] = &["owner", "repo", "schedule_issue", "slot"];
+pub const CANVAS_PAUSE_SCHEDULE_FIELDS: &[&str] = &["owner", "repo", "schedule_issue"];
+pub const CANVAS_RESUME_SCHEDULE_FIELDS: &[&str] = &["owner", "repo", "schedule_issue"];
+pub const CANVAS_RUN_SCHEDULE_NOW_FIELDS: &[&str] = &["owner", "repo", "schedule_issue"];
 pub const CANVAS_CREATE_WORK_ITEM_FIELDS: &[&str] = &[
     "owner",
     "repo",

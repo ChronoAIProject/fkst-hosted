@@ -205,7 +205,7 @@ async fn plan_one(
 /// GitHub renders an App's author login as `<slug>[bot]` in most contexts but not
 /// all, so the comparison tolerates the suffix in either direction — the same
 /// leniency [`crate::session_access::policy`] applies to the App system principal.
-fn comment_is_from_bot(author: &str, bot_login: &str) -> bool {
+pub fn comment_is_from_bot(author: &str, bot_login: &str) -> bool {
     let normalize = |login: &str| login.trim().trim_end_matches("[bot]").to_ascii_lowercase();
     !author.is_empty() && normalize(author) == normalize(bot_login)
 }
@@ -215,7 +215,7 @@ fn comment_is_from_bot(author: &str, bot_login: &str) -> bool {
 /// Fail-closed when ambiguous rather than guessing: a run issue with the wrong
 /// label wakes the wrong session, or no session at all, and the author would have
 /// no way to tell which happened.
-fn resolve_work_label(
+pub fn resolve_work_label(
     reg: &SessionRegistration,
     logical_work_labels: &HashMap<String, Vec<String>>,
     cfg: &ReconcileConfig,
@@ -270,6 +270,70 @@ fn resolve_work_label(
                 .join(", ")
         )),
     }
+}
+
+/// The effective work label a MANUAL run's issue must carry.
+///
+/// Shares [`resolve_work_label`] with the clock rather than approximating it. A
+/// manual run that routed somewhere a scheduled one would not is exactly the class
+/// of surprise the fail-closed label rules exist to prevent, so this resolves from
+/// the same inputs — the creator's registrations and their manifest-expanded
+/// work-label sets — and fails closed for the same reasons.
+pub async fn resolve_manual_run_label(
+    http: &reqwest::Client,
+    api_base: &str,
+    token: &SecretString,
+    repo: &RepoRef,
+    triggers: &[IssueSummary],
+    creator_login: &str,
+    cfg: &ReconcileConfig,
+) -> Result<String, String> {
+    let mut regs: Vec<SessionRegistration> = triggers
+        .iter()
+        .filter_map(|issue| {
+            let creator = match crate::reconcile::effective_creator(
+                &issue.metadata(),
+                cfg.github_bot_login.as_deref(),
+            ) {
+                crate::reconcile::CreatorResolution::Resolved(creator) => creator,
+                crate::reconcile::CreatorResolution::Unattributable { .. } => return None,
+            };
+            // The installation id only seeds the deterministic session id, which
+            // is used here purely as a lookup key within this one call — never
+            // persisted, never compared with a real session's id.
+            crate::reconcile::parse_registration(0, repo, issue, creator).ok()
+        })
+        .filter(|reg| reg.creator_login.eq_ignore_ascii_case(creator_login))
+        .collect();
+    // Same tie-break as the schedule pass: the lowest trigger issue owns it.
+    regs.sort_by_key(|reg| reg.trigger_issue);
+    let Some(mut reg) = regs.into_iter().next() else {
+        return Err(format!(
+            "no active session on this repository is owned by {creator_login}"
+        ));
+    };
+
+    // Discovery must walk the MANIFEST-EXPANDED package set, exactly as the
+    // reconciler does, or a manifest-driven session's labels would be invisible.
+    let expanded = crate::reconcile::effective_packages::resolve_effective_packages(
+        http,
+        api_base,
+        token,
+        std::slice::from_ref(&reg),
+        &cfg.mandatory_packages,
+    )
+    .await;
+    if let Some(packages) = expanded.by_session.get(&reg.session_id) {
+        reg.effective_packages = packages.clone();
+    }
+    let logical = crate::reconcile::work_labels::resolve_work_label_sets(
+        http,
+        api_base,
+        token,
+        std::slice::from_ref(&reg),
+    )
+    .await;
+    resolve_work_label(&reg, &logical, cfg)
 }
 
 #[cfg(test)]

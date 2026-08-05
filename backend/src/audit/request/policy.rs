@@ -288,6 +288,36 @@ pub const OPERATION_POLICIES: &[AuditOperation] = &[
         arguments::CANVAS_CREATE_WORK_ITEM_FIELDS,
     ),
     audited(
+        "canvas_repo_schedules",
+        "SafeCanvasRepoSchedules",
+        arguments::CANVAS_REPO_SCHEDULES_FIELDS,
+    ),
+    audited(
+        "canvas_schedule_detail",
+        "SafeCanvasScheduleDetail",
+        arguments::CANVAS_SCHEDULE_DETAIL_FIELDS,
+    ),
+    audited(
+        "canvas_schedule_run",
+        "SafeCanvasScheduleRun",
+        arguments::CANVAS_SCHEDULE_RUN_FIELDS,
+    ),
+    audited(
+        "canvas_pause_schedule",
+        "SafeCanvasPauseSchedule",
+        arguments::CANVAS_PAUSE_SCHEDULE_FIELDS,
+    ),
+    audited(
+        "canvas_resume_schedule",
+        "SafeCanvasResumeSchedule",
+        arguments::CANVAS_RESUME_SCHEDULE_FIELDS,
+    ),
+    audited(
+        "canvas_run_schedule_now",
+        "SafeCanvasRunScheduleNow",
+        arguments::CANVAS_RUN_SCHEDULE_NOW_FIELDS,
+    ),
+    audited(
         "canvas_session_outcomes",
         "SafeCanvasSessionOutcomes",
         arguments::CANVAS_SESSION_OUTCOMES_FIELDS,

@@ -205,11 +205,7 @@ async fn dispatch(
     skipped: u32,
     github: &GithubAppTokens,
 ) {
-    let body = render_run_issue_body(&request);
-    let run_issue = match github
-        .create_issue(owner_repo, &request.title(), &body, &[], &[])
-        .await
-    {
+    let run_issue = match create_run_issue(owner_repo, &request, github).await {
         Ok(number) => number,
         Err(error) => {
             tracing::warn!(
@@ -221,44 +217,6 @@ async fn dispatch(
             return;
         }
     };
-
-    if let Err(error) = github
-        .add_issue_labels(
-            owner_repo,
-            run_issue,
-            std::slice::from_ref(&request.work_label),
-        )
-        .await
-    {
-        // Without its label the run issue cannot wake the session. Say so loudly:
-        // the next sweep will not adopt it either, because nothing recorded it.
-        tracing::error!(
-            owner_repo = %owner_repo,
-            schedule_issue,
-            run_issue,
-            error = %error,
-            "schedule: run issue created but labelling failed; it will not wake a session"
-        );
-        return;
-    }
-    if let Err(error) = github
-        .add_issue_assignees(
-            owner_repo,
-            run_issue,
-            std::slice::from_ref(&request.creator_login),
-        )
-        .await
-    {
-        // Recoverable and self-explaining: the reconciler latches `fkst-unrouted`
-        // on the labelled-but-unassigned issue, which clears when it is assigned.
-        tracing::warn!(
-            owner_repo = %owner_repo,
-            schedule_issue,
-            run_issue,
-            error = %error,
-            "schedule: run issue created but assignment failed; it will latch fkst-unrouted"
-        );
-    }
 
     let now = Utc::now();
     let record = RunRecord::new(request.slot, RunStatus::Dispatched, now).with_issue(run_issue);
@@ -288,6 +246,89 @@ async fn dispatch(
         github,
     )
     .await;
+}
+
+/// Create the run issue: the three writes whose ORDER is described in the module
+/// docs, shared by the clock and by a dashboard "run now" so a manual run is
+/// indistinguishable from a scheduled one downstream.
+///
+/// Labelling failure is an ERROR return, not a warning: without its label the run
+/// issue cannot wake a session, and nothing has recorded it yet, so no later pass
+/// will adopt it. Assignment failure is recoverable and self-explaining — the
+/// reconciler latches `fkst-unrouted` on the labelled-but-unassigned issue, which
+/// clears the moment it is assigned.
+async fn create_run_issue(
+    owner_repo: &str,
+    request: &RunIssueRequest,
+    github: &GithubAppTokens,
+) -> Result<u64, GithubAppError> {
+    let body = render_run_issue_body(request);
+    let run_issue = github
+        .create_issue(owner_repo, &request.title(), &body, &[], &[])
+        .await?;
+    github
+        .add_issue_labels(
+            owner_repo,
+            run_issue,
+            std::slice::from_ref(&request.work_label),
+        )
+        .await?;
+    if let Err(error) = github
+        .add_issue_assignees(
+            owner_repo,
+            run_issue,
+            std::slice::from_ref(&request.creator_login),
+        )
+        .await
+    {
+        tracing::warn!(
+            owner_repo = %owner_repo,
+            run_issue,
+            error = %error,
+            "schedule: run issue created but assignment failed; it will latch fkst-unrouted"
+        );
+    }
+    Ok(run_issue)
+}
+
+/// Dispatch a MANUAL run and report the run issue back to the caller.
+///
+/// It goes through the same `create_run_issue` and writes the same `Dispatched`
+/// record and running latch as the clock, so completion detection, the watchdog,
+/// and the overlap rule all treat it identically. The only difference is
+/// `manual = true` in the record, which is what lets the history distinguish an
+/// operator's run from a cadence firing.
+///
+/// Unlike the clock's path this one PROPAGATES failure: an interactive caller
+/// pressing a button deserves an error, not a silent no-op.
+pub async fn dispatch_manual_run(
+    owner_repo: &str,
+    request: RunIssueRequest,
+    github: &GithubAppTokens,
+) -> Result<u64, crate::error::AppError> {
+    let schedule_issue = request.schedule_issue;
+    let run_issue = create_run_issue(owner_repo, &request, github).await?;
+    let now = Utc::now();
+    let record = RunRecord::new(request.slot, RunStatus::Dispatched, now)
+        .manual()
+        .with_issue(run_issue);
+    post_record(
+        owner_repo,
+        schedule_issue,
+        &record,
+        &format!("▶️ Manual run started — tracked in #{run_issue}."),
+        github,
+    )
+    .await;
+    set_labels(
+        owner_repo,
+        schedule_issue,
+        &[CRON_RUNNING_LABEL],
+        &[],
+        github,
+    )
+    .await;
+    Ok(run_issue)
 }
 
 /// Post one run record as a comment carrying its human line and hidden marker.

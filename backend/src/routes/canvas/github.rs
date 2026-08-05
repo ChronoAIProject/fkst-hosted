@@ -375,6 +375,78 @@ impl DashboardGithub {
         Err(issue_write_error("get_issue", status, message))
     }
 
+    /// `POST /repos/{owner}/{repo}/issues/{number}/labels` with the USER token —
+    /// additive, so applying a label twice is a no-op rather than an error.
+    ///
+    /// The user token is deliberate: if our own authority tier were ever wrong,
+    /// GitHub still refuses the write, and the resulting event carries the human's
+    /// identity rather than the App's.
+    pub(crate) async fn add_issue_label(
+        &self,
+        user_token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        label: &str,
+    ) -> Result<(), AppError> {
+        let url = format!(
+            "{}/repos/{owner}/{repo}/issues/{number}/labels",
+            self.api_base
+        );
+        let response = self
+            .client
+            .post(&url)
+            .bearer_auth(user_token.expose_secret())
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+            .json(&serde_json::json!({ "labels": [label] }))
+            .send()
+            .await
+            .map_err(|e| {
+                tracing::warn!(error = %e, "github add-label transport error");
+                AppError::Unavailable("github add-label request failed".to_string())
+            })?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        let message = github_error_message(response).await;
+        Err(issue_write_error("add_issue_label", status, message))
+    }
+
+    /// `DELETE /repos/{owner}/{repo}/issues/{number}/labels/{label}` with the USER
+    /// token. A 404 means the label was already absent, which IS the desired state,
+    /// so resuming an unpaused schedule succeeds rather than erroring.
+    pub(crate) async fn remove_issue_label(
+        &self,
+        user_token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        label: &str,
+    ) -> Result<(), AppError> {
+        let url = format!(
+            "{}/repos/{owner}/{repo}/issues/{number}/labels/{label}",
+            self.api_base
+        );
+        let response = self
+            .client
+            .delete(&url)
+            .bearer_auth(user_token.expose_secret())
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+            .send()
+            .await
+            .map_err(|e| {
+                tracing::warn!(error = %e, "github remove-label transport error");
+                AppError::Unavailable("github remove-label request failed".to_string())
+            })?;
+        let status = response.status();
+        if status.is_success() || status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(());
+        }
+        let message = github_error_message(response).await;
+        Err(issue_write_error("remove_issue_label", status, message))
+    }
+
     /// `PATCH /repos/{owner}/{repo}/issues/{number}` `state=closed` with the
     /// USER token — closing the trigger issue IS the stop/retire contract, and
     /// GitHub natively enforces whether THIS caller may close it.

@@ -181,6 +181,57 @@ impl CronExpr {
         smallest
     }
 
+    /// A short human rendering of the cadence, for the dashboard and the API.
+    ///
+    /// Deliberately covers only the shapes people actually write and falls back to
+    /// the expression itself for everything else. A description that paraphrases a
+    /// complex expression approximately is worse than none: an operator would trust
+    /// it, and the clock would do something different.
+    pub fn describe(&self) -> String {
+        let every_day = !self.day_of_month.is_restricted()
+            && !self.day_of_week.is_restricted()
+            && !self.month.is_restricted();
+        let single = |field: &CronField| {
+            let mut values = field.values();
+            match (values.next(), values.next()) {
+                (Some(value), None) => Some(value),
+                _ => None,
+            }
+        };
+
+        // `*/n * * * *` — the sub-hourly case.
+        if every_day && single(&self.hour).is_none() && !self.hour.is_restricted() {
+            let minutes: Vec<u32> = self.minute.values().collect();
+            if let Some(step) = even_step(&minutes) {
+                return format!("every {step} minutes");
+            }
+            if minutes.len() == 60 {
+                return "every minute".to_string();
+            }
+        }
+
+        let (Some(minute), Some(hour)) = (single(&self.minute), single(&self.hour)) else {
+            return format!("cron `{}` (UTC)", self.expression);
+        };
+        let time = format!("{hour:02}:{minute:02} UTC");
+        if every_day {
+            return format!("daily at {time}");
+        }
+        if !self.day_of_month.is_restricted() && !self.month.is_restricted() {
+            let days: Vec<u32> = self.day_of_week.values().collect();
+            if days == [1, 2, 3, 4, 5] {
+                return format!("weekdays at {time}");
+            }
+            if days == [0, 6] {
+                return format!("weekends at {time}");
+            }
+            if let [day] = days.as_slice() {
+                return format!("every {} at {time}", weekday_name(*day));
+            }
+        }
+        format!("cron `{}` (UTC)", self.expression)
+    }
+
     /// Whether `date` is a day this expression fires on, applying the month filter
     /// and the day-of-month / day-of-week OR rule documented on [`Self::next_after`].
     fn day_matches(&self, date: NaiveDate) -> bool {
@@ -200,6 +251,29 @@ impl CronExpr {
             (false, true) => dow,
             (false, false) => true,
         }
+    }
+}
+
+/// The step of an evenly-spaced value set covering its whole domain from 0, or
+/// `None` when the spacing is irregular (`0,1,30` describes nothing simple).
+fn even_step(values: &[u32]) -> Option<u32> {
+    let [first, second, ..] = values else {
+        return None;
+    };
+    let step = second - first;
+    (*first == 0 && step > 1 && values.windows(2).all(|pair| pair[1] - pair[0] == step))
+        .then_some(step)
+}
+
+fn weekday_name(day: u32) -> &'static str {
+    match day {
+        0 => "Sunday",
+        1 => "Monday",
+        2 => "Tuesday",
+        3 => "Wednesday",
+        4 => "Thursday",
+        5 => "Friday",
+        _ => "Saturday",
     }
 }
 
