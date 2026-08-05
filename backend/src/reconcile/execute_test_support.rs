@@ -260,6 +260,25 @@ pub(crate) use crate::session_backend::test_support::FakeSessionBackend;
 /// A trivial [`GithubListing`] the routing tests never actually call (only the pod
 /// effects run through the faked backend); present so a `ReconcileCtx` is buildable.
 #[derive(Default)]
+/// A repository with no comment history anywhere. The executor-routing tests do
+/// not exercise the schedule pass, so an empty history is both correct and the
+/// cheapest way to satisfy the context.
+pub(super) struct NoComments;
+
+#[async_trait]
+impl crate::github_app::comments::IssueCommentReader for NoComments {
+    async fn list_recent_issue_comments(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        _max_pages: u32,
+    ) -> Result<Vec<crate::github_app::comments::IssueComment>, GithubAppError> {
+        Ok(Vec::new())
+    }
+}
+
 pub(super) struct FakeListing;
 
 #[async_trait]
@@ -325,6 +344,7 @@ pub(crate) fn test_ctx_with_github(
         env_store: Arc::new(EnvStore::fake()),
         github,
         listing: Arc::new(FakeListing),
+        comments: Arc::new(NoComments),
         http: reqwest::Client::new(),
         config: Config::default(),
         active_repos: crate::reconcile::new_active_repos(),

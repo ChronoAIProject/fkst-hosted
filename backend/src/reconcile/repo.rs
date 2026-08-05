@@ -550,6 +550,59 @@ pub async fn reconcile_repo(
         execute(action, repo, ctx).await;
     }
 
+    // 5b. The schedule pass: a SECOND enumeration, over this repository's open
+    //     `fkst-scheduled-workflow` definitions. Deliberately not folded into
+    //     `plan_repo`: it diffs a different desired state (a clock against a run
+    //     history) against a different observed state (issue labels and markers),
+    //     and it must not be able to change which pods the lifecycle planner
+    //     spawns. It reaches sessions only the way a human does — by creating an
+    //     ordinary routed work issue.
+    //
+    //     It runs here, and therefore only on the Lease holder, inheriting leader
+    //     scoping from the reconciler rather than needing its own election.
+    //
+    //     Fail-soft as a WHOLE: a read failure drops this sweep's schedule effects
+    //     with a warning instead of aborting the repo, because the session
+    //     lifecycle above must never depend on the clock. Planning from partial
+    //     reads is separately impossible — the pass itself returns `Err` rather
+    //     than treating a failed history read as an empty one.
+    match crate::reconcile::schedule_pass::plan_repo_schedules(
+        ctx.listing.as_ref(),
+        ctx.comments.as_ref(),
+        &token,
+        repo,
+        &regs,
+        &logical_work_labels_by_session,
+        &ctx.config.access,
+        Utc::now(),
+        cfg,
+    )
+    .await
+    {
+        Ok(effects) => {
+            if !effects.is_empty() {
+                tracing::info!(
+                    owner_repo = %owner_repo,
+                    effects = effects.len(),
+                    "reconcile: schedule pass planned"
+                );
+            }
+            for effect in effects {
+                crate::reconcile::schedule_execute::execute_schedule_effect(
+                    effect,
+                    repo,
+                    &ctx.github,
+                )
+                .await;
+            }
+        }
+        Err(error) => tracing::warn!(
+            owner_repo = %owner_repo,
+            error = %error,
+            "reconcile: schedule pass failed; retrying next sweep"
+        ),
+    }
+
     // 6. Backfill durable creator/trigger attribution onto any live runtime this
     //    pass matched to a registration but that predates the launch stamp. Uses
     //    the stamp already read in step 3, so a settled runtime costs no API call;

@@ -117,6 +117,70 @@ impl CronExpr {
         )))
     }
 
+    /// The latest matching UTC instant at or before `at`, or `None` when this
+    /// expression has never fired within the search horizon.
+    ///
+    /// This is what makes the schedule pass stateless. Walking FORWARD from a
+    /// definition's anchor to find the slot that has just come due would cost one
+    /// iteration per elapsed slot — unbounded for a `*/15` cadence on an issue that
+    /// has been open for months — so the clock instead asks "what is the most recent
+    /// slot?" directly and compares it with the cursor recovered from the run
+    /// history.
+    pub fn previous_or_equal(&self, at: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        let start = at.date_naive();
+        for offset in 0..MAX_SEARCH_DAYS {
+            let date = start.checked_sub_days(Days::new(offset))?;
+            if !self.day_matches(date) {
+                continue;
+            }
+            // Descending, so the first candidate at or before `at` is the latest one.
+            for hour in self.hour.values().rev() {
+                for minute in self.minute.values().rev() {
+                    let Some(naive) = date.and_hms_opt(hour, minute, 0) else {
+                        continue;
+                    };
+                    let candidate = Utc.from_utc_datetime(&naive);
+                    if candidate <= at {
+                        return Some(candidate);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// The shortest gap this expression can produce between consecutive firings,
+    /// in seconds, used to enforce the deployment's minimum-cadence guard.
+    ///
+    /// Sampled from a FIXED reference instant rather than from the caller's clock so
+    /// the verdict is a property of the expression alone: the same schedule must not
+    /// be accepted on Monday and rejected on Tuesday. The reference is a Monday so
+    /// that a weekday-restricted expression starts inside its own active window and
+    /// the sample is not dominated by the weekend gap.
+    ///
+    /// `None` when the expression fires fewer than twice inside the sample, which
+    /// means its cadence is far coarser than any plausible minimum.
+    pub fn min_interval_secs(&self) -> Option<u64> {
+        /// Enough firings to see the tight gaps inside an irregular list such as
+        /// `0,1,30 * * * *`, and cheap: each step is one `next_after` walk.
+        const SAMPLE: usize = 32;
+        // 2001-01-01 was a Monday. The first firing is only the starting point:
+        // measuring from the reference itself would report the distance to the
+        // first slot (three hours for `0 3 * * *`) as if it were the cadence.
+        let reference = Utc.with_ymd_and_hms(2001, 1, 1, 0, 0, 0).single()?;
+        let mut cursor = self.next_after(reference).ok()?;
+        let mut smallest: Option<u64> = None;
+        for _ in 0..SAMPLE {
+            let Ok(next) = self.next_after(cursor) else {
+                break;
+            };
+            let gap = (next - cursor).num_seconds().max(0) as u64;
+            smallest = Some(smallest.map_or(gap, |current: u64| current.min(gap)));
+            cursor = next;
+        }
+        smallest
+    }
+
     /// Whether `date` is a day this expression fires on, applying the month filter
     /// and the day-of-month / day-of-week OR rule documented on [`Self::next_after`].
     fn day_matches(&self, date: NaiveDate) -> bool {

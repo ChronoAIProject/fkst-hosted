@@ -31,6 +31,10 @@ fn defaults_apply_when_nothing_is_set() {
     assert_eq!(config.sandbox_inventory_max_source_items, 5000);
     assert_eq!(config.sandbox_inventory_max_warnings, 256);
     assert_eq!(config.health_scrape_secs, 150);
+    assert_eq!(config.cron_min_interval_secs, 900);
+    assert_eq!(config.cron_max_runtime_secs, 3600);
+    assert_eq!(config.cron_max_jobs_per_creator, 20);
+    assert_eq!(config.cron_history_pages, 2);
     // I9: install-time seeding is ON by default (behaviour change) and points
     // at the default-workflows manifest.
     assert!(config.seed_trigger_issue_on_install);
@@ -384,4 +388,52 @@ fn the_deployed_mandatory_list_is_accepted() {
         .all(|r| r.owner == "ChronoAIProject"
             && r.repo == "fkst-hosted"
             && r.git_ref == "packages"));
+}
+
+// ---- the clock's knobs -----------------------------------------------------
+
+#[test]
+fn the_cron_knobs_accept_deliberate_overrides() {
+    let config = ReconcileConfig::from_vars(&vars(&[
+        ("FKST_CRON_MIN_INTERVAL_SECS", "60"),
+        ("FKST_CRON_MAX_RUNTIME_SECS", "259200"),
+        ("FKST_CRON_MAX_JOBS_PER_CREATOR", "5"),
+        ("FKST_CRON_HISTORY_PAGES", "10"),
+    ]))
+    .expect("explicit overrides are accepted");
+    assert_eq!(config.cron_min_interval_secs, 60);
+    assert_eq!(config.cron_max_runtime_secs, 259_200);
+    assert_eq!(config.cron_max_jobs_per_creator, 5);
+    assert_eq!(config.cron_history_pages, 10);
+}
+
+#[test]
+fn the_cron_knobs_fail_closed_on_values_that_would_break_the_clock() {
+    // Each of these is a value that LOOKS like tuning and would silently break
+    // scheduling, so each names its own variable at startup rather than producing
+    // a confusing runtime symptom later.
+    let cases = [
+        // Below the sweep cadence the clock could never keep up with its own
+        // definition, and each firing still costs a run issue plus a pod boot.
+        ("FKST_CRON_MIN_INTERVAL_SECS", "30"),
+        // A tiny budget expires every real run mid-flight, which reads to an
+        // operator as "scheduled workflows randomly time out".
+        ("FKST_CRON_MAX_RUNTIME_SECS", "10"),
+        // Zero would reject every schedule in the deployment.
+        ("FKST_CRON_MAX_JOBS_PER_CREATOR", "0"),
+        // Zero pages means no definition ever recovers its history, so every one
+        // re-fires its anchor slot on every sweep.
+        ("FKST_CRON_HISTORY_PAGES", "0"),
+    ];
+    for (key, value) in cases {
+        let error = ReconcileConfig::from_vars(&vars(&[(key, value)]))
+            .expect_err("{key}={value} must be refused");
+        let AppError::Config(message) = error else {
+            panic!("expected a config error for {key}");
+        };
+        assert!(
+            message.contains(key),
+            "the error must name {key}: {message}"
+        );
+    }
 }

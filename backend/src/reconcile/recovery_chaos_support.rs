@@ -195,6 +195,23 @@ impl GithubLedger {
     }
 }
 
+/// The chaos fixtures drive session lifecycle, not schedules, so the ledger has no
+/// comment history to serve. Answering empty keeps the schedule pass a no-op there
+/// instead of adding a second fake for a surface these scenarios never touch.
+#[async_trait]
+impl crate::github_app::comments::IssueCommentReader for GithubLedger {
+    async fn list_recent_issue_comments(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        _max_pages: u32,
+    ) -> Result<Vec<crate::github_app::comments::IssueComment>, GithubAppError> {
+        Ok(Vec::new())
+    }
+}
+
 #[async_trait]
 impl GithubListing for GithubLedger {
     async fn list_issues_by_label(
@@ -486,7 +503,8 @@ impl ChaosHarness {
             backend,
             env_store: Arc::new(FixtureEnvironmentStore),
             github,
-            listing: ledger,
+            listing: ledger.clone(),
+            comments: ledger,
             http: reqwest::Client::new(),
             config,
             active_repos: new_active_repos(),

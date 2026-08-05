@@ -27,7 +27,10 @@ impl CronField {
 
     /// Every matching value, ascending. Used to walk candidate hours/minutes in
     /// order without scanning the whole domain.
-    pub(super) fn values(&self) -> impl Iterator<Item = u32> + '_ {
+    ///
+    /// Double-ended so the same iterator serves both search directions: `next_after`
+    /// takes the first match, `previous_or_equal` the last.
+    pub(super) fn values(&self) -> impl DoubleEndedIterator<Item = u32> + '_ {
         (0..64u32).filter(|value| self.matches(*value))
     }
 
