@@ -15,6 +15,7 @@ import {
   type WorkItemTone,
 } from '@/lib/api/derive';
 import { Note, SectionLabel, Spinner } from './parts';
+import { fallbackRecovery, isRuntimeLive } from './recovery-state';
 import { ObserveView } from './observe-view';
 import { SessionTimeline } from './session-timeline';
 import { PHASE_TONE, WORK_TONE } from './tones';
@@ -178,60 +179,6 @@ const RECOVERY_TONE: Record<SessionRecoveryState, 'neutral' | 'amber' | 'green' 
   invalid: 'red',
 };
 
-function fallbackRecovery(session: SessionDetail): SessionRecoveryProjection {
-  const openWork = session.work_issues.filter((issue) => issue.state === 'open').length;
-  const status = decodeSessionStatus(session);
-  const runtime = session.liveness ?? 'unknown';
-
-  switch (status.phase) {
-    case 'invalid':
-      return {
-        state: 'invalid',
-        reason: session.status_labels.includes('fkst-config-rejected')
-          ? 'configuration_rejected'
-          : 'registration_invalid',
-        open_work_items: 0,
-        runtime,
-      };
-    case 'retired':
-      return { state: 'retired', reason: 'trigger_closed', open_work_items: 0, runtime };
-    case 'degraded':
-      return {
-        state: 'degraded',
-        reason: 'runtime_health_degraded',
-        open_work_items: openWork,
-        runtime,
-      };
-    case 'idle':
-      return { state: 'idle', reason: 'no_pending_work', open_work_items: 0, runtime };
-    case 'active':
-      return { state: 'normal', reason: 'runtime_live', open_work_items: openWork, runtime };
-    default:
-      if (openWork > 0 && session.liveness === 'starting') {
-        return {
-          state: 'recovering',
-          reason: 'runtime_starting',
-          open_work_items: openWork,
-          runtime,
-        };
-      }
-      if (openWork > 0 && session.liveness === 'terminating') {
-        return {
-          state: 'recovering',
-          reason: 'runtime_terminating',
-          open_work_items: openWork,
-          runtime,
-        };
-      }
-      return {
-        state: 'unknown',
-        reason: 'runtime_observation_unavailable',
-        open_work_items: openWork,
-        runtime,
-      };
-  }
-}
-
 /** Bounded operator read model. It deliberately renders enum-backed labels only:
  * provider errors and private issue content never enter this surface. */
 function RecoveryCard({ recovery }: { recovery: SessionRecoveryProjection }) {
@@ -279,13 +226,7 @@ export function TabStatus({
   const t = useContent().dashboard.detail;
   const counts = countWorkItems(session.work_issues);
   const recovery = session.recovery ?? fallbackRecovery(session);
-  // The live-engine observe fetch pod-execs INTO the running pod, so it is only
-  // meaningful — and only permitted — while the runtime is positively live.
-  // Prefer the typed projection when present so stale legacy liveness cannot
-  // enable a pod exec after an authoritative absent/terminal observation.
-  const isLive = session.recovery
-    ? session.recovery.runtime === 'live'
-    : session.liveness === 'live';
+  const isLive = isRuntimeLive(session);
 
   // Hard gate: never let the observe fetch fire unless the pod is live, even if
   // a stray caller reaches the handler.
