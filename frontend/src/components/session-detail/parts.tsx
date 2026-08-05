@@ -49,18 +49,9 @@ export function SplitPanes({
   );
 }
 
-/** Small indeterminate spinner matching the dashboard's Refresh affordance. */
-export function Spinner({ className }: { className?: string }) {
-  return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        'anim-spin inline-block w-3 h-3 border border-line-2 border-t-amber rounded-full flex-none',
-        className
-      )}
-    />
-  );
-}
+// The spinner is the app's ONE in-flight indicator and lives in ui/loading with
+// LoadingState; re-exported here so this cluster's existing imports keep working.
+export { Spinner } from '@/components/ui/loading';
 
 /** Uppercase eyebrow label used to head a section inside the drawer. */
 export function SectionLabel({ children }: { children: ReactNode }) {

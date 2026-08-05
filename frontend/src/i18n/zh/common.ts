@@ -29,4 +29,9 @@ export const common: CommonSlice = {
     notFoundMetaTitle: 'FKST — 页面未找到',
     toastDismiss: '关闭',
   },
+  loading: {
+    working: '处理中…',
+    github: '正在实时读取 GitHub 上的最新数据 —— 可能需要一点时间。',
+    service: '正在向控制平面获取最新数据 —— 可能需要一点时间。',
+  },
 };

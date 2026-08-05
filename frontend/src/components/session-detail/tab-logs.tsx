@@ -15,6 +15,7 @@ import type { LogFileContent, LogManifest, SessionDetail } from '@/lib/api/types
 import { Chip } from '@/components/ui/chip';
 import { FadeSwap, StaggerItem } from '@/components/ui/motion';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { LoadingState } from '@/components/ui/loading';
 import { Note, NoticeLine, SectionLabel, Spinner, SplitPanes } from './parts';
 import { LogViewer } from './log-viewer';
 import { RunPicker } from './run-picker';
@@ -52,7 +53,8 @@ function Pane({ children }: { children: ReactNode }) {
  *  item, read it. Run-level chrome (the run picker, the bundle download) stays
  *  above the split; it is about the RUN, not the selected file. */
 export function TabLogs({ session }: { session: SessionDetail }) {
-  const t = useContent().dashboard.detail;
+  const c = useContent();
+  const t = c.dashboard.detail;
   const { apiFetch } = useAuth();
   const sessionId = session.session_id;
 
@@ -275,10 +277,7 @@ export function TabLogs({ session }: { session: SessionDetail }) {
   if (runsState === 'loading') {
     return (
       <Pane>
-        <span className="inline-flex items-center gap-2 font-mono text-[11.5px] text-dim">
-          <Spinner />
-          {t.logsLoading}
-        </span>
+        <LoadingState label={t.logsLoading} detail={c.loading.service} />
       </Pane>
     );
   }
@@ -342,10 +341,7 @@ export function TabLogs({ session }: { session: SessionDetail }) {
       {!hasFiles && (
         <Pane>
           {manifestState === 'loading' && (
-            <span className="inline-flex items-center gap-2 font-mono text-[11.5px] text-dim">
-              <Spinner />
-              {t.logsLoading}
-            </span>
+            <LoadingState label={t.logsLoading} detail={c.loading.service} />
           )}
 
           {manifestState === 'error' && (
@@ -439,19 +435,17 @@ export function TabLogs({ session }: { session: SessionDetail }) {
                   type="button"
                   onClick={refresh}
                   disabled={fileState === 'loading' || !selected}
+                  aria-busy={fileState === 'loading'}
                   className="inline-flex items-center gap-1.5 font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber transition-[color,border-color,box-shadow] duration-150 cursor-pointer disabled:cursor-default disabled:hover:text-dim disabled:hover:border-line disabled:hover:shadow-none"
                 >
                   {fileState === 'loading' && <Spinner />}
-                  {t.logsRefresh}
+                  {fileState === 'loading' ? t.logsRefreshing : t.logsRefresh}
                 </button>
               </div>
 
               {fileState === 'idle' && !file && <Note>{t.logsSelectFile}</Note>}
               {fileState === 'loading' && !file && (
-                <span className="inline-flex items-center gap-2 font-mono text-[11.5px] text-dim">
-                  <Spinner />
-                  {t.logsFileLoading}
-                </span>
+                <LoadingState label={t.logsFileLoading} detail={c.loading.service} />
               )}
               {fileState === 'error' && !file && (
                 <p className="text-[12.5px] text-red">{t.logsFileError}</p>

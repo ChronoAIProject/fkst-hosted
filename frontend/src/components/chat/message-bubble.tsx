@@ -1,5 +1,6 @@
 import { CopyButton } from '@/components/ui/copy-button';
 import { MarkdownPreview } from '@/components/ui/markdown-preview';
+import { LoadingState } from '@/components/ui/loading';
 import { useContent } from '@/i18n';
 import type { ChatMessage } from './chat-context';
 import { ActionCards } from './action-card';
@@ -92,6 +93,14 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
       {/* Confirm-gated action cards last, so the answer explaining them is read
           first. */}
       <ActionCards proposals={message.proposals ?? []} />
+
+      {/* Before the first token there is nothing on screen but the caret, which
+          is aria-hidden and says nothing — so a turn that is merely slow reads
+          as one that failed. The label appears only in that pre-token window
+          and gives way to the streaming text itself. */}
+      {message.pending && message.content.length === 0 && (
+        <LoadingState label={s.thinking} className="mt-0.5" />
+      )}
 
       {/* The pending caret IS the typing indicator — no separate component, so
           there is never a moment showing both or neither. */}

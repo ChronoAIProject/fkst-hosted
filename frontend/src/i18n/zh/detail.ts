@@ -145,6 +145,7 @@ export const detail: DetailSlice = {
   logsSearchPlaceholder: '在文件中查找…',
   logsSearchCount: '{n} 处匹配',
   logsRefresh: '刷新',
+  logsRefreshing: '正在刷新…',
   logsRetry: '重试',
   logsTruncated: '尾部——显示 {total} 中的最后 {shown}。',
   logsSearchCountTail: '在所示尾部有 {n} 处匹配——加载完整文件以搜索全部',
@@ -181,6 +182,7 @@ export const detail: DetailSlice = {
   previewBinary: '二进制文件——请下载后查看。',
   openOnGithub: '在 GitHub 上打开 ↗',
   download: '下载',
+  downloadPending: '正在下载…',
   downloadAria: '下载 {name}',
   // ---- 健康分页 ----
   healthStatus: {

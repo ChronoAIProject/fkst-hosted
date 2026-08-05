@@ -135,6 +135,10 @@ export interface OperationsContent {
 
   loadOlder: string;
   loadingOlder: string;
+  /** Panel label while the FIRST activity page for this query is in flight. */
+  loadingActivity: string;
+  /** Panel label while the FIRST sandbox snapshot is in flight. */
+  loadingSandboxes: string;
   noMore: string;
   pollPaused: string;
 

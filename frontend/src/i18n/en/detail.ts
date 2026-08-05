@@ -147,6 +147,7 @@ export const detail: DetailSlice = {
   logsSearchPlaceholder: 'Find in file…',
   logsSearchCount: '{n} matches',
   logsRefresh: 'Refresh',
+  logsRefreshing: 'Refreshing…',
   logsRetry: 'Retry',
   logsTruncated: 'Tail — showing the last {shown} of {total}.',
   logsSearchCountTail: '{n} matches in the shown tail — load the full file to search all',
@@ -183,6 +184,7 @@ export const detail: DetailSlice = {
   previewBinary: 'Binary file — download to view.',
   openOnGithub: 'Open on GitHub ↗',
   download: 'Download',
+  downloadPending: 'Downloading…',
   downloadAria: 'Download {name}',
   // ---- Health tab ----
   healthStatus: {

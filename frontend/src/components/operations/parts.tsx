@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { Spinner } from '@/components/ui/loading';
 import { cn } from '@/lib/utils';
 import { EMPTY_VALUE } from '@/lib/operations/format';
 
@@ -237,10 +238,11 @@ export function RefreshButton({
       aria-busy={busy}
       className="font-ui font-semibold text-[12px] border border-line rounded-control px-2.5 py-1.5 text-dim hover:text-fg hover:shadow-glow-amber transition-[color,box-shadow] cursor-pointer inline-flex items-center gap-1.5 flex-none"
     >
-      <RefreshCw
-        aria-hidden="true"
-        className={cn('w-3 h-3', busy && 'anim-spin motion-reduce:animate-none')}
-      />
+      {/* One in-flight indicator across the app: the shared ring while busy, the
+          refresh glyph at rest. `.anim-spin` is already collapsed to a static
+          ring under prefers-reduced-motion globally, so no per-call-site
+          motion-reduce override is needed. */}
+      {busy ? <Spinner /> : <RefreshCw aria-hidden="true" className="w-3 h-3" />}
       {busy ? busyLabel : label}
     </button>
   );

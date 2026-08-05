@@ -4,6 +4,7 @@ import { describeError } from '@/lib/api/operations';
 import type { SandboxFeed } from '@/lib/hooks/use-operations-sandboxes';
 import { isSnapshotStale } from '@/lib/hooks/use-operations-sandboxes';
 import type { SandboxFilters } from '@/lib/operations/state';
+import { LoadingState } from '@/components/ui/loading';
 import { EmptyState, ErrorState, Notice } from './parts';
 import { SandboxDetails } from './sandbox-details';
 import { SandboxFiltersBar } from './sandbox-filters';
@@ -44,6 +45,7 @@ export function SandboxView({
   onViewActivity: (sessionId: string) => void;
 }) {
   const t = useContent().operations;
+  const c = useContent();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
@@ -91,9 +93,20 @@ export function SandboxView({
               retryLabel={t.retry}
               onRetry={feed.refresh}
             />
+          ) : feed.loading && rows.length === 0 ? (
+            // Still asking: a distinct third shape from "empty" below. Before
+            // this, the first load fell through and rendered an empty table, so
+            // an in-flight fleet read looked exactly like an empty fleet.
+            <LoadingState
+              variant="block"
+              testId="operations-loading-sandboxes"
+              label={t.loadingSandboxes}
+              detail={c.loading.service}
+            />
           ) : rows.length === 0 && !feed.loading ? (
             // A COMPLETE authorized snapshot that happens to be empty. Nothing
-            // here is a failure state, so nothing spins.
+            // here is a failure state, so nothing spins — which is why the
+            // loading branch above has to be its own shape rather than this one.
             <EmptyState message={t.emptySandboxes} />
           ) : (
             <div className="flex-1 min-h-0 overflow-auto">

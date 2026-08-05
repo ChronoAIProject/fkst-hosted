@@ -49,6 +49,7 @@ export const canvasModals: CanvasModalsSlice = {
   createSavedEnvironmentLabel: '已保存的环境配置',
   createEnvironmentNote: '只能引用已保存的环境。请在顶栏的环境管理器中创建。',
   createEnvironmentLoadFailed: '无法加载你的环境 —— 请手动输入名称。',
+  createEnvironmentLoading: '正在加载你的环境…',
   createDisposablePrivateNote:
     '私密详情会直接注入此会话的沙箱。GitHub 只会收到一次性环境标记，并且不会创建可复用配置。',
   createDisposableInstallLabel: '软件安装命令',

@@ -7,7 +7,8 @@ import { getHealthReport, type HealthReport, type SessionHealth } from '@/lib/ap
 import { Chip } from '@/components/ui/chip';
 import { MarkdownPreview } from '@/components/ui/markdown-preview';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Note, SectionLabel, Spinner, SplitPanes } from './parts';
+import { LoadingState } from '@/components/ui/loading';
+import { Note, SectionLabel, SplitPanes } from './parts';
 import { StatusCard } from './status-charts';
 import { HEALTH_TONE, minutes, showsStaleNotice } from './health-state';
 
@@ -40,7 +41,8 @@ export function TabHealth({
   state: HealthState;
   onRetry: () => void;
 }) {
-  const t = useContent().dashboard.detail;
+  const c = useContent();
+  const t = c.dashboard.detail;
   const { lang } = useLang();
   const { apiFetch } = useAuth();
 
@@ -79,12 +81,7 @@ export function TabHealth({
   }, [activeId, loadReport]);
 
   if (state.status === 'idle' || state.status === 'loading') {
-    return (
-      <div className="flex items-center gap-2 text-ghost text-[12.5px]">
-        <Spinner />
-        {t.healthLoading}
-      </div>
-    );
+    return <LoadingState label={t.healthLoading} detail={c.loading.service} />;
   }
 
   if (state.status === 'error') {
@@ -142,6 +139,7 @@ export function TabHealth({
       {showsStaleNotice(health) && (
         <div
           role="status"
+          data-testid="health-stale-callout"
           className="rounded-card border border-[color-mix(in_oklab,var(--amber)_40%,var(--line))] bg-[color-mix(in_oklab,var(--amber)_8%,var(--raise-2))] px-3.5 py-3 flex flex-col gap-1"
         >
           <p className="text-[12.5px] text-amber font-medium">{t.healthStaleTitle}</p>
@@ -229,10 +227,7 @@ export function TabHealth({
               </StatusCard>
 
               {report.status === 'loading' && (
-                <div className="flex items-center gap-2 text-ghost text-[12.5px]">
-                  <Spinner />
-                  {t.healthLoading}
-                </div>
+                <LoadingState label={t.healthLoading} detail={c.loading.service} />
               )}
               {report.status === 'error' && <Note>{t.healthError}</Note>}
 

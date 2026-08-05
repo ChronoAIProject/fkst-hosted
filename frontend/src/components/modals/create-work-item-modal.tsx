@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type React from 'react';
+import { Spinner } from '@/components/ui/loading';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth/github-auth';
 import { useContent } from '@/i18n';
@@ -108,6 +109,7 @@ export function CreateWorkItemModal({
         type="submit"
         form={FORM_ID}
         disabled={!valid || pending}
+        aria-busy={pending}
         className={cn(
           'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-[filter,box-shadow]',
           !valid || pending
@@ -115,6 +117,7 @@ export function CreateWorkItemModal({
             : 'bg-grad-accent text-amber-ink shadow-[var(--shadow-1),var(--glow-amber)] anim-sheen hover:brightness-110 cursor-pointer'
         )}
       >
+        {pending && <Spinner className="mr-1.5" />}
         {pending ? cc.workItemPending : cc.workItemSubmit}
       </button>
     </div>

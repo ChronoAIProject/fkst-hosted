@@ -3,7 +3,8 @@ import type { ReactNode } from 'react';
 import { useContent } from '@/i18n';
 import type { LogFileContent } from '@/lib/api/types';
 import { CopyButton } from '@/components/ui/copy-button';
-import { NoticeLine, Spinner } from './parts';
+import { Spinner } from '@/components/ui/loading';
+import { NoticeLine } from './parts';
 
 /** Format a byte count as a rounded-KB label for the tail notice. */
 function kb(bytes: number): string {
@@ -137,6 +138,7 @@ export function LogViewer({ file, onLoadFull, loadingFull, stale }: LogViewerPro
                   type="button"
                   onClick={onLoadFull}
                   disabled={loadingFull}
+                  aria-busy={loadingFull}
                   className="hover-underline inline-flex items-center gap-1.5 font-ui font-semibold text-[11px] text-amber hover:brightness-[1.1] transition-[filter] cursor-pointer disabled:cursor-default disabled:opacity-70"
                 >
                   {loadingFull && <Spinner />}

@@ -51,6 +51,7 @@ export const canvasModals: CanvasModalsSlice = {
   createEnvironmentNote:
     'Only a saved environment can be referenced. Create one in the Environments manager in the top bar.',
   createEnvironmentLoadFailed: 'Could not load your environments — enter a name manually.',
+  createEnvironmentLoading: 'Loading your environments…',
   createDisposablePrivateNote:
     'Private details are injected directly into this session’s sandbox. GitHub receives only a disposable-environment marker, and no reusable profile is created.',
   createDisposableInstallLabel: 'Software installation commands',

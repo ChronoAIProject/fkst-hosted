@@ -7,6 +7,7 @@ import type { ActivityFilters, WindowProblem } from '@/lib/operations/state';
 import { ActivityDetails } from './activity-details';
 import { ActivityFiltersBar } from './activity-filters';
 import { ActivityTable } from './activity-table';
+import { LoadingState } from '@/components/ui/loading';
 import { EmptyState, ErrorState, Notice } from './parts';
 import { ActivityStatusLine } from './status-line';
 
@@ -21,10 +22,15 @@ import { ActivityStatusLine } from './status-line';
  *    piece. This must NOT fall through to the empty state: "nothing matched"
  *    would report a result for a query that never ran.
  * 2. **error with no data** — the failure, its localized code copy, and a retry.
- * 3. **incomplete and empty** — zero rows on a page a source could not fill.
+ * 3. **loading with no data** — the FIRST request for this query, with nothing
+ *    yet to show. A third distinct shape: "we are still asking" must never be
+ *    dressed as "nothing matched". Gated on `feed.loading` (first request only),
+ *    never `feed.refreshing`, which is true on every poll and would blank the
+ *    table under the reader every 15 seconds.
+ * 4. **incomplete and empty** — zero rows on a page a source could not fill.
  *    Distinct copy and a distinct test id, because it is not a result.
- * 4. **complete and empty** — a plain sentence, no spinner. This IS a result.
- * 5. **rows** — with a partial banner above them when a source could not answer,
+ * 5. **complete and empty** — a plain sentence, no spinner. This IS a result.
+ * 6. **rows** — with a partial banner above them when a source could not answer,
  *    so an incomplete page is never mistaken for a complete one.
  *
  * A failure that arrives while rows are on screen keeps them and adds a banner:
@@ -58,6 +64,7 @@ export function ActivityView({
   onReset: () => void;
 }) {
   const t = useContent().operations;
+  const c = useContent();
   // Only the row's ID is state. The row itself is looked up in the CURRENT
   // result set every render, so a filter, scope, or identity change that drops
   // the row closes the panel synchronously — while a routine 15-second poll that
@@ -111,6 +118,16 @@ export function ActivityView({
               requestIdLabel={t.errorRequestId}
               retryLabel={t.retry}
               onRetry={feed.refresh}
+            />
+          ) : feed.loading && feed.rows.length === 0 ? (
+            // Still asking. Before this, the first load fell through to the rows
+            // branch and rendered an EMPTY TABLE plus a pager — indistinguishable
+            // from a query that genuinely matched nothing.
+            <LoadingState
+              variant="block"
+              testId="operations-loading-activity"
+              label={t.loadingActivity}
+              detail={c.loading.service}
             />
           ) : feed.rows.length === 0 && !feed.loading ? (
             // A page a source could not fill is NOT an empty result, and must

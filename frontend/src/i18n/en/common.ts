@@ -30,4 +30,9 @@ export const common: CommonSlice = {
     notFoundMetaTitle: 'FKST — Page not found',
     toastDismiss: 'Dismiss',
   },
+  loading: {
+    working: 'Working…',
+    github: 'Reading the latest data from GitHub in real time — this can take a moment.',
+    service: 'Asking the control plane for the latest — this can take a moment.',
+  },
 };

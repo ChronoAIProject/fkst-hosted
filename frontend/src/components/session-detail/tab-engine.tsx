@@ -3,7 +3,8 @@ import type { ReactNode } from 'react';
 import { useContent } from '@/i18n';
 import type { SessionDetail } from '@/lib/api/types';
 import { FadeSwap } from '@/components/ui/motion';
-import { Note, SectionLabel, Spinner } from './parts';
+import { LoadingState } from '@/components/ui/loading';
+import { Note, SectionLabel } from './parts';
 import { ObserveView } from './observe-view';
 import type { ObserveState } from './observe-state';
 import { fallbackRecovery, isRuntimeLive } from './recovery-state';
@@ -94,15 +95,9 @@ export function TabEngine({
           </button>
         );
       case 'loading':
-        return (
-          <div className="flex flex-col gap-1.5">
-            <span className="inline-flex items-center gap-2 font-mono text-[11.5px] text-dim">
-              <Spinner />
-              {t.liveEngineLoading}
-            </span>
-            <Note>{t.liveEngineSlow}</Note>
-          </div>
-        );
+        // `liveEngineSlow` is already the right explanation for a pod exec, so
+        // it stays rather than being swapped for the generic service sentence.
+        return <LoadingState label={t.liveEngineLoading} detail={t.liveEngineSlow} />;
       case 'error': {
         // Explain the failure: 409 == no durable delivery store to observe;
         // anything else is a transient/defensive fallback (the section is
