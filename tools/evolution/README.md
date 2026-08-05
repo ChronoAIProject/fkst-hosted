@@ -66,6 +66,25 @@ against a check run published by the configured App — is not, because no contr
 plane exists to publish one. A condition that cannot be evaluated reports
 `not-evaluable` and downgrades the verdict; it never counts as a pass.
 
+## Screenshot capture is not byte-reproducible
+
+Re-running the journey with no product change produces PNGs that differ from the
+committed ones. Measured across two runs: maximum per-pixel luma difference
+`2/255`, mean `0.006`. The images are visually identical — this is headless
+Chromium's rasterization, not a product change.
+
+It matters because the output fingerprint hashes bytes. A capture rewritten for
+no reason changes `outputFingerprint`, which the convergence decision reads as
+managed-output drift, which under `drift.policy: block` stops the lane.
+
+**So do not re-run the journey and commit its captures unless an input actually
+changed.** The committed PNGs are canonical; `git checkout` them after a
+verification run. The proper fix is change-impact analysis: a capture should be
+adopted into the managed subtree only when its journey, the product UI, or the
+input fingerprint moved — the same rule the specification already states for
+video rendering, applied to screenshots. That is not implemented here and is the
+first follow-up.
+
 ## Known gaps
 
 These need the control plane and are tracked on #5866:
