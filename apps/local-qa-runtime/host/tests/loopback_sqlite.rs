@@ -18,6 +18,7 @@ const HEALTH_BODY: &[u8] =
 const NOT_FOUND_BODY: &[u8] = b"{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"run not found\"}\n";
 const INVALID_READ_BODY: &[u8] = b"{\"type\":\"about:blank\",\"title\":\"Bad Request\",\"status\":400,\"detail\":\"invalid read request\"}\n";
 const INVALID_CANCEL_BODY: &[u8] = b"{\"type\":\"about:blank\",\"title\":\"Bad Request\",\"status\":400,\"detail\":\"invalid cancel request\"}\n";
+const INVALID_SUBMIT_BODY: &[u8] = b"{\"type\":\"about:blank\",\"title\":\"Bad Request\",\"status\":400,\"detail\":\"invalid submit request\"}\n";
 const METHOD_NOT_ALLOWED_BODY: &[u8] = b"{\"type\":\"about:blank\",\"title\":\"Method Not Allowed\",\"status\":405,\"detail\":\"method not allowed\"}\n";
 const ENDPOINT_NOT_FOUND_BODY: &[u8] = b"{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"endpoint not found\"}\n";
 
@@ -191,6 +192,103 @@ fn assert_response(response: HttpResponse, status: &str, content_type: &str, bod
     assert_eq!(response.status_line, status);
     assert_eq!(response.content_type, content_type);
     assert_eq!(response.body, body);
+}
+
+fn submit_with_total_head_bytes(port: u16, total_head_bytes: usize) -> HttpResponse {
+    let prefix = format!(
+        "PUT /v1/runs/run-001 HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nIdempotency-Key: idem-001\r\nContent-Length: 16\r\nX-Fill: "
+    );
+    let suffix = "\r\nConnection: close\r\n\r\n";
+    assert!(
+        prefix.len() + suffix.len() <= total_head_bytes,
+        "requested head size must fit the bounded filler header"
+    );
+    let mut head = prefix.into_bytes();
+    head.resize(total_head_bytes - suffix.len(), b'a');
+    head.extend_from_slice(suffix.as_bytes());
+    assert_eq!(head.len(), total_head_bytes);
+
+    let mut stream =
+        TcpStream::connect(("127.0.0.1", port)).expect("loopback host must accept connections");
+    stream
+        .write_all(&head)
+        .expect("bounded submit request head must be written");
+    stream
+        .write_all(b"{\"kind\":\"inert\"}")
+        .expect("bounded submit request body must be written");
+    stream.flush().expect("bounded submit must be flushed");
+    read_response(&mut stream)
+}
+
+fn assert_empty_journal(database_path: &Path) {
+    let connection = Connection::open(database_path).expect("journal must open after host exit");
+    for table in ["accepted_requests", "runs", "events", "cancel_requests"] {
+        let count = connection
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("journal row count must be readable");
+        assert_eq!(count, 0, "{table} must remain empty");
+    }
+}
+
+#[test]
+fn submit_accepts_exact_maximum_total_head_bytes() {
+    let temp = TempDirectory::new("maximum-submit-head");
+    let database_path = temp.database_path();
+    let host = HostProcess::start(&database_path);
+    assert_response(
+        submit_with_total_head_bytes(host.port, 16_384),
+        "HTTP/1.1 201 Created",
+        "application/json",
+        CREATED_BODY,
+    );
+    host.stop();
+    assert_exact_journal(&database_path, "idem-001");
+}
+
+#[test]
+fn submit_rejects_total_head_one_byte_over_limit_without_mutation() {
+    let temp = TempDirectory::new("oversized-submit-head");
+    let database_path = temp.database_path();
+    let host = HostProcess::start(&database_path);
+    assert_response(
+        submit_with_total_head_bytes(host.port, 16_385),
+        "HTTP/1.1 400 Bad Request",
+        "application/problem+json",
+        INVALID_SUBMIT_BODY,
+    );
+    host.stop();
+    assert_empty_journal(&database_path);
+}
+
+#[test]
+fn truncated_submit_body_returns_complete_error_without_mutation() {
+    let temp = TempDirectory::new("truncated-submit-body");
+    let database_path = temp.database_path();
+    let host = HostProcess::start(&database_path);
+    let mut stream = TcpStream::connect(("127.0.0.1", host.port))
+        .expect("loopback host must accept connections");
+    write!(
+        stream,
+        "PUT /v1/runs/run-001 HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Type: application/json\r\nIdempotency-Key: idem-001\r\nContent-Length: 16\r\nConnection: close\r\n\r\n",
+        host.port
+    )
+    .expect("truncated submit request head must be written");
+    stream
+        .write_all(b"{\"kind\":\"inert\"")
+        .expect("partial submit request body must be written");
+    stream
+        .shutdown(Shutdown::Write)
+        .expect("submit request write side must close");
+    assert_response(
+        read_response(&mut stream),
+        "HTTP/1.1 400 Bad Request",
+        "application/problem+json",
+        INVALID_SUBMIT_BODY,
+    );
+    host.stop();
+    assert_empty_journal(&database_path);
 }
 
 #[test]
