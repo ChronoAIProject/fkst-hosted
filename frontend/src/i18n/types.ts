@@ -3,6 +3,7 @@ import type { DashboardContent } from './dashboard-types';
 import type { OperationsContent } from './operations-types';
 import type { GetStartedContent, IntroContent } from './pages-types';
 import type { TitleBody } from './shared-types';
+import type { WorkflowsContent } from './workflows-types';
 
 export type { Lang, LifecycleCard, TitleBody } from './shared-types';
 
@@ -115,4 +116,5 @@ export interface SiteContent {
     };
   };
   operations: OperationsContent;
+  workflows: WorkflowsContent;
 }

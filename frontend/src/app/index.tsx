@@ -24,6 +24,12 @@ const OperationsPage = lazy(() =>
   import('../pages/operations').then((m) => ({ default: m.Operations }))
 );
 
+// The workflows workspace carries its own list/detail/stepper tree and is only
+// ever opened deliberately — lazy for the same reason as operations.
+const WorkflowsPage = lazy(() =>
+  import('../pages/workflows').then((m) => ({ default: m.Workflows }))
+);
+
 /** Route-level skeleton shown while the lazy dashboard chunk downloads —
  *  page-shaped shimmer blocks (index.css vocabulary) so the content area
  *  never flashes blank on a slow connection. Exported for its unit test. */
@@ -40,6 +46,25 @@ export function DashboardFallback() {
       <div className="anim-shimmer rounded-card h-10 w-2/3 max-w-[520px]" />
       <div className="anim-shimmer rounded-chip h-4 w-1/2 max-w-[400px]" />
       <div className="anim-shimmer rounded-panel h-[440px]" />
+    </div>
+  );
+}
+
+/** Route-level skeleton for the lazy workflows chunk. Shaped like the page it
+ *  replaces — a header strip above one tall list region — so the fixed-height
+ *  layout does not jump when the real workspace mounts. Exported for its test. */
+export function WorkflowsFallback() {
+  const t = useContent().workflows;
+  return (
+    <div
+      role="status"
+      aria-label={t.loading}
+      data-testid="workflows-route-skeleton"
+      className="h-full flex flex-col gap-3"
+    >
+      <div className="anim-shimmer rounded-chip h-6 w-56 flex-none" />
+      <div className="anim-shimmer rounded-control h-8 w-full max-w-[520px] flex-none" />
+      <div className="anim-shimmer rounded-panel flex-1 min-h-[240px]" />
     </div>
   );
 }
@@ -102,6 +127,14 @@ const router = createBrowserRouter(
               element: (
                 <Suspense fallback={<OperationsFallback />}>
                   <OperationsPage />
+                </Suspense>
+              ),
+            },
+            {
+              path: 'workflows',
+              element: (
+                <Suspense fallback={<WorkflowsFallback />}>
+                  <WorkflowsPage />
                 </Suspense>
               ),
             },
