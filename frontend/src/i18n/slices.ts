@@ -260,3 +260,6 @@ export type ReposModalsSlice = Pick<
 /** The `/operations` workspace — its own top-level domain, so the operations
  *  cluster never contends with the dashboard modules on one file. */
 export type OperationsSlice = SiteContent['operations'];
+
+/** The `/workflows` workspace (scheduled workflows and their run history). */
+export type WorkflowsSlice = SiteContent['workflows'];
