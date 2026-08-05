@@ -2,5 +2,9 @@
   "name": "fkst-hosted",
   "version": "0.2.3",
   "private": true,
-  "description": "Unified product version for fkst-hosted (backend + frontend). The Docker build reads this version."
+  "description": "Unified product version for fkst-hosted (backend + frontend). The Docker build reads this version.",
+  "scripts": {
+    "evolution": "node tools/evolution/src/cli.ts",
+    "evolution:test": "node --test tools/evolution/test/*.test.ts"
+  }
 }

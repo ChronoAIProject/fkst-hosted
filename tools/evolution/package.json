@@ -1,0 +1,20 @@
+{
+  "name": "@fkst/evolution-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "FKST Evolution generator and convergence verifier — fingerprints, manifest assembly, and the section 17.7 convergence decision.",
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "scripts": {
+    "evolution": "node src/cli.ts",
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@marp-team/marp-cli": "^4.5.0",
+    "canonicalize": "^2.1.0",
+    "picomatch": "^4.0.3",
+    "yaml": "^2.8.1"
+  }
+}
