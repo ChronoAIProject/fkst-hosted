@@ -17,6 +17,28 @@ local function capture_raises(fn)
   return nil, raised, { error = result }
 end
 
+--- The `_model.writes` a fake port carries, or nil for any port that has none.
+---
+--- The probe is pcall-guarded because a port may be HOSTILE to speculative field
+--- access: `forge.ports` installs a poison object as `ports.github` when it cannot
+--- build a trusted author policy, and that object's metatable raises on ANY field
+--- read. An unguarded `port._model` therefore makes the harness itself the point
+--- of failure — and it fails AFTER capture_raises' pcall has returned, so it
+--- reports as an uncaught pipeline error and fails a department that survived the
+--- poison exactly as it was designed to.
+local function port_model_writes(port)
+  if type(port) ~= "table" then
+    return nil
+  end
+  local ok, model = pcall(function()
+    return port._model
+  end)
+  if not ok or type(model) ~= "table" or type(model.writes) ~= "table" then
+    return nil
+  end
+  return model.writes
+end
+
 local function writes_from_department(dept)
   local ports = type(dept) == "table" and dept.ports or nil
   local model = type(dept) == "table" and dept.model or nil
@@ -25,8 +47,9 @@ local function writes_from_department(dept)
   end
   if type(ports) == "table" then
     for _, port in pairs(ports) do
-      if type(port) == "table" and type(port._model) == "table" and type(port._model.writes) == "table" then
-        return port._model.writes
+      local writes = port_model_writes(port)
+      if writes ~= nil then
+        return writes
       end
     end
   end
