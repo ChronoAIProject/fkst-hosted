@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "browser-adapter",
   "guest-agent",
   "host",
   "launcher",

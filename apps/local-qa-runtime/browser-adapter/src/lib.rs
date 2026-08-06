@@ -1,0 +1,977 @@
+use thiserror::Error;
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct FixedBrowserSmokeResult {
+    pub final_url: String,
+    pub selector: String,
+    pub expected_text: String,
+    pub observed_text: String,
+    pub screenshot: FixedPngScreenshot,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct FixedPngScreenshot {
+    pub bytes: Vec<u8>,
+    pub media_type: String,
+    pub width_px: u32,
+    pub height_px: u32,
+}
+
+#[derive(Debug, Error)]
+pub enum BrowserAdapterError {
+    #[error("unsupported platform: the fixed browser smoke supports Linux only")]
+    UnsupportedPlatform,
+    #[error("no allowlisted system Chrome executable found")]
+    ChromeNotFound,
+    #[error("fixed browser smoke setup failed: {0}")]
+    Setup(String),
+    #[error("fixed browser smoke operation failed: {0}")]
+    Operation(String),
+    #[error("fixed browser smoke cleanup failed: {0}")]
+    Cleanup(String),
+    #[error("fixed browser smoke operation failed: {operation}; cleanup also failed: {cleanup}")]
+    OperationAndCleanup { operation: String, cleanup: String },
+}
+
+pub async fn run_fixed_browser_smoke() -> Result<FixedBrowserSmokeResult, BrowserAdapterError> {
+    #[cfg(target_os = "linux")]
+    {
+        let (sender, receiver) = futures_channel::oneshot::channel();
+        std::thread::Builder::new()
+            .name("local-qa-fixed-browser-smoke".to_string())
+            .spawn(move || {
+                let _ = sender.send(linux::run_fixed_browser_smoke());
+            })
+            .map_err(|error| {
+                BrowserAdapterError::Setup(format!("start fixed browser smoke worker: {error}"))
+            })?;
+        receiver.await.map_err(|_| {
+            BrowserAdapterError::Operation(
+                "fixed browser smoke worker terminated without a result".to_string(),
+            )
+        })?
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err(BrowserAdapterError::UnsupportedPlatform)
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod linux {
+    use super::{BrowserAdapterError, FixedBrowserSmokeResult, FixedPngScreenshot};
+    use headless_chrome::{protocol::cdp::Page, Browser};
+    use nix::{
+        errno::Errno,
+        sys::signal::{killpg, Signal},
+        unistd::Pid,
+    };
+    use png::Decoder;
+    use serde_json::json;
+    use std::{
+        fs,
+        io::{Cursor, Read, Write},
+        net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream},
+        os::unix::{fs::PermissionsExt, process::CommandExt},
+        path::{Path, PathBuf},
+        process::{Child, Command, Stdio},
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            mpsc, Arc,
+        },
+        thread::{self, JoinHandle},
+        time::{Duration, Instant},
+    };
+    use tempfile::TempDir;
+
+    const CHROME_CANDIDATES: [&str; 4] = [
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/google-chrome",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+    ];
+    const FIXTURE_PATH: &str = "/fixed-page.html";
+    const FIXTURE_HTML: &[u8] = br#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Local QA Fixed Page</title></head><body><main><span data-local-qa="status">READY</span></main></body></html>"#;
+    const SELECTOR: &str = r#"[data-local-qa="status"]"#;
+    const EXPECTED_TEXT: &str = "READY";
+    const SCREENSHOT_MEDIA_TYPE: &str = "image/png";
+    const VIEWPORT_WIDTH: u32 = 1280;
+    const VIEWPORT_HEIGHT: u32 = 720;
+    const MAX_SCREENSHOT_BYTES: usize = 2_097_152;
+    const OPERATION_TIMEOUT: Duration = Duration::from_secs(15);
+    const IO_POLL_INTERVAL: Duration = Duration::from_millis(10);
+    const CLEANUP_GRACE: Duration = Duration::from_millis(500);
+    const CLEANUP_LIMIT: Duration = Duration::from_secs(3);
+
+    pub(super) fn run_fixed_browser_smoke() -> Result<FixedBrowserSmokeResult, BrowserAdapterError>
+    {
+        let chrome_path = discover_chrome()?;
+        let fixture = FixtureServer::start()?;
+        let profile = TempDir::new().map_err(setup_error("create temporary Chrome profile"))?;
+        let downloads =
+            TempDir::new().map_err(setup_error("create temporary Chrome downloads directory"))?;
+        write_download_preferences(profile.path(), downloads.path())?;
+
+        #[cfg(test)]
+        record_owned_resources(profile.path(), downloads.path(), None, Vec::new());
+
+        let deadline = Instant::now() + OPERATION_TIMEOUT;
+        let mut chrome = match OwnedChrome::launch(&chrome_path, profile.path(), deadline) {
+            Ok(chrome) => chrome,
+            Err(error) => return finish(None, fixture, profile, downloads, Err(error)),
+        };
+
+        #[cfg(test)]
+        record_owned_resources(
+            profile.path(),
+            downloads.path(),
+            Some(chrome.root_pid()),
+            process_group_members(chrome.process_group()).unwrap_or_default(),
+        );
+
+        let operation = perform_smoke(&mut chrome, fixture.navigation_url(), deadline);
+        finish(Some(chrome), fixture, profile, downloads, operation)
+    }
+
+    fn perform_smoke(
+        chrome: &mut OwnedChrome,
+        navigation_url: String,
+        deadline: Instant,
+    ) -> Result<FixedBrowserSmokeResult, BrowserAdapterError> {
+        let debug_ws_url = chrome.wait_for_debug_ws_url(deadline)?;
+        let browser = Browser::connect_with_timeout(debug_ws_url, remaining(deadline)?)
+            .map_err(operation_error("connect to owned Chrome"))?;
+        browser.set_default_timeout(remaining(deadline)?);
+
+        let tab = browser
+            .wait_for_initial_tab()
+            .map_err(operation_error("acquire initial Chrome tab"))?;
+        tab.set_default_timeout(remaining(deadline)?);
+        tab.navigate_to(&navigation_url)
+            .and_then(|tab| tab.wait_until_navigated())
+            .map_err(operation_error("navigate to fixed fixture"))?;
+        tab.set_default_timeout(remaining(deadline)?);
+
+        let element = tab
+            .wait_for_element(SELECTOR)
+            .map_err(operation_error("locate fixed status element"))?;
+        let observed_value = element
+            .call_js_fn("function() { return this.textContent; }", Vec::new(), false)
+            .map_err(operation_error("read fixed status textContent"))?
+            .value
+            .ok_or_else(|| {
+                BrowserAdapterError::Operation(
+                    "fixed status textContent did not produce a value".to_string(),
+                )
+            })?;
+        let observed_text: String = serde_json::from_value(observed_value)
+            .map_err(operation_error("decode fixed status textContent"))?;
+        if observed_text != EXPECTED_TEXT {
+            return Err(BrowserAdapterError::Operation(format!(
+                "fixed status textContent was {observed_text:?}, expected {EXPECTED_TEXT:?}"
+            )));
+        }
+
+        ensure_before_deadline(deadline)?;
+        let screenshot = tab
+            .capture_screenshot(Page::CaptureScreenshotFormatOption::Png, None, None, true)
+            .map_err(operation_error("capture fixed PNG screenshot"))?;
+        let (width_px, height_px) = validate_png(&screenshot)?;
+        let final_url = tab.get_url();
+        if final_url != navigation_url {
+            return Err(BrowserAdapterError::Operation(format!(
+                "final URL was {final_url:?}, expected {navigation_url:?}"
+            )));
+        }
+        ensure_before_deadline(deadline)?;
+
+        drop(element);
+        tab.close(false)
+            .map_err(operation_error("close fixed Chrome tab"))?;
+        drop(tab);
+        drop(browser);
+
+        Ok(FixedBrowserSmokeResult {
+            final_url,
+            selector: SELECTOR.to_string(),
+            expected_text: EXPECTED_TEXT.to_string(),
+            observed_text,
+            screenshot: FixedPngScreenshot {
+                bytes: screenshot,
+                media_type: SCREENSHOT_MEDIA_TYPE.to_string(),
+                width_px,
+                height_px,
+            },
+        })
+    }
+
+    fn finish(
+        chrome: Option<OwnedChrome>,
+        fixture: FixtureServer,
+        profile: TempDir,
+        downloads: TempDir,
+        operation: Result<FixedBrowserSmokeResult, BrowserAdapterError>,
+    ) -> Result<FixedBrowserSmokeResult, BrowserAdapterError> {
+        let mut cleanup_failures = Vec::new();
+
+        if let Some(mut chrome) = chrome {
+            #[cfg(test)]
+            record_owned_resources(
+                profile.path(),
+                downloads.path(),
+                Some(chrome.root_pid()),
+                process_group_members(chrome.process_group()).unwrap_or_default(),
+            );
+            if let Err(error) = chrome.cleanup() {
+                cleanup_failures.push(error);
+            }
+        }
+        if let Err(error) = fixture.stop() {
+            cleanup_failures.push(error);
+        }
+        if let Err(error) = downloads.close() {
+            cleanup_failures.push(format!("remove owned downloads directory: {error}"));
+        }
+        if let Err(error) = profile.close() {
+            cleanup_failures.push(format!("remove owned profile directory: {error}"));
+        }
+
+        let cleanup = cleanup_failures.join("; ");
+        match (operation, cleanup.is_empty()) {
+            (Ok(result), true) => Ok(result),
+            (Ok(_), false) => Err(BrowserAdapterError::Cleanup(cleanup)),
+            (Err(error), true) => Err(error),
+            (Err(error), false) => Err(BrowserAdapterError::OperationAndCleanup {
+                operation: error.to_string(),
+                cleanup,
+            }),
+        }
+    }
+
+    fn discover_chrome() -> Result<PathBuf, BrowserAdapterError> {
+        discover_chrome_from(
+            CHROME_CANDIDATES
+                .iter()
+                .map(|candidate| Path::new(candidate)),
+        )
+    }
+
+    fn discover_chrome_from<'a>(
+        candidates: impl IntoIterator<Item = &'a Path>,
+    ) -> Result<PathBuf, BrowserAdapterError> {
+        for candidate in candidates {
+            let Ok(metadata) = fs::metadata(candidate) else {
+                continue;
+            };
+            if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0 {
+                return Ok(candidate.to_path_buf());
+            }
+        }
+        Err(BrowserAdapterError::ChromeNotFound)
+    }
+
+    fn write_download_preferences(
+        profile: &Path,
+        downloads: &Path,
+    ) -> Result<(), BrowserAdapterError> {
+        let default_profile = profile.join("Default");
+        fs::create_dir(&default_profile)
+            .map_err(setup_error("create owned Chrome Default profile directory"))?;
+        let preferences = json!({
+            "download": {
+                "default_directory": downloads,
+                "prompt_for_download": false
+            }
+        });
+        fs::write(
+            default_profile.join("Preferences"),
+            serde_json::to_vec(&preferences)
+                .map_err(setup_error("encode owned Chrome download preferences"))?,
+        )
+        .map_err(setup_error("write owned Chrome download preferences"))
+    }
+
+    struct FixtureServer {
+        address: SocketAddrV4,
+        stop: Arc<AtomicBool>,
+        thread: Option<JoinHandle<Result<(), String>>>,
+    }
+
+    impl FixtureServer {
+        fn start() -> Result<Self, BrowserAdapterError> {
+            let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+                .map_err(setup_error("bind fixed loopback fixture"))?;
+            listener
+                .set_nonblocking(true)
+                .map_err(setup_error("configure fixed loopback fixture"))?;
+            let address = match listener.local_addr() {
+                Ok(std::net::SocketAddr::V4(address)) => address,
+                Ok(_) => {
+                    return Err(BrowserAdapterError::Setup(
+                        "fixed fixture did not bind an IPv4 address".to_string(),
+                    ));
+                }
+                Err(error) => {
+                    return Err(BrowserAdapterError::Setup(format!(
+                        "read fixed fixture address: {error}"
+                    )));
+                }
+            };
+            let stop = Arc::new(AtomicBool::new(false));
+            let thread_stop = Arc::clone(&stop);
+            let thread = thread::Builder::new()
+                .name("local-qa-fixed-fixture".to_string())
+                .spawn(move || serve_fixture(listener, &thread_stop))
+                .map_err(setup_error("start fixed fixture thread"))?;
+            Ok(Self {
+                address,
+                stop,
+                thread: Some(thread),
+            })
+        }
+
+        fn navigation_url(&self) -> String {
+            format!("http://127.0.0.1:{}{FIXTURE_PATH}", self.address.port())
+        }
+
+        fn stop(mut self) -> Result<(), String> {
+            self.stop.store(true, Ordering::Release);
+            let Some(thread) = self.thread.take() else {
+                return Ok(());
+            };
+            match thread.join() {
+                Ok(result) => result,
+                Err(_) => Err("fixed fixture thread panicked".to_string()),
+            }
+        }
+    }
+
+    impl Drop for FixtureServer {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Release);
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+
+    fn serve_fixture(listener: TcpListener, stop: &AtomicBool) -> Result<(), String> {
+        while !stop.load(Ordering::Acquire) {
+            match listener.accept() {
+                Ok((stream, _)) => handle_fixture_connection(stream)?,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(IO_POLL_INTERVAL);
+                }
+                Err(error) => return Err(format!("accept fixed fixture connection: {error}")),
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_fixture_connection(mut stream: TcpStream) -> Result<(), String> {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .map_err(|error| format!("configure fixed fixture connection: {error}"))?;
+        let mut request = Vec::with_capacity(1024);
+        let mut chunk = [0_u8; 1024];
+        while request.len() <= 8192 && !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+            match stream.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(read) => request.extend_from_slice(&chunk[..read]),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    break;
+                }
+                Err(error) => return Err(format!("read fixed fixture request: {error}")),
+            }
+        }
+
+        let header_end = request.windows(4).position(|bytes| bytes == b"\r\n\r\n");
+        let request_line = request
+            .split(|byte| *byte == b'\n')
+            .next()
+            .map(|line| line.strip_suffix(b"\r").unwrap_or(line));
+        let valid_request = header_end.is_some_and(|header_end| {
+            request.len() <= 8192
+                && request_line == Some(b"GET /fixed-page.html HTTP/1.1")
+                && request[header_end + 4..].is_empty()
+                && !headers_declare_body(&request[..header_end])
+        });
+        if valid_request {
+            write_response(
+                &mut stream,
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: 174\r\nConnection: close\r\n\r\n",
+                FIXTURE_HTML,
+            )
+        } else {
+            write_response(
+                &mut stream,
+                b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                &[],
+            )
+        }
+    }
+
+    fn write_response(stream: &mut TcpStream, head: &[u8], body: &[u8]) -> Result<(), String> {
+        stream
+            .write_all(head)
+            .and_then(|()| stream.write_all(body))
+            .and_then(|()| stream.flush())
+            .map_err(|error| format!("write fixed fixture response: {error}"))
+    }
+
+    fn headers_declare_body(headers: &[u8]) -> bool {
+        headers.split(|byte| *byte == b'\n').skip(1).any(|line| {
+            let line = line.strip_suffix(b"\r").unwrap_or(line);
+            let Some(separator) = line.iter().position(|byte| *byte == b':') else {
+                return true;
+            };
+            let (name, value) = line.split_at(separator);
+            let value = &value[1..];
+            if name.eq_ignore_ascii_case(b"transfer-encoding") {
+                return true;
+            }
+            name.eq_ignore_ascii_case(b"content-length")
+                && value
+                    .iter()
+                    .copied()
+                    .filter(|byte| !byte.is_ascii_whitespace())
+                    .any(|byte| byte != b'0')
+        })
+    }
+
+    struct OwnedChrome {
+        child: Option<Child>,
+        process_group: Pid,
+        profile_path: PathBuf,
+        watchdog_done: Option<mpsc::Sender<()>>,
+        watchdog: Option<JoinHandle<()>>,
+        cleaned: bool,
+    }
+
+    impl OwnedChrome {
+        fn launch(
+            executable: &Path,
+            profile_path: &Path,
+            deadline: Instant,
+        ) -> Result<Self, BrowserAdapterError> {
+            let user_data_argument = format!("--user-data-dir={}", profile_path.display());
+            let mut command = Command::new(executable);
+            command
+                .args([
+                    "--headless=new",
+                    "--window-size=1280,720",
+                    "--force-device-scale-factor=1",
+                    "--remote-debugging-address=127.0.0.1",
+                    "--remote-debugging-port=0",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--disable-background-networking",
+                    "--disable-component-update",
+                    "--disable-default-apps",
+                    "--disable-extensions",
+                    "--disable-sync",
+                    "--metrics-recording-only",
+                    user_data_argument.as_str(),
+                    "about:blank",
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .process_group(0);
+            let child = command
+                .spawn()
+                .map_err(operation_error("launch allowlisted system Chrome"))?;
+            let process_group = Pid::from_raw(child.id() as i32);
+            let (watchdog_done, watchdog_rx) = mpsc::channel();
+            let watchdog = match thread::Builder::new()
+                .name("local-qa-chrome-deadline".to_string())
+                .spawn(move || {
+                    let wait = deadline.saturating_duration_since(Instant::now());
+                    if watchdog_rx.recv_timeout(wait).is_err() {
+                        let _ = killpg(process_group, Signal::SIGKILL);
+                    }
+                }) {
+                Ok(watchdog) => watchdog,
+                Err(error) => {
+                    let _ = killpg(process_group, Signal::SIGKILL);
+                    let mut child = child;
+                    let _ = child.wait();
+                    return Err(BrowserAdapterError::Operation(format!(
+                        "start Chrome deadline watchdog: {error}"
+                    )));
+                }
+            };
+            Ok(Self {
+                child: Some(child),
+                process_group,
+                profile_path: profile_path.to_path_buf(),
+                watchdog_done: Some(watchdog_done),
+                watchdog: Some(watchdog),
+                cleaned: false,
+            })
+        }
+
+        fn root_pid(&self) -> u32 {
+            self.child.as_ref().map_or(0, Child::id)
+        }
+
+        fn process_group(&self) -> Pid {
+            self.process_group
+        }
+
+        fn wait_for_debug_ws_url(
+            &mut self,
+            deadline: Instant,
+        ) -> Result<String, BrowserAdapterError> {
+            let active_port = self.profile_path.join("DevToolsActivePort");
+            loop {
+                ensure_before_deadline(deadline)?;
+                if let Some(status) = self
+                    .child
+                    .as_mut()
+                    .expect("owned Chrome child exists before cleanup")
+                    .try_wait()
+                    .map_err(operation_error("observe owned Chrome startup"))?
+                {
+                    return Err(BrowserAdapterError::Operation(format!(
+                        "allowlisted system Chrome exited during launch with {status}"
+                    )));
+                }
+                match fs::read_to_string(&active_port) {
+                    Ok(contents) => return parse_debug_ws_url(&contents),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        thread::sleep(IO_POLL_INTERVAL);
+                    }
+                    Err(error) => {
+                        return Err(BrowserAdapterError::Operation(format!(
+                            "read owned Chrome debugging endpoint: {error}"
+                        )));
+                    }
+                }
+            }
+        }
+
+        fn cleanup(&mut self) -> Result<(), String> {
+            self.stop_watchdog();
+            let mut failures = Vec::new();
+            if let Err(error) = signal_process_group(self.process_group, Signal::SIGTERM) {
+                failures.push(format!("terminate owned Chrome process group: {error}"));
+            }
+            match wait_for_process_group_exit(self.process_group, CLEANUP_GRACE) {
+                Ok(true) => {}
+                Ok(false) => {
+                    if let Err(error) = signal_process_group(self.process_group, Signal::SIGKILL) {
+                        failures.push(format!("kill owned Chrome process group: {error}"));
+                    }
+                }
+                Err(error) => {
+                    failures.push(error);
+                    if let Err(error) = signal_process_group(self.process_group, Signal::SIGKILL) {
+                        failures.push(format!("kill owned Chrome process group: {error}"));
+                    }
+                }
+            }
+            if let Some(mut child) = self.child.take() {
+                match child.try_wait() {
+                    Ok(Some(_)) => {}
+                    Ok(None) => {
+                        if let Err(error) = child.kill() {
+                            failures.push(format!("kill owned Chrome root process: {error}"));
+                        }
+                    }
+                    Err(error) => {
+                        failures.push(format!("observe owned Chrome root process: {error}"));
+                    }
+                }
+                if let Err(error) = child.wait() {
+                    failures.push(format!("reap owned Chrome root process: {error}"));
+                }
+            }
+            match wait_for_process_group_exit(self.process_group, CLEANUP_LIMIT) {
+                Ok(true) => {}
+                Ok(false) => failures.push(format!(
+                    "owned Chrome process group {} still has live members",
+                    self.process_group
+                )),
+                Err(error) => failures.push(error),
+            }
+            self.cleaned = true;
+            if failures.is_empty() {
+                Ok(())
+            } else {
+                Err(failures.join("; "))
+            }
+        }
+
+        fn stop_watchdog(&mut self) {
+            if let Some(sender) = self.watchdog_done.take() {
+                let _ = sender.send(());
+            }
+            if let Some(watchdog) = self.watchdog.take() {
+                let _ = watchdog.join();
+            }
+        }
+    }
+
+    impl Drop for OwnedChrome {
+        fn drop(&mut self) {
+            if self.cleaned {
+                return;
+            }
+            self.stop_watchdog();
+            let _ = killpg(self.process_group, Signal::SIGKILL);
+            if let Some(mut child) = self.child.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+
+    fn parse_debug_ws_url(contents: &str) -> Result<String, BrowserAdapterError> {
+        let mut lines = contents.lines();
+        let port: u16 = lines
+            .next()
+            .ok_or_else(|| {
+                BrowserAdapterError::Operation(
+                    "owned Chrome debugging endpoint omitted its port".to_string(),
+                )
+            })?
+            .parse()
+            .map_err(operation_error("parse owned Chrome debugging port"))?;
+        let browser_path = lines.next().ok_or_else(|| {
+            BrowserAdapterError::Operation(
+                "owned Chrome debugging endpoint omitted its browser path".to_string(),
+            )
+        })?;
+        if !browser_path.starts_with("/devtools/browser/") {
+            return Err(BrowserAdapterError::Operation(
+                "owned Chrome debugging endpoint returned an unexpected browser path".to_string(),
+            ));
+        }
+        Ok(format!("ws://127.0.0.1:{port}{browser_path}"))
+    }
+
+    fn validate_png(bytes: &[u8]) -> Result<(u32, u32), BrowserAdapterError> {
+        if bytes.is_empty() {
+            return Err(BrowserAdapterError::Operation(
+                "fixed PNG screenshot was empty".to_string(),
+            ));
+        }
+        if bytes.len() > MAX_SCREENSHOT_BYTES {
+            return Err(BrowserAdapterError::Operation(format!(
+                "fixed PNG screenshot was {} bytes, exceeding {MAX_SCREENSHOT_BYTES}",
+                bytes.len()
+            )));
+        }
+        let decoder = Decoder::new(Cursor::new(bytes));
+        let mut reader = decoder
+            .read_info()
+            .map_err(operation_error("decode fixed PNG screenshot metadata"))?;
+        let mut decoded = vec![
+            0;
+            reader.output_buffer_size().ok_or_else(|| {
+                BrowserAdapterError::Operation(
+                    "fixed PNG screenshot decoded size is unknown".to_string(),
+                )
+            })?
+        ];
+        let output = reader
+            .next_frame(&mut decoded)
+            .map_err(operation_error("decode fixed PNG screenshot pixels"))?;
+        if output.width != VIEWPORT_WIDTH || output.height != VIEWPORT_HEIGHT {
+            return Err(BrowserAdapterError::Operation(format!(
+                "fixed PNG screenshot dimensions were {}x{}, expected {}x{}",
+                output.width, output.height, VIEWPORT_WIDTH, VIEWPORT_HEIGHT
+            )));
+        }
+        Ok((output.width, output.height))
+    }
+
+    fn remaining(deadline: Instant) -> Result<Duration, BrowserAdapterError> {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            Err(deadline_error())
+        } else {
+            Ok(remaining)
+        }
+    }
+
+    fn ensure_before_deadline(deadline: Instant) -> Result<(), BrowserAdapterError> {
+        if Instant::now() >= deadline {
+            Err(deadline_error())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn deadline_error() -> BrowserAdapterError {
+        BrowserAdapterError::Operation(
+            "fixed browser smoke exceeded its 15-second deadline".to_string(),
+        )
+    }
+
+    fn signal_process_group(process_group: Pid, signal: Signal) -> Result<(), Errno> {
+        match killpg(process_group, signal) {
+            Ok(()) | Err(Errno::ESRCH) => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn wait_for_process_group_exit(process_group: Pid, limit: Duration) -> Result<bool, String> {
+        let deadline = Instant::now() + limit;
+        loop {
+            if process_group_members(process_group)?.is_empty() {
+                return Ok(true);
+            }
+            if Instant::now() >= deadline {
+                return Ok(false);
+            }
+            thread::sleep(IO_POLL_INTERVAL);
+        }
+    }
+
+    fn process_group_members(process_group: Pid) -> Result<Vec<u32>, String> {
+        let entries = fs::read_dir("/proc")
+            .map_err(|error| format!("inspect owned Chrome process group: {error}"))?;
+        let mut members = Vec::new();
+        for entry in entries.flatten() {
+            let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+                continue;
+            };
+            let Ok(stat) = fs::read_to_string(entry.path().join("stat")) else {
+                continue;
+            };
+            let Some(after_name) = stat.rsplit_once(')').map(|(_, rest)| rest.trim()) else {
+                continue;
+            };
+            let mut fields = after_name.split_whitespace();
+            let state = fields.next();
+            let _parent_pid = fields.next();
+            let group = fields.next().and_then(|value| value.parse::<i32>().ok());
+            if state != Some("Z") && group == Some(process_group.as_raw()) {
+                members.push(pid);
+            }
+        }
+        members.sort_unstable();
+        Ok(members)
+    }
+
+    fn setup_error<E: std::fmt::Display>(
+        context: &'static str,
+    ) -> impl FnOnce(E) -> BrowserAdapterError {
+        move |error| BrowserAdapterError::Setup(format!("{context}: {error}"))
+    }
+
+    fn operation_error<E: std::fmt::Display>(
+        context: &'static str,
+    ) -> impl FnOnce(E) -> BrowserAdapterError {
+        move |error| BrowserAdapterError::Operation(format!("{context}: {error}"))
+    }
+
+    #[cfg(test)]
+    #[derive(Clone, Debug, Default)]
+    struct TestObservation {
+        root_pid: Option<u32>,
+        process_ids: Vec<u32>,
+        profile_path: PathBuf,
+        downloads_path: PathBuf,
+    }
+
+    #[cfg(test)]
+    static TEST_OBSERVATION: std::sync::OnceLock<
+        std::sync::Mutex<Option<Arc<std::sync::Mutex<TestObservation>>>>,
+    > = std::sync::OnceLock::new();
+
+    #[cfg(test)]
+    fn record_owned_resources(
+        profile_path: &Path,
+        downloads_path: &Path,
+        root_pid: Option<u32>,
+        process_ids: Vec<u32>,
+    ) {
+        let slot = TEST_OBSERVATION.get_or_init(|| std::sync::Mutex::new(None));
+        let Ok(slot) = slot.lock() else {
+            return;
+        };
+        let Some(observation) = slot.as_ref() else {
+            return;
+        };
+        if let Ok(mut observation) = observation.lock() {
+            observation.root_pid = root_pid.or(observation.root_pid);
+            if !process_ids.is_empty() {
+                observation.process_ids = process_ids;
+            }
+            observation.profile_path = profile_path.to_path_buf();
+            observation.downloads_path = downloads_path.to_path_buf();
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn fixture_serves_only_the_fixed_contract() {
+            let fixture = FixtureServer::start().expect("fixture starts");
+            let address = fixture.address;
+            let ok = send_request(
+                fixture.address,
+                b"GET /fixed-page.html HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+            );
+            let (head, body) = split_response(&ok);
+            assert!(head.starts_with("HTTP/1.1 200 OK\r\n"));
+            assert!(head.contains("Content-Type: text/html; charset=utf-8\r\n"));
+            assert!(head.contains("Content-Length: 174\r\n"));
+            assert_eq!(body, FIXTURE_HTML);
+
+            for request in [
+                b"GET /other HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".as_slice(),
+                b"POST /fixed-page.html HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 4\r\n\r\nDATA"
+                    .as_slice(),
+                b"GET /fixed-page.html HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 4\r\n\r\nDATA"
+                    .as_slice(),
+            ] {
+                let response = send_request(fixture.address, request);
+                let (head, body) = split_response(&response);
+                assert!(head.starts_with("HTTP/1.1 404 Not Found\r\n"));
+                assert!(body.is_empty());
+            }
+            fixture.stop().expect("fixture stops");
+            assert!(TcpStream::connect(address).is_err());
+        }
+
+        #[test]
+        fn discovery_uses_the_fixed_candidate_order() {
+            let directory = TempDir::new().expect("temporary candidates");
+            let first = directory.path().join("first");
+            let second = directory.path().join("second");
+            fs::write(&first, b"first").expect("first candidate");
+            fs::write(&second, b"second").expect("second candidate");
+            fs::set_permissions(&first, fs::Permissions::from_mode(0o755))
+                .expect("first executable");
+            fs::set_permissions(&second, fs::Permissions::from_mode(0o755))
+                .expect("second executable");
+
+            let selected = discover_chrome_from([first.as_path(), second.as_path()])
+                .expect("candidate selected");
+            assert_eq!(selected, first);
+            assert_eq!(
+                CHROME_CANDIDATES,
+                [
+                    "/usr/bin/google-chrome-stable",
+                    "/usr/bin/google-chrome",
+                    "/usr/bin/chromium",
+                    "/usr/bin/chromium-browser",
+                ]
+            );
+        }
+
+        #[test]
+        fn real_browser_walks_fixed_fixture_and_cleans_owned_resources() {
+            let observation = Arc::new(std::sync::Mutex::new(TestObservation::default()));
+            let _observation_guard = install_observer(Arc::clone(&observation));
+
+            let result = futures_executor::block_on(super::super::run_fixed_browser_smoke())
+                .expect("real browser smoke succeeds");
+            assert!(result.final_url.starts_with("http://127.0.0.1:"));
+            assert!(result.final_url.ends_with(FIXTURE_PATH));
+            assert_eq!(result.selector, SELECTOR);
+            assert_eq!(result.expected_text, EXPECTED_TEXT);
+            assert_eq!(result.observed_text, EXPECTED_TEXT);
+            assert_eq!(result.screenshot.media_type, SCREENSHOT_MEDIA_TYPE);
+            assert_eq!(result.screenshot.width_px, VIEWPORT_WIDTH);
+            assert_eq!(result.screenshot.height_px, VIEWPORT_HEIGHT);
+            assert!(!result.screenshot.bytes.is_empty());
+            assert!(result.screenshot.bytes.len() <= MAX_SCREENSHOT_BYTES);
+            assert_eq!(
+                result.screenshot.bytes.get(..8),
+                Some(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a][..])
+            );
+            let fixture_address = fixture_address(&result.final_url);
+
+            let observation = observation.lock().expect("observation lock").clone();
+            let root_pid = observation.root_pid.expect("launched Chrome PID recorded");
+            assert!(observation.process_ids.contains(&root_pid));
+            for pid in observation.process_ids {
+                assert!(
+                    !process_is_alive(pid),
+                    "owned Chrome PID {pid} is still alive"
+                );
+            }
+            assert!(!observation.profile_path.exists());
+            assert!(!observation.downloads_path.exists());
+            assert!(TcpStream::connect(fixture_address).is_err());
+        }
+
+        fn send_request(address: SocketAddrV4, request: &[u8]) -> Vec<u8> {
+            let mut stream = TcpStream::connect(address).expect("connect to fixture");
+            stream.write_all(request).expect("write fixture request");
+            let mut response = Vec::new();
+            stream
+                .read_to_end(&mut response)
+                .expect("read fixture response");
+            response
+        }
+
+        fn split_response(response: &[u8]) -> (String, &[u8]) {
+            let boundary = response
+                .windows(4)
+                .position(|bytes| bytes == b"\r\n\r\n")
+                .expect("response header boundary");
+            (
+                String::from_utf8(response[..boundary + 4].to_vec())
+                    .expect("ASCII response headers"),
+                &response[boundary + 4..],
+            )
+        }
+
+        fn process_is_alive(pid: u32) -> bool {
+            let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) else {
+                return false;
+            };
+            stat.rsplit_once(')')
+                .and_then(|(_, fields)| fields.split_whitespace().next())
+                != Some("Z")
+        }
+
+        fn fixture_address(final_url: &str) -> SocketAddrV4 {
+            let authority_and_path = final_url
+                .strip_prefix("http://127.0.0.1:")
+                .expect("fixed loopback URL prefix");
+            let (port, path) = authority_and_path
+                .split_once('/')
+                .expect("fixed loopback URL path");
+            assert_eq!(format!("/{path}"), FIXTURE_PATH);
+            SocketAddrV4::new(
+                Ipv4Addr::LOCALHOST,
+                port.parse().expect("fixed loopback URL port"),
+            )
+        }
+
+        fn install_observer(observer: Arc<std::sync::Mutex<TestObservation>>) -> ObserverGuard {
+            let slot = TEST_OBSERVATION.get_or_init(|| std::sync::Mutex::new(None));
+            let mut slot = slot.lock().expect("test observation slot");
+            assert!(slot.is_none(), "only one browser observation may be active");
+            *slot = Some(observer);
+            drop(slot);
+            ObserverGuard
+        }
+
+        struct ObserverGuard;
+
+        impl Drop for ObserverGuard {
+            fn drop(&mut self) {
+                let slot = TEST_OBSERVATION.get_or_init(|| std::sync::Mutex::new(None));
+                if let Ok(mut slot) = slot.lock() {
+                    *slot = None;
+                }
+            }
+        }
+    }
+}

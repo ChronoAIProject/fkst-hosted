@@ -5,6 +5,7 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 cd "$root"
 
 expected=$(printf '%s\n' \
+  apps/local-qa-runtime/browser-adapter/src/lib.rs \
   apps/local-qa-runtime/guest-agent/src/main.rs \
   apps/local-qa-runtime/host/src/lib.rs \
   apps/local-qa-runtime/host/src/main.rs \
@@ -33,6 +34,21 @@ done
 
 grep -Eq '^[[:space:]]*"host",[[:space:]]*$' apps/local-qa-runtime/Cargo.toml || {
   echo 'Local QA Host is not registered in the Cargo workspace' >&2
+  exit 1
+}
+
+grep -Eq '^[[:space:]]*"browser-adapter",[[:space:]]*$' apps/local-qa-runtime/Cargo.toml || {
+  echo 'Local QA Browser adapter is not registered in the Cargo workspace' >&2
+  exit 1
+}
+
+browser_adapter_manifest=apps/local-qa-runtime/browser-adapter/Cargo.toml
+grep -Eq '^name = "fkst-local-qa-browser-adapter"$' "$browser_adapter_manifest" || {
+  echo 'Local QA Browser adapter package name is incorrect' >&2
+  exit 1
+}
+grep -Eq '^headless_chrome = \{ version = "=1\.0\.22", default-features = false, features = \["offline"\] \}$' "$browser_adapter_manifest" || {
+  echo 'Local QA Browser adapter must use the pinned Chrome automation dependency' >&2
   exit 1
 }
 
