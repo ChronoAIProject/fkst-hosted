@@ -11,9 +11,25 @@ libraries = ["contract", "workflow", "testkit", "forge"]
 [event_deps]
 packages = ["github-proxy", "github-comment-effect"]
 
-# Deliberately NO [github] work_labels.
+# The runner's OWN work-label family, one per run mode.
 #
-# A scheduled run is woken by the RUN ISSUE the control-plane clock creates, and
-# that issue already carries the session's own work label. Declaring a label here
-# would add it to FKST_SESSION_WORK_LABEL and expose the session to a second,
-# unrelated intake — this package must not change which issues wake a session.
+# This package used to declare none, on the reasoning that a run issue already
+# carries the session's own work label and adding one here would expose the
+# session to a second intake. The reasoning was right about the risk and wrong
+# about which direction it ran: carrying the SESSION's label is what exposed the
+# run to the DEV loop. In a deployment whose mandatory package set includes the
+# devloop adapters the session label is `fkst-dev`, so every run also looked like
+# ordinary development work — and `github-devloop-intake` gates on labels before
+# it reads a body, so it cannot see the dispatch marker that would tell it
+# otherwise. It claimed runs and worked them as features (#5890).
+#
+# Owning a distinct family is what separates the two queues. The control plane
+# derives the run issue's label from the run mode and applies the deployment
+# namespace, so these must stay spelled exactly as
+# `backend/src/reconcile/reserved_labels.rs` spells them.
+#
+# Both are RESERVED platform labels, so they are excluded from work-label
+# collision detection — every session composing this package declares the same
+# two, and a run is routed to the right one by SOLE ASSIGNEE, not by label.
+[github]
+work_labels = ["fkst-workflow-run", "fkst-workflow-scheduled"]
