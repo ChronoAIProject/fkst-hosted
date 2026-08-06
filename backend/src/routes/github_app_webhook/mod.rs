@@ -30,6 +30,7 @@
 //! Secret discipline: the webhook secret is never logged; the payload is parsed
 //! only for the non-secret installation, repository, and sender fields used below.
 
+mod evolution_trigger;
 mod installation;
 mod issue_trigger;
 mod sender;
@@ -201,6 +202,14 @@ async fn dispatch_event(state: &AppState, event: &str, body: &[u8]) -> Result<Ha
         "installation_repositories" => handle_installation_repositories(state, body).await,
         "issues" => issue_trigger::classify_and_enqueue(state, body).await,
         "issue_comment" => Ok(Handled::Ignored),
+        // FKST Evolution reacts to what reaches the trusted branch, not only to
+        // issue activity. Each of these is a thin classifier over the payload:
+        // relevant events enqueue the same repository hint the issue path uses,
+        // and the level-triggered reconciler decides what to do with it.
+        "push" => evolution_trigger::classify_push(state, body).await,
+        "pull_request" => evolution_trigger::classify_pull_request(state, body).await,
+        "release" => evolution_trigger::classify_release(state, body).await,
+        "repository" => evolution_trigger::classify_repository(state, body).await,
         other => {
             // ping / membership / etc. — acknowledged but not acted on.
             tracing::debug!(event = %other, "github webhook event ignored");
