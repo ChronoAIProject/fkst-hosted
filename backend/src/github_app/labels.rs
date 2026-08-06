@@ -56,6 +56,21 @@ const PLATFORM_LABELS: &[(&str, &str, &str)] = &[
         "D93F0B",
         "The last scheduled run exceeded its budget and was released by the watchdog.",
     ),
+    // The two run-issue labels are WORK labels, so a deployment that sets a
+    // work-label namespace routes on the suffixed form and these bootstrap only the
+    // bare names. Listing them is still worth it: an unnamespaced deployment gets
+    // the colour and description, and the reserved-name invariant below is what
+    // stops either name being adopted by a session.
+    (
+        crate::reconcile::reserved_labels::WORKFLOW_RUN_LABEL,
+        "1D76DB",
+        "A one-time workflow run. Worked by the workflow runner, not the dev loop.",
+    ),
+    (
+        crate::reconcile::reserved_labels::WORKFLOW_SCHEDULED_RUN_LABEL,
+        "1D76DB",
+        "A scheduled workflow run. Worked by the workflow runner, not the dev loop.",
+    ),
 ];
 
 /// Create any missing platform label on `owner_repo`. Never propagates.

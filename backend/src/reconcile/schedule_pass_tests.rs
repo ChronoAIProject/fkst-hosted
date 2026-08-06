@@ -204,22 +204,10 @@ fn cfg() -> ReconcileConfig {
     }
 }
 
-fn work_labels(regs: &[SessionRegistration], labels: &[&str]) -> HashMap<String, Vec<String>> {
-    regs.iter()
-        .map(|reg| {
-            (
-                reg.session_id.clone(),
-                labels.iter().map(|label| (*label).to_string()).collect(),
-            )
-        })
-        .collect()
-}
-
 async fn run(
     issues: Vec<IssueSummary>,
     comments: &dyn IssueCommentReader,
     regs: &[SessionRegistration],
-    labels: &[&str],
     now: DateTime<Utc>,
     cfg: &ReconcileConfig,
 ) -> Result<Vec<ScheduleEffect>, AppError> {
@@ -229,7 +217,6 @@ async fn run(
         &token(),
         &repo(),
         regs,
-        &work_labels(regs, labels),
         &AccessPolicy::from_vars(&[]).expect("open policy"),
         now,
         cfg,
@@ -247,13 +234,14 @@ fn detail(effect: &ScheduleEffect) -> &str {
 // ---- the happy path --------------------------------------------------------
 
 #[tokio::test]
-async fn a_due_definition_dispatches_with_the_sessions_effective_work_label() {
+async fn a_due_definition_dispatches_with_the_runners_own_work_label() {
+    // The label comes from the RUN MODE, not the session — so a session whose own
+    // label is `fkst-dev` still produces a run issue the dev loop will not touch.
     let regs = vec![registration(10, Some("fkst-dev"))];
     let effects = run(
         vec![definition(50, HOURLY, &[])],
         &Comments::default(),
         &regs,
-        &["fkst-dev"],
         at(27, 1),
         &cfg(),
     )
@@ -262,7 +250,7 @@ async fn a_due_definition_dispatches_with_the_sessions_effective_work_label() {
     let [ScheduleEffect::Dispatch { request, .. }] = effects.as_slice() else {
         panic!("expected one dispatch, got {effects:?}");
     };
-    assert_eq!(request.work_label, "fkst-dev");
+    assert_eq!(request.work_label, "fkst-workflow-scheduled");
     assert_eq!(request.creator_login, "alice");
     assert_eq!(request.schedule_issue, 50);
 }
@@ -271,14 +259,77 @@ async fn a_due_definition_dispatches_with_the_sessions_effective_work_label() {
 fn the_namespace_is_applied_to_the_run_issues_label() {
     // The run issue must carry the DEPLOYMENT-effective label, or it routes to
     // nothing on a namespaced deployment.
-    let regs = vec![registration(10, Some("fkst-dev"))];
     let cfg = ReconcileConfig {
         work_label_namespace: Some("chronoai-fkst".to_string()),
         ..cfg()
     };
-    let resolved =
-        resolve_work_label(&regs[0], &work_labels(&regs, &["fkst-dev"]), &cfg).expect("resolves");
-    assert_eq!(resolved, "fkst-dev-chronoai-fkst");
+    let resolved = run_issue_work_label(&RunMode::Once, &cfg).expect("resolves");
+    assert_eq!(resolved, "fkst-workflow-run-chronoai-fkst");
+}
+
+/// The two run modes, taken from the same parser production uses rather than
+/// hand-built, so a grammar change cannot leave these tests asserting a shape the
+/// parser no longer produces.
+fn both_run_modes() -> [RunMode; 2] {
+    let cron = parse_scheduled_workflow(HOURLY)
+        .expect("hourly parses")
+        .run_mode;
+    [RunMode::Once, cron]
+}
+
+#[test]
+fn a_cron_run_and_a_one_time_run_carry_different_labels() {
+    // Split so a repeating cadence is distinguishable from a one-shot at a glance,
+    // in the issue list and in any label-scoped query an operator writes.
+    let cfg = cfg();
+    let [once, cron] = both_run_modes();
+    let once = run_issue_work_label(&once, &cfg).expect("resolves");
+    let cron = run_issue_work_label(&cron, &cfg).expect("resolves");
+    assert_eq!(once, "fkst-workflow-run");
+    assert_eq!(cron, "fkst-workflow-scheduled");
+    assert_ne!(once, cron);
+}
+
+#[test]
+fn a_run_issue_never_carries_a_dev_or_authoring_label() {
+    // The regression #5890 is about. `fkst-dev` is admitted by the dev intake,
+    // which gates on labels BEFORE it reads a body and so cannot see the dispatch
+    // marker that identifies a run — it would triage and implement the run as
+    // ordinary development work. `fkst-workflow` is workflow-writer's AUTHORING
+    // queue, which would answer a run with a template pull request.
+    let cfg = cfg();
+    for mode in both_run_modes() {
+        let label = run_issue_work_label(&mode, &cfg).expect("resolves");
+        assert!(
+            !label.starts_with("fkst-dev"),
+            "a run issue must never carry a dev label, got {label}"
+        );
+        assert_ne!(label, "fkst-workflow");
+    }
+}
+
+#[tokio::test]
+async fn a_session_with_several_work_labels_can_still_run_a_schedule() {
+    // Before #5890 the run label came from the SESSION and had to resolve to
+    // exactly one, so a deployment whose mandatory package set declares three
+    // rejected every schedule on every session. The run label no longer consults
+    // the session at all, so the count cannot matter.
+    let regs = vec![registration(10, None)];
+    let effects = run(
+        vec![definition(50, HOURLY, &[])],
+        &Comments::default(),
+        &regs,
+        at(27, 1),
+        &cfg(),
+    )
+    .await
+    .expect("the pass succeeds");
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, ScheduleEffect::FlagInvalid { .. })),
+        "three session labels must not make a schedule invalid: {effects:?}"
+    );
 }
 
 // ---- authorization + rejection ---------------------------------------------
@@ -288,16 +339,9 @@ async fn an_unroutable_definition_is_latched_invalid_rather_than_ignored() {
     let regs = vec![registration(10, Some("fkst-dev"))];
     let mut issue = definition(50, HOURLY, &[]);
     issue.assignees.clear();
-    let effects = run(
-        vec![issue],
-        &Comments::default(),
-        &regs,
-        &["fkst-dev"],
-        at(27, 1),
-        &cfg(),
-    )
-    .await
-    .expect("the pass succeeds");
+    let effects = run(vec![issue], &Comments::default(), &regs, at(27, 1), &cfg())
+        .await
+        .expect("the pass succeeds");
     assert!(
         detail(&effects[0]).contains("exactly one assignee"),
         "{effects:?}"
@@ -311,7 +355,6 @@ async fn a_malformed_body_is_latched_invalid_with_the_parser_message() {
         vec![definition(50, "### Workflow\nsourcing\n", &[])],
         &Comments::default(),
         &regs,
-        &["fkst-dev"],
         at(27, 1),
         &cfg(),
     )
@@ -328,7 +371,6 @@ async fn a_too_tight_cadence_is_latched_invalid() {
         vec![definition(50, body, &[])],
         &Comments::default(),
         &regs,
-        &["fkst-dev"],
         at(27, 1),
         &cfg(),
     )
@@ -341,39 +383,12 @@ async fn a_too_tight_cadence_is_latched_invalid() {
 }
 
 #[tokio::test]
-async fn an_ambiguous_work_label_set_is_refused_naming_the_candidates() {
-    // Fail-closed: a run issue with the wrong label wakes the wrong session, and
-    // the author would have no way to tell which happened.
-    let regs = vec![registration(10, None)];
-    let effects = run(
-        vec![definition(50, HOURLY, &[])],
-        &Comments::default(),
-        &regs,
-        &["fkst-dev", "fkst-security"],
-        at(27, 1),
-        &cfg(),
-    )
-    .await
-    .expect("the pass succeeds");
-    let detail = detail(&effects[0]);
-    assert!(
-        detail.contains("fkst-dev") && detail.contains("fkst-security"),
-        "{detail}"
-    );
-    assert!(
-        detail.contains("### Work Label"),
-        "states the fix: {detail}"
-    );
-}
-
-#[tokio::test]
 async fn a_single_discovered_label_needs_no_explicit_declaration() {
     let regs = vec![registration(10, None)];
     let effects = run(
         vec![definition(50, HOURLY, &[])],
         &Comments::default(),
         &regs,
-        &["fkst-dev"],
         at(27, 1),
         &cfg(),
     )
@@ -402,7 +417,6 @@ async fn beyond_the_per_creator_cap_the_lowest_numbered_definitions_keep_running
         ],
         &Comments::default(),
         &regs,
-        &["fkst-dev"],
         at(27, 1),
         &cfg,
     )
@@ -436,7 +450,6 @@ async fn only_bot_authored_records_are_trusted_as_history() {
         vec![definition(50, HOURLY, &[])],
         &comments,
         &regs,
-        &["fkst-dev"],
         at(27, 1),
         &cfg(),
     )
@@ -457,7 +470,6 @@ async fn a_bot_authored_record_advances_the_cursor() {
         vec![definition(50, HOURLY, &[])],
         &comments,
         &regs,
-        &["fkst-dev"],
         at(27, 1),
         &cfg(),
     )
@@ -477,7 +489,6 @@ async fn the_bot_login_comparison_tolerates_the_bot_suffix() {
         vec![definition(50, HOURLY, &[])],
         &comments,
         &regs,
-        &["fkst-dev"],
         at(27, 1),
         &cfg(),
     )
@@ -495,7 +506,6 @@ async fn a_history_read_failure_fails_the_pass_rather_than_reading_as_empty() {
         vec![definition(50, HOURLY, &[])],
         &BrokenComments,
         &regs,
-        &["fkst-dev"],
         at(27, 1),
         &cfg(),
     )
@@ -518,7 +528,6 @@ async fn without_a_configured_app_identity_the_clock_does_not_run() {
         vec![definition(50, HOURLY, &[])],
         &Comments::default(),
         &regs,
-        &["fkst-dev"],
         at(27, 1),
         &cfg,
     )
@@ -530,16 +539,9 @@ async fn without_a_configured_app_identity_the_clock_does_not_run() {
 #[tokio::test]
 async fn a_repository_with_no_definitions_costs_one_list_and_reads_nothing_else() {
     let regs = vec![registration(10, Some("fkst-dev"))];
-    let effects = run(
-        Vec::new(),
-        &BrokenComments,
-        &regs,
-        &["fkst-dev"],
-        at(27, 1),
-        &cfg(),
-    )
-    .await
-    .expect("no definitions, no comment reads to fail");
+    let effects = run(Vec::new(), &BrokenComments, &regs, at(27, 1), &cfg())
+        .await
+        .expect("no definitions, no comment reads to fail");
     assert!(effects.is_empty());
 }
 
@@ -550,7 +552,6 @@ async fn a_fixed_definition_clears_its_latch_and_runs_the_same_pass() {
         vec![definition(50, HOURLY, &[SCHEDULE_INVALID_LABEL])],
         &Comments::default(),
         &regs,
-        &["fkst-dev"],
         at(27, 1),
         &cfg(),
     )
@@ -581,7 +582,6 @@ async fn an_in_flight_definition_skips_rather_than_starting_a_second_run() {
         vec![definition(50, HOURLY, &[CRON_RUNNING_LABEL])],
         &comments,
         &regs,
-        &["fkst-dev"],
         at(27, 2),
         &cfg,
     )

@@ -579,7 +579,6 @@ pub async fn reconcile_repo(
         &token,
         repo,
         &regs,
-        &logical_work_labels_by_session,
         &ctx.config.access,
         Utc::now(),
         cfg,
