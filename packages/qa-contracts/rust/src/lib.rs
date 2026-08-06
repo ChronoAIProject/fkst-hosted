@@ -28,7 +28,12 @@ const EMBEDDED_SCHEMAS: &[(&str, &str)] = &[
 ];
 const LOCAL_STATE_TYPE_NAME: &str = "LocalState";
 const EXECUTION_OUTCOME_TYPE_NAME: &str = "ExecutionOutcome";
-const LIFECYCLE_TYPE_NAMES: [&str; 2] = [LOCAL_STATE_TYPE_NAME, EXECUTION_OUTCOME_TYPE_NAME];
+const CANCEL_DISPOSITION_TYPE_NAME: &str = "CancelDisposition";
+const LIFECYCLE_TYPE_NAMES: [&str; 3] = [
+    LOCAL_STATE_TYPE_NAME,
+    EXECUTION_OUTCOME_TYPE_NAME,
+    CANCEL_DISPOSITION_TYPE_NAME,
+];
 const LOCAL_SANITIZED_OBSERVATION_TYPE_NAME: &str = "LocalSanitizedObservation";
 const LOCAL_EVIDENCE_OBJECT_TYPE_NAME: &str = "LocalEvidenceObject";
 const LOCAL_SANITIZED_OBSERVATION_REF_TYPE_NAME: &str = "LocalSanitizedObservationRef";
@@ -207,6 +212,10 @@ pub fn validate_local_state(raw: &[u8]) -> Result<ValidatedValue, ContractError>
 
 pub fn validate_execution_outcome(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
     validate_registered_value(admit_json(raw)?, EXECUTION_OUTCOME_TYPE_NAME)
+}
+
+pub fn validate_cancel_disposition(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    validate_registered_value(admit_json(raw)?, CANCEL_DISPOSITION_TYPE_NAME)
 }
 
 pub fn validate_local_sanitized_observation(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
@@ -1401,6 +1410,32 @@ mod registry_tests {
                     .pointer = "#/$defs/Missing".into();
             },
             "unresolved_registered_pointer",
+        );
+        assert_registry_error(
+            |registry| {
+                registry.types.remove(CANCEL_DISPOSITION_TYPE_NAME);
+            },
+            "unknown_registered_type",
+        );
+        assert_registry_error(
+            |registry| {
+                registry
+                    .types
+                    .get_mut(CANCEL_DISPOSITION_TYPE_NAME)
+                    .expect("CancelDisposition type")
+                    .pointer = "#/$defs/Missing".into();
+            },
+            "unresolved_registered_pointer",
+        );
+        assert_registry_error(
+            |registry| {
+                registry
+                    .types
+                    .get_mut(CANCEL_DISPOSITION_TYPE_NAME)
+                    .expect("CancelDisposition type")
+                    .fixture_only = true;
+            },
+            "invalid_embedded_registry",
         );
         assert_registry_error(
             |registry| {

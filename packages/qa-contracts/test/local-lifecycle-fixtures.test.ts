@@ -19,6 +19,7 @@ import {
   ContractError,
   type Rejection,
   sha256Digest,
+  validateCancelDisposition,
   validateExecutionOutcome,
   validateLocalState,
 } from "../src/index.js";
@@ -34,6 +35,12 @@ interface LifecycleFixture {
   readonly schema_version: string;
   readonly valid_cases: readonly (LifecycleCase & {
     readonly lifecycle_type: LifecycleType;
+    readonly source: string;
+    readonly expected_canonical_utf8_hex: string;
+    readonly expected_canonical_utf8_base64: string;
+    readonly expected_sha256: string;
+  })[];
+  readonly cancel_disposition_valid_cases: readonly (LifecycleCase & {
     readonly source: string;
     readonly expected_canonical_utf8_hex: string;
     readonly expected_canonical_utf8_base64: string;
@@ -80,6 +87,10 @@ test("local lifecycle fixture metadata", () => {
     schema: "qa.local-lifecycle/v1",
     pointer: "#/$defs/ExecutionOutcome",
   });
+  assert.deepEqual(contractRegistry().types.CancelDisposition, {
+    schema: "qa.local-lifecycle/v1",
+    pointer: "#/$defs/CancelDisposition",
+  });
 });
 
 for (const fixtureCase of fixture.valid_cases) {
@@ -88,6 +99,23 @@ for (const fixtureCase of fixture.valid_cases) {
     const raw = Buffer.from(JSON.stringify(fixtureCase.source));
     const validated = validateLifecycleCase(fixtureCase.lifecycle_type, raw);
     assert.equal(validated.value(), fixtureCase.source);
+    const canonical = canonicalBytes(validated);
+    assert.equal(Buffer.from(canonical).toString("hex"), fixtureCase.expected_canonical_utf8_hex);
+    assert.equal(
+      Buffer.from(canonical).toString("base64"),
+      fixtureCase.expected_canonical_utf8_base64,
+    );
+    assert.equal(sha256Digest(canonical), fixtureCase.expected_sha256);
+  });
+}
+
+for (const fixtureCase of fixture.cancel_disposition_valid_cases) {
+  test(fixtureCase.case_id, () => {
+    console.log(`case_id=${fixtureCase.case_id}`);
+    const raw = Buffer.from(JSON.stringify(fixtureCase.source));
+    assert.equal(raw.toString("utf8"), '"accepted"');
+    const validated = validateCancelDisposition(raw);
+    assert.equal(validated.value(), "accepted");
     const canonical = canonicalBytes(validated);
     assert.equal(Buffer.from(canonical).toString("hex"), fixtureCase.expected_canonical_utf8_hex);
     assert.equal(
@@ -186,6 +214,15 @@ const registryFailures: readonly (readonly [string, PackageMutation])[] = [
   }],
   ["invalid registered ExecutionOutcome schema", (_registry, lifecycleSchema) => {
     lifecycleSchema.$defs.ExecutionOutcome = { type: "not-a-json-schema-type" };
+  }],
+  ["unknown registered CancelDisposition type", (registry: RegistryJson) => {
+    delete registry.types.CancelDisposition;
+  }],
+  ["unresolved registered CancelDisposition pointer", (registry: RegistryJson) => {
+    registry.types.CancelDisposition!.pointer = "#/$defs/Missing";
+  }],
+  ["fixture-only registered CancelDisposition type", (registry: RegistryJson) => {
+    registry.types.CancelDisposition!.fixture_only = true;
   }],
   ["escaping registered path", (registry: RegistryJson) => {
     registry.schemas["qa.local-lifecycle/v1"]!.path = "../schema.json";

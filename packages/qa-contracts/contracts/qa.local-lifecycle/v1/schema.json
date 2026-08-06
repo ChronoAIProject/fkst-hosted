@@ -27,6 +27,14 @@
         "lost",
         "blocked"
       ]
+    },
+    "CancelDisposition": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "already_accepted",
+        "terminal"
+      ]
     }
   }
 }

@@ -98,6 +98,7 @@ test("contract registry and fixture metadata", () => {
   ]);
   assert.deepEqual(Object.keys(registry.types).sort(), [
     ...foundationTypeNames(),
+    "CancelDisposition",
     "ExecutionOutcome",
     "LocalEvidenceObject",
     "LocalEvidenceObjectRef",
