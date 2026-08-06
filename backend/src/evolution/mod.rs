@@ -22,5 +22,7 @@
 //! control plane's half: enrollment, the singleton coordination lane, the merge
 //! gate, and the convergence decision.
 
+pub mod boundary;
 pub mod config;
+pub mod gate;
 pub mod lane;
