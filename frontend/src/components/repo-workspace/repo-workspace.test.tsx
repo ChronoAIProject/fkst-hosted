@@ -96,7 +96,12 @@ describe('RepoWorkspace', () => {
   it('renders the rail plus the first session detail by default', () => {
     renderWorkspace();
 
-    expect(screen.getByTestId('repo-workspace')).toHaveClass(
+    // The rail/detail row is now nested under the view switch, so the stacking
+    // and no-horizontal-overflow guarantee is asserted where it moved to rather
+    // than dropped: the sessions body is what must stack, and the outer element
+    // is a plain column holding the switch above it.
+    expect(screen.getByTestId('repo-workspace')).toHaveClass('flex-col');
+    expect(screen.getByTestId('sessions-view')).toHaveClass(
       'flex-col',
       'md:flex-row',
       'overflow-x-hidden'
@@ -116,6 +121,25 @@ describe('RepoWorkspace', () => {
     // (its name is the level-2 heading, distinct from the rail's <span>).
     expect(screen.getByRole('heading', { level: 2, name: 'alpha' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { level: 2, name: 'beta' })).not.toBeInTheDocument();
+  });
+
+  it('switches between this repository’s sessions and its scheduled workflows', async () => {
+    // Schedules used to live behind a top-level route whose first act was asking
+    // which repository you meant — a question this view has already answered.
+    // Both halves are the SAME repo, so the switch must swap the body without
+    // navigating away from it.
+    renderWorkspace();
+
+    expect(screen.getByTestId('sessions-view')).toBeInTheDocument();
+    expect(screen.queryByTestId('repo-workflows')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('tab', { name: 'Workflows' }));
+
+    expect(screen.getByTestId('repo-workflows')).toBeInTheDocument();
+    expect(screen.queryByTestId('sessions-view')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('tab', { name: 'Sessions' }));
+    expect(screen.getByTestId('sessions-view')).toBeInTheDocument();
   });
 
   it('keeps App-wide cross-account sessions inspectable but read-only', () => {

@@ -31,6 +31,8 @@ export const dashboardScalars: DashboardScalars = {
     'You were signed out because your GitHub token could not be refreshed. Sign in again to pick up right where you left off — your place on the dashboard is kept.',
   sessionExpiredAction: 'Sign in again',
   noSessions: 'No fkst sessions in this repository.',
+  sessionsTab: 'Sessions',
+  workspaceViewAria: 'Repository view',
   installed: 'installed',
   workLabel: 'Work label',
   packages: 'Packages',

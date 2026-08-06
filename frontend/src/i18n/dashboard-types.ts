@@ -92,6 +92,10 @@ export interface DashboardContent {
   sessionExpiredBody: string;
   sessionExpiredAction: string;
   noSessions: string;
+  /** Label of the sessions half of the workspace view switch. */
+  sessionsTab: string;
+  /** Accessible name for the Sessions | Workflows switch. */
+  workspaceViewAria: string;
   installed: string;
   workLabel: string;
   packages: string;

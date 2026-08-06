@@ -1,13 +1,16 @@
 import { expect, test, type Page } from '@playwright/test';
 import { shot } from './harness';
 
-// End-to-end coverage of the `/workflows` workspace.
+// End-to-end coverage of a repository's scheduled workflows.
 //
-// The route is fixed-viewport like `/dashboard` and `/operations`, so the
-// load-bearing assertion here is the one a unit test cannot make: the body never
-// scrolls, and the list scrolls inside its own region. That contract depends on
-// `/workflows` being registered in the shell's `isApp` check — omit it and the
-// route silently lands in the padded doc layout, collapsing its `h-full` chain.
+// They live inside the repository workspace rather than behind a route of their
+// own: a schedule is a repository's issue, so the repository is the context you
+// are already in, not a parameter to re-choose.
+//
+// `/dashboard` is fixed-viewport, so the load-bearing assertion here is the one
+// a unit test cannot make: the body never scrolls, and the schedule table
+// scrolls inside its own region. Nesting the workflows body under the view
+// switch must not break that `h-full` chain.
 
 const DESKTOP = { width: 1440, height: 900 };
 const MOBILE = { width: 390, height: 844 };
@@ -121,12 +124,18 @@ async function installRoutes(page: Page) {
   });
 }
 
-async function open(page: Page, search = '?repo=acme/site') {
+async function open(page: Page, search = '') {
   await page.addInitScript(() => {
     window.localStorage.setItem('fkst-gh-access', 'e2e-fake-access-token');
   });
   await installRoutes(page);
-  await page.goto(`/workflows${search}`);
+  // Reach schedules the way an operator does: open the repository, then switch
+  // its workspace to Workflows. A direct URL would not exercise the switch, and
+  // the switch is now the only way in.
+  await page.goto(`/dashboard?owner=acme&repo=site${search}`);
+  await page.getByTestId('repo-workspace').waitFor();
+  await page.getByRole('tab', { name: 'Workflows' }).click();
+  await page.getByTestId('repo-workflows').waitFor();
 }
 
 /** The fixed-viewport contract: the window cannot scroll and neither does the
@@ -177,7 +186,7 @@ test.describe('scheduled workflows', () => {
 
   test('the whole view is a shareable URL', async ({ page }) => {
     await page.setViewportSize(DESKTOP);
-    await open(page, '?repo=acme/site&schedule=50&run=2026-07-31T01:00:00Z');
+    await open(page, '&schedule=50&run=2026-07-31T01:00:00Z');
     // Deep-linked straight into one run's steps, with no clicks at all.
     await expect(page.getByTestId('run-stepper')).toBeVisible();
     await expect(page.getByTestId('step-2')).toContainText('score');
