@@ -13,13 +13,14 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { buildManifest, detectToolchain, presentManagedFiles, resolveInputs } from './build.ts';
+import { adoptCaptures, currentJourneyHashes } from './captures.ts';
 import { parseConfig } from './config.ts';
 import { evaluateConvergence } from './converge.ts';
 import { generatorEnvFingerprint, outputFingerprint, readManagedOutputs } from './fingerprints.ts';
 import { GhCliGitHubPort } from './github.ts';
 import { readTree } from './gittree.ts';
 import { log, setLevel, type Level } from './log.ts';
-import { manifestProjection, parseManifest } from './manifest.ts';
+import { manifestProjection, parseManifest, type Manifest } from './manifest.ts';
 import { parsePlan } from './plan.ts';
 import { CONFIG_PATH } from './selector.ts';
 
@@ -122,6 +123,33 @@ async function cmdBuildManifest(root: string, rev: string, write: boolean): Prom
   }
 }
 
+/**
+ * Adopt freshly captured screenshots into the managed subtree — but only those
+ * whose inputs actually moved (section 32.2). Run after a journey, before
+ * `build-manifest`.
+ */
+async function cmdAdoptCaptures(root: string, rev: string): Promise<void> {
+  const { config, plan } = await loadContext(root, rev);
+  const { input } = await resolveInputs(root, config, plan, rev);
+
+  // A baseline run has no committed manifest; everything is adopted.
+  let manifest: Manifest | null = null;
+  try {
+    manifest = parseManifest(await readFromTree(root, rev, '.fkst/evolution/manifest.json'));
+  } catch {
+    log.info('no committed manifest — treating this as a baseline run');
+  }
+
+  const decisions = await adoptCaptures({
+    repoRoot: root,
+    manifest,
+    currentInputFingerprint: input,
+    currentJourneyHashes: await currentJourneyHashes(root, manifest),
+    freshCaptureDir: join(root, 'tools/evolution/out/captures'),
+  });
+  process.stdout.write(`${JSON.stringify({ decisions }, null, 2)}\n`);
+}
+
 async function cmdVerify(root: string, rev: string, useGitHub: boolean): Promise<void> {
   // The artifact repository comes from the manifest, not from the local remote:
   // condition 6 must ask about the repository the manifest claims, so a wrong
@@ -164,13 +192,16 @@ async function main(): Promise<void> {
   switch (args.command) {
     case 'fingerprint':
       return cmdFingerprint(root, args.rev);
+    case 'adopt-captures':
+      return cmdAdoptCaptures(root, args.rev);
     case 'build-manifest':
       return cmdBuildManifest(root, args.rev, args.write);
     case 'verify':
       return cmdVerify(root, args.rev, args.github);
     default:
       process.stdout.write(
-        'usage: evolution <fingerprint|build-manifest|verify> [--rev <rev>] [--write] [--github]\n'
+        'usage: evolution <fingerprint|adopt-captures|build-manifest|verify> ' +
+          '[--rev <rev>] [--write] [--github]\n'
       );
       process.exitCode = args.command === 'help' ? 0 : 1;
   }

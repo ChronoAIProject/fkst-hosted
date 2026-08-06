@@ -28,10 +28,20 @@ import { installApiRoutes, seedAuth, PERSONAL, REPO } from '../../../frontend/e2
 // config two directories away, and a cwd-relative path would write captures
 // wherever the runner happened to be invoked.
 const HERE = dirname(fileURLToPath(import.meta.url));
-/** Managed screenshots subtree (section 13.2 fixes this destination). */
-const SHOTS = join(HERE, '..', 'screenshots');
-/** Build output, NOT Evolution state — section 12.2 keeps temporary frames out. */
-const CHECKPOINTS = join(HERE, '..', '..', '..', 'tools', 'evolution', 'out', 'checkpoints.json');
+const BUILD_OUT = join(HERE, '..', '..', '..', 'tools', 'evolution', 'out');
+/**
+ * Fresh captures land in BUILD OUTPUT, never straight into the managed
+ * screenshots subtree.
+ *
+ * Writing them directly would re-commit visually identical bytes on every run —
+ * headless Chromium's rasterization is not bit-reproducible — and since the
+ * output fingerprint hashes bytes, that reads as managed-output drift and stops
+ * the lane. `adopt-captures` decides which of these actually replace the
+ * committed bytes.
+ */
+const SHOTS = join(BUILD_OUT, 'captures');
+/** Build output too — section 12.2 keeps temporary frames out of the Evolution root. */
+const CHECKPOINTS = join(BUILD_OUT, 'checkpoints.json');
 
 interface Checkpoint {
   id: string;
