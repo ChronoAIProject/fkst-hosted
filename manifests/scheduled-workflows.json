@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "name": "scheduled-workflows",
+  "description": "Runs scheduled workflows inside the session pod: executes a .fkst/workflows/<id>.toml definition's run/task steps in declared order and reports each run to its schedule definition issue as an fkst-cron-run:v1 record. Declares NO work labels — a scheduled run is woken by the run issue the control-plane clock creates, which already carries the session's own label. Compose it alongside a session's ordinary adapters; on a session with no scheduled workflows it boots and does nothing.",
+  "packages": [
+    "ChronoAIProject/fkst-hosted@packages:packages/workflow-runner",
+    "ChronoAIProject/fkst-hosted@packages:packages/github-proxy",
+    "ChronoAIProject/fkst-hosted@packages:packages/github-comment-effect"
+  ]
+}
