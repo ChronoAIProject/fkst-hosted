@@ -86,10 +86,14 @@ from the environment by the step's own script. Never put a token in
   `fkst-cron-*` label; that is what makes the overlap rule and the watchdog
   trustworthy. A label written from here would race the reconciler for state it
   does not own. `run_report_test.lua` pins this.
-- **It declares no `[github] work_labels`.** A scheduled run is woken by the run
-  issue, which already carries the session's own label. Declaring one here would
-  add it to `FKST_SESSION_WORK_LABEL` and expose the session to an unrelated
-  second intake.
+- **It does not share the session's work label.** It declares its own family
+  instead — `fkst-workflow-run` for a one-time run, `fkst-workflow-scheduled` for
+  a cron one. An earlier revision declared none at all, reasoning that the run
+  issue already carried the session's label; that turned out to be the problem
+  rather than the solution. Where a deployment mandates the devloop adapters the
+  session label is `fkst-dev`, so every run looked like ordinary development work,
+  and the dev intake — which gates on labels before it reads a body, and so never
+  sees the dispatch marker — claimed runs and worked them as features (#5890).
 - **It does not poll.** The pod exists only because a run issue woke the session,
   so a polling raiser would be redundant and a standing cost.
 - **It does not use the blueprint workflow engine.** `libraries/workflow/engine`
