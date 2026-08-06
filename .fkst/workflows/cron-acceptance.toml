@@ -1,0 +1,69 @@
+description = "Milestone-24 acceptance: prove the scheduled-workflow machinery end to end."
+
+# The acceptance instance for #5846.
+#
+# It carries the SHAPE the issue specifies -- deterministic step, agentic step,
+# deterministic step that commits a cross-run ledger -- while deliberately
+# carrying NONE of the concrete instance. #5846 draws a content boundary: search
+# parameters, judgment criteria, destination-table identifiers, and
+# credential-broker service names are operator-supplied and must not enter this
+# repository. So the external API is replaced by locally generated candidates and
+# the destination table by a committed file.
+#
+# What that still proves is the bounded milestone: a due slot creating a run
+# issue, an idle session waking on it, `run` and `task` steps executing in
+# declared order, arguments substituted as data, a previously seeded cross-run
+# ledger suppressing repeats, at least one accepted row being committed, and one
+# fkst-cron-run:v1 record travelling back to release the schedule. The workflow
+# fails closed when the required prior-ledger suppression is not observable.
+#
+# What it does NOT prove is the operator's real workload -- live API pagination,
+# rate-limit backoff, and credential-broker delivery. Those need the concrete
+# instance, and this definition is the slot it drops into.
+
+[[step]]
+id = "collect"
+kind = "run"
+command = [
+  "python3",
+  ".fkst/workflows/cron-acceptance/collect.py",
+  "--topic",
+  "{{ topic }}",
+  "--count",
+  "{{ count }}",
+]
+timeout_secs = 300
+
+[[step]]
+id = "score"
+kind = "task"
+prompt = """
+Read `candidates.json` in the repository root. It is a JSON array of objects,
+each with an `id` and a `title`.
+
+Score every entry from 0 to 10 for how well its title matches this criterion:
+{{ criterion }}
+
+Write `scored.json` to the repository root: a JSON array, one object per input
+entry, each with exactly these keys:
+
+  id        the entry's id, unchanged
+  score     an integer 0-10
+  rationale one sentence, under 120 characters
+
+Emit the JSON array as the entire file content. Do not wrap it in a code fence
+and do not add commentary before or after it. Every input entry must appear
+exactly once in the output.
+"""
+timeout_secs = 900
+
+[[step]]
+id = "publish"
+kind = "run"
+command = [
+  "python3",
+  ".fkst/workflows/cron-acceptance/publish.py",
+  "--min-score",
+  "{{ min_score }}",
+]
+timeout_secs = 300
