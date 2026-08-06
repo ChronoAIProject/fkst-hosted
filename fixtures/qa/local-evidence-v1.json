@@ -1,0 +1,112 @@
+{
+  "schema_version": "qa.local-evidence-fixtures/v1",
+  "raw_evidence_cases": [
+    {
+      "case_id": "local-runner-log-raw-bytes",
+      "utf8": "navigation accepted\nassertion passed\n",
+      "expected_byte_length": 37,
+      "expected_sha256": "bb9c62cc84fc533e52193a8961778b0be251cd8f19a89b3fa836e94043a0075e"
+    }
+  ],
+  "accepted_cases": [
+    {
+      "case_id": "local-observation-accepted",
+      "evidence_type": "LocalSanitizedObservation",
+      "source": {
+        "schema_version": "qa.local-evidence/v1",
+        "run_id": "run-1",
+        "attempt": 1,
+        "fixture_url": "http://127.0.0.1:43123/fixed-page.html",
+        "final_url": "http://127.0.0.1:43123/fixed-page.html",
+        "selector": "[data-local-qa=\"status\"]",
+        "expected_text": "READY",
+        "observed_text": "READY"
+      },
+      "expected_canonical_utf8": "{\"attempt\":1,\"expected_text\":\"READY\",\"final_url\":\"http://127.0.0.1:43123/fixed-page.html\",\"fixture_url\":\"http://127.0.0.1:43123/fixed-page.html\",\"observed_text\":\"READY\",\"run_id\":\"run-1\",\"schema_version\":\"qa.local-evidence/v1\",\"selector\":\"[data-local-qa=\\\"status\\\"]\"}",
+      "expected_content_digest": "sha256:9318138daa6bd664a7a6e06c05132dc144ffd75d39ad9d901449861af3dfef45"
+    },
+    {
+      "case_id": "local-runner-log-object-accepted",
+      "evidence_type": "LocalEvidenceObject",
+      "raw_evidence_case_id": "local-runner-log-raw-bytes",
+      "source": {
+        "schema_version": "qa.local-evidence/v1",
+        "run_id": "run-1",
+        "attempt": 1,
+        "object_id": "evidence/1",
+        "role": "runner-log",
+        "media_type": "text/plain; charset=utf-8",
+        "byte_length": 37,
+        "sha256": "bb9c62cc84fc533e52193a8961778b0be251cd8f19a89b3fa836e94043a0075e",
+        "ownership": "local-only:not-uploadable"
+      },
+      "expected_canonical_utf8": "{\"attempt\":1,\"byte_length\":37,\"media_type\":\"text/plain; charset=utf-8\",\"object_id\":\"evidence/1\",\"ownership\":\"local-only:not-uploadable\",\"role\":\"runner-log\",\"run_id\":\"run-1\",\"schema_version\":\"qa.local-evidence/v1\",\"sha256\":\"bb9c62cc84fc533e52193a8961778b0be251cd8f19a89b3fa836e94043a0075e\"}",
+      "expected_content_digest": "sha256:bdcf45ce2e53d380d8773efca6522a4d17d4b5c9aa923066ca43ed64f110ec88"
+    },
+    {
+      "case_id": "local-observation-ref-accepted",
+      "evidence_type": "LocalSanitizedObservationRef",
+      "referenced_case_id": "local-observation-accepted",
+      "source": {
+        "kind": "local-sanitized-observation",
+        "id": "observation/0",
+        "schema_version": "qa.local-evidence/v1",
+        "content_digest": "sha256:9318138daa6bd664a7a6e06c05132dc144ffd75d39ad9d901449861af3dfef45"
+      }
+    },
+    {
+      "case_id": "local-runner-log-ref-accepted",
+      "evidence_type": "LocalEvidenceObjectRef",
+      "referenced_case_id": "local-runner-log-object-accepted",
+      "source": {
+        "kind": "local-evidence-object",
+        "id": "evidence/1",
+        "schema_version": "qa.local-evidence/v1",
+        "content_digest": "sha256:bdcf45ce2e53d380d8773efca6522a4d17d4b5c9aa923066ca43ed64f110ec88"
+      }
+    }
+  ],
+  "rejected_binding_cases": [
+    {
+      "case_id": "local-observation-ref-evidence-digest-rejected",
+      "evidence_type": "LocalSanitizedObservationRef",
+      "referenced_case_id": "local-observation-accepted",
+      "source": {
+        "kind": "local-sanitized-observation",
+        "id": "observation/0",
+        "schema_version": "qa.local-evidence/v1",
+        "content_digest": "sha256:bdcf45ce2e53d380d8773efca6522a4d17d4b5c9aa923066ca43ed64f110ec88"
+      }
+    },
+    {
+      "case_id": "local-runner-log-ref-observation-digest-rejected",
+      "evidence_type": "LocalEvidenceObjectRef",
+      "referenced_case_id": "local-runner-log-object-accepted",
+      "source": {
+        "kind": "local-evidence-object",
+        "id": "evidence/1",
+        "schema_version": "qa.local-evidence/v1",
+        "content_digest": "sha256:9318138daa6bd664a7a6e06c05132dc144ffd75d39ad9d901449861af3dfef45"
+      }
+    }
+  ],
+  "raw_digest_non_binding_cases": [
+    {
+      "case_id": "local-runner-log-raw-digest-unprefixed-not-contract-digest",
+      "raw_evidence_case_id": "local-runner-log-raw-bytes",
+      "referenced_case_id": "local-runner-log-object-accepted",
+      "digest_form": "unprefixed"
+    },
+    {
+      "case_id": "local-runner-log-raw-digest-prefixed-not-contract-digest",
+      "raw_evidence_case_id": "local-runner-log-raw-bytes",
+      "referenced_case_id": "local-runner-log-object-accepted",
+      "digest_form": "prefixed"
+    }
+  ],
+  "unknown_type_case": {
+    "case_id": "local-evidence-unknown-fixture-type",
+    "evidence_type": "Unknown",
+    "source": {}
+  }
+}

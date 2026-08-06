@@ -47,6 +47,9 @@ The checked-in conformance sources are:
 - `fixtures/qa/local-lifecycle-v1.json` for the complete `LocalState`
   conformance matrix and accepted `ExecutionOutcome` walking skeleton through
   registry resolution, validation, canonicalization, and digesting.
+- `fixtures/qa/local-evidence-v1.json` for Local Evidence canonical bytes, raw
+  Evidence byte identity, contract-object content digests, and reference
+  binding across the four public Local Evidence types.
 
 The implementations are:
 
