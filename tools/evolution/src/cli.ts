@@ -22,6 +22,7 @@ import { readTree } from './gittree.ts';
 import { log, setLevel, type Level } from './log.ts';
 import { manifestProjection, parseManifest, type Manifest } from './manifest.ts';
 import { parsePlan } from './plan.ts';
+import { formatReport, replay, type Candidate } from './replay.ts';
 import { CONFIG_PATH } from './selector.ts';
 
 const execFileAsync = promisify(execFile);
@@ -31,17 +32,24 @@ interface Args {
   rev: string;
   write: boolean;
   github: boolean;
+  commits: number;
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { command: argv[0] ?? 'help', rev: 'HEAD', write: false, github: false };
+  const args: Args = {
+    command: argv[0] ?? 'help', rev: 'HEAD', write: false, github: false, commits: 200,
+  };
   for (let i = 1; i < argv.length; i += 1) {
     const flag = argv[i];
     if (flag === '--rev') args.rev = argv[++i];
     else if (flag === '--write') args.write = true;
     else if (flag === '--github') args.github = true;
+    else if (flag === '--commits') args.commits = Number(argv[++i]);
     else if (flag === '--log-level') setLevel(argv[++i] as Level);
     else throw new Error(`unknown argument: ${flag}`);
+  }
+  if (!Number.isSafeInteger(args.commits) || args.commits < 1) {
+    throw new Error('--commits must be a positive integer');
   }
   return args;
 }
@@ -124,6 +132,57 @@ async function cmdBuildManifest(root: string, rev: string, write: boolean): Prom
 }
 
 /**
+ * Candidate `source.productRelevant` sets scored against real history.
+ *
+ * The spec ships NO default and defers the question to Phase 1 measurement
+ * (open question 40.16). These four bracket the plausible range so the trade-off
+ * is visible rather than argued: `everything` is the previous draft's
+ * `include: ["**"]`, `shipped` is what this repository's config.yaml declares,
+ * and the two either side of it show what widening or narrowing costs.
+ */
+const REPLAY_CANDIDATES: Candidate[] = [
+  {
+    name: 'narrow (source trees only)',
+    selector: {
+      include: ['backend/src/**', 'frontend/src/**'],
+      exclude: ['**/*_tests.rs', '**/*.test.ts', '**/*.test.tsx', '**/test_support.rs', 'frontend/src/test/**'],
+    },
+  },
+  {
+    name: 'shipped (config.yaml)',
+    selector: {
+      include: ['backend/src/**', 'frontend/src/**', 'frontend/index.html', 'skills/**'],
+      exclude: ['**/*_tests.rs', '**/*.test.ts', '**/*.test.tsx', '**/test_support.rs', 'frontend/src/test/**'],
+    },
+  },
+  {
+    name: 'broad (+ deploy, schemas, manifests)',
+    selector: {
+      include: [
+        'backend/src/**', 'backend/Cargo.toml', 'frontend/src/**', 'frontend/index.html',
+        'frontend/package.json', 'skills/**', 'deploy/**', '**/*.proto', 'openapi.json',
+      ],
+      exclude: ['**/*_tests.rs', '**/*.test.ts', '**/*.test.tsx', '**/test_support.rs', 'frontend/src/test/**'],
+    },
+  },
+  { name: 'everything (**)', selector: { include: ['**'], exclude: [] } },
+];
+
+/** Replay real history and score each candidate selector (spec Phase 1). */
+async function cmdReplay(root: string, rev: string, commits: number): Promise<void> {
+  const { config } = await loadContext(root, 'HEAD');
+  const { stdout } = await execFileAsync(
+    'git', ['remote', 'get-url', 'origin'], { cwd: root, encoding: 'utf8' }
+  );
+  const repository = /github\.com[:/]([^/]+\/[^/.]+)/.exec(stdout.trim())?.[1] ?? 'unknown';
+  const report = await replay(
+    root, repository, `${rev}~${commits}..${rev}`, REPLAY_CANDIDATES, config.source.coverage
+  );
+  process.stderr.write(`\n${formatReport(report)}\n`);
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+}
+
+/**
  * Adopt freshly captured screenshots into the managed subtree — but only those
  * whose inputs actually moved (section 32.2). Run after a journey, before
  * `build-manifest`.
@@ -194,14 +253,16 @@ async function main(): Promise<void> {
       return cmdFingerprint(root, args.rev);
     case 'adopt-captures':
       return cmdAdoptCaptures(root, args.rev);
+    case 'replay':
+      return cmdReplay(root, args.rev, args.commits);
     case 'build-manifest':
       return cmdBuildManifest(root, args.rev, args.write);
     case 'verify':
       return cmdVerify(root, args.rev, args.github);
     default:
       process.stdout.write(
-        'usage: evolution <fingerprint|adopt-captures|build-manifest|verify> ' +
-          '[--rev <rev>] [--write] [--github]\n'
+        'usage: evolution <fingerprint|replay|adopt-captures|build-manifest|verify> ' +
+          '[--rev <rev>] [--commits <n>] [--write] [--github]\n'
       );
       process.exitCode = args.command === 'help' ? 0 : 1;
   }
