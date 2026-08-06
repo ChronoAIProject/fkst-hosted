@@ -106,59 +106,143 @@ mod linux {
 
     pub(super) fn run_fixed_browser_smoke() -> Result<FixedBrowserSmokeResult, BrowserAdapterError>
     {
-        let chrome_path = discover_chrome()?;
-        let fixture = FixtureServer::start()?;
-        let profile = TempDir::new().map_err(setup_error("create temporary Chrome profile"))?;
-        let downloads =
-            TempDir::new().map_err(setup_error("create temporary Chrome downloads directory"))?;
-        write_download_preferences(profile.path(), downloads.path())?;
+        run_with_options(RunOptions::production())
+    }
 
+    struct RunOptions {
+        timeout: Duration,
+        selector: &'static str,
+        expected_text: &'static str,
         #[cfg(test)]
-        record_owned_resources(profile.path(), downloads.path(), None, Vec::new());
-
-        let deadline = Instant::now() + OPERATION_TIMEOUT;
-        let mut chrome = match OwnedChrome::launch(&chrome_path, profile.path(), deadline) {
-            Ok(chrome) => chrome,
-            Err(error) => return finish(None, fixture, profile, downloads, Err(error)),
-        };
-
+        executable: Option<PathBuf>,
         #[cfg(test)]
-        record_owned_resources(
-            profile.path(),
-            downloads.path(),
-            Some(chrome.root_pid()),
-            process_group_members(chrome.process_group()).unwrap_or_default(),
-        );
+        screenshot_override: Option<Vec<u8>>,
+        #[cfg(test)]
+        cleanup_failure: Option<&'static str>,
+    }
 
-        let operation = perform_smoke(&mut chrome, fixture.navigation_url(), deadline);
-        finish(Some(chrome), fixture, profile, downloads, operation)
+    impl RunOptions {
+        fn production() -> Self {
+            Self {
+                timeout: OPERATION_TIMEOUT,
+                selector: SELECTOR,
+                expected_text: EXPECTED_TEXT,
+                #[cfg(test)]
+                executable: None,
+                #[cfg(test)]
+                screenshot_override: None,
+                #[cfg(test)]
+                cleanup_failure: None,
+            }
+        }
+
+        fn chrome_path(&self) -> Result<PathBuf, BrowserAdapterError> {
+            #[cfg(test)]
+            if let Some(executable) = &self.executable {
+                return Ok(executable.clone());
+            }
+            discover_chrome()
+        }
+    }
+
+    #[derive(Default)]
+    struct OwnedRun {
+        fixture: Option<FixtureServer>,
+        profile: Option<TempDir>,
+        downloads: Option<TempDir>,
+        chrome: Option<OwnedChrome>,
+    }
+
+    fn run_with_options(
+        options: RunOptions,
+    ) -> Result<FixedBrowserSmokeResult, BrowserAdapterError> {
+        let mut owned = OwnedRun::default();
+        let operation = (|| {
+            let chrome_path = options.chrome_path()?;
+            owned.fixture = Some(FixtureServer::start()?);
+            record_owned_resources(&owned);
+
+            owned.profile =
+                Some(TempDir::new().map_err(setup_error("create temporary Chrome profile"))?);
+            record_owned_resources(&owned);
+            owned.downloads = Some(
+                TempDir::new()
+                    .map_err(setup_error("create temporary Chrome downloads directory"))?,
+            );
+            record_owned_resources(&owned);
+
+            write_download_preferences(
+                owned.profile.as_ref().expect("owned profile exists").path(),
+                owned
+                    .downloads
+                    .as_ref()
+                    .expect("owned downloads directory exists")
+                    .path(),
+            )?;
+
+            let deadline = Instant::now() + options.timeout;
+            owned.chrome = Some(OwnedChrome::launch(
+                &chrome_path,
+                owned.profile.as_ref().expect("owned profile exists").path(),
+                deadline,
+            )?);
+            record_owned_resources(&owned);
+
+            let navigation_url = owned
+                .fixture
+                .as_ref()
+                .expect("owned fixture exists")
+                .navigation_url();
+            perform_smoke(
+                owned.chrome.as_mut().expect("owned Chrome exists"),
+                navigation_url,
+                deadline,
+                &options,
+            )
+        })();
+
+        owned.finish(operation, &options)
     }
 
     fn perform_smoke(
         chrome: &mut OwnedChrome,
         navigation_url: String,
         deadline: Instant,
+        options: &RunOptions,
     ) -> Result<FixedBrowserSmokeResult, BrowserAdapterError> {
         let debug_ws_url = chrome.wait_for_debug_ws_url(deadline)?;
-        let browser = Browser::connect_with_timeout(debug_ws_url, remaining(deadline)?)
-            .map_err(operation_error("connect to owned Chrome"))?;
+        let browser = Browser::connect_with_timeout(debug_ws_url, remaining(deadline)?).map_err(
+            operation_error_before_deadline("connect to owned Chrome", deadline),
+        )?;
         browser.set_default_timeout(remaining(deadline)?);
 
         let tab = browser
             .wait_for_initial_tab()
-            .map_err(operation_error("acquire initial Chrome tab"))?;
+            .map_err(operation_error_before_deadline(
+                "acquire initial Chrome tab",
+                deadline,
+            ))?;
         tab.set_default_timeout(remaining(deadline)?);
         tab.navigate_to(&navigation_url)
             .and_then(|tab| tab.wait_until_navigated())
-            .map_err(operation_error("navigate to fixed fixture"))?;
+            .map_err(operation_error_before_deadline(
+                "navigate to fixed fixture",
+                deadline,
+            ))?;
         tab.set_default_timeout(remaining(deadline)?);
 
-        let element = tab
-            .wait_for_element(SELECTOR)
-            .map_err(operation_error("locate fixed status element"))?;
+        let element =
+            tab.wait_for_element(options.selector)
+                .map_err(operation_error_before_deadline(
+                    "locate fixed status element",
+                    deadline,
+                ))?;
         let observed_value = element
             .call_js_fn("function() { return this.textContent; }", Vec::new(), false)
-            .map_err(operation_error("read fixed status textContent"))?
+            .map_err(operation_error_before_deadline(
+                "read fixed status textContent",
+                deadline,
+            ))?
             .value
             .ok_or_else(|| {
                 BrowserAdapterError::Operation(
@@ -167,16 +251,31 @@ mod linux {
             })?;
         let observed_text: String = serde_json::from_value(observed_value)
             .map_err(operation_error("decode fixed status textContent"))?;
-        if observed_text != EXPECTED_TEXT {
+        if observed_text != options.expected_text {
             return Err(BrowserAdapterError::Operation(format!(
-                "fixed status textContent was {observed_text:?}, expected {EXPECTED_TEXT:?}"
+                "fixed status textContent was {observed_text:?}, expected {:?}",
+                options.expected_text
             )));
         }
 
         ensure_before_deadline(deadline)?;
+        #[cfg(test)]
+        let screenshot = match &options.screenshot_override {
+            Some(screenshot) => screenshot.clone(),
+            None => tab
+                .capture_screenshot(Page::CaptureScreenshotFormatOption::Png, None, None, true)
+                .map_err(operation_error_before_deadline(
+                    "capture fixed PNG screenshot",
+                    deadline,
+                ))?,
+        };
+        #[cfg(not(test))]
         let screenshot = tab
             .capture_screenshot(Page::CaptureScreenshotFormatOption::Png, None, None, true)
-            .map_err(operation_error("capture fixed PNG screenshot"))?;
+            .map_err(operation_error_before_deadline(
+                "capture fixed PNG screenshot",
+                deadline,
+            ))?;
         let (width_px, height_px) = validate_png(&screenshot)?;
         let final_url = tab.get_url();
         if final_url != navigation_url {
@@ -187,15 +286,17 @@ mod linux {
         ensure_before_deadline(deadline)?;
 
         drop(element);
-        tab.close(false)
-            .map_err(operation_error("close fixed Chrome tab"))?;
+        tab.close(false).map_err(operation_error_before_deadline(
+            "close fixed Chrome tab",
+            deadline,
+        ))?;
         drop(tab);
         drop(browser);
 
         Ok(FixedBrowserSmokeResult {
             final_url,
-            selector: SELECTOR.to_string(),
-            expected_text: EXPECTED_TEXT.to_string(),
+            selector: options.selector.to_string(),
+            expected_text: options.expected_text.to_string(),
             observed_text,
             screenshot: FixedPngScreenshot {
                 bytes: screenshot,
@@ -206,37 +307,50 @@ mod linux {
         })
     }
 
-    fn finish(
-        chrome: Option<OwnedChrome>,
-        fixture: FixtureServer,
-        profile: TempDir,
-        downloads: TempDir,
-        operation: Result<FixedBrowserSmokeResult, BrowserAdapterError>,
-    ) -> Result<FixedBrowserSmokeResult, BrowserAdapterError> {
-        let mut cleanup_failures = Vec::new();
+    impl OwnedRun {
+        fn finish(
+            mut self,
+            operation: Result<FixedBrowserSmokeResult, BrowserAdapterError>,
+            options: &RunOptions,
+        ) -> Result<FixedBrowserSmokeResult, BrowserAdapterError> {
+            #[cfg(not(test))]
+            let _ = options;
+            record_owned_resources(&self);
+            let mut cleanup_failures = Vec::new();
 
-        if let Some(mut chrome) = chrome {
-            #[cfg(test)]
-            record_owned_resources(
-                profile.path(),
-                downloads.path(),
-                Some(chrome.root_pid()),
-                process_group_members(chrome.process_group()).unwrap_or_default(),
-            );
-            if let Err(error) = chrome.cleanup() {
-                cleanup_failures.push(error);
+            if let Some(mut chrome) = self.chrome.take() {
+                if let Err(error) = chrome.cleanup() {
+                    cleanup_failures.push(error);
+                }
             }
-        }
-        if let Err(error) = fixture.stop() {
-            cleanup_failures.push(error);
-        }
-        if let Err(error) = downloads.close() {
-            cleanup_failures.push(format!("remove owned downloads directory: {error}"));
-        }
-        if let Err(error) = profile.close() {
-            cleanup_failures.push(format!("remove owned profile directory: {error}"));
-        }
+            if let Some(fixture) = self.fixture.take() {
+                if let Err(error) = fixture.stop() {
+                    cleanup_failures.push(error);
+                }
+            }
+            if let Some(downloads) = self.downloads.take() {
+                if let Err(error) = downloads.close() {
+                    cleanup_failures.push(format!("remove owned downloads directory: {error}"));
+                }
+            }
+            if let Some(profile) = self.profile.take() {
+                if let Err(error) = profile.close() {
+                    cleanup_failures.push(format!("remove owned profile directory: {error}"));
+                }
+            }
+            #[cfg(test)]
+            if let Some(error) = options.cleanup_failure {
+                cleanup_failures.push(error.to_string());
+            }
 
+            combine_outcome(operation, cleanup_failures)
+        }
+    }
+
+    fn combine_outcome(
+        operation: Result<FixedBrowserSmokeResult, BrowserAdapterError>,
+        cleanup_failures: Vec<String>,
+    ) -> Result<FixedBrowserSmokeResult, BrowserAdapterError> {
         let cleanup = cleanup_failures.join("; ");
         match (operation, cleanup.is_empty()) {
             (Ok(result), true) => Ok(result),
@@ -499,12 +613,24 @@ mod linux {
                 }) {
                 Ok(watchdog) => watchdog,
                 Err(error) => {
-                    let _ = killpg(process_group, Signal::SIGKILL);
-                    let mut child = child;
-                    let _ = child.wait();
-                    return Err(BrowserAdapterError::Operation(format!(
+                    let operation = BrowserAdapterError::Operation(format!(
                         "start Chrome deadline watchdog: {error}"
-                    )));
+                    ));
+                    let mut chrome = Self {
+                        child: Some(child),
+                        process_group,
+                        profile_path: profile_path.to_path_buf(),
+                        watchdog_done: None,
+                        watchdog: None,
+                        cleaned: false,
+                    };
+                    return match chrome.cleanup() {
+                        Ok(()) => Err(operation),
+                        Err(cleanup) => Err(BrowserAdapterError::OperationAndCleanup {
+                            operation: operation.to_string(),
+                            cleanup,
+                        }),
+                    };
                 }
             };
             Ok(Self {
@@ -537,7 +663,10 @@ mod linux {
                     .as_mut()
                     .expect("owned Chrome child exists before cleanup")
                     .try_wait()
-                    .map_err(operation_error("observe owned Chrome startup"))?
+                    .map_err(operation_error_before_deadline(
+                        "observe owned Chrome startup",
+                        deadline,
+                    ))?
                 {
                     return Err(BrowserAdapterError::Operation(format!(
                         "allowlisted system Chrome exited during launch with {status}"
@@ -593,15 +722,22 @@ mod linux {
                     failures.push(format!("reap owned Chrome root process: {error}"));
                 }
             }
-            match wait_for_process_group_exit(self.process_group, CLEANUP_LIMIT) {
-                Ok(true) => {}
-                Ok(false) => failures.push(format!(
-                    "owned Chrome process group {} still has live members",
-                    self.process_group
-                )),
-                Err(error) => failures.push(error),
-            }
-            self.cleaned = true;
+            let group_exited = match wait_for_process_group_exit(self.process_group, CLEANUP_LIMIT)
+            {
+                Ok(true) => true,
+                Ok(false) => {
+                    failures.push(format!(
+                        "owned Chrome process group {} still has live members",
+                        self.process_group
+                    ));
+                    false
+                }
+                Err(error) => {
+                    failures.push(error);
+                    false
+                }
+            };
+            self.cleaned = group_exited;
             if failures.is_empty() {
                 Ok(())
             } else {
@@ -630,6 +766,8 @@ mod linux {
                 let _ = child.kill();
                 let _ = child.wait();
             }
+            let _ = wait_for_process_group_exit(self.process_group, CLEANUP_LIMIT);
+            self.cleaned = true;
         }
     }
 
@@ -774,11 +912,25 @@ mod linux {
         move |error| BrowserAdapterError::Operation(format!("{context}: {error}"))
     }
 
+    fn operation_error_before_deadline<E: std::fmt::Display>(
+        context: &'static str,
+        deadline: Instant,
+    ) -> impl FnOnce(E) -> BrowserAdapterError {
+        move |error| {
+            if Instant::now() >= deadline {
+                deadline_error()
+            } else {
+                BrowserAdapterError::Operation(format!("{context}: {error}"))
+            }
+        }
+    }
+
     #[cfg(test)]
     #[derive(Clone, Debug, Default)]
     struct TestObservation {
         root_pid: Option<u32>,
-        process_ids: Vec<u32>,
+        process_group: Option<Pid>,
+        fixture_address: Option<SocketAddrV4>,
         profile_path: PathBuf,
         downloads_path: PathBuf,
     }
@@ -789,12 +941,7 @@ mod linux {
     > = std::sync::OnceLock::new();
 
     #[cfg(test)]
-    fn record_owned_resources(
-        profile_path: &Path,
-        downloads_path: &Path,
-        root_pid: Option<u32>,
-        process_ids: Vec<u32>,
-    ) {
+    fn record_owned_resources(owned: &OwnedRun) {
         let slot = TEST_OBSERVATION.get_or_init(|| std::sync::Mutex::new(None));
         let Ok(slot) = slot.lock() else {
             return;
@@ -803,18 +950,33 @@ mod linux {
             return;
         };
         if let Ok(mut observation) = observation.lock() {
-            observation.root_pid = root_pid.or(observation.root_pid);
-            if !process_ids.is_empty() {
-                observation.process_ids = process_ids;
+            if let Some(fixture) = &owned.fixture {
+                observation.fixture_address = Some(fixture.address);
             }
-            observation.profile_path = profile_path.to_path_buf();
-            observation.downloads_path = downloads_path.to_path_buf();
+            if let Some(profile) = &owned.profile {
+                observation.profile_path = profile.path().to_path_buf();
+            }
+            if let Some(downloads) = &owned.downloads {
+                observation.downloads_path = downloads.path().to_path_buf();
+            }
+            if let Some(chrome) = &owned.chrome {
+                observation.root_pid = Some(chrome.root_pid());
+                observation.process_group = Some(chrome.process_group());
+            }
         }
     }
+
+    #[cfg(not(test))]
+    fn record_owned_resources(_owned: &OwnedRun) {}
 
     #[cfg(test)]
     mod tests {
         use super::*;
+        use png::{BitDepth, ColorType, Encoder};
+        use std::{net::Shutdown, sync::MutexGuard};
+
+        static BROWSER_TEST_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> =
+            std::sync::OnceLock::new();
 
         #[test]
         fn fixture_serves_only_the_fixed_contract() {
@@ -830,14 +992,22 @@ mod linux {
             assert!(head.contains("Content-Length: 174\r\n"));
             assert_eq!(body, FIXTURE_HTML);
 
-            for request in [
-                b"GET /other HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".as_slice(),
-                b"POST /fixed-page.html HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 4\r\n\r\nDATA"
-                    .as_slice(),
-                b"GET /fixed-page.html HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 4\r\n\r\nDATA"
-                    .as_slice(),
-            ] {
-                let response = send_request(fixture.address, request);
+            let mut oversized = b"GET /fixed-page.html HTTP/1.1\r\nX-Fill: ".to_vec();
+            oversized.extend_from_slice(&vec![b'x'; 8_192]);
+            oversized.extend_from_slice(b"\r\n\r\n");
+            let requests = [
+                b"GET /other HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_vec(),
+                b"GET /fixed-page.html?query=1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_vec(),
+                b"POST /fixed-page.html HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_vec(),
+                b"GET /fixed-page.html HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 4\r\n\r\n".to_vec(),
+                b"GET /fixed-page.html HTTP/1.1\r\nHost: 127.0.0.1\r\nTransfer-Encoding: chunked\r\n\r\n".to_vec(),
+                b"GET /fixed-page.html HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\nDATA".to_vec(),
+                b"not an HTTP request\r\n\r\n".to_vec(),
+                b"GET /fixed-page.html HTTP/1.1\r\nHost: 127.0.0.1".to_vec(),
+                oversized,
+            ];
+            for request in requests {
+                let response = send_request(fixture.address, &request);
                 let (head, body) = split_response(&response);
                 assert!(head.starts_with("HTTP/1.1 404 Not Found\r\n"));
                 assert!(body.is_empty());
@@ -847,10 +1017,19 @@ mod linux {
         }
 
         #[test]
-        fn discovery_uses_the_fixed_candidate_order() {
+        fn discovery_uses_only_executable_regular_files_in_candidate_order() {
             let directory = TempDir::new().expect("temporary candidates");
+            let missing = directory.path().join("missing");
+            let candidate_directory = directory.path().join("directory");
+            let non_executable = directory.path().join("non-executable");
             let first = directory.path().join("first");
             let second = directory.path().join("second");
+            fs::create_dir(&candidate_directory).expect("candidate directory");
+            fs::set_permissions(&candidate_directory, fs::Permissions::from_mode(0o755))
+                .expect("executable directory permissions");
+            fs::write(&non_executable, b"not executable").expect("non-executable candidate");
+            fs::set_permissions(&non_executable, fs::Permissions::from_mode(0o644))
+                .expect("non-executable permissions");
             fs::write(&first, b"first").expect("first candidate");
             fs::write(&second, b"second").expect("second candidate");
             fs::set_permissions(&first, fs::Permissions::from_mode(0o755))
@@ -858,8 +1037,14 @@ mod linux {
             fs::set_permissions(&second, fs::Permissions::from_mode(0o755))
                 .expect("second executable");
 
-            let selected = discover_chrome_from([first.as_path(), second.as_path()])
-                .expect("candidate selected");
+            let selected = discover_chrome_from([
+                missing.as_path(),
+                candidate_directory.as_path(),
+                non_executable.as_path(),
+                first.as_path(),
+                second.as_path(),
+            ])
+            .expect("candidate selected");
             assert_eq!(selected, first);
             assert_eq!(
                 CHROME_CANDIDATES,
@@ -873,14 +1058,210 @@ mod linux {
         }
 
         #[test]
+        fn discovery_reports_the_fixed_missing_chrome_error() {
+            let directory = TempDir::new().expect("temporary candidates");
+            let missing = directory.path().join("missing");
+            let non_executable = directory.path().join("non-executable");
+            fs::write(&non_executable, b"not executable").expect("non-executable candidate");
+            fs::set_permissions(&non_executable, fs::Permissions::from_mode(0o644))
+                .expect("non-executable permissions");
+
+            let error = discover_chrome_from([missing.as_path(), non_executable.as_path()])
+                .expect_err("no candidate qualifies");
+            assert!(matches!(error, BrowserAdapterError::ChromeNotFound));
+            assert!(error
+                .to_string()
+                .contains("no allowlisted system Chrome executable found"));
+        }
+
+        #[test]
+        fn png_validation_rejects_invalid_data_and_accepts_fixed_dimensions() {
+            assert!(validate_png(&[]).is_err());
+            assert!(validate_png(&vec![0; MAX_SCREENSHOT_BYTES + 1]).is_err());
+            assert!(validate_png(b"not a PNG").is_err());
+            assert!(validate_png(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]).is_err());
+            assert!(validate_png(&png_bytes(VIEWPORT_WIDTH - 1, VIEWPORT_HEIGHT)).is_err());
+            assert!(validate_png(&png_bytes(VIEWPORT_WIDTH, VIEWPORT_HEIGHT - 1)).is_err());
+            assert_eq!(
+                validate_png(&png_bytes(VIEWPORT_WIDTH, VIEWPORT_HEIGHT))
+                    .expect("fixed PNG validates"),
+                (VIEWPORT_WIDTH, VIEWPORT_HEIGHT)
+            );
+        }
+
+        #[test]
+        fn launch_failure_explicitly_cleans_every_acquired_resource() {
+            let _browser_guard = browser_test_guard();
+            let observation = Arc::new(std::sync::Mutex::new(TestObservation::default()));
+            let _observation_guard = install_observer(Arc::clone(&observation));
+            let directory = TempDir::new().expect("temporary missing executable parent");
+            let mut options = RunOptions::production();
+            options.executable = Some(directory.path().join("missing-chrome"));
+
+            let error = run_with_options(options).expect_err("Chrome launch fails");
+            assert!(matches!(error, BrowserAdapterError::Operation(_)));
+            assert!(error
+                .to_string()
+                .contains("launch allowlisted system Chrome"));
+            assert_observed_resources_cleaned(&observation, false);
+        }
+
+        #[test]
+        fn text_mismatch_cleans_the_live_browser_group_and_owned_state() {
+            let _browser_guard = browser_test_guard();
+            let observation = Arc::new(std::sync::Mutex::new(TestObservation::default()));
+            let _observation_guard = install_observer(Arc::clone(&observation));
+            let mut options = RunOptions::production();
+            options.expected_text = "NOT READY";
+
+            let error = run_with_options(options).expect_err("exact text mismatch fails");
+            assert!(matches!(error, BrowserAdapterError::Operation(_)));
+            assert!(error.to_string().contains("fixed status textContent"));
+            assert_observed_resources_cleaned(&observation, true);
+        }
+
+        #[test]
+        fn screenshot_validation_failure_cleans_all_owned_resources() {
+            let _browser_guard = browser_test_guard();
+            let observation = Arc::new(std::sync::Mutex::new(TestObservation::default()));
+            let _observation_guard = install_observer(Arc::clone(&observation));
+            let mut options = RunOptions::production();
+            options.screenshot_override = Some(b"not a PNG".to_vec());
+
+            let error = run_with_options(options).expect_err("invalid screenshot fails");
+            assert!(matches!(error, BrowserAdapterError::Operation(_)));
+            assert!(error.to_string().contains("fixed PNG screenshot"));
+            assert_observed_resources_cleaned(&observation, true);
+        }
+
+        #[test]
+        fn deadline_failure_is_deterministic_and_cleans_all_owned_resources() {
+            let _browser_guard = browser_test_guard();
+            let observation = Arc::new(std::sync::Mutex::new(TestObservation::default()));
+            let _observation_guard = install_observer(Arc::clone(&observation));
+            let mut options = RunOptions::production();
+            options.timeout = Duration::from_millis(1);
+
+            let error = run_with_options(options).expect_err("short deadline expires");
+            assert!(error
+                .to_string()
+                .contains("fixed browser smoke exceeded its 15-second deadline"));
+            assert_observed_resources_cleaned(&observation, true);
+        }
+
+        #[test]
+        fn injected_cleanup_failure_preserves_the_launch_failure() {
+            let _browser_guard = browser_test_guard();
+            let observation = Arc::new(std::sync::Mutex::new(TestObservation::default()));
+            let _observation_guard = install_observer(Arc::clone(&observation));
+            let directory = TempDir::new().expect("temporary missing executable parent");
+            let mut options = RunOptions::production();
+            options.executable = Some(directory.path().join("missing-chrome"));
+            options.cleanup_failure = Some("injected cleanup failure");
+
+            let error = run_with_options(options).expect_err("both failures are retained");
+            match error {
+                BrowserAdapterError::OperationAndCleanup { operation, cleanup } => {
+                    assert!(operation.contains("launch allowlisted system Chrome"));
+                    assert_eq!(cleanup, "injected cleanup failure");
+                }
+                other => panic!("unexpected combined outcome: {other}"),
+            }
+            assert_observed_resources_cleaned(&observation, false);
+        }
+
+        #[test]
+        fn outcome_composition_covers_all_operation_and_cleanup_combinations() {
+            assert!(combine_outcome(Ok(dummy_result()), Vec::new()).is_ok());
+
+            let cleanup = combine_outcome(
+                Ok(dummy_result()),
+                vec!["cleanup failed independently".to_string()],
+            )
+            .expect_err("cleanup failure replaces success");
+            assert!(matches!(cleanup, BrowserAdapterError::Cleanup(_)));
+
+            let operation = combine_outcome(
+                Err(BrowserAdapterError::Operation(
+                    "operation failed independently".to_string(),
+                )),
+                Vec::new(),
+            )
+            .expect_err("operation failure is preserved");
+            assert!(matches!(operation, BrowserAdapterError::Operation(_)));
+
+            let combined = combine_outcome(
+                Err(BrowserAdapterError::Operation(
+                    "operation failed independently".to_string(),
+                )),
+                vec!["cleanup failed independently".to_string()],
+            )
+            .expect_err("both failures are preserved");
+            match combined {
+                BrowserAdapterError::OperationAndCleanup { operation, cleanup } => {
+                    assert!(operation.contains("operation failed independently"));
+                    assert_eq!(cleanup, "cleanup failed independently");
+                }
+                other => panic!("unexpected combined outcome: {other}"),
+            }
+        }
+
+        #[test]
+        fn owned_chrome_drop_kills_the_live_group_without_touching_unrelated_processes() {
+            let _browser_guard = browser_test_guard();
+            let unrelated = KillOnDrop::spawn("sleep", &["30"]);
+            let unrelated_pid = unrelated.id();
+
+            let mut command = Command::new("/bin/sh");
+            command
+                .args(["-c", "sleep 30 & wait"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .process_group(0);
+            let child = command.spawn().expect("owned process group starts");
+            let process_group = Pid::from_raw(child.id() as i32);
+            wait_for_group_size(process_group, 2);
+
+            drop(OwnedChrome {
+                child: Some(child),
+                process_group,
+                profile_path: PathBuf::new(),
+                watchdog_done: None,
+                watchdog: None,
+                cleaned: false,
+            });
+
+            assert!(
+                wait_for_process_group_exit(process_group, CLEANUP_LIMIT)
+                    .expect("inspect dropped process group"),
+                "owned process group still has live non-zombie members"
+            );
+            assert!(
+                process_is_alive(unrelated_pid),
+                "unrelated process was killed"
+            );
+        }
+
+        #[test]
         fn real_browser_walks_fixed_fixture_and_cleans_owned_resources() {
+            let _browser_guard = browser_test_guard();
             let observation = Arc::new(std::sync::Mutex::new(TestObservation::default()));
             let _observation_guard = install_observer(Arc::clone(&observation));
 
             let result = futures_executor::block_on(super::super::run_fixed_browser_smoke())
                 .expect("real browser smoke succeeds");
-            assert!(result.final_url.starts_with("http://127.0.0.1:"));
-            assert!(result.final_url.ends_with(FIXTURE_PATH));
+            let observation = observation.lock().expect("observation lock").clone();
+            assert_eq!(
+                result.final_url,
+                format!(
+                    "http://127.0.0.1:{}{FIXTURE_PATH}",
+                    observation
+                        .fixture_address
+                        .expect("fixture address recorded")
+                        .port()
+                )
+            );
             assert_eq!(result.selector, SELECTOR);
             assert_eq!(result.expected_text, EXPECTED_TEXT);
             assert_eq!(result.observed_text, EXPECTED_TEXT);
@@ -893,25 +1274,46 @@ mod linux {
                 result.screenshot.bytes.get(..8),
                 Some(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a][..])
             );
-            let fixture_address = fixture_address(&result.final_url);
+            assert_eq!(
+                validate_png(&result.screenshot.bytes).expect("result PNG decodes"),
+                (VIEWPORT_WIDTH, VIEWPORT_HEIGHT)
+            );
+            assert_observation_cleaned(&observation, true);
+        }
 
-            let observation = observation.lock().expect("observation lock").clone();
-            let root_pid = observation.root_pid.expect("launched Chrome PID recorded");
-            assert!(observation.process_ids.contains(&root_pid));
-            for pid in observation.process_ids {
-                assert!(
-                    !process_is_alive(pid),
-                    "owned Chrome PID {pid} is still alive"
-                );
+        fn png_bytes(width: u32, height: u32) -> Vec<u8> {
+            let mut bytes = Vec::new();
+            {
+                let mut encoder = Encoder::new(&mut bytes, width, height);
+                encoder.set_color(ColorType::Rgb);
+                encoder.set_depth(BitDepth::Eight);
+                let mut writer = encoder.write_header().expect("PNG header");
+                writer
+                    .write_image_data(&vec![0; width as usize * height as usize * 3])
+                    .expect("PNG pixels");
             }
-            assert!(!observation.profile_path.exists());
-            assert!(!observation.downloads_path.exists());
-            assert!(TcpStream::connect(fixture_address).is_err());
+            bytes
+        }
+
+        fn dummy_result() -> FixedBrowserSmokeResult {
+            FixedBrowserSmokeResult {
+                final_url: "http://127.0.0.1:1/fixed-page.html".to_string(),
+                selector: SELECTOR.to_string(),
+                expected_text: EXPECTED_TEXT.to_string(),
+                observed_text: EXPECTED_TEXT.to_string(),
+                screenshot: FixedPngScreenshot {
+                    bytes: Vec::new(),
+                    media_type: SCREENSHOT_MEDIA_TYPE.to_string(),
+                    width_px: VIEWPORT_WIDTH,
+                    height_px: VIEWPORT_HEIGHT,
+                },
+            }
         }
 
         fn send_request(address: SocketAddrV4, request: &[u8]) -> Vec<u8> {
             let mut stream = TcpStream::connect(address).expect("connect to fixture");
             stream.write_all(request).expect("write fixture request");
+            stream.shutdown(Shutdown::Write).expect("finish request");
             let mut response = Vec::new();
             stream
                 .read_to_end(&mut response)
@@ -931,6 +1333,42 @@ mod linux {
             )
         }
 
+        fn assert_observed_resources_cleaned(
+            observation: &Arc<std::sync::Mutex<TestObservation>>,
+            expected_process_group: bool,
+        ) {
+            let observation = observation.lock().expect("observation lock").clone();
+            assert_observation_cleaned(&observation, expected_process_group);
+        }
+
+        fn assert_observation_cleaned(observation: &TestObservation, expected_process_group: bool) {
+            let fixture_address = observation
+                .fixture_address
+                .expect("fixture address was recorded");
+            assert!(TcpStream::connect(fixture_address).is_err());
+            assert!(!observation.profile_path.exists());
+            assert!(!observation.downloads_path.exists());
+            if expected_process_group {
+                assert!(observation.process_group.is_some());
+            } else {
+                assert!(observation.process_group.is_none());
+            }
+            if let Some(process_group) = observation.process_group {
+                assert!(
+                    process_group_members(process_group)
+                        .expect("inspect owned process group after return")
+                        .is_empty(),
+                    "owned process group still has live non-zombie members"
+                );
+            }
+            if let Some(root_pid) = observation.root_pid {
+                assert!(
+                    !process_is_alive(root_pid),
+                    "owned Chrome root is still alive"
+                );
+            }
+        }
+
         fn process_is_alive(pid: u32) -> bool {
             let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) else {
                 return false;
@@ -940,18 +1378,24 @@ mod linux {
                 != Some("Z")
         }
 
-        fn fixture_address(final_url: &str) -> SocketAddrV4 {
-            let authority_and_path = final_url
-                .strip_prefix("http://127.0.0.1:")
-                .expect("fixed loopback URL prefix");
-            let (port, path) = authority_and_path
-                .split_once('/')
-                .expect("fixed loopback URL path");
-            assert_eq!(format!("/{path}"), FIXTURE_PATH);
-            SocketAddrV4::new(
-                Ipv4Addr::LOCALHOST,
-                port.parse().expect("fixed loopback URL port"),
-            )
+        fn wait_for_group_size(process_group: Pid, minimum: usize) {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                let members =
+                    process_group_members(process_group).expect("inspect test-owned process group");
+                if members.len() >= minimum {
+                    return;
+                }
+                assert!(Instant::now() < deadline, "owned descendant did not start");
+                thread::sleep(IO_POLL_INTERVAL);
+            }
+        }
+
+        fn browser_test_guard() -> MutexGuard<'static, ()> {
+            BROWSER_TEST_LOCK
+                .get_or_init(|| std::sync::Mutex::new(()))
+                .lock()
+                .expect("browser test lock")
         }
 
         fn install_observer(observer: Arc<std::sync::Mutex<TestObservation>>) -> ObserverGuard {
@@ -971,6 +1415,33 @@ mod linux {
                 if let Ok(mut slot) = slot.lock() {
                     *slot = None;
                 }
+            }
+        }
+
+        struct KillOnDrop(Child);
+
+        impl KillOnDrop {
+            fn spawn(executable: &str, arguments: &[&str]) -> Self {
+                Self(
+                    Command::new(executable)
+                        .args(arguments)
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .spawn()
+                        .expect("unrelated process starts"),
+                )
+            }
+
+            fn id(&self) -> u32 {
+                self.0.id()
+            }
+        }
+
+        impl Drop for KillOnDrop {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
             }
         }
     }

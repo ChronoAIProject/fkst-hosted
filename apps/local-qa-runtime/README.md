@@ -65,12 +65,18 @@ The Rust Local QA Host API and journal boundary described above is already
 activated in `host/`. The launcher, supervisor, guest agent, and Secret Broker
 remain intentionally inert hardened-profile shells.
 
+The argument-free Rust Browser adapter under `browser-adapter/` runs one fixed
+loopback fixture through the first executable Linux system Chrome found in its
+fixed absolute allowlist. Each invocation owns a fresh Chrome process group, a
+temporary profile, and a separate temporary downloads directory, returns only
+the validated bounded `1280x720` PNG result, and explicitly finalizes all owned
+resources on success or failure. Its 15-second operation deadline and `Drop`
+safety net do not expose caller-programmable browser behavior.
+
 The following capabilities remain explicitly deferred:
 
-- a Host-owned Browser Controller and real system Chrome discovery, launch,
-  execution, and lifecycle;
-- a Host-worker process protocol and process, profile, download, and cleanup
-  ownership;
+- Host coordination of the fixed Browser adapter and a Host-worker process
+  protocol;
 - local filesystem Evidence persistence and journal Evidence references;
 - execution terminal outcomes and restart-to-`lost` reconciliation;
 - NyxID and Hosted transport or authentication;
