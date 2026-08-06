@@ -30,10 +30,12 @@ use crate::access_policy::AccessPolicy;
 use crate::error::AppError;
 use crate::github_app::comments::IssueCommentReader;
 use crate::github_app::listing::{GithubListing, IssueSummary};
-use crate::goals::scheduled_workflow_parse::parse_scheduled_workflow;
+use crate::goals::scheduled_workflow_parse::{parse_scheduled_workflow, RunMode};
 use crate::models::RepoRef;
 use crate::reconcile::desired::SessionRegistration;
-use crate::reconcile::reserved_labels::{is_reserved_label, SCHEDULED_WORKFLOW_LABEL};
+use crate::reconcile::reserved_labels::{
+    SCHEDULED_WORKFLOW_LABEL, WORKFLOW_RUN_LABEL, WORKFLOW_SCHEDULED_RUN_LABEL,
+};
 use crate::reconcile::schedule_authz::authorize_schedule_issue;
 use crate::reconcile::schedule_plan::{
     check_min_interval, plan_invalid, plan_schedule, ScheduleEffect, ScheduleObservation,
@@ -56,7 +58,6 @@ pub async fn plan_repo_schedules(
     token: &SecretString,
     repo: &RepoRef,
     regs: &[SessionRegistration],
-    logical_work_labels: &HashMap<String, Vec<String>>,
     access: &AccessPolicy,
     now: DateTime<Utc>,
     cfg: &ReconcileConfig,
@@ -86,7 +87,6 @@ pub async fn plan_repo_schedules(
             token,
             repo,
             regs,
-            logical_work_labels,
             access,
             bot_login,
             &mut accepted_per_creator,
@@ -111,7 +111,6 @@ async fn plan_one(
     token: &SecretString,
     repo: &RepoRef,
     regs: &[SessionRegistration],
-    logical_work_labels: &HashMap<String, Vec<String>>,
     access: &AccessPolicy,
     bot_login: &str,
     accepted_per_creator: &mut HashMap<String, u32>,
@@ -146,7 +145,7 @@ async fn plan_one(
         return Ok(plan_invalid(issue.number, authorized.labels(), detail));
     }
 
-    let work_label = match resolve_work_label(reg, logical_work_labels, cfg) {
+    let work_label = match run_issue_work_label(&spec.run_mode, cfg) {
         Ok(label) => label,
         Err(detail) => return Ok(plan_invalid(issue.number, authorized.labels(), detail)),
     };
@@ -210,82 +209,60 @@ pub fn comment_is_from_bot(author: &str, bot_login: &str) -> bool {
     !author.is_empty() && normalize(author) == normalize(bot_login)
 }
 
-/// Which single work label a definition's run issues carry.
+/// The effective work label a run issue carries, derived from the RUN MODE.
 ///
-/// Fail-closed when ambiguous rather than guessing: a run issue with the wrong
-/// label wakes the wrong session, or no session at all, and the author would have
-/// no way to tell which happened.
-pub fn resolve_work_label(
-    reg: &SessionRegistration,
-    logical_work_labels: &HashMap<String, Vec<String>>,
-    cfg: &ReconcileConfig,
-) -> Result<String, String> {
-    let logical = logical_work_labels
-        .get(&reg.session_id)
+/// A run issue is work for the workflow runner and for nothing else, so it carries
+/// the runner's own label family rather than the session's work label. Deriving it
+/// from the run mode instead of the session has three consequences that together
+/// are the fix for #5890:
+///
+///  * A run never looks like ordinary development work. Carrying the session label
+///    meant carrying `fkst-dev` in any deployment that mandates the devloop
+///    adapters, so the dev intake — which has no knowledge of the run-issue marker
+///    and gates on labels BEFORE it reads a body — admitted every run as something
+///    to triage and implement.
+///  * A session no longer has to resolve to exactly ONE work label to run a
+///    schedule. That requirement rejected every session in a deployment whose
+///    mandatory package set declares three, which was all of them.
+///  * A repeating cadence is distinguishable from a one-shot at a glance.
+///
+/// Both labels are reserved, so a session may not adopt either name and neither
+/// participates in collision detection.
+pub fn run_issue_work_label(run_mode: &RunMode, cfg: &ReconcileConfig) -> Result<String, String> {
+    let logical = match run_mode {
+        RunMode::Once => WORKFLOW_RUN_LABEL,
+        RunMode::Cron(_) => WORKFLOW_SCHEDULED_RUN_LABEL,
+    };
+    let effective = apply_work_label_namespace(
+        std::slice::from_ref(&logical.to_string()),
+        cfg.work_label_namespace.as_deref(),
+    )
+    .map_err(|error| format!("the run-issue work label is unusable: {error}"))?;
+    effective
+        .logical_to_effective
+        .get(logical)
         .cloned()
-        .unwrap_or_default();
-    let effective = apply_work_label_namespace(&logical, cfg.work_label_namespace.as_deref())
-        .map_err(|error| format!("the session's work labels are unusable: {error}"))?;
-
-    // An explicit `### Work Label` on the trigger is the author's own statement of
-    // which queue this session serves, so it wins over discovery.
-    if let Some(declared) = &reg.def.work_label {
-        return effective
-            .logical_to_effective
-            .get(declared)
-            .cloned()
-            .ok_or_else(|| {
-                format!(
-                    "session #{} declares work label `{declared}` but it did not resolve to an \
-                     effective label",
-                    reg.trigger_issue
-                )
-            });
-    }
-
-    let candidates: Vec<&String> = effective
-        .logical
-        .iter()
-        .filter(|label| !is_reserved_label(label))
-        .collect();
-    match candidates.as_slice() {
-        [single] => effective
-            .logical_to_effective
-            .get(*single)
-            .cloned()
-            .ok_or_else(|| "the discovered work label did not resolve".to_string()),
-        [] => Err(format!(
-            "session #{} has no work label, so a scheduled run has nothing to route to. Add a \
-             `### Work Label` to that trigger issue.",
-            reg.trigger_issue
-        )),
-        many => Err(format!(
-            "session #{} has {} work labels ({}), so a scheduled run cannot pick one. Add an \
-             explicit `### Work Label` to that trigger issue.",
-            reg.trigger_issue,
-            many.len(),
-            many.iter()
-                .map(|label| label.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )),
-    }
+        .ok_or_else(|| format!("the run-issue work label `{logical}` did not resolve"))
 }
 
-/// The effective work label a MANUAL run's issue must carry.
+/// The effective work label a MANUAL run's issue must carry, after checking the
+/// creator actually has a session to run it.
 ///
-/// Shares [`resolve_work_label`] with the clock rather than approximating it. A
+/// Shares [`run_issue_work_label`] with the clock rather than approximating it: a
 /// manual run that routed somewhere a scheduled one would not is exactly the class
-/// of surprise the fail-closed label rules exist to prevent, so this resolves from
-/// the same inputs — the creator's registrations and their manifest-expanded
-/// work-label sets — and fails closed for the same reasons.
+/// of surprise the fail-closed label rules exist to prevent.
+///
+/// The registration walk is now purely a PRECONDITION CHECK. It used to also drive
+/// the label — expanding the manifest package set and discovering each package's
+/// declared labels — but the run-issue label no longer depends on the session, so
+/// that work is gone. What remains is worth keeping: dispatching a run for a
+/// creator with no session would create an issue nothing ever wakes on, and
+/// silence is a worse answer than a refusal that says why.
 pub async fn resolve_manual_run_label(
-    http: &reqwest::Client,
-    api_base: &str,
-    token: &SecretString,
     repo: &RepoRef,
     triggers: &[IssueSummary],
     creator_login: &str,
+    run_mode: &RunMode,
     cfg: &ReconcileConfig,
 ) -> Result<String, String> {
     let mut regs: Vec<SessionRegistration> = triggers
@@ -307,33 +284,13 @@ pub async fn resolve_manual_run_label(
         .collect();
     // Same tie-break as the schedule pass: the lowest trigger issue owns it.
     regs.sort_by_key(|reg| reg.trigger_issue);
-    let Some(mut reg) = regs.into_iter().next() else {
+    if regs.is_empty() {
         return Err(format!(
             "no active session on this repository is owned by {creator_login}"
         ));
-    };
-
-    // Discovery must walk the MANIFEST-EXPANDED package set, exactly as the
-    // reconciler does, or a manifest-driven session's labels would be invisible.
-    let expanded = crate::reconcile::effective_packages::resolve_effective_packages(
-        http,
-        api_base,
-        token,
-        std::slice::from_ref(&reg),
-        &cfg.mandatory_packages,
-    )
-    .await;
-    if let Some(packages) = expanded.by_session.get(&reg.session_id) {
-        reg.effective_packages = packages.clone();
     }
-    let logical = crate::reconcile::work_labels::resolve_work_label_sets(
-        http,
-        api_base,
-        token,
-        std::slice::from_ref(&reg),
-    )
-    .await;
-    resolve_work_label(&reg, &logical, cfg)
+
+    run_issue_work_label(run_mode, cfg)
 }
 
 #[cfg(test)]

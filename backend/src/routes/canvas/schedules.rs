@@ -399,7 +399,7 @@ pub(super) async fn run_schedule_now(
     // indistinguishable downstream — same run-issue shape, same record, same
     // completion detection. The slot is `now`, which cannot collide with a cron
     // slot to the second and is what marks the run manual in the history.
-    let work_label = resolve_run_label(&state, &owner, &name, &loaded).await?;
+    let work_label = resolve_run_label(&state, &owner, &name, &loaded, &spec.run_mode).await?;
     let request = RunIssueRequest {
         schedule_issue: schedule_issue as i64,
         workflow_id: spec.workflow_id.clone(),
@@ -441,6 +441,7 @@ async fn resolve_run_label(
     owner: &str,
     name: &str,
     loaded: &LoadedSchedule,
+    run_mode: &crate::goals::scheduled_workflow_parse::RunMode,
 ) -> Result<String, AppError> {
     let creator = creator_login(loaded);
     if creator.is_empty() {
@@ -454,13 +455,6 @@ async fn resolve_run_label(
     let owner_repo = format!("{owner}/{name}");
     let token = app.token_for_repo(&owner_repo, None).await?;
     let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
-    // Package/manifest reads are plain authenticated contents fetches; a
-    // request-scoped client keeps this out of `AppState`, which nothing else on
-    // the canvas surface needs.
-    let http = reqwest::Client::builder()
-        .user_agent("fkst-hosted-api")
-        .build()
-        .map_err(|error| AppError::Unavailable(format!("http client build failed: {error}")))?;
     let triggers: Vec<_> = gh
         .issues_by_label(
             &token,
@@ -474,15 +468,13 @@ async fn resolve_run_label(
         .map(|trigger| trigger.summary)
         .collect();
     crate::reconcile::schedule_pass::resolve_manual_run_label(
-        &http,
-        &state.config.github_api_base_url,
-        &token,
         &crate::models::RepoRef {
             owner: owner.to_string(),
             name: name.to_string(),
         },
         &triggers,
         &creator,
+        run_mode,
         &state.config.reconcile,
     )
     .await

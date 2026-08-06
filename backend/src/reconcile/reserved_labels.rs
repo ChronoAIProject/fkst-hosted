@@ -58,12 +58,44 @@ pub const CRON_FAILED_LABEL: &str = "fkst-cron-failed";
 /// Control-plane owned; cleared on the next successful run.
 pub const CRON_TIMEOUT_LABEL: &str = "fkst-cron-timeout";
 
+/// The LOGICAL work label a one-time workflow run's issue carries, before the
+/// deployment work-label namespace is applied.
+///
+/// A run issue is work for the workflow runner and for nothing else. It used to
+/// carry the SESSION's work label, which in a deployment that mandates the devloop
+/// adapters resolves to `fkst-dev` — so every run issue also looked like ordinary
+/// development work and was admitted by the dev intake, which has no knowledge of
+/// the run-issue marker (#5890). Giving the runner its own label family is what
+/// separates the two queues, rather than teaching every other adapter to recognise
+/// and decline a run.
+///
+/// Deliberately NOT `fkst-workflow`: that name is already `workflow-writer`'s
+/// authoring queue, where an issue means "author or refine a workflow template".
+/// A run issue landing there would be answered with a template pull request.
+pub const WORKFLOW_RUN_LABEL: &str = "fkst-workflow-run";
+
+/// The LOGICAL work label a CRON-scheduled run's issue carries, before the
+/// deployment work-label namespace is applied.
+///
+/// Split from [`WORKFLOW_RUN_LABEL`] so a repeating cadence is distinguishable from
+/// a one-shot at a glance — in the issue list, in a label-scoped query, and in any
+/// automation an operator hangs off it. Both are the runner's own family and
+/// neither is ever `fkst-dev`.
+pub const WORKFLOW_SCHEDULED_RUN_LABEL: &str = "fkst-workflow-scheduled";
+
 /// Every platform-owned label, for the repo-level label bootstrap and for the
 /// reserved-name check below.
 ///
 /// [`CRON_PAUSED_LABEL`] is in this list because it is still platform-owned
 /// VOCABULARY — a session may not adopt the name — even though the human, not the
 /// control plane, is the one who applies it.
+/// The two run-issue labels are in this list for a second reason beyond
+/// bootstrapping: [`crate::reconcile::collision`] excludes reserved labels from
+/// collision detection. Every session that composes the workflow runner declares
+/// the same two, so without the exclusion a second session on a repository would
+/// collide with the first on the runner's own family and be demoted. Sharing them
+/// is safe because a run issue is routed by SOLE ASSIGNEE, so only the creator
+/// whose schedule produced it can pick it up.
 pub const RESERVED_LABELS: &[&str] = &[
     SCHEDULED_WORKFLOW_LABEL,
     SCHEDULE_INVALID_LABEL,
@@ -71,6 +103,8 @@ pub const RESERVED_LABELS: &[&str] = &[
     CRON_PAUSED_LABEL,
     CRON_FAILED_LABEL,
     CRON_TIMEOUT_LABEL,
+    WORKFLOW_RUN_LABEL,
+    WORKFLOW_SCHEDULED_RUN_LABEL,
 ];
 
 /// True when `label` is platform-owned. GitHub label identity is case-insensitive,
