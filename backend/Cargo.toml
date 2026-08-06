@@ -50,6 +50,13 @@ http-body-util = "0.1"
 percent-encoding = "2"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
+# Evolution configuration is YAML (`.fkst/evolution/config.yaml`), which `toml`
+# cannot read. This crate is ALREADY compiled into the binary as a transitive
+# dependency of `kube-client`, so declaring it directly adds no new code and no
+# new supply-chain surface — it only makes an existing dependency explicit.
+# It carries a `+deprecated` marker upstream; if kube ever drops it, move to a
+# maintained fork rather than re-deriving a parser here.
+serde_yaml = "0.9"
 serde_json = "1"
 base64 = "0.22"
 sha2 = "0.10"
