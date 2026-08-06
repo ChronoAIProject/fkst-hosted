@@ -3,12 +3,12 @@
   "source": {
     "repository": "ChronoAIProject/fkst-hosted",
     "branch": "@default",
-    "observedHead": "ec822be8c00245f4d66cfb8f3d7e7ac218ad0b12",
-    "previousCoveredHead": "ec822be8c00245f4d66cfb8f3d7e7ac218ad0b12",
+    "observedHead": "1c6f182d0eee4fc18cb4e9c3aab8d36094a58763",
+    "previousCoveredHead": "1c6f182d0eee4fc18cb4e9c3aab8d36094a58763",
     "historyRelation": "fast-forward",
     "productRelevantFingerprint": "sha256:4169943d1005bc9d97b44fefc2010a15e2828d3dac4d05661c253ca2aeef82fe",
-    "coverageFingerprint": "sha256:7a02fcb2e1ae25fa894dc81d0931ca9508eed3862496579ba053bc9044bbeb70",
-    "inputFingerprint": "sha256:53045e0405b2468e80ab65ee6c158b10a7007521941eb648e08217e9eb6d27c2",
+    "coverageFingerprint": "sha256:9a99489779dfcde20a9a4ba05ebacf3c99a029af7dec453ad59e6f5ef0314bab",
+    "inputFingerprint": "sha256:aeb3a300191ddd9ca022918fe61e1d0a3ad38b644d79adbc6a23fcd0d2a7d225",
     "lastFullRebuildFor": null
   },
   "artifactRepository": {
@@ -16,12 +16,12 @@
     "branch": "@default"
   },
   "generator": {
-    "manifestRef": "ChronoAIProject/fkst-hosted@ec822be8c00245f4d66cfb8f3d7e7ac218ad0b12:tools/evolution/artifact-plan.yaml",
+    "manifestRef": "ChronoAIProject/fkst-hosted@1c6f182d0eee4fc18cb4e9c3aab8d36094a58763:tools/evolution/artifact-plan.yaml",
     "packages": [
-      "ChronoAIProject/fkst-hosted@ec822be8c00245f4d66cfb8f3d7e7ac218ad0b12:tools/evolution"
+      "ChronoAIProject/fkst-hosted@1c6f182d0eee4fc18cb4e9c3aab8d36094a58763:tools/evolution"
     ],
     "generatorEpoch": 1,
-    "pinnedFingerprint": "sha256:82a0f520674e78618a8bac66af7a0a48d6f9920e10db01bff12e84ac06f2a198",
+    "pinnedFingerprint": "sha256:c310e48a07b5ca67650750c37617f55f99b162c72b2374beb999441f1f0d2c9a",
     "provenanceOnly": [
       "engineVersion",
       "model",
@@ -38,10 +38,10 @@
     },
     "envFingerprint": "sha256:0a763d2993ea8dadd223fe58f908059ca2f71d5b84a5deaa457c85d220cde5f6"
   },
-  "outputFingerprint": "sha256:10f3055f54e51ab545221e41d13d51bcddf37cced0d8154ce5a4300ea86f393a",
+  "outputFingerprint": "sha256:ff29677dd14d1859c6b4ada39315acfe0b970502422a978fbf8ef3ae99d9a6ed",
   "verification": {
     "status": "passed",
-    "verifiedAt": "2026-08-05T09:45:00Z",
+    "verifiedAt": "2026-08-06T09:00:00Z",
     "checks": [
       {
         "id": "jny_2f7c",
@@ -49,7 +49,7 @@
         "evidence": ".fkst/evolution/journeys/queue-work-item.spec.ts",
         "checkRun": {
           "repository": "ChronoAIProject/fkst-hosted",
-          "headSha": "ec822be8c00245f4d66cfb8f3d7e7ac218ad0b12",
+          "headSha": "1c6f182d0eee4fc18cb4e9c3aab8d36094a58763",
           "id": null,
           "name": "fkst-evolution/journey.jny_2f7c"
         },
@@ -69,15 +69,15 @@
       "journeys": [
         "jny_2f7c"
       ],
-      "sourceCommit": "ec822be8c00245f4d66cfb8f3d7e7ac218ad0b12",
-      "inputFingerprint": "sha256:53045e0405b2468e80ab65ee6c158b10a7007521941eb648e08217e9eb6d27c2",
-      "generatorPinnedFingerprint": "sha256:82a0f520674e78618a8bac66af7a0a48d6f9920e10db01bff12e84ac06f2a198",
+      "sourceCommit": "1c6f182d0eee4fc18cb4e9c3aab8d36094a58763",
+      "inputFingerprint": "sha256:aeb3a300191ddd9ca022918fe61e1d0a3ad38b644d79adbc6a23fcd0d2a7d225",
+      "generatorPinnedFingerprint": "sha256:c310e48a07b5ca67650750c37617f55f99b162c72b2374beb999441f1f0d2c9a",
       "repositoryPath": ".fkst/evolution/docs/queue-work-item.md",
       "contentHash": "sha256:12d83ad653cf2f473c42e3ed29ab4b7321adaa1ba7782bfc5b2d0df2694b9c58",
       "status": "current",
       "required": true,
       "verification": "passed",
-      "updatedAt": "2026-08-05T09:45:00Z"
+      "updatedAt": "2026-08-06T09:00:00Z"
     },
     {
       "id": "skill.queue-work-item",
@@ -90,15 +90,15 @@
       "journeys": [
         "jny_2f7c"
       ],
-      "sourceCommit": "ec822be8c00245f4d66cfb8f3d7e7ac218ad0b12",
-      "inputFingerprint": "sha256:53045e0405b2468e80ab65ee6c158b10a7007521941eb648e08217e9eb6d27c2",
-      "generatorPinnedFingerprint": "sha256:82a0f520674e78618a8bac66af7a0a48d6f9920e10db01bff12e84ac06f2a198",
+      "sourceCommit": "1c6f182d0eee4fc18cb4e9c3aab8d36094a58763",
+      "inputFingerprint": "sha256:aeb3a300191ddd9ca022918fe61e1d0a3ad38b644d79adbc6a23fcd0d2a7d225",
+      "generatorPinnedFingerprint": "sha256:c310e48a07b5ca67650750c37617f55f99b162c72b2374beb999441f1f0d2c9a",
       "repositoryPath": ".fkst/evolution/skills/queue-work-item/SKILL.md",
       "contentHash": "sha256:75696fa01dd51e2d0786802a4a93cf4fe8a1d428b7051a05de95ad82106bc6e9",
       "status": "current",
       "required": true,
       "verification": "passed",
-      "updatedAt": "2026-08-05T09:45:00Z"
+      "updatedAt": "2026-08-06T09:00:00Z"
     },
     {
       "id": "journey.queue-work-item",
@@ -111,15 +111,15 @@
       "journeys": [
         "jny_2f7c"
       ],
-      "sourceCommit": "ec822be8c00245f4d66cfb8f3d7e7ac218ad0b12",
-      "inputFingerprint": "sha256:53045e0405b2468e80ab65ee6c158b10a7007521941eb648e08217e9eb6d27c2",
-      "generatorPinnedFingerprint": "sha256:82a0f520674e78618a8bac66af7a0a48d6f9920e10db01bff12e84ac06f2a198",
+      "sourceCommit": "1c6f182d0eee4fc18cb4e9c3aab8d36094a58763",
+      "inputFingerprint": "sha256:aeb3a300191ddd9ca022918fe61e1d0a3ad38b644d79adbc6a23fcd0d2a7d225",
+      "generatorPinnedFingerprint": "sha256:c310e48a07b5ca67650750c37617f55f99b162c72b2374beb999441f1f0d2c9a",
       "repositoryPath": ".fkst/evolution/journeys/queue-work-item.spec.ts",
-      "contentHash": "sha256:9b64e530a083df8cb6e17b8f10314064bb8255ce27f135c036c6553e0759fd4f",
+      "contentHash": "sha256:80b5359ced637345a4a5d8b647d9722c0acae5802cee67a0995d9b23ea01fa06",
       "status": "current",
       "required": true,
       "verification": "passed",
-      "updatedAt": "2026-08-05T09:45:00Z"
+      "updatedAt": "2026-08-06T09:00:00Z"
     },
     {
       "id": "screenshot.sessions-level",
@@ -132,15 +132,15 @@
       "journeys": [
         "jny_2f7c"
       ],
-      "sourceCommit": "ec822be8c00245f4d66cfb8f3d7e7ac218ad0b12",
-      "inputFingerprint": "sha256:53045e0405b2468e80ab65ee6c158b10a7007521941eb648e08217e9eb6d27c2",
-      "generatorPinnedFingerprint": "sha256:82a0f520674e78618a8bac66af7a0a48d6f9920e10db01bff12e84ac06f2a198",
+      "sourceCommit": "1c6f182d0eee4fc18cb4e9c3aab8d36094a58763",
+      "inputFingerprint": "sha256:aeb3a300191ddd9ca022918fe61e1d0a3ad38b644d79adbc6a23fcd0d2a7d225",
+      "generatorPinnedFingerprint": "sha256:c310e48a07b5ca67650750c37617f55f99b162c72b2374beb999441f1f0d2c9a",
       "repositoryPath": ".fkst/evolution/screenshots/sessions-level.png",
       "contentHash": "sha256:9cd6d0c8f99ab95ca452452c2ce0bcb0c5a7a35d2fb7b55c4f721d9c99d23bf7",
       "status": "current",
       "required": true,
       "verification": "passed",
-      "updatedAt": "2026-08-05T09:45:00Z"
+      "updatedAt": "2026-08-06T09:00:00Z"
     },
     {
       "id": "screenshot.work-composer",
@@ -153,15 +153,15 @@
       "journeys": [
         "jny_2f7c"
       ],
-      "sourceCommit": "ec822be8c00245f4d66cfb8f3d7e7ac218ad0b12",
-      "inputFingerprint": "sha256:53045e0405b2468e80ab65ee6c158b10a7007521941eb648e08217e9eb6d27c2",
-      "generatorPinnedFingerprint": "sha256:82a0f520674e78618a8bac66af7a0a48d6f9920e10db01bff12e84ac06f2a198",
+      "sourceCommit": "1c6f182d0eee4fc18cb4e9c3aab8d36094a58763",
+      "inputFingerprint": "sha256:aeb3a300191ddd9ca022918fe61e1d0a3ad38b644d79adbc6a23fcd0d2a7d225",
+      "generatorPinnedFingerprint": "sha256:c310e48a07b5ca67650750c37617f55f99b162c72b2374beb999441f1f0d2c9a",
       "repositoryPath": ".fkst/evolution/screenshots/work-composer.png",
       "contentHash": "sha256:5a99f7864a60330426d82a3d9e836b037f07511eb2e1a51a88b6bbd6fa1b218e",
       "status": "current",
       "required": true,
       "verification": "passed",
-      "updatedAt": "2026-08-05T09:45:00Z"
+      "updatedAt": "2026-08-06T09:00:00Z"
     },
     {
       "id": "screenshot.session-detail",
@@ -174,15 +174,15 @@
       "journeys": [
         "jny_2f7c"
       ],
-      "sourceCommit": "ec822be8c00245f4d66cfb8f3d7e7ac218ad0b12",
-      "inputFingerprint": "sha256:53045e0405b2468e80ab65ee6c158b10a7007521941eb648e08217e9eb6d27c2",
-      "generatorPinnedFingerprint": "sha256:82a0f520674e78618a8bac66af7a0a48d6f9920e10db01bff12e84ac06f2a198",
+      "sourceCommit": "1c6f182d0eee4fc18cb4e9c3aab8d36094a58763",
+      "inputFingerprint": "sha256:aeb3a300191ddd9ca022918fe61e1d0a3ad38b644d79adbc6a23fcd0d2a7d225",
+      "generatorPinnedFingerprint": "sha256:c310e48a07b5ca67650750c37617f55f99b162c72b2374beb999441f1f0d2c9a",
       "repositoryPath": ".fkst/evolution/screenshots/session-detail.png",
       "contentHash": "sha256:9d9146306b4502809d9907e1e8383ec8d12ae36648fd03d83c0684a86cd3cc39",
       "status": "current",
       "required": true,
       "verification": "passed",
-      "updatedAt": "2026-08-05T09:45:00Z"
+      "updatedAt": "2026-08-06T09:00:00Z"
     },
     {
       "id": "deck.product-intro",
@@ -195,15 +195,15 @@
       "journeys": [
         "jny_2f7c"
       ],
-      "sourceCommit": "ec822be8c00245f4d66cfb8f3d7e7ac218ad0b12",
-      "inputFingerprint": "sha256:53045e0405b2468e80ab65ee6c158b10a7007521941eb648e08217e9eb6d27c2",
-      "generatorPinnedFingerprint": "sha256:82a0f520674e78618a8bac66af7a0a48d6f9920e10db01bff12e84ac06f2a198",
+      "sourceCommit": "1c6f182d0eee4fc18cb4e9c3aab8d36094a58763",
+      "inputFingerprint": "sha256:aeb3a300191ddd9ca022918fe61e1d0a3ad38b644d79adbc6a23fcd0d2a7d225",
+      "generatorPinnedFingerprint": "sha256:c310e48a07b5ca67650750c37617f55f99b162c72b2374beb999441f1f0d2c9a",
       "repositoryPath": ".fkst/evolution/slides/product-intro.md",
       "contentHash": "sha256:5fc39550b1787bb075300eba43e95808dbb5c65bd2e492ffcb8c35ddd4aea8ae",
       "status": "current",
       "required": true,
       "verification": "passed",
-      "updatedAt": "2026-08-05T09:45:00Z"
+      "updatedAt": "2026-08-06T09:00:00Z"
     },
     {
       "id": "deck.product-intro.pdf",
@@ -216,19 +216,19 @@
       "journeys": [
         "jny_2f7c"
       ],
-      "sourceCommit": "ec822be8c00245f4d66cfb8f3d7e7ac218ad0b12",
-      "inputFingerprint": "sha256:53045e0405b2468e80ab65ee6c158b10a7007521941eb648e08217e9eb6d27c2",
-      "generatorPinnedFingerprint": "sha256:82a0f520674e78618a8bac66af7a0a48d6f9920e10db01bff12e84ac06f2a198",
+      "sourceCommit": "1c6f182d0eee4fc18cb4e9c3aab8d36094a58763",
+      "inputFingerprint": "sha256:aeb3a300191ddd9ca022918fe61e1d0a3ad38b644d79adbc6a23fcd0d2a7d225",
+      "generatorPinnedFingerprint": "sha256:c310e48a07b5ca67650750c37617f55f99b162c72b2374beb999441f1f0d2c9a",
       "release": {
         "repository": "ChronoAIProject/fkst-hosted",
-        "tag": "fkst-evolution/53045e0405b2468e",
+        "tag": "fkst-evolution/aeb3a300191ddd9c",
         "asset": "product-intro.sha256-23614e24df4af31e.pdf"
       },
       "contentHash": "sha256:23614e24df4af31e1675d7afbd33ae0d5b2f8e8968fbe9b379d2aabf3e4ccc51",
       "status": "current",
       "required": false,
       "verification": "passed",
-      "updatedAt": "2026-08-05T09:45:00Z"
+      "updatedAt": "2026-08-06T09:00:00Z"
     },
     {
       "id": "video.queue-work-item",
@@ -241,19 +241,19 @@
       "journeys": [
         "jny_2f7c"
       ],
-      "sourceCommit": "ec822be8c00245f4d66cfb8f3d7e7ac218ad0b12",
-      "inputFingerprint": "sha256:53045e0405b2468e80ab65ee6c158b10a7007521941eb648e08217e9eb6d27c2",
-      "generatorPinnedFingerprint": "sha256:82a0f520674e78618a8bac66af7a0a48d6f9920e10db01bff12e84ac06f2a198",
+      "sourceCommit": "1c6f182d0eee4fc18cb4e9c3aab8d36094a58763",
+      "inputFingerprint": "sha256:aeb3a300191ddd9ca022918fe61e1d0a3ad38b644d79adbc6a23fcd0d2a7d225",
+      "generatorPinnedFingerprint": "sha256:c310e48a07b5ca67650750c37617f55f99b162c72b2374beb999441f1f0d2c9a",
       "release": {
         "repository": "ChronoAIProject/fkst-hosted",
-        "tag": "fkst-evolution/53045e0405b2468e",
+        "tag": "fkst-evolution/aeb3a300191ddd9c",
         "asset": "queue-work-item.sha256-258e093f3cee68f2.mp4"
       },
       "contentHash": "sha256:258e093f3cee68f2c0f19f30c1a7108c41ed13d14a3f23a0b0b41ba174289c63",
       "status": "current",
       "required": true,
       "verification": "passed",
-      "updatedAt": "2026-08-05T09:45:00Z"
+      "updatedAt": "2026-08-06T09:00:00Z"
     }
   ]
 }
