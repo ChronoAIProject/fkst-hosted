@@ -143,6 +143,7 @@ fn contract_registry_and_fixture_metadata() {
         .map(|foundation_type| foundation_type.definition().to_owned())
         .collect();
     let mut expected_types = expected_foundation_types.clone();
+    expected_types.insert("CancelDisposition".to_owned());
     expected_types.insert("ExecutionOutcome".to_owned());
     expected_types.insert("LocalEvidenceObject".to_owned());
     expected_types.insert("LocalEvidenceObjectRef".to_owned());

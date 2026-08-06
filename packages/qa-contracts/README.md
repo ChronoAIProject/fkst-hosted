@@ -22,14 +22,16 @@ verification, or testing-package behavior.
 
 The registry-driven non-foundation walking skeleton exposes the narrow
 `validateLocalState`/`validate_local_state` and
-`validateExecutionOutcome`/`validate_execution_outcome` APIs. `LocalState` has
+`validateExecutionOutcome`/`validate_execution_outcome` and
+`validateCancelDisposition`/`validate_cancel_disposition` APIs. `LocalState` has
 the complete ordered vocabulary `accepted`, `preparing`, `ready`, `executing`,
 `staging_evidence`, `cleaning_up_execution`, `uploading`, `finalizing_local`,
 and `terminal`. Local `terminal` means only that required local actions are
 settled or moved to an explicit repair backlog; it does not imply Hosted
 Quality, Report, Publication, RunSettlement completion, or settlement.
 `ExecutionOutcome` has the ordered vocabulary `passed`, `failed`, `cancelled`,
-`timed_out`, `lost`, and `blocked`.
+`timed_out`, `lost`, and `blocked`. `CancelDisposition` has the ordered
+vocabulary `accepted`, `already_accepted`, and `terminal`.
 
 Schema versions use `qa.<lowercase-kebab-name>/v<positive-major>`. Consumers
 must resolve schema and type names through `contracts/registry.json`; runtime
@@ -44,9 +46,10 @@ The checked-in conformance sources are:
   bytes, and SHA-256 vectors;
 - `fixtures/qa/contract-foundation-v1.json` for foundation validation,
   exact-object/union behavior, and root-only digest projection vectors.
-- `fixtures/qa/local-lifecycle-v1.json` for the complete `LocalState`
-  conformance matrix and accepted `ExecutionOutcome` walking skeleton through
-  registry resolution, validation, canonicalization, and digesting.
+- `fixtures/qa/local-lifecycle-v1.json` for the complete `LocalState` and
+  `ExecutionOutcome` conformance matrices plus the accepted `CancelDisposition`
+  walking skeleton through registry resolution, validation, canonicalization,
+  and digesting.
 - `fixtures/qa/local-evidence-v1.json` for Local Evidence canonical bytes, raw
   Evidence byte identity, contract-object content digests, and reference
   binding across the four public Local Evidence types.

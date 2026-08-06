@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
 use fkst_qa_contracts::{
-    canonical_bytes, contract_registry, sha256_digest, validate_execution_outcome,
-    validate_local_state, ContractError, Rejection, ValidatedValue,
+    canonical_bytes, contract_registry, sha256_digest, validate_cancel_disposition,
+    validate_execution_outcome, validate_local_state, ContractError, Rejection, ValidatedValue,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -13,6 +13,7 @@ use serde_json::Value;
 struct LifecycleFixture {
     schema_version: String,
     valid_cases: Vec<LifecycleValidCase>,
+    cancel_disposition_valid_cases: Vec<CancelDispositionValidCase>,
     invalid_cases: Vec<LifecycleInvalidCase>,
 }
 
@@ -20,6 +21,15 @@ struct LifecycleFixture {
 struct LifecycleValidCase {
     case_id: String,
     lifecycle_type: LifecycleType,
+    source: Value,
+    expected_canonical_utf8_hex: String,
+    expected_canonical_utf8_base64: String,
+    expected_sha256: String,
+}
+
+#[derive(Deserialize)]
+struct CancelDispositionValidCase {
+    case_id: String,
     source: Value,
     expected_canonical_utf8_hex: String,
     expected_canonical_utf8_base64: String,
@@ -90,6 +100,18 @@ fn local_lifecycle_fixture_walks_the_production_path() {
             .and_then(Value::as_str),
         Some("#/$defs/ExecutionOutcome")
     );
+    assert_eq!(
+        registry
+            .pointer("/types/CancelDisposition/schema")
+            .and_then(Value::as_str),
+        Some("qa.local-lifecycle/v1")
+    );
+    assert_eq!(
+        registry
+            .pointer("/types/CancelDisposition/pointer")
+            .and_then(Value::as_str),
+        Some("#/$defs/CancelDisposition")
+    );
 
     for fixture_case in &fixture.valid_cases {
         println!("case_id={}", fixture_case.case_id);
@@ -98,6 +120,21 @@ fn local_lifecycle_fixture_walks_the_production_path() {
             .expect("validate lifecycle fixture");
         assert_eq!(validated.value(), &fixture_case.source);
         let canonical = canonical_bytes(&validated).expect("canonical lifecycle bytes");
+        assert_eq!(hex(&canonical), fixture_case.expected_canonical_utf8_hex);
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD.encode(&canonical),
+            fixture_case.expected_canonical_utf8_base64
+        );
+        assert_eq!(sha256_digest(&canonical), fixture_case.expected_sha256);
+    }
+
+    for fixture_case in &fixture.cancel_disposition_valid_cases {
+        println!("case_id={}", fixture_case.case_id);
+        let raw = serde_json::to_vec(&fixture_case.source).expect("serialize fixture source");
+        assert_eq!(raw, br#""accepted""#);
+        let validated = validate_cancel_disposition(&raw).expect("validate cancel disposition");
+        assert_eq!(validated.value(), "accepted");
+        let canonical = canonical_bytes(&validated).expect("canonical cancel disposition bytes");
         assert_eq!(hex(&canonical), fixture_case.expected_canonical_utf8_hex);
         assert_eq!(
             base64::engine::general_purpose::STANDARD.encode(&canonical),

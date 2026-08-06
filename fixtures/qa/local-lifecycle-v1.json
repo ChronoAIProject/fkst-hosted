@@ -122,6 +122,15 @@
       "expected_sha256": "sha256:7b92de7d08814ff2863dbd0239cdcb3cd107364ebf588b5d95693527f066f106"
     }
   ],
+  "cancel_disposition_valid_cases": [
+    {
+      "case_id": "cancel-disposition-accepted",
+      "source": "accepted",
+      "expected_canonical_utf8_hex": "22616363657074656422",
+      "expected_canonical_utf8_base64": "ImFjY2VwdGVkIg==",
+      "expected_sha256": "sha256:d288c584af270151f7b7cd7977b94160ce1d7b501dee2d6308f2ac84ebaacc99"
+    }
+  ],
   "invalid_cases": [
     {
       "case_id": "local-state-unknown-string",
