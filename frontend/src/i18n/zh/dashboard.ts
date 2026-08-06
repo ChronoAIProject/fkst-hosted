@@ -27,6 +27,8 @@ export const dashboardScalars: DashboardScalars = {
     '由于无法刷新你的 GitHub token，你已被登出。重新登录即可从中断处继续 —— 你在仪表盘中的位置会被保留。',
   sessionExpiredAction: '重新登录',
   noSessions: '此仓库中没有 fkst 会话。',
+  sessionsTab: '会话',
+  workspaceViewAria: '仓库视图',
   installed: '已安装',
   workLabel: '工作标签',
   packages: 'Package',

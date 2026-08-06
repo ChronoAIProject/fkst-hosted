@@ -77,13 +77,9 @@ export function Shell() {
   // `/operations` is a fixed-viewport application route exactly like the
   // dashboard: it fills <main>, its table region scrolls internally, and it gets
   // the pinned slim footer rather than the marketing one.
-  // `/workflows` is a third fixed-viewport application route. Omitting it here
-  // is not a cosmetic slip: it would land in the padded doc layout and collapse
-  // the page's `h-full` chain, so its list region would stop scrolling.
   const isApp =
     location.pathname.startsWith('/dashboard') ||
-    location.pathname.startsWith('/operations') ||
-    location.pathname.startsWith('/workflows');
+    location.pathname.startsWith('/operations');
   // The v2 landing is a single-viewport centered hero: it fills <main> like the
   // app view (no padding, no scroll) and pairs with the pinned slim footer so
   // nav + hero + footer compose exactly one viewport.
@@ -197,17 +193,6 @@ export function Shell() {
                     {c.operations.nav}
                   </NavLink>
                 )}
-                {/* Workflows collapses at a WIDER breakpoint than Operations:
-                    it is the fourth inline item, and four plus the wordmark is
-                    what starts crowding a small laptop. */}
-                {isAuthenticated && (
-                  <NavLink
-                    to="/workflows"
-                    className={(props) => `${navLinkClass(props)} max-[860px]:hidden`}
-                  >
-                    {c.workflows.nav}
-                  </NavLink>
-                )}
               </nav>
 
               <div className="flex items-center gap-2 ml-auto">
@@ -315,16 +300,6 @@ export function Shell() {
                             className={menuItemClass}
                           >
                             {c.operations.nav}
-                          </NavLink>
-                        )}
-                        {isAuthenticated && (
-                          <NavLink
-                            role="menuitem"
-                            to="/workflows"
-                            onClick={() => setMenuOpen(false)}
-                            className={menuItemClass}
-                          >
-                            {c.workflows.nav}
                           </NavLink>
                         )}
                         {isAuthenticated && (
