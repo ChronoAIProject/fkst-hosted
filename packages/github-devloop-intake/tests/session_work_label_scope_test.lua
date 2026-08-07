@@ -92,6 +92,48 @@ local function assert_label_mode_rejects(number, name, labels, scope)
 end
 
 return {
+  -- A scheduled-workflow RUN issue belongs to workflow-runner, never to the dev
+  -- loop. It MUST carry a label in the session's effective set so the clock can
+  -- wake the session with it, so the session-scope check admits it -- and the
+  -- dev loop then works a run as a feature. Observed in production (#5904): run
+  -- issue #5896 was claimed and merged as a PR re-implementing the workflow
+  -- definition, while the run itself never executed.
+  --
+  -- The scope value here deliberately INCLUDES the run label, reproducing the
+  -- real session: it is in the set, and the issue must still be declined.
+  test_a_scheduled_workflow_run_issue_is_never_admitted_by_the_dev_loop = function()
+    for _, label in ipairs({
+      "fkst-workflow-run",
+      "fkst-workflow-run-chronoai-fkst-cloud",
+      "fkst-workflow-scheduled",
+      "fkst-workflow-scheduled-chronoai-fkst-cloud",
+    }) do
+      mock_repo_env()
+      mock_scope("fkst-dev,fkst-security,fkst-workflow," .. label)
+      mock_issue(77, { label })
+
+      local result = run_admission(77, "workflow-run-declined-" .. label)
+
+      t.eq(result.exit_code, 0)
+      t.eq(candidate(result), nil)
+      t.eq(h.count_calls("--add-label"), 0)
+    end
+  end,
+
+  -- The prefix match must not swallow the AUTHORING queue. `fkst-workflow` is
+  -- workflow-writer's label and is ordinary work; only the run family belongs to
+  -- the runner.
+  test_the_workflow_authoring_label_is_not_mistaken_for_a_run = function()
+    mock_repo_env()
+    mock_scope("fkst-dev,fkst-security,fkst-workflow")
+    mock_issue(78, { "fkst-workflow" })
+
+    local result = run_admission(78, "workflow-authoring-still-admitted")
+
+    t.eq(result.exit_code, 0)
+    t.is_true(candidate(result) ~= nil, "an authoring issue must still be admitted")
+  end,
+
   test_session_work_label_parser_trims_and_deduplicates_exact_labels = function()
     local labels = config.parse_session_work_labels(" fkst-dev, fkst-security, fkst-dev ,,fkst-workflow ")
     t.eq(#labels, 3)
