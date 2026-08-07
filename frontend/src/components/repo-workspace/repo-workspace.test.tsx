@@ -123,23 +123,25 @@ describe('RepoWorkspace', () => {
     expect(screen.queryByRole('heading', { level: 2, name: 'beta' })).not.toBeInTheDocument();
   });
 
-  it('switches between this repository’s sessions and its scheduled workflows', async () => {
-    // Schedules used to live behind a top-level route whose first act was asking
-    // which repository you meant — a question this view has already answered.
-    // Both halves are the SAME repo, so the switch must swap the body without
-    // navigating away from it.
+  it('has no repository-level workflows view — a schedule is reached through its session', async () => {
+    // A repository briefly carried a Sessions | Workflows switch. It is gone: a
+    // schedule is assigned to a session creator and runs in that session's pod,
+    // so a repository-level list mixed schedules that different sessions own and
+    // could never run for each other. The sessions body is now unconditional,
+    // and the only Workflows tab in the tree belongs to the selected session.
     renderWorkspace();
 
     expect(screen.getByTestId('sessions-view')).toBeInTheDocument();
-    expect(screen.queryByTestId('repo-workflows')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('workspace-view-switch')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Sessions' })).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('tab', { name: 'Workflows' }));
+    const detail = screen.getByTestId('session-detail');
+    await userEvent.click(within(detail).getByRole('tab', { name: 'Workflows' }));
 
-    expect(screen.getByTestId('repo-workflows')).toBeInTheDocument();
-    expect(screen.queryByTestId('sessions-view')).not.toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('tab', { name: 'Sessions' }));
+    expect(screen.getByTestId('session-workflows')).toBeInTheDocument();
+    // Switching a session-detail tab must not disturb the workspace around it.
     expect(screen.getByTestId('sessions-view')).toBeInTheDocument();
+    expect(screen.getByTestId('session-rail')).toBeInTheDocument();
   });
 
   it('keeps App-wide cross-account sessions inspectable but read-only', () => {

@@ -19,13 +19,14 @@ import { TabLogs } from './tab-logs';
 import { TabOutcomes } from './tab-outcomes';
 import { TabHealth, type HealthState } from './tab-health';
 import { TabEngine } from './tab-engine';
+import { SessionWorkflows } from '@/components/workflows/session-workflows';
 import { healthChip } from './health-state';
 
-type TabKey = 'status' | 'packages' | 'logs' | 'health' | 'engine' | 'outcomes';
+type TabKey = 'status' | 'packages' | 'logs' | 'health' | 'workflows' | 'engine' | 'outcomes';
 
 /** The reusable inner detail surface: a sticky header with the decoded status
- *  pill and a six-tab body (status / packages / logs / health / engine /
- *  outcomes). It renders identically inside the overlay drawer
+ *  pill and a seven-tab body (status / packages / logs / health / workflows /
+ *  engine / outcomes). It renders identically inside the overlay drawer
  *  (SessionDetailDrawer) and an inline workspace scroll area — the only
  *  difference is the header Close button, which is emitted only when an
  *  `onClose` handler is supplied. The observe fetch STATE is lifted here so the
@@ -137,9 +138,11 @@ export function SessionDetailView({
     { key: 'packages', label: t.tabPackages },
     { key: 'logs', label: t.tabLogs },
     { key: 'health', label: t.tabHealth },
-    // Engine sits between Health and Outcomes deliberately: it keeps ArrowRight
-    // from Status on Packages and {End} on Outcomes, so the drawer's existing
-    // keyboard contract is unchanged by adding a tab.
+    // Workflows and Engine both sit between Health and Outcomes deliberately:
+    // inserting there keeps ArrowRight from Status on Packages and {End} on
+    // Outcomes, so the drawer's existing keyboard contract is unchanged by
+    // adding a tab. Any further tab belongs in this same interior window.
+    { key: 'workflows', label: t.tabWorkflows },
     { key: 'engine', label: t.tabEngine },
     { key: 'outcomes', label: t.tabOutcomes },
   ];
@@ -338,6 +341,13 @@ export function SessionDetailView({
           {tab === 'health' && (
             <div className="flex-1 min-h-0 px-5 py-4">
               <TabHealth sessionId={session.session_id ?? ''} state={health} onRetry={loadHealth} />
+            </div>
+          )}
+          {/* Workflows is a third master/detail tab (schedule rail + detail), so
+              it gets the fixed box for the same reason Logs and Health do. */}
+          {tab === 'workflows' && (
+            <div className="flex-1 min-h-0 flex flex-col px-5 py-4">
+              <SessionWorkflows owner={owner} name={name} creator={session.creator} />
             </div>
           )}
           {/* The observe fetch is triggered HERE, by opening this tab — never by

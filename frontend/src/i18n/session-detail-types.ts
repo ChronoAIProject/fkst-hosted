@@ -26,6 +26,9 @@ export interface SessionDetailContent {
   tabLogs: string;
   tabOutcomes: string;
   tabHealth: string;
+  /** This session's scheduled workflows: a schedule is assigned to a session
+   *  creator and runs inside that session's pod, so it is looked at here. */
+  tabWorkflows: string;
   /** Live runtime-observation tab, split out of Status so the lifecycle view
    *  issues no pod exec. */
   tabEngine: string;

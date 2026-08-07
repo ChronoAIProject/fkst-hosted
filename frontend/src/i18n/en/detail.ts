@@ -14,6 +14,7 @@ export const detail: DetailSlice = {
   tabLogs: 'Logs',
   tabOutcomes: 'Outcomes',
   tabHealth: 'Health',
+  tabWorkflows: 'Workflows',
   tabEngine: 'Engine',
   sessionIdCopy: 'Copy session ID',
   creatorLabel: 'Creator',

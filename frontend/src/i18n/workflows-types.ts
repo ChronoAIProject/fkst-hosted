@@ -1,6 +1,10 @@
 /**
- * The `/workflows` workspace: a repository's scheduled workflows, their next
- * firings, and their run history.
+ * A session's scheduled workflows: what they are, when they fire next, and what
+ * they are doing or last did.
+ *
+ * The surface lives inside the session detail's Workflows tab — a schedule is
+ * assigned to a session creator and runs inside that session's pod, so there is
+ * no route and no repository picker to name here.
  *
  * Two conventions, both shared with `/operations`. **Enum records are
  * exhaustive** — each `Record<..., string>` below is keyed by the exact wire
@@ -11,26 +15,8 @@
  * and the UI would confidently show a time the schedule does not honour.
  */
 export interface WorkflowsContent {
-  /** document.title for the route. */
-  metaTitle: string;
-  /** Topbar navigation label. */
-  nav: string;
-  title: string;
-  /** Accessible name for the route-level loading skeleton. */
+  /** Accessible name for the tab-level loading state. */
   loading: string;
-
-  /** Cold sign-in gate (the route is authenticated-only). */
-  gateTitle: string;
-  gateBody: string;
-  gateAction: string;
-  /** Shown when no API base URL is configured for this build. */
-  unconfiguredTitle: string;
-  unconfiguredBody: string;
-
-  /** Repository picker. */
-  repoLabel: string;
-  repoPlaceholder: string;
-  repoHint: string;
 
   /** Empty and error states. */
   emptyTitle: string;
@@ -38,15 +24,22 @@ export interface WorkflowsContent {
   emptyAction: string;
   notInstalled: string;
   loadFailed: string;
+  /** One schedule could not be read, while the rail around it still can be. */
+  detailFailed: string;
   retry: string;
 
-  /** List columns. */
-  colWorkflow: string;
-  colCadence: string;
-  colNextRun: string;
-  colState: string;
-  colLastRun: string;
-  colSuccess: string;
+  /** The rail: this session's schedules, and the ones routed to no session. */
+  railTitle: string;
+  railAria: string;
+  unroutedTitle: string;
+  unroutedBody: string;
+  /** Shown in the detail pane when the rail holds only unrouted schedules, none
+   *  of which is selectable. */
+  unroutedOnly: string;
+
+  /** Detail-pane field labels. */
+  cadenceLabel: string;
+  successLabel: string;
 
   /** Lifecycle badges, keyed by the API's `state` vocabulary. */
   lifecycle: Record<'idle' | 'running' | 'paused' | 'invalid', string>;
@@ -64,16 +57,20 @@ export interface WorkflowsContent {
   never: string;
 
   /** Detail view. */
-  detailBack: string;
   upcoming: string;
   argumentsTitle: string;
   noArguments: string;
-  runsTitle: string;
+  latestRunTitle: string;
+  earlierRunsTitle: string;
   noRuns: string;
-  stepsTitle: string;
   noSteps: string;
+  /** What a run still in flight can honestly say about its steps: the runner
+   *  posts one record at the end, so there is nothing finer to report yet. */
+  awaitingSteps: string;
+  /** A run's live age. `{d}` is substituted with a formatted duration. */
+  runningFor: string;
   openOnGithub: string;
-  runIssue: string;
+  openRunIssue: string;
   /** The one line that explains why there is no inline cadence editor. */
   editHint: string;
 
@@ -83,14 +80,9 @@ export interface WorkflowsContent {
   actionResume: string;
   actionBusy: string;
   actionFailed: string;
-  runNowStarted: string;
 
-  /** Column/aria labels inside the run list and the stepper. */
-  slot: string;
-  duration: string;
+  /** Labels inside the run list and the stepper. */
   manual: string;
-  detailColumn: string;
   stepperAria: string;
   runsAria: string;
-  schedulesAria: string;
 }

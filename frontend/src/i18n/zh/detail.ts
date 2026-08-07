@@ -14,6 +14,7 @@ export const detail: DetailSlice = {
   tabLogs: '日志',
   tabOutcomes: '成果',
   tabHealth: '健康',
+  tabWorkflows: '工作流',
   tabEngine: '引擎',
   sessionIdCopy: '复制会话 ID',
   creatorLabel: '创建者',

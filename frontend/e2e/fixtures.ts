@@ -395,6 +395,93 @@ function logFileBody(path: string) {
   };
 }
 
+// ---- GET /api/v1/repos/{o}/{n}/schedules ------------------------------------
+//
+// Three schedules on the repository, deliberately owned by DIFFERENT creators:
+// a session's Workflows tab must show only the ones routed to that session, and
+// list the unroutable one instead of hiding it.
+
+const scheduleRun = (over: Record<string, unknown> = {}) => ({
+  slot: '2026-07-31T01:00:00Z',
+  manual: false,
+  status: 'ok',
+  startedAt: '2026-07-31T01:00:00Z',
+  endedAt: '2026-07-31T01:12:00Z',
+  durationS: 720,
+  elapsedS: null,
+  issue: 4242,
+  detail: null,
+  ...over,
+});
+
+const scheduleSummary = (over: Record<string, unknown> = {}) => ({
+  scheduleIssue: 50,
+  title: 'nightly sourcing',
+  htmlUrl: `https://github.com/${PERSONAL}/${REPO}/issues/50`,
+  workflowId: 'github-candidate-sourcing',
+  runMode: 'cron: 0 1 * * 1-5',
+  cadence: 'weekdays at 01:00 UTC',
+  state: 'running',
+  creator: PERSONAL,
+  nextDue: '2099-01-01T01:00:00Z',
+  lastRun: scheduleRun(),
+  successRate30d: 0.75,
+  invalidDetail: null,
+  ...over,
+});
+
+/** #50 belongs to the live session's creator and has a run STILL IN FLIGHT;
+ *  #51 belongs to someone else; #52 is assigned to nobody, so no session can
+ *  run it. */
+export const repoSchedules = {
+  owner: PERSONAL,
+  name: REPO,
+  installed: true,
+  schedules: [
+    scheduleSummary(),
+    scheduleSummary({
+      scheduleIssue: 51,
+      workflowId: 'someone-elses-digest',
+      creator: 'another-dev',
+      state: 'idle',
+    }),
+    scheduleSummary({
+      scheduleIssue: 52,
+      workflowId: 'orphaned-report',
+      creator: null,
+      state: 'idle',
+    }),
+  ],
+};
+
+/** #50's detail: a run in flight, so `latestRun` is the control plane's
+ *  dispatch record — no steps yet, and an age instead of a duration. */
+export const scheduleDetail = {
+  summary: scheduleSummary(),
+  upcoming: ['2099-01-01T01:00:00Z', '2099-01-02T01:00:00Z'],
+  arguments: { role: 'AI Tools Application Engineer', min_score: '6' },
+  runs: [
+    scheduleRun({ slot: '2026-08-05T01:00:00Z', status: 'dispatched', endedAt: null, durationS: null, elapsedS: 125, issue: 4300 }),
+    scheduleRun({ slot: '2026-07-31T01:00:00Z', status: 'failed', durationS: 180, detail: 'step 2 returned no parseable payload' }),
+  ],
+  latestRun: {
+    run: scheduleRun({ slot: '2026-08-05T01:00:00Z', status: 'dispatched', endedAt: null, durationS: null, elapsedS: 125, issue: 4300 }),
+    steps: [],
+    runIssue: 4300,
+  },
+};
+
+/** The earlier, finished run an operator expands out of the history. */
+export const scheduleRunDetail = {
+  run: scheduleRun({ slot: '2026-07-31T01:00:00Z', status: 'failed', durationS: 180, detail: 'step 2 returned no parseable payload' }),
+  steps: [
+    { index: 1, id: 'scrape', status: 'ok', durationS: 41 },
+    { index: 2, id: 'score', status: 'failed', durationS: 9 },
+    { index: 3, id: 'publish', status: 'skipped', durationS: null },
+  ],
+  runIssue: 4242,
+};
+
 // ---- Router -----------------------------------------------------------------
 
 const json = (route: Route, body: unknown, status = 200) =>
@@ -489,6 +576,17 @@ export async function installApiRoutes(page: Page, opts: RouteOptions = {}) {
     // auth refresh (never hit in the happy path, but answer defensively)
     if (p.endsWith('/auth/github/refresh')) {
       return json(route, { access_token: 'e2e-refreshed-token' });
+    }
+
+    // schedules: /repos/{o}/{n}/schedules[/{issue}[/runs/{slot}]]
+    if (/\/schedules(\/|$)/.test(p)) {
+      if (route.request().method() === 'POST') {
+        // run / pause / resume all answer the way the control plane does.
+        return p.endsWith('/run') ? json(route, 4301, 202) : route.fulfill({ status: 204 });
+      }
+      if (/\/runs\//.test(p)) return json(route, scheduleRunDetail);
+      if (/\/schedules\/\d+$/.test(p)) return json(route, scheduleDetail);
+      return json(route, repoSchedules);
     }
 
     // outcomes: /repos/{o}/{n}/sessions/{issue}/outcomes

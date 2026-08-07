@@ -59,6 +59,15 @@ pub struct RunSummary {
     pub ended_at: Option<String>,
     /// Derived from the timestamps, never stored, so it cannot disagree with them.
     pub duration_s: Option<u64>,
+    /// How long an IN-FLIGHT run has been going, as of this response. Present only
+    /// while the run has not ended — a terminal run reports `duration_s` instead,
+    /// and the two are never both set.
+    ///
+    /// Computed server-side against the same clock the reconciler uses rather than
+    /// left to the browser: a skewed client clock would render a run that started
+    /// "in the future" as a negative age, and the one thing this field exists to
+    /// answer is how long a run has really been going.
+    pub elapsed_s: Option<u64>,
     /// The run issue this slot produced.
     pub issue: Option<u64>,
     pub detail: Option<String>,
@@ -89,6 +98,15 @@ pub struct ScheduleSummary {
     /// A short human reading of the cadence, e.g. "weekdays at 01:00 UTC".
     pub cadence: String,
     pub state: ScheduleLifecycle,
+    /// The definition's SOLE assignee: the session creator its run issues route to,
+    /// and therefore the session this schedule belongs to.
+    ///
+    /// `None` when the definition has zero or several assignees. That is not a
+    /// display detail — it is exactly the unroutable case, because a run issue is
+    /// routed to a session by having exactly one assignee equal to that session's
+    /// creator. A caller grouping schedules by session must treat `None` as
+    /// "belongs to no session" rather than as "unknown".
+    pub creator: Option<String>,
     /// The next firing, or null for a one-shot definition that already ran.
     pub next_due: Option<String>,
     pub last_run: Option<RunSummary>,
@@ -110,6 +128,15 @@ pub struct ScheduleDetail {
     pub arguments: BTreeMap<String, String>,
     /// Newest first.
     pub runs: Vec<RunSummary>,
+    /// The newest run projected WITH its per-step outcomes.
+    ///
+    /// Carried on the detail so the most recent run's stepper is reachable without
+    /// a second request and a second click — including while the run is still in
+    /// flight, where the record is the control plane's `dispatched` marker and the
+    /// step list is legitimately empty (the runner posts one record at the end, so
+    /// there is nothing finer to report yet). An in-flight run is recognised by
+    /// `run.status == "dispatched"`; its age is `run.elapsed_s`.
+    pub latest_run: Option<ScheduleRunDetail>,
 }
 
 /// One run with its per-step outcomes.
@@ -140,6 +167,9 @@ pub struct ScheduleFacts<'a> {
     pub title: &'a str,
     pub html_url: &'a str,
     pub labels: &'a [String],
+    /// The definition issue's assignee logins, in GitHub's order. Exactly one is
+    /// the routable case (see [`ScheduleSummary::creator`]).
+    pub assignees: &'a [String],
     pub created_at: DateTime<Utc>,
     /// `Ok` for an accepted definition, `Err(detail)` for a refused one.
     pub spec: Result<&'a ScheduledWorkflowSpec, String>,
@@ -206,10 +236,23 @@ pub fn summarize(facts: &ScheduleFacts<'_>, now: DateTime<Utc>) -> ScheduleSumma
         run_mode,
         cadence,
         state,
+        creator: sole_assignee(facts.assignees),
         next_due,
-        last_run: newest_run(facts.records).map(summarize_run),
+        last_run: latest_run_record(facts.records).map(|record| summarize_run(record, now)),
         success_rate_30d: success_rate(facts.records, now),
         invalid_detail,
+    }
+}
+
+/// The one assignee a definition routes through, or `None` for zero or several.
+///
+/// Deliberately not "the first of several": a definition with two assignees has no
+/// session to run it — the reconciler refuses it for exactly that reason — and
+/// silently picking one would show it under a session that will never work it.
+fn sole_assignee(assignees: &[String]) -> Option<String> {
+    match assignees {
+        [only] if !only.is_empty() => Some(only.clone()),
+        _ => None,
     }
 }
 
@@ -224,7 +267,12 @@ pub fn detail(facts: &ScheduleFacts<'_>, now: DateTime<Utc>) -> ScheduleDetail {
         summary,
         upcoming,
         arguments,
-        runs: runs_newest_first(facts.records),
+        runs: runs_newest_first(facts.records, now),
+        // Projected through `run_detail`, which collapses a slot's dispatch and its
+        // terminal record exactly as the run endpoint does — so the inlined view and
+        // a later fetched one cannot disagree.
+        latest_run: latest_run_record(facts.records)
+            .and_then(|record| run_detail(facts.records, record.slot, now)),
     }
 }
 
@@ -263,7 +311,11 @@ fn upcoming(
 }
 
 /// The run records that belong to one slot, projected with their step outcomes.
-pub fn run_detail(records: &[RunRecord], slot: DateTime<Utc>) -> Option<ScheduleRunDetail> {
+pub fn run_detail(
+    records: &[RunRecord],
+    slot: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> Option<ScheduleRunDetail> {
     // Later records for a slot supersede earlier ones: a terminal record written
     // by the pod replaces the control plane's `dispatched`.
     let record = records.iter().rfind(|record| record.slot == slot)?;
@@ -274,7 +326,7 @@ pub fn run_detail(records: &[RunRecord], slot: DateTime<Utc>) -> Option<Schedule
         .filter(|candidate| candidate.slot == slot)
         .find_map(|candidate| candidate.issue);
     Some(ScheduleRunDetail {
-        run: summarize_run(record),
+        run: summarize_run(record, now),
         steps: record.steps.iter().map(project_step).collect(),
         run_issue,
     })
@@ -294,23 +346,40 @@ fn project_step(step: &RunStep) -> RunStepView {
     }
 }
 
-/// The newest record overall — the one the list view shows as "last run".
-fn newest_run(records: &[RunRecord]) -> Option<&RunRecord> {
-    records
-        .iter()
-        .max_by_key(|record| (record.slot, record.started))
+/// The run this schedule is doing, or last did.
+///
+/// The run IN FLIGHT wins over the newest record, using the clock's own
+/// [`crate::schedule::open_dispatch`] rule rather than a second implementation of
+/// it. On a busy schedule the newest record is routinely NOT the current run: when
+/// a slot comes due while the previous run is still going, the control plane
+/// records a terminal `skipped-overlap` for that LATER slot. Picking the newest
+/// record would then report "Skipped" — with no elapsed time, no run issue and no
+/// steps — for a workflow that is at that moment executing, which is precisely the
+/// busy schedule where seeing the live run matters most.
+///
+/// With nothing in flight this is the newest record, which is the last run.
+fn latest_run_record(records: &[RunRecord]) -> Option<&RunRecord> {
+    crate::schedule::open_dispatch(records).or_else(|| {
+        records
+            .iter()
+            .max_by_key(|record| (record.slot, record.started))
+    })
 }
 
 /// Every run, newest first, with each slot collapsed to its latest record.
-fn runs_newest_first(records: &[RunRecord]) -> Vec<RunSummary> {
+fn runs_newest_first(records: &[RunRecord], now: DateTime<Utc>) -> Vec<RunSummary> {
     let mut latest: BTreeMap<DateTime<Utc>, &RunRecord> = BTreeMap::new();
     for record in records {
         latest.insert(record.slot, record);
     }
-    latest.into_values().rev().map(summarize_run).collect()
+    latest
+        .into_values()
+        .rev()
+        .map(|record| summarize_run(record, now))
+        .collect()
 }
 
-fn summarize_run(record: &RunRecord) -> RunSummary {
+fn summarize_run(record: &RunRecord, now: DateTime<Utc>) -> RunSummary {
     RunSummary {
         slot: timestamp(record.slot),
         manual: record.manual,
@@ -318,9 +387,26 @@ fn summarize_run(record: &RunRecord) -> RunSummary {
         started_at: timestamp(record.started),
         ended_at: record.ended.map(timestamp),
         duration_s: record.duration_s(),
+        elapsed_s: elapsed(record, now),
         issue: record.issue,
         detail: record.detail.clone(),
     }
+}
+
+/// How long an unfinished run has been going, as of `now`.
+///
+/// `None` for a run that has ended — it reports `duration_s` instead, and emitting
+/// both would invite a reader to show a growing "elapsed" for a run that finished
+/// yesterday. A TERMINAL status counts as ended even without an `ended` timestamp:
+/// the marker format tolerates a writer that omits it, and the honest reading of
+/// "ok, no end time" is a finished run of unknown length, never one still going.
+/// Clamped at zero so a record written a second into the future by a
+/// slightly-ahead writer reads as "just started" rather than wrapping.
+fn elapsed(record: &RunRecord, now: DateTime<Utc>) -> Option<u64> {
+    if record.ended.is_some() || record.status.is_terminal() {
+        return None;
+    }
+    Some((now - record.started).num_seconds().max(0) as u64)
 }
 
 /// The successful share of the terminal runs inside the window.

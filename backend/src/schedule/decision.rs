@@ -29,7 +29,7 @@ use k8s_openapi::chrono::{DateTime, Duration, Utc};
 
 use crate::goals::scheduled_workflow_parse::RunMode;
 
-use super::marker::RunStatus;
+use super::marker::{RunRecord, RunStatus};
 
 /// How many skipped slots the misfire report will count before giving up and
 /// reporting the cap. Purely cosmetic — the firing decision does not depend on it —
@@ -42,6 +42,30 @@ const MAX_COUNTED_SKIPS: u32 = 64;
 pub struct OpenDispatch {
     pub slot: DateTime<Utc>,
     pub started: DateTime<Utc>,
+}
+
+/// The record of the run that is IN FLIGHT: the newest `Dispatched` record whose
+/// slot has no terminal record.
+///
+/// The one definition of "still running", shared by the clock (which builds its
+/// [`ScheduleState`] from it) and by the dashboard projection. It is deliberately
+/// NOT "the newest record": when a slot comes due while the previous run is still
+/// going, the control plane writes a terminal `skipped-overlap` record for that
+/// LATER slot, so the newest record on a busy schedule is routinely a skip while a
+/// run is genuinely executing. Two implementations of this rule would eventually
+/// disagree, and the visible symptom would be a dashboard reporting "Skipped" for
+/// a workflow that is running.
+pub fn open_dispatch(records: &[RunRecord]) -> Option<&RunRecord> {
+    let terminal_slots: Vec<DateTime<Utc>> = records
+        .iter()
+        .filter(|record| record.status.is_terminal())
+        .map(|record| record.slot)
+        .collect();
+    records
+        .iter()
+        .filter(|record| record.status == RunStatus::Dispatched)
+        .filter(|record| !terminal_slots.contains(&record.slot))
+        .max_by_key(|record| record.slot)
 }
 
 /// Everything the clock needs to know about one scheduled workflow.

@@ -17,7 +17,7 @@ mod decision;
 mod marker;
 
 pub use cron::CronExpr;
-pub use decision::{decide, OpenDispatch, ScheduleAction, ScheduleState};
+pub use decision::{decide, open_dispatch, OpenDispatch, ScheduleAction, ScheduleState};
 pub use marker::{
     collect_records, parse_marker, render_marker, RunRecord, RunStatus, RunStep, StepStatus,
 };

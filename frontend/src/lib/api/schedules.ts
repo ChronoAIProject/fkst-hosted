@@ -27,6 +27,13 @@ export interface RunSummary {
   startedAt: string;
   endedAt: string | null;
   durationS: number | null;
+  /** How long an IN-FLIGHT run had been going when the API answered. Null once
+   *  the run has ended, where `durationS` is the fact instead — the two are never
+   *  both set. Extend this number with time elapsed since the response rather
+   *  than re-deriving an age from `startedAt`: the server computed it against the
+   *  clock the reconciler uses, and a skewed browser clock is exactly what that
+   *  avoids. */
+  elapsedS: number | null;
   issue: number | null;
   detail: string | null;
 }
@@ -46,6 +53,10 @@ export interface ScheduleSummary {
   runMode: string;
   cadence: string;
   state: ScheduleLifecycle;
+  /** The definition's SOLE assignee — the session creator its runs route to, and
+   *  so the session this schedule belongs to. Null for zero or several assignees,
+   *  which means it belongs to no session and can never run. */
+  creator: string | null;
   nextDue: string | null;
   lastRun: RunSummary | null;
   successRate30d: number | null;
@@ -57,6 +68,9 @@ export interface ScheduleDetail {
   upcoming: string[];
   arguments: Record<string, string>;
   runs: RunSummary[];
+  /** The newest run already projected with its per-step outcomes, so the stepper
+   *  needs no second request. Null for a schedule that has never run. */
+  latestRun: ScheduleRunDetail | null;
 }
 
 export interface ScheduleRunDetail {
