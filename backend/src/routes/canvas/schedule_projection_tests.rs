@@ -1,6 +1,8 @@
 //! Pure projection coverage: what the dashboard shows, derived only from the
 //! facts the clock also reads.
 
+use std::sync::OnceLock;
+
 use k8s_openapi::chrono::TimeZone;
 
 use crate::goals::scheduled_workflow_parse::parse_scheduled_workflow;
@@ -22,16 +24,35 @@ fn spec(run_mode: &str) -> ScheduledWorkflowSpec {
     .expect("valid definition")
 }
 
+/// The default assignment: one login, which is the only routable shape.
+fn sole_assignee() -> &'static [String] {
+    static ASSIGNEES: OnceLock<Vec<String>> = OnceLock::new();
+    ASSIGNEES.get_or_init(|| vec!["shining".to_string()])
+}
+
+/// The routable shape: exactly one assignee, so the definition belongs to a
+/// session. [`assigned_facts`] varies that when the assignment itself is the
+/// subject.
 fn facts<'a>(
     spec: &'a ScheduledWorkflowSpec,
     labels: &'a [String],
     records: &'a [RunRecord],
+) -> ScheduleFacts<'a> {
+    assigned_facts(spec, labels, records, sole_assignee())
+}
+
+fn assigned_facts<'a>(
+    spec: &'a ScheduledWorkflowSpec,
+    labels: &'a [String],
+    records: &'a [RunRecord],
+    assignees: &'a [String],
 ) -> ScheduleFacts<'a> {
     ScheduleFacts {
         schedule_issue: 50,
         title: "nightly sourcing",
         html_url: "https://github.com/acme/site/issues/50",
         labels,
+        assignees,
         created_at: at(27, 0),
         spec: Ok(spec),
         records,
@@ -106,6 +127,7 @@ fn an_unparseable_definition_surfaces_its_reason_rather_than_vanishing() {
         title: "broken",
         html_url: "https://github.com/acme/site/issues/50",
         labels: &[],
+        assignees: sole_assignee(),
         created_at: at(27, 0),
         spec: Err("missing required section `### Run Mode`".to_string()),
         records: &[],
@@ -229,7 +251,7 @@ fn a_runs_step_outcomes_project_including_the_step_that_never_ran() {
             ..RunRecord::new(at(27, 1), RunStatus::Failed, at(27, 1))
         },
     ];
-    let run = run_detail(&records, at(27, 1)).expect("the slot has a run");
+    let run = run_detail(&records, at(27, 1), at(27, 2)).expect("the slot has a run");
     assert_eq!(run.run.status, "failed");
     assert_eq!(
         run.steps
@@ -253,5 +275,130 @@ fn a_runs_step_outcomes_project_including_the_step_that_never_ran() {
 #[test]
 fn an_unknown_slot_has_no_run_detail() {
     let records = vec![RunRecord::new(at(27, 1), RunStatus::Ok, at(27, 1))];
-    assert!(run_detail(&records, at(27, 9)).is_none());
+    assert!(run_detail(&records, at(27, 9), at(27, 10)).is_none());
+}
+
+#[test]
+fn a_definitions_sole_assignee_is_the_session_it_belongs_to() {
+    let spec = spec("cron: 0 * * * *");
+    let summary = summarize(&facts(&spec, &[], &[]), at(27, 2));
+    assert_eq!(
+        summary.creator.as_deref(),
+        Some("shining"),
+        "a schedule is grouped under the session whose creator its runs route to"
+    );
+}
+
+#[test]
+fn a_definition_with_no_single_assignee_belongs_to_no_session() {
+    // Zero or several assignees is not a display gap — it is the unroutable case
+    // the reconciler refuses, and picking one of two would show the schedule under
+    // a session that will never work it.
+    let spec = spec("cron: 0 * * * *");
+    let none: Vec<String> = Vec::new();
+    assert_eq!(
+        summarize(&assigned_facts(&spec, &[], &[], &none), at(27, 2)).creator,
+        None
+    );
+    let two = labels(&["shining", "someone-else"]);
+    assert_eq!(
+        summarize(&assigned_facts(&spec, &[], &[], &two), at(27, 2)).creator,
+        None
+    );
+}
+
+#[test]
+fn the_newest_runs_steps_ride_along_on_the_detail() {
+    // The stepper must be reachable without a second request and a second click,
+    // so the detail carries the newest slot already collapsed and projected.
+    let spec = spec("cron: 0 * * * *");
+    let records = vec![
+        RunRecord::new(at(27, 1), RunStatus::Ok, at(27, 1)),
+        RunRecord::new(at(27, 2), RunStatus::Dispatched, at(27, 2)).with_issue(4242),
+        RunRecord {
+            steps: vec![RunStep {
+                index: 1,
+                id: "scrape".to_string(),
+                status: StepStatus::Ok,
+                duration_s: Some(41),
+            }],
+            ..RunRecord::new(at(27, 2), RunStatus::Ok, at(27, 2))
+        },
+    ];
+    let latest = detail(&facts(&spec, &[], &records), at(27, 3))
+        .latest_run
+        .expect("the newest slot has a run");
+    assert_eq!(latest.run.slot, "2026-07-27T02:00:00Z");
+    assert_eq!(latest.run.status, "ok", "the outcome, not the dispatch");
+    assert_eq!(latest.steps.len(), 1);
+    assert_eq!(
+        latest.run_issue,
+        Some(4242),
+        "recovered across the whole slot, exactly as the run endpoint does"
+    );
+}
+
+#[test]
+fn a_schedule_that_has_never_run_has_no_latest_run() {
+    let spec = spec("cron: 0 * * * *");
+    assert!(detail(&facts(&spec, &[], &[]), at(27, 2))
+        .latest_run
+        .is_none());
+}
+
+#[test]
+fn an_in_flight_run_reports_its_age_and_its_run_issue() {
+    // While a run is in flight the runner has posted nothing yet — it writes ONE
+    // record at the end — so the only honest live facts are how long it has been
+    // going and which issue it is running as. Both come from the dispatch.
+    let spec = spec("cron: 0 * * * *");
+    let records =
+        vec![RunRecord::new(at(27, 2), RunStatus::Dispatched, at(27, 2)).with_issue(4242)];
+    let latest = detail(
+        &facts(&spec, &[], &records),
+        at(27, 2) + Duration::seconds(95),
+    )
+    .latest_run
+    .expect("a run is in flight");
+    assert_eq!(latest.run.status, "dispatched");
+    assert_eq!(latest.run.elapsed_s, Some(95));
+    assert_eq!(
+        latest.run.duration_s, None,
+        "an unfinished run has no duration; elapsed is the live fact"
+    );
+    assert!(
+        latest.steps.is_empty(),
+        "no per-step record exists mid-run, and inventing one would be a lie"
+    );
+    assert_eq!(latest.run_issue, Some(4242));
+}
+
+#[test]
+fn a_finished_run_reports_a_duration_and_no_elapsed() {
+    // The two must never both be set: a growing "elapsed" on a run that ended
+    // yesterday is exactly the confusion this split avoids.
+    let spec = spec("cron: 0 * * * *");
+    let records = vec![RunRecord {
+        ended: Some(at(27, 1) + Duration::seconds(30)),
+        ..RunRecord::new(at(27, 1), RunStatus::Ok, at(27, 1))
+    }];
+    let last = summarize(&facts(&spec, &[], &records), at(27, 5))
+        .last_run
+        .expect("a run");
+    assert_eq!(last.duration_s, Some(30));
+    assert_eq!(last.elapsed_s, None);
+}
+
+#[test]
+fn a_run_started_a_moment_in_the_future_reads_as_just_started() {
+    // A writer whose clock is a second ahead must not produce a wrapped elapsed.
+    let spec = spec("cron: 0 * * * *");
+    let records = vec![RunRecord::new(at(27, 2), RunStatus::Dispatched, at(27, 2))];
+    let latest = detail(
+        &facts(&spec, &[], &records),
+        at(27, 2) - Duration::seconds(3),
+    )
+    .latest_run
+    .expect("a run is in flight");
+    assert_eq!(latest.run.elapsed_s, Some(0));
 }

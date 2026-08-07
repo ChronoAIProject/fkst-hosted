@@ -55,6 +55,7 @@ impl LoadedSchedule {
             title: &self.issue.summary.title,
             html_url: &self.issue.html_url,
             labels: &self.issue.summary.labels,
+            assignees: &self.issue.summary.assignees,
             created_at: self
                 .issue
                 .created_at
@@ -224,7 +225,7 @@ pub(super) async fn schedule_run(
         &headers,
     )
     .await?;
-    run_detail(&loaded.records, parsed)
+    run_detail(&loaded.records, parsed, Utc::now())
         .map(Json)
         .ok_or_else(|| AppError::NotFound(format!("no run recorded for slot {slot}")))
 }
