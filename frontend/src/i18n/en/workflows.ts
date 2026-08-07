@@ -1,37 +1,25 @@
 import type { WorkflowsSlice } from '../slices';
 
 export const workflows: WorkflowsSlice = {
-  metaTitle: 'Scheduled workflows — FKST',
-  nav: 'Workflows',
-  title: 'Scheduled workflows',
   loading: 'Loading scheduled workflows',
 
-  gateTitle: 'Sign in to see your scheduled workflows',
-  gateBody:
-    'A scheduled workflow runs a workflow from your repository on a cadence — once, or on a cron schedule. Sign in with GitHub to see the ones you can reach.',
-  gateAction: 'Sign in with GitHub',
-  unconfiguredTitle: 'No API configured',
-  unconfiguredBody:
-    'This build has no API base URL, so no request can be made. Set `VITE_FKST_API_BASE` at build time.',
-
-  repoLabel: 'Repository',
-  repoPlaceholder: 'owner/name',
-  repoHint: 'The repository whose scheduled workflows you want to see.',
-
-  emptyTitle: 'No scheduled workflows yet',
+  emptyTitle: 'This session has no scheduled workflows',
   emptyBody:
-    'A scheduled workflow is one GitHub issue: open it from the **FKST scheduled workflow** template, name a workflow, a run mode, and assign the session creator. There is nothing else to install.',
+    'A scheduled workflow is one GitHub issue: open it from the **FKST scheduled workflow** template, name a workflow and a run mode, and assign this session’s creator. There is nothing else to install.',
   emptyAction: 'Open the template on GitHub',
   notInstalled: 'The FKST app is not installed on this repository, or you cannot see it.',
   loadFailed: 'Could not load the scheduled workflows for this repository.',
   retry: 'Try again',
 
-  colWorkflow: 'Workflow',
-  colCadence: 'Cadence',
-  colNextRun: 'Next run',
-  colState: 'State',
-  colLastRun: 'Last run',
-  colSuccess: '30-day success',
+  railTitle: 'Schedules',
+  railAria: 'Scheduled workflows this session owns',
+  unroutedTitle: 'Routed to no session',
+  unroutedBody:
+    'A schedule runs only when exactly one of its assignees is a session creator. These have none, or several, so nothing will run them.',
+  unroutedOnly: 'Nothing here is routed to this session yet.',
+
+  cadenceLabel: 'Cadence',
+  successLabel: '30-day success',
 
   lifecycle: {
     idle: 'Idle',
@@ -59,16 +47,17 @@ export const workflows: WorkflowsSlice = {
   overdue: 'overdue',
   never: '—',
 
-  detailBack: 'Back to all workflows',
   upcoming: 'Next firings',
   argumentsTitle: 'Arguments',
   noArguments: 'This workflow takes no arguments.',
-  runsTitle: 'Runs',
+  latestRunTitle: 'Most recent run',
+  earlierRunsTitle: 'Earlier runs',
   noRuns: 'This workflow has not run yet.',
-  stepsTitle: 'Steps',
   noSteps: 'This run recorded no per-step outcomes.',
+  awaitingSteps: 'Awaiting the first step record — a run reports its steps when it finishes.',
+  runningFor: 'running for {d}',
   openOnGithub: 'Open the definition on GitHub',
-  runIssue: 'Run issue',
+  openRunIssue: 'Run issue',
   editHint:
     'There is no editor here on purpose: the schedule lives on its GitHub issue and stays editable there. Change the cadence or the arguments by editing that issue.',
 
@@ -77,13 +66,8 @@ export const workflows: WorkflowsSlice = {
   actionResume: 'Resume',
   actionBusy: 'Working…',
   actionFailed: 'That did not work.',
-  runNowStarted: 'Started. The run appears once the session picks it up.',
 
-  slot: 'Slot',
-  duration: 'Duration',
   manual: 'Manual',
-  detailColumn: 'Detail',
   stepperAria: 'Steps of this run',
-  runsAria: 'Run history',
-  schedulesAria: "This repository's scheduled workflows",
+  runsAria: 'Earlier runs',
 };

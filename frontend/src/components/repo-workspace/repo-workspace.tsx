@@ -3,14 +3,7 @@ import { useContent } from '@/i18n';
 import type { RepoSessionsResponse, SessionDetail } from '@/lib/api/types';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SessionDetailView } from '@/components/session-detail/session-detail-view';
-import { RepoWorkflows } from '@/components/workflows/repo-workflows';
 import { SessionRail } from './session-rail';
-
-/** The two things a repository has: sessions working its issues, and schedules
- *  firing on a cadence. Scheduled workflows used to live behind a top-level
- *  route whose first act was asking which repository you meant — which is a
- *  question this view has already answered. */
-type WorkspaceView = 'sessions' | 'workflows';
 
 /** Stable per-repo identity for a session across polls: the session_id once the
  *  backend has assigned one, else the trigger issue number. Deliberately NOT
@@ -69,9 +62,6 @@ export function RepoWorkspace({
   onSelectedKeyChange?: (key: string) => void;
 }) {
   const sessions = data?.sessions ?? [];
-  // Sessions first: a repository that has no schedules is the common case, and
-  // opening on an empty schedule table would read as "nothing here".
-  const [view, setView] = useState<WorkspaceView>('sessions');
 
   // Selection is stored as a session KEY (not an index or object) so it stays
   // stable across the parent's silent polls, each of which delivers a fresh
@@ -94,69 +84,28 @@ export function RepoWorkspace({
 
   return (
     <div data-testid="repo-workspace" className="h-full flex flex-col min-h-0 gap-3">
-      <ViewSwitch view={view} onChange={setView} />
-      {view === 'workflows' ? (
-        <RepoWorkflows owner={owner} name={name} />
-      ) : (
-        <SessionsView
-          owner={owner}
-          name={name}
-          data={data}
-          loadFailed={loadFailed}
-          onChanged={onChanged}
-          viewerLogin={viewerLogin}
-          readOnly={readOnly}
-          selected={selected}
-          onSelect={onSelect}
-        />
-      )}
+      <SessionsView
+        owner={owner}
+        name={name}
+        data={data}
+        loadFailed={loadFailed}
+        onChanged={onChanged}
+        viewerLogin={viewerLogin}
+        readOnly={readOnly}
+        selected={selected}
+        onSelect={onSelect}
+      />
     </div>
   );
 }
 
-/** The Sessions | Workflows toggle. A segmented control rather than a nav link:
- *  both views are the SAME repository, so moving between them must not read as
- *  navigating away from it. */
-function ViewSwitch({
-  view,
-  onChange,
-}: {
-  view: WorkspaceView;
-  onChange: (view: WorkspaceView) => void;
-}) {
-  const c = useContent().dashboard;
-  const w = useContent().workflows;
-  const tabs: [WorkspaceView, string][] = [
-    ['sessions', c.sessionsTab],
-    ['workflows', w.nav],
-  ];
-  return (
-    <div
-      role="tablist"
-      aria-label={c.workspaceViewAria}
-      data-testid="workspace-view-switch"
-      className="flex-none flex items-center gap-1 rounded-control border border-line bg-raise p-0.5 self-start"
-    >
-      {tabs.map(([id, label]) => (
-        <button
-          key={id}
-          type="button"
-          role="tab"
-          aria-selected={view === id}
-          onClick={() => onChange(id)}
-          className={`font-ui text-[12.5px] rounded-control px-3 py-1 cursor-pointer ${
-            view === id ? 'bg-shell text-fg shadow-1' : 'text-ghost hover:text-dim'
-          }`}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/** The original rail + detail body, unchanged, lifted out so the switch above
- *  reads as one decision rather than being threaded through every element. */
+/** The rail + detail body. A repository briefly carried a Sessions | Workflows
+ *  switch above this; it is gone because a schedule belongs to a SESSION — it is
+ *  assigned to a session creator and runs in that session's pod — so a
+ *  repository-level list mixed schedules that different sessions own and could
+ *  never run for each other. Schedules are reached through the owning session's
+ *  Workflows tab. This stays a separate function so the workspace root is one
+ *  bounded column and the stacking contract lives on the body that must stack. */
 function SessionsView({
   owner,
   name,
