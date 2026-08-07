@@ -187,6 +187,27 @@ local function make_department(ports)
     local issue, dispatch = runner.select_run_issue(issues, creator)
     if issue == nil then
       -- Not a scheduled run: an ordinary session boot must be a clean no-op.
+      --
+      -- But it must SAY so. Silence made "looked and found no run" and "never
+      -- looked" indistinguishable from outside, which is why a schedule that
+      -- never started could only be diagnosed by reading pod logs — and even
+      -- there, the department's only trace was a clean exit. The counts are what
+      -- separate the two: candidates > 0 with dispatched == 0 means the runner
+      -- saw the board and nothing on it was a run for this creator.
+      local dispatched = 0
+      for _, candidate in ipairs(issues) do
+        if runner.parse_dispatch(candidate.body) ~= nil then
+          dispatched = dispatched + 1
+        end
+      end
+      log.info(
+        ("workflow-runner: no scheduled run to service repo=%s creator=%s candidates=%d dispatched=%d"):format(
+          tostring(identity.repo),
+          tostring(creator),
+          #issues,
+          dispatched
+        )
+      )
       return
     end
 
