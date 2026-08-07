@@ -62,6 +62,7 @@ pub(super) fn config() -> PodConfig {
         llm_model: "gpt-5-codex".to_string(),
         llm_wire_api: "chat".to_string(),
         llm_reasoning_effort: "max".to_string(),
+        creds_wait_timeout_secs: 300,
         dns_nameservers: vec!["1.1.1.1".to_string(), "8.8.8.8".to_string()],
         runtime_class: None,
         rate_pools: BTreeMap::new(),

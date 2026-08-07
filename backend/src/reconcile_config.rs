@@ -178,6 +178,16 @@ mod defaults {
         2
     }
 
+    pub(super) fn creds_watch_secs() -> u64 {
+        // How often the credentials watch probes every live session for a missing
+        // credential bundle. Deliberately FAST (unlike the health scrape) because
+        // it races the session pod's own bounded creds wait: a pod replaced under a
+        // surviving runtime aborts if delivery is not triggered inside that window.
+        // The probe is a cheap backend/execd file check and costs no GitHub call,
+        // so a tight cadence is affordable (issue #5927).
+        30
+    }
+
     pub(super) fn health_scrape_secs() -> u64 {
         // How often the package-agnostic session-health scrape reads each live
         // pod's status + recent framework logs to flag/clear a degraded session.
@@ -227,6 +237,8 @@ struct ReconcileVars {
     sandbox_inventory_max_warnings: usize,
     #[serde(default = "defaults::health_scrape_secs")]
     health_scrape_secs: u64,
+    #[serde(default = "defaults::creds_watch_secs")]
+    creds_watch_secs: u64,
     #[serde(default = "defaults::cron_min_interval_secs")]
     cron_min_interval_secs: u64,
     #[serde(default = "defaults::cron_max_runtime_secs")]
@@ -317,6 +329,11 @@ pub struct ReconcileConfig {
     /// reads each live pod's status + recent framework logs to flag/clear a
     /// degraded session on its trigger issue.
     pub health_scrape_secs: u64,
+    /// Credentials watch cadence, seconds. Env: `FKST_CREDS_WATCH_SECS`. Default
+    /// 30; must be >= 1. How often every live session is probed for a missing
+    /// credential bundle so a REPLACED pod gets re-delivery triggered before its
+    /// own bounded wait expires (issue #5927). The probe costs no GitHub call.
+    pub creds_watch_secs: u64,
     /// The tightest cadence a `fkst-scheduled-workflow` issue may declare, in
     /// seconds. Env: `FKST_CRON_MIN_INTERVAL_SECS`. Default 900; must be >= 60.
     ///
@@ -400,6 +417,7 @@ impl Default for ReconcileConfig {
             sandbox_inventory_max_source_items: defaults::sandbox_inventory_max_source_items(),
             sandbox_inventory_max_warnings: defaults::sandbox_inventory_max_warnings(),
             health_scrape_secs: defaults::health_scrape_secs(),
+            creds_watch_secs: defaults::creds_watch_secs(),
             cron_min_interval_secs: defaults::cron_min_interval_secs(),
             cron_max_runtime_secs: defaults::cron_max_runtime_secs(),
             cron_max_jobs_per_creator: defaults::cron_max_jobs_per_creator(),
@@ -460,6 +478,11 @@ impl ReconcileConfig {
         if env.health_scrape_secs == 0 {
             return Err(AppError::Config(
                 "FKST_HEALTH_SCRAPE_SECS must be at least 1".to_string(),
+            ));
+        }
+        if env.creds_watch_secs == 0 {
+            return Err(AppError::Config(
+                "FKST_CREDS_WATCH_SECS must be at least 1".to_string(),
             ));
         }
         // A cadence bound below a minute would let a schedule fire faster than the
@@ -609,6 +632,7 @@ impl ReconcileConfig {
             sandbox_inventory_max_source_items: env.sandbox_inventory_max_source_items,
             sandbox_inventory_max_warnings: env.sandbox_inventory_max_warnings,
             health_scrape_secs: env.health_scrape_secs,
+            creds_watch_secs: env.creds_watch_secs,
             cron_min_interval_secs: env.cron_min_interval_secs,
             cron_max_runtime_secs: env.cron_max_runtime_secs,
             cron_max_jobs_per_creator: env.cron_max_jobs_per_creator,
