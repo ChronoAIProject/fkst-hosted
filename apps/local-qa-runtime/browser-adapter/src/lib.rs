@@ -61,7 +61,10 @@ pub async fn run_fixed_browser_smoke() -> Result<FixedBrowserSmokeResult, Browse
 #[cfg(target_os = "linux")]
 mod linux {
     use super::{BrowserAdapterError, FixedBrowserSmokeResult, FixedPngScreenshot};
-    use headless_chrome::{protocol::cdp::Page, Browser};
+    use headless_chrome::{
+        protocol::cdp::{Emulation, Page},
+        Browser,
+    };
     use nix::{
         errno::Errno,
         sys::signal::{killpg, Signal},
@@ -230,6 +233,26 @@ mod linux {
             thread::sleep(IO_POLL_INTERVAL);
         };
         tab.set_default_timeout(remaining(deadline)?);
+        tab.call_method(Emulation::SetDeviceMetricsOverride {
+            width: VIEWPORT_WIDTH,
+            height: VIEWPORT_HEIGHT,
+            device_scale_factor: 1.0,
+            mobile: false,
+            scale: None,
+            screen_width: None,
+            screen_height: None,
+            position_x: None,
+            position_y: None,
+            dont_set_visible_size: None,
+            screen_orientation: None,
+            viewport: None,
+            display_feature: None,
+            device_posture: None,
+        })
+        .map_err(operation_error_before_deadline(
+            "set fixed Chrome viewport",
+            deadline,
+        ))?;
         tab.navigate_to(&navigation_url)
             .and_then(|tab| tab.wait_until_navigated())
             .map_err(operation_error_before_deadline(
