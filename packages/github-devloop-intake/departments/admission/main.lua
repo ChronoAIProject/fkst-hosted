@@ -139,7 +139,52 @@ local function issue_from_current(issue_number, current)
   }
 end
 
+-- The workflow runner's own work-label family, matched as a PREFIX because the
+-- deployment work-label namespace is appended (`fkst-workflow-run-<namespace>`).
+local WORKFLOW_RUN_LABEL_PREFIXES = { "fkst-workflow-run", "fkst-workflow-scheduled" }
+
+--- Whether an issue is a scheduled-workflow RUN issue, from labels alone.
+---
+--- A run issue belongs to `workflow-runner`, never to the dev loop. It has to
+--- carry a label in the session's effective set so the control-plane clock can
+--- wake the session with it, and `matches_session_work_label` below tests
+--- membership of that WHOLE set -- so without this check the dev loop admits
+--- every run and works it as a feature.
+---
+--- Observed in production (#5904): run issue #5896 was claimed and driven to
+--- `merged` as a pull request that re-implemented the workflow definition, while
+--- the run itself never executed and its schedule was never released.
+---
+--- Decided on LABELS, which are metadata, so this fires BEFORE the claim and
+--- before any body read. The `fkst-cron-dispatch:v1` marker would identify a run
+--- more precisely, but it lives in the body, which admission only reads AFTER
+--- claiming -- so a marker-based check could only reject an issue this session
+--- had already claimed out from under the runner executing it.
+local function is_workflow_run_issue(labels)
+  for _, label in ipairs(labels or {}) do
+    local text = tostring(label)
+    for _, prefix in ipairs(WORKFLOW_RUN_LABEL_PREFIXES) do
+      if text == prefix or text:sub(1, #prefix + 1) == prefix .. "-" then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 local function session_work_scope_allows(current, proposal_id, transition)
+  if is_workflow_run_issue(current.labels) then
+    devloop_logging.log_cas_decision(
+      "admission",
+      proposal_id,
+      { state = nil, version = nil },
+      transition,
+      "candidate",
+      "skip-workflow-run",
+      "scheduled-workflow run issue belongs to workflow-runner, not the dev loop"
+    )
+    return false
+  end
   if config.claim_mode() ~= "label" and not config.work_label_family_isolation_active() then
     return true
   end
