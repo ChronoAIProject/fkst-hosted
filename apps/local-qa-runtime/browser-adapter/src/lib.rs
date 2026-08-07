@@ -217,7 +217,7 @@ mod linux {
         browser.set_default_timeout(remaining(deadline)?);
 
         let tab = browser
-            .wait_for_initial_tab()
+            .new_tab()
             .map_err(operation_error_before_deadline(
                 "acquire initial Chrome tab",
                 deadline,
@@ -367,7 +367,7 @@ mod linux {
         discover_chrome_from(
             CHROME_CANDIDATES
                 .iter()
-                .map(|candidate| Path::new(candidate)),
+                .map(Path::new),
         )
     }
 
@@ -641,14 +641,6 @@ mod linux {
                 watchdog: Some(watchdog),
                 cleaned: false,
             })
-        }
-
-        fn root_pid(&self) -> u32 {
-            self.child.as_ref().map_or(0, Child::id)
-        }
-
-        fn process_group(&self) -> Pid {
-            self.process_group
         }
 
         fn wait_for_debug_ws_url(
@@ -943,25 +935,26 @@ mod linux {
     #[cfg(test)]
     fn record_owned_resources(owned: &OwnedRun) {
         let slot = TEST_OBSERVATION.get_or_init(|| std::sync::Mutex::new(None));
-        let Ok(slot) = slot.lock() else {
+        let Ok(slot_guard) = slot.lock() else {
             return;
         };
-        let Some(observation) = slot.as_ref() else {
+        let Some(observation) = slot_guard.as_ref() else {
             return;
         };
-        if let Ok(mut observation) = observation.lock() {
+        let observation_lock = observation.lock();
+        if let Ok(mut observation_guard) = observation_lock {
             if let Some(fixture) = &owned.fixture {
-                observation.fixture_address = Some(fixture.address);
+                observation_guard.fixture_address = Some(fixture.address);
             }
             if let Some(profile) = &owned.profile {
-                observation.profile_path = profile.path().to_path_buf();
+                observation_guard.profile_path = profile.path().to_path_buf();
             }
             if let Some(downloads) = &owned.downloads {
-                observation.downloads_path = downloads.path().to_path_buf();
+                observation_guard.downloads_path = downloads.path().to_path_buf();
             }
             if let Some(chrome) = &owned.chrome {
-                observation.root_pid = Some(chrome.root_pid());
-                observation.process_group = Some(chrome.process_group());
+                observation_guard.root_pid = chrome.child.as_ref().map(Child::id);
+                observation_guard.process_group = Some(chrome.process_group);
             }
         }
     }
