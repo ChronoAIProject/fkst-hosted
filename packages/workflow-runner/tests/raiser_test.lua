@@ -1,14 +1,18 @@
 local t = fkst.test
 
 return {
-  test_run_start_is_a_boot_once_raiser = function()
-    -- `cron_first_fire_jitter` bounds the first fire by min(interval, 30s), so a
-    -- 24h interval fires within ~30s of pod start and never again before the pod
-    -- idles down. The pod only exists because a run issue woke the session, so
-    -- polling would be both redundant and a standing cost.
+  test_run_start_polls_inside_the_tightest_declarable_cadence = function()
+    -- Not boot-once. A session with other open work keeps its pod alive, so the
+    -- next run issue arrives long after a boot-once raiser has fired and would
+    -- wait up to 24h — past the control plane's 3600s watchdog, which records a
+    -- `timeout` for a run nothing ever started.
+    --
+    -- The interval must stay strictly under FKST_CRON_MIN_INTERVAL_SECS (900s),
+    -- the tightest cadence a schedule may declare, so detection latency can never
+    -- make a run miss its own next slot.
     local raiser = require("raisers.run_start")
     t.eq(raiser.type, "cron")
-    t.eq(raiser.interval, "24h")
+    t.eq(raiser.interval, "5m")
     t.eq(raiser.produces, "scheduled_run_tick")
   end,
 }
