@@ -216,10 +216,19 @@ mod linux {
         )?;
         browser.set_default_timeout(remaining(deadline)?);
 
-        let tab = browser.new_tab().map_err(operation_error_before_deadline(
-            "acquire initial Chrome tab",
-            deadline,
-        ))?;
+        let tab = loop {
+            ensure_before_deadline(deadline)?;
+            if let Some(tab) = browser
+                .get_tabs()
+                .lock()
+                .map_err(operation_error("inspect owned Chrome tabs"))?
+                .first()
+                .cloned()
+            {
+                break tab;
+            }
+            thread::sleep(IO_POLL_INTERVAL);
+        };
         tab.set_default_timeout(remaining(deadline)?);
         tab.navigate_to(&navigation_url)
             .and_then(|tab| tab.wait_until_navigated())
