@@ -277,6 +277,46 @@ return {
     t.is_nil(runner.select_run_issue(issues, "alice"))
   end,
 
+  -- The shape PRODUCTION actually passes. `gh issue list --json assignees`
+  -- returns objects, not logins, and `issue_list_intake` hands that through
+  -- untouched — so a comparison that stringified the entry could never match and
+  -- every dispatched run was silently declined. The string fixtures above are a
+  -- convenience the real listing never produces, which is exactly why this
+  -- suite stayed green while no scheduled workflow could run.
+  test_an_assignee_object_from_the_real_listing_is_matched = function()
+    local issues = {
+      {
+        number = 5919,
+        body = RUN_ISSUE_BODY,
+        assignees = { { id = "U_kgDODuiITQ", login = "chronoai-shining", name = "Shining" } },
+      },
+    }
+    local issue, dispatch = runner.select_run_issue(issues, "chronoai-shining")
+    t.is_true(issue ~= nil)
+    t.eq(issue.number, 5919)
+    t.eq(dispatch.workflow_id, "sourcing")
+  end,
+
+  test_object_assignees_honour_the_same_sole_assignee_rule = function()
+    -- Routing is by EXACTLY one assignee equal to the creator; accepting the
+    -- object shape must not loosen that.
+    local issues = {
+      { number = 10, body = RUN_ISSUE_BODY, assignees = { { login = "someone-else" } } },
+      { number = 11, body = RUN_ISSUE_BODY, assignees = { { login = "alice" }, { login = "bob" } } },
+      { number = 12, body = RUN_ISSUE_BODY, assignees = { {} } },
+    }
+    t.is_nil(runner.select_run_issue(issues, "alice"))
+  end,
+
+  test_an_object_assignee_is_matched_case_insensitively = function()
+    local issues = {
+      { number = 15, body = RUN_ISSUE_BODY, assignees = { { login = "Alice" } } },
+    }
+    local issue = runner.select_run_issue(issues, "alice")
+    t.is_true(issue ~= nil)
+    t.eq(issue.number, 15)
+  end,
+
   test_the_lowest_numbered_run_issue_is_serviced_first = function()
     local issues = {
       { number = 22, body = RUN_ISSUE_BODY, assignees = { "alice" } },

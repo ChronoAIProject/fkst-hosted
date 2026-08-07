@@ -1,4 +1,9 @@
-kind = "package"
+# `package.composed` because `run_report` raises onto github-proxy's published
+# comment seam. A plain `package` graph is scanned alone, so a foreign seam is
+# unresolvable there — which is why every other package that raises
+# `github-proxy.github_issue_comment_request` is composed too. The
+# `[event_deps]` below already named the packages that graph spans.
+kind = "package.composed"
 name = "workflow-runner"
 persistence_class = "stateless_adapter"
 

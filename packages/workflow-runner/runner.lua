@@ -324,13 +324,39 @@ end
 --- the order they were created rather than in whatever order the listing came
 --- back. Only issues assigned to this session's creator are eligible, mirroring
 --- the control plane's own sole-assignee routing rule.
+--- The login of one entry in a `gh issue list --json assignees` array.
+---
+--- `gh` returns OBJECTS (`{id, login, name}`). The bare-string form exists only
+--- in hand-written fixtures, so accepting only strings meant comparing a
+--- stringified table address against a login: it never matched, and every
+--- dispatched run was silently declined while the unit tests stayed green.
+---
+--- `login` only, never `name`: routing is by GitHub identity, and `name` is a
+--- display string ("Shining") that no routing rule is defined over.
+---
+--- Deliberately NOT reused from `devloop.claims`, which has an equivalent
+--- helper. This package declares no devloop lib dependency on purpose — see the
+--- `[github].work_labels` note in `fkst.toml` for why its queue is separate from
+--- the dev loop's — and G-DEVLOOP-DECOUPLE is a shrink-only ratchet against
+--- exactly that coupling. Six lines here beat a dependency that fights it.
+local function assignee_login(entry)
+  if type(entry) == "table" then
+    return entry.login ~= nil and tostring(entry.login) or nil
+  end
+  if type(entry) == "string" then
+    return entry
+  end
+  return nil
+end
+
 function M.select_run_issue(issues, creator_login)
   local chosen, chosen_dispatch = nil, nil
   for _, issue in ipairs(issues or {}) do
     local assignees = issue.assignees or {}
-    local routed = #assignees == 1
+    local login = #assignees == 1 and assignee_login(assignees[1]) or nil
+    local routed = login ~= nil
       and creator_login ~= nil
-      and tostring(assignees[1]):lower() == tostring(creator_login):lower()
+      and login:lower() == tostring(creator_login):lower()
     if routed then
       local dispatch = M.parse_dispatch(issue.body)
       if dispatch ~= nil and (chosen == nil or issue.number < chosen.number) then

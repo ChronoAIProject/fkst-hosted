@@ -15,7 +15,14 @@ local saga = require("workflow.saga")
 -- reconciler for state it does not own.
 local spec = {
   consumes = { "scheduled_run_result" },
-  produces = { "github_issue_comment_request" },
+  -- FULLY QUALIFIED. The seam is published by github-proxy; a bare name is
+  -- namespaced to THIS package, so the request would land on
+  -- `workflow-runner.github_issue_comment_request`, which nothing consumes.
+  -- The engine says so at every boot ("produced by ... but has no consumer"),
+  -- and the effect is that a finished run posts no record at all: the control
+  -- plane never sees completion and the schedule sits until its watchdog
+  -- expires, recording every run as `timeout` whatever it really did.
+  produces = { "github-proxy.github_issue_comment_request" },
   stall_window = "30s",
 }
 
@@ -48,7 +55,7 @@ return saga.department(spec, {
     if type(record) ~= "table" or payload.schedule_issue == nil then
       error("workflow-runner: malformed-run-result: missing record or schedule issue", 0)
     end
-    raise("github_issue_comment_request", {
+    raise("github-proxy.github_issue_comment_request", {
       schema = "github-proxy.v1",
       repo = payload.repo,
       issue_number = payload.schedule_issue,
