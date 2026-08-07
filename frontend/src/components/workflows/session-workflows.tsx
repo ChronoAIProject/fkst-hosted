@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useContent } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
 import { LoadingState } from '@/components/ui/loading';
@@ -86,6 +86,11 @@ export function SessionWorkflows({
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
   const [openSlot, setOpenSlot] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
+  const [detailError, setDetailError] = useState(false);
+  // Mirrors `detail` so the fetch's catch handler can tell a FIRST read from a
+  // re-read without taking `detail` as an effect dependency, which would refetch
+  // on every response.
+  const detailRef = useRef<ScheduleDetailData | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   // One clock read per load rather than a ticking timer: the finest useful
@@ -131,7 +136,13 @@ export function SessionWorkflows({
     const wanted = creator.toLowerCase();
     return {
       mine: schedules.filter((s) => s.creator?.toLowerCase() === wanted),
-      unrouted: schedules.filter((s) => s.creator === null),
+      // `== null` catches undefined as well as null, deliberately. A backend that
+      // predates `creator` omits the field entirely, and a strict `=== null` would
+      // put such a schedule in NEITHER bucket — every schedule would silently
+      // vanish into the empty state for the length of a backend-behind deploy.
+      // Listing them as unrouted is wrong in an obvious, recoverable way; showing
+      // nothing at all looks like the feature is broken.
+      unrouted: schedules.filter((s) => s.creator == null),
     };
   }, [list, creator]);
 
@@ -155,10 +166,17 @@ export function SessionWorkflows({
         if (cancelled) return;
         setDetail(response);
         setDetailLoadedAt(Date.now());
+        setDetailError(false);
         setNow(Date.now());
       })
       .catch(() => {
-        if (!cancelled) {
+        if (cancelled) return;
+        // Say so and offer a way out. Clearing the detail alone would leave the
+        // pane on its loading state forever, which reads as a hung request that
+        // is in fact already over. A failed RE-read keeps the last-good detail
+        // (the live tick polls) rather than replacing what is being read.
+        setDetailError(true);
+        if (!detailRef.current) {
           setDetail(null);
           setDetailLoadedAt(null);
         }
@@ -204,7 +222,21 @@ export function SessionWorkflows({
     reload,
   ]);
 
-  const inFlight = detail?.latestRun?.run.status === 'dispatched';
+  useEffect(() => {
+    detailRef.current = detail;
+  }, [detail]);
+
+  // The detail is used ONLY when it is the selected schedule's. Clearing on click
+  // is not enough: `selected` also changes implicitly, when a read no longer
+  // carries the chosen schedule (its issue was closed) and the fallback moves to
+  // the first row. On that path nothing clears, and the pane would render one
+  // schedule's cadence, arguments, history and lifecycle while the action buttons
+  // — which close over `selected` — pause, resume and run a DIFFERENT one.
+  // Deriving the guard from the payload's own identity closes the whole class,
+  // whatever moved the selection.
+  const shown = detail?.summary.scheduleIssue === selectedScheduleIssue ? detail : null;
+
+  const inFlight = shown?.latestRun?.run.status === 'dispatched';
 
   // While a run is in flight — and ONLY then, so an idle schedule costs no timer
   // and no request — advance the clock and RE-READ.
@@ -228,8 +260,8 @@ export function SessionWorkflows({
   // browser clock minutes off would otherwise render a run as having started in
   // the future.
   const liveElapsedS =
-    inFlight && detail?.latestRun && detailLoadedAt !== null
-      ? (detail.latestRun.run.elapsedS ?? 0) + Math.max(0, Math.round((now - detailLoadedAt) / 1000))
+    inFlight && shown?.latestRun && detailLoadedAt !== null
+      ? (shown.latestRun.run.elapsedS ?? 0) + Math.max(0, Math.round((now - detailLoadedAt) / 1000))
       : null;
 
   const selectRun = useCallback((slot: string) => {
@@ -245,6 +277,8 @@ export function SessionWorkflows({
     // detail when it is another's.
     setDetail(null);
     setDetailLoadedAt(null);
+    detailRef.current = null;
+    setDetailError(false);
     // A different schedule's history is a different set of slots, so an open one
     // must not survive the switch and request a slot this schedule never had.
     setOpenSlot(null);
@@ -255,16 +289,26 @@ export function SessionWorkflows({
     async (perform: () => Promise<{ ok: boolean; message?: string | null }>) => {
       setBusy(true);
       setActionError(null);
-      const result = await perform();
-      setBusy(false);
-      if (!result.ok) {
-        setActionError(result.message ?? t.actionFailed);
-        return;
+      try {
+        const result = await perform();
+        if (!result.ok) {
+          setActionError(result.message ?? t.actionFailed);
+          return;
+        }
+        // Re-read rather than patch: these mutations change durable GitHub state
+        // the reconciler also writes, so a local guess would be a second and
+        // quieter source of truth.
+        setReload((value) => value + 1);
+      } catch {
+        // A REJECTED fetch — a dropped network throws rather than resolving to
+        // `{ok: false}`. Without this the schedule is left permanently busy: both
+        // buttons disabled, one still reading "Working…", and nothing said. The
+        // generic message is the honest one; there is no server response to quote.
+        setActionError(t.actionFailed);
+      } finally {
+        // In `finally` so no failure path can strand the buttons disabled.
+        setBusy(false);
       }
-      // Re-read rather than patch: these mutations change durable GitHub state
-      // the reconciler also writes, so a local guess would be a second and
-      // quieter source of truth.
-      setReload((value) => value + 1);
     },
     [t.actionFailed]
   );
@@ -336,12 +380,13 @@ export function SessionWorkflows({
           />
         }
         end={
-          detail && selected ? (
+          shown && selected ? (
             <ScheduleDetail
               owner={owner}
               name={name}
-              detail={detail}
+              detail={shown}
               run={run}
+              openSlot={openSlot}
               liveElapsedS={liveElapsedS}
               now={now}
               busy={busy}
@@ -358,14 +403,26 @@ export function SessionWorkflows({
               }
             />
           ) : (
-            // Two shapes reach here: the first detail is still in flight, or the
-            // session owns nothing but the rail's unrouted section — which is
-            // never selectable, so there is nothing to show beside it.
+            // Three shapes reach here: the read failed, the first detail is still
+            // in flight, or the session owns nothing but the rail's unrouted
+            // section — which is never selectable, so there is nothing to show
+            // beside it.
             <ScrollArea className="pr-1">
-              {selected ? (
-                <LoadingState label={t.loading} detail={c.loading.service} />
-              ) : (
+              {!selected ? (
                 <p className="font-ui text-[12.5px] text-ghost italic">{t.unroutedOnly}</p>
+              ) : detailError ? (
+                <div data-testid="schedule-detail-error" className="flex flex-col items-start gap-2">
+                  <p className="font-ui text-[13px] text-red">{t.detailFailed}</p>
+                  <button
+                    type="button"
+                    onClick={() => setReload((value) => value + 1)}
+                    className="font-ui text-[12.5px] text-fg border border-line rounded-control px-3 py-1.5 cursor-pointer"
+                  >
+                    {t.retry}
+                  </button>
+                </div>
+              ) : (
+                <LoadingState label={t.loading} detail={c.loading.service} />
               )}
             </ScrollArea>
           )

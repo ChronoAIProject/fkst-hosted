@@ -26,6 +26,7 @@ export function ScheduleDetail({
   name,
   detail,
   run,
+  openSlot,
   liveElapsedS,
   now,
   busy,
@@ -42,6 +43,8 @@ export function ScheduleDetail({
   /** An EARLIER run's per-step outcomes, when one is expanded. The most recent
    *  run needs none of this — it rides on `detail.latestRun`. */
   run: ScheduleRunDetail | null;
+  /** The slot the reader asked to expand, which leads the fetched `run`. */
+  openSlot: string | null;
   /** The in-flight run's live age in seconds; null when nothing is in flight. */
   liveElapsedS: number | null;
   now: number;
@@ -188,6 +191,7 @@ export function ScheduleDetail({
         <EarlierRuns
           runs={detail.runs}
           latestSlot={detail.latestRun?.run.slot ?? null}
+          openSlot={openSlot}
           selected={run}
           onSelectRun={onSelectRun}
         />

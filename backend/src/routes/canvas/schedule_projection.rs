@@ -238,7 +238,7 @@ pub fn summarize(facts: &ScheduleFacts<'_>, now: DateTime<Utc>) -> ScheduleSumma
         state,
         creator: sole_assignee(facts.assignees),
         next_due,
-        last_run: newest_run(facts.records).map(|record| summarize_run(record, now)),
+        last_run: latest_run_record(facts.records).map(|record| summarize_run(record, now)),
         success_rate_30d: success_rate(facts.records, now),
         invalid_detail,
     }
@@ -268,10 +268,10 @@ pub fn detail(facts: &ScheduleFacts<'_>, now: DateTime<Utc>) -> ScheduleDetail {
         upcoming,
         arguments,
         runs: runs_newest_first(facts.records, now),
-        // The newest SLOT, not the newest record: a slot's dispatch and its terminal
-        // record are two records, and `run_detail` already collapses them the way
-        // the run endpoint does, so the inlined view and the fetched one agree.
-        latest_run: newest_run(facts.records)
+        // Projected through `run_detail`, which collapses a slot's dispatch and its
+        // terminal record exactly as the run endpoint does — so the inlined view and
+        // a later fetched one cannot disagree.
+        latest_run: latest_run_record(facts.records)
             .and_then(|record| run_detail(facts.records, record.slot, now)),
     }
 }
@@ -346,11 +346,24 @@ fn project_step(step: &RunStep) -> RunStepView {
     }
 }
 
-/// The newest record overall — the one the list view shows as "last run".
-fn newest_run(records: &[RunRecord]) -> Option<&RunRecord> {
-    records
-        .iter()
-        .max_by_key(|record| (record.slot, record.started))
+/// The run this schedule is doing, or last did.
+///
+/// The run IN FLIGHT wins over the newest record, using the clock's own
+/// [`crate::schedule::open_dispatch`] rule rather than a second implementation of
+/// it. On a busy schedule the newest record is routinely NOT the current run: when
+/// a slot comes due while the previous run is still going, the control plane
+/// records a terminal `skipped-overlap` for that LATER slot. Picking the newest
+/// record would then report "Skipped" — with no elapsed time, no run issue and no
+/// steps — for a workflow that is at that moment executing, which is precisely the
+/// busy schedule where seeing the live run matters most.
+///
+/// With nothing in flight this is the newest record, which is the last run.
+fn latest_run_record(records: &[RunRecord]) -> Option<&RunRecord> {
+    crate::schedule::open_dispatch(records).or_else(|| {
+        records
+            .iter()
+            .max_by_key(|record| (record.slot, record.started))
+    })
 }
 
 /// Every run, newest first, with each slot collapsed to its latest record.
@@ -384,10 +397,13 @@ fn summarize_run(record: &RunRecord, now: DateTime<Utc>) -> RunSummary {
 ///
 /// `None` for a run that has ended — it reports `duration_s` instead, and emitting
 /// both would invite a reader to show a growing "elapsed" for a run that finished
-/// yesterday. Clamped at zero so a record written a second into the future by a
+/// yesterday. A TERMINAL status counts as ended even without an `ended` timestamp:
+/// the marker format tolerates a writer that omits it, and the honest reading of
+/// "ok, no end time" is a finished run of unknown length, never one still going.
+/// Clamped at zero so a record written a second into the future by a
 /// slightly-ahead writer reads as "just started" rather than wrapping.
 fn elapsed(record: &RunRecord, now: DateTime<Utc>) -> Option<u64> {
-    if record.ended.is_some() {
+    if record.ended.is_some() || record.status.is_terminal() {
         return None;
     }
     Some((now - record.started).num_seconds().max(0) as u64)

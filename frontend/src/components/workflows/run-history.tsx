@@ -121,6 +121,7 @@ export function RunStepper({ run, inFlight }: { run: ScheduleRunDetail; inFlight
 export function EarlierRuns({
   runs,
   latestSlot,
+  openSlot,
   selected,
   onSelectRun,
 }: {
@@ -129,7 +130,12 @@ export function EarlierRuns({
   runs: RunSummary[];
   /** The slot {@link LatestRun} is already showing, or null when nothing has run. */
   latestSlot: string | null;
-  /** The expanded older run's detail, when one is open. */
+  /** The slot the reader ASKED for. Drives the disclosure state, so a row reports
+   *  itself expanded the moment it is clicked rather than once its fetch lands —
+   *  deriving that from the payload leaves `aria-expanded="false"` on a row the
+   *  user has already opened, and a spinner-free row with no acknowledgement. */
+  openSlot: string | null;
+  /** The expanded older run's detail, once it has loaded. */
   selected: ScheduleRunDetail | null;
   onSelectRun: (slot: string) => void;
 }) {
@@ -143,7 +149,7 @@ export function EarlierRuns({
       </h3>
       <ul aria-label={t.runsAria} data-testid="run-history" className="flex flex-col">
         {earlier.map((entry) => {
-          const open = selected?.run.slot === entry.slot;
+          const open = openSlot === entry.slot;
           return (
             <li key={entry.slot} className="border-b border-line">
               <button
@@ -171,10 +177,16 @@ export function EarlierRuns({
               </button>
               {open && (
                 <div className="px-1 pb-3">
-                  {/* An older run is terminal by definition: its slot was
-                      superseded by a newer one, so it cannot still be waiting on
-                      a first step record. */}
-                  <RunStepper run={selected} inFlight={false} />
+                  {/* `selected` trails `openSlot` by one fetch, and can name the
+                      PREVIOUSLY opened run while this one loads — so it is shown
+                      only once it is this row's. An older run is terminal by
+                      definition: its slot was superseded by a newer one, so it
+                      cannot still be waiting on a first step record. */}
+                  {selected?.run.slot === entry.slot ? (
+                    <RunStepper run={selected} inFlight={false} />
+                  ) : (
+                    <p className="font-ui text-[12px] text-ghost">{t.loading}</p>
+                  )}
                 </div>
               )}
             </li>

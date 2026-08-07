@@ -9,6 +9,7 @@ export const workflows: WorkflowsSlice = {
   emptyAction: '在 GitHub 上打开模板',
   notInstalled: 'FKST 应用未安装在此仓库上，或者你无权查看它。',
   loadFailed: '无法加载此仓库的定时工作流。',
+  detailFailed: '无法加载这个定时工作流。',
   retry: '重试',
 
   railTitle: '调度',

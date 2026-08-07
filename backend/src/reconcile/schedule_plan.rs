@@ -99,28 +99,18 @@ pub struct ScheduleObservation<'a> {
 pub fn build_state(observation: &ScheduleObservation<'_>) -> ScheduleState {
     let has_label = |name: &str| observation.labels.iter().any(|label| label == name);
 
-    // A slot is finished once ANY terminal record exists for it.
-    let terminal_slots: Vec<DateTime<Utc>> = observation
-        .records
-        .iter()
-        .filter(|record| record.status.is_terminal())
-        .map(|record| record.slot)
-        .collect();
-
     ScheduleState {
         anchor: observation.created_at,
         cursor: observation.records.iter().map(|record| record.slot).max(),
         running_label: has_label(CRON_RUNNING_LABEL),
-        open_dispatch: observation
-            .records
-            .iter()
-            .filter(|record| record.status == RunStatus::Dispatched)
-            .filter(|record| !terminal_slots.contains(&record.slot))
-            .max_by_key(|record| record.slot)
-            .map(|record| OpenDispatch {
+        // Shared with the dashboard projection so the clock and the UI can never
+        // disagree about which run is in flight.
+        open_dispatch: crate::schedule::open_dispatch(observation.records).map(|record| {
+            OpenDispatch {
                 slot: record.slot,
                 started: record.started,
-            }),
+            }
+        }),
         latest_terminal: observation
             .records
             .iter()

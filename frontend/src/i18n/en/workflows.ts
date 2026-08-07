@@ -9,6 +9,7 @@ export const workflows: WorkflowsSlice = {
   emptyAction: 'Open the template on GitHub',
   notInstalled: 'The FKST app is not installed on this repository, or you cannot see it.',
   loadFailed: 'Could not load the scheduled workflows for this repository.',
+  detailFailed: 'Could not load this scheduled workflow.',
   retry: 'Try again',
 
   railTitle: 'Schedules',

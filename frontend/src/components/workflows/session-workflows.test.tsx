@@ -80,7 +80,14 @@ function stubApi(routes: {
       return json(result.body, result.status);
     }
     if (/\/schedules\/\d+\/runs\//.test(url)) return json(routes.runDetail ?? null);
-    if (/\/schedules\/\d+$/.test(url)) return json(routes.detail ?? detail());
+    const one = url.match(/\/schedules\/(\d+)$/);
+    if (one) {
+      // The real endpoint always answers with the REQUESTED schedule's summary.
+      // Echoing the id keeps the fixture honest — the component uses it to tell
+      // its own payload from a previous schedule's still in flight.
+      const body = routes.detail ?? detail();
+      return json({ ...body, summary: { ...body.summary, scheduleIssue: Number(one[1]) } });
+    }
     if (/\/schedules$/.test(url)) {
       if (routes.listStatus && routes.listStatus !== 200) {
         return json({ message: 'boom' }, routes.listStatus);
@@ -432,6 +439,179 @@ describe('SessionWorkflows', () => {
     fetchMock.mockClear();
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it('never strands the actions disabled when the mutation request itself fails', async () => {
+    // A dropped network REJECTS rather than resolving to {ok:false}. Without a
+    // finally the schedule is left permanently busy — both buttons disabled, one
+    // still reading "Working…" — and nothing is said.
+    stubApi({});
+    const passthrough = (globalThis.fetch as ReturnType<typeof vi.fn>).getMockImplementation()!;
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'POST') throw new TypeError('Failed to fetch');
+        return passthrough(input, init);
+      }
+    );
+    renderTab();
+
+    await userEvent.click(await screen.findByTestId('action-pause-resume'));
+
+    expect(await screen.findByTestId('action-error')).toHaveTextContent('That did not work.');
+    expect(screen.getByTestId('action-pause-resume')).toBeEnabled();
+    expect(screen.getByTestId('action-run-now')).toBeEnabled();
+  });
+
+  it('never shows one schedule’s detail beside another schedule’s actions', async () => {
+    // The selection also moves IMPLICITLY: when a read no longer carries the
+    // chosen schedule (its issue was closed) the fallback jumps to the first row.
+    // Nothing clears on that path, so the pane would render #51's cadence and
+    // "Resume" while the button pauses #50.
+    const list: RepoSchedulesResponse = {
+      owner: 'acme',
+      name: 'site',
+      installed: true,
+      schedules: [
+        summary({ scheduleIssue: 50, workflowId: 'alpha' }),
+        summary({ scheduleIssue: 51, workflowId: 'beta', state: 'paused' }),
+      ],
+    };
+    const detailsByIssue: Record<number, ScheduleDetail> = {
+      50: detail({ summary: summary({ scheduleIssue: 50, workflowId: 'alpha' }), arguments: { who: 'alpha' } }),
+      51: detail({
+        summary: summary({ scheduleIssue: 51, workflowId: 'beta', state: 'paused' }),
+        arguments: { who: 'beta' },
+      }),
+    };
+    // Hold #50's detail read open so the INTERIM state is observable — that
+    // window is the whole defect, and a findBy* that retried past it would pass
+    // against the broken code.
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let gateArmed = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const json = (body: unknown) =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      const m = url.match(/\/schedules\/(\d+)$/);
+      if (m) {
+        if (gateArmed && m[1] === '50') await gate;
+        return json(detailsByIssue[Number(m[1])]);
+      }
+      return json(list);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderTab();
+
+    await userEvent.click(await screen.findByTestId('schedule-row-51'));
+    expect(await screen.findByTestId('arguments')).toHaveTextContent('beta');
+    expect(screen.getByTestId('action-pause-resume')).toHaveTextContent('Resume');
+
+    // #51's issue is closed on GitHub; the next read drops it and the selection
+    // falls back to #50, whose detail has not arrived yet.
+    gateArmed = true;
+    list.schedules = [list.schedules[0]!];
+    await userEvent.click(screen.getByTestId('action-pause-resume'));
+    await screen.findByTestId('schedule-row-50');
+
+    // Beta's pane must be GONE the instant the selection moves — never left
+    // beside actions that now target alpha.
+    expect(screen.getByTestId('schedule-row-50')).toHaveAttribute('aria-current', 'true');
+    expect(screen.queryByTestId('schedule-detail')).not.toBeInTheDocument();
+    expect(screen.queryByText('beta')).not.toBeInTheDocument();
+
+    release!();
+    expect(await screen.findByTestId('arguments')).toHaveTextContent('alpha');
+  });
+
+  it('says a schedule could not be read, instead of spinning forever', async () => {
+    // Clearing the detail alone leaves the pane on its loading state for good,
+    // which reads as a hung request that is in fact already over.
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const json = (body: unknown, status = 200) =>
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { 'content-type': 'application/json' },
+        });
+      if (/\/schedules\/\d+$/.test(url)) return json({ message: 'boom' }, 500);
+      return json({
+        owner: 'acme',
+        name: 'site',
+        installed: true,
+        schedules: [summary({ scheduleIssue: 50 })],
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderTab();
+
+    expect(await screen.findByTestId('schedule-detail-error')).toHaveTextContent(
+      'Could not load this scheduled workflow.'
+    );
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    // The rail still works — one unreadable schedule is not a dead tab.
+    expect(screen.getByTestId('schedule-row-50')).toBeInTheDocument();
+  });
+
+  it('shows every schedule as unrouted against a backend that predates `creator`', async () => {
+    // Version skew during a deploy. A strict `=== null` would put a
+    // creator-less schedule in NEITHER bucket and the whole tab would read
+    // "no scheduled workflows" — the feature looking broken rather than stale.
+    const old = { ...summary({ scheduleIssue: 50 }) } as unknown as Record<string, unknown>;
+    delete old.creator;
+    stubApi({
+      list: {
+        owner: 'acme',
+        name: 'site',
+        installed: true,
+        schedules: [old as unknown as ScheduleSummary],
+      },
+    });
+    renderTab();
+
+    expect(await screen.findByTestId('unrouted-row-50')).toBeInTheDocument();
+    expect(screen.queryByText('This session has no scheduled workflows')).not.toBeInTheDocument();
+  });
+
+  it('marks an earlier run expanded the moment it is clicked, not when its fetch lands', async () => {
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { fetchMock } = stubApi({
+      detail: detail({
+        runs: [
+          run({ slot: '2026-08-04T01:00:00Z' }),
+          run({ slot: '2026-08-03T01:00:00Z', status: 'failed' }),
+        ],
+      }),
+      runDetail: {
+        run: run({ slot: '2026-08-03T01:00:00Z', status: 'failed' }),
+        steps: [{ index: 1, id: 'scrape', status: 'failed', durationS: 3 }],
+        runIssue: 4200,
+      },
+    });
+    renderTab();
+    const history = await screen.findByTestId('run-history');
+
+    const passthrough = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (/\/runs\//.test(String(input))) await gate;
+      return passthrough(input, init);
+    });
+
+    const row = within(history).getByTestId('run-row-2026-08-03T01:00:00Z');
+    await userEvent.click(row);
+    // Acknowledged immediately, from the REQUESTED slot.
+    expect(row).toHaveAttribute('aria-expanded', 'true');
+
+    release!();
+    expect(await within(history).findByTestId('step-1')).toHaveTextContent('scrape');
   });
 
   it('owns a scroll region in every state, loaded or not', async () => {

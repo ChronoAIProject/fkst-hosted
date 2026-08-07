@@ -24,6 +24,8 @@ export interface WorkflowsContent {
   emptyAction: string;
   notInstalled: string;
   loadFailed: string;
+  /** One schedule could not be read, while the rail around it still can be. */
+  detailFailed: string;
   retry: string;
 
   /** The rail: this session's schedules, and the ones routed to no session. */

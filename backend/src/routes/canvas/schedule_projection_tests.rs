@@ -390,6 +390,56 @@ fn a_finished_run_reports_a_duration_and_no_elapsed() {
 }
 
 #[test]
+fn an_overlap_skip_does_not_mask_the_run_actually_in_flight() {
+    // When a slot comes due while the previous run is still going, the control
+    // plane records a terminal `skipped-overlap` for that LATER slot. The newest
+    // RECORD is then the skip while a run is genuinely executing — so picking it
+    // would report "Skipped", with no elapsed time and no run issue, for exactly
+    // the busy schedule where seeing the live run matters most.
+    let spec = spec("cron: 0 * * * *");
+    let records = vec![
+        RunRecord::new(at(27, 1), RunStatus::Dispatched, at(27, 1)).with_issue(4242),
+        RunRecord::new(at(27, 2), RunStatus::SkippedOverlap, at(27, 2)),
+    ];
+    let detail = detail(
+        &facts(&spec, &[], &records),
+        at(27, 2) + Duration::seconds(30),
+    );
+    let latest = detail.latest_run.expect("a run is in flight");
+    assert_eq!(latest.run.slot, "2026-07-27T01:00:00Z");
+    assert_eq!(latest.run.status, "dispatched");
+    assert_eq!(latest.run_issue, Some(4242));
+    assert_eq!(
+        detail.summary.last_run.map(|run| run.status),
+        Some("dispatched".to_string()),
+        "the summary and the detail must name the SAME run"
+    );
+    assert!(
+        detail
+            .runs
+            .iter()
+            .any(|run| run.status == "skipped-overlap"),
+        "the skip still appears in the history — it is what explains the gap"
+    );
+}
+
+#[test]
+fn a_terminal_record_with_no_end_time_is_finished_rather_than_forever_running() {
+    // The marker format tolerates a writer that omits `ended`. "ok, no end time"
+    // is a finished run of unknown length, never one still going.
+    let spec = spec("cron: 0 * * * *");
+    let records = vec![RunRecord {
+        ended: None,
+        ..RunRecord::new(at(27, 1), RunStatus::Ok, at(27, 1))
+    }];
+    let last = summarize(&facts(&spec, &[], &records), at(27, 5))
+        .last_run
+        .expect("a run");
+    assert_eq!(last.elapsed_s, None);
+    assert_eq!(last.duration_s, None);
+}
+
+#[test]
 fn a_run_started_a_moment_in_the_future_reads_as_just_started() {
     // A writer whose clock is a second ahead must not produce a wrapped elapsed.
     let spec = spec("cron: 0 * * * *");
