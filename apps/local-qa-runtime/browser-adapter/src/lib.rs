@@ -216,12 +216,10 @@ mod linux {
         )?;
         browser.set_default_timeout(remaining(deadline)?);
 
-        let tab = browser
-            .new_tab()
-            .map_err(operation_error_before_deadline(
-                "acquire initial Chrome tab",
-                deadline,
-            ))?;
+        let tab = browser.new_tab().map_err(operation_error_before_deadline(
+            "acquire initial Chrome tab",
+            deadline,
+        ))?;
         tab.set_default_timeout(remaining(deadline)?);
         tab.navigate_to(&navigation_url)
             .and_then(|tab| tab.wait_until_navigated())
@@ -364,11 +362,7 @@ mod linux {
     }
 
     fn discover_chrome() -> Result<PathBuf, BrowserAdapterError> {
-        discover_chrome_from(
-            CHROME_CANDIDATES
-                .iter()
-                .map(Path::new),
-        )
+        discover_chrome_from(CHROME_CANDIDATES.iter().map(Path::new))
     }
 
     fn discover_chrome_from<'a>(
