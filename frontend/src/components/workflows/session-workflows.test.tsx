@@ -211,6 +211,113 @@ describe('SessionWorkflows', () => {
     expect(screen.getByTestId('action-run-now')).toBeDisabled();
   });
 
+  it('re-reads while a run is in flight, so its steps appear when it ends', async () => {
+    // A tick that only re-rendered would grow "running for 25m" forever on a run
+    // that finished twenty minutes ago: the terminal record lands on the
+    // definition issue, and nothing else on this surface would ever ask for it.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const finished: ScheduleDetail = detail();
+    const routes: Parameters<typeof stubApi>[0] = {
+      detail: detail({
+        summary: summary({ scheduleIssue: 50, state: 'running' }),
+        runs: [run({ slot: '2026-08-05T01:00:00Z', status: 'dispatched' })],
+        latestRun: {
+          run: run({
+            slot: '2026-08-05T01:00:00Z',
+            status: 'dispatched',
+            endedAt: null,
+            durationS: null,
+            elapsedS: 60,
+          }),
+          steps: [],
+          runIssue: 4300,
+        },
+      }),
+    };
+    stubApi(routes);
+    renderTab();
+
+    expect(await screen.findByTestId('run-stepper')).toHaveTextContent(
+      'Awaiting the first step record'
+    );
+
+    // The run completes server-side; the next tick must pick it up unprompted.
+    routes.detail = finished;
+    await vi.advanceTimersByTimeAsync(16_000);
+
+    expect(await screen.findByTestId('step-1')).toHaveTextContent('scrape');
+    expect(screen.queryByText(/Awaiting the first step record/)).not.toBeInTheDocument();
+  });
+
+  it('does not poll a schedule that is idle', async () => {
+    // The timer exists for a run in flight only; an idle schedule must cost no
+    // repeated request for as long as the tab stays open.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { fetchMock } = stubApi({});
+    renderTab();
+    await screen.findByTestId('schedule-detail');
+
+    fetchMock.mockClear();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('clears the pane when another schedule is selected, rather than showing the old one', async () => {
+    // Otherwise the previous schedule's arguments, runs and steps sit beside a
+    // rail that already highlights the new row — reading as this schedule's
+    // detail when they are another's.
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { fetchMock } = stubApi({
+      list: {
+        owner: 'acme',
+        name: 'site',
+        installed: true,
+        schedules: [
+          summary({ scheduleIssue: 50, workflowId: 'alpha' }),
+          summary({ scheduleIssue: 51, workflowId: 'beta' }),
+        ],
+      },
+    });
+    renderTab();
+    await screen.findByTestId('schedule-detail');
+
+    // Hold the NEXT detail read open so the interim state is observable.
+    const passthrough = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (/\/schedules\/51$/.test(String(input))) await gate;
+      return passthrough(input, init);
+    });
+
+    await userEvent.click(screen.getByTestId('schedule-row-51'));
+    expect(screen.queryByTestId('schedule-detail')).not.toBeInTheDocument();
+
+    release!();
+    expect(await screen.findByTestId('schedule-detail')).toBeInTheDocument();
+  });
+
+  it('keeps the last-good list when a re-read fails, instead of blanking the view', async () => {
+    // The live tick polls; a single transient failure must not replace what the
+    // reader is looking at with an error screen.
+    const { fetchMock } = stubApi({});
+    renderTab();
+    await screen.findByTestId('schedule-detail');
+
+    const passthrough = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (/\/schedules$/.test(String(input))) throw new Error('network');
+      return passthrough(input, init);
+    });
+    await userEvent.click(screen.getByTestId('action-pause-resume'));
+
+    expect(screen.getByTestId('schedule-row-50')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Could not load the scheduled workflows for this repository.')
+    ).not.toBeInTheDocument();
+  });
+
   it('keeps the selected schedule when a reload reorders the list', async () => {
     // Selection is stored by ISSUE NUMBER, so a response that returns the same
     // schedules in a different order cannot swap the detail pane out from under

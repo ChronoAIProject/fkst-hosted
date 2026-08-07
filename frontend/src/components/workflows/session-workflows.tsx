@@ -96,6 +96,10 @@ export function SessionWorkflows({
   const [detailLoadedAt, setDetailLoadedAt] = useState<number | null>(null);
   // Bumped by every mutation to force a refetch without duplicating the loader.
   const [reload, setReload] = useState(0);
+  // Bumped by the live tick below, so a run in flight is re-READ and not merely
+  // re-rendered. Separate from `reload` because it must not re-fetch an expanded
+  // older run: that run is terminal, and its record cannot change.
+  const [liveRefresh, setLiveRefresh] = useState(0);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -103,11 +107,11 @@ export function SessionWorkflows({
       return;
     }
     let cancelled = false;
-    setLoadError(false);
     listRepoSchedules(apiFetch, owner, name)
       .then((response) => {
         if (cancelled) return;
         setList(response);
+        setLoadError(false);
         setNow(Date.now());
       })
       .catch(() => {
@@ -116,7 +120,7 @@ export function SessionWorkflows({
     return () => {
       cancelled = true;
     };
-  }, [apiFetch, isAuthenticated, identityGeneration, owner, name, reload]);
+  }, [apiFetch, isAuthenticated, identityGeneration, owner, name, reload, liveRefresh]);
 
   // Partition once per list: this session's schedules, and the ones that route
   // to no session at all (see ScheduleRail's UnroutedSection for why those are
@@ -162,7 +166,16 @@ export function SessionWorkflows({
     return () => {
       cancelled = true;
     };
-  }, [apiFetch, isAuthenticated, identityGeneration, owner, name, selectedScheduleIssue, reload]);
+  }, [
+    apiFetch,
+    isAuthenticated,
+    identityGeneration,
+    owner,
+    name,
+    selectedScheduleIssue,
+    reload,
+    liveRefresh,
+  ]);
 
   useEffect(() => {
     if (!isAuthenticated || selectedScheduleIssue === null || !openSlot) {
@@ -193,11 +206,20 @@ export function SessionWorkflows({
 
   const inFlight = detail?.latestRun?.run.status === 'dispatched';
 
-  // The one live number on this surface. Only while something is actually
-  // running, so an idle schedule costs no timer at all.
+  // While a run is in flight — and ONLY then, so an idle schedule costs no timer
+  // and no request — advance the clock and RE-READ.
+  //
+  // Re-reading is the load-bearing half. A tick that only re-rendered would grow
+  // "running for 25m" forever on a run that finished twenty minutes ago, because
+  // the terminal record (and with it the step outcomes) arrives on the definition
+  // issue and nothing else here would ever ask for it. Re-reading is also what
+  // makes the steps appear WHEN the run ends rather than on the next mutation.
   useEffect(() => {
     if (!inFlight) return;
-    const timer = window.setInterval(() => setNow(Date.now()), LIVE_TICK_MS);
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+      setLiveRefresh((value) => value + 1);
+    }, LIVE_TICK_MS);
     return () => window.clearInterval(timer);
   }, [inFlight]);
 
@@ -217,6 +239,12 @@ export function SessionWorkflows({
 
   const selectSchedule = useCallback((scheduleIssue: number) => {
     setSelectedIssue(scheduleIssue);
+    // Clear the pane SYNCHRONOUSLY. Without this the previous schedule's
+    // arguments, runs and steps stay on screen beside a rail that already
+    // highlights the new row, until the fetch lands — reading as this schedule's
+    // detail when it is another's.
+    setDetail(null);
+    setDetailLoadedAt(null);
     // A different schedule's history is a different set of slots, so an open one
     // must not survive the switch and request a slot this schedule never had.
     setOpenSlot(null);
@@ -241,7 +269,11 @@ export function SessionWorkflows({
     [t.actionFailed]
   );
 
-  if (loadError) {
+  // Only when there is nothing to fall back to. Once a list has loaded, a failed
+  // re-read (the live tick polls every LIVE_TICK_MS while a run is in flight)
+  // keeps the last-good view rather than replacing what the reader is looking at
+  // with an error screen; the next successful read clears the flag.
+  if (loadError && !list) {
     return (
       <Short>
         <p className="font-ui text-[13px] text-red">{t.loadFailed}</p>
