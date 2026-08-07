@@ -13,6 +13,11 @@ local t = fkst.test
 -- common case for this package is an ordinary session that composes it and has no
 -- schedule at all, and such a session must boot, do nothing, and cost nothing.
 --
+-- Named `run_graph_*` so it runs against the COMPOSED graph. This package
+-- raises onto github-proxy's published comment seam, which a package-alone
+-- scan cannot resolve; the `run_graph_` prefix is what the harness uses to
+-- select the root set that includes the packages this graph spans.
+--
 -- It also pins the failure posture that makes that true. An earlier revision read
 -- the environment with `propagate_exec_errors = true`, which turned an unreadable
 -- value into a thrown error — every unscheduled session would have errored its
@@ -23,8 +28,12 @@ return {
     local trace = t.fire_raiser("run_start")
 
     t.eq(trace.source_ref.kind, "cron")
-    t.eq(trace.source_payload.raiser, "run_start")
-    t.eq(trace.routed_to[1], "run_execute")
+    -- Namespaced, because the composed graph is what production runs: the pod's
+    -- own logs read `raiser=workflow-runner.run_start` and
+    -- `dept=workflow-runner.run_execute`. Asserting the bare names would pin a
+    -- shape only a package-alone scan ever produces.
+    t.eq(trace.source_payload.raiser, "workflow-runner.run_start")
+    t.eq(trace.routed_to[1], "workflow-runner.run_execute")
     if trace.consumer_result.status ~= "accepted" then
       error(trace.consumer_result.message or "fire_raiser consumer failed")
     end

@@ -40,7 +40,12 @@ return {
     local department = require("departments.run_report.main")
     local raised = capture(department, result_event())
     t.eq(#raised, 1)
-    t.eq(raised[1].queue, "github_issue_comment_request")
+    -- FULLY QUALIFIED. The seam is published by github-proxy, so a bare name is
+    -- namespaced to this package and lands on a queue nothing consumes — the
+    -- record would never be posted and every run would read as a watchdog
+    -- timeout. Asserting the qualified name is what keeps a consumer on the
+    -- other end.
+    t.eq(raised[1].queue, "github-proxy.github_issue_comment_request")
     t.eq(raised[1].payload.issue_number, 123)
     t.eq(raised[1].payload.repo, "acme/site")
   end,
