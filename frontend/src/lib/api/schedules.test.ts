@@ -19,6 +19,7 @@ const summary = {
   runMode: 'cron: 0 1 * * 1-5',
   cadence: 'weekdays at 01:00 UTC',
   state: 'idle',
+  creator: 'shining',
   nextDue: '2026-08-03T01:00:00Z',
   lastRun: null,
   successRate30d: null,
@@ -27,9 +28,11 @@ const summary = {
 
 describe('schedules client', () => {
   it('lists a repository’s schedules from the repo-scoped path', async () => {
-    const apiFetch = vi.fn().mockResolvedValue(
-      json({ owner: 'acme', name: 'site', installed: true, schedules: [summary] })
-    );
+    const apiFetch = vi
+      .fn()
+      .mockResolvedValue(
+        json({ owner: 'acme', name: 'site', installed: true, schedules: [summary] })
+      );
     const response = await listRepoSchedules(apiFetch, 'acme', 'site');
     expect(apiFetch).toHaveBeenCalledWith('/api/v1/repos/acme/site/schedules');
     expect(response.schedules).toHaveLength(1);
@@ -56,6 +59,29 @@ describe('schedules client', () => {
   it('rejects a malformed payload at the boundary rather than deep inside a component', async () => {
     const apiFetch = vi.fn().mockResolvedValue(json({ owner: 'acme', name: 'site' }));
     await expect(listRepoSchedules(apiFetch, 'acme', 'site')).rejects.toThrow(/malformed/);
+  });
+
+  it('names the session each schedule belongs to', async () => {
+    // The sole assignee is the routing key: a session's workflows are exactly the
+    // repository's schedules whose creator is that session's creator.
+    const apiFetch = vi
+      .fn()
+      .mockResolvedValue(
+        json({ owner: 'acme', name: 'site', installed: true, schedules: [summary] })
+      );
+    const response = await listRepoSchedules(apiFetch, 'acme', 'site');
+    expect(response.schedules[0]!.creator).toBe('shining');
+  });
+
+  it('accepts a schedule that has never run, whose latest run is legitimately null', async () => {
+    // `latestRun: null` is a fact, not a malformed payload — rejecting it at the
+    // boundary would make a brand-new schedule unopenable.
+    const apiFetch = vi
+      .fn()
+      .mockResolvedValue(json({ summary, upcoming: [], arguments: {}, runs: [], latestRun: null }));
+    await expect(getSchedule(apiFetch, 'acme', 'site', 50)).resolves.toMatchObject({
+      latestRun: null,
+    });
   });
 
   it('surfaces a non-2xx read as an error carrying its status', async () => {
