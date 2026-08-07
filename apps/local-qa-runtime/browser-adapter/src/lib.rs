@@ -61,7 +61,7 @@ pub async fn run_fixed_browser_smoke() -> Result<FixedBrowserSmokeResult, Browse
 #[cfg(target_os = "linux")]
 mod linux {
     use super::{BrowserAdapterError, FixedBrowserSmokeResult, FixedPngScreenshot};
-    use headless_chrome::{protocol::cdp::Page, Browser};
+    use headless_chrome::{protocol::cdp::Page, Browser, Tab};
     use nix::{
         errno::Errno,
         sys::signal::{killpg, Signal},
@@ -104,8 +104,7 @@ mod linux {
     const CLEANUP_GRACE: Duration = Duration::from_millis(500);
     const CLEANUP_LIMIT: Duration = Duration::from_secs(3);
 
-    pub(super) fn run_fixed_browser_smoke() -> Result<FixedBrowserSmokeResult, BrowserAdapterError>
-    {
+    pub(super) fn run_fixed_browser_smoke() -> Result<FixedBrowserSmokeResult, BrowserAdapterError> {
         run_with_options(RunOptions::production())
     }
 
@@ -216,12 +215,7 @@ mod linux {
         )?;
         browser.set_default_timeout(remaining(deadline)?);
 
-        let tab = browser
-            .new_tab()
-            .map_err(operation_error_before_deadline(
-                "acquire initial Chrome tab",
-                deadline,
-            ))?;
+        let tab = wait_for_initial_tab(&browser, deadline)?;
         tab.set_default_timeout(remaining(deadline)?);
         tab.navigate_to(&navigation_url)
             .and_then(|tab| tab.wait_until_navigated())
@@ -231,12 +225,9 @@ mod linux {
             ))?;
         tab.set_default_timeout(remaining(deadline)?);
 
-        let element =
-            tab.wait_for_element(options.selector)
-                .map_err(operation_error_before_deadline(
-                    "locate fixed status element",
-                    deadline,
-                ))?;
+        let element = tab.wait_for_element(options.selector).map_err(
+            operation_error_before_deadline("locate fixed status element", deadline),
+        )?;
         let observed_value = element
             .call_js_fn("function() { return this.textContent; }", Vec::new(), false)
             .map_err(operation_error_before_deadline(
@@ -305,6 +296,24 @@ mod linux {
                 height_px,
             },
         })
+    }
+
+    fn wait_for_initial_tab(
+        browser: &Browser,
+        deadline: Instant,
+    ) -> Result<Arc<Tab>, BrowserAdapterError> {
+        loop {
+            ensure_before_deadline(deadline)?;
+            if let Some(tab) = browser
+                .get_tabs()
+                .into_iter()
+                .find(|tab| tab.get_url() == "about:blank")
+            {
+                ensure_before_deadline(deadline)?;
+                return Ok(tab);
+            }
+            thread::sleep(IO_POLL_INTERVAL.min(remaining(deadline)?));
+        }
     }
 
     impl OwnedRun {
