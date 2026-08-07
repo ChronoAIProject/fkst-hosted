@@ -109,6 +109,11 @@ const LLM_REASONING_EFFORT_ENV: &str = "FKST_LLM_REASONING_EFFORT";
 const DURABLE_ROOT_ENV: &str = "FKST_DURABLE_ROOT";
 const RUNTIME_ROOT_ENV: &str = "FKST_RUNTIME_ROOT";
 const SESSION_CREDS_DIR_ENV: &str = "FKST_SESSION_CREDS_DIR";
+/// The in-pod credentials-gate wait (`session_pod::creds_gate`). Injected so the
+/// operator knob `FKST_POD_CREDS_WAIT_TIMEOUT_SECS` actually REACHES the pod —
+/// the gate has always read this var, but nothing ever set it, so every pod was
+/// pinned to the in-pod default (issue #5927).
+const CREDS_WAIT_TIMEOUT_ENV: &str = "FKST_CREDS_WAIT_TIMEOUT_SECS";
 const CODEX_HOME_ENV: &str = "CODEX_HOME";
 const GIT_AUTHOR_NAME_ENV: &str = "GIT_AUTHOR_NAME";
 const GIT_COMMITTER_NAME_ENV: &str = "GIT_COMMITTER_NAME";
@@ -359,6 +364,10 @@ pub(crate) fn session_env_pairs(
         (DURABLE_ROOT_ENV, DURABLE_ROOT_DIR.to_string()),
         (RUNTIME_ROOT_ENV, RUNTIME_ROOT_DIR.to_string()),
         (SESSION_CREDS_DIR_ENV, CREDS_MOUNT_DIR.to_string()),
+        (
+            CREDS_WAIT_TIMEOUT_ENV,
+            config.creds_wait_timeout_secs.to_string(),
+        ),
         (CODEX_HOME_ENV, CODEX_HOME_DIR.to_string()),
         (GIT_AUTHOR_NAME_ENV, spec.bot_login.clone()),
         (GIT_COMMITTER_NAME_ENV, spec.bot_login.clone()),

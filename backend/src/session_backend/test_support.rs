@@ -50,6 +50,10 @@ pub(crate) struct FakeSessionBackend {
     gone_sessions: HashSet<String>,
     /// Per-session scripted `recent_output` (absent → `None`).
     recent: HashMap<String, Option<String>>,
+    /// Per-session scripted `credential_recovery_needed`. `Some(v)` → `Ok(v)`;
+    /// `None` → the probe FAILS (the "pod is not reachable yet" path). A session
+    /// absent from the map keeps the historical default of `Ok(true)`.
+    creds_probe: HashMap<String, Option<bool>>,
     /// How many more `deliver_credential` calls must fail TRANSIENTLY per session
     /// before it starts succeeding. Drives the token-rotation retry tests.
     deliver_failures: Mutex<HashMap<String, usize>>,
@@ -129,6 +133,13 @@ impl FakeSessionBackend {
     /// Script the fleet `list_fleet` returns.
     pub(crate) fn with_fleet(mut self, fleet: Vec<SessionHandle>) -> Self {
         self.fleet = fleet;
+        self
+    }
+
+    /// Script one session's `credential_recovery_needed`: `Some(v)` → `Ok(v)`,
+    /// `None` → a probe failure. Sessions left unscripted keep the default `true`.
+    pub(crate) fn with_creds_probe(mut self, session_id: &str, outcome: Option<bool>) -> Self {
+        self.creds_probe.insert(session_id.to_string(), outcome);
         self
     }
 
@@ -312,8 +323,14 @@ impl SessionBackend for FakeSessionBackend {
         )))
     }
 
-    async fn credential_recovery_needed(&self, _session_id: &str) -> Result<bool, BackendError> {
-        Ok(true)
+    async fn credential_recovery_needed(&self, session_id: &str) -> Result<bool, BackendError> {
+        match self.creds_probe.get(session_id) {
+            Some(Some(needed)) => Ok(*needed),
+            Some(None) => Err(BackendError::Other(anyhow::anyhow!(
+                "scripted credential probe failure"
+            ))),
+            None => Ok(true),
+        }
     }
 
     async fn observe_repo(&self, _repo: &RepoRef) -> Result<Vec<LivePod>, BackendError> {

@@ -1517,6 +1517,14 @@ data:
   # FKST_ENV_INSTALL_MAX_COMMANDS: "..."          # max install commands per profile
   # FKST_ENV_INSTALL_MAX_COMMAND_BYTES: "..."     # max bytes per install command
   # FKST_ENV_INSTALL_STDERR_TAIL_BYTES: "..."     # stderr tail kept on failure
+  # Session-credential delivery (issue #5927). A session pod REPLACED under a
+  # surviving runtime (autoscaler scale-down, node loss) starts with an empty
+  # creds dir and must be re-delivered by the control plane; these two knobs are
+  # what keep that from racing. The wait is injected into the session pod as
+  # FKST_CREDS_WAIT_TIMEOUT_SECS; the watch probes live runtimes through the
+  # backend (no GitHub call) and enqueues a reconcile only when creds are missing.
+  # FKST_POD_CREDS_WAIT_TIMEOUT_SECS: "300"       # in-pod wait before abort; >= 1
+  # FKST_CREDS_WATCH_SECS: "30"                   # credential watch cadence; >= 1
 EOF
 
 # gate check: unreplaced <placeholders> apply cleanly but fail later in

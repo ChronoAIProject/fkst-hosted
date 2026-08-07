@@ -113,6 +113,14 @@ mod defaults {
         "fkst-session-runner".to_string()
     }
 
+    pub(super) fn pod_creds_wait_timeout_secs() -> u64 {
+        // How long a session pod waits for its credentials-complete sentinel.
+        // 300s: a pod replaced under a surviving BatchSandbox needs the control
+        // plane to re-deliver, and that rides the event-driven reconcile pass
+        // (51s-297s observed). Must exceed that spread (issue #5927).
+        300
+    }
+
     pub(super) fn pod_dns_nameservers() -> Vec<String> {
         // The isolated session/validation pod's external-only DNS. Public
         // resolvers so the pod can reach GitHub/LLM without cluster DNS.
@@ -188,6 +196,11 @@ struct PodVars {
     /// error. Space-separated `NAME=<burst>,<refill_per_minute>` tokens.
     #[serde(default)]
     rate_pools: Option<String>,
+    /// How long a session pod waits for its credentials-complete sentinel before
+    /// aborting engine start. Rendered into the session pod as
+    /// `FKST_CREDS_WAIT_TIMEOUT_SECS` (issue #5927).
+    #[serde(default = "defaults::pod_creds_wait_timeout_secs")]
+    creds_wait_timeout_secs: u64,
 }
 
 /// `FKST_LLM_*`-prefixed variables (static LLM-provider config). The session
@@ -370,6 +383,15 @@ pub struct PodConfig {
     /// space-separated `NAME=<burst>,<refill_per_minute>` tokens. Default empty
     /// (no pools, no PATH shims — exactly the pre-knob behavior).
     pub rate_pools: BTreeMap<String, RatePool>,
+    /// How long a session pod waits for its credentials-complete sentinel before
+    /// aborting engine start, injected as `FKST_CREDS_WAIT_TIMEOUT_SECS`. Env:
+    /// `FKST_POD_CREDS_WAIT_TIMEOUT_SECS`. Default 300; must be >= 1.
+    ///
+    /// A pod REPLACED under a surviving `BatchSandbox` starts with an empty creds
+    /// dir and must be re-delivered by the reconcile pass, whose spacing is
+    /// event-driven (51s–297s observed). The wait must exceed that spacing or the
+    /// replacement dies before delivery is even attempted (issue #5927).
+    pub creds_wait_timeout_secs: u64,
 }
 
 impl Default for PodConfig {
@@ -387,6 +409,7 @@ impl Default for PodConfig {
             dns_nameservers: defaults::pod_dns_nameservers(),
             runtime_class: None,
             rate_pools: BTreeMap::new(),
+            creds_wait_timeout_secs: defaults::pod_creds_wait_timeout_secs(),
         }
     }
 }
@@ -692,6 +715,16 @@ impl Config {
             // Parsed UNCONDITIONALLY (like the mode) so a malformed pool fails
             // closed at startup even with dispatch off.
             rate_pools: parse_rate_pools(pod.rate_pools.as_deref().unwrap_or(""))?,
+            // Zero would make every replacement pod abort instantly, so it is
+            // rejected here rather than silently normalized (issue #5927).
+            creds_wait_timeout_secs: {
+                if pod.creds_wait_timeout_secs == 0 {
+                    return Err(AppError::Config(
+                        "FKST_POD_CREDS_WAIT_TIMEOUT_SECS must be >= 1".to_string(),
+                    ));
+                }
+                pod.creds_wait_timeout_secs
+            },
         };
         if leader.enabled && !pod.dispatch {
             return Err(AppError::Config(

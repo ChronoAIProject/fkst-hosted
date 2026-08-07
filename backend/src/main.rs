@@ -856,6 +856,18 @@ async fn run_worker_generation(
         .await
     });
 
+    let creds_watch_backend = ctx.backend.clone();
+    let creds_watch_config = ctx.config.reconcile.clone();
+    let creds_watch_handle = handle.clone();
+    tasks.spawn(async move {
+        fkst_control_plane::k8s::run_creds_watch_loop(
+            creds_watch_backend,
+            creds_watch_config,
+            creds_watch_handle,
+        )
+        .await
+    });
+
     let validation_backend = ctx.backend.clone();
     let validation_interval = Duration::from_secs(
         u64::try_from(ctx.config.env.validate_deadline_secs)

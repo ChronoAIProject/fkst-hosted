@@ -18,6 +18,7 @@ pub(crate) mod env_validator_pod;
 // the scrape loop ([`health_scrape`]) that flags/clears a degraded session on its
 // trigger issue (the recent-log read now lives on the session backend). Gated on pod
 // dispatch.
+pub mod creds_watch;
 pub mod health_eval;
 pub mod health_scrape;
 pub(crate) mod isolation;
@@ -33,6 +34,7 @@ pub(crate) mod work_label_wire;
 pub mod token_rotation;
 
 pub use client::{KubeClient, KubeError};
+pub use creds_watch::run_creds_watch_loop;
 pub use health_scrape::run_health_scrape_loop;
 pub use session_launcher::{
     build_session_pod, build_session_secret, create_session_pod, session_github_token_json,
