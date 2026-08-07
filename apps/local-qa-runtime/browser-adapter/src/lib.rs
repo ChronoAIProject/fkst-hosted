@@ -233,21 +233,9 @@ mod linux {
             thread::sleep(IO_POLL_INTERVAL);
         };
         tab.set_default_timeout(remaining(deadline)?);
-        tab.call_method(Emulation::SetDeviceMetricsOverride {
+        tab.call_method(Emulation::SetVisibleSize {
             width: VIEWPORT_WIDTH,
             height: VIEWPORT_HEIGHT,
-            device_scale_factor: 1.0,
-            mobile: false,
-            scale: None,
-            screen_width: None,
-            screen_height: None,
-            position_x: None,
-            position_y: None,
-            dont_set_visible_size: None,
-            screen_orientation: None,
-            viewport: None,
-            display_feature: None,
-            device_posture: None,
         })
         .map_err(operation_error_before_deadline(
             "set fixed Chrome viewport",
