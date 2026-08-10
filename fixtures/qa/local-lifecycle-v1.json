@@ -129,6 +129,82 @@
       "expected_canonical_utf8_hex": "22616363657074656422",
       "expected_canonical_utf8_base64": "ImFjY2VwdGVkIg==",
       "expected_sha256": "sha256:d288c584af270151f7b7cd7977b94160ce1d7b501dee2d6308f2ac84ebaacc99"
+    },
+    {
+      "case_id": "cancel-disposition-already-accepted",
+      "source": "already_accepted",
+      "expected_canonical_utf8_hex": "22616c72656164795f616363657074656422",
+      "expected_canonical_utf8_base64": "ImFscmVhZHlfYWNjZXB0ZWQi",
+      "expected_sha256": "sha256:2769a2fa1b2e73dcb4ccca89e64e0fe6e5ce50d9155405954aea8f2a9c96f2fd"
+    },
+    {
+      "case_id": "cancel-disposition-terminal",
+      "source": "terminal",
+      "expected_canonical_utf8_hex": "227465726d696e616c22",
+      "expected_canonical_utf8_base64": "InRlcm1pbmFsIg==",
+      "expected_sha256": "sha256:c34e20c40cc2581f3184cc0fc5e67f7d5cbebd5365a5ce02a3614f321b6e3e4b"
+    }
+  ],
+  "cancel_disposition_invalid_cases": [
+    {
+      "case_id": "cancel-disposition-unknown-string",
+      "source": "cancelled",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "cancel-disposition-case-folding-forbidden",
+      "source": "Accepted",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "cancel-disposition-leading-whitespace-forbidden",
+      "source": " accepted",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "cancel-disposition-trailing-whitespace-forbidden",
+      "source": "accepted ",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "cancel-disposition-hyphen-alias-forbidden",
+      "source": "already-accepted",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "cancel-disposition-unicode-compatibility-normalization-forbidden",
+      "source": "ａｃｃｅｐｔｅｄ",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "cancel-disposition-object-forbidden",
+      "source": { "disposition": "accepted" },
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "cancel-disposition-array-forbidden",
+      "source": ["accepted"],
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "cancel-disposition-number-forbidden",
+      "source": 1,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "cancel-disposition-true-forbidden",
+      "source": true,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "cancel-disposition-false-forbidden",
+      "source": false,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "cancel-disposition-null-forbidden",
+      "source": null,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
     }
   ],
   "event_sequence_valid_cases": [
@@ -138,6 +214,173 @@
       "expected_canonical_utf8_hex": "31",
       "expected_canonical_utf8_base64": "MQ==",
       "expected_sha256": "sha256:6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+    },
+    {
+      "case_id": "event-sequence-safe-integer-maximum",
+      "source": 9007199254740991,
+      "expected_canonical_utf8_hex": "39303037313939323534373430393931",
+      "expected_canonical_utf8_base64": "OTAwNzE5OTI1NDc0MDk5MQ==",
+      "expected_sha256": "sha256:f40b423c2dd95ff2b2f027e22208f438cf7242862e5e746860e697308c9add26"
+    }
+  ],
+  "event_sequence_invalid_cases": [
+    {
+      "case_id": "event-sequence-zero-forbidden",
+      "source": 0,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "event-sequence-negative-forbidden",
+      "source": -1,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "event-sequence-fraction-forbidden",
+      "source": 1.5,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "event-sequence-string-forbidden",
+      "source": "1",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "event-sequence-object-forbidden",
+      "source": { "sequence": 1 },
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "event-sequence-array-forbidden",
+      "source": [1],
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "event-sequence-true-forbidden",
+      "source": true,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "event-sequence-false-forbidden",
+      "source": false,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "event-sequence-null-forbidden",
+      "source": null,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "event-sequence-unsafe-integer",
+      "source": 9007199254740992,
+      "expected": { "category": "canonicalization", "code": "canonicalization.unsafe_integer", "reason": "unsafe_integer", "path": "/" }
+    }
+  ],
+  "event_cursor_valid_cases": [
+    {
+      "case_id": "event-cursor-none-consumed",
+      "source": 0,
+      "expected_canonical_utf8_hex": "30",
+      "expected_canonical_utf8_base64": "MA==",
+      "expected_sha256": "sha256:5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "case_id": "event-cursor-first-consumed",
+      "source": 1,
+      "expected_canonical_utf8_hex": "31",
+      "expected_canonical_utf8_base64": "MQ==",
+      "expected_sha256": "sha256:6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+    },
+    {
+      "case_id": "event-cursor-safe-integer-maximum",
+      "source": 9007199254740991,
+      "expected_canonical_utf8_hex": "39303037313939323534373430393931",
+      "expected_canonical_utf8_base64": "OTAwNzE5OTI1NDc0MDk5MQ==",
+      "expected_sha256": "sha256:f40b423c2dd95ff2b2f027e22208f438cf7242862e5e746860e697308c9add26"
+    }
+  ],
+  "event_cursor_invalid_cases": [
+    {
+      "case_id": "event-cursor-negative-forbidden",
+      "source": -1,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "event-cursor-fraction-forbidden",
+      "source": 0.5,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "event-cursor-string-forbidden",
+      "source": "0",
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "event-cursor-object-forbidden",
+      "source": { "cursor": 0 },
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "event-cursor-array-forbidden",
+      "source": [0],
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "event-cursor-true-forbidden",
+      "source": true,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "event-cursor-false-forbidden",
+      "source": false,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "event-cursor-null-forbidden",
+      "source": null,
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "event-cursor-unsafe-integer",
+      "source": 9007199254740992,
+      "expected": { "category": "canonicalization", "code": "canonicalization.unsafe_integer", "reason": "unsafe_integer", "path": "/" }
+    }
+  ],
+  "raw_invalid_cases": [
+    {
+      "case_id": "cancel-disposition-malformed-json",
+      "lifecycle_type": "CancelDisposition",
+      "raw_utf8_hex": "22",
+      "expected": { "category": "validation", "reason": "invalid_json", "path": "/" }
+    },
+    {
+      "case_id": "cancel-disposition-invalid-utf8",
+      "lifecycle_type": "CancelDisposition",
+      "raw_utf8_hex": "ff",
+      "expected": { "category": "canonicalization", "code": "canonicalization.invalid_utf8", "reason": "invalid_utf8", "path": "/" }
+    },
+    {
+      "case_id": "event-sequence-malformed-json",
+      "lifecycle_type": "EventSequence",
+      "raw_utf8_hex": "22",
+      "expected": { "category": "validation", "reason": "invalid_json", "path": "/" }
+    },
+    {
+      "case_id": "event-sequence-invalid-utf8",
+      "lifecycle_type": "EventSequence",
+      "raw_utf8_hex": "ff",
+      "expected": { "category": "canonicalization", "code": "canonicalization.invalid_utf8", "reason": "invalid_utf8", "path": "/" }
+    },
+    {
+      "case_id": "event-cursor-malformed-json",
+      "lifecycle_type": "EventCursor",
+      "raw_utf8_hex": "22",
+      "expected": { "category": "validation", "reason": "invalid_json", "path": "/" }
+    },
+    {
+      "case_id": "event-cursor-invalid-utf8",
+      "lifecycle_type": "EventCursor",
+      "raw_utf8_hex": "ff",
+      "expected": { "category": "canonicalization", "code": "canonicalization.invalid_utf8", "reason": "invalid_utf8", "path": "/" }
     }
   ],
   "invalid_cases": [
