@@ -32,6 +32,7 @@
     "ExecutionOutcome": { "schema": "qa.local-lifecycle/v1", "pointer": "#/$defs/ExecutionOutcome" },
     "CancelDisposition": { "schema": "qa.local-lifecycle/v1", "pointer": "#/$defs/CancelDisposition" },
     "EventSequence": { "schema": "qa.local-lifecycle/v1", "pointer": "#/$defs/EventSequence" },
+    "EventCursor": { "schema": "qa.local-lifecycle/v1", "pointer": "#/$defs/EventCursor" },
     "LocalSanitizedObservation": { "schema": "qa.local-evidence/v1", "pointer": "#/$defs/LocalSanitizedObservation" },
     "LocalEvidenceObject": { "schema": "qa.local-evidence/v1", "pointer": "#/$defs/LocalEvidenceObject" },
     "LocalSanitizedObservationRef": { "schema": "qa.local-evidence/v1", "pointer": "#/$defs/LocalSanitizedObservationRef" },

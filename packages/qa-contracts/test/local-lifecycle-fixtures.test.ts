@@ -20,13 +20,19 @@ import {
   type Rejection,
   sha256Digest,
   validateCancelDisposition,
+  validateEventCursor,
   validateEventSequence,
   validateExecutionOutcome,
   validateLocalState,
   ValidatedValue,
 } from "../src/index.js";
 
-type LifecycleType = "LocalState" | "ExecutionOutcome";
+type LifecycleType =
+  | "LocalState"
+  | "ExecutionOutcome"
+  | "CancelDisposition"
+  | "EventSequence"
+  | "EventCursor";
 
 interface LifecycleCase {
   readonly case_id: string;
@@ -54,6 +60,27 @@ interface LifecycleFixture {
     readonly expected_canonical_utf8_base64: string;
     readonly expected_sha256: string;
   })[];
+  readonly event_cursor_valid_cases: readonly (LifecycleCase & {
+    readonly source: number;
+    readonly expected_canonical_utf8_hex: string;
+    readonly expected_canonical_utf8_base64: string;
+    readonly expected_sha256: string;
+  })[];
+  readonly cancel_disposition_invalid_cases: readonly (LifecycleCase & {
+    readonly expected: Rejection;
+  })[];
+  readonly event_sequence_invalid_cases: readonly (LifecycleCase & {
+    readonly expected: Rejection;
+  })[];
+  readonly event_cursor_invalid_cases: readonly (LifecycleCase & {
+    readonly expected: Rejection;
+  })[];
+  readonly raw_invalid_cases: readonly {
+    readonly case_id: string;
+    readonly lifecycle_type: "CancelDisposition" | "EventSequence" | "EventCursor";
+    readonly raw_utf8_hex: string;
+    readonly expected: Rejection;
+  }[];
   readonly invalid_cases: readonly (LifecycleCase & {
     readonly lifecycle_type: LifecycleType;
     readonly expected: Rejection;
@@ -103,75 +130,69 @@ test("local lifecycle fixture metadata", () => {
     schema: "qa.local-lifecycle/v1",
     pointer: "#/$defs/EventSequence",
   });
+  assert.deepEqual(contractRegistry().types.EventCursor, {
+    schema: "qa.local-lifecycle/v1",
+    pointer: "#/$defs/EventCursor",
+  });
 });
 
 for (const fixtureCase of fixture.valid_cases) {
   test(fixtureCase.case_id, () => {
-    console.log(`case_id=${fixtureCase.case_id}`);
-    const raw = Buffer.from(JSON.stringify(fixtureCase.source));
-    const validated = validateLifecycleCase(fixtureCase.lifecycle_type, raw);
-    assert.equal(validated.value(), fixtureCase.source);
-    const canonical = canonicalBytes(validated);
-    assert.equal(Buffer.from(canonical).toString("hex"), fixtureCase.expected_canonical_utf8_hex);
-    assert.equal(
-      Buffer.from(canonical).toString("base64"),
-      fixtureCase.expected_canonical_utf8_base64,
-    );
-    assert.equal(sha256Digest(canonical), fixtureCase.expected_sha256);
+    assertValidCase(fixtureCase, fixtureCase.lifecycle_type);
   });
 }
 
 for (const fixtureCase of fixture.cancel_disposition_valid_cases) {
   test(fixtureCase.case_id, () => {
-    console.log(`case_id=${fixtureCase.case_id}`);
-    const raw = Buffer.from(JSON.stringify(fixtureCase.source));
-    assert.equal(raw.toString("utf8"), '"accepted"');
-    const validated = validateCancelDisposition(raw);
-    assert.equal(validated.value(), "accepted");
-    const canonical = canonicalBytes(validated);
-    assert.equal(Buffer.from(canonical).toString("hex"), fixtureCase.expected_canonical_utf8_hex);
-    assert.equal(
-      Buffer.from(canonical).toString("base64"),
-      fixtureCase.expected_canonical_utf8_base64,
-    );
-    assert.equal(sha256Digest(canonical), fixtureCase.expected_sha256);
+    assertValidCase(fixtureCase, "CancelDisposition");
   });
 }
 
 for (const fixtureCase of fixture.event_sequence_valid_cases) {
   test(fixtureCase.case_id, () => {
-    console.log(`case_id=${fixtureCase.case_id}`);
-    const raw = Buffer.from(JSON.stringify(fixtureCase.source));
-    assert.equal(raw.toString("utf8"), "1");
-    const validated = validateEventSequence(raw);
-    assert.ok(validated instanceof ValidatedValue);
-    assert.ok(Object.isFrozen(validated.value()));
-    assert.equal(validated.value(), 1);
-    const canonical = canonicalBytes(validated);
-    assert.equal(Buffer.from(canonical).toString("hex"), fixtureCase.expected_canonical_utf8_hex);
-    assert.equal(
-      Buffer.from(canonical).toString("base64"),
-      fixtureCase.expected_canonical_utf8_base64,
-    );
-    assert.equal(sha256Digest(canonical), fixtureCase.expected_sha256);
+    assertValidCase(fixtureCase, "EventSequence");
   });
 }
 
-for (const fixtureCase of fixture.invalid_cases) {
+for (const fixtureCase of fixture.event_cursor_valid_cases) {
+  test(fixtureCase.case_id, () => {
+    assertValidCase(fixtureCase, "EventCursor");
+  });
+}
+
+for (const [lifecycleType, invalidCases] of [
+  ["CancelDisposition", fixture.cancel_disposition_invalid_cases],
+  ["EventSequence", fixture.event_sequence_invalid_cases],
+  ["EventCursor", fixture.event_cursor_invalid_cases],
+] as const) {
+  for (const fixtureCase of invalidCases) {
+    test(fixtureCase.case_id, () => {
+      assertInvalidCase(fixtureCase, lifecycleType);
+    });
+  }
+}
+
+for (const fixtureCase of fixture.raw_invalid_cases) {
   test(fixtureCase.case_id, () => {
     console.log(`case_id=${fixtureCase.case_id}`);
     assert.throws(
       () =>
         validateLifecycleCase(
           fixtureCase.lifecycle_type,
-          Buffer.from(JSON.stringify(fixtureCase.source)),
+          Buffer.from(fixtureCase.raw_utf8_hex, "hex"),
         ),
       (error) => rejectionMatches(error, fixtureCase.expected, fixtureCase.case_id),
     );
   });
 }
 
-const admissionCases = [
+for (const fixtureCase of fixture.invalid_cases) {
+  test(fixtureCase.case_id, () => {
+    assertInvalidCase(fixtureCase, fixtureCase.lifecycle_type);
+  });
+}
+
+const preExistingRawInvalidCases = [
   {
     case_id: "local-state-malformed-json",
     lifecycle_type: "LocalState",
@@ -213,7 +234,7 @@ const admissionCases = [
   readonly expected: Rejection;
 }[];
 
-for (const admissionCase of admissionCases) {
+for (const admissionCase of preExistingRawInvalidCases) {
   test(admissionCase.case_id, () => {
     console.log(`case_id=${admissionCase.case_id}`);
     assert.throws(
@@ -230,39 +251,61 @@ test("unknown lifecycle fixture type fails closed", () => {
   );
 });
 
-const registryFailures: readonly (readonly [string, PackageMutation])[] = [
-  ["mismatched schema id", (registry: RegistryJson) => {
+const registryFailures: readonly (readonly [string, string, PackageMutation])[] = [
+  ["mismatched schema id", "invalid_embedded_schema", (registry: RegistryJson) => {
     registry.schemas["qa.local-lifecycle/v1"]!.id = "urn:example:mismatch";
   }],
-  ["unsupported schema major", (registry: RegistryJson) => {
+  ["unsupported schema major", "unsupported_schema_major", (registry: RegistryJson) => {
     registry.schemas["qa.local-lifecycle/v1"]!.major = 2;
   }],
-  ["unknown registered ExecutionOutcome type", (registry: RegistryJson) => {
+  ["unknown registered ExecutionOutcome type", "unknown_registered_type", (registry: RegistryJson) => {
     delete registry.types.ExecutionOutcome;
   }],
-  ["unresolved registered ExecutionOutcome pointer", (registry: RegistryJson) => {
+  ["unresolved registered ExecutionOutcome pointer", "unresolved_registered_pointer", (registry: RegistryJson) => {
     registry.types.ExecutionOutcome!.pointer = "#/$defs/Missing";
   }],
-  ["invalid registered ExecutionOutcome schema", (_registry, lifecycleSchema) => {
+  ["invalid registered ExecutionOutcome schema", "invalid_embedded_schema", (_registry, lifecycleSchema) => {
     lifecycleSchema.$defs.ExecutionOutcome = { type: "not-a-json-schema-type" };
   }],
-  ["unknown registered CancelDisposition type", (registry: RegistryJson) => {
+  ["unknown registered CancelDisposition type", "unknown_registered_type", (registry: RegistryJson) => {
     delete registry.types.CancelDisposition;
   }],
-  ["unresolved registered CancelDisposition pointer", (registry: RegistryJson) => {
+  ["unresolved registered CancelDisposition pointer", "unresolved_registered_pointer", (registry: RegistryJson) => {
     registry.types.CancelDisposition!.pointer = "#/$defs/Missing";
   }],
-  ["fixture-only registered CancelDisposition type", (registry: RegistryJson) => {
+  ["fixture-only registered CancelDisposition type", "invalid_embedded_registry", (registry: RegistryJson) => {
     registry.types.CancelDisposition!.fixture_only = true;
   }],
-  ["escaping registered path", (registry: RegistryJson) => {
+  ["unknown registered EventSequence type", "unknown_registered_type", (registry: RegistryJson) => {
+    delete registry.types.EventSequence;
+  }],
+  ["unresolved registered EventSequence pointer", "unresolved_registered_pointer", (registry: RegistryJson) => {
+    registry.types.EventSequence!.pointer = "#/$defs/Missing";
+  }],
+  ["fixture-only registered EventSequence type", "invalid_embedded_registry", (registry: RegistryJson) => {
+    registry.types.EventSequence!.fixture_only = true;
+  }],
+  ["unknown registered EventCursor type", "unknown_registered_type", (registry: RegistryJson) => {
+    delete registry.types.EventCursor;
+  }],
+  ["unresolved registered EventCursor pointer", "unresolved_registered_pointer", (registry: RegistryJson) => {
+    registry.types.EventCursor!.pointer = "#/$defs/Missing";
+  }],
+  ["fixture-only registered EventCursor type", "invalid_embedded_registry", (registry: RegistryJson) => {
+    registry.types.EventCursor!.fixture_only = true;
+  }],
+  ["escaping registered path", "invalid_embedded_schema_path", (registry: RegistryJson) => {
     registry.schemas["qa.local-lifecycle/v1"]!.path = "../schema.json";
   }],
 ];
 
-for (const [name, mutate] of registryFailures) {
+for (const [name, expectedReason, mutate] of registryFailures) {
   test(`registry fails closed for ${name}`, async () => {
-    await assert.rejects(importWithRegistryMutation(mutate));
+    await assert.rejects(importWithRegistryMutation(mutate), (error: unknown) => {
+      const rejection = (error as { rejection?: { reason?: unknown } }).rejection;
+      assert.equal(rejection?.reason, expectedReason);
+      return true;
+    });
   });
 }
 
@@ -317,11 +360,53 @@ function validateLifecycleCase(lifecycleType: LifecycleType, raw: Uint8Array) {
       return validateLocalState(raw);
     case "ExecutionOutcome":
       return validateExecutionOutcome(raw);
+    case "CancelDisposition":
+      return validateCancelDisposition(raw);
+    case "EventSequence":
+      return validateEventSequence(raw);
+    case "EventCursor":
+      return validateEventCursor(raw);
     default: {
       const unsupportedType: never = lifecycleType;
       throw new Error(`unsupported lifecycle fixture type: ${String(unsupportedType)}`);
     }
   }
+}
+
+function assertValidCase(
+  fixtureCase: LifecycleCase & {
+    readonly expected_canonical_utf8_hex: string;
+    readonly expected_canonical_utf8_base64: string;
+    readonly expected_sha256: string;
+  },
+  lifecycleType: LifecycleType,
+): void {
+  console.log(`case_id=${fixtureCase.case_id}`);
+  const validated = validateLifecycleCase(
+    lifecycleType,
+    Buffer.from(JSON.stringify(fixtureCase.source)),
+  );
+  assert.ok(validated instanceof ValidatedValue);
+  assert.ok(Object.isFrozen(validated.value()));
+  assert.deepEqual(validated.value(), fixtureCase.source);
+  const canonical = canonicalBytes(validated);
+  assert.equal(Buffer.from(canonical).toString("hex"), fixtureCase.expected_canonical_utf8_hex);
+  assert.equal(
+    Buffer.from(canonical).toString("base64"),
+    fixtureCase.expected_canonical_utf8_base64,
+  );
+  assert.equal(sha256Digest(canonical), fixtureCase.expected_sha256);
+}
+
+function assertInvalidCase(
+  fixtureCase: LifecycleCase & { readonly expected: Rejection },
+  lifecycleType: LifecycleType,
+): void {
+  console.log(`case_id=${fixtureCase.case_id}`);
+  assert.throws(
+    () => validateLifecycleCase(lifecycleType, Buffer.from(JSON.stringify(fixtureCase.source))),
+    (error) => rejectionMatches(error, fixtureCase.expected, fixtureCase.case_id),
+  );
 }
 
 function rejectionMatches(error: unknown, expected: Rejection, caseId: string): boolean {

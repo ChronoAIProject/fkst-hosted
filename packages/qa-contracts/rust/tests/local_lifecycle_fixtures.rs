@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use base64::Engine as _;
 use fkst_qa_contracts::{
     canonical_bytes, contract_registry, sha256_digest, validate_cancel_disposition,
-    validate_event_sequence, validate_execution_outcome, validate_local_state, ContractError,
-    Rejection, ValidatedValue,
+    validate_event_cursor, validate_event_sequence, validate_execution_outcome,
+    validate_local_state, ContractError, Rejection, ValidatedValue,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -14,8 +14,13 @@ use serde_json::Value;
 struct LifecycleFixture {
     schema_version: String,
     valid_cases: Vec<LifecycleValidCase>,
-    cancel_disposition_valid_cases: Vec<CancelDispositionValidCase>,
-    event_sequence_valid_cases: Vec<EventSequenceValidCase>,
+    cancel_disposition_valid_cases: Vec<ScalarValidCase>,
+    cancel_disposition_invalid_cases: Vec<ScalarInvalidCase>,
+    event_sequence_valid_cases: Vec<ScalarValidCase>,
+    event_sequence_invalid_cases: Vec<ScalarInvalidCase>,
+    event_cursor_valid_cases: Vec<ScalarValidCase>,
+    event_cursor_invalid_cases: Vec<ScalarInvalidCase>,
+    raw_invalid_cases: Vec<RawInvalidCase>,
     invalid_cases: Vec<LifecycleInvalidCase>,
 }
 
@@ -30,7 +35,7 @@ struct LifecycleValidCase {
 }
 
 #[derive(Deserialize)]
-struct CancelDispositionValidCase {
+struct ScalarValidCase {
     case_id: String,
     source: Value,
     expected_canonical_utf8_hex: String,
@@ -39,18 +44,27 @@ struct CancelDispositionValidCase {
 }
 
 #[derive(Deserialize)]
-struct EventSequenceValidCase {
+struct ScalarInvalidCase {
     case_id: String,
     source: Value,
-    expected_canonical_utf8_hex: String,
-    expected_canonical_utf8_base64: String,
-    expected_sha256: String,
+    expected: ExpectedRejection,
+}
+
+#[derive(Deserialize)]
+struct RawInvalidCase {
+    case_id: String,
+    lifecycle_type: LifecycleType,
+    raw_utf8_hex: String,
+    expected: ExpectedRejection,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 enum LifecycleType {
     LocalState,
     ExecutionOutcome,
+    CancelDisposition,
+    EventSequence,
+    EventCursor,
 }
 
 #[derive(Deserialize)]
@@ -135,51 +149,67 @@ fn local_lifecycle_fixture_walks_the_production_path() {
             .and_then(Value::as_str),
         Some("#/$defs/EventSequence")
     );
+    assert_eq!(
+        registry
+            .pointer("/types/EventCursor/schema")
+            .and_then(Value::as_str),
+        Some("qa.local-lifecycle/v1")
+    );
+    assert_eq!(
+        registry
+            .pointer("/types/EventCursor/pointer")
+            .and_then(Value::as_str),
+        Some("#/$defs/EventCursor")
+    );
 
     for fixture_case in &fixture.valid_cases {
-        println!("case_id={}", fixture_case.case_id);
-        let raw = serde_json::to_vec(&fixture_case.source).expect("serialize fixture source");
-        let validated = validate_lifecycle_case(fixture_case.lifecycle_type, &raw)
-            .expect("validate lifecycle fixture");
-        assert_eq!(validated.value(), &fixture_case.source);
-        let canonical = canonical_bytes(&validated).expect("canonical lifecycle bytes");
-        assert_eq!(hex(&canonical), fixture_case.expected_canonical_utf8_hex);
-        assert_eq!(
-            base64::engine::general_purpose::STANDARD.encode(&canonical),
-            fixture_case.expected_canonical_utf8_base64
+        assert_valid_case(
+            &fixture_case.case_id,
+            fixture_case.lifecycle_type,
+            &fixture_case.source,
+            &fixture_case.expected_canonical_utf8_hex,
+            &fixture_case.expected_canonical_utf8_base64,
+            &fixture_case.expected_sha256,
         );
-        assert_eq!(sha256_digest(&canonical), fixture_case.expected_sha256);
     }
 
     for fixture_case in &fixture.cancel_disposition_valid_cases {
-        println!("case_id={}", fixture_case.case_id);
-        let raw = serde_json::to_vec(&fixture_case.source).expect("serialize fixture source");
-        assert_eq!(raw, br#""accepted""#);
-        let validated = validate_cancel_disposition(&raw).expect("validate cancel disposition");
-        assert_eq!(validated.value(), "accepted");
-        let canonical = canonical_bytes(&validated).expect("canonical cancel disposition bytes");
-        assert_eq!(hex(&canonical), fixture_case.expected_canonical_utf8_hex);
-        assert_eq!(
-            base64::engine::general_purpose::STANDARD.encode(&canonical),
-            fixture_case.expected_canonical_utf8_base64
-        );
-        assert_eq!(sha256_digest(&canonical), fixture_case.expected_sha256);
+        assert_valid_scalar_case(fixture_case, LifecycleType::CancelDisposition);
     }
 
     for fixture_case in &fixture.event_sequence_valid_cases {
+        assert_valid_scalar_case(fixture_case, LifecycleType::EventSequence);
+    }
+
+    for fixture_case in &fixture.event_cursor_valid_cases {
+        assert_valid_scalar_case(fixture_case, LifecycleType::EventCursor);
+    }
+
+    for (lifecycle_type, invalid_cases) in [
+        (
+            LifecycleType::CancelDisposition,
+            &fixture.cancel_disposition_invalid_cases,
+        ),
+        (
+            LifecycleType::EventSequence,
+            &fixture.event_sequence_invalid_cases,
+        ),
+        (
+            LifecycleType::EventCursor,
+            &fixture.event_cursor_invalid_cases,
+        ),
+    ] {
+        for fixture_case in invalid_cases {
+            assert_invalid_case(fixture_case, lifecycle_type);
+        }
+    }
+
+    for fixture_case in &fixture.raw_invalid_cases {
         println!("case_id={}", fixture_case.case_id);
-        let raw = serde_json::to_vec(&fixture_case.source).expect("serialize fixture source");
-        assert_eq!(raw, b"1");
-        let validated: ValidatedValue =
-            validate_event_sequence(&raw).expect("validate event sequence");
-        assert_eq!(validated.value(), &Value::from(1));
-        let canonical = canonical_bytes(&validated).expect("canonical event sequence bytes");
-        assert_eq!(hex(&canonical), fixture_case.expected_canonical_utf8_hex);
-        assert_eq!(
-            base64::engine::general_purpose::STANDARD.encode(&canonical),
-            fixture_case.expected_canonical_utf8_base64
-        );
-        assert_eq!(sha256_digest(&canonical), fixture_case.expected_sha256);
+        let raw = decode_hex(&fixture_case.raw_utf8_hex);
+        let error = validate_lifecycle_case(fixture_case.lifecycle_type, &raw)
+            .expect_err("reject invalid lifecycle bytes");
+        assert_rejection(&fixture_case.case_id, &error, &fixture_case.expected);
     }
 
     for fixture_case in &fixture.invalid_cases {
@@ -256,7 +286,51 @@ fn validate_lifecycle_case(
     match lifecycle_type {
         LifecycleType::LocalState => validate_local_state(raw),
         LifecycleType::ExecutionOutcome => validate_execution_outcome(raw),
+        LifecycleType::CancelDisposition => validate_cancel_disposition(raw),
+        LifecycleType::EventSequence => validate_event_sequence(raw),
+        LifecycleType::EventCursor => validate_event_cursor(raw),
     }
+}
+
+fn assert_valid_scalar_case(fixture_case: &ScalarValidCase, lifecycle_type: LifecycleType) {
+    assert_valid_case(
+        &fixture_case.case_id,
+        lifecycle_type,
+        &fixture_case.source,
+        &fixture_case.expected_canonical_utf8_hex,
+        &fixture_case.expected_canonical_utf8_base64,
+        &fixture_case.expected_sha256,
+    );
+}
+
+fn assert_valid_case(
+    case_id: &str,
+    lifecycle_type: LifecycleType,
+    source: &Value,
+    expected_hex: &str,
+    expected_base64: &str,
+    expected_sha256: &str,
+) {
+    println!("case_id={case_id}");
+    let raw = serde_json::to_vec(source).expect("serialize fixture source");
+    let validated: ValidatedValue =
+        validate_lifecycle_case(lifecycle_type, &raw).expect("validate lifecycle fixture");
+    assert_eq!(validated.value(), source);
+    let canonical = canonical_bytes(&validated).expect("canonical lifecycle bytes");
+    assert_eq!(hex(&canonical), expected_hex);
+    assert_eq!(
+        base64::engine::general_purpose::STANDARD.encode(&canonical),
+        expected_base64
+    );
+    assert_eq!(sha256_digest(&canonical), expected_sha256);
+}
+
+fn assert_invalid_case(fixture_case: &ScalarInvalidCase, lifecycle_type: LifecycleType) {
+    println!("case_id={}", fixture_case.case_id);
+    let raw = serde_json::to_vec(&fixture_case.source).expect("serialize fixture source");
+    let error = validate_lifecycle_case(lifecycle_type, &raw)
+        .expect_err("reject invalid lifecycle value");
+    assert_rejection(&fixture_case.case_id, &error, &fixture_case.expected);
 }
 
 fn assert_rejection(case_id: &str, actual: &ContractError, expected: &ExpectedRejection) {
@@ -292,4 +366,16 @@ fn hex(bytes: &[u8]) -> String {
         write!(&mut output, "{byte:02x}").expect("writing to a string cannot fail");
     }
     output
+}
+
+fn decode_hex(value: &str) -> Vec<u8> {
+    assert_eq!(value.len() % 2, 0, "hex fixture must contain byte pairs");
+    value
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let pair = std::str::from_utf8(pair).expect("hex fixture is ASCII");
+            u8::from_str_radix(pair, 16).expect("hex fixture contains hexadecimal bytes")
+        })
+        .collect()
 }

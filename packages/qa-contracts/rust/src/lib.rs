@@ -30,11 +30,13 @@ const LOCAL_STATE_TYPE_NAME: &str = "LocalState";
 const EXECUTION_OUTCOME_TYPE_NAME: &str = "ExecutionOutcome";
 const CANCEL_DISPOSITION_TYPE_NAME: &str = "CancelDisposition";
 const EVENT_SEQUENCE_TYPE_NAME: &str = "EventSequence";
-const LIFECYCLE_TYPE_NAMES: [&str; 4] = [
+const EVENT_CURSOR_TYPE_NAME: &str = "EventCursor";
+const LIFECYCLE_TYPE_NAMES: [&str; 5] = [
     LOCAL_STATE_TYPE_NAME,
     EXECUTION_OUTCOME_TYPE_NAME,
     CANCEL_DISPOSITION_TYPE_NAME,
     EVENT_SEQUENCE_TYPE_NAME,
+    EVENT_CURSOR_TYPE_NAME,
 ];
 const LOCAL_SANITIZED_OBSERVATION_TYPE_NAME: &str = "LocalSanitizedObservation";
 const LOCAL_EVIDENCE_OBJECT_TYPE_NAME: &str = "LocalEvidenceObject";
@@ -222,6 +224,10 @@ pub fn validate_cancel_disposition(raw: &[u8]) -> Result<ValidatedValue, Contrac
 
 pub fn validate_event_sequence(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
     validate_registered_value(admit_json(raw)?, EVENT_SEQUENCE_TYPE_NAME)
+}
+
+pub fn validate_event_cursor(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    validate_registered_value(admit_json(raw)?, EVENT_CURSOR_TYPE_NAME)
 }
 
 pub fn validate_local_sanitized_observation(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
@@ -1439,6 +1445,58 @@ mod registry_tests {
                     .types
                     .get_mut(CANCEL_DISPOSITION_TYPE_NAME)
                     .expect("CancelDisposition type")
+                    .fixture_only = true;
+            },
+            "invalid_embedded_registry",
+        );
+        assert_registry_error(
+            |registry| {
+                registry.types.remove(EVENT_SEQUENCE_TYPE_NAME);
+            },
+            "unknown_registered_type",
+        );
+        assert_registry_error(
+            |registry| {
+                registry
+                    .types
+                    .get_mut(EVENT_SEQUENCE_TYPE_NAME)
+                    .expect("EventSequence type")
+                    .pointer = "#/$defs/Missing".into();
+            },
+            "unresolved_registered_pointer",
+        );
+        assert_registry_error(
+            |registry| {
+                registry
+                    .types
+                    .get_mut(EVENT_SEQUENCE_TYPE_NAME)
+                    .expect("EventSequence type")
+                    .fixture_only = true;
+            },
+            "invalid_embedded_registry",
+        );
+        assert_registry_error(
+            |registry| {
+                registry.types.remove(EVENT_CURSOR_TYPE_NAME);
+            },
+            "unknown_registered_type",
+        );
+        assert_registry_error(
+            |registry| {
+                registry
+                    .types
+                    .get_mut(EVENT_CURSOR_TYPE_NAME)
+                    .expect("EventCursor type")
+                    .pointer = "#/$defs/Missing".into();
+            },
+            "unresolved_registered_pointer",
+        );
+        assert_registry_error(
+            |registry| {
+                registry
+                    .types
+                    .get_mut(EVENT_CURSOR_TYPE_NAME)
+                    .expect("EventCursor type")
                     .fixture_only = true;
             },
             "invalid_embedded_registry",
