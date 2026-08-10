@@ -61,7 +61,7 @@ pub async fn run_fixed_browser_smoke() -> Result<FixedBrowserSmokeResult, Browse
 #[cfg(target_os = "linux")]
 mod linux {
     use super::{BrowserAdapterError, FixedBrowserSmokeResult, FixedPngScreenshot};
-    use headless_chrome::{protocol::cdp::Page, Browser};
+    use headless_chrome::{protocol::cdp::Page, Browser, Tab};
     use nix::{
         errno::Errno,
         sys::signal::{killpg, Signal},
@@ -216,19 +216,7 @@ mod linux {
         )?;
         browser.set_default_timeout(remaining(deadline)?);
 
-        let tab = loop {
-            ensure_before_deadline(deadline)?;
-            if let Some(tab) = browser
-                .get_tabs()
-                .lock()
-                .map_err(operation_error("inspect owned Chrome tabs"))?
-                .first()
-                .cloned()
-            {
-                break tab;
-            }
-            thread::sleep(IO_POLL_INTERVAL);
-        };
+        let tab = wait_for_initial_tab(&browser, deadline)?;
         tab.set_default_timeout(remaining(deadline)?);
         tab.navigate_to(&navigation_url)
             .and_then(|tab| tab.wait_until_navigated())
@@ -270,7 +258,12 @@ mod linux {
         let screenshot = match &options.screenshot_override {
             Some(screenshot) => screenshot.clone(),
             None => tab
-                .capture_screenshot(Page::CaptureScreenshotFormatOption::Png, None, None, true)
+                .capture_screenshot(
+                    Page::CaptureScreenshotFormatOption::Png,
+                    None,
+                    Some(fixed_screenshot_viewport()),
+                    true,
+                )
                 .map_err(operation_error_before_deadline(
                     "capture fixed PNG screenshot",
                     deadline,
@@ -278,7 +271,12 @@ mod linux {
         };
         #[cfg(not(test))]
         let screenshot = tab
-            .capture_screenshot(Page::CaptureScreenshotFormatOption::Png, None, None, true)
+            .capture_screenshot(
+                Page::CaptureScreenshotFormatOption::Png,
+                None,
+                Some(fixed_screenshot_viewport()),
+                true,
+            )
             .map_err(operation_error_before_deadline(
                 "capture fixed PNG screenshot",
                 deadline,
@@ -312,6 +310,37 @@ mod linux {
                 height_px,
             },
         })
+    }
+
+    fn wait_for_initial_tab(
+        browser: &Browser,
+        deadline: Instant,
+    ) -> Result<Arc<Tab>, BrowserAdapterError> {
+        loop {
+            ensure_before_deadline(deadline)?;
+            if let Some(tab) = browser
+                .get_tabs()
+                .lock()
+                .map_err(operation_error("inspect owned Chrome tabs"))?
+                .iter()
+                .find(|tab| tab.get_url() == "about:blank")
+                .cloned()
+            {
+                ensure_before_deadline(deadline)?;
+                return Ok(tab);
+            }
+            thread::sleep(IO_POLL_INTERVAL.min(remaining(deadline)?));
+        }
+    }
+
+    fn fixed_screenshot_viewport() -> Page::Viewport {
+        Page::Viewport {
+            x: 0.0,
+            y: 0.0,
+            width: f64::from(VIEWPORT_WIDTH),
+            height: f64::from(VIEWPORT_HEIGHT),
+            scale: 1.0,
+        }
     }
 
     impl OwnedRun {
@@ -595,7 +624,7 @@ mod linux {
                     "--disable-sync",
                     "--metrics-recording-only",
                     user_data_argument.as_str(),
-                    "--app=about:blank",
+                    "about:blank",
                 ])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
