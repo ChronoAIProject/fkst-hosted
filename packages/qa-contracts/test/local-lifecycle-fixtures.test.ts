@@ -20,8 +20,10 @@ import {
   type Rejection,
   sha256Digest,
   validateCancelDisposition,
+  validateEventSequence,
   validateExecutionOutcome,
   validateLocalState,
+  ValidatedValue,
 } from "../src/index.js";
 
 type LifecycleType = "LocalState" | "ExecutionOutcome";
@@ -42,6 +44,12 @@ interface LifecycleFixture {
   })[];
   readonly cancel_disposition_valid_cases: readonly (LifecycleCase & {
     readonly source: string;
+    readonly expected_canonical_utf8_hex: string;
+    readonly expected_canonical_utf8_base64: string;
+    readonly expected_sha256: string;
+  })[];
+  readonly event_sequence_valid_cases: readonly (LifecycleCase & {
+    readonly source: number;
     readonly expected_canonical_utf8_hex: string;
     readonly expected_canonical_utf8_base64: string;
     readonly expected_sha256: string;
@@ -91,6 +99,10 @@ test("local lifecycle fixture metadata", () => {
     schema: "qa.local-lifecycle/v1",
     pointer: "#/$defs/CancelDisposition",
   });
+  assert.deepEqual(contractRegistry().types.EventSequence, {
+    schema: "qa.local-lifecycle/v1",
+    pointer: "#/$defs/EventSequence",
+  });
 });
 
 for (const fixtureCase of fixture.valid_cases) {
@@ -116,6 +128,25 @@ for (const fixtureCase of fixture.cancel_disposition_valid_cases) {
     assert.equal(raw.toString("utf8"), '"accepted"');
     const validated = validateCancelDisposition(raw);
     assert.equal(validated.value(), "accepted");
+    const canonical = canonicalBytes(validated);
+    assert.equal(Buffer.from(canonical).toString("hex"), fixtureCase.expected_canonical_utf8_hex);
+    assert.equal(
+      Buffer.from(canonical).toString("base64"),
+      fixtureCase.expected_canonical_utf8_base64,
+    );
+    assert.equal(sha256Digest(canonical), fixtureCase.expected_sha256);
+  });
+}
+
+for (const fixtureCase of fixture.event_sequence_valid_cases) {
+  test(fixtureCase.case_id, () => {
+    console.log(`case_id=${fixtureCase.case_id}`);
+    const raw = Buffer.from(JSON.stringify(fixtureCase.source));
+    assert.equal(raw.toString("utf8"), "1");
+    const validated = validateEventSequence(raw);
+    assert.ok(validated instanceof ValidatedValue);
+    assert.ok(Object.isFrozen(validated.value()));
+    assert.equal(validated.value(), 1);
     const canonical = canonicalBytes(validated);
     assert.equal(Buffer.from(canonical).toString("hex"), fixtureCase.expected_canonical_utf8_hex);
     assert.equal(

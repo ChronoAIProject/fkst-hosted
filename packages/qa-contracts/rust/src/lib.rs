@@ -29,10 +29,12 @@ const EMBEDDED_SCHEMAS: &[(&str, &str)] = &[
 const LOCAL_STATE_TYPE_NAME: &str = "LocalState";
 const EXECUTION_OUTCOME_TYPE_NAME: &str = "ExecutionOutcome";
 const CANCEL_DISPOSITION_TYPE_NAME: &str = "CancelDisposition";
-const LIFECYCLE_TYPE_NAMES: [&str; 3] = [
+const EVENT_SEQUENCE_TYPE_NAME: &str = "EventSequence";
+const LIFECYCLE_TYPE_NAMES: [&str; 4] = [
     LOCAL_STATE_TYPE_NAME,
     EXECUTION_OUTCOME_TYPE_NAME,
     CANCEL_DISPOSITION_TYPE_NAME,
+    EVENT_SEQUENCE_TYPE_NAME,
 ];
 const LOCAL_SANITIZED_OBSERVATION_TYPE_NAME: &str = "LocalSanitizedObservation";
 const LOCAL_EVIDENCE_OBJECT_TYPE_NAME: &str = "LocalEvidenceObject";
@@ -216,6 +218,10 @@ pub fn validate_execution_outcome(raw: &[u8]) -> Result<ValidatedValue, Contract
 
 pub fn validate_cancel_disposition(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
     validate_registered_value(admit_json(raw)?, CANCEL_DISPOSITION_TYPE_NAME)
+}
+
+pub fn validate_event_sequence(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    validate_registered_value(admit_json(raw)?, EVENT_SEQUENCE_TYPE_NAME)
 }
 
 pub fn validate_local_sanitized_observation(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
