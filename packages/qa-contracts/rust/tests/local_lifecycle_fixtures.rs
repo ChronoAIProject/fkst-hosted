@@ -328,8 +328,8 @@ fn assert_valid_case(
 fn assert_invalid_case(fixture_case: &ScalarInvalidCase, lifecycle_type: LifecycleType) {
     println!("case_id={}", fixture_case.case_id);
     let raw = serde_json::to_vec(&fixture_case.source).expect("serialize fixture source");
-    let error = validate_lifecycle_case(lifecycle_type, &raw)
-        .expect_err("reject invalid lifecycle value");
+    let error =
+        validate_lifecycle_case(lifecycle_type, &raw).expect_err("reject invalid lifecycle value");
     assert_rejection(&fixture_case.case_id, &error, &fixture_case.expected);
 }
 
