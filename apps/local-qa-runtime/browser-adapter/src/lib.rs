@@ -104,7 +104,8 @@ mod linux {
     const CLEANUP_GRACE: Duration = Duration::from_millis(500);
     const CLEANUP_LIMIT: Duration = Duration::from_secs(3);
 
-    pub(super) fn run_fixed_browser_smoke() -> Result<FixedBrowserSmokeResult, BrowserAdapterError> {
+    pub(super) fn run_fixed_browser_smoke() -> Result<FixedBrowserSmokeResult, BrowserAdapterError>
+    {
         run_with_options(RunOptions::production())
     }
 
@@ -225,9 +226,12 @@ mod linux {
             ))?;
         tab.set_default_timeout(remaining(deadline)?);
 
-        let element = tab.wait_for_element(options.selector).map_err(
-            operation_error_before_deadline("locate fixed status element", deadline),
-        )?;
+        let element =
+            tab.wait_for_element(options.selector)
+                .map_err(operation_error_before_deadline(
+                    "locate fixed status element",
+                    deadline,
+                ))?;
         let observed_value = element
             .call_js_fn("function() { return this.textContent; }", Vec::new(), false)
             .map_err(operation_error_before_deadline(
@@ -254,7 +258,12 @@ mod linux {
         let screenshot = match &options.screenshot_override {
             Some(screenshot) => screenshot.clone(),
             None => tab
-                .capture_screenshot(Page::CaptureScreenshotFormatOption::Png, None, None, true)
+                .capture_screenshot(
+                    Page::CaptureScreenshotFormatOption::Png,
+                    None,
+                    Some(fixed_screenshot_viewport()),
+                    true,
+                )
                 .map_err(operation_error_before_deadline(
                     "capture fixed PNG screenshot",
                     deadline,
@@ -262,7 +271,12 @@ mod linux {
         };
         #[cfg(not(test))]
         let screenshot = tab
-            .capture_screenshot(Page::CaptureScreenshotFormatOption::Png, None, None, true)
+            .capture_screenshot(
+                Page::CaptureScreenshotFormatOption::Png,
+                None,
+                Some(fixed_screenshot_viewport()),
+                true,
+            )
             .map_err(operation_error_before_deadline(
                 "capture fixed PNG screenshot",
                 deadline,
@@ -306,13 +320,26 @@ mod linux {
             ensure_before_deadline(deadline)?;
             if let Some(tab) = browser
                 .get_tabs()
-                .into_iter()
+                .lock()
+                .map_err(operation_error("inspect owned Chrome tabs"))?
+                .iter()
                 .find(|tab| tab.get_url() == "about:blank")
+                .cloned()
             {
                 ensure_before_deadline(deadline)?;
                 return Ok(tab);
             }
             thread::sleep(IO_POLL_INTERVAL.min(remaining(deadline)?));
+        }
+    }
+
+    fn fixed_screenshot_viewport() -> Page::Viewport {
+        Page::Viewport {
+            x: 0.0,
+            y: 0.0,
+            width: f64::from(VIEWPORT_WIDTH),
+            height: f64::from(VIEWPORT_HEIGHT),
+            scale: 1.0,
         }
     }
 
@@ -373,11 +400,7 @@ mod linux {
     }
 
     fn discover_chrome() -> Result<PathBuf, BrowserAdapterError> {
-        discover_chrome_from(
-            CHROME_CANDIDATES
-                .iter()
-                .map(Path::new),
-        )
+        discover_chrome_from(CHROME_CANDIDATES.iter().map(Path::new))
     }
 
     fn discover_chrome_from<'a>(
