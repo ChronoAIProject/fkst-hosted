@@ -19,10 +19,12 @@ const SUPPORTED_SCHEMA_MAJOR = 1;
 const LOCAL_STATE_TYPE_NAME = "LocalState";
 const EXECUTION_OUTCOME_TYPE_NAME = "ExecutionOutcome";
 const CANCEL_DISPOSITION_TYPE_NAME = "CancelDisposition";
+const EVENT_SEQUENCE_TYPE_NAME = "EventSequence";
 const LIFECYCLE_TYPE_NAMES = Object.freeze([
   LOCAL_STATE_TYPE_NAME,
   EXECUTION_OUTCOME_TYPE_NAME,
   CANCEL_DISPOSITION_TYPE_NAME,
+  EVENT_SEQUENCE_TYPE_NAME,
 ] as const);
 const LOCAL_SANITIZED_OBSERVATION_TYPE_NAME = "LocalSanitizedObservation";
 const LOCAL_EVIDENCE_OBJECT_TYPE_NAME = "LocalEvidenceObject";
@@ -212,6 +214,10 @@ export function validateExecutionOutcome(raw: Uint8Array): ValidatedValue {
 
 export function validateCancelDisposition(raw: Uint8Array): ValidatedValue {
   return validateRegisteredValue(admitJson(raw), CANCEL_DISPOSITION_TYPE_NAME);
+}
+
+export function validateEventSequence(raw: Uint8Array): ValidatedValue {
+  return validateRegisteredValue(admitJson(raw), EVENT_SEQUENCE_TYPE_NAME);
 }
 
 export function validateLocalSanitizedObservation(raw: Uint8Array): ValidatedValue {

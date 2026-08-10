@@ -131,6 +131,15 @@
       "expected_sha256": "sha256:d288c584af270151f7b7cd7977b94160ce1d7b501dee2d6308f2ac84ebaacc99"
     }
   ],
+  "event_sequence_valid_cases": [
+    {
+      "case_id": "event-sequence-first",
+      "source": 1,
+      "expected_canonical_utf8_hex": "31",
+      "expected_canonical_utf8_base64": "MQ==",
+      "expected_sha256": "sha256:6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+    }
+  ],
   "invalid_cases": [
     {
       "case_id": "local-state-unknown-string",
