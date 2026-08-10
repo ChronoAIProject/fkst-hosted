@@ -112,22 +112,6 @@ export interface ContractRegistry {
   readonly types: Readonly<Record<string, RegistryTypeEntry>>;
 }
 
-const REGISTRY_URL = resolvePackageFile("contracts/registry.json");
-const REGISTRY = JSON.parse(readFileSync(REGISTRY_URL, "utf8")) as ContractRegistry;
-validateRegistry(REGISTRY);
-
-const AJV = new Ajv2020({ allErrors: true, strict: true, validateFormats: false });
-const VALIDATORS = new Map<string, ValidateFunction>();
-for (const type of FOUNDATION_TYPE_NAMES) {
-  VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
-}
-for (const type of LIFECYCLE_TYPE_NAMES) {
-  VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
-}
-for (const type of LOCAL_EVIDENCE_TYPE_NAMES) {
-  VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
-}
-
 export interface Rejection {
   readonly category: "canonicalization" | "contract" | "validation";
   readonly code?: string;
@@ -143,6 +127,22 @@ export class ContractError extends Error {
     this.name = "ContractError";
     this.rejection = rejection;
   }
+}
+
+const REGISTRY_URL = resolvePackageFile("contracts/registry.json");
+const REGISTRY = JSON.parse(readFileSync(REGISTRY_URL, "utf8")) as ContractRegistry;
+validateRegistry(REGISTRY);
+
+const AJV = new Ajv2020({ allErrors: true, strict: true, validateFormats: false });
+const VALIDATORS = new Map<string, ValidateFunction>();
+for (const type of FOUNDATION_TYPE_NAMES) {
+  VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
+}
+for (const type of LIFECYCLE_TYPE_NAMES) {
+  VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
+}
+for (const type of LOCAL_EVIDENCE_TYPE_NAMES) {
+  VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
 }
 
 export class AdmittedJson {
@@ -388,7 +388,7 @@ function validateRegistry(registry: ContractRegistry): void {
   for (const type of LIFECYCLE_TYPE_NAMES) {
     const entry = registry.types[type];
     if (entry?.fixture_only !== undefined) {
-      throw new Error(`qa contract fixture-only marker is invalid: ${type}`);
+      throw validationError("invalid_embedded_registry", `/types/${type}`);
     }
   }
   for (const type of LOCAL_EVIDENCE_TYPE_NAMES) {
@@ -430,28 +430,37 @@ function isFixedFixtureUrl(value: string): boolean {
 function compileRegisteredValidator(registry: ContractRegistry, typeName: string): ValidateFunction {
   const typeEntry = registry.types[typeName];
   if (typeEntry === undefined) {
-    throw new Error(`unknown registered qa contract type: ${typeName}`);
+    throw validationError("unknown_registered_type", "/types");
   }
   const schemaEntry = registry.schemas[typeEntry.schema];
   if (schemaEntry === undefined) {
-    throw new Error(`unknown registered qa contract schema: ${typeEntry.schema}`);
+    throw validationError("unknown_registered_schema", "/schemas");
   }
   if (schemaEntry.major !== SUPPORTED_SCHEMA_MAJOR) {
-    throw new Error(`unsupported qa contract schema major: ${schemaEntry.major}`);
+    throw validationError("unsupported_schema_major", `/schemas/${typeEntry.schema}/major`);
   }
-  const schemaUrl = resolvePackageFile(schemaEntry.path);
+  let schemaUrl: URL;
+  try {
+    schemaUrl = resolvePackageFile(schemaEntry.path);
+  } catch {
+    throw validationError("invalid_embedded_schema_path", `/schemas/${typeEntry.schema}/path`);
+  }
   const schema = JSON.parse(readFileSync(schemaUrl, "utf8")) as Record<string, unknown>;
   if (schema.$id !== schemaEntry.id) {
-    throw new Error("qa contract registry schema id does not match the referenced schema");
+    throw validationError("invalid_embedded_schema", "/$id");
   }
   assertLocalReferences(schema);
   if (resolveJsonPointer(schema, typeEntry.pointer) === undefined) {
-    throw new Error(`unresolved qa contract registry pointer: ${typeEntry.pointer}`);
+    throw validationError("unresolved_registered_pointer", "/types");
   }
   const validatorSchema = structuredClone(schema);
   delete validatorSchema.$id;
   validatorSchema.$ref = typeEntry.pointer;
-  return AJV.compile(validatorSchema);
+  try {
+    return AJV.compile(validatorSchema);
+  } catch {
+    throw validationError("invalid_embedded_schema", "/");
+  }
 }
 
 function resolveJsonPointer(root: unknown, pointerValue: string): unknown {
@@ -873,6 +882,10 @@ function hasLoneSurrogate(value: string): boolean {
 
 function canonicalError(code: string, reason: string): ContractError {
   return new ContractError({ category: "canonicalization", code, reason, path: "/" });
+}
+
+function validationError(reason: string, path: string): ContractError {
+  return new ContractError({ category: "validation", reason, path });
 }
 
 function contractError(code: string, reason: string, path: string): ContractError {
