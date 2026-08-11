@@ -1,0 +1,21 @@
+[package]
+name = "fkst-local-qa-evidence-stager"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+name = "fkst_local_qa_evidence_stager"
+path = "src/lib.rs"
+
+[dependencies]
+fkst-qa-contracts = { path = "../../../packages/qa-contracts/rust" }
+serde_json = "=1.0.151"
+sha2 = "=0.11.0"
+thiserror = "=2.0.19"
+
+[dev-dependencies]
+tempfile = "=3.27.0"
+
+[lints]
+workspace = true

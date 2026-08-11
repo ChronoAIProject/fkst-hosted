@@ -6,6 +6,8 @@ cd "$root"
 
 expected=$(printf '%s\n' \
   apps/local-qa-runtime/browser-adapter/src/lib.rs \
+  apps/local-qa-runtime/evidence-stager/src/lib.rs \
+  apps/local-qa-runtime/evidence-stager/tests/runner_log.rs \
   apps/local-qa-runtime/guest-agent/src/main.rs \
   apps/local-qa-runtime/host/src/coordinator.rs \
   apps/local-qa-runtime/host/src/executor.rs \
@@ -45,6 +47,21 @@ grep -Eq '^[[:space:]]*"host",[[:space:]]*$' apps/local-qa-runtime/Cargo.toml ||
 
 grep -Eq '^[[:space:]]*"browser-adapter",[[:space:]]*$' apps/local-qa-runtime/Cargo.toml || {
   echo 'Local QA Browser adapter is not registered in the Cargo workspace' >&2
+  exit 1
+}
+
+grep -Eq '^[[:space:]]*"evidence-stager",[[:space:]]*$' apps/local-qa-runtime/Cargo.toml || {
+  echo 'Local QA Evidence stager is not registered in the Cargo workspace' >&2
+  exit 1
+}
+
+evidence_stager_manifest=apps/local-qa-runtime/evidence-stager/Cargo.toml
+grep -Eq '^name = "fkst-local-qa-evidence-stager"$' "$evidence_stager_manifest" || {
+  echo 'Local QA Evidence stager package name is incorrect' >&2
+  exit 1
+}
+grep -Eq '^fkst-qa-contracts = \{ path = "\.\./\.\./\.\./packages/qa-contracts/rust" \}$' "$evidence_stager_manifest" || {
+  echo 'Local QA Evidence stager must consume the checked-in QA contracts API' >&2
   exit 1
 }
 
@@ -143,4 +160,4 @@ unexpected=$(find apps/local-qa-runtime -type f \
   ! -path '*/node_modules/*' ! -path '*/target/*' ! -path '*/dist/*')
 [[ -z "$unexpected" ]] || { echo 'unexpected executable implementation file' >&2; exit 1; }
 
-echo 'Local QA Host coordinator, pure worker policy, and inert Runtime shells are complete.'
+echo 'Local QA Host coordinator, Evidence stager, pure worker policy, and inert Runtime shells are complete.'

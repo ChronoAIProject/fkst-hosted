@@ -436,6 +436,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fkst-local-qa-evidence-stager"
+version = "0.0.0"
+dependencies = [
+ "fkst-qa-contracts",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "fkst-local-qa-guest-agent"
 version = "0.0.0"
 

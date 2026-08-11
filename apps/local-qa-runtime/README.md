@@ -61,6 +61,13 @@ owns Host cleanup. Browser output acquisition, screenshot production, reference
 digesting, and storage are responsibilities of the injected ports, not worker
 policy. The Host does not yet invoke this worker boundary.
 
+The Rust `evidence-stager/` library owns bounded Local Evidence filesystem
+effects. It accepts validated Evidence identities and bytes, derives confined
+paths beneath an injected quarantine root, publishes a synced temporary file by
+same-directory atomic rename, returns contract-validated object metadata and a
+canonical digest-bound reference, and verifies the reopened published bytes.
+The Host and worker do not yet invoke this library.
+
 The Rust Local QA Host API and journal boundary described above is already
 activated in `host/`. The launcher, supervisor, guest agent, and Secret Broker
 remain intentionally inert hardened-profile shells.
@@ -77,7 +84,8 @@ The following capabilities remain explicitly deferred:
 
 - Host coordination of the fixed Browser adapter and a Host-worker process
   protocol;
-- local filesystem Evidence persistence and journal Evidence references;
+- Host integration of filesystem Evidence staging and journal Evidence
+  references;
 - execution terminal outcomes and restart-to-`lost` reconciliation;
 - NyxID and Hosted transport or authentication;
 - Source, Compose, and Secrets;
