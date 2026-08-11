@@ -7,6 +7,9 @@ cd "$root"
 expected=$(printf '%s\n' \
   apps/local-qa-runtime/browser-adapter/src/lib.rs \
   apps/local-qa-runtime/guest-agent/src/main.rs \
+  apps/local-qa-runtime/host/src/coordinator.rs \
+  apps/local-qa-runtime/host/src/executor.rs \
+  apps/local-qa-runtime/host/src/journal.rs \
   apps/local-qa-runtime/host/src/lib.rs \
   apps/local-qa-runtime/host/src/main.rs \
   apps/local-qa-runtime/host/tests/fail_closed.rs \
@@ -25,6 +28,9 @@ actual=$(find apps/local-qa-runtime -type f \( -name '*.rs' -o -name '*.ts' -o -
 
 for required in \
   apps/local-qa-runtime/host/Cargo.toml \
+  apps/local-qa-runtime/host/src/coordinator.rs \
+  apps/local-qa-runtime/host/src/executor.rs \
+  apps/local-qa-runtime/host/src/journal.rs \
   apps/local-qa-runtime/host/src/lib.rs \
   apps/local-qa-runtime/host/src/main.rs \
   apps/local-qa-runtime/host/tests/fail_closed.rs \
@@ -57,6 +63,14 @@ host_manifest=apps/local-qa-runtime/host/Cargo.toml
   echo 'Local QA Host package and binary names must match' >&2
   exit 1
 }
+grep -Eq '^ctrlc = \{ version = "=3\.4\.7", features = \["termination"\] \}$' "$host_manifest" || {
+  echo 'Local QA Host must use the pinned termination-signal dependency' >&2
+  exit 1
+}
+grep -Eq '^fkst-qa-contracts = \{ path = "\.\./\.\./\.\./packages/qa-contracts/rust" \}$' "$host_manifest" || {
+  echo 'Local QA Host must consume the checked-in QA contracts API' >&2
+  exit 1
+}
 grep -Eq '^rusqlite = "=0\.40\.1"$' "$host_manifest" || {
   echo 'Local QA Host must use the pinned SQLite dependency' >&2
   exit 1
@@ -69,16 +83,27 @@ grep -Eq '^serde_json = "=1\.0\.151"$' "$host_manifest" || {
   echo 'Local QA Host must use the pinned JSON dependency' >&2
   exit 1
 }
-host_sources=(apps/local-qa-runtime/host/src/lib.rs apps/local-qa-runtime/host/src/main.rs)
+host_sources=(
+  apps/local-qa-runtime/host/src/coordinator.rs
+  apps/local-qa-runtime/host/src/executor.rs
+  apps/local-qa-runtime/host/src/journal.rs
+  apps/local-qa-runtime/host/src/lib.rs
+  apps/local-qa-runtime/host/src/main.rs
+)
 ! grep -Eq '(unsafe|extern crate|include_(bytes|str)!)' "${host_sources[@]}" || {
   echo 'Local QA Host gained unauthorized production inclusion' >&2
   exit 1
 }
 grep -Fq '"/v1/runs/"' apps/local-qa-runtime/host/src/lib.rs
-grep -Fq 'CREATE TABLE accepted_requests' apps/local-qa-runtime/host/src/lib.rs
-grep -Fq 'CREATE TABLE runs' apps/local-qa-runtime/host/src/lib.rs
-grep -Fq 'CREATE TABLE events' apps/local-qa-runtime/host/src/lib.rs
-grep -Fq '"journal_mode", "WAL"' apps/local-qa-runtime/host/src/lib.rs
+grep -Fq 'CREATE TABLE accepted_requests' apps/local-qa-runtime/host/src/journal.rs
+grep -Fq 'CREATE TABLE runs' apps/local-qa-runtime/host/src/journal.rs
+grep -Fq 'CREATE TABLE events' apps/local-qa-runtime/host/src/journal.rs
+grep -Fq 'CREATE TABLE execution_attempts' apps/local-qa-runtime/host/src/journal.rs
+grep -Fq 'PRAGMA user_version = 3' apps/local-qa-runtime/host/src/journal.rs
+grep -Fq '"journal_mode", "WAL"' apps/local-qa-runtime/host/src/journal.rs
+grep -Fq 'validate_local_state' apps/local-qa-runtime/host/src/journal.rs
+grep -Fq 'validate_execution_outcome' apps/local-qa-runtime/host/src/journal.rs
+grep -Fq 'CoordinatorHandle::start' apps/local-qa-runtime/host/src/lib.rs
 
 for component in guest-agent launcher secret-broker supervisor; do
   manifest="apps/local-qa-runtime/$component/Cargo.toml"
@@ -118,4 +143,4 @@ unexpected=$(find apps/local-qa-runtime -type f \
   ! -path '*/node_modules/*' ! -path '*/target/*' ! -path '*/dist/*')
 [[ -z "$unexpected" ]] || { echo 'unexpected executable implementation file' >&2; exit 1; }
 
-echo 'Local QA Host, pure worker policy, and inert Runtime shells are complete.'
+echo 'Local QA Host coordinator, pure worker policy, and inert Runtime shells are complete.'

@@ -1,11 +1,21 @@
+mod coordinator;
+mod executor;
+mod journal;
+
 use std::ffi::OsString;
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
 
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use coordinator::CoordinatorHandle;
+use executor::PassingExecutor;
+use fkst_qa_contracts::{validate_cancel_disposition, validate_event_cursor};
+use journal::{Admission, Cancellation, EventPayload, Journal};
 use serde::{Deserialize, Serialize};
 
 const CANONICAL_REQUEST_DIGEST: &str =
@@ -36,21 +46,37 @@ impl fmt::Display for StartupError {
 
 #[derive(Debug)]
 pub enum RunError {
+    ActiveAttempt,
+    Contract(&'static str),
+    CoordinatorPanicked,
+    CoordinatorStopped,
     Database(rusqlite::Error),
+    InvalidJournal(&'static str),
     Io(io::Error),
-    UnsupportedDatabaseVersion(i64),
     JournalMode(String),
+    ShutdownHandler(ctrlc::Error),
+    UnsupportedDatabaseVersion(i64),
 }
 
 impl fmt::Display for RunError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ActiveAttempt => {
+                formatter.write_str("cancellation during execution is unsupported")
+            }
+            Self::Contract(detail) => write!(formatter, "contract error: {detail}"),
+            Self::CoordinatorPanicked => formatter.write_str("Run coordinator panicked"),
+            Self::CoordinatorStopped => formatter.write_str("Run coordinator stopped unexpectedly"),
             Self::Database(error) => write!(formatter, "database error: {error}"),
+            Self::InvalidJournal(detail) => write!(formatter, "invalid journal: {detail}"),
             Self::Io(error) => write!(formatter, "I/O error: {error}"),
+            Self::JournalMode(mode) => write!(formatter, "SQLite WAL mode unavailable: {mode}"),
+            Self::ShutdownHandler(error) => {
+                write!(formatter, "shutdown handler error: {error}")
+            }
             Self::UnsupportedDatabaseVersion(version) => {
                 write!(formatter, "unsupported database version: {version}")
             }
-            Self::JournalMode(mode) => write!(formatter, "SQLite WAL mode unavailable: {mode}"),
         }
     }
 }
@@ -64,6 +90,12 @@ impl From<io::Error> for RunError {
 impl From<rusqlite::Error> for RunError {
     fn from(error: rusqlite::Error) -> Self {
         Self::Database(error)
+    }
+}
+
+impl From<ctrlc::Error> for RunError {
+    fn from(error: ctrlc::Error) -> Self {
+        Self::ShutdownHandler(error)
     }
 }
 
@@ -135,9 +167,19 @@ fn parse_port(value: &str) -> Result<u16, StartupError> {
 }
 
 pub fn run(config: StartupConfig) -> Result<(), RunError> {
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let signal_shutdown = Arc::clone(&shutdown);
+    ctrlc::set_handler(move || signal_shutdown.store(true, Ordering::SeqCst))?;
+    serve(config, shutdown)
+}
+
+fn serve(config: StartupConfig, shutdown: Arc<AtomicBool>) -> Result<(), RunError> {
     let mut journal = Journal::open(&config.database_path)?;
     let listener = TcpListener::bind(config.listen)?;
+    listener.set_nonblocking(true)?;
     let assigned_address = listener.local_addr()?;
+    let mut coordinator =
+        CoordinatorHandle::start(&config.database_path, Box::new(PassingExecutor))?;
 
     let mut stdout = io::stdout().lock();
     writeln!(
@@ -147,324 +189,35 @@ pub fn run(config: StartupConfig) -> Result<(), RunError> {
     stdout.flush()?;
     drop(stdout);
 
-    for stream in listener.incoming() {
-        match stream {
-            Ok(mut stream) => {
+    let serve_result = loop {
+        if shutdown.load(Ordering::SeqCst) {
+            break Ok(());
+        }
+        if let Err(error) = coordinator.check() {
+            break Err(error);
+        }
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let _ = stream.set_nonblocking(false);
                 let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
                 let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
-                let _ = handle_connection(&mut stream, &mut journal);
+                let _ = handle_connection(&mut stream, &mut journal, &coordinator);
             }
-            Err(error) => return Err(RunError::Io(error)),
-        }
-    }
-    Ok(())
-}
-
-struct Journal {
-    connection: Connection,
-}
-
-enum Admission {
-    Created(Vec<u8>),
-    Replay(Vec<u8>),
-    DifferentKey,
-}
-
-struct RunSnapshot {
-    state: String,
-    latest_event_sequence: i64,
-}
-
-struct StoredEvent {
-    sequence: i64,
-    event_type: String,
-    event: serde_json::Value,
-}
-
-enum Cancellation {
-    Accepted(i64),
-    AlreadyAccepted(i64),
-    Terminal(i64),
-    NotFound,
-}
-
-impl Journal {
-    fn open(path: &Path) -> Result<Self, RunError> {
-        let connection = Connection::open(path)?;
-        connection.busy_timeout(Duration::from_secs(5))?;
-        connection.pragma_update(None, "foreign_keys", true)?;
-        let foreign_keys: i64 =
-            connection.pragma_query_value(None, "foreign_keys", |row| row.get(0))?;
-        if foreign_keys != 1 {
-            return Err(RunError::Database(rusqlite::Error::InvalidQuery));
-        }
-
-        let journal_mode: String =
-            connection.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
-        if !journal_mode.eq_ignore_ascii_case("wal") {
-            connection.pragma_update(None, "journal_mode", "WAL")?;
-            let confirmed_mode: String =
-                connection.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
-            if !confirmed_mode.eq_ignore_ascii_case("wal") {
-                return Err(RunError::JournalMode(confirmed_mode));
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(10));
             }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => break Err(RunError::Io(error)),
         }
-
-        let mut journal = Self { connection };
-        journal.migrate()?;
-        Ok(journal)
-    }
-
-    fn migrate(&mut self) -> Result<(), RunError> {
-        let version: i64 = self
-            .connection
-            .pragma_query_value(None, "user_version", |row| row.get(0))?;
-        match version {
-            0 => {
-                let transaction = self
-                    .connection
-                    .transaction_with_behavior(TransactionBehavior::Immediate)?;
-                transaction.execute_batch(
-                    "CREATE TABLE accepted_requests (
-                        run_id TEXT PRIMARY KEY NOT NULL,
-                        idempotency_key TEXT NOT NULL,
-                        request_digest TEXT NOT NULL,
-                        response_json BLOB NOT NULL,
-                        UNIQUE (run_id, idempotency_key)
-                    );
-                    CREATE TABLE runs (
-                        run_id TEXT PRIMARY KEY NOT NULL,
-                        state TEXT NOT NULL
-                    );
-                    CREATE TABLE events (
-                        run_id TEXT NOT NULL,
-                        sequence INTEGER NOT NULL,
-                        event_type TEXT NOT NULL,
-                        event_json TEXT NOT NULL,
-                        PRIMARY KEY (run_id, sequence),
-                        FOREIGN KEY (run_id) REFERENCES runs(run_id)
-                    );
-                    PRAGMA user_version = 1;",
-                )?;
-                transaction.commit()?;
-                self.migrate_v2()
-            }
-            1 => self.migrate_v2(),
-            2 => Ok(()),
-            other => Err(RunError::UnsupportedDatabaseVersion(other)),
-        }
-    }
-
-    fn migrate_v2(&mut self) -> Result<(), RunError> {
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        transaction.execute_batch(
-            "CREATE TABLE cancel_requests (
-                run_id TEXT PRIMARY KEY NOT NULL,
-                idempotency_key TEXT NOT NULL,
-                event_sequence INTEGER NOT NULL,
-                FOREIGN KEY (run_id) REFERENCES runs(run_id)
-            );
-            PRAGMA user_version = 2;",
-        )?;
-        transaction.commit()?;
-        Ok(())
-    }
-
-    fn admit(
-        &mut self,
-        run_id: &str,
-        idempotency_key: &str,
-        request_digest: &str,
-    ) -> Result<Admission, RunError> {
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let stored = transaction
-            .query_row(
-                "SELECT idempotency_key, request_digest, response_json
-                 FROM accepted_requests WHERE run_id = ?1",
-                [run_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Vec<u8>>(2)?,
-                    ))
-                },
-            )
-            .optional()?;
-
-        if let Some((stored_key, stored_digest, response_json)) = stored {
-            let admission = if stored_key == idempotency_key && stored_digest == request_digest {
-                Admission::Replay(response_json)
-            } else {
-                Admission::DifferentKey
-            };
-            transaction.commit()?;
-            return Ok(admission);
-        }
-
-        let existing_run: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM runs WHERE run_id = ?1)",
-            [run_id],
-            |row| row.get(0),
-        )?;
-        if existing_run {
-            transaction.commit()?;
-            return Ok(Admission::DifferentKey);
-        }
-
-        let response_json =
-            format!("{{\"run_id\":\"{run_id}\",\"state\":\"accepted\",\"event_sequence\":1}}\n")
-                .into_bytes();
-        let event_json = format!("{{\"run_id\":\"{run_id}\",\"state\":\"accepted\"}}");
-        transaction.execute(
-            "INSERT INTO accepted_requests
-             (run_id, idempotency_key, request_digest, response_json)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![run_id, idempotency_key, request_digest, response_json],
-        )?;
-        transaction.execute(
-            "INSERT INTO runs (run_id, state) VALUES (?1, 'accepted')",
-            [run_id],
-        )?;
-        transaction.execute(
-            "INSERT INTO events (run_id, sequence, event_type, event_json)
-             VALUES (?1, 1, 'run.accepted', ?2)",
-            params![run_id, event_json],
-        )?;
-        transaction.commit()?;
-        Ok(Admission::Created(response_json))
-    }
-
-    fn snapshot(&self, run_id: &str) -> Result<Option<RunSnapshot>, RunError> {
-        self.connection
-            .query_row(
-                "SELECT runs.state, MAX(events.sequence)
-                 FROM runs JOIN events ON events.run_id = runs.run_id
-                 WHERE runs.run_id = ?1
-                 GROUP BY runs.run_id, runs.state",
-                [run_id],
-                |row| {
-                    Ok(RunSnapshot {
-                        state: row.get(0)?,
-                        latest_event_sequence: row.get(1)?,
-                    })
-                },
-            )
-            .optional()
-            .map_err(RunError::from)
-    }
-
-    fn events(
-        &self,
-        run_id: &str,
-        after: i64,
-        limit: i64,
-    ) -> Result<Option<Vec<StoredEvent>>, RunError> {
-        let exists: bool = self.connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM runs WHERE run_id = ?1)",
-            [run_id],
-            |row| row.get(0),
-        )?;
-        if !exists {
-            return Ok(None);
-        }
-
-        let mut statement = self.connection.prepare(
-            "SELECT sequence, event_type, event_json
-             FROM events
-             WHERE run_id = ?1 AND sequence > ?2
-             ORDER BY sequence ASC
-             LIMIT ?3",
-        )?;
-        let rows = statement.query_map(params![run_id, after, limit], |row| {
-            let event_json: String = row.get(2)?;
-            let event = serde_json::from_str::<serde_json::Value>(&event_json)
-                .map_err(|_| rusqlite::Error::InvalidQuery)?;
-            if !event.is_object() {
-                return Err(rusqlite::Error::InvalidQuery);
-            }
-            Ok(StoredEvent {
-                sequence: row.get(0)?,
-                event_type: row.get(1)?,
-                event,
-            })
-        })?;
-        Ok(Some(rows.collect::<Result<Vec<_>, _>>()?))
-    }
-
-    fn cancel(&mut self, run_id: &str, idempotency_key: &str) -> Result<Cancellation, RunError> {
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let run = transaction
-            .query_row(
-                "SELECT runs.state, MAX(events.sequence)
-                 FROM runs JOIN events ON events.run_id = runs.run_id
-                 WHERE runs.run_id = ?1
-                 GROUP BY runs.run_id, runs.state",
-                [run_id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-            )
-            .optional()?;
-        let Some((state, latest_sequence)) = run else {
-            transaction.commit()?;
-            return Ok(Cancellation::NotFound);
-        };
-
-        if state == "terminal" {
-            transaction.commit()?;
-            return Ok(Cancellation::Terminal(latest_sequence));
-        }
-
-        let existing_sequence = transaction
-            .query_row(
-                "SELECT event_sequence FROM cancel_requests WHERE run_id = ?1",
-                [run_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()?;
-        if let Some(event_sequence) = existing_sequence {
-            transaction.commit()?;
-            return Ok(Cancellation::AlreadyAccepted(event_sequence));
-        }
-
-        let event_sequence = latest_sequence
-            .checked_add(1)
-            .ok_or(RunError::Database(rusqlite::Error::InvalidQuery))?;
-        let event_json = serde_json::to_string(&RunStateEvent {
-            run_id,
-            state: &state,
-        })
-        .map_err(|_| RunError::Database(rusqlite::Error::InvalidQuery))?;
-        transaction.execute(
-            "INSERT INTO cancel_requests (run_id, idempotency_key, event_sequence)
-             VALUES (?1, ?2, ?3)",
-            params![run_id, idempotency_key, event_sequence],
-        )?;
-        transaction.execute(
-            "INSERT INTO events (run_id, sequence, event_type, event_json)
-             VALUES (?1, ?2, 'run.cancel_requested', ?3)",
-            params![run_id, event_sequence, event_json],
-        )?;
-        transaction.commit()?;
-        Ok(Cancellation::Accepted(event_sequence))
-    }
+    };
+    let shutdown_result = coordinator.shutdown();
+    serve_result.and(shutdown_result)
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SubmitBody {
     kind: String,
-}
-
-#[derive(Serialize)]
-struct RunStateEvent<'a> {
-    run_id: &'a str,
-    state: &'a str,
 }
 
 #[derive(Serialize)]
@@ -478,6 +231,8 @@ struct HealthResponse<'a> {
 struct SnapshotResponse<'a> {
     run_id: &'a str,
     state: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    execution_outcome: Option<&'a str>,
     latest_event_sequence: i64,
 }
 
@@ -485,7 +240,7 @@ struct SnapshotResponse<'a> {
 struct EventResponse {
     sequence: i64,
     event_type: String,
-    event: serde_json::Value,
+    event: EventPayload,
 }
 
 #[derive(Serialize)]
@@ -527,7 +282,11 @@ struct Request {
     body: Vec<u8>,
 }
 
-fn handle_connection(stream: &mut TcpStream, journal: &mut Journal) -> io::Result<()> {
+fn handle_connection(
+    stream: &mut TcpStream,
+    journal: &mut Journal,
+    coordinator: &CoordinatorHandle,
+) -> io::Result<()> {
     let request = match read_request(stream)? {
         Ok(request) => request,
         Err(response) => return write_rejection_response(stream, response),
@@ -545,6 +304,7 @@ fn handle_connection(stream: &mut TcpStream, journal: &mut Journal) -> io::Resul
         ),
         Route::Submit { run_id } => handle_submit(
             journal,
+            coordinator,
             &run_id,
             request.idempotency_key.as_deref().unwrap_or_default(),
             &request.body,
@@ -556,6 +316,7 @@ fn handle_connection(stream: &mut TcpStream, journal: &mut Journal) -> io::Resul
                 &SnapshotResponse {
                     run_id: &run_id,
                     state: &snapshot.state,
+                    execution_outcome: snapshot.execution_outcome.as_deref(),
                     latest_event_sequence: snapshot.latest_event_sequence,
                 },
             ),
@@ -613,6 +374,7 @@ fn handle_connection(stream: &mut TcpStream, journal: &mut Journal) -> io::Resul
 
 fn handle_submit(
     journal: &mut Journal,
+    coordinator: &CoordinatorHandle,
     run_id: &str,
     idempotency_key: &str,
     body: &[u8],
@@ -624,8 +386,14 @@ fn handle_submit(
     }
 
     match journal.admit(run_id, idempotency_key, CANONICAL_REQUEST_DIGEST) {
-        Ok(Admission::Created(body)) => Response::new(201, "Created", "application/json", body),
-        Ok(Admission::Replay(body)) => Response::new(200, "OK", "application/json", body),
+        Ok(Admission::Created(body)) => {
+            coordinator.wake();
+            Response::new(201, "Created", "application/json", body)
+        }
+        Ok(Admission::Replay(body)) => {
+            coordinator.wake();
+            Response::new(200, "OK", "application/json", body)
+        }
         Ok(Admission::DifferentKey) => problem_response(
             409,
             "Conflict",
@@ -884,7 +652,10 @@ fn parse_event_query(query: &str) -> Option<(i64, i64)> {
             return None;
         }
         match name.as_str() {
-            "after" if after.is_none() => after = Some(value.parse::<i64>().ok()?),
+            "after" if after.is_none() => {
+                validate_event_cursor(value.as_bytes()).ok()?;
+                after = Some(value.parse::<i64>().ok()?);
+            }
             "limit" if limit.is_none() => {
                 let parsed = value.parse::<i64>().ok()?;
                 if !(1..=100).contains(&parsed) {
@@ -1015,6 +786,12 @@ fn cancel_response(
     disposition: &str,
     event_sequence: i64,
 ) -> Response {
+    let Ok(encoded_disposition) = serde_json::to_vec(disposition) else {
+        return journal_failure();
+    };
+    if validate_cancel_disposition(&encoded_disposition).is_err() {
+        return journal_failure();
+    }
     json_response(
         status,
         reason,
@@ -1122,58 +899,10 @@ fn write_rejection_response(stream: &mut TcpStream, response: Response) -> io::R
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;
-    use std::fs;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{
-        parse_startup, Admission, Journal, StartupConfig, StartupError, CANONICAL_REQUEST_DIGEST,
-    };
-
-    #[test]
-    fn same_key_with_a_different_digest_is_conflict_without_mutation() {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock must be after the Unix epoch")
-            .as_nanos();
-        let directory = std::env::temp_dir().join(format!(
-            "fkst-local-qa-host-digest-{}-{timestamp}",
-            std::process::id()
-        ));
-        fs::create_dir(&directory).expect("temporary directory must be created");
-        let database_path = directory.join("journal.sqlite");
-
-        {
-            let mut journal = Journal::open(&database_path).expect("journal must open");
-            assert!(matches!(
-                journal.admit("run-001", "idem-001", CANONICAL_REQUEST_DIGEST),
-                Ok(Admission::Created(_))
-            ));
-            assert!(matches!(
-                journal.admit("run-001", "idem-001", "different-digest"),
-                Ok(Admission::DifferentKey)
-            ));
-            assert_eq!(
-                journal
-                    .connection
-                    .query_row("SELECT COUNT(*) FROM accepted_requests", [], |row| row
-                        .get::<_, i64>(0))
-                    .expect("accepted count must be readable"),
-                1
-            );
-            assert_eq!(
-                journal
-                    .connection
-                    .query_row("SELECT COUNT(*) FROM events", [], |row| row
-                        .get::<_, i64>(0))
-                    .expect("Event count must be readable"),
-                1
-            );
-        }
-
-        fs::remove_dir_all(directory).expect("temporary directory must be removed");
-    }
+    use super::{parse_startup, StartupConfig, StartupError};
 
     #[test]
     fn zero_arguments_are_rejected() {
