@@ -5,12 +5,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Barrier};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension};
 
 const CREATED_BODY: &[u8] =
     b"{\"run_id\":\"run-001\",\"state\":\"accepted\",\"event_sequence\":1}\n";
+const TERMINAL_BODY: &[u8] = b"{\"run_id\":\"run-001\",\"state\":\"terminal\",\"execution_outcome\":\"passed\",\"latest_event_sequence\":9}\n";
+const EVENTS_BODY: &[u8] = b"{\"run_id\":\"run-001\",\"after\":0,\"events\":[{\"sequence\":1,\"event_type\":\"run.accepted\",\"event\":{\"run_id\":\"run-001\",\"state\":\"accepted\"}},{\"sequence\":2,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"preparing\"}},{\"sequence\":3,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"ready\"}},{\"sequence\":4,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"executing\"}},{\"sequence\":5,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"staging_evidence\"}},{\"sequence\":6,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"cleaning_up_execution\"}},{\"sequence\":7,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"uploading\"}},{\"sequence\":8,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"finalizing_local\"}},{\"sequence\":9,\"event_type\":\"run.completed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"terminal\",\"execution_outcome\":\"passed\"}}],\"next_after\":9}\n";
 const CONFLICT_BODY: &[u8] = b"{\"type\":\"about:blank\",\"title\":\"Conflict\",\"status\":409,\"detail\":\"run_id is already accepted under a different Idempotency-Key\"}\n";
 const REQUEST_DIGEST: &str = "c6da30d2cbe81af624c4e364e21cdad9dc2510d2e2ff9a02bb5bd6c325a25428";
 const HEALTH_BODY: &[u8] =
@@ -83,12 +85,27 @@ impl HostProcess {
     }
 
     fn stop(mut self) {
-        self.child.kill().expect("host process must terminate");
-        let status = self.child.wait().expect("host process must be reaped");
-        assert!(
-            !status.success(),
-            "a killed host must not exit successfully"
-        );
+        let signal_status = Command::new("kill")
+            .args(["-TERM", &self.child.id().to_string()])
+            .status()
+            .expect("SIGTERM command must execute");
+        assert!(signal_status.success(), "SIGTERM must be delivered");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = self.child.try_wait().expect("host status must be readable") {
+                assert!(
+                    status.success(),
+                    "host must shut down successfully: {status}"
+                );
+                return;
+            }
+            if Instant::now() >= deadline {
+                let _ = self.child.kill();
+                let _ = self.child.wait();
+                panic!("host did not join its coordinator after SIGTERM");
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 }
 
@@ -194,6 +211,46 @@ fn assert_response(response: HttpResponse, status: &str, content_type: &str, bod
     assert_eq!(response.body, body);
 }
 
+fn wait_for_exact_get(port: u16, target: &str, body: &[u8]) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let response = get(port, target);
+        if response.status_line == "HTTP/1.1 200 OK"
+            && response.content_type == "application/json"
+            && response.body == body
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "GET {target} did not reach the expected body; last status={} body={}",
+            response.status_line,
+            String::from_utf8_lossy(&response.body)
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn insert_unclaimed_run(database_path: &Path) {
+    let connection = Connection::open(database_path).expect("journal must open");
+    connection
+        .execute_batch(
+            "INSERT INTO accepted_requests VALUES (
+                 'run-001',
+                 'idem-001',
+                 'c6da30d2cbe81af624c4e364e21cdad9dc2510d2e2ff9a02bb5bd6c325a25428',
+                 X'7B2272756E5F6964223A2272756E2D303031222C227374617465223A226163636570746564222C226576656E745F73657175656E6365223A317D0A'
+             );
+             INSERT INTO runs (run_id, state, execution_outcome)
+             VALUES ('run-001', 'accepted', NULL);
+             INSERT INTO events VALUES (
+                 'run-001', 1, 'run.accepted',
+                 '{\"run_id\":\"run-001\",\"state\":\"accepted\"}'
+             );",
+        )
+        .expect("unclaimed Run fixture must be inserted");
+}
+
 fn submit_with_total_head_bytes(port: u16, total_head_bytes: usize) -> HttpResponse {
     let prefix = format!(
         "PUT /v1/runs/run-001 HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nIdempotency-Key: idem-001\r\nContent-Length: 16\r\nX-Fill: "
@@ -222,7 +279,13 @@ fn submit_with_total_head_bytes(port: u16, total_head_bytes: usize) -> HttpRespo
 
 fn assert_empty_journal(database_path: &Path) {
     let connection = Connection::open(database_path).expect("journal must open after host exit");
-    for table in ["accepted_requests", "runs", "events", "cancel_requests"] {
+    for table in [
+        "accepted_requests",
+        "runs",
+        "events",
+        "cancel_requests",
+        "execution_attempts",
+    ] {
         let count = connection
             .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
                 row.get::<_, i64>(0)
@@ -243,6 +306,7 @@ fn submit_accepts_exact_maximum_total_head_bytes() {
         "application/json",
         CREATED_BODY,
     );
+    wait_for_exact_get(host.port, "/v1/runs/run-001", TERMINAL_BODY);
     host.stop();
     assert_exact_journal(&database_path, "idem-001");
 }
@@ -296,12 +360,7 @@ fn delayed_nonempty_cancel_body_returns_complete_error_without_mutation() {
     let temp = TempDirectory::new("delayed-cancel-body");
     let database_path = temp.database_path();
     let host = HostProcess::start(&database_path);
-    assert_response(
-        submit(host.port, "run-001", "idem-001"),
-        "HTTP/1.1 201 Created",
-        "application/json",
-        CREATED_BODY,
-    );
+    insert_unclaimed_run(&database_path);
 
     let mut stream = TcpStream::connect(("127.0.0.1", host.port))
         .expect("loopback host must accept connections");
@@ -389,29 +448,68 @@ fn oversized_cancel_body_declaration_is_rejected_without_waiting_for_body() {
 }
 
 #[test]
-fn acceptance_restarts_replays_and_rejects_a_different_key_without_mutation() {
-    let temp = TempDirectory::new("restart-replay");
+fn exact_submission_completes_replays_and_restarts_without_duplicate_work() {
+    let temp = TempDirectory::new("complete-replay-restart");
     let database_path = temp.database_path();
 
     let first_host = HostProcess::start(&database_path);
-    let created = submit(first_host.port, "run-001", "idem-001");
-    assert_eq!(created.status_line, "HTTP/1.1 201 Created");
-    assert_eq!(created.content_type, "application/json");
-    assert_eq!(created.body, CREATED_BODY);
+    assert_response(
+        submit(first_host.port, "run-001", "idem-001"),
+        "HTTP/1.1 201 Created",
+        "application/json",
+        CREATED_BODY,
+    );
+    assert_response(
+        submit(first_host.port, "run-001", "idem-001"),
+        "HTTP/1.1 200 OK",
+        "application/json",
+        CREATED_BODY,
+    );
+    assert_response(
+        submit(first_host.port, "run-001", "idem-002"),
+        "HTTP/1.1 409 Conflict",
+        "application/problem+json",
+        CONFLICT_BODY,
+    );
+    wait_for_exact_get(first_host.port, "/v1/runs/run-001", TERMINAL_BODY);
+    assert_response(
+        get(first_host.port, "/v1/runs/run-001/events?after=0&limit=100"),
+        "HTTP/1.1 200 OK",
+        "application/json",
+        EVENTS_BODY,
+    );
+    assert_response(
+        submit(first_host.port, "run-001", "idem-001"),
+        "HTTP/1.1 200 OK",
+        "application/json",
+        CREATED_BODY,
+    );
     first_host.stop();
+    assert_exact_journal(&database_path, "idem-001");
 
     let restarted_host = HostProcess::start(&database_path);
-    let replay = submit(restarted_host.port, "run-001", "idem-001");
-    assert_eq!(replay.status_line, "HTTP/1.1 200 OK");
-    assert_eq!(replay.content_type, "application/json");
-    assert_eq!(replay.body, CREATED_BODY);
-
-    let conflict = submit(restarted_host.port, "run-001", "idem-002");
-    assert_eq!(conflict.status_line, "HTTP/1.1 409 Conflict");
-    assert_eq!(conflict.content_type, "application/problem+json");
-    assert_eq!(conflict.body, CONFLICT_BODY);
+    assert_response(
+        submit(restarted_host.port, "run-001", "idem-001"),
+        "HTTP/1.1 200 OK",
+        "application/json",
+        CREATED_BODY,
+    );
+    assert_response(
+        get(restarted_host.port, "/v1/runs/run-001"),
+        "HTTP/1.1 200 OK",
+        "application/json",
+        TERMINAL_BODY,
+    );
+    assert_response(
+        get(
+            restarted_host.port,
+            "/v1/runs/run-001/events?after=0&limit=100",
+        ),
+        "HTTP/1.1 200 OK",
+        "application/json",
+        EVENTS_BODY,
+    );
     restarted_host.stop();
-
     assert_exact_journal(&database_path, "idem-001");
 }
 
@@ -442,6 +540,7 @@ fn concurrent_different_keys_create_exactly_one_acceptance() {
     assert_eq!(results[1].1.status_line, "HTTP/1.1 409 Conflict");
     assert_eq!(results[1].1.body, CONFLICT_BODY);
     let accepted_key = results[0].0;
+    wait_for_exact_get(host.port, "/v1/runs/run-001", TERMINAL_BODY);
     host.stop();
 
     assert_exact_journal(&database_path, accepted_key);
@@ -459,12 +558,7 @@ fn reads_cancellation_and_restart_match_the_durable_contract() {
         "application/json",
         HEALTH_BODY,
     );
-    assert_response(
-        submit(host.port, "run-001", "idem-001"),
-        "HTTP/1.1 201 Created",
-        "application/json",
-        CREATED_BODY,
-    );
+    insert_unclaimed_run(&database_path);
     assert_response(
         get(host.port, "/v1/runs/run-001"),
         "HTTP/1.1 200 OK",
@@ -529,7 +623,7 @@ fn reads_cancellation_and_restart_match_the_durable_contract() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        2
+        3
     );
     assert_eq!(
         connection
@@ -552,10 +646,7 @@ fn concurrent_cancellation_has_one_winner() {
     let temp = TempDirectory::new("concurrent-cancel");
     let database_path = temp.database_path();
     let host = HostProcess::start(&database_path);
-    assert_eq!(
-        submit(host.port, "run-001", "idem-001").status_line,
-        "HTTP/1.1 201 Created"
-    );
+    insert_unclaimed_run(&database_path);
     let barrier = Arc::new(Barrier::new(5));
     let mut threads = Vec::new();
     for index in 0..4 {
@@ -607,7 +698,7 @@ fn concurrent_cancellation_has_one_winner() {
 }
 
 #[test]
-fn terminal_absent_and_invalid_requests_are_mutation_free() {
+fn terminal_and_invalid_requests_are_mutation_free() {
     let temp = TempDirectory::new("negative-contracts");
     let database_path = temp.database_path();
     let host = HostProcess::start(&database_path);
@@ -615,22 +706,12 @@ fn terminal_absent_and_invalid_requests_are_mutation_free() {
         submit(host.port, "run-001", "idem-001").status_line,
         "HTTP/1.1 201 Created"
     );
-    host.stop();
-    let connection = Connection::open(&database_path).unwrap();
-    connection
-        .execute(
-            "UPDATE runs SET state = 'terminal' WHERE run_id = 'run-001'",
-            [],
-        )
-        .unwrap();
-    drop(connection);
-
-    let host = HostProcess::start(&database_path);
+    wait_for_exact_get(host.port, "/v1/runs/run-001", TERMINAL_BODY);
     assert_response(
         cancel(host.port, "run-001", "cancel-terminal"),
         "HTTP/1.1 200 OK",
         "application/json",
-        b"{\"run_id\":\"run-001\",\"disposition\":\"terminal\",\"event_sequence\":1}\n",
+        b"{\"run_id\":\"run-001\",\"disposition\":\"terminal\",\"event_sequence\":9}\n",
     );
     assert_response(
         get(host.port, "/v1/runs/missing"),
@@ -649,6 +730,7 @@ fn terminal_absent_and_invalid_requests_are_mutation_free() {
         "/v1/runs/run-001/events?after=0&limit=0",
         "/v1/runs/run-001/events?after=0&limit=1&extra=1",
         "/v1/runs/run-001/events?after=%GG&limit=1",
+        "/v1/runs/run-001/events?after=9007199254740992&limit=1",
     ] {
         assert_response(
             get(host.port, target),
@@ -720,7 +802,7 @@ fn terminal_absent_and_invalid_requests_are_mutation_free() {
             .query_row("SELECT COUNT(*) FROM events", [], |row| row
                 .get::<_, i64>(0))
             .unwrap(),
-        1
+        9
     );
 }
 
@@ -747,13 +829,19 @@ fn version_one_database_migrates_without_changing_accepted_bytes() {
         "application/json",
         CREATED_BODY,
     );
+    assert_response(
+        get(host.port, "/v1/runs/run-001"),
+        "HTTP/1.1 200 OK",
+        "application/json",
+        TERMINAL_BODY,
+    );
     host.stop();
     let connection = Connection::open(&database_path).unwrap();
     assert_eq!(
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        2
+        3
     );
     assert_eq!(
         connection
@@ -761,6 +849,132 @@ fn version_one_database_migrates_without_changing_accepted_bytes() {
                 .get::<_, Vec<u8>>(0))
             .unwrap(),
         CREATED_BODY
+    );
+}
+
+#[test]
+fn version_two_database_migrates_without_rewriting_durable_data() {
+    let temp = TempDirectory::new("v2-migration");
+    let database_path = temp.database_path();
+    let connection = Connection::open(&database_path).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE accepted_requests (run_id TEXT PRIMARY KEY NOT NULL, idempotency_key TEXT NOT NULL, request_digest TEXT NOT NULL, response_json BLOB NOT NULL, UNIQUE (run_id, idempotency_key));
+             CREATE TABLE runs (run_id TEXT PRIMARY KEY NOT NULL, state TEXT NOT NULL);
+             CREATE TABLE events (run_id TEXT NOT NULL, sequence INTEGER NOT NULL, event_type TEXT NOT NULL, event_json TEXT NOT NULL, PRIMARY KEY (run_id, sequence), FOREIGN KEY (run_id) REFERENCES runs(run_id));
+             CREATE TABLE cancel_requests (run_id TEXT PRIMARY KEY NOT NULL, idempotency_key TEXT NOT NULL, event_sequence INTEGER NOT NULL, FOREIGN KEY (run_id) REFERENCES runs(run_id));
+             INSERT INTO accepted_requests VALUES ('run-001', 'idem-001', 'c6da30d2cbe81af624c4e364e21cdad9dc2510d2e2ff9a02bb5bd6c325a25428', X'7B2272756E5F6964223A2272756E2D303031222C227374617465223A226163636570746564222C226576656E745F73657175656E6365223A317D0A');
+             INSERT INTO runs VALUES ('run-001', 'accepted');
+             INSERT INTO events VALUES ('run-001', 1, 'run.accepted', '{\"run_id\":\"run-001\",\"state\":\"accepted\"}');
+             INSERT INTO events VALUES ('run-001', 2, 'run.cancel_requested', '{\"run_id\":\"run-001\",\"state\":\"accepted\"}');
+             INSERT INTO cancel_requests VALUES ('run-001', 'cancel-001', 2);
+             PRAGMA user_version = 2;",
+        )
+        .unwrap();
+    drop(connection);
+
+    let host = HostProcess::start(&database_path);
+    assert_response(
+        submit(host.port, "run-001", "idem-001"),
+        "HTTP/1.1 200 OK",
+        "application/json",
+        CREATED_BODY,
+    );
+    assert_response(
+        get(host.port, "/v1/runs/run-001"),
+        "HTTP/1.1 200 OK",
+        "application/json",
+        b"{\"run_id\":\"run-001\",\"state\":\"accepted\",\"latest_event_sequence\":2}\n",
+    );
+    host.stop();
+
+    let connection = Connection::open(&database_path).unwrap();
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        3
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT run_id, idempotency_key, request_digest, response_json FROM accepted_requests",
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, Vec<u8>>(3)?))
+            )
+            .unwrap(),
+        (
+            "run-001".to_owned(),
+            "idem-001".to_owned(),
+            REQUEST_DIGEST.to_owned(),
+            CREATED_BODY.to_vec(),
+        )
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT run_id, state, execution_outcome FROM runs",
+                [],
+                |row| Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?
+                ))
+            )
+            .unwrap(),
+        ("run-001".to_owned(), "accepted".to_owned(), None)
+    );
+    let events = connection
+        .prepare("SELECT run_id, sequence, event_type, event_json FROM events ORDER BY sequence")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        events,
+        vec![
+            (
+                "run-001".to_owned(),
+                1,
+                "run.accepted".to_owned(),
+                "{\"run_id\":\"run-001\",\"state\":\"accepted\"}".to_owned(),
+            ),
+            (
+                "run-001".to_owned(),
+                2,
+                "run.cancel_requested".to_owned(),
+                "{\"run_id\":\"run-001\",\"state\":\"accepted\"}".to_owned(),
+            ),
+        ]
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT run_id, idempotency_key, event_sequence FROM cancel_requests",
+                [],
+                |row| Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?
+                ))
+            )
+            .unwrap(),
+        ("run-001".to_owned(), "cancel-001".to_owned(), 2)
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM execution_attempts", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
     );
 }
 
@@ -800,39 +1014,89 @@ fn assert_exact_journal(database_path: &Path, accepted_key: &str) {
     );
     assert_eq!(
         connection
-            .query_row("SELECT run_id, state FROM runs", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .expect("Run row must be readable"),
-        ("run-001".to_owned(), "accepted".to_owned())
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .expect("journal version must be readable"),
+        3
     );
     assert_eq!(
         connection
             .query_row(
-                "SELECT run_id, sequence, event_type, event_json FROM events",
+                "SELECT run_id, state, execution_outcome FROM runs",
                 [],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
                     ))
-                },
+                }
             )
-            .expect("Event row must be readable"),
+            .expect("Run row must be readable"),
         (
             "run-001".to_owned(),
-            1,
-            "run.accepted".to_owned(),
-            "{\"run_id\":\"run-001\",\"state\":\"accepted\"}".to_owned(),
+            "terminal".to_owned(),
+            Some("passed".to_owned()),
         )
     );
     assert_eq!(
         connection
-            .query_row("SELECT COUNT(*) FROM events", [], |row| row
+            .query_row(
+                "SELECT run_id, status, execution_outcome FROM execution_attempts",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                }
+            )
+            .expect("attempt row must be readable"),
+        (
+            "run-001".to_owned(),
+            "completed".to_owned(),
+            Some("passed".to_owned()),
+        )
+    );
+    let mut statement = connection
+        .prepare("SELECT sequence, event_type FROM events ORDER BY sequence")
+        .expect("Event query must prepare");
+    let events = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .expect("Events must be queryable")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("Events must be readable");
+    assert_eq!(
+        events,
+        vec![
+            (1, "run.accepted".to_owned()),
+            (2, "run.state_changed".to_owned()),
+            (3, "run.state_changed".to_owned()),
+            (4, "run.state_changed".to_owned()),
+            (5, "run.state_changed".to_owned()),
+            (6, "run.state_changed".to_owned()),
+            (7, "run.state_changed".to_owned()),
+            (8, "run.state_changed".to_owned()),
+            (9, "run.completed".to_owned()),
+        ]
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT event_json FROM events WHERE sequence = 9",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .expect("completed Event must be readable"),
+        "{\"run_id\":\"run-001\",\"state\":\"terminal\",\"execution_outcome\":\"passed\"}"
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM cancel_requests", [], |row| row
                 .get::<_, i64>(0))
-            .expect("Event count must be readable"),
-        1
+            .expect("cancellation count must be readable"),
+        0
     );
 }
