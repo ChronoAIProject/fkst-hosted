@@ -19,7 +19,7 @@ pub struct FixedPngScreenshot {
 
 #[derive(Debug, Error)]
 pub enum BrowserAdapterError {
-    #[error("unsupported platform: the fixed browser smoke supports Linux only")]
+    #[error("unsupported platform: the fixed browser smoke supports Linux and macOS arm64 only")]
     UnsupportedPlatform,
     #[error("no allowlisted system Chrome executable found")]
     ChromeNotFound,
@@ -34,13 +34,16 @@ pub enum BrowserAdapterError {
 }
 
 pub async fn run_fixed_browser_smoke() -> Result<FixedBrowserSmokeResult, BrowserAdapterError> {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(
+        target_os = "linux",
+        all(target_os = "macos", target_arch = "aarch64")
+    ))]
     {
         let (sender, receiver) = futures_channel::oneshot::channel();
         std::thread::Builder::new()
             .name("local-qa-fixed-browser-smoke".to_string())
             .spawn(move || {
-                let _ = sender.send(linux::run_fixed_browser_smoke());
+                let _ = sender.send(unix::run_fixed_browser_smoke());
             })
             .map_err(|error| {
                 BrowserAdapterError::Setup(format!("start fixed browser smoke worker: {error}"))
@@ -52,14 +55,20 @@ pub async fn run_fixed_browser_smoke() -> Result<FixedBrowserSmokeResult, Browse
         })?
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(
+        target_os = "linux",
+        all(target_os = "macos", target_arch = "aarch64")
+    )))]
     {
         Err(BrowserAdapterError::UnsupportedPlatform)
     }
 }
 
-#[cfg(target_os = "linux")]
-mod linux {
+#[cfg(any(
+    target_os = "linux",
+    all(target_os = "macos", target_arch = "aarch64")
+))]
+mod unix {
     use super::{BrowserAdapterError, FixedBrowserSmokeResult, FixedPngScreenshot};
     use headless_chrome::{protocol::cdp::Page, Browser, Tab};
     use nix::{
@@ -85,12 +94,16 @@ mod linux {
     };
     use tempfile::TempDir;
 
+    #[cfg(target_os = "linux")]
     const CHROME_CANDIDATES: [&str; 4] = [
         "/usr/bin/google-chrome-stable",
         "/usr/bin/google-chrome",
         "/usr/bin/chromium",
         "/usr/bin/chromium-browser",
     ];
+    #[cfg(target_os = "macos")]
+    const CHROME_CANDIDATES: [&str; 1] =
+        ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"];
     const FIXTURE_PATH: &str = "/fixed-page.html";
     const FIXTURE_HTML: &[u8] = br#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Local QA Fixed Page</title></head><body><main><span data-local-qa="status">READY</span></main></body></html>"#;
     const SELECTOR: &str = r#"[data-local-qa="status"]"#;
@@ -888,7 +901,7 @@ mod linux {
     fn wait_for_process_group_exit(process_group: Pid, limit: Duration) -> Result<bool, String> {
         let deadline = Instant::now() + limit;
         loop {
-            if process_group_members(process_group)?.is_empty() {
+            if !process_group_is_alive(process_group)? {
                 return Ok(true);
             }
             if Instant::now() >= deadline {
@@ -898,6 +911,22 @@ mod linux {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    fn process_group_is_alive(process_group: Pid) -> Result<bool, String> {
+        Ok(!process_group_members(process_group)?.is_empty())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn process_group_is_alive(process_group: Pid) -> Result<bool, String> {
+        let group_target = Pid::from_raw(-process_group.as_raw());
+        match nix::sys::signal::kill(group_target, None) {
+            Ok(()) | Err(Errno::EPERM) => Ok(true),
+            Err(Errno::ESRCH) => Ok(false),
+            Err(error) => Err(format!("inspect owned Chrome process group: {error}")),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
     fn process_group_members(process_group: Pid) -> Result<Vec<u32>, String> {
         let entries = fs::read_dir("/proc")
             .map_err(|error| format!("inspect owned Chrome process group: {error}"))?;
@@ -1071,6 +1100,7 @@ mod linux {
             ])
             .expect("candidate selected");
             assert_eq!(selected, first);
+            #[cfg(target_os = "linux")]
             assert_eq!(
                 CHROME_CANDIDATES,
                 [
@@ -1079,6 +1109,11 @@ mod linux {
                     "/usr/bin/chromium",
                     "/usr/bin/chromium-browser",
                 ]
+            );
+            #[cfg(target_os = "macos")]
+            assert_eq!(
+                CHROME_CANDIDATES,
+                ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
             );
         }
 
@@ -1094,9 +1129,10 @@ mod linux {
             let error = discover_chrome_from([missing.as_path(), non_executable.as_path()])
                 .expect_err("no candidate qualifies");
             assert!(matches!(error, BrowserAdapterError::ChromeNotFound));
-            assert!(error
-                .to_string()
-                .contains("no allowlisted system Chrome executable found"));
+            assert_eq!(
+                error.to_string(),
+                "no allowlisted system Chrome executable found"
+            );
         }
 
         #[test]
@@ -1231,6 +1267,7 @@ mod linux {
             }
         }
 
+        #[cfg(target_os = "linux")]
         #[test]
         fn owned_chrome_drop_kills_the_live_group_without_touching_unrelated_processes() {
             let _browser_guard = browser_test_guard();
@@ -1380,9 +1417,8 @@ mod linux {
             }
             if let Some(process_group) = observation.process_group {
                 assert!(
-                    process_group_members(process_group)
-                        .expect("inspect owned process group after return")
-                        .is_empty(),
+                    !process_group_is_alive(process_group)
+                        .expect("inspect owned process group after return"),
                     "owned process group still has live non-zombie members"
                 );
             }
@@ -1394,6 +1430,7 @@ mod linux {
             }
         }
 
+        #[cfg(target_os = "linux")]
         fn process_is_alive(pid: u32) -> bool {
             let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) else {
                 return false;
@@ -1403,6 +1440,16 @@ mod linux {
                 != Some("Z")
         }
 
+        #[cfg(target_os = "macos")]
+        fn process_is_alive(pid: u32) -> bool {
+            match nix::sys::signal::kill(Pid::from_raw(pid as i32), None) {
+                Ok(()) | Err(Errno::EPERM) => true,
+                Err(Errno::ESRCH) => false,
+                Err(_) => true,
+            }
+        }
+
+        #[cfg(target_os = "linux")]
         fn wait_for_group_size(process_group: Pid, minimum: usize) {
             let deadline = Instant::now() + Duration::from_secs(2);
             loop {
