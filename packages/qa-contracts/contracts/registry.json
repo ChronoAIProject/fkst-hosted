@@ -17,6 +17,11 @@
       "path": "contracts/qa.local-evidence/v1/schema.json",
       "id": "urn:chronoai:fkst:qa-contracts:qa.local-evidence:v1",
       "major": 1
+    },
+    "qa.local-worker-protocol/v1": {
+      "path": "contracts/qa.local-worker-protocol/v1/schema.json",
+      "id": "urn:chronoai:fkst:qa-contracts:qa.local-worker-protocol:v1",
+      "major": 1
     }
   },
   "types": {
@@ -36,6 +41,12 @@
     "LocalSanitizedObservation": { "schema": "qa.local-evidence/v1", "pointer": "#/$defs/LocalSanitizedObservation" },
     "LocalEvidenceObject": { "schema": "qa.local-evidence/v1", "pointer": "#/$defs/LocalEvidenceObject" },
     "LocalSanitizedObservationRef": { "schema": "qa.local-evidence/v1", "pointer": "#/$defs/LocalSanitizedObservationRef" },
-    "LocalEvidenceObjectRef": { "schema": "qa.local-evidence/v1", "pointer": "#/$defs/LocalEvidenceObjectRef" }
+    "LocalEvidenceObjectRef": { "schema": "qa.local-evidence/v1", "pointer": "#/$defs/LocalEvidenceObjectRef" },
+    "LocalWorkerFrame": { "schema": "qa.local-worker-protocol/v1", "pointer": "#/$defs/LocalWorkerFrame" },
+    "LocalWorkerInvocation": { "schema": "qa.local-worker-protocol/v1", "pointer": "#/$defs/LocalWorkerInvocation" },
+    "LocalWorkerCapabilityRequest": { "schema": "qa.local-worker-protocol/v1", "pointer": "#/$defs/LocalWorkerCapabilityRequest" },
+    "LocalWorkerCapabilityResult": { "schema": "qa.local-worker-protocol/v1", "pointer": "#/$defs/LocalWorkerCapabilityResult" },
+    "LocalWorkerTerminalResult": { "schema": "qa.local-worker-protocol/v1", "pointer": "#/$defs/LocalWorkerTerminalResult" },
+    "LocalWorkerProtocolFailure": { "schema": "qa.local-worker-protocol/v1", "pointer": "#/$defs/LocalWorkerProtocolFailure" }
   }
 }

@@ -42,8 +42,8 @@ export interface BrowserSessionPort {
   run(request: BrowserSmokeRequest): Promise<{
     finalUrl: string;
     observedText: string;
-    sanitizedObservationRef: DigestBoundRef<"qa.sanitized-observation/v1">;
-    screenshotArtifactRef: DigestBoundRef<"qa.artifact-pointer/v1">;
+    sanitizedObservationRef: DigestBoundRef<"qa.local-evidence/v1">;
+    screenshotEvidenceRef: DigestBoundRef<"qa.local-evidence/v1">;
   }>;
   close(): Promise<void>;
 }
@@ -53,12 +53,12 @@ export interface EvidenceStagingPort {
     name: "runner.log";
     mediaType: "text/plain; charset=utf-8";
     bytes: Uint8Array;
-  }): Promise<DigestBoundRef<"qa.artifact-pointer/v1">>;
+  }): Promise<DigestBoundRef<"qa.local-evidence/v1">>;
 }
 
 export interface ClockPort {
-  now(): string;
-  monotonicMs(): number;
+  now(): string | Promise<string>;
+  monotonicMs(): number | Promise<number>;
 }
 
 export interface BrowserSmokeResult {
@@ -70,7 +70,7 @@ export interface BrowserSmokeResult {
     readonly selector: typeof SELECTOR;
     readonly expectedText: typeof EXPECTED_TEXT;
     readonly observedText: typeof EXPECTED_TEXT;
-    readonly sanitizedObservationRef: DigestBoundRef<"qa.sanitized-observation/v1">;
+    readonly sanitizedObservationRef: DigestBoundRef<"qa.local-evidence/v1">;
   };
   readonly startedAt: string;
   readonly finishedAt: string;
@@ -79,12 +79,12 @@ export interface BrowserSmokeResult {
     {
       readonly objectId: "evidence/0";
       readonly role: "screenshot";
-      readonly artifactRef: DigestBoundRef<"qa.artifact-pointer/v1">;
+      readonly artifactRef: DigestBoundRef<"qa.local-evidence/v1">;
     },
     {
       readonly objectId: "evidence/1";
       readonly role: "runner-log";
-      readonly artifactRef: DigestBoundRef<"qa.artifact-pointer/v1">;
+      readonly artifactRef: DigestBoundRef<"qa.local-evidence/v1">;
     },
   ];
 }
@@ -148,10 +148,10 @@ export async function runBrowserSmoke(
   },
 ): Promise<BrowserSmokeBundle> {
   const request = parseBrowserSmokeRequest(source);
-  const startedAt = clockNow(ports.clock);
-  const startedMonotonicMs = monotonicNow(ports.clock);
+  const startedAt = await clockNow(ports.clock);
+  const startedMonotonicMs = await monotonicNow(ports.clock);
   let validatedSession: ReturnType<typeof validateSessionResult>;
-  let runnerLogArtifactRef: DigestBoundRef<"qa.artifact-pointer/v1">;
+  let runnerLogArtifactRef: DigestBoundRef<"qa.local-evidence/v1">;
 
   try {
     let sessionResult: Awaited<ReturnType<BrowserSessionPort["run"]>>;
@@ -181,8 +181,8 @@ export async function runBrowserSmoke(
           mediaType: "text/plain; charset=utf-8",
           bytes: RUNNER_LOG.slice(),
         }),
-        "artifact-pointer",
-        "qa.artifact-pointer/v1",
+        "local-evidence-object",
+        "qa.local-evidence/v1",
       );
     } catch (error) {
       if (error instanceof BrowserSmokeWorkerError) {
@@ -198,8 +198,8 @@ export async function runBrowserSmoke(
     }
   }
 
-  const finishedAt = clockNow(ports.clock);
-  const finishedMonotonicMs = monotonicNow(ports.clock);
+  const finishedAt = await clockNow(ports.clock);
+  const finishedMonotonicMs = await monotonicNow(ports.clock);
   const durationMs = finishedMonotonicMs - startedMonotonicMs;
   if (!Number.isSafeInteger(durationMs) || durationMs < 0) {
     throw new BrowserSmokeWorkerError("clock.invalid_value");
@@ -224,7 +224,7 @@ export async function runBrowserSmoke(
         {
           objectId: "evidence/0",
           role: "screenshot",
-          artifactRef: validatedSession.screenshotArtifactRef,
+          artifactRef: validatedSession.screenshotEvidenceRef,
         },
         {
           objectId: "evidence/1",
@@ -313,14 +313,14 @@ function isFixedFixtureUrl(value: string): boolean {
 function validateSessionResult(value: unknown): {
   readonly finalUrl: string;
   readonly observedText: string;
-  readonly sanitizedObservationRef: DigestBoundRef<"qa.sanitized-observation/v1">;
-  readonly screenshotArtifactRef: DigestBoundRef<"qa.artifact-pointer/v1">;
+  readonly sanitizedObservationRef: DigestBoundRef<"qa.local-evidence/v1">;
+  readonly screenshotEvidenceRef: DigestBoundRef<"qa.local-evidence/v1">;
 } {
   if (!isExactRecord(value, [
     "finalUrl",
     "observedText",
     "sanitizedObservationRef",
-    "screenshotArtifactRef",
+    "screenshotEvidenceRef",
   ])) {
     throw new BrowserSmokeWorkerError("session.invalid_response");
   }
@@ -332,13 +332,13 @@ function validateSessionResult(value: unknown): {
     observedText: value.observedText,
     sanitizedObservationRef: validateReference(
       value.sanitizedObservationRef,
-      "sanitized-observation",
-      "qa.sanitized-observation/v1",
+      "local-sanitized-observation",
+      "qa.local-evidence/v1",
     ),
-    screenshotArtifactRef: validateReference(
-      value.screenshotArtifactRef,
-      "artifact-pointer",
-      "qa.artifact-pointer/v1",
+    screenshotEvidenceRef: validateReference(
+      value.screenshotEvidenceRef,
+      "local-evidence-object",
+      "qa.local-evidence/v1",
     ),
   };
 }
@@ -361,7 +361,10 @@ function validateReference<TSchema extends string>(
   }
   if (
     value.kind !== expectedKind ||
-    !isNonEmptyString(value.id) ||
+    typeof value.id !== "string" ||
+    !(expectedKind === "local-sanitized-observation"
+      ? /^observation\/[0-9]+$/.test(value.id)
+      : /^evidence\/[0-9]+$/.test(value.id)) ||
     value.schema_version !== expectedSchema ||
     typeof value.content_digest !== "string" ||
     !/^sha256:[0-9a-f]{64}$/.test(value.content_digest) ||
@@ -390,10 +393,10 @@ function canonicalReference<TSchema extends string>(
   };
 }
 
-function clockNow(clock: ClockPort): string {
+async function clockNow(clock: ClockPort): Promise<string> {
   let value: string;
   try {
-    value = clock.now();
+    value = await clock.now();
   } catch {
     throw new BrowserSmokeWorkerError("clock.failed");
   }
@@ -403,10 +406,10 @@ function clockNow(clock: ClockPort): string {
   return value;
 }
 
-function monotonicNow(clock: ClockPort): number {
+async function monotonicNow(clock: ClockPort): Promise<number> {
   let value: number;
   try {
-    value = clock.monotonicMs();
+    value = await clock.monotonicMs();
   } catch {
     throw new BrowserSmokeWorkerError("clock.failed");
   }

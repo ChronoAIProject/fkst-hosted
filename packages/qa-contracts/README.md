@@ -56,7 +56,9 @@ The checked-in conformance sources are:
   canonicalization, and digesting.
 - `fixtures/qa/local-evidence-v1.json` for Local Evidence canonical bytes, raw
   Evidence byte identity, contract-object content digests, and reference
-  binding across the four public Local Evidence types.
+  binding across the four public Local Evidence types;
+- `fixtures/qa.local-worker-protocol/v1/happy-path.json` for the shared logical
+  and length-prefixed golden transcript of the fixed browser-smoke Worker.
 
 The implementations are:
 
@@ -90,6 +92,7 @@ cargo test --manifest-path apps/local-qa-runtime/Cargo.toml \
   --workspace --locked -- --nocapture
 ```
 
-These libraries provide contract validation and deterministic bytes only. They
-do not start a process, expose an endpoint, authorize a request, persist state,
-verify signatures, invoke a worker, or perform any other side effect.
+These libraries provide contract validation, RFC 8785/JCS bytes, and bounded
+`qa.local-worker-protocol/v1` framing only. They do not start a process, expose
+an endpoint, authorize a request, persist state, verify signatures, invoke a
+worker, or perform any other side effect.

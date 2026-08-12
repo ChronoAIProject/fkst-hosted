@@ -1,0 +1,763 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:chronoai:fkst:qa-contracts:qa.local-worker-protocol:v1",
+  "$defs": {
+    "InvocationId": {
+      "type": "string",
+      "pattern": "^invocation/[0-9]+$",
+      "maxLength": 64
+    },
+    "RequestId": {
+      "type": "string",
+      "pattern": "^capability/[0-9]+$",
+      "maxLength": 64
+    },
+    "EmptyObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "maxProperties": 0
+    },
+    "BrowserSmokeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "fixtureUrl",
+        "selector",
+        "expectedText",
+        "timeoutMs"
+      ],
+      "properties": {
+        "version": {
+          "const": "local-qa-browser-smoke/request-v1"
+        },
+        "fixtureUrl": {
+          "type": "string",
+          "pattern": "^http://127\\.0\\.0\\.1:([0-9]+)/fixed-page\\.html$"
+        },
+        "selector": {
+          "const": "[data-local-qa=\"status\"]"
+        },
+        "expectedText": {
+          "const": "READY"
+        },
+        "timeoutMs": {
+          "const": 5000
+        }
+      }
+    },
+    "LocalSanitizedObservationRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "id",
+        "schema_version",
+        "content_digest"
+      ],
+      "properties": {
+        "kind": {
+          "const": "local-sanitized-observation"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^observation/[0-9]+$"
+        },
+        "schema_version": {
+          "const": "qa.local-evidence/v1"
+        },
+        "content_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "LocalEvidenceObjectRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "id",
+        "schema_version",
+        "content_digest"
+      ],
+      "properties": {
+        "kind": {
+          "const": "local-evidence-object"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^evidence/[0-9]+$"
+        },
+        "schema_version": {
+          "const": "qa.local-evidence/v1"
+        },
+        "content_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "ClockNowResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value"
+      ],
+      "properties": {
+        "value": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        }
+      }
+    },
+    "MonotonicResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value"
+      ],
+      "properties": {
+        "value": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "BrowserRunResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "finalUrl",
+        "observedText",
+        "sanitizedObservationRef",
+        "screenshotEvidenceRef"
+      ],
+      "properties": {
+        "finalUrl": {
+          "type": "string",
+          "pattern": "^http://127\\.0\\.0\\.1:([0-9]+)/fixed-page\\.html$"
+        },
+        "observedText": {
+          "const": "READY"
+        },
+        "sanitizedObservationRef": {
+          "$ref": "#/$defs/LocalSanitizedObservationRef"
+        },
+        "screenshotEvidenceRef": {
+          "$ref": "#/$defs/LocalEvidenceObjectRef"
+        }
+      }
+    },
+    "StageLogRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "mediaType",
+        "template"
+      ],
+      "properties": {
+        "name": {
+          "const": "runner.log"
+        },
+        "mediaType": {
+          "const": "text/plain; charset=utf-8"
+        },
+        "template": {
+          "const": "fixed-browser-smoke-runner-log/v1"
+        }
+      }
+    },
+    "StageLogResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runnerLogEvidenceRef"
+      ],
+      "properties": {
+        "runnerLogEvidenceRef": {
+          "$ref": "#/$defs/LocalEvidenceObjectRef"
+        }
+      }
+    },
+    "BrowserSmokeResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "outcome",
+        "observation",
+        "startedAt",
+        "finishedAt",
+        "durationMs",
+        "evidence"
+      ],
+      "properties": {
+        "version": {
+          "const": "local-qa-browser-smoke/result-v1"
+        },
+        "outcome": {
+          "const": "passed"
+        },
+        "observation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "fixtureUrl",
+            "finalUrl",
+            "selector",
+            "expectedText",
+            "observedText",
+            "sanitizedObservationRef"
+          ],
+          "properties": {
+            "fixtureUrl": {
+              "type": "string",
+              "pattern": "^http://127\\.0\\.0\\.1:([0-9]+)/fixed-page\\.html$"
+            },
+            "finalUrl": {
+              "type": "string",
+              "pattern": "^http://127\\.0\\.0\\.1:([0-9]+)/fixed-page\\.html$"
+            },
+            "selector": {
+              "const": "[data-local-qa=\"status\"]"
+            },
+            "expectedText": {
+              "const": "READY"
+            },
+            "observedText": {
+              "const": "READY"
+            },
+            "sanitizedObservationRef": {
+              "$ref": "#/$defs/LocalSanitizedObservationRef"
+            }
+          }
+        },
+        "startedAt": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "finishedAt": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "prefixItems": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "objectId",
+                "role",
+                "artifactRef"
+              ],
+              "properties": {
+                "objectId": {
+                  "const": "evidence/0"
+                },
+                "role": {
+                  "const": "screenshot"
+                },
+                "artifactRef": {
+                  "$ref": "#/$defs/LocalEvidenceObjectRef"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "objectId",
+                "role",
+                "artifactRef"
+              ],
+              "properties": {
+                "objectId": {
+                  "const": "evidence/1"
+                },
+                "role": {
+                  "const": "runner-log"
+                },
+                "artifactRef": {
+                  "$ref": "#/$defs/LocalEvidenceObjectRef"
+                }
+              }
+            }
+          ],
+          "items": false
+        }
+      }
+    },
+    "LocalWorkerInvocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "kind",
+        "invocation_id",
+        "operation",
+        "input"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "qa.local-worker-protocol/v1"
+        },
+        "kind": {
+          "const": "invocation"
+        },
+        "invocation_id": {
+          "$ref": "#/$defs/InvocationId"
+        },
+        "operation": {
+          "const": "browser-smoke"
+        },
+        "input": {
+          "$ref": "#/$defs/BrowserSmokeRequest"
+        }
+      }
+    },
+    "CapabilityRequest0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "kind",
+        "invocation_id",
+        "request_id",
+        "capability",
+        "input"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "qa.local-worker-protocol/v1"
+        },
+        "kind": {
+          "const": "capability_request"
+        },
+        "invocation_id": {
+          "$ref": "#/$defs/InvocationId"
+        },
+        "request_id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "capability": {
+          "const": "clock.now/v1"
+        },
+        "input": {
+          "$ref": "#/$defs/EmptyObject"
+        }
+      }
+    },
+    "CapabilityRequest1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "kind",
+        "invocation_id",
+        "request_id",
+        "capability",
+        "input"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "qa.local-worker-protocol/v1"
+        },
+        "kind": {
+          "const": "capability_request"
+        },
+        "invocation_id": {
+          "$ref": "#/$defs/InvocationId"
+        },
+        "request_id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "capability": {
+          "const": "clock.monotonic-ms/v1"
+        },
+        "input": {
+          "$ref": "#/$defs/EmptyObject"
+        }
+      }
+    },
+    "CapabilityRequest2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "kind",
+        "invocation_id",
+        "request_id",
+        "capability",
+        "input"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "qa.local-worker-protocol/v1"
+        },
+        "kind": {
+          "const": "capability_request"
+        },
+        "invocation_id": {
+          "$ref": "#/$defs/InvocationId"
+        },
+        "request_id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "capability": {
+          "const": "browser-session.run/v1"
+        },
+        "input": {
+          "$ref": "#/$defs/BrowserSmokeRequest"
+        }
+      }
+    },
+    "CapabilityRequest3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "kind",
+        "invocation_id",
+        "request_id",
+        "capability",
+        "input"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "qa.local-worker-protocol/v1"
+        },
+        "kind": {
+          "const": "capability_request"
+        },
+        "invocation_id": {
+          "$ref": "#/$defs/InvocationId"
+        },
+        "request_id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "capability": {
+          "const": "evidence.stage-fixed-runner-log/v1"
+        },
+        "input": {
+          "$ref": "#/$defs/StageLogRequest"
+        }
+      }
+    },
+    "CapabilityRequest4": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "kind",
+        "invocation_id",
+        "request_id",
+        "capability",
+        "input"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "qa.local-worker-protocol/v1"
+        },
+        "kind": {
+          "const": "capability_request"
+        },
+        "invocation_id": {
+          "$ref": "#/$defs/InvocationId"
+        },
+        "request_id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "capability": {
+          "const": "browser-session.close/v1"
+        },
+        "input": {
+          "$ref": "#/$defs/EmptyObject"
+        }
+      }
+    },
+    "CapabilityResult0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "kind",
+        "invocation_id",
+        "request_id",
+        "capability",
+        "output"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "qa.local-worker-protocol/v1"
+        },
+        "kind": {
+          "const": "capability_result"
+        },
+        "invocation_id": {
+          "$ref": "#/$defs/InvocationId"
+        },
+        "request_id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "capability": {
+          "const": "clock.now/v1"
+        },
+        "output": {
+          "$ref": "#/$defs/ClockNowResult"
+        }
+      }
+    },
+    "CapabilityResult1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "kind",
+        "invocation_id",
+        "request_id",
+        "capability",
+        "output"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "qa.local-worker-protocol/v1"
+        },
+        "kind": {
+          "const": "capability_result"
+        },
+        "invocation_id": {
+          "$ref": "#/$defs/InvocationId"
+        },
+        "request_id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "capability": {
+          "const": "clock.monotonic-ms/v1"
+        },
+        "output": {
+          "$ref": "#/$defs/MonotonicResult"
+        }
+      }
+    },
+    "CapabilityResult2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "kind",
+        "invocation_id",
+        "request_id",
+        "capability",
+        "output"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "qa.local-worker-protocol/v1"
+        },
+        "kind": {
+          "const": "capability_result"
+        },
+        "invocation_id": {
+          "$ref": "#/$defs/InvocationId"
+        },
+        "request_id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "capability": {
+          "const": "browser-session.run/v1"
+        },
+        "output": {
+          "$ref": "#/$defs/BrowserRunResult"
+        }
+      }
+    },
+    "CapabilityResult3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "kind",
+        "invocation_id",
+        "request_id",
+        "capability",
+        "output"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "qa.local-worker-protocol/v1"
+        },
+        "kind": {
+          "const": "capability_result"
+        },
+        "invocation_id": {
+          "$ref": "#/$defs/InvocationId"
+        },
+        "request_id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "capability": {
+          "const": "evidence.stage-fixed-runner-log/v1"
+        },
+        "output": {
+          "$ref": "#/$defs/StageLogResult"
+        }
+      }
+    },
+    "CapabilityResult4": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "kind",
+        "invocation_id",
+        "request_id",
+        "capability",
+        "output"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "qa.local-worker-protocol/v1"
+        },
+        "kind": {
+          "const": "capability_result"
+        },
+        "invocation_id": {
+          "$ref": "#/$defs/InvocationId"
+        },
+        "request_id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "capability": {
+          "const": "browser-session.close/v1"
+        },
+        "output": {
+          "$ref": "#/$defs/EmptyObject"
+        }
+      }
+    },
+    "LocalWorkerCapabilityRequest": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/CapabilityRequest0"
+        },
+        {
+          "$ref": "#/$defs/CapabilityRequest1"
+        },
+        {
+          "$ref": "#/$defs/CapabilityRequest2"
+        },
+        {
+          "$ref": "#/$defs/CapabilityRequest3"
+        },
+        {
+          "$ref": "#/$defs/CapabilityRequest4"
+        }
+      ]
+    },
+    "LocalWorkerCapabilityResult": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/CapabilityResult0"
+        },
+        {
+          "$ref": "#/$defs/CapabilityResult1"
+        },
+        {
+          "$ref": "#/$defs/CapabilityResult2"
+        },
+        {
+          "$ref": "#/$defs/CapabilityResult3"
+        },
+        {
+          "$ref": "#/$defs/CapabilityResult4"
+        }
+      ]
+    },
+    "LocalWorkerTerminalResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "kind",
+        "invocation_id",
+        "outcome",
+        "result"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "qa.local-worker-protocol/v1"
+        },
+        "kind": {
+          "const": "terminal_result"
+        },
+        "invocation_id": {
+          "$ref": "#/$defs/InvocationId"
+        },
+        "outcome": {
+          "const": "passed"
+        },
+        "result": {
+          "$ref": "#/$defs/BrowserSmokeResult"
+        }
+      }
+    },
+    "LocalWorkerProtocolFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "kind",
+        "code"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "qa.local-worker-protocol/v1"
+        },
+        "kind": {
+          "const": "protocol_failure"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      }
+    },
+    "LocalWorkerFrame": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/LocalWorkerInvocation"
+        },
+        {
+          "$ref": "#/$defs/LocalWorkerCapabilityRequest"
+        },
+        {
+          "$ref": "#/$defs/LocalWorkerCapabilityResult"
+        },
+        {
+          "$ref": "#/$defs/LocalWorkerTerminalResult"
+        },
+        {
+          "$ref": "#/$defs/LocalWorkerProtocolFailure"
+        }
+      ]
+    }
+  }
+}

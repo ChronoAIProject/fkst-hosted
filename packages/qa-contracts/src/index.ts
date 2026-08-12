@@ -16,6 +16,7 @@ import {
 const MAX_DEPTH = 128;
 const MAX_SAFE_INTEGER = 9_007_199_254_740_991n;
 const SUPPORTED_SCHEMA_MAJOR = 1;
+export const LOCAL_WORKER_MAX_FRAME_BYTES = 65_536;
 const LOCAL_STATE_TYPE_NAME = "LocalState";
 const EXECUTION_OUTCOME_TYPE_NAME = "ExecutionOutcome";
 const CANCEL_DISPOSITION_TYPE_NAME = "CancelDisposition";
@@ -37,6 +38,14 @@ const LOCAL_EVIDENCE_TYPE_NAMES = Object.freeze([
   LOCAL_EVIDENCE_OBJECT_TYPE_NAME,
   LOCAL_SANITIZED_OBSERVATION_REF_TYPE_NAME,
   LOCAL_EVIDENCE_OBJECT_REF_TYPE_NAME,
+] as const);
+const LOCAL_WORKER_TYPE_NAMES = Object.freeze([
+  "LocalWorkerFrame",
+  "LocalWorkerInvocation",
+  "LocalWorkerCapabilityRequest",
+  "LocalWorkerCapabilityResult",
+  "LocalWorkerTerminalResult",
+  "LocalWorkerProtocolFailure",
 ] as const);
 const FOUNDATION_TYPE_NAMES = Object.freeze([
   "ContractMeta",
@@ -144,6 +153,9 @@ for (const type of LIFECYCLE_TYPE_NAMES) {
 for (const type of LOCAL_EVIDENCE_TYPE_NAMES) {
   VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
 }
+for (const type of LOCAL_WORKER_TYPE_NAMES) {
+  VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
+}
 
 export class AdmittedJson {
   readonly #value: unknown;
@@ -242,6 +254,83 @@ export function validateLocalSanitizedObservationRef(raw: Uint8Array): Validated
 
 export function validateLocalEvidenceObjectRef(raw: Uint8Array): ValidatedValue {
   return validateRegisteredValue(admitJson(raw), LOCAL_EVIDENCE_OBJECT_REF_TYPE_NAME);
+}
+
+export function validateLocalWorkerFrame(raw: Uint8Array): ValidatedValue {
+  const validated = validateRegisteredValue(admitJson(raw), "LocalWorkerFrame");
+  validateLocalWorkerUrls(validated.value());
+  return validated;
+}
+
+export function validateLocalWorkerInvocation(raw: Uint8Array): ValidatedValue {
+  const validated = validateRegisteredValue(admitJson(raw), "LocalWorkerInvocation");
+  validateLocalWorkerUrls(validated.value());
+  return validated;
+}
+
+export function validateLocalWorkerCapabilityRequest(raw: Uint8Array): ValidatedValue {
+  const validated = validateRegisteredValue(admitJson(raw), "LocalWorkerCapabilityRequest");
+  validateLocalWorkerUrls(validated.value());
+  return validated;
+}
+
+export function validateLocalWorkerCapabilityResult(raw: Uint8Array): ValidatedValue {
+  const validated = validateRegisteredValue(admitJson(raw), "LocalWorkerCapabilityResult");
+  validateLocalWorkerUrls(validated.value());
+  return validated;
+}
+
+export function validateLocalWorkerTerminalResult(raw: Uint8Array): ValidatedValue {
+  const validated = validateRegisteredValue(admitJson(raw), "LocalWorkerTerminalResult");
+  validateLocalWorkerUrls(validated.value());
+  return validated;
+}
+
+export function validateLocalWorkerProtocolFailure(raw: Uint8Array): ValidatedValue {
+  return validateRegisteredValue(admitJson(raw), "LocalWorkerProtocolFailure");
+}
+
+export function encodeLocalWorkerFrame(value: ValidatedValue): Uint8Array {
+  const payload = canonicalBytes(value);
+  if (payload.length < 1 || payload.length > LOCAL_WORKER_MAX_FRAME_BYTES) {
+    throw new ContractError({ category: "validation", reason: "frame_length_out_of_range", path: "/" });
+  }
+  const frame = new Uint8Array(4 + payload.length);
+  new DataView(frame.buffer).setUint32(0, payload.length, false);
+  frame.set(payload, 4);
+  return frame;
+}
+
+export class LocalWorkerFrameDecoder {
+  #buffer = new Uint8Array(0);
+
+  push(chunk: Uint8Array): readonly ValidatedValue[] {
+    if (chunk.length > 0) {
+      const combined = new Uint8Array(this.#buffer.length + chunk.length);
+      combined.set(this.#buffer);
+      combined.set(chunk, this.#buffer.length);
+      this.#buffer = combined;
+    }
+    const frames: ValidatedValue[] = [];
+    let offset = 0;
+    while (this.#buffer.length - offset >= 4) {
+      const length = new DataView(this.#buffer.buffer, this.#buffer.byteOffset + offset, 4).getUint32(0, false);
+      if (length < 1 || length > LOCAL_WORKER_MAX_FRAME_BYTES) {
+        throw new ContractError({ category: "validation", reason: "frame_length_out_of_range", path: "/" });
+      }
+      if (this.#buffer.length - offset - 4 < length) break;
+      frames.push(validateLocalWorkerFrame(this.#buffer.slice(offset + 4, offset + 4 + length)));
+      offset += 4 + length;
+    }
+    if (offset > 0) this.#buffer = this.#buffer.slice(offset);
+    return frames;
+  }
+
+  finish(): void {
+    if (this.#buffer.length !== 0) {
+      throw new ContractError({ category: "validation", reason: "truncated_frame", path: "/" });
+    }
+  }
 }
 
 export function validateValue(admitted: AdmittedJson, type: FoundationType): ValidatedValue {
@@ -396,6 +485,28 @@ function validateRegistry(registry: ContractRegistry): void {
     if (entry?.fixture_only !== undefined) {
       throw new Error(`qa contract fixture-only marker is invalid: ${type}`);
     }
+  }
+  for (const type of LOCAL_WORKER_TYPE_NAMES) {
+    const entry = registry.types[type];
+    if (entry?.fixture_only !== undefined) {
+      throw new Error(`qa contract fixture-only marker is invalid: ${type}`);
+    }
+  }
+}
+
+
+function validateLocalWorkerUrls(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) validateLocalWorkerUrls(item);
+    return;
+  }
+  if (typeof value !== "object" || value === null) return;
+  for (const [key, child] of Object.entries(value)) {
+    if ((key === "fixtureUrl" || key === "finalUrl") &&
+        (typeof child !== "string" || !isFixedFixtureUrl(child))) {
+      throw new ContractError({ category: "validation", reason: "schema_violation", path: `/${key}` });
+    }
+    validateLocalWorkerUrls(child);
   }
 }
 

@@ -17,24 +17,24 @@ const requestValue = {
 };
 const requestJson = JSON.stringify(requestValue);
 const sanitizedObservationRef = {
-  kind: "sanitized-observation",
+  kind: "local-sanitized-observation",
   id: "observation/0",
-  schema_version: "qa.sanitized-observation/v1",
+  schema_version: "qa.local-evidence/v1",
   content_digest: `sha256:${"a".repeat(64)}`,
 };
-const screenshotArtifactRef = {
-  kind: "artifact-pointer",
-  id: "artifact/0",
-  schema_version: "qa.artifact-pointer/v1",
+const screenshotEvidenceRef = {
+  kind: "local-evidence-object",
+  id: "evidence/0",
+  schema_version: "qa.local-evidence/v1",
   content_digest: "sha256:4c4b6a3be1314ab86138bef4314dde022e600960d8689a2c8f8631802d20dab6",
 };
-const runnerLogArtifactRef = {
-  kind: "artifact-pointer",
-  id: "artifact/1",
-  schema_version: "qa.artifact-pointer/v1",
+const runnerLogEvidenceRef = {
+  kind: "local-evidence-object",
+  id: "evidence/1",
+  schema_version: "qa.local-evidence/v1",
   content_digest: "sha256:bb9c62cc84fc533e52193a8961778b0be251cd8f19a89b3fa836e94043a0075e",
 };
-const expectedSerialized = '{"version":"local-qa-browser-smoke/result-v1","outcome":"passed","observation":{"fixtureUrl":"http://127.0.0.1:43123/fixed-page.html","finalUrl":"http://127.0.0.1:43123/fixed-page.html","selector":"[data-local-qa=\\"status\\"]","expectedText":"READY","observedText":"READY","sanitizedObservationRef":{"kind":"sanitized-observation","id":"observation/0","schema_version":"qa.sanitized-observation/v1","content_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"startedAt":"2026-01-02T03:04:05.000Z","finishedAt":"2026-01-02T03:04:05.012Z","durationMs":12,"evidence":[{"objectId":"evidence/0","role":"screenshot","artifactRef":{"kind":"artifact-pointer","id":"artifact/0","schema_version":"qa.artifact-pointer/v1","content_digest":"sha256:4c4b6a3be1314ab86138bef4314dde022e600960d8689a2c8f8631802d20dab6"}},{"objectId":"evidence/1","role":"runner-log","artifactRef":{"kind":"artifact-pointer","id":"artifact/1","schema_version":"qa.artifact-pointer/v1","content_digest":"sha256:bb9c62cc84fc533e52193a8961778b0be251cd8f19a89b3fa836e94043a0075e"}}]}';
+const expectedSerialized = '{"version":"local-qa-browser-smoke/result-v1","outcome":"passed","observation":{"fixtureUrl":"http://127.0.0.1:43123/fixed-page.html","finalUrl":"http://127.0.0.1:43123/fixed-page.html","selector":"[data-local-qa=\\"status\\"]","expectedText":"READY","observedText":"READY","sanitizedObservationRef":{"kind":"local-sanitized-observation","id":"observation/0","schema_version":"qa.local-evidence/v1","content_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"startedAt":"2026-01-02T03:04:05.000Z","finishedAt":"2026-01-02T03:04:05.012Z","durationMs":12,"evidence":[{"objectId":"evidence/0","role":"screenshot","artifactRef":{"kind":"local-evidence-object","id":"evidence/0","schema_version":"qa.local-evidence/v1","content_digest":"sha256:4c4b6a3be1314ab86138bef4314dde022e600960d8689a2c8f8631802d20dab6"}},{"objectId":"evidence/1","role":"runner-log","artifactRef":{"kind":"local-evidence-object","id":"evidence/1","schema_version":"qa.local-evidence/v1","content_digest":"sha256:bb9c62cc84fc533e52193a8961778b0be251cd8f19a89b3fa836e94043a0075e"}}]}';
 
 test("walks the fixed request through pure policy in exact order", async () => {
   const harness = createHarness();
@@ -64,8 +64,8 @@ test("walks the fixed request through pure policy in exact order", async () => {
   assert.equal("objects" in bundle, false);
   assert.deepEqual(bundle.result.observation.sanitizedObservationRef, sanitizedObservationRef);
   assert.deepEqual(bundle.result.evidence, [
-    { objectId: "evidence/0", role: "screenshot", artifactRef: screenshotArtifactRef },
-    { objectId: "evidence/1", role: "runner-log", artifactRef: runnerLogArtifactRef },
+    { objectId: "evidence/0", role: "screenshot", artifactRef: screenshotEvidenceRef },
+    { objectId: "evidence/1", role: "runner-log", artifactRef: runnerLogEvidenceRef },
   ]);
   assert.equal(new TextDecoder().decode(serializeBrowserSmokeResult(bundle.result)), expectedSerialized);
 });
@@ -237,8 +237,8 @@ test("rejects observed-text mismatch and non-string observations", async () => {
 
 test("rejects the complete canonical reference failure matrix", async () => {
   const matrices = [
-    ["sanitizedObservationRef", sanitizedObservationRef, "artifact-pointer", "qa.artifact-pointer/v1"],
-    ["screenshotArtifactRef", screenshotArtifactRef, "sanitized-observation", "qa.sanitized-observation/v1"],
+    ["sanitizedObservationRef", sanitizedObservationRef, "local-evidence-object", "qa.local-evidence/v2"],
+    ["screenshotEvidenceRef", screenshotEvidenceRef, "local-sanitized-observation", "qa.local-evidence/v2"],
   ];
   for (const [field, reference, wrongKind, wrongSchema] of matrices) {
     for (const invalidReference of invalidReferenceVariants(reference, wrongKind, wrongSchema)) {
@@ -253,13 +253,13 @@ test("rejects the complete canonical reference failure matrix", async () => {
 });
 
 test("accepts optional reference versions and forwards every value unchanged", async () => {
-  const versionedObservation = { ...sanitizedObservationRef, id: 'observation/"quoted"', version: "obs-v1" };
-  const versionedScreenshot = { ...screenshotArtifactRef, id: "artifact/screenshot", version: "screen-v1" };
-  const versionedLog = { ...runnerLogArtifactRef, id: "artifact/log", version: "log-v1" };
+  const versionedObservation = { ...sanitizedObservationRef, version: "obs-v1" };
+  const versionedScreenshot = { ...screenshotEvidenceRef, version: "screen-v1" };
+  const versionedLog = { ...runnerLogEvidenceRef, version: "log-v1" };
   const harness = createHarness({
     sessionResult: validSessionResult({
       sanitizedObservationRef: versionedObservation,
-      screenshotArtifactRef: versionedScreenshot,
+      screenshotEvidenceRef: versionedScreenshot,
     }),
     stagingResult: versionedLog,
   });
@@ -273,7 +273,6 @@ test("accepts optional reference versions and forwards every value unchanged", a
     const fragment = `"content_digest":${JSON.stringify(reference.content_digest)},"version":${JSON.stringify(reference.version)}`;
     assert.equal(serialized.includes(fragment), true);
   }
-  assert.equal(serialized.includes('observation/\\"quoted\\"'), true);
   assert.equal(serialized.endsWith("\n"), false);
 });
 
@@ -288,9 +287,9 @@ test("maps staging rejection, validates staged references, and always finalizes"
   assert.equal(rejected.calls.close, 1);
 
   for (const invalidReference of invalidReferenceVariants(
-    runnerLogArtifactRef,
-    "sanitized-observation",
-    "qa.sanitized-observation/v1",
+    runnerLogEvidenceRef,
+    "local-sanitized-observation",
+    "qa.local-evidence/v2",
   )) {
     const harness = createHarness({ stagingResult: invalidReference });
     await captureWorkerError(() => runBrowserSmoke(requestJson, harness.ports), "evidence.invalid_reference");
@@ -418,7 +417,7 @@ function createHarness(options = {}) {
     : validSessionResult();
   const stagingResult = Object.prototype.hasOwnProperty.call(options, "stagingResult")
     ? options.stagingResult
-    : runnerLogArtifactRef;
+    : runnerLogEvidenceRef;
 
   return {
     events,
@@ -482,7 +481,7 @@ function validSessionResult(overrides = {}) {
     finalUrl: requestValue.fixtureUrl,
     observedText: "READY",
     sanitizedObservationRef,
-    screenshotArtifactRef,
+    screenshotEvidenceRef,
     ...overrides,
   };
 }

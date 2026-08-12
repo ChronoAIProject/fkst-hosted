@@ -55,11 +55,17 @@ production policy code. It:
 - always finalizes the injected session after acquisition; and
 - returns a bounded, deterministic serialized result.
 
+The fixed Worker executable walks that policy through the registered bounded
+`qa.local-worker-protocol/v1` over stdin/stdout. It accepts one invocation,
+performs the seven fixed typed capability exchanges, emits one terminal result,
+and exits. The process acceptance harness acts as the Host-shaped peer; the
+production Host does not yet invoke this Worker.
+
 The worker never discovers or launches Chrome, opens network or filesystem
-resources, creates profiles, downloads, or processes, persists Evidence, or
-owns Host cleanup. Browser output acquisition, screenshot production, reference
-digesting, and storage are responsibilities of the injected ports, not worker
-policy. The Host does not yet invoke this worker boundary.
+resources, creates profiles, downloads, or child processes, persists Evidence,
+or owns Host cleanup. Browser output acquisition, screenshot production,
+reference digesting, and storage are responsibilities of the protocol peer, not
+worker policy.
 
 The Rust `evidence-stager/` library owns bounded Local Evidence filesystem
 effects. It accepts validated Evidence identities and bytes, derives confined
@@ -82,8 +88,7 @@ safety net do not expose caller-programmable browser behavior.
 
 The following capabilities remain explicitly deferred:
 
-- Host coordination of the fixed Browser adapter and a Host-worker process
-  protocol;
+- Host executor integration of the fixed Browser adapter and Worker protocol;
 - Host integration of filesystem Evidence staging and journal Evidence
   references;
 - execution terminal outcomes and restart-to-`lost` reconciliation;

@@ -21,10 +21,13 @@ const LOCAL_LIFECYCLE_SCHEMA_PATH: &str = "contracts/qa.local-lifecycle/v1/schem
 const LOCAL_EVIDENCE_SCHEMA: &str =
     include_str!("../../contracts/qa.local-evidence/v1/schema.json");
 const LOCAL_EVIDENCE_SCHEMA_PATH: &str = "contracts/qa.local-evidence/v1/schema.json";
+const LOCAL_WORKER_SCHEMA: &str = include_str!("../../contracts/qa.local-worker-protocol/v1/schema.json");
+const LOCAL_WORKER_SCHEMA_PATH: &str = "contracts/qa.local-worker-protocol/v1/schema.json";
 const EMBEDDED_SCHEMAS: &[(&str, &str)] = &[
     (FOUNDATION_SCHEMA_PATH, FOUNDATION_SCHEMA),
     (LOCAL_LIFECYCLE_SCHEMA_PATH, LOCAL_LIFECYCLE_SCHEMA),
     (LOCAL_EVIDENCE_SCHEMA_PATH, LOCAL_EVIDENCE_SCHEMA),
+    (LOCAL_WORKER_SCHEMA_PATH, LOCAL_WORKER_SCHEMA),
 ];
 const LOCAL_STATE_TYPE_NAME: &str = "LocalState";
 const EXECUTION_OUTCOME_TYPE_NAME: &str = "ExecutionOutcome";
@@ -49,6 +52,15 @@ const LOCAL_EVIDENCE_TYPE_NAMES: [&str; 4] = [
     LOCAL_EVIDENCE_OBJECT_REF_TYPE_NAME,
 ];
 const SUPPORTED_SCHEMA_MAJOR: u64 = 1;
+pub const LOCAL_WORKER_MAX_FRAME_BYTES: usize = 65_536;
+const LOCAL_WORKER_TYPE_NAMES: [&str; 6] = [
+    "LocalWorkerFrame",
+    "LocalWorkerInvocation",
+    "LocalWorkerCapabilityRequest",
+    "LocalWorkerCapabilityResult",
+    "LocalWorkerTerminalResult",
+    "LocalWorkerProtocolFailure",
+];
 const MAX_DEPTH: usize = 128;
 const MAX_SAFE_INTEGER_TEXT: &str = "9007199254740991";
 
@@ -251,6 +263,107 @@ pub fn validate_local_evidence_object_ref(raw: &[u8]) -> Result<ValidatedValue, 
     validate_registered_value(admit_json(raw)?, LOCAL_EVIDENCE_OBJECT_REF_TYPE_NAME)
 }
 
+pub fn validate_local_worker_frame(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    let validated = validate_registered_value(admit_json(raw)?, "LocalWorkerFrame")?;
+    validate_local_worker_urls(validated.value())?;
+    Ok(validated)
+}
+
+pub fn validate_local_worker_invocation(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    let validated = validate_registered_value(admit_json(raw)?, "LocalWorkerInvocation")?;
+    validate_local_worker_urls(validated.value())?;
+    Ok(validated)
+}
+
+pub fn validate_local_worker_capability_request(
+    raw: &[u8],
+) -> Result<ValidatedValue, ContractError> {
+    let validated =
+        validate_registered_value(admit_json(raw)?, "LocalWorkerCapabilityRequest")?;
+    validate_local_worker_urls(validated.value())?;
+    Ok(validated)
+}
+
+pub fn validate_local_worker_capability_result(
+    raw: &[u8],
+) -> Result<ValidatedValue, ContractError> {
+    let validated = validate_registered_value(admit_json(raw)?, "LocalWorkerCapabilityResult")?;
+    validate_local_worker_urls(validated.value())?;
+    Ok(validated)
+}
+
+pub fn validate_local_worker_terminal_result(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    let validated = validate_registered_value(admit_json(raw)?, "LocalWorkerTerminalResult")?;
+    validate_local_worker_urls(validated.value())?;
+    Ok(validated)
+}
+
+pub fn validate_local_worker_protocol_failure(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    validate_registered_value(admit_json(raw)?, "LocalWorkerProtocolFailure")
+}
+
+pub fn encode_local_worker_frame(value: &ValidatedValue) -> Result<Vec<u8>, ContractError> {
+    let payload = canonical_bytes(value)?;
+    if payload.is_empty() || payload.len() > LOCAL_WORKER_MAX_FRAME_BYTES {
+        return Err(ContractError(Rejection::validation(
+            "frame_length_out_of_range",
+            "/",
+        )));
+    }
+    let mut frame = Vec::with_capacity(4 + payload.len());
+    frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    frame.extend_from_slice(&payload);
+    Ok(frame)
+}
+
+#[derive(Default)]
+pub struct LocalWorkerFrameDecoder {
+    buffer: Vec<u8>,
+}
+
+impl LocalWorkerFrameDecoder {
+    pub fn push(&mut self, chunk: &[u8]) -> Result<Vec<ValidatedValue>, ContractError> {
+        self.buffer.extend_from_slice(chunk);
+        let mut frames = Vec::new();
+        let mut offset = 0;
+        while self.buffer.len().saturating_sub(offset) >= 4 {
+            let length = u32::from_be_bytes(
+                self.buffer[offset..offset + 4]
+                    .try_into()
+                    .expect("four-byte prefix"),
+            ) as usize;
+            if length == 0 || length > LOCAL_WORKER_MAX_FRAME_BYTES {
+                return Err(ContractError(Rejection::validation(
+                    "frame_length_out_of_range",
+                    "/",
+                )));
+            }
+            if self.buffer.len() - offset - 4 < length {
+                break;
+            }
+            frames.push(validate_local_worker_frame(
+                &self.buffer[offset + 4..offset + 4 + length],
+            )?);
+            offset += 4 + length;
+        }
+        if offset > 0 {
+            self.buffer.drain(..offset);
+        }
+        Ok(frames)
+    }
+
+    pub fn finish(&self) -> Result<(), ContractError> {
+        if self.buffer.is_empty() {
+            Ok(())
+        } else {
+            Err(ContractError(Rejection::validation(
+                "truncated_frame",
+                "/",
+            )))
+        }
+    }
+}
+
 pub fn validate_value(
     admitted: AdmittedJson,
     foundation_type: FoundationType,
@@ -409,6 +522,44 @@ fn validate_registry_value(registry: &Registry) -> Result<(), ContractError> {
                 format!("/types/{type_name}"),
             )));
         }
+    }
+    for type_name in LOCAL_WORKER_TYPE_NAMES {
+        schema_for_registered_type(registry, type_name, embedded_schema)?;
+        let entry = registry
+            .types
+            .get(type_name)
+            .expect("registered type was resolved above");
+        if entry.fixture_only {
+            return Err(ContractError(Rejection::validation(
+                "invalid_embedded_registry",
+                format!("/types/{type_name}"),
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_local_worker_urls(value: &Value) -> Result<(), ContractError> {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                validate_local_worker_urls(item)?;
+            }
+        }
+        Value::Object(object) => {
+            for (key, child) in object {
+                if matches!(key.as_str(), "fixtureUrl" | "finalUrl")
+                    && !child.as_str().is_some_and(is_fixed_fixture_url)
+                {
+                    return Err(ContractError(Rejection::validation(
+                        "schema_violation",
+                        format!("/{key}"),
+                    )));
+                }
+                validate_local_worker_urls(child)?;
+            }
+        }
+        _ => {}
     }
     Ok(())
 }

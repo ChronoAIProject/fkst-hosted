@@ -12,3 +12,5 @@ export {
   type EvidenceStagingPort,
   type WorkerErrorCode,
 } from "./policy.js";
+
+export { runProtocolWorker } from "./protocol-worker.js";
