@@ -132,14 +132,19 @@ done
 
 node - <<'NODE'
 const pkg = require('./apps/local-qa-runtime/workers/package.json');
-const scripts = {
-  build: 'tsc -p tsconfig.build.json',
-  typecheck: 'tsc -p tsconfig.json',
-  test: 'tsc -p tsconfig.build.json && node --test test/*.test.mjs',
+const dependencies = { '@chronoai/fkst-qa-contracts': 'file:../../../packages/qa-contracts' };
+const devDependencies = { '@types/node': '20.19.43', typescript: '5.9.3' };
+const bin = { 'fkst-local-qa-worker': 'dist/worker-main.js' };
+const expectedScripts = {
+  build: 'npm run build --prefix ../../../packages/qa-contracts && tsc -p tsconfig.build.json',
+  typecheck: 'npm run build --prefix ../../../packages/qa-contracts && tsc -p tsconfig.json',
+  test: 'npm run build --prefix ../../../packages/qa-contracts && tsc -p tsconfig.build.json && node --test test/*.test.mjs',
 };
-if (pkg.dependencies || JSON.stringify(pkg.scripts) !== JSON.stringify(scripts) ||
-    JSON.stringify(pkg.devDependencies) !== JSON.stringify({ typescript: '5.9.3' })) {
-  throw new Error('workers package gained unreviewed dependencies or scripts');
+if (JSON.stringify(pkg.dependencies) !== JSON.stringify(dependencies) ||
+    JSON.stringify(pkg.scripts) !== JSON.stringify(expectedScripts) ||
+    JSON.stringify(pkg.devDependencies) !== JSON.stringify(devDependencies) ||
+    JSON.stringify(pkg.bin) !== JSON.stringify(bin)) {
+  throw new Error('workers package gained unreviewed dependencies, scripts, or executables');
 }
 NODE
 
@@ -157,6 +162,7 @@ unexpected=$(find apps/local-qa-runtime -type f \
   \( -perm -111 -o -name '*.sh' -o -name '*.py' -o -name '*.js' -o -name '*.mjs' \) \
   ! -path 'apps/local-qa-runtime/tests/scaffold-structure.sh' \
   ! -path 'apps/local-qa-runtime/workers/test/browser-smoke.test.mjs' \
+  ! -path 'apps/local-qa-runtime/workers/test/protocol-worker.test.mjs' \
   ! -path '*/node_modules/*' ! -path '*/target/*' ! -path '*/dist/*')
 [[ -z "$unexpected" ]] || { echo 'unexpected executable implementation file' >&2; exit 1; }
 

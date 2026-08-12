@@ -4,11 +4,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.build.json && node --test test/*.test.mjs"
+    "build": "npm run build --prefix ../../../packages/qa-contracts && tsc -p tsconfig.build.json",
+    "typecheck": "npm run build --prefix ../../../packages/qa-contracts && tsc -p tsconfig.json",
+    "test": "npm run build --prefix ../../../packages/qa-contracts && tsc -p tsconfig.build.json && node --test test/*.test.mjs"
   },
   "devDependencies": {
+    "@types/node": "20.19.43",
     "typescript": "5.9.3"
+  },
+  "bin": {
+    "fkst-local-qa-worker": "dist/worker-main.js"
+  },
+  "dependencies": {
+    "@chronoai/fkst-qa-contracts": "file:../../../packages/qa-contracts"
   }
 }

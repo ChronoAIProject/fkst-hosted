@@ -1,0 +1,298 @@
+{
+  "fixture_version": "qa.local-worker-protocol/happy-path-v1",
+  "frames": [
+    {
+      "direction": "host_to_worker",
+      "value": {
+        "protocol": "qa.local-worker-protocol/v1",
+        "kind": "invocation",
+        "invocation_id": "invocation/0",
+        "operation": "browser-smoke",
+        "input": {
+          "version": "local-qa-browser-smoke/request-v1",
+          "fixtureUrl": "http://127.0.0.1:43123/fixed-page.html",
+          "selector": "[data-local-qa=\"status\"]",
+          "expectedText": "READY",
+          "timeoutMs": 5000
+        }
+      },
+      "canonical_utf8": "{\"input\":{\"expectedText\":\"READY\",\"fixtureUrl\":\"http://127.0.0.1:43123/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"timeoutMs\":5000,\"version\":\"local-qa-browser-smoke/request-v1\"},\"invocation_id\":\"invocation/0\",\"kind\":\"invocation\",\"operation\":\"browser-smoke\",\"protocol\":\"qa.local-worker-protocol/v1\"}",
+      "wire_hex": "000001377b22696e707574223a7b22657870656374656454657874223a225245414459222c226669787475726555726c223a22687474703a2f2f3132372e302e302e313a34333132332f66697865642d706167652e68746d6c222c2273656c6563746f72223a225b646174612d6c6f63616c2d71613d5c227374617475735c225d222c2274696d656f75744d73223a353030302c2276657273696f6e223a226c6f63616c2d71612d62726f777365722d736d6f6b652f726571756573742d7631227d2c22696e766f636174696f6e5f6964223a22696e766f636174696f6e2f30222c226b696e64223a22696e766f636174696f6e222c226f7065726174696f6e223a2262726f777365722d736d6f6b65222c2270726f746f636f6c223a2271612e6c6f63616c2d776f726b65722d70726f746f636f6c2f7631227d"
+    },
+    {
+      "direction": "worker_to_host",
+      "value": {
+        "protocol": "qa.local-worker-protocol/v1",
+        "invocation_id": "invocation/0",
+        "request_id": "capability/0",
+        "capability": "clock.now/v1",
+        "kind": "capability_request",
+        "input": {}
+      },
+      "canonical_utf8": "{\"capability\":\"clock.now/v1\",\"input\":{},\"invocation_id\":\"invocation/0\",\"kind\":\"capability_request\",\"protocol\":\"qa.local-worker-protocol/v1\",\"request_id\":\"capability/0\"}",
+      "wire_hex": "000000a87b226361706162696c697479223a22636c6f636b2e6e6f772f7631222c22696e707574223a7b7d2c22696e766f636174696f6e5f6964223a22696e766f636174696f6e2f30222c226b696e64223a226361706162696c6974795f72657175657374222c2270726f746f636f6c223a2271612e6c6f63616c2d776f726b65722d70726f746f636f6c2f7631222c22726571756573745f6964223a226361706162696c6974792f30227d"
+    },
+    {
+      "direction": "host_to_worker",
+      "value": {
+        "protocol": "qa.local-worker-protocol/v1",
+        "invocation_id": "invocation/0",
+        "request_id": "capability/0",
+        "capability": "clock.now/v1",
+        "kind": "capability_result",
+        "output": {
+          "value": "2026-01-02T03:04:05.000Z"
+        }
+      },
+      "canonical_utf8": "{\"capability\":\"clock.now/v1\",\"invocation_id\":\"invocation/0\",\"kind\":\"capability_result\",\"output\":{\"value\":\"2026-01-02T03:04:05.000Z\"},\"protocol\":\"qa.local-worker-protocol/v1\",\"request_id\":\"capability/0\"}",
+      "wire_hex": "000000ca7b226361706162696c697479223a22636c6f636b2e6e6f772f7631222c22696e766f636174696f6e5f6964223a22696e766f636174696f6e2f30222c226b696e64223a226361706162696c6974795f726573756c74222c226f7574707574223a7b2276616c7565223a22323032362d30312d30325430333a30343a30352e3030305a227d2c2270726f746f636f6c223a2271612e6c6f63616c2d776f726b65722d70726f746f636f6c2f7631222c22726571756573745f6964223a226361706162696c6974792f30227d"
+    },
+    {
+      "direction": "worker_to_host",
+      "value": {
+        "protocol": "qa.local-worker-protocol/v1",
+        "invocation_id": "invocation/0",
+        "request_id": "capability/1",
+        "capability": "clock.monotonic-ms/v1",
+        "kind": "capability_request",
+        "input": {}
+      },
+      "canonical_utf8": "{\"capability\":\"clock.monotonic-ms/v1\",\"input\":{},\"invocation_id\":\"invocation/0\",\"kind\":\"capability_request\",\"protocol\":\"qa.local-worker-protocol/v1\",\"request_id\":\"capability/1\"}",
+      "wire_hex": "000000b17b226361706162696c697479223a22636c6f636b2e6d6f6e6f746f6e69632d6d732f7631222c22696e707574223a7b7d2c22696e766f636174696f6e5f6964223a22696e766f636174696f6e2f30222c226b696e64223a226361706162696c6974795f72657175657374222c2270726f746f636f6c223a2271612e6c6f63616c2d776f726b65722d70726f746f636f6c2f7631222c22726571756573745f6964223a226361706162696c6974792f31227d"
+    },
+    {
+      "direction": "host_to_worker",
+      "value": {
+        "protocol": "qa.local-worker-protocol/v1",
+        "invocation_id": "invocation/0",
+        "request_id": "capability/1",
+        "capability": "clock.monotonic-ms/v1",
+        "kind": "capability_result",
+        "output": {
+          "value": 1000
+        }
+      },
+      "canonical_utf8": "{\"capability\":\"clock.monotonic-ms/v1\",\"invocation_id\":\"invocation/0\",\"kind\":\"capability_result\",\"output\":{\"value\":1000},\"protocol\":\"qa.local-worker-protocol/v1\",\"request_id\":\"capability/1\"}",
+      "wire_hex": "000000bd7b226361706162696c697479223a22636c6f636b2e6d6f6e6f746f6e69632d6d732f7631222c22696e766f636174696f6e5f6964223a22696e766f636174696f6e2f30222c226b696e64223a226361706162696c6974795f726573756c74222c226f7574707574223a7b2276616c7565223a313030307d2c2270726f746f636f6c223a2271612e6c6f63616c2d776f726b65722d70726f746f636f6c2f7631222c22726571756573745f6964223a226361706162696c6974792f31227d"
+    },
+    {
+      "direction": "worker_to_host",
+      "value": {
+        "protocol": "qa.local-worker-protocol/v1",
+        "invocation_id": "invocation/0",
+        "request_id": "capability/2",
+        "capability": "browser-session.run/v1",
+        "kind": "capability_request",
+        "input": {
+          "version": "local-qa-browser-smoke/request-v1",
+          "fixtureUrl": "http://127.0.0.1:43123/fixed-page.html",
+          "selector": "[data-local-qa=\"status\"]",
+          "expectedText": "READY",
+          "timeoutMs": 5000
+        }
+      },
+      "canonical_utf8": "{\"capability\":\"browser-session.run/v1\",\"input\":{\"expectedText\":\"READY\",\"fixtureUrl\":\"http://127.0.0.1:43123/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"timeoutMs\":5000,\"version\":\"local-qa-browser-smoke/request-v1\"},\"invocation_id\":\"invocation/0\",\"kind\":\"capability_request\",\"protocol\":\"qa.local-worker-protocol/v1\",\"request_id\":\"capability/2\"}",
+      "wire_hex": "000001657b226361706162696c697479223a2262726f777365722d73657373696f6e2e72756e2f7631222c22696e707574223a7b22657870656374656454657874223a225245414459222c226669787475726555726c223a22687474703a2f2f3132372e302e302e313a34333132332f66697865642d706167652e68746d6c222c2273656c6563746f72223a225b646174612d6c6f63616c2d71613d5c227374617475735c225d222c2274696d656f75744d73223a353030302c2276657273696f6e223a226c6f63616c2d71612d62726f777365722d736d6f6b652f726571756573742d7631227d2c22696e766f636174696f6e5f6964223a22696e766f636174696f6e2f30222c226b696e64223a226361706162696c6974795f72657175657374222c2270726f746f636f6c223a2271612e6c6f63616c2d776f726b65722d70726f746f636f6c2f7631222c22726571756573745f6964223a226361706162696c6974792f32227d"
+    },
+    {
+      "direction": "host_to_worker",
+      "value": {
+        "protocol": "qa.local-worker-protocol/v1",
+        "invocation_id": "invocation/0",
+        "request_id": "capability/2",
+        "capability": "browser-session.run/v1",
+        "kind": "capability_result",
+        "output": {
+          "finalUrl": "http://127.0.0.1:43123/fixed-page.html",
+          "observedText": "READY",
+          "sanitizedObservationRef": {
+            "kind": "local-sanitized-observation",
+            "id": "observation/0",
+            "schema_version": "qa.local-evidence/v1",
+            "content_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "screenshotEvidenceRef": {
+            "kind": "local-evidence-object",
+            "id": "evidence/0",
+            "schema_version": "qa.local-evidence/v1",
+            "content_digest": "sha256:4c4b6a3be1314ab86138bef4314dde022e600960d8689a2c8f8631802d20dab6"
+          }
+        }
+      },
+      "canonical_utf8": "{\"capability\":\"browser-session.run/v1\",\"invocation_id\":\"invocation/0\",\"kind\":\"capability_result\",\"output\":{\"finalUrl\":\"http://127.0.0.1:43123/fixed-page.html\",\"observedText\":\"READY\",\"sanitizedObservationRef\":{\"content_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"id\":\"observation/0\",\"kind\":\"local-sanitized-observation\",\"schema_version\":\"qa.local-evidence/v1\"},\"screenshotEvidenceRef\":{\"content_digest\":\"sha256:4c4b6a3be1314ab86138bef4314dde022e600960d8689a2c8f8631802d20dab6\",\"id\":\"evidence/0\",\"kind\":\"local-evidence-object\",\"schema_version\":\"qa.local-evidence/v1\"}},\"protocol\":\"qa.local-worker-protocol/v1\",\"request_id\":\"capability/2\"}",
+      "wire_hex": "000002a37b226361706162696c697479223a2262726f777365722d73657373696f6e2e72756e2f7631222c22696e766f636174696f6e5f6964223a22696e766f636174696f6e2f30222c226b696e64223a226361706162696c6974795f726573756c74222c226f7574707574223a7b2266696e616c55726c223a22687474703a2f2f3132372e302e302e313a34333132332f66697865642d706167652e68746d6c222c226f6273657276656454657874223a225245414459222c2273616e6974697a65644f62736572766174696f6e526566223a7b22636f6e74656e745f646967657374223a227368613235363a61616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161222c226964223a226f62736572766174696f6e2f30222c226b696e64223a226c6f63616c2d73616e6974697a65642d6f62736572766174696f6e222c22736368656d615f76657273696f6e223a2271612e6c6f63616c2d65766964656e63652f7631227d2c2273637265656e73686f7445766964656e6365526566223a7b22636f6e74656e745f646967657374223a227368613235363a34633462366133626531333134616238363133386265663433313464646530323265363030393630643836383961326338663836333138303264323064616236222c226964223a2265766964656e63652f30222c226b696e64223a226c6f63616c2d65766964656e63652d6f626a656374222c22736368656d615f76657273696f6e223a2271612e6c6f63616c2d65766964656e63652f7631227d7d2c2270726f746f636f6c223a2271612e6c6f63616c2d776f726b65722d70726f746f636f6c2f7631222c22726571756573745f6964223a226361706162696c6974792f32227d"
+    },
+    {
+      "direction": "worker_to_host",
+      "value": {
+        "protocol": "qa.local-worker-protocol/v1",
+        "invocation_id": "invocation/0",
+        "request_id": "capability/3",
+        "capability": "evidence.stage-fixed-runner-log/v1",
+        "kind": "capability_request",
+        "input": {
+          "name": "runner.log",
+          "mediaType": "text/plain; charset=utf-8",
+          "template": "fixed-browser-smoke-runner-log/v1"
+        }
+      },
+      "canonical_utf8": "{\"capability\":\"evidence.stage-fixed-runner-log/v1\",\"input\":{\"mediaType\":\"text/plain; charset=utf-8\",\"name\":\"runner.log\",\"template\":\"fixed-browser-smoke-runner-log/v1\"},\"invocation_id\":\"invocation/0\",\"kind\":\"capability_request\",\"protocol\":\"qa.local-worker-protocol/v1\",\"request_id\":\"capability/3\"}",
+      "wire_hex": "000001287b226361706162696c697479223a2265766964656e63652e73746167652d66697865642d72756e6e65722d6c6f672f7631222c22696e707574223a7b226d6564696154797065223a22746578742f706c61696e3b20636861727365743d7574662d38222c226e616d65223a2272756e6e65722e6c6f67222c2274656d706c617465223a2266697865642d62726f777365722d736d6f6b652d72756e6e65722d6c6f672f7631227d2c22696e766f636174696f6e5f6964223a22696e766f636174696f6e2f30222c226b696e64223a226361706162696c6974795f72657175657374222c2270726f746f636f6c223a2271612e6c6f63616c2d776f726b65722d70726f746f636f6c2f7631222c22726571756573745f6964223a226361706162696c6974792f33227d"
+    },
+    {
+      "direction": "host_to_worker",
+      "value": {
+        "protocol": "qa.local-worker-protocol/v1",
+        "invocation_id": "invocation/0",
+        "request_id": "capability/3",
+        "capability": "evidence.stage-fixed-runner-log/v1",
+        "kind": "capability_result",
+        "output": {
+          "runnerLogEvidenceRef": {
+            "kind": "local-evidence-object",
+            "id": "evidence/1",
+            "schema_version": "qa.local-evidence/v1",
+            "content_digest": "sha256:bb9c62cc84fc533e52193a8961778b0be251cd8f19a89b3fa836e94043a0075e"
+          }
+        }
+      },
+      "canonical_utf8": "{\"capability\":\"evidence.stage-fixed-runner-log/v1\",\"invocation_id\":\"invocation/0\",\"kind\":\"capability_result\",\"output\":{\"runnerLogEvidenceRef\":{\"content_digest\":\"sha256:bb9c62cc84fc533e52193a8961778b0be251cd8f19a89b3fa836e94043a0075e\",\"id\":\"evidence/1\",\"kind\":\"local-evidence-object\",\"schema_version\":\"qa.local-evidence/v1\"}},\"protocol\":\"qa.local-worker-protocol/v1\",\"request_id\":\"capability/3\"}",
+      "wire_hex": "0000018a7b226361706162696c697479223a2265766964656e63652e73746167652d66697865642d72756e6e65722d6c6f672f7631222c22696e766f636174696f6e5f6964223a22696e766f636174696f6e2f30222c226b696e64223a226361706162696c6974795f726573756c74222c226f7574707574223a7b2272756e6e65724c6f6745766964656e6365526566223a7b22636f6e74656e745f646967657374223a227368613235363a62623963363263633834666335333365353231393361383936313737386230626532353163643866313961383962336661383336653934303433613030373565222c226964223a2265766964656e63652f31222c226b696e64223a226c6f63616c2d65766964656e63652d6f626a656374222c22736368656d615f76657273696f6e223a2271612e6c6f63616c2d65766964656e63652f7631227d7d2c2270726f746f636f6c223a2271612e6c6f63616c2d776f726b65722d70726f746f636f6c2f7631222c22726571756573745f6964223a226361706162696c6974792f33227d"
+    },
+    {
+      "direction": "worker_to_host",
+      "value": {
+        "protocol": "qa.local-worker-protocol/v1",
+        "invocation_id": "invocation/0",
+        "request_id": "capability/4",
+        "capability": "browser-session.close/v1",
+        "kind": "capability_request",
+        "input": {}
+      },
+      "canonical_utf8": "{\"capability\":\"browser-session.close/v1\",\"input\":{},\"invocation_id\":\"invocation/0\",\"kind\":\"capability_request\",\"protocol\":\"qa.local-worker-protocol/v1\",\"request_id\":\"capability/4\"}",
+      "wire_hex": "000000b47b226361706162696c697479223a2262726f777365722d73657373696f6e2e636c6f73652f7631222c22696e707574223a7b7d2c22696e766f636174696f6e5f6964223a22696e766f636174696f6e2f30222c226b696e64223a226361706162696c6974795f72657175657374222c2270726f746f636f6c223a2271612e6c6f63616c2d776f726b65722d70726f746f636f6c2f7631222c22726571756573745f6964223a226361706162696c6974792f34227d"
+    },
+    {
+      "direction": "host_to_worker",
+      "value": {
+        "protocol": "qa.local-worker-protocol/v1",
+        "invocation_id": "invocation/0",
+        "request_id": "capability/4",
+        "capability": "browser-session.close/v1",
+        "kind": "capability_result",
+        "output": {}
+      },
+      "canonical_utf8": "{\"capability\":\"browser-session.close/v1\",\"invocation_id\":\"invocation/0\",\"kind\":\"capability_result\",\"output\":{},\"protocol\":\"qa.local-worker-protocol/v1\",\"request_id\":\"capability/4\"}",
+      "wire_hex": "000000b47b226361706162696c697479223a2262726f777365722d73657373696f6e2e636c6f73652f7631222c22696e766f636174696f6e5f6964223a22696e766f636174696f6e2f30222c226b696e64223a226361706162696c6974795f726573756c74222c226f7574707574223a7b7d2c2270726f746f636f6c223a2271612e6c6f63616c2d776f726b65722d70726f746f636f6c2f7631222c22726571756573745f6964223a226361706162696c6974792f34227d"
+    },
+    {
+      "direction": "worker_to_host",
+      "value": {
+        "protocol": "qa.local-worker-protocol/v1",
+        "invocation_id": "invocation/0",
+        "request_id": "capability/5",
+        "capability": "clock.now/v1",
+        "kind": "capability_request",
+        "input": {}
+      },
+      "canonical_utf8": "{\"capability\":\"clock.now/v1\",\"input\":{},\"invocation_id\":\"invocation/0\",\"kind\":\"capability_request\",\"protocol\":\"qa.local-worker-protocol/v1\",\"request_id\":\"capability/5\"}",
+      "wire_hex": "000000a87b226361706162696c697479223a22636c6f636b2e6e6f772f7631222c22696e707574223a7b7d2c22696e766f636174696f6e5f6964223a22696e766f636174696f6e2f30222c226b696e64223a226361706162696c6974795f72657175657374222c2270726f746f636f6c223a2271612e6c6f63616c2d776f726b65722d70726f746f636f6c2f7631222c22726571756573745f6964223a226361706162696c6974792f35227d"
+    },
+    {
+      "direction": "host_to_worker",
+      "value": {
+        "protocol": "qa.local-worker-protocol/v1",
+        "invocation_id": "invocation/0",
+        "request_id": "capability/5",
+        "capability": "clock.now/v1",
+        "kind": "capability_result",
+        "output": {
+          "value": "2026-01-02T03:04:05.012Z"
+        }
+      },
+      "canonical_utf8": "{\"capability\":\"clock.now/v1\",\"invocation_id\":\"invocation/0\",\"kind\":\"capability_result\",\"output\":{\"value\":\"2026-01-02T03:04:05.012Z\"},\"protocol\":\"qa.local-worker-protocol/v1\",\"request_id\":\"capability/5\"}",
+      "wire_hex": "000000ca7b226361706162696c697479223a22636c6f636b2e6e6f772f7631222c22696e766f636174696f6e5f6964223a22696e766f636174696f6e2f30222c226b696e64223a226361706162696c6974795f726573756c74222c226f7574707574223a7b2276616c7565223a22323032362d30312d30325430333a30343a30352e3031325a227d2c2270726f746f636f6c223a2271612e6c6f63616c2d776f726b65722d70726f746f636f6c2f7631222c22726571756573745f6964223a226361706162696c6974792f35227d"
+    },
+    {
+      "direction": "worker_to_host",
+      "value": {
+        "protocol": "qa.local-worker-protocol/v1",
+        "invocation_id": "invocation/0",
+        "request_id": "capability/6",
+        "capability": "clock.monotonic-ms/v1",
+        "kind": "capability_request",
+        "input": {}
+      },
+      "canonical_utf8": "{\"capability\":\"clock.monotonic-ms/v1\",\"input\":{},\"invocation_id\":\"invocation/0\",\"kind\":\"capability_request\",\"protocol\":\"qa.local-worker-protocol/v1\",\"request_id\":\"capability/6\"}",
+      "wire_hex": "000000b17b226361706162696c697479223a22636c6f636b2e6d6f6e6f746f6e69632d6d732f7631222c22696e707574223a7b7d2c22696e766f636174696f6e5f6964223a22696e766f636174696f6e2f30222c226b696e64223a226361706162696c6974795f72657175657374222c2270726f746f636f6c223a2271612e6c6f63616c2d776f726b65722d70726f746f636f6c2f7631222c22726571756573745f6964223a226361706162696c6974792f36227d"
+    },
+    {
+      "direction": "host_to_worker",
+      "value": {
+        "protocol": "qa.local-worker-protocol/v1",
+        "invocation_id": "invocation/0",
+        "request_id": "capability/6",
+        "capability": "clock.monotonic-ms/v1",
+        "kind": "capability_result",
+        "output": {
+          "value": 1012
+        }
+      },
+      "canonical_utf8": "{\"capability\":\"clock.monotonic-ms/v1\",\"invocation_id\":\"invocation/0\",\"kind\":\"capability_result\",\"output\":{\"value\":1012},\"protocol\":\"qa.local-worker-protocol/v1\",\"request_id\":\"capability/6\"}",
+      "wire_hex": "000000bd7b226361706162696c697479223a22636c6f636b2e6d6f6e6f746f6e69632d6d732f7631222c22696e766f636174696f6e5f6964223a22696e766f636174696f6e2f30222c226b696e64223a226361706162696c6974795f726573756c74222c226f7574707574223a7b2276616c7565223a313031327d2c2270726f746f636f6c223a2271612e6c6f63616c2d776f726b65722d70726f746f636f6c2f7631222c22726571756573745f6964223a226361706162696c6974792f36227d"
+    },
+    {
+      "direction": "worker_to_host",
+      "value": {
+        "protocol": "qa.local-worker-protocol/v1",
+        "kind": "terminal_result",
+        "invocation_id": "invocation/0",
+        "outcome": "passed",
+        "result": {
+          "version": "local-qa-browser-smoke/result-v1",
+          "outcome": "passed",
+          "observation": {
+            "fixtureUrl": "http://127.0.0.1:43123/fixed-page.html",
+            "finalUrl": "http://127.0.0.1:43123/fixed-page.html",
+            "selector": "[data-local-qa=\"status\"]",
+            "expectedText": "READY",
+            "observedText": "READY",
+            "sanitizedObservationRef": {
+              "kind": "local-sanitized-observation",
+              "id": "observation/0",
+              "schema_version": "qa.local-evidence/v1",
+              "content_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          },
+          "startedAt": "2026-01-02T03:04:05.000Z",
+          "finishedAt": "2026-01-02T03:04:05.012Z",
+          "durationMs": 12,
+          "evidence": [
+            {
+              "objectId": "evidence/0",
+              "role": "screenshot",
+              "artifactRef": {
+                "kind": "local-evidence-object",
+                "id": "evidence/0",
+                "schema_version": "qa.local-evidence/v1",
+                "content_digest": "sha256:4c4b6a3be1314ab86138bef4314dde022e600960d8689a2c8f8631802d20dab6"
+              }
+            },
+            {
+              "objectId": "evidence/1",
+              "role": "runner-log",
+              "artifactRef": {
+                "kind": "local-evidence-object",
+                "id": "evidence/1",
+                "schema_version": "qa.local-evidence/v1",
+                "content_digest": "sha256:bb9c62cc84fc533e52193a8961778b0be251cd8f19a89b3fa836e94043a0075e"
+              }
+            }
+          ]
+        }
+      },
+      "canonical_utf8": "{\"invocation_id\":\"invocation/0\",\"kind\":\"terminal_result\",\"outcome\":\"passed\",\"protocol\":\"qa.local-worker-protocol/v1\",\"result\":{\"durationMs\":12,\"evidence\":[{\"artifactRef\":{\"content_digest\":\"sha256:4c4b6a3be1314ab86138bef4314dde022e600960d8689a2c8f8631802d20dab6\",\"id\":\"evidence/0\",\"kind\":\"local-evidence-object\",\"schema_version\":\"qa.local-evidence/v1\"},\"objectId\":\"evidence/0\",\"role\":\"screenshot\"},{\"artifactRef\":{\"content_digest\":\"sha256:bb9c62cc84fc533e52193a8961778b0be251cd8f19a89b3fa836e94043a0075e\",\"id\":\"evidence/1\",\"kind\":\"local-evidence-object\",\"schema_version\":\"qa.local-evidence/v1\"},\"objectId\":\"evidence/1\",\"role\":\"runner-log\"}],\"finishedAt\":\"2026-01-02T03:04:05.012Z\",\"observation\":{\"expectedText\":\"READY\",\"finalUrl\":\"http://127.0.0.1:43123/fixed-page.html\",\"fixtureUrl\":\"http://127.0.0.1:43123/fixed-page.html\",\"observedText\":\"READY\",\"sanitizedObservationRef\":{\"content_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"id\":\"observation/0\",\"kind\":\"local-sanitized-observation\",\"schema_version\":\"qa.local-evidence/v1\"},\"selector\":\"[data-local-qa=\\\"status\\\"]\"},\"outcome\":\"passed\",\"startedAt\":\"2026-01-02T03:04:05.000Z\",\"version\":\"local-qa-browser-smoke/result-v1\"}}",
+      "wire_hex": "000004b97b22696e766f636174696f6e5f6964223a22696e766f636174696f6e2f30222c226b696e64223a227465726d696e616c5f726573756c74222c226f7574636f6d65223a22706173736564222c2270726f746f636f6c223a2271612e6c6f63616c2d776f726b65722d70726f746f636f6c2f7631222c22726573756c74223a7b226475726174696f6e4d73223a31322c2265766964656e6365223a5b7b226172746966616374526566223a7b22636f6e74656e745f646967657374223a227368613235363a34633462366133626531333134616238363133386265663433313464646530323265363030393630643836383961326338663836333138303264323064616236222c226964223a2265766964656e63652f30222c226b696e64223a226c6f63616c2d65766964656e63652d6f626a656374222c22736368656d615f76657273696f6e223a2271612e6c6f63616c2d65766964656e63652f7631227d2c226f626a6563744964223a2265766964656e63652f30222c22726f6c65223a2273637265656e73686f74227d2c7b226172746966616374526566223a7b22636f6e74656e745f646967657374223a227368613235363a62623963363263633834666335333365353231393361383936313737386230626532353163643866313961383962336661383336653934303433613030373565222c226964223a2265766964656e63652f31222c226b696e64223a226c6f63616c2d65766964656e63652d6f626a656374222c22736368656d615f76657273696f6e223a2271612e6c6f63616c2d65766964656e63652f7631227d2c226f626a6563744964223a2265766964656e63652f31222c22726f6c65223a2272756e6e65722d6c6f67227d5d2c2266696e69736865644174223a22323032362d30312d30325430333a30343a30352e3031325a222c226f62736572766174696f6e223a7b22657870656374656454657874223a225245414459222c2266696e616c55726c223a22687474703a2f2f3132372e302e302e313a34333132332f66697865642d706167652e68746d6c222c226669787475726555726c223a22687474703a2f2f3132372e302e302e313a34333132332f66697865642d706167652e68746d6c222c226f6273657276656454657874223a225245414459222c2273616e6974697a65644f62736572766174696f6e526566223a7b22636f6e74656e745f646967657374223a227368613235363a61616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161222c226964223a226f62736572766174696f6e2f30222c226b696e64223a226c6f63616c2d73616e6974697a65642d6f62736572766174696f6e222c22736368656d615f76657273696f6e223a2271612e6c6f63616c2d65766964656e63652f7631227d2c2273656c6563746f72223a225b646174612d6c6f63616c2d71613d5c227374617475735c225d227d2c226f7574636f6d65223a22706173736564222c22737461727465644174223a22323032362d30312d30325430333a30343a30352e3030305a222c2276657273696f6e223a226c6f63616c2d71612d62726f777365722d736d6f6b652f726573756c742d7631227d7d"
+    }
+  ]
+}
