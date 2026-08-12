@@ -2,8 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use fkst_local_qa_evidence_stager::{
-    EvidenceMediaType, EvidenceRole, EvidenceStager, StageRequest, StagerError,
-    MAX_EVIDENCE_BYTES,
+    EvidenceMediaType, EvidenceRole, EvidenceStager, StageRequest, StagerError, MAX_EVIDENCE_BYTES,
 };
 use fkst_qa_contracts::{
     canonical_bytes, contract_content_digest, validate_local_evidence_object,
@@ -57,7 +56,10 @@ fn stages_and_verifies_one_runner_log() {
         canonical_bytes(staged.object()).unwrap(),
         CANONICAL_OBJECT.as_bytes()
     );
-    assert_eq!(contract_content_digest(staged.object()).unwrap(), CONTRACT_DIGEST);
+    assert_eq!(
+        contract_content_digest(staged.object()).unwrap(),
+        CONTRACT_DIGEST
+    );
 
     let expected_ref = json!({
         "kind": "local-evidence-object",
@@ -66,10 +68,8 @@ fn stages_and_verifies_one_runner_log() {
         "content_digest": CONTRACT_DIGEST,
     });
     assert_eq!(staged.object_ref().value(), &expected_ref);
-    validate_local_evidence_object_ref(
-        &serde_json::to_vec(staged.object_ref().value()).unwrap(),
-    )
-    .unwrap();
+    validate_local_evidence_object_ref(&serde_json::to_vec(staged.object_ref().value()).unwrap())
+        .unwrap();
 
     let files = regular_files(temporary_parent.path());
     assert_eq!(files.len(), 1);
