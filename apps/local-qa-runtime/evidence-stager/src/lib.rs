@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use fkst_qa_contracts::{
-    contract_content_digest, validate_local_evidence_object,
-    validate_local_evidence_object_ref, ValidatedValue,
+    contract_content_digest, validate_local_evidence_object, validate_local_evidence_object_ref,
+    ValidatedValue,
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -149,7 +149,9 @@ impl EvidenceStager {
             .write_all(request.bytes)
             .map_err(|_| StagerError::Storage)?;
         temporary_file.flush().map_err(|_| StagerError::Storage)?;
-        temporary_file.sync_all().map_err(|_| StagerError::Storage)?;
+        temporary_file
+            .sync_all()
+            .map_err(|_| StagerError::Storage)?;
         drop(temporary_file);
 
         fs::rename(&temporary_path, &final_path).map_err(|_| StagerError::Storage)?;

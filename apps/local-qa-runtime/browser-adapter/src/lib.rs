@@ -34,10 +34,7 @@ pub enum BrowserAdapterError {
 }
 
 pub async fn run_fixed_browser_smoke() -> Result<FixedBrowserSmokeResult, BrowserAdapterError> {
-    #[cfg(any(
-        target_os = "linux",
-        all(target_os = "macos", target_arch = "aarch64")
-    ))]
+    #[cfg(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
     {
         let (sender, receiver) = futures_channel::oneshot::channel();
         std::thread::Builder::new()
@@ -55,19 +52,13 @@ pub async fn run_fixed_browser_smoke() -> Result<FixedBrowserSmokeResult, Browse
         })?
     }
 
-    #[cfg(not(any(
-        target_os = "linux",
-        all(target_os = "macos", target_arch = "aarch64")
-    )))]
+    #[cfg(not(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64"))))]
     {
         Err(BrowserAdapterError::UnsupportedPlatform)
     }
 }
 
-#[cfg(any(
-    target_os = "linux",
-    all(target_os = "macos", target_arch = "aarch64")
-))]
+#[cfg(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
 mod unix {
     use super::{BrowserAdapterError, FixedBrowserSmokeResult, FixedPngScreenshot};
     use headless_chrome::{protocol::cdp::Page, Browser, Tab};
