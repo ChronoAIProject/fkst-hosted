@@ -527,7 +527,9 @@ fn remove_empty_parents(root: &Path, attempt_path: &Path) -> Result<(), StagerEr
     let mut current = attempt_path.to_path_buf();
     while current != root {
         match fs::remove_dir(&current) {
-            Ok(()) => current.pop(),
+            Ok(()) => {
+                let _ = current.pop();
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound || error.kind() == std::io::ErrorKind::DirectoryNotEmpty => break,
             Err(_) => return Err(StagerError::Cleanup),
         }
