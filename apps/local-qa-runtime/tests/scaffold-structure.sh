@@ -22,8 +22,11 @@ expected=$(printf '%s\n' \
   apps/local-qa-runtime/workers/src/index.ts \
   apps/local-qa-runtime/workers/src/json.ts \
   apps/local-qa-runtime/workers/src/policy.ts \
+  apps/local-qa-runtime/workers/src/protocol-worker.ts \
   apps/local-qa-runtime/workers/src/worker-error.ts \
-  apps/local-qa-runtime/workers/test/browser-smoke.test.mjs)
+  apps/local-qa-runtime/workers/src/worker-main.ts \
+  apps/local-qa-runtime/workers/test/browser-smoke.test.mjs \
+  apps/local-qa-runtime/workers/test/protocol-worker.test.mjs)
 actual=$(find apps/local-qa-runtime -type f \( -name '*.rs' -o -name '*.ts' -o -name '*.mjs' \) \
   ! -path '*/node_modules/*' ! -path '*/target/*' ! -path '*/dist/*' | sort)
 [[ "$actual" == "$expected" ]] || { echo 'unexpected Local QA source file' >&2; exit 1; }

@@ -1,0 +1,159 @@
+{
+  "fixture_version": "qa.local-worker-protocol/negative-v1",
+  "frame_cases": [
+    {
+      "case_id": "worker-frame-unknown-version",
+      "happy_index": 0,
+      "mutation": { "path": ["protocol"], "value": "qa.local-worker-protocol/v2" },
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "worker-frame-unknown-kind",
+      "happy_index": 0,
+      "mutation": { "path": ["kind"], "value": "invoke" },
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "worker-frame-unknown-field",
+      "happy_index": 0,
+      "mutation": { "path": ["rawPath"], "value": "/private/tmp/secret" },
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "worker-frame-duplicate-member",
+      "source_utf8": "{\"protocol\":\"qa.local-worker-protocol/v1\",\"protocol\":\"qa.local-worker-protocol/v1\",\"kind\":\"protocol_failure\",\"code\":\"protocol.invalid_frame\"}",
+      "expected": { "category": "canonicalization", "code": "canonicalization.duplicate_member", "reason": "duplicate_member", "path": "/" }
+    },
+    {
+      "case_id": "worker-frame-invalid-json",
+      "source_utf8": "{",
+      "expected": { "category": "validation", "reason": "invalid_json", "path": "/" }
+    },
+    {
+      "case_id": "worker-frame-invalid-utf8",
+      "source_hex": "ff",
+      "expected": { "category": "canonicalization", "code": "canonicalization.invalid_utf8", "reason": "invalid_utf8", "path": "/" }
+    },
+    {
+      "case_id": "worker-frame-open-failure-code",
+      "happy_index": 0,
+      "replacement": {
+        "protocol": "qa.local-worker-protocol/v1",
+        "kind": "protocol_failure",
+        "code": "private.stack.trace"
+      },
+      "expected": { "category": "validation", "reason": "schema_violation", "path": "/" }
+    },
+    {
+      "case_id": "worker-frame-invalid-calendar-date",
+      "happy_index": 2,
+      "mutation": { "path": ["output", "value"], "value": "2026-02-30T03:04:05.000Z" },
+      "expected": { "category": "validation", "reason": "invalid_timestamp", "path": "/output/value" }
+    },
+    {
+      "case_id": "worker-frame-observation-id-mismatch",
+      "happy_index": 6,
+      "mutation": { "path": ["output", "sanitizedObservationRef", "id"], "value": "observation/1" },
+      "expected": { "category": "contract", "code": "contract.invalid_relation", "reason": "reference_id_mismatch", "path": "/output/sanitizedObservationRef/id" }
+    },
+    {
+      "case_id": "worker-frame-screenshot-id-mismatch",
+      "happy_index": 6,
+      "mutation": { "path": ["output", "screenshotEvidenceRef", "id"], "value": "evidence/9" },
+      "expected": { "category": "contract", "code": "contract.invalid_relation", "reason": "reference_id_mismatch", "path": "/output/screenshotEvidenceRef/id" }
+    },
+    {
+      "case_id": "worker-frame-runner-id-mismatch",
+      "happy_index": 8,
+      "mutation": { "path": ["output", "runnerLogEvidenceRef", "id"], "value": "evidence/9" },
+      "expected": { "category": "contract", "code": "contract.invalid_relation", "reason": "reference_id_mismatch", "path": "/output/runnerLogEvidenceRef/id" }
+    },
+    {
+      "case_id": "worker-frame-terminal-ref-mismatch",
+      "happy_index": 15,
+      "mutation": { "path": ["result", "evidence", 0, "artifactRef", "id"], "value": "evidence/9" },
+      "expected": { "category": "contract", "code": "contract.invalid_relation", "reason": "reference_id_mismatch", "path": "/result/evidence/0/artifactRef/id" }
+    },
+    {
+      "case_id": "worker-frame-terminal-finished-before-started",
+      "happy_index": 15,
+      "mutation": { "path": ["result", "finishedAt"], "value": "2026-01-02T03:04:04.999Z" },
+      "expected": { "category": "contract", "code": "contract.invalid_relation", "reason": "finished_before_started", "path": "/result/finishedAt" }
+    },
+    {
+      "case_id": "worker-frame-terminal-duration-mismatch",
+      "happy_index": 15,
+      "mutation": { "path": ["result", "durationMs"], "value": 11 },
+      "expected": { "category": "contract", "code": "contract.invalid_relation", "reason": "duration_mismatch", "path": "/result/durationMs" }
+    }
+  ],
+  "framing_cases": [
+    {
+      "case_id": "worker-frame-zero-length",
+      "wire_hex": "00000000",
+      "phase": "push",
+      "expected": { "category": "validation", "reason": "frame_length_out_of_range", "path": "/" }
+    },
+    {
+      "case_id": "worker-frame-oversize-length",
+      "wire_hex": "00010001",
+      "phase": "push",
+      "expected": { "category": "validation", "reason": "frame_length_out_of_range", "path": "/" }
+    },
+    {
+      "case_id": "worker-frame-truncated-payload",
+      "wire_hex": "000000057b7d",
+      "phase": "finish",
+      "expected": { "category": "validation", "reason": "truncated_frame", "path": "/" }
+    },
+    {
+      "case_id": "worker-frame-trailing-byte",
+      "happy_index": 0,
+      "suffix_hex": "00",
+      "phase": "finish",
+      "expected": { "category": "validation", "reason": "truncated_frame", "path": "/" }
+    },
+    {
+      "case_id": "worker-frame-framed-invalid-utf8",
+      "wire_hex": "00000001ff",
+      "phase": "push",
+      "expected": { "category": "canonicalization", "code": "canonicalization.invalid_utf8", "reason": "invalid_utf8", "path": "/" }
+    }
+  ],
+  "sequence_cases": [
+    {
+      "case_id": "worker-sequence-duplicate-invocation",
+      "frames": [{ "happy_index": 0 }, { "happy_index": 0 }],
+      "expected": { "category": "validation", "reason": "invalid_sequence", "path": "/kind" }
+    },
+    {
+      "case_id": "worker-sequence-bad-correlation",
+      "frames": [
+        { "happy_index": 0 },
+        { "happy_index": 2, "mutation": { "path": ["request_id"], "value": "capability/9" } }
+      ],
+      "expected": { "category": "contract", "code": "contract.invalid_relation", "reason": "capability_mismatch", "path": "/request_id" }
+    },
+    {
+      "case_id": "worker-sequence-unexpected-eof",
+      "frames": [{ "happy_index": 0 }],
+      "finish": true,
+      "expected": { "category": "validation", "reason": "unexpected_eof", "path": "/" }
+    },
+    {
+      "case_id": "worker-sequence-extra-frame",
+      "frames": [
+        { "happy_index": 0 },
+        { "happy_index": 2 },
+        { "happy_index": 4 },
+        { "happy_index": 6 },
+        { "happy_index": 8 },
+        { "happy_index": 10 },
+        { "happy_index": 12 },
+        { "happy_index": 14 },
+        { "happy_index": 0 }
+      ],
+      "expected": { "category": "validation", "reason": "trailing_input", "path": "/" }
+    }
+  ]
+}

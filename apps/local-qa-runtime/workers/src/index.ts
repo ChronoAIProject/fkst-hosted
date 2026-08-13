@@ -13,4 +13,4 @@ export {
   type WorkerErrorCode,
 } from "./policy.js";
 
-export { runProtocolWorker } from "./protocol-worker.js";
+export { runProtocolWorker, type ProtocolFailureCode } from "./protocol-worker.js";

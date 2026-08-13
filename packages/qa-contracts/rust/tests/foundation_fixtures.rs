@@ -121,7 +121,8 @@ fn contract_registry_and_fixture_metadata() {
         [
             "qa.contract-foundation/v1",
             "qa.local-lifecycle/v1",
-            "qa.local-evidence/v1"
+            "qa.local-evidence/v1",
+            "qa.local-worker-protocol/v1"
         ]
     );
     let schema = &schemas["qa.contract-foundation/v1"];
@@ -152,6 +153,12 @@ fn contract_registry_and_fixture_metadata() {
     expected_types.insert("LocalSanitizedObservation".to_owned());
     expected_types.insert("LocalSanitizedObservationRef".to_owned());
     expected_types.insert("LocalState".to_owned());
+    expected_types.insert("LocalWorkerCapabilityRequest".to_owned());
+    expected_types.insert("LocalWorkerCapabilityResult".to_owned());
+    expected_types.insert("LocalWorkerFrame".to_owned());
+    expected_types.insert("LocalWorkerInvocation".to_owned());
+    expected_types.insert("LocalWorkerProtocolFailure".to_owned());
+    expected_types.insert("LocalWorkerTerminalResult".to_owned());
     assert_eq!(
         types.keys().cloned().collect::<BTreeSet<_>>(),
         expected_types
