@@ -322,6 +322,18 @@ test("does not acquire session capabilities after parsing or initial clock failu
   }
 });
 
+test("rejects invalid calendar timestamps and wall-clock duration mismatches", async () => {
+  const cases = [
+    { nowValues: ["2026-02-30T03:04:05.000Z"] },
+    { nowValues: ["2026-01-02T03:04:05Z"] },
+    { nowValues: ["2026-01-02T03:04:05.000Z", "2026-01-02T03:04:05.011Z"] },
+  ];
+  for (const options of cases) {
+    const harness = createHarness(options);
+    await captureWorkerError(() => runBrowserSmoke(requestJson, harness.ports), "clock.invalid_value");
+  }
+});
+
 test("rejects failed or invalid finished clock reads after finalization", async () => {
   const cases = [
     [{ nowErrorAt: 2 }, "clock.failed"],
@@ -497,6 +509,7 @@ function invalidReferenceVariants(reference, wrongKind, wrongSchema) {
     { ...reference, kind: wrongKind },
     { ...reference, kind: 1 },
     { ...reference, id: "" },
+    { ...reference, id: reference.id === "observation/0" ? "observation/1" : "evidence/9" },
     { ...reference, id: 1 },
     { ...reference, schema_version: wrongSchema },
     { ...reference, schema_version: 1 },

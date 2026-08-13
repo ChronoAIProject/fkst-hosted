@@ -1025,6 +1025,7 @@ mod unix {
 
         #[test]
         fn fixture_serves_only_the_fixed_contract() {
+            let _browser_guard = browser_test_guard();
             let fixture = FixtureServer::start().expect("fixture starts");
             let address = fixture.address;
             let ok = send_request(
@@ -1481,8 +1482,10 @@ mod unix {
             }
         }
 
+        #[cfg(target_os = "linux")]
         struct KillOnDrop(Child);
 
+        #[cfg(target_os = "linux")]
         impl KillOnDrop {
             fn spawn(executable: &str, arguments: &[&str]) -> Self {
                 Self(
@@ -1501,6 +1504,7 @@ mod unix {
             }
         }
 
+        #[cfg(target_os = "linux")]
         impl Drop for KillOnDrop {
             fn drop(&mut self) {
                 let _ = self.0.kill();

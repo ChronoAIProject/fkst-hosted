@@ -257,32 +257,32 @@ export function validateLocalEvidenceObjectRef(raw: Uint8Array): ValidatedValue 
 }
 
 export function validateLocalWorkerFrame(raw: Uint8Array): ValidatedValue {
-  const validated = validateRegisteredValue(admitJson(raw), "LocalWorkerFrame");
-  validateLocalWorkerUrls(validated.value());
+  const validated = validateLocalWorkerRegistered(raw, "LocalWorkerFrame");
+  validateLocalWorkerRules(validated.value());
   return validated;
 }
 
 export function validateLocalWorkerInvocation(raw: Uint8Array): ValidatedValue {
-  const validated = validateRegisteredValue(admitJson(raw), "LocalWorkerInvocation");
-  validateLocalWorkerUrls(validated.value());
+  const validated = validateLocalWorkerRegistered(raw, "LocalWorkerInvocation");
+  validateLocalWorkerRules(validated.value());
   return validated;
 }
 
 export function validateLocalWorkerCapabilityRequest(raw: Uint8Array): ValidatedValue {
-  const validated = validateRegisteredValue(admitJson(raw), "LocalWorkerCapabilityRequest");
-  validateLocalWorkerUrls(validated.value());
+  const validated = validateLocalWorkerRegistered(raw, "LocalWorkerCapabilityRequest");
+  validateLocalWorkerRules(validated.value());
   return validated;
 }
 
 export function validateLocalWorkerCapabilityResult(raw: Uint8Array): ValidatedValue {
-  const validated = validateRegisteredValue(admitJson(raw), "LocalWorkerCapabilityResult");
-  validateLocalWorkerUrls(validated.value());
+  const validated = validateLocalWorkerRegistered(raw, "LocalWorkerCapabilityResult");
+  validateLocalWorkerRules(validated.value());
   return validated;
 }
 
 export function validateLocalWorkerTerminalResult(raw: Uint8Array): ValidatedValue {
-  const validated = validateRegisteredValue(admitJson(raw), "LocalWorkerTerminalResult");
-  validateLocalWorkerUrls(validated.value());
+  const validated = validateLocalWorkerRegistered(raw, "LocalWorkerTerminalResult");
+  validateLocalWorkerRules(validated.value());
   return validated;
 }
 
@@ -301,8 +301,64 @@ export function encodeLocalWorkerFrame(value: ValidatedValue): Uint8Array {
   return frame;
 }
 
+const LOCAL_WORKER_CAPABILITY_SEQUENCE = Object.freeze([
+  "clock.now/v1",
+  "clock.monotonic-ms/v1",
+  "browser-session.run/v1",
+  "evidence.stage-fixed-runner-log/v1",
+  "browser-session.close/v1",
+  "clock.now/v1",
+  "clock.monotonic-ms/v1",
+] as const);
+
+export class LocalWorkerInputSequence {
+  #invocationId: string | undefined;
+  #nextFrame = 0;
+
+  accept(frame: ValidatedValue): void {
+    const value = frame.value();
+    if (!isRecord(value)) {
+      throw new ContractError({ category: "validation", reason: "invalid_sequence", path: "/" });
+    }
+    if (this.#nextFrame === 0) {
+      if (value.kind !== "invocation" || typeof value.invocation_id !== "string") {
+        throw new ContractError({ category: "validation", reason: "invalid_sequence", path: "/kind" });
+      }
+      this.#invocationId = value.invocation_id;
+      this.#nextFrame = 1;
+      return;
+    }
+    if (this.#nextFrame > LOCAL_WORKER_CAPABILITY_SEQUENCE.length) {
+      throw new ContractError({ category: "validation", reason: "trailing_input", path: "/" });
+    }
+    if (value.kind !== "capability_result") {
+      throw new ContractError({ category: "validation", reason: "invalid_sequence", path: "/kind" });
+    }
+    const index = this.#nextFrame - 1;
+    const expectedCapability = LOCAL_WORKER_CAPABILITY_SEQUENCE[index];
+    if (
+      value.invocation_id !== this.#invocationId ||
+      value.request_id !== `capability/${index}` ||
+      value.capability !== expectedCapability
+    ) {
+      throw contractError("contract.invalid_relation", "capability_mismatch", "/request_id");
+    }
+    this.#nextFrame += 1;
+  }
+
+  finish(): void {
+    if (this.#nextFrame !== LOCAL_WORKER_CAPABILITY_SEQUENCE.length + 1) {
+      throw new ContractError({ category: "validation", reason: "unexpected_eof", path: "/" });
+    }
+  }
+}
+
 export class LocalWorkerFrameDecoder {
   #buffer = new Uint8Array(0);
+
+  bufferedBytes(): number {
+    return this.#buffer.length;
+  }
 
   push(chunk: Uint8Array): readonly ValidatedValue[] {
     if (chunk.length > 0) {
@@ -495,6 +551,42 @@ function validateRegistry(registry: ContractRegistry): void {
 }
 
 
+function validateLocalWorkerRegistered(raw: Uint8Array, typeName: string): ValidatedValue {
+  try {
+    return validateRegisteredValue(admitJson(raw), typeName);
+  } catch (error) {
+    if (error instanceof ContractError && error.rejection.reason === "schema_violation") {
+      throw new ContractError({ ...error.rejection, path: "/" });
+    }
+    throw error;
+  }
+}
+
+function validateLocalWorkerRules(value: unknown): void {
+  validateLocalWorkerUrls(value);
+  if (!isRecord(value)) return;
+
+  if (value.kind === "capability_result" && isRecord(value.output)) {
+    if (value.capability === "clock.now/v1") {
+      const timestamp = value.output.value;
+      if (typeof timestamp !== "string" || !validateWorkerTimestamp(timestamp)) {
+        throw new ContractError({ category: "validation", reason: "invalid_timestamp", path: "/output/value" });
+      }
+    }
+    if (value.capability === "browser-session.run/v1") {
+      validateExpectedReference(value.output.sanitizedObservationRef, "observation/0", "/output/sanitizedObservationRef/id");
+      validateExpectedReference(value.output.screenshotEvidenceRef, "evidence/0", "/output/screenshotEvidenceRef/id");
+    }
+    if (value.capability === "evidence.stage-fixed-runner-log/v1") {
+      validateExpectedReference(value.output.runnerLogEvidenceRef, "evidence/1", "/output/runnerLogEvidenceRef/id");
+    }
+  }
+
+  if (value.kind === "terminal_result" && isRecord(value.result)) {
+    validateTerminalResultRelations(value.result);
+  }
+}
+
 function validateLocalWorkerUrls(value: unknown): void {
   if (Array.isArray(value)) {
     for (const item of value) validateLocalWorkerUrls(item);
@@ -508,6 +600,56 @@ function validateLocalWorkerUrls(value: unknown): void {
     }
     validateLocalWorkerUrls(child);
   }
+}
+
+function validateExpectedReference(value: unknown, expectedId: string, path: string): void {
+  if (!isRecord(value) || value.id !== expectedId) {
+    throw contractError("contract.invalid_relation", "reference_id_mismatch", path);
+  }
+}
+
+function validateTerminalResultRelations(result: Record<string, unknown>): void {
+  const startedAt = result.startedAt;
+  const finishedAt = result.finishedAt;
+  const durationMs = result.durationMs;
+  if (typeof startedAt !== "string" || !validateWorkerTimestamp(startedAt)) {
+    throw new ContractError({ category: "validation", reason: "invalid_timestamp", path: "/result/startedAt" });
+  }
+  if (typeof finishedAt !== "string" || !validateWorkerTimestamp(finishedAt)) {
+    throw new ContractError({ category: "validation", reason: "invalid_timestamp", path: "/result/finishedAt" });
+  }
+  const startedMs = Date.parse(startedAt);
+  const finishedMs = Date.parse(finishedAt);
+  if (startedMs > finishedMs) {
+    throw contractError("contract.invalid_relation", "finished_before_started", "/result/finishedAt");
+  }
+  if (typeof durationMs !== "number" || finishedMs - startedMs !== durationMs) {
+    throw contractError("contract.invalid_relation", "duration_mismatch", "/result/durationMs");
+  }
+  if (!isRecord(result.observation)) {
+    throw new ContractError({ category: "validation", reason: "schema_violation", path: "/result/observation" });
+  }
+  validateExpectedReference(
+    result.observation.sanitizedObservationRef,
+    "observation/0",
+    "/result/observation/sanitizedObservationRef/id",
+  );
+  if (!Array.isArray(result.evidence) || result.evidence.length !== 2) {
+    throw new ContractError({ category: "validation", reason: "schema_violation", path: "/result/evidence" });
+  }
+  for (const [index, expectedId] of ["evidence/0", "evidence/1"].entries()) {
+    const entry = result.evidence[index];
+    if (!isRecord(entry) || entry.objectId !== expectedId) {
+      throw contractError("contract.invalid_relation", "object_id_mismatch", `/result/evidence/${index}/objectId`);
+    }
+    validateExpectedReference(entry.artifactRef, expectedId, `/result/evidence/${index}/artifactRef/id`);
+  }
+}
+
+function validateWorkerTimestamp(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+  const millis = Date.parse(value);
+  return Number.isFinite(millis) && new Date(millis).toISOString() === value;
 }
 
 function validateLocalSanitizedObservationRules(value: LocalSanitizedObservation): void {

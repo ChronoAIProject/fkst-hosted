@@ -21,7 +21,8 @@ const LOCAL_LIFECYCLE_SCHEMA_PATH: &str = "contracts/qa.local-lifecycle/v1/schem
 const LOCAL_EVIDENCE_SCHEMA: &str =
     include_str!("../../contracts/qa.local-evidence/v1/schema.json");
 const LOCAL_EVIDENCE_SCHEMA_PATH: &str = "contracts/qa.local-evidence/v1/schema.json";
-const LOCAL_WORKER_SCHEMA: &str = include_str!("../../contracts/qa.local-worker-protocol/v1/schema.json");
+const LOCAL_WORKER_SCHEMA: &str =
+    include_str!("../../contracts/qa.local-worker-protocol/v1/schema.json");
 const LOCAL_WORKER_SCHEMA_PATH: &str = "contracts/qa.local-worker-protocol/v1/schema.json";
 const EMBEDDED_SCHEMAS: &[(&str, &str)] = &[
     (FOUNDATION_SCHEMA_PATH, FOUNDATION_SCHEMA),
@@ -265,22 +266,21 @@ pub fn validate_local_evidence_object_ref(raw: &[u8]) -> Result<ValidatedValue, 
 
 pub fn validate_local_worker_frame(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
     let validated = validate_registered_value(admit_json(raw)?, "LocalWorkerFrame")?;
-    validate_local_worker_urls(validated.value())?;
+    validate_local_worker_rules(validated.value())?;
     Ok(validated)
 }
 
 pub fn validate_local_worker_invocation(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
     let validated = validate_registered_value(admit_json(raw)?, "LocalWorkerInvocation")?;
-    validate_local_worker_urls(validated.value())?;
+    validate_local_worker_rules(validated.value())?;
     Ok(validated)
 }
 
 pub fn validate_local_worker_capability_request(
     raw: &[u8],
 ) -> Result<ValidatedValue, ContractError> {
-    let validated =
-        validate_registered_value(admit_json(raw)?, "LocalWorkerCapabilityRequest")?;
-    validate_local_worker_urls(validated.value())?;
+    let validated = validate_registered_value(admit_json(raw)?, "LocalWorkerCapabilityRequest")?;
+    validate_local_worker_rules(validated.value())?;
     Ok(validated)
 }
 
@@ -288,13 +288,13 @@ pub fn validate_local_worker_capability_result(
     raw: &[u8],
 ) -> Result<ValidatedValue, ContractError> {
     let validated = validate_registered_value(admit_json(raw)?, "LocalWorkerCapabilityResult")?;
-    validate_local_worker_urls(validated.value())?;
+    validate_local_worker_rules(validated.value())?;
     Ok(validated)
 }
 
 pub fn validate_local_worker_terminal_result(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
     let validated = validate_registered_value(admit_json(raw)?, "LocalWorkerTerminalResult")?;
-    validate_local_worker_urls(validated.value())?;
+    validate_local_worker_rules(validated.value())?;
     Ok(validated)
 }
 
@@ -314,6 +314,77 @@ pub fn encode_local_worker_frame(value: &ValidatedValue) -> Result<Vec<u8>, Cont
     frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
     frame.extend_from_slice(&payload);
     Ok(frame)
+}
+
+const LOCAL_WORKER_CAPABILITY_SEQUENCE: [&str; 7] = [
+    "clock.now/v1",
+    "clock.monotonic-ms/v1",
+    "browser-session.run/v1",
+    "evidence.stage-fixed-runner-log/v1",
+    "browser-session.close/v1",
+    "clock.now/v1",
+    "clock.monotonic-ms/v1",
+];
+
+#[derive(Default)]
+pub struct LocalWorkerInputSequence {
+    invocation_id: Option<String>,
+    next_frame: usize,
+}
+
+impl LocalWorkerInputSequence {
+    pub fn accept(&mut self, frame: &ValidatedValue) -> Result<(), ContractError> {
+        let object = frame
+            .value()
+            .as_object()
+            .ok_or_else(|| ContractError(Rejection::validation("invalid_sequence", "/")))?;
+        if self.next_frame == 0 {
+            if object.get("kind").and_then(Value::as_str) != Some("invocation") {
+                return Err(ContractError(Rejection::validation(
+                    "invalid_sequence",
+                    "/kind",
+                )));
+            }
+            self.invocation_id = object
+                .get("invocation_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            self.next_frame = 1;
+            return Ok(());
+        }
+        if self.next_frame > LOCAL_WORKER_CAPABILITY_SEQUENCE.len() {
+            return Err(ContractError(Rejection::validation("trailing_input", "/")));
+        }
+        if object.get("kind").and_then(Value::as_str) != Some("capability_result") {
+            return Err(ContractError(Rejection::validation(
+                "invalid_sequence",
+                "/kind",
+            )));
+        }
+        let index = self.next_frame - 1;
+        if object.get("invocation_id").and_then(Value::as_str) != self.invocation_id.as_deref()
+            || object.get("request_id").and_then(Value::as_str)
+                != Some(format!("capability/{index}").as_str())
+            || object.get("capability").and_then(Value::as_str)
+                != Some(LOCAL_WORKER_CAPABILITY_SEQUENCE[index])
+        {
+            return Err(ContractError(Rejection::contract(
+                "contract.invalid_relation",
+                "capability_mismatch",
+                "/request_id",
+            )));
+        }
+        self.next_frame += 1;
+        Ok(())
+    }
+
+    pub fn finish(&self) -> Result<(), ContractError> {
+        if self.next_frame == LOCAL_WORKER_CAPABILITY_SEQUENCE.len() + 1 {
+            Ok(())
+        } else {
+            Err(ContractError(Rejection::validation("unexpected_eof", "/")))
+        }
+    }
 }
 
 #[derive(Default)]
@@ -356,10 +427,7 @@ impl LocalWorkerFrameDecoder {
         if self.buffer.is_empty() {
             Ok(())
         } else {
-            Err(ContractError(Rejection::validation(
-                "truncated_frame",
-                "/",
-            )))
+            Err(ContractError(Rejection::validation("truncated_frame", "/")))
         }
     }
 }
@@ -537,6 +605,235 @@ fn validate_registry_value(registry: &Registry) -> Result<(), ContractError> {
         }
     }
     Ok(())
+}
+
+fn validate_local_worker_rules(value: &Value) -> Result<(), ContractError> {
+    validate_local_worker_urls(value)?;
+    let Some(object) = value.as_object() else {
+        return Ok(());
+    };
+
+    if object.get("kind").and_then(Value::as_str) == Some("capability_result") {
+        let capability = object.get("capability").and_then(Value::as_str);
+        let output = object
+            .get("output")
+            .and_then(Value::as_object)
+            .ok_or_else(|| ContractError(Rejection::validation("schema_violation", "/output")))?;
+        if capability == Some("clock.now/v1") {
+            let timestamp = output.get("value").and_then(Value::as_str).ok_or_else(|| {
+                ContractError(Rejection::validation("invalid_timestamp", "/output/value"))
+            })?;
+            if !validate_worker_timestamp(timestamp) {
+                return Err(ContractError(Rejection::validation(
+                    "invalid_timestamp",
+                    "/output/value",
+                )));
+            }
+        }
+        if capability == Some("browser-session.run/v1") {
+            validate_expected_reference(
+                output.get("sanitizedObservationRef"),
+                "observation/0",
+                "/output/sanitizedObservationRef/id",
+            )?;
+            validate_expected_reference(
+                output.get("screenshotEvidenceRef"),
+                "evidence/0",
+                "/output/screenshotEvidenceRef/id",
+            )?;
+        }
+        if capability == Some("evidence.stage-fixed-runner-log/v1") {
+            validate_expected_reference(
+                output.get("runnerLogEvidenceRef"),
+                "evidence/1",
+                "/output/runnerLogEvidenceRef/id",
+            )?;
+        }
+    }
+
+    if object.get("kind").and_then(Value::as_str) == Some("terminal_result") {
+        let result = object
+            .get("result")
+            .and_then(Value::as_object)
+            .ok_or_else(|| ContractError(Rejection::validation("schema_violation", "/result")))?;
+        validate_terminal_result_relations(result)?;
+    }
+    Ok(())
+}
+
+fn validate_expected_reference(
+    value: Option<&Value>,
+    expected_id: &str,
+    path: &str,
+) -> Result<(), ContractError> {
+    if value
+        .and_then(Value::as_object)
+        .and_then(|reference| reference.get("id"))
+        .and_then(Value::as_str)
+        == Some(expected_id)
+    {
+        Ok(())
+    } else {
+        Err(ContractError(Rejection::contract(
+            "contract.invalid_relation",
+            "reference_id_mismatch",
+            path,
+        )))
+    }
+}
+
+fn validate_terminal_result_relations(result: &Map<String, Value>) -> Result<(), ContractError> {
+    let started_at = result
+        .get("startedAt")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            ContractError(Rejection::validation(
+                "invalid_timestamp",
+                "/result/startedAt",
+            ))
+        })?;
+    let finished_at = result
+        .get("finishedAt")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            ContractError(Rejection::validation(
+                "invalid_timestamp",
+                "/result/finishedAt",
+            ))
+        })?;
+    let started_ms = worker_timestamp_millis(started_at).ok_or_else(|| {
+        ContractError(Rejection::validation(
+            "invalid_timestamp",
+            "/result/startedAt",
+        ))
+    })?;
+    let finished_ms = worker_timestamp_millis(finished_at).ok_or_else(|| {
+        ContractError(Rejection::validation(
+            "invalid_timestamp",
+            "/result/finishedAt",
+        ))
+    })?;
+    if started_ms > finished_ms {
+        return Err(ContractError(Rejection::contract(
+            "contract.invalid_relation",
+            "finished_before_started",
+            "/result/finishedAt",
+        )));
+    }
+    let duration_ms = result
+        .get("durationMs")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            ContractError(Rejection::validation(
+                "schema_violation",
+                "/result/durationMs",
+            ))
+        })?;
+    if finished_ms - started_ms != duration_ms {
+        return Err(ContractError(Rejection::contract(
+            "contract.invalid_relation",
+            "duration_mismatch",
+            "/result/durationMs",
+        )));
+    }
+    let observation = result
+        .get("observation")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            ContractError(Rejection::validation(
+                "schema_violation",
+                "/result/observation",
+            ))
+        })?;
+    validate_expected_reference(
+        observation.get("sanitizedObservationRef"),
+        "observation/0",
+        "/result/observation/sanitizedObservationRef/id",
+    )?;
+    let evidence = result
+        .get("evidence")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            ContractError(Rejection::validation(
+                "schema_violation",
+                "/result/evidence",
+            ))
+        })?;
+    for (index, expected_id) in ["evidence/0", "evidence/1"].into_iter().enumerate() {
+        let entry = evidence[index].as_object().ok_or_else(|| {
+            ContractError(Rejection::validation(
+                "schema_violation",
+                format!("/result/evidence/{index}"),
+            ))
+        })?;
+        if entry.get("objectId").and_then(Value::as_str) != Some(expected_id) {
+            return Err(ContractError(Rejection::contract(
+                "contract.invalid_relation",
+                "object_id_mismatch",
+                format!("/result/evidence/{index}/objectId"),
+            )));
+        }
+        validate_expected_reference(
+            entry.get("artifactRef"),
+            expected_id,
+            &format!("/result/evidence/{index}/artifactRef/id"),
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_worker_timestamp(value: &str) -> bool {
+    worker_timestamp_millis(value).is_some()
+}
+
+fn worker_timestamp_millis(value: &str) -> Option<u64> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 24
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || bytes[10] != b'T'
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+        || bytes[19] != b'.'
+        || bytes[23] != b'Z'
+        || !bytes.iter().enumerate().all(|(index, byte)| {
+            matches!(index, 4 | 7 | 10 | 13 | 16 | 19 | 23) || byte.is_ascii_digit()
+        })
+    {
+        return None;
+    }
+    let year = u64::from(decimal_field(bytes, 0, 4)?);
+    let month = u64::from(decimal_field(bytes, 5, 7)?);
+    let day = u64::from(decimal_field(bytes, 8, 10)?);
+    let hour = u64::from(decimal_field(bytes, 11, 13)?);
+    let minute = u64::from(decimal_field(bytes, 14, 16)?);
+    let second = u64::from(decimal_field(bytes, 17, 19)?);
+    let millisecond = u64::from(decimal_field(bytes, 20, 23)?);
+    if year == 0 || !(1..=12).contains(&month) || hour > 23 || minute > 59 || second > 59 {
+        return None;
+    }
+    let leap_year = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days_in_month = [
+        31,
+        if leap_year { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    if day == 0 || day > days_in_month[(month - 1) as usize] {
+        return None;
+    }
+    let days_before_year = 365 * (year - 1) + (year - 1) / 4 - (year - 1) / 100 + (year - 1) / 400;
+    let days_before_month: u64 = days_in_month[..(month - 1) as usize].iter().copied().sum();
+    let days = days_before_year + days_before_month + day - 1;
+    Some((((days * 24 + hour) * 60 + minute) * 60 + second) * 1000 + millisecond)
 }
 
 fn validate_local_worker_urls(value: &Value) -> Result<(), ContractError> {

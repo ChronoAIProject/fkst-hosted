@@ -124,10 +124,18 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: packages/qa-contracts/package-lock.json
+          cache-dependency-path: |
+            apps/local-qa-runtime/workers/package-lock.json
+            packages/qa-contracts/package-lock.json
       - name: Install QA contracts
         working-directory: packages/qa-contracts
         run: npm ci --ignore-scripts
       - name: Test QA contracts
         working-directory: packages/qa-contracts
+        run: npm run --ignore-scripts test
+      - name: Install Local QA workers
+        working-directory: apps/local-qa-runtime/workers
+        run: npm ci --ignore-scripts
+      - name: Test Local QA workers
+        working-directory: apps/local-qa-runtime/workers
         run: npm run --ignore-scripts test

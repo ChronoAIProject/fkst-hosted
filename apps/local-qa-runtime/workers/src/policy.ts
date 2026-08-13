@@ -182,6 +182,7 @@ export async function runBrowserSmoke(
           bytes: RUNNER_LOG.slice(),
         }),
         "local-evidence-object",
+        "evidence/1",
         "qa.local-evidence/v1",
       );
     } catch (error) {
@@ -201,7 +202,13 @@ export async function runBrowserSmoke(
   const finishedAt = await clockNow(ports.clock);
   const finishedMonotonicMs = await monotonicNow(ports.clock);
   const durationMs = finishedMonotonicMs - startedMonotonicMs;
-  if (!Number.isSafeInteger(durationMs) || durationMs < 0) {
+  const wallDurationMs = Date.parse(finishedAt) - Date.parse(startedAt);
+  if (
+    !Number.isSafeInteger(durationMs) ||
+    durationMs < 0 ||
+    wallDurationMs < 0 ||
+    wallDurationMs !== durationMs
+  ) {
     throw new BrowserSmokeWorkerError("clock.invalid_value");
   }
 
@@ -333,11 +340,13 @@ function validateSessionResult(value: unknown): {
     sanitizedObservationRef: validateReference(
       value.sanitizedObservationRef,
       "local-sanitized-observation",
+      "observation/0",
       "qa.local-evidence/v1",
     ),
     screenshotEvidenceRef: validateReference(
       value.screenshotEvidenceRef,
       "local-evidence-object",
+      "evidence/0",
       "qa.local-evidence/v1",
     ),
   };
@@ -346,6 +355,7 @@ function validateSessionResult(value: unknown): {
 function validateReference<TSchema extends string>(
   value: unknown,
   expectedKind: string,
+  expectedId: string,
   expectedSchema: TSchema,
 ): DigestBoundRef<TSchema> {
   if (!isRecord(value)) {
@@ -361,10 +371,7 @@ function validateReference<TSchema extends string>(
   }
   if (
     value.kind !== expectedKind ||
-    typeof value.id !== "string" ||
-    !(expectedKind === "local-sanitized-observation"
-      ? /^observation\/[0-9]+$/.test(value.id)
-      : /^evidence\/[0-9]+$/.test(value.id)) ||
+    value.id !== expectedId ||
     value.schema_version !== expectedSchema ||
     typeof value.content_digest !== "string" ||
     !/^sha256:[0-9a-f]{64}$/.test(value.content_digest) ||
@@ -400,7 +407,7 @@ async function clockNow(clock: ClockPort): Promise<string> {
   } catch {
     throw new BrowserSmokeWorkerError("clock.failed");
   }
-  if (typeof value !== "string") {
+  if (typeof value !== "string" || !isWorkerTimestamp(value)) {
     throw new BrowserSmokeWorkerError("clock.invalid_value");
   }
   return value;
@@ -417,6 +424,12 @@ async function monotonicNow(clock: ClockPort): Promise<number> {
     throw new BrowserSmokeWorkerError("clock.invalid_value");
   }
   return value;
+}
+
+function isWorkerTimestamp(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+  const millis = Date.parse(value);
+  return Number.isFinite(millis) && new Date(millis).toISOString() === value;
 }
 
 function isExactRecord(value: unknown, expectedKeys: readonly string[]): value is Record<string, unknown> {
