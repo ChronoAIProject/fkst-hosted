@@ -165,3 +165,64 @@ fn regular_files(root: &Path) -> Vec<PathBuf> {
     files.sort();
     files
 }
+
+#[test]
+fn enforces_count_and_byte_quotas_without_temporary_remnants() {
+    let temporary_parent = TempDir::new().expect("create test-owned temporary parent");
+    let root = temporary_parent.path().join("quarantine");
+    let stager = EvidenceStager::new(&root);
+    let bytes = vec![b'x'; MAX_EVIDENCE_BYTES];
+
+    for object_id in ["evidence/1", "evidence/2"] {
+        stager
+            .stage(StageRequest {
+                run_id: "run-1",
+                attempt: 1,
+                object_id,
+                role: EvidenceRole::RunnerLog,
+                media_type: EvidenceMediaType::PlainTextUtf8,
+                bytes: &bytes,
+            })
+            .expect("accept quota boundary object");
+    }
+
+    let error = stager
+        .stage(StageRequest {
+            run_id: "run-1",
+            attempt: 1,
+            object_id: "evidence/3",
+            role: EvidenceRole::RunnerLog,
+            media_type: EvidenceMediaType::PlainTextUtf8,
+            bytes: b"third",
+        })
+        .unwrap_err();
+    assert_eq!(error, StagerError::QuotaExceeded);
+    assert_eq!(regular_files(&root).len(), 2);
+    assert!(regular_files(&root).iter().all(|path| {
+        !path.file_name().unwrap().to_string_lossy().ends_with(".tmp")
+    }));
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_symlinked_storage_component_before_mutation() {
+    let temporary_parent = TempDir::new().expect("create test-owned temporary parent");
+    let root = temporary_parent.path().join("quarantine");
+    let outside = temporary_parent.path().join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, &root).unwrap();
+    let stager = EvidenceStager::new(&root);
+
+    let error = stager
+        .stage(StageRequest {
+            run_id: "run-1",
+            attempt: 1,
+            object_id: "evidence/1",
+            role: EvidenceRole::RunnerLog,
+            media_type: EvidenceMediaType::PlainTextUtf8,
+            bytes: RUNNER_LOG,
+        })
+        .unwrap_err();
+    assert_eq!(error, StagerError::FilesystemSafety);
+    assert!(regular_files(&outside).is_empty());
+}
