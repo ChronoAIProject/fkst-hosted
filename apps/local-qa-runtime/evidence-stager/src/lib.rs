@@ -75,6 +75,18 @@ impl StagedEvidence {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[must_use]
+pub struct CleanupResult {
+    complete: bool,
+}
+
+impl CleanupResult {
+    pub const fn is_complete(self) -> bool {
+        self.complete
+    }
+}
+
 #[derive(Debug, Error, Eq, PartialEq)]
 pub enum StagerError {
     #[error("evidence object exceeds the per-object byte limit")]
@@ -87,6 +99,10 @@ pub enum StagerError {
     Storage,
     #[error("published evidence verification failed")]
     VerificationFailed,
+    #[error("evidence cleanup scope validation failed")]
+    InvalidCleanupScope,
+    #[error("evidence cleanup operation failed")]
+    Cleanup,
 }
 
 #[derive(Clone, Debug)]
@@ -154,7 +170,8 @@ impl EvidenceStager {
             .map_err(|_| StagerError::Storage)?;
         drop(temporary_file);
 
-        fs::rename(&temporary_path, &final_path).map_err(|_| StagerError::Storage)?;
+        fs::hard_link(&temporary_path, &final_path).map_err(|_| StagerError::Storage)?;
+        fs::remove_file(&temporary_path).map_err(|_| StagerError::Storage)?;
         temporary_guard.disarm();
         sync_directory(parent)?;
 
@@ -208,6 +225,38 @@ impl EvidenceStager {
         Ok(())
     }
 
+    pub fn cleanup_attempt(
+        &self,
+        run_id: &str,
+        attempt: u64,
+    ) -> Result<CleanupResult, StagerError> {
+        validate_cleanup_scope(run_id, attempt)?;
+
+        let run_path = self.root.join(run_id);
+        let attempt_path = run_path.join(attempt.to_string());
+        match fs::remove_dir_all(&attempt_path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(StagerError::Cleanup),
+        }
+
+        match fs::remove_dir(&run_path) {
+            Ok(()) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+                ) => {}
+            Err(_) => return Err(StagerError::Cleanup),
+        }
+
+        if self.root.exists() {
+            sync_directory(&self.root).map_err(|_| StagerError::Cleanup)?;
+        }
+
+        Ok(CleanupResult { complete: true })
+    }
+
     fn object_path(
         &self,
         run_id: &str,
@@ -225,6 +274,25 @@ impl EvidenceStager {
             .join("evidence")
             .join(format!("{object_number}.bin")))
     }
+}
+
+fn validate_cleanup_scope(run_id: &str, attempt: u64) -> Result<(), StagerError> {
+    let object_json = json!({
+        "schema_version": SCHEMA_VERSION,
+        "run_id": run_id,
+        "attempt": attempt,
+        "object_id": "evidence/0",
+        "role": EvidenceRole::BrowserScreenshot.as_str(),
+        "media_type": EvidenceMediaType::Png.as_str(),
+        "byte_length": 0,
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "ownership": OWNERSHIP,
+    });
+    let object_bytes =
+        serde_json::to_vec(&object_json).map_err(|_| StagerError::InvalidCleanupScope)?;
+    validate_local_evidence_object(&object_bytes)
+        .map(|_| ())
+        .map_err(|_| StagerError::InvalidCleanupScope)
 }
 
 fn raw_sha256(bytes: &[u8]) -> String {
