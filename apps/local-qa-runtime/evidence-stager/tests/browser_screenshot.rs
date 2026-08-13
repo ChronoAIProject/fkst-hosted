@@ -138,7 +138,7 @@ fn staging_does_not_overwrite_an_existing_object() {
 
     let error = stager.stage(request).unwrap_err();
 
-    assert_eq!(error, StagerError::Storage);
+    assert_eq!(error, StagerError::DuplicateIdentity);
     assert_eq!(fs::read(published).unwrap(), PNG);
     assert_no_temporary_files(&root);
     assert_sanitized_error(&error, &root);
