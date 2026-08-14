@@ -12,20 +12,16 @@ use serde_json::json;
 use tempfile::TempDir;
 
 const PNG: &[u8] = &[
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
-    0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x04, 0x00, 0x00,
-    0x00, 0xb5, 0x1c, 0x0c, 0x02, 0x00, 0x00, 0x00, 0x0b, 0x49, 0x44, 0x41, 0x54, 0x78,
-    0xda, 0x63, 0x64, 0xf8, 0x0f, 0x00, 0x01, 0x05, 0x01, 0x01, 0x27, 0x18, 0xe3, 0x66,
-    0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x04, 0x00, 0x00, 0x00, 0xb5, 0x1c, 0x0c,
+    0x02, 0x00, 0x00, 0x00, 0x0b, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0x64, 0xf8, 0x0f, 0x00,
+    0x01, 0x05, 0x01, 0x01, 0x27, 0x18, 0xe3, 0x66, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44,
+    0xae, 0x42, 0x60, 0x82,
 ];
 const RAW_DIGEST: &str = "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460";
 const CONTRACT_DIGEST: &str =
     "sha256:4423332d8ae5ce26e0adaeab085e85441f3686ed0cdc0e367631aef442e4ec4d";
-const CANONICAL_OBJECT: &str = concat!(
-    r#"{"attempt":1,"byte_length":68,"media_type":"image/png","object_id":"evidence/1","ownership":"local-only:not-uploadable",#,
-    r#""role":"browser-screenshot","run_id":"run-1","schema_version":"qa.local-evidence/v1",#,
-    r#""sha256":"431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460"}"#,
-);
+const CANONICAL_OBJECT: &str = r#"{"attempt":1,"byte_length":68,"media_type":"image/png","object_id":"evidence/1","ownership":"local-only:not-uploadable","role":"browser-screenshot","run_id":"run-1","schema_version":"qa.local-evidence/v1","sha256":"431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460"}"#;
 
 #[test]
 fn walks_one_png_through_staging_verification_and_cleanup() {
@@ -111,12 +107,18 @@ fn cleanup_validates_scope_before_mutating_storage() {
 
     let invalid_run_error = stager.cleanup_attempt("../run-1", 1).unwrap_err();
     assert_eq!(invalid_run_error, StagerError::InvalidCleanupScope);
-    assert_eq!(fs::read(owned_attempt.join("sentinel")).unwrap(), b"preserve");
+    assert_eq!(
+        fs::read(owned_attempt.join("sentinel")).unwrap(),
+        b"preserve"
+    );
     assert_sanitized_error(&invalid_run_error, &root);
 
     let invalid_attempt_error = stager.cleanup_attempt("run-1", 0).unwrap_err();
     assert_eq!(invalid_attempt_error, StagerError::InvalidCleanupScope);
-    assert_eq!(fs::read(owned_attempt.join("sentinel")).unwrap(), b"preserve");
+    assert_eq!(
+        fs::read(owned_attempt.join("sentinel")).unwrap(),
+        b"preserve"
+    );
     assert_sanitized_error(&invalid_attempt_error, &root);
 }
 
