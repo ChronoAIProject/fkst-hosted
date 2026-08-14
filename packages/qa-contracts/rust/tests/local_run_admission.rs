@@ -47,7 +47,19 @@ fn raw(value: &Value) -> Vec<u8> {
 }
 
 fn set_pointer(value: &mut Value, pointer: &str, replacement: Value) {
-    *value.pointer_mut(pointer).expect("fixture pointer exists") = replacement;
+    if let Some(slot) = value.pointer_mut(pointer) {
+        *slot = replacement;
+        return;
+    }
+
+    let root_member = pointer
+        .strip_prefix('/')
+        .filter(|member| !member.is_empty() && !member.contains('/'))
+        .expect("missing fixture pointer names one root member");
+    value
+        .as_object_mut()
+        .expect("fixture root is an object")
+        .insert(root_member.to_owned(), replacement);
 }
 
 fn assert_rejection(error: ContractError, expected: &Value) {
