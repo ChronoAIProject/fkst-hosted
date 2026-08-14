@@ -23,6 +23,17 @@ local changed_queues = {
   pr = "github_pr_changed",
 }
 
+local function read_session_creator()
+  local command = config.read_env_command("FKST_SESSION_CREATOR")
+  local ok, result = pcall(exec_sync, command)
+  if not ok or type(result) ~= "table" or result.exit_code ~= 0 then
+    error("github-proxy: session-creator-read-failed: unable to read FKST_SESSION_CREATOR")
+  end
+  return config.session_creator(function()
+    return result
+  end)
+end
+
 local function replay_sort_key(entity)
   return tostring(entity.updated_at or "")
     .. "/"
@@ -50,30 +61,43 @@ local function has_configured_label_prefix(labels, prefixes)
   return false
 end
 
-local function is_intake_candidate_snapshot(entity_type, entity, poll_label_prefixes, session_creator)
-  local candidate = entity_type == "issue"
+local function is_intake_candidate_snapshot(entity_type, entity, poll_label_prefixes)
+  return entity_type == "issue"
     and tostring(entity.state or ""):upper() == "OPEN"
     and not has_configured_label_prefix(entity.labels, poll_label_prefixes)
-  if not candidate or session_creator == nil then
-    return candidate
-  end
-  return claims.is_routed_to_session(entity.assignees, session_creator)
 end
 
 local function is_level_replay_candidate_snapshot(entity_type, entity, poll_label_prefixes, session_creator)
+  local candidate = is_intake_candidate_snapshot(entity_type, entity, poll_label_prefixes)
   if session_creator ~= nil then
-    return is_intake_candidate_snapshot(entity_type, entity, poll_label_prefixes, session_creator)
+    return candidate
   end
-  return is_intake_candidate_snapshot(entity_type, entity, poll_label_prefixes, nil)
-    and #(entity.assignees or {}) == 0
+  return candidate and #(entity.assignees or {}) == 0
+end
+
+-- Sole poll admission point for issue changed, cold/level replay, and observed
+-- delivery. Creator-routed sessions fail closed unless both the effective work
+-- label and the well-formed sole-assignee route match; PR delivery is unchanged.
+local function is_entity_admitted(entity_type, entity, session_creator, session_work_scope)
+  if entity_type ~= "issue" then
+    return true
+  end
+
+  if session_creator == nil then
+    return session_work_scope == nil
+      or config.matches_session_work_label(entity.labels, nil, session_work_scope)
+  end
+
+  local matches_work_label = session_work_scope ~= nil
+    and config.matches_session_work_label(entity.labels, nil, session_work_scope)
+  return matches_work_label
+    and entity.assignees_valid == true
+    and claims.is_routed_to_session(entity.assignees, session_creator)
 end
 
 local function collect_changed(repo, entity_type, entities, fresh_changes, replay_candidates, observed_issues, poll_label_prefixes, session_creator, session_work_scope)
   for _, entity in ipairs(entities) do
-    local in_scope = entity_type ~= "issue"
-      or session_work_scope == nil
-      or config.matches_session_work_label(entity.labels, nil, session_work_scope)
-    if in_scope then
+    if is_entity_admitted(entity_type, entity, session_creator, session_work_scope) then
       local key = core.entity_cache_key(repo, entity_type, entity.number)
       local cached_updated_at = cache_get(key)
       local level_replay = is_level_replay_candidate_snapshot(entity_type, entity, poll_label_prefixes, session_creator)
@@ -225,9 +249,12 @@ local function act(event)
 
   local replay_budget = core.github_proxy_replay_budget()
   local poll_label_prefixes = core.github_proxy_poll_label_prefixes()
-  local session_creator = config.session_creator()
+  local session_creator = read_session_creator()
   local family_isolation_active = config.work_label_family_isolation_active()
-  local session_work_scope = family_isolation_active and config.session_work_label_scope() or nil
+  local session_work_scope = nil
+  if session_creator ~= nil or family_isolation_active then
+    session_work_scope = config.session_work_label_scope()
+  end
   local fresh_changes = {}
   local replay_candidates = {}
   local observed_issues = nil

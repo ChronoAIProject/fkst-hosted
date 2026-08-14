@@ -1,5 +1,6 @@
 local M = {}
 local devloop_config = require("devloop.config")
+local contract_strings = require("contract.strings")
 local github_env = require("github-proxy-effects.core.env")
 local forge_strings = require("forge.strings")
 
@@ -285,14 +286,24 @@ function M.parse_entity_list(gh_json_stdout, entity_type)
   local entities = {}
   local function parse_assignees(value)
     local assignees = {}
-    for _, assignee in ipairs(value.assignees or {}) do
-      if type(assignee) == "table" and assignee.login ~= nil then
-        table.insert(assignees, tostring(assignee.login))
-      elseif type(assignee) == "string" then
+    if type(value.assignees) ~= "table" then
+      return assignees, false
+    end
+    local valid = true
+    for _, assignee in ipairs(value.assignees) do
+      if type(assignee) == "table" and type(assignee.login) == "string" and assignee.login ~= "" then
+        table.insert(assignees, assignee.login)
+        if contract_strings.trim(assignee.login) ~= assignee.login then
+          valid = false
+        end
+      elseif type(assignee) == "string" and assignee ~= "" then
         table.insert(assignees, assignee)
+        valid = false
+      else
+        valid = false
       end
     end
-    return assignees
+    return assignees, valid
   end
 
   local function visit_items(value)
@@ -315,9 +326,10 @@ function M.parse_entity_list(gh_json_stdout, entity_type)
         end
         local author = value.user or value.author
         local author_login = type(author) == "table" and author.login or author
+        local assignees, assignees_valid = parse_assignees(value)
         table.insert(entities, { number = number, title = value.title, url = value.url or value.html_url,
           updated_at = value.updatedAt or value.updated_at, state = item_state, labels = labels,
-          assignees = parse_assignees(value), author_login = author_login })
+          assignees = assignees, assignees_valid = assignees_valid, author_login = author_login })
       end
       return
     end

@@ -14,11 +14,12 @@ local function source_ref()
 end
 
 local function mock_env()
-  for _ = 1, 8 do
+  for _ = 1, 12 do
     t.mock_command(devloop_base.read_env_command("FKST_GITHUB_REPO"), { stdout = repo, stderr = "", exit_code = 0 })
     t.mock_command(devloop_base.read_env_command("FKST_GITHUB_BOT_LOGIN"), { stdout = "fkst-test-bot", stderr = "", exit_code = 0 })
     t.mock_command(devloop_base.read_env_command("FKST_GITHUB_WRITE"), { stdout = "", stderr = "", exit_code = 0 })
     t.mock_command(devloop_base.read_env_command("FKST_GITHUB_CLAIM_MODE"), { stdout = "label", stderr = "", exit_code = 0 })
+    t.mock_command(devloop_base.read_env_command("FKST_SESSION_CREATOR"), { stdout = "fkst-test-bot", stderr = "", exit_code = 0 })
     t.mock_command(devloop_base.read_env_command("FKST_SESSION_WORK_LABEL"), { stdout = "fkst-dev", stderr = "", exit_code = 0 })
     t.mock_command('printf %s "$FKST_GITHUB_PROXY_POLL_LABEL_PREFIX"', {
       stdout = "fkst-dev:,fkst-class:,fkst-security:,fkst-workflow:,fkst-dashboard",
@@ -34,7 +35,7 @@ end
 
 local function mock_proxy_poll_lists()
   t.mock_command("gh api --paginate --slurp 'repos/owner/repo/issues?state=open&per_page=100'", {
-    stdout = '[[{"number":42,"title":"Fresh unmanaged issue","html_url":"https://github.example/owner/repo/issues/42","updated_at":"2026-06-03T01:02:03Z","state":"open","labels":[{"name":"fkst-dev"}]}]]\n',
+    stdout = '[[{"number":42,"title":"Fresh unmanaged issue","html_url":"https://github.example/owner/repo/issues/42","updated_at":"2026-06-03T01:02:03Z","state":"open","labels":[{"name":"fkst-dev"}],"assignees":[{"login":"fkst-test-bot"}]}]]\n',
     stderr = "",
     exit_code = 0,
   })
@@ -58,7 +59,7 @@ local function mock_admission_issue_view()
     assignees = { "fkst-test-bot" },
     author_login = "fkst-test-bot",
   }
-  entity_read_mocks.mock_issue_view_selector(t, issue, "number,state,labels,assignees,author")
+  entity_read_mocks.mock_issue_view_selector(t, issue, "number,state,labels,assignees,author", 2)
   entity_read_mocks.mock_issue_view_selector(
     t,
     issue,

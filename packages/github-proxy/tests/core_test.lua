@@ -570,7 +570,25 @@ return {
     local entities = core.parse_entity_list('[[{"number":7,"title":"Fix","html_url":"https://example.test/7","updated_at":"2026-06-03T00:00:00Z","state":"open","assignees":[{"login":"fkst-test-bot"}],"user":{"login":"human"}}]]')
     t.eq(#entities[1].assignees, 1)
     t.eq(entities[1].assignees[1], "fkst-test-bot")
+    t.eq(entities[1].assignees_valid, true)
     t.eq(entities[1].author_login, "human")
+  end,
+
+  test_parse_entity_list_preserves_malformed_assignee_evidence = function()
+    local entities = core.parse_entity_list('[[{"number":7,"title":"Fix","assignees":[{"login":"creator-login"},{"name":"missing-login"}]}]]')
+    t.eq(#entities[1].assignees, 1)
+    t.eq(entities[1].assignees[1], "creator-login")
+    t.eq(entities[1].assignees_valid, false)
+
+    local legacy = core.parse_entity_list('[[{"number":8,"title":"Legacy","assignees":["creator-login"]}]]')
+    t.eq(#legacy[1].assignees, 1)
+    t.eq(legacy[1].assignees[1], "creator-login")
+    t.eq(legacy[1].assignees_valid, false)
+
+    local whitespace = core.parse_entity_list('[[{"number":9,"title":"Whitespace","assignees":[{"login":" creator-login "}]}]]')
+    t.eq(#whitespace[1].assignees, 1)
+    t.eq(whitespace[1].assignees[1], " creator-login ")
+    t.eq(whitespace[1].assignees_valid, false)
   end,
 
   test_parse_entity_list_empty_array = function()
