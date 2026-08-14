@@ -40,8 +40,8 @@ pub enum BrowserAdapterError {
     OperationAndCleanup { operation: String, cleanup: String },
 }
 
-pub async fn observe_fixed_browser_fixture(
-) -> Result<FixedBrowserObservation, BrowserAdapterError> {
+pub async fn observe_fixed_browser_fixture() -> Result<FixedBrowserObservation, BrowserAdapterError>
+{
     #[cfg(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
     {
         let (sender, receiver) = futures_channel::oneshot::channel();
@@ -97,9 +97,9 @@ fn fixed_expected_text() -> &'static str {
 
 #[cfg(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
 mod unix {
-    use super::{
-        fixed_selector, BrowserAdapterError, FixedBrowserObservation, FixedPngScreenshot,
-    };
+    #[cfg(test)]
+    use super::fixed_expected_text;
+    use super::{fixed_selector, BrowserAdapterError, FixedBrowserObservation, FixedPngScreenshot};
     use headless_chrome::{protocol::cdp::Page, Browser, Tab};
     use nix::{
         errno::Errno,
@@ -1263,8 +1263,7 @@ mod unix {
         #[test]
         fn rendered_text_decoding_accepts_only_json_strings_verbatim() {
             assert_eq!(
-                decode_rendered_text(Some(json!("NOT READY")))
-                    .expect("JSON string is accepted"),
+                decode_rendered_text(Some(json!("NOT READY"))).expect("JSON string is accepted"),
                 "NOT READY"
             );
 
@@ -1366,9 +1365,7 @@ mod unix {
 
             let error = run_with_options(options).expect_err("missing selector fails");
             assert!(matches!(error, BrowserAdapterError::Operation(_)));
-            assert!(error
-                .to_string()
-                .contains("locate fixed status element"));
+            assert!(error.to_string().contains("locate fixed status element"));
             assert_observed_resources_cleaned(&resources, true);
         }
 
