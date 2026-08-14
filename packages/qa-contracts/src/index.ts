@@ -47,6 +47,12 @@ const LOCAL_WORKER_TYPE_NAMES = Object.freeze([
   "LocalWorkerTerminalResult",
   "LocalWorkerProtocolFailure",
 ] as const);
+const LOCAL_QA_RUN_REQUEST_TYPE_NAME = "LocalQARunRequest";
+const RUN_ACCEPTANCE_TYPE_NAME = "RunAcceptance";
+const LOCAL_RUN_ADMISSION_TYPE_NAMES = Object.freeze([
+  LOCAL_QA_RUN_REQUEST_TYPE_NAME,
+  RUN_ACCEPTANCE_TYPE_NAME,
+] as const);
 const FOUNDATION_TYPE_NAMES = Object.freeze([
   "ContractMeta",
   "HostScopedMeta",
@@ -97,6 +103,46 @@ export interface LocalEvidenceObjectRef {
   readonly schema_version: "qa.local-evidence/v1";
   readonly content_digest: string;
   readonly version?: string;
+}
+
+export interface DigestBoundIdentity {
+  readonly kind: string;
+  readonly id: string;
+  readonly schema_version: string;
+  readonly content_digest: string;
+}
+
+export interface LocalQARunRequest {
+  readonly schema_version: "qa.local-run-admission/v1";
+  readonly content_digest: string;
+  readonly run_id: string;
+  readonly created_at: string;
+  readonly producer_version: string;
+  readonly idempotency_key: string;
+  readonly nonce: string;
+  readonly expires_at: string;
+  readonly profile: "local_qa_agent_mvp";
+  readonly source: DigestBoundIdentity & { readonly kind: "source" };
+  readonly structured_plan: DigestBoundIdentity & { readonly kind: "structured-plan" };
+  readonly environment_profile: DigestBoundIdentity & { readonly kind: "environment-profile" };
+  readonly device: DigestBoundIdentity & { readonly kind: "device" };
+  readonly nyxid_node: DigestBoundIdentity & { readonly kind: "nyxid-node" };
+  readonly host_installation: DigestBoundIdentity & { readonly kind: "host-installation" };
+  readonly authorization: DigestBoundIdentity & {
+    readonly kind: "local-credential-authorization";
+  };
+}
+
+export interface RunAcceptance {
+  readonly schema_version: "qa.local-run-admission/v1";
+  readonly content_digest: string;
+  readonly run_id: string;
+  readonly created_at: string;
+  readonly producer_version: string;
+  readonly request_digest: string;
+  readonly idempotency_key: string;
+  readonly state: "accepted";
+  readonly accepted_at: string;
 }
 
 const PACKAGE_ROOT = realpathSync(resolvePackageRoot());
@@ -154,6 +200,9 @@ for (const type of LOCAL_EVIDENCE_TYPE_NAMES) {
   VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
 }
 for (const type of LOCAL_WORKER_TYPE_NAMES) {
+  VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
+}
+for (const type of LOCAL_RUN_ADMISSION_TYPE_NAMES) {
   VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
 }
 
@@ -290,6 +339,50 @@ export function validateLocalWorkerProtocolFailure(raw: Uint8Array): ValidatedVa
   return validateRegisteredValue(admitJson(raw), "LocalWorkerProtocolFailure");
 }
 
+export function validateLocalQARunRequest(raw: Uint8Array): ValidatedValue {
+  return validateLocalQARunRequestValue(admitJson(raw));
+}
+
+export function validateRunAcceptance(raw: Uint8Array): ValidatedValue {
+  return validateRunAcceptanceValue(admitJson(raw));
+}
+
+export function buildInitialRunAcceptance(
+  request: ValidatedValue,
+  acceptedAt: string,
+  producerVersion: string,
+): ValidatedValue {
+  const validatedRequest = validateLocalQARunRequestValue(
+    new AdmittedJson(request.value(), ADMISSION_TOKEN),
+  );
+  const requestValue = validatedRequest.value() as LocalQARunRequest;
+  if (!validateIso8601(acceptedAt)) {
+    throw validationError("schema_violation", "/accepted_at");
+  }
+  if (producerVersion.length === 0) {
+    throw validationError("schema_violation", "/producer_version");
+  }
+  if (
+    compareIso8601(acceptedAt, requestValue.created_at) < 0 ||
+    compareIso8601(acceptedAt, requestValue.expires_at) >= 0
+  ) {
+    throw contractError("contract.invalid_relation", "accepted_at_out_of_window", "/accepted_at");
+  }
+  const acceptance: Record<string, unknown> = {
+    schema_version: "qa.local-run-admission/v1",
+    run_id: requestValue.run_id,
+    created_at: acceptedAt,
+    producer_version: producerVersion,
+    request_digest: requestValue.content_digest,
+    idempotency_key: requestValue.idempotency_key,
+    state: "accepted",
+    accepted_at: acceptedAt,
+  };
+  const projected = new ValidatedValue(acceptance, VALIDATION_TOKEN);
+  acceptance.content_digest = contractContentDigest(projected);
+  return validateRunAcceptance(canonicalizeUnknown(acceptance));
+}
+
 export function encodeLocalWorkerFrame(value: ValidatedValue): Uint8Array {
   const payload = canonicalBytes(value);
   if (payload.length < 1 || payload.length > LOCAL_WORKER_MAX_FRAME_BYTES) {
@@ -406,6 +499,38 @@ function validateRegisteredValue(admitted: AdmittedJson, typeName: string): Vali
     throw new ContractError({ category: "validation", reason: "schema_violation", path });
   }
   return new ValidatedValue(value, VALIDATION_TOKEN);
+}
+
+function validateLocalQARunRequestValue(admitted: AdmittedJson): ValidatedValue {
+  const validated = validateRegisteredValue(admitted, LOCAL_QA_RUN_REQUEST_TYPE_NAME);
+  const value = validated.value() as LocalQARunRequest;
+  if (!validateIso8601(value.created_at)) {
+    throw validationError("schema_violation", "/created_at");
+  }
+  if (!validateIso8601(value.expires_at)) {
+    throw validationError("schema_violation", "/expires_at");
+  }
+  if (!validateBase64UrlNoPad(value.nonce)) {
+    throw contractError("contract.invalid_encoding", "invalid_encoding", "/nonce");
+  }
+  verifyContractContentDigest(validated);
+  return validated;
+}
+
+function validateRunAcceptanceValue(admitted: AdmittedJson): ValidatedValue {
+  const validated = validateRegisteredValue(admitted, RUN_ACCEPTANCE_TYPE_NAME);
+  const value = validated.value() as RunAcceptance;
+  if (!validateIso8601(value.created_at)) {
+    throw validationError("schema_violation", "/created_at");
+  }
+  if (!validateIso8601(value.accepted_at)) {
+    throw validationError("schema_violation", "/accepted_at");
+  }
+  if (value.created_at !== value.accepted_at) {
+    throw contractError("contract.invalid_relation", "accepted_at_mismatch", "/created_at");
+  }
+  verifyContractContentDigest(validated);
+  return validated;
 }
 
 export function validateScalar(
@@ -543,6 +668,12 @@ function validateRegistry(registry: ContractRegistry): void {
     }
   }
   for (const type of LOCAL_WORKER_TYPE_NAMES) {
+    const entry = registry.types[type];
+    if (entry?.fixture_only !== undefined) {
+      throw new Error(`qa contract fixture-only marker is invalid: ${type}`);
+    }
+  }
+  for (const type of LOCAL_RUN_ADMISSION_TYPE_NAMES) {
     const entry = registry.types[type];
     if (entry?.fixture_only !== undefined) {
       throw new Error(`qa contract fixture-only marker is invalid: ${type}`);
@@ -702,11 +833,11 @@ function compileRegisteredValidator(registry: ContractRegistry, typeName: string
   if (schema.$id !== schemaEntry.id) {
     throw validationError("invalid_embedded_schema", "/$id");
   }
-  assertLocalReferences(schema);
+  const resolvedSchema = resolveRegisteredReferences(schema, registry);
   if (resolveJsonPointer(schema, typeEntry.pointer) === undefined) {
     throw validationError("unresolved_registered_pointer", "/types");
   }
-  const validatorSchema = structuredClone(schema);
+  const validatorSchema = structuredClone(resolvedSchema);
   delete validatorSchema.$id;
   validatorSchema.$ref = typeEntry.pointer;
   try {
@@ -728,16 +859,71 @@ function resolveJsonPointer(root: unknown, pointerValue: string): unknown {
   return current;
 }
 
-function assertLocalReferences(value: unknown): void {
+function resolveRegisteredReferences(
+  value: unknown,
+  registry: ContractRegistry,
+): Record<string, unknown> {
+  const resolved = resolveRegisteredReferenceValue(value, registry);
+  if (!isRecord(resolved)) {
+    throw validationError("invalid_embedded_schema", "/");
+  }
+  return resolved;
+}
+
+function resolveRegisteredReferenceValue(value: unknown, registry: ContractRegistry): unknown {
   if (Array.isArray(value)) {
-    for (const item of value) assertLocalReferences(item);
-    return;
+    return value.map((item) => resolveRegisteredReferenceValue(item, registry));
   }
-  if (!isRecord(value)) return;
+  if (!isRecord(value)) return value;
   if (typeof value.$ref === "string" && !value.$ref.startsWith("#")) {
-    throw new Error(`external qa contract schema reference is forbidden: ${value.$ref}`);
+    const imported = importRegisteredReference(value.$ref, registry);
+    const siblings = Object.fromEntries(Object.entries(value).filter(([key]) => key !== "$ref"));
+    if (Object.keys(siblings).length === 0) return imported;
+    return {
+      allOf: [
+        imported,
+        resolveRegisteredReferenceValue(siblings, registry),
+      ],
+    };
   }
-  for (const child of Object.values(value)) assertLocalReferences(child);
+  return Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [
+      key,
+      resolveRegisteredReferenceValue(child, registry),
+    ]),
+  );
+}
+
+function importRegisteredReference(reference: string, registry: ContractRegistry): unknown {
+  const match = Object.entries(registry.schemas).find(([, entry]) =>
+    reference === entry.id || reference.startsWith(`${entry.id}#`),
+  );
+  if (match === undefined) {
+    throw validationError("external_schema_reference", "/$ref");
+  }
+  const [schemaName, schemaEntry] = match;
+  let schemaUrl: URL;
+  try {
+    schemaUrl = resolvePackageFile(schemaEntry.path);
+  } catch {
+    throw validationError("invalid_embedded_schema_path", `/schemas/${schemaName}/path`);
+  }
+  const schema = JSON.parse(readFileSync(schemaUrl, "utf8")) as Record<string, unknown>;
+  if (schema.$id !== schemaEntry.id) {
+    throw validationError("invalid_embedded_schema", "/$id");
+  }
+  const fragment = reference.slice(schemaEntry.id.length);
+  const target = fragment.length === 0 ? schema : resolveJsonPointer(schema, fragment);
+  if (target === undefined || containsSchemaReference(target)) {
+    throw validationError("invalid_embedded_schema", "/$ref");
+  }
+  return structuredClone(target);
+}
+
+function containsSchemaReference(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsSchemaReference);
+  if (!isRecord(value)) return false;
+  return typeof value.$ref === "string" || Object.values(value).some(containsSchemaReference);
 }
 
 function inspectNode(node: JsonNode, text: string, depth: number): void {
@@ -1064,6 +1250,25 @@ function validateIso8601(value: string): boolean {
   const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
   const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
   return day >= 1 && day <= daysInMonth[month - 1]!;
+}
+
+function compareIso8601(left: string, right: string): number {
+  const leftSecond = left.slice(0, 19);
+  const rightSecond = right.slice(0, 19);
+  if (leftSecond !== rightSecond) return leftSecond < rightSecond ? -1 : 1;
+  const leftFraction = iso8601Fraction(left);
+  const rightFraction = iso8601Fraction(right);
+  const length = Math.max(leftFraction.length, rightFraction.length);
+  for (let index = 0; index < length; index += 1) {
+    const leftDigit = leftFraction.charCodeAt(index) || 48;
+    const rightDigit = rightFraction.charCodeAt(index) || 48;
+    if (leftDigit !== rightDigit) return leftDigit < rightDigit ? -1 : 1;
+  }
+  return 0;
+}
+
+function iso8601Fraction(value: string): string {
+  return value[19] === "." ? value.slice(20, -1) : "";
 }
 
 function validateBase64UrlNoPad(value: string): boolean {
