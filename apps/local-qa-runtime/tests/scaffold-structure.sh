@@ -7,6 +7,7 @@ cd "$root"
 expected=$(printf '%s\n' \
   apps/local-qa-runtime/browser-adapter/src/lib.rs \
   apps/local-qa-runtime/evidence-stager/src/lib.rs \
+  apps/local-qa-runtime/evidence-stager/tests/browser_screenshot.rs \
   apps/local-qa-runtime/evidence-stager/tests/runner_log.rs \
   apps/local-qa-runtime/guest-agent/src/main.rs \
   apps/local-qa-runtime/host/src/coordinator.rs \

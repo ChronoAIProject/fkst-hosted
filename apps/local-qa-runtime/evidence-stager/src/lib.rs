@@ -175,10 +175,7 @@ impl EvidenceStager {
         let _global_guard = STAGING_COORDINATION
             .lock()
             .map_err(|_| StagerError::Storage)?;
-        let _guard = self
-            .coordination
-            .lock()
-            .map_err(|_| StagerError::Storage)?;
+        let _guard = self.coordination.lock().map_err(|_| StagerError::Storage)?;
         let final_path = self.object_path(request.run_id, request.attempt, request.object_id)?;
         let parent = final_path.parent().ok_or(StagerError::Storage)?;
         ensure_directory_path(&self.root, parent)?;
@@ -286,30 +283,41 @@ impl EvidenceStager {
         let _global_guard = STAGING_COORDINATION
             .lock()
             .map_err(|_| StagerError::Cleanup)?;
-        let _guard = self
-            .coordination
-            .lock()
-            .map_err(|_| StagerError::Cleanup)?;
+        let _guard = self.coordination.lock().map_err(|_| StagerError::Cleanup)?;
         let attempt_path = self.root.join(run_id).join(attempt.to_string());
         if !safe_existing_components(&self.root, &attempt_path)? {
-            return Ok(residual(run_id, attempt, CleanupResidualReason::UnsafeEntry));
+            return Ok(residual(
+                run_id,
+                attempt,
+                CleanupResidualReason::UnsafeEntry,
+            ));
         }
         let metadata = match fs::symlink_metadata(&attempt_path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(CleanupResult { complete: true, residuals: Vec::new() })
+                return Ok(CleanupResult {
+                    complete: true,
+                    residuals: Vec::new(),
+                })
             }
             Err(_) => return Err(StagerError::Cleanup),
         };
         if !metadata.file_type().is_dir() {
-            return Ok(residual(run_id, attempt, CleanupResidualReason::UnsafeEntry));
+            return Ok(residual(
+                run_id,
+                attempt,
+                CleanupResidualReason::UnsafeEntry,
+            ));
         }
         let mut residuals = Vec::new();
         cleanup_owned_tree(&attempt_path, &mut residuals, run_id, attempt)?;
         if residuals.is_empty() {
             remove_empty_parents(&self.root, &attempt_path)?;
         }
-        Ok(CleanupResult { complete: residuals.is_empty(), residuals })
+        Ok(CleanupResult {
+            complete: residuals.is_empty(),
+            residuals,
+        })
     }
 
     fn object_path(
@@ -321,8 +329,15 @@ impl EvidenceStager {
         validate_run_id(run_id).map_err(|_| StagerError::InvalidObject)?;
         validate_attempt(attempt).map_err(|_| StagerError::InvalidObject)?;
         validate_object_id(object_id).map_err(|_| StagerError::InvalidObject)?;
-        let object_number = object_id.strip_prefix("evidence/").ok_or(StagerError::InvalidObject)?;
-        Ok(self.root.join(run_id).join(attempt.to_string()).join("evidence").join(format!("{object_number}.bin")))
+        let object_number = object_id
+            .strip_prefix("evidence/")
+            .ok_or(StagerError::InvalidObject)?;
+        Ok(self
+            .root
+            .join(run_id)
+            .join(attempt.to_string())
+            .join("evidence")
+            .join(format!("{object_number}.bin")))
     }
 }
 
@@ -339,27 +354,51 @@ fn validate_request(request: &StageRequest<'_>) -> Result<(), StagerError> {
     if request.bytes.len() > MAX_EVIDENCE_BYTES {
         return Err(StagerError::ObjectTooLarge);
     }
-    if !matches!((request.role, request.media_type),
+    if !matches!(
+        (request.role, request.media_type),
         (EvidenceRole::BrowserScreenshot, EvidenceMediaType::Png)
-            | (EvidenceRole::RunnerLog, EvidenceMediaType::PlainTextUtf8))
-    {
+            | (EvidenceRole::RunnerLog, EvidenceMediaType::PlainTextUtf8)
+    ) {
         return Err(StagerError::InvalidObject);
     }
     Ok(())
 }
 
 fn validate_run_id(value: &str) -> Result<(), ()> {
-    if value.is_empty() || value.len() > 64 || !value.is_ascii() || !value.bytes().next().unwrap().is_ascii_alphanumeric() {
+    if value.is_empty()
+        || value.len() > 64
+        || !value.is_ascii()
+        || !value.bytes().next().unwrap().is_ascii_alphanumeric()
+    {
         return Err(());
     }
-    if value.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-') { Ok(()) } else { Err(()) }
+    if value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+    {
+        Ok(())
+    } else {
+        Err(())
+    }
 }
 
-fn validate_attempt(value: u64) -> Result<(), ()> { if (1..=MAX_SAFE_ATTEMPT).contains(&value) { Ok(()) } else { Err(()) } }
+fn validate_attempt(value: u64) -> Result<(), ()> {
+    if (1..=MAX_SAFE_ATTEMPT).contains(&value) {
+        Ok(())
+    } else {
+        Err(())
+    }
+}
 
 fn validate_object_id(value: &str) -> Result<(), ()> {
     let number = value.strip_prefix("evidence/").ok_or(())?;
-    if value.is_empty() || value.len() > 64 || number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) { return Err(()); }
+    if value.is_empty()
+        || value.len() > 64
+        || number.is_empty()
+        || !number.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Err(());
+    }
     Ok(())
 }
 
@@ -387,14 +426,20 @@ fn build_reference(object_id: &str, digest: String) -> Result<ValidatedValue, St
 
 fn ensure_directory_path(root: &Path, target: &Path) -> Result<(), StagerError> {
     ensure_root_directory(root)?;
-    let relative = target.strip_prefix(root).map_err(|_| StagerError::FilesystemSafety)?;
+    let relative = target
+        .strip_prefix(root)
+        .map_err(|_| StagerError::FilesystemSafety)?;
     let mut current = root.to_path_buf();
     for component in relative.components() {
         current.push(component.as_os_str());
         match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() => return Err(StagerError::FilesystemSafety),
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() => {
+                return Err(StagerError::FilesystemSafety)
+            }
             Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => fs::create_dir(&current).map_err(|_| StagerError::Storage)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                fs::create_dir(&current).map_err(|_| StagerError::Storage)?
+            }
             Err(_) => return Err(StagerError::Storage),
         }
     }
@@ -414,7 +459,9 @@ fn ensure_root_directory(root: &Path) -> Result<(), StagerError> {
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 missing.push(current.clone());
-                if !current.pop() { return Err(StagerError::Storage); }
+                if !current.pop() {
+                    return Err(StagerError::Storage);
+                }
             }
             Err(_) => return Err(StagerError::Storage),
         }
@@ -428,12 +475,16 @@ fn ensure_root_directory(root: &Path) -> Result<(), StagerError> {
 fn safe_existing_components(root: &Path, target: &Path) -> Result<bool, StagerError> {
     match fs::symlink_metadata(root) {
         Ok(metadata) if metadata.file_type().is_symlink() => return Ok(false),
-        Ok(metadata) if !metadata.file_type().is_dir() => return Err(StagerError::FilesystemSafety),
+        Ok(metadata) if !metadata.file_type().is_dir() => {
+            return Err(StagerError::FilesystemSafety)
+        }
         Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
         Err(_) => return Err(StagerError::Cleanup),
     }
-    let relative = target.strip_prefix(root).map_err(|_| StagerError::FilesystemSafety)?;
+    let relative = target
+        .strip_prefix(root)
+        .map_err(|_| StagerError::FilesystemSafety)?;
     let mut current = root.to_path_buf();
     for component in relative.components() {
         current.push(component.as_os_str());
@@ -452,12 +503,19 @@ fn inspect_attempt(parent: &Path) -> Result<Quota, StagerError> {
     for entry in fs::read_dir(parent).map_err(|_| StagerError::Storage)? {
         let entry = entry.map_err(|_| StagerError::FilesystemSafety)?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        let metadata = fs::symlink_metadata(entry.path()).map_err(|_| StagerError::FilesystemSafety)?;
-        if !is_published_name(&name) || !metadata.file_type().is_file() || link_count(&metadata) != Some(1) {
+        let metadata =
+            fs::symlink_metadata(entry.path()).map_err(|_| StagerError::FilesystemSafety)?;
+        if !is_published_name(&name)
+            || !metadata.file_type().is_file()
+            || link_count(&metadata) != Some(1)
+        {
             return Err(StagerError::FilesystemSafety);
         }
         quota.count += 1;
-        quota.bytes = quota.bytes.checked_add(metadata.len()).ok_or(StagerError::QuotaExceeded)?;
+        quota.bytes = quota
+            .bytes
+            .checked_add(metadata.len())
+            .ok_or(StagerError::QuotaExceeded)?;
     }
     Ok(quota)
 }
@@ -468,20 +526,31 @@ fn is_published_name(name: &str) -> bool {
 }
 
 fn checked_open_regular(root: &Path, path: &Path) -> Result<File, ()> {
-    if !safe_existing_components(root, path).map_err(|_| ())? { return Err(()); }
+    if !safe_existing_components(root, path).map_err(|_| ())? {
+        return Err(());
+    }
     let before = fs::symlink_metadata(path).map_err(|_| ())?;
-    if !before.file_type().is_file() || link_count(&before) != Some(1) { return Err(()); }
+    if !before.file_type().is_file() || link_count(&before) != Some(1) {
+        return Err(());
+    }
     let file = File::open(path).map_err(|_| ())?;
     let opened = file.metadata().map_err(|_| ())?;
     let after = fs::symlink_metadata(path).map_err(|_| ())?;
-    if !after.file_type().is_file() || link_count(&after) != Some(1) || !same_file(&opened, &after) { return Err(()); }
+    if !after.file_type().is_file() || link_count(&after) != Some(1) || !same_file(&opened, &after)
+    {
+        return Err(());
+    }
     Ok(file)
 }
 
 #[cfg(unix)]
-fn link_count(metadata: &fs::Metadata) -> Option<u64> { Some(std::os::unix::fs::MetadataExt::nlink(metadata)) }
+fn link_count(metadata: &fs::Metadata) -> Option<u64> {
+    Some(std::os::unix::fs::MetadataExt::nlink(metadata))
+}
 #[cfg(not(unix))]
-fn link_count(_metadata: &fs::Metadata) -> Option<u64> { None }
+fn link_count(_metadata: &fs::Metadata) -> Option<u64> {
+    None
+}
 
 #[cfg(unix)]
 fn same_file(left: &fs::Metadata, right: &fs::Metadata) -> bool {
@@ -489,38 +558,79 @@ fn same_file(left: &fs::Metadata, right: &fs::Metadata) -> bool {
     left.dev() == right.dev() && left.ino() == right.ino()
 }
 #[cfg(not(unix))]
-fn same_file(left: &fs::Metadata, right: &fs::Metadata) -> bool { left.len() == right.len() }
+fn same_file(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    left.len() == right.len()
+}
 
-fn cleanup_owned_tree(path: &Path, residuals: &mut Vec<CleanupResidual>, run_id: &str, attempt: u64) -> Result<(), StagerError> {
+fn cleanup_owned_tree(
+    path: &Path,
+    residuals: &mut Vec<CleanupResidual>,
+    run_id: &str,
+    attempt: u64,
+) -> Result<(), StagerError> {
     for entry in fs::read_dir(path).map_err(|_| StagerError::Cleanup)? {
         let entry = entry.map_err(|_| StagerError::Cleanup)?;
         let name = entry.file_name().to_string_lossy().into_owned();
         let metadata = fs::symlink_metadata(entry.path()).map_err(|_| StagerError::Cleanup)?;
         if metadata.file_type().is_symlink() {
-            residuals.push(residual_item(run_id, attempt, CleanupResidualReason::UnsafeEntry));
+            residuals.push(residual_item(
+                run_id,
+                attempt,
+                CleanupResidualReason::UnsafeEntry,
+            ));
         } else if metadata.file_type().is_dir() {
-            if name == "evidence" { cleanup_owned_tree(&entry.path(), residuals, run_id, attempt)?; }
-            else { residuals.push(residual_item(run_id, attempt, CleanupResidualReason::UnrelatedEntry)); }
+            if name == "evidence" {
+                cleanup_owned_tree(&entry.path(), residuals, run_id, attempt)?;
+            } else {
+                residuals.push(residual_item(
+                    run_id,
+                    attempt,
+                    CleanupResidualReason::UnrelatedEntry,
+                ));
+            }
         } else if is_published_name(&name) || is_temporary_name(&name) {
             if !metadata.file_type().is_file() {
-                residuals.push(residual_item(run_id, attempt, CleanupResidualReason::UnsafeEntry));
+                residuals.push(residual_item(
+                    run_id,
+                    attempt,
+                    CleanupResidualReason::UnsafeEntry,
+                ));
             } else if fs::remove_file(entry.path()).is_err() {
-                residuals.push(residual_item(run_id, attempt, CleanupResidualReason::RemovalFailed));
+                residuals.push(residual_item(
+                    run_id,
+                    attempt,
+                    CleanupResidualReason::RemovalFailed,
+                ));
             }
         } else {
-            residuals.push(residual_item(run_id, attempt, CleanupResidualReason::UnrelatedEntry));
+            residuals.push(residual_item(
+                run_id,
+                attempt,
+                CleanupResidualReason::UnrelatedEntry,
+            ));
         }
     }
-    if residuals.is_empty() { let _ = fs::remove_dir(path); }
+    if residuals.is_empty() {
+        let _ = fs::remove_dir(path);
+    }
     Ok(())
 }
 
-fn is_temporary_name(name: &str) -> bool { name.starts_with('.') && name.ends_with(".tmp") }
+fn is_temporary_name(name: &str) -> bool {
+    name.starts_with('.') && name.ends_with(".tmp")
+}
 fn residual_item(run_id: &str, attempt: u64, reason: CleanupResidualReason) -> CleanupResidual {
-    CleanupResidual { run_id: run_id.to_owned(), attempt, reason }
+    CleanupResidual {
+        run_id: run_id.to_owned(),
+        attempt,
+        reason,
+    }
 }
 fn residual(run_id: &str, attempt: u64, reason: CleanupResidualReason) -> CleanupResult {
-    CleanupResult { complete: false, residuals: vec![residual_item(run_id, attempt, reason)] }
+    CleanupResult {
+        complete: false,
+        residuals: vec![residual_item(run_id, attempt, reason)],
+    }
 }
 
 fn remove_empty_parents(root: &Path, attempt_path: &Path) -> Result<(), StagerError> {
@@ -530,7 +640,12 @@ fn remove_empty_parents(root: &Path, attempt_path: &Path) -> Result<(), StagerEr
             Ok(()) => {
                 let _ = current.pop();
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound || error.kind() == std::io::ErrorKind::DirectoryNotEmpty => break,
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound
+                    || error.kind() == std::io::ErrorKind::DirectoryNotEmpty =>
+            {
+                break
+            }
             Err(_) => return Err(StagerError::Cleanup),
         }
     }
@@ -545,21 +660,53 @@ fn validate_cleanup_scope(run_id: &str, attempt: u64) -> Result<(), StagerError>
 fn raw_sha256(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     let mut output = String::with_capacity(64);
-    for byte in digest { use std::fmt::Write as _; write!(&mut output, "{byte:02x}").expect("writing to a string cannot fail"); }
+    for byte in digest {
+        use std::fmt::Write as _;
+        write!(&mut output, "{byte:02x}").expect("writing to a string cannot fail");
+    }
     output
 }
 
 fn temporary_path(parent: &Path, final_path: &Path) -> Result<PathBuf, StagerError> {
-    let final_name = final_path.file_name().and_then(|name| name.to_str()).ok_or(StagerError::Storage)?;
+    let final_name = final_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or(StagerError::Storage)?;
     let sequence = TEMPORARY_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    Ok(parent.join(format!(".{final_name}.{}.{}.tmp", std::process::id(), sequence)))
+    Ok(parent.join(format!(
+        ".{final_name}.{}.{}.tmp",
+        std::process::id(),
+        sequence
+    )))
 }
 
 #[cfg(unix)]
-fn sync_directory(path: &Path) -> Result<(), StagerError> { File::open(path).and_then(|directory| directory.sync_all()).map_err(|_| StagerError::Storage) }
+fn sync_directory(path: &Path) -> Result<(), StagerError> {
+    File::open(path)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|_| StagerError::Storage)
+}
 #[cfg(not(unix))]
-fn sync_directory(_path: &Path) -> Result<(), StagerError> { Ok(()) }
+fn sync_directory(_path: &Path) -> Result<(), StagerError> {
+    Ok(())
+}
 
-struct TemporaryFileGuard { path: PathBuf, armed: bool }
-impl TemporaryFileGuard { fn new(path: PathBuf) -> Self { Self { path, armed: true } } fn disarm(&mut self) { self.armed = false; } }
-impl Drop for TemporaryFileGuard { fn drop(&mut self) { if self.armed { let _ = fs::remove_file(&self.path); } } }
+struct TemporaryFileGuard {
+    path: PathBuf,
+    armed: bool,
+}
+impl TemporaryFileGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
+    }
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+impl Drop for TemporaryFileGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}

@@ -199,7 +199,11 @@ fn enforces_count_and_byte_quotas_without_temporary_remnants() {
     assert_eq!(error, StagerError::QuotaExceeded);
     assert_eq!(regular_files(&root).len(), 2);
     assert!(regular_files(&root).iter().all(|path| {
-        !path.file_name().unwrap().to_string_lossy().ends_with(".tmp")
+        !path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .ends_with(".tmp")
     }));
 }
 
