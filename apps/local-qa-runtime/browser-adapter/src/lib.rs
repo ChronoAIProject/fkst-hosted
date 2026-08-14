@@ -138,6 +138,10 @@ mod unix {
     const FIXTURE_HTML: &[u8] = br#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Local QA Fixed Page</title></head><body><main><span data-local-qa="status">READY</span></main></body></html>"#;
     #[cfg(test)]
     const NOT_READY_FIXTURE_HTML: &[u8] = br#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Local QA Fixed Page</title></head><body><main><span data-local-qa="status">NOT READY</span></main></body></html>"#;
+    #[cfg(test)]
+    const MISSING_SELECTOR_FIXTURE_HTML: &[u8] = br#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Local QA Fixed Page</title></head><body><main>READY</main></body></html>"#;
+    #[cfg(test)]
+    const REDIRECT_PATH: &str = "/redirected-page.html";
     const SCREENSHOT_MEDIA_TYPE: &str = "image/png";
     const VIEWPORT_WIDTH: u32 = 1280;
     const VIEWPORT_HEIGHT: u32 = 720;
@@ -157,6 +161,10 @@ mod unix {
         Ready,
         #[cfg(test)]
         NotReady,
+        #[cfg(test)]
+        Redirect,
+        #[cfg(test)]
+        MissingSelector,
     }
 
     impl FixtureContent {
@@ -165,6 +173,8 @@ mod unix {
                 Self::Ready => FIXTURE_HTML,
                 #[cfg(test)]
                 Self::NotReady => NOT_READY_FIXTURE_HTML,
+                #[cfg(test)]
+                Self::Redirect | Self::MissingSelector => MISSING_SELECTOR_FIXTURE_HTML,
             }
         }
     }
@@ -284,6 +294,8 @@ mod unix {
                 "navigate to fixed fixture",
                 deadline,
             ))?;
+        let final_url = tab.get_url();
+        validate_final_url(&final_url, &navigation_url)?;
         tab.set_default_timeout(remaining(deadline)?);
 
         let element =
@@ -298,14 +310,8 @@ mod unix {
                 "read fixed status rendered text",
                 deadline,
             ))?
-            .value
-            .ok_or_else(|| {
-                BrowserAdapterError::Operation(
-                    "fixed status rendered text did not produce a value".to_string(),
-                )
-            })?;
-        let observed_text: String = serde_json::from_value(observed_value)
-            .map_err(operation_error("decode fixed status rendered text"))?;
+            .value;
+        let observed_text = decode_rendered_text(observed_value)?;
 
         ensure_before_deadline(deadline)?;
         #[cfg(test)]
@@ -336,12 +342,6 @@ mod unix {
                 deadline,
             ))?;
         let (width_px, height_px) = validate_png(&screenshot)?;
-        let final_url = tab.get_url();
-        if final_url != navigation_url {
-            return Err(BrowserAdapterError::Operation(format!(
-                "final URL was {final_url:?}, expected {navigation_url:?}"
-            )));
-        }
         ensure_before_deadline(deadline)?;
 
         drop(element);
@@ -362,6 +362,33 @@ mod unix {
                 height_px,
             },
         })
+    }
+
+    fn validate_final_url(
+        final_url: &str,
+        navigation_url: &str,
+    ) -> Result<(), BrowserAdapterError> {
+        if final_url == navigation_url {
+            Ok(())
+        } else {
+            Err(BrowserAdapterError::Operation(format!(
+                "final URL was {final_url:?}, expected {navigation_url:?}"
+            )))
+        }
+    }
+
+    fn decode_rendered_text(
+        value: Option<serde_json::Value>,
+    ) -> Result<String, BrowserAdapterError> {
+        match value {
+            Some(serde_json::Value::String(text)) => Ok(text),
+            Some(value) => Err(BrowserAdapterError::Operation(format!(
+                "fixed status rendered text was not a string: {value}"
+            ))),
+            None => Err(BrowserAdapterError::Operation(
+                "fixed status rendered text did not produce a value".to_string(),
+            )),
+        }
     }
 
     fn wait_for_initial_tab(
@@ -520,7 +547,7 @@ mod unix {
             let thread_stop = Arc::clone(&stop);
             let thread = thread::Builder::new()
                 .name("local-qa-fixed-fixture".to_string())
-                .spawn(move || serve_fixture(listener, &thread_stop, content.html()))
+                .spawn(move || serve_fixture(listener, &thread_stop, content))
                 .map_err(setup_error("start fixed fixture thread"))?;
             Ok(Self {
                 address,
@@ -557,11 +584,11 @@ mod unix {
     fn serve_fixture(
         listener: TcpListener,
         stop: &AtomicBool,
-        fixture_html: &[u8],
+        content: FixtureContent,
     ) -> Result<(), String> {
         while !stop.load(Ordering::Acquire) {
             match listener.accept() {
-                Ok((stream, _)) => handle_fixture_connection(stream, fixture_html)?,
+                Ok((stream, _)) => handle_fixture_connection(stream, content)?,
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(IO_POLL_INTERVAL);
                 }
@@ -573,7 +600,7 @@ mod unix {
 
     fn handle_fixture_connection(
         mut stream: TcpStream,
-        fixture_html: &[u8],
+        content: FixtureContent,
     ) -> Result<(), String> {
         stream
             .set_read_timeout(Some(Duration::from_secs(1)))
@@ -601,13 +628,36 @@ mod unix {
             .split(|byte| *byte == b'\n')
             .next()
             .map(|line| line.strip_suffix(b"\r").unwrap_or(line));
+        let request_path = request_line.and_then(|line| {
+            line.strip_prefix(b"GET ")
+                .and_then(|line| line.strip_suffix(b" HTTP/1.1"))
+        });
         let valid_request = header_end.is_some_and(|header_end| {
             request.len() <= 8192
-                && request_line == Some(b"GET /fixed-page.html HTTP/1.1")
+                && request_path.is_some()
                 && request[header_end + 4..].is_empty()
                 && !headers_declare_body(&request[..header_end])
         });
-        if valid_request {
+        if valid_request && request_path == Some(FIXTURE_PATH.as_bytes()) {
+            #[cfg(test)]
+            if matches!(content, FixtureContent::Redirect) {
+                return write_response(
+                    &mut stream,
+                    format!(
+                        "HTTP/1.1 302 Found\r\nLocation: {REDIRECT_PATH}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    )
+                    .as_bytes(),
+                    &[],
+                );
+            }
+            let fixture_html = content.html();
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                fixture_html.len()
+            );
+            write_response(&mut stream, head.as_bytes(), fixture_html)
+        } else if valid_request && is_redirect_destination(content, request_path) {
+            let fixture_html = content.html();
             let head = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 fixture_html.len()
@@ -619,6 +669,19 @@ mod unix {
                 b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                 &[],
             )
+        }
+    }
+
+    fn is_redirect_destination(content: FixtureContent, request_path: Option<&[u8]>) -> bool {
+        #[cfg(test)]
+        {
+            matches!(content, FixtureContent::Redirect)
+                && request_path == Some(REDIRECT_PATH.as_bytes())
+        }
+        #[cfg(not(test))]
+        {
+            let _ = (content, request_path);
+            false
         }
     }
 
@@ -1198,6 +1261,30 @@ mod unix {
         }
 
         #[test]
+        fn rendered_text_decoding_accepts_only_json_strings_verbatim() {
+            assert_eq!(
+                decode_rendered_text(Some(json!("NOT READY")))
+                    .expect("JSON string is accepted"),
+                "NOT READY"
+            );
+
+            let invalid_values = [
+                None,
+                Some(serde_json::Value::Null),
+                Some(json!(true)),
+                Some(json!(42)),
+                Some(json!(["READY"])),
+                Some(json!({"status": "READY"})),
+            ];
+            for value in invalid_values {
+                assert!(matches!(
+                    decode_rendered_text(value),
+                    Err(BrowserAdapterError::Operation(_))
+                ));
+            }
+        }
+
+        #[test]
         fn launch_failure_explicitly_cleans_every_acquired_resource() {
             let _browser_guard = browser_test_guard();
             let observation = Arc::new(std::sync::Mutex::new(TestObservation::default()));
@@ -1245,6 +1332,44 @@ mod unix {
                 (VIEWPORT_WIDTH, VIEWPORT_HEIGHT)
             );
             assert_observation_cleaned(&resources, true);
+        }
+
+        #[test]
+        fn real_browser_rejects_redirect_before_observation_and_cleans_owned_resources() {
+            let _browser_guard = browser_test_guard();
+            let resources = Arc::new(std::sync::Mutex::new(TestObservation::default()));
+            let _observation_guard = install_observer(Arc::clone(&resources));
+            let mut options = RunOptions::production();
+            options.fixture_content = FixtureContent::Redirect;
+            options.screenshot_override = Some(b"not a PNG".to_vec());
+
+            let error = run_with_options(options).expect_err("redirected final URL fails");
+            match error {
+                BrowserAdapterError::Operation(message) => {
+                    assert!(message.contains("final URL was"));
+                    assert!(message.contains(REDIRECT_PATH));
+                    assert!(!message.contains("locate fixed status element"));
+                    assert!(!message.contains("fixed PNG screenshot"));
+                }
+                other => panic!("unexpected redirect outcome: {other}"),
+            }
+            assert_observed_resources_cleaned(&resources, true);
+        }
+
+        #[test]
+        fn real_browser_rejects_missing_selector_and_cleans_owned_resources() {
+            let _browser_guard = browser_test_guard();
+            let resources = Arc::new(std::sync::Mutex::new(TestObservation::default()));
+            let _observation_guard = install_observer(Arc::clone(&resources));
+            let mut options = RunOptions::production();
+            options.fixture_content = FixtureContent::MissingSelector;
+
+            let error = run_with_options(options).expect_err("missing selector fails");
+            assert!(matches!(error, BrowserAdapterError::Operation(_)));
+            assert!(error
+                .to_string()
+                .contains("locate fixed status element"));
+            assert_observed_resources_cleaned(&resources, true);
         }
 
         #[test]
