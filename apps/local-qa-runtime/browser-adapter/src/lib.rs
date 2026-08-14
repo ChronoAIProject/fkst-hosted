@@ -40,8 +40,8 @@ pub enum BrowserAdapterError {
     OperationAndCleanup { operation: String, cleanup: String },
 }
 
-pub async fn observe_fixed_browser_fixture(
-) -> Result<FixedBrowserObservation, BrowserAdapterError> {
+pub async fn observe_fixed_browser_fixture() -> Result<FixedBrowserObservation, BrowserAdapterError>
+{
     #[cfg(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
     {
         let (sender, receiver) = futures_channel::oneshot::channel();
@@ -97,9 +97,7 @@ fn fixed_expected_text() -> &'static str {
 
 #[cfg(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
 mod unix {
-    use super::{
-        fixed_selector, BrowserAdapterError, FixedBrowserObservation, FixedPngScreenshot,
-    };
+    use super::{fixed_selector, BrowserAdapterError, FixedBrowserObservation, FixedPngScreenshot};
     use headless_chrome::{protocol::cdp::Page, Browser, Tab};
     use nix::{
         errno::Errno,
@@ -571,10 +569,7 @@ mod unix {
         Ok(())
     }
 
-    fn handle_fixture_connection(
-        mut stream: TcpStream,
-        fixture_html: &[u8],
-    ) -> Result<(), String> {
+    fn handle_fixture_connection(mut stream: TcpStream, fixture_html: &[u8]) -> Result<(), String> {
         stream
             .set_read_timeout(Some(Duration::from_secs(1)))
             .map_err(|error| format!("configure fixed fixture connection: {error}"))?;
@@ -1391,8 +1386,8 @@ mod unix {
                 )
             );
             assert_eq!(result.selector, fixed_selector());
-            assert_eq!(result.expected_text, fixed_expected_text());
-            assert_eq!(result.observed_text, fixed_expected_text());
+            assert_eq!(result.expected_text, crate::fixed_expected_text());
+            assert_eq!(result.observed_text, crate::fixed_expected_text());
             assert_eq!(result.screenshot.media_type, SCREENSHOT_MEDIA_TYPE);
             assert_eq!(result.screenshot.width_px, VIEWPORT_WIDTH);
             assert_eq!(result.screenshot.height_px, VIEWPORT_HEIGHT);
@@ -1426,7 +1421,7 @@ mod unix {
         fn dummy_result() -> FixedBrowserObservation {
             FixedBrowserObservation {
                 final_url: "http://127.0.0.1:1/fixed-page.html".to_string(),
-                observed_text: fixed_expected_text().to_string(),
+                observed_text: crate::fixed_expected_text().to_string(),
                 screenshot: FixedPngScreenshot {
                     bytes: Vec::new(),
                     media_type: SCREENSHOT_MEDIA_TYPE.to_string(),
