@@ -87,8 +87,7 @@ fn walks_shared_request_fixture_into_exact_acceptance_bytes() {
         Some(&Value::String("#/$defs/RunAcceptance".into()))
     );
 
-    let request =
-        validate_local_qa_run_request(&raw(&fixture.request)).expect("validate request");
+    let request = validate_local_qa_run_request(&raw(&fixture.request)).expect("validate request");
     assert_eq!(
         String::from_utf8(canonical_bytes(&request).expect("canonicalize request"))
             .expect("request is UTF-8"),
@@ -143,16 +142,14 @@ fn rejects_profile_unknown_member_and_digest_mismatch() {
 
     let mut digest_mismatch = fixture.request;
     digest_mismatch["producer_version"] = Value::String("changed/1".into());
-    let error =
-        validate_local_qa_run_request(&raw(&digest_mismatch)).expect_err("digest mismatch");
+    let error = validate_local_qa_run_request(&raw(&digest_mismatch)).expect_err("digest mismatch");
     assert_eq!(error.0.code, Some("contract.digest_mismatch"));
 }
 
 #[test]
 fn expires_at_equality_returns_no_acceptance() {
     let fixture = fixture();
-    let request =
-        validate_local_qa_run_request(&raw(&fixture.request)).expect("validate request");
+    let request = validate_local_qa_run_request(&raw(&fixture.request)).expect("validate request");
     let acceptance: Result<ValidatedValue, ContractError> = build_initial_run_acceptance(
         &request,
         "2026-08-14T04:05:00Z",
@@ -165,10 +162,16 @@ fn expires_at_equality_returns_no_acceptance() {
 fn applies_shared_request_rejection_corpus() {
     let fixture = fixture();
     let conformance = conformance();
-    assert_eq!(conformance["schema_version"], "qa.local-run-admission-conformance/v1");
+    assert_eq!(
+        conformance["schema_version"],
+        "qa.local-run-admission-conformance/v1"
+    );
     for member in conformance["missing_request_members"].as_array().unwrap() {
         let mut request = fixture.request.clone();
-        request.as_object_mut().unwrap().remove(member.as_str().unwrap());
+        request
+            .as_object_mut()
+            .unwrap()
+            .remove(member.as_str().unwrap());
         let error = validate_local_qa_run_request(&raw(&request)).expect_err("missing member");
         assert_eq!(error.0.category, "validation");
         assert_eq!(error.0.reason, "schema_violation");
@@ -188,16 +191,38 @@ fn applies_shared_request_rejection_corpus() {
         let mut request = fixture.request.clone();
         request["source"].as_object_mut().unwrap().insert(
             member.as_str().unwrap().into(),
-            if member.as_str() == Some("bytes") { serde_json::json!([1]) } else { Value::String("secret".into()) },
+            if member.as_str() == Some("bytes") {
+                serde_json::json!([1])
+            } else {
+                Value::String("secret".into())
+            },
         );
         let error = validate_local_qa_run_request(&raw(&request)).expect_err("nested member");
-        assert_eq!((error.0.category, error.0.reason.as_str(), error.0.path.as_str()), ("validation", "schema_violation", "/source"));
+        assert_eq!(
+            (
+                error.0.category,
+                error.0.reason.as_str(),
+                error.0.path.as_str()
+            ),
+            ("validation", "schema_violation", "/source")
+        );
     }
     for (identity, _) in conformance["identity_kinds"].as_object().unwrap() {
         let mut request = fixture.request.clone();
-        set_pointer(&mut request, &format!("/{identity}/kind"), Value::String("wrong-kind".into()));
+        set_pointer(
+            &mut request,
+            &format!("/{identity}/kind"),
+            Value::String("wrong-kind".into()),
+        );
         let error = validate_local_qa_run_request(&raw(&request)).expect_err("wrong kind");
-        assert_eq!((error.0.category, error.0.reason.as_str(), error.0.path), ("validation", "schema_violation", format!("/{identity}/kind")));
+        assert_eq!(
+            (error.0.category, error.0.reason.as_str(), error.0.path),
+            (
+                "validation",
+                "schema_violation",
+                format!("/{identity}/kind")
+            )
+        );
     }
 }
 
@@ -205,7 +230,10 @@ fn applies_shared_request_rejection_corpus() {
 fn binds_every_request_projection_class_and_nested_digest() {
     let fixture = fixture();
     let conformance = conformance();
-    for path in conformance["request_digest_bound_paths"].as_array().unwrap() {
+    for path in conformance["request_digest_bound_paths"]
+        .as_array()
+        .unwrap()
+    {
         let path = path.as_str().unwrap();
         let mut request = fixture.request.clone();
         set_pointer(&mut request, path, digest_mutation(path));
@@ -244,17 +272,40 @@ fn rejects_acceptance_mutations_and_created_at_mismatch() {
     let fixture = fixture();
     let conformance = conformance();
     let acceptance: Value = serde_json::from_str(&fixture.expected_acceptance_utf8).unwrap();
-    for member in conformance["missing_acceptance_members"].as_array().unwrap() {
+    for member in conformance["missing_acceptance_members"]
+        .as_array()
+        .unwrap()
+    {
         let mut changed = acceptance.clone();
-        changed.as_object_mut().unwrap().remove(member.as_str().unwrap());
+        changed
+            .as_object_mut()
+            .unwrap()
+            .remove(member.as_str().unwrap());
         let error = validate_run_acceptance(&raw(&changed)).expect_err("missing acceptance member");
-        assert_eq!((error.0.category, error.0.reason.as_str(), error.0.path.as_str()), ("validation", "schema_violation", "/"));
+        assert_eq!(
+            (
+                error.0.category,
+                error.0.reason.as_str(),
+                error.0.path.as_str()
+            ),
+            ("validation", "schema_violation", "/")
+        );
     }
     let mut unknown = acceptance.clone();
     unknown["unknown"] = Value::Bool(true);
     let error = validate_run_acceptance(&raw(&unknown)).expect_err("unknown acceptance member");
-    assert_eq!((error.0.category, error.0.reason.as_str(), error.0.path.as_str()), ("validation", "schema_violation", "/"));
-    for path in conformance["acceptance_digest_bound_paths"].as_array().unwrap() {
+    assert_eq!(
+        (
+            error.0.category,
+            error.0.reason.as_str(),
+            error.0.path.as_str()
+        ),
+        ("validation", "schema_violation", "/")
+    );
+    for path in conformance["acceptance_digest_bound_paths"]
+        .as_array()
+        .unwrap()
+    {
         let path = path.as_str().unwrap();
         let mut changed = acceptance.clone();
         let replacement = if path == "/state" {
@@ -282,17 +333,49 @@ fn applies_strict_raw_admission_and_canonicalizes_formatting() {
     let fixture = fixture();
     let conformance = conformance();
     for entry in conformance["raw_cases"].as_array().unwrap() {
-        let mut text = if entry["target"] == "request" { fixture.expected_request_utf8.clone() } else { fixture.expected_acceptance_utf8.clone() };
+        let mut text = if entry["target"] == "request" {
+            fixture.expected_request_utf8.clone()
+        } else {
+            fixture.expected_acceptance_utf8.clone()
+        };
         if let Some(replacement) = entry.get("replace").and_then(Value::as_array) {
-            text = text.replacen(replacement[0].as_str().unwrap(), replacement[1].as_str().unwrap(), 1);
+            text = text.replacen(
+                replacement[0].as_str().unwrap(),
+                replacement[1].as_str().unwrap(),
+                1,
+            );
         }
         if let Some(depth) = entry.get("wrap_depth").and_then(Value::as_u64) {
-            text = format!("{}{}{}", "[".repeat(depth as usize), text, "]".repeat(depth as usize));
+            text = format!(
+                "{}{}{}",
+                "[".repeat(depth as usize),
+                text,
+                "]".repeat(depth as usize)
+            );
         }
-        text = format!("{}{}{}", entry.get("prefix").and_then(Value::as_str).unwrap_or(""), text, entry.get("suffix").and_then(Value::as_str).unwrap_or(""));
-        let mut bytes: Vec<u8> = entry.get("hex_prefix").and_then(Value::as_str).map(|hex| hex.as_bytes().chunks(2).map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap()).collect()).unwrap_or_default();
+        text = format!(
+            "{}{}{}",
+            entry.get("prefix").and_then(Value::as_str).unwrap_or(""),
+            text,
+            entry.get("suffix").and_then(Value::as_str).unwrap_or("")
+        );
+        let mut bytes: Vec<u8> = entry
+            .get("hex_prefix")
+            .and_then(Value::as_str)
+            .map(|hex| {
+                hex.as_bytes()
+                    .chunks(2)
+                    .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+                    .collect()
+            })
+            .unwrap_or_default();
         bytes.extend_from_slice(text.as_bytes());
-        let error = if entry["target"] == "request" { validate_local_qa_run_request(&bytes) } else { validate_run_acceptance(&bytes) }.expect_err("raw rejection");
+        let error = if entry["target"] == "request" {
+            validate_local_qa_run_request(&bytes)
+        } else {
+            validate_run_acceptance(&bytes)
+        }
+        .expect_err("raw rejection");
         assert_rejection(error, &entry["expected"]);
     }
     let spaced = fixture
@@ -300,5 +383,8 @@ fn applies_strict_raw_admission_and_canonicalizes_formatting() {
         .replace(",\"", ", \"")
         .replace("\":", "\": ");
     let validated = validate_local_qa_run_request(spaced.as_bytes()).expect("formatted request");
-    assert_eq!(String::from_utf8(canonical_bytes(&validated).unwrap()).unwrap(), fixture.expected_request_utf8);
+    assert_eq!(
+        String::from_utf8(canonical_bytes(&validated).unwrap()).unwrap(),
+        fixture.expected_request_utf8
+    );
 }

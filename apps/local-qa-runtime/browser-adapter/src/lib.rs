@@ -298,12 +298,9 @@ mod unix {
         validate_final_url(&final_url, &navigation_url)?;
         tab.set_default_timeout(remaining(deadline)?);
 
-        let element =
-            tab.wait_for_element(fixed_selector())
-                .map_err(operation_error_before_deadline(
-                    "locate fixed status element",
-                    deadline,
-                ))?;
+        let element = tab
+            .wait_for_element(fixed_selector())
+            .map_err(operation_error("locate fixed status element"))?;
         let observed_value = element
             .call_js_fn("function() { return this.innerText; }", Vec::new(), false)
             .map_err(operation_error_before_deadline(
