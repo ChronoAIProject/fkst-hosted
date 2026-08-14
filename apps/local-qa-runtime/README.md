@@ -78,13 +78,27 @@ The Rust Local QA Host API and journal boundary described above is already
 activated in `host/`. The launcher, supervisor, guest agent, and Secret Broker
 remain intentionally inert hardened-profile shells.
 
+The Testing adapter source is pinned but not activated. Its immutable package
+root is
+`ChronoAIProject/fkst-packages-testing@ac953ff0bb3f1c909728e66c3968cbb3ed5e3cf1:packages/local-qa-host-adapter`,
+with nested platform packages pinned to
+`ChronoAIProject/fkst-packages@d4146d7bbdbde9d6fbbee404d5a2e3e4da0fa08c`
+and the engine pinned to
+`ChronoAIProject/fkst-substrate@e3355b42709f4138613b8238cba34a5ab1161053`.
+The reserved canonical schemas are `testing-observation.v1`,
+`testing-assertion-result.v1`, `testing-case-result.v2`, and
+`testing-case-result-set.v2`. This source-authority pin does not fetch, hydrate,
+import, or execute the package graph.
+
 The argument-free Rust Browser adapter under `browser-adapter/` runs one fixed
 loopback fixture through the first executable Linux system Chrome found in its
-fixed absolute allowlist. Each invocation owns a fresh Chrome process group, a
-temporary profile, and a separate temporary downloads directory, returns only
-the validated bounded `1280x720` PNG result, and explicitly finalizes all owned
-resources on success or failure. Its 15-second operation deadline and `Drop`
-safety net do not expose caller-programmable browser behavior.
+fixed absolute allowlist. Each observation owns a fresh Chrome process group, a
+temporary profile, and a separate temporary downloads directory; it returns the
+exact final URL, rendered fixed-element text, and validated bounded `1280x720`
+PNG without evaluating pass/fail. The legacy fixed smoke wrapper alone asserts
+that the production fixture rendered `READY`. Both paths explicitly finalize
+all owned resources on success or failure. The 15-second operation deadline and
+`Drop` safety net do not expose caller-programmable browser behavior.
 
 The following capabilities remain explicitly deferred:
 
