@@ -62,6 +62,8 @@ The checked-in conformance sources are:
 - `fixtures/qa.local-run-admission/v1/happy-path.json` for the shared
   `LocalQARunRequest` to `RunAcceptance` golden path, projection digests, and
   byte-identical TypeScript/Rust acceptance construction.
+- `fixtures/qa.local-run-admission/v1/conformance.json` for shared Rust and
+  TypeScript admission, relation, digest-binding, and rejection-classification cases.
 
 The implementations are:
 

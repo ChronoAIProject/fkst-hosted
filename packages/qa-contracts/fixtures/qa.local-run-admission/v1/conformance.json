@@ -1,0 +1,73 @@
+{
+  "schema_version": "qa.local-run-admission-conformance/v1",
+  "missing_request_members": [
+    "schema_version", "content_digest", "run_id", "created_at", "producer_version",
+    "idempotency_key", "nonce", "expires_at", "profile", "source", "structured_plan",
+    "environment_profile", "device", "nyxid_node", "host_installation", "authorization"
+  ],
+  "request_cases": [
+    { "name": "created-at-equals-expires-at", "path": "/created_at", "value": "2026-08-14T04:05:00Z", "refresh_digest": true, "expected": { "category": "contract", "code": "contract.invalid_relation", "reason": "invalid_request_window", "path": "/expires_at" } },
+    { "name": "created-at-after-expires-at", "path": "/created_at", "value": "2026-08-14T04:05:01Z", "refresh_digest": true, "expected": { "category": "contract", "code": "contract.invalid_relation", "reason": "invalid_request_window", "path": "/expires_at" } },
+    { "name": "unknown-root-member", "path": "/token", "value": "secret", "expected": { "category": "validation", "reason": "schema_violation", "path": "/" } },
+    { "name": "empty-idempotency-key", "path": "/idempotency_key", "value": "", "expected": { "category": "validation", "reason": "schema_violation", "path": "/idempotency_key" } },
+    { "name": "long-idempotency-key", "path": "/idempotency_key", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "expected": { "category": "validation", "reason": "schema_violation", "path": "/idempotency_key" } },
+    { "name": "punctuated-idempotency-key", "path": "/idempotency_key", "value": "idem.bad", "expected": { "category": "validation", "reason": "schema_violation", "path": "/idempotency_key" } },
+    { "name": "whitespace-idempotency-key", "path": "/idempotency_key", "value": "idem bad", "expected": { "category": "validation", "reason": "schema_violation", "path": "/idempotency_key" } },
+    { "name": "non-ascii-idempotency-key", "path": "/idempotency_key", "value": "idéм", "expected": { "category": "validation", "reason": "schema_violation", "path": "/idempotency_key" } },
+    { "name": "short-canonical-nonce", "path": "/nonce", "value": "AAAAAAAAAAAAAAA", "expected": { "category": "validation", "reason": "schema_violation", "path": "/nonce" } },
+    { "name": "long-nonce-with-impossible-modulus", "path": "/nonce", "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "expected": { "category": "contract", "code": "contract.invalid_encoding", "reason": "invalid_encoding", "path": "/nonce" } },
+    { "name": "padded-nonce", "path": "/nonce", "value": "bm9uY2UtMDAwMDAx=", "expected": { "category": "contract", "code": "contract.invalid_encoding", "reason": "invalid_encoding", "path": "/nonce" } },
+    { "name": "mod-one-nonce", "path": "/nonce", "value": "AAAAAAAAAAAAAAAAA", "expected": { "category": "contract", "code": "contract.invalid_encoding", "reason": "invalid_encoding", "path": "/nonce" } },
+    { "name": "alphabet-nonce", "path": "/nonce", "value": "AAAAAAAAAAAAAAA+", "expected": { "category": "contract", "code": "contract.invalid_encoding", "reason": "invalid_encoding", "path": "/nonce" } },
+    { "name": "trailing-bits-nonce", "path": "/nonce", "value": "AAAAAAAAAAAAAAAB", "expected": { "category": "contract", "code": "contract.invalid_encoding", "reason": "invalid_encoding", "path": "/nonce" } },
+    { "name": "uppercase-uuid", "path": "/run_id", "value": "00000000-0000-0000-0000-00000000000A", "expected": { "category": "validation", "reason": "schema_violation", "path": "/run_id" } },
+    { "name": "short-uuid", "path": "/run_id", "value": "00000000-0000-0000-0000-00000000001", "expected": { "category": "validation", "reason": "schema_violation", "path": "/run_id" } },
+    { "name": "bad-hyphen-uuid", "path": "/run_id", "value": "000000000000-0000-0000-000000000001", "expected": { "category": "validation", "reason": "schema_violation", "path": "/run_id" } },
+    { "name": "invalid-root-schema-version", "path": "/schema_version", "value": "qa.local_run_admission/v1", "expected": { "category": "validation", "reason": "schema_violation", "path": "/schema_version" } },
+    { "name": "unsupported-root-major", "path": "/schema_version", "value": "qa.local-run-admission/v2", "expected": { "category": "validation", "reason": "schema_violation", "path": "/schema_version" } },
+    { "name": "invalid-nested-schema-version", "path": "/source/schema_version", "value": "qa.source/v0", "expected": { "category": "validation", "reason": "schema_violation", "path": "/source/schema_version" } },
+    { "name": "offset-created-at", "path": "/created_at", "value": "2026-08-14T04:00:00+00:00", "expected": { "category": "validation", "reason": "schema_violation", "path": "/created_at" } },
+    { "name": "impossible-date", "path": "/created_at", "value": "2026-02-30T04:00:00Z", "expected": { "category": "validation", "reason": "schema_violation", "path": "/created_at" } },
+    { "name": "invalid-leap-day", "path": "/created_at", "value": "2025-02-29T04:00:00Z", "expected": { "category": "validation", "reason": "schema_violation", "path": "/created_at" } },
+    { "name": "zero-fraction", "path": "/created_at", "value": "2026-08-14T04:00:00.0Z", "expected": { "category": "validation", "reason": "schema_violation", "path": "/created_at" } },
+    { "name": "trailing-fractional-zero", "path": "/created_at", "value": "2026-08-14T04:00:00.10Z", "expected": { "category": "validation", "reason": "schema_violation", "path": "/created_at" } },
+    { "name": "empty-fraction", "path": "/created_at", "value": "2026-08-14T04:00:00.Z", "expected": { "category": "validation", "reason": "schema_violation", "path": "/created_at" } },
+    { "name": "host-profile", "path": "/profile", "value": "local_qa_host_mvp", "expected": { "category": "validation", "reason": "schema_violation", "path": "/profile" } },
+    { "name": "unknown-profile", "path": "/profile", "value": "unknown", "expected": { "category": "validation", "reason": "schema_violation", "path": "/profile" } },
+    { "name": "wrong-case-profile", "path": "/profile", "value": "LOCAL_QA_AGENT_MVP", "expected": { "category": "validation", "reason": "schema_violation", "path": "/profile" } }
+  ],
+  "nested_unknown_members": ["token", "headers", "cookie", "path", "environment", "bytes", "value"],
+  "identity_kinds": {
+    "source": "source", "structured_plan": "structured-plan", "environment_profile": "environment-profile",
+    "device": "device", "nyxid_node": "nyxid-node", "host_installation": "host-installation",
+    "authorization": "local-credential-authorization"
+  },
+  "request_digest_bound_paths": [
+    "/producer_version", "/idempotency_key", "/nonce", "/expires_at",
+    "/source/id", "/structured_plan/id", "/environment_profile/id", "/device/id", "/nyxid_node/id", "/host_installation/id", "/authorization/id",
+    "/source/schema_version", "/structured_plan/schema_version", "/environment_profile/schema_version", "/device/schema_version", "/nyxid_node/schema_version", "/host_installation/schema_version", "/authorization/schema_version",
+    "/source/content_digest", "/structured_plan/content_digest", "/environment_profile/content_digest", "/device/content_digest", "/nyxid_node/content_digest", "/host_installation/content_digest", "/authorization/content_digest"
+  ],
+  "builder_cases": [
+    { "name": "created-at-boundary", "accepted_at": "2026-08-14T04:00:00Z", "accepted": true },
+    { "name": "fractional-before-expiry", "accepted_at": "2026-08-14T04:04:59.9Z", "accepted": true },
+    { "name": "before-created-at", "accepted_at": "2026-08-14T03:59:59Z", "accepted": false },
+    { "name": "at-expiry", "accepted_at": "2026-08-14T04:05:00Z", "accepted": false },
+    { "name": "after-expiry", "accepted_at": "2026-08-14T04:05:01Z", "accepted": false }
+  ],
+  "missing_acceptance_members": ["schema_version", "content_digest", "run_id", "created_at", "producer_version", "request_digest", "idempotency_key", "state", "accepted_at"],
+  "acceptance_digest_bound_paths": ["/run_id", "/created_at", "/producer_version", "/request_digest", "/idempotency_key", "/state", "/accepted_at"],
+  "raw_cases": [
+    { "name": "leading-bytes", "target": "request", "prefix": "x", "expected": { "category": "validation", "reason": "invalid_json", "path": "/" } },
+    { "name": "trailing-bytes", "target": "request", "suffix": "x", "expected": { "category": "validation", "reason": "invalid_json", "path": "/" } },
+    { "name": "leading-whitespace", "target": "request", "prefix": " ", "expected": { "category": "validation", "reason": "invalid_json", "path": "/" } },
+    { "name": "trailing-newline", "target": "request", "suffix": "\n", "expected": { "category": "validation", "reason": "invalid_json", "path": "/" } },
+    { "name": "bom", "target": "request", "hex_prefix": "efbbbf", "expected": { "category": "validation", "reason": "invalid_json", "path": "/" } },
+    { "name": "invalid-utf8", "target": "request", "hex_prefix": "ff", "expected": { "category": "canonicalization", "code": "canonicalization.invalid_utf8", "reason": "invalid_utf8", "path": "/" } },
+    { "name": "lone-surrogate", "target": "request", "replace": ["\"producer_version\":\"fkst-qa-contracts-test/1\"", "\"producer_version\":\"\\ud800\""], "expected": { "category": "canonicalization", "code": "canonicalization.invalid_unicode_scalar", "reason": "invalid_unicode_scalar", "path": "/" } },
+    { "name": "duplicate-root", "target": "request", "replace": ["{", "{\"run_id\":\"00000000-0000-0000-0000-000000000001\","], "expected": { "category": "canonicalization", "code": "canonicalization.duplicate_member", "reason": "duplicate_member", "path": "/" } },
+    { "name": "duplicate-nested", "target": "request", "replace": ["\"source\":{", "\"source\":{\"id\":\"src-1\","], "expected": { "category": "canonicalization", "code": "canonicalization.duplicate_member", "reason": "duplicate_member", "path": "/" } },
+    { "name": "excessive-nesting", "target": "request", "wrap_depth": 129, "expected": { "category": "validation", "reason": "depth_overflow", "path": "/" } },
+    { "name": "invalid-number-form", "target": "request", "replace": ["{", "{\"unknown\":01,"], "expected": { "category": "canonicalization", "code": "canonicalization.invalid_json_number", "reason": "invalid_json_number", "path": "/" } }
+  ]
+}
