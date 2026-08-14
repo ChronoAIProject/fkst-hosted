@@ -59,6 +59,9 @@ The checked-in conformance sources are:
   binding across the four public Local Evidence types;
 - `fixtures/qa.local-worker-protocol/v1/happy-path.json` for the shared logical
   and length-prefixed golden transcript of the fixed browser-smoke Worker.
+- `fixtures/qa.local-run-admission/v1/happy-path.json` for the shared
+  `LocalQARunRequest` to `RunAcceptance` golden path, projection digests, and
+  byte-identical TypeScript/Rust acceptance construction.
 
 The implementations are:
 

@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:chronoai:fkst:qa-contracts:qa.local-run-admission:v1",
+  "title": "Local QA run admission v1",
+  "$defs": {
+    "DigestBoundIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "schema_version", "content_digest"],
+      "properties": {
+        "kind": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/NonEmptyString" },
+        "id": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/NonEmptyString" },
+        "schema_version": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/SchemaVersion" },
+        "content_digest": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/Sha256" }
+      }
+    },
+    "SourceIdentity": {
+      "allOf": [
+        { "$ref": "#/$defs/DigestBoundIdentity" },
+        { "type": "object", "properties": { "kind": { "const": "source" } } }
+      ]
+    },
+    "StructuredPlanIdentity": {
+      "allOf": [
+        { "$ref": "#/$defs/DigestBoundIdentity" },
+        { "type": "object", "properties": { "kind": { "const": "structured-plan" } } }
+      ]
+    },
+    "EnvironmentProfileIdentity": {
+      "allOf": [
+        { "$ref": "#/$defs/DigestBoundIdentity" },
+        { "type": "object", "properties": { "kind": { "const": "environment-profile" } } }
+      ]
+    },
+    "DeviceIdentity": {
+      "allOf": [
+        { "$ref": "#/$defs/DigestBoundIdentity" },
+        { "type": "object", "properties": { "kind": { "const": "device" } } }
+      ]
+    },
+    "NyxidNodeIdentity": {
+      "allOf": [
+        { "$ref": "#/$defs/DigestBoundIdentity" },
+        { "type": "object", "properties": { "kind": { "const": "nyxid-node" } } }
+      ]
+    },
+    "HostInstallationIdentity": {
+      "allOf": [
+        { "$ref": "#/$defs/DigestBoundIdentity" },
+        { "type": "object", "properties": { "kind": { "const": "host-installation" } } }
+      ]
+    },
+    "AuthorizationIdentity": {
+      "allOf": [
+        { "$ref": "#/$defs/DigestBoundIdentity" },
+        { "type": "object", "properties": { "kind": { "const": "local-credential-authorization" } } }
+      ]
+    },
+    "LocalQARunRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "content_digest", "run_id", "created_at", "producer_version",
+        "idempotency_key", "nonce", "expires_at", "profile", "source", "structured_plan",
+        "environment_profile", "device", "nyxid_node", "host_installation", "authorization"
+      ],
+      "properties": {
+        "schema_version": { "const": "qa.local-run-admission/v1" },
+        "content_digest": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/Sha256" },
+        "run_id": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/UUID" },
+        "created_at": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/ISO8601" },
+        "producer_version": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/NonEmptyString" },
+        "idempotency_key": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "nonce": {
+          "allOf": [
+            { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/Base64UrlNoPad" },
+            { "type": "string", "minLength": 16, "maxLength": 128 }
+          ]
+        },
+        "expires_at": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/ISO8601" },
+        "profile": { "const": "local_qa_agent_mvp" },
+        "source": { "$ref": "#/$defs/SourceIdentity" },
+        "structured_plan": { "$ref": "#/$defs/StructuredPlanIdentity" },
+        "environment_profile": { "$ref": "#/$defs/EnvironmentProfileIdentity" },
+        "device": { "$ref": "#/$defs/DeviceIdentity" },
+        "nyxid_node": { "$ref": "#/$defs/NyxidNodeIdentity" },
+        "host_installation": { "$ref": "#/$defs/HostInstallationIdentity" },
+        "authorization": { "$ref": "#/$defs/AuthorizationIdentity" }
+      }
+    },
+    "RunAcceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "content_digest", "run_id", "created_at", "producer_version",
+        "request_digest", "idempotency_key", "state", "accepted_at"
+      ],
+      "properties": {
+        "schema_version": { "const": "qa.local-run-admission/v1" },
+        "content_digest": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/Sha256" },
+        "run_id": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/UUID" },
+        "created_at": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/ISO8601" },
+        "producer_version": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/NonEmptyString" },
+        "request_digest": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/Sha256" },
+        "idempotency_key": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "state": { "const": "accepted" },
+        "accepted_at": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/ISO8601" }
+      }
+    }
+  }
+}

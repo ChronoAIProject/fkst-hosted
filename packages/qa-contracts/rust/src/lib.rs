@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Component, Path};
@@ -24,11 +25,16 @@ const LOCAL_EVIDENCE_SCHEMA_PATH: &str = "contracts/qa.local-evidence/v1/schema.
 const LOCAL_WORKER_SCHEMA: &str =
     include_str!("../../contracts/qa.local-worker-protocol/v1/schema.json");
 const LOCAL_WORKER_SCHEMA_PATH: &str = "contracts/qa.local-worker-protocol/v1/schema.json";
+const LOCAL_RUN_ADMISSION_SCHEMA: &str =
+    include_str!("../../contracts/qa.local-run-admission/v1/schema.json");
+const LOCAL_RUN_ADMISSION_SCHEMA_PATH: &str =
+    "contracts/qa.local-run-admission/v1/schema.json";
 const EMBEDDED_SCHEMAS: &[(&str, &str)] = &[
     (FOUNDATION_SCHEMA_PATH, FOUNDATION_SCHEMA),
     (LOCAL_LIFECYCLE_SCHEMA_PATH, LOCAL_LIFECYCLE_SCHEMA),
     (LOCAL_EVIDENCE_SCHEMA_PATH, LOCAL_EVIDENCE_SCHEMA),
     (LOCAL_WORKER_SCHEMA_PATH, LOCAL_WORKER_SCHEMA),
+    (LOCAL_RUN_ADMISSION_SCHEMA_PATH, LOCAL_RUN_ADMISSION_SCHEMA),
 ];
 const LOCAL_STATE_TYPE_NAME: &str = "LocalState";
 const EXECUTION_OUTCOME_TYPE_NAME: &str = "ExecutionOutcome";
@@ -62,6 +68,10 @@ const LOCAL_WORKER_TYPE_NAMES: [&str; 6] = [
     "LocalWorkerTerminalResult",
     "LocalWorkerProtocolFailure",
 ];
+const LOCAL_QA_RUN_REQUEST_TYPE_NAME: &str = "LocalQARunRequest";
+const RUN_ACCEPTANCE_TYPE_NAME: &str = "RunAcceptance";
+const LOCAL_RUN_ADMISSION_TYPE_NAMES: [&str; 2] =
+    [LOCAL_QA_RUN_REQUEST_TYPE_NAME, RUN_ACCEPTANCE_TYPE_NAME];
 const MAX_DEPTH: usize = 128;
 const MAX_SAFE_INTEGER_TEXT: &str = "9007199254740991";
 
@@ -302,6 +312,79 @@ pub fn validate_local_worker_protocol_failure(raw: &[u8]) -> Result<ValidatedVal
     validate_registered_value(admit_json(raw)?, "LocalWorkerProtocolFailure")
 }
 
+pub fn validate_local_qa_run_request(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    validate_local_qa_run_request_value(admit_json(raw)?)
+}
+
+pub fn validate_run_acceptance(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    validate_run_acceptance_value(admit_json(raw)?)
+}
+
+pub fn build_initial_run_acceptance(
+    request: &ValidatedValue,
+    accepted_at: &str,
+    producer_version: &str,
+) -> Result<ValidatedValue, ContractError> {
+    let validated_request = validate_local_qa_run_request_value(AdmittedJson(request.0.clone()))?;
+    let request_value = validated_request
+        .0
+        .as_object()
+        .ok_or_else(|| ContractError(Rejection::validation("schema_violation", "/")))?;
+    if !validate_iso8601(accepted_at) {
+        return Err(ContractError(Rejection::validation(
+            "schema_violation",
+            "/accepted_at",
+        )));
+    }
+    if producer_version.is_empty() {
+        return Err(ContractError(Rejection::validation(
+            "schema_violation",
+            "/producer_version",
+        )));
+    }
+    let created_at = required_string(request_value, "created_at")?;
+    let expires_at = required_string(request_value, "expires_at")?;
+    if compare_iso8601(accepted_at, created_at).is_lt()
+        || !compare_iso8601(accepted_at, expires_at).is_lt()
+    {
+        return Err(ContractError(Rejection::contract(
+            "contract.invalid_relation",
+            "accepted_at_out_of_window",
+            "/accepted_at",
+        )));
+    }
+    let mut acceptance = Map::new();
+    acceptance.insert(
+        "schema_version".into(),
+        Value::String("qa.local-run-admission/v1".into()),
+    );
+    acceptance.insert(
+        "run_id".into(),
+        Value::String(required_string(request_value, "run_id")?.into()),
+    );
+    acceptance.insert("created_at".into(), Value::String(accepted_at.into()));
+    acceptance.insert(
+        "producer_version".into(),
+        Value::String(producer_version.into()),
+    );
+    acceptance.insert(
+        "request_digest".into(),
+        Value::String(required_string(request_value, "content_digest")?.into()),
+    );
+    acceptance.insert(
+        "idempotency_key".into(),
+        Value::String(required_string(request_value, "idempotency_key")?.into()),
+    );
+    acceptance.insert("state".into(), Value::String("accepted".into()));
+    acceptance.insert("accepted_at".into(), Value::String(accepted_at.into()));
+    let projected = ValidatedValue(Value::Object(acceptance.clone()));
+    acceptance.insert(
+        "content_digest".into(),
+        Value::String(contract_content_digest(&projected)?),
+    );
+    validate_run_acceptance(&canonicalize(&Value::Object(acceptance))?)
+}
+
 pub fn encode_local_worker_frame(value: &ValidatedValue) -> Result<Vec<u8>, ContractError> {
     let payload = canonical_bytes(value)?;
     if payload.is_empty() || payload.len() > LOCAL_WORKER_MAX_FRAME_BYTES {
@@ -458,6 +541,80 @@ fn validate_registered_value(
     Ok(ValidatedValue(value))
 }
 
+fn validate_local_qa_run_request_value(
+    admitted: AdmittedJson,
+) -> Result<ValidatedValue, ContractError> {
+    let validated = validate_registered_value(admitted, LOCAL_QA_RUN_REQUEST_TYPE_NAME)?;
+    let value = validated
+        .0
+        .as_object()
+        .ok_or_else(|| ContractError(Rejection::validation("schema_violation", "/")))?;
+    if !required_string(value, "created_at").is_ok_and(validate_iso8601) {
+        return Err(ContractError(Rejection::validation(
+            "schema_violation",
+            "/created_at",
+        )));
+    }
+    if !required_string(value, "expires_at").is_ok_and(validate_iso8601) {
+        return Err(ContractError(Rejection::validation(
+            "schema_violation",
+            "/expires_at",
+        )));
+    }
+    if !required_string(value, "nonce").is_ok_and(validate_base64url_no_pad) {
+        return Err(ContractError(Rejection::contract(
+            "contract.invalid_encoding",
+            "invalid_encoding",
+            "/nonce",
+        )));
+    }
+    verify_contract_content_digest(&validated)?;
+    Ok(validated)
+}
+
+fn validate_run_acceptance_value(admitted: AdmittedJson) -> Result<ValidatedValue, ContractError> {
+    let validated = validate_registered_value(admitted, RUN_ACCEPTANCE_TYPE_NAME)?;
+    let value = validated
+        .0
+        .as_object()
+        .ok_or_else(|| ContractError(Rejection::validation("schema_violation", "/")))?;
+    let created_at = required_string(value, "created_at")?;
+    let accepted_at = required_string(value, "accepted_at")?;
+    if !validate_iso8601(created_at) {
+        return Err(ContractError(Rejection::validation(
+            "schema_violation",
+            "/created_at",
+        )));
+    }
+    if !validate_iso8601(accepted_at) {
+        return Err(ContractError(Rejection::validation(
+            "schema_violation",
+            "/accepted_at",
+        )));
+    }
+    if created_at != accepted_at {
+        return Err(ContractError(Rejection::contract(
+            "contract.invalid_relation",
+            "accepted_at_mismatch",
+            "/created_at",
+        )));
+    }
+    verify_contract_content_digest(&validated)?;
+    Ok(validated)
+}
+
+fn required_string<'a>(
+    object: &'a Map<String, Value>,
+    field: &str,
+) -> Result<&'a str, ContractError> {
+    object.get(field).and_then(Value::as_str).ok_or_else(|| {
+        ContractError(Rejection::validation(
+            "schema_violation",
+            format!("/{}", pointer_token(field)),
+        ))
+    })
+}
+
 pub fn validate_scalar(name: &str, value: &str) -> Result<(), ContractError> {
     let valid = match name {
         "ISO8601" => validate_iso8601(value),
@@ -592,6 +749,19 @@ fn validate_registry_value(registry: &Registry) -> Result<(), ContractError> {
         }
     }
     for type_name in LOCAL_WORKER_TYPE_NAMES {
+        schema_for_registered_type(registry, type_name, embedded_schema)?;
+        let entry = registry
+            .types
+            .get(type_name)
+            .expect("registered type was resolved above");
+        if entry.fixture_only {
+            return Err(ContractError(Rejection::validation(
+                "invalid_embedded_registry",
+                format!("/types/{type_name}"),
+            )));
+        }
+    }
+    for type_name in LOCAL_RUN_ADMISSION_TYPE_NAMES {
         schema_for_registered_type(registry, type_name, embedded_schema)?;
         let entry = registry
             .types
@@ -942,7 +1112,7 @@ fn schema_for_registered_type(
             format!("/schemas/{}/path", pointer_token(&type_entry.schema)),
         ))
     })?;
-    let mut schema: Value = serde_json::from_str(schema_source)
+    let schema: Value = serde_json::from_str(schema_source)
         .map_err(|_| ContractError(Rejection::validation("invalid_embedded_schema", "/")))?;
     if schema.get("$id").and_then(Value::as_str) != Some(schema_entry.id.as_str()) {
         return Err(ContractError(Rejection::validation(
@@ -950,7 +1120,7 @@ fn schema_for_registered_type(
             "/$id",
         )));
     }
-    validate_local_references(&schema)?;
+    let mut schema = resolve_registered_references(schema, registry, load_schema)?;
     let pointer = type_entry.pointer.strip_prefix('#').ok_or_else(|| {
         ContractError(Rejection::validation(
             "unresolved_registered_pointer",
@@ -993,31 +1163,107 @@ fn validate_package_path(path: &str) -> Result<(), ContractError> {
     Ok(())
 }
 
-fn validate_local_references(value: &Value) -> Result<(), ContractError> {
+fn resolve_registered_references(
+    value: Value,
+    registry: &Registry,
+    load_schema: fn(&str) -> Option<&'static str>,
+) -> Result<Value, ContractError> {
     match value {
-        Value::Array(items) => {
-            for item in items {
-                validate_local_references(item)?;
-            }
-        }
-        Value::Object(object) => {
-            if object
+        Value::Array(items) => Ok(Value::Array(
+            items
+                .into_iter()
+                .map(|item| resolve_registered_references(item, registry, load_schema))
+                .collect::<Result<_, _>>()?,
+        )),
+        Value::Object(mut object) => {
+            let external_reference = object
                 .get("$ref")
                 .and_then(Value::as_str)
-                .is_some_and(|reference| !reference.starts_with('#'))
-            {
-                return Err(ContractError(Rejection::validation(
-                    "external_schema_reference",
-                    "/$ref",
-                )));
+                .filter(|reference| !reference.starts_with('#'))
+                .map(str::to_owned);
+            if let Some(reference) = external_reference {
+                object.remove("$ref");
+                let imported = import_registered_reference(&reference, registry, load_schema)?;
+                if object.is_empty() {
+                    return Ok(imported);
+                }
+                let siblings = resolve_registered_references(
+                    Value::Object(object),
+                    registry,
+                    load_schema,
+                )?;
+                return Ok(serde_json::json!({ "allOf": [imported, siblings] }));
             }
-            for child in object.values() {
-                validate_local_references(child)?;
+            for child in object.values_mut() {
+                *child = resolve_registered_references(child.take(), registry, load_schema)?;
             }
+            Ok(Value::Object(object))
         }
-        _ => {}
+        scalar => Ok(scalar),
     }
-    Ok(())
+}
+
+fn import_registered_reference(
+    reference: &str,
+    registry: &Registry,
+    load_schema: fn(&str) -> Option<&'static str>,
+) -> Result<Value, ContractError> {
+    let (_, schema_entry) = registry
+        .schemas
+        .iter()
+        .find(|(_, entry)| {
+            reference == entry.id || reference.starts_with(&format!("{}#", entry.id))
+        })
+        .ok_or_else(|| {
+            ContractError(Rejection::validation("external_schema_reference", "/$ref"))
+        })?;
+    validate_package_path(&schema_entry.path)?;
+    let schema_source = load_schema(&schema_entry.path).ok_or_else(|| {
+        ContractError(Rejection::validation("invalid_embedded_schema_path", "/schemas"))
+    })?;
+    let schema: Value = serde_json::from_str(schema_source)
+        .map_err(|_| ContractError(Rejection::validation("invalid_embedded_schema", "/")))?;
+    if schema.get("$id").and_then(Value::as_str) != Some(schema_entry.id.as_str()) {
+        return Err(ContractError(Rejection::validation(
+            "invalid_embedded_schema",
+            "/$id",
+        )));
+    }
+    let fragment = &reference[schema_entry.id.len()..];
+    let target = if fragment.is_empty() {
+        &schema
+    } else {
+        let pointer = fragment.strip_prefix('#').ok_or_else(|| {
+            ContractError(Rejection::validation("invalid_embedded_schema", "/$ref"))
+        })?;
+        if !valid_json_pointer(pointer) {
+            return Err(ContractError(Rejection::validation(
+                "invalid_embedded_schema",
+                "/$ref",
+            )));
+        }
+        schema.pointer(pointer).ok_or_else(|| {
+            ContractError(Rejection::validation("invalid_embedded_schema", "/$ref"))
+        })?
+    };
+    if contains_schema_reference(target) {
+        return Err(ContractError(Rejection::validation(
+            "invalid_embedded_schema",
+            "/$ref",
+        )));
+    }
+    Ok(target.clone())
+}
+
+fn contains_schema_reference(value: &Value) -> bool {
+    match value {
+        Value::Array(items) => items.iter().any(contains_schema_reference),
+        Value::Object(object) => {
+            object.get("$ref").and_then(Value::as_str).is_some()
+                || object.values().any(contains_schema_reference)
+        }
+        _ => false,
+    }
 }
 
 fn pointer_token(value: &str) -> String {
@@ -1338,6 +1584,32 @@ fn validate_iso8601(value: &str) -> bool {
         31,
     ];
     day >= 1 && day <= days_in_month[(month - 1) as usize]
+}
+
+fn compare_iso8601(left: &str, right: &str) -> Ordering {
+    match left[..19].cmp(&right[..19]) {
+        Ordering::Equal => {}
+        ordering => return ordering,
+    }
+    let left_fraction = iso8601_fraction(left).as_bytes();
+    let right_fraction = iso8601_fraction(right).as_bytes();
+    for index in 0..left_fraction.len().max(right_fraction.len()) {
+        let left_digit = left_fraction.get(index).copied().unwrap_or(b'0');
+        let right_digit = right_fraction.get(index).copied().unwrap_or(b'0');
+        match left_digit.cmp(&right_digit) {
+            Ordering::Equal => {}
+            ordering => return ordering,
+        }
+    }
+    Ordering::Equal
+}
+
+fn iso8601_fraction(value: &str) -> &str {
+    if value.as_bytes().get(19) == Some(&b'.') {
+        &value[20..value.len() - 1]
+    } else {
+        ""
+    }
 }
 
 fn decimal_field(bytes: &[u8], start: usize, end: usize) -> Option<u32> {
