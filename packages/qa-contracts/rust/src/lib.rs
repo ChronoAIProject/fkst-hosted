@@ -27,8 +27,7 @@ const LOCAL_WORKER_SCHEMA: &str =
 const LOCAL_WORKER_SCHEMA_PATH: &str = "contracts/qa.local-worker-protocol/v1/schema.json";
 const LOCAL_RUN_ADMISSION_SCHEMA: &str =
     include_str!("../../contracts/qa.local-run-admission/v1/schema.json");
-const LOCAL_RUN_ADMISSION_SCHEMA_PATH: &str =
-    "contracts/qa.local-run-admission/v1/schema.json";
+const LOCAL_RUN_ADMISSION_SCHEMA_PATH: &str = "contracts/qa.local-run-admission/v1/schema.json";
 const EMBEDDED_SCHEMAS: &[(&str, &str)] = &[
     (FOUNDATION_SCHEMA_PATH, FOUNDATION_SCHEMA),
     (LOCAL_LIFECYCLE_SCHEMA_PATH, LOCAL_LIFECYCLE_SCHEMA),
@@ -1216,11 +1215,8 @@ fn resolve_registered_references(
                 if object.is_empty() {
                     return Ok(imported);
                 }
-                let siblings = resolve_registered_references(
-                    Value::Object(object),
-                    registry,
-                    load_schema,
-                )?;
+                let siblings =
+                    resolve_registered_references(Value::Object(object), registry, load_schema)?;
                 return Ok(serde_json::json!({ "allOf": [imported, siblings] }));
             }
             for child in object.values_mut() {
@@ -1248,7 +1244,10 @@ fn import_registered_reference(
         })?;
     validate_package_path(&schema_entry.path)?;
     let schema_source = load_schema(&schema_entry.path).ok_or_else(|| {
-        ContractError(Rejection::validation("invalid_embedded_schema_path", "/schemas"))
+        ContractError(Rejection::validation(
+            "invalid_embedded_schema_path",
+            "/schemas",
+        ))
     })?;
     let schema: Value = serde_json::from_str(schema_source)
         .map_err(|_| ContractError(Rejection::validation("invalid_embedded_schema", "/")))?;

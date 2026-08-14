@@ -19,7 +19,7 @@
     { "name": "padded-nonce", "path": "/nonce", "value": "bm9uY2UtMDAwMDAx=", "expected": { "category": "contract", "code": "contract.invalid_encoding", "reason": "invalid_encoding", "path": "/nonce" } },
     { "name": "mod-one-nonce", "path": "/nonce", "value": "AAAAAAAAAAAAAAAAA", "expected": { "category": "contract", "code": "contract.invalid_encoding", "reason": "invalid_encoding", "path": "/nonce" } },
     { "name": "alphabet-nonce", "path": "/nonce", "value": "AAAAAAAAAAAAAAA+", "expected": { "category": "contract", "code": "contract.invalid_encoding", "reason": "invalid_encoding", "path": "/nonce" } },
-    { "name": "trailing-bits-nonce", "path": "/nonce", "value": "AAAAAAAAAAAAAAAB", "expected": { "category": "contract", "code": "contract.invalid_encoding", "reason": "invalid_encoding", "path": "/nonce" } },
+    { "name": "trailing-bits-nonce", "path": "/nonce", "value": "AAAAAAAAAAAAAAB", "expected": { "category": "contract", "code": "contract.invalid_encoding", "reason": "invalid_encoding", "path": "/nonce" } },
     { "name": "uppercase-uuid", "path": "/run_id", "value": "00000000-0000-0000-0000-00000000000A", "expected": { "category": "validation", "reason": "schema_violation", "path": "/run_id" } },
     { "name": "short-uuid", "path": "/run_id", "value": "00000000-0000-0000-0000-00000000001", "expected": { "category": "validation", "reason": "schema_violation", "path": "/run_id" } },
     { "name": "bad-hyphen-uuid", "path": "/run_id", "value": "000000000000-0000-0000-000000000001", "expected": { "category": "validation", "reason": "schema_violation", "path": "/run_id" } },
