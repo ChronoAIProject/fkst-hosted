@@ -4,6 +4,31 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 cd "$root"
 
+testing_packages_pin=apps/local-qa-runtime/.fkst/conformance/fkst-packages-testing.pin
+expected_testing_packages_pin=$(mktemp)
+trap 'rm -f "$expected_testing_packages_pin"' EXIT
+printf 'ac953ff0bb3f1c909728e66c3968cbb3ed5e3cf1\n' > "$expected_testing_packages_pin"
+[[ -f "$testing_packages_pin" ]] && cmp -s "$expected_testing_packages_pin" "$testing_packages_pin" || {
+  echo 'Local QA Testing Packages pin must contain the exact immutable source revision' >&2
+  exit 1
+}
+
+local_qa_readme=apps/local-qa-runtime/README.md
+for required_reference in \
+  'ChronoAIProject/fkst-packages-testing@ac953ff0bb3f1c909728e66c3968cbb3ed5e3cf1:packages/local-qa-host-adapter' \
+  'ChronoAIProject/fkst-packages@d4146d7bbdbde9d6fbbee404d5a2e3e4da0fa08c' \
+  'ChronoAIProject/fkst-substrate@e3355b42709f4138613b8238cba34a5ab1161053' \
+  'testing-observation.v1' \
+  'testing-assertion-result.v1' \
+  'testing-case-result.v2' \
+  'testing-case-result-set.v2' \
+  'pinned but not activated'; do
+  grep -Fq "$required_reference" "$local_qa_readme" || {
+    echo "Local QA README is missing immutable Testing Packages reference: $required_reference" >&2
+    exit 1
+  }
+done
+
 expected=$(printf '%s\n' \
   apps/local-qa-runtime/browser-adapter/src/lib.rs \
   apps/local-qa-runtime/evidence-stager/src/lib.rs \

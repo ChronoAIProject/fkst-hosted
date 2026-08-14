@@ -17,6 +17,13 @@ pub struct FixedPngScreenshot {
     pub height_px: u32,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct FixedBrowserObservation {
+    pub final_url: String,
+    pub observed_text: String,
+    pub screenshot: FixedPngScreenshot,
+}
+
 #[derive(Debug, Error)]
 pub enum BrowserAdapterError {
     #[error("unsupported platform: the fixed browser smoke supports Linux and macOS arm64 only")]
@@ -33,21 +40,24 @@ pub enum BrowserAdapterError {
     OperationAndCleanup { operation: String, cleanup: String },
 }
 
-pub async fn run_fixed_browser_smoke() -> Result<FixedBrowserSmokeResult, BrowserAdapterError> {
+pub async fn observe_fixed_browser_fixture(
+) -> Result<FixedBrowserObservation, BrowserAdapterError> {
     #[cfg(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
     {
         let (sender, receiver) = futures_channel::oneshot::channel();
         std::thread::Builder::new()
-            .name("local-qa-fixed-browser-smoke".to_string())
+            .name("local-qa-fixed-browser-observation".to_string())
             .spawn(move || {
-                let _ = sender.send(unix::run_fixed_browser_smoke());
+                let _ = sender.send(unix::observe_fixed_browser_fixture());
             })
             .map_err(|error| {
-                BrowserAdapterError::Setup(format!("start fixed browser smoke worker: {error}"))
+                BrowserAdapterError::Setup(format!(
+                    "start fixed browser observation worker: {error}"
+                ))
             })?;
         receiver.await.map_err(|_| {
             BrowserAdapterError::Operation(
-                "fixed browser smoke worker terminated without a result".to_string(),
+                "fixed browser observation worker terminated without a result".to_string(),
             )
         })?
     }
@@ -58,9 +68,38 @@ pub async fn run_fixed_browser_smoke() -> Result<FixedBrowserSmokeResult, Browse
     }
 }
 
+pub async fn run_fixed_browser_smoke() -> Result<FixedBrowserSmokeResult, BrowserAdapterError> {
+    let observation = observe_fixed_browser_fixture().await?;
+    if observation.observed_text != fixed_expected_text() {
+        return Err(BrowserAdapterError::Operation(format!(
+            "fixed status rendered text was {:?}, expected {:?}",
+            observation.observed_text,
+            fixed_expected_text()
+        )));
+    }
+
+    Ok(FixedBrowserSmokeResult {
+        final_url: observation.final_url,
+        selector: fixed_selector().to_string(),
+        expected_text: fixed_expected_text().to_string(),
+        observed_text: observation.observed_text,
+        screenshot: observation.screenshot,
+    })
+}
+
+fn fixed_selector() -> &'static str {
+    r#"[data-local-qa="status"]"#
+}
+
+fn fixed_expected_text() -> &'static str {
+    "READY"
+}
+
 #[cfg(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
 mod unix {
-    use super::{BrowserAdapterError, FixedBrowserSmokeResult, FixedPngScreenshot};
+    use super::{
+        fixed_selector, BrowserAdapterError, FixedBrowserObservation, FixedPngScreenshot,
+    };
     use headless_chrome::{protocol::cdp::Page, Browser, Tab};
     use nix::{
         errno::Errno,
@@ -97,8 +136,8 @@ mod unix {
         ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"];
     const FIXTURE_PATH: &str = "/fixed-page.html";
     const FIXTURE_HTML: &[u8] = br#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Local QA Fixed Page</title></head><body><main><span data-local-qa="status">READY</span></main></body></html>"#;
-    const SELECTOR: &str = r#"[data-local-qa="status"]"#;
-    const EXPECTED_TEXT: &str = "READY";
+    #[cfg(test)]
+    const NOT_READY_FIXTURE_HTML: &[u8] = br#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Local QA Fixed Page</title></head><body><main><span data-local-qa="status">NOT READY</span></main></body></html>"#;
     const SCREENSHOT_MEDIA_TYPE: &str = "image/png";
     const VIEWPORT_WIDTH: u32 = 1280;
     const VIEWPORT_HEIGHT: u32 = 720;
@@ -108,15 +147,31 @@ mod unix {
     const CLEANUP_GRACE: Duration = Duration::from_millis(500);
     const CLEANUP_LIMIT: Duration = Duration::from_secs(3);
 
-    pub(super) fn run_fixed_browser_smoke() -> Result<FixedBrowserSmokeResult, BrowserAdapterError>
-    {
+    pub(super) fn observe_fixed_browser_fixture(
+    ) -> Result<FixedBrowserObservation, BrowserAdapterError> {
         run_with_options(RunOptions::production())
+    }
+
+    #[derive(Clone, Copy)]
+    enum FixtureContent {
+        Ready,
+        #[cfg(test)]
+        NotReady,
+    }
+
+    impl FixtureContent {
+        fn html(self) -> &'static [u8] {
+            match self {
+                Self::Ready => FIXTURE_HTML,
+                #[cfg(test)]
+                Self::NotReady => NOT_READY_FIXTURE_HTML,
+            }
+        }
     }
 
     struct RunOptions {
         timeout: Duration,
-        selector: &'static str,
-        expected_text: &'static str,
+        fixture_content: FixtureContent,
         #[cfg(test)]
         executable: Option<PathBuf>,
         #[cfg(test)]
@@ -129,8 +184,7 @@ mod unix {
         fn production() -> Self {
             Self {
                 timeout: OPERATION_TIMEOUT,
-                selector: SELECTOR,
-                expected_text: EXPECTED_TEXT,
+                fixture_content: FixtureContent::Ready,
                 #[cfg(test)]
                 executable: None,
                 #[cfg(test)]
@@ -159,11 +213,11 @@ mod unix {
 
     fn run_with_options(
         options: RunOptions,
-    ) -> Result<FixedBrowserSmokeResult, BrowserAdapterError> {
+    ) -> Result<FixedBrowserObservation, BrowserAdapterError> {
         let mut owned = OwnedRun::default();
         let operation = (|| {
             let chrome_path = options.chrome_path()?;
-            owned.fixture = Some(FixtureServer::start()?);
+            owned.fixture = Some(FixtureServer::start(options.fixture_content)?);
             record_owned_resources(&owned);
 
             owned.profile =
@@ -213,7 +267,9 @@ mod unix {
         navigation_url: String,
         deadline: Instant,
         options: &RunOptions,
-    ) -> Result<FixedBrowserSmokeResult, BrowserAdapterError> {
+    ) -> Result<FixedBrowserObservation, BrowserAdapterError> {
+        #[cfg(not(test))]
+        let _ = options;
         let debug_ws_url = chrome.wait_for_debug_ws_url(deadline)?;
         let browser = Browser::connect_with_timeout(debug_ws_url, remaining(deadline)?).map_err(
             operation_error_before_deadline("connect to owned Chrome", deadline),
@@ -231,31 +287,25 @@ mod unix {
         tab.set_default_timeout(remaining(deadline)?);
 
         let element =
-            tab.wait_for_element(options.selector)
+            tab.wait_for_element(fixed_selector())
                 .map_err(operation_error_before_deadline(
                     "locate fixed status element",
                     deadline,
                 ))?;
         let observed_value = element
-            .call_js_fn("function() { return this.textContent; }", Vec::new(), false)
+            .call_js_fn("function() { return this.innerText; }", Vec::new(), false)
             .map_err(operation_error_before_deadline(
-                "read fixed status textContent",
+                "read fixed status rendered text",
                 deadline,
             ))?
             .value
             .ok_or_else(|| {
                 BrowserAdapterError::Operation(
-                    "fixed status textContent did not produce a value".to_string(),
+                    "fixed status rendered text did not produce a value".to_string(),
                 )
             })?;
         let observed_text: String = serde_json::from_value(observed_value)
-            .map_err(operation_error("decode fixed status textContent"))?;
-        if observed_text != options.expected_text {
-            return Err(BrowserAdapterError::Operation(format!(
-                "fixed status textContent was {observed_text:?}, expected {:?}",
-                options.expected_text
-            )));
-        }
+            .map_err(operation_error("decode fixed status rendered text"))?;
 
         ensure_before_deadline(deadline)?;
         #[cfg(test)]
@@ -302,10 +352,8 @@ mod unix {
         drop(tab);
         drop(browser);
 
-        Ok(FixedBrowserSmokeResult {
+        Ok(FixedBrowserObservation {
             final_url,
-            selector: options.selector.to_string(),
-            expected_text: options.expected_text.to_string(),
             observed_text,
             screenshot: FixedPngScreenshot {
                 bytes: screenshot,
@@ -350,9 +398,9 @@ mod unix {
     impl OwnedRun {
         fn finish(
             mut self,
-            operation: Result<FixedBrowserSmokeResult, BrowserAdapterError>,
+            operation: Result<FixedBrowserObservation, BrowserAdapterError>,
             options: &RunOptions,
-        ) -> Result<FixedBrowserSmokeResult, BrowserAdapterError> {
+        ) -> Result<FixedBrowserObservation, BrowserAdapterError> {
             #[cfg(not(test))]
             let _ = options;
             record_owned_resources(&self);
@@ -388,9 +436,9 @@ mod unix {
     }
 
     fn combine_outcome(
-        operation: Result<FixedBrowserSmokeResult, BrowserAdapterError>,
+        operation: Result<FixedBrowserObservation, BrowserAdapterError>,
         cleanup_failures: Vec<String>,
-    ) -> Result<FixedBrowserSmokeResult, BrowserAdapterError> {
+    ) -> Result<FixedBrowserObservation, BrowserAdapterError> {
         let cleanup = cleanup_failures.join("; ");
         match (operation, cleanup.is_empty()) {
             (Ok(result), true) => Ok(result),
@@ -449,7 +497,7 @@ mod unix {
     }
 
     impl FixtureServer {
-        fn start() -> Result<Self, BrowserAdapterError> {
+        fn start(content: FixtureContent) -> Result<Self, BrowserAdapterError> {
             let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
                 .map_err(setup_error("bind fixed loopback fixture"))?;
             listener
@@ -472,7 +520,7 @@ mod unix {
             let thread_stop = Arc::clone(&stop);
             let thread = thread::Builder::new()
                 .name("local-qa-fixed-fixture".to_string())
-                .spawn(move || serve_fixture(listener, &thread_stop))
+                .spawn(move || serve_fixture(listener, &thread_stop, content.html()))
                 .map_err(setup_error("start fixed fixture thread"))?;
             Ok(Self {
                 address,
@@ -506,10 +554,14 @@ mod unix {
         }
     }
 
-    fn serve_fixture(listener: TcpListener, stop: &AtomicBool) -> Result<(), String> {
+    fn serve_fixture(
+        listener: TcpListener,
+        stop: &AtomicBool,
+        fixture_html: &[u8],
+    ) -> Result<(), String> {
         while !stop.load(Ordering::Acquire) {
             match listener.accept() {
-                Ok((stream, _)) => handle_fixture_connection(stream)?,
+                Ok((stream, _)) => handle_fixture_connection(stream, fixture_html)?,
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(IO_POLL_INTERVAL);
                 }
@@ -519,7 +571,10 @@ mod unix {
         Ok(())
     }
 
-    fn handle_fixture_connection(mut stream: TcpStream) -> Result<(), String> {
+    fn handle_fixture_connection(
+        mut stream: TcpStream,
+        fixture_html: &[u8],
+    ) -> Result<(), String> {
         stream
             .set_read_timeout(Some(Duration::from_secs(1)))
             .map_err(|error| format!("configure fixed fixture connection: {error}"))?;
@@ -553,11 +608,11 @@ mod unix {
                 && !headers_declare_body(&request[..header_end])
         });
         if valid_request {
-            write_response(
-                &mut stream,
-                b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: 174\r\nConnection: close\r\n\r\n",
-                FIXTURE_HTML,
-            )
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                fixture_html.len()
+            );
+            write_response(&mut stream, head.as_bytes(), fixture_html)
         } else {
             write_response(
                 &mut stream,
@@ -1026,7 +1081,7 @@ mod unix {
         #[test]
         fn fixture_serves_only_the_fixed_contract() {
             let _browser_guard = browser_test_guard();
-            let fixture = FixtureServer::start().expect("fixture starts");
+            let fixture = FixtureServer::start(FixtureContent::Ready).expect("fixture starts");
             let address = fixture.address;
             let ok = send_request(
                 fixture.address,
@@ -1160,17 +1215,36 @@ mod unix {
         }
 
         #[test]
-        fn text_mismatch_cleans_the_live_browser_group_and_owned_state() {
+        fn real_browser_observes_non_matching_fixture_and_cleans_owned_resources() {
             let _browser_guard = browser_test_guard();
-            let observation = Arc::new(std::sync::Mutex::new(TestObservation::default()));
-            let _observation_guard = install_observer(Arc::clone(&observation));
+            let resources = Arc::new(std::sync::Mutex::new(TestObservation::default()));
+            let _observation_guard = install_observer(Arc::clone(&resources));
             let mut options = RunOptions::production();
-            options.expected_text = "NOT READY";
+            options.fixture_content = FixtureContent::NotReady;
 
-            let error = run_with_options(options).expect_err("exact text mismatch fails");
-            assert!(matches!(error, BrowserAdapterError::Operation(_)));
-            assert!(error.to_string().contains("fixed status textContent"));
-            assert_observed_resources_cleaned(&observation, true);
+            let observation = run_with_options(options).expect("non-matching observation succeeds");
+            let resources = resources.lock().expect("observation lock").clone();
+            assert_eq!(
+                observation.final_url,
+                format!(
+                    "http://127.0.0.1:{}{FIXTURE_PATH}",
+                    resources
+                        .fixture_address
+                        .expect("fixture address recorded")
+                        .port()
+                )
+            );
+            assert_eq!(observation.observed_text, "NOT READY");
+            assert_eq!(observation.screenshot.media_type, SCREENSHOT_MEDIA_TYPE);
+            assert_eq!(observation.screenshot.width_px, VIEWPORT_WIDTH);
+            assert_eq!(observation.screenshot.height_px, VIEWPORT_HEIGHT);
+            assert!(!observation.screenshot.bytes.is_empty());
+            assert!(observation.screenshot.bytes.len() <= MAX_SCREENSHOT_BYTES);
+            assert_eq!(
+                validate_png(&observation.screenshot.bytes).expect("observation PNG decodes"),
+                (VIEWPORT_WIDTH, VIEWPORT_HEIGHT)
+            );
+            assert_observation_cleaned(&resources, true);
         }
 
         #[test]
@@ -1316,9 +1390,9 @@ mod unix {
                         .port()
                 )
             );
-            assert_eq!(result.selector, SELECTOR);
-            assert_eq!(result.expected_text, EXPECTED_TEXT);
-            assert_eq!(result.observed_text, EXPECTED_TEXT);
+            assert_eq!(result.selector, fixed_selector());
+            assert_eq!(result.expected_text, fixed_expected_text());
+            assert_eq!(result.observed_text, fixed_expected_text());
             assert_eq!(result.screenshot.media_type, SCREENSHOT_MEDIA_TYPE);
             assert_eq!(result.screenshot.width_px, VIEWPORT_WIDTH);
             assert_eq!(result.screenshot.height_px, VIEWPORT_HEIGHT);
@@ -1349,12 +1423,10 @@ mod unix {
             bytes
         }
 
-        fn dummy_result() -> FixedBrowserSmokeResult {
-            FixedBrowserSmokeResult {
+        fn dummy_result() -> FixedBrowserObservation {
+            FixedBrowserObservation {
                 final_url: "http://127.0.0.1:1/fixed-page.html".to_string(),
-                selector: SELECTOR.to_string(),
-                expected_text: EXPECTED_TEXT.to_string(),
-                observed_text: EXPECTED_TEXT.to_string(),
+                observed_text: fixed_expected_text().to_string(),
                 screenshot: FixedPngScreenshot {
                     bytes: Vec::new(),
                     media_type: SCREENSHOT_MEDIA_TYPE.to_string(),
