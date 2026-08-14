@@ -246,11 +246,17 @@ export function foundationTypeNames(): readonly FoundationType[] {
 }
 
 export function admitJson(raw: Uint8Array): AdmittedJson {
+  if (raw.length >= 3 && raw[0] === 0xef && raw[1] === 0xbb && raw[2] === 0xbf) {
+    throw validationError("invalid_json", "/");
+  }
   let text: string;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(raw);
   } catch {
     throw canonicalError("canonicalization.invalid_utf8", "invalid_utf8");
+  }
+  if (/^\s|\s$/u.test(text)) {
+    throw validationError("invalid_json", "/");
   }
   preflightDepth(text);
   preflightNumbers(text);
@@ -502,7 +508,22 @@ function validateRegisteredValue(admitted: AdmittedJson, typeName: string): Vali
 }
 
 function validateLocalQARunRequestValue(admitted: AdmittedJson): ValidatedValue {
-  const validated = validateRegisteredValue(admitted, LOCAL_QA_RUN_REQUEST_TYPE_NAME);
+  const admittedValue = admitted.value();
+  let validated: ValidatedValue;
+  try {
+    validated = validateRegisteredValue(admitted, LOCAL_QA_RUN_REQUEST_TYPE_NAME);
+  } catch (error) {
+    if (
+      error instanceof ContractError &&
+      error.rejection.reason === "schema_violation" &&
+      isRecord(admittedValue) &&
+      typeof admittedValue.nonce === "string" &&
+      !validateBase64UrlNoPad(admittedValue.nonce)
+    ) {
+      throw contractError("contract.invalid_encoding", "invalid_encoding", "/nonce");
+    }
+    throw error;
+  }
   const value = validated.value() as LocalQARunRequest;
   if (!validateIso8601(value.created_at)) {
     throw validationError("schema_violation", "/created_at");
@@ -512,6 +533,9 @@ function validateLocalQARunRequestValue(admitted: AdmittedJson): ValidatedValue 
   }
   if (!validateBase64UrlNoPad(value.nonce)) {
     throw contractError("contract.invalid_encoding", "invalid_encoding", "/nonce");
+  }
+  if (compareIso8601(value.created_at, value.expires_at) >= 0) {
+    throw contractError("contract.invalid_relation", "invalid_request_window", "/expires_at");
   }
   verifyContractContentDigest(validated);
   return validated;

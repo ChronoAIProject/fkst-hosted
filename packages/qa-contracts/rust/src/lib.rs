@@ -213,6 +213,11 @@ pub fn admit_json(raw: &[u8]) -> Result<AdmittedJson, ContractError> {
             "invalid_utf8",
         ))
     })?;
+    if text.chars().next().is_some_and(char::is_whitespace)
+        || text.chars().next_back().is_some_and(char::is_whitespace)
+    {
+        return Err(ContractError(Rejection::validation("invalid_json", "/")));
+    }
     preflight_depth(text)?;
     preflight_numbers(text)?;
     validate_json_syntax(text)?;
@@ -544,7 +549,22 @@ fn validate_registered_value(
 fn validate_local_qa_run_request_value(
     admitted: AdmittedJson,
 ) -> Result<ValidatedValue, ContractError> {
-    let validated = validate_registered_value(admitted, LOCAL_QA_RUN_REQUEST_TYPE_NAME)?;
+    let nonce_has_invalid_encoding = admitted
+        .0
+        .get("nonce")
+        .and_then(Value::as_str)
+        .is_some_and(|nonce| !validate_base64url_no_pad(nonce));
+    let validated = match validate_registered_value(admitted, LOCAL_QA_RUN_REQUEST_TYPE_NAME) {
+        Ok(validated) => validated,
+        Err(error) if error.0.reason == "schema_violation" && nonce_has_invalid_encoding => {
+            return Err(ContractError(Rejection::contract(
+                "contract.invalid_encoding",
+                "invalid_encoding",
+                "/nonce",
+            )));
+        }
+        Err(error) => return Err(error),
+    };
     let value = validated
         .0
         .as_object()
@@ -566,6 +586,15 @@ fn validate_local_qa_run_request_value(
             "contract.invalid_encoding",
             "invalid_encoding",
             "/nonce",
+        )));
+    }
+    let created_at = required_string(value, "created_at")?;
+    let expires_at = required_string(value, "expires_at")?;
+    if !compare_iso8601(created_at, expires_at).is_lt() {
+        return Err(ContractError(Rejection::contract(
+            "contract.invalid_relation",
+            "invalid_request_window",
+            "/expires_at",
         )));
     }
     verify_contract_content_digest(&validated)?;
