@@ -1,6 +1,7 @@
 mod coordinator;
 mod executor;
 mod journal;
+pub mod ownership;
 
 use std::ffi::OsString;
 use std::fmt;
@@ -15,7 +16,11 @@ use std::time::Duration;
 use coordinator::CoordinatorHandle;
 use executor::PassingExecutor;
 use fkst_qa_contracts::{validate_cancel_disposition, validate_event_cursor};
-use journal::{Admission, Cancellation, EventPayload, Journal};
+use journal::{Admission, Cancellation, EventPayload};
+pub use journal::{Journal, OwnedHandle, ResourceIntent};
+pub use ownership::{
+    reconcile_environment, CreateRequest, EnvironmentProvider, EnvironmentRequest, ProviderResource,
+};
 use serde::{Deserialize, Serialize};
 
 const CANONICAL_REQUEST_DIGEST: &str =
