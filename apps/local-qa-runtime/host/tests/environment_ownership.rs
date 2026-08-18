@@ -1,18 +1,20 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use fkst_local_qa_host::{
     ownership::{ENVIRONMENT_ID_LABEL, PROFILE_ID_LABEL, RUN_ID_LABEL},
-    reconcile_environment, CreateRequest, EnvironmentProvider, EnvironmentRequest, Journal,
-    ProviderResource, RunError,
+    reconcile_environment, CreateRequest, EnvironmentProvider, EnvironmentRequest, FixedClock,
+    Journal, ProviderResource, RunError,
 };
 use rusqlite::Connection;
 
 const RUN_ID: &str = "00000000-0000-4000-8000-000000000001";
 const DEADLINE: &str = "2026-08-14T12:00:00Z";
 const NOW: &str = "2026-08-14T11:59:00Z";
+const EXPIRED_NOW: &str = "2026-08-14T12:00:01Z";
+static DATABASE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 struct FakeProvider {
     database_path: PathBuf,
@@ -71,11 +73,11 @@ fn request(intent_id: &str, deadline_utc: &str) -> EnvironmentRequest {
 }
 
 fn database_path(label: &str) -> PathBuf {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock must be after the Unix epoch")
-        .as_nanos();
-    std::env::temp_dir().join(format!("fkst-local-qa-host-{label}-{timestamp}.sqlite"))
+    let sequence = DATABASE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "fkst-local-qa-host-{label}-{}-{sequence}.sqlite",
+        std::process::id()
+    ))
 }
 
 fn insert_run(path: &Path) {
@@ -103,14 +105,21 @@ fn environment_bind_walks_the_host_and_replays_without_provider_effect() {
         expected_intent_id: "intent-env-001".to_owned(),
         mismatch: false,
     };
+    let clock = FixedClock::new(NOW).expect("fixture clock must be valid");
 
-    let first = reconcile_environment(&mut journal, &mut provider, &request("intent-env-001", DEADLINE), NOW)
-        .expect("environment bind must succeed");
+    let first = reconcile_environment(
+        &mut journal,
+        &mut provider,
+        &request("intent-env-001", DEADLINE),
+        &clock,
+    )
+    .expect("environment bind must succeed");
     assert_eq!(first.intent_id, "intent-env-001");
     assert_eq!(first.run_id, RUN_ID);
     assert_eq!(first.profile_id, "profile-001");
     assert_eq!(first.environment_id, "environment-001");
     assert_eq!(first.generation, 1);
+    assert_eq!(first.deadline_utc, DEADLINE);
     assert_eq!(first.stable_provider_key, "fkst-local-qa/environment/v1/intent-env-001");
     assert_eq!(first.provider_identity, "provider-env-001");
     assert_eq!(first.state, "active");
@@ -128,10 +137,17 @@ fn environment_bind_walks_the_host_and_replays_without_provider_effect() {
         (ENVIRONMENT_ID_LABEL.to_owned(), "environment-001".to_owned()),
     ]));
 
-    let replay = reconcile_environment(&mut journal, &mut provider, &request("intent-env-001", DEADLINE), NOW)
-        .expect("identical replay must return the durable handle");
+    let expired_clock = FixedClock::new(EXPIRED_NOW).expect("fixture clock must be valid");
+    let replay = reconcile_environment(
+        &mut journal,
+        &mut provider,
+        &request("intent-env-001", DEADLINE),
+        &expired_clock,
+    )
+    .expect("identical replay must return the durable handle after expiry");
     assert_eq!(replay, first);
     assert_eq!(create_calls.lock().unwrap().len(), 1);
+    assert_eq!(discover_calls.lock().unwrap().len(), 1);
 
     let connection = Connection::open(&path).expect("inspection connection must open");
     assert_eq!(connection.query_row("SELECT status FROM resource_intents", [], |row| row.get::<_, String>(0)).unwrap(), "bound");
@@ -163,11 +179,12 @@ fn provider_mismatch_and_expiry_fail_closed_without_effects() {
         expected_intent_id: "intent-env-mismatch".to_owned(),
         mismatch: true,
     };
+    let clock = FixedClock::new(NOW).expect("fixture clock must be valid");
     assert!(reconcile_environment(
         &mut journal,
         &mut mismatch_provider,
         &request("intent-env-mismatch", DEADLINE),
-        NOW,
+        &clock,
     )
     .is_err());
     assert_eq!(create_calls.lock().unwrap().len(), 1);
@@ -188,15 +205,74 @@ fn provider_mismatch_and_expiry_fail_closed_without_effects() {
         expected_intent_id: "intent-env-expired".to_owned(),
         mismatch: false,
     };
+    let expired_clock = FixedClock::new(EXPIRED_NOW).expect("fixture clock must be valid");
     assert!(reconcile_environment(
         &mut journal,
         &mut expired_provider,
-        &request("intent-env-expired", "2026-08-14T10:00:00Z"),
-        NOW,
+        &request("intent-env-expired", DEADLINE),
+        &expired_clock,
     )
     .is_err());
     assert_eq!(expired_provider.discover_calls.lock().unwrap().len(), before_discover);
     assert_eq!(expired_provider.create_calls.lock().unwrap().len(), before_create);
     assert_eq!(journal.owned_handle("intent-env-expired").unwrap(), None);
+    let expired_intents: i64 = Connection::open(&path)
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM resource_intents WHERE intent_id = 'intent-env-expired'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(expired_intents, 0);
+    std::fs::remove_file(path).expect("temporary database must be removed");
+}
+
+#[test]
+fn version_three_migration_preserves_lifecycle_rows() {
+    let path = database_path("environment-v3-migration");
+    {
+        let journal = Journal::open(&path).expect("journal must open");
+        drop(journal);
+        let connection = Connection::open(&path).expect("fixture database must open");
+        connection
+            .execute(
+                "INSERT INTO runs (run_id, state) VALUES (?1, 'accepted')",
+                [RUN_ID],
+            )
+            .expect("lifecycle row must be inserted");
+        connection
+            .execute_batch(
+                "DROP TABLE owned_handles;
+                 DROP TABLE resource_intents;
+                 PRAGMA user_version = 3;",
+            )
+            .expect("version three fixture must be prepared");
+    }
+
+    let journal = Journal::open(&path).expect("version three journal must migrate");
+    let connection = Connection::open(&path).expect("inspection database must open");
+    let state: String = connection
+        .query_row("SELECT state FROM runs WHERE run_id = ?1", [RUN_ID], |row| {
+            row.get(0)
+        })
+        .expect("lifecycle row must survive migration");
+    assert_eq!(state, "accepted");
+    let version: i64 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("schema version must be readable");
+    assert_eq!(version, 4);
+    let foreign_key_errors: Vec<(String, i64, String, i64)> = connection
+        .prepare("PRAGMA foreign_key_check")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert!(foreign_key_errors.is_empty());
+    drop(connection);
+    drop(journal);
     std::fs::remove_file(path).expect("temporary database must be removed");
 }

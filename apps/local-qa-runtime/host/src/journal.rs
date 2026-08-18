@@ -34,6 +34,7 @@ pub struct OwnedHandle {
     pub profile_id: String,
     pub environment_id: String,
     pub generation: i64,
+    pub deadline_utc: String,
     pub stable_provider_key: String,
     pub provider_identity: String,
     pub state: String,
@@ -321,9 +322,14 @@ impl Journal {
         Ok(self
             .connection
             .query_row(
-                "SELECT intent_id, run_id, profile_id, environment_id, generation,
-                        stable_provider_key, provider_identity, state
-                 FROM owned_handles WHERE intent_id = ?1",
+                "SELECT owned_handles.intent_id, owned_handles.run_id,
+                        owned_handles.profile_id, owned_handles.environment_id,
+                        owned_handles.generation, resource_intents.deadline_utc,
+                        owned_handles.stable_provider_key, owned_handles.provider_identity,
+                        owned_handles.state
+                 FROM owned_handles
+                 JOIN resource_intents ON resource_intents.intent_id = owned_handles.intent_id
+                 WHERE owned_handles.intent_id = ?1",
                 [intent_id],
                 owned_handle_from_row,
             )
@@ -355,15 +361,21 @@ impl Journal {
             || intent.profile_id != handle.profile_id
             || intent.environment_id != handle.environment_id
             || intent.generation != handle.generation
+            || intent.deadline_utc != handle.deadline_utc
             || intent.stable_provider_key != handle.stable_provider_key
         {
             return Err(RunError::InvalidJournal("owned handle does not match intent"));
         }
         let existing = transaction
             .query_row(
-                "SELECT intent_id, run_id, profile_id, environment_id, generation,
-                        stable_provider_key, provider_identity, state
-                 FROM owned_handles WHERE intent_id = ?1",
+                "SELECT owned_handles.intent_id, owned_handles.run_id,
+                        owned_handles.profile_id, owned_handles.environment_id,
+                        owned_handles.generation, resource_intents.deadline_utc,
+                        owned_handles.stable_provider_key, owned_handles.provider_identity,
+                        owned_handles.state
+                 FROM owned_handles
+                 JOIN resource_intents ON resource_intents.intent_id = owned_handles.intent_id
+                 WHERE owned_handles.intent_id = ?1",
                 [&handle.intent_id],
                 owned_handle_from_row,
             )
@@ -949,9 +961,10 @@ fn owned_handle_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<OwnedHandl
         profile_id: row.get(2)?,
         environment_id: row.get(3)?,
         generation: row.get(4)?,
-        stable_provider_key: row.get(5)?,
-        provider_identity: row.get(6)?,
-        state: row.get(7)?,
+        deadline_utc: row.get(5)?,
+        stable_provider_key: row.get(6)?,
+        provider_identity: row.get(7)?,
+        state: row.get(8)?,
     })
 }
 

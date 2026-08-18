@@ -19,7 +19,8 @@ use fkst_qa_contracts::{validate_cancel_disposition, validate_event_cursor};
 use journal::{Admission, Cancellation, EventPayload};
 pub use journal::{Journal, OwnedHandle, ResourceIntent};
 pub use ownership::{
-    reconcile_environment, CreateRequest, EnvironmentProvider, EnvironmentRequest, ProviderResource,
+    reconcile_environment, Clock, CreateRequest, EnvironmentProvider, EnvironmentRequest,
+    FixedClock, ProviderResource, SystemClock,
 };
 use serde::{Deserialize, Serialize};
 
