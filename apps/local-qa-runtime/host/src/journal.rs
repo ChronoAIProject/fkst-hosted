@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use fkst_qa_contracts::{
     validate_cancel_disposition, validate_event_sequence, validate_execution_outcome,
-    validate_local_state,
+    validate_local_state, validate_scalar,
 };
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
@@ -11,8 +11,32 @@ use serde::{Deserialize, Serialize};
 use crate::executor::ExecutionOutcome;
 use crate::RunError;
 
-pub(crate) struct Journal {
-    connection: Connection,
+pub struct Journal {
+    pub(crate) connection: Connection,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResourceIntent {
+    pub intent_id: String,
+    pub run_id: String,
+    pub profile_id: String,
+    pub environment_id: String,
+    pub generation: i64,
+    pub deadline_utc: String,
+    pub stable_provider_key: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedHandle {
+    pub intent_id: String,
+    pub run_id: String,
+    pub profile_id: String,
+    pub environment_id: String,
+    pub generation: i64,
+    pub stable_provider_key: String,
+    pub provider_identity: String,
+    pub state: String,
 }
 
 pub(crate) enum Admission {
@@ -67,7 +91,7 @@ pub(crate) struct RunCompletedEvent {
 }
 
 impl Journal {
-    pub(crate) fn open(path: &Path) -> Result<Self, RunError> {
+    pub fn open(path: &Path) -> Result<Self, RunError> {
         let connection = Connection::open(path)?;
         connection.busy_timeout(Duration::from_secs(5))?;
         connection.pragma_update(None, "foreign_keys", true)?;
@@ -133,7 +157,7 @@ impl Journal {
                 self.migrate_v3()
             }
             2 => self.migrate_v3(),
-            3 => Ok(()),
+            3 => self.migrate_v4(),
             other => Err(RunError::UnsupportedDatabaseVersion(other)),
         }
     }
@@ -182,9 +206,200 @@ impl Journal {
             PRAGMA user_version = 3;",
         )?;
         transaction.commit()?;
+        self.migrate_v4()
+    }
+
+    fn migrate_v4(&mut self) -> Result<(), RunError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            "CREATE TABLE resource_intents (
+                intent_id TEXT PRIMARY KEY NOT NULL,
+                run_id TEXT NOT NULL,
+                profile_id TEXT NOT NULL,
+                environment_id TEXT NOT NULL,
+                generation INTEGER NOT NULL CHECK (generation > 0),
+                deadline_utc TEXT NOT NULL,
+                stable_provider_key TEXT NOT NULL UNIQUE,
+                status TEXT NOT NULL CHECK (status IN ('prepared', 'bound')),
+                FOREIGN KEY (run_id) REFERENCES runs(run_id)
+            );
+            CREATE TABLE owned_handles (
+                intent_id TEXT PRIMARY KEY NOT NULL,
+                run_id TEXT NOT NULL,
+                profile_id TEXT NOT NULL,
+                environment_id TEXT NOT NULL,
+                generation INTEGER NOT NULL CHECK (generation > 0),
+                stable_provider_key TEXT NOT NULL UNIQUE,
+                provider_identity TEXT NOT NULL,
+                state TEXT NOT NULL CHECK (state = 'active'),
+                FOREIGN KEY (intent_id) REFERENCES resource_intents(intent_id),
+                FOREIGN KEY (run_id) REFERENCES runs(run_id)
+            );
+            PRAGMA user_version = 4;",
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
+    pub fn prepare_intent(
+        &mut self,
+        intent_id: &str,
+        run_id: &str,
+        profile_id: &str,
+        environment_id: &str,
+        generation: i64,
+        deadline_utc: &str,
+    ) -> Result<ResourceIntent, RunError> {
+        validate_scalar("UUID", run_id)
+            .map_err(|_| RunError::InvalidJournal("run_id must be a canonical UUID"))?;
+        validate_scalar("ISO8601", deadline_utc)
+            .map_err(|_| RunError::InvalidJournal("deadline_utc must be ISO8601"))?;
+        if intent_id.is_empty()
+            || profile_id.is_empty()
+            || environment_id.is_empty()
+            || generation <= 0
+        {
+            return Err(RunError::InvalidJournal("invalid resource intent"));
+        }
+        let stable_provider_key = format!("fkst-local-qa/environment/v1/{intent_id}");
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing = transaction
+            .query_row(
+                "SELECT intent_id, run_id, profile_id, environment_id, generation,
+                        deadline_utc, stable_provider_key, status
+                 FROM resource_intents WHERE intent_id = ?1",
+                [intent_id],
+                resource_intent_from_row,
+            )
+            .optional()?;
+        if let Some(existing) = existing {
+            if existing.run_id != run_id
+                || existing.profile_id != profile_id
+                || existing.environment_id != environment_id
+                || existing.generation != generation
+                || existing.deadline_utc != deadline_utc
+                || existing.stable_provider_key != stable_provider_key
+            {
+                return Err(RunError::InvalidJournal("conflicting resource intent"));
+            }
+            transaction.commit()?;
+            return Ok(existing);
+        }
+        transaction.execute(
+            "INSERT INTO resource_intents
+             (intent_id, run_id, profile_id, environment_id, generation, deadline_utc,
+              stable_provider_key, status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'prepared')",
+            params![
+                intent_id,
+                run_id,
+                profile_id,
+                environment_id,
+                generation,
+                deadline_utc,
+                stable_provider_key
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(ResourceIntent {
+            intent_id: intent_id.to_owned(),
+            run_id: run_id.to_owned(),
+            profile_id: profile_id.to_owned(),
+            environment_id: environment_id.to_owned(),
+            generation,
+            deadline_utc: deadline_utc.to_owned(),
+            stable_provider_key,
+            status: "prepared".to_owned(),
+        })
+    }
+
+    pub fn owned_handle(&self, intent_id: &str) -> Result<Option<OwnedHandle>, RunError> {
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT intent_id, run_id, profile_id, environment_id, generation,
+                        stable_provider_key, provider_identity, state
+                 FROM owned_handles WHERE intent_id = ?1",
+                [intent_id],
+                owned_handle_from_row,
+            )
+            .optional()?)
+    }
+
+    pub fn record_handle(&mut self, handle: &OwnedHandle) -> Result<OwnedHandle, RunError> {
+        if handle.state != "active"
+            || handle.intent_id.is_empty()
+            || handle.provider_identity.is_empty()
+            || handle.generation <= 0
+        {
+            return Err(RunError::InvalidJournal("invalid owned handle"));
+        }
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let intent = transaction
+            .query_row(
+                "SELECT intent_id, run_id, profile_id, environment_id, generation,
+                        deadline_utc, stable_provider_key, status
+                 FROM resource_intents WHERE intent_id = ?1",
+                [&handle.intent_id],
+                resource_intent_from_row,
+            )
+            .optional()?
+            .ok_or(RunError::InvalidJournal("resource intent is missing"))?;
+        if intent.run_id != handle.run_id
+            || intent.profile_id != handle.profile_id
+            || intent.environment_id != handle.environment_id
+            || intent.generation != handle.generation
+            || intent.stable_provider_key != handle.stable_provider_key
+        {
+            return Err(RunError::InvalidJournal("owned handle does not match intent"));
+        }
+        let existing = transaction
+            .query_row(
+                "SELECT intent_id, run_id, profile_id, environment_id, generation,
+                        stable_provider_key, provider_identity, state
+                 FROM owned_handles WHERE intent_id = ?1",
+                [&handle.intent_id],
+                owned_handle_from_row,
+            )
+            .optional()?;
+        if let Some(existing) = existing {
+            if existing != *handle {
+                return Err(RunError::InvalidJournal("conflicting owned handle"));
+            }
+            transaction.commit()?;
+            return Ok(existing);
+        }
+        if intent.status != "prepared" {
+            return Err(RunError::InvalidJournal("resource intent is already bound"));
+        }
+        transaction.execute(
+            "INSERT INTO owned_handles
+             (intent_id, run_id, profile_id, environment_id, generation,
+              stable_provider_key, provider_identity, state)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active')",
+            params![
+                handle.intent_id,
+                handle.run_id,
+                handle.profile_id,
+                handle.environment_id,
+                handle.generation,
+                handle.stable_provider_key,
+                handle.provider_identity
+            ],
+        )?;
+        transaction.execute(
+            "UPDATE resource_intents SET status = 'bound' WHERE intent_id = ?1",
+            [&handle.intent_id],
+        )?;
+        transaction.commit()?;
+        Ok(handle.clone())
+    }
     pub(crate) fn admit(
         &mut self,
         run_id: &str,
@@ -712,6 +927,32 @@ fn validate_sequence(value: i64) -> Result<(), RunError> {
     validate_event_sequence(value.to_string().as_bytes())
         .map_err(|_| RunError::Contract("invalid EventSequence"))?;
     Ok(())
+}
+
+fn resource_intent_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ResourceIntent> {
+    Ok(ResourceIntent {
+        intent_id: row.get(0)?,
+        run_id: row.get(1)?,
+        profile_id: row.get(2)?,
+        environment_id: row.get(3)?,
+        generation: row.get(4)?,
+        deadline_utc: row.get(5)?,
+        stable_provider_key: row.get(6)?,
+        status: row.get(7)?,
+    })
+}
+
+fn owned_handle_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<OwnedHandle> {
+    Ok(OwnedHandle {
+        intent_id: row.get(0)?,
+        run_id: row.get(1)?,
+        profile_id: row.get(2)?,
+        environment_id: row.get(3)?,
+        generation: row.get(4)?,
+        stable_provider_key: row.get(5)?,
+        provider_identity: row.get(6)?,
+        state: row.get(7)?,
+    })
 }
 
 #[cfg(test)]
