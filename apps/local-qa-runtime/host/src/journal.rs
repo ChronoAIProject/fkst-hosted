@@ -159,6 +159,7 @@ impl Journal {
             }
             2 => self.migrate_v3(),
             3 => self.migrate_v4(),
+            4 => Ok(()),
             other => Err(RunError::UnsupportedDatabaseVersion(other)),
         }
     }
@@ -998,6 +999,54 @@ mod tests {
             assert!(matches!(
                 journal.admit("run-001", "idem-001", "different-digest"),
                 Ok(Admission::DifferentKey)
+            ));
+            assert_eq!(
+                journal
+                    .connection
+                    .query_row("SELECT COUNT(*) FROM accepted_requests", [], |row| row
+                        .get::<_, i64>(0))
+                    .expect("accepted count must be readable"),
+                1
+            );
+            assert_eq!(
+                journal
+                    .connection
+                    .query_row("SELECT COUNT(*) FROM events", [], |row| row
+                        .get::<_, i64>(0))
+                    .expect("Event count must be readable"),
+                1
+            );
+        }
+
+        fs::remove_dir_all(directory).expect("temporary directory must be removed");
+    }
+
+    #[test]
+    fn current_version_reopens_without_mutating_durable_rows() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock must be after the Unix epoch")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "fkst-local-qa-host-reopen-{}-{timestamp}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).expect("temporary directory must be created");
+        let database_path = directory.join("journal.sqlite");
+
+        {
+            let mut journal = Journal::open(&database_path).expect("journal must open");
+            assert!(matches!(
+                journal.admit("run-001", "idem-001", CANONICAL_REQUEST_DIGEST),
+                Ok(Admission::Created(_))
+            ));
+        }
+
+        {
+            let mut journal = Journal::open(&database_path).expect("v4 journal must reopen");
+            assert!(matches!(
+                journal.admit("run-001", "idem-001", CANONICAL_REQUEST_DIGEST),
+                Ok(Admission::Replay(_))
             ));
             assert_eq!(
                 journal
