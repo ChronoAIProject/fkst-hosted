@@ -365,7 +365,9 @@ impl Journal {
             || intent.deadline_utc != handle.deadline_utc
             || intent.stable_provider_key != handle.stable_provider_key
         {
-            return Err(RunError::InvalidJournal("owned handle does not match intent"));
+            return Err(RunError::InvalidJournal(
+                "owned handle does not match intent",
+            ));
         }
         let existing = transaction
             .query_row(
@@ -1004,7 +1006,7 @@ mod tests {
                 journal
                     .connection
                     .query_row("SELECT COUNT(*) FROM accepted_requests", [], |row| row
-                        .get::<_, i64>(0))
+                        .get::<_, i64>(0),)
                     .expect("accepted count must be readable"),
                 1
             );
@@ -1012,7 +1014,7 @@ mod tests {
                 journal
                     .connection
                     .query_row("SELECT COUNT(*) FROM events", [], |row| row
-                        .get::<_, i64>(0))
+                        .get::<_, i64>(0),)
                     .expect("Event count must be readable"),
                 1
             );
@@ -1052,7 +1054,7 @@ mod tests {
                 journal
                     .connection
                     .query_row("SELECT COUNT(*) FROM accepted_requests", [], |row| row
-                        .get::<_, i64>(0))
+                        .get::<_, i64>(0),)
                     .expect("accepted count must be readable"),
                 1
             );
@@ -1060,7 +1062,7 @@ mod tests {
                 journal
                     .connection
                     .query_row("SELECT COUNT(*) FROM events", [], |row| row
-                        .get::<_, i64>(0))
+                        .get::<_, i64>(0),)
                     .expect("Event count must be readable"),
                 1
             );

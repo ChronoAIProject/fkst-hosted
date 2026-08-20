@@ -26,7 +26,10 @@ struct FakeProvider {
 }
 
 impl EnvironmentProvider for FakeProvider {
-    fn discover(&mut self, stable_provider_key: &str) -> Result<Option<ProviderResource>, RunError> {
+    fn discover(
+        &mut self,
+        stable_provider_key: &str,
+    ) -> Result<Option<ProviderResource>, RunError> {
         self.discover_calls
             .lock()
             .expect("discover calls lock must be available")
@@ -35,7 +38,8 @@ impl EnvironmentProvider for FakeProvider {
     }
 
     fn create(&mut self, request: CreateRequest) -> Result<ProviderResource, RunError> {
-        let connection = Connection::open(&self.database_path).expect("visibility connection must open");
+        let connection =
+            Connection::open(&self.database_path).expect("visibility connection must open");
         let prepared: String = connection
             .query_row(
                 "SELECT status FROM resource_intents WHERE intent_id = ?1",
@@ -120,7 +124,10 @@ fn environment_bind_walks_the_host_and_replays_without_provider_effect() {
     assert_eq!(first.environment_id, "environment-001");
     assert_eq!(first.generation, 1);
     assert_eq!(first.deadline_utc, DEADLINE);
-    assert_eq!(first.stable_provider_key, "fkst-local-qa/environment/v1/intent-env-001");
+    assert_eq!(
+        first.stable_provider_key,
+        "fkst-local-qa/environment/v1/intent-env-001"
+    );
     assert_eq!(first.provider_identity, "provider-env-001");
     assert_eq!(first.state, "active");
     assert_eq!(
@@ -130,12 +137,21 @@ fn environment_bind_walks_the_host_and_replays_without_provider_effect() {
     assert_eq!(create_calls.lock().unwrap().len(), 1);
     let create_requests = create_calls.lock().unwrap().clone();
     let create_request = &create_requests[0];
-    assert_eq!(create_request.stable_provider_key, first.stable_provider_key);
-    assert_eq!(create_request.labels, BTreeMap::from([
-        (RUN_ID_LABEL.to_owned(), RUN_ID.to_owned()),
-        (PROFILE_ID_LABEL.to_owned(), "profile-001".to_owned()),
-        (ENVIRONMENT_ID_LABEL.to_owned(), "environment-001".to_owned()),
-    ]));
+    assert_eq!(
+        create_request.stable_provider_key,
+        first.stable_provider_key
+    );
+    assert_eq!(
+        create_request.labels,
+        BTreeMap::from([
+            (RUN_ID_LABEL.to_owned(), RUN_ID.to_owned()),
+            (PROFILE_ID_LABEL.to_owned(), "profile-001".to_owned()),
+            (
+                ENVIRONMENT_ID_LABEL.to_owned(),
+                "environment-001".to_owned()
+            ),
+        ])
+    );
 
     let expired_clock = FixedClock::new(EXPIRED_NOW).expect("fixture clock must be valid");
     let replay = reconcile_environment(
@@ -150,13 +166,34 @@ fn environment_bind_walks_the_host_and_replays_without_provider_effect() {
     assert_eq!(discover_calls.lock().unwrap().len(), 1);
 
     let connection = Connection::open(&path).expect("inspection connection must open");
-    assert_eq!(connection.query_row("SELECT status FROM resource_intents", [], |row| row.get::<_, String>(0)).unwrap(), "bound");
-    assert_eq!(connection.query_row("SELECT COUNT(*) FROM owned_handles", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-    assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 4);
+    assert_eq!(
+        connection
+            .query_row("SELECT status FROM resource_intents", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap(),
+        "bound"
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM owned_handles", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        4
+    );
     let foreign_key_errors: Vec<(String, i64, String, i64)> = connection
         .prepare("PRAGMA foreign_key_check")
         .unwrap()
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
@@ -191,7 +228,11 @@ fn provider_mismatch_and_expiry_fail_closed_without_effects() {
     assert_eq!(journal.owned_handle("intent-env-mismatch").unwrap(), None);
     let status: String = Connection::open(&path)
         .unwrap()
-        .query_row("SELECT status FROM resource_intents WHERE intent_id = 'intent-env-mismatch'", [], |row| row.get(0))
+        .query_row(
+            "SELECT status FROM resource_intents WHERE intent_id = 'intent-env-mismatch'",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
     assert_eq!(status, "prepared");
 
@@ -213,8 +254,14 @@ fn provider_mismatch_and_expiry_fail_closed_without_effects() {
         &expired_clock,
     )
     .is_err());
-    assert_eq!(expired_provider.discover_calls.lock().unwrap().len(), before_discover);
-    assert_eq!(expired_provider.create_calls.lock().unwrap().len(), before_create);
+    assert_eq!(
+        expired_provider.discover_calls.lock().unwrap().len(),
+        before_discover
+    );
+    assert_eq!(
+        expired_provider.create_calls.lock().unwrap().len(),
+        before_create
+    );
     assert_eq!(journal.owned_handle("intent-env-expired").unwrap(), None);
     let expired_intents: i64 = Connection::open(&path)
         .unwrap()
@@ -253,9 +300,11 @@ fn version_three_migration_preserves_lifecycle_rows() {
     let journal = Journal::open(&path).expect("version three journal must migrate");
     let connection = Connection::open(&path).expect("inspection database must open");
     let state: String = connection
-        .query_row("SELECT state FROM runs WHERE run_id = ?1", [RUN_ID], |row| {
-            row.get(0)
-        })
+        .query_row(
+            "SELECT state FROM runs WHERE run_id = ?1",
+            [RUN_ID],
+            |row| row.get(0),
+        )
         .expect("lifecycle row must survive migration");
     assert_eq!(state, "accepted");
     let version: i64 = connection
