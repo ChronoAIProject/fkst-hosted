@@ -35,7 +35,8 @@ pub struct ProviderResource {
 }
 
 pub trait EnvironmentProvider {
-    fn discover(&mut self, stable_provider_key: &str) -> Result<Option<ProviderResource>, RunError>;
+    fn discover(&mut self, stable_provider_key: &str)
+        -> Result<Option<ProviderResource>, RunError>;
     fn create(&mut self, request: CreateRequest) -> Result<ProviderResource, RunError>;
 }
 
@@ -111,7 +112,9 @@ pub fn reconcile_environment<P: EnvironmentProvider>(
         &request.deadline_utc,
     )?;
     if intent.status != "prepared" {
-        return Err(RunError::InvalidJournal("resource intent is not available for binding"));
+        return Err(RunError::InvalidJournal(
+            "resource intent is not available for binding",
+        ));
     }
     ensure_before_deadline(clock, &intent.deadline_utc)?;
 
@@ -135,7 +138,9 @@ pub fn reconcile_environment<P: EnvironmentProvider>(
     if resource.provider_identity != request.provider_identity
         || resource.provider_identity.is_empty()
     {
-        return Err(RunError::InvalidJournal("provider identity does not match intent"));
+        return Err(RunError::InvalidJournal(
+            "provider identity does not match intent",
+        ));
     }
 
     journal.record_handle(&OwnedHandle {
@@ -175,7 +180,9 @@ fn validate_handle_request(
         || handle.provider_identity != request.provider_identity
         || handle.state != "active"
     {
-        return Err(RunError::InvalidJournal("durable handle does not match intent"));
+        return Err(RunError::InvalidJournal(
+            "durable handle does not match intent",
+        ));
     }
     Ok(())
 }
@@ -196,12 +203,10 @@ fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
     let days = days_since_epoch + 719_468;
     let era = if days >= 0 { days } else { days - 146_096 } / 146_097;
     let day_of_era = days - era * 146_097;
-    let year_of_era = (day_of_era - day_of_era / 1_460 + day_of_era / 36_524
-        - day_of_era / 146_096)
-        / 365;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
     let year = year_of_era + era * 400;
-    let day_of_year =
-        day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let month_part = (5 * day_of_year + 2) / 153;
     let day = day_of_year - (153 * month_part + 2) / 5 + 1;
     let month = month_part + if month_part < 10 { 3 } else { -9 };
