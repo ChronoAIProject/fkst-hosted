@@ -98,6 +98,7 @@ pub fn reconcile_environment<P: EnvironmentProvider>(
     request: &EnvironmentRequest,
     clock: &impl Clock,
 ) -> Result<OwnedHandle, RunError> {
+    validate_request(request)?;
     if let Some(handle) = journal.owned_handle(&request.intent_id)? {
         validate_handle_request(request, &handle)?;
         return Ok(handle);
@@ -130,18 +131,7 @@ pub fn reconcile_environment<P: EnvironmentProvider>(
             })?
         }
     };
-    if resource.stable_provider_key != expected_key || resource.labels != expected_labels {
-        return Err(RunError::InvalidJournal(
-            "provider resource ownership does not match intent",
-        ));
-    }
-    if resource.provider_identity != request.provider_identity
-        || resource.provider_identity.is_empty()
-    {
-        return Err(RunError::InvalidJournal(
-            "provider identity does not match intent",
-        ));
-    }
+    validate_provider_resource(request, &expected_key, &expected_labels, &resource)?;
 
     journal.record_handle(&OwnedHandle {
         intent_id: request.intent_id.clone(),
@@ -154,6 +144,34 @@ pub fn reconcile_environment<P: EnvironmentProvider>(
         provider_identity: resource.provider_identity,
         state: "active".to_owned(),
     })
+}
+
+fn validate_request(request: &EnvironmentRequest) -> Result<(), RunError> {
+    if request.provider_identity.is_empty() {
+        return Err(RunError::InvalidJournal(
+            "provider identity must not be empty",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_provider_resource(
+    request: &EnvironmentRequest,
+    expected_key: &str,
+    expected_labels: &BTreeMap<String, String>,
+    resource: &ProviderResource,
+) -> Result<(), RunError> {
+    if resource.stable_provider_key != expected_key || resource.labels != *expected_labels {
+        return Err(RunError::InvalidJournal(
+            "provider resource ownership does not match intent",
+        ));
+    }
+    if resource.provider_identity != request.provider_identity {
+        return Err(RunError::InvalidJournal(
+            "provider identity does not match intent",
+        ));
+    }
+    Ok(())
 }
 
 fn ensure_before_deadline(clock: &impl Clock, deadline_utc: &str) -> Result<(), RunError> {

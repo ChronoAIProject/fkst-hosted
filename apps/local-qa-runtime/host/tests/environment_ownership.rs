@@ -481,3 +481,101 @@ fn version_three_migration_preserves_lifecycle_rows() {
     drop(journal);
     std::fs::remove_file(path).expect("temporary database must be removed");
 }
+
+#[test]
+fn discovered_resource_mismatch_fails_closed_without_handle() {
+    let path = database_path("environment-discovered-mismatch");
+    let mut journal = Journal::open(&path).expect("journal must open");
+    insert_run(&path);
+    let discover_calls = Arc::new(Mutex::new(Vec::new()));
+    let create_calls = Arc::new(Mutex::new(Vec::new()));
+    let mut provider = DiscoveringProvider {
+        database_path: path.clone(),
+        discover_calls: Arc::clone(&discover_calls),
+        create_calls: Arc::clone(&create_calls),
+        expected_intent_id: "intent-env-discovered-mismatch".to_owned(),
+        resource: ProviderResource {
+            stable_provider_key:
+                "fkst-local-qa/environment/v1/intent-env-discovered-mismatch".to_owned(),
+            labels: BTreeMap::from([
+                (RUN_ID_LABEL.to_owned(), RUN_ID.to_owned()),
+                (PROFILE_ID_LABEL.to_owned(), "profile-other".to_owned()),
+                (
+                    ENVIRONMENT_ID_LABEL.to_owned(),
+                    "environment-001".to_owned(),
+                ),
+            ]),
+            provider_identity: "provider-env-001".to_owned(),
+        },
+    };
+    let clock = FixedClock::new(NOW).expect("fixture clock must be valid");
+
+    assert!(reconcile_environment(
+        &mut journal,
+        &mut provider,
+        &request("intent-env-discovered-mismatch", DEADLINE),
+        &clock,
+    )
+    .is_err());
+    assert_eq!(
+        discover_calls.lock().unwrap().as_slice(),
+        ["fkst-local-qa/environment/v1/intent-env-discovered-mismatch".to_owned()].as_slice()
+    );
+    assert!(create_calls.lock().unwrap().is_empty());
+    assert_eq!(
+        journal
+            .owned_handle("intent-env-discovered-mismatch")
+            .unwrap(),
+        None
+    );
+    let status: String = Connection::open(&path)
+        .unwrap()
+        .query_row(
+            "SELECT status FROM resource_intents WHERE intent_id = 'intent-env-discovered-mismatch'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(status, "prepared");
+    std::fs::remove_file(path).expect("temporary database must be removed");
+}
+
+#[test]
+fn empty_provider_identity_is_rejected_before_provider_effects() {
+    let path = database_path("environment-empty-provider-identity");
+    let mut journal = Journal::open(&path).expect("journal must open");
+    insert_run(&path);
+    let discover_calls = Arc::new(Mutex::new(Vec::new()));
+    let create_calls = Arc::new(Mutex::new(Vec::new()));
+    let mut provider = FakeProvider {
+        database_path: path.clone(),
+        discover_calls: Arc::clone(&discover_calls),
+        create_calls: Arc::clone(&create_calls),
+        provider_identity: "provider-env-001".to_owned(),
+        expected_intent_id: "intent-env-empty-provider-identity".to_owned(),
+        mismatch: false,
+    };
+    let mut empty_request = request("intent-env-empty-provider-identity", DEADLINE);
+    empty_request.provider_identity.clear();
+    let clock = FixedClock::new(NOW).expect("fixture clock must be valid");
+
+    assert!(reconcile_environment(
+        &mut journal,
+        &mut provider,
+        &empty_request,
+        &clock,
+    )
+    .is_err());
+    assert!(discover_calls.lock().unwrap().is_empty());
+    assert!(create_calls.lock().unwrap().is_empty());
+    let intent_count: i64 = Connection::open(&path)
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM resource_intents WHERE intent_id = 'intent-env-empty-provider-identity'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(intent_count, 0);
+    std::fs::remove_file(path).expect("temporary database must be removed");
+}
