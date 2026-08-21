@@ -6,9 +6,9 @@ use std::sync::{Arc, Mutex};
 use fkst_local_qa_host::{
     ownership::{ENVIRONMENT_ID_LABEL, PROFILE_ID_LABEL, RUN_ID_LABEL},
     reconcile_environment, CreateRequest, EnvironmentProvider, EnvironmentRequest, FixedClock,
-    Journal, ProviderResource, RunError,
+    Journal, OwnedHandle, ProviderResource, RunError,
 };
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 
 const RUN_ID: &str = "00000000-0000-4000-8000-000000000001";
 const DEADLINE: &str = "2026-08-14T12:00:00Z";
@@ -23,6 +23,47 @@ struct FakeProvider {
     provider_identity: String,
     expected_intent_id: String,
     mismatch: bool,
+}
+
+struct DiscoveringProvider {
+    database_path: PathBuf,
+    discover_calls: Arc<Mutex<Vec<String>>>,
+    create_calls: Arc<Mutex<Vec<CreateRequest>>>,
+    expected_intent_id: String,
+    resource: ProviderResource,
+}
+
+impl EnvironmentProvider for DiscoveringProvider {
+    fn discover(
+        &mut self,
+        stable_provider_key: &str,
+    ) -> Result<Option<ProviderResource>, RunError> {
+        let connection =
+            Connection::open(&self.database_path).expect("visibility connection must open");
+        let prepared: String = connection
+            .query_row(
+                "SELECT status FROM resource_intents WHERE intent_id = ?1",
+                [&self.expected_intent_id],
+                |row| row.get(0),
+            )
+            .expect("prepared intent must be visible before discover");
+        assert_eq!(prepared, "prepared");
+        self.discover_calls
+            .lock()
+            .expect("discover calls lock must be available")
+            .push(stable_provider_key.to_owned());
+        Ok(Some(self.resource.clone()))
+    }
+
+    fn create(&mut self, request: CreateRequest) -> Result<ProviderResource, RunError> {
+        self.create_calls
+            .lock()
+            .expect("create calls lock must be available")
+            .push(request);
+        Err(RunError::InvalidJournal(
+            "create must not run for exact discovery",
+        ))
+    }
 }
 
 impl EnvironmentProvider for FakeProvider {
@@ -92,6 +133,121 @@ fn insert_run(path: &Path) {
             [RUN_ID],
         )
         .expect("canonical run must exist before intent insertion");
+}
+
+#[test]
+fn exact_environment_discovery_binds_without_create() {
+    let path = database_path("environment-exact-discovery");
+    let mut journal = Journal::open(&path).expect("journal must open");
+    insert_run(&path);
+    let connection = Connection::open(&path).expect("inspection connection must open");
+    let run_count: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM runs WHERE run_id = ?1 AND state = 'accepted'",
+            [RUN_ID],
+            |row| row.get(0),
+        )
+        .expect("canonical run must be queryable before reconciliation");
+    assert_eq!(run_count, 1);
+    drop(connection);
+
+    let expected_labels = BTreeMap::from([
+        (RUN_ID_LABEL.to_owned(), RUN_ID.to_owned()),
+        (PROFILE_ID_LABEL.to_owned(), "profile-001".to_owned()),
+        (
+            ENVIRONMENT_ID_LABEL.to_owned(),
+            "environment-001".to_owned(),
+        ),
+    ]);
+    let discover_calls = Arc::new(Mutex::new(Vec::new()));
+    let create_calls = Arc::new(Mutex::new(Vec::new()));
+    let mut provider = DiscoveringProvider {
+        database_path: path.clone(),
+        discover_calls: Arc::clone(&discover_calls),
+        create_calls: Arc::clone(&create_calls),
+        expected_intent_id: "intent-env-001".to_owned(),
+        resource: ProviderResource {
+            stable_provider_key:
+                "fkst-local-qa/environment/v1/intent-env-001".to_owned(),
+            labels: expected_labels,
+            provider_identity: "provider-env-001".to_owned(),
+        },
+    };
+    let clock = FixedClock::new(NOW).expect("fixture clock must be valid");
+    let expected = OwnedHandle {
+        intent_id: "intent-env-001".to_owned(),
+        run_id: RUN_ID.to_owned(),
+        profile_id: "profile-001".to_owned(),
+        environment_id: "environment-001".to_owned(),
+        generation: 1,
+        deadline_utc: DEADLINE.to_owned(),
+        stable_provider_key: "fkst-local-qa/environment/v1/intent-env-001".to_owned(),
+        provider_identity: "provider-env-001".to_owned(),
+        state: "active".to_owned(),
+    };
+
+    let recorded = reconcile_environment(
+        &mut journal,
+        &mut provider,
+        &request("intent-env-001", DEADLINE),
+        &clock,
+    )
+    .expect("exact discovered environment must bind");
+
+    assert_eq!(recorded, expected);
+    assert_eq!(
+        discover_calls.lock().unwrap().as_slice(),
+        ["fkst-local-qa/environment/v1/intent-env-001".to_owned()].as_slice()
+    );
+    assert!(create_calls.lock().unwrap().is_empty());
+    let persisted = journal
+        .owned_handle("intent-env-001")
+        .expect("owned handle lookup must succeed")
+        .expect("owned handle must be recorded");
+    assert_eq!(persisted, recorded);
+
+    let connection = Connection::open(&path).expect("inspection connection must open");
+    let bound_intents: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM resource_intents
+             WHERE intent_id = ?1 AND run_id = ?2 AND profile_id = ?3
+               AND environment_id = ?4 AND generation = ?5 AND deadline_utc = ?6
+               AND stable_provider_key = ?7 AND status = 'bound'",
+            params![
+                recorded.intent_id,
+                recorded.run_id,
+                recorded.profile_id,
+                recorded.environment_id,
+                recorded.generation,
+                recorded.deadline_utc,
+                recorded.stable_provider_key,
+            ],
+            |row| row.get(0),
+        )
+        .expect("bound intent must be queryable");
+    assert_eq!(bound_intents, 1);
+    let active_handles: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM owned_handles
+             WHERE intent_id = ?1 AND run_id = ?2 AND profile_id = ?3
+               AND environment_id = ?4 AND generation = ?5
+               AND stable_provider_key = ?6 AND provider_identity = ?7
+               AND state = 'active'",
+            params![
+                recorded.intent_id,
+                recorded.run_id,
+                recorded.profile_id,
+                recorded.environment_id,
+                recorded.generation,
+                recorded.stable_provider_key,
+                recorded.provider_identity,
+            ],
+            |row| row.get(0),
+        )
+        .expect("active handle must be queryable");
+    assert_eq!(active_handles, 1);
+    drop(connection);
+    std::fs::remove_file(path).expect("temporary database must be removed");
 }
 
 #[test]
