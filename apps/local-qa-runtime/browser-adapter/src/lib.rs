@@ -70,6 +70,12 @@ pub async fn observe_fixed_browser_fixture() -> Result<FixedBrowserObservation, 
 
 pub async fn run_fixed_browser_smoke() -> Result<FixedBrowserSmokeResult, BrowserAdapterError> {
     let observation = observe_fixed_browser_fixture().await?;
+    complete_fixed_browser_smoke(observation)
+}
+
+fn complete_fixed_browser_smoke(
+    observation: FixedBrowserObservation,
+) -> Result<FixedBrowserSmokeResult, BrowserAdapterError> {
     if observation.observed_text != fixed_expected_text() {
         return Err(BrowserAdapterError::Operation(format!(
             "fixed status rendered text was {:?}, expected {:?}",
@@ -147,6 +153,8 @@ mod unix {
     const VIEWPORT_HEIGHT: u32 = 720;
     const MAX_SCREENSHOT_BYTES: usize = 2_097_152;
     const OPERATION_TIMEOUT: Duration = Duration::from_secs(15);
+    #[cfg(test)]
+    const REAL_BROWSER_TEST_TIMEOUT: Duration = Duration::from_secs(60);
     const IO_POLL_INTERVAL: Duration = Duration::from_millis(10);
     const CLEANUP_GRACE: Duration = Duration::from_millis(500);
     const CLEANUP_LIMIT: Duration = Duration::from_secs(3);
@@ -204,12 +212,35 @@ mod unix {
             }
         }
 
+        #[cfg(test)]
+        fn real_browser_test() -> Self {
+            Self {
+                timeout: REAL_BROWSER_TEST_TIMEOUT,
+                ..Self::production()
+            }
+        }
+
         fn chrome_path(&self) -> Result<PathBuf, BrowserAdapterError> {
             #[cfg(test)]
             if let Some(executable) = &self.executable {
                 return Ok(executable.clone());
             }
             discover_chrome()
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct OperationDeadline {
+        expires_at: Instant,
+        timeout: Duration,
+    }
+
+    impl OperationDeadline {
+        fn new(timeout: Duration) -> Self {
+            Self {
+                expires_at: Instant::now() + timeout,
+                timeout,
+            }
         }
     }
 
@@ -248,7 +279,7 @@ mod unix {
                     .path(),
             )?;
 
-            let deadline = Instant::now() + options.timeout;
+            let deadline = OperationDeadline::new(options.timeout);
             owned.chrome = Some(OwnedChrome::launch(
                 &chrome_path,
                 owned.profile.as_ref().expect("owned profile exists").path(),
@@ -275,7 +306,7 @@ mod unix {
     fn perform_smoke(
         chrome: &mut OwnedChrome,
         navigation_url: String,
-        deadline: Instant,
+        deadline: OperationDeadline,
         options: &RunOptions,
     ) -> Result<FixedBrowserObservation, BrowserAdapterError> {
         #[cfg(not(test))]
@@ -390,7 +421,7 @@ mod unix {
 
     fn wait_for_initial_tab(
         browser: &Browser,
-        deadline: Instant,
+        deadline: OperationDeadline,
     ) -> Result<Arc<Tab>, BrowserAdapterError> {
         loop {
             ensure_before_deadline(deadline)?;
@@ -723,7 +754,7 @@ mod unix {
         fn launch(
             executable: &Path,
             profile_path: &Path,
-            deadline: Instant,
+            deadline: OperationDeadline,
         ) -> Result<Self, BrowserAdapterError> {
             let user_data_argument = format!("--user-data-dir={}", profile_path.display());
             let mut command = Command::new(executable);
@@ -757,7 +788,7 @@ mod unix {
             let watchdog = match thread::Builder::new()
                 .name("local-qa-chrome-deadline".to_string())
                 .spawn(move || {
-                    let wait = deadline.saturating_duration_since(Instant::now());
+                    let wait = deadline.expires_at.saturating_duration_since(Instant::now());
                     if watchdog_rx.recv_timeout(wait).is_err() {
                         let _ = killpg(process_group, Signal::SIGKILL);
                     }
@@ -796,7 +827,7 @@ mod unix {
 
         fn wait_for_debug_ws_url(
             &mut self,
-            deadline: Instant,
+            deadline: OperationDeadline,
         ) -> Result<String, BrowserAdapterError> {
             let active_port = self.profile_path.join("DevToolsActivePort");
             loop {
@@ -974,27 +1005,27 @@ mod unix {
         Ok((output.width, output.height))
     }
 
-    fn remaining(deadline: Instant) -> Result<Duration, BrowserAdapterError> {
-        let remaining = deadline.saturating_duration_since(Instant::now());
+    fn remaining(deadline: OperationDeadline) -> Result<Duration, BrowserAdapterError> {
+        let remaining = deadline.expires_at.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
-            Err(deadline_error())
+            Err(deadline_error(deadline.timeout))
         } else {
             Ok(remaining)
         }
     }
 
-    fn ensure_before_deadline(deadline: Instant) -> Result<(), BrowserAdapterError> {
-        if Instant::now() >= deadline {
-            Err(deadline_error())
+    fn ensure_before_deadline(deadline: OperationDeadline) -> Result<(), BrowserAdapterError> {
+        if Instant::now() >= deadline.expires_at {
+            Err(deadline_error(deadline.timeout))
         } else {
             Ok(())
         }
     }
 
-    fn deadline_error() -> BrowserAdapterError {
-        BrowserAdapterError::Operation(
-            "fixed browser smoke exceeded its 15-second deadline".to_string(),
-        )
+    fn deadline_error(timeout: Duration) -> BrowserAdapterError {
+        BrowserAdapterError::Operation(format!(
+            "fixed browser smoke exceeded its configured {timeout:?} deadline"
+        ))
     }
 
     fn signal_process_group(process_group: Pid, signal: Signal) -> Result<(), Errno> {
@@ -1073,11 +1104,11 @@ mod unix {
 
     fn operation_error_before_deadline<E: std::fmt::Display>(
         context: &'static str,
-        deadline: Instant,
+        deadline: OperationDeadline,
     ) -> impl FnOnce(E) -> BrowserAdapterError {
         move |error| {
-            if Instant::now() >= deadline {
-                deadline_error()
+            if Instant::now() >= deadline.expires_at {
+                deadline_error(deadline.timeout)
             } else {
                 BrowserAdapterError::Operation(format!("{context}: {error}"))
             }
@@ -1302,7 +1333,7 @@ mod unix {
             let _browser_guard = browser_test_guard();
             let resources = Arc::new(std::sync::Mutex::new(TestObservation::default()));
             let _observation_guard = install_observer(Arc::clone(&resources));
-            let mut options = RunOptions::production();
+            let mut options = RunOptions::real_browser_test();
             options.fixture_content = FixtureContent::NotReady;
 
             let observation = run_with_options(options).expect("non-matching observation succeeds");
@@ -1335,7 +1366,7 @@ mod unix {
             let _browser_guard = browser_test_guard();
             let resources = Arc::new(std::sync::Mutex::new(TestObservation::default()));
             let _observation_guard = install_observer(Arc::clone(&resources));
-            let mut options = RunOptions::production();
+            let mut options = RunOptions::real_browser_test();
             options.fixture_content = FixtureContent::Redirect;
             options.screenshot_override = Some(b"not a PNG".to_vec());
 
@@ -1357,7 +1388,7 @@ mod unix {
             let _browser_guard = browser_test_guard();
             let resources = Arc::new(std::sync::Mutex::new(TestObservation::default()));
             let _observation_guard = install_observer(Arc::clone(&resources));
-            let mut options = RunOptions::production();
+            let mut options = RunOptions::real_browser_test();
             options.fixture_content = FixtureContent::MissingSelector;
 
             let error = run_with_options(options).expect_err("missing selector fails");
@@ -1371,7 +1402,7 @@ mod unix {
             let _browser_guard = browser_test_guard();
             let observation = Arc::new(std::sync::Mutex::new(TestObservation::default()));
             let _observation_guard = install_observer(Arc::clone(&observation));
-            let mut options = RunOptions::production();
+            let mut options = RunOptions::real_browser_test();
             options.screenshot_override = Some(b"not a PNG".to_vec());
 
             let error = run_with_options(options).expect_err("invalid screenshot fails");
@@ -1391,8 +1422,27 @@ mod unix {
             let error = run_with_options(options).expect_err("short deadline expires");
             assert!(error
                 .to_string()
-                .contains("fixed browser smoke exceeded its 15-second deadline"));
+                .contains("fixed browser smoke exceeded its configured 1ms deadline"));
             assert_observed_resources_cleaned(&observation, true);
+        }
+
+        #[test]
+        fn production_options_keep_the_fixed_fifteen_second_deadline() {
+            assert_eq!(RunOptions::production().timeout, Duration::from_secs(15));
+        }
+
+        #[test]
+        fn poisoned_browser_test_lock_is_recovered() {
+            let lock = Arc::new(std::sync::Mutex::new(()));
+            let poisoner = Arc::clone(&lock);
+            let panic = thread::spawn(move || {
+                let _guard = poisoner.lock().expect("unpoisoned test lock");
+                panic!("poison test lock");
+            })
+            .join();
+            assert!(panic.is_err());
+
+            drop(recover_lock(&lock));
         }
 
         #[test]
@@ -1496,7 +1546,9 @@ mod unix {
             let observation = Arc::new(std::sync::Mutex::new(TestObservation::default()));
             let _observation_guard = install_observer(Arc::clone(&observation));
 
-            let result = futures_executor::block_on(super::super::run_fixed_browser_smoke())
+            let observation_result =
+                run_with_options(RunOptions::real_browser_test()).expect("real browser observes");
+            let result = super::super::complete_fixed_browser_smoke(observation_result)
                 .expect("real browser smoke succeeds");
             let observation = observation.lock().expect("observation lock").clone();
             assert_eq!(
@@ -1647,10 +1699,12 @@ mod unix {
         }
 
         fn browser_test_guard() -> MutexGuard<'static, ()> {
-            BROWSER_TEST_LOCK
-                .get_or_init(|| std::sync::Mutex::new(()))
-                .lock()
-                .expect("browser test lock")
+            recover_lock(BROWSER_TEST_LOCK.get_or_init(|| std::sync::Mutex::new(())))
+        }
+
+        fn recover_lock<T>(lock: &std::sync::Mutex<T>) -> MutexGuard<'_, T> {
+            lock.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
         }
 
         fn install_observer(observer: Arc<std::sync::Mutex<TestObservation>>) -> ObserverGuard {
