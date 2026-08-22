@@ -167,8 +167,7 @@ fn exact_environment_discovery_binds_without_create() {
         create_calls: Arc::clone(&create_calls),
         expected_intent_id: "intent-env-001".to_owned(),
         resource: ProviderResource {
-            stable_provider_key:
-                "fkst-local-qa/environment/v1/intent-env-001".to_owned(),
+            stable_provider_key: "fkst-local-qa/environment/v1/intent-env-001".to_owned(),
             labels: expected_labels,
             provider_identity: "provider-env-001".to_owned(),
         },
@@ -495,8 +494,8 @@ fn discovered_resource_mismatch_fails_closed_without_handle() {
         create_calls: Arc::clone(&create_calls),
         expected_intent_id: "intent-env-discovered-mismatch".to_owned(),
         resource: ProviderResource {
-            stable_provider_key:
-                "fkst-local-qa/environment/v1/intent-env-discovered-mismatch".to_owned(),
+            stable_provider_key: "fkst-local-qa/environment/v1/intent-env-discovered-mismatch"
+                .to_owned(),
             labels: BTreeMap::from([
                 (RUN_ID_LABEL.to_owned(), RUN_ID.to_owned()),
                 (PROFILE_ID_LABEL.to_owned(), "profile-other".to_owned()),
