@@ -558,13 +558,7 @@ fn empty_provider_identity_is_rejected_before_provider_effects() {
     empty_request.provider_identity.clear();
     let clock = FixedClock::new(NOW).expect("fixture clock must be valid");
 
-    assert!(reconcile_environment(
-        &mut journal,
-        &mut provider,
-        &empty_request,
-        &clock,
-    )
-    .is_err());
+    assert!(reconcile_environment(&mut journal, &mut provider, &empty_request, &clock,).is_err());
     assert!(discover_calls.lock().unwrap().is_empty());
     assert!(create_calls.lock().unwrap().is_empty());
     let intent_count: i64 = Connection::open(&path)

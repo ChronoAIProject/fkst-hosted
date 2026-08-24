@@ -788,7 +788,9 @@ mod unix {
             let watchdog = match thread::Builder::new()
                 .name("local-qa-chrome-deadline".to_string())
                 .spawn(move || {
-                    let wait = deadline.expires_at.saturating_duration_since(Instant::now());
+                    let wait = deadline
+                        .expires_at
+                        .saturating_duration_since(Instant::now());
                     if watchdog_rx.recv_timeout(wait).is_err() {
                         let _ = killpg(process_group, Signal::SIGKILL);
                     }
@@ -1006,7 +1008,9 @@ mod unix {
     }
 
     fn remaining(deadline: OperationDeadline) -> Result<Duration, BrowserAdapterError> {
-        let remaining = deadline.expires_at.saturating_duration_since(Instant::now());
+        let remaining = deadline
+            .expires_at
+            .saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             Err(deadline_error(deadline.timeout))
         } else {
