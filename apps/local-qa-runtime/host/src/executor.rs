@@ -91,8 +91,7 @@ pub(crate) fn inert_executor_descriptor() -> ExecutorDescriptor {
         executor_version: "1.0.0".to_owned(),
         capabilities: vec!["runtime.inert".to_owned()],
         capability_digest:
-            "sha256:2778ff138818dfa4d505611593b746df69ffb092dee08e2f708b5df3ca8bf4e8"
-                .to_owned(),
+            "sha256:2778ff138818dfa4d505611593b746df69ffb092dee08e2f708b5df3ca8bf4e8".to_owned(),
     }
 }
 
@@ -102,8 +101,7 @@ pub(crate) fn inert_executor_selection() -> ExecutorSelection {
         executor_id: "local.inert".to_owned(),
         executor_version: "1.0.0".to_owned(),
         capability_digest:
-            "sha256:2778ff138818dfa4d505611593b746df69ffb092dee08e2f708b5df3ca8bf4e8"
-                .to_owned(),
+            "sha256:2778ff138818dfa4d505611593b746df69ffb092dee08e2f708b5df3ca8bf4e8".to_owned(),
         required_capability: "runtime.inert".to_owned(),
     }
 }
@@ -287,10 +285,9 @@ mod tests {
 
         for (field, value) in cases {
             let descriptor = DeterministicExecutor::api().descriptor().clone();
-            let registry = ExecutorRegistry::new(vec![Box::new(PanicOnCallExecutor {
-                descriptor,
-            })])
-            .expect("registry must be valid");
+            let registry =
+                ExecutorRegistry::new(vec![Box::new(PanicOnCallExecutor { descriptor })])
+                    .expect("registry must be valid");
             let mut selection = ExecutorSelection {
                 schema_version: "qa.local-executor/v1".to_owned(),
                 executor_id: "fake.api".to_owned(),
@@ -359,7 +356,9 @@ mod tests {
 
         assert_eq!(executor.descriptor(), &inert_executor_descriptor());
         assert_eq!(
-            executor.execute(&request).expect("inert execution succeeds"),
+            executor
+                .execute(&request)
+                .expect("inert execution succeeds"),
             ExecutorResult {
                 schema_version: "qa.local-executor/v1".to_owned(),
                 run_id: request.run_id,
