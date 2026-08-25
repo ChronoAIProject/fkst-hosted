@@ -14,10 +14,7 @@ use std::thread;
 use std::time::Duration;
 
 use coordinator::CoordinatorHandle;
-use executor::{
-    inert_executor_descriptor, inert_executor_selection, ExecutorRegistry, InertExecutor,
-    LegacyExecutorAdapter,
-};
+use executor::{inert_executor_selection, ExecutorRegistry, InertExecutor};
 use fkst_qa_contracts::{validate_cancel_disposition, validate_event_cursor, validate_scalar};
 use journal::{Admission, Cancellation, EventPayload};
 pub use journal::{Journal, OwnedHandle, ResourceIntent};
@@ -187,10 +184,7 @@ fn serve(config: StartupConfig, shutdown: Arc<AtomicBool>) -> Result<(), RunErro
     let listener = TcpListener::bind(config.listen)?;
     listener.set_nonblocking(true)?;
     let assigned_address = listener.local_addr()?;
-    let registry = ExecutorRegistry::new(vec![Box::new(LegacyExecutorAdapter::new(
-        Box::new(InertExecutor),
-        inert_executor_descriptor(),
-    ))])?;
+    let registry = ExecutorRegistry::new(vec![Box::new(InertExecutor::new())])?;
     let mut coordinator = CoordinatorHandle::start_versioned(
         &config.database_path,
         registry,
