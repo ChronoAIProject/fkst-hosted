@@ -123,7 +123,8 @@ fn contract_registry_and_fixture_metadata() {
             "qa.local-lifecycle/v1",
             "qa.local-evidence/v1",
             "qa.local-worker-protocol/v1",
-            "qa.local-run-admission/v1"
+            "qa.local-run-admission/v1",
+            "qa.local-executor/v1"
         ]
     );
     let schema = &schemas["qa.contract-foundation/v1"];
@@ -149,6 +150,10 @@ fn contract_registry_and_fixture_metadata() {
     expected_types.insert("EventCursor".to_owned());
     expected_types.insert("EventSequence".to_owned());
     expected_types.insert("ExecutionOutcome".to_owned());
+    expected_types.insert("ExecutorDescriptor".to_owned());
+    expected_types.insert("ExecutorRequest".to_owned());
+    expected_types.insert("ExecutorResult".to_owned());
+    expected_types.insert("ExecutorSelection".to_owned());
     expected_types.insert("LocalEvidenceObject".to_owned());
     expected_types.insert("LocalEvidenceObjectRef".to_owned());
     expected_types.insert("LocalSanitizedObservation".to_owned());

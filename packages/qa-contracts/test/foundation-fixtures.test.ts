@@ -97,6 +97,7 @@ test("contract registry and fixture metadata", () => {
     "qa.local-evidence/v1",
     "qa.local-worker-protocol/v1",
     "qa.local-run-admission/v1",
+    "qa.local-executor/v1",
   ]);
   assert.deepEqual(Object.keys(registry.types).sort(), [
     ...foundationTypeNames(),
@@ -104,6 +105,10 @@ test("contract registry and fixture metadata", () => {
     "EventCursor",
     "EventSequence",
     "ExecutionOutcome",
+    "ExecutorDescriptor",
+    "ExecutorRequest",
+    "ExecutorResult",
+    "ExecutorSelection",
     "LocalEvidenceObject",
     "LocalEvidenceObjectRef",
     "LocalQARunRequest",
