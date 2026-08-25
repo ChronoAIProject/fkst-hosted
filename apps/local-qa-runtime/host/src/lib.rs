@@ -184,8 +184,7 @@ fn serve(config: StartupConfig, shutdown: Arc<AtomicBool>) -> Result<(), RunErro
     let listener = TcpListener::bind(config.listen)?;
     listener.set_nonblocking(true)?;
     let assigned_address = listener.local_addr()?;
-    let mut coordinator =
-        CoordinatorHandle::start(&config.database_path, Box::new(InertExecutor))?;
+    let mut coordinator = CoordinatorHandle::start(&config.database_path, Box::new(InertExecutor))?;
 
     let mut stdout = io::stdout().lock();
     writeln!(

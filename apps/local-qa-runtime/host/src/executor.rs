@@ -13,6 +13,7 @@ use crate::RunError;
 pub(crate) struct ExecutionOutcome(String);
 
 impl ExecutionOutcome {
+    #[cfg(test)]
     pub(crate) fn passed() -> Result<Self, RunError> {
         Self::validated("passed")
     }
@@ -57,6 +58,7 @@ impl Executor for PassingExecutor {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[expect(dead_code)]
 pub(crate) struct ExecutorDescriptor {
     pub schema_version: String,
     pub executor_id: String,
@@ -66,6 +68,7 @@ pub(crate) struct ExecutorDescriptor {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[expect(dead_code)]
 pub(crate) struct ExecutorSelection {
     pub schema_version: String,
     pub executor_id: String,
@@ -75,6 +78,7 @@ pub(crate) struct ExecutorSelection {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[expect(dead_code)]
 pub(crate) struct ExecutorRequest {
     pub schema_version: String,
     pub run_id: String,
@@ -82,6 +86,7 @@ pub(crate) struct ExecutorRequest {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[expect(dead_code)]
 pub(crate) struct ExecutorResult {
     pub schema_version: String,
     pub run_id: String,
@@ -91,27 +96,39 @@ pub(crate) struct ExecutorResult {
     pub execution_outcome: String,
 }
 
+#[expect(dead_code)]
 pub(crate) trait VersionedExecutor: Send + Sync {
     fn descriptor(&self) -> &ExecutorDescriptor;
     fn execute(&self, request: &ExecutorRequest) -> Result<ExecutorResult, RunError>;
 }
 
+#[expect(dead_code)]
 pub(crate) struct LegacyExecutorAdapter {
     descriptor: ExecutorDescriptor,
     legacy: Mutex<Box<dyn Executor>>,
 }
 
 impl LegacyExecutorAdapter {
+    #[expect(dead_code)]
     pub(crate) fn new(legacy: Box<dyn Executor>, descriptor: ExecutorDescriptor) -> Self {
-        Self { descriptor, legacy: Mutex::new(legacy) }
+        Self {
+            descriptor,
+            legacy: Mutex::new(legacy),
+        }
     }
 }
 
 impl VersionedExecutor for LegacyExecutorAdapter {
-    fn descriptor(&self) -> &ExecutorDescriptor { &self.descriptor }
+    fn descriptor(&self) -> &ExecutorDescriptor {
+        &self.descriptor
+    }
 
     fn execute(&self, request: &ExecutorRequest) -> Result<ExecutorResult, RunError> {
-        let outcome = self.legacy.lock().map_err(|_| RunError::Contract("legacy executor bridge poisoned"))?.execute(&request.run_id)?;
+        let outcome = self
+            .legacy
+            .lock()
+            .map_err(|_| RunError::Contract("legacy executor bridge poisoned"))?
+            .execute(&request.run_id)?;
         Ok(ExecutorResult {
             schema_version: "qa.local-executor/v1".into(),
             run_id: request.run_id.clone(),
@@ -123,11 +140,13 @@ impl VersionedExecutor for LegacyExecutorAdapter {
     }
 }
 
+#[expect(dead_code)]
 pub(crate) struct ExecutorRegistry {
     entries: BTreeMap<(String, String, String, String), Arc<dyn VersionedExecutor>>,
 }
 
 impl ExecutorRegistry {
+    #[expect(dead_code)]
     pub(crate) fn new(executors: Vec<Box<dyn VersionedExecutor>>) -> Result<Self, RunError> {
         let mut entries = BTreeMap::new();
         for executor in executors {
@@ -152,6 +171,7 @@ impl ExecutorRegistry {
         Ok(Self { entries })
     }
 
+    #[expect(dead_code)]
     pub(crate) fn execute(&self, request: &ExecutorRequest) -> Result<ExecutionOutcome, RunError> {
         let request_bytes = serde_json::to_vec(request)
             .map_err(|_| RunError::Contract("executor request serialization failed"))?;
@@ -169,7 +189,10 @@ impl ExecutorRegistry {
             .get(&key)
             .ok_or(RunError::Contract("executor selection not allowlisted"))?;
         let descriptor = executor.descriptor();
-        if !descriptor.capabilities.iter().any(|capability| capability == &selection.required_capability)
+        if !descriptor
+            .capabilities
+            .iter()
+            .any(|capability| capability == &selection.required_capability)
             || descriptor.capability_digest != selection.capability_digest
         {
             return Err(RunError::Contract("executor selection relation failed"));
@@ -197,6 +220,7 @@ pub(crate) struct DeterministicExecutor {
 }
 
 #[cfg(test)]
+#[expect(dead_code)]
 impl DeterministicExecutor {
     pub(crate) fn browser() -> Self {
         Self {
@@ -205,7 +229,8 @@ impl DeterministicExecutor {
                 executor_id: "fake.browser".into(),
                 executor_version: "1.0.0".into(),
                 capabilities: vec!["browser.observe".into()],
-                capability_digest: "sha256:0f447361154fd5aa70f1b6c830547ae0401a3b185174177a123d9dbce1dc41b1".into(),
+                capability_digest:
+                    "sha256:0f447361154fd5aa70f1b6c830547ae0401a3b185174177a123d9dbce1dc41b1".into(),
             },
             outcome: "blocked",
         }
@@ -218,7 +243,8 @@ impl DeterministicExecutor {
                 executor_id: "fake.api".into(),
                 executor_version: "1.0.0".into(),
                 capabilities: vec!["api.request".into()],
-                capability_digest: "sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335".into(),
+                capability_digest:
+                    "sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335".into(),
             },
             outcome: "passed",
         }
@@ -227,7 +253,9 @@ impl DeterministicExecutor {
 
 #[cfg(test)]
 impl VersionedExecutor for DeterministicExecutor {
-    fn descriptor(&self) -> &ExecutorDescriptor { &self.descriptor }
+    fn descriptor(&self) -> &ExecutorDescriptor {
+        &self.descriptor
+    }
 
     fn execute(&self, request: &ExecutorRequest) -> Result<ExecutorResult, RunError> {
         Ok(ExecutorResult {
