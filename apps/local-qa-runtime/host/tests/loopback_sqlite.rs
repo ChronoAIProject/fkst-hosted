@@ -11,8 +11,8 @@ use rusqlite::{Connection, OptionalExtension};
 
 const CREATED_BODY: &[u8] =
     b"{\"run_id\":\"run-001\",\"state\":\"accepted\",\"event_sequence\":1}\n";
-const TERMINAL_BODY: &[u8] = b"{\"run_id\":\"run-001\",\"state\":\"terminal\",\"execution_outcome\":\"passed\",\"latest_event_sequence\":9}\n";
-const EVENTS_BODY: &[u8] = b"{\"run_id\":\"run-001\",\"after\":0,\"events\":[{\"sequence\":1,\"event_type\":\"run.accepted\",\"event\":{\"run_id\":\"run-001\",\"state\":\"accepted\"}},{\"sequence\":2,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"preparing\"}},{\"sequence\":3,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"ready\"}},{\"sequence\":4,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"executing\"}},{\"sequence\":5,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"staging_evidence\"}},{\"sequence\":6,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"cleaning_up_execution\"}},{\"sequence\":7,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"uploading\"}},{\"sequence\":8,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"finalizing_local\"}},{\"sequence\":9,\"event_type\":\"run.completed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"terminal\",\"execution_outcome\":\"passed\"}}],\"next_after\":9}\n";
+const TERMINAL_BODY: &[u8] = b"{\"run_id\":\"run-001\",\"state\":\"terminal\",\"execution_outcome\":\"blocked\",\"latest_event_sequence\":9}\n";
+const EVENTS_BODY: &[u8] = b"{\"run_id\":\"run-001\",\"after\":0,\"events\":[{\"sequence\":1,\"event_type\":\"run.accepted\",\"event\":{\"run_id\":\"run-001\",\"state\":\"accepted\"}},{\"sequence\":2,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"preparing\"}},{\"sequence\":3,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"ready\"}},{\"sequence\":4,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"executing\"}},{\"sequence\":5,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"staging_evidence\"}},{\"sequence\":6,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"cleaning_up_execution\"}},{\"sequence\":7,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"uploading\"}},{\"sequence\":8,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"finalizing_local\"}},{\"sequence\":9,\"event_type\":\"run.completed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"terminal\",\"execution_outcome\":\"blocked\"}}],\"next_after\":9}\n";
 const CONFLICT_BODY: &[u8] = b"{\"type\":\"about:blank\",\"title\":\"Conflict\",\"status\":409,\"detail\":\"run_id is already accepted under a different Idempotency-Key\"}\n";
 const REQUEST_DIGEST: &str = "c6da30d2cbe81af624c4e364e21cdad9dc2510d2e2ff9a02bb5bd6c325a25428";
 const HEALTH_BODY: &[u8] =
@@ -1035,7 +1035,7 @@ fn assert_exact_journal(database_path: &Path, accepted_key: &str) {
         (
             "run-001".to_owned(),
             "terminal".to_owned(),
-            Some("passed".to_owned()),
+            Some("blocked".to_owned()),
         )
     );
     assert_eq!(
@@ -1055,7 +1055,7 @@ fn assert_exact_journal(database_path: &Path, accepted_key: &str) {
         (
             "run-001".to_owned(),
             "completed".to_owned(),
-            Some("passed".to_owned()),
+            Some("blocked".to_owned()),
         )
     );
     let mut statement = connection
@@ -1090,7 +1090,7 @@ fn assert_exact_journal(database_path: &Path, accepted_key: &str) {
                 |row| row.get::<_, String>(0)
             )
             .expect("completed Event must be readable"),
-        "{\"run_id\":\"run-001\",\"state\":\"terminal\",\"execution_outcome\":\"passed\"}"
+        "{\"run_id\":\"run-001\",\"state\":\"terminal\",\"execution_outcome\":\"blocked\"}"
     );
     assert_eq!(
         connection

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:chronoai:fkst:qa-contracts:qa.local-executor:v1",
+  "$defs": {
+    "ExecutorDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "executor_id", "executor_version", "capabilities", "capability_digest"],
+      "properties": {
+        "schema_version": { "const": "qa.local-executor/v1" },
+        "executor_id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$", "maxLength": 64 },
+        "executor_version": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$", "maxLength": 32 },
+        "capabilities": {
+          "type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$", "maxLength": 64 }
+        },
+        "capability_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    },
+    "ExecutorSelection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "executor_id", "executor_version", "capability_digest", "required_capability"],
+      "properties": {
+        "schema_version": { "const": "qa.local-executor/v1" },
+        "executor_id": { "$ref": "#/$defs/ExecutorDescriptor/properties/executor_id" },
+        "executor_version": { "$ref": "#/$defs/ExecutorDescriptor/properties/executor_version" },
+        "capability_digest": { "$ref": "#/$defs/ExecutorDescriptor/properties/capability_digest" },
+        "required_capability": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$", "maxLength": 64 }
+      }
+    },
+    "ExecutorRequest": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "run_id", "selection"],
+      "properties": {
+        "schema_version": { "const": "qa.local-executor/v1" },
+        "run_id": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/UUID" },
+        "selection": { "$ref": "#/$defs/ExecutorSelection" }
+      }
+    },
+    "ExecutorResult": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "run_id", "executor_id", "executor_version", "capability_digest", "execution_outcome"],
+      "properties": {
+        "schema_version": { "const": "qa.local-executor/v1" },
+        "run_id": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/UUID" },
+        "executor_id": { "$ref": "#/$defs/ExecutorDescriptor/properties/executor_id" },
+        "executor_version": { "$ref": "#/$defs/ExecutorDescriptor/properties/executor_version" },
+        "capability_digest": { "$ref": "#/$defs/ExecutorDescriptor/properties/capability_digest" },
+        "execution_outcome": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.local-lifecycle:v1#/$defs/ExecutionOutcome" }
+      }
+    }
+  }
+}

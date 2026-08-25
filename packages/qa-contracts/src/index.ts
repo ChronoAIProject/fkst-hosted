@@ -53,6 +53,7 @@ const LOCAL_RUN_ADMISSION_TYPE_NAMES = Object.freeze([
   LOCAL_QA_RUN_REQUEST_TYPE_NAME,
   RUN_ACCEPTANCE_TYPE_NAME,
 ] as const);
+const LOCAL_EXECUTOR_TYPE_NAMES = Object.freeze(["ExecutorDescriptor", "ExecutorSelection", "ExecutorRequest", "ExecutorResult"] as const);
 const FOUNDATION_TYPE_NAMES = Object.freeze([
   "ContractMeta",
   "HostScopedMeta",
@@ -145,6 +146,37 @@ export interface RunAcceptance {
   readonly accepted_at: string;
 }
 
+export interface ExecutorDescriptor {
+  readonly schema_version: "qa.local-executor/v1";
+  readonly executor_id: string;
+  readonly executor_version: string;
+  readonly capabilities: readonly string[];
+  readonly capability_digest: string;
+}
+
+export interface ExecutorSelection {
+  readonly schema_version: "qa.local-executor/v1";
+  readonly executor_id: string;
+  readonly executor_version: string;
+  readonly capability_digest: string;
+  readonly required_capability: string;
+}
+
+export interface ExecutorRequest {
+  readonly schema_version: "qa.local-executor/v1";
+  readonly run_id: string;
+  readonly selection: ExecutorSelection;
+}
+
+export interface ExecutorResult {
+  readonly schema_version: "qa.local-executor/v1";
+  readonly run_id: string;
+  readonly executor_id: string;
+  readonly executor_version: string;
+  readonly capability_digest: string;
+  readonly execution_outcome: string;
+}
+
 const PACKAGE_ROOT = realpathSync(resolvePackageRoot());
 
 interface RegistrySchemaEntry {
@@ -203,6 +235,9 @@ for (const type of LOCAL_WORKER_TYPE_NAMES) {
   VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
 }
 for (const type of LOCAL_RUN_ADMISSION_TYPE_NAMES) {
+  VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
+}
+for (const type of LOCAL_EXECUTOR_TYPE_NAMES) {
   VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
 }
 
@@ -351,6 +386,23 @@ export function validateLocalQARunRequest(raw: Uint8Array): ValidatedValue {
 
 export function validateRunAcceptance(raw: Uint8Array): ValidatedValue {
   return validateRunAcceptanceValue(admitJson(raw));
+}
+
+export function validateExecutorDescriptor(raw: Uint8Array): ValidatedValue {
+  const validated = validateRegisteredValue(admitJson(raw), "ExecutorDescriptor");
+  validateExecutorDescriptorRules(validated.value() as ExecutorDescriptor);
+  return validated;
+}
+export function validateExecutorSelection(raw: Uint8Array): ValidatedValue {
+  return validateRegisteredValue(admitJson(raw), "ExecutorSelection");
+}
+
+export function validateExecutorRequest(raw: Uint8Array): ValidatedValue {
+  return validateRegisteredValue(admitJson(raw), "ExecutorRequest");
+}
+
+export function validateExecutorResult(raw: Uint8Array): ValidatedValue {
+  return validateRegisteredValue(admitJson(raw), "ExecutorResult");
 }
 
 export function buildInitialRunAcceptance(
@@ -805,6 +857,31 @@ function validateWorkerTimestamp(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
   const millis = Date.parse(value);
   return Number.isFinite(millis) && new Date(millis).toISOString() === value;
+}
+
+function validateExecutorDescriptorRules(value: ExecutorDescriptor): void {
+  for (let index = 1; index < value.capabilities.length; index += 1) {
+    if (value.capabilities[index - 1]! >= value.capabilities[index]!) {
+      throw contractError(
+        "contract.invalid_relation",
+        "capabilities_not_sorted",
+        "/capabilities",
+      );
+    }
+  }
+  const projection = {
+    schema_version: value.schema_version,
+    executor_id: value.executor_id,
+    executor_version: value.executor_version,
+    capabilities: value.capabilities,
+  };
+  if (value.capability_digest !== sha256Digest(canonicalizeUnknown(projection))) {
+    throw contractError(
+      "contract.invalid_relation",
+      "capability_digest_mismatch",
+      "/capability_digest",
+    );
+  }
 }
 
 function validateLocalSanitizedObservationRules(value: LocalSanitizedObservation): void {
