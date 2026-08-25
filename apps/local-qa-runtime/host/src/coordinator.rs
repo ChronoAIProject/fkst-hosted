@@ -105,9 +105,7 @@ fn run_coordinator(
 
     loop {
         match receiver.recv() {
-            Ok(CoordinatorMessage::Wake) => {
-                process_available(&mut journal, &registry, &selection)?
-            }
+            Ok(CoordinatorMessage::Wake) => process_available(&mut journal, &registry, &selection)?,
             Ok(CoordinatorMessage::Stop) | Err(_) => return Ok(()),
         }
     }
@@ -243,8 +241,7 @@ mod tests {
             executor_version: "1.0.0".to_owned(),
             capabilities: vec!["api.request".to_owned()],
             capability_digest:
-                "sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335"
-                    .to_owned(),
+                "sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335".to_owned(),
         }
     }
 
@@ -254,8 +251,7 @@ mod tests {
             executor_id: "fake.api".to_owned(),
             executor_version: "1.0.0".to_owned(),
             capability_digest:
-                "sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335"
-                    .to_owned(),
+                "sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335".to_owned(),
             required_capability: "api.request".to_owned(),
         }
     }
@@ -273,8 +269,8 @@ mod tests {
             entered: entered_sender,
             release: Mutex::new(release_receiver),
         };
-        let registry = ExecutorRegistry::new(vec![Box::new(executor)])
-            .expect("registry must be valid");
+        let registry =
+            ExecutorRegistry::new(vec![Box::new(executor)]).expect("registry must be valid");
         let mut coordinator =
             CoordinatorHandle::start_versioned(&database_path, registry, api_selection())
                 .expect("coordinator starts");

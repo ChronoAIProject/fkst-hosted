@@ -314,7 +314,11 @@ fn submit_accepts_exact_maximum_total_head_bytes() {
         "application/json",
         CREATED_BODY,
     );
-    wait_for_exact_get(host.port, "/v1/runs/00000000-0000-0000-0000-000000000001", TERMINAL_BODY);
+    wait_for_exact_get(
+        host.port,
+        "/v1/runs/00000000-0000-0000-0000-000000000001",
+        TERMINAL_BODY,
+    );
     host.stop();
     assert_exact_journal(&database_path, "idem-001");
 }
@@ -462,32 +466,55 @@ fn exact_submission_completes_replays_and_restarts_without_duplicate_work() {
 
     let first_host = HostProcess::start(&database_path);
     assert_response(
-        submit(first_host.port, "00000000-0000-0000-0000-000000000001", "idem-001"),
+        submit(
+            first_host.port,
+            "00000000-0000-0000-0000-000000000001",
+            "idem-001",
+        ),
         "HTTP/1.1 201 Created",
         "application/json",
         CREATED_BODY,
     );
     assert_response(
-        submit(first_host.port, "00000000-0000-0000-0000-000000000001", "idem-001"),
+        submit(
+            first_host.port,
+            "00000000-0000-0000-0000-000000000001",
+            "idem-001",
+        ),
         "HTTP/1.1 200 OK",
         "application/json",
         CREATED_BODY,
     );
     assert_response(
-        submit(first_host.port, "00000000-0000-0000-0000-000000000001", "idem-002"),
+        submit(
+            first_host.port,
+            "00000000-0000-0000-0000-000000000001",
+            "idem-002",
+        ),
         "HTTP/1.1 409 Conflict",
         "application/problem+json",
         CONFLICT_BODY,
     );
-    wait_for_exact_get(first_host.port, "/v1/runs/00000000-0000-0000-0000-000000000001", TERMINAL_BODY);
+    wait_for_exact_get(
+        first_host.port,
+        "/v1/runs/00000000-0000-0000-0000-000000000001",
+        TERMINAL_BODY,
+    );
     assert_response(
-        get(first_host.port, "/v1/runs/00000000-0000-0000-0000-000000000001/events?after=0&limit=100"),
+        get(
+            first_host.port,
+            "/v1/runs/00000000-0000-0000-0000-000000000001/events?after=0&limit=100",
+        ),
         "HTTP/1.1 200 OK",
         "application/json",
         EVENTS_BODY,
     );
     assert_response(
-        submit(first_host.port, "00000000-0000-0000-0000-000000000001", "idem-001"),
+        submit(
+            first_host.port,
+            "00000000-0000-0000-0000-000000000001",
+            "idem-001",
+        ),
         "HTTP/1.1 200 OK",
         "application/json",
         CREATED_BODY,
@@ -497,13 +524,20 @@ fn exact_submission_completes_replays_and_restarts_without_duplicate_work() {
 
     let restarted_host = HostProcess::start(&database_path);
     assert_response(
-        submit(restarted_host.port, "00000000-0000-0000-0000-000000000001", "idem-001"),
+        submit(
+            restarted_host.port,
+            "00000000-0000-0000-0000-000000000001",
+            "idem-001",
+        ),
         "HTTP/1.1 200 OK",
         "application/json",
         CREATED_BODY,
     );
     assert_response(
-        get(restarted_host.port, "/v1/runs/00000000-0000-0000-0000-000000000001"),
+        get(
+            restarted_host.port,
+            "/v1/runs/00000000-0000-0000-0000-000000000001",
+        ),
         "HTTP/1.1 200 OK",
         "application/json",
         TERMINAL_BODY,
@@ -533,7 +567,10 @@ fn concurrent_different_keys_create_exactly_one_acceptance() {
         let port = host.port;
         threads.push(thread::spawn(move || {
             barrier.wait();
-            (key, submit(port, "00000000-0000-0000-0000-000000000001", key))
+            (
+                key,
+                submit(port, "00000000-0000-0000-0000-000000000001", key),
+            )
         }));
     }
     barrier.wait();
@@ -548,7 +585,11 @@ fn concurrent_different_keys_create_exactly_one_acceptance() {
     assert_eq!(results[1].1.status_line, "HTTP/1.1 409 Conflict");
     assert_eq!(results[1].1.body, CONFLICT_BODY);
     let accepted_key = results[0].0;
-    wait_for_exact_get(host.port, "/v1/runs/00000000-0000-0000-0000-000000000001", TERMINAL_BODY);
+    wait_for_exact_get(
+        host.port,
+        "/v1/runs/00000000-0000-0000-0000-000000000001",
+        TERMINAL_BODY,
+    );
     host.stop();
 
     assert_exact_journal(&database_path, accepted_key);
@@ -567,6 +608,15 @@ fn reads_cancellation_and_restart_match_the_durable_contract() {
         HEALTH_BODY,
     );
     insert_unclaimed_run(&database_path);
+    let executor_run_id_before_restart = Connection::open(&database_path)
+        .expect("journal must open")
+        .query_row(
+            "SELECT executor_run_id FROM runs WHERE run_id = '00000000-0000-0000-0000-000000000001'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .expect("executor run ID must be present");
+    fkst_qa_contracts::validate_scalar("UUID", &executor_run_id_before_restart).unwrap();
     assert_response(
         get(host.port, "/v1/runs/00000000-0000-0000-0000-000000000001"),
         "HTTP/1.1 200 OK",
@@ -607,7 +657,11 @@ fn reads_cancellation_and_restart_match_the_durable_contract() {
 
     let restarted = HostProcess::start(&database_path);
     assert_response(
-        submit(restarted.port, "00000000-0000-0000-0000-000000000001", "idem-001"),
+        submit(
+            restarted.port,
+            "00000000-0000-0000-0000-000000000001",
+            "idem-001",
+        ),
         "HTTP/1.1 200 OK",
         "application/json",
         CREATED_BODY,
@@ -631,7 +685,37 @@ fn reads_cancellation_and_restart_match_the_durable_contract() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        4
+        5
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT executor_run_id FROM runs WHERE run_id = '00000000-0000-0000-0000-000000000001'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+        executor_run_id_before_restart
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                r#"SELECT "notnull" FROM pragma_table_info('runs') WHERE name = 'executor_run_id'"#,
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                r#"SELECT COUNT(*) FROM pragma_index_list('runs') WHERE name = 'runs_executor_run_id_unique' AND "unique" = 1"#,
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        1
     );
     assert_eq!(
         connection
@@ -662,7 +746,11 @@ fn concurrent_cancellation_has_one_winner() {
         let port = host.port;
         threads.push(thread::spawn(move || {
             barrier.wait();
-            cancel(port, "00000000-0000-0000-0000-000000000001", &format!("cancel-{index}"))
+            cancel(
+                port,
+                "00000000-0000-0000-0000-000000000001",
+                &format!("cancel-{index}"),
+            )
         }));
     }
     barrier.wait();
@@ -717,10 +805,19 @@ fn terminal_and_invalid_requests_are_mutation_free() {
         INVALID_SUBMIT_BODY,
     );
     assert_eq!(
-        submit(host.port, "00000000-0000-0000-0000-000000000001", "idem-001").status_line,
+        submit(
+            host.port,
+            "00000000-0000-0000-0000-000000000001",
+            "idem-001"
+        )
+        .status_line,
         "HTTP/1.1 201 Created"
     );
-    wait_for_exact_get(host.port, "/v1/runs/00000000-0000-0000-0000-000000000001", TERMINAL_BODY);
+    wait_for_exact_get(
+        host.port,
+        "/v1/runs/00000000-0000-0000-0000-000000000001",
+        TERMINAL_BODY,
+    );
     assert_response(
         cancel(host.port, "00000000-0000-0000-0000-000000000001", "cancel-terminal"),
         "HTTP/1.1 200 OK",
@@ -790,7 +887,13 @@ fn terminal_and_invalid_requests_are_mutation_free() {
         INVALID_CANCEL_BODY,
     );
     assert_response(
-        request(host.port, "DELETE", "/v1/runs/00000000-0000-0000-0000-000000000001", &[], b""),
+        request(
+            host.port,
+            "DELETE",
+            "/v1/runs/00000000-0000-0000-0000-000000000001",
+            &[],
+            b"",
+        ),
         "HTTP/1.1 405 Method Not Allowed",
         "application/problem+json",
         METHOD_NOT_ALLOWED_BODY,
