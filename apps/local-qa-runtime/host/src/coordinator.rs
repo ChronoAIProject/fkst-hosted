@@ -2,10 +2,7 @@ use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 
-use crate::executor::{
-    legacy_executor_descriptor, legacy_executor_selection, Executor, ExecutorRegistry,
-    ExecutorRequest, ExecutorSelection, LegacyExecutorAdapter,
-};
+use crate::executor::{ExecutorRegistry, ExecutorRequest, ExecutorSelection};
 use crate::journal::Journal;
 use crate::RunError;
 
@@ -20,17 +17,6 @@ pub(crate) struct CoordinatorHandle {
 }
 
 impl CoordinatorHandle {
-    pub(crate) fn start(
-        database_path: &Path,
-        executor: Box<dyn Executor>,
-    ) -> Result<Self, RunError> {
-        let registry = ExecutorRegistry::new(vec![Box::new(LegacyExecutorAdapter::new(
-            executor,
-            legacy_executor_descriptor(),
-        ))])?;
-        Self::start_versioned(database_path, registry, legacy_executor_selection())
-    }
-
     pub(crate) fn start_versioned(
         database_path: &Path,
         registry: ExecutorRegistry,
@@ -168,35 +154,56 @@ mod tests {
 
     use super::CoordinatorHandle;
     use crate::executor::{
-        ExecutionOutcome, Executor, ExecutorDescriptor, ExecutorRegistry, ExecutorRequest,
+        DeterministicExecutor, ExecutorDescriptor, ExecutorRegistry, ExecutorRequest,
         ExecutorResult, ExecutorSelection, VersionedExecutor,
     };
     use crate::journal::{Admission, Journal};
     use crate::{RunError, CANONICAL_REQUEST_DIGEST};
 
     struct BlockingExecutor {
+        descriptor: ExecutorDescriptor,
         calls: Arc<AtomicUsize>,
         entered: mpsc::Sender<String>,
-        release: mpsc::Receiver<()>,
+        release: Mutex<mpsc::Receiver<()>>,
     }
 
-    impl Executor for BlockingExecutor {
-        fn execute(&mut self, run_id: &str) -> Result<ExecutionOutcome, RunError> {
+    impl VersionedExecutor for BlockingExecutor {
+        fn descriptor(&self) -> &ExecutorDescriptor {
+            &self.descriptor
+        }
+
+        fn execute(&self, request: &ExecutorRequest) -> Result<ExecutorResult, RunError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             self.entered
-                .send(run_id.to_owned())
+                .send(request.run_id.clone())
                 .map_err(|_| RunError::Contract("blocking executor entry signal failed"))?;
             self.release
+                .lock()
+                .map_err(|_| RunError::Contract("blocking executor release lock poisoned"))?
                 .recv()
                 .map_err(|_| RunError::Contract("blocking executor release signal failed"))?;
-            ExecutionOutcome::passed()
+            Ok(ExecutorResult {
+                schema_version: "qa.local-executor/v1".to_owned(),
+                run_id: request.run_id.clone(),
+                executor_id: self.descriptor.executor_id.clone(),
+                executor_version: self.descriptor.executor_version.clone(),
+                capability_digest: self.descriptor.capability_digest.clone(),
+                execution_outcome: "passed".to_owned(),
+            })
         }
     }
 
     struct RecordingVersionedExecutor {
         descriptor: ExecutorDescriptor,
         requests: Mutex<mpsc::Sender<ExecutorRequest>>,
-        mismatched_result: bool,
+        result_behavior: ResultBehavior,
+    }
+
+    #[derive(Clone, Copy)]
+    enum ResultBehavior {
+        Valid,
+        Malformed,
+        RelationMismatch,
     }
 
     impl VersionedExecutor for RecordingVersionedExecutor {
@@ -211,8 +218,12 @@ mod tests {
                 .send(request.clone())
                 .map_err(|_| RunError::Contract("recording executor request signal failed"))?;
             Ok(ExecutorResult {
-                schema_version: "qa.local-executor/v1".to_owned(),
-                run_id: if self.mismatched_result {
+                schema_version: if matches!(self.result_behavior, ResultBehavior::Malformed) {
+                    "qa.local-executor/v2".to_owned()
+                } else {
+                    "qa.local-executor/v1".to_owned()
+                },
+                run_id: if matches!(self.result_behavior, ResultBehavior::RelationMismatch) {
                     "00000000-0000-0000-0000-000000000099".to_owned()
                 } else {
                     request.run_id.clone()
@@ -257,12 +268,16 @@ mod tests {
         let (entered_sender, entered_receiver) = mpsc::channel();
         let (release_sender, release_receiver) = mpsc::channel();
         let executor = BlockingExecutor {
+            descriptor: api_descriptor(),
             calls: Arc::clone(&calls),
             entered: entered_sender,
-            release: release_receiver,
+            release: Mutex::new(release_receiver),
         };
-        let mut coordinator = CoordinatorHandle::start(&database_path, Box::new(executor))
-            .expect("coordinator starts");
+        let registry = ExecutorRegistry::new(vec![Box::new(executor)])
+            .expect("registry must be valid");
+        let mut coordinator =
+            CoordinatorHandle::start_versioned(&database_path, registry, api_selection())
+                .expect("coordinator starts");
         let mut journal = Journal::open(&database_path).expect("HTTP journal opens");
         assert!(matches!(
             journal.admit("run-001", "idem-001", CANONICAL_REQUEST_DIGEST),
@@ -355,7 +370,7 @@ mod tests {
         let registry = ExecutorRegistry::new(vec![Box::new(RecordingVersionedExecutor {
             descriptor: api_descriptor(),
             requests: Mutex::new(request_sender),
-            mismatched_result: false,
+            result_behavior: ResultBehavior::Valid,
         })])
         .expect("registry must be valid");
         let selection = api_selection();
@@ -398,7 +413,7 @@ mod tests {
         let registry = ExecutorRegistry::new(vec![Box::new(RecordingVersionedExecutor {
             descriptor: api_descriptor(),
             requests: Mutex::new(request_sender),
-            mismatched_result: false,
+            result_behavior: ResultBehavior::Valid,
         })])
         .expect("registry must be valid");
         let mut selection = api_selection();
@@ -432,7 +447,46 @@ mod tests {
         let registry = ExecutorRegistry::new(vec![Box::new(RecordingVersionedExecutor {
             descriptor: api_descriptor(),
             requests: Mutex::new(request_sender),
-            mismatched_result: true,
+            result_behavior: ResultBehavior::RelationMismatch,
+        })])
+        .expect("registry must be valid");
+        assert!(
+            CoordinatorHandle::start_versioned(&database_path, registry, api_selection()).is_err()
+        );
+        assert_eq!(
+            request_receiver
+                .recv_timeout(Duration::from_secs(2))
+                .expect("executor must be invoked once")
+                .run_id,
+            run_id
+        );
+        let journal = Journal::open(&database_path).expect("journal reopens");
+        let snapshot = journal
+            .snapshot(run_id)
+            .expect("snapshot reads")
+            .expect("run exists");
+        assert_eq!(snapshot.state, "executing");
+        assert_eq!(snapshot.execution_outcome, None);
+        assert_eq!(snapshot.latest_event_sequence, 4);
+        fs::remove_dir_all(directory).expect("temporary directory must be removed");
+    }
+
+    #[test]
+    fn malformed_result_never_completes_the_journal() {
+        let directory = temporary_directory("malformed-result");
+        let database_path = directory.join("journal.sqlite");
+        let run_id = "00000000-0000-0000-0000-000000000004";
+        let mut journal = Journal::open(&database_path).expect("journal opens");
+        assert!(matches!(
+            journal.admit(run_id, "idem-001", CANONICAL_REQUEST_DIGEST),
+            Ok(Admission::Created(_))
+        ));
+        drop(journal);
+        let (request_sender, request_receiver) = mpsc::channel();
+        let registry = ExecutorRegistry::new(vec![Box::new(RecordingVersionedExecutor {
+            descriptor: api_descriptor(),
+            requests: Mutex::new(request_sender),
+            result_behavior: ResultBehavior::Malformed,
         })])
         .expect("registry must be valid");
         assert!(
@@ -460,8 +514,10 @@ mod tests {
     fn idle_shutdown_joins_without_hanging() {
         let directory = temporary_directory("coordinator-shutdown");
         let database_path = directory.join("journal.sqlite");
+        let registry = ExecutorRegistry::new(vec![Box::new(DeterministicExecutor::api())])
+            .expect("registry must be valid");
         let mut coordinator =
-            CoordinatorHandle::start(&database_path, Box::new(crate::executor::PassingExecutor))
+            CoordinatorHandle::start_versioned(&database_path, registry, api_selection())
                 .expect("coordinator starts");
         let started = Instant::now();
         coordinator.shutdown().expect("coordinator joins");

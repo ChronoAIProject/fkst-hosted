@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use fkst_qa_contracts::{
     validate_execution_outcome, validate_executor_descriptor, validate_executor_request,
@@ -13,15 +13,6 @@ use crate::RunError;
 pub(crate) struct ExecutionOutcome(String);
 
 impl ExecutionOutcome {
-    #[cfg(test)]
-    pub(crate) fn passed() -> Result<Self, RunError> {
-        Self::validated("passed")
-    }
-
-    pub(crate) fn blocked() -> Result<Self, RunError> {
-        Self::validated("blocked")
-    }
-
     pub(crate) fn validated(value: &str) -> Result<Self, RunError> {
         let encoded = serde_json::to_vec(value)
             .map_err(|_| RunError::Contract("ExecutionOutcome serialization failed"))?;
@@ -32,28 +23,6 @@ impl ExecutionOutcome {
 
     pub(crate) fn as_str(&self) -> &str {
         &self.0
-    }
-}
-
-pub(crate) trait Executor: Send + 'static {
-    fn execute(&mut self, run_id: &str) -> Result<ExecutionOutcome, RunError>;
-}
-
-pub(crate) struct InertExecutor;
-
-impl Executor for InertExecutor {
-    fn execute(&mut self, _run_id: &str) -> Result<ExecutionOutcome, RunError> {
-        ExecutionOutcome::blocked()
-    }
-}
-
-#[cfg(test)]
-pub(crate) struct PassingExecutor;
-
-#[cfg(test)]
-impl Executor for PassingExecutor {
-    fn execute(&mut self, _run_id: &str) -> Result<ExecutionOutcome, RunError> {
-        ExecutionOutcome::passed()
     }
 }
 
@@ -97,41 +66,21 @@ pub(crate) trait VersionedExecutor: Send + Sync {
     fn execute(&self, request: &ExecutorRequest) -> Result<ExecutorResult, RunError>;
 }
 
-pub(crate) struct LegacyExecutorAdapter {
+pub(crate) struct InertExecutor {
     descriptor: ExecutorDescriptor,
-    legacy: Mutex<Box<dyn Executor>>,
 }
 
-impl LegacyExecutorAdapter {
-    pub(crate) fn new(legacy: Box<dyn Executor>, descriptor: ExecutorDescriptor) -> Self {
+impl InertExecutor {
+    pub(crate) fn new() -> Self {
         Self {
-            descriptor,
-            legacy: Mutex::new(legacy),
+            descriptor: inert_executor_descriptor(),
         }
     }
 }
 
-pub(crate) fn legacy_executor_descriptor() -> ExecutorDescriptor {
-    ExecutorDescriptor {
-        schema_version: "qa.local-executor/v1".to_owned(),
-        executor_id: "legacy.executor".to_owned(),
-        executor_version: "1.0.0".to_owned(),
-        capabilities: vec!["legacy.execute".to_owned()],
-        capability_digest:
-            "sha256:e4760210c40c509504bf4cbf529835fc895e1b7d8e6cc3313fa673658e56a787"
-                .to_owned(),
-    }
-}
-
-pub(crate) fn legacy_executor_selection() -> ExecutorSelection {
-    ExecutorSelection {
-        schema_version: "qa.local-executor/v1".to_owned(),
-        executor_id: "legacy.executor".to_owned(),
-        executor_version: "1.0.0".to_owned(),
-        capability_digest:
-            "sha256:e4760210c40c509504bf4cbf529835fc895e1b7d8e6cc3313fa673658e56a787"
-                .to_owned(),
-        required_capability: "legacy.execute".to_owned(),
+impl Default for InertExecutor {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -159,24 +108,19 @@ pub(crate) fn inert_executor_selection() -> ExecutorSelection {
     }
 }
 
-impl VersionedExecutor for LegacyExecutorAdapter {
+impl VersionedExecutor for InertExecutor {
     fn descriptor(&self) -> &ExecutorDescriptor {
         &self.descriptor
     }
 
     fn execute(&self, request: &ExecutorRequest) -> Result<ExecutorResult, RunError> {
-        let outcome = self
-            .legacy
-            .lock()
-            .map_err(|_| RunError::Contract("legacy executor bridge poisoned"))?
-            .execute(&request.run_id)?;
         Ok(ExecutorResult {
             schema_version: "qa.local-executor/v1".into(),
             run_id: request.run_id.clone(),
             executor_id: self.descriptor.executor_id.clone(),
             executor_version: self.descriptor.executor_version.clone(),
             capability_digest: self.descriptor.capability_digest.clone(),
-            execution_outcome: outcome.as_str().into(),
+            execution_outcome: "blocked".into(),
         })
     }
 }
@@ -309,9 +253,9 @@ impl VersionedExecutor for DeterministicExecutor {
 #[cfg(test)]
 mod tests {
     use super::{
-        inert_executor_descriptor, inert_executor_selection, legacy_executor_descriptor,
-        legacy_executor_selection, DeterministicExecutor, ExecutorDescriptor, ExecutorRegistry,
-        ExecutorRequest, ExecutorResult, ExecutorSelection, VersionedExecutor,
+        inert_executor_descriptor, inert_executor_selection, DeterministicExecutor,
+        ExecutorDescriptor, ExecutorRegistry, ExecutorRequest, ExecutorResult, ExecutorSelection,
+        InertExecutor, VersionedExecutor,
     };
     use crate::RunError;
 
@@ -373,34 +317,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_compatibility_tuple_is_exact() {
-        assert_eq!(
-            legacy_executor_descriptor(),
-            ExecutorDescriptor {
-                schema_version: "qa.local-executor/v1".to_owned(),
-                executor_id: "legacy.executor".to_owned(),
-                executor_version: "1.0.0".to_owned(),
-                capabilities: vec!["legacy.execute".to_owned()],
-                capability_digest:
-                    "sha256:e4760210c40c509504bf4cbf529835fc895e1b7d8e6cc3313fa673658e56a787"
-                        .to_owned(),
-            }
-        );
-        assert_eq!(
-            legacy_executor_selection(),
-            ExecutorSelection {
-                schema_version: "qa.local-executor/v1".to_owned(),
-                executor_id: "legacy.executor".to_owned(),
-                executor_version: "1.0.0".to_owned(),
-                capability_digest:
-                    "sha256:e4760210c40c509504bf4cbf529835fc895e1b7d8e6cc3313fa673658e56a787"
-                        .to_owned(),
-                required_capability: "legacy.execute".to_owned(),
-            }
-        );
-    }
-
-    #[test]
     fn production_inert_tuple_is_exact() {
         assert_eq!(
             inert_executor_descriptor(),
@@ -430,5 +346,65 @@ mod tests {
             DeterministicExecutor::browser().descriptor().executor_id,
             "fake.browser"
         );
+    }
+
+    #[test]
+    fn production_inert_executor_returns_exact_blocked_result() {
+        let executor = InertExecutor::new();
+        let request = ExecutorRequest {
+            schema_version: "qa.local-executor/v1".to_owned(),
+            run_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            selection: inert_executor_selection(),
+        };
+
+        assert_eq!(executor.descriptor(), &inert_executor_descriptor());
+        assert_eq!(
+            executor.execute(&request).expect("inert execution succeeds"),
+            ExecutorResult {
+                schema_version: "qa.local-executor/v1".to_owned(),
+                run_id: request.run_id,
+                executor_id: "local.inert".to_owned(),
+                executor_version: "1.0.0".to_owned(),
+                capability_digest:
+                    "sha256:2778ff138818dfa4d505611593b746df69ffb092dee08e2f708b5df3ca8bf4e8"
+                        .to_owned(),
+                execution_outcome: "blocked".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn removed_execution_contract_is_absent_from_host_sources() {
+        let sources = [
+            include_str!("executor.rs"),
+            include_str!("coordinator.rs"),
+            include_str!("lib.rs"),
+        ]
+        .concat();
+        let removed = [
+            ["trait ", "Executor"].concat(),
+            ["impl ", "Executor", " for"].concat(),
+            ["Legacy", "ExecutorAdapter"].concat(),
+            ["Box<dyn ", "Executor>"].concat(),
+            ["legacy_executor_", "descriptor"].concat(),
+            ["legacy_executor_", "selection"].concat(),
+            ["legacy", ".executor"].concat(),
+            ["legacy", ".execute"].concat(),
+            [
+                "sha256:e4760210c40c509504bf4cbf529835fc",
+                "895e1b7d8e6cc3313fa673658e56a787",
+            ]
+            .concat(),
+            ["Passing", "Executor"].concat(),
+            ["CoordinatorHandle::", "start("].concat(),
+        ];
+
+        for removed_value in removed {
+            assert!(
+                !sources.contains(removed_value.as_str()),
+                "removed execution contract artifact remains"
+            );
+        }
+        assert!(include_str!("lib.rs").contains("Box::new(InertExecutor::new())"));
     }
 }
