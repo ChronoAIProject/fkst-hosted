@@ -131,17 +131,30 @@ grep -Eq '^serde_json = "=1\.0\.151"$' "$host_manifest" || {
   echo 'Local QA Host must use the pinned JSON dependency' >&2
   exit 1
 }
-host_sources=(
-  apps/local-qa-runtime/host/src/coordinator.rs
-  apps/local-qa-runtime/host/src/executor.rs
-  apps/local-qa-runtime/host/src/journal.rs
-  apps/local-qa-runtime/host/src/lib.rs
-  apps/local-qa-runtime/host/src/main.rs
-)
+host_sources=(apps/local-qa-runtime/host/src/*.rs)
 ! grep -Eq '(unsafe|extern crate|include_(bytes|str)!)' "${host_sources[@]}" || {
   echo 'Local QA Host gained unauthorized production inclusion' >&2
   exit 1
 }
+removed_executor_artifacts=(
+  'trait Executor'
+  'impl Executor for'
+  'LegacyExecutorAdapter'
+  'Box<dyn Executor>'
+  'legacy_executor_descriptor'
+  'legacy_executor_selection'
+  'legacy.executor'
+  'legacy.execute'
+  'sha256:e4760210c40c509504bf4cbf529835fc895e1b7d8e6cc3313fa673658e56a787'
+  'PassingExecutor'
+  'CoordinatorHandle::start('
+)
+for removed_artifact in "${removed_executor_artifacts[@]}"; do
+  ! grep -Fq "$removed_artifact" "${host_sources[@]}" || {
+    echo "Local QA Host restored removed Executor artifact: $removed_artifact" >&2
+    exit 1
+  }
+done
 grep -Fq '"/v1/runs/"' apps/local-qa-runtime/host/src/lib.rs
 grep -Fq 'CREATE TABLE accepted_requests' apps/local-qa-runtime/host/src/journal.rs
 grep -Fq 'CREATE TABLE runs' apps/local-qa-runtime/host/src/journal.rs
