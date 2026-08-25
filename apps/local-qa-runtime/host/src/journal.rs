@@ -74,6 +74,7 @@ pub(crate) enum Cancellation {
 
 pub(crate) struct ClaimedRun {
     pub(crate) run_id: String,
+    pub(crate) executor_run_id: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -159,7 +160,8 @@ impl Journal {
             }
             2 => self.migrate_v3(),
             3 => self.migrate_v4(),
-            4 => Ok(()),
+            4 => self.migrate_v5(),
+            5 => Ok(()),
             other => Err(RunError::UnsupportedDatabaseVersion(other)),
         }
     }
@@ -240,6 +242,81 @@ impl Journal {
                 FOREIGN KEY (run_id) REFERENCES runs(run_id)
             );
             PRAGMA user_version = 4;",
+        )?;
+        transaction.commit()?;
+        self.migrate_v5()
+    }
+
+    fn migrate_v5(&mut self) -> Result<(), RunError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            "ALTER TABLE runs ADD COLUMN executor_run_id TEXT NOT NULL DEFAULT '';",
+        )?;
+        let run_ids = {
+            let mut statement = transaction.prepare("SELECT run_id FROM runs ORDER BY rowid")?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        for run_id in run_ids {
+            let executor_run_id = if validate_scalar("UUID", &run_id).is_ok() {
+                run_id.clone()
+            } else {
+                transaction.query_row(
+                    "SELECT lower(
+                        hex(randomblob(4)) || '-' ||
+                        hex(randomblob(2)) || '-' ||
+                        hex(randomblob(2)) || '-' ||
+                        hex(randomblob(2)) || '-' ||
+                        hex(randomblob(6))
+                    )",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )?
+            };
+            validate_scalar("UUID", &executor_run_id).map_err(|_| {
+                RunError::InvalidJournal("executor_run_id must be a canonical UUID")
+            })?;
+            transaction.execute(
+                "UPDATE runs SET executor_run_id = ?1 WHERE run_id = ?2",
+                params![executor_run_id, run_id],
+            )?;
+        }
+        transaction.execute_batch(
+            "CREATE UNIQUE INDEX runs_executor_run_id_unique
+                 ON runs(executor_run_id);
+             CREATE TRIGGER runs_executor_run_id_insert
+             BEFORE INSERT ON runs
+             WHEN length(NEW.executor_run_id) != 36
+               OR substr(NEW.executor_run_id, 9, 1) != '-'
+               OR substr(NEW.executor_run_id, 14, 1) != '-'
+               OR substr(NEW.executor_run_id, 19, 1) != '-'
+               OR substr(NEW.executor_run_id, 24, 1) != '-'
+               OR substr(NEW.executor_run_id, 1, 8) GLOB '*[^0-9a-f]*'
+               OR substr(NEW.executor_run_id, 10, 4) GLOB '*[^0-9a-f]*'
+               OR substr(NEW.executor_run_id, 15, 4) GLOB '*[^0-9a-f]*'
+               OR substr(NEW.executor_run_id, 20, 4) GLOB '*[^0-9a-f]*'
+               OR substr(NEW.executor_run_id, 25, 12) GLOB '*[^0-9a-f]*'
+             BEGIN
+                 SELECT RAISE(ABORT, 'executor_run_id must be a canonical UUID');
+             END;
+             CREATE TRIGGER runs_executor_run_id_update
+             BEFORE UPDATE OF executor_run_id ON runs
+             WHEN length(NEW.executor_run_id) != 36
+               OR substr(NEW.executor_run_id, 9, 1) != '-'
+               OR substr(NEW.executor_run_id, 14, 1) != '-'
+               OR substr(NEW.executor_run_id, 19, 1) != '-'
+               OR substr(NEW.executor_run_id, 24, 1) != '-'
+               OR substr(NEW.executor_run_id, 1, 8) GLOB '*[^0-9a-f]*'
+               OR substr(NEW.executor_run_id, 10, 4) GLOB '*[^0-9a-f]*'
+               OR substr(NEW.executor_run_id, 15, 4) GLOB '*[^0-9a-f]*'
+               OR substr(NEW.executor_run_id, 20, 4) GLOB '*[^0-9a-f]*'
+               OR substr(NEW.executor_run_id, 25, 12) GLOB '*[^0-9a-f]*'
+             BEGIN
+                 SELECT RAISE(ABORT, 'executor_run_id must be a canonical UUID');
+             END;
+             PRAGMA user_version = 5;",
         )?;
         transaction.commit()?;
         Ok(())
@@ -465,6 +542,23 @@ impl Journal {
             format!("{{\"run_id\":\"{run_id}\",\"state\":\"accepted\",\"event_sequence\":1}}\n")
                 .into_bytes();
         let event_json = state_event_json(run_id, "accepted")?;
+        let executor_run_id = if validate_scalar("UUID", run_id).is_ok() {
+            run_id.to_owned()
+        } else {
+            transaction.query_row(
+                "SELECT lower(
+                    hex(randomblob(4)) || '-' ||
+                    hex(randomblob(2)) || '-' ||
+                    hex(randomblob(2)) || '-' ||
+                    hex(randomblob(2)) || '-' ||
+                    hex(randomblob(6))
+                )",
+                [],
+                |row| row.get::<_, String>(0),
+            )?
+        };
+        validate_scalar("UUID", &executor_run_id)
+            .map_err(|_| RunError::InvalidJournal("executor_run_id must be a canonical UUID"))?;
         transaction.execute(
             "INSERT INTO accepted_requests
              (run_id, idempotency_key, request_digest, response_json)
@@ -472,9 +566,9 @@ impl Journal {
             params![run_id, idempotency_key, request_digest, response_json],
         )?;
         transaction.execute(
-            "INSERT INTO runs (run_id, state, execution_outcome)
-             VALUES (?1, 'accepted', NULL)",
-            [run_id],
+            "INSERT INTO runs (run_id, executor_run_id, state, execution_outcome)
+             VALUES (?1, ?2, 'accepted', NULL)",
+            params![run_id, executor_run_id],
         )?;
         transaction.execute(
             "INSERT INTO events (run_id, sequence, event_type, event_json)
@@ -669,9 +763,9 @@ impl Journal {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let run_id = transaction
+        let claimed = transaction
             .query_row(
-                "SELECT runs.run_id
+                "SELECT runs.run_id, runs.executor_run_id
                  FROM runs
                  WHERE runs.state = 'accepted'
                    AND runs.execution_outcome IS NULL
@@ -686,10 +780,10 @@ impl Journal {
                  ORDER BY runs.rowid
                  LIMIT 1",
                 [],
-                |row| row.get::<_, String>(0),
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()?;
-        let Some(run_id) = run_id else {
+        let Some((run_id, executor_run_id)) = claimed else {
             transaction.commit()?;
             return Ok(None);
         };
@@ -727,7 +821,10 @@ impl Journal {
             params![run_id, event_json],
         )?;
         transaction.commit()?;
-        Ok(Some(ClaimedRun { run_id }))
+        Ok(Some(ClaimedRun {
+            run_id,
+            executor_run_id,
+        }))
     }
 
     pub(crate) fn transition(
@@ -1045,7 +1142,7 @@ mod tests {
         }
 
         {
-            let mut journal = Journal::open(&database_path).expect("v4 journal must reopen");
+            let mut journal = Journal::open(&database_path).expect("v5 journal must reopen");
             assert!(matches!(
                 journal.admit("run-001", "idem-001", CANONICAL_REQUEST_DIGEST),
                 Ok(Admission::Replay(_))

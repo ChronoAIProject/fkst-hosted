@@ -14,8 +14,11 @@ use std::thread;
 use std::time::Duration;
 
 use coordinator::CoordinatorHandle;
-use executor::InertExecutor;
-use fkst_qa_contracts::{validate_cancel_disposition, validate_event_cursor};
+use executor::{
+    inert_executor_descriptor, inert_executor_selection, ExecutorRegistry, InertExecutor,
+    LegacyExecutorAdapter,
+};
+use fkst_qa_contracts::{validate_cancel_disposition, validate_event_cursor, validate_scalar};
 use journal::{Admission, Cancellation, EventPayload};
 pub use journal::{Journal, OwnedHandle, ResourceIntent};
 pub use ownership::{
@@ -184,7 +187,15 @@ fn serve(config: StartupConfig, shutdown: Arc<AtomicBool>) -> Result<(), RunErro
     let listener = TcpListener::bind(config.listen)?;
     listener.set_nonblocking(true)?;
     let assigned_address = listener.local_addr()?;
-    let mut coordinator = CoordinatorHandle::start(&config.database_path, Box::new(InertExecutor))?;
+    let registry = ExecutorRegistry::new(vec![Box::new(LegacyExecutorAdapter::new(
+        Box::new(InertExecutor),
+        inert_executor_descriptor(),
+    ))])?;
+    let mut coordinator = CoordinatorHandle::start_versioned(
+        &config.database_path,
+        registry,
+        inert_executor_selection(),
+    )?;
 
     let mut stdout = io::stdout().lock();
     writeln!(
@@ -618,7 +629,7 @@ fn classify_route(method: &str, target: &str) -> Result<Route, Response> {
 
     match method {
         "PUT" => {
-            if query.is_some() || !valid_run_id(remainder) {
+            if query.is_some() || !valid_submit_run_id(remainder) {
                 return Err(problem_response(
                     400,
                     "Bad Request",
@@ -738,6 +749,10 @@ fn valid_run_id(value: &str) -> bool {
         && bytes[1..]
             .iter()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+fn valid_submit_run_id(value: &str) -> bool {
+    validate_scalar("UUID", value).is_ok()
 }
 
 fn valid_idempotency_key(value: &str) -> bool {
