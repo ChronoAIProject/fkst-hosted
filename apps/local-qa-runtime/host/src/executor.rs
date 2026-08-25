@@ -191,6 +191,45 @@ impl ExecutorRegistry {
         }
         ExecutionOutcome::validated(&result.execution_outcome)
     }
+
+    pub(crate) fn resolve(&self, selection: &ExecutorSelection) -> Result<ExecutorSelection, RunError> {
+        let key = (
+            selection.executor_id.clone(),
+            selection.executor_version.clone(),
+            selection.capability_digest.clone(),
+            selection.required_capability.clone(),
+        );
+        self.entries
+            .contains_key(&key)
+            .then(|| selection.clone())
+            .ok_or(RunError::Contract("executor selection not allowlisted"))
+    }
+}
+
+pub(crate) struct FakeApiAdmissionExecutor {
+    descriptor: ExecutorDescriptor,
+}
+
+impl FakeApiAdmissionExecutor {
+    pub(crate) fn new() -> Self {
+        Self {
+            descriptor: ExecutorDescriptor {
+                schema_version: "qa.local-executor/v1".into(),
+                executor_id: "fake.api".into(),
+                executor_version: "1.0.0".into(),
+                capabilities: vec!["api.request".into()],
+                capability_digest: "sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335".into(),
+            },
+        }
+    }
+}
+
+impl VersionedExecutor for FakeApiAdmissionExecutor {
+    fn descriptor(&self) -> &ExecutorDescriptor { &self.descriptor }
+
+    fn execute(&self, _request: &ExecutorRequest) -> Result<ExecutorResult, RunError> {
+        panic!("fake API admission executor must not execute")
+    }
 }
 
 #[cfg(test)]

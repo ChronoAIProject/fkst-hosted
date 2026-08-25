@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:chronoai:fkst:qa-contracts:qa.local-run-admission:v2",
+  "$defs": {
+    "Identifier": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "Digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "UtcTimestamp": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?Z$" },
+    "DigestBoundReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "schema_version", "content_digest"],
+      "properties": {
+        "kind": { "type": "string" },
+        "id": { "$ref": "#/$defs/Identifier" },
+        "schema_version": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$" },
+        "content_digest": { "$ref": "#/$defs/Digest" }
+      }
+    },
+    "AttemptBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["qa_task_id", "qa_attempt_id", "machine_id", "worker_id", "installation_id", "generation", "fence_token", "deadline"],
+      "properties": {
+        "qa_task_id": { "$ref": "#/$defs/Identifier" },
+        "qa_attempt_id": { "$ref": "#/$defs/Identifier" },
+        "machine_id": { "$ref": "#/$defs/Identifier" },
+        "worker_id": { "$ref": "#/$defs/Identifier" },
+        "installation_id": { "$ref": "#/$defs/Identifier" },
+        "generation": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "fence_token": { "type": "string", "pattern": "^[A-Za-z0-9_-]{16,128}$" },
+        "deadline": { "$ref": "#/$defs/UtcTimestamp" }
+      }
+    },
+    "LocalQARunRequestV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "content_digest", "run_id", "created_at", "producer_version", "profile", "idempotency_key", "nonce", "attempt_binding", "source", "test_case_set", "structured_plan", "package_manifest", "environment", "executor_selection", "policy", "budget"],
+      "properties": {
+        "schema_version": { "const": "qa.local-run-admission/v2" },
+        "content_digest": { "$ref": "#/$defs/Digest" },
+        "run_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+        "created_at": { "$ref": "#/$defs/UtcTimestamp" },
+        "producer_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "profile": { "const": "local_qa_agent_mvp" },
+        "idempotency_key": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "nonce": { "type": "string", "pattern": "^[A-Za-z0-9_-]{16,128}$" },
+        "attempt_binding": { "$ref": "#/$defs/AttemptBinding" },
+        "source": { "allOf": [{ "$ref": "#/$defs/DigestBoundReference" }, { "properties": { "kind": { "const": "source" } } }] },
+        "test_case_set": { "allOf": [{ "$ref": "#/$defs/DigestBoundReference" }, { "properties": { "kind": { "const": "test-case-set" } } }] },
+        "structured_plan": { "allOf": [{ "$ref": "#/$defs/DigestBoundReference" }, { "properties": { "kind": { "const": "structured-plan" } } }] },
+        "package_manifest": { "allOf": [{ "$ref": "#/$defs/DigestBoundReference" }, { "properties": { "kind": { "const": "package-manifest" } } }] },
+        "environment": { "allOf": [{ "$ref": "#/$defs/DigestBoundReference" }, { "properties": { "kind": { "const": "environment" } } }] },
+        "executor_selection": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.local-executor:v1#/$defs/ExecutorSelection" },
+        "policy": {
+          "type": "object", "additionalProperties": false,
+          "required": ["allow_network", "retain_workspace"],
+          "properties": { "allow_network": { "type": "boolean" }, "retain_workspace": { "type": "boolean" } }
+        },
+        "budget": {
+          "type": "object", "additionalProperties": false,
+          "required": ["max_cases", "max_duration_ms", "max_evidence_bytes"],
+          "properties": {
+            "max_cases": { "type": "integer", "minimum": 1, "maximum": 10000 },
+            "max_duration_ms": { "type": "integer", "minimum": 1, "maximum": 86400000 },
+            "max_evidence_bytes": { "type": "integer", "minimum": 0, "maximum": 1073741824 }
+          }
+        }
+      }
+    },
+    "RunAcceptanceV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "content_digest", "run_id", "created_at", "producer_version", "request_digest", "idempotency_key", "profile", "state", "accepted_at", "event_sequence", "executor_selection"],
+      "properties": {
+        "schema_version": { "const": "qa.local-run-admission/v2" },
+        "content_digest": { "$ref": "#/$defs/Digest" },
+        "run_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+        "created_at": { "$ref": "#/$defs/UtcTimestamp" },
+        "producer_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "request_digest": { "$ref": "#/$defs/Digest" },
+        "idempotency_key": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "profile": { "const": "local_qa_agent_mvp" },
+        "state": { "const": "accepted" },
+        "accepted_at": { "$ref": "#/$defs/UtcTimestamp" },
+        "event_sequence": { "const": 1 },
+        "executor_selection": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.local-executor:v1#/$defs/ExecutorSelection" }
+      }
+    }
+  }
+}

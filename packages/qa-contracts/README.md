@@ -64,6 +64,8 @@ The checked-in conformance sources are:
   byte-identical TypeScript/Rust acceptance construction.
 - `fixtures/qa.local-run-admission/v1/conformance.json` for shared Rust and
   TypeScript admission, relation, digest-binding, and rejection-classification cases.
+- `fixtures/qa.local-run-admission/v2/happy-path.json` for the strict fake API
+  admission request, executor selection, and byte-exact v2 acceptance vectors.
 
 The implementations are:
 

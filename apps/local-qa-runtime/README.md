@@ -20,11 +20,15 @@ exactly these loopback-only routes:
 - `GET /v1/runs/{run_id}/events?after={cursor}&limit={limit}`
 - `POST /v1/runs/{run_id}:cancel`
 
-The submit route accepts only the strict inert JSON body. The Host opens a
-migrated SQLite journal in WAL mode and atomically persists the accepted
-request, Run, and ordered `run.accepted` Event. Repeating the submission with
-the same idempotency key replays the immutable response, including after a
-restart. A different key for the accepted Run returns a mutation-free conflict.
+The submit route accepts the strict `qa.local-run-admission/v2` fake API walking
+skeleton only. It validates the shared request digest, verifies the normalized
+attempt binding through the MVP-0 deterministic verifier, resolves the exact
+`qa.local-executor/v1` selection without invoking it, and atomically persists
+the immutable acceptance bytes, binding, selection, ordered `run.accepted`
+Event, and singleton active slot in SQLite journal v6. Repeating the same
+submission replays the stored response, including after restart; changed keys
+or canonical request digests return a mutation-free conflict. `POST` is not an
+admission alias, and the former `{"kind":"inert"}` body is rejected.
 
 The snapshot route reads the current durable Run state and latest Event
 sequence. The Events route reads Events after the required cursor in ascending

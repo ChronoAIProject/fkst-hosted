@@ -124,6 +124,7 @@ fn contract_registry_and_fixture_metadata() {
             "qa.local-evidence/v1",
             "qa.local-worker-protocol/v1",
             "qa.local-run-admission/v1",
+            "qa.local-run-admission/v2",
             "qa.local-executor/v1"
         ]
     );
@@ -159,6 +160,7 @@ fn contract_registry_and_fixture_metadata() {
     expected_types.insert("LocalSanitizedObservation".to_owned());
     expected_types.insert("LocalSanitizedObservationRef".to_owned());
     expected_types.insert("LocalQARunRequest".to_owned());
+    expected_types.insert("LocalQARunRequestV2".to_owned());
     expected_types.insert("LocalState".to_owned());
     expected_types.insert("LocalWorkerCapabilityRequest".to_owned());
     expected_types.insert("LocalWorkerCapabilityResult".to_owned());
@@ -167,6 +169,7 @@ fn contract_registry_and_fixture_metadata() {
     expected_types.insert("LocalWorkerProtocolFailure".to_owned());
     expected_types.insert("LocalWorkerTerminalResult".to_owned());
     expected_types.insert("RunAcceptance".to_owned());
+    expected_types.insert("RunAcceptanceV2".to_owned());
     assert_eq!(
         types.keys().cloned().collect::<BTreeSet<_>>(),
         expected_types

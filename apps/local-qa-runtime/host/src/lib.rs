@@ -1,3 +1,4 @@
+mod admission;
 mod coordinator;
 mod executor;
 mod journal;
@@ -13,22 +14,24 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+use admission::Mvp0DeterministicAttemptBindingVerifier;
 use coordinator::CoordinatorHandle;
-use executor::{inert_executor_selection, ExecutorRegistry, InertExecutor};
+use executor::{inert_executor_selection, ExecutorRegistry, FakeApiAdmissionExecutor, InertExecutor};
 use fkst_qa_contracts::{validate_cancel_disposition, validate_event_cursor, validate_scalar};
-use journal::{Admission, Cancellation, EventPayload};
-pub use journal::{Journal, OwnedHandle, ResourceIntent};
+use journal::{Cancellation, EventPayload};
+pub use journal::{Journal, OwnedHandle, ResourceIntent, StoredV2Admission};
 pub use ownership::{
     reconcile_environment, Clock, CreateRequest, EnvironmentProvider, EnvironmentRequest,
     FixedClock, ProviderResource, SystemClock,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 const CANONICAL_REQUEST_DIGEST: &str =
     "c6da30d2cbe81af624c4e364e21cdad9dc2510d2e2ff9a02bb5bd6c325a25428";
-const MAX_BODY_BYTES: usize = 64;
+const MAX_SUBMIT_BODY_BYTES: usize = 65_536;
+const MAX_CANCEL_BODY_BYTES: usize = 64;
 const MAX_HEADER_BYTES: usize = 16 * 1024;
-const MAX_REJECTION_DRAIN_BYTES: usize = MAX_HEADER_BYTES + MAX_BODY_BYTES;
+const MAX_REJECTION_DRAIN_BYTES: usize = MAX_HEADER_BYTES + MAX_SUBMIT_BODY_BYTES;
 const REJECTION_DRAIN_TIMEOUT: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,15 +179,22 @@ pub fn run(config: StartupConfig) -> Result<(), RunError> {
     let shutdown = Arc::new(AtomicBool::new(false));
     let signal_shutdown = Arc::clone(&shutdown);
     ctrlc::set_handler(move || signal_shutdown.store(true, Ordering::SeqCst))?;
-    serve(config, shutdown)
+    serve_with_clock(config, shutdown, Arc::new(SystemClock))
 }
 
-fn serve(config: StartupConfig, shutdown: Arc<AtomicBool>) -> Result<(), RunError> {
+#[doc(hidden)]
+pub fn serve_with_clock(
+    config: StartupConfig,
+    shutdown: Arc<AtomicBool>,
+    clock: Arc<dyn Clock + Send + Sync>,
+) -> Result<(), RunError> {
     let mut journal = Journal::open(&config.database_path)?;
     let listener = TcpListener::bind(config.listen)?;
     listener.set_nonblocking(true)?;
     let assigned_address = listener.local_addr()?;
     let registry = ExecutorRegistry::new(vec![Box::new(InertExecutor::new())])?;
+    let admission_registry = ExecutorRegistry::new(vec![Box::new(FakeApiAdmissionExecutor::new())])?;
+    let admission_verifier = Mvp0DeterministicAttemptBindingVerifier;
     let mut coordinator = CoordinatorHandle::start_versioned(
         &config.database_path,
         registry,
@@ -211,7 +221,13 @@ fn serve(config: StartupConfig, shutdown: Arc<AtomicBool>) -> Result<(), RunErro
                 let _ = stream.set_nonblocking(false);
                 let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
                 let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
-                let _ = handle_connection(&mut stream, &mut journal, &coordinator);
+                let _ = handle_connection(
+                    &mut stream,
+                    &mut journal,
+                    &admission_registry,
+                    &admission_verifier,
+                    clock.as_ref(),
+                );
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(10));
@@ -222,12 +238,6 @@ fn serve(config: StartupConfig, shutdown: Arc<AtomicBool>) -> Result<(), RunErro
     };
     let shutdown_result = coordinator.shutdown();
     serve_result.and(shutdown_result)
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SubmitBody {
-    kind: String,
 }
 
 #[derive(Serialize)]
@@ -295,7 +305,9 @@ struct Request {
 fn handle_connection(
     stream: &mut TcpStream,
     journal: &mut Journal,
-    coordinator: &CoordinatorHandle,
+    admission_registry: &ExecutorRegistry,
+    admission_verifier: &dyn admission::AttemptBindingVerifier,
+    clock: &dyn Clock,
 ) -> io::Result<()> {
     let request = match read_request(stream)? {
         Ok(request) => request,
@@ -312,13 +324,18 @@ fn handle_connection(
                 alive: true,
             },
         ),
-        Route::Submit { run_id } => handle_submit(
-            journal,
-            coordinator,
-            &run_id,
-            request.idempotency_key.as_deref().unwrap_or_default(),
-            &request.body,
-        ),
+        Route::Submit { run_id } => match clock.now_utc() {
+            Ok(now) => admission::admit_v2(
+                journal,
+                admission_registry,
+                admission_verifier,
+                &now,
+                &run_id,
+                request.idempotency_key.as_deref().unwrap_or_default(),
+                &request.body,
+            ),
+            Err(_) => journal_failure(),
+        },
         Route::Snapshot { run_id } => match journal.snapshot(&run_id) {
             Ok(Some(snapshot)) => json_response(
                 200,
@@ -380,37 +397,6 @@ fn handle_connection(
         },
     };
     write_response(stream, response)
-}
-
-fn handle_submit(
-    journal: &mut Journal,
-    coordinator: &CoordinatorHandle,
-    run_id: &str,
-    idempotency_key: &str,
-    body: &[u8],
-) -> Response {
-    let valid_body =
-        serde_json::from_slice::<SubmitBody>(body).is_ok_and(|body| body.kind == "inert");
-    if !valid_body {
-        return problem_response(400, "Bad Request", "invalid submit request");
-    }
-
-    match journal.admit(run_id, idempotency_key, CANONICAL_REQUEST_DIGEST) {
-        Ok(Admission::Created(body)) => {
-            coordinator.wake();
-            Response::new(201, "Created", "application/json", body)
-        }
-        Ok(Admission::Replay(body)) => {
-            coordinator.wake();
-            Response::new(200, "OK", "application/json", body)
-        }
-        Ok(Admission::DifferentKey) => problem_response(
-            409,
-            "Conflict",
-            "run_id is already accepted under a different Idempotency-Key",
-        ),
-        Err(_) => journal_failure(),
-    }
 }
 
 fn read_request(stream: &mut TcpStream) -> io::Result<Result<Request, Response>> {
@@ -532,9 +518,14 @@ fn read_request(stream: &mut TcpStream) -> io::Result<Result<Request, Response>>
     if matches!(route, Route::Submit { .. }) && content_lengths.len() != 1 {
         return Ok(Err(invalid_request(&route)));
     }
-    if content_length > MAX_BODY_BYTES {
+    let maximum_body_bytes = if matches!(route, Route::Submit { .. }) {
+        MAX_SUBMIT_BODY_BYTES
+    } else {
+        MAX_CANCEL_BODY_BYTES
+    };
+    if content_length > maximum_body_bytes {
         let response = if matches!(route, Route::Submit { .. }) {
-            problem_response(413, "Payload Too Large", "request body exceeds 64 bytes")
+            problem_response(413, "Payload Too Large", "request body exceeds 65536 bytes")
         } else {
             invalid_request(&route)
         };

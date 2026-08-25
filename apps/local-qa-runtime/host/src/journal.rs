@@ -46,6 +46,22 @@ pub(crate) enum Admission {
     DifferentKey,
 }
 
+pub(crate) struct V2AdmissionRecord<'a> {
+    pub(crate) run_id: &'a str,
+    pub(crate) idempotency_key: &'a str,
+    pub(crate) request_digest: &'a str,
+    pub(crate) acceptance_bytes: &'a [u8],
+    pub(crate) binding_json: &'a [u8],
+    pub(crate) selection_json: &'a [u8],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredV2Admission {
+    pub acceptance_bytes: Vec<u8>,
+    pub binding_json: Vec<u8>,
+    pub selection_json: Vec<u8>,
+}
+
 pub(crate) struct RunSnapshot {
     pub(crate) state: String,
     pub(crate) execution_outcome: Option<String>,
@@ -161,7 +177,8 @@ impl Journal {
             2 => self.migrate_v3(),
             3 => self.migrate_v4(),
             4 => self.migrate_v5(),
-            5 => Ok(()),
+            5 => self.migrate_v6(),
+            6 => Ok(()),
             other => Err(RunError::UnsupportedDatabaseVersion(other)),
         }
     }
@@ -178,6 +195,30 @@ impl Journal {
                 FOREIGN KEY (run_id) REFERENCES runs(run_id)
             );
             PRAGMA user_version = 2;",
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_v6(&mut self) -> Result<(), RunError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            "ALTER TABLE runs ADD COLUMN admission_version INTEGER NOT NULL DEFAULT 1
+                 CHECK (admission_version IN (1, 2));
+             CREATE TABLE admission_v2_records (
+                 run_id TEXT PRIMARY KEY NOT NULL,
+                 binding_json BLOB NOT NULL,
+                 selection_json BLOB NOT NULL,
+                 FOREIGN KEY (run_id) REFERENCES accepted_requests(run_id)
+             );
+             CREATE TABLE active_run_slot (
+                 slot INTEGER PRIMARY KEY NOT NULL CHECK (slot = 1),
+                 run_id TEXT NOT NULL UNIQUE,
+                 FOREIGN KEY (run_id) REFERENCES runs(run_id)
+             );
+             PRAGMA user_version = 6;",
         )?;
         transaction.commit()?;
         Ok(())
@@ -319,7 +360,7 @@ impl Journal {
              PRAGMA user_version = 5;",
         )?;
         transaction.commit()?;
-        Ok(())
+        self.migrate_v6()
     }
 
     pub fn prepare_intent(
@@ -579,6 +620,86 @@ impl Journal {
         Ok(Admission::Created(response_json))
     }
 
+    pub(crate) fn admit_v2(&mut self, record: V2AdmissionRecord<'_>) -> Result<Admission, RunError> {
+        validate_state("accepted")?;
+        validate_sequence(1)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let stored = transaction
+            .query_row(
+                "SELECT idempotency_key, request_digest, response_json
+                 FROM accepted_requests WHERE run_id = ?1",
+                [record.run_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Vec<u8>>(2)?)),
+            )
+            .optional()?;
+        if let Some((stored_key, stored_digest, response_json)) = stored {
+            let result = if stored_key == record.idempotency_key && stored_digest == record.request_digest {
+                Admission::Replay(response_json)
+            } else {
+                Admission::DifferentKey
+            };
+            transaction.commit()?;
+            return Ok(result);
+        }
+        let occupied: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM active_run_slot WHERE slot = 1)",
+            [],
+            |row| row.get(0),
+        )?;
+        if occupied {
+            transaction.commit()?;
+            return Ok(Admission::DifferentKey);
+        }
+        let event_json = state_event_json(record.run_id, "accepted")?;
+        transaction.execute(
+            "INSERT INTO accepted_requests (run_id, idempotency_key, request_digest, response_json)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![record.run_id, record.idempotency_key, record.request_digest, record.acceptance_bytes],
+        )?;
+        transaction.execute(
+            "INSERT INTO runs (run_id, executor_run_id, state, execution_outcome, admission_version)
+             VALUES (?1, ?1, 'accepted', NULL, 2)",
+            [record.run_id],
+        )?;
+        transaction.execute(
+            "INSERT INTO events (run_id, sequence, event_type, event_json)
+             VALUES (?1, 1, 'run.accepted', ?2)",
+            params![record.run_id, event_json],
+        )?;
+        transaction.execute(
+            "INSERT INTO admission_v2_records (run_id, binding_json, selection_json)
+             VALUES (?1, ?2, ?3)",
+            params![record.run_id, record.binding_json, record.selection_json],
+        )?;
+        transaction.execute(
+            "INSERT INTO active_run_slot (slot, run_id) VALUES (1, ?1)",
+            [record.run_id],
+        )?;
+        transaction.commit()?;
+        Ok(Admission::Created(record.acceptance_bytes.to_vec()))
+    }
+
+    pub fn stored_v2_admission(&self, run_id: &str) -> Result<Option<StoredV2Admission>, RunError> {
+        self.connection
+            .query_row(
+                "SELECT accepted_requests.response_json, admission_v2_records.binding_json,
+                        admission_v2_records.selection_json
+                 FROM accepted_requests
+                 JOIN admission_v2_records USING (run_id)
+                 WHERE run_id = ?1",
+                [run_id],
+                |row| Ok(StoredV2Admission {
+                    acceptance_bytes: row.get(0)?,
+                    binding_json: row.get(1)?,
+                    selection_json: row.get(2)?,
+                }),
+            )
+            .optional()
+            .map_err(RunError::from)
+    }
+
     pub(crate) fn snapshot(&self, run_id: &str) -> Result<Option<RunSnapshot>, RunError> {
         let snapshot = self
             .connection
@@ -767,7 +888,7 @@ impl Journal {
             .query_row(
                 "SELECT runs.run_id, runs.executor_run_id
                  FROM runs
-                 WHERE runs.state = 'accepted'
+                 WHERE runs.state = 'accepted' AND runs.admission_version = 1
                    AND runs.execution_outcome IS NULL
                    AND NOT EXISTS (
                        SELECT 1 FROM execution_attempts
