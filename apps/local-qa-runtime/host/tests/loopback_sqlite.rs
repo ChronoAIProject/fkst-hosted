@@ -685,7 +685,7 @@ fn reads_cancellation_and_restart_match_the_durable_contract() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        5
+        6
     );
     assert_eq!(
         connection
@@ -980,7 +980,7 @@ fn version_one_database_migrates_without_changing_accepted_bytes() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        5
+        6
     );
     assert_eq!(
         connection
@@ -1032,7 +1032,7 @@ fn version_two_database_migrates_without_rewriting_durable_data() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        5
+        6
     );
     assert_eq!(
         connection
@@ -1155,7 +1155,7 @@ fn assert_exact_journal(database_path: &Path, accepted_key: &str) {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .expect("journal version must be readable"),
-        5
+        6
     );
     assert_eq!(
         connection

@@ -341,7 +341,7 @@ fn environment_bind_walks_the_host_and_replays_without_provider_effect() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        5
+        6
     );
     let foreign_key_errors: Vec<(String, i64, String, i64)> = connection
         .prepare("PRAGMA foreign_key_check")

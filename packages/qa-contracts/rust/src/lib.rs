@@ -28,6 +28,10 @@ const LOCAL_WORKER_SCHEMA_PATH: &str = "contracts/qa.local-worker-protocol/v1/sc
 const LOCAL_RUN_ADMISSION_SCHEMA: &str =
     include_str!("../../contracts/qa.local-run-admission/v1/schema.json");
 const LOCAL_RUN_ADMISSION_SCHEMA_PATH: &str = "contracts/qa.local-run-admission/v1/schema.json";
+const LOCAL_RUN_ADMISSION_V2_SCHEMA: &str =
+    include_str!("../../contracts/qa.local-run-admission/v2/schema.json");
+const LOCAL_RUN_ADMISSION_V2_SCHEMA_PATH: &str =
+    "contracts/qa.local-run-admission/v2/schema.json";
 const LOCAL_EXECUTOR_SCHEMA: &str =
     include_str!("../../contracts/qa.local-executor/v1/schema.json");
 const LOCAL_EXECUTOR_SCHEMA_PATH: &str = "contracts/qa.local-executor/v1/schema.json";
@@ -37,6 +41,7 @@ const EMBEDDED_SCHEMAS: &[(&str, &str)] = &[
     (LOCAL_EVIDENCE_SCHEMA_PATH, LOCAL_EVIDENCE_SCHEMA),
     (LOCAL_WORKER_SCHEMA_PATH, LOCAL_WORKER_SCHEMA),
     (LOCAL_RUN_ADMISSION_SCHEMA_PATH, LOCAL_RUN_ADMISSION_SCHEMA),
+    (LOCAL_RUN_ADMISSION_V2_SCHEMA_PATH, LOCAL_RUN_ADMISSION_V2_SCHEMA),
     (LOCAL_EXECUTOR_SCHEMA_PATH, LOCAL_EXECUTOR_SCHEMA),
 ];
 const LOCAL_STATE_TYPE_NAME: &str = "LocalState";
@@ -61,7 +66,7 @@ const LOCAL_EVIDENCE_TYPE_NAMES: [&str; 4] = [
     LOCAL_SANITIZED_OBSERVATION_REF_TYPE_NAME,
     LOCAL_EVIDENCE_OBJECT_REF_TYPE_NAME,
 ];
-const SUPPORTED_SCHEMA_MAJOR: u64 = 1;
+const SUPPORTED_SCHEMA_MAJORS: [u64; 2] = [1, 2];
 pub const LOCAL_WORKER_MAX_FRAME_BYTES: usize = 65_536;
 const LOCAL_WORKER_TYPE_NAMES: [&str; 6] = [
     "LocalWorkerFrame",
@@ -73,8 +78,14 @@ const LOCAL_WORKER_TYPE_NAMES: [&str; 6] = [
 ];
 const LOCAL_QA_RUN_REQUEST_TYPE_NAME: &str = "LocalQARunRequest";
 const RUN_ACCEPTANCE_TYPE_NAME: &str = "RunAcceptance";
-const LOCAL_RUN_ADMISSION_TYPE_NAMES: [&str; 2] =
-    [LOCAL_QA_RUN_REQUEST_TYPE_NAME, RUN_ACCEPTANCE_TYPE_NAME];
+const LOCAL_QA_RUN_REQUEST_V2_TYPE_NAME: &str = "LocalQARunRequestV2";
+const RUN_ACCEPTANCE_V2_TYPE_NAME: &str = "RunAcceptanceV2";
+const LOCAL_RUN_ADMISSION_TYPE_NAMES: [&str; 4] = [
+    LOCAL_QA_RUN_REQUEST_TYPE_NAME,
+    RUN_ACCEPTANCE_TYPE_NAME,
+    LOCAL_QA_RUN_REQUEST_V2_TYPE_NAME,
+    RUN_ACCEPTANCE_V2_TYPE_NAME,
+];
 const LOCAL_EXECUTOR_TYPE_NAMES: [&str; 4] = [
     "ExecutorDescriptor",
     "ExecutorSelection",
@@ -142,6 +153,85 @@ impl ValidatedValue {
     pub fn value(&self) -> &Value {
         &self.0
     }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AttemptBindingV2 {
+    pub qa_task_id: String,
+    pub qa_attempt_id: String,
+    pub machine_id: String,
+    pub worker_id: String,
+    pub installation_id: String,
+    pub generation: u64,
+    pub fence_token: String,
+    pub deadline: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DigestBoundReferenceV2 {
+    pub kind: String,
+    pub id: String,
+    pub schema_version: String,
+    pub content_digest: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AdmissionPolicyV2 {
+    pub allow_network: bool,
+    pub retain_workspace: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AdmissionBudgetV2 {
+    pub max_cases: u64,
+    pub max_duration_ms: u64,
+    pub max_evidence_bytes: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ExecutorSelection {
+    pub schema_version: String,
+    pub executor_id: String,
+    pub executor_version: String,
+    pub capability_digest: String,
+    pub required_capability: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LocalQARunRequestV2 {
+    pub schema_version: String,
+    pub content_digest: String,
+    pub run_id: String,
+    pub created_at: String,
+    pub producer_version: String,
+    pub profile: String,
+    pub idempotency_key: String,
+    pub nonce: String,
+    pub attempt_binding: AttemptBindingV2,
+    pub source: DigestBoundReferenceV2,
+    pub test_case_set: DigestBoundReferenceV2,
+    pub structured_plan: DigestBoundReferenceV2,
+    pub package_manifest: DigestBoundReferenceV2,
+    pub environment: DigestBoundReferenceV2,
+    pub executor_selection: ExecutorSelection,
+    pub policy: AdmissionPolicyV2,
+    pub budget: AdmissionBudgetV2,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RunAcceptanceV2 {
+    pub schema_version: String,
+    pub content_digest: String,
+    pub run_id: String,
+    pub created_at: String,
+    pub producer_version: String,
+    pub request_digest: String,
+    pub idempotency_key: String,
+    pub profile: String,
+    pub state: String,
+    pub accepted_at: String,
+    pub event_sequence: u64,
+    pub executor_selection: ExecutorSelection,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -332,6 +422,66 @@ pub fn validate_local_qa_run_request(raw: &[u8]) -> Result<ValidatedValue, Contr
 
 pub fn validate_run_acceptance(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
     validate_run_acceptance_value(admit_json(raw)?)
+}
+
+pub fn validate_local_qa_run_request_v2(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    let validated = validate_registered_value(admit_json(raw)?, LOCAL_QA_RUN_REQUEST_V2_TYPE_NAME)?;
+    let request: LocalQARunRequestV2 = serde_json::from_value(validated.0.clone())
+        .map_err(|_| ContractError(Rejection::validation("schema_violation", "/")))?;
+    if !validate_iso8601(&request.created_at) || !validate_iso8601(&request.attempt_binding.deadline) {
+        return Err(ContractError(Rejection::validation("schema_violation", "/created_at")));
+    }
+    verify_contract_content_digest(&validated)?;
+    Ok(validated)
+}
+
+pub fn validate_run_acceptance_v2(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    let validated = validate_registered_value(admit_json(raw)?, RUN_ACCEPTANCE_V2_TYPE_NAME)?;
+    let acceptance: RunAcceptanceV2 = serde_json::from_value(validated.0.clone())
+        .map_err(|_| ContractError(Rejection::validation("schema_violation", "/")))?;
+    if !validate_iso8601(&acceptance.created_at) || !validate_iso8601(&acceptance.accepted_at) {
+        return Err(ContractError(Rejection::validation("schema_violation", "/created_at")));
+    }
+    if acceptance.created_at != acceptance.accepted_at {
+        return Err(ContractError(Rejection::contract(
+            "contract.invalid_relation", "accepted_at_mismatch", "/created_at",
+        )));
+    }
+    verify_contract_content_digest(&validated)?;
+    Ok(validated)
+}
+
+pub fn build_initial_run_acceptance_v2(
+    request: &ValidatedValue,
+    accepted_at: &str,
+    producer_version: &str,
+) -> Result<ValidatedValue, ContractError> {
+    let request_bytes = canonical_bytes(request)?;
+    let validated = validate_local_qa_run_request_v2(&request_bytes)?;
+    let request: LocalQARunRequestV2 = serde_json::from_value(validated.0)
+        .map_err(|_| ContractError(Rejection::validation("schema_violation", "/")))?;
+    if !validate_iso8601(accepted_at) {
+        return Err(ContractError(Rejection::validation("schema_violation", "/accepted_at")));
+    }
+    if producer_version.is_empty() || producer_version.len() > 128 {
+        return Err(ContractError(Rejection::validation("schema_violation", "/producer_version")));
+    }
+    let mut value = serde_json::json!({
+        "schema_version": "qa.local-run-admission/v2",
+        "run_id": request.run_id,
+        "created_at": accepted_at,
+        "producer_version": producer_version,
+        "request_digest": request.content_digest,
+        "idempotency_key": request.idempotency_key,
+        "profile": "local_qa_agent_mvp",
+        "state": "accepted",
+        "accepted_at": accepted_at,
+        "event_sequence": 1,
+        "executor_selection": request.executor_selection,
+    });
+    let digest = contract_content_digest(&ValidatedValue(value.clone()))?;
+    value.as_object_mut().expect("acceptance object").insert("content_digest".into(), Value::String(digest));
+    validate_run_acceptance_v2(&serde_json::to_vec(&value).map_err(|_| ContractError(Rejection::validation("schema_violation", "/")))?)
 }
 
 pub fn validate_executor_descriptor(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
@@ -1212,7 +1362,13 @@ fn schema_for_registered_type(
             "/schemas",
         ))
     })?;
-    if schema_entry.major != SUPPORTED_SCHEMA_MAJOR {
+    let registered_major = type_entry
+        .schema
+        .rsplit_once("/v")
+        .and_then(|(_, major)| major.parse::<u64>().ok());
+    if !SUPPORTED_SCHEMA_MAJORS.contains(&schema_entry.major)
+        || registered_major != Some(schema_entry.major)
+    {
         return Err(ContractError(Rejection::validation(
             "unsupported_schema_major",
             format!("/schemas/{}/major", pointer_token(&type_entry.schema)),

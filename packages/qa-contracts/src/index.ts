@@ -15,7 +15,7 @@ import {
 
 const MAX_DEPTH = 128;
 const MAX_SAFE_INTEGER = 9_007_199_254_740_991n;
-const SUPPORTED_SCHEMA_MAJOR = 1;
+const SUPPORTED_SCHEMA_MAJORS = new Set([1, 2]);
 export const LOCAL_WORKER_MAX_FRAME_BYTES = 65_536;
 const LOCAL_STATE_TYPE_NAME = "LocalState";
 const EXECUTION_OUTCOME_TYPE_NAME = "ExecutionOutcome";
@@ -49,9 +49,13 @@ const LOCAL_WORKER_TYPE_NAMES = Object.freeze([
 ] as const);
 const LOCAL_QA_RUN_REQUEST_TYPE_NAME = "LocalQARunRequest";
 const RUN_ACCEPTANCE_TYPE_NAME = "RunAcceptance";
+const LOCAL_QA_RUN_REQUEST_V2_TYPE_NAME = "LocalQARunRequestV2";
+const RUN_ACCEPTANCE_V2_TYPE_NAME = "RunAcceptanceV2";
 const LOCAL_RUN_ADMISSION_TYPE_NAMES = Object.freeze([
   LOCAL_QA_RUN_REQUEST_TYPE_NAME,
   RUN_ACCEPTANCE_TYPE_NAME,
+  LOCAL_QA_RUN_REQUEST_V2_TYPE_NAME,
+  RUN_ACCEPTANCE_V2_TYPE_NAME,
 ] as const);
 const LOCAL_EXECUTOR_TYPE_NAMES = Object.freeze(["ExecutorDescriptor", "ExecutorSelection", "ExecutorRequest", "ExecutorResult"] as const);
 const FOUNDATION_TYPE_NAMES = Object.freeze([
@@ -144,6 +148,52 @@ export interface RunAcceptance {
   readonly idempotency_key: string;
   readonly state: "accepted";
   readonly accepted_at: string;
+}
+
+export interface AttemptBindingV2 {
+  readonly qa_task_id: string;
+  readonly qa_attempt_id: string;
+  readonly machine_id: string;
+  readonly worker_id: string;
+  readonly installation_id: string;
+  readonly generation: number;
+  readonly fence_token: string;
+  readonly deadline: string;
+}
+
+export interface LocalQARunRequestV2 {
+  readonly schema_version: "qa.local-run-admission/v2";
+  readonly content_digest: string;
+  readonly run_id: string;
+  readonly created_at: string;
+  readonly producer_version: string;
+  readonly profile: "local_qa_agent_mvp";
+  readonly idempotency_key: string;
+  readonly nonce: string;
+  readonly attempt_binding: AttemptBindingV2;
+  readonly source: DigestBoundIdentity & { readonly kind: "source" };
+  readonly test_case_set: DigestBoundIdentity & { readonly kind: "test-case-set" };
+  readonly structured_plan: DigestBoundIdentity & { readonly kind: "structured-plan" };
+  readonly package_manifest: DigestBoundIdentity & { readonly kind: "package-manifest" };
+  readonly environment: DigestBoundIdentity & { readonly kind: "environment" };
+  readonly executor_selection: ExecutorSelection;
+  readonly policy: { readonly allow_network: boolean; readonly retain_workspace: boolean };
+  readonly budget: { readonly max_cases: number; readonly max_duration_ms: number; readonly max_evidence_bytes: number };
+}
+
+export interface RunAcceptanceV2 {
+  readonly schema_version: "qa.local-run-admission/v2";
+  readonly content_digest: string;
+  readonly run_id: string;
+  readonly created_at: string;
+  readonly producer_version: string;
+  readonly request_digest: string;
+  readonly idempotency_key: string;
+  readonly profile: "local_qa_agent_mvp";
+  readonly state: "accepted";
+  readonly accepted_at: string;
+  readonly event_sequence: 1;
+  readonly executor_selection: ExecutorSelection;
 }
 
 export interface ExecutorDescriptor {
@@ -388,6 +438,27 @@ export function validateRunAcceptance(raw: Uint8Array): ValidatedValue {
   return validateRunAcceptanceValue(admitJson(raw));
 }
 
+export function validateLocalQARunRequestV2(raw: Uint8Array): ValidatedValue {
+  const validated = validateRegisteredValue(admitJson(raw), LOCAL_QA_RUN_REQUEST_V2_TYPE_NAME);
+  const value = validated.value() as LocalQARunRequestV2;
+  if (!validateIso8601(value.created_at)) throw validationError("schema_violation", "/created_at");
+  if (!validateIso8601(value.attempt_binding.deadline)) throw validationError("schema_violation", "/attempt_binding/deadline");
+  verifyContractContentDigest(validated);
+  return validated;
+}
+
+export function validateRunAcceptanceV2(raw: Uint8Array): ValidatedValue {
+  const validated = validateRegisteredValue(admitJson(raw), RUN_ACCEPTANCE_V2_TYPE_NAME);
+  const value = validated.value() as RunAcceptanceV2;
+  if (!validateIso8601(value.created_at)) throw validationError("schema_violation", "/created_at");
+  if (!validateIso8601(value.accepted_at)) throw validationError("schema_violation", "/accepted_at");
+  if (value.created_at !== value.accepted_at) {
+    throw contractError("contract.invalid_relation", "accepted_at_mismatch", "/created_at");
+  }
+  verifyContractContentDigest(validated);
+  return validated;
+}
+
 export function validateExecutorDescriptor(raw: Uint8Array): ValidatedValue {
   const validated = validateRegisteredValue(admitJson(raw), "ExecutorDescriptor");
   validateExecutorDescriptorRules(validated.value() as ExecutorDescriptor);
@@ -439,6 +510,34 @@ export function buildInitialRunAcceptance(
   const projected = new ValidatedValue(acceptance, VALIDATION_TOKEN);
   acceptance.content_digest = contractContentDigest(projected);
   return validateRunAcceptance(canonicalizeUnknown(acceptance));
+}
+
+export function buildInitialRunAcceptanceV2(
+  request: ValidatedValue,
+  acceptedAt: string,
+  producerVersion: string,
+): ValidatedValue {
+  const requestValue = validateLocalQARunRequestV2(canonicalBytes(request)).value() as LocalQARunRequestV2;
+  if (!validateIso8601(acceptedAt)) throw validationError("schema_violation", "/accepted_at");
+  if (producerVersion.length === 0 || Buffer.byteLength(producerVersion, "utf8") > 128) {
+    throw validationError("schema_violation", "/producer_version");
+  }
+  const acceptance: Record<string, unknown> = {
+    schema_version: "qa.local-run-admission/v2",
+    run_id: requestValue.run_id,
+    created_at: acceptedAt,
+    producer_version: producerVersion,
+    request_digest: requestValue.content_digest,
+    idempotency_key: requestValue.idempotency_key,
+    profile: "local_qa_agent_mvp",
+    state: "accepted",
+    accepted_at: acceptedAt,
+    event_sequence: 1,
+    executor_selection: requestValue.executor_selection,
+  };
+  const projected = new ValidatedValue(acceptance, VALIDATION_TOKEN);
+  acceptance.content_digest = contractContentDigest(projected);
+  return validateRunAcceptanceV2(canonicalizeUnknown(acceptance));
 }
 
 export function encodeLocalWorkerFrame(value: ValidatedValue): Uint8Array {
@@ -921,7 +1020,8 @@ function compileRegisteredValidator(registry: ContractRegistry, typeName: string
   if (schemaEntry === undefined) {
     throw validationError("unknown_registered_schema", "/schemas");
   }
-  if (schemaEntry.major !== SUPPORTED_SCHEMA_MAJOR) {
+  const registeredMajor = Number(typeEntry.schema.match(/\/v([0-9]+)$/)?.[1]);
+  if (!SUPPORTED_SCHEMA_MAJORS.has(schemaEntry.major) || registeredMajor !== schemaEntry.major) {
     throw validationError("unsupported_schema_major", `/schemas/${typeEntry.schema}/major`);
   }
   let schemaUrl: URL;

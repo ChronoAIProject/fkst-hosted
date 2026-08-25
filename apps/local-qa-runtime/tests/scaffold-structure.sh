@@ -35,12 +35,14 @@ expected=$(printf '%s\n' \
   apps/local-qa-runtime/evidence-stager/tests/browser_screenshot.rs \
   apps/local-qa-runtime/evidence-stager/tests/runner_log.rs \
   apps/local-qa-runtime/guest-agent/src/main.rs \
+  apps/local-qa-runtime/host/src/admission.rs \
   apps/local-qa-runtime/host/src/coordinator.rs \
   apps/local-qa-runtime/host/src/executor.rs \
   apps/local-qa-runtime/host/src/journal.rs \
   apps/local-qa-runtime/host/src/lib.rs \
   apps/local-qa-runtime/host/src/main.rs \
   apps/local-qa-runtime/host/src/ownership.rs \
+  apps/local-qa-runtime/host/tests/admission_v2.rs \
   apps/local-qa-runtime/host/tests/environment_ownership.rs \
   apps/local-qa-runtime/host/tests/fail_closed.rs \
   apps/local-qa-runtime/host/tests/loopback_sqlite.rs \

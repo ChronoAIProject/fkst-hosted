@@ -97,6 +97,7 @@ test("contract registry and fixture metadata", () => {
     "qa.local-evidence/v1",
     "qa.local-worker-protocol/v1",
     "qa.local-run-admission/v1",
+    "qa.local-run-admission/v2",
     "qa.local-executor/v1",
   ]);
   assert.deepEqual(Object.keys(registry.types).sort(), [
@@ -112,6 +113,7 @@ test("contract registry and fixture metadata", () => {
     "LocalEvidenceObject",
     "LocalEvidenceObjectRef",
     "LocalQARunRequest",
+    "LocalQARunRequestV2",
     "LocalSanitizedObservation",
     "LocalSanitizedObservationRef",
     "LocalState",
@@ -122,6 +124,7 @@ test("contract registry and fixture metadata", () => {
     "LocalWorkerProtocolFailure",
     "LocalWorkerTerminalResult",
     "RunAcceptance",
+    "RunAcceptanceV2",
   ].sort());
   assert.equal(registry.types.ProjectionSpecimen?.fixture_only, true);
   assert.equal(registry.types.StrictUnionSpecimen?.fixture_only, true);
