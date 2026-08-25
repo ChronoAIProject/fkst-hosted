@@ -27,6 +27,11 @@
       "path": "contracts/qa.local-run-admission/v1/schema.json",
       "id": "urn:chronoai:fkst:qa-contracts:qa.local-run-admission:v1",
       "major": 1
+    },
+    "qa.local-executor/v1": {
+      "path": "contracts/qa.local-executor/v1/schema.json",
+      "id": "urn:chronoai:fkst:qa-contracts:qa.local-executor:v1",
+      "major": 1
     }
   },
   "types": {
@@ -54,6 +59,10 @@
     "LocalWorkerTerminalResult": { "schema": "qa.local-worker-protocol/v1", "pointer": "#/$defs/LocalWorkerTerminalResult" },
     "LocalWorkerProtocolFailure": { "schema": "qa.local-worker-protocol/v1", "pointer": "#/$defs/LocalWorkerProtocolFailure" },
     "LocalQARunRequest": { "schema": "qa.local-run-admission/v1", "pointer": "#/$defs/LocalQARunRequest" },
-    "RunAcceptance": { "schema": "qa.local-run-admission/v1", "pointer": "#/$defs/RunAcceptance" }
+    "RunAcceptance": { "schema": "qa.local-run-admission/v1", "pointer": "#/$defs/RunAcceptance" },
+    "ExecutorDescriptor": { "schema": "qa.local-executor/v1", "pointer": "#/$defs/ExecutorDescriptor" },
+    "ExecutorSelection": { "schema": "qa.local-executor/v1", "pointer": "#/$defs/ExecutorSelection" },
+    "ExecutorRequest": { "schema": "qa.local-executor/v1", "pointer": "#/$defs/ExecutorRequest" },
+    "ExecutorResult": { "schema": "qa.local-executor/v1", "pointer": "#/$defs/ExecutorResult" }
   }
 }

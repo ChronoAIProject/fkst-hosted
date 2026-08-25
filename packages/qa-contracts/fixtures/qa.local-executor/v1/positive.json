@@ -1,0 +1,4 @@
+[
+  {"schema_version":"qa.local-executor/v1","executor_id":"fake.browser","executor_version":"1.0.0","capabilities":["browser.observe"],"capability_digest":"sha256:0f447361154fd5aa70f1b6c830547ae0401a3b185174177a123d9dbce1dc41b1"},
+  {"schema_version":"qa.local-executor/v1","executor_id":"fake.api","executor_version":"1.0.0","capabilities":["api.request"],"capability_digest":"sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335"}
+]

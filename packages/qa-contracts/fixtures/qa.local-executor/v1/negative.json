@@ -1,0 +1,4 @@
+[
+  {"schema_version":"qa.local-executor/v1","executor_id":"fake.browser","executor_version":"1.0.0","capabilities":["browser.observe"],"capability_digest":"sha256:0000000000000000000000000000000000000000000000000000000000000000"},
+  {"schema_version":"qa.local-executor/v1","executor_id":"fake.browser","executor_version":"1.0.0","capabilities":["zeta","alpha"],"capability_digest":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}
+]

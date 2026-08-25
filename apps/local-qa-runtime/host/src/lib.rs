@@ -14,7 +14,7 @@ use std::thread;
 use std::time::Duration;
 
 use coordinator::CoordinatorHandle;
-use executor::PassingExecutor;
+use executor::InertExecutor;
 use fkst_qa_contracts::{validate_cancel_disposition, validate_event_cursor};
 use journal::{Admission, Cancellation, EventPayload};
 pub use journal::{Journal, OwnedHandle, ResourceIntent};
@@ -185,7 +185,7 @@ fn serve(config: StartupConfig, shutdown: Arc<AtomicBool>) -> Result<(), RunErro
     listener.set_nonblocking(true)?;
     let assigned_address = listener.local_addr()?;
     let mut coordinator =
-        CoordinatorHandle::start(&config.database_path, Box::new(PassingExecutor))?;
+        CoordinatorHandle::start(&config.database_path, Box::new(InertExecutor))?;
 
     let mut stdout = io::stdout().lock();
     writeln!(

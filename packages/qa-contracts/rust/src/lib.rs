@@ -28,12 +28,16 @@ const LOCAL_WORKER_SCHEMA_PATH: &str = "contracts/qa.local-worker-protocol/v1/sc
 const LOCAL_RUN_ADMISSION_SCHEMA: &str =
     include_str!("../../contracts/qa.local-run-admission/v1/schema.json");
 const LOCAL_RUN_ADMISSION_SCHEMA_PATH: &str = "contracts/qa.local-run-admission/v1/schema.json";
+const LOCAL_EXECUTOR_SCHEMA: &str =
+    include_str!("../../contracts/qa.local-executor/v1/schema.json");
+const LOCAL_EXECUTOR_SCHEMA_PATH: &str = "contracts/qa.local-executor/v1/schema.json";
 const EMBEDDED_SCHEMAS: &[(&str, &str)] = &[
     (FOUNDATION_SCHEMA_PATH, FOUNDATION_SCHEMA),
     (LOCAL_LIFECYCLE_SCHEMA_PATH, LOCAL_LIFECYCLE_SCHEMA),
     (LOCAL_EVIDENCE_SCHEMA_PATH, LOCAL_EVIDENCE_SCHEMA),
     (LOCAL_WORKER_SCHEMA_PATH, LOCAL_WORKER_SCHEMA),
     (LOCAL_RUN_ADMISSION_SCHEMA_PATH, LOCAL_RUN_ADMISSION_SCHEMA),
+    (LOCAL_EXECUTOR_SCHEMA_PATH, LOCAL_EXECUTOR_SCHEMA),
 ];
 const LOCAL_STATE_TYPE_NAME: &str = "LocalState";
 const EXECUTION_OUTCOME_TYPE_NAME: &str = "ExecutionOutcome";
@@ -71,6 +75,12 @@ const LOCAL_QA_RUN_REQUEST_TYPE_NAME: &str = "LocalQARunRequest";
 const RUN_ACCEPTANCE_TYPE_NAME: &str = "RunAcceptance";
 const LOCAL_RUN_ADMISSION_TYPE_NAMES: [&str; 2] =
     [LOCAL_QA_RUN_REQUEST_TYPE_NAME, RUN_ACCEPTANCE_TYPE_NAME];
+const LOCAL_EXECUTOR_TYPE_NAMES: [&str; 4] = [
+    "ExecutorDescriptor",
+    "ExecutorSelection",
+    "ExecutorRequest",
+    "ExecutorResult",
+];
 const MAX_DEPTH: usize = 128;
 const MAX_SAFE_INTEGER_TEXT: &str = "9007199254740991";
 
@@ -322,6 +332,24 @@ pub fn validate_local_qa_run_request(raw: &[u8]) -> Result<ValidatedValue, Contr
 
 pub fn validate_run_acceptance(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
     validate_run_acceptance_value(admit_json(raw)?)
+}
+
+pub fn validate_executor_descriptor(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    let validated = validate_registered_value(admit_json(raw)?, "ExecutorDescriptor")?;
+    validate_executor_descriptor_rules(validated.value())?;
+    Ok(validated)
+}
+
+pub fn validate_executor_selection(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    validate_registered_value(admit_json(raw)?, "ExecutorSelection")
+}
+
+pub fn validate_executor_request(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    validate_registered_value(admit_json(raw)?, "ExecutorRequest")
+}
+
+pub fn validate_executor_result(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    validate_registered_value(admit_json(raw)?, "ExecutorResult")
 }
 
 pub fn build_initial_run_acceptance(
@@ -801,6 +829,55 @@ fn validate_registry_value(registry: &Registry) -> Result<(), ContractError> {
                 format!("/types/{type_name}"),
             )));
         }
+    }
+    for type_name in LOCAL_EXECUTOR_TYPE_NAMES {
+        schema_for_registered_type(registry, type_name, embedded_schema)?;
+        let entry = registry
+            .types
+            .get(type_name)
+            .expect("registered type was resolved above");
+        if entry.fixture_only {
+            return Err(ContractError(Rejection::validation(
+                "invalid_embedded_registry",
+                format!("/types/{type_name}"),
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_executor_descriptor_rules(value: &Value) -> Result<(), ContractError> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| ContractError(Rejection::validation("schema_violation", "/")))?;
+    let capabilities = object
+        .get("capabilities")
+        .and_then(Value::as_array)
+        .ok_or_else(|| ContractError(Rejection::validation("schema_violation", "/capabilities")))?;
+    if capabilities.windows(2).any(|pair| pair[0].as_str() >= pair[1].as_str()) {
+        return Err(ContractError(Rejection::contract(
+            "contract.invalid_relation",
+            "capabilities_not_sorted",
+            "/capabilities",
+        )));
+    }
+    let mut projection = Map::new();
+    for key in ["capabilities", "executor_id", "executor_version", "schema_version"] {
+        projection.insert(
+            key.into(),
+            object
+                .get(key)
+                .cloned()
+                .ok_or_else(|| ContractError(Rejection::validation("schema_violation", "/")))?,
+        );
+    }
+    let digest = format!("sha256:{}", hex_digest(&canonicalize(&Value::Object(projection))?));
+    if object.get("capability_digest").and_then(Value::as_str) != Some(digest.as_str()) {
+        return Err(ContractError(Rejection::contract(
+            "contract.invalid_relation",
+            "capability_digest_mismatch",
+            "/capability_digest",
+        )));
     }
     Ok(())
 }
