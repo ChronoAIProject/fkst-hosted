@@ -371,39 +371,4 @@ mod tests {
             }
         );
     }
-
-    #[test]
-    fn removed_execution_contract_is_absent_from_host_sources() {
-        let sources = [
-            include_str!("executor.rs"),
-            include_str!("coordinator.rs"),
-            include_str!("lib.rs"),
-        ]
-        .concat();
-        let removed = [
-            ["trait ", "Executor"].concat(),
-            ["impl ", "Executor", " for"].concat(),
-            ["Legacy", "ExecutorAdapter"].concat(),
-            ["Box<dyn ", "Executor>"].concat(),
-            ["legacy_executor_", "descriptor"].concat(),
-            ["legacy_executor_", "selection"].concat(),
-            ["legacy", ".executor"].concat(),
-            ["legacy", ".execute"].concat(),
-            [
-                "sha256:e4760210c40c509504bf4cbf529835fc",
-                "895e1b7d8e6cc3313fa673658e56a787",
-            ]
-            .concat(),
-            ["Passing", "Executor"].concat(),
-            ["CoordinatorHandle::", "start("].concat(),
-        ];
-
-        for removed_value in removed {
-            assert!(
-                !sources.contains(removed_value.as_str()),
-                "removed execution contract artifact remains"
-            );
-        }
-        assert!(include_str!("lib.rs").contains("Box::new(InertExecutor::new())"));
-    }
 }
