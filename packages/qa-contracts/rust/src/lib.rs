@@ -854,7 +854,10 @@ fn validate_executor_descriptor_rules(value: &Value) -> Result<(), ContractError
         .get("capabilities")
         .and_then(Value::as_array)
         .ok_or_else(|| ContractError(Rejection::validation("schema_violation", "/capabilities")))?;
-    if capabilities.windows(2).any(|pair| pair[0].as_str() >= pair[1].as_str()) {
+    if capabilities
+        .windows(2)
+        .any(|pair| pair[0].as_str() >= pair[1].as_str())
+    {
         return Err(ContractError(Rejection::contract(
             "contract.invalid_relation",
             "capabilities_not_sorted",
@@ -862,7 +865,12 @@ fn validate_executor_descriptor_rules(value: &Value) -> Result<(), ContractError
         )));
     }
     let mut projection = Map::new();
-    for key in ["capabilities", "executor_id", "executor_version", "schema_version"] {
+    for key in [
+        "capabilities",
+        "executor_id",
+        "executor_version",
+        "schema_version",
+    ] {
         projection.insert(
             key.into(),
             object
@@ -871,7 +879,7 @@ fn validate_executor_descriptor_rules(value: &Value) -> Result<(), ContractError
                 .ok_or_else(|| ContractError(Rejection::validation("schema_violation", "/")))?,
         );
     }
-    let digest = format!("sha256:{}", hex_digest(&canonicalize(&Value::Object(projection))?));
+    let digest = sha256_digest(&canonicalize(&Value::Object(projection))?);
     if object.get("capability_digest").and_then(Value::as_str) != Some(digest.as_str()) {
         return Err(ContractError(Rejection::contract(
             "contract.invalid_relation",
@@ -2209,6 +2217,35 @@ impl<'de> Visitor<'de> for StrictValueVisitor {
 #[cfg(test)]
 mod registry_tests {
     use super::*;
+
+    #[test]
+    fn executor_capability_digests_match_shared_vectors() {
+        for (descriptor, expected_digest) in [
+            (
+                serde_json::json!({
+                    "capabilities": ["browser.observe"],
+                    "executor_id": "fake.browser",
+                    "executor_version": "1.0.0",
+                    "schema_version": "qa.local-executor/v1"
+                }),
+                "sha256:0f447361154fd5aa70f1b6c830547ae0401a3b185174177a123d9dbce1dc41b1",
+            ),
+            (
+                serde_json::json!({
+                    "capabilities": ["api.request"],
+                    "executor_id": "fake.api",
+                    "executor_version": "1.0.0",
+                    "schema_version": "qa.local-executor/v1"
+                }),
+                "sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335",
+            ),
+        ] {
+            assert_eq!(
+                sha256_digest(&canonicalize(&descriptor).expect("canonical descriptor")),
+                expected_digest
+            );
+        }
+    }
 
     #[test]
     fn registry_resolution_fails_closed() {
