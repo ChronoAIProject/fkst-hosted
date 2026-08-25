@@ -10,9 +10,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use rusqlite::{Connection, OptionalExtension};
 
 const CREATED_BODY: &[u8] =
+    b"{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"accepted\",\"event_sequence\":1}\n";
+const TERMINAL_BODY: &[u8] = b"{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"terminal\",\"execution_outcome\":\"blocked\",\"latest_event_sequence\":9}\n";
+const LEGACY_CREATED_BODY: &[u8] =
     b"{\"run_id\":\"run-001\",\"state\":\"accepted\",\"event_sequence\":1}\n";
-const TERMINAL_BODY: &[u8] = b"{\"run_id\":\"run-001\",\"state\":\"terminal\",\"execution_outcome\":\"blocked\",\"latest_event_sequence\":9}\n";
-const EVENTS_BODY: &[u8] = b"{\"run_id\":\"run-001\",\"after\":0,\"events\":[{\"sequence\":1,\"event_type\":\"run.accepted\",\"event\":{\"run_id\":\"run-001\",\"state\":\"accepted\"}},{\"sequence\":2,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"preparing\"}},{\"sequence\":3,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"ready\"}},{\"sequence\":4,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"executing\"}},{\"sequence\":5,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"staging_evidence\"}},{\"sequence\":6,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"cleaning_up_execution\"}},{\"sequence\":7,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"uploading\"}},{\"sequence\":8,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"finalizing_local\"}},{\"sequence\":9,\"event_type\":\"run.completed\",\"event\":{\"run_id\":\"run-001\",\"state\":\"terminal\",\"execution_outcome\":\"blocked\"}}],\"next_after\":9}\n";
+const LEGACY_TERMINAL_BODY: &[u8] = b"{\"run_id\":\"run-001\",\"state\":\"terminal\",\"execution_outcome\":\"blocked\",\"latest_event_sequence\":9}\n";
+const EVENTS_BODY: &[u8] = b"{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"after\":0,\"events\":[{\"sequence\":1,\"event_type\":\"run.accepted\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"accepted\"}},{\"sequence\":2,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"preparing\"}},{\"sequence\":3,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"ready\"}},{\"sequence\":4,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"executing\"}},{\"sequence\":5,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"staging_evidence\"}},{\"sequence\":6,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"cleaning_up_execution\"}},{\"sequence\":7,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"uploading\"}},{\"sequence\":8,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"finalizing_local\"}},{\"sequence\":9,\"event_type\":\"run.completed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"terminal\",\"execution_outcome\":\"blocked\"}}],\"next_after\":9}\n";
 const CONFLICT_BODY: &[u8] = b"{\"type\":\"about:blank\",\"title\":\"Conflict\",\"status\":409,\"detail\":\"run_id is already accepted under a different Idempotency-Key\"}\n";
 const REQUEST_DIGEST: &str = "c6da30d2cbe81af624c4e364e21cdad9dc2510d2e2ff9a02bb5bd6c325a25428";
 const HEALTH_BODY: &[u8] =
@@ -236,16 +239,21 @@ fn insert_unclaimed_run(database_path: &Path) {
     connection
         .execute_batch(
             "INSERT INTO accepted_requests VALUES (
-                 'run-001',
+                 '00000000-0000-0000-0000-000000000001',
                  'idem-001',
                  'c6da30d2cbe81af624c4e364e21cdad9dc2510d2e2ff9a02bb5bd6c325a25428',
-                 X'7B2272756E5F6964223A2272756E2D303031222C227374617465223A226163636570746564222C226576656E745F73657175656E6365223A317D0A'
+                 CAST('{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"accepted\",\"event_sequence\":1}' || char(10) AS BLOB)
              );
-             INSERT INTO runs (run_id, state, execution_outcome)
-             VALUES ('run-001', 'accepted', NULL);
+             INSERT INTO runs (run_id, executor_run_id, state, execution_outcome)
+             VALUES (
+                 '00000000-0000-0000-0000-000000000001',
+                 '00000000-0000-0000-0000-000000000001',
+                 'accepted',
+                 NULL
+             );
              INSERT INTO events VALUES (
-                 'run-001', 1, 'run.accepted',
-                 '{\"run_id\":\"run-001\",\"state\":\"accepted\"}'
+                 '00000000-0000-0000-0000-000000000001', 1, 'run.accepted',
+                 '{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"accepted\"}'
              );",
         )
         .expect("unclaimed Run fixture must be inserted");
@@ -253,7 +261,7 @@ fn insert_unclaimed_run(database_path: &Path) {
 
 fn submit_with_total_head_bytes(port: u16, total_head_bytes: usize) -> HttpResponse {
     let prefix = format!(
-        "PUT /v1/runs/run-001 HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nIdempotency-Key: idem-001\r\nContent-Length: 16\r\nX-Fill: "
+        "PUT /v1/runs/00000000-0000-0000-0000-000000000001 HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nIdempotency-Key: idem-001\r\nContent-Length: 16\r\nX-Fill: "
     );
     let suffix = "\r\nConnection: close\r\n\r\n";
     assert!(
@@ -306,7 +314,7 @@ fn submit_accepts_exact_maximum_total_head_bytes() {
         "application/json",
         CREATED_BODY,
     );
-    wait_for_exact_get(host.port, "/v1/runs/run-001", TERMINAL_BODY);
+    wait_for_exact_get(host.port, "/v1/runs/00000000-0000-0000-0000-000000000001", TERMINAL_BODY);
     host.stop();
     assert_exact_journal(&database_path, "idem-001");
 }
@@ -335,7 +343,7 @@ fn truncated_submit_body_returns_complete_error_without_mutation() {
         .expect("loopback host must accept connections");
     write!(
         stream,
-        "PUT /v1/runs/run-001 HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Type: application/json\r\nIdempotency-Key: idem-001\r\nContent-Length: 16\r\nConnection: close\r\n\r\n",
+        "PUT /v1/runs/00000000-0000-0000-0000-000000000001 HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Type: application/json\r\nIdempotency-Key: idem-001\r\nContent-Length: 16\r\nConnection: close\r\n\r\n",
         host.port
     )
     .expect("truncated submit request head must be written");
@@ -366,7 +374,7 @@ fn delayed_nonempty_cancel_body_returns_complete_error_without_mutation() {
         .expect("loopback host must accept connections");
     write!(
         stream,
-        "POST /v1/runs/run-001:cancel HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nIdempotency-Key: cancel-001\r\nContent-Length: 1\r\nConnection: close\r\n\r\n",
+        "POST /v1/runs/00000000-0000-0000-0000-000000000001:cancel HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nIdempotency-Key: cancel-001\r\nContent-Length: 1\r\nConnection: close\r\n\r\n",
         host.port
     )
     .expect("cancel request headers must be written");
@@ -415,7 +423,7 @@ fn oversized_cancel_body_declaration_is_rejected_without_waiting_for_body() {
         .expect("loopback host must accept connections");
     write!(
         stream,
-        "POST /v1/runs/run-001:cancel HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nIdempotency-Key: cancel-001\r\nContent-Length: 65\r\nConnection: close\r\n\r\n",
+        "POST /v1/runs/00000000-0000-0000-0000-000000000001:cancel HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nIdempotency-Key: cancel-001\r\nContent-Length: 65\r\nConnection: close\r\n\r\n",
         host.port
     )
     .expect("oversized cancel request headers must be written");
@@ -454,32 +462,32 @@ fn exact_submission_completes_replays_and_restarts_without_duplicate_work() {
 
     let first_host = HostProcess::start(&database_path);
     assert_response(
-        submit(first_host.port, "run-001", "idem-001"),
+        submit(first_host.port, "00000000-0000-0000-0000-000000000001", "idem-001"),
         "HTTP/1.1 201 Created",
         "application/json",
         CREATED_BODY,
     );
     assert_response(
-        submit(first_host.port, "run-001", "idem-001"),
+        submit(first_host.port, "00000000-0000-0000-0000-000000000001", "idem-001"),
         "HTTP/1.1 200 OK",
         "application/json",
         CREATED_BODY,
     );
     assert_response(
-        submit(first_host.port, "run-001", "idem-002"),
+        submit(first_host.port, "00000000-0000-0000-0000-000000000001", "idem-002"),
         "HTTP/1.1 409 Conflict",
         "application/problem+json",
         CONFLICT_BODY,
     );
-    wait_for_exact_get(first_host.port, "/v1/runs/run-001", TERMINAL_BODY);
+    wait_for_exact_get(first_host.port, "/v1/runs/00000000-0000-0000-0000-000000000001", TERMINAL_BODY);
     assert_response(
-        get(first_host.port, "/v1/runs/run-001/events?after=0&limit=100"),
+        get(first_host.port, "/v1/runs/00000000-0000-0000-0000-000000000001/events?after=0&limit=100"),
         "HTTP/1.1 200 OK",
         "application/json",
         EVENTS_BODY,
     );
     assert_response(
-        submit(first_host.port, "run-001", "idem-001"),
+        submit(first_host.port, "00000000-0000-0000-0000-000000000001", "idem-001"),
         "HTTP/1.1 200 OK",
         "application/json",
         CREATED_BODY,
@@ -489,13 +497,13 @@ fn exact_submission_completes_replays_and_restarts_without_duplicate_work() {
 
     let restarted_host = HostProcess::start(&database_path);
     assert_response(
-        submit(restarted_host.port, "run-001", "idem-001"),
+        submit(restarted_host.port, "00000000-0000-0000-0000-000000000001", "idem-001"),
         "HTTP/1.1 200 OK",
         "application/json",
         CREATED_BODY,
     );
     assert_response(
-        get(restarted_host.port, "/v1/runs/run-001"),
+        get(restarted_host.port, "/v1/runs/00000000-0000-0000-0000-000000000001"),
         "HTTP/1.1 200 OK",
         "application/json",
         TERMINAL_BODY,
@@ -503,7 +511,7 @@ fn exact_submission_completes_replays_and_restarts_without_duplicate_work() {
     assert_response(
         get(
             restarted_host.port,
-            "/v1/runs/run-001/events?after=0&limit=100",
+            "/v1/runs/00000000-0000-0000-0000-000000000001/events?after=0&limit=100",
         ),
         "HTTP/1.1 200 OK",
         "application/json",
@@ -525,7 +533,7 @@ fn concurrent_different_keys_create_exactly_one_acceptance() {
         let port = host.port;
         threads.push(thread::spawn(move || {
             barrier.wait();
-            (key, submit(port, "run-001", key))
+            (key, submit(port, "00000000-0000-0000-0000-000000000001", key))
         }));
     }
     barrier.wait();
@@ -540,7 +548,7 @@ fn concurrent_different_keys_create_exactly_one_acceptance() {
     assert_eq!(results[1].1.status_line, "HTTP/1.1 409 Conflict");
     assert_eq!(results[1].1.body, CONFLICT_BODY);
     let accepted_key = results[0].0;
-    wait_for_exact_get(host.port, "/v1/runs/run-001", TERMINAL_BODY);
+    wait_for_exact_get(host.port, "/v1/runs/00000000-0000-0000-0000-000000000001", TERMINAL_BODY);
     host.stop();
 
     assert_exact_journal(&database_path, accepted_key);
@@ -560,61 +568,61 @@ fn reads_cancellation_and_restart_match_the_durable_contract() {
     );
     insert_unclaimed_run(&database_path);
     assert_response(
-        get(host.port, "/v1/runs/run-001"),
+        get(host.port, "/v1/runs/00000000-0000-0000-0000-000000000001"),
         "HTTP/1.1 200 OK",
         "application/json",
-        b"{\"run_id\":\"run-001\",\"state\":\"accepted\",\"latest_event_sequence\":1}\n",
+        b"{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"accepted\",\"latest_event_sequence\":1}\n",
     );
     assert_response(
-        get(host.port, "/v1/runs/run-001/events?after=0&limit=100"),
+        get(host.port, "/v1/runs/00000000-0000-0000-0000-000000000001/events?after=0&limit=100"),
         "HTTP/1.1 200 OK",
         "application/json",
-        b"{\"run_id\":\"run-001\",\"after\":0,\"events\":[{\"sequence\":1,\"event_type\":\"run.accepted\",\"event\":{\"run_id\":\"run-001\",\"state\":\"accepted\"}}],\"next_after\":1}\n",
+        b"{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"after\":0,\"events\":[{\"sequence\":1,\"event_type\":\"run.accepted\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"accepted\"}}],\"next_after\":1}\n",
     );
     assert_response(
-        get(host.port, "/v1/runs/run-001/events?limit=1&after=1"),
+        get(host.port, "/v1/runs/00000000-0000-0000-0000-000000000001/events?limit=1&after=1"),
         "HTTP/1.1 200 OK",
         "application/json",
-        b"{\"run_id\":\"run-001\",\"after\":1,\"events\":[],\"next_after\":1}\n",
+        b"{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"after\":1,\"events\":[],\"next_after\":1}\n",
     );
     assert_response(
-        cancel(host.port, "run-001", "cancel-001"),
+        cancel(host.port, "00000000-0000-0000-0000-000000000001", "cancel-001"),
         "HTTP/1.1 202 Accepted",
         "application/json",
-        b"{\"run_id\":\"run-001\",\"disposition\":\"accepted\",\"event_sequence\":2}\n",
+        b"{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"disposition\":\"accepted\",\"event_sequence\":2}\n",
     );
     assert_response(
-        cancel(host.port, "run-001", "cancel-002"),
+        cancel(host.port, "00000000-0000-0000-0000-000000000001", "cancel-002"),
         "HTTP/1.1 200 OK",
         "application/json",
-        b"{\"run_id\":\"run-001\",\"disposition\":\"already_accepted\",\"event_sequence\":2}\n",
+        b"{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"disposition\":\"already_accepted\",\"event_sequence\":2}\n",
     );
     assert_response(
-        get(host.port, "/v1/runs/run-001/events?after=1&limit=1"),
+        get(host.port, "/v1/runs/00000000-0000-0000-0000-000000000001/events?after=1&limit=1"),
         "HTTP/1.1 200 OK",
         "application/json",
-        b"{\"run_id\":\"run-001\",\"after\":1,\"events\":[{\"sequence\":2,\"event_type\":\"run.cancel_requested\",\"event\":{\"run_id\":\"run-001\",\"state\":\"accepted\"}}],\"next_after\":2}\n",
+        b"{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"after\":1,\"events\":[{\"sequence\":2,\"event_type\":\"run.cancel_requested\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"accepted\"}}],\"next_after\":2}\n",
     );
     host.stop();
 
     let restarted = HostProcess::start(&database_path);
     assert_response(
-        submit(restarted.port, "run-001", "idem-001"),
+        submit(restarted.port, "00000000-0000-0000-0000-000000000001", "idem-001"),
         "HTTP/1.1 200 OK",
         "application/json",
         CREATED_BODY,
     );
     assert_response(
-        get(restarted.port, "/v1/runs/run-001"),
+        get(restarted.port, "/v1/runs/00000000-0000-0000-0000-000000000001"),
         "HTTP/1.1 200 OK",
         "application/json",
-        b"{\"run_id\":\"run-001\",\"state\":\"accepted\",\"latest_event_sequence\":2}\n",
+        b"{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"accepted\",\"latest_event_sequence\":2}\n",
     );
     assert_response(
-        cancel(restarted.port, "run-001", "cancel-003"),
+        cancel(restarted.port, "00000000-0000-0000-0000-000000000001", "cancel-003"),
         "HTTP/1.1 200 OK",
         "application/json",
-        b"{\"run_id\":\"run-001\",\"disposition\":\"already_accepted\",\"event_sequence\":2}\n",
+        b"{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"disposition\":\"already_accepted\",\"event_sequence\":2}\n",
     );
     restarted.stop();
 
@@ -654,7 +662,7 @@ fn concurrent_cancellation_has_one_winner() {
         let port = host.port;
         threads.push(thread::spawn(move || {
             barrier.wait();
-            cancel(port, "run-001", &format!("cancel-{index}"))
+            cancel(port, "00000000-0000-0000-0000-000000000001", &format!("cancel-{index}"))
         }));
     }
     barrier.wait();
@@ -702,16 +710,22 @@ fn terminal_and_invalid_requests_are_mutation_free() {
     let temp = TempDirectory::new("negative-contracts");
     let database_path = temp.database_path();
     let host = HostProcess::start(&database_path);
+    assert_response(
+        submit(host.port, "run-001", "idem-legacy"),
+        "HTTP/1.1 400 Bad Request",
+        "application/problem+json",
+        INVALID_SUBMIT_BODY,
+    );
     assert_eq!(
-        submit(host.port, "run-001", "idem-001").status_line,
+        submit(host.port, "00000000-0000-0000-0000-000000000001", "idem-001").status_line,
         "HTTP/1.1 201 Created"
     );
-    wait_for_exact_get(host.port, "/v1/runs/run-001", TERMINAL_BODY);
+    wait_for_exact_get(host.port, "/v1/runs/00000000-0000-0000-0000-000000000001", TERMINAL_BODY);
     assert_response(
-        cancel(host.port, "run-001", "cancel-terminal"),
+        cancel(host.port, "00000000-0000-0000-0000-000000000001", "cancel-terminal"),
         "HTTP/1.1 200 OK",
         "application/json",
-        b"{\"run_id\":\"run-001\",\"disposition\":\"terminal\",\"event_sequence\":9}\n",
+        b"{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"disposition\":\"terminal\",\"event_sequence\":9}\n",
     );
     assert_response(
         get(host.port, "/v1/runs/missing"),
@@ -726,11 +740,11 @@ fn terminal_and_invalid_requests_are_mutation_free() {
         NOT_FOUND_BODY,
     );
     for target in [
-        "/v1/runs/run-001/events?after_sequence=0&limit=1",
-        "/v1/runs/run-001/events?after=0&limit=0",
-        "/v1/runs/run-001/events?after=0&limit=1&extra=1",
-        "/v1/runs/run-001/events?after=%GG&limit=1",
-        "/v1/runs/run-001/events?after=9007199254740992&limit=1",
+        "/v1/runs/00000000-0000-0000-0000-000000000001/events?after_sequence=0&limit=1",
+        "/v1/runs/00000000-0000-0000-0000-000000000001/events?after=0&limit=0",
+        "/v1/runs/00000000-0000-0000-0000-000000000001/events?after=0&limit=1&extra=1",
+        "/v1/runs/00000000-0000-0000-0000-000000000001/events?after=%GG&limit=1",
+        "/v1/runs/00000000-0000-0000-0000-000000000001/events?after=9007199254740992&limit=1",
     ] {
         assert_response(
             get(host.port, target),
@@ -743,7 +757,7 @@ fn terminal_and_invalid_requests_are_mutation_free() {
         request(
             host.port,
             "POST",
-            "/v1/runs/run-001:cancel",
+            "/v1/runs/00000000-0000-0000-0000-000000000001:cancel",
             &[("Content-Length", "0")],
             b"",
         ),
@@ -755,7 +769,7 @@ fn terminal_and_invalid_requests_are_mutation_free() {
         request(
             host.port,
             "POST",
-            "/v1/runs/run-001:cancel?x=1",
+            "/v1/runs/00000000-0000-0000-0000-000000000001:cancel?x=1",
             &[("Idempotency-Key", "cancel-001"), ("Content-Length", "0")],
             b"",
         ),
@@ -767,7 +781,7 @@ fn terminal_and_invalid_requests_are_mutation_free() {
         request(
             host.port,
             "POST",
-            "/v1/runs/run-001:cancel",
+            "/v1/runs/00000000-0000-0000-0000-000000000001:cancel",
             &[("Idempotency-Key", "cancel-001"), ("Content-Length", "1")],
             b"x",
         ),
@@ -776,7 +790,7 @@ fn terminal_and_invalid_requests_are_mutation_free() {
         INVALID_CANCEL_BODY,
     );
     assert_response(
-        request(host.port, "DELETE", "/v1/runs/run-001", &[], b""),
+        request(host.port, "DELETE", "/v1/runs/00000000-0000-0000-0000-000000000001", &[], b""),
         "HTTP/1.1 405 Method Not Allowed",
         "application/problem+json",
         METHOD_NOT_ALLOWED_BODY,
@@ -825,30 +839,52 @@ fn version_one_database_migrates_without_changing_accepted_bytes() {
     let host = HostProcess::start(&database_path);
     assert_response(
         submit(host.port, "run-001", "idem-001"),
-        "HTTP/1.1 200 OK",
-        "application/json",
-        CREATED_BODY,
+        "HTTP/1.1 400 Bad Request",
+        "application/problem+json",
+        INVALID_SUBMIT_BODY,
     );
     assert_response(
         get(host.port, "/v1/runs/run-001"),
         "HTTP/1.1 200 OK",
         "application/json",
-        TERMINAL_BODY,
+        LEGACY_TERMINAL_BODY,
     );
+    let executor_run_id = Connection::open(&database_path)
+        .unwrap()
+        .query_row(
+            "SELECT executor_run_id FROM runs WHERE run_id = 'run-001'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap();
+    fkst_qa_contracts::validate_scalar("UUID", &executor_run_id).unwrap();
+    assert_ne!(executor_run_id, "run-001");
     host.stop();
+    let restarted = HostProcess::start(&database_path);
+    restarted.stop();
     let connection = Connection::open(&database_path).unwrap();
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT executor_run_id FROM runs WHERE run_id = 'run-001'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+        executor_run_id
+    );
     assert_eq!(
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        4
+        5
     );
     assert_eq!(
         connection
             .query_row("SELECT response_json FROM accepted_requests", [], |row| row
                 .get::<_, Vec<u8>>(0))
             .unwrap(),
-        CREATED_BODY
+        LEGACY_CREATED_BODY
     );
 }
 
@@ -876,9 +912,9 @@ fn version_two_database_migrates_without_rewriting_durable_data() {
     let host = HostProcess::start(&database_path);
     assert_response(
         submit(host.port, "run-001", "idem-001"),
-        "HTTP/1.1 200 OK",
-        "application/json",
-        CREATED_BODY,
+        "HTTP/1.1 400 Bad Request",
+        "application/problem+json",
+        INVALID_SUBMIT_BODY,
     );
     assert_response(
         get(host.port, "/v1/runs/run-001"),
@@ -893,7 +929,7 @@ fn version_two_database_migrates_without_rewriting_durable_data() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        4
+        5
     );
     assert_eq!(
         connection
@@ -907,7 +943,7 @@ fn version_two_database_migrates_without_rewriting_durable_data() {
             "run-001".to_owned(),
             "idem-001".to_owned(),
             REQUEST_DIGEST.to_owned(),
-            CREATED_BODY.to_vec(),
+            LEGACY_CREATED_BODY.to_vec(),
         )
     );
     assert_eq!(
@@ -999,7 +1035,7 @@ fn assert_exact_journal(database_path: &Path, accepted_key: &str) {
     assert_eq!(
         accepted,
         Some((
-            "run-001".to_owned(),
+            "00000000-0000-0000-0000-000000000001".to_owned(),
             accepted_key.to_owned(),
             REQUEST_DIGEST.to_owned(),
             CREATED_BODY.to_vec(),
@@ -1016,24 +1052,26 @@ fn assert_exact_journal(database_path: &Path, accepted_key: &str) {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .expect("journal version must be readable"),
-        4
+        5
     );
     assert_eq!(
         connection
             .query_row(
-                "SELECT run_id, state, execution_outcome FROM runs",
+                "SELECT run_id, executor_run_id, state, execution_outcome FROM runs",
                 [],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
                     ))
                 }
             )
             .expect("Run row must be readable"),
         (
-            "run-001".to_owned(),
+            "00000000-0000-0000-0000-000000000001".to_owned(),
+            "00000000-0000-0000-0000-000000000001".to_owned(),
             "terminal".to_owned(),
             Some("blocked".to_owned()),
         )
@@ -1053,7 +1091,7 @@ fn assert_exact_journal(database_path: &Path, accepted_key: &str) {
             )
             .expect("attempt row must be readable"),
         (
-            "run-001".to_owned(),
+            "00000000-0000-0000-0000-000000000001".to_owned(),
             "completed".to_owned(),
             Some("blocked".to_owned()),
         )
@@ -1090,7 +1128,7 @@ fn assert_exact_journal(database_path: &Path, accepted_key: &str) {
                 |row| row.get::<_, String>(0)
             )
             .expect("completed Event must be readable"),
-        "{\"run_id\":\"run-001\",\"state\":\"terminal\",\"execution_outcome\":\"blocked\"}"
+        "{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"terminal\",\"execution_outcome\":\"blocked\"}"
     );
     assert_eq!(
         connection

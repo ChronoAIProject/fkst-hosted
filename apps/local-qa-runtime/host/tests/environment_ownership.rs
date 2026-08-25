@@ -129,7 +129,7 @@ fn insert_run(path: &Path) {
     let connection = Connection::open(path).expect("database must open");
     connection
         .execute(
-            "INSERT INTO runs (run_id, state) VALUES (?1, 'accepted')",
+            "INSERT INTO runs (run_id, executor_run_id, state) VALUES (?1, ?1, 'accepted')",
             [RUN_ID],
         )
         .expect("canonical run must exist before intent insertion");
@@ -341,7 +341,7 @@ fn environment_bind_walks_the_host_and_replays_without_provider_effect() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        4
+        5
     );
     let foreign_key_errors: Vec<(String, i64, String, i64)> = connection
         .prepare("PRAGMA foreign_key_check")
@@ -438,15 +438,15 @@ fn version_three_migration_preserves_lifecycle_rows() {
         drop(journal);
         let connection = Connection::open(&path).expect("fixture database must open");
         connection
-            .execute(
-                "INSERT INTO runs (run_id, state) VALUES (?1, 'accepted')",
-                [RUN_ID],
-            )
-            .expect("lifecycle row must be inserted");
-        connection
             .execute_batch(
                 "DROP TABLE owned_handles;
                  DROP TABLE resource_intents;
+                 DROP INDEX runs_executor_run_id_unique;
+                 DROP TRIGGER runs_executor_run_id_insert;
+                 DROP TRIGGER runs_executor_run_id_update;
+                 ALTER TABLE runs DROP COLUMN executor_run_id;
+                 INSERT INTO runs (run_id, state)
+                 VALUES ('00000000-0000-4000-8000-000000000001', 'accepted');
                  PRAGMA user_version = 3;",
             )
             .expect("version three fixture must be prepared");
@@ -465,7 +465,7 @@ fn version_three_migration_preserves_lifecycle_rows() {
     let version: i64 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("schema version must be readable");
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
     let foreign_key_errors: Vec<(String, i64, String, i64)> = connection
         .prepare("PRAGMA foreign_key_check")
         .unwrap()
