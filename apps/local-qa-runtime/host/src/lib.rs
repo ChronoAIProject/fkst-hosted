@@ -16,7 +16,9 @@ use std::time::Duration;
 
 use admission::Mvp0DeterministicAttemptBindingVerifier;
 use coordinator::CoordinatorHandle;
-use executor::{inert_executor_selection, ExecutorRegistry, FakeApiAdmissionExecutor, InertExecutor};
+use executor::{
+    inert_executor_selection, ExecutorRegistry, FakeApiAdmissionExecutor, InertExecutor,
+};
 use fkst_qa_contracts::{validate_cancel_disposition, validate_event_cursor, validate_scalar};
 use journal::{Cancellation, EventPayload};
 pub use journal::{Journal, OwnedHandle, ResourceIntent, StoredV2Admission};
@@ -193,7 +195,8 @@ pub fn serve_with_clock(
     listener.set_nonblocking(true)?;
     let assigned_address = listener.local_addr()?;
     let registry = ExecutorRegistry::new(vec![Box::new(InertExecutor::new())])?;
-    let admission_registry = ExecutorRegistry::new(vec![Box::new(FakeApiAdmissionExecutor::new())])?;
+    let admission_registry =
+        ExecutorRegistry::new(vec![Box::new(FakeApiAdmissionExecutor::new())])?;
     let admission_verifier = Mvp0DeterministicAttemptBindingVerifier;
     let mut coordinator = CoordinatorHandle::start_versioned(
         &config.database_path,

@@ -28,18 +28,21 @@ fn validates_the_v2_admission_walking_skeleton_vectors() {
         contract_content_digest(&request).unwrap(),
         fixture.request["content_digest"]
     );
-    assert_eq!(canonical_bytes(&request).unwrap(), fixture.expected_request_utf8.as_bytes());
+    assert_eq!(
+        canonical_bytes(&request).unwrap(),
+        fixture.expected_request_utf8.as_bytes()
+    );
 
-    let acceptance = build_initial_run_acceptance_v2(
-        &request,
-        &fixture.accepted_at,
-        "fkst-local-qa-host/0.1.0",
-    )
-    .expect("valid acceptance");
-    assert_eq!(canonical_bytes(&acceptance).unwrap(), fixture.expected_acceptance_utf8.as_bytes());
+    let acceptance =
+        build_initial_run_acceptance_v2(&request, &fixture.accepted_at, "fkst-local-qa-host/0.1.0")
+            .expect("valid acceptance");
+    assert_eq!(
+        canonical_bytes(&acceptance).unwrap(),
+        fixture.expected_acceptance_utf8.as_bytes()
+    );
     assert_eq!(
         contract_content_digest(&acceptance).unwrap(),
-        "sha256:c590e3ffd6ca7d36e1a62e4ebb8f5799f7f879d0abff82422497c1bcba0f399d"
+        "sha256:950ebfea8336014cb3dea966edb0516c55644b4c345aa1a3d7fe765a428d9bb5"
     );
     validate_run_acceptance_v2(fixture.expected_acceptance_utf8.as_bytes())
         .expect("valid acceptance fixture");

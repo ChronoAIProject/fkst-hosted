@@ -40,8 +40,14 @@ fn fixture() -> Fixture {
 }
 
 fn database_path() -> PathBuf {
-    let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    std::env::temp_dir().join(format!("fkst-admission-v2-{}-{nonce}.sqlite", std::process::id()))
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "fkst-admission-v2-{}-{nonce}.sqlite",
+        std::process::id()
+    ))
 }
 
 fn start_host(database: &PathBuf) -> Host {
@@ -68,7 +74,11 @@ fn start_host(database: &PathBuf) -> Host {
     });
     for _ in 0..100 {
         if TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            return Host { shutdown, join: Some(join), port };
+            return Host {
+                shutdown,
+                join: Some(join),
+                port,
+            };
         }
         thread::sleep(Duration::from_millis(10));
     }
@@ -89,7 +99,11 @@ fn request(port: u16, method: &str, key: &str, body: &str) -> Vec<u8> {
 }
 
 fn body(response: &[u8]) -> &[u8] {
-    let offset = response.windows(4).position(|bytes| bytes == b"\r\n\r\n").unwrap() + 4;
+    let offset = response
+        .windows(4)
+        .position(|bytes| bytes == b"\r\n\r\n")
+        .unwrap()
+        + 4;
     &response[offset..]
 }
 
@@ -98,9 +112,11 @@ fn with_idempotency_key(body: &str, key: &str) -> String {
     value["idempotency_key"] = key.into();
     value.as_object_mut().unwrap().remove("content_digest");
     let projected = serde_json::to_vec(&value).unwrap();
-    let digest = sha256_digest(&canonical_admitted_bytes(admit_json(&projected).unwrap()).unwrap());
+    let admitted = admit_json(&projected).unwrap();
+    let digest = sha256_digest(&canonical_admitted_bytes(&admitted).unwrap());
     value["content_digest"] = digest.into();
-    String::from_utf8(canonical_admitted_bytes(admit_json(&serde_json::to_vec(&value).unwrap()).unwrap()).unwrap()).unwrap()
+    let admitted = admit_json(&serde_json::to_vec(&value).unwrap()).unwrap();
+    String::from_utf8(canonical_admitted_bytes(&admitted).unwrap()).unwrap()
 }
 
 #[test]
@@ -109,24 +125,53 @@ fn admits_replays_conflicts_and_recovers_one_v2_request() {
     let database = database_path();
     {
         let host = start_host(&database);
-        let created = request(host.port, "PUT", "idem_0002", &fixture.expected_request_utf8);
+        let created = request(
+            host.port,
+            "PUT",
+            "idem_0002",
+            &fixture.expected_request_utf8,
+        );
         assert!(created.starts_with(b"HTTP/1.1 201 Created\r\n"));
-        assert_eq!(body(&created), format!("{}\n", fixture.expected_acceptance_utf8).as_bytes());
-        let replay = request(host.port, "PUT", "idem_0002", &fixture.expected_request_utf8);
+        assert_eq!(
+            body(&created),
+            format!("{}\n", fixture.expected_acceptance_utf8).as_bytes()
+        );
+        let replay = request(
+            host.port,
+            "PUT",
+            "idem_0002",
+            &fixture.expected_request_utf8,
+        );
         assert!(replay.starts_with(b"HTTP/1.1 200 OK\r\n"));
         assert_eq!(body(&replay), body(&created));
         let changed = with_idempotency_key(&fixture.expected_request_utf8, "different");
         let conflict = request(host.port, "PUT", "different", &changed);
         assert!(conflict.starts_with(b"HTTP/1.1 409 Conflict\r\n"));
-        let post = request(host.port, "POST", "idem_0002", &fixture.expected_request_utf8);
+        let post = request(
+            host.port,
+            "POST",
+            "idem_0002",
+            &fixture.expected_request_utf8,
+        );
         assert!(post.starts_with(b"HTTP/1.1 405 Method Not Allowed\r\n"));
     }
     let journal = Journal::open(&database).unwrap();
-    let stored = journal.stored_v2_admission("00000000-0000-0000-0000-000000000002").unwrap().unwrap();
-    assert_eq!(stored.acceptance_bytes, format!("{}\n", fixture.expected_acceptance_utf8).as_bytes());
+    let stored = journal
+        .stored_v2_admission("00000000-0000-0000-0000-000000000002")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        stored.acceptance_bytes,
+        format!("{}\n", fixture.expected_acceptance_utf8).as_bytes()
+    );
     drop(journal);
     let restarted = start_host(&database);
-    let replay = request(restarted.port, "PUT", "idem_0002", &fixture.expected_request_utf8);
+    let replay = request(
+        restarted.port,
+        "PUT",
+        "idem_0002",
+        &fixture.expected_request_utf8,
+    );
     assert!(replay.starts_with(b"HTTP/1.1 200 OK\r\n"));
     let _ = fs::remove_file(database);
 }
