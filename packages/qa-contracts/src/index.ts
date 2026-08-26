@@ -1064,38 +1064,72 @@ function resolveRegisteredReferences(
   value: unknown,
   registry: ContractRegistry,
 ): Record<string, unknown> {
-  const resolved = resolveRegisteredReferenceValue(value, registry);
+  const context: ReferenceResolutionContext = {
+    activeReferences: new Set<string>(),
+    resolvedReferenceCount: 0,
+  };
+  const resolved = resolveRegisteredReferenceValue(value, registry, context);
   if (!isRecord(resolved)) {
     throw validationError("invalid_embedded_schema", "/");
   }
   return resolved;
 }
 
-function resolveRegisteredReferenceValue(value: unknown, registry: ContractRegistry): unknown {
+interface ReferenceResolutionContext {
+  readonly activeReferences: Set<string>;
+  resolvedReferenceCount: number;
+}
+
+function resolveRegisteredReferenceValue(
+  value: unknown,
+  registry: ContractRegistry,
+  context: ReferenceResolutionContext,
+): unknown {
   if (Array.isArray(value)) {
-    return value.map((item) => resolveRegisteredReferenceValue(item, registry));
+    return value.map((item) => resolveRegisteredReferenceValue(item, registry, context));
   }
   if (!isRecord(value)) return value;
   if (typeof value.$ref === "string" && !value.$ref.startsWith("#")) {
-    const imported = importRegisteredReference(value.$ref, registry);
+    const imported = importRegisteredReference(value.$ref, registry, context);
     const siblings = Object.fromEntries(Object.entries(value).filter(([key]) => key !== "$ref"));
     if (Object.keys(siblings).length === 0) return imported;
     return {
       allOf: [
         imported,
-        resolveRegisteredReferenceValue(siblings, registry),
+        resolveRegisteredReferenceValue(siblings, registry, context),
       ],
     };
   }
   return Object.fromEntries(
     Object.entries(value).map(([key, child]) => [
       key,
-      resolveRegisteredReferenceValue(child, registry),
+      resolveRegisteredReferenceValue(child, registry, context),
     ]),
   );
 }
 
-function importRegisteredReference(reference: string, registry: ContractRegistry): unknown {
+function importRegisteredReference(
+  reference: string,
+  registry: ContractRegistry,
+  context: ReferenceResolutionContext,
+): unknown {
+  if (context.resolvedReferenceCount >= MAX_DEPTH || context.activeReferences.has(reference)) {
+    throw validationError("invalid_embedded_schema", "/$ref");
+  }
+  context.resolvedReferenceCount += 1;
+  context.activeReferences.add(reference);
+  try {
+    return importRegisteredReferenceInner(reference, registry, context);
+  } finally {
+    context.activeReferences.delete(reference);
+  }
+}
+
+function importRegisteredReferenceInner(
+  reference: string,
+  registry: ContractRegistry,
+  context: ReferenceResolutionContext,
+): unknown {
   const match = Object.entries(registry.schemas).find(([, entry]) =>
     reference === entry.id || reference.startsWith(`${entry.id}#`),
   );
@@ -1115,16 +1149,44 @@ function importRegisteredReference(reference: string, registry: ContractRegistry
   }
   const fragment = reference.slice(schemaEntry.id.length);
   const target = fragment.length === 0 ? schema : resolveJsonPointer(schema, fragment);
-  if (target === undefined || containsSchemaReference(target)) {
+  if (target === undefined) {
     throw validationError("invalid_embedded_schema", "/$ref");
   }
-  return structuredClone(target);
+  return resolveImportedReferences(structuredClone(target), schemaEntry.id, registry, context);
 }
 
-function containsSchemaReference(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(containsSchemaReference);
-  if (!isRecord(value)) return false;
-  return typeof value.$ref === "string" || Object.values(value).some(containsSchemaReference);
+function resolveImportedReferences(
+  value: unknown,
+  sourceSchemaId: string,
+  registry: ContractRegistry,
+  context: ReferenceResolutionContext,
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) =>
+      resolveImportedReferences(item, sourceSchemaId, registry, context)
+    );
+  }
+  if (!isRecord(value)) return value;
+  if (typeof value.$ref === "string") {
+    const absoluteReference = value.$ref.startsWith("#")
+      ? `${sourceSchemaId}${value.$ref}`
+      : value.$ref;
+    const imported = importRegisteredReference(absoluteReference, registry, context);
+    const siblings = Object.fromEntries(Object.entries(value).filter(([key]) => key !== "$ref"));
+    if (Object.keys(siblings).length === 0) return imported;
+    return {
+      allOf: [
+        imported,
+        resolveImportedReferences(siblings, sourceSchemaId, registry, context),
+      ],
+    };
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [
+      key,
+      resolveImportedReferences(child, sourceSchemaId, registry, context),
+    ]),
+  );
 }
 
 function inspectNode(node: JsonNode, text: string, depth: number): void {

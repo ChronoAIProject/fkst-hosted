@@ -28,8 +28,6 @@ pub use ownership::{
 };
 use serde::Serialize;
 
-const CANONICAL_REQUEST_DIGEST: &str =
-    "c6da30d2cbe81af624c4e364e21cdad9dc2510d2e2ff9a02bb5bd6c325a25428";
 const MAX_SUBMIT_BODY_BYTES: usize = 65_536;
 const MAX_CANCEL_BODY_BYTES: usize = 64;
 const MAX_HEADER_BYTES: usize = 16 * 1024;

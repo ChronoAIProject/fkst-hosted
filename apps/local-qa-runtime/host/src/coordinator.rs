@@ -7,7 +7,6 @@ use crate::journal::Journal;
 use crate::RunError;
 
 enum CoordinatorMessage {
-    Wake,
     Stop,
 }
 
@@ -42,10 +41,6 @@ impl CoordinatorHandle {
                 Err(_) => Err(RunError::CoordinatorPanicked),
             },
         }
-    }
-
-    pub(crate) fn wake(&self) {
-        let _ = self.sender.send(CoordinatorMessage::Wake);
     }
 
     pub(crate) fn check(&mut self) -> Result<(), RunError> {
@@ -105,7 +100,6 @@ fn run_coordinator(
 
     loop {
         match receiver.recv() {
-            Ok(CoordinatorMessage::Wake) => process_available(&mut journal, &registry, &selection)?,
             Ok(CoordinatorMessage::Stop) | Err(_) => return Ok(()),
         }
     }
@@ -155,8 +149,11 @@ mod tests {
         DeterministicExecutor, ExecutorDescriptor, ExecutorRegistry, ExecutorRequest,
         ExecutorResult, ExecutorSelection, VersionedExecutor,
     };
-    use crate::journal::{Admission, Journal};
-    use crate::{RunError, CANONICAL_REQUEST_DIGEST};
+    use crate::journal::{Admission, Journal, V2AdmissionRecord};
+    use crate::RunError;
+
+    const TEST_REQUEST_DIGEST: &str =
+        "c6da30d2cbe81af624c4e364e21cdad9dc2510d2e2ff9a02bb5bd6c325a25428";
 
     struct BlockingExecutor {
         descriptor: ExecutorDescriptor,
@@ -256,6 +253,22 @@ mod tests {
         }
     }
 
+    fn admit_v2(
+        journal: &mut Journal,
+        run_id: &str,
+        idempotency_key: &str,
+        request_digest: &str,
+    ) -> Result<Admission, RunError> {
+        journal.admit_v2(V2AdmissionRecord {
+            run_id,
+            idempotency_key,
+            request_digest,
+            acceptance_bytes: b"{}",
+            binding_json: b"{}",
+            selection_json: b"{}",
+        })
+    }
+
     #[test]
     fn replay_during_execution_is_at_most_once_and_completion_is_atomic() {
         let directory = temporary_directory("blocking-executor");
@@ -271,26 +284,24 @@ mod tests {
         };
         let registry =
             ExecutorRegistry::new(vec![Box::new(executor)]).expect("registry must be valid");
+        let run_id = "00000000-0000-0000-0000-000000000000";
+        let mut journal = Journal::open(&database_path).expect("HTTP journal opens");
+        assert!(matches!(
+            admit_v2(&mut journal, run_id, "idem-001", TEST_REQUEST_DIGEST),
+            Ok(Admission::Created(_))
+        ));
         let mut coordinator =
             CoordinatorHandle::start_versioned(&database_path, registry, api_selection())
                 .expect("coordinator starts");
-        let mut journal = Journal::open(&database_path).expect("HTTP journal opens");
-        assert!(matches!(
-            journal.admit("run-001", "idem-001", CANONICAL_REQUEST_DIGEST),
-            Ok(Admission::Created(_))
-        ));
-        coordinator.wake();
         let executor_run_id = entered_receiver
             .recv_timeout(Duration::from_secs(2))
             .expect("executor must be entered");
-        fkst_qa_contracts::validate_scalar("UUID", &executor_run_id)
-            .expect("legacy run must receive a canonical executor UUID");
-        assert_ne!(executor_run_id, "run-001");
+        assert_eq!(executor_run_id, run_id);
         assert_eq!(
             journal
                 .connection
                 .query_row(
-                    "SELECT executor_run_id FROM runs WHERE run_id = 'run-001'",
+                    "SELECT executor_run_id FROM runs WHERE run_id = '00000000-0000-0000-0000-000000000000'",
                     [],
                     |row| row.get::<_, String>(0),
                 )
@@ -299,14 +310,13 @@ mod tests {
         );
 
         assert!(matches!(
-            journal.admit("run-001", "idem-001", CANONICAL_REQUEST_DIGEST),
+            admit_v2(&mut journal, run_id, "idem-001", TEST_REQUEST_DIGEST),
             Ok(Admission::Replay(_))
         ));
         assert!(matches!(
-            journal.cancel("run-001", "cancel-active"),
+            journal.cancel(run_id, "cancel-active"),
             Err(RunError::ActiveAttempt)
         ));
-        coordinator.wake();
         let connection = Connection::open(&database_path).expect("inspection journal opens");
         assert_eq!(row_count(&connection, "cancel_requests"), 0);
         assert_eq!(row_count(&connection, "execution_attempts"), 1);
@@ -346,7 +356,7 @@ mod tests {
             reopened
                 .connection
                 .query_row(
-                    "SELECT executor_run_id FROM runs WHERE run_id = 'run-001'",
+                    "SELECT executor_run_id FROM runs WHERE run_id = '00000000-0000-0000-0000-000000000000'",
                     [],
                     |row| row.get::<_, String>(0),
                 )
@@ -370,15 +380,14 @@ mod tests {
         })])
         .expect("registry must be valid");
         let selection = api_selection();
+        let mut journal = Journal::open(&database_path).expect("journal opens");
+        assert!(matches!(
+            admit_v2(&mut journal, run_id, "idem-001", TEST_REQUEST_DIGEST),
+            Ok(Admission::Created(_))
+        ));
         let mut coordinator =
             CoordinatorHandle::start_versioned(&database_path, registry, selection.clone())
                 .expect("versioned coordinator starts");
-        let mut journal = Journal::open(&database_path).expect("journal opens");
-        assert!(matches!(
-            journal.admit(run_id, "idem-001", CANONICAL_REQUEST_DIGEST),
-            Ok(Admission::Created(_))
-        ));
-        coordinator.wake();
         assert_eq!(
             request_receiver
                 .recv_timeout(Duration::from_secs(2))
@@ -401,7 +410,7 @@ mod tests {
         let run_id = "00000000-0000-0000-0000-000000000002";
         let mut journal = Journal::open(&database_path).expect("journal opens");
         assert!(matches!(
-            journal.admit(run_id, "idem-001", CANONICAL_REQUEST_DIGEST),
+            admit_v2(&mut journal, run_id, "idem-001", TEST_REQUEST_DIGEST),
             Ok(Admission::Created(_))
         ));
         drop(journal);
@@ -435,7 +444,7 @@ mod tests {
         let run_id = "00000000-0000-0000-0000-000000000003";
         let mut journal = Journal::open(&database_path).expect("journal opens");
         assert!(matches!(
-            journal.admit(run_id, "idem-001", CANONICAL_REQUEST_DIGEST),
+            admit_v2(&mut journal, run_id, "idem-001", TEST_REQUEST_DIGEST),
             Ok(Admission::Created(_))
         ));
         drop(journal);
@@ -474,7 +483,7 @@ mod tests {
         let run_id = "00000000-0000-0000-0000-000000000004";
         let mut journal = Journal::open(&database_path).expect("journal opens");
         assert!(matches!(
-            journal.admit(run_id, "idem-001", CANONICAL_REQUEST_DIGEST),
+            admit_v2(&mut journal, run_id, "idem-001", TEST_REQUEST_DIGEST),
             Ok(Admission::Created(_))
         ));
         drop(journal);

@@ -1461,11 +1461,37 @@ fn resolve_registered_references(
     registry: &Registry,
     load_schema: fn(&str) -> Option<&'static str>,
 ) -> Result<Value, ContractError> {
+    let mut active_references = BTreeSet::new();
+    let mut resolved_reference_count = 0;
+    resolve_registered_reference_value(
+        value,
+        registry,
+        load_schema,
+        &mut active_references,
+        &mut resolved_reference_count,
+    )
+}
+
+fn resolve_registered_reference_value(
+    value: Value,
+    registry: &Registry,
+    load_schema: fn(&str) -> Option<&'static str>,
+    active_references: &mut BTreeSet<String>,
+    resolved_reference_count: &mut usize,
+) -> Result<Value, ContractError> {
     match value {
         Value::Array(items) => Ok(Value::Array(
             items
                 .into_iter()
-                .map(|item| resolve_registered_references(item, registry, load_schema))
+                .map(|item| {
+                    resolve_registered_reference_value(
+                        item,
+                        registry,
+                        load_schema,
+                        active_references,
+                        resolved_reference_count,
+                    )
+                })
                 .collect::<Result<_, _>>()?,
         )),
         Value::Object(mut object) => {
@@ -1476,16 +1502,33 @@ fn resolve_registered_references(
                 .map(str::to_owned);
             if let Some(reference) = external_reference {
                 object.remove("$ref");
-                let imported = import_registered_reference(&reference, registry, load_schema)?;
+                let imported = import_registered_reference(
+                    &reference,
+                    registry,
+                    load_schema,
+                    active_references,
+                    resolved_reference_count,
+                )?;
                 if object.is_empty() {
                     return Ok(imported);
                 }
-                let siblings =
-                    resolve_registered_references(Value::Object(object), registry, load_schema)?;
+                let siblings = resolve_registered_reference_value(
+                    Value::Object(object),
+                    registry,
+                    load_schema,
+                    active_references,
+                    resolved_reference_count,
+                )?;
                 return Ok(serde_json::json!({ "allOf": [imported, siblings] }));
             }
             for child in object.values_mut() {
-                *child = resolve_registered_references(child.take(), registry, load_schema)?;
+                *child = resolve_registered_reference_value(
+                    child.take(),
+                    registry,
+                    load_schema,
+                    active_references,
+                    resolved_reference_count,
+                )?;
             }
             Ok(Value::Object(object))
         }
@@ -1497,6 +1540,33 @@ fn import_registered_reference(
     reference: &str,
     registry: &Registry,
     load_schema: fn(&str) -> Option<&'static str>,
+    active_references: &mut BTreeSet<String>,
+    resolved_reference_count: &mut usize,
+) -> Result<Value, ContractError> {
+    if *resolved_reference_count >= MAX_DEPTH || !active_references.insert(reference.to_owned()) {
+        return Err(ContractError(Rejection::validation(
+            "invalid_embedded_schema",
+            "/$ref",
+        )));
+    }
+    *resolved_reference_count += 1;
+    let result = import_registered_reference_inner(
+        reference,
+        registry,
+        load_schema,
+        active_references,
+        resolved_reference_count,
+    );
+    active_references.remove(reference);
+    result
+}
+
+fn import_registered_reference_inner(
+    reference: &str,
+    registry: &Registry,
+    load_schema: fn(&str) -> Option<&'static str>,
+    active_references: &mut BTreeSet<String>,
+    resolved_reference_count: &mut usize,
 ) -> Result<Value, ContractError> {
     let (_, schema_entry) = registry
         .schemas
@@ -1539,23 +1609,85 @@ fn import_registered_reference(
             ContractError(Rejection::validation("invalid_embedded_schema", "/$ref"))
         })?
     };
-    if contains_schema_reference(target) {
-        return Err(ContractError(Rejection::validation(
-            "invalid_embedded_schema",
-            "/$ref",
-        )));
-    }
-    Ok(target.clone())
+    resolve_imported_references(
+        target.clone(),
+        schema_entry.id.as_str(),
+        registry,
+        load_schema,
+        active_references,
+        resolved_reference_count,
+    )
 }
 
-fn contains_schema_reference(value: &Value) -> bool {
+fn resolve_imported_references(
+    value: Value,
+    source_schema_id: &str,
+    registry: &Registry,
+    load_schema: fn(&str) -> Option<&'static str>,
+    active_references: &mut BTreeSet<String>,
+    resolved_reference_count: &mut usize,
+) -> Result<Value, ContractError> {
     match value {
-        Value::Array(items) => items.iter().any(contains_schema_reference),
-        Value::Object(object) => {
-            object.get("$ref").and_then(Value::as_str).is_some()
-                || object.values().any(contains_schema_reference)
+        Value::Array(items) => Ok(Value::Array(
+            items
+                .into_iter()
+                .map(|item| {
+                    resolve_imported_references(
+                        item,
+                        source_schema_id,
+                        registry,
+                        load_schema,
+                        active_references,
+                        resolved_reference_count,
+                    )
+                })
+                .collect::<Result<_, _>>()?,
+        )),
+        Value::Object(mut object) => {
+            let reference = object
+                .get("$ref")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if let Some(reference) = reference {
+                object.remove("$ref");
+                let absolute_reference = if reference.starts_with('#') {
+                    format!("{source_schema_id}{reference}")
+                } else {
+                    reference
+                };
+                let imported = import_registered_reference(
+                    &absolute_reference,
+                    registry,
+                    load_schema,
+                    active_references,
+                    resolved_reference_count,
+                )?;
+                if object.is_empty() {
+                    return Ok(imported);
+                }
+                let siblings = resolve_imported_references(
+                    Value::Object(object),
+                    source_schema_id,
+                    registry,
+                    load_schema,
+                    active_references,
+                    resolved_reference_count,
+                )?;
+                return Ok(serde_json::json!({ "allOf": [imported, siblings] }));
+            }
+            for child in object.values_mut() {
+                *child = resolve_imported_references(
+                    child.take(),
+                    source_schema_id,
+                    registry,
+                    load_schema,
+                    active_references,
+                    resolved_reference_count,
+                )?;
+            }
+            Ok(Value::Object(object))
         }
-        _ => false,
+        scalar => Ok(scalar),
     }
 }
 
@@ -2428,6 +2560,62 @@ mod registry_tests {
     }
 
     #[test]
+    fn admission_v2_import_resolves_executor_v1_local_references() {
+        let registry: Registry =
+            serde_json::from_str(CONTRACT_REGISTRY).expect("parse embedded registry");
+        let schema: Value =
+            serde_json::from_str(LOCAL_RUN_ADMISSION_V2_SCHEMA).expect("parse admission v2 schema");
+        let resolved = resolve_registered_references(schema, &registry, embedded_schema)
+            .expect("resolve admission v2 references");
+        let selection = resolved
+            .pointer("/$defs/LocalQARunRequestV2/properties/executor_selection")
+            .expect("resolved executor selection");
+
+        assert_eq!(
+            selection.pointer("/properties/executor_id/type"),
+            Some(&Value::String("string".into()))
+        );
+        assert_eq!(
+            selection.pointer("/properties/executor_version/pattern"),
+            Some(&Value::String(
+                "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$".into()
+            ))
+        );
+        assert_eq!(
+            selection.pointer("/properties/capability_digest/pattern"),
+            Some(&Value::String("^sha256:[0-9a-f]{64}$".into()))
+        );
+    }
+
+    #[test]
+    fn nested_registered_references_fail_closed() {
+        let registry = reference_test_registry();
+        for (reference, reason) in [
+            ("urn:example:missing:v1#/$defs/Value", "external_schema_reference"),
+            (
+                "urn:example:reference-tests:v1#/$defs/Malformed",
+                "invalid_embedded_schema",
+            ),
+            (
+                "urn:example:reference-tests:v1#/$defs/Unresolved",
+                "invalid_embedded_schema",
+            ),
+            (
+                "urn:example:reference-tests:v1#/$defs/CycleA",
+                "invalid_embedded_schema",
+            ),
+        ] {
+            let error = resolve_registered_references(
+                serde_json::json!({ "$ref": reference }),
+                &registry,
+                reference_test_schema,
+            )
+            .expect_err("reference must fail closed");
+            assert_eq!(error.0.reason, reason, "reference {reference}");
+        }
+    }
+
+    #[test]
     fn registry_resolution_fails_closed() {
         assert_registry_error(
             |registry| {
@@ -2553,6 +2741,36 @@ mod registry_tests {
             },
             "invalid_embedded_schema_path",
         );
+    }
+
+    fn reference_test_registry() -> Registry {
+        Registry {
+            registry_version: "qa.contract-registry/v1".into(),
+            profile: "local_qa_host_mvp".into(),
+            schemas: BTreeMap::from([(
+                "reference-tests/v1".into(),
+                RegistrySchemaEntry {
+                    path: "contracts/reference-tests/v1/schema.json".into(),
+                    id: "urn:example:reference-tests:v1".into(),
+                    major: 1,
+                },
+            )]),
+            types: BTreeMap::new(),
+        }
+    }
+
+    fn reference_test_schema(path: &str) -> Option<&'static str> {
+        (path == "contracts/reference-tests/v1/schema.json").then_some(
+            r##"{
+                "$id": "urn:example:reference-tests:v1",
+                "$defs": {
+                    "Malformed": { "$ref": "#not-a-pointer" },
+                    "Unresolved": { "$ref": "#/$defs/Missing" },
+                    "CycleA": { "$ref": "#/$defs/CycleB" },
+                    "CycleB": { "$ref": "#/$defs/CycleA" }
+                }
+            }"##,
+        )
     }
 
     fn assert_registry_error(mutate: impl FnOnce(&mut Registry), reason: &str) {

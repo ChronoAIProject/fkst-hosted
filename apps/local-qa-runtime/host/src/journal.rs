@@ -533,93 +533,6 @@ impl Journal {
         transaction.commit()?;
         Ok(handle.clone())
     }
-    pub(crate) fn admit(
-        &mut self,
-        run_id: &str,
-        idempotency_key: &str,
-        request_digest: &str,
-    ) -> Result<Admission, RunError> {
-        validate_state("accepted")?;
-        validate_sequence(1)?;
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let stored = transaction
-            .query_row(
-                "SELECT idempotency_key, request_digest, response_json
-                 FROM accepted_requests WHERE run_id = ?1",
-                [run_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Vec<u8>>(2)?,
-                    ))
-                },
-            )
-            .optional()?;
-
-        if let Some((stored_key, stored_digest, response_json)) = stored {
-            let admission = if stored_key == idempotency_key && stored_digest == request_digest {
-                Admission::Replay(response_json)
-            } else {
-                Admission::DifferentKey
-            };
-            transaction.commit()?;
-            return Ok(admission);
-        }
-
-        let existing_run: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM runs WHERE run_id = ?1)",
-            [run_id],
-            |row| row.get(0),
-        )?;
-        if existing_run {
-            transaction.commit()?;
-            return Ok(Admission::DifferentKey);
-        }
-
-        let response_json =
-            format!("{{\"run_id\":\"{run_id}\",\"state\":\"accepted\",\"event_sequence\":1}}\n")
-                .into_bytes();
-        let event_json = state_event_json(run_id, "accepted")?;
-        let executor_run_id = if validate_scalar("UUID", run_id).is_ok() {
-            run_id.to_owned()
-        } else {
-            transaction.query_row(
-                "SELECT lower(
-                    hex(randomblob(4)) || '-' ||
-                    hex(randomblob(2)) || '-' ||
-                    hex(randomblob(2)) || '-' ||
-                    hex(randomblob(2)) || '-' ||
-                    hex(randomblob(6))
-                )",
-                [],
-                |row| row.get::<_, String>(0),
-            )?
-        };
-        validate_scalar("UUID", &executor_run_id)
-            .map_err(|_| RunError::InvalidJournal("executor_run_id must be a canonical UUID"))?;
-        transaction.execute(
-            "INSERT INTO accepted_requests
-             (run_id, idempotency_key, request_digest, response_json)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![run_id, idempotency_key, request_digest, response_json],
-        )?;
-        transaction.execute(
-            "INSERT INTO runs (run_id, executor_run_id, state, execution_outcome)
-             VALUES (?1, ?2, 'accepted', NULL)",
-            params![run_id, executor_run_id],
-        )?;
-        transaction.execute(
-            "INSERT INTO events (run_id, sequence, event_type, event_json)
-             VALUES (?1, 1, 'run.accepted', ?2)",
-            params![run_id, event_json],
-        )?;
-        transaction.commit()?;
-        Ok(Admission::Created(response_json))
-    }
-
     pub(crate) fn admit_v2(
         &mut self,
         record: V2AdmissionRecord<'_>,
@@ -1211,8 +1124,26 @@ mod tests {
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{Admission, Journal};
-    use crate::CANONICAL_REQUEST_DIGEST;
+    use super::{Admission, Journal, V2AdmissionRecord};
+
+    const TEST_REQUEST_DIGEST: &str =
+        "c6da30d2cbe81af624c4e364e21cdad9dc2510d2e2ff9a02bb5bd6c325a25428";
+
+    fn admit_v2(
+        journal: &mut Journal,
+        run_id: &str,
+        idempotency_key: &str,
+        request_digest: &str,
+    ) -> Result<Admission, crate::RunError> {
+        journal.admit_v2(V2AdmissionRecord {
+            run_id,
+            idempotency_key,
+            request_digest,
+            acceptance_bytes: b"{}",
+            binding_json: b"{}",
+            selection_json: b"{}",
+        })
+    }
 
     #[test]
     fn same_key_with_a_different_digest_is_conflict_without_mutation() {
@@ -1230,11 +1161,11 @@ mod tests {
         {
             let mut journal = Journal::open(&database_path).expect("journal must open");
             assert!(matches!(
-                journal.admit("run-001", "idem-001", CANONICAL_REQUEST_DIGEST),
+                admit_v2(&mut journal, "run-001", "idem-001", TEST_REQUEST_DIGEST),
                 Ok(Admission::Created(_))
             ));
             assert!(matches!(
-                journal.admit("run-001", "idem-001", "different-digest"),
+                admit_v2(&mut journal, "run-001", "idem-001", "different-digest"),
                 Ok(Admission::DifferentKey)
             ));
             assert_eq!(
@@ -1274,7 +1205,7 @@ mod tests {
         {
             let mut journal = Journal::open(&database_path).expect("journal must open");
             assert!(matches!(
-                journal.admit("run-001", "idem-001", CANONICAL_REQUEST_DIGEST),
+                admit_v2(&mut journal, "run-001", "idem-001", TEST_REQUEST_DIGEST),
                 Ok(Admission::Created(_))
             ));
         }
@@ -1282,7 +1213,7 @@ mod tests {
         {
             let mut journal = Journal::open(&database_path).expect("v5 journal must reopen");
             assert!(matches!(
-                journal.admit("run-001", "idem-001", CANONICAL_REQUEST_DIGEST),
+                admit_v2(&mut journal, "run-001", "idem-001", TEST_REQUEST_DIGEST),
                 Ok(Admission::Replay(_))
             ));
             assert_eq!(
