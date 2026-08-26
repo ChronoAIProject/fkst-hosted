@@ -30,8 +30,7 @@ const LOCAL_RUN_ADMISSION_SCHEMA: &str =
 const LOCAL_RUN_ADMISSION_SCHEMA_PATH: &str = "contracts/qa.local-run-admission/v1/schema.json";
 const LOCAL_RUN_ADMISSION_V2_SCHEMA: &str =
     include_str!("../../contracts/qa.local-run-admission/v2/schema.json");
-const LOCAL_RUN_ADMISSION_V2_SCHEMA_PATH: &str =
-    "contracts/qa.local-run-admission/v2/schema.json";
+const LOCAL_RUN_ADMISSION_V2_SCHEMA_PATH: &str = "contracts/qa.local-run-admission/v2/schema.json";
 const LOCAL_EXECUTOR_SCHEMA: &str =
     include_str!("../../contracts/qa.local-executor/v1/schema.json");
 const LOCAL_EXECUTOR_SCHEMA_PATH: &str = "contracts/qa.local-executor/v1/schema.json";
@@ -41,7 +40,10 @@ const EMBEDDED_SCHEMAS: &[(&str, &str)] = &[
     (LOCAL_EVIDENCE_SCHEMA_PATH, LOCAL_EVIDENCE_SCHEMA),
     (LOCAL_WORKER_SCHEMA_PATH, LOCAL_WORKER_SCHEMA),
     (LOCAL_RUN_ADMISSION_SCHEMA_PATH, LOCAL_RUN_ADMISSION_SCHEMA),
-    (LOCAL_RUN_ADMISSION_V2_SCHEMA_PATH, LOCAL_RUN_ADMISSION_V2_SCHEMA),
+    (
+        LOCAL_RUN_ADMISSION_V2_SCHEMA_PATH,
+        LOCAL_RUN_ADMISSION_V2_SCHEMA,
+    ),
     (LOCAL_EXECUTOR_SCHEMA_PATH, LOCAL_EXECUTOR_SCHEMA),
 ];
 const LOCAL_STATE_TYPE_NAME: &str = "LocalState";
@@ -428,8 +430,13 @@ pub fn validate_local_qa_run_request_v2(raw: &[u8]) -> Result<ValidatedValue, Co
     let validated = validate_registered_value(admit_json(raw)?, LOCAL_QA_RUN_REQUEST_V2_TYPE_NAME)?;
     let request: LocalQARunRequestV2 = serde_json::from_value(validated.0.clone())
         .map_err(|_| ContractError(Rejection::validation("schema_violation", "/")))?;
-    if !validate_iso8601(&request.created_at) || !validate_iso8601(&request.attempt_binding.deadline) {
-        return Err(ContractError(Rejection::validation("schema_violation", "/created_at")));
+    if !validate_iso8601(&request.created_at)
+        || !validate_iso8601(&request.attempt_binding.deadline)
+    {
+        return Err(ContractError(Rejection::validation(
+            "schema_violation",
+            "/created_at",
+        )));
     }
     verify_contract_content_digest(&validated)?;
     Ok(validated)
@@ -440,11 +447,16 @@ pub fn validate_run_acceptance_v2(raw: &[u8]) -> Result<ValidatedValue, Contract
     let acceptance: RunAcceptanceV2 = serde_json::from_value(validated.0.clone())
         .map_err(|_| ContractError(Rejection::validation("schema_violation", "/")))?;
     if !validate_iso8601(&acceptance.created_at) || !validate_iso8601(&acceptance.accepted_at) {
-        return Err(ContractError(Rejection::validation("schema_violation", "/created_at")));
+        return Err(ContractError(Rejection::validation(
+            "schema_violation",
+            "/created_at",
+        )));
     }
     if acceptance.created_at != acceptance.accepted_at {
         return Err(ContractError(Rejection::contract(
-            "contract.invalid_relation", "accepted_at_mismatch", "/created_at",
+            "contract.invalid_relation",
+            "accepted_at_mismatch",
+            "/created_at",
         )));
     }
     verify_contract_content_digest(&validated)?;
@@ -461,10 +473,16 @@ pub fn build_initial_run_acceptance_v2(
     let request: LocalQARunRequestV2 = serde_json::from_value(validated.0)
         .map_err(|_| ContractError(Rejection::validation("schema_violation", "/")))?;
     if !validate_iso8601(accepted_at) {
-        return Err(ContractError(Rejection::validation("schema_violation", "/accepted_at")));
+        return Err(ContractError(Rejection::validation(
+            "schema_violation",
+            "/accepted_at",
+        )));
     }
     if producer_version.is_empty() || producer_version.len() > 128 {
-        return Err(ContractError(Rejection::validation("schema_violation", "/producer_version")));
+        return Err(ContractError(Rejection::validation(
+            "schema_violation",
+            "/producer_version",
+        )));
     }
     let mut value = serde_json::json!({
         "schema_version": "qa.local-run-admission/v2",
@@ -480,8 +498,14 @@ pub fn build_initial_run_acceptance_v2(
         "executor_selection": request.executor_selection,
     });
     let digest = contract_content_digest(&ValidatedValue(value.clone()))?;
-    value.as_object_mut().expect("acceptance object").insert("content_digest".into(), Value::String(digest));
-    validate_run_acceptance_v2(&serde_json::to_vec(&value).map_err(|_| ContractError(Rejection::validation("schema_violation", "/")))?)
+    value
+        .as_object_mut()
+        .expect("acceptance object")
+        .insert("content_digest".into(), Value::String(digest));
+    validate_run_acceptance_v2(
+        &serde_json::to_vec(&value)
+            .map_err(|_| ContractError(Rejection::validation("schema_violation", "/")))?,
+    )
 }
 
 pub fn validate_executor_descriptor(raw: &[u8]) -> Result<ValidatedValue, ContractError> {

@@ -20,7 +20,7 @@ impl AttemptBindingVerifier for Mvp0DeterministicAttemptBindingVerifier {
         let expected = binding.qa_task_id == "qa-task-0002"
             && binding.qa_attempt_id == "qa-attempt-0002"
             && binding.generation == 1
-            && binding.fence_token == "ZmFrZS1mZW5jZS0wMDAy"
+            && binding.fence_token == "test-fence-00000002"
             && binding.machine_id == "machine-0002"
             && binding.worker_id == "worker-0002"
             && binding.installation_id == "installation-0002"

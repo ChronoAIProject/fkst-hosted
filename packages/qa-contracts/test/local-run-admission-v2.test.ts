@@ -21,6 +21,6 @@ test("validates the v2 admission walking skeleton vectors", () => {
 
   const acceptance = buildInitialRunAcceptanceV2(request, fixture.accepted_at, "fkst-local-qa-host/0.1.0");
   assert.equal(decoder.decode(canonicalBytes(acceptance)), fixture.expected_acceptance_utf8);
-  assert.equal(contractContentDigest(acceptance), "sha256:c590e3ffd6ca7d36e1a62e4ebb8f5799f7f879d0abff82422497c1bcba0f399d");
+  assert.equal(contractContentDigest(acceptance), "sha256:950ebfea8336014cb3dea966edb0516c55644b4c345aa1a3d7fe765a428d9bb5");
   validateRunAcceptanceV2(encoder.encode(fixture.expected_acceptance_utf8));
 });

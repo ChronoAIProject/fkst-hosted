@@ -620,7 +620,10 @@ impl Journal {
         Ok(Admission::Created(response_json))
     }
 
-    pub(crate) fn admit_v2(&mut self, record: V2AdmissionRecord<'_>) -> Result<Admission, RunError> {
+    pub(crate) fn admit_v2(
+        &mut self,
+        record: V2AdmissionRecord<'_>,
+    ) -> Result<Admission, RunError> {
         validate_state("accepted")?;
         validate_sequence(1)?;
         let transaction = self
@@ -631,15 +634,22 @@ impl Journal {
                 "SELECT idempotency_key, request_digest, response_json
                  FROM accepted_requests WHERE run_id = ?1",
                 [record.run_id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Vec<u8>>(2)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Vec<u8>>(2)?,
+                    ))
+                },
             )
             .optional()?;
         if let Some((stored_key, stored_digest, response_json)) = stored {
-            let result = if stored_key == record.idempotency_key && stored_digest == record.request_digest {
-                Admission::Replay(response_json)
-            } else {
-                Admission::DifferentKey
-            };
+            let result =
+                if stored_key == record.idempotency_key && stored_digest == record.request_digest {
+                    Admission::Replay(response_json)
+                } else {
+                    Admission::DifferentKey
+                };
             transaction.commit()?;
             return Ok(result);
         }
@@ -656,7 +666,12 @@ impl Journal {
         transaction.execute(
             "INSERT INTO accepted_requests (run_id, idempotency_key, request_digest, response_json)
              VALUES (?1, ?2, ?3, ?4)",
-            params![record.run_id, record.idempotency_key, record.request_digest, record.acceptance_bytes],
+            params![
+                record.run_id,
+                record.idempotency_key,
+                record.request_digest,
+                record.acceptance_bytes
+            ],
         )?;
         transaction.execute(
             "INSERT INTO runs (run_id, executor_run_id, state, execution_outcome, admission_version)
@@ -690,11 +705,13 @@ impl Journal {
                  JOIN admission_v2_records USING (run_id)
                  WHERE run_id = ?1",
                 [run_id],
-                |row| Ok(StoredV2Admission {
-                    acceptance_bytes: row.get(0)?,
-                    binding_json: row.get(1)?,
-                    selection_json: row.get(2)?,
-                }),
+                |row| {
+                    Ok(StoredV2Admission {
+                        acceptance_bytes: row.get(0)?,
+                        binding_json: row.get(1)?,
+                        selection_json: row.get(2)?,
+                    })
+                },
             )
             .optional()
             .map_err(RunError::from)
