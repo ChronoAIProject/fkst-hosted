@@ -609,6 +609,45 @@ impl Journal {
         Ok(Admission::Created(record.acceptance_bytes.to_vec()))
     }
 
+    #[cfg(test)]
+    pub(crate) fn seed_executable_v1(
+        &mut self,
+        run_id: &str,
+        idempotency_key: &str,
+        request_digest: &str,
+    ) -> Result<(), RunError> {
+        validate_scalar("UUID", run_id)
+            .map_err(|_| RunError::InvalidJournal("executor_run_id must be a canonical UUID"))?;
+        validate_state("accepted")?;
+        validate_sequence(1)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let response_json =
+            format!("{{\"run_id\":\"{run_id}\",\"state\":\"accepted\",\"event_sequence\":1}}\n")
+                .into_bytes();
+        let event_json = state_event_json(run_id, "accepted")?;
+        transaction.execute(
+            "INSERT INTO accepted_requests
+             (run_id, idempotency_key, request_digest, response_json)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![run_id, idempotency_key, request_digest, response_json],
+        )?;
+        transaction.execute(
+            "INSERT INTO runs
+             (run_id, executor_run_id, state, execution_outcome, admission_version)
+             VALUES (?1, ?1, 'accepted', NULL, 1)",
+            [run_id],
+        )?;
+        transaction.execute(
+            "INSERT INTO events (run_id, sequence, event_type, event_json)
+             VALUES (?1, 1, 'run.accepted', ?2)",
+            params![run_id, event_json],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn stored_v2_admission(&self, run_id: &str) -> Result<Option<StoredV2Admission>, RunError> {
         self.connection
             .query_row(
@@ -1128,6 +1167,8 @@ mod tests {
 
     const TEST_REQUEST_DIGEST: &str =
         "c6da30d2cbe81af624c4e364e21cdad9dc2510d2e2ff9a02bb5bd6c325a25428";
+    const TEST_BINDING_JSON: &[u8] = br#"{"qa_task_id":"qa-task-0002","qa_attempt_id":"qa-attempt-0002","machine_id":"machine-0002","worker_id":"worker-0002","installation_id":"installation-0002","generation":1,"fence_token":"test-fence-00000002","deadline":"2026-08-25T16:05:00Z"}"#;
+    const TEST_SELECTION_JSON: &[u8] = br#"{"schema_version":"qa.local-executor/v1","executor_id":"fake.api","executor_version":"1.0.0","capability_digest":"sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335","required_capability":"api.request"}"#;
 
     fn admit_v2(
         journal: &mut Journal,
@@ -1140,8 +1181,8 @@ mod tests {
             idempotency_key,
             request_digest,
             acceptance_bytes: b"{}",
-            binding_json: b"{}",
-            selection_json: b"{}",
+            binding_json: TEST_BINDING_JSON,
+            selection_json: TEST_SELECTION_JSON,
         })
     }
 
@@ -1157,15 +1198,16 @@ mod tests {
         ));
         fs::create_dir(&directory).expect("temporary directory must be created");
         let database_path = directory.join("journal.sqlite");
+        let run_id = "00000000-0000-0000-0000-000000000001";
 
         {
             let mut journal = Journal::open(&database_path).expect("journal must open");
             assert!(matches!(
-                admit_v2(&mut journal, "run-001", "idem-001", TEST_REQUEST_DIGEST),
+                admit_v2(&mut journal, run_id, "idem-001", TEST_REQUEST_DIGEST),
                 Ok(Admission::Created(_))
             ));
             assert!(matches!(
-                admit_v2(&mut journal, "run-001", "idem-001", "different-digest"),
+                admit_v2(&mut journal, run_id, "idem-001", "different-digest"),
                 Ok(Admission::DifferentKey)
             ));
             assert_eq!(
@@ -1201,19 +1243,20 @@ mod tests {
         ));
         fs::create_dir(&directory).expect("temporary directory must be created");
         let database_path = directory.join("journal.sqlite");
+        let run_id = "00000000-0000-0000-0000-000000000002";
 
         {
             let mut journal = Journal::open(&database_path).expect("journal must open");
             assert!(matches!(
-                admit_v2(&mut journal, "run-001", "idem-001", TEST_REQUEST_DIGEST),
+                admit_v2(&mut journal, run_id, "idem-001", TEST_REQUEST_DIGEST),
                 Ok(Admission::Created(_))
             ));
         }
 
         {
-            let mut journal = Journal::open(&database_path).expect("v5 journal must reopen");
+            let mut journal = Journal::open(&database_path).expect("journal must reopen");
             assert!(matches!(
-                admit_v2(&mut journal, "run-001", "idem-001", TEST_REQUEST_DIGEST),
+                admit_v2(&mut journal, run_id, "idem-001", TEST_REQUEST_DIGEST),
                 Ok(Admission::Replay(_))
             ));
             assert_eq!(
