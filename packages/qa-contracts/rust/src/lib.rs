@@ -2591,7 +2591,10 @@ mod registry_tests {
     fn nested_registered_references_fail_closed() {
         let registry = reference_test_registry();
         for (reference, reason) in [
-            ("urn:example:missing:v1#/$defs/Value", "external_schema_reference"),
+            (
+                "urn:example:missing:v1#/$defs/Value",
+                "external_schema_reference",
+            ),
             (
                 "urn:example:reference-tests:v1#/$defs/Malformed",
                 "invalid_embedded_schema",

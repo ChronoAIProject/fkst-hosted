@@ -154,6 +154,8 @@ mod tests {
 
     const TEST_REQUEST_DIGEST: &str =
         "c6da30d2cbe81af624c4e364e21cdad9dc2510d2e2ff9a02bb5bd6c325a25428";
+    const TEST_BINDING_JSON: &[u8] = br#"{"qa_task_id":"qa-task-0002","qa_attempt_id":"qa-attempt-0002","machine_id":"machine-0002","worker_id":"worker-0002","installation_id":"installation-0002","generation":1,"fence_token":"test-fence-00000002","deadline":"2026-08-25T16:05:00Z"}"#;
+    const TEST_SELECTION_JSON: &[u8] = br#"{"schema_version":"qa.local-executor/v1","executor_id":"fake.api","executor_version":"1.0.0","capability_digest":"sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335","required_capability":"api.request"}"#;
 
     struct BlockingExecutor {
         descriptor: ExecutorDescriptor,
@@ -264,13 +266,13 @@ mod tests {
             idempotency_key,
             request_digest,
             acceptance_bytes: b"{}",
-            binding_json: b"{}",
-            selection_json: b"{}",
+            binding_json: TEST_BINDING_JSON,
+            selection_json: TEST_SELECTION_JSON,
         })
     }
 
     #[test]
-    fn replay_during_execution_is_at_most_once_and_completion_is_atomic() {
+    fn active_execution_is_at_most_once_and_completion_is_atomic() {
         let directory = temporary_directory("blocking-executor");
         let database_path = directory.join("journal.sqlite");
         let calls = Arc::new(AtomicUsize::new(0));
@@ -286,13 +288,17 @@ mod tests {
             ExecutorRegistry::new(vec![Box::new(executor)]).expect("registry must be valid");
         let run_id = "00000000-0000-0000-0000-000000000000";
         let mut journal = Journal::open(&database_path).expect("HTTP journal opens");
-        assert!(matches!(
-            admit_v2(&mut journal, run_id, "idem-001", TEST_REQUEST_DIGEST),
-            Ok(Admission::Created(_))
-        ));
-        let mut coordinator =
-            CoordinatorHandle::start_versioned(&database_path, registry, api_selection())
-                .expect("coordinator starts");
+        journal
+            .seed_executable_v1(run_id, "idem-001", TEST_REQUEST_DIGEST)
+            .expect("executable v1 fixture must be seeded");
+        let coordinator_database_path = database_path.clone();
+        let coordinator_start = thread::spawn(move || {
+            CoordinatorHandle::start_versioned(
+                &coordinator_database_path,
+                registry,
+                api_selection(),
+            )
+        });
         let executor_run_id = entered_receiver
             .recv_timeout(Duration::from_secs(2))
             .expect("executor must be entered");
@@ -309,10 +315,10 @@ mod tests {
             executor_run_id
         );
 
-        assert!(matches!(
-            admit_v2(&mut journal, run_id, "idem-001", TEST_REQUEST_DIGEST),
-            Ok(Admission::Replay(_))
-        ));
+        assert!(journal
+            .claim_next()
+            .expect("claim check must succeed")
+            .is_none());
         assert!(matches!(
             journal.cancel(run_id, "cancel-active"),
             Err(RunError::ActiveAttempt)
@@ -321,7 +327,7 @@ mod tests {
         assert_eq!(row_count(&connection, "cancel_requests"), 0);
         assert_eq!(row_count(&connection, "execution_attempts"), 1);
         assert_eq!(row_count(&connection, "events"), 4);
-        let before = lifecycle_facts(&connection);
+        let before = lifecycle_facts(&connection, run_id);
         assert_eq!(before.0, "executing");
         assert_eq!(before.1, None);
         assert_eq!(before.2, 4);
@@ -331,7 +337,7 @@ mod tests {
         release_sender.send(()).expect("executor must be released");
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
-            let facts = lifecycle_facts(&connection);
+            let facts = lifecycle_facts(&connection, run_id);
             if facts.0 == "terminal" {
                 assert_eq!(facts.1.as_deref(), Some("passed"));
                 assert_eq!(facts.2, 9);
@@ -348,6 +354,10 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert_eq!(row_count(&connection, "execution_attempts"), 1);
         assert_eq!(row_count(&connection, "events"), 9);
+        let mut coordinator = coordinator_start
+            .join()
+            .expect("coordinator startup thread joins")
+            .expect("coordinator starts after processing executable v1 work");
         coordinator.shutdown().expect("coordinator joins");
         drop(connection);
         drop(journal);
@@ -381,10 +391,9 @@ mod tests {
         .expect("registry must be valid");
         let selection = api_selection();
         let mut journal = Journal::open(&database_path).expect("journal opens");
-        assert!(matches!(
-            admit_v2(&mut journal, run_id, "idem-001", TEST_REQUEST_DIGEST),
-            Ok(Admission::Created(_))
-        ));
+        journal
+            .seed_executable_v1(run_id, "idem-001", TEST_REQUEST_DIGEST)
+            .expect("executable v1 fixture must be seeded");
         let mut coordinator =
             CoordinatorHandle::start_versioned(&database_path, registry, selection.clone())
                 .expect("versioned coordinator starts");
@@ -404,15 +413,14 @@ mod tests {
     }
 
     #[test]
-    fn selection_failure_does_not_invoke_or_fall_back() {
+    fn startup_selection_failure_does_not_invoke_or_fall_back() {
         let directory = temporary_directory("selection-failure");
         let database_path = directory.join("journal.sqlite");
         let run_id = "00000000-0000-0000-0000-000000000002";
         let mut journal = Journal::open(&database_path).expect("journal opens");
-        assert!(matches!(
-            admit_v2(&mut journal, run_id, "idem-001", TEST_REQUEST_DIGEST),
-            Ok(Admission::Created(_))
-        ));
+        journal
+            .seed_executable_v1(run_id, "idem-001", TEST_REQUEST_DIGEST)
+            .expect("executable v1 fixture must be seeded");
         drop(journal);
         let (request_sender, request_receiver) = mpsc::channel();
         let registry = ExecutorRegistry::new(vec![Box::new(RecordingVersionedExecutor {
@@ -438,15 +446,14 @@ mod tests {
     }
 
     #[test]
-    fn relation_mismatched_result_never_completes_the_journal() {
+    fn startup_relation_mismatch_never_completes_the_journal() {
         let directory = temporary_directory("result-mismatch");
         let database_path = directory.join("journal.sqlite");
         let run_id = "00000000-0000-0000-0000-000000000003";
         let mut journal = Journal::open(&database_path).expect("journal opens");
-        assert!(matches!(
-            admit_v2(&mut journal, run_id, "idem-001", TEST_REQUEST_DIGEST),
-            Ok(Admission::Created(_))
-        ));
+        journal
+            .seed_executable_v1(run_id, "idem-001", TEST_REQUEST_DIGEST)
+            .expect("executable v1 fixture must be seeded");
         drop(journal);
         let (request_sender, request_receiver) = mpsc::channel();
         let registry = ExecutorRegistry::new(vec![Box::new(RecordingVersionedExecutor {
@@ -477,15 +484,14 @@ mod tests {
     }
 
     #[test]
-    fn malformed_result_never_completes_the_journal() {
+    fn startup_malformed_result_never_completes_the_journal() {
         let directory = temporary_directory("malformed-result");
         let database_path = directory.join("journal.sqlite");
         let run_id = "00000000-0000-0000-0000-000000000004";
         let mut journal = Journal::open(&database_path).expect("journal opens");
-        assert!(matches!(
-            admit_v2(&mut journal, run_id, "idem-001", TEST_REQUEST_DIGEST),
-            Ok(Admission::Created(_))
-        ));
+        journal
+            .seed_executable_v1(run_id, "idem-001", TEST_REQUEST_DIGEST)
+            .expect("executable v1 fixture must be seeded");
         drop(journal);
         let (request_sender, request_receiver) = mpsc::channel();
         let registry = ExecutorRegistry::new(vec![Box::new(RecordingVersionedExecutor {
@@ -512,6 +518,65 @@ mod tests {
         assert_eq!(snapshot.state, "executing");
         assert_eq!(snapshot.execution_outcome, None);
         assert_eq!(snapshot.latest_event_sequence, 4);
+        fs::remove_dir_all(directory).expect("temporary directory must be removed");
+    }
+
+    #[test]
+    fn v2_admission_remains_durable_and_unexecuted_after_restart() {
+        let directory = temporary_directory("v2-inert");
+        let database_path = directory.join("journal.sqlite");
+        let run_id = "00000000-0000-0000-0000-000000000005";
+        let mut journal = Journal::open(&database_path).expect("journal opens");
+        assert!(matches!(
+            admit_v2(&mut journal, run_id, "idem-001", TEST_REQUEST_DIGEST),
+            Ok(Admission::Created(_))
+        ));
+        drop(journal);
+
+        let mut journal = Journal::open(&database_path).expect("journal reopens");
+        assert!(matches!(
+            admit_v2(&mut journal, run_id, "idem-001", TEST_REQUEST_DIGEST),
+            Ok(Admission::Replay(_))
+        ));
+        assert!(journal
+            .claim_next()
+            .expect("claim check must succeed")
+            .is_none());
+        assert_eq!(
+            journal
+                .connection
+                .query_row(
+                    "SELECT run_id FROM active_run_slot WHERE slot = 1",
+                    [],
+                    |row| { row.get::<_, String>(0) }
+                )
+                .expect("active slot must remain durable"),
+            run_id
+        );
+        drop(journal);
+
+        let (request_sender, request_receiver) = mpsc::channel();
+        let registry = ExecutorRegistry::new(vec![Box::new(RecordingVersionedExecutor {
+            descriptor: api_descriptor(),
+            requests: Mutex::new(request_sender),
+            result_behavior: ResultBehavior::Valid,
+        })])
+        .expect("registry must be valid");
+        let mut coordinator =
+            CoordinatorHandle::start_versioned(&database_path, registry, api_selection())
+                .expect("coordinator starts without executing v2");
+        assert!(request_receiver.try_recv().is_err());
+        coordinator.shutdown().expect("coordinator joins");
+
+        let journal = Journal::open(&database_path).expect("journal reopens after coordinator");
+        let snapshot = journal
+            .snapshot(run_id)
+            .expect("snapshot reads")
+            .expect("run exists");
+        assert_eq!(snapshot.state, "accepted");
+        assert_eq!(snapshot.execution_outcome, None);
+        assert_eq!(snapshot.latest_event_sequence, 1);
+        assert_eq!(row_count(&journal.connection, "execution_attempts"), 0);
         fs::remove_dir_all(directory).expect("temporary directory must be removed");
     }
 
@@ -551,6 +616,7 @@ mod tests {
 
     fn lifecycle_facts(
         connection: &Connection,
+        run_id: &str,
     ) -> (String, Option<String>, i64, String, Option<String>) {
         connection
             .query_row(
@@ -559,8 +625,8 @@ mod tests {
                         execution_attempts.status, execution_attempts.execution_outcome
                  FROM runs JOIN execution_attempts
                    ON execution_attempts.run_id = runs.run_id
-                 WHERE runs.run_id = 'run-001'",
-                [],
+                 WHERE runs.run_id = ?1",
+                [run_id],
                 |row| {
                     Ok((
                         row.get(0)?,
