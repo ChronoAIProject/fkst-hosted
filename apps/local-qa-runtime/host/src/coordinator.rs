@@ -98,10 +98,8 @@ fn run_coordinator(
         let _ = sender.send(true);
     }
 
-    loop {
-        match receiver.recv() {
-            Ok(CoordinatorMessage::Stop) | Err(_) => return Ok(()),
-        }
+    match receiver.recv() {
+        Ok(CoordinatorMessage::Stop) | Err(_) => Ok(()),
     }
 }
 
@@ -144,7 +142,7 @@ mod tests {
 
     use rusqlite::Connection;
 
-    use super::CoordinatorHandle;
+    use super::{run_coordinator, CoordinatorHandle};
     use crate::executor::{
         DeterministicExecutor, ExecutorDescriptor, ExecutorRegistry, ExecutorRequest,
         ExecutorResult, ExecutorSelection, VersionedExecutor,
@@ -592,6 +590,35 @@ mod tests {
         let started = Instant::now();
         coordinator.shutdown().expect("coordinator joins");
         assert!(started.elapsed() < Duration::from_secs(1));
+        fs::remove_dir_all(directory).expect("temporary directory must be removed");
+    }
+
+    #[test]
+    fn sender_disconnect_stops_the_coordinator() {
+        let directory = temporary_directory("coordinator-disconnect");
+        let database_path = directory.join("journal.sqlite");
+        let journal = Journal::open(&database_path).expect("journal opens");
+        let registry = ExecutorRegistry::new(vec![Box::new(DeterministicExecutor::api())])
+            .expect("registry must be valid");
+        let (sender, receiver) = mpsc::channel();
+        let (startup_sender, startup_receiver) = mpsc::sync_channel(0);
+        let coordinator = thread::spawn(move || {
+            run_coordinator(
+                journal,
+                registry,
+                api_selection(),
+                receiver,
+                Some(startup_sender),
+            )
+        });
+
+        assert!(startup_receiver.recv().expect("startup signal arrives"));
+        assert!(!coordinator.is_finished());
+        drop(sender);
+        coordinator
+            .join()
+            .expect("coordinator thread joins")
+            .expect("sender disconnect stops the coordinator");
         fs::remove_dir_all(directory).expect("temporary directory must be removed");
     }
 
