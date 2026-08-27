@@ -434,38 +434,152 @@ fn provider_mismatch_and_expiry_fail_closed_without_effects() {
 fn version_three_migration_preserves_lifecycle_rows() {
     let path = database_path("environment-v3-migration");
     {
-        let journal = Journal::open(&path).expect("journal must open");
-        drop(journal);
         let connection = Connection::open(&path).expect("fixture database must open");
         connection
             .execute_batch(
-                "DROP TABLE owned_handles;
-                 DROP TABLE resource_intents;
-                 DROP INDEX runs_executor_run_id_unique;
-                 DROP TRIGGER runs_executor_run_id_insert;
-                 DROP TRIGGER runs_executor_run_id_update;
-                 ALTER TABLE runs DROP COLUMN executor_run_id;
+                "CREATE TABLE accepted_requests (
+                    run_id TEXT PRIMARY KEY NOT NULL,
+                    idempotency_key TEXT NOT NULL,
+                    request_digest TEXT NOT NULL,
+                    response_json BLOB NOT NULL,
+                    UNIQUE (run_id, idempotency_key)
+                 );
+                 CREATE TABLE runs (
+                    run_id TEXT PRIMARY KEY NOT NULL,
+                    state TEXT NOT NULL,
+                    execution_outcome TEXT
+                        CHECK (
+                            execution_outcome IS NULL OR execution_outcome IN
+                            ('passed', 'failed', 'cancelled', 'timed_out', 'lost', 'blocked')
+                        )
+                 );
+                 CREATE TABLE events (
+                    run_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    event_type TEXT NOT NULL,
+                    event_json TEXT NOT NULL,
+                    PRIMARY KEY (run_id, sequence),
+                    FOREIGN KEY (run_id) REFERENCES runs(run_id)
+                 );
+                 CREATE TABLE cancel_requests (
+                    run_id TEXT PRIMARY KEY NOT NULL,
+                    idempotency_key TEXT NOT NULL,
+                    event_sequence INTEGER NOT NULL,
+                    FOREIGN KEY (run_id) REFERENCES runs(run_id)
+                 );
+                 CREATE TABLE execution_attempts (
+                    run_id TEXT PRIMARY KEY NOT NULL,
+                    status TEXT NOT NULL CHECK (status IN ('claimed', 'completed')),
+                    execution_outcome TEXT
+                        CHECK (
+                            execution_outcome IS NULL OR execution_outcome IN
+                            ('passed', 'failed', 'cancelled', 'timed_out', 'lost', 'blocked')
+                        ),
+                    CHECK (
+                        (status = 'claimed' AND execution_outcome IS NULL) OR
+                        (status = 'completed' AND execution_outcome IS NOT NULL)
+                    ),
+                    FOREIGN KEY (run_id) REFERENCES runs(run_id)
+                 );
                  INSERT INTO runs (run_id, state)
                  VALUES ('00000000-0000-4000-8000-000000000001', 'accepted');
                  PRAGMA user_version = 3;",
             )
             .expect("version three fixture must be prepared");
+        let schema_objects = connection
+            .prepare(
+                "SELECT type, name
+                 FROM sqlite_schema
+                 WHERE name NOT LIKE 'sqlite_%'
+                 ORDER BY type, name",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            schema_objects,
+            [
+                ("table".to_owned(), "accepted_requests".to_owned()),
+                ("table".to_owned(), "cancel_requests".to_owned()),
+                ("table".to_owned(), "events".to_owned()),
+                ("table".to_owned(), "execution_attempts".to_owned()),
+                ("table".to_owned(), "runs".to_owned()),
+            ]
+        );
+        let run_columns = connection
+            .prepare("SELECT name FROM pragma_table_info('runs') ORDER BY cid")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(run_columns, ["run_id", "state", "execution_outcome"]);
     }
 
     let journal = Journal::open(&path).expect("version three journal must migrate");
     let connection = Connection::open(&path).expect("inspection database must open");
-    let state: String = connection
+    let migrated_identity: (String, String, i64, String) = connection
         .query_row(
-            "SELECT state FROM runs WHERE run_id = ?1",
+            "SELECT run_id, executor_run_id, admission_version, state
+             FROM runs WHERE run_id = ?1",
             [RUN_ID],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .expect("lifecycle row must survive migration");
-    assert_eq!(state, "accepted");
+    assert_eq!(
+        migrated_identity,
+        (RUN_ID.to_owned(), RUN_ID.to_owned(), 1, "accepted".to_owned())
+    );
     let version: i64 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("schema version must be readable");
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
+    assert_eq!(
+        connection
+            .query_row(
+                r#"SELECT COUNT(*) FROM pragma_index_list('runs')
+                   WHERE name = 'runs_executor_run_id_unique' AND "unique" = 1"#,
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        1
+    );
+    let admission_tables = connection
+        .prepare(
+            "SELECT name FROM sqlite_schema
+             WHERE type = 'table' AND name IN ('active_run_slot', 'admission_v2_records')
+             ORDER BY name",
+        )
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        admission_tables,
+        ["active_run_slot", "admission_v2_records"]
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM admission_v2_records", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM active_run_slot", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+        0
+    );
     let foreign_key_errors: Vec<(String, i64, String, i64)> = connection
         .prepare("PRAGMA foreign_key_check")
         .unwrap()
@@ -476,6 +590,28 @@ fn version_three_migration_preserves_lifecycle_rows() {
         .collect::<Result<_, _>>()
         .unwrap();
     assert!(foreign_key_errors.is_empty());
+    drop(connection);
+    drop(journal);
+
+    let journal = Journal::open(&path).expect("migrated journal must reopen");
+    let connection = Connection::open(&path).expect("reopened database must be inspectable");
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT run_id, executor_run_id, admission_version, state
+                 FROM runs WHERE run_id = ?1",
+                [RUN_ID],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("migrated identity must survive reopen"),
+        migrated_identity
+    );
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        6
+    );
     drop(connection);
     drop(journal);
     std::fs::remove_file(path).expect("temporary database must be removed");
