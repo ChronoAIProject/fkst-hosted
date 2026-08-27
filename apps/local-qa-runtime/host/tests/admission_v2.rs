@@ -101,6 +101,21 @@ fn request(port: u16, method: &str, key: &str, body: &[u8]) -> Vec<u8> {
     response
 }
 
+fn malformed_content_type_request(port: u16, body: &[u8]) -> Vec<u8> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        stream,
+        "PUT /v1/runs/00000000-0000-0000-0000-000000000002 HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type application/json\r\nIdempotency-Key: idem_0002\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    )
+    .unwrap();
+    stream.write_all(body).unwrap();
+    stream.flush().unwrap();
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).unwrap();
+    response
+}
+
 fn body(response: &[u8]) -> &[u8] {
     let offset = response
         .windows(4)
@@ -122,9 +137,32 @@ fn with_idempotency_key(body: &str, key: &str) -> String {
     String::from_utf8(canonical_admitted_bytes(&admitted).unwrap()).unwrap()
 }
 
+fn assert_admission_tables_empty(database: &Path) {
+    let connection = Connection::open(database).unwrap();
+    for table in [
+        "accepted_requests",
+        "runs",
+        "events",
+        "admission_v2_records",
+        "active_run_slot",
+    ] {
+        let count: i64 = connection
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0, "{table} must remain empty");
+    }
+}
+
 #[test]
 fn admits_replays_conflicts_and_recovers_one_v2_request() {
     let fixture = fixture();
+    assert_eq!(fixture.expected_request_utf8.len(), 1940);
+    let expected_body = format!("{}\n", fixture.expected_acceptance_utf8).into_bytes();
+    assert_eq!(expected_body.len(), 740);
+    let mut expected_created = b"HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: 740\r\nConnection: close\r\n\r\n".to_vec();
+    expected_created.extend_from_slice(&expected_body);
     let database = database_path();
     {
         let host = start_host(&database);
@@ -134,11 +172,7 @@ fn admits_replays_conflicts_and_recovers_one_v2_request() {
             "idem_0002",
             fixture.expected_request_utf8.as_bytes(),
         );
-        assert!(created.starts_with(b"HTTP/1.1 201 Created\r\n"));
-        assert_eq!(
-            body(&created),
-            format!("{}\n", fixture.expected_acceptance_utf8).as_bytes()
-        );
+        assert_eq!(created, expected_created);
         let replay = request(
             host.port,
             "PUT",
@@ -163,11 +197,61 @@ fn admits_replays_conflicts_and_recovers_one_v2_request() {
         .stored_v2_admission("00000000-0000-0000-0000-000000000002")
         .unwrap()
         .unwrap();
-    assert_eq!(
-        stored.acceptance_bytes,
-        format!("{}\n", fixture.expected_acceptance_utf8).as_bytes()
-    );
+    assert_eq!(stored.acceptance_bytes, expected_body);
     drop(journal);
+
+    let connection = Connection::open(&database).unwrap();
+    let accepted: (String, String, String, Vec<u8>) = connection
+        .query_row(
+            "SELECT run_id, idempotency_key, request_digest, response_json FROM accepted_requests",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        accepted,
+        (
+            "00000000-0000-0000-0000-000000000002".to_owned(),
+            "idem_0002".to_owned(),
+            "sha256:42711db690b0ce483e28161924a8371ac9f498fd9f81ad90fc29bb15b9e96e30".to_owned(),
+            expected_body.clone(),
+        )
+    );
+    let run: (String, i64, Option<String>) = connection
+        .query_row(
+            "SELECT state, admission_version, execution_outcome FROM runs",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(run, ("accepted".to_owned(), 2, None));
+    let event: (i64, String) = connection
+        .query_row("SELECT sequence, event_type FROM events", [], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .unwrap();
+    assert_eq!(event, (1, "run.accepted".to_owned()));
+    let admission_records: i64 = connection
+        .query_row("SELECT COUNT(*) FROM admission_v2_records", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(admission_records, 1);
+    let active_slot: (i64, String) = connection
+        .query_row("SELECT slot, run_id FROM active_run_slot", [], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .unwrap();
+    assert_eq!(
+        active_slot,
+        (1, "00000000-0000-0000-0000-000000000002".to_owned())
+    );
+    let user_version: i64 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(user_version, 6);
+    drop(connection);
+
     let restarted = start_host(&database);
     let replay = request(
         restarted.port,
@@ -176,6 +260,21 @@ fn admits_replays_conflicts_and_recovers_one_v2_request() {
         fixture.expected_request_utf8.as_bytes(),
     );
     assert!(replay.starts_with(b"HTTP/1.1 200 OK\r\n"));
+    let _ = fs::remove_file(database);
+}
+
+#[test]
+fn maintained_parser_rejects_malformed_header_before_admission_mutation() {
+    let fixture = fixture();
+    let database = database_path();
+    {
+        let host = start_host(&database);
+        let rejected =
+            malformed_content_type_request(host.port, fixture.expected_request_utf8.as_bytes());
+        assert!(rejected.starts_with(b"HTTP/1.1 400 Bad Request\r\n"));
+    }
+
+    assert_admission_tables_empty(&database);
     let _ = fs::remove_file(database);
 }
 
@@ -191,21 +290,6 @@ fn rejects_trailing_newline_before_admission_mutation() {
         assert!(rejected.starts_with(b"HTTP/1.1 400 Bad Request\r\n"));
     }
 
-    let connection = Connection::open(&database).unwrap();
-    for table in [
-        "accepted_requests",
-        "runs",
-        "events",
-        "admission_v2_records",
-        "active_run_slot",
-    ] {
-        let count: i64 = connection
-            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(count, 0, "{table} must remain empty");
-    }
-    drop(connection);
+    assert_admission_tables_empty(&database);
     let _ = fs::remove_file(database);
 }
