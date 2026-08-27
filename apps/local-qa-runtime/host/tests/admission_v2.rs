@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -9,6 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use fkst_local_qa_host::{parse_startup, serve_with_clock, FixedClock, Journal};
 use fkst_qa_contracts::{admit_json, canonical_admitted_bytes, sha256_digest};
+use rusqlite::Connection;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -50,7 +51,7 @@ fn database_path() -> PathBuf {
     ))
 }
 
-fn start_host(database: &PathBuf) -> Host {
+fn start_host(database: &Path) -> Host {
     let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener);
@@ -85,14 +86,16 @@ fn start_host(database: &PathBuf) -> Host {
     panic!("host did not start")
 }
 
-fn request(port: u16, method: &str, key: &str, body: &str) -> Vec<u8> {
+fn request(port: u16, method: &str, key: &str, body: &[u8]) -> Vec<u8> {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
     write!(
         stream,
-        "{method} /v1/runs/00000000-0000-0000-0000-000000000002 HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nIdempotency-Key: {key}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}\n",
-        body.len() + 1
+        "{method} /v1/runs/00000000-0000-0000-0000-000000000002 HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nIdempotency-Key: {key}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
     )
     .unwrap();
+    stream.write_all(body).unwrap();
+    stream.flush().unwrap();
     let mut response = Vec::new();
     stream.read_to_end(&mut response).unwrap();
     response
@@ -129,7 +132,7 @@ fn admits_replays_conflicts_and_recovers_one_v2_request() {
             host.port,
             "PUT",
             "idem_0002",
-            &fixture.expected_request_utf8,
+            fixture.expected_request_utf8.as_bytes(),
         );
         assert!(created.starts_with(b"HTTP/1.1 201 Created\r\n"));
         assert_eq!(
@@ -140,18 +143,18 @@ fn admits_replays_conflicts_and_recovers_one_v2_request() {
             host.port,
             "PUT",
             "idem_0002",
-            &fixture.expected_request_utf8,
+            fixture.expected_request_utf8.as_bytes(),
         );
         assert!(replay.starts_with(b"HTTP/1.1 200 OK\r\n"));
         assert_eq!(body(&replay), body(&created));
         let changed = with_idempotency_key(&fixture.expected_request_utf8, "different");
-        let conflict = request(host.port, "PUT", "different", &changed);
+        let conflict = request(host.port, "PUT", "different", changed.as_bytes());
         assert!(conflict.starts_with(b"HTTP/1.1 409 Conflict\r\n"));
         let post = request(
             host.port,
             "POST",
             "idem_0002",
-            &fixture.expected_request_utf8,
+            fixture.expected_request_utf8.as_bytes(),
         );
         assert!(post.starts_with(b"HTTP/1.1 405 Method Not Allowed\r\n"));
     }
@@ -170,8 +173,39 @@ fn admits_replays_conflicts_and_recovers_one_v2_request() {
         restarted.port,
         "PUT",
         "idem_0002",
-        &fixture.expected_request_utf8,
+        fixture.expected_request_utf8.as_bytes(),
     );
     assert!(replay.starts_with(b"HTTP/1.1 200 OK\r\n"));
+    let _ = fs::remove_file(database);
+}
+
+#[test]
+fn rejects_trailing_newline_before_admission_mutation() {
+    let fixture = fixture();
+    let database = database_path();
+    {
+        let host = start_host(&database);
+        let mut request_body = fixture.expected_request_utf8.into_bytes();
+        request_body.push(b'\n');
+        let rejected = request(host.port, "PUT", "idem_0002", &request_body);
+        assert!(rejected.starts_with(b"HTTP/1.1 400 Bad Request\r\n"));
+    }
+
+    let connection = Connection::open(&database).unwrap();
+    for table in [
+        "accepted_requests",
+        "runs",
+        "events",
+        "admission_v2_records",
+        "active_run_slot",
+    ] {
+        let count: i64 = connection
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0, "{table} must remain empty");
+    }
+    drop(connection);
     let _ = fs::remove_file(database);
 }
