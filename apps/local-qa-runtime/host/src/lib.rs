@@ -3,6 +3,7 @@ mod coordinator;
 mod executor;
 mod journal;
 pub mod ownership;
+mod transport;
 
 use std::ffi::OsString;
 use std::fmt;
@@ -401,82 +402,22 @@ fn handle_connection(
 }
 
 fn read_request(stream: &mut TcpStream) -> io::Result<Result<Request, Response>> {
-    let mut received = Vec::new();
-    let header_end = loop {
-        if let Some(position) = find_header_end(&received) {
-            if position + 4 > MAX_HEADER_BYTES {
-                return Ok(Err(oversized_header_response(&received)));
-            }
-            break position;
-        }
-        if received.len() >= MAX_HEADER_BYTES {
-            return Ok(Err(oversized_header_response(&received)));
-        }
-        let mut chunk = [0_u8; 1024];
-        let read = stream.read(&mut chunk)?;
-        if read == 0 {
-            return Ok(Err(problem_response(
-                400,
-                "Bad Request",
-                "invalid read request",
-            )));
-        }
-        received.extend_from_slice(&chunk[..read]);
+    let head = match transport::read_request_head(stream, MAX_HEADER_BYTES)? {
+        Ok(head) => head,
+        Err(error) => return Ok(Err(transport_error_response(error))),
     };
-
-    let header_bytes = &received[..header_end];
-    let header_text = match std::str::from_utf8(header_bytes) {
-        Ok(value) => value,
-        Err(_) => {
-            return Ok(Err(problem_response(
-                400,
-                "Bad Request",
-                "invalid read request",
-            )))
-        }
-    };
-    let mut lines = header_text.split("\r\n");
-    let request_line = lines.next().unwrap_or_default();
-    let mut request_parts = request_line.split(' ');
-    let method = request_parts.next().unwrap_or_default();
-    let target = request_parts.next().unwrap_or_default();
-    let version = request_parts.next().unwrap_or_default();
-    if request_parts.next().is_some() || !matches!(version, "HTTP/1.0" | "HTTP/1.1") {
-        return Ok(Err(problem_response(
-            400,
-            "Bad Request",
-            "invalid read request",
-        )));
-    }
-    let route = match classify_route(method, target) {
+    let route = match classify_route(&head.method, &head.target) {
         Ok(route) => route,
         Err(response) => return Ok(Err(response)),
     };
 
     let mut content_types = Vec::new();
     let mut idempotency_keys = Vec::new();
-    let mut content_lengths = Vec::new();
-    let mut has_transfer_encoding = false;
-    for line in lines {
-        let Some((name, value)) = line.split_once(':') else {
-            return Ok(Err(invalid_request(&route)));
-        };
-        if name.is_empty()
-            || !name
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-        {
-            return Ok(Err(invalid_request(&route)));
-        }
-        let value = value.trim_matches([' ', '\t']);
-        if name.eq_ignore_ascii_case("content-type") {
-            content_types.push(value);
-        } else if name.eq_ignore_ascii_case("idempotency-key") {
-            idempotency_keys.push(value);
-        } else if name.eq_ignore_ascii_case("content-length") {
-            content_lengths.push(value);
-        } else if name.eq_ignore_ascii_case("transfer-encoding") {
-            has_transfer_encoding = true;
+    for header in &head.headers {
+        if header.name.eq_ignore_ascii_case("content-type") {
+            content_types.push(header.value.as_slice());
+        } else if header.name.eq_ignore_ascii_case("idempotency-key") {
+            idempotency_keys.push(header.value.as_slice());
         }
     }
 
@@ -492,33 +433,21 @@ fn read_request(stream: &mut TcpStream) -> io::Result<Result<Request, Response>>
             if idempotency_keys.len() != 1 || !valid_idempotency_key(idempotency_keys[0]) {
                 return Ok(Err(invalid_request(&route)));
             }
-            Some(idempotency_keys[0].to_owned())
+            Some(String::from_utf8_lossy(idempotency_keys[0]).into_owned())
         }
         Route::Cancel { .. } => {
             if idempotency_keys.len() != 1 || !valid_idempotency_key(idempotency_keys[0]) {
                 return Ok(Err(invalid_request(&route)));
             }
-            Some(idempotency_keys[0].to_owned())
+            Some(String::from_utf8_lossy(idempotency_keys[0]).into_owned())
         }
         _ => None,
     };
 
-    if has_transfer_encoding || content_lengths.len() > 1 {
+    if matches!(route, Route::Submit { .. }) && head.content_length.is_none() {
         return Ok(Err(invalid_request(&route)));
     }
-    let content_length = match content_lengths.first() {
-        Some(value) if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) => {
-            match value.parse::<usize>() {
-                Ok(value) => value,
-                Err(_) => return Ok(Err(invalid_request(&route))),
-            }
-        }
-        Some(_) => return Ok(Err(invalid_request(&route))),
-        None => 0,
-    };
-    if matches!(route, Route::Submit { .. }) && content_lengths.len() != 1 {
-        return Ok(Err(invalid_request(&route)));
-    }
+    let content_length = head.content_length.unwrap_or(0);
     let maximum_body_bytes = if matches!(route, Route::Submit { .. }) {
         MAX_SUBMIT_BODY_BYTES
     } else {
@@ -533,21 +462,10 @@ fn read_request(stream: &mut TcpStream) -> io::Result<Result<Request, Response>>
         return Ok(Err(response));
     }
 
-    let body_start = header_end + 4;
-    let mut body = received[body_start..].to_vec();
-    if body.len() > content_length {
-        return Ok(Err(invalid_request(&route)));
-    }
-    if body.len() < content_length {
-        let mut remaining = vec![0_u8; content_length - body.len()];
-        if let Err(error) = stream.read_exact(&mut remaining) {
-            if error.kind() == io::ErrorKind::UnexpectedEof {
-                return Ok(Err(invalid_request(&route)));
-            }
-            return Err(error);
-        }
-        body.extend_from_slice(&remaining);
-    }
+    let body = match transport::read_body(stream, head.buffered_body, content_length)? {
+        Ok(body) => body,
+        Err(_) => return Ok(Err(invalid_request(&route))),
+    };
     if !matches!(route, Route::Submit { .. }) && content_length != 0 {
         return Ok(Err(invalid_request(&route)));
     }
@@ -557,6 +475,13 @@ fn read_request(stream: &mut TcpStream) -> io::Result<Result<Request, Response>>
         idempotency_key,
         body,
     }))
+}
+
+fn transport_error_response(error: transport::RequestHeadError) -> Response {
+    let route = error
+        .request_target()
+        .and_then(|(method, target)| classify_route(method, target).ok());
+    route.as_ref().map_or_else(invalid_read, invalid_request)
 }
 
 fn classify_route(method: &str, target: &str) -> Result<Route, Response> {
@@ -704,30 +629,6 @@ fn hex_value(byte: u8) -> Option<u8> {
     }
 }
 
-fn find_header_end(bytes: &[u8]) -> Option<usize> {
-    bytes.windows(4).position(|window| window == b"\r\n\r\n")
-}
-
-fn oversized_header_response(bytes: &[u8]) -> Response {
-    let Some(request_line_end) = bytes.windows(2).position(|window| window == b"\r\n") else {
-        return invalid_read();
-    };
-    let Ok(request_line) = std::str::from_utf8(&bytes[..request_line_end]) else {
-        return invalid_read();
-    };
-    let mut request_parts = request_line.split(' ');
-    let method = request_parts.next().unwrap_or_default();
-    let target = request_parts.next().unwrap_or_default();
-    let version = request_parts.next().unwrap_or_default();
-    if request_parts.next().is_some() || !matches!(version, "HTTP/1.0" | "HTTP/1.1") {
-        return invalid_read();
-    }
-    match classify_route(method, target) {
-        Ok(route) => invalid_request(&route),
-        Err(_) => invalid_read(),
-    }
-}
-
 fn valid_run_id(value: &str) -> bool {
     let bytes = value.as_bytes();
     (1..=64).contains(&bytes.len())
@@ -741,16 +642,18 @@ fn valid_submit_run_id(value: &str) -> bool {
     validate_scalar("UUID", value).is_ok()
 }
 
-fn valid_idempotency_key(value: &str) -> bool {
-    let bytes = value.as_bytes();
+fn valid_idempotency_key(bytes: &[u8]) -> bool {
     (1..=64).contains(&bytes.len())
         && bytes[0].is_ascii_alphanumeric()
         && bytes[1..]
             .iter()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
-fn valid_content_type(value: &str) -> bool {
+fn valid_content_type(value: &[u8]) -> bool {
+    let Ok(value) = std::str::from_utf8(value) else {
+        return false;
+    };
     value
         .split(';')
         .next()
