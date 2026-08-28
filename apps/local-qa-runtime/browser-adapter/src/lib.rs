@@ -1,5 +1,8 @@
 use thiserror::Error;
 
+#[cfg(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
+use std::path::Path;
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct FixedBrowserSmokeResult {
     pub final_url: String,
@@ -38,6 +41,63 @@ pub enum BrowserAdapterError {
     Cleanup(String),
     #[error("fixed browser smoke operation failed: {operation}; cleanup also failed: {cleanup}")]
     OperationAndCleanup { operation: String, cleanup: String },
+}
+
+#[cfg(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
+pub struct PreparedFixedBrowserSession {
+    inner: unix::PreparedSession,
+}
+
+#[cfg(not(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64"))))]
+pub struct PreparedFixedBrowserSession;
+
+#[cfg(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
+impl PreparedFixedBrowserSession {
+    pub fn fixture_url(&self) -> &str {
+        self.inner.fixture_url()
+    }
+
+    pub fn observe(&mut self) -> Result<FixedBrowserObservation, BrowserAdapterError> {
+        self.inner.observe()
+    }
+
+    pub fn close(self) -> Result<(), BrowserAdapterError> {
+        self.inner.close()
+    }
+}
+
+pub fn prepare_fixed_browser_session(
+    chrome_executable: &std::path::Path,
+) -> Result<PreparedFixedBrowserSession, BrowserAdapterError> {
+    #[cfg(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
+    {
+        validate_explicit_chrome(chrome_executable)?;
+        unix::prepare_fixed_browser_session(chrome_executable)
+            .map(|inner| PreparedFixedBrowserSession { inner })
+    }
+
+    #[cfg(not(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64"))))]
+    {
+        let _ = chrome_executable;
+        Err(BrowserAdapterError::UnsupportedPlatform)
+    }
+}
+
+#[cfg(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
+fn validate_explicit_chrome(path: &Path) -> Result<(), BrowserAdapterError> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let metadata = std::fs::metadata(path).map_err(|_| {
+        BrowserAdapterError::Setup(
+            "explicit Chrome executable is not an executable regular file".to_string(),
+        )
+    })?;
+    if !path.is_absolute() || !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
+        return Err(BrowserAdapterError::Setup(
+            "explicit Chrome executable is not an executable regular file".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 pub async fn observe_fixed_browser_fixture() -> Result<FixedBrowserObservation, BrowserAdapterError>
@@ -164,6 +224,14 @@ mod unix {
         run_with_options(RunOptions::production())
     }
 
+    pub(super) fn prepare_fixed_browser_session(
+        chrome_executable: &Path,
+    ) -> Result<PreparedSession, BrowserAdapterError> {
+        let mut options = RunOptions::production();
+        options.executable = Some(chrome_executable.to_path_buf());
+        prepare_with_options(options)
+    }
+
     #[derive(Clone, Copy)]
     enum FixtureContent {
         Ready,
@@ -190,7 +258,6 @@ mod unix {
     struct RunOptions {
         timeout: Duration,
         fixture_content: FixtureContent,
-        #[cfg(test)]
         executable: Option<PathBuf>,
         #[cfg(test)]
         screenshot_override: Option<Vec<u8>>,
@@ -203,7 +270,6 @@ mod unix {
             Self {
                 timeout: OPERATION_TIMEOUT,
                 fixture_content: FixtureContent::Ready,
-                #[cfg(test)]
                 executable: None,
                 #[cfg(test)]
                 screenshot_override: None,
@@ -221,7 +287,6 @@ mod unix {
         }
 
         fn chrome_path(&self) -> Result<PathBuf, BrowserAdapterError> {
-            #[cfg(test)]
             if let Some(executable) = &self.executable {
                 return Ok(executable.clone());
             }
@@ -252,9 +317,77 @@ mod unix {
         chrome: Option<OwnedChrome>,
     }
 
+    #[derive(Clone, Copy, Eq, PartialEq)]
+    enum ObservationState {
+        Ready,
+        Attempted,
+    }
+
+    pub(super) struct PreparedSession {
+        owned: Option<OwnedRun>,
+        options: RunOptions,
+        fixture_url: String,
+        deadline: OperationDeadline,
+        state: ObservationState,
+    }
+
+    impl PreparedSession {
+        pub(super) fn fixture_url(&self) -> &str {
+            &self.fixture_url
+        }
+
+        pub(super) fn observe(&mut self) -> Result<FixedBrowserObservation, BrowserAdapterError> {
+            if self.state != ObservationState::Ready {
+                return Err(BrowserAdapterError::Operation(
+                    "fixed browser observation was already attempted".to_string(),
+                ));
+            }
+            self.state = ObservationState::Attempted;
+            let owned = self.owned.as_mut().ok_or_else(|| {
+                BrowserAdapterError::Operation(
+                    "fixed browser session was already closed".to_string(),
+                )
+            })?;
+            perform_smoke(
+                owned.chrome.as_mut().ok_or_else(|| {
+                    BrowserAdapterError::Operation(
+                        "fixed browser session has no owned Chrome process".to_string(),
+                    )
+                })?,
+                self.fixture_url.clone(),
+                self.deadline,
+                &self.options,
+            )
+        }
+
+        pub(super) fn close(mut self) -> Result<(), BrowserAdapterError> {
+            let failures = self
+                .owned
+                .take()
+                .map(|owned| owned.cleanup(&self.options))
+                .unwrap_or_default();
+            if failures.is_empty() {
+                Ok(())
+            } else {
+                Err(BrowserAdapterError::Cleanup(failures.join("; ")))
+            }
+        }
+    }
+
     fn run_with_options(
         options: RunOptions,
     ) -> Result<FixedBrowserObservation, BrowserAdapterError> {
+        let mut prepared = prepare_with_options(options)?;
+        let operation = prepared.observe();
+        let cleanup_failures = prepared
+            .owned
+            .take()
+            .map(|owned| owned.cleanup(&prepared.options))
+            .unwrap_or_default();
+        combine_outcome(operation, cleanup_failures)
+    }
+
+    fn prepare_with_options(options: RunOptions) -> Result<PreparedSession, BrowserAdapterError> {
         let mut owned = OwnedRun::default();
         let operation = (|| {
             let chrome_path = options.chrome_path()?;
@@ -286,21 +419,29 @@ mod unix {
                 deadline,
             )?);
             record_owned_resources(&owned);
-
-            let navigation_url = owned
-                .fixture
-                .as_ref()
-                .expect("owned fixture exists")
-                .navigation_url();
-            perform_smoke(
-                owned.chrome.as_mut().expect("owned Chrome exists"),
-                navigation_url,
-                deadline,
-                &options,
-            )
+            Ok(deadline)
         })();
 
-        owned.finish(operation, &options)
+        let deadline = match operation {
+            Ok(deadline) => deadline,
+            Err(error) => {
+                return Err(owned
+                    .finish(Err(error), &options)
+                    .expect_err("setup failure cannot produce an observation"))
+            }
+        };
+        let fixture_url = owned
+            .fixture
+            .as_ref()
+            .expect("owned fixture exists")
+            .navigation_url();
+        Ok(PreparedSession {
+            owned: Some(owned),
+            options,
+            fixture_url,
+            deadline,
+            state: ObservationState::Ready,
+        })
     }
 
     fn perform_smoke(
@@ -451,11 +592,7 @@ mod unix {
     }
 
     impl OwnedRun {
-        fn finish(
-            mut self,
-            operation: Result<FixedBrowserObservation, BrowserAdapterError>,
-            options: &RunOptions,
-        ) -> Result<FixedBrowserObservation, BrowserAdapterError> {
+        fn cleanup(mut self, options: &RunOptions) -> Vec<String> {
             #[cfg(not(test))]
             let _ = options;
             record_owned_resources(&self);
@@ -485,8 +622,15 @@ mod unix {
             if let Some(error) = options.cleanup_failure {
                 cleanup_failures.push(error.to_string());
             }
+            cleanup_failures
+        }
 
-            combine_outcome(operation, cleanup_failures)
+        fn finish(
+            self,
+            operation: Result<FixedBrowserObservation, BrowserAdapterError>,
+            options: &RunOptions,
+        ) -> Result<FixedBrowserObservation, BrowserAdapterError> {
+            combine_outcome(operation, self.cleanup(options))
         }
     }
 
