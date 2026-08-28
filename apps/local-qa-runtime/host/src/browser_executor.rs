@@ -4,7 +4,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use fkst_local_qa_browser_adapter::{prepare_fixed_browser_session, PreparedFixedBrowserSession};
+use fkst_local_qa_browser_adapter::{
+    prepare_fixed_browser_session, FixedBrowserObservation, PreparedFixedBrowserSession,
+};
 use fkst_local_qa_evidence_stager::{
     EvidenceMediaType, EvidenceRole, EvidenceStager, StageRequest,
     StageSanitizedObservationRequest, StagedEvidence, StagedSanitizedObservation,
@@ -63,6 +65,12 @@ pub(crate) struct EffectCounters {
     browser_closes: AtomicUsize,
     evidence_stages: AtomicUsize,
     fixture_url: Mutex<Option<String>>,
+}
+
+struct HostObservation {
+    final_url: String,
+    observed_text: String,
+    staged: StagedSanitizedObservation,
 }
 
 pub(crate) struct BrowserWorkerExecutor {
@@ -216,7 +224,7 @@ impl BrowserWorkerExecutor {
         write_host_frame(process, &mut input_sequence, &invocation)?;
 
         let mut decoder = LocalWorkerFrameDecoder::default();
-        let mut observation: Option<StagedSanitizedObservation> = None;
+        let mut observation: Option<HostObservation> = None;
         let mut screenshot: Option<StagedEvidence> = None;
         let mut runner_log: Option<StagedEvidence> = None;
         for index in 0..7 {
@@ -249,6 +257,9 @@ impl BrowserWorkerExecutor {
                         .ok_or(RunError::Contract("Browser session closed before run"))?
                         .observe()
                         .map_err(|_| RunError::Contract("Browser observation failed"))?;
+                    validate_host_observation(fixture_url, &observed)?;
+                    let observed_final_url = observed.final_url.clone();
+                    let observed_text = observed.observed_text.clone();
                     let staged_observation = stager
                         .stage_sanitized_observation(StageSanitizedObservationRequest {
                             run_id: &request.run_id,
@@ -286,7 +297,11 @@ impl BrowserWorkerExecutor {
                         "sanitizedObservationRef": staged_observation.observation_ref().value(),
                         "screenshotEvidenceRef": staged_screenshot.object_ref().value(),
                     });
-                    observation = Some(staged_observation);
+                    observation = Some(HostObservation {
+                        final_url: observed_final_url,
+                        observed_text,
+                        staged: staged_observation,
+                    });
                     screenshot = Some(staged_screenshot);
                     output
                 }
@@ -354,11 +369,11 @@ impl BrowserWorkerExecutor {
                 "outcome": "passed",
                 "observation": {
                     "fixtureUrl": fixture_url,
-                    "finalUrl": fixture_url,
+                    "finalUrl": observation.final_url,
                     "selector": SELECTOR,
                     "expectedText": EXPECTED_TEXT,
-                    "observedText": EXPECTED_TEXT,
-                    "sanitizedObservationRef": observation.observation_ref().value(),
+                    "observedText": observation.observed_text,
+                    "sanitizedObservationRef": observation.staged.observation_ref().value(),
                 },
                 "startedAt": self.started_at,
                 "finishedAt": self.finished_at,
@@ -475,6 +490,21 @@ fn write_host_frame(
     let encoded = encode_local_worker_frame(frame)
         .map_err(|_| RunError::Contract("Browser Worker frame encoding failed"))?;
     process.write(&encoded)
+}
+
+fn validate_host_observation(
+    fixture_url: &str,
+    observation: &FixedBrowserObservation,
+) -> Result<(), RunError> {
+    if observation.final_url != fixture_url {
+        return Err(RunError::Contract(
+            "Browser final URL did not match fixture",
+        ));
+    }
+    if observation.observed_text != EXPECTED_TEXT {
+        return Err(RunError::Contract("Browser observed text did not pass"));
+    }
+    Ok(())
 }
 
 fn close_browser(
@@ -703,6 +733,29 @@ mod tests {
 
         drop(journal);
         fs::remove_dir_all(directory).expect("temporary test directory removed");
+    }
+
+    #[test]
+    fn host_observation_must_independently_pass_before_terminal_authority() {
+        let fixture_url = "http://127.0.0.1:43123/fixed-page.html";
+        let not_ready = FixedBrowserObservation {
+            final_url: fixture_url.to_owned(),
+            observed_text: "NOT READY".to_owned(),
+            screenshot: fkst_local_qa_browser_adapter::FixedPngScreenshot {
+                bytes: Vec::new(),
+                media_type: "image/png".to_owned(),
+                width_px: 1280,
+                height_px: 720,
+            },
+        };
+        assert!(validate_host_observation(fixture_url, &not_ready).is_err());
+
+        let wrong_url = FixedBrowserObservation {
+            final_url: "http://127.0.0.1:43124/fixed-page.html".to_owned(),
+            observed_text: EXPECTED_TEXT.to_owned(),
+            screenshot: not_ready.screenshot,
+        };
+        assert!(validate_host_observation(fixture_url, &wrong_url).is_err());
     }
 
     #[test]
