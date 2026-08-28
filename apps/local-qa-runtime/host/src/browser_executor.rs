@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -217,12 +216,11 @@ impl BrowserWorkerExecutor {
         write_host_frame(process, &mut input_sequence, &invocation)?;
 
         let mut decoder = LocalWorkerFrameDecoder::default();
-        let mut pending = VecDeque::new();
         let mut observation: Option<StagedSanitizedObservation> = None;
         let mut screenshot: Option<StagedEvidence> = None;
         let mut runner_log: Option<StagedEvidence> = None;
         for index in 0..7 {
-            let frame = process.read_frame(&mut decoder, &mut pending, deadline)?;
+            let frame = process.read_frame(&mut decoder, deadline)?;
             let expected_input = expected_capability_input(index, fixture_url);
             let capability = capability_name(index);
             let expected = json!({
@@ -338,7 +336,7 @@ impl BrowserWorkerExecutor {
             .map_err(|_| RunError::Contract("incomplete Browser capability sequence"))?;
         process.close_stdin()?;
 
-        let terminal = process.read_frame(&mut decoder, &mut pending, deadline)?;
+        let terminal = process.read_frame(&mut decoder, deadline)?;
         let terminal_bytes = canonical_bytes(&terminal)
             .map_err(|_| RunError::Contract("invalid Browser terminal serialization"))?;
         let terminal = validate_local_worker_terminal_result(&terminal_bytes)
@@ -384,7 +382,7 @@ impl BrowserWorkerExecutor {
                 "Browser terminal result relation failed",
             ));
         }
-        process.require_clean_eof(&mut decoder, &mut pending, deadline)?;
+        process.require_clean_eof(&mut decoder, deadline)?;
         process.wait_success(deadline)
     }
 }
@@ -504,17 +502,17 @@ fn validate_regular_file(path: &Path) -> Result<(), RunError> {
 }
 
 fn validate_executable(path: &Path) -> Result<(), RunError> {
-    validate_regular_file(path)?;
+    let metadata =
+        fs::metadata(path).map_err(|_| RunError::Contract("explicit executable is unavailable"))?;
+    if !path.is_absolute() || !metadata.is_file() {
+        return Err(RunError::Contract(
+            "explicit executable must be an absolute regular file",
+        ));
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if fs::metadata(path)
-            .map_err(|_| RunError::Contract("explicit executable is unavailable"))?
-            .permissions()
-            .mode()
-            & 0o111
-            == 0
-        {
+        if metadata.permissions().mode() & 0o111 == 0 {
             return Err(RunError::Contract("explicit path is not executable"));
         }
     }

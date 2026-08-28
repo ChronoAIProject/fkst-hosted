@@ -235,31 +235,7 @@ impl EvidenceStager {
             return Err(StagerError::QuotaExceeded);
         }
 
-        let temporary_path = temporary_path(parent, &final_path)?;
-        let mut temporary_file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary_path)
-            .map_err(|_| StagerError::Storage)?;
-        let mut temporary_guard = TemporaryFileGuard::new(temporary_path.clone());
-        temporary_file
-            .write_all(request.bytes)
-            .map_err(|_| StagerError::Storage)?;
-        temporary_file.flush().map_err(|_| StagerError::Storage)?;
-        temporary_file
-            .sync_all()
-            .map_err(|_| StagerError::Storage)?;
-        drop(temporary_file);
-        fs::hard_link(&temporary_path, &final_path).map_err(|error| {
-            if error.kind() == std::io::ErrorKind::AlreadyExists {
-                StagerError::DuplicateIdentity
-            } else {
-                StagerError::Storage
-            }
-        })?;
-        fs::remove_file(&temporary_path).map_err(|_| StagerError::Storage)?;
-        temporary_guard.disarm();
-        sync_directory(parent).map_err(|_| StagerError::Storage)?;
+        publish_new_file(&self.root, &final_path, request.bytes)?;
         Ok(StagedEvidence { object, object_ref })
     }
 
@@ -648,14 +624,12 @@ fn build_observation_reference(
     observation_id: &str,
     digest: String,
 ) -> Result<ValidatedValue, StagerError> {
-    let reference_json = json!({
-        "kind": OBSERVATION_REFERENCE_KIND,
-        "id": observation_id,
-        "schema_version": SCHEMA_VERSION,
-        "content_digest": digest,
-    });
-    let bytes = serde_json::to_vec(&reference_json).map_err(|_| StagerError::InvalidReference)?;
-    validate_local_sanitized_observation_ref(&bytes).map_err(|_| StagerError::InvalidReference)
+    build_digest_reference(
+        OBSERVATION_REFERENCE_KIND,
+        observation_id,
+        digest,
+        validate_local_sanitized_observation_ref,
+    )
 }
 
 fn build_object(request: &StageRequest<'_>) -> Result<ValidatedValue, StagerError> {
@@ -675,9 +649,28 @@ fn build_object(request: &StageRequest<'_>) -> Result<ValidatedValue, StagerErro
 }
 
 fn build_reference(object_id: &str, digest: String) -> Result<ValidatedValue, StagerError> {
-    let object_ref_json = json!({ "kind": REFERENCE_KIND, "id": object_id, "schema_version": SCHEMA_VERSION, "content_digest": digest });
-    let bytes = serde_json::to_vec(&object_ref_json).map_err(|_| StagerError::InvalidReference)?;
-    validate_local_evidence_object_ref(&bytes).map_err(|_| StagerError::InvalidReference)
+    build_digest_reference(
+        REFERENCE_KIND,
+        object_id,
+        digest,
+        validate_local_evidence_object_ref,
+    )
+}
+
+fn build_digest_reference(
+    kind: &str,
+    id: &str,
+    digest: String,
+    validator: fn(&[u8]) -> Result<ValidatedValue, fkst_qa_contracts::ContractError>,
+) -> Result<ValidatedValue, StagerError> {
+    let reference_json = json!({
+        "kind": kind,
+        "id": id,
+        "schema_version": SCHEMA_VERSION,
+        "content_digest": digest,
+    });
+    let bytes = serde_json::to_vec(&reference_json).map_err(|_| StagerError::InvalidReference)?;
+    validator(&bytes).map_err(|_| StagerError::InvalidReference)
 }
 
 fn publish_new_file(root: &Path, final_path: &Path, bytes: &[u8]) -> Result<(), StagerError> {

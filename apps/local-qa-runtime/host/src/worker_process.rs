@@ -1,8 +1,7 @@
-use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -123,12 +122,8 @@ impl WorkerProcess {
     pub(crate) fn read_frame(
         &mut self,
         decoder: &mut LocalWorkerFrameDecoder,
-        pending: &mut VecDeque<ValidatedValue>,
         deadline: Instant,
     ) -> Result<ValidatedValue, RunError> {
-        if let Some(frame) = pending.pop_front() {
-            return Ok(frame);
-        }
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
@@ -139,14 +134,14 @@ impl WorkerProcess {
                     let frames = decoder
                         .push(&bytes)
                         .map_err(|_| RunError::Contract("malformed Browser Worker frame"))?;
-                    if frames.len() > 1 || (!frames.is_empty() && !pending.is_empty()) {
-                        return Err(RunError::Contract(
-                            "unexpected Browser Worker frame sequence",
-                        ));
-                    }
-                    pending.extend(frames);
-                    if let Some(frame) = pending.pop_front() {
-                        return Ok(frame);
+                    match frames.len() {
+                        0 => {}
+                        1 => return Ok(frames.into_iter().next().expect("one decoded frame")),
+                        _ => {
+                            return Err(RunError::Contract(
+                                "unexpected Browser Worker frame sequence",
+                            ))
+                        }
                     }
                 }
                 Ok(ReaderEvent::Eof) => {
@@ -168,12 +163,8 @@ impl WorkerProcess {
     pub(crate) fn require_clean_eof(
         &mut self,
         decoder: &mut LocalWorkerFrameDecoder,
-        pending: &mut VecDeque<ValidatedValue>,
         deadline: Instant,
     ) -> Result<(), RunError> {
-        if !pending.is_empty() {
-            return Err(RunError::Contract("trailing Browser Worker frame"));
-        }
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
@@ -286,7 +277,7 @@ impl Drop for WorkerProcess {
     }
 }
 
-fn read_stdout(mut stdout: impl Read, sender: mpsc::Sender<ReaderEvent>) {
+fn read_stdout(mut stdout: impl Read, sender: Sender<ReaderEvent>) {
     let mut total = 0_usize;
     let mut chunk = [0_u8; 4096];
     loop {

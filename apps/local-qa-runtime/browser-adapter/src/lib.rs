@@ -324,7 +324,7 @@ mod unix {
     }
 
     pub(super) struct PreparedSession {
-        owned: Option<OwnedRun>,
+        owned: OwnedRun,
         options: RunOptions,
         fixture_url: String,
         deadline: OperationDeadline,
@@ -343,13 +343,8 @@ mod unix {
                 ));
             }
             self.state = ObservationState::Attempted;
-            let owned = self.owned.as_mut().ok_or_else(|| {
-                BrowserAdapterError::Operation(
-                    "fixed browser session was already closed".to_string(),
-                )
-            })?;
             perform_smoke(
-                owned.chrome.as_mut().ok_or_else(|| {
+                self.owned.chrome.as_mut().ok_or_else(|| {
                     BrowserAdapterError::Operation(
                         "fixed browser session has no owned Chrome process".to_string(),
                     )
@@ -360,17 +355,17 @@ mod unix {
             )
         }
 
-        pub(super) fn close(mut self) -> Result<(), BrowserAdapterError> {
-            let failures = self
-                .owned
-                .take()
-                .map(|owned| owned.cleanup(&self.options))
-                .unwrap_or_default();
+        pub(super) fn close(self) -> Result<(), BrowserAdapterError> {
+            let failures = self.cleanup();
             if failures.is_empty() {
                 Ok(())
             } else {
                 Err(BrowserAdapterError::Cleanup(failures.join("; ")))
             }
+        }
+
+        fn cleanup(self) -> Vec<String> {
+            self.owned.cleanup(&self.options)
         }
     }
 
@@ -379,11 +374,7 @@ mod unix {
     ) -> Result<FixedBrowserObservation, BrowserAdapterError> {
         let mut prepared = prepare_with_options(options)?;
         let operation = prepared.observe();
-        let cleanup_failures = prepared
-            .owned
-            .take()
-            .map(|owned| owned.cleanup(&prepared.options))
-            .unwrap_or_default();
+        let cleanup_failures = prepared.cleanup();
         combine_outcome(operation, cleanup_failures)
     }
 
@@ -436,7 +427,7 @@ mod unix {
             .expect("owned fixture exists")
             .navigation_url();
         Ok(PreparedSession {
-            owned: Some(owned),
+            owned,
             options,
             fixture_url,
             deadline,
@@ -1583,7 +1574,7 @@ mod unix {
         fn prepared_session_exposes_fixture_and_never_retries_observation() {
             let fixture_url = "http://127.0.0.1:43123/fixed-page.html".to_owned();
             let mut prepared = PreparedSession {
-                owned: Some(OwnedRun::default()),
+                owned: OwnedRun::default(),
                 options: RunOptions::production(),
                 fixture_url: fixture_url.clone(),
                 deadline: OperationDeadline::new(Duration::from_secs(1)),
