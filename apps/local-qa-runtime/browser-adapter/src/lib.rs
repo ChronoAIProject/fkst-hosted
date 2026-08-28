@@ -1312,10 +1312,9 @@ mod unix {
             let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) else {
                 return false;
             };
-            return stat
-                .rsplit_once(')')
+            stat.rsplit_once(')')
                 .and_then(|(_, fields)| fields.split_whitespace().next())
-                != Some("Z");
+                != Some("Z")
         }
         #[cfg(target_os = "macos")]
         {

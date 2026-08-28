@@ -588,7 +588,7 @@ pub(crate) fn mvp0_executor(
         mvp0_attempt_binding(),
         Arc::new(Mvp0DeterministicCurrentClaimVerifier),
         "2026-08-25T16:00:01Z".to_owned(),
-        "2026-08-25T16:00:01Z".to_owned(),
+        "2026-08-25T16:00:01.000Z".to_owned(),
         "2026-08-25T16:00:01.012Z".to_owned(),
         1_000,
         1_012,
@@ -797,6 +797,23 @@ mod tests {
             screenshot: not_ready.screenshot,
         };
         assert!(validate_host_observation(fixture_url, &wrong_url).is_err());
+    }
+
+    #[test]
+    fn mvp_clock_result_uses_the_protocol_timestamp_form() {
+        validate_frame(
+            json!({
+                "protocol": PROTOCOL,
+                "kind": "capability_result",
+                "invocation_id": INVOCATION_ID,
+                "request_id": "capability/0",
+                "capability": "clock.now/v1",
+                "output": { "value": "2026-08-25T16:00:01.000Z" },
+            }),
+            validate_local_worker_capability_result,
+            "invalid test clock result",
+        )
+        .expect("MVP clock result validates");
     }
 
     #[test]
