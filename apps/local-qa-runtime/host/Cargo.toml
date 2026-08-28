@@ -16,6 +16,7 @@ path = "src/main.rs"
 default = []
 mvp0-browser-test = [
   "dep:fkst-local-qa-browser-adapter",
+  "fkst-local-qa-browser-adapter/mvp0-test-support",
   "dep:fkst-local-qa-evidence-stager",
   "dep:nix",
 ]

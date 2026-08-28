@@ -5,7 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use fkst_local_qa_browser_adapter::{
-    prepare_fixed_browser_session, FixedBrowserObservation, PreparedFixedBrowserSession,
+    prepare_fixed_browser_session, BrowserCleanupReceipt, FixedBrowserObservation,
+    PreparedFixedBrowserSession,
 };
 use fkst_local_qa_evidence_stager::{
     EvidenceMediaType, EvidenceRole, EvidenceStager, StageRequest,
@@ -63,7 +64,9 @@ pub(crate) struct EffectCounters {
     capability_exchanges: AtomicUsize,
     browser_observations: AtomicUsize,
     browser_closes: AtomicUsize,
+    sanitized_observation_stages: AtomicUsize,
     evidence_stages: AtomicUsize,
+    cleanup_receipt: Mutex<Option<BrowserCleanupReceipt>>,
     fixture_url: Mutex<Option<String>>,
 }
 
@@ -277,7 +280,9 @@ impl BrowserWorkerExecutor {
                         .map_err(|_| {
                             RunError::Contract("sanitized observation verification failed")
                         })?;
-                    self.counters.evidence_stages.fetch_add(1, Ordering::SeqCst);
+                    self.counters
+                        .sanitized_observation_stages
+                        .fetch_add(1, Ordering::SeqCst);
                     let staged_screenshot = stager
                         .stage(StageRequest {
                             run_id: &request.run_id,
@@ -291,6 +296,7 @@ impl BrowserWorkerExecutor {
                     stager.verify(&staged_screenshot).map_err(|_| {
                         RunError::Contract("screenshot Evidence verification failed")
                     })?;
+                    self.counters.evidence_stages.fetch_add(1, Ordering::SeqCst);
                     let output = json!({
                         "finalUrl": observed.final_url,
                         "observedText": observed.observed_text,
@@ -306,7 +312,6 @@ impl BrowserWorkerExecutor {
                     output
                 }
                 3 => {
-                    self.counters.evidence_stages.fetch_add(1, Ordering::SeqCst);
                     let staged = stager
                         .stage(StageRequest {
                             run_id: &request.run_id,
@@ -320,6 +325,7 @@ impl BrowserWorkerExecutor {
                     stager.verify(&staged).map_err(|_| {
                         RunError::Contract("runner-log Evidence verification failed")
                     })?;
+                    self.counters.evidence_stages.fetch_add(1, Ordering::SeqCst);
                     let output = json!({ "runnerLogEvidenceRef": staged.object_ref().value() });
                     runner_log = Some(staged);
                     output
@@ -514,10 +520,15 @@ fn close_browser(
     let Some(browser) = browser.take() else {
         return Err(RunError::Contract("Browser session was already closed"));
     };
+    let receipt = browser
+        .close_with_receipt()
+        .map_err(|_| RunError::Contract("Browser cleanup failed"))?;
+    *counters
+        .cleanup_receipt
+        .lock()
+        .map_err(|_| RunError::Contract("Browser cleanup receipt lock poisoned"))? = Some(receipt);
     counters.browser_closes.fetch_add(1, Ordering::SeqCst);
-    browser
-        .close()
-        .map_err(|_| RunError::Contract("Browser cleanup failed"))
+    Ok(())
 }
 
 fn validate_regular_file(path: &Path) -> Result<(), RunError> {
@@ -647,7 +658,22 @@ mod tests {
         assert_eq!(counters.capability_exchanges.load(Ordering::SeqCst), 7);
         assert_eq!(counters.browser_observations.load(Ordering::SeqCst), 1);
         assert_eq!(counters.browser_closes.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            counters.sanitized_observation_stages.load(Ordering::SeqCst),
+            1
+        );
         assert_eq!(counters.evidence_stages.load(Ordering::SeqCst), 2);
+        let cleanup_receipt = counters
+            .cleanup_receipt
+            .lock()
+            .expect("cleanup receipt lock")
+            .clone()
+            .expect("Browser cleanup receipt recorded");
+        assert!(cleanup_receipt.fixture_closed);
+        assert!(cleanup_receipt.profile_removed);
+        assert!(cleanup_receipt.downloads_removed);
+        assert!(cleanup_receipt.chrome_group_gone);
+        assert!(cleanup_receipt.root_gone);
         let fixture_url = counters
             .fixture_url
             .lock()
@@ -705,6 +731,17 @@ mod tests {
             .expect("runner-log Evidence reloads");
         stager.verify(&runner_log).expect("runner log verifies");
         let stored_before = stored_artifact_bytes(&staging_root, run_id);
+        assert_eq!(
+            stored_before
+                .iter()
+                .map(|(path, _)| path.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            [
+                "evidence/0.bin".to_owned(),
+                "evidence/1.bin".to_owned(),
+                "observation/0.json".to_owned()
+            ]
+        );
 
         let restart_registry = ExecutorRegistry::new(vec![Box::new(
             mvp0_executor(
@@ -728,6 +765,10 @@ mod tests {
         assert_eq!(counters.capability_exchanges.load(Ordering::SeqCst), 7);
         assert_eq!(counters.browser_observations.load(Ordering::SeqCst), 1);
         assert_eq!(counters.browser_closes.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            counters.sanitized_observation_stages.load(Ordering::SeqCst),
+            1
+        );
         assert_eq!(counters.evidence_stages.load(Ordering::SeqCst), 2);
         assert_eq!(stored_artifact_bytes(&staging_root, run_id), stored_before);
 

@@ -301,6 +301,16 @@ impl EvidenceStager {
         let _guard = self.coordination.lock().map_err(|_| StagerError::Storage)?;
         let final_path =
             self.observation_path(request.run_id, request.attempt, request.observation_id)?;
+        let parent = final_path.parent().ok_or(StagerError::Storage)?;
+        ensure_directory_path(&self.root, parent)?;
+        match fs::symlink_metadata(&final_path) {
+            Ok(metadata) if metadata.file_type().is_file() => {
+                return Err(StagerError::DuplicateIdentity)
+            }
+            Ok(_) => return Err(StagerError::FilesystemSafety),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(StagerError::Storage),
+        }
         publish_new_file(&self.root, &final_path, &canonical_bytes)?;
         Ok(StagedSanitizedObservation {
             observation,

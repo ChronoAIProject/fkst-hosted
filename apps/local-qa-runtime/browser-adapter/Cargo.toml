@@ -8,6 +8,10 @@ publish = false
 name = "fkst_local_qa_browser_adapter"
 path = "src/lib.rs"
 
+[features]
+default = []
+mvp0-test-support = []
+
 [dependencies]
 futures-channel = "=0.3.33"
 headless_chrome = { version = "=1.0.22", default-features = false, features = ["offline"] }

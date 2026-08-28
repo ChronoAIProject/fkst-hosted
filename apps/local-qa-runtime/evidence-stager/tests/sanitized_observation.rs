@@ -74,7 +74,6 @@ fn stages_reloads_verifies_and_cleans_canonical_observation() {
         stager.stage_sanitized_observation(request()).unwrap_err(),
         StagerError::DuplicateIdentity
     );
-
     assert!(stager
         .cleanup_attempt("run-1", 1)
         .expect("attempt cleanup")
