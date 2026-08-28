@@ -71,10 +71,9 @@ fn assert_rejection(raw: String, category: &str, code: Option<&str>, path: &str)
 fn rejects_non_canonical_v2_encoded_identities() {
     let fixture = fixture();
     assert_rejection(
-        fixture.expected_request_utf8.replace(
-            "dGVzdC1mZW5jZS0wMDAwMDAwMg",
-            "test-fence-00000002",
-        ),
+        fixture
+            .expected_request_utf8
+            .replace("dGVzdC1mZW5jZS0wMDAwMDAwMg", "test-fence-00000002"),
         "contract",
         Some("contract.invalid_encoding"),
         "/attempt_binding/fence_token",

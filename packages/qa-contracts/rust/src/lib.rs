@@ -447,9 +447,7 @@ pub fn validate_local_qa_run_request_v2(raw: &[u8]) -> Result<ValidatedValue, Co
                 "/nonce",
             )));
         }
-        Err(error)
-            if error.0.reason == "schema_violation" && fence_token_has_invalid_encoding =>
-        {
+        Err(error) if error.0.reason == "schema_violation" && fence_token_has_invalid_encoding => {
             return Err(ContractError(Rejection::contract(
                 "contract.invalid_encoding",
                 "invalid_encoding",

@@ -330,10 +330,9 @@ fn rejects_the_old_non_canonical_fence_token_without_mutation() {
     let database = database_path();
     {
         let host = start_host(&database);
-        let request_body = fixture.expected_request_utf8.replace(
-            "dGVzdC1mZW5jZS0wMDAwMDAwMg",
-            "test-fence-00000002",
-        );
+        let request_body = fixture
+            .expected_request_utf8
+            .replace("dGVzdC1mZW5jZS0wMDAwMDAwMg", "test-fence-00000002");
         let rejected = request(host.port, "PUT", "idem_0002", request_body.as_bytes());
         assert!(rejected.starts_with(b"HTTP/1.1 400 Bad Request\r\n"));
     }
@@ -358,7 +357,10 @@ fn accepts_every_idempotency_key_character_allowed_by_the_transport_contract() {
             let host = start_host(&database);
             let request_body = with_idempotency_key(&fixture.expected_request_utf8, &key);
             let accepted = request(host.port, "PUT", &key, request_body.as_bytes());
-            assert!(accepted.starts_with(b"HTTP/1.1 201 Created\r\n"), "key {key}");
+            assert!(
+                accepted.starts_with(b"HTTP/1.1 201 Created\r\n"),
+                "key {key}"
+            );
         }
         let _ = fs::remove_file(database);
     }

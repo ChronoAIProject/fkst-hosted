@@ -27,4 +27,8 @@ paths = [
 # "-----BEGIN RSA PRIVATE KEY-----\nSECRET\n-----END RSA PRIVATE KEY-----".
 regexes = [
   '''BEGIN RSA PRIVATE KEY-----\\nSECRET\\n-----END''',
+  # Canonical admission-v2 conformance sentinel. It decodes to the literal
+  # "test-fence-00000002" and is shared by the deterministic MVP-0 verifier
+  # and cross-language fixtures; it is not a credential.
+  '''dGVzdC1mZW5jZS0wMDAwMDAwMg''',
 ]
