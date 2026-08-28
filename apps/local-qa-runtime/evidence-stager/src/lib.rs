@@ -263,6 +263,47 @@ impl EvidenceStager {
         Ok(StagedEvidence { object, object_ref })
     }
 
+    pub fn load(
+        &self,
+        run_id: &str,
+        attempt: u64,
+        object_id: &str,
+        role: EvidenceRole,
+        media_type: EvidenceMediaType,
+    ) -> Result<StagedEvidence, StagerError> {
+        let _global_guard = STAGING_COORDINATION
+            .lock()
+            .map_err(|_| StagerError::VerificationFailed)?;
+        let _guard = self
+            .coordination
+            .lock()
+            .map_err(|_| StagerError::VerificationFailed)?;
+        let final_path = self
+            .object_path(run_id, attempt, object_id)
+            .map_err(|_| StagerError::VerificationFailed)?;
+        let file = checked_open_regular(&self.root, &final_path)
+            .map_err(|_| StagerError::VerificationFailed)?;
+        let mut stored_bytes = Vec::new();
+        file.take((MAX_EVIDENCE_BYTES + 1) as u64)
+            .read_to_end(&mut stored_bytes)
+            .map_err(|_| StagerError::VerificationFailed)?;
+        let request = StageRequest {
+            run_id,
+            attempt,
+            object_id,
+            role,
+            media_type,
+            bytes: &stored_bytes,
+        };
+        validate_request(&request).map_err(|_| StagerError::VerificationFailed)?;
+        let object = build_object(&request).map_err(|_| StagerError::VerificationFailed)?;
+        let digest =
+            contract_content_digest(&object).map_err(|_| StagerError::VerificationFailed)?;
+        let object_ref =
+            build_reference(object_id, digest).map_err(|_| StagerError::VerificationFailed)?;
+        Ok(StagedEvidence { object, object_ref })
+    }
+
     pub fn stage_sanitized_observation(
         &self,
         request: StageSanitizedObservationRequest<'_>,

@@ -1580,6 +1580,30 @@ mod unix {
         }
 
         #[test]
+        fn prepared_session_exposes_fixture_and_never_retries_observation() {
+            let fixture_url = "http://127.0.0.1:43123/fixed-page.html".to_owned();
+            let mut prepared = PreparedSession {
+                owned: Some(OwnedRun::default()),
+                options: RunOptions::production(),
+                fixture_url: fixture_url.clone(),
+                deadline: OperationDeadline::new(Duration::from_secs(1)),
+                state: ObservationState::Ready,
+            };
+            assert_eq!(prepared.fixture_url(), fixture_url);
+            assert!(prepared
+                .observe()
+                .expect_err("missing Chrome fails the first observation")
+                .to_string()
+                .contains("no owned Chrome process"));
+            assert!(prepared
+                .observe()
+                .expect_err("observation cannot be retried")
+                .to_string()
+                .contains("already attempted"));
+            prepared.close().expect("empty ownership closes");
+        }
+
+        #[test]
         fn poisoned_browser_test_lock_is_recovered() {
             let lock = Arc::new(std::sync::Mutex::new(()));
             let poisoner = Arc::clone(&lock);

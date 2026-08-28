@@ -455,8 +455,11 @@ name = "fkst-local-qa-host"
 version = "0.0.0"
 dependencies = [
  "ctrlc",
+ "fkst-local-qa-browser-adapter",
+ "fkst-local-qa-evidence-stager",
  "fkst-qa-contracts",
  "httparse",
+ "nix 0.30.1",
  "rusqlite",
  "serde",
  "serde_json",

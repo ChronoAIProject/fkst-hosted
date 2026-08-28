@@ -35,8 +35,7 @@ fn stages_reloads_verifies_and_cleans_canonical_observation() {
     let staged = stager
         .stage_sanitized_observation(request())
         .expect("observation stages");
-    validate_local_sanitized_observation(staged.canonical_bytes())
-        .expect("stored bytes validate");
+    validate_local_sanitized_observation(staged.canonical_bytes()).expect("stored bytes validate");
     validate_local_sanitized_observation_ref(
         &serde_json::to_vec(staged.observation_ref().value()).expect("reference encodes"),
     )
@@ -67,7 +66,10 @@ fn stages_reloads_verifies_and_cleans_canonical_observation() {
     );
 
     let path = root.join("run-1/1/observation/0.json");
-    assert_eq!(fs::read(&path).expect("observation bytes read"), staged.canonical_bytes());
+    assert_eq!(
+        fs::read(&path).expect("observation bytes read"),
+        staged.canonical_bytes()
+    );
     assert_eq!(
         stager.stage_sanitized_observation(request()).unwrap_err(),
         StagerError::DuplicateIdentity
@@ -124,8 +126,7 @@ fn tampered_or_unsafe_observation_fails_closed() {
     let staged = stager
         .stage_sanitized_observation(request())
         .expect("observation stages");
-    fs::write(root.join("run-1/1/observation/0.json"), b"{}")
-        .expect("tamper observation");
+    fs::write(root.join("run-1/1/observation/0.json"), b"{}").expect("tamper observation");
     assert_eq!(
         stager.verify_sanitized_observation(&staged),
         Err(StagerError::VerificationFailed)
