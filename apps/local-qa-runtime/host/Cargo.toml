@@ -12,10 +12,22 @@ path = "src/lib.rs"
 name = "fkst-local-qa-host"
 path = "src/main.rs"
 
+[features]
+default = []
+mvp0-browser-test = [
+  "dep:fkst-local-qa-browser-adapter",
+  "fkst-local-qa-browser-adapter/mvp0-test-support",
+  "dep:fkst-local-qa-evidence-stager",
+  "dep:nix",
+]
+
 [dependencies]
 ctrlc = { version = "=3.4.7", features = ["termination"] }
+fkst-local-qa-browser-adapter = { path = "../browser-adapter", optional = true }
+fkst-local-qa-evidence-stager = { path = "../evidence-stager", optional = true }
 fkst-qa-contracts = { path = "../../../packages/qa-contracts/rust" }
 httparse = "=1.10.1"
+nix = { version = "=0.30.1", features = ["signal"], optional = true }
 rusqlite = "=0.40.1"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"

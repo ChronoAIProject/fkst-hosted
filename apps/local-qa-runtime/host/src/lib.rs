@@ -1,9 +1,15 @@
 mod admission;
+#[cfg(feature = "mvp0-browser-test")]
+#[allow(dead_code)]
+mod browser_executor;
 mod coordinator;
 mod executor;
 mod journal;
 pub mod ownership;
 mod transport;
+#[cfg(feature = "mvp0-browser-test")]
+#[allow(dead_code)]
+mod worker_process;
 
 use std::ffi::OsString;
 use std::fmt;

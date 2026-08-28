@@ -1,5 +1,8 @@
 use thiserror::Error;
 
+#[cfg(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
+use std::path::Path;
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct FixedBrowserSmokeResult {
     pub final_url: String,
@@ -24,6 +27,21 @@ pub struct FixedBrowserObservation {
     pub screenshot: FixedPngScreenshot,
 }
 
+#[cfg(feature = "mvp0-test-support")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BrowserCleanupReceipt {
+    pub root_pid: Option<u32>,
+    pub process_group: Option<i32>,
+    pub fixture_address: String,
+    pub profile_path: String,
+    pub downloads_path: String,
+    pub fixture_closed: bool,
+    pub profile_removed: bool,
+    pub downloads_removed: bool,
+    pub chrome_group_gone: bool,
+    pub root_gone: bool,
+}
+
 #[derive(Debug, Error)]
 pub enum BrowserAdapterError {
     #[error("unsupported platform: the fixed browser smoke supports Linux and macOS arm64 only")]
@@ -38,6 +56,68 @@ pub enum BrowserAdapterError {
     Cleanup(String),
     #[error("fixed browser smoke operation failed: {operation}; cleanup also failed: {cleanup}")]
     OperationAndCleanup { operation: String, cleanup: String },
+}
+
+#[cfg(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
+pub struct PreparedFixedBrowserSession {
+    inner: unix::PreparedSession,
+}
+
+#[cfg(not(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64"))))]
+pub struct PreparedFixedBrowserSession;
+
+#[cfg(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
+impl PreparedFixedBrowserSession {
+    pub fn fixture_url(&self) -> &str {
+        self.inner.fixture_url()
+    }
+
+    pub fn observe(&mut self) -> Result<FixedBrowserObservation, BrowserAdapterError> {
+        self.inner.observe()
+    }
+
+    pub fn close(self) -> Result<(), BrowserAdapterError> {
+        self.inner.close()
+    }
+
+    #[cfg(feature = "mvp0-test-support")]
+    pub fn close_with_receipt(self) -> Result<BrowserCleanupReceipt, BrowserAdapterError> {
+        self.inner.close_with_receipt()
+    }
+}
+
+pub fn prepare_fixed_browser_session(
+    chrome_executable: &std::path::Path,
+) -> Result<PreparedFixedBrowserSession, BrowserAdapterError> {
+    #[cfg(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
+    {
+        validate_explicit_chrome(chrome_executable)?;
+        unix::prepare_fixed_browser_session(chrome_executable)
+            .map(|inner| PreparedFixedBrowserSession { inner })
+    }
+
+    #[cfg(not(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64"))))]
+    {
+        let _ = chrome_executable;
+        Err(BrowserAdapterError::UnsupportedPlatform)
+    }
+}
+
+#[cfg(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
+fn validate_explicit_chrome(path: &Path) -> Result<(), BrowserAdapterError> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let metadata = std::fs::metadata(path).map_err(|_| {
+        BrowserAdapterError::Setup(
+            "explicit Chrome executable is not an executable regular file".to_string(),
+        )
+    })?;
+    if !path.is_absolute() || !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
+        return Err(BrowserAdapterError::Setup(
+            "explicit Chrome executable is not an executable regular file".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 pub async fn observe_fixed_browser_fixture() -> Result<FixedBrowserObservation, BrowserAdapterError>
@@ -155,6 +235,7 @@ mod unix {
     const OPERATION_TIMEOUT: Duration = Duration::from_secs(15);
     #[cfg(test)]
     const REAL_BROWSER_TEST_TIMEOUT: Duration = Duration::from_secs(60);
+    const FIXTURE_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
     const IO_POLL_INTERVAL: Duration = Duration::from_millis(10);
     const CLEANUP_GRACE: Duration = Duration::from_millis(500);
     const CLEANUP_LIMIT: Duration = Duration::from_secs(3);
@@ -162,6 +243,14 @@ mod unix {
     pub(super) fn observe_fixed_browser_fixture(
     ) -> Result<FixedBrowserObservation, BrowserAdapterError> {
         run_with_options(RunOptions::production())
+    }
+
+    pub(super) fn prepare_fixed_browser_session(
+        chrome_executable: &Path,
+    ) -> Result<PreparedSession, BrowserAdapterError> {
+        let mut options = RunOptions::production();
+        options.executable = Some(chrome_executable.to_path_buf());
+        prepare_with_options(options)
     }
 
     #[derive(Clone, Copy)]
@@ -190,7 +279,6 @@ mod unix {
     struct RunOptions {
         timeout: Duration,
         fixture_content: FixtureContent,
-        #[cfg(test)]
         executable: Option<PathBuf>,
         #[cfg(test)]
         screenshot_override: Option<Vec<u8>>,
@@ -203,7 +291,6 @@ mod unix {
             Self {
                 timeout: OPERATION_TIMEOUT,
                 fixture_content: FixtureContent::Ready,
-                #[cfg(test)]
                 executable: None,
                 #[cfg(test)]
                 screenshot_override: None,
@@ -221,7 +308,6 @@ mod unix {
         }
 
         fn chrome_path(&self) -> Result<PathBuf, BrowserAdapterError> {
-            #[cfg(test)]
             if let Some(executable) = &self.executable {
                 return Ok(executable.clone());
             }
@@ -250,11 +336,83 @@ mod unix {
         profile: Option<TempDir>,
         downloads: Option<TempDir>,
         chrome: Option<OwnedChrome>,
+        cleaned: bool,
+    }
+
+    #[derive(Clone, Copy, Eq, PartialEq)]
+    enum ObservationState {
+        Ready,
+        Attempted,
+    }
+
+    pub(super) struct PreparedSession {
+        owned: OwnedRun,
+        options: RunOptions,
+        fixture_url: String,
+        deadline: OperationDeadline,
+        state: ObservationState,
+    }
+
+    impl PreparedSession {
+        pub(super) fn fixture_url(&self) -> &str {
+            &self.fixture_url
+        }
+
+        pub(super) fn observe(&mut self) -> Result<FixedBrowserObservation, BrowserAdapterError> {
+            if self.state != ObservationState::Ready {
+                return Err(BrowserAdapterError::Operation(
+                    "fixed browser observation was already attempted".to_string(),
+                ));
+            }
+            self.state = ObservationState::Attempted;
+            perform_smoke(
+                self.owned.chrome.as_mut().ok_or_else(|| {
+                    BrowserAdapterError::Operation(
+                        "fixed browser session has no owned Chrome process".to_string(),
+                    )
+                })?,
+                self.fixture_url.clone(),
+                self.deadline,
+                &self.options,
+            )
+        }
+
+        pub(super) fn close(mut self) -> Result<(), BrowserAdapterError> {
+            let failures = self.cleanup();
+            if failures.is_empty() {
+                Ok(())
+            } else {
+                Err(BrowserAdapterError::Cleanup(failures.join("; ")))
+            }
+        }
+
+        #[cfg(feature = "mvp0-test-support")]
+        pub(super) fn close_with_receipt(
+            mut self,
+        ) -> Result<super::BrowserCleanupReceipt, BrowserAdapterError> {
+            let snapshot = self.owned.cleanup_snapshot();
+            let failures = self.cleanup();
+            if !failures.is_empty() {
+                return Err(BrowserAdapterError::Cleanup(failures.join("; ")));
+            }
+            Ok(snapshot.receipt())
+        }
+
+        fn cleanup(&mut self) -> Vec<String> {
+            self.owned.cleanup()
+        }
     }
 
     fn run_with_options(
         options: RunOptions,
     ) -> Result<FixedBrowserObservation, BrowserAdapterError> {
+        let mut prepared = prepare_with_options(options)?;
+        let operation = prepared.observe();
+        let cleanup_failures = prepared.cleanup();
+        combine_outcome(operation, cleanup_failures)
+    }
+
+    fn prepare_with_options(options: RunOptions) -> Result<PreparedSession, BrowserAdapterError> {
         let mut owned = OwnedRun::default();
         let operation = (|| {
             let chrome_path = options.chrome_path()?;
@@ -286,21 +444,29 @@ mod unix {
                 deadline,
             )?);
             record_owned_resources(&owned);
-
-            let navigation_url = owned
-                .fixture
-                .as_ref()
-                .expect("owned fixture exists")
-                .navigation_url();
-            perform_smoke(
-                owned.chrome.as_mut().expect("owned Chrome exists"),
-                navigation_url,
-                deadline,
-                &options,
-            )
+            Ok(deadline)
         })();
 
-        owned.finish(operation, &options)
+        let deadline = match operation {
+            Ok(deadline) => deadline,
+            Err(error) => {
+                return Err(owned
+                    .finish(Err(error), &options)
+                    .expect_err("setup failure cannot produce an observation"))
+            }
+        };
+        let fixture_url = owned
+            .fixture
+            .as_ref()
+            .expect("owned fixture exists")
+            .navigation_url();
+        Ok(PreparedSession {
+            owned,
+            options,
+            fixture_url,
+            deadline,
+            state: ObservationState::Ready,
+        })
     }
 
     fn perform_smoke(
@@ -450,43 +616,120 @@ mod unix {
         }
     }
 
+    #[cfg(feature = "mvp0-test-support")]
+    #[derive(Clone, Debug)]
+    struct CleanupSnapshot {
+        root_pid: Option<u32>,
+        process_group: Option<Pid>,
+        fixture_address: Option<SocketAddrV4>,
+        profile_path: PathBuf,
+        downloads_path: PathBuf,
+    }
+
+    #[cfg(feature = "mvp0-test-support")]
+    impl CleanupSnapshot {
+        fn receipt(&self) -> super::BrowserCleanupReceipt {
+            super::BrowserCleanupReceipt {
+                root_pid: self.root_pid,
+                process_group: self.process_group.map(|pid| pid.as_raw()),
+                fixture_address: self
+                    .fixture_address
+                    .map(|address| address.to_string())
+                    .unwrap_or_default(),
+                profile_path: self.profile_path.display().to_string(),
+                downloads_path: self.downloads_path.display().to_string(),
+                fixture_closed: self
+                    .fixture_address
+                    .is_some_and(|address| TcpStream::connect(address).is_err()),
+                profile_removed: !self.profile_path.exists(),
+                downloads_removed: !self.downloads_path.exists(),
+                chrome_group_gone: self
+                    .process_group
+                    .is_none_or(|group| !process_group_is_alive(group).unwrap_or(true)),
+                root_gone: self.root_pid.is_none_or(|pid| !process_is_alive(pid)),
+            }
+        }
+    }
+
     impl OwnedRun {
-        fn finish(
-            mut self,
-            operation: Result<FixedBrowserObservation, BrowserAdapterError>,
-            options: &RunOptions,
-        ) -> Result<FixedBrowserObservation, BrowserAdapterError> {
-            #[cfg(not(test))]
-            let _ = options;
-            record_owned_resources(&self);
+        #[cfg(feature = "mvp0-test-support")]
+        fn cleanup_snapshot(&self) -> CleanupSnapshot {
+            CleanupSnapshot {
+                root_pid: self
+                    .chrome
+                    .as_ref()
+                    .and_then(|chrome| chrome.child.as_ref().map(Child::id)),
+                process_group: self.chrome.as_ref().map(|chrome| chrome.process_group),
+                fixture_address: self.fixture.as_ref().map(|fixture| fixture.address),
+                profile_path: self
+                    .profile
+                    .as_ref()
+                    .map_or_else(PathBuf::new, |profile| profile.path().to_path_buf()),
+                downloads_path: self
+                    .downloads
+                    .as_ref()
+                    .map_or_else(PathBuf::new, |downloads| downloads.path().to_path_buf()),
+            }
+        }
+
+        fn cleanup(&mut self) -> Vec<String> {
+            if self.cleaned {
+                return Vec::new();
+            }
+            self.cleaned = true;
+            record_owned_resources(self);
             let mut cleanup_failures = Vec::new();
 
+            record_cleanup_step("chrome");
             if let Some(mut chrome) = self.chrome.take() {
                 if let Err(error) = chrome.cleanup() {
                     cleanup_failures.push(error);
                 }
             }
+            record_cleanup_step("fixture");
             if let Some(fixture) = self.fixture.take() {
                 if let Err(error) = fixture.stop() {
                     cleanup_failures.push(error);
                 }
             }
+            record_cleanup_step("downloads");
             if let Some(downloads) = self.downloads.take() {
                 if let Err(error) = downloads.close() {
                     cleanup_failures.push(format!("remove owned downloads directory: {error}"));
                 }
             }
+            record_cleanup_step("profile");
             if let Some(profile) = self.profile.take() {
                 if let Err(error) = profile.close() {
                     cleanup_failures.push(format!("remove owned profile directory: {error}"));
                 }
             }
-            #[cfg(test)]
-            if let Some(error) = options.cleanup_failure {
-                cleanup_failures.push(error.to_string());
-            }
+            cleanup_failures
+        }
 
+        fn finish(
+            mut self,
+            operation: Result<FixedBrowserObservation, BrowserAdapterError>,
+            options: &RunOptions,
+        ) -> Result<FixedBrowserObservation, BrowserAdapterError> {
+            let cleanup_failures = self.cleanup();
+            #[cfg(test)]
+            let cleanup_failures = {
+                let mut cleanup_failures = cleanup_failures;
+                if let Some(error) = options.cleanup_failure {
+                    cleanup_failures.push(error.to_string());
+                }
+                cleanup_failures
+            };
+            #[cfg(not(test))]
+            let _ = options;
             combine_outcome(operation, cleanup_failures)
+        }
+    }
+
+    impl Drop for OwnedRun {
+        fn drop(&mut self) {
+            let _ = self.cleanup();
         }
     }
 
@@ -630,12 +873,17 @@ mod unix {
         mut stream: TcpStream,
         content: FixtureContent,
     ) -> Result<(), String> {
-        stream
-            .set_read_timeout(Some(Duration::from_secs(1)))
-            .map_err(|error| format!("configure fixed fixture connection: {error}"))?;
+        let request_deadline = Instant::now() + FIXTURE_REQUEST_TIMEOUT;
         let mut request = Vec::with_capacity(1024);
         let mut chunk = [0_u8; 1024];
         while request.len() <= 8192 && !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+            let remaining = request_deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            stream
+                .set_read_timeout(Some(remaining))
+                .map_err(|error| format!("configure fixed fixture connection: {error}"))?;
             match stream.read(&mut chunk) {
                 Ok(0) => break,
                 Ok(read) => request.extend_from_slice(&chunk[..read]),
@@ -1057,6 +1305,27 @@ mod unix {
         Ok(!process_group_members(process_group)?.is_empty())
     }
 
+    #[cfg(feature = "mvp0-test-support")]
+    fn process_is_alive(pid: u32) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) else {
+                return false;
+            };
+            stat.rsplit_once(')')
+                .and_then(|(_, fields)| fields.split_whitespace().next())
+                != Some("Z")
+        }
+        #[cfg(target_os = "macos")]
+        {
+            match nix::sys::signal::kill(Pid::from_raw(pid as i32), None) {
+                Ok(()) | Err(Errno::EPERM) => true,
+                Err(Errno::ESRCH) => false,
+                Err(_) => true,
+            }
+        }
+    }
+
     #[cfg(target_os = "macos")]
     fn process_group_is_alive(process_group: Pid) -> Result<bool, String> {
         let group_target = Pid::from_raw(-process_group.as_raw());
@@ -1165,6 +1434,33 @@ mod unix {
     fn record_owned_resources(_owned: &OwnedRun) {}
 
     #[cfg(test)]
+    type CleanupOrderObserver = Arc<std::sync::Mutex<Vec<&'static str>>>;
+
+    #[cfg(test)]
+    type CleanupOrderSlot = std::sync::OnceLock<std::sync::Mutex<Option<CleanupOrderObserver>>>;
+
+    #[cfg(test)]
+    static TEST_CLEANUP_ORDER: CleanupOrderSlot = std::sync::OnceLock::new();
+
+    #[cfg(test)]
+    fn record_cleanup_step(step: &'static str) {
+        let slot = TEST_CLEANUP_ORDER.get_or_init(|| std::sync::Mutex::new(None));
+        let Ok(slot_guard) = slot.lock() else {
+            return;
+        };
+        let Some(order) = slot_guard.as_ref().cloned() else {
+            return;
+        };
+        drop(slot_guard);
+        if let Ok(mut order) = order.lock() {
+            order.push(step);
+        };
+    }
+
+    #[cfg(not(test))]
+    fn record_cleanup_step(_step: &'static str) {}
+
+    #[cfg(test)]
     mod tests {
         use super::*;
         use png::{BitDepth, ColorType, Encoder};
@@ -1210,6 +1506,22 @@ mod unix {
             }
             fixture.stop().expect("fixture stops");
             assert!(TcpStream::connect(address).is_err());
+        }
+
+        #[test]
+        fn fixture_close_is_bounded_for_a_slow_byte_client() {
+            let _browser_guard = browser_test_guard();
+            let fixture = FixtureServer::start(FixtureContent::Ready).expect("fixture starts");
+            let mut client = TcpStream::connect(fixture.address).expect("slow client connects");
+            client.write_all(b"G").expect("slow client writes one byte");
+            thread::sleep(Duration::from_millis(50));
+
+            let started = Instant::now();
+            fixture
+                .stop()
+                .expect("fixture stops after request deadline");
+            assert!(started.elapsed() < Duration::from_secs(2));
+            drop(client);
         }
 
         #[test]
@@ -1433,6 +1745,44 @@ mod unix {
         #[test]
         fn production_options_keep_the_fixed_fifteen_second_deadline() {
             assert_eq!(RunOptions::production().timeout, Duration::from_secs(15));
+        }
+
+        #[test]
+        fn owned_run_drop_preserves_the_explicit_cleanup_order() {
+            let _browser_guard = browser_test_guard();
+            let order = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let _cleanup_guard = install_cleanup_observer(Arc::clone(&order));
+
+            drop(OwnedRun::default());
+
+            assert_eq!(
+                order.lock().expect("cleanup order lock").as_slice(),
+                ["chrome", "fixture", "downloads", "profile"]
+            );
+        }
+
+        #[test]
+        fn prepared_session_exposes_fixture_and_never_retries_observation() {
+            let fixture_url = "http://127.0.0.1:43123/fixed-page.html".to_owned();
+            let mut prepared = PreparedSession {
+                owned: OwnedRun::default(),
+                options: RunOptions::production(),
+                fixture_url: fixture_url.clone(),
+                deadline: OperationDeadline::new(Duration::from_secs(1)),
+                state: ObservationState::Ready,
+            };
+            assert_eq!(prepared.fixture_url(), fixture_url);
+            assert!(prepared
+                .observe()
+                .expect_err("missing Chrome fails the first observation")
+                .to_string()
+                .contains("no owned Chrome process"));
+            assert!(prepared
+                .observe()
+                .expect_err("observation cannot be retried")
+                .to_string()
+                .contains("already attempted"));
+            prepared.close().expect("empty ownership closes");
         }
 
         #[test]
@@ -1718,6 +2068,28 @@ mod unix {
             *slot = Some(observer);
             drop(slot);
             ObserverGuard
+        }
+
+        fn install_cleanup_observer(
+            order: Arc<std::sync::Mutex<Vec<&'static str>>>,
+        ) -> CleanupObserverGuard {
+            let slot = TEST_CLEANUP_ORDER.get_or_init(|| std::sync::Mutex::new(None));
+            let mut slot = slot.lock().expect("test cleanup-order slot");
+            assert!(slot.is_none(), "only one cleanup observer may be active");
+            *slot = Some(order);
+            drop(slot);
+            CleanupObserverGuard
+        }
+
+        struct CleanupObserverGuard;
+
+        impl Drop for CleanupObserverGuard {
+            fn drop(&mut self) {
+                let slot = TEST_CLEANUP_ORDER.get_or_init(|| std::sync::Mutex::new(None));
+                if let Ok(mut slot) = slot.lock() {
+                    *slot = None;
+                }
+            }
         }
 
         struct ObserverGuard;
