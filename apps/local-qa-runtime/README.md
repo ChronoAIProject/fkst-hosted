@@ -20,14 +20,16 @@ exactly these loopback-only routes:
 - `GET /v1/runs/{run_id}/events?after={cursor}&limit={limit}`
 - `POST /v1/runs/{run_id}:cancel`
 
-The submit route accepts the strict `qa.local-run-admission/v2` fake API walking
-skeleton only. It validates the shared request digest, verifies the normalized
-attempt binding through the MVP-0 deterministic verifier, resolves the exact
-`qa.local-executor/v1` selection without invoking it, and atomically persists
-the immutable acceptance bytes, binding, selection, ordered `run.accepted`
-Event, and singleton active slot in SQLite journal v6. Repeating the same
-submission replays the stored response, including after restart; changed keys
-or canonical request digests return a mutation-free conflict. `POST` is not an
+The submit route parses and validates strict `qa.local-run-admission/v2`, but
+production has no accepted current-claim authority adapter yet and therefore
+rejects every new v2 admission before executor resolution or Journal mutation.
+The MVP-0 deterministic verifier is available only through the explicit hidden
+test serving entry point. Those tests resolve the exact
+`qa.local-executor/v1` selection without invoking it and atomically persist the
+immutable acceptance bytes, binding, selection, ordered `run.accepted` Event,
+and singleton active slot in SQLite journal v6. Exact durable replay does not
+re-contact current-claim authority, including after restart; changed keys or
+canonical request digests return a mutation-free conflict. `POST` is not an
 admission alias, and the former `{"kind":"inert"}` body is rejected.
 
 The snapshot route reads the current durable Run state and latest Event

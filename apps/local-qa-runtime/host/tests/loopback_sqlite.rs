@@ -8,7 +8,7 @@ use std::sync::{Arc, Barrier, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use fkst_local_qa_host::{parse_startup, serve_with_clock, FixedClock, Journal};
+use fkst_local_qa_host::{parse_startup, serve_mvp0_with_clock, FixedClock, Journal};
 use fkst_qa_contracts::{admit_json, canonical_admitted_bytes, sha256_digest};
 use rusqlite::{Connection, OptionalExtension};
 use serde::Deserialize;
@@ -189,7 +189,7 @@ impl FixedClockHost {
         let shutdown = Arc::new(AtomicBool::new(false));
         let thread_shutdown = Arc::clone(&shutdown);
         let join = thread::spawn(move || {
-            serve_with_clock(
+            serve_mvp0_with_clock(
                 config,
                 thread_shutdown,
                 Arc::new(FixedClock::new("2026-08-25T16:00:01Z").unwrap()),

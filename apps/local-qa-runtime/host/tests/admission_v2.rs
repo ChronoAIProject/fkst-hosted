@@ -7,7 +7,10 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use fkst_local_qa_host::{parse_startup, serve_with_clock, FixedClock, Journal};
+use fkst_local_qa_host::{
+    parse_startup, serve_mvp0_with_clock, serve_with_clock, Clock, FixedClock, Journal, RunError,
+    StartupConfig,
+};
 use fkst_qa_contracts::{admit_json, canonical_admitted_bytes, sha256_digest};
 use rusqlite::Connection;
 use serde::Deserialize;
@@ -51,7 +54,10 @@ fn database_path() -> PathBuf {
     ))
 }
 
-fn start_host(database: &Path) -> Host {
+type ServeWithClock =
+    fn(StartupConfig, Arc<AtomicBool>, Arc<dyn Clock + Send + Sync>) -> Result<(), RunError>;
+
+fn start_host_with(database: &Path, serve: ServeWithClock) -> Host {
     let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener);
@@ -66,7 +72,7 @@ fn start_host(database: &Path) -> Host {
     let shutdown = Arc::new(AtomicBool::new(false));
     let thread_shutdown = Arc::clone(&shutdown);
     let join = thread::spawn(move || {
-        serve_with_clock(
+        serve(
             config,
             thread_shutdown,
             Arc::new(FixedClock::new("2026-08-25T16:00:01Z").unwrap()),
@@ -84,6 +90,14 @@ fn start_host(database: &Path) -> Host {
         thread::sleep(Duration::from_millis(10));
     }
     panic!("host did not start")
+}
+
+fn start_mvp0_host(database: &Path) -> Host {
+    start_host_with(database, serve_mvp0_with_clock)
+}
+
+fn start_production_host(database: &Path) -> Host {
+    start_host_with(database, serve_with_clock)
 }
 
 fn request(port: u16, method: &str, key: &str, body: &[u8]) -> Vec<u8> {
@@ -180,7 +194,7 @@ fn admits_replays_conflicts_and_recovers_one_v2_request() {
     expected_created.extend_from_slice(&expected_body);
     let database = database_path();
     {
-        let host = start_host(&database);
+        let host = start_mvp0_host(&database);
         let created = request(
             host.port,
             "PUT",
@@ -267,7 +281,7 @@ fn admits_replays_conflicts_and_recovers_one_v2_request() {
     assert_eq!(user_version, 6);
     drop(connection);
 
-    let restarted = start_host(&database);
+    let restarted = start_mvp0_host(&database);
     let replay = request(
         restarted.port,
         "PUT",
@@ -280,11 +294,37 @@ fn admits_replays_conflicts_and_recovers_one_v2_request() {
 }
 
 #[test]
+fn production_rejects_v2_when_current_claim_authority_is_unavailable() {
+    let fixture = fixture();
+    let database = database_path();
+    {
+        let host = start_production_host(&database);
+        let rejected = request(
+            host.port,
+            "PUT",
+            "idem_0002",
+            fixture.expected_request_utf8.as_bytes(),
+        );
+        assert!(
+            rejected.starts_with(b"HTTP/1.1 503 Service Unavailable\r\n"),
+            "unexpected production response: {}",
+            String::from_utf8_lossy(&rejected)
+        );
+        assert!(body(&rejected).starts_with(
+            b"{\"type\":\"about:blank\",\"title\":\"Service Unavailable\",\"status\":503"
+        ));
+    }
+
+    assert_admission_tables_empty(&database);
+    let _ = fs::remove_file(database);
+}
+
+#[test]
 fn maintained_parser_rejects_malformed_header_before_admission_mutation() {
     let fixture = fixture();
     let database = database_path();
     {
-        let host = start_host(&database);
+        let host = start_mvp0_host(&database);
         let rejected =
             malformed_content_type_request(host.port, fixture.expected_request_utf8.as_bytes());
         assert!(rejected.starts_with(b"HTTP/1.1 400 Bad Request\r\n"));
@@ -299,7 +339,7 @@ fn maintained_parser_rejects_http_1_0_before_admission_mutation() {
     let fixture = fixture();
     let database = database_path();
     {
-        let host = start_host(&database);
+        let host = start_mvp0_host(&database);
         let rejected = http_1_0_request(host.port, fixture.expected_request_utf8.as_bytes());
         assert!(rejected.starts_with(b"HTTP/1.1 400 Bad Request\r\n"));
     }
@@ -313,7 +353,7 @@ fn rejects_trailing_newline_before_admission_mutation() {
     let fixture = fixture();
     let database = database_path();
     {
-        let host = start_host(&database);
+        let host = start_mvp0_host(&database);
         let mut request_body = fixture.expected_request_utf8.into_bytes();
         request_body.push(b'\n');
         let rejected = request(host.port, "PUT", "idem_0002", &request_body);
@@ -329,7 +369,7 @@ fn rejects_the_old_non_canonical_fence_token_without_mutation() {
     let fixture = fixture();
     let database = database_path();
     {
-        let host = start_host(&database);
+        let host = start_mvp0_host(&database);
         let request_body = fixture
             .expected_request_utf8
             .replace("dGVzdC1mZW5jZS0wMDAwMDAwMg", "test-fence-00000002");
@@ -354,7 +394,7 @@ fn accepts_every_idempotency_key_character_allowed_by_the_transport_contract() {
     for key in keys {
         let database = database_path();
         {
-            let host = start_host(&database);
+            let host = start_mvp0_host(&database);
             let request_body = with_idempotency_key(&fixture.expected_request_utf8, &key);
             let accepted = request(host.port, "PUT", &key, request_body.as_bytes());
             assert!(

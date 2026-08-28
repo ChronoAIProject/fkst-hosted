@@ -15,7 +15,9 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use admission::Mvp0DeterministicAttemptBindingVerifier;
+use admission::{
+    CurrentClaimVerifier, Mvp0DeterministicCurrentClaimVerifier, UnavailableCurrentClaimVerifier,
+};
 use coordinator::CoordinatorHandle;
 use executor::{
     inert_executor_selection, ExecutorRegistry, FakeApiAdmissionExecutor, InertExecutor,
@@ -189,6 +191,34 @@ pub fn serve_with_clock(
     shutdown: Arc<AtomicBool>,
     clock: Arc<dyn Clock + Send + Sync>,
 ) -> Result<(), RunError> {
+    serve_with_dependencies(
+        config,
+        shutdown,
+        clock,
+        Arc::new(UnavailableCurrentClaimVerifier),
+    )
+}
+
+#[doc(hidden)]
+pub fn serve_mvp0_with_clock(
+    config: StartupConfig,
+    shutdown: Arc<AtomicBool>,
+    clock: Arc<dyn Clock + Send + Sync>,
+) -> Result<(), RunError> {
+    serve_with_dependencies(
+        config,
+        shutdown,
+        clock,
+        Arc::new(Mvp0DeterministicCurrentClaimVerifier),
+    )
+}
+
+fn serve_with_dependencies(
+    config: StartupConfig,
+    shutdown: Arc<AtomicBool>,
+    clock: Arc<dyn Clock + Send + Sync>,
+    current_claim_verifier: Arc<dyn CurrentClaimVerifier>,
+) -> Result<(), RunError> {
     let mut journal = Journal::open(&config.database_path)?;
     let listener = TcpListener::bind(config.listen)?;
     listener.set_nonblocking(true)?;
@@ -196,7 +226,6 @@ pub fn serve_with_clock(
     let registry = ExecutorRegistry::new(vec![Box::new(InertExecutor::new())])?;
     let admission_registry =
         ExecutorRegistry::new(vec![Box::new(FakeApiAdmissionExecutor::new())])?;
-    let admission_verifier = Mvp0DeterministicAttemptBindingVerifier;
     let mut coordinator = CoordinatorHandle::start_versioned(
         &config.database_path,
         registry,
@@ -227,7 +256,7 @@ pub fn serve_with_clock(
                     &mut stream,
                     &mut journal,
                     &admission_registry,
-                    &admission_verifier,
+                    current_claim_verifier.as_ref(),
                     clock.as_ref(),
                 );
             }
@@ -308,7 +337,7 @@ fn handle_connection(
     stream: &mut TcpStream,
     journal: &mut Journal,
     admission_registry: &ExecutorRegistry,
-    admission_verifier: &dyn admission::AttemptBindingVerifier,
+    current_claim_verifier: &dyn admission::CurrentClaimVerifier,
     clock: &dyn Clock,
 ) -> io::Result<()> {
     let request = match read_request(stream)? {
@@ -330,7 +359,7 @@ fn handle_connection(
             Ok(now) => admission::admit_v2(
                 journal,
                 admission_registry,
-                admission_verifier,
+                current_claim_verifier,
                 &now,
                 &run_id,
                 request.idempotency_key.as_deref().unwrap_or_default(),
@@ -753,6 +782,7 @@ fn problem_response(status: u16, title: &'static str, detail: &'static str) -> R
             409 => "Conflict",
             413 => "Payload Too Large",
             415 => "Unsupported Media Type",
+            503 => "Service Unavailable",
             _ => "Internal Server Error",
         },
         "application/problem+json",
