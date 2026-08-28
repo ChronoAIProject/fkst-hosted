@@ -535,6 +535,38 @@ impl Journal {
         transaction.commit()?;
         Ok(handle.clone())
     }
+    pub(crate) fn replay_v2(
+        &self,
+        run_id: &str,
+        idempotency_key: &str,
+        request_digest: &str,
+    ) -> Result<Option<Admission>, RunError> {
+        let stored = self
+            .connection
+            .query_row(
+                "SELECT idempotency_key, request_digest, response_json
+                 FROM accepted_requests WHERE run_id = ?1",
+                [run_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Vec<u8>>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        Ok(stored.map(|(stored_key, stored_digest, response_json)| {
+            if stored_key != idempotency_key {
+                Admission::DifferentKey
+            } else if stored_digest != request_digest {
+                Admission::DifferentDigest
+            } else {
+                Admission::Replay(response_json)
+            }
+        }))
+    }
+
     pub(crate) fn admit_v2(
         &mut self,
         record: V2AdmissionRecord<'_>,
