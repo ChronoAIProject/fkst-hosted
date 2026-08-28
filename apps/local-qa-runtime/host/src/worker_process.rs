@@ -48,25 +48,49 @@ impl WorkerProcess {
             .spawn()
             .map_err(|_| RunError::Contract("Browser Worker spawn failed"))?;
         let process_group = Pid::from_raw(child.id() as i32);
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or(RunError::Contract("Browser Worker stdin unavailable"))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or(RunError::Contract("Browser Worker stdout unavailable"))?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or(RunError::Contract("Browser Worker stderr unavailable"))?;
+        let stdin = match child.stdin.take() {
+            Some(stdin) => stdin,
+            None => {
+                terminate_spawned_child(&mut child, process_group);
+                return Err(RunError::Contract("Browser Worker stdin unavailable"));
+            }
+        };
+        let stdout = match child.stdout.take() {
+            Some(stdout) => stdout,
+            None => {
+                terminate_spawned_child(&mut child, process_group);
+                return Err(RunError::Contract("Browser Worker stdout unavailable"));
+            }
+        };
+        let stderr = match child.stderr.take() {
+            Some(stderr) => stderr,
+            None => {
+                terminate_spawned_child(&mut child, process_group);
+                return Err(RunError::Contract("Browser Worker stderr unavailable"));
+            }
+        };
         let (stdout_sender, stdout_receiver) = mpsc::channel();
-        let stdout_reader = thread::Builder::new()
+        let stdout_reader = match thread::Builder::new()
             .name("local-qa-worker-stdout".to_owned())
-            .spawn(move || read_stdout(stdout, stdout_sender))?;
-        let stderr_reader = thread::Builder::new()
+            .spawn(move || read_stdout(stdout, stdout_sender))
+        {
+            Ok(reader) => reader,
+            Err(error) => {
+                terminate_spawned_child(&mut child, process_group);
+                return Err(RunError::Io(error));
+            }
+        };
+        let stderr_reader = match thread::Builder::new()
             .name("local-qa-worker-stderr".to_owned())
-            .spawn(move || read_stderr(stderr))?;
+            .spawn(move || read_stderr(stderr))
+        {
+            Ok(reader) => reader,
+            Err(error) => {
+                terminate_spawned_child(&mut child, process_group);
+                let _ = stdout_reader.join();
+                return Err(RunError::Io(error));
+            }
+        };
         Ok(Self {
             child,
             process_group,
@@ -222,6 +246,10 @@ impl WorkerProcess {
     }
 
     pub(crate) fn terminate(&mut self) {
+        if self.reaped {
+            self.join_reader_fallbacks();
+            return;
+        }
         self.stdin.take();
         let _ = signal_group(self.process_group, Signal::SIGTERM);
         let deadline = Instant::now() + Duration::from_secs(1);
@@ -299,6 +327,12 @@ fn read_stderr(stderr: impl Read) -> Result<Vec<u8>, ()> {
     } else {
         Ok(bytes)
     }
+}
+
+fn terminate_spawned_child(child: &mut Child, process_group: Pid) {
+    let _ = signal_group(process_group, Signal::SIGKILL);
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn signal_group(process_group: Pid, signal: Signal) -> Result<(), Errno> {
