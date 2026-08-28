@@ -556,3 +556,234 @@ pub(crate) fn mvp0_executor(
         counters,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    #[cfg(target_os = "linux")]
+    use std::net::TcpStream;
+    #[cfg(target_os = "linux")]
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::*;
+    #[cfg(target_os = "linux")]
+    use crate::coordinator::CoordinatorHandle;
+    #[cfg(target_os = "linux")]
+    use crate::executor::ExecutorRegistry;
+    #[cfg(target_os = "linux")]
+    use crate::journal::Journal;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires explicit Node, prebuilt Worker bundle, and system Chrome"]
+    fn browser_worker_walking_skeleton() {
+        let node = required_absolute_path("FKST_LOCAL_QA_NODE");
+        let chrome = required_absolute_path("FKST_LOCAL_QA_CHROME");
+        let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../workers/dist/worker-main.js")
+            .canonicalize()
+            .expect("prebuilt Worker bundle is required");
+        let directory = temporary_directory("browser-worker-walking-skeleton");
+        let database_path = directory.join("journal.sqlite");
+        let staging_root = directory.join("staging");
+        let run_id = "00000000-0000-0000-0000-000000000016";
+        let counters = Arc::new(EffectCounters::default());
+        let mut journal = Journal::open(&database_path).expect("Journal opens");
+        journal
+            .seed_executable_v1(
+                run_id,
+                "idem-6116",
+                "6116611661166116611661166116611661166116611661166116611661166116",
+            )
+            .expect("executable v1 row is seeded");
+
+        let registry = ExecutorRegistry::new(vec![Box::new(
+            mvp0_executor(
+                node.clone(),
+                worker.clone(),
+                chrome.clone(),
+                staging_root.clone(),
+                Arc::clone(&counters),
+            )
+            .expect("Browser executor constructs"),
+        )])
+        .expect("Browser registry constructs");
+        let mut coordinator = CoordinatorHandle::start_versioned(
+            &database_path,
+            registry,
+            browser_executor_selection(),
+        )
+        .expect("coordinator walks real Browser execution");
+        coordinator.shutdown().expect("coordinator joins");
+
+        assert_eq!(counters.worker_spawns.load(Ordering::SeqCst), 1);
+        assert_eq!(counters.capability_exchanges.load(Ordering::SeqCst), 7);
+        assert_eq!(counters.browser_observations.load(Ordering::SeqCst), 1);
+        assert_eq!(counters.browser_closes.load(Ordering::SeqCst), 1);
+        assert_eq!(counters.evidence_stages.load(Ordering::SeqCst), 2);
+        let fixture_url = counters
+            .fixture_url
+            .lock()
+            .expect("fixture URL lock")
+            .clone()
+            .expect("fixture URL recorded");
+        let fixture_address = fixture_url
+            .strip_prefix("http://")
+            .and_then(|url| url.strip_suffix("/fixed-page.html"))
+            .expect("fixed fixture URL shape");
+        assert!(TcpStream::connect(fixture_address).is_err());
+
+        let snapshot = journal
+            .snapshot(run_id)
+            .expect("snapshot reads")
+            .expect("Run exists");
+        assert_eq!(snapshot.state, "terminal");
+        assert_eq!(snapshot.execution_outcome.as_deref(), Some("passed"));
+        assert_eq!(snapshot.latest_event_sequence, 9);
+        let events = journal
+            .events(run_id, 0, 20)
+            .expect("events read")
+            .expect("Run events exist");
+        assert_eq!(events.len(), 9);
+        assert_eq!(
+            events.last().expect("terminal event").event_type,
+            "run.completed"
+        );
+
+        let stager = EvidenceStager::new(&staging_root);
+        let observation = stager
+            .load_sanitized_observation(run_id, 1, "observation/0")
+            .expect("sanitized observation reloads");
+        stager
+            .verify_sanitized_observation(&observation)
+            .expect("sanitized observation verifies");
+        let screenshot = stager
+            .load(
+                run_id,
+                1,
+                "evidence/0",
+                EvidenceRole::BrowserScreenshot,
+                EvidenceMediaType::Png,
+            )
+            .expect("screenshot Evidence reloads");
+        stager.verify(&screenshot).expect("screenshot verifies");
+        let runner_log = stager
+            .load(
+                run_id,
+                1,
+                "evidence/1",
+                EvidenceRole::RunnerLog,
+                EvidenceMediaType::PlainTextUtf8,
+            )
+            .expect("runner-log Evidence reloads");
+        stager.verify(&runner_log).expect("runner log verifies");
+        let stored_before = stored_artifact_bytes(&staging_root, run_id);
+
+        let restart_registry = ExecutorRegistry::new(vec![Box::new(
+            mvp0_executor(
+                node,
+                worker,
+                chrome,
+                staging_root.clone(),
+                Arc::clone(&counters),
+            )
+            .expect("restart Browser executor constructs"),
+        )])
+        .expect("restart registry constructs");
+        let mut restarted = CoordinatorHandle::start_versioned(
+            &database_path,
+            restart_registry,
+            browser_executor_selection(),
+        )
+        .expect("completed Journal restarts");
+        restarted.shutdown().expect("restarted coordinator joins");
+        assert_eq!(counters.worker_spawns.load(Ordering::SeqCst), 1);
+        assert_eq!(counters.capability_exchanges.load(Ordering::SeqCst), 7);
+        assert_eq!(counters.browser_observations.load(Ordering::SeqCst), 1);
+        assert_eq!(counters.browser_closes.load(Ordering::SeqCst), 1);
+        assert_eq!(counters.evidence_stages.load(Ordering::SeqCst), 2);
+        assert_eq!(stored_artifact_bytes(&staging_root, run_id), stored_before);
+
+        drop(journal);
+        fs::remove_dir_all(directory).expect("temporary test directory removed");
+    }
+
+    #[test]
+    fn malformed_or_unexpected_capability_cannot_match() {
+        let malformed = validate_local_worker_capability_request(b"{}")
+            .expect_err("malformed capability request is rejected");
+        assert!(malformed.to_string().contains("schema_violation"));
+
+        let fixture_url = "http://127.0.0.1:43123/fixed-page.html";
+        let wrong = validate_frame(
+            json!({
+                "protocol": PROTOCOL,
+                "kind": "capability_request",
+                "invocation_id": INVOCATION_ID,
+                "request_id": "capability/0",
+                "capability": "clock.monotonic-ms/v1",
+                "input": {},
+            }),
+            validate_local_worker_capability_request,
+            "invalid test request",
+        )
+        .expect("wrong but valid capability request");
+        let expected = json!({
+            "protocol": PROTOCOL,
+            "kind": "capability_request",
+            "invocation_id": INVOCATION_ID,
+            "request_id": "capability/0",
+            "capability": "clock.now/v1",
+            "input": expected_capability_input(0, fixture_url),
+        });
+        assert!(require_exact_capability_request(&wrong, &expected).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    fn required_absolute_path(name: &str) -> PathBuf {
+        let value = std::env::var_os(name).unwrap_or_else(|| panic!("{name} must be set"));
+        PathBuf::from(value)
+            .canonicalize()
+            .unwrap_or_else(|_| panic!("{name} must name an existing path"))
+    }
+
+    #[cfg(target_os = "linux")]
+    fn temporary_directory(label: &str) -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "fkst-local-qa-host-{label}-{}-{timestamp}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).expect("temporary test directory created");
+        directory
+    }
+
+    #[cfg(target_os = "linux")]
+    fn stored_artifact_bytes(root: &Path, run_id: &str) -> Vec<(PathBuf, Vec<u8>)> {
+        let attempt = root.join(run_id).join("1");
+        let mut pending = vec![attempt.clone()];
+        let mut stored = Vec::new();
+        while let Some(path) = pending.pop() {
+            for entry in fs::read_dir(path).expect("artifact directory reads") {
+                let entry = entry.expect("artifact entry reads");
+                let file_type = entry.file_type().expect("artifact type reads");
+                if file_type.is_dir() {
+                    pending.push(entry.path());
+                } else if file_type.is_file() {
+                    stored.push((
+                        entry
+                            .path()
+                            .strip_prefix(&attempt)
+                            .expect("artifact is attempt-scoped")
+                            .to_path_buf(),
+                        fs::read(entry.path()).expect("artifact bytes read"),
+                    ));
+                }
+            }
+        }
+        stored.sort_by(|left, right| left.0.cmp(&right.0));
+        stored
+    }
+}
