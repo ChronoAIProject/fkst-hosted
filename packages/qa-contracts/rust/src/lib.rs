@@ -427,9 +427,59 @@ pub fn validate_run_acceptance(raw: &[u8]) -> Result<ValidatedValue, ContractErr
 }
 
 pub fn validate_local_qa_run_request_v2(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
-    let validated = validate_registered_value(admit_json(raw)?, LOCAL_QA_RUN_REQUEST_V2_TYPE_NAME)?;
+    let admitted = admit_json(raw)?;
+    let nonce_has_invalid_encoding = admitted
+        .0
+        .get("nonce")
+        .and_then(Value::as_str)
+        .is_some_and(|nonce| !validate_base64url_no_pad(nonce));
+    let fence_token_has_invalid_encoding = admitted
+        .0
+        .pointer("/attempt_binding/fence_token")
+        .and_then(Value::as_str)
+        .is_some_and(|fence_token| !validate_base64url_no_pad(fence_token));
+    let validated = match validate_registered_value(admitted, LOCAL_QA_RUN_REQUEST_V2_TYPE_NAME) {
+        Ok(validated) => validated,
+        Err(error) if error.0.reason == "schema_violation" && nonce_has_invalid_encoding => {
+            return Err(ContractError(Rejection::contract(
+                "contract.invalid_encoding",
+                "invalid_encoding",
+                "/nonce",
+            )));
+        }
+        Err(error)
+            if error.0.reason == "schema_violation" && fence_token_has_invalid_encoding =>
+        {
+            return Err(ContractError(Rejection::contract(
+                "contract.invalid_encoding",
+                "invalid_encoding",
+                "/attempt_binding/fence_token",
+            )));
+        }
+        Err(error) => return Err(error),
+    };
     let request: LocalQARunRequestV2 = serde_json::from_value(validated.0.clone())
         .map_err(|_| ContractError(Rejection::validation("schema_violation", "/")))?;
+    if !validate_base64url_no_pad(&request.nonce) {
+        return Err(ContractError(Rejection::contract(
+            "contract.invalid_encoding",
+            "invalid_encoding",
+            "/nonce",
+        )));
+    }
+    if !validate_base64url_no_pad(&request.attempt_binding.fence_token) {
+        return Err(ContractError(Rejection::contract(
+            "contract.invalid_encoding",
+            "invalid_encoding",
+            "/attempt_binding/fence_token",
+        )));
+    }
+    if request.producer_version.len() > 128 {
+        return Err(ContractError(Rejection::validation(
+            "schema_violation",
+            "/producer_version",
+        )));
+    }
     if !validate_iso8601(&request.created_at)
         || !validate_iso8601(&request.attempt_binding.deadline)
     {
@@ -457,6 +507,12 @@ pub fn validate_run_acceptance_v2(raw: &[u8]) -> Result<ValidatedValue, Contract
             "contract.invalid_relation",
             "accepted_at_mismatch",
             "/created_at",
+        )));
+    }
+    if acceptance.producer_version.len() > 128 {
+        return Err(ContractError(Rejection::validation(
+            "schema_violation",
+            "/producer_version",
         )));
     }
     verify_contract_content_digest(&validated)?;

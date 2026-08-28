@@ -1,6 +1,71 @@
 {
-  "request": {"attempt_binding":{"deadline":"2026-08-25T16:05:00Z","fence_token":"test-fence-00000002","generation":1,"installation_id":"installation-0002","machine_id":"machine-0002","qa_attempt_id":"qa-attempt-0002","qa_task_id":"qa-task-0002","worker_id":"worker-0002"},"budget":{"max_cases":1,"max_duration_ms":30000,"max_evidence_bytes":1048576},"content_digest":"sha256:42711db690b0ce483e28161924a8371ac9f498fd9f81ad90fc29bb15b9e96e30","created_at":"2026-08-25T16:00:00Z","environment":{"content_digest":"sha256:5555555555555555555555555555555555555555555555555555555555555555","id":"environment-0002","kind":"environment","schema_version":"qa.environment/v1"},"executor_selection":{"capability_digest":"sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335","executor_id":"fake.api","executor_version":"1.0.0","required_capability":"api.request","schema_version":"qa.local-executor/v1"},"idempotency_key":"idem_0002","nonce":"bm9uY2UtMDAwMDAwMDAy","package_manifest":{"content_digest":"sha256:4444444444444444444444444444444444444444444444444444444444444444","id":"package-0002","kind":"package-manifest","schema_version":"qa.package-manifest/v1"},"policy":{"allow_network":false,"retain_workspace":false},"producer_version":"fkst-local-qa-host/0.1.0","profile":"local_qa_agent_mvp","run_id":"00000000-0000-0000-0000-000000000002","schema_version":"qa.local-run-admission/v2","source":{"content_digest":"sha256:1111111111111111111111111111111111111111111111111111111111111111","id":"source-0002","kind":"source","schema_version":"qa.source/v1"},"structured_plan":{"content_digest":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"plan-0002","kind":"structured-plan","schema_version":"qa.structured-plan/v1"},"test_case_set":{"content_digest":"sha256:2222222222222222222222222222222222222222222222222222222222222222","id":"cases-0002","kind":"test-case-set","schema_version":"qa.test-case-set/v1"}},
-  "expected_request_utf8": "{\"attempt_binding\":{\"deadline\":\"2026-08-25T16:05:00Z\",\"fence_token\":\"test-fence-00000002\",\"generation\":1,\"installation_id\":\"installation-0002\",\"machine_id\":\"machine-0002\",\"qa_attempt_id\":\"qa-attempt-0002\",\"qa_task_id\":\"qa-task-0002\",\"worker_id\":\"worker-0002\"},\"budget\":{\"max_cases\":1,\"max_duration_ms\":30000,\"max_evidence_bytes\":1048576},\"content_digest\":\"sha256:42711db690b0ce483e28161924a8371ac9f498fd9f81ad90fc29bb15b9e96e30\",\"created_at\":\"2026-08-25T16:00:00Z\",\"environment\":{\"content_digest\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\",\"id\":\"environment-0002\",\"kind\":\"environment\",\"schema_version\":\"qa.environment/v1\"},\"executor_selection\":{\"capability_digest\":\"sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335\",\"executor_id\":\"fake.api\",\"executor_version\":\"1.0.0\",\"required_capability\":\"api.request\",\"schema_version\":\"qa.local-executor/v1\"},\"idempotency_key\":\"idem_0002\",\"nonce\":\"bm9uY2UtMDAwMDAwMDAy\",\"package_manifest\":{\"content_digest\":\"sha256:4444444444444444444444444444444444444444444444444444444444444444\",\"id\":\"package-0002\",\"kind\":\"package-manifest\",\"schema_version\":\"qa.package-manifest/v1\"},\"policy\":{\"allow_network\":false,\"retain_workspace\":false},\"producer_version\":\"fkst-local-qa-host/0.1.0\",\"profile\":\"local_qa_agent_mvp\",\"run_id\":\"00000000-0000-0000-0000-000000000002\",\"schema_version\":\"qa.local-run-admission/v2\",\"source\":{\"content_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"id\":\"source-0002\",\"kind\":\"source\",\"schema_version\":\"qa.source/v1\"},\"structured_plan\":{\"content_digest\":\"sha256:3333333333333333333333333333333333333333333333333333333333333333\",\"id\":\"plan-0002\",\"kind\":\"structured-plan\",\"schema_version\":\"qa.structured-plan/v1\"},\"test_case_set\":{\"content_digest\":\"sha256:2222222222222222222222222222222222222222222222222222222222222222\",\"id\":\"cases-0002\",\"kind\":\"test-case-set\",\"schema_version\":\"qa.test-case-set/v1\"}}",
+  "request": {
+    "attempt_binding": {
+      "deadline": "2026-08-25T16:05:00Z",
+      "fence_token": "dGVzdC1mZW5jZS0wMDAwMDAwMg",
+      "generation": 1,
+      "installation_id": "installation-0002",
+      "machine_id": "machine-0002",
+      "qa_attempt_id": "qa-attempt-0002",
+      "qa_task_id": "qa-task-0002",
+      "worker_id": "worker-0002"
+    },
+    "budget": {
+      "max_cases": 1,
+      "max_duration_ms": 30000,
+      "max_evidence_bytes": 1048576
+    },
+    "created_at": "2026-08-25T16:00:00Z",
+    "environment": {
+      "content_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "id": "environment-0002",
+      "kind": "environment",
+      "schema_version": "qa.environment/v1"
+    },
+    "executor_selection": {
+      "capability_digest": "sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335",
+      "executor_id": "fake.api",
+      "executor_version": "1.0.0",
+      "required_capability": "api.request",
+      "schema_version": "qa.local-executor/v1"
+    },
+    "idempotency_key": "idem_0002",
+    "nonce": "bm9uY2UtMDAwMDAwMDAy",
+    "package_manifest": {
+      "content_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "id": "package-0002",
+      "kind": "package-manifest",
+      "schema_version": "qa.package-manifest/v1"
+    },
+    "policy": {
+      "allow_network": false,
+      "retain_workspace": false
+    },
+    "producer_version": "fkst-local-qa-host/0.1.0",
+    "profile": "local_qa_agent_mvp",
+    "run_id": "00000000-0000-0000-0000-000000000002",
+    "schema_version": "qa.local-run-admission/v2",
+    "source": {
+      "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "id": "source-0002",
+      "kind": "source",
+      "schema_version": "qa.source/v1"
+    },
+    "structured_plan": {
+      "content_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "id": "plan-0002",
+      "kind": "structured-plan",
+      "schema_version": "qa.structured-plan/v1"
+    },
+    "test_case_set": {
+      "content_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "id": "cases-0002",
+      "kind": "test-case-set",
+      "schema_version": "qa.test-case-set/v1"
+    },
+    "content_digest": "sha256:466f393b6846c658687a0d77e17567fb6c4f403c2ebc7c44c8fb33d9f63321b5"
+  },
+  "expected_request_utf8": "{\"attempt_binding\":{\"deadline\":\"2026-08-25T16:05:00Z\",\"fence_token\":\"dGVzdC1mZW5jZS0wMDAwMDAwMg\",\"generation\":1,\"installation_id\":\"installation-0002\",\"machine_id\":\"machine-0002\",\"qa_attempt_id\":\"qa-attempt-0002\",\"qa_task_id\":\"qa-task-0002\",\"worker_id\":\"worker-0002\"},\"budget\":{\"max_cases\":1,\"max_duration_ms\":30000,\"max_evidence_bytes\":1048576},\"content_digest\":\"sha256:466f393b6846c658687a0d77e17567fb6c4f403c2ebc7c44c8fb33d9f63321b5\",\"created_at\":\"2026-08-25T16:00:00Z\",\"environment\":{\"content_digest\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\",\"id\":\"environment-0002\",\"kind\":\"environment\",\"schema_version\":\"qa.environment/v1\"},\"executor_selection\":{\"capability_digest\":\"sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335\",\"executor_id\":\"fake.api\",\"executor_version\":\"1.0.0\",\"required_capability\":\"api.request\",\"schema_version\":\"qa.local-executor/v1\"},\"idempotency_key\":\"idem_0002\",\"nonce\":\"bm9uY2UtMDAwMDAwMDAy\",\"package_manifest\":{\"content_digest\":\"sha256:4444444444444444444444444444444444444444444444444444444444444444\",\"id\":\"package-0002\",\"kind\":\"package-manifest\",\"schema_version\":\"qa.package-manifest/v1\"},\"policy\":{\"allow_network\":false,\"retain_workspace\":false},\"producer_version\":\"fkst-local-qa-host/0.1.0\",\"profile\":\"local_qa_agent_mvp\",\"run_id\":\"00000000-0000-0000-0000-000000000002\",\"schema_version\":\"qa.local-run-admission/v2\",\"source\":{\"content_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"id\":\"source-0002\",\"kind\":\"source\",\"schema_version\":\"qa.source/v1\"},\"structured_plan\":{\"content_digest\":\"sha256:3333333333333333333333333333333333333333333333333333333333333333\",\"id\":\"plan-0002\",\"kind\":\"structured-plan\",\"schema_version\":\"qa.structured-plan/v1\"},\"test_case_set\":{\"content_digest\":\"sha256:2222222222222222222222222222222222222222222222222222222222222222\",\"id\":\"cases-0002\",\"kind\":\"test-case-set\",\"schema_version\":\"qa.test-case-set/v1\"}}",
   "accepted_at": "2026-08-25T16:00:01Z",
-  "expected_acceptance_utf8": "{\"accepted_at\":\"2026-08-25T16:00:01Z\",\"content_digest\":\"sha256:950ebfea8336014cb3dea966edb0516c55644b4c345aa1a3d7fe765a428d9bb5\",\"created_at\":\"2026-08-25T16:00:01Z\",\"event_sequence\":1,\"executor_selection\":{\"capability_digest\":\"sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335\",\"executor_id\":\"fake.api\",\"executor_version\":\"1.0.0\",\"required_capability\":\"api.request\",\"schema_version\":\"qa.local-executor/v1\"},\"idempotency_key\":\"idem_0002\",\"producer_version\":\"fkst-local-qa-host/0.1.0\",\"profile\":\"local_qa_agent_mvp\",\"request_digest\":\"sha256:42711db690b0ce483e28161924a8371ac9f498fd9f81ad90fc29bb15b9e96e30\",\"run_id\":\"00000000-0000-0000-0000-000000000002\",\"schema_version\":\"qa.local-run-admission/v2\",\"state\":\"accepted\"}"
+  "expected_acceptance_utf8": "{\"accepted_at\":\"2026-08-25T16:00:01Z\",\"content_digest\":\"sha256:193ec4c65b3c5a16334c2ae2688c827e6246170a51e5f1987305fe28ce7b5ef5\",\"created_at\":\"2026-08-25T16:00:01Z\",\"event_sequence\":1,\"executor_selection\":{\"capability_digest\":\"sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335\",\"executor_id\":\"fake.api\",\"executor_version\":\"1.0.0\",\"required_capability\":\"api.request\",\"schema_version\":\"qa.local-executor/v1\"},\"idempotency_key\":\"idem_0002\",\"producer_version\":\"fkst-local-qa-host/0.1.0\",\"profile\":\"local_qa_agent_mvp\",\"request_digest\":\"sha256:466f393b6846c658687a0d77e17567fb6c4f403c2ebc7c44c8fb33d9f63321b5\",\"run_id\":\"00000000-0000-0000-0000-000000000002\",\"schema_version\":\"qa.local-run-admission/v2\",\"state\":\"accepted\"}"
 }

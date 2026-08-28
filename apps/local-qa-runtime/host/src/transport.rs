@@ -52,6 +52,9 @@ pub(crate) fn read_request_head(
                 if body_start > maximum_header_bytes {
                     return Ok(Err(RequestHeadError::new(parsed.method, parsed.path)));
                 }
+                if parsed.version != Some(1) {
+                    return Ok(Err(RequestHeadError::new(parsed.method, parsed.path)));
+                }
                 let method = parsed
                     .method
                     .expect("complete request has a method")
