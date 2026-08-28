@@ -44,6 +44,8 @@ pub(crate) enum Admission {
     Created(Vec<u8>),
     Replay(Vec<u8>),
     DifferentKey,
+    DifferentDigest,
+    Occupied,
 }
 
 pub(crate) struct V2AdmissionRecord<'a> {
@@ -557,12 +559,13 @@ impl Journal {
             )
             .optional()?;
         if let Some((stored_key, stored_digest, response_json)) = stored {
-            let result =
-                if stored_key == record.idempotency_key && stored_digest == record.request_digest {
-                    Admission::Replay(response_json)
-                } else {
-                    Admission::DifferentKey
-                };
+            let result = if stored_key != record.idempotency_key {
+                Admission::DifferentKey
+            } else if stored_digest != record.request_digest {
+                Admission::DifferentDigest
+            } else {
+                Admission::Replay(response_json)
+            };
             transaction.commit()?;
             return Ok(result);
         }
@@ -573,7 +576,7 @@ impl Journal {
         )?;
         if occupied {
             transaction.commit()?;
-            return Ok(Admission::DifferentKey);
+            return Ok(Admission::Occupied);
         }
         let event_json = state_event_json(record.run_id, "accepted")?;
         transaction.execute(
@@ -1167,7 +1170,7 @@ mod tests {
 
     const TEST_REQUEST_DIGEST: &str =
         "c6da30d2cbe81af624c4e364e21cdad9dc2510d2e2ff9a02bb5bd6c325a25428";
-    const TEST_BINDING_JSON: &[u8] = br#"{"qa_task_id":"qa-task-0002","qa_attempt_id":"qa-attempt-0002","machine_id":"machine-0002","worker_id":"worker-0002","installation_id":"installation-0002","generation":1,"fence_token":"test-fence-00000002","deadline":"2026-08-25T16:05:00Z"}"#;
+    const TEST_BINDING_JSON: &[u8] = br#"{"qa_task_id":"qa-task-0002","qa_attempt_id":"qa-attempt-0002","machine_id":"machine-0002","worker_id":"worker-0002","installation_id":"installation-0002","generation":1,"fence_token":"dGVzdC1mZW5jZS0wMDAwMDAwMg","deadline":"2026-08-25T16:05:00Z"}"#;
     const TEST_SELECTION_JSON: &[u8] = br#"{"schema_version":"qa.local-executor/v1","executor_id":"fake.api","executor_version":"1.0.0","capability_digest":"sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335","required_capability":"api.request"}"#;
 
     fn admit_v2(
@@ -1208,26 +1211,77 @@ mod tests {
             ));
             assert!(matches!(
                 admit_v2(&mut journal, run_id, "idem-001", "different-digest"),
-                Ok(Admission::DifferentKey)
+                Ok(Admission::DifferentDigest)
             ));
-            assert_eq!(
-                journal
+            for table in [
+                "accepted_requests",
+                "runs",
+                "events",
+                "admission_v2_records",
+                "active_run_slot",
+            ] {
+                let count = journal
                     .connection
-                    .query_row("SELECT COUNT(*) FROM accepted_requests", [], |row| row
-                        .get::<_, i64>(0),)
-                    .expect("accepted count must be readable"),
-                1
-            );
-            assert_eq!(
-                journal
-                    .connection
-                    .query_row("SELECT COUNT(*) FROM events", [], |row| row
-                        .get::<_, i64>(0),)
-                    .expect("Event count must be readable"),
-                1
-            );
+                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                        row.get::<_, i64>(0)
+                    })
+                    .expect("table count must be readable");
+                assert_eq!(count, 1, "{table} must not mutate after digest conflict");
+            }
         }
 
+        fs::remove_dir_all(directory).expect("temporary directory must be removed");
+    }
+
+    #[test]
+    fn changed_key_and_occupied_slot_are_distinct_without_mutation() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock must be after the Unix epoch")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "fkst-local-qa-host-outcomes-{}-{timestamp}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).expect("temporary directory must be created");
+        let database_path = directory.join("journal.sqlite");
+        let mut journal = Journal::open(&database_path).expect("journal must open");
+        let run_id = "00000000-0000-0000-0000-000000000001";
+
+        assert!(matches!(
+            admit_v2(&mut journal, run_id, "idem-001", TEST_REQUEST_DIGEST),
+            Ok(Admission::Created(_))
+        ));
+        assert!(matches!(
+            admit_v2(&mut journal, run_id, "idem-002", TEST_REQUEST_DIGEST),
+            Ok(Admission::DifferentKey)
+        ));
+        assert!(matches!(
+            admit_v2(
+                &mut journal,
+                "00000000-0000-0000-0000-000000000002",
+                "idem-002",
+                TEST_REQUEST_DIGEST,
+            ),
+            Ok(Admission::Occupied)
+        ));
+        for table in [
+            "accepted_requests",
+            "runs",
+            "events",
+            "admission_v2_records",
+            "active_run_slot",
+        ] {
+            let count = journal
+                .connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .expect("table count must be readable");
+            assert_eq!(count, 1, "{table} must not mutate after conflicts");
+        }
+
+        drop(journal);
         fs::remove_dir_all(directory).expect("temporary directory must be removed");
     }
 

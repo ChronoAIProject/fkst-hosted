@@ -439,8 +439,45 @@ export function validateRunAcceptance(raw: Uint8Array): ValidatedValue {
 }
 
 export function validateLocalQARunRequestV2(raw: Uint8Array): ValidatedValue {
-  const validated = validateRegisteredValue(admitJson(raw), LOCAL_QA_RUN_REQUEST_V2_TYPE_NAME);
+  const admitted = admitJson(raw);
+  const admittedValue = admitted.value();
+  const nonceHasInvalidEncoding =
+    isRecord(admittedValue) &&
+    typeof admittedValue.nonce === "string" &&
+    !validateBase64UrlNoPad(admittedValue.nonce);
+  const attemptBinding = isRecord(admittedValue) ? admittedValue.attempt_binding : undefined;
+  const fenceTokenHasInvalidEncoding =
+    isRecord(attemptBinding) &&
+    typeof attemptBinding.fence_token === "string" &&
+    !validateBase64UrlNoPad(attemptBinding.fence_token);
+  let validated: ValidatedValue;
+  try {
+    validated = validateRegisteredValue(admitted, LOCAL_QA_RUN_REQUEST_V2_TYPE_NAME);
+  } catch (error) {
+    if (error instanceof ContractError && error.rejection.reason === "schema_violation") {
+      if (nonceHasInvalidEncoding) {
+        throw contractError("contract.invalid_encoding", "invalid_encoding", "/nonce");
+      }
+      if (fenceTokenHasInvalidEncoding) {
+        throw contractError(
+          "contract.invalid_encoding",
+          "invalid_encoding",
+          "/attempt_binding/fence_token",
+        );
+      }
+    }
+    throw error;
+  }
   const value = validated.value() as LocalQARunRequestV2;
+  if (!validateBase64UrlNoPad(value.nonce)) {
+    throw contractError("contract.invalid_encoding", "invalid_encoding", "/nonce");
+  }
+  if (!validateBase64UrlNoPad(value.attempt_binding.fence_token)) {
+    throw contractError("contract.invalid_encoding", "invalid_encoding", "/attempt_binding/fence_token");
+  }
+  if (Buffer.byteLength(value.producer_version, "utf8") > 128) {
+    throw validationError("schema_violation", "/producer_version");
+  }
   if (!validateIso8601(value.created_at)) throw validationError("schema_violation", "/created_at");
   if (!validateIso8601(value.attempt_binding.deadline)) throw validationError("schema_violation", "/attempt_binding/deadline");
   verifyContractContentDigest(validated);
@@ -454,6 +491,9 @@ export function validateRunAcceptanceV2(raw: Uint8Array): ValidatedValue {
   if (!validateIso8601(value.accepted_at)) throw validationError("schema_violation", "/accepted_at");
   if (value.created_at !== value.accepted_at) {
     throw contractError("contract.invalid_relation", "accepted_at_mismatch", "/created_at");
+  }
+  if (Buffer.byteLength(value.producer_version, "utf8") > 128) {
+    throw validationError("schema_violation", "/producer_version");
   }
   verifyContractContentDigest(validated);
   return validated;

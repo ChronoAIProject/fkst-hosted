@@ -20,7 +20,7 @@ impl AttemptBindingVerifier for Mvp0DeterministicAttemptBindingVerifier {
         let expected = binding.qa_task_id == "qa-task-0002"
             && binding.qa_attempt_id == "qa-attempt-0002"
             && binding.generation == 1
-            && binding.fence_token == "test-fence-00000002"
+            && binding.fence_token == "dGVzdC1mZW5jZS0wMDAwMDAwMg"
             && binding.machine_id == "machine-0002"
             && binding.worker_id == "worker-0002"
             && binding.installation_id == "installation-0002"
@@ -97,6 +97,14 @@ pub(crate) fn admit_v2(
             "Conflict",
             "run_id is already accepted under a different Idempotency-Key",
         ),
+        Ok(Admission::DifferentDigest) => crate::problem_response(
+            409,
+            "Conflict",
+            "run_id is already accepted with a different request digest",
+        ),
+        Ok(Admission::Occupied) => {
+            crate::problem_response(409, "Conflict", "active run slot is occupied")
+        }
         Err(_) => crate::journal_failure(),
     }
 }

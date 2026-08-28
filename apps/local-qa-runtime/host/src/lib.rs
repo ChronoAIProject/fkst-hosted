@@ -644,8 +644,7 @@ fn valid_submit_run_id(value: &str) -> bool {
 
 fn valid_idempotency_key(bytes: &[u8]) -> bool {
     (1..=64).contains(&bytes.len())
-        && bytes[0].is_ascii_alphanumeric()
-        && bytes[1..]
+        && bytes
             .iter()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
@@ -811,7 +810,19 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::path::PathBuf;
 
-    use super::{parse_startup, StartupConfig, StartupError};
+    use super::{parse_startup, valid_idempotency_key, StartupConfig, StartupError};
+
+    #[test]
+    fn idempotency_key_matches_the_transport_contract_exactly() {
+        let accepted: &[&[u8]] = &[b"-", b"_", b"A", b"0", &[b'-'; 64]];
+        for accepted in accepted {
+            assert!(valid_idempotency_key(accepted));
+        }
+        let rejected: &[&[u8]] = &[b"", b".", b"a.b", &[b'a'; 65], &[0xff]];
+        for rejected in rejected {
+            assert!(!valid_idempotency_key(rejected));
+        }
+    }
 
     #[test]
     fn zero_arguments_are_rejected() {

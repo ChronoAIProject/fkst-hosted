@@ -116,6 +116,21 @@ fn malformed_content_type_request(port: u16, body: &[u8]) -> Vec<u8> {
     response
 }
 
+fn http_1_0_request(port: u16, body: &[u8]) -> Vec<u8> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        stream,
+        "PUT /v1/runs/00000000-0000-0000-0000-000000000002 HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nIdempotency-Key: idem_0002\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    )
+    .unwrap();
+    stream.write_all(body).unwrap();
+    stream.flush().unwrap();
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).unwrap();
+    response
+}
+
 fn body(response: &[u8]) -> &[u8] {
     let offset = response
         .windows(4)
@@ -158,7 +173,7 @@ fn assert_admission_tables_empty(database: &Path) {
 #[test]
 fn admits_replays_conflicts_and_recovers_one_v2_request() {
     let fixture = fixture();
-    assert_eq!(fixture.expected_request_utf8.len(), 1940);
+    assert_eq!(fixture.expected_request_utf8.len(), 1947);
     let expected_body = format!("{}\n", fixture.expected_acceptance_utf8).into_bytes();
     assert_eq!(expected_body.len(), 740);
     let mut expected_created = b"HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: 740\r\nConnection: close\r\n\r\n".to_vec();
@@ -213,7 +228,7 @@ fn admits_replays_conflicts_and_recovers_one_v2_request() {
         (
             "00000000-0000-0000-0000-000000000002".to_owned(),
             "idem_0002".to_owned(),
-            "sha256:42711db690b0ce483e28161924a8371ac9f498fd9f81ad90fc29bb15b9e96e30".to_owned(),
+            "sha256:466f393b6846c658687a0d77e17567fb6c4f403c2ebc7c44c8fb33d9f63321b5".to_owned(),
             expected_body.clone(),
         )
     );
@@ -260,6 +275,7 @@ fn admits_replays_conflicts_and_recovers_one_v2_request() {
         fixture.expected_request_utf8.as_bytes(),
     );
     assert!(replay.starts_with(b"HTTP/1.1 200 OK\r\n"));
+    assert_eq!(body(&replay), expected_body);
     let _ = fs::remove_file(database);
 }
 
@@ -271,6 +287,20 @@ fn maintained_parser_rejects_malformed_header_before_admission_mutation() {
         let host = start_host(&database);
         let rejected =
             malformed_content_type_request(host.port, fixture.expected_request_utf8.as_bytes());
+        assert!(rejected.starts_with(b"HTTP/1.1 400 Bad Request\r\n"));
+    }
+
+    assert_admission_tables_empty(&database);
+    let _ = fs::remove_file(database);
+}
+
+#[test]
+fn maintained_parser_rejects_http_1_0_before_admission_mutation() {
+    let fixture = fixture();
+    let database = database_path();
+    {
+        let host = start_host(&database);
+        let rejected = http_1_0_request(host.port, fixture.expected_request_utf8.as_bytes());
         assert!(rejected.starts_with(b"HTTP/1.1 400 Bad Request\r\n"));
     }
 
@@ -292,4 +322,44 @@ fn rejects_trailing_newline_before_admission_mutation() {
 
     assert_admission_tables_empty(&database);
     let _ = fs::remove_file(database);
+}
+
+#[test]
+fn rejects_the_old_non_canonical_fence_token_without_mutation() {
+    let fixture = fixture();
+    let database = database_path();
+    {
+        let host = start_host(&database);
+        let request_body = fixture.expected_request_utf8.replace(
+            "dGVzdC1mZW5jZS0wMDAwMDAwMg",
+            "test-fence-00000002",
+        );
+        let rejected = request(host.port, "PUT", "idem_0002", request_body.as_bytes());
+        assert!(rejected.starts_with(b"HTTP/1.1 400 Bad Request\r\n"));
+    }
+
+    assert_admission_tables_empty(&database);
+    let _ = fs::remove_file(database);
+}
+
+#[test]
+fn accepts_every_idempotency_key_character_allowed_by_the_transport_contract() {
+    let fixture = fixture();
+    let keys = [
+        "-".to_owned(),
+        "_".to_owned(),
+        "A".to_owned(),
+        "0".to_owned(),
+        "-".repeat(64),
+    ];
+    for key in keys {
+        let database = database_path();
+        {
+            let host = start_host(&database);
+            let request_body = with_idempotency_key(&fixture.expected_request_utf8, &key);
+            let accepted = request(host.port, "PUT", &key, request_body.as_bytes());
+            assert!(accepted.starts_with(b"HTTP/1.1 201 Created\r\n"), "key {key}");
+        }
+        let _ = fs::remove_file(database);
+    }
 }
