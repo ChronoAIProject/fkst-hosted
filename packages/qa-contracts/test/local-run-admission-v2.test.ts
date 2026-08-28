@@ -18,7 +18,7 @@ const decoder = new TextDecoder();
 test("validates the v2 admission walking skeleton vectors", () => {
   assert.equal(fixture.request.attempt_binding.fence_token, "dGVzdC1mZW5jZS0wMDAwMDAwMg");
   assert.equal(Buffer.from(fixture.request.attempt_binding.fence_token, "base64url").toString("utf8"), "test-fence-00000002");
-  const request = validateLocalQARunRequestV2(encoder.encode(`${fixture.expected_request_utf8}\n`));
+  const request = validateLocalQARunRequestV2(encoder.encode(fixture.expected_request_utf8));
   assert.equal(contractContentDigest(request), fixture.request.content_digest);
   assert.equal(decoder.decode(canonicalBytes(request)), fixture.expected_request_utf8);
 

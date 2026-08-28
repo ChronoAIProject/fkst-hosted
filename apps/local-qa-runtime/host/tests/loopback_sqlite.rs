@@ -4,7 +4,7 @@ use std::net::{Shutdown, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -155,6 +155,11 @@ impl Drop for HostProcess {
     }
 }
 
+fn fixed_clock_start_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
 struct FixedClockHost {
     shutdown: Arc<AtomicBool>,
     join: Option<thread::JoinHandle<()>>,
@@ -163,6 +168,9 @@ struct FixedClockHost {
 
 impl FixedClockHost {
     fn start(database_path: &Path) -> Self {
+        let _start_guard = fixed_clock_start_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0))
             .expect("ephemeral loopback port must bind");
         let port = listener
@@ -224,6 +232,17 @@ struct HttpResponse {
     body: Vec<u8>,
 }
 
+fn connect_loopback(port: u16) -> TcpStream {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match TcpStream::connect(("127.0.0.1", port)) {
+            Ok(stream) => return stream,
+            Err(_) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            Err(error) => panic!("loopback host must accept connections: {error}"),
+        }
+    }
+}
+
 fn request(
     port: u16,
     method: &str,
@@ -231,8 +250,7 @@ fn request(
     headers: &[(&str, &str)],
     body: &[u8],
 ) -> HttpResponse {
-    let mut stream =
-        TcpStream::connect(("127.0.0.1", port)).expect("loopback host must accept connections");
+    let mut stream = connect_loopback(port);
     write!(
         stream,
         "{method} {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
@@ -391,8 +409,7 @@ fn submit_with_total_head_bytes(port: u16, total_head_bytes: usize, body: &[u8])
     head.extend_from_slice(suffix.as_bytes());
     assert_eq!(head.len(), total_head_bytes);
 
-    let mut stream =
-        TcpStream::connect(("127.0.0.1", port)).expect("loopback host must accept connections");
+    let mut stream = connect_loopback(port);
     stream
         .write_all(&head)
         .expect("bounded submit request head must be written");
