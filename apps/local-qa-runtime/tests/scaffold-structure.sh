@@ -42,6 +42,7 @@ expected=$(printf '%s\n' \
   apps/local-qa-runtime/host/src/lib.rs \
   apps/local-qa-runtime/host/src/main.rs \
   apps/local-qa-runtime/host/src/ownership.rs \
+  apps/local-qa-runtime/host/src/transport.rs \
   apps/local-qa-runtime/host/tests/admission_v2.rs \
   apps/local-qa-runtime/host/tests/environment_ownership.rs \
   apps/local-qa-runtime/host/tests/fail_closed.rs \
@@ -68,6 +69,7 @@ for required in \
   apps/local-qa-runtime/host/src/journal.rs \
   apps/local-qa-runtime/host/src/lib.rs \
   apps/local-qa-runtime/host/src/main.rs \
+  apps/local-qa-runtime/host/src/transport.rs \
   apps/local-qa-runtime/host/tests/fail_closed.rs \
   apps/local-qa-runtime/host/tests/loopback_sqlite.rs; do
   [[ -f "$required" ]] || { echo "missing Local QA Host file: $required" >&2; exit 1; }
