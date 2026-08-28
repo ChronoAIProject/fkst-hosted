@@ -13,6 +13,9 @@ use nix::unistd::Pid;
 use crate::RunError;
 
 const IO_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const CLEANUP_GRACE: Duration = Duration::from_millis(500);
+const CLEANUP_LIMIT: Duration = Duration::from_secs(3);
+const READER_JOIN_LIMIT: Duration = Duration::from_secs(1);
 const MAX_STDOUT_BYTES: usize = 1_048_576;
 const MAX_STDERR_BYTES: usize = 1_024;
 
@@ -29,7 +32,8 @@ pub(crate) struct WorkerProcess {
     stdin: Option<ChildStdin>,
     stdout: Receiver<ReaderEvent>,
     stdout_reader: Option<JoinHandle<()>>,
-    stderr_reader: Option<JoinHandle<Result<Vec<u8>, ()>>>,
+    stderr: Receiver<Result<Vec<u8>, ()>>,
+    stderr_reader: Option<JoinHandle<()>>,
     reaped: bool,
 }
 
@@ -79,14 +83,16 @@ impl WorkerProcess {
                 return Err(RunError::Io(error));
             }
         };
+        let (stderr_sender, stderr_receiver) = mpsc::sync_channel(1);
         let stderr_reader = match thread::Builder::new()
             .name("local-qa-worker-stderr".to_owned())
-            .spawn(move || read_stderr(stderr))
-        {
+            .spawn(move || {
+                let _ = stderr_sender.send(read_stderr(stderr));
+            }) {
             Ok(reader) => reader,
             Err(error) => {
                 terminate_spawned_child(&mut child, process_group);
-                let _ = stdout_reader.join();
+                let _ = join_bounded(stdout_reader, Instant::now() + READER_JOIN_LIMIT);
                 return Err(RunError::Io(error));
             }
         };
@@ -96,6 +102,7 @@ impl WorkerProcess {
             stdin: Some(stdin),
             stdout: stdout_receiver,
             stdout_reader: Some(stdout_reader),
+            stderr: stderr_receiver,
             stderr_reader: Some(stderr_reader),
             reaped: false,
         })
@@ -196,40 +203,67 @@ impl WorkerProcess {
     }
 
     pub(crate) fn wait_success(&mut self, deadline: Instant) -> Result<(), RunError> {
-        let status = loop {
+        let status = self.wait_for_root(deadline)?;
+        let group_cleanup = self.cleanup_process_group();
+        let readers = self.join_readers(status);
+        group_cleanup?;
+        readers
+    }
+
+    fn wait_for_root(&mut self, deadline: Instant) -> Result<ExitStatus, RunError> {
+        loop {
             if let Some(status) = self
                 .child
                 .try_wait()
                 .map_err(|_| RunError::Contract("Browser Worker status failed"))?
             {
-                break status;
+                self.reaped = true;
+                return Ok(status);
             }
             if Instant::now() >= deadline {
                 return Err(RunError::Contract("Browser Worker exit timed out"));
             }
             thread::sleep(IO_POLL_INTERVAL);
-        };
-        self.reaped = true;
-        self.join_readers(status)
+        }
+    }
+
+    fn cleanup_process_group(&mut self) -> Result<(), RunError> {
+        signal_group(self.process_group, Signal::SIGTERM)
+            .map_err(|_| RunError::Contract("Browser Worker group termination failed"))?;
+        if !wait_for_process_group_exit(self.process_group, CLEANUP_GRACE)? {
+            signal_group(self.process_group, Signal::SIGKILL)
+                .map_err(|_| RunError::Contract("Browser Worker group kill failed"))?;
+        }
+        if wait_for_process_group_exit(self.process_group, CLEANUP_LIMIT)? {
+            Ok(())
+        } else {
+            Err(RunError::Contract(
+                "Browser Worker process group still has live members",
+            ))
+        }
     }
 
     fn join_readers(&mut self, status: ExitStatus) -> Result<(), RunError> {
-        if self
-            .stdout_reader
-            .take()
-            .ok_or(RunError::Contract("Browser Worker stdout reader missing"))?
-            .join()
-            .is_err()
-        {
-            return Err(RunError::Contract("Browser Worker stdout reader panicked"));
-        }
         let stderr = self
-            .stderr_reader
-            .take()
-            .ok_or(RunError::Contract("Browser Worker stderr reader missing"))?
-            .join()
-            .map_err(|_| RunError::Contract("Browser Worker stderr reader panicked"))?
+            .stderr
+            .recv_timeout(READER_JOIN_LIMIT)
+            .map_err(|_| RunError::Contract("Browser Worker stderr reader timed out"))?
             .map_err(|_| RunError::Contract("Browser Worker stderr failed"))?;
+        let join_deadline = Instant::now() + READER_JOIN_LIMIT;
+        join_bounded(
+            self.stdout_reader
+                .take()
+                .ok_or(RunError::Contract("Browser Worker stdout reader missing"))?,
+            join_deadline,
+        )
+        .map_err(|_| RunError::Contract("Browser Worker stdout reader did not join"))?;
+        join_bounded(
+            self.stderr_reader
+                .take()
+                .ok_or(RunError::Contract("Browser Worker stderr reader missing"))?,
+            join_deadline,
+        )
+        .map_err(|_| RunError::Contract("Browser Worker stderr reader did not join"))?;
         if !status.success() || !stderr.is_empty() {
             return Err(RunError::Contract("Browser Worker did not exit cleanly"));
         }
@@ -237,42 +271,51 @@ impl WorkerProcess {
     }
 
     pub(crate) fn terminate(&mut self) {
-        if self.reaped {
-            self.join_reader_fallbacks();
-            return;
-        }
         self.stdin.take();
         let _ = signal_group(self.process_group, Signal::SIGTERM);
-        let deadline = Instant::now() + Duration::from_secs(1);
-        while Instant::now() < deadline {
-            if self.child.try_wait().ok().flatten().is_some() {
-                self.reaped = true;
-                self.join_reader_fallbacks();
-                return;
+        let grace_deadline = Instant::now() + CLEANUP_GRACE;
+        while Instant::now() < grace_deadline {
+            self.try_reap_root();
+            if !process_group_is_alive(self.process_group).unwrap_or(true) {
+                break;
             }
             thread::sleep(IO_POLL_INTERVAL);
         }
-        let _ = signal_group(self.process_group, Signal::SIGKILL);
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        self.reaped = true;
+        if process_group_is_alive(self.process_group).unwrap_or(true) {
+            let _ = signal_group(self.process_group, Signal::SIGKILL);
+        }
+        if !self.reaped {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            self.reaped = true;
+        }
+        let _ = wait_for_process_group_exit(self.process_group, CLEANUP_LIMIT);
         self.join_reader_fallbacks();
     }
 
+    fn try_reap_root(&mut self) {
+        if !self.reaped && self.child.try_wait().ok().flatten().is_some() {
+            self.reaped = true;
+        }
+    }
+
     fn join_reader_fallbacks(&mut self) {
+        let deadline = Instant::now() + READER_JOIN_LIMIT;
         if let Some(reader) = self.stdout_reader.take() {
-            let _ = reader.join();
+            let _ = join_bounded(reader, deadline);
         }
         if let Some(reader) = self.stderr_reader.take() {
-            let _ = reader.join();
+            let _ = join_bounded(reader, deadline);
         }
     }
 }
 
 impl Drop for WorkerProcess {
     fn drop(&mut self) {
-        if !self.reaped {
+        if !self.reaped || process_group_is_alive(self.process_group).unwrap_or(true) {
             self.terminate();
+        } else {
+            self.join_reader_fallbacks();
         }
     }
 }
@@ -320,15 +363,220 @@ fn read_stderr(stderr: impl Read) -> Result<Vec<u8>, ()> {
     }
 }
 
+fn join_bounded<T>(handle: JoinHandle<T>, deadline: Instant) -> Result<T, ()> {
+    while !handle.is_finished() {
+        if Instant::now() >= deadline {
+            return Err(());
+        }
+        thread::sleep(IO_POLL_INTERVAL);
+    }
+    handle.join().map_err(|_| ())
+}
+
+fn wait_for_process_group_exit(process_group: Pid, limit: Duration) -> Result<bool, RunError> {
+    let deadline = Instant::now() + limit;
+    loop {
+        if !process_group_is_alive(process_group)? {
+            return Ok(true);
+        }
+        if Instant::now() >= deadline {
+            return Ok(false);
+        }
+        thread::sleep(IO_POLL_INTERVAL);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn process_group_is_alive(process_group: Pid) -> Result<bool, RunError> {
+    let entries = std::fs::read_dir("/proc")
+        .map_err(|_| RunError::Contract("Browser Worker process group inspection failed"))?;
+    for entry in entries.flatten() {
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            continue;
+        };
+        let Some(after_name) = stat.rsplit_once(')').map(|(_, rest)| rest.trim()) else {
+            continue;
+        };
+        let mut fields = after_name.split_whitespace();
+        let state = fields.next();
+        let _parent_pid = fields.next();
+        let group = fields.next().and_then(|value| value.parse::<i32>().ok());
+        if state != Some("Z") && group == Some(process_group.as_raw()) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+#[cfg(target_os = "macos")]
+fn process_group_is_alive(process_group: Pid) -> Result<bool, RunError> {
+    let target = Pid::from_raw(-process_group.as_raw());
+    match nix::sys::signal::kill(target, None) {
+        Ok(()) | Err(Errno::EPERM) => Ok(true),
+        Err(Errno::ESRCH) => Ok(false),
+        Err(_) => Err(RunError::Contract(
+            "Browser Worker process group inspection failed",
+        )),
+    }
+}
+
 fn terminate_spawned_child(child: &mut Child, process_group: Pid) {
     let _ = signal_group(process_group, Signal::SIGKILL);
     let _ = child.kill();
     let _ = child.wait();
+    let _ = wait_for_process_group_exit(process_group, CLEANUP_LIMIT);
 }
 
 fn signal_group(process_group: Pid, signal: Signal) -> Result<(), Errno> {
     match killpg(process_group, signal) {
         Ok(()) | Err(Errno::ESRCH) => Ok(()),
         Err(error) => Err(error),
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use fkst_qa_contracts::{encode_local_worker_frame, validate_local_worker_frame};
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn clean_worker_exit_without_a_frame_is_rejected_and_reaped() {
+        let directory = temporary_directory("worker-no-frame");
+        let script = directory.join("worker.sh");
+        write_output_script(&script, &[]);
+
+        let mut process = WorkerProcess::spawn(&script, &script).expect("Worker process starts");
+        let process_group = process.process_group;
+        let mut decoder = LocalWorkerFrameDecoder::default();
+        let error = process
+            .read_frame(&mut decoder, Instant::now() + Duration::from_secs(2))
+            .expect_err("a Worker without a frame is rejected");
+        assert!(
+            error.to_string().contains("unexpected Browser Worker EOF"),
+            "unexpected no-frame error: {error}"
+        );
+        process.terminate();
+        assert!(!process_group_is_alive(process_group).expect("group inspection succeeds"));
+        fs::remove_dir_all(directory).expect("temporary Worker directory removes");
+    }
+
+    #[test]
+    fn malformed_worker_frame_is_rejected_and_reaped() {
+        let directory = temporary_directory("worker-malformed-frame");
+        let script = directory.join("worker.sh");
+        write_output_script(&script, &[0, 0, 0, 1, b'X']);
+
+        let mut process = WorkerProcess::spawn(&script, &script).expect("Worker process starts");
+        let process_group = process.process_group;
+        let mut decoder = LocalWorkerFrameDecoder::default();
+        let error = process
+            .read_frame(&mut decoder, Instant::now() + Duration::from_secs(2))
+            .expect_err("malformed Worker frame is rejected");
+        assert!(error.to_string().contains("malformed Browser Worker frame"));
+        process.terminate();
+        assert!(!process_group_is_alive(process_group).expect("group inspection succeeds"));
+        fs::remove_dir_all(directory).expect("temporary Worker directory removes");
+    }
+
+    #[test]
+    fn trailing_worker_frame_is_rejected_after_the_first_frame() {
+        let directory = temporary_directory("worker-trailing-frame");
+        let script = directory.join("worker.sh");
+        let value = validate_local_worker_frame(
+            &serde_json::to_vec(&json!({
+                "protocol": "qa.local-worker-protocol/v1",
+                "kind": "invocation",
+                "invocation_id": "invocation/0",
+                "operation": "browser-smoke",
+                "input": {
+                    "version": "local-qa-browser-smoke/request-v1",
+                    "fixtureUrl": "http://127.0.0.1:43123/fixed-page.html",
+                    "selector": r#"[data-local-qa="status"]"#,
+                    "expectedText": "READY",
+                    "timeoutMs": 5000
+                }
+            }))
+            .expect("valid invocation serializes"),
+        )
+        .expect("valid invocation validates");
+        let mut output = encode_local_worker_frame(&value).expect("invocation encodes");
+        output.extend_from_slice(&encode_local_worker_frame(&value).expect("second frame encodes"));
+        write_output_script(&script, &output);
+
+        let mut process = WorkerProcess::spawn(&script, &script).expect("Worker process starts");
+        let process_group = process.process_group;
+        let mut decoder = LocalWorkerFrameDecoder::default();
+        let first = process.read_frame(&mut decoder, Instant::now() + Duration::from_secs(2));
+        if first.is_ok() {
+            let error = process
+                .require_clean_eof(&mut decoder, Instant::now() + Duration::from_secs(2))
+                .expect_err("trailing Worker frame is rejected");
+            assert!(error.to_string().contains("trailing Browser Worker frame"));
+        } else {
+            assert!(first
+                .expect_err("first result is either valid or a coalesced sequence")
+                .to_string()
+                .contains("unexpected Browser Worker frame sequence"));
+        }
+        process.terminate();
+        assert!(!process_group_is_alive(process_group).expect("group inspection succeeds"));
+        fs::remove_dir_all(directory).expect("temporary Worker directory removes");
+    }
+
+    #[test]
+    fn successful_root_exit_still_escalates_and_reaps_the_owned_group() {
+        let directory = temporary_directory("worker-descendant");
+        let script = directory.join("worker.sh");
+        fs::write(
+            &script,
+            b"#!/bin/sh\n( trap '' TERM; while :; do sleep 1; done ) &\nexit 0\n",
+        )
+        .expect("hostile Worker script writes");
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755))
+            .expect("hostile Worker script is executable");
+
+        let mut process = WorkerProcess::spawn(&script, &script).expect("Worker process starts");
+        let process_group = process.process_group;
+        let started = Instant::now();
+        process
+            .wait_success(Instant::now() + Duration::from_secs(5))
+            .expect("root success is retained after descendant cleanup");
+
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(!process_group_is_alive(process_group).expect("owned group inspection succeeds"));
+        fs::remove_dir_all(directory).expect("temporary Worker directory removes");
+    }
+
+    fn write_output_script(path: &std::path::Path, output: &[u8]) {
+        let escaped = output
+            .iter()
+            .map(|byte| format!("\\{byte:03o}"))
+            .collect::<String>();
+        fs::write(path, format!("#!/bin/sh\nprintf '{escaped}'\n"))
+            .expect("Worker output script writes");
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+            .expect("Worker output script is executable");
+    }
+
+    fn temporary_directory(label: &str) -> std::path::PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "fkst-local-qa-host-{label}-{}-{timestamp}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).expect("temporary Worker directory creates");
+        directory
     }
 }

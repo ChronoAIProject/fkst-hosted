@@ -142,6 +142,9 @@ jobs:
       - name: Test Local QA workers
         working-directory: apps/local-qa-runtime/workers
         run: npm run --ignore-scripts test
+      - name: Test Local QA MVP-0 Browser Host
+        working-directory: apps/local-qa-runtime
+        run: cargo test -p fkst-local-qa-host --features mvp0-browser-test --locked --lib
       - name: Walk one Host-owned Worker and Browser effect
         working-directory: apps/local-qa-runtime
         run: |
