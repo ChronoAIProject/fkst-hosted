@@ -7,8 +7,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use fkst_qa_contracts::{
-    contract_content_digest, validate_local_evidence_object, validate_local_evidence_object_ref,
-    ValidatedValue,
+    canonical_bytes, contract_content_digest, validate_local_evidence_object,
+    validate_local_evidence_object_ref, validate_local_sanitized_observation,
+    validate_local_sanitized_observation_ref, ValidatedValue,
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -21,6 +22,8 @@ const MAX_SAFE_ATTEMPT: u64 = 9_007_199_254_740_991;
 const SCHEMA_VERSION: &str = "qa.local-evidence/v1";
 const OWNERSHIP: &str = "local-only:not-uploadable";
 const REFERENCE_KIND: &str = "local-evidence-object";
+const OBSERVATION_REFERENCE_KIND: &str = "local-sanitized-observation";
+const MAX_OBSERVATION_BYTES: usize = 65_536;
 static TEMPORARY_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 static STAGING_COORDINATION: Mutex<()> = Mutex::new(());
 
@@ -68,6 +71,39 @@ pub struct StageRequest<'a> {
 pub struct StagedEvidence {
     object: ValidatedValue,
     object_ref: ValidatedValue,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct StageSanitizedObservationRequest<'a> {
+    pub run_id: &'a str,
+    pub attempt: u64,
+    pub observation_id: &'a str,
+    pub fixture_url: &'a str,
+    pub final_url: &'a str,
+    pub selector: &'a str,
+    pub expected_text: &'a str,
+    pub observed_text: &'a str,
+}
+
+#[derive(Clone, Debug)]
+pub struct StagedSanitizedObservation {
+    observation: ValidatedValue,
+    observation_ref: ValidatedValue,
+    canonical_bytes: Vec<u8>,
+}
+
+impl StagedSanitizedObservation {
+    pub fn observation(&self) -> &ValidatedValue {
+        &self.observation
+    }
+
+    pub fn observation_ref(&self) -> &ValidatedValue {
+        &self.observation_ref
+    }
+
+    pub fn canonical_bytes(&self) -> &[u8] {
+        &self.canonical_bytes
+    }
 }
 
 impl StagedEvidence {
@@ -227,6 +263,112 @@ impl EvidenceStager {
         Ok(StagedEvidence { object, object_ref })
     }
 
+    pub fn stage_sanitized_observation(
+        &self,
+        request: StageSanitizedObservationRequest<'_>,
+    ) -> Result<StagedSanitizedObservation, StagerError> {
+        validate_observation_request(&request)?;
+        let observation = build_observation(&request)?;
+        let canonical_bytes =
+            canonical_bytes(&observation).map_err(|_| StagerError::InvalidObject)?;
+        if canonical_bytes.len() > MAX_OBSERVATION_BYTES {
+            return Err(StagerError::ObjectTooLarge);
+        }
+        let digest =
+            contract_content_digest(&observation).map_err(|_| StagerError::InvalidObject)?;
+        let observation_ref = build_observation_reference(request.observation_id, digest)?;
+
+        let _global_guard = STAGING_COORDINATION
+            .lock()
+            .map_err(|_| StagerError::Storage)?;
+        let _guard = self.coordination.lock().map_err(|_| StagerError::Storage)?;
+        let final_path =
+            self.observation_path(request.run_id, request.attempt, request.observation_id)?;
+        publish_new_file(&self.root, &final_path, &canonical_bytes)?;
+        Ok(StagedSanitizedObservation {
+            observation,
+            observation_ref,
+            canonical_bytes,
+        })
+    }
+
+    pub fn load_sanitized_observation(
+        &self,
+        run_id: &str,
+        attempt: u64,
+        observation_id: &str,
+    ) -> Result<StagedSanitizedObservation, StagerError> {
+        let _global_guard = STAGING_COORDINATION
+            .lock()
+            .map_err(|_| StagerError::VerificationFailed)?;
+        let _guard = self
+            .coordination
+            .lock()
+            .map_err(|_| StagerError::VerificationFailed)?;
+        let final_path = self
+            .observation_path(run_id, attempt, observation_id)
+            .map_err(|_| StagerError::VerificationFailed)?;
+        let file = checked_open_regular(&self.root, &final_path)
+            .map_err(|_| StagerError::VerificationFailed)?;
+        let mut stored_bytes = Vec::new();
+        file.take((MAX_OBSERVATION_BYTES + 1) as u64)
+            .read_to_end(&mut stored_bytes)
+            .map_err(|_| StagerError::VerificationFailed)?;
+        if stored_bytes.len() > MAX_OBSERVATION_BYTES {
+            return Err(StagerError::VerificationFailed);
+        }
+        let observation = validate_local_sanitized_observation(&stored_bytes)
+            .map_err(|_| StagerError::VerificationFailed)?;
+        let canonical =
+            canonical_bytes(&observation).map_err(|_| StagerError::VerificationFailed)?;
+        if canonical != stored_bytes {
+            return Err(StagerError::VerificationFailed);
+        }
+        let value = observation.value();
+        if value.get("run_id").and_then(serde_json::Value::as_str) != Some(run_id)
+            || value.get("attempt").and_then(serde_json::Value::as_u64) != Some(attempt)
+        {
+            return Err(StagerError::VerificationFailed);
+        }
+        let digest =
+            contract_content_digest(&observation).map_err(|_| StagerError::VerificationFailed)?;
+        let observation_ref = build_observation_reference(observation_id, digest)
+            .map_err(|_| StagerError::VerificationFailed)?;
+        Ok(StagedSanitizedObservation {
+            observation,
+            observation_ref,
+            canonical_bytes: stored_bytes,
+        })
+    }
+
+    pub fn verify_sanitized_observation(
+        &self,
+        staged: &StagedSanitizedObservation,
+    ) -> Result<(), StagerError> {
+        let value = staged.observation.value();
+        let run_id = value
+            .get("run_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(StagerError::VerificationFailed)?;
+        let attempt = value
+            .get("attempt")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or(StagerError::VerificationFailed)?;
+        let observation_id = staged
+            .observation_ref
+            .value()
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(StagerError::VerificationFailed)?;
+        let loaded = self.load_sanitized_observation(run_id, attempt, observation_id)?;
+        if loaded.canonical_bytes != staged.canonical_bytes
+            || loaded.observation_ref.value() != staged.observation_ref.value()
+        {
+            return Err(StagerError::VerificationFailed);
+        }
+        Ok(())
+    }
+
     pub fn verify(&self, staged: &StagedEvidence) -> Result<(), StagerError> {
         let _global_guard = STAGING_COORDINATION
             .lock()
@@ -310,7 +452,13 @@ impl EvidenceStager {
             ));
         }
         let mut residuals = Vec::new();
-        cleanup_owned_tree(&attempt_path, &mut residuals, run_id, attempt)?;
+        cleanup_owned_tree(
+            &attempt_path,
+            OwnedDirectory::Attempt,
+            &mut residuals,
+            run_id,
+            attempt,
+        )?;
         if residuals.is_empty() {
             remove_empty_parents(&self.root, &attempt_path)?;
         }
@@ -318,6 +466,26 @@ impl EvidenceStager {
             complete: residuals.is_empty(),
             residuals,
         })
+    }
+
+    fn observation_path(
+        &self,
+        run_id: &str,
+        attempt: u64,
+        observation_id: &str,
+    ) -> Result<PathBuf, StagerError> {
+        validate_run_id(run_id).map_err(|_| StagerError::InvalidObject)?;
+        validate_attempt(attempt).map_err(|_| StagerError::InvalidObject)?;
+        validate_observation_id(observation_id).map_err(|_| StagerError::InvalidObject)?;
+        let observation_number = observation_id
+            .strip_prefix("observation/")
+            .ok_or(StagerError::InvalidObject)?;
+        Ok(self
+            .root
+            .join(run_id)
+            .join(attempt.to_string())
+            .join("observation")
+            .join(format!("{observation_number}.json")))
     }
 
     fn object_path(
@@ -345,6 +513,14 @@ impl EvidenceStager {
 struct Quota {
     count: usize,
     bytes: u64,
+}
+
+fn validate_observation_request(
+    request: &StageSanitizedObservationRequest<'_>,
+) -> Result<(), StagerError> {
+    validate_run_id(request.run_id).map_err(|_| StagerError::InvalidObject)?;
+    validate_attempt(request.attempt).map_err(|_| StagerError::InvalidObject)?;
+    validate_observation_id(request.observation_id).map_err(|_| StagerError::InvalidObject)
 }
 
 fn validate_request(request: &StageRequest<'_>) -> Result<(), StagerError> {
@@ -391,7 +567,15 @@ fn validate_attempt(value: u64) -> Result<(), ()> {
 }
 
 fn validate_object_id(value: &str) -> Result<(), ()> {
-    let number = value.strip_prefix("evidence/").ok_or(())?;
+    validate_numbered_id(value, "evidence/")
+}
+
+fn validate_observation_id(value: &str) -> Result<(), ()> {
+    validate_numbered_id(value, "observation/")
+}
+
+fn validate_numbered_id(value: &str, prefix: &str) -> Result<(), ()> {
+    let number = value.strip_prefix(prefix).ok_or(())?;
     if value.is_empty()
         || value.len() > 64
         || number.is_empty()
@@ -400,6 +584,37 @@ fn validate_object_id(value: &str) -> Result<(), ()> {
         return Err(());
     }
     Ok(())
+}
+
+fn build_observation(
+    request: &StageSanitizedObservationRequest<'_>,
+) -> Result<ValidatedValue, StagerError> {
+    let observation_json = json!({
+        "schema_version": SCHEMA_VERSION,
+        "run_id": request.run_id,
+        "attempt": request.attempt,
+        "fixture_url": request.fixture_url,
+        "final_url": request.final_url,
+        "selector": request.selector,
+        "expected_text": request.expected_text,
+        "observed_text": request.observed_text,
+    });
+    let bytes = serde_json::to_vec(&observation_json).map_err(|_| StagerError::InvalidObject)?;
+    validate_local_sanitized_observation(&bytes).map_err(|_| StagerError::InvalidObject)
+}
+
+fn build_observation_reference(
+    observation_id: &str,
+    digest: String,
+) -> Result<ValidatedValue, StagerError> {
+    let reference_json = json!({
+        "kind": OBSERVATION_REFERENCE_KIND,
+        "id": observation_id,
+        "schema_version": SCHEMA_VERSION,
+        "content_digest": digest,
+    });
+    let bytes = serde_json::to_vec(&reference_json).map_err(|_| StagerError::InvalidReference)?;
+    validate_local_sanitized_observation_ref(&bytes).map_err(|_| StagerError::InvalidReference)
 }
 
 fn build_object(request: &StageRequest<'_>) -> Result<ValidatedValue, StagerError> {
@@ -422,6 +637,45 @@ fn build_reference(object_id: &str, digest: String) -> Result<ValidatedValue, St
     let object_ref_json = json!({ "kind": REFERENCE_KIND, "id": object_id, "schema_version": SCHEMA_VERSION, "content_digest": digest });
     let bytes = serde_json::to_vec(&object_ref_json).map_err(|_| StagerError::InvalidReference)?;
     validate_local_evidence_object_ref(&bytes).map_err(|_| StagerError::InvalidReference)
+}
+
+fn publish_new_file(root: &Path, final_path: &Path, bytes: &[u8]) -> Result<(), StagerError> {
+    let parent = final_path.parent().ok_or(StagerError::Storage)?;
+    ensure_directory_path(root, parent)?;
+    match fs::symlink_metadata(final_path) {
+        Ok(metadata) if metadata.file_type().is_file() => {
+            return Err(StagerError::DuplicateIdentity)
+        }
+        Ok(_) => return Err(StagerError::FilesystemSafety),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err(StagerError::Storage),
+    }
+    let temporary_path = temporary_path(parent, final_path)?;
+    let mut temporary_file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary_path)
+        .map_err(|_| StagerError::Storage)?;
+    let mut temporary_guard = TemporaryFileGuard::new(temporary_path.clone());
+    temporary_file
+        .write_all(bytes)
+        .map_err(|_| StagerError::Storage)?;
+    temporary_file.flush().map_err(|_| StagerError::Storage)?;
+    temporary_file
+        .sync_all()
+        .map_err(|_| StagerError::Storage)?;
+    drop(temporary_file);
+    fs::hard_link(&temporary_path, final_path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::AlreadyExists {
+            StagerError::DuplicateIdentity
+        } else {
+            StagerError::Storage
+        }
+    })?;
+    fs::remove_file(&temporary_path).map_err(|_| StagerError::Storage)?;
+    temporary_guard.disarm();
+    sync_directory(parent)?;
+    Ok(())
 }
 
 fn ensure_directory_path(root: &Path, target: &Path) -> Result<(), StagerError> {
@@ -521,7 +775,15 @@ fn inspect_attempt(parent: &Path) -> Result<Quota, StagerError> {
 }
 
 fn is_published_name(name: &str) -> bool {
-    let number = name.strip_suffix(".bin").unwrap_or("");
+    numbered_file_name(name, ".bin")
+}
+
+fn is_observation_name(name: &str) -> bool {
+    numbered_file_name(name, ".json")
+}
+
+fn numbered_file_name(name: &str, suffix: &str) -> bool {
+    let number = name.strip_suffix(suffix).unwrap_or("");
     !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())
 }
 
@@ -562,8 +824,16 @@ fn same_file(left: &fs::Metadata, right: &fs::Metadata) -> bool {
     left.len() == right.len()
 }
 
+#[derive(Clone, Copy)]
+enum OwnedDirectory {
+    Attempt,
+    Evidence,
+    Observation,
+}
+
 fn cleanup_owned_tree(
     path: &Path,
+    directory: OwnedDirectory,
     residuals: &mut Vec<CleanupResidual>,
     run_id: &str,
     attempt: u64,
@@ -579,8 +849,13 @@ fn cleanup_owned_tree(
                 CleanupResidualReason::UnsafeEntry,
             ));
         } else if metadata.file_type().is_dir() {
-            if name == "evidence" {
-                cleanup_owned_tree(&entry.path(), residuals, run_id, attempt)?;
+            let child = match (directory, name.as_str()) {
+                (OwnedDirectory::Attempt, "evidence") => Some(OwnedDirectory::Evidence),
+                (OwnedDirectory::Attempt, "observation") => Some(OwnedDirectory::Observation),
+                _ => None,
+            };
+            if let Some(child) = child {
+                cleanup_owned_tree(&entry.path(), child, residuals, run_id, attempt)?;
             } else {
                 residuals.push(residual_item(
                     run_id,
@@ -588,8 +863,21 @@ fn cleanup_owned_tree(
                     CleanupResidualReason::UnrelatedEntry,
                 ));
             }
-        } else if is_published_name(&name) || is_temporary_name(&name) {
-            if !metadata.file_type().is_file() {
+        } else {
+            let recognized = match directory {
+                OwnedDirectory::Attempt => false,
+                OwnedDirectory::Evidence => is_published_name(&name) || is_temporary_name(&name),
+                OwnedDirectory::Observation => {
+                    is_observation_name(&name) || is_temporary_name(&name)
+                }
+            };
+            if !recognized {
+                residuals.push(residual_item(
+                    run_id,
+                    attempt,
+                    CleanupResidualReason::UnrelatedEntry,
+                ));
+            } else if !metadata.file_type().is_file() {
                 residuals.push(residual_item(
                     run_id,
                     attempt,
@@ -602,12 +890,6 @@ fn cleanup_owned_tree(
                     CleanupResidualReason::RemovalFailed,
                 ));
             }
-        } else {
-            residuals.push(residual_item(
-                run_id,
-                attempt,
-                CleanupResidualReason::UnrelatedEntry,
-            ));
         }
     }
     if residuals.is_empty() {
