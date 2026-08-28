@@ -532,7 +532,12 @@ fn version_three_migration_preserves_lifecycle_rows() {
         .expect("lifecycle row must survive migration");
     assert_eq!(
         migrated_identity,
-        (RUN_ID.to_owned(), RUN_ID.to_owned(), 1, "accepted".to_owned())
+        (
+            RUN_ID.to_owned(),
+            RUN_ID.to_owned(),
+            1,
+            "accepted".to_owned()
+        )
     );
     let version: i64 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))

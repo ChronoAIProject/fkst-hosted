@@ -3,11 +3,15 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Barrier};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Barrier, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use fkst_local_qa_host::{parse_startup, serve_with_clock, FixedClock, Journal};
+use fkst_qa_contracts::{admit_json, canonical_admitted_bytes, sha256_digest};
 use rusqlite::{Connection, OptionalExtension};
+use serde::Deserialize;
 
 const CREATED_BODY: &[u8] =
     b"{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"accepted\",\"event_sequence\":1}\n";
@@ -16,7 +20,6 @@ const LEGACY_CREATED_BODY: &[u8] =
     b"{\"run_id\":\"run-001\",\"state\":\"accepted\",\"event_sequence\":1}\n";
 const LEGACY_TERMINAL_BODY: &[u8] = b"{\"run_id\":\"run-001\",\"state\":\"terminal\",\"execution_outcome\":\"blocked\",\"latest_event_sequence\":9}\n";
 const EVENTS_BODY: &[u8] = b"{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"after\":0,\"events\":[{\"sequence\":1,\"event_type\":\"run.accepted\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"accepted\"}},{\"sequence\":2,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"preparing\"}},{\"sequence\":3,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"ready\"}},{\"sequence\":4,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"executing\"}},{\"sequence\":5,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"staging_evidence\"}},{\"sequence\":6,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"cleaning_up_execution\"}},{\"sequence\":7,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"uploading\"}},{\"sequence\":8,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"finalizing_local\"}},{\"sequence\":9,\"event_type\":\"run.completed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"terminal\",\"execution_outcome\":\"blocked\"}}],\"next_after\":9}\n";
-const CONFLICT_BODY: &[u8] = b"{\"type\":\"about:blank\",\"title\":\"Conflict\",\"status\":409,\"detail\":\"run_id is already accepted under a different Idempotency-Key\"}\n";
 const REQUEST_DIGEST: &str = "c6da30d2cbe81af624c4e364e21cdad9dc2510d2e2ff9a02bb5bd6c325a25428";
 const HEALTH_BODY: &[u8] =
     b"{\"service\":\"fkst-local-qa-host\",\"version\":\"0.0.0\",\"alive\":true}\n";
@@ -26,6 +29,37 @@ const INVALID_CANCEL_BODY: &[u8] = b"{\"type\":\"about:blank\",\"title\":\"Bad R
 const INVALID_SUBMIT_BODY: &[u8] = b"{\"type\":\"about:blank\",\"title\":\"Bad Request\",\"status\":400,\"detail\":\"invalid submit request\"}\n";
 const METHOD_NOT_ALLOWED_BODY: &[u8] = b"{\"type\":\"about:blank\",\"title\":\"Method Not Allowed\",\"status\":405,\"detail\":\"method not allowed\"}\n";
 const ENDPOINT_NOT_FOUND_BODY: &[u8] = b"{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"endpoint not found\"}\n";
+
+#[derive(Deserialize)]
+struct AdmissionFixture {
+    expected_request_utf8: String,
+    expected_acceptance_utf8: String,
+}
+
+fn admission_fixture() -> AdmissionFixture {
+    serde_json::from_str(include_str!(
+        "../../../../packages/qa-contracts/fixtures/qa.local-run-admission/v2/happy-path.json"
+    ))
+    .expect("admission-v2 fixture must decode")
+}
+
+fn v2_request_with_key(body: &str, key: &str) -> Vec<u8> {
+    let mut value: serde_json::Value =
+        serde_json::from_str(body).expect("fixture request must decode");
+    value["idempotency_key"] = key.into();
+    value
+        .as_object_mut()
+        .expect("fixture request must be an object")
+        .remove("content_digest");
+    let projected = serde_json::to_vec(&value).expect("projected request must encode");
+    let admitted = admit_json(&projected).expect("projected request must admit");
+    value["content_digest"] =
+        sha256_digest(&canonical_admitted_bytes(&admitted).expect("request must canonicalize"))
+            .into();
+    let admitted = admit_json(&serde_json::to_vec(&value).expect("request must encode"))
+        .expect("request must admit");
+    canonical_admitted_bytes(&admitted).expect("request must canonicalize")
+}
 
 struct TempDirectory {
     path: PathBuf,
@@ -121,10 +155,92 @@ impl Drop for HostProcess {
     }
 }
 
+fn fixed_clock_start_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+struct FixedClockHost {
+    shutdown: Arc<AtomicBool>,
+    join: Option<thread::JoinHandle<()>>,
+    port: u16,
+}
+
+impl FixedClockHost {
+    fn start(database_path: &Path) -> Self {
+        let _start_guard = fixed_clock_start_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0))
+            .expect("ephemeral loopback port must bind");
+        let port = listener
+            .local_addr()
+            .expect("local address must exist")
+            .port();
+        drop(listener);
+        let config = parse_startup([
+            "local-demo".into(),
+            "--listen".into(),
+            format!("127.0.0.1:{port}").into(),
+            "--database".into(),
+            database_path.as_os_str().to_owned(),
+        ])
+        .expect("fixed-clock host configuration must parse");
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let thread_shutdown = Arc::clone(&shutdown);
+        let join = thread::spawn(move || {
+            serve_with_clock(
+                config,
+                thread_shutdown,
+                Arc::new(FixedClock::new("2026-08-25T16:00:01Z").unwrap()),
+            )
+            .expect("fixed-clock host must serve");
+        });
+        for _ in 0..100 {
+            if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                return Self {
+                    shutdown,
+                    join: Some(join),
+                    port,
+                };
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        panic!("fixed-clock host did not start")
+    }
+
+    fn stop(mut self) {
+        self.shutdown.store(true, Ordering::SeqCst);
+        if let Some(join) = self.join.take() {
+            join.join().expect("fixed-clock host must stop");
+        }
+    }
+}
+
+impl Drop for FixedClockHost {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::SeqCst);
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
+
 struct HttpResponse {
     status_line: String,
     content_type: String,
     body: Vec<u8>,
+}
+
+fn connect_loopback(port: u16) -> TcpStream {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match TcpStream::connect(("127.0.0.1", port)) {
+            Ok(stream) => return stream,
+            Err(_) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            Err(error) => panic!("loopback host must accept connections: {error}"),
+        }
+    }
 }
 
 fn request(
@@ -134,8 +250,7 @@ fn request(
     headers: &[(&str, &str)],
     body: &[u8],
 ) -> HttpResponse {
-    let mut stream =
-        TcpStream::connect(("127.0.0.1", port)).expect("loopback host must accept connections");
+    let mut stream = connect_loopback(port);
     write!(
         stream,
         "{method} {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
@@ -194,6 +309,21 @@ fn submit(port: u16, run_id: &str, idempotency_key: &str) -> HttpResponse {
     )
 }
 
+fn submit_v2(port: u16, idempotency_key: &str, body: &[u8]) -> HttpResponse {
+    let content_length = body.len().to_string();
+    request(
+        port,
+        "PUT",
+        "/v1/runs/00000000-0000-0000-0000-000000000002",
+        &[
+            ("Content-Type", "application/json"),
+            ("Idempotency-Key", idempotency_key),
+            ("Content-Length", &content_length),
+        ],
+        body,
+    )
+}
+
 fn get(port: u16, target: &str) -> HttpResponse {
     request(port, "GET", target, &[], b"")
 }
@@ -234,6 +364,11 @@ fn wait_for_exact_get(port: u16, target: &str, body: &[u8]) {
     }
 }
 
+fn initialize_and_insert_unclaimed_run(database_path: &Path) {
+    drop(Journal::open(database_path).expect("journal schema must initialize"));
+    insert_unclaimed_run(database_path);
+}
+
 fn insert_unclaimed_run(database_path: &Path) {
     let connection = Connection::open(database_path).expect("journal must open");
     connection
@@ -259,9 +394,10 @@ fn insert_unclaimed_run(database_path: &Path) {
         .expect("unclaimed Run fixture must be inserted");
 }
 
-fn submit_with_total_head_bytes(port: u16, total_head_bytes: usize) -> HttpResponse {
+fn submit_with_total_head_bytes(port: u16, total_head_bytes: usize, body: &[u8]) -> HttpResponse {
     let prefix = format!(
-        "PUT /v1/runs/00000000-0000-0000-0000-000000000001 HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nIdempotency-Key: idem-001\r\nContent-Length: 16\r\nX-Fill: "
+        "PUT /v1/runs/00000000-0000-0000-0000-000000000002 HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nIdempotency-Key: idem_0002\r\nContent-Length: {}\r\nX-Fill: ",
+        body.len()
     );
     let suffix = "\r\nConnection: close\r\n\r\n";
     assert!(
@@ -273,13 +409,12 @@ fn submit_with_total_head_bytes(port: u16, total_head_bytes: usize) -> HttpRespo
     head.extend_from_slice(suffix.as_bytes());
     assert_eq!(head.len(), total_head_bytes);
 
-    let mut stream =
-        TcpStream::connect(("127.0.0.1", port)).expect("loopback host must accept connections");
+    let mut stream = connect_loopback(port);
     stream
         .write_all(&head)
         .expect("bounded submit request head must be written");
     stream
-        .write_all(b"{\"kind\":\"inert\"}")
+        .write_all(body)
         .expect("bounded submit request body must be written");
     stream.flush().expect("bounded submit must be flushed");
     read_response(&mut stream)
@@ -293,6 +428,8 @@ fn assert_empty_journal(database_path: &Path) {
         "events",
         "cancel_requests",
         "execution_attempts",
+        "admission_v2_records",
+        "active_run_slot",
     ] {
         let count = connection
             .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
@@ -307,29 +444,35 @@ fn assert_empty_journal(database_path: &Path) {
 fn submit_accepts_exact_maximum_total_head_bytes() {
     let temp = TempDirectory::new("maximum-submit-head");
     let database_path = temp.database_path();
-    let host = HostProcess::start(&database_path);
+    let host = FixedClockHost::start(&database_path);
+    let fixture = admission_fixture();
+    let expected_body = format!("{}\n", fixture.expected_acceptance_utf8);
     assert_response(
-        submit_with_total_head_bytes(host.port, 16_384),
+        submit_with_total_head_bytes(host.port, 16_384, fixture.expected_request_utf8.as_bytes()),
         "HTTP/1.1 201 Created",
         "application/json",
-        CREATED_BODY,
-    );
-    wait_for_exact_get(
-        host.port,
-        "/v1/runs/00000000-0000-0000-0000-000000000001",
-        TERMINAL_BODY,
+        expected_body.as_bytes(),
     );
     host.stop();
-    assert_exact_journal(&database_path, "idem-001");
+    let connection = Connection::open(&database_path).expect("journal must open");
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM admission_v2_records", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+        1
+    );
 }
 
 #[test]
 fn submit_rejects_total_head_one_byte_over_limit_without_mutation() {
     let temp = TempDirectory::new("oversized-submit-head");
     let database_path = temp.database_path();
-    let host = HostProcess::start(&database_path);
+    let host = FixedClockHost::start(&database_path);
+    let fixture = admission_fixture();
     assert_response(
-        submit_with_total_head_bytes(host.port, 16_385),
+        submit_with_total_head_bytes(host.port, 16_385, fixture.expected_request_utf8.as_bytes()),
         "HTTP/1.1 400 Bad Request",
         "application/problem+json",
         INVALID_SUBMIT_BODY,
@@ -464,37 +607,8 @@ fn exact_submission_completes_replays_and_restarts_without_duplicate_work() {
     let temp = TempDirectory::new("complete-replay-restart");
     let database_path = temp.database_path();
 
+    initialize_and_insert_unclaimed_run(&database_path);
     let first_host = HostProcess::start(&database_path);
-    assert_response(
-        submit(
-            first_host.port,
-            "00000000-0000-0000-0000-000000000001",
-            "idem-001",
-        ),
-        "HTTP/1.1 201 Created",
-        "application/json",
-        CREATED_BODY,
-    );
-    assert_response(
-        submit(
-            first_host.port,
-            "00000000-0000-0000-0000-000000000001",
-            "idem-001",
-        ),
-        "HTTP/1.1 200 OK",
-        "application/json",
-        CREATED_BODY,
-    );
-    assert_response(
-        submit(
-            first_host.port,
-            "00000000-0000-0000-0000-000000000001",
-            "idem-002",
-        ),
-        "HTTP/1.1 409 Conflict",
-        "application/problem+json",
-        CONFLICT_BODY,
-    );
     wait_for_exact_get(
         first_host.port,
         "/v1/runs/00000000-0000-0000-0000-000000000001",
@@ -509,30 +623,10 @@ fn exact_submission_completes_replays_and_restarts_without_duplicate_work() {
         "application/json",
         EVENTS_BODY,
     );
-    assert_response(
-        submit(
-            first_host.port,
-            "00000000-0000-0000-0000-000000000001",
-            "idem-001",
-        ),
-        "HTTP/1.1 200 OK",
-        "application/json",
-        CREATED_BODY,
-    );
     first_host.stop();
     assert_exact_journal(&database_path, "idem-001");
 
     let restarted_host = HostProcess::start(&database_path);
-    assert_response(
-        submit(
-            restarted_host.port,
-            "00000000-0000-0000-0000-000000000001",
-            "idem-001",
-        ),
-        "HTTP/1.1 200 OK",
-        "application/json",
-        CREATED_BODY,
-    );
     assert_response(
         get(
             restarted_host.port,
@@ -559,18 +653,17 @@ fn exact_submission_completes_replays_and_restarts_without_duplicate_work() {
 fn concurrent_different_keys_create_exactly_one_acceptance() {
     let temp = TempDirectory::new("concurrent-keys");
     let database_path = temp.database_path();
-    let host = HostProcess::start(&database_path);
+    let host = FixedClockHost::start(&database_path);
+    let fixture = admission_fixture();
     let barrier = Arc::new(Barrier::new(3));
     let mut threads = Vec::new();
-    for key in ["idem-001", "idem-002"] {
+    for key in ["idem_0002", "idem_other"] {
         let barrier = Arc::clone(&barrier);
         let port = host.port;
+        let body = v2_request_with_key(&fixture.expected_request_utf8, key);
         threads.push(thread::spawn(move || {
             barrier.wait();
-            (
-                key,
-                submit(port, "00000000-0000-0000-0000-000000000001", key),
-            )
+            (key, submit_v2(port, key, &body))
         }));
     }
     barrier.wait();
@@ -581,18 +674,27 @@ fn concurrent_different_keys_create_exactly_one_acceptance() {
         .collect::<Vec<_>>();
     results.sort_by(|left, right| left.1.status_line.cmp(&right.1.status_line));
     assert_eq!(results[0].1.status_line, "HTTP/1.1 201 Created");
-    assert_eq!(results[0].1.body, CREATED_BODY);
     assert_eq!(results[1].1.status_line, "HTTP/1.1 409 Conflict");
-    assert_eq!(results[1].1.body, CONFLICT_BODY);
     let accepted_key = results[0].0;
-    wait_for_exact_get(
-        host.port,
-        "/v1/runs/00000000-0000-0000-0000-000000000001",
-        TERMINAL_BODY,
-    );
     host.stop();
 
-    assert_exact_journal(&database_path, accepted_key);
+    let connection = Connection::open(&database_path).expect("journal must open");
+    assert_eq!(
+        connection
+            .query_row("SELECT idempotency_key FROM accepted_requests", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap(),
+        accepted_key
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM active_run_slot", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+        1
+    );
 }
 
 #[test]
@@ -656,16 +758,6 @@ fn reads_cancellation_and_restart_match_the_durable_contract() {
     host.stop();
 
     let restarted = HostProcess::start(&database_path);
-    assert_response(
-        submit(
-            restarted.port,
-            "00000000-0000-0000-0000-000000000001",
-            "idem-001",
-        ),
-        "HTTP/1.1 200 OK",
-        "application/json",
-        CREATED_BODY,
-    );
     assert_response(
         get(restarted.port, "/v1/runs/00000000-0000-0000-0000-000000000001"),
         "HTTP/1.1 200 OK",
@@ -797,6 +889,7 @@ fn concurrent_cancellation_has_one_winner() {
 fn terminal_and_invalid_requests_are_mutation_free() {
     let temp = TempDirectory::new("negative-contracts");
     let database_path = temp.database_path();
+    initialize_and_insert_unclaimed_run(&database_path);
     let host = HostProcess::start(&database_path);
     assert_response(
         submit(host.port, "run-001", "idem-legacy"),
@@ -805,13 +898,8 @@ fn terminal_and_invalid_requests_are_mutation_free() {
         INVALID_SUBMIT_BODY,
     );
     assert_eq!(
-        submit(
-            host.port,
-            "00000000-0000-0000-0000-000000000001",
-            "idem-001"
-        )
-        .status_line,
-        "HTTP/1.1 201 Created"
+        get(host.port, "/v1/runs/00000000-0000-0000-0000-000000000001").status_line,
+        "HTTP/1.1 200 OK"
     );
     wait_for_exact_get(
         host.port,

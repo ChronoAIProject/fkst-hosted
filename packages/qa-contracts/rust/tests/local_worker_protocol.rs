@@ -91,7 +91,9 @@ fn negative_fixture() -> NegativeFixture {
 fn decode_hex(value: &str) -> Vec<u8> {
     value
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             u8::from_str_radix(std::str::from_utf8(pair).expect("hex pair"), 16).expect("hex byte")
         })
