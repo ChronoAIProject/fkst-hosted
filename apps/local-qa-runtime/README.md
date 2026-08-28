@@ -64,8 +64,11 @@ production policy code. It:
 The fixed Worker executable walks that policy through the registered bounded
 `qa.local-worker-protocol/v1` over stdin/stdout. It accepts one invocation,
 performs the seven fixed typed capability exchanges, emits one terminal result,
-and exits. The process acceptance harness acts as the Host-shaped peer; the
-production Host does not yet invoke this Worker.
+and exits. Default production does not invoke this Worker. The non-default
+`mvp0-browser-test` Host feature supplies one reviewed MVP-0A acceptance peer
+that owns an explicitly supplied Node executable, prebuilt uncommitted Worker
+bundle, explicit system Chrome executable, bounded pipes, process group, timeout,
+clean EOF, and process reap.
 
 The worker never discovers or launches Chrome, opens network or filesystem
 resources, creates profiles, downloads, or child processes, persists Evidence,
@@ -75,10 +78,13 @@ worker policy.
 
 The Rust `evidence-stager/` library owns bounded Local Evidence filesystem
 effects. It accepts validated Evidence identities and bytes, derives confined
-paths beneath an injected quarantine root, publishes a synced temporary file by
-same-directory atomic rename, returns contract-validated object metadata and a
-canonical digest-bound reference, and verifies the reopened published bytes.
-The Host and worker do not yet invoke this library.
+paths beneath an injected quarantine root, publishes through a synced
+same-directory temporary file and hard-link handoff, returns contract-validated
+object metadata and canonical digest-bound references, and verifies reopened
+published bytes. Sanitized observations are canonical JSON under the same
+run/attempt root but outside `evidence/`, so the fixed screenshot and runner-log
+quota remains exactly two Evidence objects. The feature-gated MVP-0A Host path
+stages and reloads all three artifacts; default production does not.
 
 The Rust Local QA Host API and journal boundary described above is already
 activated in `host/`. The launcher, supervisor, guest agent, and Secret Broker
@@ -96,22 +102,33 @@ The reserved canonical schemas are `testing-observation.v1`,
 `testing-case-result-set.v2`. This source-authority pin does not fetch, hydrate,
 import, or execute the package graph.
 
-The argument-free Rust Browser adapter under `browser-adapter/` runs one fixed
-loopback fixture through the first executable Linux system Chrome found in its
-fixed absolute allowlist. Each observation owns a fresh Chrome process group, a
-temporary profile, and a separate temporary downloads directory; it returns the
+The Rust Browser adapter under `browser-adapter/` owns one fixed loopback
+fixture, a fresh Chrome process group, a temporary profile, and a separate
+temporary downloads directory. Its prepared-session API accepts an explicit
+Chrome path, exposes the randomized fixture URL before Worker invocation,
+permits exactly one observation, and supports explicit close. It returns the
 exact final URL, rendered fixed-element text, and validated bounded `1280x720`
-PNG without evaluating pass/fail. The legacy fixed smoke wrapper alone asserts
-that the production fixture rendered `READY`. Both paths explicitly finalize
-all owned resources on success or failure. The 15-second operation deadline and
-`Drop` safety net do not expose caller-programmable browser behavior.
+PNG without evaluating pass/fail. The compatibility wrapper still uses the fixed
+system-Chrome allowlist and asserts only that the production fixture rendered
+`READY`. Explicit close is the primary cleanup path; the 15-second operation
+deadline and `Drop` safety net remain fallback containment.
+
+The feature-gated MVP-0A path seeds one executable v1 test row, runs the exact
+Browser executor selection through the existing registry and coordinator, stages
+one sanitized observation plus screenshot and runner-log Evidence, explicitly
+closes Browser ownership, reaps the Worker, and persists the existing terminal
+Journal outcome. Restart after durable completion proves those effects are not
+repeated. This is infrastructure execution only: it is not enabled in default
+production, does not make v2 rows claimable, and does not claim Testing Packages
+`CaseResultSet` authority.
 
 The following capabilities remain explicitly deferred:
 
-- Host executor integration of the fixed Browser adapter and Worker protocol;
-- Host integration of filesystem Evidence staging and journal Evidence
-  references;
-- execution terminal outcomes and restart-to-`lost` reconciliation;
+- production Browser executor registration, v2 claiming, and persisted v2
+  selection cutover;
+- journal receipt or Evidence-reference authority beyond the local staging
+  owner;
+- crash-after-effect uncertainty and restart-to-`lost` reconciliation;
 - NyxID and Hosted transport or authentication;
 - Source, Compose, and Secrets;
 - upload, Quality, Report, Publication, and Settlement; and
@@ -129,9 +146,26 @@ From `apps/local-qa-runtime/`, verify the Rust workspace with:
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy -p fkst-local-qa-host --features mvp0-browser-test --all-targets --locked -- -D warnings
 cargo build --workspace --locked
 cargo test --workspace --locked
 ```
+
+After building `workers/dist/worker-main.js`, Linux can run the ignored real
+walking skeleton with explicit executables:
+
+```bash
+FKST_LOCAL_QA_NODE="$(command -v node)" \
+FKST_LOCAL_QA_CHROME="$(command -v google-chrome)" \
+cargo test -p fkst-local-qa-host \
+  --features mvp0-browser-test \
+  --locked browser_worker_walking_skeleton \
+  -- --ignored --nocapture
+```
+
+`workers/dist/` is generated and remains uncommitted. The staging root is also
+explicitly supplied by the test harness; no environment variable or production
+configuration activates the Browser executor.
 
 Verify the worker from `apps/local-qa-runtime/workers/` with a clean install:
 

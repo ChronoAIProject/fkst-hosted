@@ -35,6 +35,9 @@ jobs:
       - name: Local QA Runtime clippy -D warnings
         working-directory: apps/local-qa-runtime
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Local QA Runtime MVP-0 Browser clippy -D warnings
+        working-directory: apps/local-qa-runtime
+        run: cargo clippy -p fkst-local-qa-host --features mvp0-browser-test --all-targets --locked -- -D warnings
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -139,3 +142,17 @@ jobs:
       - name: Test Local QA workers
         working-directory: apps/local-qa-runtime/workers
         run: npm run --ignore-scripts test
+      - name: Walk one Host-owned Worker and Browser effect
+        working-directory: apps/local-qa-runtime
+        run: |
+          chrome=""
+          for candidate in /usr/bin/google-chrome-stable /usr/bin/google-chrome /usr/bin/chromium /usr/bin/chromium-browser; do
+            if [[ -x "$candidate" ]]; then chrome="$candidate"; break; fi
+          done
+          test -n "$chrome"
+          FKST_LOCAL_QA_NODE="$(command -v node)" \
+          FKST_LOCAL_QA_CHROME="$chrome" \
+          cargo test -p fkst-local-qa-host \
+            --features mvp0-browser-test \
+            --locked browser_worker_walking_skeleton \
+            -- --ignored --nocapture

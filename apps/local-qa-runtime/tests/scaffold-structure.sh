@@ -34,8 +34,10 @@ expected=$(printf '%s\n' \
   apps/local-qa-runtime/evidence-stager/src/lib.rs \
   apps/local-qa-runtime/evidence-stager/tests/browser_screenshot.rs \
   apps/local-qa-runtime/evidence-stager/tests/runner_log.rs \
+  apps/local-qa-runtime/evidence-stager/tests/sanitized_observation.rs \
   apps/local-qa-runtime/guest-agent/src/main.rs \
   apps/local-qa-runtime/host/src/admission.rs \
+  apps/local-qa-runtime/host/src/browser_executor.rs \
   apps/local-qa-runtime/host/src/coordinator.rs \
   apps/local-qa-runtime/host/src/executor.rs \
   apps/local-qa-runtime/host/src/journal.rs \
@@ -43,6 +45,7 @@ expected=$(printf '%s\n' \
   apps/local-qa-runtime/host/src/main.rs \
   apps/local-qa-runtime/host/src/ownership.rs \
   apps/local-qa-runtime/host/src/transport.rs \
+  apps/local-qa-runtime/host/src/worker_process.rs \
   apps/local-qa-runtime/host/tests/admission_v2.rs \
   apps/local-qa-runtime/host/tests/environment_ownership.rs \
   apps/local-qa-runtime/host/tests/fail_closed.rs \
@@ -64,12 +67,14 @@ actual=$(find apps/local-qa-runtime -type f \( -name '*.rs' -o -name '*.ts' -o -
 
 for required in \
   apps/local-qa-runtime/host/Cargo.toml \
+  apps/local-qa-runtime/host/src/browser_executor.rs \
   apps/local-qa-runtime/host/src/coordinator.rs \
   apps/local-qa-runtime/host/src/executor.rs \
   apps/local-qa-runtime/host/src/journal.rs \
   apps/local-qa-runtime/host/src/lib.rs \
   apps/local-qa-runtime/host/src/main.rs \
   apps/local-qa-runtime/host/src/transport.rs \
+  apps/local-qa-runtime/host/src/worker_process.rs \
   apps/local-qa-runtime/host/tests/fail_closed.rs \
   apps/local-qa-runtime/host/tests/loopback_sqlite.rs; do
   [[ -f "$required" ]] || { echo "missing Local QA Host file: $required" >&2; exit 1; }
@@ -115,8 +120,28 @@ host_manifest=apps/local-qa-runtime/host/Cargo.toml
   echo 'Local QA Host package and binary names must match' >&2
   exit 1
 }
+grep -Eq '^default = \[\]$' "$host_manifest" || {
+  echo 'Local QA Host default feature set must remain empty' >&2
+  exit 1
+}
+grep -Fq 'mvp0-browser-test = [' "$host_manifest" || {
+  echo 'Local QA Host is missing the reviewed MVP-0 Browser feature' >&2
+  exit 1
+}
 grep -Eq '^ctrlc = \{ version = "=3\.4\.7", features = \["termination"\] \}$' "$host_manifest" || {
   echo 'Local QA Host must use the pinned termination-signal dependency' >&2
+  exit 1
+}
+grep -Eq '^fkst-local-qa-browser-adapter = \{ path = "\.\./browser-adapter", optional = true \}$' "$host_manifest" || {
+  echo 'Local QA Host Browser adapter dependency must remain optional' >&2
+  exit 1
+}
+grep -Eq '^fkst-local-qa-evidence-stager = \{ path = "\.\./evidence-stager", optional = true \}$' "$host_manifest" || {
+  echo 'Local QA Host Evidence stager dependency must remain optional' >&2
+  exit 1
+}
+grep -Eq '^nix = \{ version = "=0\.30\.1", features = \["signal"\], optional = true \}$' "$host_manifest" || {
+  echo 'Local QA Host process-group dependency must remain optional and pinned' >&2
   exit 1
 }
 grep -Eq '^fkst-qa-contracts = \{ path = "\.\./\.\./\.\./packages/qa-contracts/rust" \}$' "$host_manifest" || {
@@ -169,6 +194,11 @@ grep -Fq '"journal_mode", "WAL"' apps/local-qa-runtime/host/src/journal.rs
 grep -Fq 'validate_local_state' apps/local-qa-runtime/host/src/journal.rs
 grep -Fq 'validate_execution_outcome' apps/local-qa-runtime/host/src/journal.rs
 grep -Fq 'CoordinatorHandle::start' apps/local-qa-runtime/host/src/lib.rs
+grep -Fq '#[cfg(feature = "mvp0-browser-test")]' apps/local-qa-runtime/host/src/lib.rs
+grep -Fq 'Arc::new(UnavailableCurrentClaimVerifier)' apps/local-qa-runtime/host/src/lib.rs
+grep -Fq 'ExecutorRegistry::new(vec![Box::new(InertExecutor::new())])' apps/local-qa-runtime/host/src/lib.rs
+grep -Fq 'state = '\''accepted'\''' apps/local-qa-runtime/host/src/journal.rs
+grep -Fq 'admission_version = 1' apps/local-qa-runtime/host/src/journal.rs
 
 for component in guest-agent launcher secret-broker supervisor; do
   manifest="apps/local-qa-runtime/$component/Cargo.toml"
