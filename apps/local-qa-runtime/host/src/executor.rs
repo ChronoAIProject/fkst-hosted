@@ -64,6 +64,7 @@ pub(crate) struct ExecutorResult {
 pub(crate) trait VersionedExecutor: Send + Sync {
     fn descriptor(&self) -> &ExecutorDescriptor;
     fn execute(&self, request: &ExecutorRequest) -> Result<ExecutorResult, RunError>;
+    fn cancel(&self, _request: &ExecutorRequest) {}
 }
 
 pub(crate) struct InertExecutor {
@@ -123,6 +124,7 @@ impl VersionedExecutor for InertExecutor {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct ExecutorRegistry {
     entries: BTreeMap<(String, String, String, String), Arc<dyn VersionedExecutor>>,
 }
@@ -190,6 +192,22 @@ impl ExecutorRegistry {
             return Err(RunError::Contract("executor result relation failed"));
         }
         ExecutionOutcome::validated(&result.execution_outcome)
+    }
+
+    pub(crate) fn cancel(&self, request: &ExecutorRequest) -> Result<(), RunError> {
+        let selection = &request.selection;
+        let key = (
+            selection.executor_id.clone(),
+            selection.executor_version.clone(),
+            selection.capability_digest.clone(),
+            selection.required_capability.clone(),
+        );
+        let executor = self
+            .entries
+            .get(&key)
+            .ok_or(RunError::Contract("executor selection not allowlisted"))?;
+        executor.cancel(request);
+        Ok(())
     }
 
     pub(crate) fn resolve(

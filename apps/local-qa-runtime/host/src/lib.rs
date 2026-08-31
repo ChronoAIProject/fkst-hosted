@@ -64,7 +64,6 @@ impl fmt::Display for StartupError {
 
 #[derive(Debug)]
 pub enum RunError {
-    ActiveAttempt,
     Contract(&'static str),
     CoordinatorPanicked,
     CoordinatorStopped,
@@ -79,9 +78,6 @@ pub enum RunError {
 impl fmt::Display for RunError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ActiveAttempt => {
-                formatter.write_str("cancellation during execution is unsupported")
-            }
             Self::Contract(detail) => write!(formatter, "contract error: {detail}"),
             Self::CoordinatorPanicked => formatter.write_str("Run coordinator panicked"),
             Self::CoordinatorStopped => formatter.write_str("Run coordinator stopped unexpectedly"),
@@ -261,6 +257,7 @@ fn serve_with_dependencies(
                 let _ = handle_connection(
                     &mut stream,
                     &mut journal,
+                    &coordinator,
                     &admission_registry,
                     current_claim_verifier.as_ref(),
                     clock.as_ref(),
@@ -342,6 +339,7 @@ struct Request {
 fn handle_connection(
     stream: &mut TcpStream,
     journal: &mut Journal,
+    coordinator: &CoordinatorHandle,
     admission_registry: &ExecutorRegistry,
     current_claim_verifier: &dyn admission::CurrentClaimVerifier,
     clock: &dyn Clock,
@@ -416,12 +414,13 @@ fn handle_connection(
             Ok(None) => run_not_found(),
             Err(_) => journal_failure(),
         },
-        Route::Cancel { run_id } => match journal.cancel(
+        Route::Cancel { run_id } => match coordinator.cancel(
+            journal,
             &run_id,
             request.idempotency_key.as_deref().unwrap_or_default(),
         ) {
-            Ok(Cancellation::Accepted(sequence)) => {
-                cancel_response(202, "Accepted", &run_id, "accepted", sequence)
+            Ok(Cancellation::Accepted { event_sequence, .. }) => {
+                cancel_response(202, "Accepted", &run_id, "accepted", event_sequence)
             }
             Ok(Cancellation::AlreadyAccepted(sequence)) => {
                 cancel_response(200, "OK", &run_id, "already_accepted", sequence)
