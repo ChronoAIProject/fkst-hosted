@@ -84,7 +84,10 @@ pub(crate) struct StoredEvent {
 }
 
 pub(crate) enum Cancellation {
-    Accepted(i64),
+    Accepted {
+        event_sequence: i64,
+        active_executor_run_id: Option<String>,
+    },
     AlreadyAccepted(i64),
     Terminal(i64),
     NotFound,
@@ -852,14 +855,16 @@ impl Journal {
             return Ok(Cancellation::AlreadyAccepted(event_sequence));
         }
 
-        let active_attempt: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM execution_attempts WHERE run_id = ?1)",
-            [run_id],
-            |row| row.get(0),
-        )?;
-        if active_attempt {
-            return Err(RunError::ActiveAttempt);
-        }
+        let active_executor_run_id = transaction
+            .query_row(
+                "SELECT runs.executor_run_id
+                 FROM runs JOIN execution_attempts
+                   ON execution_attempts.run_id = runs.run_id
+                 WHERE runs.run_id = ?1 AND execution_attempts.status = 'claimed'",
+                [run_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
 
         let event_sequence = latest_sequence
             .checked_add(1)
@@ -878,7 +883,10 @@ impl Journal {
             params![run_id, event_sequence, event_json],
         )?;
         transaction.commit()?;
-        Ok(Cancellation::Accepted(event_sequence))
+        Ok(Cancellation::Accepted {
+            event_sequence,
+            active_executor_run_id,
+        })
     }
 
     pub(crate) fn claim_next(&mut self) -> Result<Option<ClaimedRun>, RunError> {
@@ -958,7 +966,7 @@ impl Journal {
         expected_state: &str,
         next_state: &str,
         event_sequence: i64,
-    ) -> Result<(), RunError> {
+    ) -> Result<bool, RunError> {
         validate_state(expected_state)?;
         validate_state(next_state)?;
         validate_sequence(event_sequence)?;
@@ -986,11 +994,18 @@ impl Journal {
                     ))
                 },
             )?;
+        if state == expected_state
+            && execution_outcome.is_none()
+            && attempt_status.as_deref() == Some("claimed")
+            && cancellation_exists
+        {
+            transaction.commit()?;
+            return Ok(false);
+        }
         if state != expected_state
             || execution_outcome.is_some()
             || latest_sequence != event_sequence - 1
             || attempt_status.as_deref() != Some("claimed")
-            || cancellation_exists
         {
             return Err(RunError::InvalidJournal(
                 "Run transition predicate did not match",
@@ -1014,14 +1029,14 @@ impl Journal {
             params![run_id, event_sequence, event_json],
         )?;
         transaction.commit()?;
-        Ok(())
+        Ok(true)
     }
 
     pub(crate) fn complete(
         &mut self,
         run_id: &str,
         outcome: &ExecutionOutcome,
-    ) -> Result<(), RunError> {
+    ) -> Result<bool, RunError> {
         validate_state("finalizing_local")?;
         validate_state("terminal")?;
         validate_outcome(outcome.as_str())?;
@@ -1029,13 +1044,22 @@ impl Journal {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (state, execution_outcome, latest_sequence, attempt_status, attempt_outcome) =
-            transaction.query_row(
+        let (
+            state,
+            execution_outcome,
+            latest_sequence,
+            attempt_status,
+            attempt_outcome,
+            cancellation_exists,
+        ) = transaction
+            .query_row(
                 "SELECT runs.state,
                         runs.execution_outcome,
                         (SELECT MAX(sequence) FROM events WHERE events.run_id = runs.run_id),
                         execution_attempts.status,
-                        execution_attempts.execution_outcome
+                        execution_attempts.execution_outcome,
+                        EXISTS(SELECT 1 FROM cancel_requests
+                               WHERE cancel_requests.run_id = runs.run_id)
                  FROM runs JOIN execution_attempts
                    ON execution_attempts.run_id = runs.run_id
                  WHERE runs.run_id = ?1",
@@ -1047,9 +1071,19 @@ impl Journal {
                         row.get::<_, i64>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, Option<String>>(4)?,
+                        row.get::<_, bool>(5)?,
                     ))
                 },
             )?;
+        if state == "finalizing_local"
+            && execution_outcome.is_none()
+            && attempt_status == "claimed"
+            && attempt_outcome.is_none()
+            && cancellation_exists
+        {
+            transaction.commit()?;
+            return Ok(false);
+        }
         if state != "finalizing_local"
             || execution_outcome.is_some()
             || latest_sequence != 8
@@ -1085,7 +1119,7 @@ impl Journal {
             params![run_id, event_json],
         )?;
         transaction.commit()?;
-        Ok(())
+        Ok(true)
     }
 }
 

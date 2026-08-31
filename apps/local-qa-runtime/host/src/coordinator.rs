@@ -3,7 +3,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 
 use crate::executor::{ExecutorRegistry, ExecutorRequest, ExecutorSelection};
-use crate::journal::Journal;
+use crate::journal::{Cancellation, Journal};
 use crate::RunError;
 
 enum CoordinatorMessage {
@@ -13,6 +13,8 @@ enum CoordinatorMessage {
 pub(crate) struct CoordinatorHandle {
     sender: Sender<CoordinatorMessage>,
     join: Option<JoinHandle<Result<(), RunError>>>,
+    registry: ExecutorRegistry,
+    selection: ExecutorSelection,
 }
 
 impl CoordinatorHandle {
@@ -21,26 +23,49 @@ impl CoordinatorHandle {
         registry: ExecutorRegistry,
         selection: ExecutorSelection,
     ) -> Result<Self, RunError> {
+        registry.resolve(&selection)?;
         let journal = Journal::open(database_path)?;
         let (sender, receiver) = mpsc::channel();
-        let (startup_sender, startup_receiver) = mpsc::sync_channel(0);
+        let coordinator_registry = registry.clone();
+        let coordinator_selection = selection.clone();
         let join = thread::Builder::new()
             .name("fkst-local-qa-run-coordinator".to_owned())
             .spawn(move || {
-                run_coordinator(journal, registry, selection, receiver, Some(startup_sender))
+                run_coordinator(
+                    journal,
+                    coordinator_registry,
+                    coordinator_selection,
+                    receiver,
+                    None,
+                )
             })?;
+        Ok(Self {
+            sender,
+            join: Some(join),
+            registry,
+            selection,
+        })
+    }
 
-        match startup_receiver.recv() {
-            Ok(true) => Ok(Self {
-                sender,
-                join: Some(join),
-            }),
-            Ok(false) | Err(_) => match join.join() {
-                Ok(Err(error)) => Err(error),
-                Ok(Ok(())) => Err(RunError::CoordinatorStopped),
-                Err(_) => Err(RunError::CoordinatorPanicked),
-            },
+    pub(crate) fn cancel(
+        &self,
+        journal: &mut Journal,
+        run_id: &str,
+        idempotency_key: &str,
+    ) -> Result<Cancellation, RunError> {
+        let cancellation = journal.cancel(run_id, idempotency_key)?;
+        if let Cancellation::Accepted {
+            active_executor_run_id: Some(executor_run_id),
+            ..
+        } = &cancellation
+        {
+            self.registry.cancel(&ExecutorRequest {
+                schema_version: "qa.local-executor/v1".to_owned(),
+                run_id: executor_run_id.clone(),
+                selection: self.selection.clone(),
+            })?;
         }
+        Ok(cancellation)
     }
 
     pub(crate) fn check(&mut self) -> Result<(), RunError> {
@@ -109,24 +134,38 @@ fn process_available(
     selection: &ExecutorSelection,
 ) -> Result<(), RunError> {
     while let Some(claimed) = journal.claim_next()? {
-        journal.transition(&claimed.run_id, "preparing", "ready", 3)?;
-        journal.transition(&claimed.run_id, "ready", "executing", 4)?;
+        if !journal.transition(&claimed.run_id, "preparing", "ready", 3)? {
+            return Ok(());
+        }
+        if !journal.transition(&claimed.run_id, "ready", "executing", 4)? {
+            return Ok(());
+        }
         let request = ExecutorRequest {
             schema_version: "qa.local-executor/v1".to_owned(),
             run_id: claimed.executor_run_id,
             selection: selection.clone(),
         };
         let outcome = registry.execute(&request)?;
-        journal.transition(&claimed.run_id, "executing", "staging_evidence", 5)?;
-        journal.transition(
+        if !journal.transition(&claimed.run_id, "executing", "staging_evidence", 5)? {
+            return Ok(());
+        }
+        if !journal.transition(
             &claimed.run_id,
             "staging_evidence",
             "cleaning_up_execution",
             6,
-        )?;
-        journal.transition(&claimed.run_id, "cleaning_up_execution", "uploading", 7)?;
-        journal.transition(&claimed.run_id, "uploading", "finalizing_local", 8)?;
-        journal.complete(&claimed.run_id, &outcome)?;
+        )? {
+            return Ok(());
+        }
+        if !journal.transition(&claimed.run_id, "cleaning_up_execution", "uploading", 7)? {
+            return Ok(());
+        }
+        if !journal.transition(&claimed.run_id, "uploading", "finalizing_local", 8)? {
+            return Ok(());
+        }
+        if !journal.complete(&claimed.run_id, &outcome)? {
+            return Ok(());
+        }
     }
     Ok(())
 }
@@ -158,8 +197,12 @@ mod tests {
     struct BlockingExecutor {
         descriptor: ExecutorDescriptor,
         calls: Arc<AtomicUsize>,
+        cancellations: Arc<AtomicUsize>,
         entered: mpsc::Sender<String>,
         release: Mutex<mpsc::Receiver<()>>,
+        cancel_entered: mpsc::Sender<()>,
+        cancel_release: Mutex<mpsc::Receiver<()>>,
+        database_path: std::path::PathBuf,
     }
 
     impl VersionedExecutor for BlockingExecutor {
@@ -185,6 +228,61 @@ mod tests {
                 capability_digest: self.descriptor.capability_digest.clone(),
                 execution_outcome: "passed".to_owned(),
             })
+        }
+
+        fn cancel(&self, request: &ExecutorRequest) {
+            let inspection = Journal::open(&self.database_path)
+                .expect("independent callback Journal must open");
+            let persisted = inspection
+                .connection
+                .query_row(
+                    "SELECT cancel_requests.event_sequence, events.event_type
+                     FROM cancel_requests JOIN events
+                       ON events.run_id = cancel_requests.run_id
+                      AND events.sequence = cancel_requests.event_sequence
+                     WHERE cancel_requests.run_id = ?1",
+                    [&request.run_id],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+                )
+                .expect("cancel intent and Event must be committed before callback");
+            assert_eq!(persisted, (5, "run.cancel_requested".to_owned()));
+            self.cancellations.fetch_add(1, Ordering::SeqCst);
+            self.cancel_entered
+                .send(())
+                .expect("cancel callback entry signal must be received");
+            self.cancel_release
+                .lock()
+                .expect("cancel callback release lock must remain valid")
+                .recv()
+                .expect("cancel callback release signal must be received");
+        }
+    }
+
+    struct CountingExecutor {
+        descriptor: ExecutorDescriptor,
+        executions: Arc<AtomicUsize>,
+        cancellations: Arc<AtomicUsize>,
+    }
+
+    impl VersionedExecutor for CountingExecutor {
+        fn descriptor(&self) -> &ExecutorDescriptor {
+            &self.descriptor
+        }
+
+        fn execute(&self, request: &ExecutorRequest) -> Result<ExecutorResult, RunError> {
+            self.executions.fetch_add(1, Ordering::SeqCst);
+            Ok(ExecutorResult {
+                schema_version: "qa.local-executor/v1".to_owned(),
+                run_id: request.run_id.clone(),
+                executor_id: self.descriptor.executor_id.clone(),
+                executor_version: self.descriptor.executor_version.clone(),
+                capability_digest: self.descriptor.capability_digest.clone(),
+                execution_outcome: "passed".to_owned(),
+            })
+        }
+
+        fn cancel(&self, _request: &ExecutorRequest) {
+            self.cancellations.fetch_add(1, Ordering::SeqCst);
         }
     }
 
@@ -270,108 +368,159 @@ mod tests {
     }
 
     #[test]
-    fn active_execution_is_at_most_once_and_completion_is_atomic() {
-        let directory = temporary_directory("blocking-executor");
+    fn active_cancel_commits_before_one_executor_callback_and_survives_restart() {
+        let directory = temporary_directory("blocking-executor-cancel");
         let database_path = directory.join("journal.sqlite");
         let calls = Arc::new(AtomicUsize::new(0));
+        let cancellations = Arc::new(AtomicUsize::new(0));
         let (entered_sender, entered_receiver) = mpsc::channel();
         let (release_sender, release_receiver) = mpsc::channel();
+        let (cancel_entered_sender, cancel_entered_receiver) = mpsc::channel();
+        let (cancel_release_sender, cancel_release_receiver) = mpsc::channel();
         let executor = BlockingExecutor {
             descriptor: api_descriptor(),
             calls: Arc::clone(&calls),
+            cancellations: Arc::clone(&cancellations),
             entered: entered_sender,
             release: Mutex::new(release_receiver),
+            cancel_entered: cancel_entered_sender,
+            cancel_release: Mutex::new(cancel_release_receiver),
+            database_path: database_path.clone(),
         };
         let registry =
             ExecutorRegistry::new(vec![Box::new(executor)]).expect("registry must be valid");
         let run_id = "00000000-0000-0000-0000-000000000000";
-        let mut journal = Journal::open(&database_path).expect("HTTP journal opens");
+        let mut journal = Journal::open(&database_path).expect("HTTP Journal opens");
         journal
             .seed_executable_v1(run_id, "idem-001", TEST_REQUEST_DIGEST)
             .expect("executable v1 fixture must be seeded");
-        let coordinator_database_path = database_path.clone();
-        let coordinator_start = thread::spawn(move || {
-            CoordinatorHandle::start_versioned(
-                &coordinator_database_path,
-                registry,
-                api_selection(),
-            )
-        });
-        let executor_run_id = entered_receiver
-            .recv_timeout(Duration::from_secs(2))
-            .expect("executor must be entered");
-        assert_eq!(executor_run_id, run_id);
+        let coordinator =
+            CoordinatorHandle::start_versioned(&database_path, registry, api_selection())
+                .expect("coordinator starts before execution completes");
         assert_eq!(
-            journal
-                .connection
-                .query_row(
-                    "SELECT executor_run_id FROM runs WHERE run_id = '00000000-0000-0000-0000-000000000000'",
-                    [],
-                    |row| row.get::<_, String>(0),
-                )
-                .expect("executor run ID must be readable"),
-            executor_run_id
+            entered_receiver
+                .recv_timeout(Duration::from_secs(2))
+                .expect("executor must be entered"),
+            run_id
         );
 
-        assert!(journal
-            .claim_next()
-            .expect("claim check must succeed")
-            .is_none());
+        let cancellation_database_path = database_path.clone();
+        let cancellation = thread::spawn(move || {
+            let mut cancellation_journal =
+                Journal::open(&cancellation_database_path).expect("cancellation Journal opens");
+            let result = coordinator.cancel(&mut cancellation_journal, run_id, "cancel-active");
+            (coordinator, result)
+        });
+        cancel_entered_receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("cancel callback must run after the durable commit");
+
+        let events = journal
+            .events(run_id, 0, 10)
+            .expect("events read")
+            .expect("run events exist");
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.event_type.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "run.accepted",
+                "run.state_changed",
+                "run.state_changed",
+                "run.state_changed",
+                "run.cancel_requested",
+            ]
+        );
+        assert_eq!(row_count(&journal.connection, "cancel_requests"), 1);
+        assert_eq!(cancellations.load(Ordering::SeqCst), 1);
+
+        cancel_release_sender
+            .send(())
+            .expect("cancel callback must be released");
+        let (mut coordinator, cancellation_result) = cancellation
+            .join()
+            .expect("cancellation thread joins");
         assert!(matches!(
-            journal.cancel(run_id, "cancel-active"),
-            Err(RunError::ActiveAttempt)
+            cancellation_result,
+            Ok(crate::journal::Cancellation::Accepted {
+                event_sequence: 5,
+                active_executor_run_id: Some(ref executor_run_id),
+            }) if executor_run_id == run_id
         ));
-        let connection = Connection::open(&database_path).expect("inspection journal opens");
-        assert_eq!(row_count(&connection, "cancel_requests"), 0);
-        assert_eq!(row_count(&connection, "execution_attempts"), 1);
-        assert_eq!(row_count(&connection, "events"), 4);
-        let before = lifecycle_facts(&connection, run_id);
-        assert_eq!(before.0, "executing");
-        assert_eq!(before.1, None);
-        assert_eq!(before.2, 4);
-        assert_eq!(before.3, "claimed");
-        assert_eq!(before.4, None);
+        assert!(matches!(
+            coordinator.cancel(&mut journal, run_id, "cancel-repeat"),
+            Ok(crate::journal::Cancellation::AlreadyAccepted(5))
+        ));
+        assert_eq!(cancellations.load(Ordering::SeqCst), 1);
 
         release_sender.send(()).expect("executor must be released");
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
-            let facts = lifecycle_facts(&connection, run_id);
-            if facts.0 == "terminal" {
-                assert_eq!(facts.1.as_deref(), Some("passed"));
-                assert_eq!(facts.2, 9);
-                assert_eq!(facts.3, "completed");
-                assert_eq!(facts.4.as_deref(), Some("passed"));
+            let facts = lifecycle_facts(&journal.connection, run_id);
+            if facts.2 == 5 {
+                assert_eq!(facts.0, "executing");
+                assert_eq!(facts.1, None);
+                assert_eq!(facts.3, "claimed");
+                assert_eq!(facts.4, None);
                 break;
             }
-            assert!(facts.1.is_none());
-            assert_eq!(facts.3, "claimed");
-            assert!(facts.4.is_none());
-            assert!(Instant::now() < deadline, "Run did not reach terminal");
+            assert!(Instant::now() < deadline, "cancelled Run did not settle");
             thread::yield_now();
         }
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
-        assert_eq!(row_count(&connection, "execution_attempts"), 1);
-        assert_eq!(row_count(&connection, "events"), 9);
-        let mut coordinator = coordinator_start
-            .join()
-            .expect("coordinator startup thread joins")
-            .expect("coordinator starts after processing executable v1 work");
         coordinator.shutdown().expect("coordinator joins");
-        drop(connection);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        let restart_registry = ExecutorRegistry::new(vec![Box::new(CountingExecutor {
+            descriptor: api_descriptor(),
+            executions: Arc::clone(&calls),
+            cancellations: Arc::clone(&cancellations),
+        })])
+        .expect("restart registry must be valid");
+        let mut restarted =
+            CoordinatorHandle::start_versioned(&database_path, restart_registry, api_selection())
+                .expect("cancelled Journal restarts");
+        restarted.shutdown().expect("restarted coordinator joins");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(cancellations.load(Ordering::SeqCst), 1);
+
         drop(journal);
-        let reopened = Journal::open(&database_path).expect("journal must reopen");
-        assert_eq!(
-            reopened
-                .connection
-                .query_row(
-                    "SELECT executor_run_id FROM runs WHERE run_id = '00000000-0000-0000-0000-000000000000'",
-                    [],
-                    |row| row.get::<_, String>(0),
-                )
-                .expect("executor run ID must survive restart"),
-            executor_run_id
-        );
-        drop(reopened);
+        fs::remove_dir_all(directory).expect("temporary directory must be removed");
+    }
+
+    #[test]
+    fn terminal_completion_wins_without_cancel_mutation_or_callback() {
+        let directory = temporary_directory("completion-wins-cancel-race");
+        let database_path = directory.join("journal.sqlite");
+        let run_id = "00000000-0000-0000-0000-000000000006";
+        let executions = Arc::new(AtomicUsize::new(0));
+        let cancellations = Arc::new(AtomicUsize::new(0));
+        let registry = ExecutorRegistry::new(vec![Box::new(CountingExecutor {
+            descriptor: api_descriptor(),
+            executions: Arc::clone(&executions),
+            cancellations: Arc::clone(&cancellations),
+        })])
+        .expect("registry must be valid");
+        let mut journal = Journal::open(&database_path).expect("Journal opens");
+        journal
+            .seed_executable_v1(run_id, "idem-001", TEST_REQUEST_DIGEST)
+            .expect("executable v1 fixture must be seeded");
+        let mut coordinator =
+            CoordinatorHandle::start_versioned(&database_path, registry, api_selection())
+                .expect("coordinator starts");
+        wait_for_terminal(&journal.connection, run_id, "passed");
+
+        assert!(matches!(
+            coordinator.cancel(&mut journal, run_id, "cancel-terminal"),
+            Ok(crate::journal::Cancellation::Terminal(9))
+        ));
+        assert_eq!(executions.load(Ordering::SeqCst), 1);
+        assert_eq!(cancellations.load(Ordering::SeqCst), 0);
+        assert_eq!(row_count(&journal.connection, "cancel_requests"), 0);
+        assert_eq!(row_count(&journal.connection, "events"), 9);
+
+        coordinator.shutdown().expect("coordinator joins");
+        drop(journal);
         fs::remove_dir_all(directory).expect("temporary directory must be removed");
     }
 
@@ -438,7 +587,7 @@ mod tests {
                 .expect("snapshot reads")
                 .expect("run exists")
                 .state,
-            "executing"
+            "accepted"
         );
         fs::remove_dir_all(directory).expect("temporary directory must be removed");
     }
@@ -460,9 +609,9 @@ mod tests {
             result_behavior: ResultBehavior::RelationMismatch,
         })])
         .expect("registry must be valid");
-        assert!(
-            CoordinatorHandle::start_versioned(&database_path, registry, api_selection()).is_err()
-        );
+        let mut coordinator =
+            CoordinatorHandle::start_versioned(&database_path, registry, api_selection())
+                .expect("coordinator starts before executor result validation");
         assert_eq!(
             request_receiver
                 .recv_timeout(Duration::from_secs(2))
@@ -470,6 +619,10 @@ mod tests {
                 .run_id,
             run_id
         );
+        assert!(matches!(
+            wait_for_coordinator_error(&mut coordinator),
+            RunError::Contract("executor result relation failed")
+        ));
         let journal = Journal::open(&database_path).expect("journal reopens");
         let snapshot = journal
             .snapshot(run_id)
@@ -498,9 +651,9 @@ mod tests {
             result_behavior: ResultBehavior::Malformed,
         })])
         .expect("registry must be valid");
-        assert!(
-            CoordinatorHandle::start_versioned(&database_path, registry, api_selection()).is_err()
-        );
+        let mut coordinator =
+            CoordinatorHandle::start_versioned(&database_path, registry, api_selection())
+                .expect("coordinator starts before executor result validation");
         assert_eq!(
             request_receiver
                 .recv_timeout(Duration::from_secs(2))
@@ -508,6 +661,10 @@ mod tests {
                 .run_id,
             run_id
         );
+        assert!(matches!(
+            wait_for_coordinator_error(&mut coordinator),
+            RunError::Contract("invalid executor result")
+        ));
         let journal = Journal::open(&database_path).expect("journal reopens");
         let snapshot = journal
             .snapshot(run_id)
@@ -620,6 +777,22 @@ mod tests {
             .expect("coordinator thread joins")
             .expect("sender disconnect stops the coordinator");
         fs::remove_dir_all(directory).expect("temporary directory must be removed");
+    }
+
+    fn wait_for_coordinator_error(coordinator: &mut CoordinatorHandle) -> RunError {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match coordinator.check() {
+                Ok(()) => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "coordinator did not report its execution error"
+                    );
+                    thread::yield_now();
+                }
+                Err(error) => return error,
+            }
+        }
     }
 
     fn wait_for_terminal(connection: &Connection, run_id: &str, outcome: &str) {
