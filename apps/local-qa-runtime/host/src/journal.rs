@@ -1051,9 +1051,8 @@ impl Journal {
             attempt_status,
             attempt_outcome,
             cancellation_exists,
-        ) = transaction
-            .query_row(
-                "SELECT runs.state,
+        ) = transaction.query_row(
+            "SELECT runs.state,
                         runs.execution_outcome,
                         (SELECT MAX(sequence) FROM events WHERE events.run_id = runs.run_id),
                         execution_attempts.status,
@@ -1063,18 +1062,18 @@ impl Journal {
                  FROM runs JOIN execution_attempts
                    ON execution_attempts.run_id = runs.run_id
                  WHERE runs.run_id = ?1",
-                [run_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, i64>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, Option<String>>(4)?,
-                        row.get::<_, bool>(5)?,
-                    ))
-                },
-            )?;
+            [run_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, bool>(5)?,
+                ))
+            },
+        )?;
         if state == "finalizing_local"
             && execution_outcome.is_none()
             && attempt_status == "claimed"
