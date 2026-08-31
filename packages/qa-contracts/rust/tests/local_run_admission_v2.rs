@@ -122,12 +122,9 @@ fn keeps_v2_acceptance_inside_the_attempt_authority_window() {
     let request = validate_local_qa_run_request_v2(fixture.expected_request_utf8.as_bytes())
         .expect("valid request");
     for accepted_at in ["2026-08-25T15:59:59Z", "2026-08-25T16:05:00Z"] {
-        let error = build_initial_run_acceptance_v2(
-            &request,
-            accepted_at,
-            "fkst-local-qa-host/0.1.0",
-        )
-        .expect_err("acceptance must stay inside the authority window");
+        let error =
+            build_initial_run_acceptance_v2(&request, accepted_at, "fkst-local-qa-host/0.1.0")
+                .expect_err("acceptance must stay inside the authority window");
         assert_eq!(error.0.category, "contract");
         assert_eq!(error.0.code, Some("contract.invalid_relation"));
         assert_eq!(error.0.reason, "accepted_at_out_of_window");
