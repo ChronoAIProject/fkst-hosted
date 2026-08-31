@@ -231,8 +231,8 @@ mod tests {
         }
 
         fn cancel(&self, request: &ExecutorRequest) {
-            let inspection = Journal::open(&self.database_path)
-                .expect("independent callback Journal must open");
+            let inspection =
+                Journal::open(&self.database_path).expect("independent callback Journal must open");
             let persisted = inspection
                 .connection
                 .query_row(
@@ -438,9 +438,8 @@ mod tests {
         cancel_release_sender
             .send(())
             .expect("cancel callback must be released");
-        let (mut coordinator, cancellation_result) = cancellation
-            .join()
-            .expect("cancellation thread joins");
+        let (mut coordinator, cancellation_result) =
+            cancellation.join().expect("cancellation thread joins");
         assert!(matches!(
             cancellation_result,
             Ok(crate::journal::Cancellation::Accepted {
@@ -508,7 +507,10 @@ mod tests {
         let mut coordinator =
             CoordinatorHandle::start_versioned(&database_path, registry, api_selection())
                 .expect("coordinator starts");
-        wait_for_terminal(&journal.connection, run_id, "passed");
+        coordinator
+            .shutdown()
+            .expect("coordinator completes the Run");
+        assert_terminal(&journal.connection, run_id, "passed");
 
         assert!(matches!(
             coordinator.cancel(&mut journal, run_id, "cancel-terminal"),
@@ -519,7 +521,6 @@ mod tests {
         assert_eq!(row_count(&journal.connection, "cancel_requests"), 0);
         assert_eq!(row_count(&journal.connection, "events"), 9);
 
-        coordinator.shutdown().expect("coordinator joins");
         drop(journal);
         fs::remove_dir_all(directory).expect("temporary directory must be removed");
     }
@@ -554,8 +555,10 @@ mod tests {
                 selection,
             }
         );
-        wait_for_terminal(&journal.connection, run_id, "passed");
-        coordinator.shutdown().expect("coordinator joins");
+        coordinator
+            .shutdown()
+            .expect("coordinator completes the Run");
+        assert_terminal(&journal.connection, run_id, "passed");
         fs::remove_dir_all(directory).expect("temporary directory must be removed");
     }
 
@@ -795,23 +798,16 @@ mod tests {
         }
     }
 
-    fn wait_for_terminal(connection: &Connection, run_id: &str, outcome: &str) {
-        let deadline = Instant::now() + Duration::from_secs(2);
-        loop {
-            let snapshot = connection
-                .query_row(
-                    "SELECT state, execution_outcome FROM runs WHERE run_id = ?1",
-                    [run_id],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
-                )
-                .expect("run lifecycle must be readable");
-            if snapshot.0 == "terminal" {
-                assert_eq!(snapshot.1.as_deref(), Some(outcome));
-                return;
-            }
-            assert!(Instant::now() < deadline, "Run did not reach terminal");
-            thread::yield_now();
-        }
+    fn assert_terminal(connection: &Connection, run_id: &str, outcome: &str) {
+        let snapshot = connection
+            .query_row(
+                "SELECT state, execution_outcome FROM runs WHERE run_id = ?1",
+                [run_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .expect("run lifecycle must be readable");
+        assert_eq!(snapshot.0, "terminal");
+        assert_eq!(snapshot.1.as_deref(), Some(outcome));
     }
 
     fn lifecycle_facts(
