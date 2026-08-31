@@ -486,6 +486,13 @@ pub fn validate_local_qa_run_request_v2(raw: &[u8]) -> Result<ValidatedValue, Co
             "/created_at",
         )));
     }
+    if !compare_iso8601(&request.created_at, &request.attempt_binding.deadline).is_lt() {
+        return Err(ContractError(Rejection::contract(
+            "contract.invalid_relation",
+            "invalid_attempt_window",
+            "/attempt_binding/deadline",
+        )));
+    }
     verify_contract_content_digest(&validated)?;
     Ok(validated)
 }
@@ -536,6 +543,15 @@ pub fn build_initial_run_acceptance_v2(
         return Err(ContractError(Rejection::validation(
             "schema_violation",
             "/producer_version",
+        )));
+    }
+    if compare_iso8601(accepted_at, &request.created_at).is_lt()
+        || !compare_iso8601(accepted_at, &request.attempt_binding.deadline).is_lt()
+    {
+        return Err(ContractError(Rejection::contract(
+            "contract.invalid_relation",
+            "accepted_at_out_of_window",
+            "/accepted_at",
         )));
     }
     let mut value = serde_json::json!({

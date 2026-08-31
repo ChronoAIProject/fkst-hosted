@@ -480,6 +480,13 @@ export function validateLocalQARunRequestV2(raw: Uint8Array): ValidatedValue {
   }
   if (!validateIso8601(value.created_at)) throw validationError("schema_violation", "/created_at");
   if (!validateIso8601(value.attempt_binding.deadline)) throw validationError("schema_violation", "/attempt_binding/deadline");
+  if (compareIso8601(value.created_at, value.attempt_binding.deadline) >= 0) {
+    throw contractError(
+      "contract.invalid_relation",
+      "invalid_attempt_window",
+      "/attempt_binding/deadline",
+    );
+  }
   verifyContractContentDigest(validated);
   return validated;
 }
@@ -561,6 +568,12 @@ export function buildInitialRunAcceptanceV2(
   if (!validateIso8601(acceptedAt)) throw validationError("schema_violation", "/accepted_at");
   if (producerVersion.length === 0 || Buffer.byteLength(producerVersion, "utf8") > 128) {
     throw validationError("schema_violation", "/producer_version");
+  }
+  if (
+    compareIso8601(acceptedAt, requestValue.created_at) < 0 ||
+    compareIso8601(acceptedAt, requestValue.attempt_binding.deadline) >= 0
+  ) {
+    throw contractError("contract.invalid_relation", "accepted_at_out_of_window", "/accepted_at");
   }
   const acceptance: Record<string, unknown> = {
     schema_version: "qa.local-run-admission/v2",

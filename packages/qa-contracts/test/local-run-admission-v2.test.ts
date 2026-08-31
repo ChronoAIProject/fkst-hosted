@@ -78,3 +78,18 @@ test("enforces the v2 acceptance producer version UTF-8 byte limit", () => {
       error.rejection.path === "/producer_version",
   );
 });
+
+test("keeps v2 acceptance inside the attempt authority window", () => {
+  const request = validateLocalQARunRequestV2(encoder.encode(fixture.expected_request_utf8));
+  for (const acceptedAt of ["2026-08-25T15:59:59Z", "2026-08-25T16:05:00Z"]) {
+    assert.throws(
+      () => buildInitialRunAcceptanceV2(request, acceptedAt, "fkst-local-qa-host/0.1.0"),
+      (error: unknown) =>
+        error instanceof ContractError &&
+        error.rejection.category === "contract" &&
+        error.rejection.code === "contract.invalid_relation" &&
+        error.rejection.reason === "accepted_at_out_of_window" &&
+        error.rejection.path === "/accepted_at",
+    );
+  }
+});
