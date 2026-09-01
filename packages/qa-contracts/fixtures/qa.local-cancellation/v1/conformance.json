@@ -1,0 +1,108 @@
+{
+  "control_status": {
+    "positive": [
+      "accepted",
+      "too_late",
+      "rejected",
+      "failed"
+    ],
+    "negative": [
+      "unknown"
+    ]
+  },
+  "effect_disposition": {
+    "positive": [
+      "not_started",
+      "completed",
+      "uncertain"
+    ],
+    "negative": [
+      "unknown"
+    ]
+  },
+  "independent_outcome": {
+    "positive": [
+      "not_started",
+      "succeeded",
+      "failed",
+      "cancelled",
+      "lost_or_inconclusive"
+    ],
+    "negative": [
+      "unknown"
+    ]
+  },
+  "cleanup_outcome": {
+    "positive": [
+      "not_required",
+      "completed",
+      "blocked"
+    ],
+    "negative": [
+      "unknown"
+    ]
+  },
+  "cleanup_receipt": {
+    "positive": {
+      "receipt_id": "00000000-0000-0000-0000-000000000001",
+      "no_resources_remain": true,
+      "resource_handles": []
+    },
+    "negative": [
+      {
+        "case_id": "cleanup-receipt-unknown-field",
+        "operation": "add",
+        "path": [
+          "unexpected"
+        ],
+        "value": true
+      },
+      {
+        "case_id": "cleanup-receipt-missing-required",
+        "operation": "remove",
+        "path": [
+          "receipt_id"
+        ]
+      },
+      {
+        "case_id": "cleanup-receipt-wrong-type",
+        "operation": "set",
+        "path": [
+          "no_resources_remain"
+        ],
+        "value": "true"
+      }
+    ]
+  },
+  "sanitized_residual": {
+    "positive": {
+      "code": "cleanup.blocked",
+      "summary": "Cleanup requires operator repair"
+    },
+    "negative": [
+      {
+        "case_id": "residual-unknown-field",
+        "operation": "add",
+        "path": [
+          "unexpected"
+        ],
+        "value": true
+      },
+      {
+        "case_id": "residual-missing-required",
+        "operation": "remove",
+        "path": [
+          "summary"
+        ]
+      },
+      {
+        "case_id": "residual-wrong-type",
+        "operation": "set",
+        "path": [
+          "summary"
+        ],
+        "value": 42
+      }
+    ]
+  }
+}

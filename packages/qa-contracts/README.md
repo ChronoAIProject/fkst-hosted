@@ -66,6 +66,13 @@ The checked-in conformance sources are:
   TypeScript admission, relation, digest-binding, and rejection-classification cases.
 - `fixtures/qa.local-run-admission/v2/happy-path.json` for the strict fake API
   admission request, executor selection, and byte-exact v2 acceptance vectors.
+- `fixtures/qa.local-cancellation/v1/conformance.json` for the complete cancellation
+  enum vocabularies plus closed cleanup receipt and sanitized residual vectors.
+- `fixtures/qa.local-worker-control/v1/positive.json` and `negative.json` for every
+  Worker control frame discriminator, enum, closed-object rejection, and identity relation.
+- `fixtures/qa.local-executor-control/v1/positive.json` and `negative.json` for
+  Executor control requests/reports, both cleanup evidence branches, closed-object
+  rejection, enum coverage, and request/report identity relations.
 
 The implementations are:
 

@@ -1,0 +1,156 @@
+{
+  "schema_cases": [
+    {
+      "case_id": "abort-unknown-field",
+      "frame": "abort",
+      "operation": "add",
+      "path": [
+        "unexpected"
+      ],
+      "value": true
+    },
+    {
+      "case_id": "abort-missing-required",
+      "frame": "abort",
+      "operation": "remove",
+      "path": [
+        "deadline_utc"
+      ]
+    },
+    {
+      "case_id": "abort-wrong-type",
+      "frame": "abort",
+      "operation": "set",
+      "path": [
+        "invocation_id"
+      ],
+      "value": 42
+    },
+    {
+      "case_id": "abort-unknown-protocol",
+      "frame": "abort",
+      "operation": "set",
+      "path": [
+        "protocol"
+      ],
+      "value": "qa.local-worker-control/v2"
+    },
+    {
+      "case_id": "frame-unknown-kind",
+      "frame": "abort",
+      "operation": "set",
+      "path": [
+        "kind"
+      ],
+      "value": "unknown"
+    },
+    {
+      "case_id": "ack-unknown-field",
+      "frame": "cancel_ack.accepted",
+      "operation": "add",
+      "path": [
+        "unexpected"
+      ],
+      "value": true
+    },
+    {
+      "case_id": "ack-missing-required",
+      "frame": "cancel_ack.accepted",
+      "operation": "remove",
+      "path": [
+        "status"
+      ]
+    },
+    {
+      "case_id": "ack-wrong-type",
+      "frame": "cancel_ack.accepted",
+      "operation": "set",
+      "path": [
+        "status"
+      ],
+      "value": 42
+    },
+    {
+      "case_id": "ack-unknown-protocol",
+      "frame": "cancel_ack.accepted",
+      "operation": "set",
+      "path": [
+        "protocol"
+      ],
+      "value": "qa.local-worker-control/v2"
+    },
+    {
+      "case_id": "ack-unknown-status",
+      "frame": "cancel_ack.accepted",
+      "operation": "set",
+      "path": [
+        "status"
+      ],
+      "value": "unknown"
+    },
+    {
+      "case_id": "failure-unknown-field",
+      "frame": "control_failure.control.conflict",
+      "operation": "add",
+      "path": [
+        "unexpected"
+      ],
+      "value": true
+    },
+    {
+      "case_id": "failure-missing-required",
+      "frame": "control_failure.control.conflict",
+      "operation": "remove",
+      "path": [
+        "code"
+      ]
+    },
+    {
+      "case_id": "failure-wrong-type",
+      "frame": "control_failure.control.conflict",
+      "operation": "set",
+      "path": [
+        "code"
+      ],
+      "value": 42
+    },
+    {
+      "case_id": "failure-unknown-protocol",
+      "frame": "control_failure.control.conflict",
+      "operation": "set",
+      "path": [
+        "protocol"
+      ],
+      "value": "qa.local-worker-control/v2"
+    },
+    {
+      "case_id": "failure-unknown-code",
+      "frame": "control_failure.control.conflict",
+      "operation": "set",
+      "path": [
+        "code"
+      ],
+      "value": "control.unknown"
+    }
+  ],
+  "relation_cases": [
+    {
+      "case_id": "relation-valid",
+      "field": null,
+      "value": null,
+      "valid": true
+    },
+    {
+      "case_id": "relation-control-id-mismatch",
+      "field": "control_id",
+      "value": "00000000-0000-0000-0000-000000000002",
+      "valid": false
+    },
+    {
+      "case_id": "relation-invocation-id-mismatch",
+      "field": "invocation_id",
+      "value": "invocation/1",
+      "valid": false
+    }
+  ]
+}

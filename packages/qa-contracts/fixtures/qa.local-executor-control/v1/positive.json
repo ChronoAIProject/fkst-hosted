@@ -13,26 +13,49 @@
     },
     "deadline_utc": "2026-09-02T12:00:00Z"
   },
-  "report": {
-    "schema_version": "qa.local-executor-control/v1",
-    "control_id": "00000000-0000-0000-0000-000000000001",
-    "run_id": "00000000-0000-0000-0000-000000000001",
-    "executor_run_id": "00000000-0000-0000-0000-000000000001",
-    "executor_id": "fake.api",
-    "executor_version": "1.0.0",
-    "capability_digest": "sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335",
-    "status": "accepted",
-    "control_acknowledged": true,
-    "worker_stop_observed": true,
-    "effect_disposition": "uncertain",
-    "execution_outcome": "lost_or_inconclusive",
-    "evidence_outcome": "not_started",
-    "upload_outcome": "not_started",
-    "cleanup_outcome": "completed",
+  "reports": {
     "cleanup_receipt": {
-      "receipt_id": "00000000-0000-0000-0000-000000000001",
-      "no_resources_remain": true,
-      "resource_handles": []
+      "schema_version": "qa.local-executor-control/v1",
+      "control_id": "00000000-0000-0000-0000-000000000001",
+      "run_id": "00000000-0000-0000-0000-000000000001",
+      "executor_run_id": "00000000-0000-0000-0000-000000000001",
+      "executor_id": "fake.api",
+      "executor_version": "1.0.0",
+      "capability_digest": "sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335",
+      "status": "accepted",
+      "control_acknowledged": true,
+      "worker_stop_observed": true,
+      "effect_disposition": "uncertain",
+      "execution_outcome": "lost_or_inconclusive",
+      "evidence_outcome": "not_started",
+      "upload_outcome": "not_started",
+      "cleanup_outcome": "completed",
+      "cleanup_receipt": {
+        "receipt_id": "00000000-0000-0000-0000-000000000001",
+        "no_resources_remain": true,
+        "resource_handles": []
+      }
+    },
+    "residual": {
+      "schema_version": "qa.local-executor-control/v1",
+      "control_id": "00000000-0000-0000-0000-000000000001",
+      "run_id": "00000000-0000-0000-0000-000000000001",
+      "executor_run_id": "00000000-0000-0000-0000-000000000001",
+      "executor_id": "fake.api",
+      "executor_version": "1.0.0",
+      "capability_digest": "sha256:37c748fcbb32a9c03fd27f345427fc0062a8c875147732e0653794cd1b164335",
+      "status": "accepted",
+      "control_acknowledged": true,
+      "worker_stop_observed": true,
+      "effect_disposition": "uncertain",
+      "execution_outcome": "lost_or_inconclusive",
+      "evidence_outcome": "not_started",
+      "upload_outcome": "not_started",
+      "cleanup_outcome": "blocked",
+      "residual": {
+        "code": "cleanup.blocked",
+        "summary": "Cleanup requires operator repair"
+      }
     }
   }
 }
