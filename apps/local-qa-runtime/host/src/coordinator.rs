@@ -58,12 +58,13 @@ impl CoordinatorHandle {
     ) -> Result<Cancellation, RunError> {
         let selection_json = serde_json::to_string(&self.selection)
             .map_err(|_| RunError::Contract("executor selection serialization failed"))?;
-        let cancellation =
-            journal.cancel_with_control(run_id, idempotency_key, &selection_json)?;
+        let cancellation = journal.cancel_with_control(run_id, idempotency_key, &selection_json)?;
         if matches!(cancellation, Cancellation::Accepted { .. }) {
             let control = journal
                 .cancellation_control(run_id)?
-                .ok_or(RunError::InvalidJournal("cancel control obligation missing"))?;
+                .ok_or(RunError::InvalidJournal(
+                    "cancel control obligation missing",
+                ))?;
             reconcile_control(journal, &self.registry, &control)?;
         }
         Ok(cancellation)
@@ -151,15 +152,14 @@ fn reconcile_control(
     let executor_run_id = control
         .executor_run_id
         .clone()
-        .ok_or(RunError::InvalidJournal("cancel control executor Run ID missing"))?;
-    let report = if journal
-        .connection
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM execution_attempts WHERE run_id = ?1)",
-            [&control.run_id],
-            |row| row.get::<_, bool>(0),
-        )?
-    {
+        .ok_or(RunError::InvalidJournal(
+            "cancel control executor Run ID missing",
+        ))?;
+    let report = if journal.connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM execution_attempts WHERE run_id = ?1)",
+        [&control.run_id],
+        |row| row.get::<_, bool>(0),
+    )? {
         registry.control(&ExecutorControlRequest {
             schema_version: "qa.local-executor-control/v1".to_owned(),
             control_id: control.control_id.clone(),

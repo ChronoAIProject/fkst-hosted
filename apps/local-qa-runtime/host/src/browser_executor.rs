@@ -249,9 +249,7 @@ impl BrowserWorkerExecutor {
                     Ok(_) => Err(RunError::Contract(
                         "partial Browser staging cleanup left residuals",
                     )),
-                    Err(_) => Err(RunError::Contract(
-                        "partial Browser staging cleanup failed",
-                    )),
+                    Err(_) => Err(RunError::Contract("partial Browser staging cleanup failed")),
                 }
             }
         };
@@ -492,10 +490,7 @@ impl VersionedExecutor for BrowserWorkerExecutor {
         })
     }
 
-    fn control(
-        &self,
-        request: &ExecutorControlRequest,
-    ) -> Result<ExecutorControlReport, RunError> {
+    fn control(&self, request: &ExecutorControlRequest) -> Result<ExecutorControlReport, RunError> {
         let mut active = self
             .active_worker
             .lock()
@@ -567,7 +562,9 @@ impl VersionedExecutor for BrowserWorkerExecutor {
                 }),
             ))
         } else {
-            Err(RunError::Contract("Browser Worker control wait ended unexpectedly"))
+            Err(RunError::Contract(
+                "Browser Worker control wait ended unexpectedly",
+            ))
         }
     }
 }
@@ -610,7 +607,9 @@ fn parse_utc_deadline(value: &str) -> Result<Duration, RunError> {
     }
     let days = days_from_civil(year, month, day);
     if days < 0 {
-        return Err(RunError::Contract("cancellation deadline precedes the Unix epoch"));
+        return Err(RunError::Contract(
+            "cancellation deadline precedes the Unix epoch",
+        ));
     }
     let seconds = (days as u64)
         .checked_mul(86_400)
@@ -641,7 +640,9 @@ fn parse_fractional_nanos(value: &str) -> Result<u32, RunError> {
         return Ok(0);
     }
     if value.len() > 9 || !value.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(RunError::Contract("cancellation deadline fraction is invalid"));
+        return Err(RunError::Contract(
+            "cancellation deadline fraction is invalid",
+        ));
     }
     let fraction: u32 = value
         .parse()

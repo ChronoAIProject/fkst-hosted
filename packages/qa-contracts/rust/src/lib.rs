@@ -36,12 +36,10 @@ const LOCAL_EXECUTOR_SCHEMA: &str =
 const LOCAL_EXECUTOR_SCHEMA_PATH: &str = "contracts/qa.local-executor/v1/schema.json";
 const LOCAL_CANCELLATION_SCHEMA: &str =
     include_str!("../../contracts/qa.local-cancellation/v1/schema.json");
-const LOCAL_CANCELLATION_SCHEMA_PATH: &str =
-    "contracts/qa.local-cancellation/v1/schema.json";
+const LOCAL_CANCELLATION_SCHEMA_PATH: &str = "contracts/qa.local-cancellation/v1/schema.json";
 const LOCAL_WORKER_CONTROL_SCHEMA: &str =
     include_str!("../../contracts/qa.local-worker-control/v1/schema.json");
-const LOCAL_WORKER_CONTROL_SCHEMA_PATH: &str =
-    "contracts/qa.local-worker-control/v1/schema.json";
+const LOCAL_WORKER_CONTROL_SCHEMA_PATH: &str = "contracts/qa.local-worker-control/v1/schema.json";
 const LOCAL_EXECUTOR_CONTROL_SCHEMA: &str =
     include_str!("../../contracts/qa.local-executor-control/v1/schema.json");
 const LOCAL_EXECUTOR_CONTROL_SCHEMA_PATH: &str =
@@ -58,8 +56,14 @@ const EMBEDDED_SCHEMAS: &[(&str, &str)] = &[
     ),
     (LOCAL_EXECUTOR_SCHEMA_PATH, LOCAL_EXECUTOR_SCHEMA),
     (LOCAL_CANCELLATION_SCHEMA_PATH, LOCAL_CANCELLATION_SCHEMA),
-    (LOCAL_WORKER_CONTROL_SCHEMA_PATH, LOCAL_WORKER_CONTROL_SCHEMA),
-    (LOCAL_EXECUTOR_CONTROL_SCHEMA_PATH, LOCAL_EXECUTOR_CONTROL_SCHEMA),
+    (
+        LOCAL_WORKER_CONTROL_SCHEMA_PATH,
+        LOCAL_WORKER_CONTROL_SCHEMA,
+    ),
+    (
+        LOCAL_EXECUTOR_CONTROL_SCHEMA_PATH,
+        LOCAL_EXECUTOR_CONTROL_SCHEMA,
+    ),
 ];
 const LOCAL_STATE_TYPE_NAME: &str = "LocalState";
 const EXECUTION_OUTCOME_TYPE_NAME: &str = "ExecutionOutcome";

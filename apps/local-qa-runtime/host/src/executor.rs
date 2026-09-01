@@ -111,10 +111,7 @@ pub(crate) struct ExecutorControlReport {
 pub(crate) trait VersionedExecutor: Send + Sync {
     fn descriptor(&self) -> &ExecutorDescriptor;
     fn execute(&self, request: &ExecutorRequest) -> Result<ExecutorResult, RunError>;
-    fn control(
-        &self,
-        request: &ExecutorControlRequest,
-    ) -> Result<ExecutorControlReport, RunError> {
+    fn control(&self, request: &ExecutorControlRequest) -> Result<ExecutorControlReport, RunError> {
         let descriptor = self.descriptor();
         Ok(ExecutorControlReport {
             schema_version: "qa.local-executor-control/v1".to_owned(),
@@ -301,7 +298,9 @@ impl ExecutorRegistry {
             || report.executor_version != descriptor.executor_version
             || report.capability_digest != descriptor.capability_digest
         {
-            return Err(RunError::Contract("executor control report relation failed"));
+            return Err(RunError::Contract(
+                "executor control report relation failed",
+            ));
         }
         Ok(report)
     }

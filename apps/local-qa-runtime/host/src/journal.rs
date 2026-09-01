@@ -1013,7 +1013,12 @@ impl Journal {
                 run_id, control_id, cancel_event_sequence, deadline_utc,
                 selection_json, executor_run_id
              ) VALUES (?1, ?1, ?2, strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '+30 seconds'), ?3, ?4)",
-            params![run_id, event_sequence, selection_json, persisted_executor_run_id],
+            params![
+                run_id,
+                event_sequence,
+                selection_json,
+                persisted_executor_run_id
+            ],
         )?;
         transaction.commit()?;
         Ok(Cancellation::Accepted { event_sequence })
@@ -1113,30 +1118,31 @@ impl Journal {
             Option<String>,
             Option<String>,
             bool,
-        ) = transaction
-            .query_row(
-                "SELECT cancel_event_sequence, selection_json, control_report_json,
+        ) = transaction.query_row(
+            "SELECT cancel_event_sequence, selection_json, control_report_json,
                         cleanup_receipt_json, settled
                  FROM cancellation_controls
                  WHERE run_id = ?1 AND control_id = ?2 AND executor_run_id = ?3",
-                params![report.run_id, report.control_id, report.executor_run_id],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
-                },
-            )?;
+            params![report.run_id, report.control_id, report.executor_run_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )?;
         let selection = serde_json::from_str::<ExecutorSelection>(&selection_json)
             .map_err(|_| RunError::InvalidJournal("invalid persisted executor selection"))?;
         if report.executor_id != selection.executor_id
             || report.executor_version != selection.executor_version
             || report.capability_digest != selection.capability_digest
         {
-            return Err(RunError::InvalidJournal("control report selection mismatch"));
+            return Err(RunError::InvalidJournal(
+                "control report selection mismatch",
+            ));
         }
         let resolving_residual = match existing_report {
             Some(existing_report) if existing_report == report_json => {
@@ -1144,9 +1150,7 @@ impl Journal {
                 return Ok(());
             }
             Some(_)
-                if !settled
-                    && existing_receipt.is_none()
-                    && report.cleanup_receipt.is_some() =>
+                if !settled && existing_receipt.is_none() && report.cleanup_receipt.is_some() =>
             {
                 true
             }
@@ -1154,7 +1158,9 @@ impl Journal {
             None => false,
         };
         if settled {
-            return Err(RunError::InvalidJournal("settled control is missing its report"));
+            return Err(RunError::InvalidJournal(
+                "settled control is missing its report",
+            ));
         }
         let event_base = if resolving_residual {
             transaction.query_row(
@@ -1219,7 +1225,9 @@ impl Journal {
             )?
         };
         if updated != 1 {
-            return Err(RunError::InvalidJournal("control report update lost its predicate"));
+            return Err(RunError::InvalidJournal(
+                "control report update lost its predicate",
+            ));
         }
         insert_cancellation_event(
             &transaction,
@@ -1271,7 +1279,10 @@ impl Journal {
                  WHERE run_id = ?1 AND execution_outcome IS NULL",
                 [&report.run_id],
             )?;
-            transaction.execute("DELETE FROM active_run_slot WHERE run_id = ?1", [&report.run_id])?;
+            transaction.execute(
+                "DELETE FROM active_run_slot WHERE run_id = ?1",
+                [&report.run_id],
+            )?;
             transaction.execute(
                 "UPDATE cancellation_controls SET settled = 1 WHERE run_id = ?1",
                 [&report.run_id],
@@ -2015,7 +2026,10 @@ mod tests {
         if !recoverable {
             journal
                 .connection
-                .execute("DELETE FROM admission_v2_records WHERE run_id = ?1", [run_id])
+                .execute(
+                    "DELETE FROM admission_v2_records WHERE run_id = ?1",
+                    [run_id],
+                )
                 .expect("v2 selection is removed");
             journal
                 .connection
@@ -2069,7 +2083,9 @@ mod tests {
     fn durable_v7_rows(journal: &Journal) -> (i64, String) {
         let event_count = journal
             .connection
-            .query_row("SELECT COUNT(*) FROM events", [], |row| row.get::<_, i64>(0))
+            .query_row("SELECT COUNT(*) FROM events", [], |row| {
+                row.get::<_, i64>(0)
+            })
             .expect("Event count is readable");
         let control = journal
             .connection
@@ -2091,5 +2107,4 @@ mod tests {
             .expect("control snapshot is readable");
         (event_count, control)
     }
-
 }
