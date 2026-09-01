@@ -37,6 +37,22 @@ pub(crate) struct WorkerProcess {
     reaped: bool,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct WorkerControlHandle {
+    process_group: Pid,
+}
+
+impl WorkerControlHandle {
+    pub(crate) fn request_stop(self) -> Result<(), RunError> {
+        signal_group(self.process_group, Signal::SIGTERM)
+            .map_err(|_| RunError::Contract("Browser Worker control signal failed"))
+    }
+
+    pub(crate) fn identity(self) -> String {
+        format!("worker-pgid:{}", self.process_group.as_raw())
+    }
+}
+
 impl WorkerProcess {
     pub(crate) fn spawn(node: &Path, worker: &Path) -> Result<Self, RunError> {
         use std::os::unix::process::CommandExt;
@@ -117,6 +133,12 @@ impl WorkerProcess {
             .write_all(bytes)
             .and_then(|()| stdin.flush())
             .map_err(|_| RunError::Contract("Browser Worker stdin write failed"))
+    }
+
+    pub(crate) fn control_handle(&self) -> WorkerControlHandle {
+        WorkerControlHandle {
+            process_group: self.process_group,
+        }
     }
 
     pub(crate) fn close_stdin(&mut self) -> Result<(), RunError> {

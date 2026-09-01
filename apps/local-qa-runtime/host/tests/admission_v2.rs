@@ -278,7 +278,7 @@ fn admits_replays_conflicts_and_recovers_one_v2_request() {
     let user_version: i64 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(user_version, 6);
+    assert_eq!(user_version, 7);
     drop(connection);
 
     let restarted = start_mvp0_host(&database);

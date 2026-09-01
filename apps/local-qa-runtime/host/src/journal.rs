@@ -3,12 +3,12 @@ use std::time::Duration;
 
 use fkst_qa_contracts::{
     validate_cancel_disposition, validate_event_sequence, validate_execution_outcome,
-    validate_local_state, validate_scalar,
+    validate_executor_control_report, validate_local_state, validate_scalar,
 };
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
-use crate::executor::ExecutionOutcome;
+use crate::executor::{ExecutionOutcome, ExecutorControlReport, ExecutorSelection};
 use crate::RunError;
 
 pub struct Journal {
@@ -75,6 +75,7 @@ pub(crate) struct RunSnapshot {
 pub(crate) enum EventPayload {
     State(RunStateEvent),
     Completed(RunCompletedEvent),
+    Cancellation(serde_json::Value),
 }
 
 pub(crate) struct StoredEvent {
@@ -96,6 +97,15 @@ pub(crate) enum Cancellation {
 pub(crate) struct ClaimedRun {
     pub(crate) run_id: String,
     pub(crate) executor_run_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CancellationControl {
+    pub(crate) control_id: String,
+    pub(crate) run_id: String,
+    pub(crate) executor_run_id: Option<String>,
+    pub(crate) deadline_utc: String,
+    pub(crate) selection_json: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -183,7 +193,8 @@ impl Journal {
             3 => self.migrate_v4(),
             4 => self.migrate_v5(),
             5 => self.migrate_v6(),
-            6 => Ok(()),
+            6 => self.migrate_v7(),
+            7 => Ok(()),
             other => Err(RunError::UnsupportedDatabaseVersion(other)),
         }
     }
@@ -224,6 +235,65 @@ impl Journal {
                  FOREIGN KEY (run_id) REFERENCES runs(run_id)
              );
              PRAGMA user_version = 6;",
+        )?;
+        transaction.commit()?;
+        self.migrate_v7()
+    }
+
+    fn migrate_v7(&mut self) -> Result<(), RunError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            "CREATE TABLE cancellation_controls (
+                run_id TEXT PRIMARY KEY NOT NULL,
+                control_id TEXT NOT NULL UNIQUE,
+                cancel_event_sequence INTEGER NOT NULL,
+                deadline_utc TEXT NOT NULL,
+                selection_json TEXT NOT NULL,
+                executor_run_id TEXT,
+                control_report_json TEXT,
+                cleanup_resolution_report_json TEXT,
+                control_status TEXT,
+                control_acknowledged INTEGER,
+                worker_stop_observed INTEGER,
+                effect_disposition TEXT,
+                execution_outcome TEXT,
+                evidence_outcome TEXT,
+                upload_outcome TEXT,
+                cleanup_outcome TEXT,
+                cleanup_receipt_json TEXT,
+                residual_json TEXT,
+                settled INTEGER NOT NULL DEFAULT 0 CHECK (settled IN (0, 1)),
+                FOREIGN KEY (run_id) REFERENCES runs(run_id),
+                FOREIGN KEY (run_id) REFERENCES cancel_requests(run_id)
+            );
+            CREATE TABLE effect_admissions (
+                run_id TEXT NOT NULL,
+                effect_type TEXT NOT NULL CHECK (effect_type IN (
+                    'worker.spawn', 'executor.execute', 'browser.observe',
+                    'evidence.stage', 'upload.admit', 'cleanup.execute'
+                )),
+                PRIMARY KEY (run_id, effect_type),
+                FOREIGN KEY (run_id) REFERENCES runs(run_id)
+            );
+            INSERT INTO cancellation_controls (
+                run_id, control_id, cancel_event_sequence, deadline_utc,
+                selection_json, executor_run_id, control_status,
+                control_acknowledged, worker_stop_observed,
+                effect_disposition, execution_outcome, evidence_outcome,
+                upload_outcome, cleanup_outcome, residual_json, settled
+            )
+            SELECT cancel_requests.run_id, runs.executor_run_id,
+                   cancel_requests.event_sequence,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), '',
+                   runs.executor_run_id, 'failed', 0, 0, 'uncertain',
+                   'lost_or_inconclusive', 'lost_or_inconclusive',
+                   'not_started', 'blocked',
+                   '{"code":"legacy.selection_unavailable","summary":"Exact persisted Executor selection is unavailable for this pre-v7 cancellation"}',
+                   0
+            FROM cancel_requests JOIN runs USING (run_id);
+            PRAGMA user_version = 7;",
         )?;
         transaction.commit()?;
         Ok(())
@@ -800,6 +870,15 @@ impl Journal {
         run_id: &str,
         idempotency_key: &str,
     ) -> Result<Cancellation, RunError> {
+        self.cancel_with_control(run_id, idempotency_key, "{}")
+    }
+
+    pub(crate) fn cancel_with_control(
+        &mut self,
+        run_id: &str,
+        idempotency_key: &str,
+        selection_json: &str,
+    ) -> Result<Cancellation, RunError> {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -865,6 +944,11 @@ impl Journal {
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
+        let persisted_executor_run_id: String = transaction.query_row(
+            "SELECT executor_run_id FROM runs WHERE run_id = ?1",
+            [run_id],
+            |row| row.get(0),
+        )?;
 
         let event_sequence = latest_sequence
             .checked_add(1)
@@ -882,11 +966,281 @@ impl Journal {
              VALUES (?1, ?2, 'run.cancel_requested', ?3)",
             params![run_id, event_sequence, event_json],
         )?;
+        transaction.execute(
+            "INSERT INTO cancellation_controls (
+                run_id, control_id, cancel_event_sequence, deadline_utc,
+                selection_json, executor_run_id
+             ) VALUES (?1, ?1, ?2, strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '+30 seconds'), ?3, ?4)",
+            params![run_id, event_sequence, selection_json, persisted_executor_run_id],
+        )?;
         transaction.commit()?;
         Ok(Cancellation::Accepted {
             event_sequence,
             active_executor_run_id,
         })
+    }
+
+    pub(crate) fn cancellation_control(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<CancellationControl>, RunError> {
+        self.connection
+            .query_row(
+                "SELECT control_id, run_id, executor_run_id, deadline_utc, selection_json
+                 FROM cancellation_controls
+                 WHERE run_id = ?1 AND settled = 0",
+                [run_id],
+                |row| {
+                    Ok(CancellationControl {
+                        control_id: row.get(0)?,
+                        run_id: row.get(1)?,
+                        executor_run_id: row.get(2)?,
+                        deadline_utc: row.get(3)?,
+                        selection_json: row.get(4)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub(crate) fn admit_effect(
+        &mut self,
+        run_id: &str,
+        effect_type: &str,
+    ) -> Result<bool, RunError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let cancelled: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM cancel_requests WHERE run_id = ?1)",
+            [run_id],
+            |row| row.get(0),
+        )?;
+        if cancelled {
+            transaction.commit()?;
+            return Ok(false);
+        }
+        transaction.execute(
+            "INSERT INTO effect_admissions (run_id, effect_type)
+             VALUES (?1, ?2) ON CONFLICT(run_id, effect_type) DO NOTHING",
+            params![run_id, effect_type],
+        )?;
+        transaction.commit()?;
+        Ok(true)
+    }
+
+    pub(crate) fn incomplete_cancellation_controls(
+        &self,
+    ) -> Result<Vec<CancellationControl>, RunError> {
+        let mut statement = self.connection.prepare(
+            "SELECT control_id, run_id, executor_run_id, deadline_utc, selection_json
+             FROM cancellation_controls
+             WHERE settled = 0 AND selection_json != ''
+             ORDER BY cancel_event_sequence",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(CancellationControl {
+                control_id: row.get(0)?,
+                run_id: row.get(1)?,
+                executor_run_id: row.get(2)?,
+                deadline_utc: row.get(3)?,
+                selection_json: row.get(4)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub(crate) fn record_control_report(
+        &mut self,
+        report: &ExecutorControlReport,
+    ) -> Result<(), RunError> {
+        let report_json = serde_json::to_string(report)
+            .map_err(|_| RunError::InvalidJournal("control report serialization failed"))?;
+        validate_executor_control_report(report_json.as_bytes())
+            .map_err(|_| RunError::Contract("invalid executor control report"))?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (cancel_sequence, selection_json, existing_report, existing_receipt, settled): (
+            i64,
+            String,
+            Option<String>,
+            Option<String>,
+            bool,
+        ) = transaction
+            .query_row(
+                "SELECT cancel_event_sequence, selection_json, control_report_json,
+                        cleanup_receipt_json, settled
+                 FROM cancellation_controls
+                 WHERE run_id = ?1 AND control_id = ?2 AND executor_run_id = ?3",
+                params![report.run_id, report.control_id, report.executor_run_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )?;
+        let selection = serde_json::from_str::<ExecutorSelection>(&selection_json)
+            .map_err(|_| RunError::InvalidJournal("invalid persisted executor selection"))?;
+        if report.executor_id != selection.executor_id
+            || report.executor_version != selection.executor_version
+            || report.capability_digest != selection.capability_digest
+        {
+            return Err(RunError::InvalidJournal("control report selection mismatch"));
+        }
+        let resolving_residual = match existing_report {
+            Some(existing_report) if existing_report == report_json => {
+                transaction.commit()?;
+                return Ok(());
+            }
+            Some(_)
+                if !settled
+                    && existing_receipt.is_none()
+                    && report.cleanup_receipt.is_some() =>
+            {
+                true
+            }
+            Some(_) => return Err(RunError::InvalidJournal("conflicting control report")),
+            None => false,
+        };
+        if settled {
+            return Err(RunError::InvalidJournal("settled control is missing its report"));
+        }
+        let event_base = if resolving_residual {
+            transaction.query_row(
+                "SELECT MAX(sequence) FROM events WHERE run_id = ?1",
+                [&report.run_id],
+                |row| row.get::<_, i64>(0),
+            )?
+        } else {
+            cancel_sequence
+        };
+        let receipt_json = report
+            .cleanup_receipt
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|_| RunError::InvalidJournal("cleanup receipt serialization failed"))?;
+        let residual_json = report
+            .residual
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|_| RunError::InvalidJournal("cleanup residual serialization failed"))?;
+        let updated = if resolving_residual {
+            transaction.execute(
+                "UPDATE cancellation_controls SET
+                    cleanup_resolution_report_json = ?2,
+                    cleanup_outcome = ?3, cleanup_receipt_json = ?4,
+                    residual_json = NULL
+                 WHERE run_id = ?1 AND settled = 0
+                   AND cleanup_receipt_json IS NULL",
+                params![
+                    report.run_id.as_str(),
+                    report_json.as_str(),
+                    report.cleanup_outcome.as_str(),
+                    receipt_json.as_deref(),
+                ],
+            )?
+        } else {
+            transaction.execute(
+                "UPDATE cancellation_controls SET
+                    control_report_json = ?2, control_status = ?3,
+                    control_acknowledged = ?4, worker_stop_observed = ?5,
+                    effect_disposition = ?6, execution_outcome = ?7,
+                    evidence_outcome = ?8, upload_outcome = ?9,
+                    cleanup_outcome = ?10, cleanup_receipt_json = ?11,
+                    residual_json = ?12
+                 WHERE run_id = ?1 AND control_report_json IS NULL",
+                params![
+                    report.run_id.as_str(),
+                    report_json.as_str(),
+                    report.status.as_str(),
+                    report.control_acknowledged,
+                    report.worker_stop_observed,
+                    report.effect_disposition.as_str(),
+                    report.execution_outcome.as_str(),
+                    report.evidence_outcome.as_str(),
+                    report.upload_outcome.as_str(),
+                    report.cleanup_outcome.as_str(),
+                    receipt_json.as_deref(),
+                    residual_json.as_deref(),
+                ],
+            )?
+        };
+        if updated != 1 {
+            return Err(RunError::InvalidJournal("control report update lost its predicate"));
+        }
+        insert_cancellation_event(
+            &transaction,
+            &report.run_id,
+            event_base + 1,
+            "control.reported",
+            &report_json,
+        )?;
+        let stop_event = if report.worker_stop_observed {
+            "worker.stop_observed"
+        } else {
+            "worker.stop_failed"
+        };
+        insert_cancellation_event(
+            &transaction,
+            &report.run_id,
+            event_base + 2,
+            stop_event,
+            &serde_json::to_string(&serde_json::json!({
+                "run_id": &report.run_id,
+                "control_id": &report.control_id,
+                "observed": report.worker_stop_observed
+            }))
+            .map_err(|_| RunError::InvalidJournal("stop Event serialization failed"))?,
+        )?;
+        let cleanup_json = receipt_json.as_deref().or(residual_json.as_deref()).ok_or(
+            RunError::InvalidJournal("control report lacks cleanup evidence"),
+        )?;
+        insert_cancellation_event(
+            &transaction,
+            &report.run_id,
+            event_base + 3,
+            if receipt_json.is_some() {
+                "cleanup.receipt"
+            } else {
+                "cleanup.residual"
+            },
+            cleanup_json,
+        )?;
+        if receipt_json.is_some() {
+            transaction.execute(
+                "UPDATE execution_attempts
+                 SET status = 'completed', execution_outcome = 'cancelled'
+                 WHERE run_id = ?1 AND status = 'claimed'",
+                [&report.run_id],
+            )?;
+            transaction.execute(
+                "UPDATE runs SET state = 'terminal', execution_outcome = 'cancelled'
+                 WHERE run_id = ?1 AND execution_outcome IS NULL",
+                [&report.run_id],
+            )?;
+            transaction.execute("DELETE FROM active_run_slot WHERE run_id = ?1", [&report.run_id])?;
+            transaction.execute(
+                "UPDATE cancellation_controls SET settled = 1 WHERE run_id = ?1",
+                [&report.run_id],
+            )?;
+            insert_cancellation_event(
+                &transaction,
+                &report.run_id,
+                event_base + 4,
+                "run.cancel_settled",
+                &state_event_json(&report.run_id, "terminal")?,
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
     }
 
     pub(crate) fn claim_next(&mut self) -> Result<Option<ClaimedRun>, RunError> {
@@ -997,6 +1351,14 @@ impl Journal {
         if state == expected_state
             && execution_outcome.is_none()
             && attempt_status.as_deref() == Some("claimed")
+            && cancellation_exists
+        {
+            transaction.commit()?;
+            return Ok(false);
+        }
+        if state == "terminal"
+            && execution_outcome.as_deref() == Some("cancelled")
+            && attempt_status.as_deref() == Some("completed")
             && cancellation_exists
         {
             transaction.commit()?;
@@ -1166,8 +1528,32 @@ fn parse_event(run_id: &str, event_type: &str, event_json: &str) -> Result<Event
             validate_outcome(&event.execution_outcome)?;
             Ok(EventPayload::Completed(event))
         }
+        "control.reported"
+        | "worker.stop_observed"
+        | "worker.stop_failed"
+        | "cleanup.receipt"
+        | "cleanup.residual"
+        | "run.cancel_settled" => serde_json::from_str(event_json)
+            .map(EventPayload::Cancellation)
+            .map_err(|_| RunError::InvalidJournal("invalid cancellation Event JSON")),
         _ => Err(RunError::InvalidJournal("unknown Event type")),
     }
+}
+
+fn insert_cancellation_event(
+    transaction: &rusqlite::Transaction<'_>,
+    run_id: &str,
+    sequence: i64,
+    event_type: &str,
+    event_json: &str,
+) -> Result<(), RunError> {
+    validate_sequence(sequence)?;
+    transaction.execute(
+        "INSERT INTO events (run_id, sequence, event_type, event_json)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![run_id, sequence, event_type, event_json],
+    )?;
+    Ok(())
 }
 
 fn validate_state(value: &str) -> Result<(), RunError> {

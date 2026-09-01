@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:chronoai:fkst:qa-contracts:qa.local-cancellation:v1",
+  "$defs": {
+    "ControlStatus": {
+      "type": "string",
+      "enum": ["accepted", "too_late", "rejected", "failed"]
+    },
+    "EffectDisposition": {
+      "type": "string",
+      "enum": ["not_started", "completed", "uncertain"]
+    },
+    "IndependentOutcome": {
+      "type": "string",
+      "enum": ["not_started", "succeeded", "failed", "cancelled", "lost_or_inconclusive"]
+    },
+    "CleanupOutcome": {
+      "type": "string",
+      "enum": ["not_required", "completed", "blocked"]
+    },
+    "CleanupReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["receipt_id", "no_resources_remain", "resource_handles"],
+      "properties": {
+        "receipt_id": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/UUID" },
+        "no_resources_remain": { "const": true },
+        "resource_handles": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        }
+      }
+    },
+    "SanitizedResidual": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "summary"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$", "maxLength": 64 },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    }
+  }
+}

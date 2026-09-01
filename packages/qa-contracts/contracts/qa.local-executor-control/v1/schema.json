@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:chronoai:fkst:qa-contracts:qa.local-executor-control:v1",
+  "$defs": {
+    "ExecutorControlRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "control_id", "run_id", "executor_run_id", "selection", "deadline_utc"],
+      "properties": {
+        "schema_version": { "const": "qa.local-executor-control/v1" },
+        "control_id": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/UUID" },
+        "run_id": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/UUID" },
+        "executor_run_id": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/UUID" },
+        "selection": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.local-executor:v1#/$defs/ExecutorSelection" },
+        "deadline_utc": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/ISO8601" }
+      }
+    },
+    "ExecutorControlReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "control_id", "run_id", "executor_run_id", "executor_id", "executor_version", "capability_digest", "status", "control_acknowledged", "worker_stop_observed", "effect_disposition", "execution_outcome", "evidence_outcome", "upload_outcome", "cleanup_outcome"],
+      "properties": {
+        "schema_version": { "const": "qa.local-executor-control/v1" },
+        "control_id": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/UUID" },
+        "run_id": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/UUID" },
+        "executor_run_id": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/UUID" },
+        "executor_id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$", "maxLength": 64 },
+        "executor_version": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$", "maxLength": 32 },
+        "capability_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "status": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.local-cancellation:v1#/$defs/ControlStatus" },
+        "control_acknowledged": { "type": "boolean" },
+        "worker_stop_observed": { "type": "boolean" },
+        "effect_disposition": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.local-cancellation:v1#/$defs/EffectDisposition" },
+        "execution_outcome": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.local-cancellation:v1#/$defs/IndependentOutcome" },
+        "evidence_outcome": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.local-cancellation:v1#/$defs/IndependentOutcome" },
+        "upload_outcome": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.local-cancellation:v1#/$defs/IndependentOutcome" },
+        "cleanup_outcome": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.local-cancellation:v1#/$defs/CleanupOutcome" },
+        "cleanup_receipt": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.local-cancellation:v1#/$defs/CleanupReceipt" },
+        "residual": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.local-cancellation:v1#/$defs/SanitizedResidual" }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["cleanup_receipt"],
+          "properties": { "residual": false }
+        },
+        {
+          "type": "object",
+          "required": ["residual"],
+          "properties": { "cleanup_receipt": false }
+        }
+      ]
+    }
+  }
+}

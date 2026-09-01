@@ -37,6 +37,21 @@
       "path": "contracts/qa.local-executor/v1/schema.json",
       "id": "urn:chronoai:fkst:qa-contracts:qa.local-executor:v1",
       "major": 1
+    },
+    "qa.local-cancellation/v1": {
+      "path": "contracts/qa.local-cancellation/v1/schema.json",
+      "id": "urn:chronoai:fkst:qa-contracts:qa.local-cancellation:v1",
+      "major": 1
+    },
+    "qa.local-worker-control/v1": {
+      "path": "contracts/qa.local-worker-control/v1/schema.json",
+      "id": "urn:chronoai:fkst:qa-contracts:qa.local-worker-control:v1",
+      "major": 1
+    },
+    "qa.local-executor-control/v1": {
+      "path": "contracts/qa.local-executor-control/v1/schema.json",
+      "id": "urn:chronoai:fkst:qa-contracts:qa.local-executor-control:v1",
+      "major": 1
     }
   },
   "types": {
@@ -70,6 +85,18 @@
     "ExecutorDescriptor": { "schema": "qa.local-executor/v1", "pointer": "#/$defs/ExecutorDescriptor" },
     "ExecutorSelection": { "schema": "qa.local-executor/v1", "pointer": "#/$defs/ExecutorSelection" },
     "ExecutorRequest": { "schema": "qa.local-executor/v1", "pointer": "#/$defs/ExecutorRequest" },
-    "ExecutorResult": { "schema": "qa.local-executor/v1", "pointer": "#/$defs/ExecutorResult" }
+    "ExecutorResult": { "schema": "qa.local-executor/v1", "pointer": "#/$defs/ExecutorResult" },
+    "ControlStatus": { "schema": "qa.local-cancellation/v1", "pointer": "#/$defs/ControlStatus" },
+    "EffectDisposition": { "schema": "qa.local-cancellation/v1", "pointer": "#/$defs/EffectDisposition" },
+    "IndependentOutcome": { "schema": "qa.local-cancellation/v1", "pointer": "#/$defs/IndependentOutcome" },
+    "CleanupOutcome": { "schema": "qa.local-cancellation/v1", "pointer": "#/$defs/CleanupOutcome" },
+    "CleanupReceipt": { "schema": "qa.local-cancellation/v1", "pointer": "#/$defs/CleanupReceipt" },
+    "SanitizedResidual": { "schema": "qa.local-cancellation/v1", "pointer": "#/$defs/SanitizedResidual" },
+    "LocalWorkerControlFrame": { "schema": "qa.local-worker-control/v1", "pointer": "#/$defs/LocalWorkerControlFrame" },
+    "LocalWorkerAbort": { "schema": "qa.local-worker-control/v1", "pointer": "#/$defs/LocalWorkerAbort" },
+    "LocalWorkerCancelAck": { "schema": "qa.local-worker-control/v1", "pointer": "#/$defs/LocalWorkerCancelAck" },
+    "LocalWorkerControlFailure": { "schema": "qa.local-worker-control/v1", "pointer": "#/$defs/LocalWorkerControlFailure" },
+    "ExecutorControlRequest": { "schema": "qa.local-executor-control/v1", "pointer": "#/$defs/ExecutorControlRequest" },
+    "ExecutorControlReport": { "schema": "qa.local-executor-control/v1", "pointer": "#/$defs/ExecutorControlReport" }
   }
 }
