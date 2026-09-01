@@ -8,7 +8,9 @@ use std::sync::{Arc, Barrier, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use fkst_local_qa_host::{parse_startup, serve_mvp0_with_clock, FixedClock, Journal};
+use fkst_local_qa_host::{
+    parse_startup, serve_mvp0_with_clock, serve_passive_for_test, FixedClock, Journal,
+};
 use fkst_qa_contracts::{admit_json, canonical_admitted_bytes, sha256_digest};
 use rusqlite::{Connection, OptionalExtension};
 use serde::Deserialize;
@@ -18,7 +20,8 @@ const CREATED_BODY: &[u8] =
 const TERMINAL_BODY: &[u8] = b"{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"terminal\",\"execution_outcome\":\"blocked\",\"latest_event_sequence\":9}\n";
 const LEGACY_CREATED_BODY: &[u8] =
     b"{\"run_id\":\"run-001\",\"state\":\"accepted\",\"event_sequence\":1}\n";
-const LEGACY_TERMINAL_BODY: &[u8] = b"{\"run_id\":\"run-001\",\"state\":\"terminal\",\"execution_outcome\":\"blocked\",\"latest_event_sequence\":9}\n";
+const LEGACY_ACCEPTED_SNAPSHOT_BODY: &[u8] =
+    b"{\"run_id\":\"run-001\",\"state\":\"accepted\",\"latest_event_sequence\":1}\n";
 const EVENTS_BODY: &[u8] = b"{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"after\":0,\"events\":[{\"sequence\":1,\"event_type\":\"run.accepted\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"accepted\"}},{\"sequence\":2,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"preparing\"}},{\"sequence\":3,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"ready\"}},{\"sequence\":4,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"executing\"}},{\"sequence\":5,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"staging_evidence\"}},{\"sequence\":6,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"cleaning_up_execution\"}},{\"sequence\":7,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"uploading\"}},{\"sequence\":8,\"event_type\":\"run.state_changed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"finalizing_local\"}},{\"sequence\":9,\"event_type\":\"run.completed\",\"event\":{\"run_id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"terminal\",\"execution_outcome\":\"blocked\"}}],\"next_after\":9}\n";
 const REQUEST_DIGEST: &str = "c6da30d2cbe81af624c4e364e21cdad9dc2510d2e2ff9a02bb5bd6c325a25428";
 const HEALTH_BODY: &[u8] =
@@ -151,6 +154,67 @@ impl Drop for HostProcess {
         if self.child.try_wait().ok().flatten().is_none() {
             let _ = self.child.kill();
             let _ = self.child.wait();
+        }
+    }
+}
+
+struct PassiveHost {
+    shutdown: Arc<AtomicBool>,
+    join: Option<thread::JoinHandle<()>>,
+    port: u16,
+}
+
+impl PassiveHost {
+    fn start(database_path: &Path) -> Self {
+        let _start_guard = fixed_clock_start_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0))
+            .expect("ephemeral loopback port must bind");
+        let port = listener
+            .local_addr()
+            .expect("local address must exist")
+            .port();
+        drop(listener);
+        let config = parse_startup([
+            "local-demo".into(),
+            "--listen".into(),
+            format!("127.0.0.1:{port}").into(),
+            "--database".into(),
+            database_path.as_os_str().to_owned(),
+        ])
+        .expect("passive host configuration must parse");
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let thread_shutdown = Arc::clone(&shutdown);
+        let join = thread::spawn(move || {
+            serve_passive_for_test(config, thread_shutdown).expect("passive host must serve");
+        });
+        for _ in 0..100 {
+            if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                return Self {
+                    shutdown,
+                    join: Some(join),
+                    port,
+                };
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        panic!("passive host did not start")
+    }
+
+    fn stop(mut self) {
+        self.shutdown.store(true, Ordering::SeqCst);
+        if let Some(join) = self.join.take() {
+            join.join().expect("passive host must stop");
+        }
+    }
+}
+
+impl Drop for PassiveHost {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::SeqCst);
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
         }
     }
 }
@@ -514,7 +578,7 @@ fn truncated_submit_body_returns_complete_error_without_mutation() {
 fn delayed_nonempty_cancel_body_returns_complete_error_without_mutation() {
     let temp = TempDirectory::new("delayed-cancel-body");
     let database_path = temp.database_path();
-    let host = HostProcess::start(&database_path);
+    let host = PassiveHost::start(&database_path);
     insert_unclaimed_run(&database_path);
 
     let mut stream = TcpStream::connect(("127.0.0.1", host.port))
@@ -701,7 +765,7 @@ fn concurrent_different_keys_create_exactly_one_acceptance() {
 fn reads_cancellation_and_restart_match_the_durable_contract() {
     let temp = TempDirectory::new("reads-cancel-restart");
     let database_path = temp.database_path();
-    let host = HostProcess::start(&database_path);
+    let host = PassiveHost::start(&database_path);
 
     assert_response(
         get(host.port, "/v1/health"),
@@ -757,7 +821,7 @@ fn reads_cancellation_and_restart_match_the_durable_contract() {
     );
     host.stop();
 
-    let restarted = HostProcess::start(&database_path);
+    let restarted = PassiveHost::start(&database_path);
     assert_response(
         get(restarted.port, "/v1/runs/00000000-0000-0000-0000-000000000001"),
         "HTTP/1.1 200 OK",
@@ -1027,7 +1091,7 @@ fn version_one_database_migrates_without_changing_accepted_bytes() {
     ).unwrap();
     drop(connection);
 
-    let host = HostProcess::start(&database_path);
+    let host = PassiveHost::start(&database_path);
     assert_response(
         submit(host.port, "run-001", "idem-001"),
         "HTTP/1.1 400 Bad Request",
@@ -1038,7 +1102,7 @@ fn version_one_database_migrates_without_changing_accepted_bytes() {
         get(host.port, "/v1/runs/run-001"),
         "HTTP/1.1 200 OK",
         "application/json",
-        LEGACY_TERMINAL_BODY,
+        LEGACY_ACCEPTED_SNAPSHOT_BODY,
     );
     let executor_run_id = Connection::open(&database_path)
         .unwrap()
@@ -1051,7 +1115,7 @@ fn version_one_database_migrates_without_changing_accepted_bytes() {
     fkst_qa_contracts::validate_scalar("UUID", &executor_run_id).unwrap();
     assert_ne!(executor_run_id, "run-001");
     host.stop();
-    let restarted = HostProcess::start(&database_path);
+    let restarted = PassiveHost::start(&database_path);
     restarted.stop();
     let connection = Connection::open(&database_path).unwrap();
     assert_eq!(

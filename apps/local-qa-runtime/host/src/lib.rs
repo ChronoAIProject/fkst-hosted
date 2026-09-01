@@ -215,24 +215,99 @@ pub fn serve_mvp0_with_clock(
     )
 }
 
+#[doc(hidden)]
+pub fn serve_passive_for_test(
+    config: StartupConfig,
+    shutdown: Arc<AtomicBool>,
+) -> Result<(), RunError> {
+    serve_with_composition(
+        config,
+        shutdown,
+        Arc::new(SystemClock),
+        Arc::new(UnavailableCurrentClaimVerifier),
+        ExecutionComposition::Passive,
+    )
+}
+
 fn serve_with_dependencies(
     config: StartupConfig,
     shutdown: Arc<AtomicBool>,
     clock: Arc<dyn Clock + Send + Sync>,
     current_claim_verifier: Arc<dyn CurrentClaimVerifier>,
 ) -> Result<(), RunError> {
+    serve_with_composition(
+        config,
+        shutdown,
+        clock,
+        current_claim_verifier,
+        ExecutionComposition::Coordinated,
+    )
+}
+
+enum ExecutionComposition {
+    Coordinated,
+    Passive,
+}
+
+enum ExecutionRuntime {
+    Coordinated(CoordinatorHandle),
+    Passive,
+}
+
+impl ExecutionRuntime {
+    fn cancel(
+        &self,
+        journal: &mut Journal,
+        run_id: &str,
+        idempotency_key: &str,
+    ) -> Result<Cancellation, RunError> {
+        match self {
+            Self::Coordinated(coordinator) => {
+                coordinator.cancel(journal, run_id, idempotency_key)
+            }
+            Self::Passive => journal.cancel(run_id, idempotency_key),
+        }
+    }
+
+    fn check(&mut self) -> Result<(), RunError> {
+        match self {
+            Self::Coordinated(coordinator) => coordinator.check(),
+            Self::Passive => Ok(()),
+        }
+    }
+
+    fn shutdown(&mut self) -> Result<(), RunError> {
+        match self {
+            Self::Coordinated(coordinator) => coordinator.shutdown(),
+            Self::Passive => Ok(()),
+        }
+    }
+}
+
+fn serve_with_composition(
+    config: StartupConfig,
+    shutdown: Arc<AtomicBool>,
+    clock: Arc<dyn Clock + Send + Sync>,
+    current_claim_verifier: Arc<dyn CurrentClaimVerifier>,
+    composition: ExecutionComposition,
+) -> Result<(), RunError> {
     let mut journal = Journal::open(&config.database_path)?;
     let listener = TcpListener::bind(config.listen)?;
     listener.set_nonblocking(true)?;
     let assigned_address = listener.local_addr()?;
-    let registry = ExecutorRegistry::new(vec![Box::new(InertExecutor::new())])?;
     let admission_registry =
         ExecutorRegistry::new(vec![Box::new(FakeApiAdmissionExecutor::new())])?;
-    let mut coordinator = CoordinatorHandle::start_versioned(
-        &config.database_path,
-        registry,
-        inert_executor_selection(),
-    )?;
+    let mut execution = match composition {
+        ExecutionComposition::Coordinated => {
+            let registry = ExecutorRegistry::new(vec![Box::new(InertExecutor::new())])?;
+            ExecutionRuntime::Coordinated(CoordinatorHandle::start_versioned(
+                &config.database_path,
+                registry,
+                inert_executor_selection(),
+            )?)
+        }
+        ExecutionComposition::Passive => ExecutionRuntime::Passive,
+    };
 
     let mut stdout = io::stdout().lock();
     writeln!(
@@ -246,7 +321,7 @@ fn serve_with_dependencies(
         if shutdown.load(Ordering::SeqCst) {
             break Ok(());
         }
-        if let Err(error) = coordinator.check() {
+        if let Err(error) = execution.check() {
             break Err(error);
         }
         match listener.accept() {
@@ -257,7 +332,7 @@ fn serve_with_dependencies(
                 let _ = handle_connection(
                     &mut stream,
                     &mut journal,
-                    &coordinator,
+                    &execution,
                     &admission_registry,
                     current_claim_verifier.as_ref(),
                     clock.as_ref(),
@@ -270,7 +345,7 @@ fn serve_with_dependencies(
             Err(error) => break Err(RunError::Io(error)),
         }
     };
-    let shutdown_result = coordinator.shutdown();
+    let shutdown_result = execution.shutdown();
     serve_result.and(shutdown_result)
 }
 
@@ -339,7 +414,7 @@ struct Request {
 fn handle_connection(
     stream: &mut TcpStream,
     journal: &mut Journal,
-    coordinator: &CoordinatorHandle,
+    execution: &ExecutionRuntime,
     admission_registry: &ExecutorRegistry,
     current_claim_verifier: &dyn admission::CurrentClaimVerifier,
     clock: &dyn Clock,
@@ -414,7 +489,7 @@ fn handle_connection(
             Ok(None) => run_not_found(),
             Err(_) => journal_failure(),
         },
-        Route::Cancel { run_id } => match coordinator.cancel(
+        Route::Cancel { run_id } => match execution.cancel(
             journal,
             &run_id,
             request.idempotency_key.as_deref().unwrap_or_default(),
