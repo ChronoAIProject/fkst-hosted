@@ -99,6 +99,9 @@ test("contract registry and fixture metadata", () => {
     "qa.local-run-admission/v1",
     "qa.local-run-admission/v2",
     "qa.local-executor/v1",
+    "qa.local-cancellation/v1",
+    "qa.local-worker-control/v1",
+    "qa.local-executor-control/v1",
   ]);
   assert.deepEqual(Object.keys(registry.types).sort(), [
     ...foundationTypeNames(),

@@ -492,7 +492,7 @@ fn handle_connection(
             &run_id,
             request.idempotency_key.as_deref().unwrap_or_default(),
         ) {
-            Ok(Cancellation::Accepted { event_sequence, .. }) => {
+            Ok(Cancellation::Accepted { event_sequence }) => {
                 cancel_response(202, "Accepted", &run_id, "accepted", event_sequence)
             }
             Ok(Cancellation::AlreadyAccepted(sequence)) => {

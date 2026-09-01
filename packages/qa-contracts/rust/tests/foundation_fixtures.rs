@@ -125,7 +125,10 @@ fn contract_registry_and_fixture_metadata() {
             "qa.local-worker-protocol/v1",
             "qa.local-run-admission/v1",
             "qa.local-run-admission/v2",
-            "qa.local-executor/v1"
+            "qa.local-executor/v1",
+            "qa.local-cancellation/v1",
+            "qa.local-worker-control/v1",
+            "qa.local-executor-control/v1",
         ]
     );
     let schema = &schemas["qa.contract-foundation/v1"];

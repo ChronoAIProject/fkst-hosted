@@ -86,10 +86,7 @@ pub(crate) struct StoredEvent {
 }
 
 pub(crate) enum Cancellation {
-    Accepted {
-        event_sequence: i64,
-        active_executor_run_id: Option<String>,
-    },
+    Accepted { event_sequence: i64 },
     AlreadyAccepted(i64),
     Terminal(i64),
     NotFound,
@@ -989,16 +986,6 @@ impl Journal {
             return Ok(Cancellation::AlreadyAccepted(event_sequence));
         }
 
-        let active_executor_run_id = transaction
-            .query_row(
-                "SELECT runs.executor_run_id
-                 FROM runs JOIN execution_attempts
-                   ON execution_attempts.run_id = runs.run_id
-                 WHERE runs.run_id = ?1 AND execution_attempts.status = 'claimed'",
-                [run_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
         let persisted_executor_run_id: String = transaction.query_row(
             "SELECT executor_run_id FROM runs WHERE run_id = ?1",
             [run_id],
@@ -1029,10 +1016,7 @@ impl Journal {
             params![run_id, event_sequence, selection_json, persisted_executor_run_id],
         )?;
         transaction.commit()?;
-        Ok(Cancellation::Accepted {
-            event_sequence,
-            active_executor_run_id,
-        })
+        Ok(Cancellation::Accepted { event_sequence })
     }
 
     pub(crate) fn cancellation_control(
@@ -1678,6 +1662,8 @@ mod tests {
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use rusqlite::params;
+
     use super::{Admission, Cancellation, Journal, V2AdmissionRecord};
 
     const TEST_REQUEST_DIGEST: &str =
@@ -2024,10 +2010,7 @@ mod tests {
                 "cancel-migration",
                 std::str::from_utf8(TEST_SELECTION_JSON).expect("selection is UTF-8"),
             ),
-            Ok(Cancellation::Accepted {
-                event_sequence: 2,
-                ..
-            })
+            Ok(Cancellation::Accepted { event_sequence: 2 })
         ));
         if !recoverable {
             journal

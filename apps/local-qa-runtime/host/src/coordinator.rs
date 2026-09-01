@@ -560,10 +560,7 @@ mod tests {
             cancellation.join().expect("cancellation thread joins");
         assert!(matches!(
             cancellation_result,
-            Ok(crate::journal::Cancellation::Accepted {
-                event_sequence: 5,
-                active_executor_run_id: Some(ref executor_run_id),
-            }) if executor_run_id == run_id
+            Ok(crate::journal::Cancellation::Accepted { event_sequence: 5 })
         ));
         let settled_events = journal
             .events(run_id, 0, 20)
@@ -895,10 +892,7 @@ mod tests {
 
         assert!(matches!(
             coordinator.cancel(&mut journal, run_id, "cancel-001"),
-            Ok(crate::journal::Cancellation::Accepted {
-                event_sequence: 2,
-                active_executor_run_id: None,
-            })
+            Ok(crate::journal::Cancellation::Accepted { event_sequence: 2 })
         ));
         let snapshot = journal
             .snapshot(run_id)
