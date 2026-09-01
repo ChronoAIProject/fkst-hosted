@@ -79,11 +79,23 @@ fn control_contract_registry_and_fixture_indexes_are_closed() {
         serde_json::json!(["not_required", "completed", "blocked"])
     );
     let executor_negative = fixture("qa.local-executor-control/v1/negative.json");
-    assert_eq!(executor_negative["schema_cases"].as_array().map(Vec::len), Some(16));
-    assert_eq!(executor_negative["relation_cases"].as_array().map(Vec::len), Some(7));
+    assert_eq!(
+        executor_negative["schema_cases"].as_array().map(Vec::len),
+        Some(16)
+    );
+    assert_eq!(
+        executor_negative["relation_cases"].as_array().map(Vec::len),
+        Some(7)
+    );
     let worker_negative = fixture("qa.local-worker-control/v1/negative.json");
-    assert_eq!(worker_negative["schema_cases"].as_array().map(Vec::len), Some(15));
-    assert_eq!(worker_negative["relation_cases"].as_array().map(Vec::len), Some(3));
+    assert_eq!(
+        worker_negative["schema_cases"].as_array().map(Vec::len),
+        Some(15)
+    );
+    assert_eq!(
+        worker_negative["relation_cases"].as_array().map(Vec::len),
+        Some(3)
+    );
 }
 
 #[test]
@@ -99,10 +111,7 @@ fn validates_every_control_frame_report_and_enum_value() {
         validate_executor_control_report(&raw(report)).expect("executor control report validates");
     }
 
-    assert_keys(
-        &executor["reports"],
-        &["cleanup_receipt", "residual"],
-    );
+    assert_keys(&executor["reports"], &["cleanup_receipt", "residual"]);
     let cancellation = fixture("qa.local-cancellation/v1/conformance.json");
     assert_eq!(
         executor["reports"]["cleanup_receipt"]["cleanup_receipt"],
@@ -217,7 +226,10 @@ fn rejects_the_shared_closed_schema_matrix() {
             &cancellation["cleanup_outcome"]["negative"],
         ),
     ] {
-        for value in vocabulary.as_array().expect("negative vocabulary is an array") {
+        for value in vocabulary
+            .as_array()
+            .expect("negative vocabulary is an array")
+        {
             let mut mutated = report.clone();
             mutated
                 .as_object_mut()
@@ -231,10 +243,8 @@ fn rejects_the_shared_closed_schema_matrix() {
         .expect("cleanup receipt cases is an array")
     {
         let mut mutated = report.clone();
-        mutated["cleanup_receipt"] = mutate(
-            &cancellation["cleanup_receipt"]["positive"],
-            fixture_case,
-        );
+        mutated["cleanup_receipt"] =
+            mutate(&cancellation["cleanup_receipt"]["positive"], fixture_case);
         assert!(validate_executor_control_report(&raw(&mutated)).is_err());
     }
     for fixture_case in cancellation["sanitized_residual"]["negative"]

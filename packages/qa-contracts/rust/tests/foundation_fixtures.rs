@@ -151,13 +151,20 @@ fn contract_registry_and_fixture_metadata() {
         .collect();
     let mut expected_types = expected_foundation_types.clone();
     expected_types.insert("CancelDisposition".to_owned());
+    expected_types.insert("CleanupOutcome".to_owned());
+    expected_types.insert("CleanupReceipt".to_owned());
+    expected_types.insert("ControlStatus".to_owned());
+    expected_types.insert("EffectDisposition".to_owned());
     expected_types.insert("EventCursor".to_owned());
     expected_types.insert("EventSequence".to_owned());
     expected_types.insert("ExecutionOutcome".to_owned());
+    expected_types.insert("ExecutorControlReport".to_owned());
+    expected_types.insert("ExecutorControlRequest".to_owned());
     expected_types.insert("ExecutorDescriptor".to_owned());
     expected_types.insert("ExecutorRequest".to_owned());
     expected_types.insert("ExecutorResult".to_owned());
     expected_types.insert("ExecutorSelection".to_owned());
+    expected_types.insert("IndependentOutcome".to_owned());
     expected_types.insert("LocalEvidenceObject".to_owned());
     expected_types.insert("LocalEvidenceObjectRef".to_owned());
     expected_types.insert("LocalSanitizedObservation".to_owned());
@@ -165,14 +172,19 @@ fn contract_registry_and_fixture_metadata() {
     expected_types.insert("LocalQARunRequest".to_owned());
     expected_types.insert("LocalQARunRequestV2".to_owned());
     expected_types.insert("LocalState".to_owned());
+    expected_types.insert("LocalWorkerAbort".to_owned());
+    expected_types.insert("LocalWorkerCancelAck".to_owned());
     expected_types.insert("LocalWorkerCapabilityRequest".to_owned());
     expected_types.insert("LocalWorkerCapabilityResult".to_owned());
+    expected_types.insert("LocalWorkerControlFailure".to_owned());
+    expected_types.insert("LocalWorkerControlFrame".to_owned());
     expected_types.insert("LocalWorkerFrame".to_owned());
     expected_types.insert("LocalWorkerInvocation".to_owned());
     expected_types.insert("LocalWorkerProtocolFailure".to_owned());
     expected_types.insert("LocalWorkerTerminalResult".to_owned());
     expected_types.insert("RunAcceptance".to_owned());
     expected_types.insert("RunAcceptanceV2".to_owned());
+    expected_types.insert("SanitizedResidual".to_owned());
     assert_eq!(
         types.keys().cloned().collect::<BTreeSet<_>>(),
         expected_types
