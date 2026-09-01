@@ -262,9 +262,7 @@ impl ExecutionRuntime {
         idempotency_key: &str,
     ) -> Result<Cancellation, RunError> {
         match self {
-            Self::Coordinated(coordinator) => {
-                coordinator.cancel(journal, run_id, idempotency_key)
-            }
+            Self::Coordinated(coordinator) => coordinator.cancel(journal, run_id, idempotency_key),
             Self::Passive => journal.cancel(run_id, idempotency_key),
         }
     }
