@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:chronoai:fkst:qa-contracts:qa.local-worker-control:v1",
+  "$defs": {
+    "LocalWorkerControlFrame": {
+      "oneOf": [
+        { "$ref": "#/$defs/LocalWorkerAbort" },
+        { "$ref": "#/$defs/LocalWorkerCancelAck" },
+        { "$ref": "#/$defs/LocalWorkerControlFailure" }
+      ]
+    },
+    "LocalWorkerAbort": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "kind", "control_id", "invocation_id", "deadline_utc"],
+      "properties": {
+        "protocol": { "const": "qa.local-worker-control/v1" },
+        "kind": { "const": "abort" },
+        "control_id": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/UUID" },
+        "invocation_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "deadline_utc": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/ISO8601" }
+      }
+    },
+    "LocalWorkerCancelAck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "kind", "control_id", "invocation_id", "status"],
+      "properties": {
+        "protocol": { "const": "qa.local-worker-control/v1" },
+        "kind": { "const": "cancel_ack" },
+        "control_id": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/UUID" },
+        "invocation_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "status": { "enum": ["accepted", "too_late"] }
+      }
+    },
+    "LocalWorkerControlFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "kind", "control_id", "code"],
+      "properties": {
+        "protocol": { "const": "qa.local-worker-control/v1" },
+        "kind": { "const": "control_failure" },
+        "control_id": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.contract-foundation:v1#/$defs/UUID" },
+        "code": { "enum": ["control.conflict", "control.invalid_invocation", "control.invalid_frame", "control.deadline_elapsed"] }
+      }
+    }
+  }
+}

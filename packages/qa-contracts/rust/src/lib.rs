@@ -34,6 +34,18 @@ const LOCAL_RUN_ADMISSION_V2_SCHEMA_PATH: &str = "contracts/qa.local-run-admissi
 const LOCAL_EXECUTOR_SCHEMA: &str =
     include_str!("../../contracts/qa.local-executor/v1/schema.json");
 const LOCAL_EXECUTOR_SCHEMA_PATH: &str = "contracts/qa.local-executor/v1/schema.json";
+const LOCAL_CANCELLATION_SCHEMA: &str =
+    include_str!("../../contracts/qa.local-cancellation/v1/schema.json");
+const LOCAL_CANCELLATION_SCHEMA_PATH: &str =
+    "contracts/qa.local-cancellation/v1/schema.json";
+const LOCAL_WORKER_CONTROL_SCHEMA: &str =
+    include_str!("../../contracts/qa.local-worker-control/v1/schema.json");
+const LOCAL_WORKER_CONTROL_SCHEMA_PATH: &str =
+    "contracts/qa.local-worker-control/v1/schema.json";
+const LOCAL_EXECUTOR_CONTROL_SCHEMA: &str =
+    include_str!("../../contracts/qa.local-executor-control/v1/schema.json");
+const LOCAL_EXECUTOR_CONTROL_SCHEMA_PATH: &str =
+    "contracts/qa.local-executor-control/v1/schema.json";
 const EMBEDDED_SCHEMAS: &[(&str, &str)] = &[
     (FOUNDATION_SCHEMA_PATH, FOUNDATION_SCHEMA),
     (LOCAL_LIFECYCLE_SCHEMA_PATH, LOCAL_LIFECYCLE_SCHEMA),
@@ -45,6 +57,9 @@ const EMBEDDED_SCHEMAS: &[(&str, &str)] = &[
         LOCAL_RUN_ADMISSION_V2_SCHEMA,
     ),
     (LOCAL_EXECUTOR_SCHEMA_PATH, LOCAL_EXECUTOR_SCHEMA),
+    (LOCAL_CANCELLATION_SCHEMA_PATH, LOCAL_CANCELLATION_SCHEMA),
+    (LOCAL_WORKER_CONTROL_SCHEMA_PATH, LOCAL_WORKER_CONTROL_SCHEMA),
+    (LOCAL_EXECUTOR_CONTROL_SCHEMA_PATH, LOCAL_EXECUTOR_CONTROL_SCHEMA),
 ];
 const LOCAL_STATE_TYPE_NAME: &str = "LocalState";
 const EXECUTION_OUTCOME_TYPE_NAME: &str = "ExecutionOutcome";
@@ -94,6 +109,22 @@ const LOCAL_EXECUTOR_TYPE_NAMES: [&str; 4] = [
     "ExecutorRequest",
     "ExecutorResult",
 ];
+const LOCAL_CANCELLATION_TYPE_NAMES: [&str; 6] = [
+    "ControlStatus",
+    "EffectDisposition",
+    "IndependentOutcome",
+    "CleanupOutcome",
+    "CleanupReceipt",
+    "SanitizedResidual",
+];
+const LOCAL_WORKER_CONTROL_TYPE_NAMES: [&str; 4] = [
+    "LocalWorkerControlFrame",
+    "LocalWorkerAbort",
+    "LocalWorkerCancelAck",
+    "LocalWorkerControlFailure",
+];
+const LOCAL_EXECUTOR_CONTROL_TYPE_NAMES: [&str; 2] =
+    ["ExecutorControlRequest", "ExecutorControlReport"];
 const MAX_DEPTH: usize = 128;
 const MAX_SAFE_INTEGER_TEXT: &str = "9007199254740991";
 
@@ -596,6 +627,30 @@ pub fn validate_executor_result(raw: &[u8]) -> Result<ValidatedValue, ContractEr
     validate_registered_value(admit_json(raw)?, "ExecutorResult")
 }
 
+pub fn validate_local_worker_control_frame(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    validate_registered_value(admit_json(raw)?, "LocalWorkerControlFrame")
+}
+
+pub fn validate_local_worker_abort(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    validate_registered_value(admit_json(raw)?, "LocalWorkerAbort")
+}
+
+pub fn validate_local_worker_cancel_ack(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    validate_registered_value(admit_json(raw)?, "LocalWorkerCancelAck")
+}
+
+pub fn validate_local_worker_control_failure(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    validate_registered_value(admit_json(raw)?, "LocalWorkerControlFailure")
+}
+
+pub fn validate_executor_control_request(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    validate_registered_value(admit_json(raw)?, "ExecutorControlRequest")
+}
+
+pub fn validate_executor_control_report(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    validate_registered_value(admit_json(raw)?, "ExecutorControlReport")
+}
+
 pub fn build_initial_run_acceptance(
     request: &ValidatedValue,
     accepted_at: &str,
@@ -1075,6 +1130,23 @@ fn validate_registry_value(registry: &Registry) -> Result<(), ContractError> {
         }
     }
     for type_name in LOCAL_EXECUTOR_TYPE_NAMES {
+        schema_for_registered_type(registry, type_name, embedded_schema)?;
+        let entry = registry
+            .types
+            .get(type_name)
+            .expect("registered type was resolved above");
+        if entry.fixture_only {
+            return Err(ContractError(Rejection::validation(
+                "invalid_embedded_registry",
+                format!("/types/{type_name}"),
+            )));
+        }
+    }
+    for type_name in LOCAL_CANCELLATION_TYPE_NAMES
+        .into_iter()
+        .chain(LOCAL_WORKER_CONTROL_TYPE_NAMES)
+        .chain(LOCAL_EXECUTOR_CONTROL_TYPE_NAMES)
+    {
         schema_for_registered_type(registry, type_name, embedded_schema)?;
         let entry = registry
             .types

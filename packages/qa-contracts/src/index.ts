@@ -58,6 +58,20 @@ const LOCAL_RUN_ADMISSION_TYPE_NAMES = Object.freeze([
   RUN_ACCEPTANCE_V2_TYPE_NAME,
 ] as const);
 const LOCAL_EXECUTOR_TYPE_NAMES = Object.freeze(["ExecutorDescriptor", "ExecutorSelection", "ExecutorRequest", "ExecutorResult"] as const);
+const LOCAL_CONTROL_TYPE_NAMES = Object.freeze([
+  "ControlStatus",
+  "EffectDisposition",
+  "IndependentOutcome",
+  "CleanupOutcome",
+  "CleanupReceipt",
+  "SanitizedResidual",
+  "LocalWorkerControlFrame",
+  "LocalWorkerAbort",
+  "LocalWorkerCancelAck",
+  "LocalWorkerControlFailure",
+  "ExecutorControlRequest",
+  "ExecutorControlReport",
+] as const);
 const FOUNDATION_TYPE_NAMES = Object.freeze([
   "ContractMeta",
   "HostScopedMeta",
@@ -288,6 +302,9 @@ for (const type of LOCAL_RUN_ADMISSION_TYPE_NAMES) {
   VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
 }
 for (const type of LOCAL_EXECUTOR_TYPE_NAMES) {
+  VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
+}
+for (const type of LOCAL_CONTROL_TYPE_NAMES) {
   VALIDATORS.set(type, compileRegisteredValidator(REGISTRY, type));
 }
 
@@ -521,6 +538,30 @@ export function validateExecutorRequest(raw: Uint8Array): ValidatedValue {
 
 export function validateExecutorResult(raw: Uint8Array): ValidatedValue {
   return validateRegisteredValue(admitJson(raw), "ExecutorResult");
+}
+
+export function validateLocalWorkerControlFrame(raw: Uint8Array): ValidatedValue {
+  return validateRegisteredValue(admitJson(raw), "LocalWorkerControlFrame");
+}
+
+export function validateLocalWorkerAbort(raw: Uint8Array): ValidatedValue {
+  return validateRegisteredValue(admitJson(raw), "LocalWorkerAbort");
+}
+
+export function validateLocalWorkerCancelAck(raw: Uint8Array): ValidatedValue {
+  return validateRegisteredValue(admitJson(raw), "LocalWorkerCancelAck");
+}
+
+export function validateLocalWorkerControlFailure(raw: Uint8Array): ValidatedValue {
+  return validateRegisteredValue(admitJson(raw), "LocalWorkerControlFailure");
+}
+
+export function validateExecutorControlRequest(raw: Uint8Array): ValidatedValue {
+  return validateRegisteredValue(admitJson(raw), "ExecutorControlRequest");
+}
+
+export function validateExecutorControlReport(raw: Uint8Array): ValidatedValue {
+  return validateRegisteredValue(admitJson(raw), "ExecutorControlReport");
 }
 
 export function buildInitialRunAcceptance(
@@ -902,6 +943,12 @@ function validateRegistry(registry: ContractRegistry): void {
     }
   }
   for (const type of LOCAL_RUN_ADMISSION_TYPE_NAMES) {
+    const entry = registry.types[type];
+    if (entry?.fixture_only !== undefined) {
+      throw new Error(`qa contract fixture-only marker is invalid: ${type}`);
+    }
+  }
+  for (const type of [...LOCAL_EXECUTOR_TYPE_NAMES, ...LOCAL_CONTROL_TYPE_NAMES]) {
     const entry = registry.types[type];
     if (entry?.fixture_only !== undefined) {
       throw new Error(`qa contract fixture-only marker is invalid: ${type}`);

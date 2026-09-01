@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use fkst_qa_contracts::{
-    validate_execution_outcome, validate_executor_descriptor, validate_executor_request,
+    validate_execution_outcome, validate_executor_control_report,
+    validate_executor_control_request, validate_executor_descriptor, validate_executor_request,
     validate_executor_result,
 };
 use serde::{Deserialize, Serialize};
@@ -61,10 +62,84 @@ pub(crate) struct ExecutorResult {
     pub execution_outcome: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+pub(crate) struct ExecutorControlRequest {
+    pub schema_version: String,
+    pub control_id: String,
+    pub run_id: String,
+    pub executor_run_id: String,
+    pub selection: ExecutorSelection,
+    pub deadline_utc: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+pub(crate) struct CleanupReceipt {
+    pub receipt_id: String,
+    pub no_resources_remain: bool,
+    pub resource_handles: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+pub(crate) struct SanitizedResidual {
+    pub code: String,
+    pub summary: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+pub(crate) struct ExecutorControlReport {
+    pub schema_version: String,
+    pub control_id: String,
+    pub run_id: String,
+    pub executor_run_id: String,
+    pub executor_id: String,
+    pub executor_version: String,
+    pub capability_digest: String,
+    pub status: String,
+    pub control_acknowledged: bool,
+    pub worker_stop_observed: bool,
+    pub effect_disposition: String,
+    pub execution_outcome: String,
+    pub evidence_outcome: String,
+    pub upload_outcome: String,
+    pub cleanup_outcome: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cleanup_receipt: Option<CleanupReceipt>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub residual: Option<SanitizedResidual>,
+}
+
 pub(crate) trait VersionedExecutor: Send + Sync {
     fn descriptor(&self) -> &ExecutorDescriptor;
     fn execute(&self, request: &ExecutorRequest) -> Result<ExecutorResult, RunError>;
-    fn cancel(&self, _request: &ExecutorRequest) {}
+    fn control(
+        &self,
+        request: &ExecutorControlRequest,
+    ) -> Result<ExecutorControlReport, RunError> {
+        let descriptor = self.descriptor();
+        Ok(ExecutorControlReport {
+            schema_version: "qa.local-executor-control/v1".to_owned(),
+            control_id: request.control_id.clone(),
+            run_id: request.run_id.clone(),
+            executor_run_id: request.executor_run_id.clone(),
+            executor_id: descriptor.executor_id.clone(),
+            executor_version: descriptor.executor_version.clone(),
+            capability_digest: descriptor.capability_digest.clone(),
+            status: "accepted".to_owned(),
+            control_acknowledged: true,
+            worker_stop_observed: true,
+            effect_disposition: "uncertain".to_owned(),
+            execution_outcome: "lost_or_inconclusive".to_owned(),
+            evidence_outcome: "not_started".to_owned(),
+            upload_outcome: "not_started".to_owned(),
+            cleanup_outcome: "completed".to_owned(),
+            cleanup_receipt: Some(CleanupReceipt {
+                receipt_id: request.control_id.clone(),
+                no_resources_remain: true,
+                resource_handles: Vec::new(),
+            }),
+            residual: None,
+        })
+    }
 }
 
 pub(crate) struct InertExecutor {
@@ -194,7 +269,14 @@ impl ExecutorRegistry {
         ExecutionOutcome::validated(&result.execution_outcome)
     }
 
-    pub(crate) fn cancel(&self, request: &ExecutorRequest) -> Result<(), RunError> {
+    pub(crate) fn control(
+        &self,
+        request: &ExecutorControlRequest,
+    ) -> Result<ExecutorControlReport, RunError> {
+        let request_bytes = serde_json::to_vec(request)
+            .map_err(|_| RunError::Contract("executor control request serialization failed"))?;
+        validate_executor_control_request(&request_bytes)
+            .map_err(|_| RunError::Contract("invalid executor control request"))?;
         let selection = &request.selection;
         let key = (
             selection.executor_id.clone(),
@@ -206,8 +288,22 @@ impl ExecutorRegistry {
             .entries
             .get(&key)
             .ok_or(RunError::Contract("executor selection not allowlisted"))?;
-        executor.cancel(request);
-        Ok(())
+        let report = executor.control(request)?;
+        let report_bytes = serde_json::to_vec(&report)
+            .map_err(|_| RunError::Contract("executor control report serialization failed"))?;
+        validate_executor_control_report(&report_bytes)
+            .map_err(|_| RunError::Contract("invalid executor control report"))?;
+        let descriptor = executor.descriptor();
+        if report.control_id != request.control_id
+            || report.run_id != request.run_id
+            || report.executor_run_id != request.executor_run_id
+            || report.executor_id != descriptor.executor_id
+            || report.executor_version != descriptor.executor_version
+            || report.capability_digest != descriptor.capability_digest
+        {
+            return Err(RunError::Contract("executor control report relation failed"));
+        }
+        Ok(report)
     }
 
     pub(crate) fn resolve(

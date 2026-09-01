@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use fkst_local_qa_browser_adapter::{
     prepare_fixed_browser_session, BrowserCleanupReceipt, FixedBrowserObservation,
@@ -24,9 +24,10 @@ use crate::admission::{
     CurrentClaimVerification, CurrentClaimVerifier, Mvp0DeterministicCurrentClaimVerifier,
 };
 use crate::executor::{
-    ExecutorDescriptor, ExecutorRequest, ExecutorResult, ExecutorSelection, VersionedExecutor,
+    CleanupReceipt, ExecutorControlReport, ExecutorControlRequest, ExecutorDescriptor,
+    ExecutorRequest, ExecutorResult, ExecutorSelection, SanitizedResidual, VersionedExecutor,
 };
-use crate::worker_process::WorkerProcess;
+use crate::worker_process::{WorkerControlHandle, WorkerProcess};
 use crate::RunError;
 
 const PROTOCOL: &str = "qa.local-worker-protocol/v1";
@@ -76,6 +77,12 @@ struct HostObservation {
     staged: StagedSanitizedObservation,
 }
 
+#[derive(Clone)]
+struct ActiveBrowserRun {
+    executor_run_id: String,
+    worker: Option<WorkerControlHandle>,
+}
+
 pub(crate) struct BrowserWorkerExecutor {
     descriptor: ExecutorDescriptor,
     node_executable: PathBuf,
@@ -90,6 +97,9 @@ pub(crate) struct BrowserWorkerExecutor {
     started_monotonic_ms: u64,
     finished_monotonic_ms: u64,
     counters: Arc<EffectCounters>,
+    active_worker: Mutex<Option<ActiveBrowserRun>>,
+    active_worker_changed: Condvar,
+    cancel_requested: AtomicBool,
 }
 
 impl BrowserWorkerExecutor {
@@ -131,6 +141,9 @@ impl BrowserWorkerExecutor {
             started_monotonic_ms,
             finished_monotonic_ms,
             counters,
+            active_worker: Mutex::new(None),
+            active_worker_changed: Condvar::new(),
+            cancel_requested: AtomicBool::new(false),
         })
     }
 
@@ -147,7 +160,33 @@ impl BrowserWorkerExecutor {
     }
 
     fn execute_worker(&self, request: &ExecutorRequest) -> Result<(), RunError> {
+        {
+            let mut active = self
+                .active_worker
+                .lock()
+                .map_err(|_| RunError::Contract("Browser Worker control lock poisoned"))?;
+            if active.is_some() {
+                return Err(RunError::Contract("Browser Worker control already active"));
+            }
+            self.cancel_requested.store(false, Ordering::SeqCst);
+            *active = Some(ActiveBrowserRun {
+                executor_run_id: request.run_id.clone(),
+                worker: None,
+            });
+        }
+        let result = self.execute_active_worker(request);
+        *self
+            .active_worker
+            .lock()
+            .map_err(|_| RunError::Contract("Browser Worker control lock poisoned"))? = None;
+        self.active_worker_changed.notify_all();
+        result
+    }
+
+    fn execute_active_worker(&self, request: &ExecutorRequest) -> Result<(), RunError> {
+        self.ensure_not_cancelled()?;
         self.verify_current_claim()?;
+        self.ensure_not_cancelled()?;
         let mut browser = Some(
             prepare_fixed_browser_session(&self.chrome_executable)
                 .map_err(|_| RunError::Contract("Browser preparation failed"))?,
@@ -164,6 +203,7 @@ impl BrowserWorkerExecutor {
             .map_err(|_| RunError::Contract("Browser fixture counter lock poisoned"))? =
             Some(fixture_url.clone());
         let stager = EvidenceStager::new(&self.staging_root);
+        self.ensure_not_cancelled()?;
         let mut process = match WorkerProcess::spawn(&self.node_executable, &self.worker_entrypoint)
         {
             Ok(process) => {
@@ -175,6 +215,21 @@ impl BrowserWorkerExecutor {
                 return Err(error);
             }
         };
+        {
+            let mut active = self
+                .active_worker
+                .lock()
+                .map_err(|_| RunError::Contract("Browser Worker control lock poisoned"))?;
+            let active = active
+                .as_mut()
+                .ok_or(RunError::Contract("Browser Worker control state missing"))?;
+            if active.executor_run_id != request.run_id || active.worker.is_some() {
+                process.terminate();
+                close_browser(&mut browser, &self.counters)?;
+                return Err(RunError::Contract("Browser Worker control relation failed"));
+            }
+            active.worker = Some(process.control_handle());
+        }
         let deadline = Instant::now() + EXECUTION_TIMEOUT;
         let protocol = self.walk_protocol(
             request,
@@ -184,21 +239,30 @@ impl BrowserWorkerExecutor {
             &mut process,
             deadline,
         );
-        match protocol {
+        let result = match protocol {
             Ok(()) => Ok(()),
             Err(error) => {
                 let _ = close_browser(&mut browser, &self.counters);
                 process.terminate();
-                let cleanup = stager
-                    .cleanup_attempt(&request.run_id, 1)
-                    .map_err(|_| RunError::Contract("partial Browser staging cleanup failed"))?;
-                if !cleanup.is_complete() {
-                    return Err(RunError::Contract(
+                match stager.cleanup_attempt(&request.run_id, 1) {
+                    Ok(cleanup) if cleanup.is_complete() => Err(error),
+                    Ok(_) => Err(RunError::Contract(
                         "partial Browser staging cleanup left residuals",
-                    ));
+                    )),
+                    Err(_) => Err(RunError::Contract(
+                        "partial Browser staging cleanup failed",
+                    )),
                 }
-                Err(error)
             }
+        };
+        result
+    }
+
+    fn ensure_not_cancelled(&self) -> Result<(), RunError> {
+        if self.cancel_requested.load(Ordering::SeqCst) {
+            Err(RunError::Contract("Browser execution cancelled"))
+        } else {
+            Ok(())
         }
     }
 
@@ -224,6 +288,7 @@ impl BrowserWorkerExecutor {
             validate_local_worker_invocation,
             "invalid Browser Worker invocation",
         )?;
+        self.ensure_not_cancelled()?;
         write_host_frame(process, &mut input_sequence, &invocation)?;
 
         let mut decoder = LocalWorkerFrameDecoder::default();
@@ -231,6 +296,7 @@ impl BrowserWorkerExecutor {
         let mut screenshot: Option<StagedEvidence> = None;
         let mut runner_log: Option<StagedEvidence> = None;
         for index in 0..7 {
+            self.ensure_not_cancelled()?;
             let frame = process.read_frame(&mut decoder, deadline)?;
             let expected_input = expected_capability_input(index, fixture_url);
             let capability = capability_name(index);
@@ -247,6 +313,7 @@ impl BrowserWorkerExecutor {
                 .capability_exchanges
                 .fetch_add(1, Ordering::SeqCst);
 
+            self.ensure_not_cancelled()?;
             let output = match index {
                 0 => json!({ "value": self.started_at }),
                 1 => json!({ "value": self.started_monotonic_ms }),
@@ -423,6 +490,211 @@ impl VersionedExecutor for BrowserWorkerExecutor {
             capability_digest: self.descriptor.capability_digest.clone(),
             execution_outcome: "passed".to_owned(),
         })
+    }
+
+    fn control(
+        &self,
+        request: &ExecutorControlRequest,
+    ) -> Result<ExecutorControlReport, RunError> {
+        let mut active = self
+            .active_worker
+            .lock()
+            .map_err(|_| RunError::Contract("Browser Worker control lock poisoned"))?;
+        let Some(active_run) = active.as_ref().cloned() else {
+            return Ok(browser_control_report(
+                request,
+                &self.descriptor,
+                "too_late",
+                "completed",
+                false,
+                true,
+                Some(CleanupReceipt {
+                    receipt_id: request.control_id.clone(),
+                    no_resources_remain: true,
+                    resource_handles: Vec::new(),
+                }),
+                None,
+            ));
+        };
+        if active_run.executor_run_id != request.executor_run_id {
+            return Err(RunError::Contract("Browser control Run relation failed"));
+        }
+        self.cancel_requested.store(true, Ordering::SeqCst);
+        if let Some(handle) = active_run.worker {
+            handle.request_stop()?;
+        }
+        let remaining = remaining_until_deadline(&request.deadline_utc)?;
+        let (guard, wait) = self
+            .active_worker_changed
+            .wait_timeout_while(active, remaining, |active| active.is_some())
+            .map_err(|_| RunError::Contract("Browser Worker control wait poisoned"))?;
+        active = guard;
+        if active.is_none() {
+            Ok(browser_control_report(
+                request,
+                &self.descriptor,
+                "accepted",
+                "uncertain",
+                false,
+                true,
+                Some(CleanupReceipt {
+                    receipt_id: request.control_id.clone(),
+                    no_resources_remain: true,
+                    resource_handles: active_run
+                        .worker
+                        .map(WorkerControlHandle::identity)
+                        .into_iter()
+                        .collect(),
+                }),
+                None,
+            ))
+        } else if wait.timed_out() {
+            Ok(browser_control_report(
+                request,
+                &self.descriptor,
+                "accepted",
+                "uncertain",
+                false,
+                false,
+                None,
+                Some(SanitizedResidual {
+                    code: "worker.stop_unconfirmed".to_owned(),
+                    summary: concat!(
+                        "Exact Browser Worker cleanup was not observed before the ",
+                        "cancellation deadline"
+                    )
+                    .to_owned(),
+                }),
+            ))
+        } else {
+            Err(RunError::Contract("Browser Worker control wait ended unexpectedly"))
+        }
+    }
+}
+
+fn remaining_until_deadline(deadline_utc: &str) -> Result<Duration, RunError> {
+    let deadline = parse_utc_deadline(deadline_utc)?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| RunError::Contract("system clock precedes the Unix epoch"))?;
+    Ok(deadline.saturating_sub(now))
+}
+
+fn parse_utc_deadline(value: &str) -> Result<Duration, RunError> {
+    let value = value
+        .strip_suffix('Z')
+        .ok_or(RunError::Contract("cancellation deadline is not UTC"))?;
+    let (date, time) = value
+        .split_once('T')
+        .ok_or(RunError::Contract("cancellation deadline is invalid"))?;
+    let mut date_parts = date.split('-');
+    let year = parse_deadline_part(date_parts.next(), "year")? as i64;
+    let month = parse_deadline_part(date_parts.next(), "month")?;
+    let day = parse_deadline_part(date_parts.next(), "day")?;
+    if date_parts.next().is_some() {
+        return Err(RunError::Contract("cancellation deadline is invalid"));
+    }
+    let (whole_time, fraction) = time.split_once('.').map_or((time, ""), |parts| parts);
+    let mut time_parts = whole_time.split(':');
+    let hour = parse_deadline_part(time_parts.next(), "hour")?;
+    let minute = parse_deadline_part(time_parts.next(), "minute")?;
+    let second = parse_deadline_part(time_parts.next(), "second")?;
+    if time_parts.next().is_some()
+        || month == 0
+        || month > 12
+        || hour > 23
+        || minute > 59
+        || second > 59
+    {
+        return Err(RunError::Contract("cancellation deadline is invalid"));
+    }
+    let days = days_from_civil(year, month, day);
+    if days < 0 {
+        return Err(RunError::Contract("cancellation deadline precedes the Unix epoch"));
+    }
+    let seconds = (days as u64)
+        .checked_mul(86_400)
+        .and_then(|value| value.checked_add(u64::from(hour) * 3_600))
+        .and_then(|value| value.checked_add(u64::from(minute) * 60))
+        .and_then(|value| value.checked_add(u64::from(second)))
+        .ok_or(RunError::Contract("cancellation deadline overflows"))?;
+    let nanos = parse_fractional_nanos(fraction)?;
+    Ok(Duration::new(seconds, nanos))
+}
+
+fn parse_deadline_part(value: Option<&str>, name: &'static str) -> Result<u32, RunError> {
+    value
+        .ok_or(RunError::Contract("cancellation deadline is invalid"))?
+        .parse()
+        .map_err(|_| match name {
+            "year" => RunError::Contract("cancellation deadline year is invalid"),
+            "month" => RunError::Contract("cancellation deadline month is invalid"),
+            "day" => RunError::Contract("cancellation deadline day is invalid"),
+            "hour" => RunError::Contract("cancellation deadline hour is invalid"),
+            "minute" => RunError::Contract("cancellation deadline minute is invalid"),
+            _ => RunError::Contract("cancellation deadline second is invalid"),
+        })
+}
+
+fn parse_fractional_nanos(value: &str) -> Result<u32, RunError> {
+    if value.is_empty() {
+        return Ok(0);
+    }
+    if value.len() > 9 || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(RunError::Contract("cancellation deadline fraction is invalid"));
+    }
+    let fraction: u32 = value
+        .parse()
+        .map_err(|_| RunError::Contract("cancellation deadline fraction is invalid"))?;
+    Ok(fraction * 10_u32.pow((9 - value.len()) as u32))
+}
+
+fn days_from_civil(mut year: i64, month: u32, day: u32) -> i64 {
+    year -= i64::from(month <= 2);
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let shifted_month = i64::from(month) + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * shifted_month + 2) / 5 + i64::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+fn browser_control_report(
+    request: &ExecutorControlRequest,
+    descriptor: &ExecutorDescriptor,
+    status: &str,
+    effect_disposition: &str,
+    control_acknowledged: bool,
+    worker_stop_observed: bool,
+    cleanup_receipt: Option<CleanupReceipt>,
+    residual: Option<SanitizedResidual>,
+) -> ExecutorControlReport {
+    ExecutorControlReport {
+        schema_version: "qa.local-executor-control/v1".to_owned(),
+        control_id: request.control_id.clone(),
+        run_id: request.run_id.clone(),
+        executor_run_id: request.executor_run_id.clone(),
+        executor_id: descriptor.executor_id.clone(),
+        executor_version: descriptor.executor_version.clone(),
+        capability_digest: descriptor.capability_digest.clone(),
+        status: status.to_owned(),
+        control_acknowledged,
+        worker_stop_observed,
+        effect_disposition: effect_disposition.to_owned(),
+        execution_outcome: if effect_disposition == "completed" {
+            "succeeded".to_owned()
+        } else {
+            "lost_or_inconclusive".to_owned()
+        },
+        evidence_outcome: "lost_or_inconclusive".to_owned(),
+        upload_outcome: "not_started".to_owned(),
+        cleanup_outcome: if cleanup_receipt.is_some() {
+            "completed".to_owned()
+        } else {
+            "blocked".to_owned()
+        },
+        cleanup_receipt,
+        residual,
     }
 }
 

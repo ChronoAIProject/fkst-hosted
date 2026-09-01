@@ -5,9 +5,52 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { validateLocalWorkerProtocolFailure } from "../../../../packages/qa-contracts/dist/index.js";
+import { WorkerControlState } from "../dist/protocol-worker.js";
 
 const fixture = JSON.parse(await readFile(new URL("../../../../packages/qa-contracts/fixtures/qa.local-worker-protocol/v1/happy-path.json", import.meta.url), "utf8"));
 const fromHex = (value) => Buffer.from(value, "hex");
+const controlEncoder = new TextEncoder();
+const abort = {
+  protocol: "qa.local-worker-control/v1",
+  kind: "abort",
+  control_id: "00000000-0000-0000-0000-000000000001",
+  invocation_id: "invocation/0",
+  deadline_utc: "2026-09-02T12:00:00Z",
+};
+
+test("identical abort is idempotent and fences capabilities", () => {
+  const state = new WorkerControlState("invocation/0");
+  const raw = controlEncoder.encode(JSON.stringify(abort));
+  assert.equal(state.acceptAbort(raw).status, "accepted");
+  assert.equal(state.acceptAbort(raw).status, "accepted");
+  assert.equal(state.cancelled(), true);
+  assert.throws(() => state.assertCapabilityAllowed(), /control.cancelled/);
+});
+
+test("conflicting control fails closed", () => {
+  const state = new WorkerControlState("invocation/0");
+  state.acceptAbort(controlEncoder.encode(JSON.stringify(abort)));
+  assert.throws(
+    () =>
+      state.acceptAbort(
+        controlEncoder.encode(
+          JSON.stringify({ ...abort, deadline_utc: "2026-09-02T12:00:01Z" }),
+        ),
+      ),
+    /control.conflict/,
+  );
+});
+
+test("terminal before abort reports too late without cancellation", () => {
+  const state = new WorkerControlState("invocation/0");
+  state.markTerminal();
+  assert.equal(
+    state.acceptAbort(controlEncoder.encode(JSON.stringify(abort))).status,
+    "too_late",
+  );
+  assert.equal(state.cancelled(), false);
+  state.assertCapabilityAllowed();
+});
 
 test("walks one fragmented invocation through the fixed worker process", async () => {
   const child = spawn(process.execPath, [fileURLToPath(new URL("../dist/worker-main.js", import.meta.url))], {

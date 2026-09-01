@@ -341,7 +341,7 @@ fn environment_bind_walks_the_host_and_replays_without_provider_effect() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        6
+        7
     );
     let foreign_key_errors: Vec<(String, i64, String, i64)> = connection
         .prepare("PRAGMA foreign_key_check")
@@ -542,7 +542,7 @@ fn version_three_migration_preserves_lifecycle_rows() {
     let version: i64 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("schema version must be readable");
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     assert_eq!(
         connection
             .query_row(
@@ -615,7 +615,7 @@ fn version_three_migration_preserves_lifecycle_rows() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        6
+        7
     );
     drop(connection);
     drop(journal);

@@ -3,6 +3,8 @@ import {
   LocalWorkerFrameDecoder,
   encodeLocalWorkerFrame,
   validateLocalWorkerCapabilityRequest,
+  validateLocalWorkerAbort,
+  validateLocalWorkerCancelAck,
   validateLocalWorkerProtocolFailure,
   validateLocalWorkerTerminalResult,
   type ValidatedValue,
@@ -365,4 +367,78 @@ function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+type AbortFrame = Readonly<{
+  protocol: "qa.local-worker-control/v1";
+  kind: "abort";
+  control_id: string;
+  invocation_id: string;
+  deadline_utc: string;
+}>;
+
+export type CancelAck = Readonly<{
+  protocol: "qa.local-worker-control/v1";
+  kind: "cancel_ack";
+  control_id: string;
+  invocation_id: string;
+  status: "accepted" | "too_late";
+}>;
+
+export class WorkerControlState {
+  readonly #invocationId: string;
+  #terminal = false;
+  #accepted: AbortFrame | undefined;
+
+  constructor(invocationId: string) {
+    if (invocationId.length === 0) throw new Error("control.invalid_invocation");
+    this.#invocationId = invocationId;
+  }
+
+  acceptAbort(raw: Uint8Array): CancelAck {
+    const value = validateLocalWorkerAbort(raw).value() as AbortFrame;
+    if (value.invocation_id !== this.#invocationId) {
+      throw new Error("control.invalid_invocation");
+    }
+    if (this.#accepted !== undefined) {
+      if (!sameAbort(this.#accepted, value)) throw new Error("control.conflict");
+      return this.#ack(value, "accepted");
+    }
+    if (this.#terminal) return this.#ack(value, "too_late");
+    this.#accepted = value;
+    return this.#ack(value, "accepted");
+  }
+
+  markTerminal(): void {
+    this.#terminal = true;
+  }
+
+  assertCapabilityAllowed(): void {
+    if (this.#accepted !== undefined) throw new Error("control.cancelled");
+  }
+
+  cancelled(): boolean {
+    return this.#accepted !== undefined;
+  }
+
+  #ack(abort: AbortFrame, status: "accepted" | "too_late"): CancelAck {
+    const ack = {
+      protocol: "qa.local-worker-control/v1",
+      kind: "cancel_ack",
+      control_id: abort.control_id,
+      invocation_id: abort.invocation_id,
+      status,
+    } as const;
+    return validateLocalWorkerCancelAck(
+      new TextEncoder().encode(JSON.stringify(ack)),
+    ).value() as CancelAck;
+  }
+}
+
+function sameAbort(left: AbortFrame, right: AbortFrame): boolean {
+  return (
+    left.control_id === right.control_id &&
+    left.invocation_id === right.invocation_id &&
+    left.deadline_utc === right.deadline_utc
+  );
 }

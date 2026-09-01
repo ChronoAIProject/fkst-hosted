@@ -2,8 +2,11 @@ use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 
-use crate::executor::{ExecutorRegistry, ExecutorRequest, ExecutorSelection};
-use crate::journal::{Cancellation, Journal};
+use crate::executor::{
+    CleanupReceipt, ExecutorControlReport, ExecutorControlRequest, ExecutorRegistry,
+    ExecutorRequest, ExecutorSelection,
+};
+use crate::journal::{Cancellation, CancellationControl, Journal};
 use crate::RunError;
 
 enum CoordinatorMessage {
@@ -53,17 +56,15 @@ impl CoordinatorHandle {
         run_id: &str,
         idempotency_key: &str,
     ) -> Result<Cancellation, RunError> {
-        let cancellation = journal.cancel(run_id, idempotency_key)?;
-        if let Cancellation::Accepted {
-            active_executor_run_id: Some(executor_run_id),
-            ..
-        } = &cancellation
-        {
-            self.registry.cancel(&ExecutorRequest {
-                schema_version: "qa.local-executor/v1".to_owned(),
-                run_id: executor_run_id.clone(),
-                selection: self.selection.clone(),
-            })?;
+        let selection_json = serde_json::to_string(&self.selection)
+            .map_err(|_| RunError::Contract("executor selection serialization failed"))?;
+        let cancellation =
+            journal.cancel_with_control(run_id, idempotency_key, &selection_json)?;
+        if matches!(cancellation, Cancellation::Accepted { .. }) {
+            let control = journal
+                .cancellation_control(run_id)?
+                .ok_or(RunError::InvalidJournal("cancel control obligation missing"))?;
+            reconcile_control(journal, &self.registry, &control)?;
         }
         Ok(cancellation)
     }
@@ -113,6 +114,9 @@ fn run_coordinator(
     receiver: Receiver<CoordinatorMessage>,
     startup_sender: Option<mpsc::SyncSender<bool>>,
 ) -> Result<(), RunError> {
+    for control in journal.incomplete_cancellation_controls()? {
+        reconcile_control(&mut journal, &registry, &control)?;
+    }
     if let Err(error) = process_available(&mut journal, &registry, &selection) {
         if let Some(sender) = startup_sender {
             let _ = sender.send(false);
@@ -126,6 +130,62 @@ fn run_coordinator(
     match receiver.recv() {
         Ok(CoordinatorMessage::Stop) | Err(_) => Ok(()),
     }
+}
+
+fn reconcile_control(
+    journal: &mut Journal,
+    registry: &ExecutorRegistry,
+    control: &CancellationControl,
+) -> Result<(), RunError> {
+    let selection = serde_json::from_str::<ExecutorSelection>(&control.selection_json)
+        .map_err(|_| RunError::InvalidJournal("invalid persisted executor selection"))?;
+    registry.resolve(&selection)?;
+    let executor_run_id = control
+        .executor_run_id
+        .clone()
+        .ok_or(RunError::InvalidJournal("cancel control executor Run ID missing"))?;
+    let report = if journal
+        .connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM execution_attempts WHERE run_id = ?1)",
+            [&control.run_id],
+            |row| row.get::<_, bool>(0),
+        )?
+    {
+        registry.control(&ExecutorControlRequest {
+            schema_version: "qa.local-executor-control/v1".to_owned(),
+            control_id: control.control_id.clone(),
+            run_id: control.run_id.clone(),
+            executor_run_id,
+            selection,
+            deadline_utc: control.deadline_utc.clone(),
+        })?
+    } else {
+        ExecutorControlReport {
+            schema_version: "qa.local-executor-control/v1".to_owned(),
+            control_id: control.control_id.clone(),
+            run_id: control.run_id.clone(),
+            executor_run_id,
+            executor_id: selection.executor_id,
+            executor_version: selection.executor_version,
+            capability_digest: selection.capability_digest,
+            status: "accepted".to_owned(),
+            control_acknowledged: true,
+            worker_stop_observed: true,
+            effect_disposition: "not_started".to_owned(),
+            execution_outcome: "not_started".to_owned(),
+            evidence_outcome: "not_started".to_owned(),
+            upload_outcome: "not_started".to_owned(),
+            cleanup_outcome: "not_required".to_owned(),
+            cleanup_receipt: Some(CleanupReceipt {
+                receipt_id: control.control_id.clone(),
+                no_resources_remain: true,
+                resource_handles: Vec::new(),
+            }),
+            residual: None,
+        }
+    };
+    journal.record_control_report(&report)
 }
 
 fn process_available(
@@ -145,8 +205,14 @@ fn process_available(
             run_id: claimed.executor_run_id,
             selection: selection.clone(),
         };
+        if !journal.admit_effect(&claimed.run_id, "executor.execute")? {
+            return Ok(());
+        }
         let outcome = registry.execute(&request)?;
         if !journal.transition(&claimed.run_id, "executing", "staging_evidence", 5)? {
+            return Ok(());
+        }
+        if !journal.admit_effect(&claimed.run_id, "evidence.stage")? {
             return Ok(());
         }
         if !journal.transition(
@@ -157,7 +223,13 @@ fn process_available(
         )? {
             return Ok(());
         }
+        if !journal.admit_effect(&claimed.run_id, "cleanup.execute")? {
+            return Ok(());
+        }
         if !journal.transition(&claimed.run_id, "cleaning_up_execution", "uploading", 7)? {
+            return Ok(());
+        }
+        if !journal.admit_effect(&claimed.run_id, "upload.admit")? {
             return Ok(());
         }
         if !journal.transition(&claimed.run_id, "uploading", "finalizing_local", 8)? {
@@ -183,8 +255,9 @@ mod tests {
 
     use super::{run_coordinator, CoordinatorHandle};
     use crate::executor::{
-        DeterministicExecutor, ExecutorDescriptor, ExecutorRegistry, ExecutorRequest,
-        ExecutorResult, ExecutorSelection, VersionedExecutor,
+        CleanupReceipt, DeterministicExecutor, ExecutorControlReport, ExecutorControlRequest,
+        ExecutorDescriptor, ExecutorRegistry, ExecutorRequest, ExecutorResult, ExecutorSelection,
+        VersionedExecutor,
     };
     use crate::journal::{Admission, Journal, V2AdmissionRecord};
     use crate::RunError;
@@ -230,7 +303,10 @@ mod tests {
             })
         }
 
-        fn cancel(&self, request: &ExecutorRequest) {
+        fn control(
+            &self,
+            request: &ExecutorControlRequest,
+        ) -> Result<ExecutorControlReport, RunError> {
             let inspection =
                 Journal::open(&self.database_path).expect("independent callback Journal must open");
             let persisted = inspection
@@ -255,6 +331,7 @@ mod tests {
                 .expect("cancel callback release lock must remain valid")
                 .recv()
                 .expect("cancel callback release signal must be received");
+            Ok(control_report(request, &self.descriptor))
         }
     }
 
@@ -281,8 +358,41 @@ mod tests {
             })
         }
 
-        fn cancel(&self, _request: &ExecutorRequest) {
+        fn control(
+            &self,
+            request: &ExecutorControlRequest,
+        ) -> Result<ExecutorControlReport, RunError> {
             self.cancellations.fetch_add(1, Ordering::SeqCst);
+            Ok(control_report(request, &self.descriptor))
+        }
+    }
+
+    fn control_report(
+        request: &ExecutorControlRequest,
+        descriptor: &ExecutorDescriptor,
+    ) -> ExecutorControlReport {
+        ExecutorControlReport {
+            schema_version: "qa.local-executor-control/v1".to_owned(),
+            control_id: request.control_id.clone(),
+            run_id: request.run_id.clone(),
+            executor_run_id: request.executor_run_id.clone(),
+            executor_id: descriptor.executor_id.clone(),
+            executor_version: descriptor.executor_version.clone(),
+            capability_digest: descriptor.capability_digest.clone(),
+            status: "accepted".to_owned(),
+            control_acknowledged: true,
+            worker_stop_observed: true,
+            effect_disposition: "uncertain".to_owned(),
+            execution_outcome: "lost_or_inconclusive".to_owned(),
+            evidence_outcome: "not_started".to_owned(),
+            upload_outcome: "not_started".to_owned(),
+            cleanup_outcome: "completed".to_owned(),
+            cleanup_receipt: Some(CleanupReceipt {
+                receipt_id: request.control_id.clone(),
+                no_resources_remain: true,
+                resource_handles: Vec::new(),
+            }),
+            residual: None,
         }
     }
 
@@ -447,9 +557,30 @@ mod tests {
                 active_executor_run_id: Some(ref executor_run_id),
             }) if executor_run_id == run_id
         ));
+        let settled_events = journal
+            .events(run_id, 0, 20)
+            .expect("settled events read")
+            .expect("settled events exist");
+        assert_eq!(
+            settled_events
+                .iter()
+                .map(|event| event.event_type.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "run.accepted",
+                "run.state_changed",
+                "run.state_changed",
+                "run.state_changed",
+                "run.cancel_requested",
+                "control.reported",
+                "worker.stop_observed",
+                "cleanup.receipt",
+                "run.cancel_settled",
+            ]
+        );
         assert!(matches!(
             coordinator.cancel(&mut journal, run_id, "cancel-repeat"),
-            Ok(crate::journal::Cancellation::AlreadyAccepted(5))
+            Ok(crate::journal::Cancellation::Terminal(9))
         ));
         assert_eq!(cancellations.load(Ordering::SeqCst), 1);
 
@@ -457,11 +588,11 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
             let facts = lifecycle_facts(&journal.connection, run_id);
-            if facts.2 == 5 {
-                assert_eq!(facts.0, "executing");
-                assert_eq!(facts.1, None);
-                assert_eq!(facts.3, "claimed");
-                assert_eq!(facts.4, None);
+            if facts.2 == 9 {
+                assert_eq!(facts.0, "terminal");
+                assert_eq!(facts.1.as_deref(), Some("cancelled"));
+                assert_eq!(facts.3, "completed");
+                assert_eq!(facts.4.as_deref(), Some("cancelled"));
                 break;
             }
             assert!(Instant::now() < deadline, "cancelled Run did not settle");
@@ -735,6 +866,44 @@ mod tests {
         assert_eq!(snapshot.execution_outcome, None);
         assert_eq!(snapshot.latest_event_sequence, 1);
         assert_eq!(row_count(&journal.connection, "execution_attempts"), 0);
+        fs::remove_dir_all(directory).expect("temporary directory must be removed");
+    }
+
+    #[test]
+    fn cancel_before_claim_settles_without_executor_effect_and_releases_slot() {
+        let directory = temporary_directory("cancel-before-claim");
+        let database_path = directory.join("journal.sqlite");
+        let run_id = "00000000-0000-0000-0000-000000000005";
+        let mut journal = Journal::open(&database_path).expect("journal opens");
+        assert!(matches!(
+            admit_v2(&mut journal, run_id, "idem-001", TEST_REQUEST_DIGEST),
+            Ok(Admission::Created(_))
+        ));
+        let registry = ExecutorRegistry::new(vec![Box::new(DeterministicExecutor::api())])
+            .expect("registry must be valid");
+        let mut coordinator =
+            CoordinatorHandle::start_versioned(&database_path, registry, api_selection())
+                .expect("coordinator starts");
+
+        assert!(matches!(
+            coordinator.cancel(&mut journal, run_id, "cancel-001"),
+            Ok(crate::journal::Cancellation::Accepted {
+                event_sequence: 2,
+                active_executor_run_id: None,
+            })
+        ));
+        let snapshot = journal
+            .snapshot(run_id)
+            .expect("snapshot reads")
+            .expect("run exists");
+        assert_eq!(snapshot.state, "terminal");
+        assert_eq!(snapshot.execution_outcome.as_deref(), Some("cancelled"));
+        assert_eq!(snapshot.latest_event_sequence, 6);
+        assert_eq!(row_count(&journal.connection, "execution_attempts"), 0);
+        assert_eq!(row_count(&journal.connection, "active_run_slot"), 0);
+        assert_eq!(row_count(&journal.connection, "effect_admissions"), 0);
+
+        coordinator.shutdown().expect("coordinator joins");
         fs::remove_dir_all(directory).expect("temporary directory must be removed");
     }
 

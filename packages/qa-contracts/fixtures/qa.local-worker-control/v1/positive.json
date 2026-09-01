@@ -1,0 +1,22 @@
+{
+  "abort": {
+    "protocol": "qa.local-worker-control/v1",
+    "kind": "abort",
+    "control_id": "00000000-0000-0000-0000-000000000001",
+    "invocation_id": "invocation/0",
+    "deadline_utc": "2026-09-02T12:00:00Z"
+  },
+  "cancel_ack": {
+    "protocol": "qa.local-worker-control/v1",
+    "kind": "cancel_ack",
+    "control_id": "00000000-0000-0000-0000-000000000001",
+    "invocation_id": "invocation/0",
+    "status": "accepted"
+  },
+  "control_failure": {
+    "protocol": "qa.local-worker-control/v1",
+    "kind": "control_failure",
+    "control_id": "00000000-0000-0000-0000-000000000001",
+    "code": "control.conflict"
+  }
+}
