@@ -137,7 +137,15 @@ fn reconcile_control(
     registry: &ExecutorRegistry,
     control: &CancellationControl,
 ) -> Result<(), RunError> {
-    let selection = serde_json::from_str::<ExecutorSelection>(&control.selection_json)
+    let Some(selection_json) = control.selection_json.as_deref() else {
+        if control.control_status.as_deref() == Some("failed") && control.residual_json.is_some() {
+            return Ok(());
+        }
+        return Err(RunError::InvalidJournal(
+            "cancel control selection missing without residual",
+        ));
+    };
+    let selection = serde_json::from_str::<ExecutorSelection>(selection_json)
         .map_err(|_| RunError::InvalidJournal("invalid persisted executor selection"))?;
     registry.resolve(&selection)?;
     let executor_run_id = control

@@ -1,22 +1,61 @@
 {
-  "abort": {
-    "protocol": "qa.local-worker-control/v1",
-    "kind": "abort",
-    "control_id": "00000000-0000-0000-0000-000000000001",
-    "invocation_id": "invocation/0",
-    "deadline_utc": "2026-09-02T12:00:00Z"
+  "frames": {
+    "abort": {
+      "protocol": "qa.local-worker-control/v1",
+      "kind": "abort",
+      "control_id": "00000000-0000-0000-0000-000000000001",
+      "invocation_id": "invocation/0",
+      "deadline_utc": "2026-09-02T12:00:00Z"
+    },
+    "cancel_ack.accepted": {
+      "protocol": "qa.local-worker-control/v1",
+      "kind": "cancel_ack",
+      "control_id": "00000000-0000-0000-0000-000000000001",
+      "invocation_id": "invocation/0",
+      "status": "accepted"
+    },
+    "cancel_ack.too_late": {
+      "protocol": "qa.local-worker-control/v1",
+      "kind": "cancel_ack",
+      "control_id": "00000000-0000-0000-0000-000000000001",
+      "invocation_id": "invocation/0",
+      "status": "too_late"
+    },
+    "control_failure.control.conflict": {
+      "protocol": "qa.local-worker-control/v1",
+      "kind": "control_failure",
+      "control_id": "00000000-0000-0000-0000-000000000001",
+      "code": "control.conflict"
+    },
+    "control_failure.control.invalid_invocation": {
+      "protocol": "qa.local-worker-control/v1",
+      "kind": "control_failure",
+      "control_id": "00000000-0000-0000-0000-000000000001",
+      "code": "control.invalid_invocation"
+    },
+    "control_failure.control.invalid_frame": {
+      "protocol": "qa.local-worker-control/v1",
+      "kind": "control_failure",
+      "control_id": "00000000-0000-0000-0000-000000000001",
+      "code": "control.invalid_frame"
+    },
+    "control_failure.control.deadline_elapsed": {
+      "protocol": "qa.local-worker-control/v1",
+      "kind": "control_failure",
+      "control_id": "00000000-0000-0000-0000-000000000001",
+      "code": "control.deadline_elapsed"
+    }
   },
-  "cancel_ack": {
-    "protocol": "qa.local-worker-control/v1",
-    "kind": "cancel_ack",
-    "control_id": "00000000-0000-0000-0000-000000000001",
-    "invocation_id": "invocation/0",
-    "status": "accepted"
-  },
-  "control_failure": {
-    "protocol": "qa.local-worker-control/v1",
-    "kind": "control_failure",
-    "control_id": "00000000-0000-0000-0000-000000000001",
-    "code": "control.conflict"
+  "enums": {
+    "cancel_ack_status": [
+      "accepted",
+      "too_late"
+    ],
+    "control_failure_code": [
+      "control.conflict",
+      "control.invalid_invocation",
+      "control.invalid_frame",
+      "control.deadline_elapsed"
+    ]
   }
 }

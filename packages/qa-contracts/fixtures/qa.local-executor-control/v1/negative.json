@@ -1,0 +1,192 @@
+{
+  "schema_cases": [
+    {
+      "case_id": "request-unknown-field",
+      "target": "request",
+      "operation": "add",
+      "path": [
+        "unexpected"
+      ],
+      "value": true
+    },
+    {
+      "case_id": "request-missing-required",
+      "target": "request",
+      "operation": "remove",
+      "path": [
+        "control_id"
+      ]
+    },
+    {
+      "case_id": "request-wrong-type",
+      "target": "request",
+      "operation": "set",
+      "path": [
+        "deadline_utc"
+      ],
+      "value": 42
+    },
+    {
+      "case_id": "request-unknown-schema-version",
+      "target": "request",
+      "operation": "set",
+      "path": [
+        "schema_version"
+      ],
+      "value": "qa.local-executor-control/v2"
+    },
+    {
+      "case_id": "report-unknown-field",
+      "target": "report",
+      "operation": "add",
+      "path": [
+        "unexpected"
+      ],
+      "value": true
+    },
+    {
+      "case_id": "report-missing-required",
+      "target": "report",
+      "operation": "remove",
+      "path": [
+        "status"
+      ]
+    },
+    {
+      "case_id": "report-wrong-type",
+      "target": "report",
+      "operation": "set",
+      "path": [
+        "control_acknowledged"
+      ],
+      "value": "true"
+    },
+    {
+      "case_id": "report-unknown-schema-version",
+      "target": "report",
+      "operation": "set",
+      "path": [
+        "schema_version"
+      ],
+      "value": "qa.local-executor-control/v2"
+    },
+    {
+      "case_id": "report-unknown-status",
+      "target": "report",
+      "operation": "set",
+      "path": [
+        "status"
+      ],
+      "value": "unknown"
+    },
+    {
+      "case_id": "report-unknown-effect-disposition",
+      "target": "report",
+      "operation": "set",
+      "path": [
+        "effect_disposition"
+      ],
+      "value": "unknown"
+    },
+    {
+      "case_id": "report-unknown-execution-outcome",
+      "target": "report",
+      "operation": "set",
+      "path": [
+        "execution_outcome"
+      ],
+      "value": "unknown"
+    },
+    {
+      "case_id": "report-unknown-evidence-outcome",
+      "target": "report",
+      "operation": "set",
+      "path": [
+        "evidence_outcome"
+      ],
+      "value": "unknown"
+    },
+    {
+      "case_id": "report-unknown-upload-outcome",
+      "target": "report",
+      "operation": "set",
+      "path": [
+        "upload_outcome"
+      ],
+      "value": "unknown"
+    },
+    {
+      "case_id": "report-unknown-cleanup-outcome",
+      "target": "report",
+      "operation": "set",
+      "path": [
+        "cleanup_outcome"
+      ],
+      "value": "unknown"
+    },
+    {
+      "case_id": "report-missing-cleanup-evidence",
+      "target": "report",
+      "operation": "remove",
+      "path": [
+        "cleanup_receipt"
+      ]
+    },
+    {
+      "case_id": "report-conflicting-cleanup-evidence",
+      "target": "report",
+      "operation": "add",
+      "path": [
+        "residual"
+      ],
+      "value": {
+        "code": "cleanup.blocked",
+        "summary": "Cleanup requires operator repair"
+      }
+    }
+  ],
+  "relation_cases": [
+    {
+      "case_id": "relation-valid",
+      "field": null,
+      "value": null,
+      "valid": true
+    },
+    {
+      "case_id": "relation-control-id-mismatch",
+      "field": "control_id",
+      "value": "00000000-0000-0000-0000-000000000002",
+      "valid": false
+    },
+    {
+      "case_id": "relation-run-id-mismatch",
+      "field": "run_id",
+      "value": "00000000-0000-0000-0000-000000000002",
+      "valid": false
+    },
+    {
+      "case_id": "relation-executor-run-id-mismatch",
+      "field": "executor_run_id",
+      "value": "00000000-0000-0000-0000-000000000002",
+      "valid": false
+    },
+    {
+      "case_id": "relation-executor-id-mismatch",
+      "field": "executor_id",
+      "value": "fake.other",
+      "valid": false
+    },
+    {
+      "case_id": "relation-executor-version-mismatch",
+      "field": "executor_version",
+      "value": "2.0.0",
+      "valid": false
+    },
+    {
+      "case_id": "relation-capability-digest-mismatch",
+      "field": "capability_digest",
+      "value": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "valid": false
+    }
+  ]
+}

@@ -3,7 +3,8 @@ use std::time::Duration;
 
 use fkst_qa_contracts::{
     validate_cancel_disposition, validate_event_sequence, validate_execution_outcome,
-    validate_executor_control_report, validate_local_state, validate_scalar,
+    validate_executor_control_report, validate_executor_selection, validate_local_state,
+    validate_scalar,
 };
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
@@ -105,7 +106,9 @@ pub(crate) struct CancellationControl {
     pub(crate) run_id: String,
     pub(crate) executor_run_id: Option<String>,
     pub(crate) deadline_utc: String,
-    pub(crate) selection_json: String,
+    pub(crate) selection_json: Option<String>,
+    pub(crate) control_status: Option<String>,
+    pub(crate) residual_json: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -250,7 +253,7 @@ impl Journal {
                 control_id TEXT NOT NULL UNIQUE,
                 cancel_event_sequence INTEGER NOT NULL,
                 deadline_utc TEXT NOT NULL,
-                selection_json TEXT NOT NULL,
+                selection_json TEXT,
                 executor_run_id TEXT,
                 control_report_json TEXT,
                 cleanup_resolution_report_json TEXT,
@@ -265,6 +268,11 @@ impl Journal {
                 cleanup_receipt_json TEXT,
                 residual_json TEXT,
                 settled INTEGER NOT NULL DEFAULT 0 CHECK (settled IN (0, 1)),
+                CHECK (selection_json IS NULL OR length(selection_json) > 0),
+                CHECK (
+                    selection_json IS NOT NULL OR
+                    (control_status = 'failed' AND residual_json IS NOT NULL)
+                ),
                 FOREIGN KEY (run_id) REFERENCES runs(run_id),
                 FOREIGN KEY (run_id) REFERENCES cancel_requests(run_id)
             );
@@ -276,25 +284,72 @@ impl Journal {
                 )),
                 PRIMARY KEY (run_id, effect_type),
                 FOREIGN KEY (run_id) REFERENCES runs(run_id)
-            );
-            INSERT INTO cancellation_controls (
-                run_id, control_id, cancel_event_sequence, deadline_utc,
-                selection_json, executor_run_id, control_status,
-                control_acknowledged, worker_stop_observed,
-                effect_disposition, execution_outcome, evidence_outcome,
-                upload_outcome, cleanup_outcome, residual_json, settled
-            )
-            SELECT cancel_requests.run_id, runs.executor_run_id,
-                   cancel_requests.event_sequence,
-                   strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), '',
-                   runs.executor_run_id, 'failed', 0, 0, 'uncertain',
-                   'lost_or_inconclusive', 'lost_or_inconclusive',
-                   'not_started', 'blocked',
-                   '{"code":"legacy.selection_unavailable","summary":"Exact persisted Executor selection is unavailable for this pre-v7 cancellation"}',
-                   0
-            FROM cancel_requests JOIN runs USING (run_id);
-            PRAGMA user_version = 7;",
+            );",
         )?;
+        let cancellations = {
+            let mut statement = transaction.prepare(
+                "SELECT cancel_requests.run_id, runs.executor_run_id,
+                        cancel_requests.event_sequence, admission_v2_records.selection_json
+                 FROM cancel_requests
+                 JOIN runs USING (run_id)
+                 LEFT JOIN admission_v2_records USING (run_id)
+                 ORDER BY cancel_requests.event_sequence, cancel_requests.run_id",
+            )?;
+            let rows = statement.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<Vec<u8>>>(3)?,
+                ))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        let residual_json = serde_json::to_string(&serde_json::json!({
+            "code": "legacy.selection_unavailable",
+            "summary": "Exact persisted Executor selection is unavailable for this pre-v7 cancellation"
+        }))
+        .map_err(|_| RunError::InvalidJournal("legacy residual serialization failed"))?;
+        for (run_id, executor_run_id, event_sequence, selection_bytes) in cancellations {
+            let selection_json = match selection_bytes {
+                Some(selection_bytes) => {
+                    validate_executor_selection(&selection_bytes).map_err(|_| {
+                        RunError::InvalidJournal("invalid persisted v2 Executor selection")
+                    })?;
+                    Some(String::from_utf8(selection_bytes).map_err(|_| {
+                        RunError::InvalidJournal("persisted v2 Executor selection is not UTF-8")
+                    })?)
+                }
+                None => None,
+            };
+            let unavailable = selection_json.is_none();
+            transaction.execute(
+                "INSERT INTO cancellation_controls (
+                    run_id, control_id, cancel_event_sequence, deadline_utc,
+                    selection_json, executor_run_id, control_status,
+                    control_acknowledged, worker_stop_observed,
+                    effect_disposition, execution_outcome, evidence_outcome,
+                    upload_outcome, cleanup_outcome, residual_json, settled
+                 ) VALUES (
+                    ?1, ?2, ?3, '1970-01-01T00:00:00Z', ?4, ?2,
+                    ?5, ?6, ?6, ?7, ?8, ?8, ?9, ?10, ?11, 0
+                 )",
+                params![
+                    run_id,
+                    executor_run_id,
+                    event_sequence,
+                    selection_json,
+                    unavailable.then_some("failed"),
+                    unavailable.then_some(false),
+                    unavailable.then_some("uncertain"),
+                    unavailable.then_some("lost_or_inconclusive"),
+                    unavailable.then_some("not_started"),
+                    unavailable.then_some("blocked"),
+                    unavailable.then_some(residual_json.as_str()),
+                ],
+            )?;
+        }
+        transaction.pragma_update(None, "user_version", 7)?;
         transaction.commit()?;
         Ok(())
     }
@@ -986,7 +1041,8 @@ impl Journal {
     ) -> Result<Option<CancellationControl>, RunError> {
         self.connection
             .query_row(
-                "SELECT control_id, run_id, executor_run_id, deadline_utc, selection_json
+                "SELECT control_id, run_id, executor_run_id, deadline_utc, selection_json,
+                        control_status, residual_json
                  FROM cancellation_controls
                  WHERE run_id = ?1 AND settled = 0",
                 [run_id],
@@ -997,6 +1053,8 @@ impl Journal {
                         executor_run_id: row.get(2)?,
                         deadline_utc: row.get(3)?,
                         selection_json: row.get(4)?,
+                        control_status: row.get(5)?,
+                        residual_json: row.get(6)?,
                     })
                 },
             )
@@ -1034,9 +1092,10 @@ impl Journal {
         &self,
     ) -> Result<Vec<CancellationControl>, RunError> {
         let mut statement = self.connection.prepare(
-            "SELECT control_id, run_id, executor_run_id, deadline_utc, selection_json
+            "SELECT control_id, run_id, executor_run_id, deadline_utc, selection_json,
+                    control_status, residual_json
              FROM cancellation_controls
-             WHERE settled = 0 AND selection_json != ''
+             WHERE settled = 0
              ORDER BY cancel_event_sequence",
         )?;
         let rows = statement.query_map([], |row| {
@@ -1046,6 +1105,8 @@ impl Journal {
                 executor_run_id: row.get(2)?,
                 deadline_utc: row.get(3)?,
                 selection_json: row.get(4)?,
+                control_status: row.get(5)?,
+                residual_json: row.get(6)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -1617,7 +1678,7 @@ mod tests {
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{Admission, Journal, V2AdmissionRecord};
+    use super::{Admission, Cancellation, Journal, V2AdmissionRecord};
 
     const TEST_REQUEST_DIGEST: &str =
         "c6da30d2cbe81af624c4e364e21cdad9dc2510d2e2ff9a02bb5bd6c325a25428";
@@ -1784,4 +1845,268 @@ mod tests {
 
         fs::remove_dir_all(directory).expect("temporary directory must be removed");
     }
+
+    #[test]
+    fn v7_migration_recovers_the_exact_persisted_v2_selection() {
+        let (directory, database_path) = temporary_database("v7-recoverable");
+        let run_id = "00000000-0000-0000-0000-000000000011";
+        prepare_v6_cancellation(&database_path, run_id, true);
+        let preserved = preserved_rows(&database_path);
+
+        let journal = Journal::open(&database_path).expect("v6 Journal migrates to v7");
+        let control = journal
+            .cancellation_control(run_id)
+            .expect("control is readable")
+            .expect("control exists");
+        assert_eq!(
+            control.selection_json.as_deref(),
+            std::str::from_utf8(TEST_SELECTION_JSON).ok()
+        );
+        assert_eq!(control.control_status, None);
+        assert_eq!(control.residual_json, None);
+        assert_eq!(
+            journal
+                .incomplete_cancellation_controls()
+                .expect("recovery reads"),
+            vec![control]
+        );
+        assert_eq!(preserved_rows_from(&journal), preserved);
+
+        drop(journal);
+        fs::remove_dir_all(directory).expect("temporary directory must be removed");
+    }
+
+    #[test]
+    fn v7_migration_keeps_unavailable_legacy_selection_visible_and_idempotent() {
+        let (directory, database_path) = temporary_database("v7-unavailable");
+        let run_id = "00000000-0000-0000-0000-000000000012";
+        prepare_v6_cancellation(&database_path, run_id, false);
+        let preserved = preserved_rows(&database_path);
+
+        let mut journal = Journal::open(&database_path).expect("v6 Journal migrates to v7");
+        let control = journal
+            .cancellation_control(run_id)
+            .expect("control is readable")
+            .expect("control exists");
+        assert_eq!(control.selection_json, None);
+        assert_eq!(control.control_status.as_deref(), Some("failed"));
+        assert_eq!(
+            control.residual_json.as_deref(),
+            Some(
+                r#"{"code":"legacy.selection_unavailable","summary":"Exact persisted Executor selection is unavailable for this pre-v7 cancellation"}"#
+            )
+        );
+        assert_eq!(
+            journal
+                .incomplete_cancellation_controls()
+                .expect("recovery reads"),
+            vec![control]
+        );
+        assert_eq!(preserved_rows_from(&journal), preserved);
+
+        let before_repeat = durable_v7_rows(&journal);
+        assert!(matches!(
+            journal.cancel_with_control(run_id, "cancel-repeat", "{}"),
+            Ok(Cancellation::AlreadyAccepted(2))
+        ));
+        assert_eq!(durable_v7_rows(&journal), before_repeat);
+        drop(journal);
+
+        let reopened = Journal::open(&database_path).expect("v7 Journal reopens");
+        assert_eq!(durable_v7_rows(&reopened), before_repeat);
+        assert_eq!(preserved_rows_from(&reopened), preserved);
+        assert_eq!(
+            reopened
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM cancellation_controls
+                     WHERE settled = 0 AND selection_json IS NULL
+                       AND control_status = 'failed' AND residual_json IS NOT NULL",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("discoverable residual count is readable"),
+            1
+        );
+        assert_eq!(
+            reopened
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM cancellation_controls
+                     WHERE settled = 0 AND (
+                         selection_json = '' OR
+                         (selection_json IS NULL AND residual_json IS NULL)
+                     )",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("undiscoverable obligation count is readable"),
+            0
+        );
+
+        drop(reopened);
+        fs::remove_dir_all(directory).expect("temporary directory must be removed");
+    }
+
+    #[test]
+    fn v7_migration_rejects_an_invalid_persisted_v2_selection_atomically() {
+        let (directory, database_path) = temporary_database("v7-invalid-selection");
+        let run_id = "00000000-0000-0000-0000-000000000013";
+        prepare_v6_cancellation(&database_path, run_id, true);
+        let connection = rusqlite::Connection::open(&database_path).expect("v6 database opens");
+        connection
+            .execute(
+                "UPDATE admission_v2_records SET selection_json = ?1 WHERE run_id = ?2",
+                params![b"{}".as_slice(), run_id],
+            )
+            .expect("selection is corrupted for the fail-closed test");
+        drop(connection);
+
+        assert!(matches!(
+            Journal::open(&database_path),
+            Err(crate::RunError::InvalidJournal(
+                "invalid persisted v2 Executor selection"
+            ))
+        ));
+        let connection = rusqlite::Connection::open(&database_path).expect("database reopens");
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .expect("version is readable"),
+            6
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master
+                     WHERE type = 'table' AND name = 'cancellation_controls'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("schema is readable"),
+            0
+        );
+
+        drop(connection);
+        fs::remove_dir_all(directory).expect("temporary directory must be removed");
+    }
+
+    fn temporary_database(label: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock must be after the Unix epoch")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "fkst-local-qa-host-{label}-{}-{timestamp}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).expect("temporary directory must be created");
+        let database_path = directory.join("journal.sqlite");
+        (directory, database_path)
+    }
+
+    fn prepare_v6_cancellation(database_path: &std::path::Path, run_id: &str, recoverable: bool) {
+        let mut journal = Journal::open(database_path).expect("Journal must open");
+        assert!(matches!(
+            admit_v2(&mut journal, run_id, "idem-migration", TEST_REQUEST_DIGEST),
+            Ok(Admission::Created(_))
+        ));
+        journal
+            .connection
+            .execute(
+                "INSERT INTO execution_attempts (run_id, status) VALUES (?1, 'claimed')",
+                [run_id],
+            )
+            .expect("pre-v7 execution attempt is recorded");
+        assert!(matches!(
+            journal.cancel_with_control(
+                run_id,
+                "cancel-migration",
+                std::str::from_utf8(TEST_SELECTION_JSON).expect("selection is UTF-8"),
+            ),
+            Ok(Cancellation::Accepted {
+                event_sequence: 2,
+                ..
+            })
+        ));
+        if !recoverable {
+            journal
+                .connection
+                .execute("DELETE FROM admission_v2_records WHERE run_id = ?1", [run_id])
+                .expect("v2 selection is removed");
+            journal
+                .connection
+                .execute(
+                    "UPDATE runs SET admission_version = 1 WHERE run_id = ?1",
+                    [run_id],
+                )
+                .expect("Run is marked as legacy admission");
+        }
+        journal
+            .connection
+            .execute_batch(
+                "DROP TABLE effect_admissions;
+                 DROP TABLE cancellation_controls;
+                 PRAGMA user_version = 6;",
+            )
+            .expect("database is restored to the v6 schema");
+    }
+
+    fn preserved_rows(database_path: &std::path::Path) -> Vec<(String, i64)> {
+        let connection = rusqlite::Connection::open(database_path).expect("database opens");
+        let journal = Journal { connection };
+        preserved_rows_from(&journal)
+    }
+
+    fn preserved_rows_from(journal: &Journal) -> Vec<(String, i64)> {
+        [
+            "accepted_requests",
+            "runs",
+            "events",
+            "cancel_requests",
+            "execution_attempts",
+            "resource_intents",
+            "owned_handles",
+            "admission_v2_records",
+            "active_run_slot",
+        ]
+        .into_iter()
+        .map(|table| {
+            let count = journal
+                .connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .expect("preserved table count is readable");
+            (table.to_owned(), count)
+        })
+        .collect()
+    }
+
+    fn durable_v7_rows(journal: &Journal) -> (i64, String) {
+        let event_count = journal
+            .connection
+            .query_row("SELECT COUNT(*) FROM events", [], |row| row.get::<_, i64>(0))
+            .expect("Event count is readable");
+        let control = journal
+            .connection
+            .query_row(
+                "SELECT json_object(
+                    'run_id', run_id,
+                    'control_id', control_id,
+                    'cancel_event_sequence', cancel_event_sequence,
+                    'deadline_utc', deadline_utc,
+                    'selection_json', selection_json,
+                    'executor_run_id', executor_run_id,
+                    'control_status', control_status,
+                    'residual_json', residual_json,
+                    'settled', settled
+                 ) FROM cancellation_controls",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("control snapshot is readable");
+        (event_count, control)
+    }
+
 }

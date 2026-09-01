@@ -42,12 +42,18 @@
         {
           "type": "object",
           "required": ["cleanup_receipt"],
-          "properties": { "residual": false }
+          "properties": {
+            "cleanup_receipt": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.local-cancellation:v1#/$defs/CleanupReceipt" },
+            "residual": false
+          }
         },
         {
           "type": "object",
           "required": ["residual"],
-          "properties": { "cleanup_receipt": false }
+          "properties": {
+            "cleanup_receipt": false,
+            "residual": { "$ref": "urn:chronoai:fkst:qa-contracts:qa.local-cancellation:v1#/$defs/SanitizedResidual" }
+          }
         }
       ]
     }
